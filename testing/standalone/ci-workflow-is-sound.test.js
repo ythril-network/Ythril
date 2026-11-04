@@ -48,6 +48,26 @@
  * second gate, a run nobody asked for, or a run that never starts. The docs rule at the end derives the check's name from the
  * two files, so the guide cannot name a check that does not exist.
  *
+ * ## A pull request reuses a Full run (bundle-244, Q-710)
+ *
+ * `Build & Test` of a pull request skips every suite and reads the results of a green Full run of the same tree, when one exists
+ * (`scripts/full-run-reuse.mjs`; the decision itself is held by `a-pull-request-reuses-only-a-green-full-run-of-its-own-tree`).
+ * What this file holds is the workflow's side of it, each rule with a breakage of the conforming miniature that turns it red:
+ *
+ *  - `the reuse job`: first, pull_request only, five minutes, `contents: read` and `actions: read`, one output (`full_run`), no
+ *    install; `pull_request types` include `labeled`, so adding `ci:full` starts a run that carries the label.
+ *  - `suite jobs stand down on a reused run`: every job but `reuse`, `changelog`, the gate and the advisory job waits for `reuse`
+ *    and carries `!cancelled() && needs.reuse.outputs.full_run == ''` (never the default `success()`: a failed reuse job must run
+ *    the whole graph); the set that carry it equals the set the verdict lets be skipped, read by running the verdict.
+ *  - `merge gate`: the verdict's whole truth table, executed in a real bash (a suite skipped with an empty id fails, with an id
+ *    passes, `changelog` skipped fails, `reuse` skipped beside everything else succeeding passes, `reuse` not success while a
+ *    suite is skipped fails).
+ *  - `no pull-request value inside run text`, `credential expressions`, `permissions`, `gate evidence`: a value a stranger
+ *    controls reaches a shell only through `env:`; `github.token` stands only in the `GH_TOKEN` of the reuse and verify steps and
+ *    the download's `github-token`; `actions: read` only in `reuse`, the gate and the advisory job; the gate verifies the named run
+ *    before it downloads that run's results.
+ *  - `the changelog job`: the CHANGELOG check is a job of its own, so a run that skips the suites still makes it.
+ *
  * Run: node --test testing/standalone/ci-workflow-is-sound.test.js
  */
 import { describe, it } from 'node:test';
@@ -63,6 +83,7 @@ import {
   MERGE_GATE_NAME, loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, shellCommands, usesOf, isCommitPinned, stepsUsing,
   runsNpmCi, expressionOf, transitiveNeeds, isAdvisory, isTrue, triggersOf, onOf, mergeGateEntries,
   workflowFiles, loadWorkflow, actionFiles, loadAction, parseAction, CI_WORKFLOW,
+  REUSE_JOB_ID, REUSE_OUTPUT, REUSE_EMPTY, ifConjuncts, skipsWhenRunIsReused,
 } from '../_shared/ci-workflow.mjs';
 // The full-run names (`FULL_RUN_WORKFLOW`, `FULL_RUN_PREFIX`, `loadFullRun`, `branchesOf`) are read off the namespace, so a
 // module that lacks one fails the tests that need it and not the whole file.
@@ -81,36 +102,70 @@ const clone = (doc) => structuredClone(doc);
 const NEEDED_FLOOR = 5;
 
 /** Where a bash to run the verdict step can be found. A missing one FAILS the gate — a skip here is a silent one. */
+let foundBash;
 function findBash() {
+  if (foundBash) return foundBash;
   const candidates = [process.env['BASH_EXE'], 'C:\\Program Files\\Git\\bin\\bash.exe', 'bash'].filter(Boolean);
   for (const c of candidates) {
     if (c.includes('\\') && !existsSync(c)) continue;
     const r = spawnSync(c, ['-c', 'echo ok'], { encoding: 'utf8' });
-    if (r.status === 0 && r.stdout.trim() === 'ok') return c;
+    if (r.status === 0 && r.stdout.trim() === 'ok') return (foundBash = c);
   }
   throw new Error('no POSIX bash found to run the merge gate\'s verdict step (set BASH_EXE to one)');
 }
 
 /**
- * The verdict step as it would run with the given results, or an Error naming what this gate cannot render.
- * Only two expressions are understood — `needs.<id>.result` and `toJSON(needs)` — and any other is refused,
- * because a verdict the gate cannot read is a verdict the gate cannot hold to the rule.
+ * The verdict step as it would run with the given results (and, for a job that has outputs, `outputs`: `{ <job id>: { <name>:
+ * value } }`), or an Error naming what this gate cannot render. Three expressions are understood — `needs.<id>.result`,
+ * `needs.<id>.outputs.<name>` (an output nobody set is the empty string, as GitHub renders it) and `toJSON(needs)` — and any
+ * other is refused, because a verdict the gate cannot read is a verdict the gate cannot hold to the rule.
  */
-function renderVerdict(step, results) {
+function renderVerdict(step, results, outputs = {}) {
   const render = (text) => String(text).replace(/\$\{\{([\s\S]*?)\}\}/g, (_, raw) => {
     const e = raw.trim();
     const one = e.match(/^needs\.([\w-]+)\.result$/);
     if (one) return results[one[1]] ?? '';
+    const out = e.match(/^needs\.([\w-]+)\.outputs\.([\w-]+)$/);
+    if (out) return outputs[out[1]]?.[out[2]] ?? '';
     if (e === 'toJSON(needs)') {
-      return JSON.stringify(Object.fromEntries(Object.entries(results).map(([k, r]) => [k, { result: r, outputs: {} }])), null, 2);
+      return JSON.stringify(Object.fromEntries(Object.entries(results).map(([k, r]) => [k, { result: r, outputs: outputs[k] ?? {} }])), null, 2);
     }
-    throw new Error(`the verdict step reads \`\${{ ${e} }}\`, which this gate cannot render: use needs.<job>.result or toJSON(needs)`);
+    throw new Error(`the verdict step reads \`\${{ ${e} }}\`, which this gate cannot render: use needs.<job>.result, needs.<job>.outputs.<name> or toJSON(needs)`);
   });
   const env = Object.fromEntries(Object.entries(step.env ?? {}).map(([k, v]) => [k, render(v)]));
   return { script: render(shellOf(step)), env };
 }
 
-/** The gate job's verdict: every needed job must have succeeded, and anything else must fail the step. */
+/** The run a reused pull request names: what `reuse` outputs when a Full run of the same tree was found ("<run id>.<attempt>"). */
+const NAMED_RUN = '7654321.1';
+
+/** The jobs of the gate's `needs` that run no suite: `reuse` decides, `changelog` is the PR-only check. A reused run skips neither's verdict. */
+const NOT_SUITES = [REUSE_JOB_ID, 'changelog'];
+
+/** Run the verdict step once. `results` is each needed job's result, `fullRun` what `reuse` output; the exit status, or an Error naming what cannot be rendered. */
+function runVerdict(verdict, results, fullRun) {
+  const rendered = renderVerdict(verdict, results, { [REUSE_JOB_ID]: { [REUSE_OUTPUT]: fullRun } });
+  return spawnSync(findBash(), ['-e', '-c', rendered.script], { env: { ...process.env, ...rendered.env }, encoding: 'utf8' }).status;
+}
+
+/** Every needed job's result `success`, but for the overrides. */
+const resultsOf = (needs, overrides = {}) => Object.fromEntries(needs.map((n) => [n, overrides[n] ?? 'success']));
+
+/** The verdict step of a gate job: the first step that is not an action and reads `needs`. */
+const verdictStepOf = (gate) => stepsOf(gate.job).find((s) => !s.uses && /\bneeds\b/.test(`${s.run ?? ''}\n${JSON.stringify(s.env ?? {})}`));
+
+/**
+ * The suites the verdict lets stand down when `reuse` names a run: each needed suite job in turn `skipped`, every other job
+ * `success`, the reuse job `success` and the id set. Read by EXECUTING the verdict, never from its text, so it is what the gate
+ * does and the set the jobs' `if:` is compared with (`reuseSkipSetViolations`).
+ */
+function verdictSkipSet(gate, needs) {
+  const verdict = verdictStepOf(gate);
+  if (!verdict) return [];
+  return needs.filter((n) => !NOT_SUITES.includes(n)).filter((id) => runVerdict(verdict, resultsOf(needs, { [id]: 'skipped' }), NAMED_RUN) === 0).sort();
+}
+
+/** The gate job's verdict: every needed job must have succeeded, a suite may be skipped only beside a named reused run, and anything else must fail the step. */
 function verdictViolations(gate, needs) {
   const v = [];
   const steps = stepsOf(gate.job);
@@ -133,17 +188,46 @@ function verdictViolations(gate, needs) {
   }
   if (/\|\|\s*true\b/.test(text)) v.push('the verdict step ends a failing path in `|| true`');
 
-  // The failing half of the truth table, executed. Every needed job in turn: failure, cancelled, skipped.
-  const bash = findBash();
-  for (const id of needs) {
-    for (const bad of ['failure', 'cancelled', 'skipped']) {
-      const results = Object.fromEntries(needs.map((n) => [n, n === id ? bad : 'success']));
-      let rendered;
-      try { rendered = renderVerdict(verdict, results); } catch (e) { return [...v, e.message]; }
-      const r = spawnSync(bash, ['-e', '-c', rendered.script], { env: { ...process.env, ...rendered.env }, encoding: 'utf8' });
-      if (r.status === 0) v.push(`the gate PASSES when ${id} is ${bad}`);
+  // The truth table, executed (Q-710). A pull request whose tree a green Full run already tested skips the suites and names that
+  // run in the `reuse` job's one output; the verdict is the only thing that tells a skip that is the saving from a skip that is a
+  // job that never ran, so each cell is run, in a real bash, with the output empty (nothing reused) and set (a run named).
+  if (!needs.includes(REUSE_JOB_ID)) v.push(`the gate does not wait for \`${REUSE_JOB_ID}\`: it cannot tell a skipped suite that a reused run covers from one that never ran`);
+  if (!needs.includes('changelog')) v.push('the gate does not wait for `changelog`: the CHANGELOG check runs on every pull request, reused or not, and nothing would fail on a missing entry');
+  const suites = needs.filter((n) => !NOT_SUITES.includes(n));
+  const cell = (results, fullRun) => runVerdict(verdict, results, fullRun);
+  try {
+    // No run named (a fresh run, or a push, or a refusal): every job but `reuse` must have succeeded, whatever `reuse` says.
+    for (const id of needs.filter((n) => n !== REUSE_JOB_ID)) {
+      for (const bad of ['failure', 'cancelled', 'skipped']) {
+        if (cell(resultsOf(needs, { [id]: bad }), '') === 0) v.push(`the gate PASSES when ${id} is ${bad} and no run is named`);
+      }
     }
-  }
+    // `reuse` is not run on a push: all success beside a skipped `reuse` passes, and so does one that ran and named nothing.
+    for (const state of ['skipped', 'success']) {
+      if (cell(resultsOf(needs, { [REUSE_JOB_ID]: state }), '') !== 0) v.push(`the gate FAILS when every job succeeded, \`reuse\` is ${state} and no run is named`);
+    }
+    // A suite skipped beside a `reuse` that failed, was cancelled or was skipped is a suite that never ran.
+    for (const r of ['failure', 'cancelled', 'skipped']) {
+      for (const id of suites) {
+        if (cell(resultsOf(needs, { [REUSE_JOB_ID]: r, [id]: 'skipped' }), '') === 0) v.push(`the gate PASSES when ${REUSE_JOB_ID} is ${r} and ${id} is skipped and no run is named`);
+      }
+    }
+    // A run named: `reuse` must have succeeded, and what the reused run covers is the only thing allowed to be skipped.
+    if (cell(resultsOf(needs), NAMED_RUN) !== 0) v.push('the gate FAILS when every job succeeded and a run is named');
+    for (const r of ['failure', 'cancelled', 'skipped']) {
+      if (cell(resultsOf(needs, { [REUSE_JOB_ID]: r, ...Object.fromEntries(suites.map((s) => [s, 'skipped'])) }), NAMED_RUN) === 0) {
+        v.push(`the gate PASSES when ${REUSE_JOB_ID} is ${r}, the suites are skipped and a run is named`);
+      }
+    }
+    for (const id of needs.filter((n) => n !== REUSE_JOB_ID)) {
+      for (const bad of ['failure', 'cancelled']) {
+        if (cell(resultsOf(needs, { [id]: bad }), NAMED_RUN) === 0) v.push(`the gate PASSES when ${id} is ${bad} and a run is named`);
+      }
+    }
+    if (needs.includes('changelog') && cell(resultsOf(needs, { changelog: 'skipped' }), NAMED_RUN) === 0) {
+      v.push('the gate PASSES when changelog is skipped and a run is named: the CHANGELOG check is not part of a reused run');
+    }
+  } catch (e) { v.push(e.message); }
   return v;
 }
 
@@ -420,6 +504,13 @@ function permissionsNotAMapping(id, p, wanted = '') {
   return typeof p === 'object' ? null : `${id}: permissions are \`${p}\`${wanted}`;
 }
 
+/**
+ * The jobs that read the Actions API with the run's own token, and so hold `actions: read` — GitHub has no step-level permission,
+ * so the grant is the job's and this names the jobs: the advisory job (timings), `reuse` (finds the Full run of the head SHA) and
+ * the merge gate (re-reads that run, and downloads its artifacts, before it trusts what `reuse` output). Nothing else.
+ */
+const readsActionsApi = (doc, id, job) => isAdvisory(job) || id === REUSE_JOB_ID || mergeGateEntries(doc).some((g) => g.id === id);
+
 function permissionViolations(doc) {
   const v = topLevelPermissionViolations(doc);
   for (const { id, job } of jobEntries(doc)) {
@@ -429,9 +520,13 @@ function permissionViolations(doc) {
     if (refusal) { v.push(refusal); continue; }
     for (const [k, val] of Object.entries(p)) {
       if (k === 'contents' && val === 'read') continue;
-      if (k === 'actions' && val === 'read' && isAdvisory(job)) continue;
-      v.push(`${id}: permission ${k}: ${val} is not granted to this job (actions: read belongs to the advisory job alone)`);
+      if (k === 'actions' && val === 'read' && readsActionsApi(doc, id, job)) continue;
+      v.push(`${id}: permission ${k}: ${val} is not granted to this job (actions: read belongs to the reuse job, the merge gate and the advisory job alone)`);
     }
+  }
+  // The gate downloads another run's artifacts when a run is reused: without `actions: read` that download is refused at the end of a green run.
+  for (const gate of mergeGateEntries(doc)) {
+    if (gate.job.permissions?.actions !== 'read') v.push(`${gate.id}: no \`actions: read\`: a reused run's artifacts cannot be downloaded, and the gate fails after every suite passed`);
   }
   return v;
 }
@@ -516,9 +611,35 @@ function gateEvidenceViolations(doc) {
   const download = after.find((s) => usesOf(s)?.action === 'actions/download-artifact');
   if (!download) return ['the gate downloads no artifacts after its verdict: the results checks have nothing to read'];
   const w = download.with ?? {};
-  if (!/^test-results-\*-\$\{\{\s*github\.run_attempt\s*\}\}$/.test(String(w.pattern ?? ''))) {
-    v.push(`the download pattern is \`${w.pattern}\`; it must be test-results-*-\${{ github.run_attempt }}, every job's results of THIS attempt and no earlier one's`);
+
+  // Q-710: a reused pull request reads the Full run's results, a fresh one its own, through ONE download. A step runs
+  // `scripts/full-run-reuse.mjs verify` first: it re-reads the run `reuse` named (fails closed, with the remedy), and writes
+  // the `run_id` and `attempt` the download reads — the whole of "this run, or that one" is in the script, never in an expression.
+  const verifyRe = /\bnode\s+scripts\/full-run-reuse\.mjs\s+verify\b/;
+  const verifies = after.filter((s) => verifyRe.test(shellOf(s)));
+  const verify = verifies.length === 1 ? verifies[0] : null;
+  if (!verify) v.push(`${verifies.length} step(s) run scripts/full-run-reuse.mjs verify after the verdict; exactly one, before the download`);
+  const verifyId = verify?.id ?? '(no id)';
+  if (verify) {
+    if (!verify.id) v.push('the verify step has no `id`: the download cannot read what it writes');
+    if (after.indexOf(verify) > after.indexOf(download)) v.push('the verify step runs AFTER the download: a reused run would be read before it is checked');
+    const upTo = after.slice(0, after.indexOf(verify));
+    if (!upTo.some((s) => usesOf(s)?.action === 'actions/checkout') || !upTo.some((s) => usesOf(s)?.action === 'actions/setup-node')) {
+      v.push('the verify step runs before the checkout or setup-node: the script is not on the runner yet');
+    }
+    if (expressionOf(verify.env?.FULL_RUN) !== `needs.${REUSE_JOB_ID}.outputs.${REUSE_OUTPUT}`) v.push(`the verify step's FULL_RUN is \`${verify.env?.FULL_RUN}\`; it must be \${{ needs.${REUSE_JOB_ID}.outputs.${REUSE_OUTPUT} }}, through env and never inside the script`);
+    if (!verify.env?.GH_TOKEN) v.push('the verify step has no GH_TOKEN: it cannot re-read the run it is told to trust');
+    if (isTrue(verify['continue-on-error'])) v.push('the verify step is continue-on-error: a mismatch could not fail the gate');
+    if (!runsOnlyOnSuccess(verify)) v.push(`the verify step has \`if: ${verify.if}\`: it must not run when a needed job failed`);
+    if (/\|\|\s*(true|:)\b/.test(shellOf(verify))) v.push('the verify step ends a failing path in `|| true`');
   }
+  if (expressionOf(w['run-id']) !== `steps.${verifyId}.outputs.run_id`) {
+    v.push(`the download run-id is \`${w['run-id'] ?? '(none: this run)'}\`; it must be \${{ steps.${verifyId}.outputs.run_id }}, the run the verify step checked, so a reused run's artifacts are the ones read`);
+  }
+  if (String(w.pattern ?? '').replace(/\$\{\{\s*([\s\S]*?)\s*\}\}/g, '${{ $1 }}') !== `test-results-*-\${{ steps.${verifyId}.outputs.attempt }}`) {
+    v.push(`the download pattern is \`${w.pattern}\`; it must be test-results-*-\${{ steps.${verifyId}.outputs.attempt }}, every job's results of THAT run's attempt and no other's`);
+  }
+  if (expressionOf(w['github-token']) !== 'github.token') v.push('the download has no `github-token: ${{ github.token }}`: another run\'s artifacts are refused without it');
   if (!isTrue(w['merge-multiple'])) v.push('the download does not set merge-multiple: true, so every job lands in a folder of its own and no check reads them as one set');
   const dir = String(w.path ?? '').replace(/^\.\//, '');
   if (!dir) v.push('the download names no path');
@@ -825,6 +946,26 @@ function isAdvisoryGhToken(doc, path, value) {
 }
 
 /**
+ * The two places besides the advisory job's `GH_TOKEN` that `github.token` may stand (Q-710), each one STEP and never a job's
+ * or a workflow's env: the `GH_TOKEN` of the step that runs `scripts/full-run-reuse.mjs decide` in the reuse job and of the one
+ * that runs `... verify` in the merge gate (the script's reads), and the `github-token` input of the gate's download of another
+ * run's artifacts. It reaches no checkout, no test step and neither of the two evidence scripts.
+ */
+function isReuseToken(doc, path, value) {
+  if (!/^\$\{\{\s*github\.token\s*\}\}$/.test(String(value).trim())) return false;
+  const [top, id, steps, index, key, name] = path;
+  if (top !== 'jobs' || steps !== 'steps' || path.length !== 6 || !doc.jobs[id]) return false;
+  const step = stepsOf(doc.jobs[id])[index];
+  if (!step) return false;
+  const isGate = mergeGateEntries(doc).some((g) => g.id === id);
+  if (key === 'env' && name === 'GH_TOKEN') {
+    if (id === REUSE_JOB_ID) return /\bnode\s+scripts\/full-run-reuse\.mjs\s+decide\b/.test(shellOf(step));
+    return isGate && /\bnode\s+scripts\/full-run-reuse\.mjs\s+verify\b/.test(shellOf(step));
+  }
+  return key === 'with' && name === 'github-token' && isGate && usesOf(step)?.action === 'actions/download-artifact';
+}
+
+/**
  * No credential expression anywhere in the PARSED document — env, with:, if:, run, a job's `name`, every value — beyond the
  * advisory job's `GH_TOKEN`. The job log is public and the console is not masked, so a credential that reaches repository
  * code reaches the log; the gate holds the cause (nothing is handed over) and not the symptom.
@@ -835,8 +976,8 @@ function credentialExpressionViolations(doc) {
     if (typeof node === 'string') {
       for (const expr of expressionsIn(node, path.at(-1))) {
         const what = credentialIn(expr);
-        if (what && !isAdvisoryGhToken(doc, path, node)) {
-          v.push(`${path.join('.')}: \`${expr.trim()}\` reads ${what}; nothing in this file may hand a credential to a step (only github.token as the advisory job's GH_TOKEN)`);
+        if (what && !isAdvisoryGhToken(doc, path, node) && !isReuseToken(doc, path, node)) {
+          v.push(`${path.join('.')}: \`${expr.trim()}\` reads ${what}; nothing in this file may hand a credential to a step (only github.token as the advisory job's GH_TOKEN, the reuse and verify steps' GH_TOKEN, and the gate's download github-token)`);
         }
       }
     } else if (Array.isArray(node)) {
@@ -1059,6 +1200,143 @@ function fullRunConcurrencyViolations({ fullRun, ci }) {
   return v;
 }
 
+// ───────────────────────────────────────── a pull request reuses a Full run (Q-710) ─────────────────────────────────────────
+
+/**
+ * What lets a pull request run skip every suite is one job, and a job that cannot be trusted to be small and to fail open is a
+ * new way for a green check to mean nothing. `reuse`: first in the file; named; only on a pull_request (a push to main and the
+ * Full run itself never pay for it); five minutes; the token of a read, `contents: read` and `actions: read` and nothing else;
+ * ONE output, `full_run`, taken from the step that decides; no install (the script imports node built-ins only, and a job with
+ * an install is a job the import-closure rule stops reading); and nothing it waits for.
+ */
+function reuseJobViolations(doc) {
+  const job = doc.jobs?.[REUSE_JOB_ID];
+  if (!job) return [`no job \`${REUSE_JOB_ID}\`: nothing decides whether a Full run of this tree is reused`];
+  const v = [];
+  if (Object.keys(doc.jobs)[0] !== REUSE_JOB_ID) v.push(`\`${REUSE_JOB_ID}\` is not the first job of the file (it is ${Object.keys(doc.jobs)[0]})`);
+  if (job.name !== 'Full run reuse') v.push(`the reuse job is named ${JSON.stringify(job.name)}; exactly "Full run reuse"`);
+  if (expressionOf(job.if) !== "github.event_name == 'pull_request'") v.push(`the reuse job has \`if: ${job.if ?? '(none)'}\`; it must run on a pull_request and on nothing else, so a push and a full run pay nothing`);
+  if (job['timeout-minutes'] !== 5) v.push(`the reuse job's timeout-minutes is ${JSON.stringify(job['timeout-minutes'])}; exactly 5 (its own deadline is 120 s)`);
+  if (JSON.stringify(Object.entries(job.permissions ?? {}).sort()) !== JSON.stringify([['actions', 'read'], ['contents', 'read']])) {
+    v.push(`the reuse job's permissions are ${JSON.stringify(job.permissions ?? '(none)')}; exactly contents: read and actions: read`);
+  }
+  if (job.needs != null) v.push('the reuse job waits for another job: it must start at once');
+  const outputs = Object.keys(job.outputs ?? {});
+  if (outputs.length !== 1 || outputs[0] !== REUSE_OUTPUT) v.push(`the reuse job's outputs are ${JSON.stringify(outputs)}; exactly [${JSON.stringify(REUSE_OUTPUT)}], "<run id>.<attempt>" or empty, so the two halves can never disagree`);
+  const decides = stepsOf(job).filter((s) => /\bnode\s+scripts\/full-run-reuse\.mjs\s+decide\b/.test(shellOf(s)));
+  if (decides.length !== 1) v.push(`${decides.length} step(s) of the reuse job run scripts/full-run-reuse.mjs decide; exactly one`);
+  else {
+    const [step] = decides;
+    if (!step.id) v.push('the deciding step has no `id`, so no output can be read from it');
+    else if (expressionOf(job.outputs?.[REUSE_OUTPUT]) !== `steps.${step.id}.outputs.${REUSE_OUTPUT}`) v.push(`the reuse job's output is \`${job.outputs?.[REUSE_OUTPUT]}\`; it must be the deciding step's own ${REUSE_OUTPUT}`);
+    if (isTrue(step['continue-on-error'])) v.push('the deciding step is continue-on-error: the script fails open on its own, and a step that cannot fail hides a script that broke');
+  }
+  if (stepsOf(job).some(runsNpmCi)) v.push('the reuse job runs `npm ci`: the script imports node built-ins only, and an install would take it out of the import-closure rule');
+  return v;
+}
+
+/** The pull_request types: `labeled` is what makes adding `ci:full` start a run that carries the label (without it the label does nothing until the next push). */
+function pullRequestTypesViolations(doc) {
+  const types = onOf(doc)?.pull_request?.types;
+  if (!Array.isArray(types)) return [`pull_request has no \`types\`: GitHub's default (opened, synchronize, reopened) never starts a run when \`ci:full\` is added`];
+  const want = ['opened', 'reopened', 'synchronize', 'labeled'];
+  const missing = want.filter((t) => !types.includes(t));
+  const extra = types.filter((t) => !want.includes(t));
+  return [
+    ...missing.map((t) => `pull_request types lack \`${t}\``),
+    ...extra.map((t) => `pull_request types include \`${t}\`, which no part of the reuse decision reads`),
+  ];
+}
+
+/** The ids of the jobs that run a suite: every job but `reuse`, `changelog`, the merge gate and the advisory job. Derived, never listed. */
+function suiteJobIds(doc) {
+  const gates = mergeGateEntries(doc).map((g) => g.id);
+  return jobEntries(doc).filter((j) => ![REUSE_JOB_ID, 'changelog', ...gates].includes(j.id) && !isAdvisory(j.job)).map((j) => j.id);
+}
+
+const SUITE_FLOOR = 5;
+
+/**
+ * Every suite job stands down on a reused run, the advisory job with it, and no other job does — and the set the `if:` names is
+ * the set the verdict lets skip. They are two statements of one fact in two places; held apart they drift, and the drift is a
+ * suite skipped with nothing covering it (the gate fails, a red nobody asked for) or a suite that must succeed and never runs.
+ * The verdict's set is read by running it (`verdictSkipSet`), not from its text.
+ */
+function reuseSkipSetViolations(doc) {
+  const v = [];
+  const suites = suiteJobIds(doc);
+  if (suites.length < SUITE_FLOOR) v.push(`only ${suites.length} suite job(s) derived (floor ${SUITE_FLOOR}): the derivation is broken`);
+  for (const id of suites) {
+    if (!skipsWhenRunIsReused(doc.jobs[id])) v.push(`${id} does not stand down on a reused run: it must wait for \`${REUSE_JOB_ID}\` and carry \`if: !cancelled() && ${REUSE_EMPTY}\``);
+  }
+  for (const { id, job } of jobEntries(doc)) {
+    if (!suites.includes(id) && !isAdvisory(job) && ifConjuncts(job).includes(REUSE_EMPTY)) {
+      v.push(`${id} carries the reuse condition but is no suite job: a reused run would skip a job whose result the verdict still needs`);
+    }
+  }
+  const advisory = jobEntries(doc).find((j) => isAdvisory(j.job));
+  if (advisory) {
+    const parts = ifConjuncts(advisory.job);
+    if (![].concat(advisory.job.needs ?? []).includes(REUSE_JOB_ID) || !parts.includes(REUSE_EMPTY) || !(parts.includes('always()') || parts.includes('!cancelled()'))) {
+      v.push(`${advisory.id} must wait for \`${REUSE_JOB_ID}\` and carry \`if: always() && ${REUSE_EMPTY}\`: it reads THIS run's results, and a reused run has none`);
+    }
+  }
+  const [gate] = mergeGateEntries(doc);
+  if (gate) {
+    const needs = [].concat(gate.job.needs ?? []);
+    const lets = verdictSkipSet(gate, needs);
+    const carries = suites.filter((id) => skipsWhenRunIsReused(doc.jobs[id])).sort();
+    if (JSON.stringify(lets) !== JSON.stringify(carries)) {
+      v.push(`the verdict lets [${lets.join(', ')}] be skipped beside a named run, and the jobs that carry the reuse condition are [${carries.join(', ')}]: the two sets must be equal`);
+    }
+    if (carries.length < SUITE_FLOOR) v.push(`only ${carries.length} job(s) carry the reuse condition (floor ${SUITE_FLOOR})`);
+  }
+  return v;
+}
+
+/**
+ * A value a pull request controls reaches a shell only through `env:`. `needs.reuse.outputs.*` is built from what the script
+ * writes and `github.event.pull_request.*` (a title, a branch name, a label) from a stranger; inside `run:` text either is
+ * code. A comment line is not read as a comment: GitHub substitutes the expression before the shell sees the line. The sink is
+ * also required to exist (a rule that finds no `env:` use of either passes over a workflow that reads neither).
+ */
+function runTextSinkViolations(doc) {
+  const v = [];
+  let outputsInEnv = 0;
+  let eventInEnv = 0;
+  for (const { where, step } of stepEntries(doc)) {
+    for (const m of String(step.run ?? '').matchAll(/\$\{\{([\s\S]*?)\}\}/g)) {
+      if (/\bneeds\s*\.\s*reuse\s*\.\s*outputs\b|\bgithub\s*\.\s*event\s*\.\s*pull_request\b/.test(m[1])) {
+        v.push(`${where}: \`\${{${m[1]}}}\` inside run: text is code, not data; read it through env:`);
+      }
+    }
+    for (const value of Object.values(step.env ?? {})) {
+      if (/\bneeds\s*\.\s*reuse\s*\.\s*outputs\b/.test(String(value))) outputsInEnv++;
+      if (/\bgithub\s*\.\s*event\s*\.\s*pull_request\b/.test(String(value))) eventInEnv++;
+    }
+  }
+  if (outputsInEnv < 1) v.push('no step reads `needs.reuse.outputs.*` through env: the verdict and the verify step have nothing to read the named run from');
+  if (eventInEnv < 1) v.push('no step reads `github.event.pull_request.*` through env: the reuse job has no labels and no head SHA to decide with');
+  return v;
+}
+
+/**
+ * The CHANGELOG check lives in the job `changelog` and nowhere else. It was a step of `prepare`, which a reused run skips, so a
+ * pull request that reuses would have merged without the check. As its own job it needs nothing and carries no condition of its
+ * own (the step carries the PR-only one), so no reuse and no failed job can make it not run.
+ */
+function changelogJobViolations(doc) {
+  const hits = jobEntries(doc).flatMap(({ id, job }) => stepsOf(job).filter((s) => /\bnode\s+scripts\/check-changelog\.mjs\b/.test(shellOf(s))).map(() => id));
+  const v = [];
+  if (hits.length !== 1) v.push(`${hits.length} steps run scripts/check-changelog.mjs; exactly one`);
+  for (const id of hits) if (id !== 'changelog') v.push(`the CHANGELOG check runs in \`${id}\`; it lives in the job \`changelog\` and nowhere else`);
+  const job = doc.jobs?.changelog;
+  if (!job) return [...v, 'no job `changelog`'];
+  if (job.needs != null) v.push('the changelog job waits for another job: a failed or skipped one would keep the check from running');
+  if (job.if != null) v.push(`the changelog job has \`if: ${job.if}\`: a skipped job is a check that never ran`);
+  return v;
+}
+
 // ───────────────────────────────────────── the rules, and how each is held ─────────────────────────────────────────
 
 /**
@@ -1100,10 +1378,18 @@ const RULES = {
   'test jobs read history': historyViolations,
   'test jobs build the server': serverBuildViolations,
   'stack jobs start what their suite reaches': stackInstanceViolations,
+  'the reuse job': reuseJobViolations,
+  'pull_request types': pullRequestTypesViolations,
+  'suite jobs stand down on a reused run': reuseSkipSetViolations,
+  'no pull-request value inside run text': runTextSinkViolations,
+  'the changelog job': changelogJobViolations,
 };
 
 const job = (doc, id) => doc.jobs[id];
 const stepWhere = (j, pred) => stepsOf(j).find(pred);
+/** The step of the merge gate that verifies the reused run, and the step of `reuse` that decides: found by what they run. */
+const verifyStep = (d) => stepWhere(job(d, 'test'), (s) => /full-run-reuse\.mjs\s+verify/.test(s.run ?? ''));
+const decideStep = (d) => stepWhere(job(d, REUSE_JOB_ID), (s) => /full-run-reuse\.mjs\s+decide/.test(s.run ?? ''));
 
 /** The full-run rows mutate the PAIR: `p.fullRun` the caller, `p.ci` the workflow it calls. */
 const callJob = (p) => p.fullRun.jobs.full;
@@ -1419,6 +1705,112 @@ const BREAKAGES = [
     stepWhere(job(d, 'sync'), (x) => usesOf(x)?.action === 'actions/upload-artifact').with.name = 'test-results-${{ github.run_attempt }}';
   }, 'results upload names', /is not test-results-<job id>/],
 
+  // ── a pull request reuses a Full run of its own tree (Q-710): the reuse job, the types, the skip set, the verdict, the token, the sinks ──
+  ['the reuse job is not the first job', (d) => { const { reuse, ...rest } = d.jobs; d.jobs = { ...rest, reuse }; }, 'the reuse job', /not the first job/],
+  ['the reuse job is renamed', (d) => { job(d, 'reuse').name = 'Reuse'; }, 'the reuse job', /exactly "Full run reuse"/],
+  ['the reuse job runs on every event (a push and the full run would pay for it)', (d) => { delete job(d, 'reuse').if; }, 'the reuse job', /must run on a pull_request and on nothing else/],
+  ['the reuse job has a longer timeout', (d) => { job(d, 'reuse')['timeout-minutes'] = 10; }, 'the reuse job', /exactly 5/],
+  ['the reuse job asks for pull-requests: read', (d) => { job(d, 'reuse').permissions['pull-requests'] = 'read'; }, 'the reuse job', /permissions are/],
+  ['the reuse job drops actions: read', (d) => { job(d, 'reuse').permissions = { contents: 'read' }; }, 'the reuse job', /permissions are/],
+  ['the reuse job outputs the halves apart (run_id beside full_run)', (d) => { job(d, 'reuse').outputs.run_id = '${{ steps.decide.outputs.run_id }}'; }, 'the reuse job', /outputs are/],
+  ['the reuse job\'s output is not the deciding step\'s', (d) => { job(d, 'reuse').outputs.full_run = '${{ steps.other.outputs.full_run }}'; }, 'the reuse job', /must be the deciding step's own/],
+  ['the reuse job installs', (d) => { job(d, 'reuse').steps.splice(1, 0, { run: 'npm ci' }); }, 'the reuse job', /runs `npm ci`/],
+  ['the reuse job waits for another job', (d) => { job(d, 'reuse').needs = 'changelog'; }, 'the reuse job', /waits for another job/],
+  ['the reuse job is gone', (d) => { delete d.jobs.reuse; }, 'the reuse job', /no job `reuse`/],
+  ['the deciding step cannot fail the job', (d) => { decideStep(d)['continue-on-error'] = true; }, 'the reuse job', /continue-on-error/],
+  ['the deciding step runs twice', (d) => { job(d, 'reuse').steps.push(clone(decideStep(d))); }, 'the reuse job', /2 step\(s\) of the reuse job/],
+  ['pull_request has no types (adding ci:full starts nothing)', (d) => { delete onOf(d).pull_request.types; }, 'pull_request types', /no `types`/],
+  ['pull_request types lose labeled', (d) => { onOf(d).pull_request.types = ['opened', 'synchronize', 'reopened']; }, 'pull_request types', /lack `labeled`/],
+  ['pull_request types gain edited', (d) => { onOf(d).pull_request.types.push('edited'); }, 'pull_request types', /include `edited`/],
+  ['a suite job loses the reuse condition', (d) => { delete job(d, 'sync').if; }, 'suite jobs stand down on a reused run', /sync does not stand down/],
+  ['a suite job stops waiting for reuse (its needs context has no output)', (d) => { job(d, 'integration').needs = 'prepare'; }, 'suite jobs stand down on a reused run', /integration does not stand down/],
+  ['a suite job\'s condition is the default success() again (a failed reuse would skip it)', (d) => { job(d, 'sync').if = "${{ needs.reuse.outputs.full_run == '' }}"; }, 'suite jobs stand down on a reused run', /sync does not stand down/],
+  ['a suite job\'s condition is the other way round', (d) => { job(d, 'sync').if = "${{ !cancelled() && needs.reuse.outputs.full_run != '' }}"; }, 'suite jobs stand down on a reused run', /sync does not stand down/],
+  ['the changelog job carries the reuse condition', (d) => { job(d, 'changelog').needs = 'reuse'; job(d, 'changelog').if = "${{ !cancelled() && needs.reuse.outputs.full_run == '' }}"; }, 'suite jobs stand down on a reused run', /changelog carries the reuse condition/],
+  ['the advisory job does not wait for reuse', (d) => { job(d, 'ci-advisory').needs = ['standalone', 'integration', 'sync']; }, 'suite jobs stand down on a reused run', /must wait for `reuse`/],
+  ['the advisory job keeps a bare always()', (d) => { job(d, 'ci-advisory').if = 'always()'; }, 'suite jobs stand down on a reused run', /must wait for `reuse`/],
+  ['the verdict lets no suite be skipped (the jobs that stand down would fail the gate)', (d) => {
+    const s = stepsOf(job(d, 'test'))[0];
+    s.run = s.run.replaceAll('check_suite ', 'check ');
+  }, 'suite jobs stand down on a reused run', /the verdict lets \[\] be skipped/],
+  ['the verdict lets a skipped suite pass whether or not a run is named', (d) => {
+    const s = stepsOf(job(d, 'test'))[0];
+    s.run = s.run.replace('&& [ -n "$FULL_RUN" ]', '');
+  }, 'merge gate', /PASSES when .* is skipped and no run is named/],
+  ['the verdict lets a failed suite pass beside a named run', (d) => {
+    const s = stepsOf(job(d, 'test'))[0];
+    s.run = s.run.replace('[ "$2" = skipped ] && [ -n "$FULL_RUN" ]', '[ -n "$FULL_RUN" ]');
+  }, 'merge gate', /PASSES when .* is failure and a run is named/],
+  ['the verdict never reads reuse (a named run whose reuse job failed passes)', (d) => {
+    const s = stepsOf(job(d, 'test'))[0];
+    s.run = s.run.replace('check reuse', 'true reuse');
+  }, 'merge gate', /PASSES when reuse is failure, the suites are skipped and a run is named/],
+  ['the verdict forgets the changelog job', (d) => {
+    const s = stepsOf(job(d, 'test'))[0];
+    s.run = s.run.split('\n').filter((l) => !l.includes('needs.changelog.')).join('\n');
+  }, 'merge gate', /PASSES when changelog is failure/],
+  ['the verdict lets the changelog check be skipped beside a named run', (d) => {
+    const s = stepsOf(job(d, 'test'))[0];
+    s.run = s.run.replace('check changelog', 'check_suite changelog');
+  }, 'merge gate', /PASSES when changelog is skipped and a run is named/],
+  ['the gate stops waiting for reuse', (d) => { job(d, 'test').needs = job(d, 'test').needs.filter((n) => n !== 'reuse'); }, 'merge gate', /does not wait for: reuse/],
+  ['the gate stops waiting for changelog', (d) => { job(d, 'test').needs = job(d, 'test').needs.filter((n) => n !== 'changelog'); }, 'merge gate', /does not wait for: changelog/],
+  ['a run step reads the reuse output inside its text', (d) => { job(d, 'sync').steps.push({ run: 'echo ${{ needs.reuse.outputs.full_run }}' }); }, 'no pull-request value inside run text', /needs\.reuse\.outputs\.full_run/],
+  ['a run step reads a pull-request title inside its text', (d) => { job(d, 'sync').steps.push({ run: 'echo "${{ github.event.pull_request.title }}"' }); }, 'no pull-request value inside run text', /github\.event\.pull_request\.title/],
+  ['a comment line of a run step names the expression (GitHub substitutes it before the shell reads the comment)', (d) => {
+    job(d, 'sync').steps.push({ run: '# ${{ github.event.pull_request.head.ref }}\nnpm test' });
+  }, 'no pull-request value inside run text', /github\.event\.pull_request\.head\.ref/],
+  ['the verify step is handed the named run on its command line', (d) => { verifyStep(d).run = 'node scripts/full-run-reuse.mjs verify ${{ needs.reuse.outputs.full_run }}'; }, 'no pull-request value inside run text', /inside run: text/],
+  ['no step reads a pull-request value through env', (d) => {
+    for (const j of Object.values(d.jobs)) for (const s of stepsOf(j)) for (const k of ['HEAD_SHA', 'PR_LABELS']) delete s.env?.[k];
+  }, 'no pull-request value inside run text', /no step reads `github\.event\.pull_request\.\*` through env/],
+  ['no step reads the reuse output through env', (d) => { delete stepsOf(job(d, 'test'))[0].env; delete verifyStep(d).env.FULL_RUN; }, 'no pull-request value inside run text', /no step reads `needs\.reuse\.outputs\.\*` through env/],
+  ['the CHANGELOG check moves back into prepare', (d) => {
+    const step = stepWhere(job(d, 'changelog'), (s) => /check-changelog/.test(s.run ?? ''));
+    job(d, 'prepare').steps.push(clone(step));
+    job(d, 'changelog').steps = stepsOf(job(d, 'changelog')).filter((s) => s !== step);
+  }, 'the changelog job', /runs in `prepare`; it lives in the job `changelog` and nowhere else/],
+  ['the CHANGELOG check also runs in prepare', (d) => {
+    job(d, 'prepare').steps.push(clone(stepWhere(job(d, 'changelog'), (s) => /check-changelog/.test(s.run ?? ''))));
+  }, 'the changelog job', /2 steps run scripts\/check-changelog\.mjs/],
+  ['the changelog job waits for reuse', (d) => { job(d, 'changelog').needs = 'reuse'; }, 'the changelog job', /waits for another job/],
+  ['the changelog job is conditional', (d) => { job(d, 'changelog').if = "github.event_name == 'pull_request'"; }, 'the changelog job', /has `if:/],
+  ['the changelog job is gone', (d) => { delete d.jobs.changelog; }, 'the changelog job', /no job `changelog`/],
+  ['the gate loses actions: read (a reused run\'s artifacts are refused)', (d) => { job(d, 'test').permissions = { contents: 'read' }; }, 'permissions', /no `actions: read`/],
+  ['the changelog job takes actions: read', (d) => { job(d, 'changelog').permissions = { contents: 'read', actions: 'read' }; }, 'permissions', /actions: read belongs/],
+  ['the gate has no verify step', (d) => { job(d, 'test').steps = stepsOf(job(d, 'test')).filter((s) => s !== verifyStep(d)); }, 'gate evidence', /0 step\(s\) run scripts\/full-run-reuse\.mjs verify/],
+  ['the verify step runs after the download', (d) => {
+    const s = verifyStep(d);
+    job(d, 'test').steps = [...stepsOf(job(d, 'test')).filter((x) => x !== s), s];
+  }, 'gate evidence', /AFTER the download/],
+  ['the verify step runs before the checkout', (d) => {
+    const s = verifyStep(d);
+    const rest = stepsOf(job(d, 'test')).filter((x) => x !== s);
+    job(d, 'test').steps = [rest[0], s, ...rest.slice(1)];
+  }, 'gate evidence', /before the checkout or setup-node/],
+  ['the verify step cannot fail the gate', (d) => { verifyStep(d)['continue-on-error'] = true; }, 'gate evidence', /verify step is continue-on-error/],
+  ['the verify step swallows its failure', (d) => { verifyStep(d).run += ' || true'; }, 'gate evidence', /verify step ends a failing path/],
+  ['the verify step reads the run from somewhere else', (d) => { verifyStep(d).env.FULL_RUN = '${{ github.run_id }}'; }, 'gate evidence', /FULL_RUN is/],
+  ['the verify step has no token', (d) => { delete verifyStep(d).env.GH_TOKEN; }, 'gate evidence', /no GH_TOKEN/],
+  ['the download reads this run only (a reused run\'s results are never fetched)', (d) => {
+    delete stepWhere(job(d, 'test'), (s) => usesOf(s)?.action === 'actions/download-artifact').with['run-id'];
+  }, 'gate evidence', /download run-id/],
+  ['the download reads the reuse output directly, not what the verify step checked', (d) => {
+    stepWhere(job(d, 'test'), (s) => usesOf(s)?.action === 'actions/download-artifact').with['run-id'] = '${{ needs.reuse.outputs.full_run }}';
+  }, 'gate evidence', /download run-id/],
+  ['the download has no token', (d) => { delete stepWhere(job(d, 'test'), (s) => usesOf(s)?.action === 'actions/download-artifact').with['github-token']; }, 'gate evidence', /github-token/],
+  ['the download pattern is this run\'s attempt, not the verified run\'s', (d) => {
+    stepWhere(job(d, 'test'), (s) => usesOf(s)?.action === 'actions/download-artifact').with.pattern = 'test-results-*-${{ github.run_attempt }}';
+  }, 'gate evidence', /download pattern/],
+  ['the token reaches an evidence script', (d) => { stepWhere(job(d, 'test'), (x) => /executed-tests/.test(x.run ?? '')).env = { GH_TOKEN: '${{ github.token }}' }; }, 'credential expressions', /jobs\.test\.steps\.\d+\.env\.GH_TOKEN/],
+  ['the token reaches the reuse job\'s checkout', (d) => { stepWhere(job(d, 'reuse'), (x) => usesOf(x)?.action === 'actions/checkout').with.token = '${{ github.token }}'; }, 'credential expressions', /jobs\.reuse\.steps\.0\.with\.token/],
+  ['the token reaches the download as env, not as its github-token', (d) => {
+    stepWhere(job(d, 'test'), (s) => usesOf(s)?.action === 'actions/download-artifact').env = { GH_TOKEN: '${{ github.token }}' };
+  }, 'credential expressions', /jobs\.test\.steps\.\d+\.env\.GH_TOKEN/],
+  ['the verify step passes the token under another name', (d) => { verifyStep(d).env.OTHER = '${{ github.token }}'; }, 'credential expressions', /env\.OTHER/],
+  ['the reuse job holds the token in its own env, for every step', (d) => { job(d, 'reuse').env = { GH_TOKEN: '${{ github.token }}' }; }, 'credential expressions', /jobs\.reuse\.env\.GH_TOKEN/],
+  ['a suite job takes the token for its step', (d) => { job(d, 'sync').steps[0].env = { GH_TOKEN: '${{ github.token }}' }; }, 'credential expressions', /jobs\.sync\.steps\.0\.env\.GH_TOKEN/],
+
   // ── the full run: one caller, one call, nothing handed over, one trigger, no second gate ──
   ['the caller gets a second job', (p) => { p.fullRun.jobs.extra = clone(callJob(p)); }, 'full run is one job that calls ci.yml', /2 jobs.*exactly one/],
   ['the caller has no job at all', (p) => { p.fullRun.jobs = {}; }, 'full run is one job that calls ci.yml', /0 jobs.*exactly one/],
@@ -1468,7 +1860,7 @@ const BREAKAGES = [
   ['the call job grants more of a permission than the jobs ask', (p) => { callJob(p).permissions.actions = 'write'; }, 'full run permissions are what ci.yml asks for', /grants actions: write; the called jobs ask read at most/],
   ['the call job takes write-all', (p) => { callJob(p).permissions = 'write-all'; }, 'full run permissions are what ci.yml asks for', /write-all/],
   ['a job of ci.yml starts asking for another permission (the derivation reads ci.yml)', (p) => { job(p.ci, 'sync').permissions = { contents: 'read', checks: 'read' }; }, 'full run permissions are what ci.yml asks for', /does not grant checks: read/],
-  ['no job of ci.yml asks for any permission (the derived set is empty)', (p) => { delete job(p.ci, 'ci-advisory').permissions; }, 'full run permissions are what ci.yml asks for', /floor 1/],
+  ['no job of ci.yml asks for any permission (the derived set is empty)', (p) => { for (const id of ['ci-advisory', 'reuse', 'test']) delete job(p.ci, id).permissions; }, 'full run permissions are what ci.yml asks for', /floor 1/],
   ['the caller has no concurrency', (p) => { delete p.fullRun.concurrency; }, 'full run cancels its older run and shares no group with ci.yml', /no top-level concurrency/],
   ['the caller does not cancel', (p) => { p.fullRun.concurrency['cancel-in-progress'] = false; }, 'full run cancels its older run and shares no group with ci.yml', /cancel-in-progress is `false`/],
   ['the caller leaves cancel-in-progress out', (p) => { delete p.fullRun.concurrency['cancel-in-progress']; }, 'full run cancels its older run and shares no group with ci.yml', /cancel-in-progress is/],
@@ -1850,4 +2242,41 @@ describe('docs/testing-guide.md names the full run\'s check as the two workflows
     mergeGateEntries(gateRenamed)[0].job.name = 'Gate';
     assert.ok(guideNamesFullRunCheck(guideWith('The check is `Full run / Build & Test`.'), GOOD_FULL, gateRenamed).length > 0, 'a gate that is no longer named Build & Test leaves nothing to derive');
   });
+});
+
+// ───────────────────────────────────────── the verdict renderer and the reuse condition, by their own truth tables ─────────────────────────────────────────
+
+describe('the verdict renderer reads a job\'s output as GitHub renders it (Q-710)', () => {
+  const step = { env: { FULL_RUN: '${{ needs.reuse.outputs.full_run }}' }, run: 'echo "${{ needs.reuse.result }}"' };
+
+  it('renders `needs.reuse.outputs.full_run` from the outputs it is given, and an output nobody set as the empty string', () => {
+    assert.equal(renderVerdict(step, { reuse: 'success' }, { reuse: { full_run: NAMED_RUN } }).env.FULL_RUN, NAMED_RUN);
+    assert.equal(renderVerdict(step, { reuse: 'skipped' }).env.FULL_RUN, '');
+    assert.equal(renderVerdict(step, { reuse: 'skipped' }, { reuse: {} }).env.FULL_RUN, '');
+  });
+
+  it('carries the outputs into toJSON(needs), and still refuses an expression it cannot render', () => {
+    const json = renderVerdict({ run: 'echo ${{ toJSON(needs) }}' }, { reuse: 'success' }, { reuse: { full_run: NAMED_RUN } }).script;
+    assert.ok(json.includes(NAMED_RUN), json);
+    assert.throws(() => renderVerdict({ run: '${{ needs.reuse.outputs }}' }, {}), /cannot render/);
+    assert.throws(() => renderVerdict({ run: '${{ github.event.pull_request.title }}' }, {}), /cannot render/);
+  });
+});
+
+describe('a job that stands down on a reused run is read from its `if:` and its `needs`, in any spelling of the same condition', () => {
+  const candidate = (ifValue, needs = 'reuse') => ({ needs, ...(ifValue === undefined ? {} : { if: ifValue }) });
+  for (const [what, j, stands] of [
+    ['the written form', candidate("${{ !cancelled() && needs.reuse.outputs.full_run == '' }}"), true],
+    ['without the braces, with double quotes and loose spacing', candidate('!cancelled()   &&  needs.reuse.outputs.full_run == ""'), true],
+    ['the parts the other way round', candidate("${{ needs.reuse.outputs.full_run == '' && !cancelled() }}"), true],
+    ['one of several needs', candidate("${{ !cancelled() && needs.reuse.outputs.full_run == '' }}", ['prepare', 'reuse']), true],
+    ['no condition', candidate(undefined), false],
+    ['success() in place of !cancelled()', candidate("${{ success() && needs.reuse.outputs.full_run == '' }}"), false],
+    ['always() in place of !cancelled() (it would run on a cancelled run)', candidate("${{ always() && needs.reuse.outputs.full_run == '' }}"), false],
+    ['the output compared the wrong way', candidate("${{ !cancelled() && needs.reuse.outputs.full_run != '' }}"), false],
+    ['the condition without the reuse part', candidate('${{ !cancelled() }}'), false],
+    ['the right condition and no need for reuse (the output is not in its context)', candidate("${{ !cancelled() && needs.reuse.outputs.full_run == '' }}", 'prepare'), false],
+  ]) {
+    it(`${stands ? 'stands down' : 'does not'}: ${what}`, () => assert.equal(skipsWhenRunIsReused(j), stands));
+  }
 });

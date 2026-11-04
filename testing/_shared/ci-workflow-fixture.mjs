@@ -41,7 +41,8 @@ const UPLOAD_RESULTS = (job) => `
 const STACK_JOB = (id, name, script = id) => `
   ${id}:
     name: ${name}
-    needs: prepare
+    needs: [reuse, prepare]
+    if: ${STANDS_DOWN}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -67,7 +68,16 @@ const STACK_JOB = (id, name, script = id) => `
       - name: Run ${id}
         run: npm run test:${script}${UPLOAD_RESULTS(id)}`;
 
-export const NEEDED_JOBS = ['client-tests', 'prepare', 'standalone', 'integration', 'sync'];
+/**
+ * The jobs that run a suite, and so stand down when a pull request reuses a Full run of its own tree (bundle-244, Q-710): each
+ * waits for `reuse` and carries `if: !cancelled() && needs.reuse.outputs.full_run == ''`. `reuse` decides, and `changelog` is the
+ * PR-only CHANGELOG check, which a reused run still makes; neither skips, and the gate waits for both.
+ */
+export const TEST_JOBS = ['client-tests', 'prepare', 'standalone', 'integration', 'sync'];
+export const NEEDED_JOBS = ['reuse', 'changelog', ...TEST_JOBS];
+
+/** The one condition of a job that stands down on a reused run, as the YAML text of its `if:`. */
+const STANDS_DOWN = "@{{ !cancelled() && needs.reuse.outputs.full_run == '' }}";
 
 /**
  * The command the client job runs, written once: the fixture's client step and the fixture's preflight both carry it, and
@@ -89,8 +99,15 @@ try { run('npm run typecheck:client'); } catch { /* reported below */ }
 try { run('${CLIENT_COMMAND}'); } catch { /* reported below */ }
 `;
 
+/**
+ * The verdict's lines, one per needed job: `reuse` counts only when it names a run (the whole graph ran without it otherwise,
+ * and a push never runs it), `changelog` must have succeeded, and a test job may be `skipped` only beside a named run.
+ */
 const verdictLines = NEEDED_JOBS
-  .map((id) => `          [ "@{{ needs.${id}.result }}" = success ] || { echo "${id}: not success"; exit 1; }`)
+  .map((id) => {
+    if (id === 'reuse') return '          [ -z "$FULL_RUN" ] || check reuse "@{{ needs.reuse.result }}"';
+    return `          ${id === 'changelog' ? 'check' : 'check_suite'} ${id} "@{{ needs.${id}.result }}"`;
+  })
   .join('\n');
 
 export const GOOD_CI = `
@@ -98,6 +115,7 @@ name: CI
 on:
   pull_request:
     branches: [main, 'release/**']
+    types: [opened, synchronize, reopened, labeled]
   push:
     branches: [main]
   workflow_call:
@@ -109,8 +127,45 @@ concurrency:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 jobs:
+  reuse:
+    name: Full run reuse
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      full_run: @{{ steps.decide.outputs.full_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Decide whether a Full run of this tree is reused
+        id: decide
+        env:
+          GH_TOKEN: @{{ github.token }}
+          HEAD_SHA: @{{ github.event.pull_request.head.sha }}
+          PR_LABELS: @{{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: node scripts/full-run-reuse.mjs decide
+  changelog:
+    name: CHANGELOG entry
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: CHANGELOG entry for shipped changes
+        if: github.event_name == 'pull_request'
+        run: |
+          # comment lines are not the script
+          node scripts/check-changelog.mjs "origin/$GITHUB_BASE_REF"
   client-tests:
     name: Client tests
+    needs: reuse
+    if: ${STANDS_DOWN}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -126,6 +181,8 @@ jobs:
         run: ${CLIENT_COMMAND}${UPLOAD_RESULTS('client-tests')}
   prepare:
     name: Prepare
+    needs: reuse
+    if: ${STANDS_DOWN}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -137,11 +194,6 @@ jobs:
         with:
           node-version: '22'
           cache: npm${NPM_CI}
-      - name: CHANGELOG entry for shipped changes
-        if: github.event_name == 'pull_request'
-        run: |
-          # comment lines are not the script
-          node scripts/check-changelog.mjs "origin/$GITHUB_BASE_REF"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Expose GitHub Actions cache to Buildx
@@ -164,8 +216,8 @@ jobs:
           compression-level: 0${STACK_JOB('standalone', 'Standalone', 'standalone:instance')}${STACK_JOB('integration', 'Integration')}${STACK_JOB('sync', 'Sync')}
   ci-advisory:
     name: CI advisory
-    needs: [standalone, integration, sync]
-    if: always()
+    needs: [reuse, standalone, integration, sync]
+    if: @{{ always() && needs.reuse.outputs.full_run == '' }}
     continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -194,20 +246,39 @@ jobs:
     needs: [${NEEDED_JOBS.join(', ')}]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Every needed job succeeded
+        env:
+          FULL_RUN: @{{ needs.reuse.outputs.full_run }}
         run: |
+          fail=0
+          bad() { echo "::error::$1 finished: $2"; fail=1; }
+          check() { [ "$2" = success ] || bad "$1" "$2"; }
+          check_suite() { [ "$2" = success ] || { [ "$2" = skipped ] && [ -n "$FULL_RUN" ]; } || bad "$1" "$2"; }
 ${verdictLines}
+          exit $fail
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Verify the reused run and name the results to read
+        id: results
+        env:
+          FULL_RUN: @{{ needs.reuse.outputs.full_run }}
+          GH_TOKEN: @{{ github.token }}
+          HEAD_SHA: @{{ github.event.pull_request.head.sha }}
+        run: node scripts/full-run-reuse.mjs verify
       - name: Download every job's test results
         uses: actions/download-artifact@v4
         with:
-          pattern: test-results-*-@{{ github.run_attempt }}
+          run-id: @{{ steps.results.outputs.run_id }}
+          github-token: @{{ github.token }}
+          pattern: test-results-*-@{{ steps.results.outputs.attempt }}
           path: test-results
           merge-multiple: true
       - name: Every tracked test file produced a test event

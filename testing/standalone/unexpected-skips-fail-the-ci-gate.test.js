@@ -43,6 +43,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REPO_ROOT } from './_sources.mjs';
 import { bareImports, importClosure } from './_import-closure.mjs';
+import { loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, runsNpmCi } from '../_shared/ci-workflow.mjs';
+import { GOOD_CI } from '../_shared/ci-workflow-fixture.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { runTimed, fixture } from './_timing-runs.mjs';
 import { runScript } from './_run-script.mjs';
@@ -278,5 +280,66 @@ describe('what the aggregator\'s steps import', () => {
     const src = readFileSync(SCRIPT, 'utf8');
     assert.match(src, /from '\.\.\/testing\/_shared\/expected-in-ci\.mjs'/, 'the script keeps its own copy of the list');
     assert.doesNotMatch(stripComments(src), /the-extractor|corpus not fetched/, 'a file or cause is written into the script');
+  });
+});
+
+/**
+ * Every script a job that installs nothing runs. A step that runs `node scripts/<x>.mjs` in a job with no `npm ci` has only
+ * what the runner ships: node and its built-ins. The two evidence scripts of the gate, the timings summary of the advisory job
+ * and (Q-710) the reuse job's script, the gate's verify step and the CHANGELOG check are such steps. The list of them is
+ * DERIVED from ci.yml, never kept here: a script added to such a job tomorrow is in this rule the day it is written, and the one
+ * that gains an `npm ci` leaves it (and is then held to its own install, not to this).
+ */
+function entriesOfJobsWithoutInstall(doc) {
+  const entries = new Set();
+  for (const { job } of jobEntries(doc)) {
+    const steps = stepsOf(job);
+    if (steps.some(runsNpmCi)) continue;
+    for (const s of steps) {
+      for (const m of shellOf(s).matchAll(/\bnode\s+(?:\.\/)?(scripts\/[\w./-]+\.mjs)\b/g)) entries.add(m[1]);
+    }
+  }
+  return [...entries].sort();
+}
+
+/** Anything in the closure of `entry` that is neither a node built-in nor a file of this repository. */
+function packagesReachedFrom(entry) {
+  assert.ok(existsSync(join(REPO_ROOT, entry)), `${entry} does not exist yet`);
+  return importClosure(entry).flatMap((f) => bareImports(f).filter((spec) => !spec.startsWith('node:')).map((spec) => `${f} imports ${spec}`));
+}
+
+describe('what every script of a job that installs nothing imports (derived from ci.yml)', () => {
+  const FLOOR = 5;
+
+  it('the entries are derived from the steps: more than the two evidence scripts, and the reuse job\'s own script among them', () => {
+    const ci = loadCi();
+    const entries = entriesOfJobsWithoutInstall(ci);
+    assert.ok(entries.length >= FLOOR, `only ${entries.length} script(s) run in a job with no install (${entries.join(', ')}); floor ${FLOOR}: the reuse job, the gate's verify step and the CHANGELOG job each run one, beside the two evidence scripts and the timings summary`);
+    const ofReuse = entriesOfJobsWithoutInstall({ jobs: { reuse: ci.jobs.reuse ?? { steps: [] } } });
+    assert.ok(ofReuse.length >= 1, 'the reuse job runs no script in a job that installs nothing: there is no `reuse` job, or it installs');
+    for (const e of ofReuse) assert.ok(entries.includes(e));
+  });
+
+  it('every one reaches only node built-ins and files of this repository, so the job that runs it needs no install', () => {
+    const found = entriesOfJobsWithoutInstall(loadCi()).flatMap(packagesReachedFrom);
+    assert.deepEqual(found, [], `a package here is an \`npm ci\` the job would owe, and a job that owes one is not the lean job it was written as:\n  ${found.join('\n  ')}`);
+  });
+
+  it('is derived from a workflow, not listed: a script of a job with no install is an entry, and one whose job installs is not', () => {
+    const GOOD = parseWorkflow(GOOD_CI, 'the conforming fixture');
+    assert.deepEqual(entriesOfJobsWithoutInstall(GOOD), [
+      'scripts/check-changelog.mjs', 'scripts/executed-tests.mjs', 'scripts/full-run-reuse.mjs', 'scripts/test-times.mjs', 'scripts/unexpected-skips.mjs',
+    ]);
+    const more = structuredClone(GOOD);
+    more.jobs.changelog.steps.push({ run: 'node scripts/another.mjs' });
+    assert.ok(entriesOfJobsWithoutInstall(more).includes('scripts/another.mjs'), 'a script added to a job with no install is not an entry');
+    more.jobs.changelog.steps.push({ run: 'npm ci' });
+    assert.ok(!entriesOfJobsWithoutInstall(more).includes('scripts/another.mjs'), 'a job that now installs is still read as one that does not');
+    assert.ok(!entriesOfJobsWithoutInstall(more).includes('scripts/check-changelog.mjs'));
+  });
+
+  it('a script that reaches a package is found (the closure is walked from the entry, not read from its first lines)', () => {
+    const found = packagesReachedFrom('scripts/_shared/ci-run-reader.mjs');
+    assert.ok(found.some((m) => /js-yaml/.test(m)), `the closure of the shared run reader (which reads ci.yml through js-yaml) held no package: ${found.join('; ')}`);
   });
 });

@@ -1,0 +1,18 @@
+{
+  "total_count": 13,
+  "jobs": [
+    { "name": "Full run / Prepare", "status": "completed", "conclusion": "success", "run_attempt": 1 },
+    { "name": "Full run / Standalone (database, shard 3)", "status": "completed", "conclusion": "success", "run_attempt": 1 },
+    { "name": "Full run / Standalone (database, shard 2)", "status": "completed", "conclusion": "success", "run_attempt": 1 },
+    { "name": "Full run / Standalone (no services)", "status": "completed", "conclusion": "success", "run_attempt": 1 },
+    { "name": "Full run / Standalone (database, shard 1)", "status": "completed", "conclusion": "success", "run_attempt": 1 },
+    { "name": "Full run / Standalone (database, shard 0)", "status": "completed", "conclusion": "success", "run_attempt": 1 },
+    { "name": "Full run / Client tests", "status": "completed", "conclusion": "success", "run_attempt": 1 },
+    { "name": "Full run / Sync", "status": "completed", "conclusion": "success", "run_attempt": 1 },
+    { "name": "Full run / Red team", "status": "completed", "conclusion": "success", "run_attempt": 1 },
+    { "name": "Full run / Standalone (instances)", "status": "completed", "conclusion": "success", "run_attempt": 1 },
+    { "name": "Full run / Integration", "status": "completed", "conclusion": "success", "run_attempt": 1 },
+    { "name": "Full run / Build & Test", "status": "completed", "conclusion": "success", "run_attempt": 1 },
+    { "name": "Full run / CI advisory", "status": "completed", "conclusion": "success", "run_attempt": 1 }
+  ]
+}

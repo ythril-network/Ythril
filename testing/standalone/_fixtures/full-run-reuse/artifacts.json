@@ -1,0 +1,18 @@
+{
+  "total_count": 13,
+  "artifacts": [
+    { "name": "ythril-network~Ythril~KIZ666.dockerbuild", "expired": false },
+    { "name": "test-results-standalone-db-1-1", "expired": false },
+    { "name": "test-results-sync-1", "expired": false },
+    { "name": "test-results-client-tests-1", "expired": false },
+    { "name": "test-results-standalone-db-0-1", "expired": false },
+    { "name": "test-results-standalone-db-2-1", "expired": false },
+    { "name": "test-results-standalone-db-3-1", "expired": false },
+    { "name": "ythril-network~Ythril~PJFKIG.dockerbuild", "expired": false },
+    { "name": "test-results-standalone-pure-1", "expired": false },
+    { "name": "test-results-integration-1", "expired": false },
+    { "name": "test-results-redteam-1", "expired": false },
+    { "name": "test-results-standalone-instance-1", "expired": false },
+    { "name": "ythril-test-image-1", "expired": false }
+  ]
+}
