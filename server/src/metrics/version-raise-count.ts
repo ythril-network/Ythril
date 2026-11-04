@@ -23,4 +23,4 @@ const raised = countSink<[reason: VersionRaiseReason]>();
 export const setVersionRaiseSink = raised.set;
 
 /** One raise of a counter that actually moved it, counted under its reason. */
-export const countVersionCounterRaise = raised.count;
+export const countVersionCounterRaise = raised.add;

@@ -22,5 +22,5 @@ export const setBrainWriteSink = write.set;
 
 /** One brain write's outcome, counted: `ceiling` (refused, the record's version is at the highest sync accepts) or `collision` (a retry). */
 export function countBrainWriteSeq(collection: string, outcome: 'ceiling' | 'collision'): void {
-  write.count(collection, outcome);
+  write.add(collection, outcome);
 }
