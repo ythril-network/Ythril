@@ -1172,6 +1172,7 @@ export function getEmbeddingConfig() {
     // Left `undefined` when unset on purpose: `embedConcurrency()` picks a different default per embedder,
     // so a number here would flatten that distinction. Clamping happens there, in one place.
     embedConcurrency: envIntOpt('EMBEDDING_CONCURRENCY') ?? base.embedConcurrency,
+    maxInputBytes: base.maxInputBytes,   // raw: `embedInputCeiling()` (brain/embed-text.ts) validates it
     similarity: base.similarity ?? ('cosine' as const),
     provider: (process.env['EMBEDDING_PROVIDER'] as 'local' | 'external' | undefined) ?? base.provider ?? 'local',
     // 'auto' resolves to the pre-existing behaviour (see resolvePrefixScheme in brain/embedding.ts), so an

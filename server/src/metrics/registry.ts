@@ -30,6 +30,7 @@ import { positionClockUnusable } from '../util/position-clock.js';
 import { setBrainWriteSink } from './brain-write-count.js';
 import { setVersionRaiseSink, VERSION_RAISE_REASONS } from './version-raise-count.js';
 import { setConfigFlushFailureSink } from './config-flush-count.js';
+import { setEmbedJobFailedSink, EMBED_JOB_FAILED_REASONS } from './embed-job-failed-count.js';
 import { oldestRecordPositionHoldSeconds } from '../sync/record-position-stream.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
 import { schemaRefusalCounts } from '../brain/schema-refusal-tally.js';
@@ -1943,6 +1944,45 @@ export const embedChunksTotal = new Counter({
   registers: [register],
 });
 embedChunksTotal.labels({ space: '' }).inc(0);
+
+/**
+ * Embed jobs left `failed`, by why (`brain/embed-queue.ts`, ONE helper writes the status so no writer can drop the count, and counts
+ * through `metrics/embed-job-failed-count.ts`, which the queue can import where it cannot import this):
+ * `refused_413` (the embedder answered payload-too-large), `over_ceiling` (a stored passage is larger than the embedder accepts and
+ * needs its file re-converted), `budget` (the attempts ran out), `lost_child` (the inference process was lost too often).
+ */
+export const embedJobsFailedCounter = new Counter({
+  name: 'ythril_embed_jobs_failed_total',
+  help: 'Embed jobs left failed, by reason (refused_413, over_ceiling, budget, lost_child)',
+  labelNames: ['reason'] as const,
+  registers: [register],
+});
+setEmbedJobFailedSink(reason => embedJobsFailedCounter.labels({ reason }).inc());
+for (const reason of EMBED_JOB_FAILED_REASONS) embedJobsFailedCounter.labels({ reason }).inc(0);
+
+/**
+ * Text cut to the embedder's input ceiling before it was embedded, by who produced it (`brain/embed-text.ts`): a whole-document
+ * vector, a media transcript or caption, or an input that reached `embed()` over the ceiling (`http`: a fact, an entity, a query).
+ * A cut text is embedded as its beginning only, so a non-zero rate is text whose tail the vector does not describe.
+ */
+export const embedInputCutTotal = new Counter({
+  name: 'ythril_embed_input_cut_total',
+  help: 'Texts cut to the embedder input ceiling before embedding, by producer',
+  labelNames: ['producer'] as const,
+  registers: [register],
+});
+for (const producer of ['whole-document', 'media', 'http']) embedInputCutTotal.labels({ producer }).inc(0);
+
+/**
+ * Document passages stored WITHOUT a vector because the embedder refused them during conversion (the file still converts; the
+ * passage is findable by its words only). Otherwise nothing reports a partial failure unless every passage failed.
+ */
+export const conversionChunksUnembeddedTotal = new Counter({
+  name: 'ythril_conversion_chunks_unembedded_total',
+  help: 'Document passages stored without a vector because the embedder refused them',
+  registers: [register],
+});
+conversionChunksUnembeddedTotal.inc(0);
 
 // ── Silent degradation ───────────────────────────────────────────────────────
 /**

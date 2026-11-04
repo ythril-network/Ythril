@@ -91,6 +91,13 @@ export const DUAL_DOOR_BOUNDS = {
     min: 1, max: MAX_EMBED_CONCURRENCY,
     what: 'how many embeds run at once',
   },
+  // The one row here with a SINGLE door: no environment variable writes it (it is the embedder's own configuration, set beside
+  // `embedding.model` and `embedding.baseUrl`). It lives in this table so the admin schema reads it through `bounded()` and the
+  // reader (`embedInputCeiling()`) answers its own default for a value outside the range, from the same two numbers.
+  'embedding.maxInputBytes': {
+    min: 512, max: 65_536,
+    what: 'the most bytes one embedder request may carry',
+  },
   // The five `getMediaEmbeddingConfig()` reads through its own `pick()`. These were worse than divergent:
   // `pick` coerced with a bare `Number(envRaw)` and checked nothing, so a typo became NaN and travelled.
   // `maxFileSizeBytes` is the one that matters — `input.bytes > NaN` is FALSE, so a mistyped

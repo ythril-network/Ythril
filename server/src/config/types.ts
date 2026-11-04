@@ -367,6 +367,13 @@ export interface EmbeddingConfig {
    * `embed-concurrency.ts` for the measurements. Raise it only with CPU headroom to spare; clamped to 1…32.
    */
   embedConcurrency?: number;
+  /**
+   * The most UTF-8 bytes one embedder request may carry, task prefix included. Absent = 6,000; range 512…65,536. An embedder with a
+   * small context (512 tokens) needs it lower. Read through `embedInputCeiling()` (`brain/embed-text.ts`), which never means "no limit":
+   * a stored value outside the range (a hand-edited `config.json` is not validated at load) reads as the default. A change re-chunks
+   * a file only when it is re-converted (`retry_embed_file`).
+   */
+  maxInputBytes?: number;
   model: string;
   dimensions: number;
   similarity: 'cosine' | 'dotProduct' | 'euclidean';
@@ -1956,6 +1963,12 @@ export interface FileMetaDoc {
    *                  records still render.
    */
   embeddingStatus?: 'pending' | 'processing' | 'complete' | 'partial' | 'failed' | 'skipped' | 'disabled';
+  /**
+   * On the ONE chunk of a file converted at the `embed` text level: its vector is made from the beginning of the whole document (cut to
+   * the embedder's ceiling where it is embedded) and `content` stays whole. A rebuild reads it to tell this chunk from a chunker's,
+   * which is never cut. Local-only, like every derived row.
+   */
+  wholeDocument?: boolean;
   /** For audio/video chunk records: start offset within the parent media file. */
   chunkOffsetMs?: number;
   /** For audio/video chunk records: duration covered by this chunk. */
