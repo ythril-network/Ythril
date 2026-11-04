@@ -28,7 +28,6 @@ import { derivedIdOwnerCandidate, idsUnder, isDerivedRowOf, movedRoot, type Side
 import { LIVE_FILE_ROW } from './live-file-row.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
-
 /** What {@link rowsDerivedFrom} found: every row reached, and the ids among them that HAVE children. */
 export interface DerivedRows {
   /** `roots` and the id of every file row derived from them, however deep (to `MAX_ANCESTRY`). */

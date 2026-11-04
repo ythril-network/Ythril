@@ -32,6 +32,8 @@ import { waitFor } from '../_shared/wait-for.mjs';
 
 /** The width of a face descriptor the external provider answers with (`faceDescriptorDimsFor`'s default). */
 const FACE_DIMS = 128;
+/** The time a seeded file row reads as created and updated: the same figure every test seeds its rows with. */
+const SEEDED_AT = '2026-09-01T00:00:00.000Z';
 
 /**
  * A model endpoint whose every call waits for the test. `calls[n - 1]` is call `n`: `{ n, released, release() }`.
@@ -134,6 +136,19 @@ export async function openParkedMediaRuns({ suite, space, faces = false }) {
         unsubscribe = logMod.subscribeLogLines(line => { if (re.test(line)) resolve(line); });
       });
       return ended.finally(() => unsubscribe());
+    },
+    /** The file row a run's derived rows hang from, with no bytes on disk: `p` of `sizeBytes`, as a stored file's row reads. */
+    async seedParent(p, sizeBytes) {
+      await acts.door.coll(space, 'files').insertOne({ _id: p, spaceId: space, path: p, sizeBytes, tags: [], createdAt: SEEDED_AT, updatedAt: SEEDED_AT, seq: 1 });
+    },
+    /** A stored picture: its bytes through the real file door's writer, and its row ({@link seedParent}). */
+    async seedPicture(p, bytes) {
+      await acts.files.writeFile(space, p, bytes);
+      await this.seedParent(p, bytes.length);
+    },
+    /** The ids of every row whose parent is `p`, sorted: what a run left (or cleared) of the rows derived from `p`. */
+    async derivedIds(p) {
+      return (await acts.door.coll(space, 'files').find({ parentFileId: p }, { projection: { _id: 1 } }).toArray()).map(r => r._id).sort();
     },
     /** Queue the job for the already-stored file `p` and make sure the worker is running. */
     async startRun(p, mime = 'image/png') {

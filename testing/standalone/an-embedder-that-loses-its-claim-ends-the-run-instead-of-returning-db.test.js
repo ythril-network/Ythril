@@ -27,7 +27,7 @@ import { createRequire } from 'node:module';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openParkedMediaRuns } from './_parked-media-runs.mjs';
-import { seedClaim, revoke } from './_media-claim.mjs';
+import { seedClaim, revoke, isLeaseLost } from './_media-claim.mjs';
 import { installFfmpeg } from './_media-job-door.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -38,7 +38,6 @@ const PERSON = '33333333-3333-4333-8333-333333333333';
 let runs, acts, audioMod, videoMod, imageMod, png;
 const files = () => acts.door.coll(S, 'files');
 const derivedOf = async (parent) => (await files().find({ parentFileId: parent }, { projection: { _id: 1 } }).toArray()).map(r => r._id).sort();
-const isLeaseLost = (err) => err instanceof Error && err.name === 'JobLeaseLostError';
 
 /** A plaintext handle's file under the harness's data root; the embedders read a PATH and a size, never bytes. */
 function handleFor(id, bytes = Buffer.from('wav')) {

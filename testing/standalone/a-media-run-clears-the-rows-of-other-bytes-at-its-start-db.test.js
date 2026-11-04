@@ -50,10 +50,7 @@ let runs, acts, png;
 const files = () => acts.door.coll(S, 'files');
 const jobs = () => acts.door.coll(S, 'media_jobs');
 
-async function seedPicture(p) {
-  await acts.files.writeFile(S, p, png);
-  await files().insertOne({ _id: p, spaceId: S, path: p, sizeBytes: png.length, tags: [], createdAt: T0, updatedAt: T0, seq: 1 });
-}
+const seedPicture = (p) => runs.seedPicture(p, png);
 
 /** A derived row of `p` as an earlier run stored it; `sourceSha256: undefined` is a row written before the stamp existed. */
 const derivedRow = (p, suffix, sourceSha256, extra = {}) => ({
@@ -61,7 +58,7 @@ const derivedRow = (p, suffix, sourceSha256, extra = {}) => ({
   content: `stored for ${suffix}`, ...(sourceSha256 ? { sourceSha256 } : {}), ...extra,
 });
 const seedRows = (p, rows) => files().insertMany(rows.map(([suffix, sha, extra]) => derivedRow(p, suffix, sha, extra)));
-const idsOf = async (p) => (await files().find({ parentFileId: p }, { projection: { _id: 1 } }).toArray()).map(r => r._id).sort();
+const idsOf = (p) => runs.derivedIds(p);
 
 /** A job the worker can claim now; `sha256` absent is a job with no known hash. */
 const pendingJob = (p, sha256) => ({ _id: p, spaceId: S, filePath: p, mimeType: 'image/png', mediaType: 'image', status: 'pending', attempts: 0,

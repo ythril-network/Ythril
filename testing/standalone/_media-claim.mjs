@@ -65,3 +65,10 @@ export async function recover(space, fileId) {
 export async function jobOf(space, fileId) {
   return await (await jobs(space)).findOne({ _id: fileId });
 }
+
+/**
+ * Did this error end a run because its claim was gone (`JobLeaseLostError`)? Read by NAME, as the worker does (`isLeaseLost`,
+ * `files/media/lease.ts`): the test's error may come from a module instance other than the one the test imported, and `instanceof` then
+ * answers no for the one error that means "the fence held". The one spelling for every test that asserts a run stopped for a lost claim.
+ */
+export const isLeaseLost = (err) => err instanceof Error && err.name === 'JobLeaseLostError';

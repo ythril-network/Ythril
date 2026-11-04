@@ -19,7 +19,8 @@
 import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { getMediaEmbeddingConfig, DEFAULT_MEDIA_MAX_FILE_SIZE_BYTES } from '../config/loader.js';
-import { resolveInputFormat, deleteConversionArtifacts, isMediaFormat, type ResolvedFormat } from './converters/pipeline.js';
+import { sameKnownHash } from './same-known-hash.js';
+import { resolveInputFormat,deleteConversionArtifacts, isMediaFormat, type ResolvedFormat } from './converters/pipeline.js';
 import { replaceContent, cancelMediaJob, reportDoorFailure } from './media/job-queue.js';
 import { setFileProcessingState, type FileProcessingState } from './derived-fields.js';
 import { documentsAreOff } from './converters/extraction-level.js';
@@ -106,7 +107,7 @@ const SETTLED = new Set<string>(['complete', 'pending', 'processing']);
  * searches for it and it is not there. So the rule refuses to guess, and one function holds it for EVERY branch of the dispatcher.
  */
 function settledAndIdentical(prior: PriorProcessing | null | undefined, sha256: string | undefined): prior is PriorProcessing {
-  return sha256 !== undefined && sha256 !== '' && prior?.sha256 === sha256 && SETTLED.has(prior.embeddingStatus ?? '');
+  return sameKnownHash(sha256, prior?.sha256) && SETTLED.has(prior?.embeddingStatus ?? '');
 }
 
 export interface DispatchInput {

@@ -55,7 +55,7 @@ import {
 import type { ResolvedFormat } from '../converters/pipeline.js';
 import { ConversionUnavailableError } from '../converters/types.js';
 import type { StepProgress } from '../converters/types.js';
-import { isLeaseLost, isAbandonment, holdsClaim, JobLeaseLostError, type JobClaim } from './lease.js';
+import { isLeaseLost, isAbandonment, assertHoldsClaim, type JobClaim } from './lease.js';
 import { effectiveDocExtractionMode } from '../converters/extraction-level.js';
 import { effectiveTextLevel, effectiveVideoLevel, videoDoesKeyframes } from '../converters/media-level.js';
 import path from 'path';
@@ -770,7 +770,7 @@ async function processJob(
  * and records the move was about to carry — the moved file arrived with no job and nothing ever processed it.
  */
 async function reconcileDeletedSource(spaceId: string, claim: JobClaim): Promise<boolean> {
-  if (!(await holdsClaim(spaceId, claim))) throw new JobLeaseLostError(spaceId, claim.jobId);
+  await assertHoldsClaim(spaceId, claim);
   // A path with no bytes is not always a deleted file: the move that took the bytes away may still have to carry the records.
   // The hold the move put on this job ends on its own; past it the job is claimed here, finds nothing at the old path, and "the
   // deleted source" removed the very record the move owes its destination. Asked of the move's marker: while one is OWED (or cannot be

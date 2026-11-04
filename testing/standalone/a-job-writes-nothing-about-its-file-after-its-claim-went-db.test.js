@@ -43,7 +43,7 @@ import { createRequire } from 'node:module';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openParkedMediaRuns } from './_parked-media-runs.mjs';
-import { seedClaim, jobOf } from './_media-claim.mjs';
+import { seedClaim, jobOf, isLeaseLost } from './_media-claim.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -54,7 +54,6 @@ const LONG_AGO = '2020-01-01T00:00:00.000Z';
 let runs, acts, queue, derived, loader, png;
 const files = () => acts.door.coll(S, 'files');
 const derivedOf = async (parent) => (await files().find({ parentFileId: parent }, { projection: { _id: 1 } }).toArray()).map(r => r._id).sort();
-const isLeaseLost = (err) => err instanceof Error && err.name === 'JobLeaseLostError';
 /** What identifies a run's claim on its job: the fields only a claim, an end or a recovery changes (never its heartbeat). */
 const claimState = (job) => job && ({
   status: job.status, claimToken: job.claimToken, attempts: job.attempts, lastError: job.lastError ?? null,

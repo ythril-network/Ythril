@@ -50,7 +50,7 @@ import { detectFacesExternal, externalFaceReady, inProcessFallbackAllowed } from
 import { spaceCollection } from '../../db/space-collection.js';
 import { upsertDerivedFileRow } from '../derived-fields.js';
 import { NOT_A_FLAGGED_ROW } from '../live-file-row.js';
-import { holdsClaim, isAbandonment, JobLeaseLostError, stopIfLeaseLost } from './lease.js';
+import { assertHoldsClaim, isAbandonment, stopIfLeaseLost } from './lease.js';
 import { IMAGE_STEPS, type MediaRunOpts } from './progress.js';
 import { predicateRecall, type PredicateIdMemo } from '../../brain/predicate-recall.js';
 import { isMaxTimeExpired } from '../../db/max-time.js';
@@ -445,7 +445,7 @@ export async function embedFaces(
   // A run whose claim is gone (a delete, a move, a re-upload that revoked the job) pays for no decode and no detect call: the first
   // write would tell it nothing it makes is wanted, after the provider's quota and round trip were spent (a faces-only re-run has
   // nothing else to cost).
-  if (!(await holdsClaim(spaceId, opts.claim))) throw new JobLeaseLostError(spaceId, opts.claim.jobId);
+  await assertHoldsClaim(spaceId, opts.claim);
 
   // ── 1. Decode image to raw RGBA ─────────────────────────────────────────
   let pixelData: Buffer;
@@ -638,7 +638,7 @@ export async function embedFaces(
   // the window in which a path reused in that instant could take the label and does not close it (see `parentIsLive`, which says the same).
   if (autoLabelEntityId) {
     try {
-      if (!(await holdsClaim(spaceId, opts.claim))) throw new JobLeaseLostError(spaceId, opts.claim.jobId);
+      await assertHoldsClaim(spaceId, opts.claim);
       const parent = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
         // The parent read decides the auto-label, so it asks whether the parent is still here: labelling links an
         // entity to a file, and a deleted file takes no label.

@@ -673,26 +673,12 @@ export async function deleteConversionArtifactsUnderClaim(spaceId: string, claim
   assertSpaceTakesWrites(spaceId, 'files');
   const originalId = toDocId(originalFilePath);
   const owned = await sidecarsOwnedBy(spaceId, originalId, 'file');
-  const { atSidecars, ids } = await rowsOfFiles(spaceId, [originalId], owned);
-  const arrived = new Set(atSidecars.filter(r => r.parentFileId === undefined).map(r => r._id));
-  const derived = [...ids].filter(id => id !== originalId && !arrived.has(id));
 
   // The jobs go first, so none starts over what is being removed — after the fence, so a run that lost its claim cancels none.
   await fenceOnClaim(spaceId, claim);
   await cancelJobsOwnedBy(spaceId, originalId, 'file');
-
-  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-  for (const part of inChunks(derived, READ_CHUNK)) {
-    await writeUnderClaim(spaceId, claim, session => files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: part } }), { session }));
-    await retireEmbedWorkOfRemovedRows(spaceId, { ids: part });
-  }
-  if (arrived.size > 0) {
-    await fenceOnClaim(spaceId, claim);
-    await retireFileMetaMany(spaceId, [...arrived]);
-    await retireEmbedWorkOfRemovedRows(spaceId, { ids: [...arrived] });
-  }
-  await fenceOnClaim(spaceId, claim);
-  await removeSidecarBytesAndCache(spaceId, owned);
+  // The rows and the bytes by the same step every remover takes: the claim is the fence INSIDE it, so no step of it runs unfenced.
+  await removeWhatSidecarsLeft(spaceId, [originalId], owned, claim);
 
   log.info(`Cleared the conversion artifacts of ${peerText(spaceId)}/${peerText(originalId)} under its run's claim`);
 }
@@ -714,26 +700,48 @@ export async function deleteConversionArtifactsUnderClaim(spaceId: string, claim
  * A file's remover and a directory's used to each hand-write a part of this, one level deep, and each missed a different half:
  * the file's left the arrivals' rows, the directory's left those and the rows two levels down (bundle-71, Q-349).
  */
-async function removeWhatSidecarsLeft(spaceId: string, roots: readonly string[], owned: readonly Sidecar[]): Promise<void> {
-  await removeSidecarRows(spaceId, roots, owned);
+async function removeWhatSidecarsLeft(spaceId: string, roots: readonly string[], owned: readonly Sidecar[], claim?: JobClaim): Promise<void> {
+  await removeSidecarRows(spaceId, roots, owned, claim);
+  if (claim) await fenceOnClaim(spaceId, claim);
   await removeSidecarBytesAndCache(spaceId, owned);
 }
 
-/** The ROW half of {@link removeWhatSidecarsLeft}: steps 1 to 4, for `roots` and `owned`, which a directory's delete runs once per page of roots. */
-async function removeSidecarRows(spaceId: string, roots: readonly string[], owned: readonly Sidecar[]): Promise<void> {
+/**
+ * The ROW half of {@link removeWhatSidecarsLeft}: steps 1 to 4, for `roots` and `owned`, which a directory's delete runs once per page of roots.
+ *
+ * With a `claim` (the text run that is converting the file again, `deleteConversionArtifactsUnderClaim`) the rows go through the claim's
+ * fence: the deletes `READ_CHUNK` ids per transaction inside `writeUnderClaim` (a conversion of 1 200 passages is three transactions, not one
+ * command whose size is the file's, so the derived rows are taken BY ID here and by parent, a command per level, without a claim), the steps
+ * that cannot join a transaction (the retire of an arrival's row, of the embed work) each after a fence. A run that lost its claim stops at the
+ * next step and what the run that replaced it wrote stays. The fence is inside, so a caller that passes a claim cannot drop it; without one
+ * the removal is the unfenced delete of a caller that owns no run.
+ */
+async function removeSidecarRows(spaceId: string, roots: readonly string[], owned: readonly Sidecar[], claim?: JobClaim): Promise<void> {
   assertSpaceTakesWrites(spaceId, 'files');
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   // The selection a move carries as well (`rowsOfFiles`): what the roots and the sidecars' rows leave, at every level.
   const { atSidecars, ids, parents } = await rowsOfFiles(spaceId, roots, owned);
-  await deleteRowsDerivedFrom(spaceId, parents);
-  const derivedHere = atSidecars.filter(r => r.parentFileId !== undefined).map(r => r._id);
-  for (const part of inChunks(derivedHere, READ_CHUNK)) await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: part } }));
-  // The rows an arrival made, retired as the file's own is: ONE write per chunk of ids, however many there are.
-  await retireFileMetaMany(spaceId, atSidecars.filter(r => r.parentFileId === undefined).map(r => r._id));
-  // The embed jobs of every row taken above — read from the rows, never by an id prefix — and not the roots': a root is the caller's
-  // (a re-conversion keeps its file).
+  const arrived = atSidecars.filter(r => r.parentFileId === undefined).map(r => r._id);
+  // Not the roots: a root is the caller's (a re-conversion keeps its file).
   const rootSet = new Set(roots);
-  await retireEmbedWorkOfRemovedRows(spaceId, { ids: [...ids].filter(id => !rootSet.has(id)) });
+  const taken = [...ids].filter(id => !rootSet.has(id));
+  if (claim) {
+    const arrivedSet = new Set(arrived);
+    const derived = taken.filter(id => !arrivedSet.has(id));
+    for (const part of inChunks(derived, READ_CHUNK)) {
+      await writeUnderClaim(spaceId, claim, session => files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: part } }), { session }));
+      await retireEmbedWorkOfRemovedRows(spaceId, { ids: part });
+    }
+  } else {
+    await deleteRowsDerivedFrom(spaceId, parents);
+    const derivedHere = atSidecars.filter(r => r.parentFileId !== undefined).map(r => r._id);
+    for (const part of inChunks(derivedHere, READ_CHUNK)) await files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: part } }));
+  }
+  // The rows an arrival made, retired as the file's own is: ONE write per chunk of ids, however many there are.
+  if (claim && arrived.length > 0) await fenceOnClaim(spaceId, claim);
+  await retireFileMetaMany(spaceId, arrived);
+  // The embed jobs of every row taken, read from the rows and never by an id prefix: with a claim the derived rows' went with their chunks above.
+  await retireEmbedWorkOfRemovedRows(spaceId, { ids: claim ? arrived : taken });
 }
 
 /** The BYTES and cache half of {@link removeWhatSidecarsLeft} (step 5), run once after the last row page. */

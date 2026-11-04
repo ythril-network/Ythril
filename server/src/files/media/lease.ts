@@ -225,6 +225,18 @@ export async function holdsClaim(spaceId: string, claim: JobClaim): Promise<bool
 }
 
 /**
+ * Throw `JobLeaseLostError` unless `claim` still holds its job: {@link holdsClaim}'s read, asked where a run must not go on without it
+ * (before a paid provider call, before a write that cannot join a transaction, before reconciling a "deleted" source).
+ *
+ * It narrows a window only: a READ, not a fence. A revocation landing after the read still leaves the step that follows it unfenced; what
+ * can join a transaction is `writeUnderClaim`'s, and a step that cannot is `fenceOnClaim`'s. Spelled as a bare `if (!(await holdsClaim(...)))
+ * throw` at each site, the throw (and its job id) was the part a copy could get wrong.
+ */
+export async function assertHoldsClaim(spaceId: string, claim: JobClaim): Promise<void> {
+  if (!(await holdsClaim(spaceId, claim))) throw new JobLeaseLostError(spaceId, claim.jobId);
+}
+
+/**
  * How long a heartbeat may be withheld while a phase makes many small steps.
  *
  * Chunk embedding lands a step every ~200 ms and each heartbeat is a database write, so an unthrottled
