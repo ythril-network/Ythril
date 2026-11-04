@@ -1,5 +1,10 @@
 import { BUDGET_CEILING_MIN, MIN_MAX_BYTES, MAX_MAX_BYTES, DEFAULT_CHARS_PER_TOKEN, ROW_PAGER, budgetDefaultsSentence, type Pager } from '../../brain/result-budget.js';
 
+/** The plural of a unit as English spells it: "matches", not "matchs" (a description read "whole matchs only"). */
+function pluralOf(unit: string): string {
+  return /(?:ch|sh|x|s)$/.test(unit) ? `${unit}es` : `${unit}s`;
+}
+
 /**
  * What the ceiling does to the unit that is itself over it, said in the caller's words and from the pager's own descriptor (Q-450): a row pager
  * admits the first row whole (the answer says `truncated: true`), a document window splits the first paragraph at the ceiling.
@@ -25,7 +30,7 @@ function overTheCeilingSentence(unit: string, pager: Pager): string {
 export function budgetSizeSchema(unit: string, pager: Pager = ROW_PAGER): Record<string, Record<string, unknown>> {
   const lead = pager.firstUnit === 'split'
     ? `Ceiling on the returned text, in CHARACTERS: whole paragraphs only, the rest reached with \`${pager.continuedBy}\`; `
-    : `Ceiling on the serialised answer, in CHARACTERS: whole ${unit}s only, the rest reached with \`${pager.continuedBy}\`; `;
+    : `Ceiling on the serialised answer, in CHARACTERS: whole ${pluralOf(unit)} only, the rest reached with \`${pager.continuedBy}\`; `;
   return {
     maxChars: {
       type: 'integer', minimum: BUDGET_CEILING_MIN,
@@ -58,12 +63,12 @@ export function pageBudgetSchema(unit: string): Record<string, Record<string, un
   return {
     skip: {
       type: 'integer', minimum: 0,
-      description: `How many ${unit}s to skip before filling the byte budget (default 0). A response with \`truncated: true\` and \`nextSkip\` continues when you send \`nextSkip\` back as \`skip\` — none repeated, none missed.`,
+      description: `How many ${pluralOf(unit)} to skip before filling the byte budget (default 0). A response with \`truncated: true\` and \`nextSkip\` continues when you send \`nextSkip\` back as \`skip\` — none repeated, none missed.`,
     },
     ...budgetSizeSchema(unit),
     remainderDump: {
       type: 'boolean',
-      description: `Also keep the ${unit}s that did not fit as a spill for \`read_spill\` (default false), readable by your token alone for a day. Paging with \`skip\` reaches the same ${unit}s without one.`,
+      description: `Also keep the ${pluralOf(unit)} that did not fit as a spill for \`read_spill\` (default false), readable by your token alone for a day. Paging with \`skip\` reaches the same ${pluralOf(unit)} without one.`,
     },
   };
 }
