@@ -19,8 +19,10 @@
  *
  *  1. every file the pull delivers whose class is processed has a queued job and a `pending` state when the cycle ends, and the
  *     row names the peer that delivered it; a class that is not processed has neither
- *  2. a pulled CHANGED version removes what the previous version left (its passages and its sidecar rows) and resets the job
- *     (a `complete` job with attempts is replaced by a fresh `pending` one); a neighbour that did not change is untouched
+ *  2. a pulled CHANGED version resets the job at the pull (a `complete` job with attempts is replaced by a fresh `pending` one) and
+ *     leaves nothing of the previous version once the new text run STARTS: the previous version's passages and sidecar rows go at
+ *     that run's start, under its claim (`deleteConversionArtifactsUnderClaim`, bundle-236), not at the pull's write; a neighbour
+ *     that did not change is untouched
  *  3. a failed record write leaves nothing behind: the bytes the pull wrote are removed, no sync base is written, the failure is
  *     said once with the space and the path, and the next cycle delivers the file again, recorded with its true deliverer
  *  4. a row that was never processed is processed on a later cycle, and a row that was processed is not queued again; a cycle
@@ -48,6 +50,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
+import { seedClaim } from './_media-claim.mjs';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
@@ -65,7 +68,7 @@ const GiB = 1024 ** 3;
 let DOC_EXTS = [];
 const PLAIN_EXT = 'log';
 
-let door, resolveInputFormat, invalidateUsageCache;
+let door, pipeline, resolveInputFormat, invalidateUsageCache;
 
 const rowOf = (id) => door.coll(S, 'files').findOne({ _id: id });
 const jobOf = (id) => door.coll(S, 'media_jobs').findOne({ _id: id });
@@ -98,7 +101,7 @@ function repairCap() {
 describe('a file the pull delivers is recorded and processed, or it is not kept', { skip }, () => {
   before(async () => {
     door = await openPullDoor({ suite: 'g2pulledfile', spaces: [S], files: true });
-    const pipeline = await import('../../server/dist/files/converters/pipeline.js');
+    pipeline = await import('../../server/dist/files/converters/pipeline.js');
     ({ resolveInputFormat } = pipeline);
     ({ invalidateUsageCache } = await import('../../server/dist/quota/quota.js'));
     DOC_EXTS = ['html', 'htm', 'md', 'markdown', 'txt', 'pdf', 'docx', 'epub']
@@ -135,7 +138,7 @@ describe('a file the pull delivers is recorded and processed, or it is not kept'
   });
 
   describe('a pulled CHANGED version replaces what the previous one left (Q-260)', () => {
-    it('its passages and sidecar rows go, its job is a fresh pending one, and a neighbour that did not change keeps all of it', async () => {
+    it('its job is a fresh pending one, its passages and sidecar rows go when the new run starts, and a neighbour that did not change keeps all of it', async () => {
       const V1 = (n) => `first version of ${n}`;
       const V2 = (n) => `SECOND version of ${n}, which says something else`;
       const names = DOC_EXTS.map(e => `chg.${e}`);
@@ -162,11 +165,18 @@ describe('a file the pull delivers is recorded and processed, or it is not kept'
         const row = await rowOf(n);
         if (row?.sha256 !== sha(V2(n))) wrong.push(`${n}: the pull did not take the new version (row hash ${row?.sha256})`);
         if ((await readLocal(n)) !== V2(n)) wrong.push(`${n}: the bytes on disk are not the new version`);
-        if (await rowOf(`${n}#chunk-0`)) wrong.push(`${n}: the previous version's passage row is still there`);
-        if (await rowOf(`_converted/${n}.md`)) wrong.push(`${n}: the previous version's sidecar row is still there`);
         const job = await jobOf(n);
         if (!job || job.status !== 'pending' || job.attempts !== 0) wrong.push(`${n}: the job is ${JSON.stringify(job && { status: job.status, attempts: job.attempts })}, want a fresh pending one`);
         if (row?.embeddingStatus !== 'pending') wrong.push(`${n}: embeddingStatus is ${JSON.stringify(row?.embeddingStatus)}, want "pending"`);
+      }
+      // The new text run starts: it holds the job's claim for the new bytes and clears the previous version's rows under it (the worker's
+      // text branch calls exactly this). The old rows go HERE, not at the pull's write.
+      for (const n of names) {
+        const claim = await seedClaim(S, n, { mediaType: 'text', sha256: sha(V2(n)) });
+        await pipeline.deleteConversionArtifactsUnderClaim(S, claim, n);
+        if (await rowOf(`${n}#chunk-0`)) wrong.push(`${n}: the previous version's passage row is still there once the new run has started`);
+        if (await rowOf(`_converted/${n}.md`)) wrong.push(`${n}: the previous version's sidecar row is still there once the new run has started`);
+        if (!(await rowOf(n))) wrong.push(`${n}: the start clear removed the file's own row`);
       }
       if (!(await rowOf('keep.html#chunk-0'))) wrong.push('keep.html: a neighbour that did not change lost its passage');
       const keepJob = await jobOf('keep.html');
