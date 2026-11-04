@@ -825,6 +825,11 @@ export class SpaceSettingsState {
   typeState(kt: KnowledgeType, name: string): TypeSchemaState { return (this.schTypeSchemas[kt] ?? {})[name]!; }
   typeCount(kt: KnowledgeType): number { return Object.keys(this.schTypeSchemas[kt] ?? {}).length; }
   /** Returns the library entry name if this type is set as a $ref, otherwise null. */
+  /** Whether the type's schema, as opened or last saved (`pristinePayload`), suppresses embeddings; the draft's own value is `typeState(kt, name).suppressEmbeddings`. */
+  savedTypeSuppress(kt: KnowledgeType, name: string): boolean {
+    const typeSchemas = (this.pristinePayload['meta'] as { typeSchemas?: Record<string, Record<string, { suppressEmbeddings?: boolean }>> } | undefined)?.typeSchemas;
+    return typeSchemas?.[kt]?.[name]?.suppressEmbeddings === true;
+  }
   typeLibRef(kt: KnowledgeType, name: string): string | null {
     return (this.schTypeSchemas[kt] ?? {})[name]?._libRef ?? null;
   }

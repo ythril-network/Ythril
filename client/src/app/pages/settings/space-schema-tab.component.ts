@@ -307,7 +307,7 @@ import { escapeHtml } from '../../shared/escape-html';
              keeps the library and delete actions deliberately — see the component for why. -->
         <app-schema-type-editor
           [knowledgeType]="kt"
-          [draft]="state.typeState(kt,name)"
+          [draft]="state.typeState(kt,name)" [savedSuppress]="state.savedTypeSuppress(kt,name)"
           [libRef]="state.typeLibRef(kt,name)"
           [linkedProps]="linkedProps(kt,name)"
           [linkedRules]="linkedRules(kt,name)"

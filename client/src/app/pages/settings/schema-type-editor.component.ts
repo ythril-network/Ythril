@@ -213,8 +213,11 @@ export interface LayerMark {
     </select>
     <div class="sch-hint" style="margin-top:3px;">{{ 'spaces.schema.suppressEmbeddings.hint' | transloco }}</div>
     @if (d().suppressEmbeddings === true) {
-      <div class="sch-msg warn" role="status" [id]="suppressId + '-notice'"><strong>{{ 'spaces.schema.suppressEmbeddings.removes' | transloco }}</strong>
-        {{ 'spaces.schema.suppressEmbeddings.wayBack' | transloco: { button: ('spaces.dangerZone.embeddingsBackfill' | transloco), tab: ('spaces.popup.tab.dangerZone' | transloco), section: ('spaces.dangerZone.embeddingsTitle' | transloco) } }}
+      <div class="sch-msg warn" role="status" [id]="suppressId + '-notice'">
+        @if (!savedSuppress()) {
+          <strong>{{ 'spaces.schema.suppressEmbeddings.removes' | transloco }}</strong>
+          {{ 'spaces.schema.suppressEmbeddings.wayBack' | transloco: { button: ('spaces.dangerZone.embeddingsBackfill' | transloco), tab: ('spaces.popup.tab.dangerZone' | transloco), section: ('spaces.dangerZone.embeddingsTitle' | transloco) } }}
+        }
         {{ 'spaces.schema.suppressEmbeddings.noBackfill' | transloco }}</div>
     }
   </div>
@@ -485,6 +488,8 @@ export class SchemaTypeEditorComponent {
   readonly knowledgeType = input.required<KnowledgeType>();
   /** The draft being edited, IN PLACE. The host owns it and decides when it is persisted. */
   readonly draft = input.required<TypeSchemaState>();
+  /** The type's suppression as last SAVED: while it is on in the draft and already saved on, Save removes nothing more, so the notice leaves the removal out. */
+  readonly savedSuppress = input<boolean>(false);
   /** The library entry this type is linked to, if any — a linked type is read-only until unlinked. */
   readonly libRef = input<string | null>(null);
   /** A linked entry's properties, resolved by the host, for the read-only view. */

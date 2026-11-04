@@ -833,3 +833,34 @@ describe('SpaceSettingsState - the unknownWriteFields form field (bundle-128, §
     expect(s.changedSettings()).toEqual({ unknownWriteFields: '' });
   });
 });
+
+describe('what a type\'s suppression was when last saved (the type editor\'s removal notice reads it)', () => {
+  /*
+   * The editor says "Save removes the stored text vectors" only when the draft turns suppression ON over a type saved as not suppressed. The baseline
+   * is the opened payload, never the draft: the draft is edited in place, so a baseline read off it would follow every edit.
+   */
+  const opened = () => {
+    const s = make();
+    s.openSettings(space({ meta: { typeSchemas: { fact: { note: { suppressEmbeddings: true }, plain: {} } } } } as Partial<Space>));
+    s.markPristine();
+    return s;
+  };
+
+  it('a type opened as suppressed is saved as suppressed, and a type that states nothing is not', () => {
+    const s = opened();
+    expect(s.savedTypeSuppress('fact', 'note')).toBe(true);
+    expect(s.savedTypeSuppress('fact', 'plain')).toBe(false);
+    expect(s.savedTypeSuppress('fact', 'no-such-type')).toBe(false);
+  });
+
+  it('editing the draft does not move the saved value; marking the form pristine does', () => {
+    const s = opened();
+    s.typeState('fact', 'note').suppressEmbeddings = false;
+    s.typeState('fact', 'plain').suppressEmbeddings = true;
+    expect(s.savedTypeSuppress('fact', 'note'), 'still saved as suppressed').toBe(true);
+    expect(s.savedTypeSuppress('fact', 'plain'), 'still saved as not suppressed').toBe(false);
+    s.markPristine();
+    expect(s.savedTypeSuppress('fact', 'note')).toBe(false);
+    expect(s.savedTypeSuppress('fact', 'plain')).toBe(true);
+  });
+});
