@@ -67,8 +67,8 @@ embedJobsRouter.get('/spaces/:spaceId/embedding-queue/records', globalRateLimit,
 // POST /api/brain/spaces/:spaceId/embedding-queue/records/retry — re-queue ONE record's embed job.
 //
 // Per record rather than "retry all failed" (the media route's shape) because a brain record's failure is usually about
-// that record — an oversized fact, a property the embedder choked on — where a media failure is usually about the
-// worker. Retrying a thousand records that will each fail again is a way to hide a problem, not to fix one.
+// that record — a property the embedder choked on, an input it answers 413 (payload too large) to, which ends the job at once
+// — where a media failure is usually about the worker. (A fact over the embedder's ceiling is cut to it by `embed()`.) Retrying a thousand records that will each fail again is a way to hide a problem, not to fix one.
 //
 // `recordType`/`recordId` go in the BODY, not the path: a recordId is caller-supplied and may contain a slash, and a
 // path-segment id would 404 on exactly the records most likely to be malformed.

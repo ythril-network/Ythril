@@ -127,7 +127,8 @@ export interface BrainEmbedJobDoc {
   status: 'pending' | 'processing' | 'failed';
   /**
    * The PERMANENT-failure budget. Spent only on errors that a retry cannot fix — a malformed input, a 400
-   * from a reachable embedder. See `transientFailures` for the other kind.
+   * from a reachable embedder. A 413 (payload too large) or a stored passage over the embedder's ceiling spends it all at once:
+   * the job is `failed` with `attempts` at the maximum after its first claim. See `transientFailures` for the other kind.
    */
   attempts: number;
   maxAttempts: number;

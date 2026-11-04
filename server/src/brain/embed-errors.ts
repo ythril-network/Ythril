@@ -86,3 +86,37 @@ const MARKERS_ANYWHERE = [LOST_MARKER, NOT_SENT_MARKER]
 export function withoutLostMarker(text: string): string {
   return MARKERS_ANYWHERE.reduce((out, { pattern, defused }) => out.replace(pattern, defused), text);
 }
+
+/**
+ * The embedder refused THIS REQUEST as too large: an HTTP 413 (payload too large). The input is the record's own and will be refused
+ * on every retry, so the embed job fails at once (`failEmbedJob`), where it used to spend five attempts and twelve minutes.
+ *
+ * ## Why only 413, and why anchored
+ *
+ * A 400 keeps the attempt budget on purpose: an embedder that is misconfigured (a wrong model name, a missing header, a mismatched
+ * width) answers 400 for EVERY record, and ending each at once would end a whole backlog on its first claim. The size case of a 400 is
+ * prevented upstream instead (no chunk reaches the embedder over `embedding.maxInputBytes`). The message is the one `EmbeddingHttpError`
+ * builds (`Embedding request failed (HTTP 413): <body>`), so the match is ANCHORED to its start: a 503 whose body quotes `(HTTP 413)`,
+ * or a message that merely contains the words, is a busy endpoint, not a refusal. The queue asks this BEFORE `isTransientEmbedError`,
+ * which reads the same text for needles and could match a 413 body that talks about a busy server.
+ */
+export function isRequestRefusal(message: string): boolean {
+  return /^Embedding request failed \(HTTP 413\)/.test(message);
+}
+
+/** The words a stored passage's refusal begins with. Only this module writes them and the queue reads them (`isOverCeilingMessage`). */
+export const OVER_CEILING_MARKER = 'This passage is larger than the embedder accepts';
+
+/**
+ * Why a stored passage is not embedded: its text (the heading and the body) is `bytes` long and the embedder takes `ceiling`.
+ * It was stored before the ceiling existed (or by a conversion at a higher one); cutting it would leave the passage `complete` with
+ * most of its text unfindable by meaning, so it is refused with the act that cures it: re-converting its file splits it into parts.
+ */
+export function overCeilingMessage(bytes: number, ceiling: number): string {
+  return `${OVER_CEILING_MARKER} (${bytes} bytes, ceiling ${ceiling}). Re-convert its file to split it: retry_embed_file, or POST /api/files/<space>/retry_embedding.`;
+}
+
+/** Is this the refusal {@link overCeilingMessage} writes? Anchored, like {@link isRequestRefusal}: a message that merely contains the words is not it. */
+export function isOverCeilingMessage(message: string): boolean {
+  return message.startsWith(OVER_CEILING_MARKER);
+}

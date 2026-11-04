@@ -44,7 +44,8 @@ import { declareStep } from '../util/housekeeping-signals.js';
 import { CLAIM_OP_MS } from '../db/write-bound.js';
 import { newClaimToken } from '../files/media/lease.js';
 import { isSpillPath } from './spill-path.js';
-import { LOST_MARKER, NOT_SENT_MARKER } from './embed-errors.js';
+import { LOST_MARKER, NOT_SENT_MARKER, isRequestRefusal, isOverCeilingMessage } from './embed-errors.js';
+import { embedJobsFailedTotal, type EmbedJobFailedReason } from '../metrics/embed-job-failed-count.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js';
@@ -544,7 +545,9 @@ export async function retireEmbedJobs(
  *
  * A `400` or `422` is NOT here, and that is the whole point of keeping a budget at all — a malformed input is
  * exactly the per-record failure `attempts` exists to bound. Retrying it forever would replace one silent
- * failure mode with another: a job that never completes and never gives up.
+ * failure mode with another: a job that never completes and never gives up. A `413` is not here either, and does not wait out the
+ * budget: the embedder said this input is too large, which no retry changes, so `failEmbedJob` ends the job at once
+ * (`isRequestRefusal`, asked before this). A `400` keeps its budget because a misconfigured embedder answers it for every record.
  *
  * Matched on the message because that is what reaches us — the embedder is behind `fetch`, an HTTP client or
  * an inference child process depending on configuration, and there is no one error type across the three.
@@ -561,6 +564,35 @@ export function isTransientEmbedError(message: string): boolean {
     'too many requests', 'service unavailable', 'bad gateway', 'gateway timeout', 'temporarily unavailable',
     ' 429', ' 502', ' 503', ' 504', 'status 429', 'status 502', 'status 503', 'status 504',
   ].some(needle => m.includes(needle));
+}
+
+/** What a job left `failed` stores. The status is a literal here so nothing but a failure can be written through {@link endEmbedJob}. */
+interface FailedJobFields {
+  status: 'failed';
+  claimedAt: null;
+  claimToken: null;
+  lastError: string;
+  updatedAt: string;
+  attempts?: number;
+  transientFailures?: number;
+  lostChildFailures?: number;
+}
+
+/**
+ * THE one writer of a job's terminal `failed` status, and it counts what it wrote (`ythril_embed_jobs_failed_total{reason}`).
+ *
+ * Three places used to write `status: 'failed'` beside their own copy of the claim filter, and none counted: an instance whose jobs
+ * ended `failed` had no signal but the list. One helper that both writes and counts is what keeps a fourth writer from dropping the
+ * count. Counted only when the write landed: a claim that was taken over matches nothing, and the job it lost is not this one's failure.
+ */
+async function endEmbedJob(
+  spaceId: string,
+  filter: Record<string, unknown>,
+  reason: EmbedJobFailedReason,
+  fields: FailedJobFields,
+): Promise<void> {
+  const result = await jobs(spaceId).updateOne(asFilter<BrainEmbedJobDoc>(filter), asUpdate<BrainEmbedJobDoc>({ $set: fields }));
+  if (result.matchedCount > 0) embedJobsFailedTotal.count(reason);
 }
 
 /**
@@ -602,15 +634,23 @@ export async function failEmbedJob(
   const lostCrash = errorMessage.includes(LOST_MARKER);
   const lostFailures = (opts.lostChildFailures ?? 0) + (lostCrash ? 1 : 0);
   if (lostCrash && lostFailures >= MAX_LOST_CHILD_FAILURES) {
-    await jobs(spaceId).updateOne(
-      asFilter<BrainEmbedJobDoc>(filter),
-      asUpdate<BrainEmbedJobDoc>({
-        $set: {
-          status: 'failed', claimedAt: null, claimToken: null, lastError, updatedAt: now,
-          transientFailures: transientFailures + 1, lostChildFailures: lostFailures,
-        },
-      }),
-    );
+    await endEmbedJob(spaceId, filter, 'lost_child', {
+      status: 'failed', claimedAt: null, claimToken: null, lastError, updatedAt: now,
+      transientFailures: transientFailures + 1, lostChildFailures: lostFailures,
+    });
+    return;
+  }
+
+  // The embedder refused THIS INPUT as too large (HTTP 413), or the record is a stored passage over the embedder's ceiling: neither
+  // changes on a retry, so the job ends at once with its budget spent (`attempts` at the maximum is how every reader of a failed job
+  // already tells "given up" from "lost process"). Asked BEFORE the transient needles below, which read the same text: a 413 body that
+  // talks about a busy server must not be retried, and a ceiling of 5040 must not read as ` 504`. A 400 keeps its budget: see `isRequestRefusal`.
+  const ended = isRequestRefusal(errorMessage) ? 'refused_413' : isOverCeilingMessage(errorMessage) ? 'over_ceiling' : null;
+  if (ended) {
+    log.warn(`Embed job for ${peerText(recordType)} '${peerText(recordId)}' in '${peerText(spaceId)}' ended at once (${ended}): ${lastError}`);
+    await endEmbedJob(spaceId, filter, ended, {
+      status: 'failed', claimedAt: null, claimToken: null, lastError, updatedAt: now, attempts: MAX_EMBED_ATTEMPTS,
+    });
     return;
   }
 
@@ -649,12 +689,7 @@ export async function failEmbedJob(
     return;
   }
 
-  await jobs(spaceId).updateOne(
-    asFilter<BrainEmbedJobDoc>(filter),
-    asUpdate<BrainEmbedJobDoc>({
-      $set: { status: 'failed', claimedAt: null, claimToken: null, lastError, updatedAt: now },
-    }),
-  );
+  await endEmbedJob(spaceId, filter, 'budget', { status: 'failed', claimedAt: null, claimToken: null, lastError, updatedAt: now });
 }
 
 /**

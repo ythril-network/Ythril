@@ -15,6 +15,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { scratchDir } from '../stored-bytes.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
+import { embedTextForProducer } from '../../brain/embed-text.js';
 import type { VisionProvider, SttProvider } from './providers.js';
 import { embedAudio, type AudioChunkRecord } from './audio-embedder.js';
 import { log } from '../../util/log.js';
@@ -233,12 +234,14 @@ export async function embedVideo(
 
       try {
         // A suppressed file's chunk takes the combined TEXT (the lexical channel searches it) and no vector.
-        const vectorFields = await vectors.fieldsFor(combined);
+        // The ONE builder's text: the beginning of a combined text over the embedder's ceiling, which `matchedText` is exactly.
+        const embedded = embedTextForProducer(null, combined, 'media');
+        const vectorFields = await vectors.fieldsFor(embedded);
         // Through the one writer of a derived row, which holds the claim and reads the PARENT in the same transaction: this rewrite lands
         // minutes after the transcript was stored, and a file deleted in between must not get its segments re-embedded.
         await updateDerivedFileRow(spaceId, opts.claim, chunk.chunkId, fileId, {
           content: combined,
-          matchedText: combined,
+          matchedText: embedded,
           ...vectorFields,
           updatedAt: now,
         });

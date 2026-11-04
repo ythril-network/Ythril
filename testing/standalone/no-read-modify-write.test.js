@@ -268,10 +268,6 @@ export const EXEMPT = [
     why: 'the count comes from the job this worker claimed, and the write is filtered by the claim token (claimedBy): a job whose claim '
       + 'was taken over matches nothing, so only the claim holder writes the count it read',
   },
-  {
-    file: 'server/src/brain/embed-queue.ts', fn: 'failEmbedJob', field: 'lostChildFailures',
-    why: 'as transientFailures: read from the claimed job and written under its claim token, so only the claim holder writes it',
-  },
 ];
 
 const exemptionOf = (h) => EXEMPT.find(e => e.file === h.file && e.fn === h.fn && e.field === h.field);
