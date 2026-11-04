@@ -346,6 +346,20 @@ will not retry on its own, and the record stays unfindable until you retry it or
 `spaceId`, which through a **personal view** is the member space the record actually lives in — that is the space to retry it
 in. `counts` is returned whether or not you filtered, so a caller can filter to `failed` and still see the whole picture.
 
+**An embedder's refusal that no retry changes ends the job at once.** A job whose embedder answers **HTTP 413** (payload too large)
+is `failed` after its first claim, with `attempts` at `maxAttempts` and the embedder's own message in `lastError`
+(`Embedding request failed (HTTP 413): …`), where it used to spend five attempts and about twelve minutes. A **400** keeps the
+attempt budget on purpose: an embedder that is misconfigured (a wrong model name, a missing header) answers 400 for every
+record, and ending each at once would end a whole backlog on its first claim. Reading `attempts === maxAttempts` as "the content
+needs fixing" is unchanged.
+
+**A stored file passage larger than the embedder accepts also ends at once.** A passage made before `embedding.maxInputBytes`
+existed (6,000 bytes by default) is never embedded as a cut text, which would leave it `complete` with most of its words
+unfindable by meaning. Its job is `failed` with `attempts` at `maxAttempts` and `lastError` beginning `This passage is larger than
+the embedder accepts`, naming the bytes and the ceiling. **Re-convert its file** to split it into parts that fit: the MCP
+`retry_embed_file`, or `POST /api/files/:spaceId/retry_embedding`. Both work on a file that completed, and delete the file's old
+passages before they write the new ones. `ythril_embed_jobs_failed_total{reason}` counts every job left `failed`, by why.
+
 `transientFailures` counts the times the embedder did not answer at all — connection refused, a timeout, a 429 or 5xx —
 which hand the attempt back rather than spend it; `attempts` is spent only on errors a retry cannot fix. A high
 `transientFailures` with `attempts` at zero is an outage waiting itself out. It was described on the tool and returned by
@@ -404,8 +418,8 @@ untouched — this re-embeds what is already there rather than re-writing it.
 | `processing` | `200` | A worker already holds this job. **Left alone** rather than reset, so the run in progress is not interrupted. Not an error |
 | `not_found` | `404` | No job for that record — either it embedded successfully, or the record is gone |
 
-Per record rather than "retry all failed": a brain record's failure is usually about *that record* (an oversized fact, a
-property the embedder choked on), where a media failure is usually about the worker. Retrying a thousand records that
+Per record rather than "retry all failed": a brain record's failure is usually about *that record* (a property the embedder
+choked on, an input it answered 413 to; a fact over `embedding.maxInputBytes` is cut to it by the embedder call, not refused), where a media failure is usually about the worker. Retrying a thousand records that
 will each fail again hides the problem. If a whole space needs re-embedding — after changing the embedding model, for
 instance — use [Reindex Space](#reindex-space) instead.
 

@@ -136,7 +136,7 @@ creates nothing and shows the server's own sentence naming what is in the way (*
 |---|---|
 | *Embedded* | fully indexed; the file is findable by meaning |
 | *Embedding* | work in progress — a stage bar replaces the pill while it runs (below) |
-| *Partial* | **some of it is findable and some is not.** A long recording whose transcription failed for a few of its pieces, or a document where some pages did not convert. The file stays retry-eligible, so **Retry** is worth pressing |
+| *Partial* | **some of it is findable and some is not.** A long recording whose transcription failed for a few of its pieces, a document where some pages did not convert, or a document whose passages the embedder refused (those passages are still found by their words). The file stays retry-eligible, so **Retry** is worth pressing: it converts the file again, and a document's passages are then split to the size the embedder accepts |
 | *Failed* | nothing was indexed and the reason was not a refusal — most often a file whose stored bytes could not be read. Retrying reads the same bytes, so a *Failed* file usually needs the cause fixed first |
 | *Skipped* | **nothing was indexed because Ythril declined, not because anything broke.** Either the file is larger than the instance's size limit, or this kind of media is switched **Off** for the space (Settings → Media Processing). The file itself is stored and downloadable either way — only the indexing was skipped |
 
