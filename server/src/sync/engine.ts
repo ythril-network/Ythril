@@ -34,8 +34,7 @@ import { selfRecordFor } from '../networks/self-record.js';
 import { mergePeerRoster, revokeRemoved, pairIntroduced } from '../networks/member-introductions.js';
 import { peerSafeFetch, isPeerUrlAllowed } from './peer-fetch.js';
 import { settleRounds } from '../networks/round-conclusion.js';
-import { createCoalescingRunner } from './coalescing-runner.js';
-import { DetachedWork } from '../util/detached-work.js';
+import { inCycle, joinNetworkCycle, runNetworkCycle, type NetworkCycleProgress, type NetworkCycleResult } from './network-cycle-runner.js';
 import { warnOnce } from '../util/warn-once.js';
 import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
 import { syncCyclesTotal, syncDurationSeconds } from '../metrics/registry.js';
@@ -81,70 +80,19 @@ export { remoteToLocal, localToRemote } from './space-map.js';
 // A member's failure counters, PEER UNREACHABLE and the local-fault streak are moved by the one classifier both doors use (`sync/cycle-outcome.ts`).
 
 // ── Per-network sync dedup lock ─────────────────────────────────────────────
-// Prevents concurrent sync cycles for the same network from competing for
-// bcrypt cache, MongoDB connections, and peer HTTP sockets.  When a trigger
-// arrives while a cycle is in-flight, we set a "rerun requested" flag so the
-// running cycle fires one more round after completion.
-// The coalescing + rerun-once behaviour lives in ./coalescing-runner.ts, where the job is a
-// parameter and can therefore be counted by a test. It could not be verified while inlined here:
-// `runSyncForNetwork` is async, so the in-flight promise it returns is never referentially equal to
-// the one it holds, and a members-less cycle resolves in microtasks, so a queued rerun starts and
-// finishes before any caller resumes.
-const _syncRunner = createCoalescingRunner<NetworkCycleResult, NetworkCycleProgress>({
-  onQueued: (id) => log.debug(`Sync cycle already running for network ${peerText(id)} — queuing rerun`),
-  onRerun: (id) => log.debug(`Rerun requested for network ${peerText(id)} — starting`),
-});
+// Moved to ./network-cycle-runner.ts: one cycle per network at a time, a trigger that arrives meanwhile joins it and schedules one follow-up.
+// The engine passes in what a cycle does; the runner imports nothing from here, so the two do not form a runtime cycle.
+export { isNetworkSyncing, syncCyclesInFlight, syncCyclesSettled, type NetworkCycleProgress, type NetworkCycleResult } from './network-cycle-runner.js';
 
-/**
- * What a running cycle has done so far, for a trigger that stops waiting for it (Q-675). The runner makes one holder per run and hands it to
- * the cycle, which fills it in; a trigger reads the holder of the run it joined (`joinSyncForNetwork`). `members` is the cycle's own list, live:
- * a reader copies it when it builds its answer. Absent until the cycle has read the network.
- */
-export interface NetworkCycleProgress {
-  /** The members whose turn has ended, with each one's outcome. */
-  members?: readonly MemberResult[];
-  /** How many members the network had when the cycle began. */
-  membersTotal?: number;
-}
-
-/** True while a sync cycle for the given network is in-flight. Cheap, in-memory —
- *  used by GET /api/spaces to show a "syncing" status on a space's network chip. */
-export function isNetworkSyncing(networkId: string): boolean {
-  return _syncRunner.isRunning(networkId);
-}
-
-/** Run a full sync cycle for a network: iterate members and sync each space.
- *
- *  Concurrent triggers for the same network join the running cycle rather than starting another, and
- *  schedule exactly one follow-up. Resolves with the result of the cycle the caller JOINED, not of
- *  any rerun. */
+/** Run a full sync cycle for a network: iterate members and sync each space. Concurrent triggers join the running cycle (see the runner). */
 export async function runSyncForNetwork(networkId: string): Promise<NetworkCycleResult> {
-  return _syncRunner.run(networkId, cycleJob(networkId));
+  return runNetworkCycle(networkId, _runSyncForNetworkImpl);
 }
 
-/**
- * The job the runner runs for a network: one cycle, counted, handed the progress holder of its run. Shared by `runSyncForNetwork` and `joinSyncForNetwork`.
- * A declaration with a block body, not a curried arrow const: the housekeeping gates read a function by its declaration and its block, and a concise
- * `const f = (a) => (b) => …` is a function they cannot see, so the cycle's loops would have no root reaching them (`every-housekeeping-space-walk-is-isolated`).
- */
-function cycleJob(networkId: string) {
-  return (progress: NetworkCycleProgress): Promise<NetworkCycleResult> => inCycle(() => _runSyncForNetworkImpl(networkId, progress));
-}
-
-/**
- * {@link runSyncForNetwork}, and with it the progress holder of the cycle the caller started or joined. A trigger that races the cycle
- * against a time bound reads the holder when the bound ends, to answer the members that had finished.
- */
+/** {@link runSyncForNetwork}, and with it the progress holder of the cycle the caller started or joined. */
 export function joinSyncForNetwork(networkId: string): { promise: Promise<NetworkCycleResult>; progress: NetworkCycleProgress } {
-  return _syncRunner.join(networkId, cycleJob(networkId));
+  return joinNetworkCycle(networkId, _runSyncForNetworkImpl);
 }
-
-// Every cycle, network and single-peer alike, is counted here the moment it starts: the quiescence a test waits for, and what a shutdown
-// waits for (bounded) before it closes the database (`runShutdown`, bundle-39 D5).
-const cycles = new DetachedWork('sync cycle');
-export function syncCyclesInFlight(): number { return cycles.size; }
-export function syncCyclesSettled(ms: number): ReturnType<DetachedWork['settledWithin']> { return cycles.settledWithin(ms); }
-const inCycle = <T>(run: () => Promise<T>): Promise<T> => cycles.track(run());
 
 async function _runSyncForNetworkImpl(networkId: string, progress: NetworkCycleProgress): Promise<NetworkCycleResult> {
   const cfg = getConfig();
@@ -297,7 +245,6 @@ export async function runSyncForPeer(peerId: string): Promise<PeerCycleResult> {
 }
 
 /** What a network cycle answers: the members synced and errored, each member's outcome, and the cycle's verdict word (`syncVerdict`). */
-export type NetworkCycleResult = { synced: number; errors: number; members: MemberResult[]; outcome: SyncVerdict['outcome'] };
 /** What a single-peer sync answers: the same, over every network the peer is a member of. */
 export type PeerCycleResult = {
   networksSynced: number; errors: number; refused: number; notFound: boolean; members: MemberResult[]; outcome: SyncVerdict['outcome'];

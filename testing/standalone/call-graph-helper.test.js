@@ -150,10 +150,12 @@ describe('a closure built at module scope is followed', () => {
   it('on the real tree: the sync engine reaches its coalescing runner\'s callbacks', () => {
     const real = moduleIndex('server/src');
     const ENGINE = 'server/src/sync/engine.ts';
-    assert.ok(real.bodies.has(`${ENGINE}:_syncRunner`), `${ENGINE}:_syncRunner is not a key — re-anchor this case`);
+    const RUNNER = 'server/src/sync/network-cycle-runner.ts';
+    assert.ok(real.bodies.has(`${RUNNER}:_syncRunner`), `${RUNNER}:_syncRunner is not a key — re-anchor this case`);
     const { seen, parent } = walkFrom(real, [`${ENGINE}:runSyncForNetwork`], { closures: true });
-    assert.ok(seen.has(`${ENGINE}:_syncRunner`), 'runSyncForNetwork does not reach the runner built at module scope');
-    assert.equal(pathTo(parent, `${ENGINE}:_syncRunner`).at(-2), `${ENGINE}:runSyncForNetwork`);
+    assert.ok(seen.has(`${RUNNER}:_syncRunner`), 'runSyncForNetwork does not reach the runner built at module scope');
+    assert.equal(pathTo(parent, `${RUNNER}:_syncRunner`).at(-2), `${RUNNER}:runNetworkCycle`);
+    assert.ok(seen.has(`${ENGINE}:_runSyncForNetworkImpl`), 'the cycle the engine passes in is not reached from runSyncForNetwork');
   });
 });
 
