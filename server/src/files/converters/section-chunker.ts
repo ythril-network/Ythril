@@ -7,9 +7,12 @@
  *    `minBodyLength` chars are merged into the previous chunk
  *  - **A section longer than `maxBodyLength` is split further, at paragraph
  *    boundaries**, keeping the heading as provenance on each part
- *  - Table blocks (<table>…</table>) are never split across boundaries
+ *  - Table blocks (<table>…</table>) are never split across SECTION boundaries, and this chunker leaves a block it cannot divide
+ *    (a table, a fence, one long line) whole: the HARD bound on what the embedder is sent is the bounding pass that follows it
+ *    (`bound-chunks.ts`, at `chunkForLevel`), which keeps a table whole under the embedder's ceiling and cuts it at row lines above it
  *  - The last paragraph of the previous chunk is prepended to the next chunk
- *    as overlap (context continuity for the embedding model)
+ *    as overlap (context continuity for the embedding model), itself capped at `maxBodyLength` bytes so a table is never copied
+ *    into the next section
  *  - Returns an array of Chunk objects with headingText, content, chunkIndex
  *
  * ## Why a maximum exists (customer report, 2026-08-02)
@@ -27,11 +30,13 @@
  *    idle because the ONNX arena allocator keeps its high-water mark. Lowering embed concurrency had made it
  *    *worse*, because the peak is set by the size of one chunk, not by how many run at once.
  *
- * So the cap is a retrieval-quality rule that happens to also be the fact fix. `embed()` truncates as well —
- * belt and braces, because a chunk that slips through must never cost gigabytes again.
+ * So the cap is a retrieval-quality rule that happens to also be the fact fix. It is a SOFT cap: it never cuts a paragraph. What the
+ * embedder is actually sent is bounded by `embedding.maxInputBytes` in the pass after this one (`bound-chunks.ts`); the local model's
+ * own truncation was once called the backstop, and it is the local model's alone (an HTTP embedder refuses an over-long input).
  */
 
 import type { Chunk } from './types.js';
+import { boundedPrefix } from '../../util/bounded-text.js';
 
 const HEADING_RE = /^#{2,3}\s+(.+)$/;
 const TABLE_OPEN_RE = /^<table[^>]*>/i;
@@ -60,9 +65,9 @@ export const DEFAULT_MAX_BODY_LENGTH = 2_000;
  * Split one oversized body at paragraph boundaries, never inside a table.
  *
  * Greedy rather than balanced: paragraphs accumulate until the next one would exceed the cap. A single
- * paragraph (or table) longer than the cap is emitted alone and left intact — bisecting a table destroys the
- * only thing that made it a semantic unit, and `embed()`'s truncation is the backstop for the pathological
- * case of one enormous paragraph.
+ * paragraph (or table) longer than the cap is emitted alone and left intact: this is the soft, retrieval-quality cap, and a table the
+ * embedder accepts is worth more whole. What the embedder would REFUSE is cut afterwards, at row lines, by the bounding pass
+ * (`bound-chunks.ts`): an unembeddable table is worth less than a table in parts.
  */
 function splitOversized(body: string, maxLen: number): string[] {
   if (body.length <= maxLen) return [body];
@@ -170,7 +175,8 @@ export function sectionChunk(
       body = prevLastPara + '\n\n' + body;
     }
 
-    prevLastPara = lastParagraph(body);
+    // Capped, so an indivisible last paragraph (a 38 KB table of rows) is not copied whole into the next section's body.
+    prevLastPara = boundedPrefix(lastParagraph(body), maxBodyLength).text;
 
     // A section with no size limit was the whole defect: two headings in a 57 KB document meant two 28 KB
     // chunks. Every part keeps the section's heading, so provenance survives the split and a reader still sees
