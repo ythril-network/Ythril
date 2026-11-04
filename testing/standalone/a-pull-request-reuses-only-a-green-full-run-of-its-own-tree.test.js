@@ -473,3 +473,55 @@ describe('a module the entry cannot load: decide fails open, verify fails closed
     assert.doesNotMatch(r.out, /::warning/);
   });
 });
+
+describe('the tree comparison never makes a full clone shallow or partial (bundle-244: a drive on a developer\'s clone did)', () => {
+  /** An origin with two commits of different trees, a FULL clone of it, then a third commit the clone has not fetched. */
+  function repos() {
+    const dir = mkdtempSync(join(tmpdir(), 'full-run-reuse-tree-'));
+    const git = (cwd, ...args) => {
+      const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', HOME: dir } });
+      assert.equal(r.status, 0, `git ${args.join(' ')}: ${r.stderr}`);
+      return r.stdout.trim();
+    };
+    const origin = join(dir, 'origin');
+    mkdirSync(origin);
+    git(origin, 'init', '-q', '-b', 'main');
+    git(origin, 'config', 'uploadpack.allowAnySHA1InWant', 'true');
+    git(origin, 'config', 'uploadpack.allowFilter', 'true');
+    const commit = (text) => {
+      writeFileSync(join(origin, 'f.txt'), text);
+      git(origin, 'add', 'f.txt');
+      git(origin, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', text);
+      return git(origin, 'rev-parse', 'HEAD');
+    };
+    const first = commit('one');
+    const second = commit('two');
+    const work = join(dir, 'work');
+    git(dir, 'clone', '-q', `file://${origin}`, work);
+    const third = commit('three');
+    const state = () => ({
+      shallow: git(work, 'rev-parse', '--is-shallow-repository'),
+      partial: spawnSync('git', ['config', '--get-regexp', 'promisor|partialclone'], { cwd: work, encoding: 'utf8' }).stdout.trim(),
+    });
+    return { dir, work, first, second, third, state };
+  }
+
+  for (const [what, pick, expected] of [
+    ['the head is the checked-out commit, already present', (r) => r.second, true],
+    ['the head is an older commit with another tree, already present', (r) => r.first, false],
+    ['the head is a commit the clone has not fetched', (r) => r.third, false],
+  ]) {
+    it(`${what}: answers ${expected}, and the clone stays full`, async () => {
+      const { treeMatchesHead } = await reuse();
+      assert.equal(typeof treeMatchesHead, 'function', `${SCRIPT} must export treeMatchesHead`);
+      const r = repos();
+      try {
+        const answer = treeMatchesHead(pick(r), { deadline: Date.now() + 60_000, env: process.env, cwd: r.work });
+        assert.equal(answer, expected);
+        assert.deepEqual(r.state(), { shallow: 'false', partial: '' }, 'the comparison changed what the clone is');
+      } finally {
+        rmSync(r.dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
