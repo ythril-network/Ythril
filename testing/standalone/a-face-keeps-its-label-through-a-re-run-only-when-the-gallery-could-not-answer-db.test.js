@@ -107,8 +107,8 @@ function handleOf() {
  * Re-run the faces of `file`: the provider answers `boxes` (one face each, the embedding at 0 degrees from the query axis, so a gallery that
  * answers finds the labelled face far behind it), under `refusal` (a `REFUSALS` entry, or none for a gallery that answers).
  */
-async function rerun(file, boxes, { refusal = REFUSALS.dimensionMismatch, opts = {}, sha } = {}) {
-  runs.setFaces(boxes.map(boxRaw => ({ boxRaw, embedding: unitAt(0, FACE_DIMS) })));
+async function rerun(file, boxes, { refusal = REFUSALS.dimensionMismatch, opts = {}, sha, embedding = unitAt(0, FACE_DIMS) } = {}) {
+  runs.setFaces(boxes.map(boxRaw => ({ boxRaw, embedding })));
   const fault = refusal ? refuseVectorSearch(refusal) : null;
   try {
     await embedFaces(S, file, handleOf(), { claim: await seedClaim(S, file, sha ? { sha256: sha } : {}), ...opts });
@@ -270,12 +270,18 @@ describe('a face keeps its label through a re-run only when the gallery could no
     // The control: the same face, the gallery refusing - the label is kept.
     await rerun(refused, [A]);
     assert.equal((await faceRowsOf(refused)).get(0)?.faceEntityId, PERSON, 'control: a gallery that could not answer did not keep the label');
-    // The gallery answers: the face is not the one labelled face the gallery holds (170 degrees away), so it is no_match, and no_match is an answer.
+    // The gallery answers, and finds no one: the query is ORTHOGONAL to every face the suite stores (all lie in the plane of axes 0 and 2),
+    // so each scores 0.5, under the 0.6 threshold. Not the query axis the other cases use: the faces their runs stored there carry
+    // the person's label, and once the index has caught up with them (CI, Full run of bundle-236) the gallery MATCHED one and auto-labelled.
+    const orthogonal = new Array(FACE_DIMS).fill(0);
+    orthogonal[1] = 1;
     const refusedBefore = await unmatched('index_unavailable');
-    await rerun(answered, [A], { refusal: null });
+    await rerun(answered, [A], { refusal: null, embedding: orthogonal });
     assert.equal(await unmatched('index_unavailable'), refusedBefore,
       'fixture check: the gallery that should have ANSWERED refused (the face index was not serving), so this case says nothing about no_match');
-    assert.ok(unlabelled((await faceRowsOf(answered)).get(0)), 'a gallery that answered "no one" was overruled by the label the face had');
+    const row = (await faceRowsOf(answered)).get(0);
+    assert.ok(row, 'fixture check: the answered run stored no face');
+    assert.ok(unlabelled(row), `a gallery that answered "no one" was overruled by the label the face had (got ${JSON.stringify(row.faceEntityId)}; a label here can also be a MATCH, if the query is near a labelled face)`);
   });
 
   it('keeps a label when the job\'s deferrals are spent (the gallery could not answer in time), and counts each face once from any starting value', async () => {
