@@ -42,7 +42,7 @@ const STACK_JOB = (id, name, script = id) => `
   ${id}:
     name: ${name}
     needs: [reuse, prepare]
-    if: ${STANDS_DOWN}
+    if: ${STACK_STANDS_DOWN}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -78,6 +78,9 @@ export const NEEDED_JOBS = ['reuse', 'changelog', ...TEST_JOBS];
 
 /** The one condition of a job that stands down on a reused run, as the YAML text of its `if:`. */
 const STANDS_DOWN = "@{{ !cancelled() && needs.reuse.outputs.full_run == '' }}";
+
+/** The stack jobs also wait for `prepare`: `!cancelled()` replaces the default `success()`, so the condition names prepare's success itself. */
+const STACK_STANDS_DOWN = "@{{ !cancelled() && needs.reuse.outputs.full_run == '' && needs.prepare.result == 'success' }}";
 
 /**
  * The command the client job runs, written once: the fixture's client step and the fixture's preflight both carry it, and

@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Settings:** a refused sync is a translated message; the tokens page shows its summary after the list; the server log colours a line by its own level only.
 - **Spaces:** turning embedding suppression on asks before Save, and says Save removes the stored text vectors and Backfill restores them.
 - **Tooling:** the changelog check covers `sidecars/` and `scripts/`; `npm run test:up` first clears a test stack left by a run without a project name.
+- **CI:** a pull request whose exact tree already passed a Full run reads that run's results instead of running every suite again; the `ci:full` label forces the whole graph.
 
 ### Fixed
 

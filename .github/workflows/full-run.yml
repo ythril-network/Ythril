@@ -26,8 +26,8 @@ on:
   push:
     branches: ['full-run/**']
 
-# Exactly this and nothing wider. The job below adds only what ci.yml's own jobs ask for (`ci-advisory`: `actions: read`):
-# a caller that grants less rejects the whole run at startup.
+# Exactly this and nothing wider. The job below adds only what ci.yml's own jobs ask for (`actions: read`, asked by `reuse`,
+# `Build & Test` and `ci-advisory`): a caller that grants less rejects the whole run at startup.
 permissions:
   contents: read
 

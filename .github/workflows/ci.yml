@@ -4,6 +4,9 @@ on:
   # Release branches too (Q-56): a patch is bumped through a PR into release/X.Y.x, and Build & Test is the merge gate.
   pull_request:
     branches: [main, 'release/**']
+    # `labeled` starts a run when `ci:full` is added, so the label reaches the `reuse` job (its event payload lists the labels):
+    # the one lever that forces the whole graph on a pull request (Q-710). Exactly these four, held by ci-workflow-is-sound.
+    types: [opened, synchronize, reopened, labeled]
   push:
     branches: [main]
   # Called by full-run.yml, which runs this whole graph for a push to a `full-run/<bundle>` ref: the bundle's one full run
@@ -15,7 +18,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 # Exactly this and nothing wider (held by ci-workflow-is-sound). A job that needs more says so on the job:
-# only `ci-advisory` does, and only `actions: read`.
+# only `reuse`, `Build & Test` and `ci-advisory` do, and only `actions: read` (the Actions API of another or this run).
 permissions:
   contents: read
 
@@ -27,9 +30,20 @@ concurrency:
   group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# ── The job graph (bundle-56) ─────────────────────────────────────────────────────────────────────────────────────
+# ── The job graph (bundle-56, bundle-244) ─────────────────────────────────────────────────────────────────────────
 #
-# Everything that does not need the application image starts at t=0, in parallel:
+# Two jobs decide and check before any suite; both start at t=0, in parallel with the suites that do not wait for `reuse`:
+#
+#   reuse               pull requests only: is there a green Full run of this very tree (same commit tree as the pull
+#                       request's head, a Full run of that head that passed and left every result)? If so its one output,
+#                       `full_run` ("<run id>.<attempt>"), names it and every suite job below STANDS DOWN (`if: !cancelled()
+#                       && needs.reuse.outputs.full_run == ''`): the suites ran already, on this tree. It fails OPEN: anything
+#                       it cannot establish is an empty output and the whole graph runs. `ci:full` on the pull request forces
+#                       that (scripts/full-run-reuse.mjs; a push, a Full run and a release-branch pull request never reuse).
+#   changelog           the pull request's CHANGELOG check, a job of its own because a reused run skips every suite job and the
+#                       check is not one of them. It waits for nothing and carries no condition.
+#
+# Everything that does not need the application image starts at t=0, in parallel (after `reuse`'s answer):
 #
 #   client-tests        the client's unit tests and its production build (its own `npm ci`)
 #   standalone-pure     the standalone files that need nothing but `server/dist` (and `client/dist`)
@@ -39,18 +53,22 @@ concurrency:
 #                       shard's files. A runner has room for one Mongo, so the shards run as jobs and not as containers of
 #                       one job. Held by `ci-runs-every-db-shard-exactly-once`: the matrix is exactly the plan's indices,
 #                       each upload carries its index, and `Build & Test` waits for the job and checks its result.
-#   prepare             the changelog check, the docs lint, and the one build of the test image
+#   prepare             the docs lint, and the one build of the test image
 #
 # Everything that drives a running Ythril waits for `prepare`, loads the image it built and starts ONLY the services
-# its suite needs (`--no-build --pull never`, so compose can neither rebuild nor pull a different image):
+# its suite needs (`--no-build --pull never`, so compose can neither rebuild nor pull a different image). Each carries
+# `needs.prepare.result == 'success'` beside the reuse condition: `!cancelled()` replaces the default `success()` of a job
+# that needs another, so without it a failed `prepare` would not stop them (held by ci-workflow-is-sound):
 #
 #   standalone-instance the @needs-instance standalone files: A, C and their databases
 #   integration         A, B and their databases, plus the two document sidecars (doc-render, doc-office)
 #   sync                A, B, C, D and their databases
 #   redteam             A, B, D and their databases
 #
-# `Build & Test` is the only required check. It does no work: it waits for every other job and fails unless each
-# succeeded. `ci-advisory` is the one job that may fail without failing the run (timings and trends).
+# `Build & Test` is the only required check. It waits for every other job and fails unless each succeeded, a suite job
+# having stood down only beside a named, reused Full run. It then reads the results of the run it judges: this one's, or
+# (after verifying it again, failing closed) the reused Full run's. `ci-advisory` is the one job that may fail without
+# failing the run (timings and trends), and it stands down on a reused run: it reads THIS run's results.
 #
 # What is cached, and why only that: the test image's layers and each document sidecar's layers, in the GitHub
 # Actions layer cache, WRITTEN only by `prepare` on a push to main and READ by every run (a pull request that wrote
@@ -68,8 +86,74 @@ concurrency:
 # Held for every install in every workflow by `cuda-download-is-skipped-everywhere`.
 
 jobs:
+  # Does this pull request reuse a green Full run of its own tree? The first job of the file and a lean one: no install (the
+  # script imports node built-ins only, held by unexpected-skips-fail-the-ci-gate), no setup-node (the runner's node runs it),
+  # five minutes (its own deadline is 120 s). `contents: read` for the checkout it compares trees in, `actions: read` for the
+  # Actions API (the Full runs of the head SHA); the token is the deciding step's own `GH_TOKEN` and reaches nothing else. Every
+  # value of the pull request reaches the script through `env:`, never inside the shell text. A push, a Full run and every other
+  # event skip this job (the suite jobs then run, their condition being an empty output). Any failure inside it is an empty output
+  # too: the script fails open, and says why in the step summary (an error-class reason as a warning).
+  reuse:
+    name: Full run reuse
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      full_run: ${{ steps.decide.outputs.full_run }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every step.
+          persist-credentials: false
+
+      - name: Decide whether a Full run of this tree is reused
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # The names of the pull request's labels, as a JSON list: `ci:full` among them forces the whole graph.
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: node scripts/full-run-reuse.mjs decide
+
+  # A change to shipped code needs a CHANGELOG entry under [Unreleased]. The rule was already the house rule and was being
+  # followed; nothing enforced it, and a rule kept alive by memory is one distracted afternoon from lapsing, invisibly. A job of
+  # its own (it was a step of `prepare`): a pull request that reuses a Full run skips every suite job, and this check is not a
+  # suite. It waits for nothing and has no condition, so no failed or skipped job can keep it from running; the STEP is PR-only,
+  # because on a push to main there is no base to diff against and the entry was already required of the pull request.
+  changelog:
+    name: CHANGELOG entry
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history: the check diffs `base...HEAD`, which needs a MERGE BASE. The default shallow clone has none, and
+          # the failure mode is the bad one: the diff errors, the check skips, and a missing entry looks like a passing build.
+          fetch-depth: 0
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every step.
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: CHANGELOG entry for shipped changes
+        if: github.event_name == 'pull_request'
+        run: |
+          node scripts/check-changelog.mjs "origin/$GITHUB_BASE_REF"
+
   client-tests:
     name: Client tests
+    needs: reuse
+    # Stands down when a pull request reuses a Full run of its own tree (`reuse`'s output names it). `!cancelled()`, not the
+    # default `success()`: a failed or skipped `reuse` job must run the whole graph, never skip it.
+    if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' }}
     runs-on: ubuntu-latest
     # Measured 130-145 s of tests plus a 30 s production build; 15 minutes is five times that, and a hung Vitest
     # worker is the failure it bounds.
@@ -136,6 +220,8 @@ jobs:
 
   standalone-pure:
     name: Standalone (no services)
+    needs: reuse
+    if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' }}
     runs-on: ubuntu-latest
     # The offline files that need no database: measured about 145 s of tests after about 80 s of install and builds.
     # 30 minutes is a hung file, not a slow one.
@@ -183,6 +269,9 @@ jobs:
 
   standalone-db:
     name: Standalone (database, shard ${{ matrix.shard }})
+    needs: reuse
+    # One condition for the whole matrix: a skipped matrix is a single skipped job, so no shard stands down alone.
+    if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' }}
     runs-on: ubuntu-latest
     # One shard of the `-db` plan per job, against a Mongo of its own. `fail-fast` is off so one red shard does not hide
     # the verdict of the others; `Build & Test` fails when any of them failed (a matrix job's result is the worst of its
@@ -255,6 +344,8 @@ jobs:
 
   prepare:
     name: Prepare
+    needs: reuse
+    if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' }}
     runs-on: ubuntu-latest
     # Measured: about 95-115 s for the image build on a warm cache, 2-3 minutes cold plus the HuggingFace model
     # fetch; the checks around it take under a minute. 30 minutes bounds a stalled registry or cache service.
@@ -263,9 +354,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Full history: the CHANGELOG check below diffs `base...HEAD`, which needs a MERGE BASE. The default
-          # shallow clone has none, and the failure mode is the bad one: the diff errors, the check skips, and a
-          # missing entry looks like a passing build.
+          # Full history, as every job that reads this repository has it (the CHANGELOG check that needed a merge base is
+          # the `changelog` job's now).
           fetch-depth: 0
           # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every test and dependency.
           persist-credentials: false
@@ -282,15 +372,6 @@ jobs:
         run: npm ci --workspaces=false
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
-
-      # A change to shipped code needs a CHANGELOG entry under [Unreleased]. The rule was already the house rule and
-      # was being followed; nothing enforced it, and a rule kept alive by memory is one distracted afternoon from
-      # lapsing, invisibly. PRs only: on a push to main there is no base to diff against, and the entry was already
-      # required of the PR.
-      - name: CHANGELOG entry for shipped changes
-        if: github.event_name == 'pull_request'
-        run: |
-          node scripts/check-changelog.mjs "origin/$GITHUB_BASE_REF"
 
       - name: Lint docs
         run: npm run lint:docs
@@ -344,7 +425,8 @@ jobs:
 
   standalone-instance:
     name: Standalone (instances)
-    needs: prepare
+    needs: [reuse, prepare]
+    if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
     # The @needs-instance files, one at a time: measured about 110 s of tests after about 150 s of setup.
     # 30 minutes bounds a hung request to a wedged instance.
@@ -418,7 +500,8 @@ jobs:
 
   integration:
     name: Integration
-    needs: prepare
+    needs: [reuse, prepare]
+    if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
     # Measured 510-570 s of tests after about 150 s of setup, and one job rather than shards: standalone, not
     # integration, was the longest suite on this runner shape. A cold doc-office build (LibreOffice) is on top of it
@@ -517,7 +600,8 @@ jobs:
 
   sync:
     name: Sync
-    needs: prepare
+    needs: [reuse, prepare]
+    if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
     # Measured 383-388 s of tests after about 150 s of setup. 45 minutes bounds a network that never converges.
     timeout-minutes: 45
@@ -589,7 +673,8 @@ jobs:
 
   redteam:
     name: Red team
-    needs: prepare
+    needs: [reuse, prepare]
+    if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
     # Measured 126 s of tests after about 150 s of setup. 30 minutes bounds a hung probe.
     timeout-minutes: 30
@@ -662,11 +747,12 @@ jobs:
 
   # Not required, and allowed to fail: durations, trends and flags. It reads the other jobs' result artifacts, so it
   # waits for them, and it never gates a merge. `actions: read` is for the run's job and step timings (the Actions
-  # API), and it is granted to this job alone.
+  # API); only this job, `reuse` and `Build & Test` hold it. It stands down when a pull request reuses a Full run: it reads
+  # THIS run's results, and a reused run has none (the Full run's own advisory job recorded the timings).
   ci-advisory:
     name: CI advisory
-    needs: [client-tests, standalone-pure, standalone-db, standalone-instance, integration, sync, redteam]
-    if: always()
+    needs: [reuse, client-tests, standalone-pure, standalone-db, standalone-instance, integration, sync, redteam]
+    if: ${{ always() && needs.reuse.outputs.full_run == '' }}
     continue-on-error: true
     runs-on: ubuntu-latest
     # Downloads a handful of small artifacts and prints a table. 10 minutes is generous for that.
@@ -707,32 +793,49 @@ jobs:
   # there is NO "Build & Test" yet: the monitor reads that as in progress, never as passing.
   #
   # `if: always()` because a failed needed job would otherwise SKIP this one, and a skipped required check is not a
-  # red one. Every needed job must be `success` (a skipped or cancelled job is not): a check for `failure` passes
-  # exactly those. It needs every job of the file except `ci-advisory`, which is derived and held by
-  # `ci-workflow-is-sound`, so a job added tomorrow cannot be forgotten here.
+  # red one. Every needed job must be `success` (a cancelled or failed one is not): a check for `failure` passes
+  # exactly those. A SUITE job may also be `skipped`, and only beside a named run: when `reuse` output a Full run
+  # (`FULL_RUN`, through env), the suites stood down on purpose, and `reuse` itself and `changelog` must have succeeded.
+  # With no run named a skipped job is a job that never ran, and fails. It needs every job of the file except
+  # `ci-advisory`, which is derived and held by `ci-workflow-is-sound`, so a job added tomorrow cannot be forgotten
+  # here; the same file runs the verdict in a real bash for every cell, and holds that the jobs that carry the reuse
+  # condition are exactly the ones the verdict lets be skipped.
   test:
     name: Build & Test
-    needs: [client-tests, standalone-pure, standalone-db, prepare, standalone-instance, integration, sync, redteam]
+    needs: [reuse, changelog, client-tests, standalone-pure, standalone-db, prepare, standalone-instance, integration, sync, redteam]
     if: always()
     runs-on: ubuntu-latest
-    # A shell function over the results, then two node scripts over a few megabytes of JSONL.
+    # A shell function over the results, a read of one run (the reused one's, again) and two node scripts over a few
+    # megabytes of JSONL.
     timeout-minutes: 10
+    # `actions: read` is for the verification and the download of ANOTHER run's artifacts (a reused Full run's): without it
+    # the download is refused at the end of a green run. Held, with `reuse` and the advisory job alone, by ci-workflow-is-sound.
+    permissions:
+      contents: read
+      actions: read
     steps:
       # Everything after this first step runs ONLY when it passed (a step that follows a failed one is skipped, and none
       # below has an `if` that would change that: `ci-workflow-is-sound` holds it). So the checks below read a COMPLETE
       # set, never the partial one a failed job leaves — a verdict about half a run would be worse than none.
       - name: Every job succeeded
+        env:
+          # The reuse output reaches the shell through env, never inside the script text.
+          FULL_RUN: ${{ needs.reuse.outputs.full_run }}
         run: |
           fail=0
-          check() { [ "$2" = success ] || { echo "::error::$1 finished: $2"; fail=1; }; }
-          check client-tests "${{ needs.client-tests.result }}"
-          check standalone-pure "${{ needs.standalone-pure.result }}"
-          check standalone-db "${{ needs.standalone-db.result }}"
-          check prepare "${{ needs.prepare.result }}"
-          check standalone-instance "${{ needs.standalone-instance.result }}"
-          check integration "${{ needs.integration.result }}"
-          check sync "${{ needs.sync.result }}"
-          check redteam "${{ needs.redteam.result }}"
+          bad() { echo "::error::$1 finished: $2"; fail=1; }
+          check() { [ "$2" = success ] || bad "$1" "$2"; }
+          check_suite() { [ "$2" = success ] || { [ "$2" = skipped ] && [ -n "$FULL_RUN" ]; } || bad "$1" "$2"; }
+          [ -z "$FULL_RUN" ] || check reuse "${{ needs.reuse.result }}"
+          check changelog "${{ needs.changelog.result }}"
+          check_suite client-tests "${{ needs.client-tests.result }}"
+          check_suite standalone-pure "${{ needs.standalone-pure.result }}"
+          check_suite standalone-db "${{ needs.standalone-db.result }}"
+          check_suite prepare "${{ needs.prepare.result }}"
+          check_suite standalone-instance "${{ needs.standalone-instance.result }}"
+          check_suite integration "${{ needs.integration.result }}"
+          check_suite sync "${{ needs.sync.result }}"
+          check_suite redteam "${{ needs.redteam.result }}"
           exit $fail
 
       # The run's own evidence, read once every job succeeded. Both scripts import only node built-ins, so this job
@@ -749,11 +852,27 @@ jobs:
         with:
           node-version: '22'
 
+      # Which run's results this check reads: this one's, or the reused Full run's after it is READ AGAIN. A suite job was
+      # skipped on the strength of `reuse`'s output, so by now nothing ran and the output is trusted no further than a fresh
+      # read of that run (its commit, trigger, branch, repository, latest attempt, Build & Test and every results
+      # artifact, and the tree of the head). Fails CLOSED, naming the remedy: re-run the whole PR run. Writes the `run_id`
+      # and `attempt` the download reads (this run's own when nothing was reused). The token is this step's alone.
+      - name: Verify the reused run and name the results to read
+        id: results
+        env:
+          FULL_RUN: ${{ needs.reuse.outputs.full_run }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/full-run-reuse.mjs verify
+
       - name: Download every job's test results
         uses: actions/download-artifact@v4
         with:
-          # This attempt's artifacts only: a re-run of one job must not read the first attempt's files beside its own.
-          pattern: test-results-*-${{ github.run_attempt }}
+          # The verified run's artifacts and attempt only (this run's own when nothing was reused): a re-run of one job must
+          # not read the first attempt's files beside its own. `github-token` is what lets the download read another run.
+          run-id: ${{ steps.results.outputs.run_id }}
+          github-token: ${{ github.token }}
+          pattern: test-results-*-${{ steps.results.outputs.attempt }}
           path: test-results
           merge-multiple: true
 
