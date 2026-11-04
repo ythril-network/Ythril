@@ -18,12 +18,14 @@
  *  2. A face labelled SECONDS ago counts: the gallery has no fresh-write scan, so its labelled-face read has no age clause (S1).
  *  3. An absent index (the search answers no documents, no error) while a labelled face exists -> `GalleryIncompleteError`.
  *  4. A store condition (code 6, a dead mongot) while a labelled face exists -> `GalleryIncompleteError`, never null (A-S5).
- *  5. No labelled face anywhere -> `null`, whatever the index is doing: there is no gallery to be incomplete about (B7, `face-embedder.ts:223-225`).
+ *  5. No labelled face anywhere -> `{ kind: 'no_match' }`, whatever the index is doing: there is no gallery to be incomplete about (B7, `face-embedder.ts:223-225`).
  *  6. An index that will not serve without action (here a REAL one created with half the face width: mongot refuses every query) with a labelled
- *     face -> `null`, so the caption and the rest of the image job still complete, and `ythril_faces_stored_unmatched_total{reason}` counts the
+ *     face -> `{ kind: 'could_not_answer', reason: 'index_unavailable' }` (bundle-236, Q-698: a typed answer, so a label the face already had is kept
+ *     where `null` read as "no one"), so the caption and the rest of the image job still complete, and `ythril_faces_stored_unmatched_total{reason}` counts the
  *     face stored unlabelled for want of a gallery (S10).
  *
- * Rule 5 holds on the base already (the `catch` answers null): it is the side the change must keep. The others fail on the base.
+ * Rule 5 held on the base as `null` and rule 6 answered `null`: bundle-236 types the answer (`match` | `no_match` | `could_not_answer`), so those two cases read the typed shape and
+ * fail on the base, which still answers `null`. The others fail on the base too.
  *
  * ## How
  *
@@ -41,9 +43,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Collection, MongoServerError } from 'mongodb';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { unitAt, createSpaceCollections, insertAll } from './_vector-harness.mjs';
+import { REFUSALS, refuseVectorSearch } from './_mongot-refusals.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
@@ -76,39 +78,6 @@ const gallery = (spaceId, { unlabelled = 3, labelledAt } = {}) => [
   ...Array.from({ length: unlabelled }, (_, i) => face(spaceId, i, {})),
   ...(labelledAt ? [face(spaceId, 99, { faceEntityId: 'person-1' }, labelledAt)] : []),
 ];
-
-/**
- * mongot's refusals as the b72 probe recorded them, as the driver delivers them: a `MongoServerError` at `toArray`. The namespace, index name and
- * database are the space's; the uuid and the index id are placeholders, as they differ per run.
- */
-const REFUSALS = {
-  notInitialized: (ns, index) => new MongoServerError({ ok: 0, code: 8, codeName: 'UnknownError',
-    errmsg: `Executor error during aggregate command on namespace: ${ns} :: caused by :: Index ${index} not initialized` }),
-  notStarted: (ns, index, coll) => new MongoServerError({ ok: 0, code: 8, codeName: 'UnknownError',
-    errmsg: `Executor error during aggregate command on namespace: ${ns} :: caused by :: cannot query vector index 6ae8ac3d3962027b25dbb42a `
-      + `(vector index v1 collection ${coll} (bf525713-b742-4828-a241-0e687265d80d) in database ${ns.split('.')[0]}) while in state NOT_STARTED` }),
-  initialSync: (ns, index, coll) => new MongoServerError({ ok: 0, code: 8, codeName: 'UnknownError',
-    errmsg: `Executor error during aggregate command on namespace: ${ns} :: caused by :: cannot query vector index 6ae8ac3d3962027b25dbb42a `
-      + `(vector index v1 collection ${coll} (bf525713-b742-4828-a241-0e687265d80d) in database ${ns.split('.')[0]}) while in state INITIAL_SYNC` }),
-  hostUnreachable: (ns) => new MongoServerError({ ok: 0, code: 6, codeName: 'HostUnreachable',
-    errmsg: `Executor error during aggregate command on namespace: ${ns} :: caused by :: Error connecting to localhost:27027 (127.0.0.1:27027) `
-      + ':: caused by :: onInvoke :: caused by :: Connection refused' }),
-};
-
-/** Every `$vectorSearch` aggregate reaches the store and then comes back as `refusal`; returns how many were refused and a restore. */
-function refuseVectorSearch(refusal) {
-  const original = Collection.prototype.aggregate;
-  let refused = 0;
-  Collection.prototype.aggregate = function aggregate(pipeline, ...rest) {
-    const cursor = original.call(this, pipeline, ...rest);
-    const stage = Array.isArray(pipeline) ? pipeline[0]?.['$vectorSearch'] : undefined;
-    if (!stage) return cursor;
-    const err = refusal(`${this.dbName}.${this.collectionName}`, stage.index, this.collectionName);
-    cursor.toArray = async () => { refused++; await cursor.close(); throw err; };
-    return cursor;
-  };
-  return { refused: () => refused, restore: () => { Collection.prototype.aggregate = original; } };
-}
 
 /** What the gallery search answers or throws, with the refusal injected for the duration. */
 async function searchRefusedAs(space, refusal) {
@@ -213,25 +182,26 @@ describe('a face gallery that cannot answer is retried while a face is labelled'
     });
   });
 
-  describe('no labelled face exists: there is no gallery, and null is the answer', () => {
+  describe('no labelled face exists: there is no gallery, and no_match is the answer', () => {
     // Green on the base already: this is the answer the change must keep (B7).
-    it('an absent index answers null', async () => {
-      assert.equal(await faceEmbedder.gallerySearch(S.none, unitAt(0, FACE_DIMS), threshold), null);
+    it('an absent index answers no_match', async () => {
+      assert.deepEqual(await faceEmbedder.gallerySearch(S.none, unitAt(0, FACE_DIMS), threshold), { kind: 'no_match' });
     });
     for (const [wording, refusal] of [['a not-yet refusal', REFUSALS.initialSync], ['"Index … not initialized"', REFUSALS.notInitialized], ['a dead mongot (code 6)', REFUSALS.hostUnreachable]]) {
-      it(`${wording} answers null`, async () => {
+      it(`${wording} answers no_match`, async () => {
         const o = await searchRefusedAs(S.none, refusal);
-        assert.ok('v' in o && o.v === null, `the gallery ${describeOutcome(o)} - with no labelled face there is nothing to retry for`);
+        assert.ok('v' in o && o.v?.kind === 'no_match' && Object.keys(o.v).length === 1,
+          `the gallery ${describeOutcome(o)} - with no labelled face there is nothing to retry for, and nothing a label could be kept for: no_match`);
       });
     }
   });
 
   describe('an index that will not serve without action', () => {
-    it('with a labelled face answers null (the job completes) and counts the face stored unlabelled', async () => {
+    it('with a labelled face answers could_not_answer index_unavailable (the job completes) and counts the face stored unlabelled', async () => {
       const before = await unmatchedStored();
       const o = await faceEmbedder.gallerySearch(S.wrongWidth, unitAt(0, FACE_DIMS), threshold).then(v => ({ v }), e => ({ e }));
-      assert.ok('v' in o && o.v === null,
-        `the gallery ${describeOutcome(o)} - a broken face index must not retry a photo for ever or lose its caption: it answers null`);
+      assert.deepEqual('v' in o ? o.v : o, { kind: 'could_not_answer', reason: 'index_unavailable' },
+        `the gallery ${describeOutcome(o)} - a broken face index must not retry a photo for ever or lose its caption: it answers that it could not answer, so a label a face already had can be kept`);
       const after = await unmatchedStored();
       assert.equal(after - before, 1,
         'ythril_faces_stored_unmatched_total{reason} did not move by one: an operator sees faces stored unlabelled for want of a gallery only here');
