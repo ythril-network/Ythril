@@ -26,7 +26,8 @@ import { writeFile, writeFileBytes } from '../files.js';
 import { resolveSafePathChecked } from '../sandbox.js';
 import { col, asFilter } from '../../db/mongo.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
-import { chunkEmbedText } from '../../brain/embed-text.js';
+import { embedTextFor, embedTextForProducer } from '../../brain/embed-text.js';
+import { boundChunks } from './bound-chunks.js';
 import { getConfig, getDocumentProcessingConfig, getEmbeddingConfig } from '../../config/loader.js';
 import { vlmExtractDocument } from './vlm-extract.js';
 import type { FileMetaDoc, DocExtractionMode, TextLevel } from '../../config/types.js';
@@ -41,7 +42,7 @@ import { READ_CHUNK, readStoredById } from '../../db/read-by-id.js';
 import { NOT_A_FLAGGED_ROW } from '../live-file-row.js';
 import { embedConcurrency } from './embed-concurrency.js';
 import { isLeaseLost, shouldHeartbeat, stopIfLeaseLost, type JobClaim } from '../media/lease.js';
-import { embedChunksTotal } from '../../metrics/registry.js';
+import { embedChunksTotal, conversionChunksUnembeddedTotal } from '../../metrics/registry.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { replaceDerivedFileRows, type DerivedWriteOutcome } from '../derived-fields.js';
 import { mapLimit } from '../../util/map-limit.js';
@@ -195,17 +196,22 @@ const DEFAULT_MAX_CONVERSION_BYTES = 100 * 1024 * 1024;
  * matters for long documents, where a single averaged vector answers "which file mentions this?" but
  * can no longer answer "where does it say that?".
  */
-function chunkForLevel(normalised: string, format: ResolvedFormat, opts: ConversionPipelineOptions): Chunk[] {
+export function chunkForLevel(normalised: string, format: ResolvedFormat, opts: ConversionPipelineOptions): Chunk[] {
   const level = opts.textLevel ?? 'auto';
   if (level === 'off') return [];
   if (level === 'embed') {
     // Whole document as a single unit. An empty body would produce a vector of nothing, so treat it
     // as having no content rather than storing an embedding that matches everything weakly.
-    return normalised.trim() ? [{ headingText: null, content: normalised, chunkIndex: 0 }] : [];
+    // One vector for the whole document, as documented: it is NOT split. Its vector is made from the beginning of the text
+    // (`embedTextForProducer` cuts it where it is embedded) and the stored `content` stays whole for the lexical channel. The
+    // marker tells a rebuild it is this, and not a chunker's chunk that the ceiling should have bounded.
+    return normalised.trim() ? [{ headingText: null, content: normalised, chunkIndex: 0, wholeDocument: true }] : [];
   }
-  return format === 'txt'
+  // THE bounding pass: the chunkers keep their soft cap and leave an indivisible block whole; this splits what the embedder
+  // would still refuse, after both chunkers' overlaps are in (`bound-chunks.ts`). Every chunk the conversion makes leaves here.
+  return boundChunks(format === 'txt'
     ? paragraphChunk(normalised, { maxChunkLength: opts.maxParagraphChunkLength })
-    : sectionChunk(normalised, { minBodyLength: opts.minChunkBodyLength });
+    : sectionChunk(normalised, { minBodyLength: opts.minChunkBodyLength }));
 }
 
 export async function runConversionPipeline(
@@ -485,8 +491,12 @@ export async function storeConversionResults(
   // own index, so chunkDocs keeps the chunk order whatever order the embeds finish in.
   await mapLimit(chunks, EMBED_CONCURRENCY, async (chunk, i) => {
     const chunkId = `${originalId}#chunk${chunk.chunkIndex}`;
-    // The one builder a rebuild uses too (`buildEmbedText`), so a reindexed chunk embeds this exact string.
-    const embedText = chunkEmbedText(chunk.headingText, chunk.content);
+    // The one builder a rebuild uses too (`derivedText`, `embed-record.ts`), so a reindexed chunk embeds this exact string. A chunker's chunk
+    // is already bounded (`bound-chunks.ts`), so it comes out whole; the `embed` level's one chunk is the whole document and is cut here,
+    // counted, with `content` kept whole for the lexical channel.
+    const embedText = chunk.wholeDocument
+      ? embedTextForProducer(chunk.headingText, chunk.content, 'whole-document')
+      : embedTextFor(chunk.headingText, chunk.content);
 
     // A suppressed file keeps the text the lexical channel searches (`matchedText`, the queue path's rule, Q-94) and
     // holds no vector: the model is not called and nothing is counted as failed.
@@ -495,7 +505,10 @@ export async function storeConversionResults(
       embeddingFields = { ...(await vectors.fieldsFor(embedText)), matchedText: embedText };
     } catch (err) {
       embedFailures++;
-      log.warn(`Chunk embed failed for ${spaceId}/${chunkId}: ${err instanceof Error ? err.message : String(err)}`);
+      // Counted, because a passage stored without a vector surfaces nowhere unless EVERY passage failed; and the message is the
+      // embedder's (an HTTP body can echo the document's own text), so it is peer text.
+      conversionChunksUnembeddedTotal.inc();
+      log.warn(`Chunk embed failed for ${peerText(spaceId)}/${peerText(chunkId)}: ${peerText(err)}`);
     }
 
     // There used to be a `setImmediate` yield here, to hand the event loop a turn between chunks. It existed because
@@ -525,6 +538,7 @@ export async function storeConversionResults(
       chunkIndex: chunk.chunkIndex,
       headingText: chunk.headingText,
       content: chunk.content,
+      ...(chunk.wholeDocument ? { wholeDocument: true as const } : {}),
       ...embeddingFields,
     };
   });

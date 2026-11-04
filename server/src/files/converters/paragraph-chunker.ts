@@ -4,11 +4,15 @@
  * Rules:
  *  - Split on double newlines (paragraph boundaries)
  *  - Concatenate consecutive paragraphs until the chunk reaches `maxChunkLength` chars
- *  - Prepend the last paragraph of the previous chunk as overlap
+ *  - Prepend the last paragraph of the previous chunk as overlap (capped at `maxChunkLength` bytes, so a paragraph that could not be
+ *    divided is not copied whole into the next chunk)
+ *  - A paragraph over the length is emitted whole: the HARD bound on what the embedder is sent is the bounding pass that follows
+ *    (`bound-chunks.ts`, at `chunkForLevel`)
  *  - headingText is null on all produced chunks
  */
 
 import type { Chunk } from './types.js';
+import { boundedPrefix } from '../../util/bounded-text.js';
 
 export interface ParagraphChunkerOptions {
   maxChunkLength?: number; // default 800
@@ -41,7 +45,7 @@ export function paragraphChunk(
     if (prevLastPara) {
       body = prevLastPara + '\n\n' + body;
     }
-    prevLastPara = lastParagraph(body);
+    prevLastPara = boundedPrefix(lastParagraph(body), maxLen).text;
     chunks.push({ headingText: null, content: body, chunkIndex: chunks.length });
     currentParas = [];
     currentLen = 0;

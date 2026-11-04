@@ -29,6 +29,13 @@ export interface Chunk {
   headingText: string | null;
   content: string;
   chunkIndex: number;
+  /**
+   * Set by the `embed` text level on its ONE chunk, the whole document: its vector is made from the beginning of the text (cut where
+   * it is embedded), and the stored `content` stays whole. It is stored on the row so a rebuild can tell this chunk from a chunker's
+   * (which the ceiling bounds, and which is never cut on rebuild): a stored passage over the ceiling WITHOUT it needs its file
+   * re-converted. Local-only: chunks never sync.
+   */
+  wholeDocument?: true;
 }
 
 /** Implemented by every converter. */

@@ -97,11 +97,14 @@ describe('a reindex embeds nothing itself', () => {
 });
 
 describe('a chunk\'s text has one builder', () => {
-  it('pipeline.ts imports chunkEmbedText from embed-text.js and calls it', () => {
+  it('pipeline.ts takes its chunk text from the one builder in embed-text.js (embedTextFor, which is chunkEmbedText bounded to the embedder\'s ceiling) and calls it', () => {
     const pipeline = src(PIPELINE);
-    assert.ok(importedFrom(pipeline, '[^\']*embed-text\\.js').includes('chunkEmbedText'),
+    assert.ok(importedFrom(pipeline, '[^\']*embed-text\\.js').includes('embedTextFor'),
       'pipeline.ts must take its chunk text from brain/embed-text.js');
-    assert.match(pipeline, /\bchunkEmbedText\(/, 'and must call it for every text chunk');
+    assert.match(pipeline, /\bembedTextFor\(/, 'and must call it for every text chunk');
+    // The rule this test pinned, kept: the builder embed-record's rebuild calls is the same one the pipeline's builder is made of.
+    const embedText = src('server/src/brain/embed-text.ts');
+    assert.match(embedText.slice(embedText.indexOf('export function boundedEmbedText')), /\bchunkEmbedText\(/, 'embedTextFor must be built from chunkEmbedText, the one spelling of "heading, space, body"');
   });
 
   it('pipeline.ts does not assemble a chunk\'s text inline', () => {

@@ -24,8 +24,8 @@
  * any specific term, because one averaged vector is not about anything.
  *
  * A Windows checkout, a Windows-authored file, or any tool that writes CRLF was enough to trigger it. Rule 0
- * is the one-line half of that fix; the other halves are `maxBodyLength` in `section-chunker.ts` and
- * `truncation` in `brain/embedding.ts`.
+ * is the one-line half of that fix; the other halves are `maxBodyLength` in `section-chunker.ts`, the ceiling's bounding pass
+ * (`bound-chunks.ts`, which holds what an HTTP embedder is sent) and `truncation` in the local inference (`brain/embed-process.ts`).
  */
 
 const PAGE_LINE_RE = /^-{0,3}Page\s+\d+.*$/i;

@@ -1,3 +1,14 @@
+import { boundedPrefix, utf8Bytes } from '../util/bounded-text.js';
+import { warnOnce } from '../util/warn-once.js';
+import { log } from '../util/log.js';
+import { embedInputCutTotal } from '../metrics/registry.js';
+import { largestTaskPrefixBytes } from './embedding.js';
+import { embedInputCeiling, storedEmbeddingConfig } from './embed-ceiling.js';
+
+// The ceiling's accessor lives in `embed-ceiling.ts` (`embedding.ts` reads it too, and cannot import this file); it is re-exported
+// here, beside the builders that read it, because this is where a reader of "what is embedded" looks.
+export { embedInputCeiling };
+
 /**
  * Shared helper for turning a knowledge record's `properties` into embeddable text.
  *
@@ -161,4 +172,73 @@ export function fileEmbedText(
  */
 export function chunkEmbedText(headingText: string | null | undefined, content: string): string {
   return headingText ? `${headingText} ${content}` : content;
+}
+
+
+// ── What is EMBEDDED: the one builder, and the bytes it may hold ────────────────────────────────────────────────
+
+/**
+ * The most bytes of embed text one passage may be, so that what `prepareInput` then SENDS is at most `embedding.maxInputBytes`:
+ * the ceiling less the largest task prefix of the configured scheme (`search_document: ` is 17 bytes, the `qwen` query instruction
+ * over a hundred). A chunker that stopped at the ceiling and a sender that then added the prefix would be over by exactly the prefix.
+ */
+export function embedTextBudget(): number {
+  const cfg = storedEmbeddingConfig();
+  return Math.max(1, embedInputCeiling(cfg) - largestTaskPrefixBytes(cfg));
+}
+
+/** A heading is capped to a quarter of the budget before the body's share is counted, so a 7,000-byte heading cannot leave a passage no room. */
+export function cappedHeading(headingText: string | null | undefined, budget: number = embedTextBudget()): string | null {
+  return headingText ? boundedPrefix(headingText, Math.floor(budget / 4)).text : null;
+}
+
+/**
+ * The text that is embedded for a heading and a body, and whether the BODY had to be cut to make it fit the budget.
+ *
+ * The heading is capped first, then `chunkEmbedText` builds the string, then the string is cut to the budget by the shared cut rule
+ * (the last line break that fits, never inside a surrogate pair). A text that fits is `chunkEmbedText` itself.
+ */
+export function boundedEmbedText(
+  headingText: string | null | undefined,
+  content: string,
+): { text: string; cut: boolean } {
+  const budget = embedTextBudget();
+  return boundedPrefix(chunkEmbedText(cappedHeading(headingText, budget), content), budget);
+}
+
+/**
+ * THE ONE BUILDER of what a derived passage's vector is made from. The conversion's chunk store, the `embed` level, the media
+ * embedders and the queue's rebuild (`derivedText` in `embed-record.ts`) all call it, and `matchedText` stores exactly its output,
+ * so a rebuilt vector describes what the producer's did. `content` keeps the whole text for the lexical channel.
+ */
+export function embedTextFor(headingText: string | null | undefined, content: string): string {
+  return boundedEmbedText(headingText, content).text;
+}
+
+const cutSaid = warnOnce<string>({ max: 8, every: 10 * 60_000 });
+
+/** Which producer's text was cut: a whole-document vector (the `embed` level) or a media transcript, caption or combined text. */
+export type CutProducer = 'whole-document' | 'media';
+
+/**
+ * {@link embedTextFor} for a PRODUCER that embeds a text it cannot split (a whole document, a transcript): the cut is deterministic
+ * and recorded, counted (`ythril_embed_input_cut_total{producer}`) and said once per window. A rebuild of the same record calls
+ * {@link embedTextFor} and gets the same string, without counting again (a walk that builds a page of texts is not a producer).
+ */
+export function embedTextForProducer(
+  headingText: string | null | undefined,
+  content: string,
+  producer: CutProducer,
+): string {
+  const { text, cut } = boundedEmbedText(headingText, content);
+  if (cut) noteInputCut(producer, utf8Bytes(content), utf8Bytes(text));
+  return text;
+}
+
+/** The count and the warning of one cut, for a producer (`embedTextForProducer`) or a rebuild that embeds a cut text (`embedStoredRecord`). */
+export function noteInputCut(producer: CutProducer, textBytes: number, keptBytes: number): void {
+  embedInputCutTotal.labels({ producer }).inc();
+  cutSaid(producer, () => log.warn(
+    `A ${producer} text of ${textBytes} bytes is over the embedder's ceiling (embedding.maxInputBytes); it is embedded as its first `
+    + `${keptBytes} bytes, so its vector describes its beginning only. The stored text is whole and is still found by its words.`));
 }
