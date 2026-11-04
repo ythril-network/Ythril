@@ -66,6 +66,12 @@ A file written again at the same path with **other bytes** gets a whole new run,
 becomes claimable a few seconds after the **last** write (3 s), so a path written again and again is analysed once, after
 it settles, not once per save. A run already under way for the old bytes loses its claim and writes nothing more.
 
+The file's own record stops matching by the old bytes in the write that records the new ones: a machine-made
+`description` (with its `descriptionSource`), the `excerpt`, the vector and `matchedText` are removed, and the record is
+queued to re-embed from what remains; the new run then writes a new description and excerpt. A description a person wrote
+stays, and the same bytes written again keep everything. On a peer's copy the arriving bytes remove that instance's own
+excerpt and vector the same way, and the description changes by the publisher's write, which replicates.
+
 The old caption, faces and passages stop matching when the new run starts, and the new run clears them before it calls
 any model. When the new bytes are **not analysed** (over `MAX_FILE_SIZE_BYTES`, or that class of analysis is `off` for the
 space, or documents are off) they are removed at once, in the same write, and the record reads `"skipped"`: a picture

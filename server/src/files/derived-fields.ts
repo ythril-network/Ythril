@@ -173,6 +173,49 @@ export function stripDerivedStages(): object[] {
   ];
 }
 
+/** The local fields a file's own row loses when its bytes are replaced: what the old bytes made it match by. */
+const REPLACED = ['embedding', 'embeddingModel', 'matchedText', 'excerpt'];
+
+/**
+ * Who is writing the new bytes, which decides whether the machine-made description goes with the local fields.
+ *
+ *  - `authored` — a person's upload (`upsertFileMeta`): an authored write that stamps a version, so removing the hashed description and
+ *    its marker there is the author's change and pages to every peer like any other.
+ *  - `arrival` — a peer's bytes (`recordArrivedFile`): the write stamps no version, so a hashed field changed in it would differ from the
+ *    publisher's copy for good. The description is the publisher's; its removal arrives as the publisher's own authored write.
+ */
+export type ReplacedBytesWriter = 'authored' | 'arrival';
+
+/**
+ * The pipeline stages that drop what a file's PREVIOUS bytes made from its own row — exactly when the stored `sha256` differs from
+ * the `sha256` of the bytes being recorded, and evaluated by the database against the row as it stands, so they run in the write that
+ * records the new bytes and leave no window in which the row says one hash and matches by another's text.
+ *
+ * What it prevents: a file rewritten with other text kept the old excerpt, vector and `matchedText` on its own row, and a derived
+ * description that the new run could never replace ({@link setDerivedDescriptionIfUnset} writes only where none is stored), so recall
+ * kept finding the file by the words it no longer holds — for good when the door skips the new bytes and no run follows. The chunk and
+ * caption rows are a run's to clear; this is the parent row's half.
+ *
+ * What stays: `sha256` (the caller's stage after these sets the new one), the processing state (the dispatcher writes it), and a
+ * description a person wrote (no `descriptionSource`). A row with no stored hash counts as replaced: unknown bytes are processed. Put
+ * these stages BEFORE the stage that sets the new hash, and queue the row's re-embed after the write, so it is re-embedded from what
+ * remains. Same bytes keep everything.
+ */
+export function replacedBytesStages(sha256: string, writer: ReplacedBytesWriter): object[] {
+  const replaced = { $ne: ['$sha256', { $literal: sha256 }] };
+  const drop = (field: string, when: object = replaced) => ({ $cond: [when, '$$REMOVE', `$${field}`] });
+  return [{
+    // One stage: every expression reads the row as it was, so the description's test sees the marker removed beside it.
+    $set: {
+      ...Object.fromEntries(REPLACED.map(f => [f, drop(f)])),
+      ...(writer === 'authored' ? {
+        description: drop('description', { $and: [replaced, { $in: ['$descriptionSource', [...MACHINE_MADE_SOURCES]] }] }),
+        descriptionSource: drop('descriptionSource'),
+      } : {}),
+    },
+  }];
+}
+
 /**
  * Strip the rows of one space that were FLAGGED BEFORE the flag write started stripping — a bounded, idempotent repair.
  *
