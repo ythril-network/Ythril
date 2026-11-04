@@ -6,6 +6,7 @@
  */
 
 import { col, asFilter, asDoc, asUpdate } from '../../db/mongo.js';
+import { eachIdPage } from '../../db/id-keyset-page.js';
 import type { ClientSession } from 'mongodb';
 import { inBoundedTransaction } from '../../db/bounded-transaction.js';
 import { READ_CHUNK, readStoredById } from '../../db/read-by-id.js';
@@ -289,6 +290,12 @@ export interface ReplacedContent {
   resolvedFormat?: string;
   /** The hash of the bytes now at the path, when the caller has it: absent reads as "not the same bytes as any job's". */
   sha256?: string | undefined;
+  /**
+   * The hash the FILE ROW held before this write (`PriorProcessing.sha256`), when the caller read it: the only evidence the clear of
+   * unstamped rows ({@link clearUnstampedRowsOfFile}) accepts that the bytes are NEW. Absent (no row, or a row with no hash) deletes nothing.
+   * The job's own hash is never asked: a job made before it carried one has none, and a same-bytes rewrite of it would read as new bytes.
+   */
+  priorSha256?: string | undefined;
   /** The bytes came from a peer (`MediaJobDoc.arrival`). */
   arrival: boolean;
 }
@@ -310,7 +317,7 @@ export interface ReplacedContent {
  *    `moveCarriesRecordsAt`, the second asked only when the job at the path carries a hold already) it is held until the move's hold is over
  *    as well, and ALWAYS keeps a later hold the job already carries (read inside the write, so a hold taken between the read and the write
  *    is not lost): a job unheld in the middle of a move would be claimed at the OLD path.
- *  - **A picture's old rows under its new bytes.** A media file written with other bytes (a hash known, not the job's) loses the derived
+ *  - **A picture's old rows under its new bytes.** A media file written with other bytes (the hash known, and the file row's previous hash known and different: `priorSha256`) loses the derived
  *    rows that carry no `sourceSha256` ({@link clearUnstampedRowsOfFile}), after the write that revoked the old run: the run's own clear
  *    counts such a row as the same bytes. A same-bytes write and a retry keep them (a person's face label may be on one).
  *  - **A run's own state overwritten.** The row is written `pending` BEFORE the job is reset, as every writer that makes a job claimable
@@ -383,11 +390,12 @@ export async function replaceContent(spaceId: string, filePath: string, identity
       ],
       { upsert: true },
     ));
-    // NEW bytes of a media file, a hash known: the rows an earlier release left with no stamp (`sourceSha256`) go now, AFTER the write
-    // that revoked the old run's claim, because the run's own clear counts an unstamped row as the same bytes. Nothing the new run writes
-    // can be taken by it: its rows are stamped (it has the hash), and it cannot claim before the settle delay is over. Not on a same-bytes
-    // write or a retry, where an unstamped row may hold a person's face label.
-    if (!isText && identity.sha256 && !sameBytes) {
+    // NEW bytes of a media file, a hash known AND the file row's previous hash known and different: the rows an earlier release left with
+    // no stamp (`sourceSha256`) go now, AFTER the write that revoked the old run's claim, because the run's own clear counts an unstamped
+    // row as the same bytes. Nothing the new run writes can be taken by it: its rows are stamped (it has the hash), and it cannot claim
+    // before the settle delay is over. Not on a same-bytes write or a retry, where an unstamped row may hold a person's face label, and
+    // not where the row's previous hash is unknown: nothing says the bytes changed. The job's hash is not asked (a legacy job has none).
+    if (!isText && identity.sha256 && identity.priorSha256 && identity.priorSha256 !== identity.sha256) {
       step = 'removing the rows the replaced bytes made before rows carried a stamp';
       await clearUnstampedRowsOfFile(spaceId, id);
     }
@@ -1143,15 +1151,9 @@ export async function retryFailedJobs(spaceId: string): Promise<number> {
   const jc = jobCollection(spaceId);
   const now = new Date().toISOString();
   let reset = 0;
-  // A page of failed ids at a time, never the whole set, walked by `_id` so a job that stays failed is not read twice.
-  let after: string | undefined;
-  for (;;) {
-    const page = await jc
-      .find(asFilter<MediaJobDoc>({ status: 'failed', ...(after === undefined ? {} : { _id: { $gt: after } }) }), { projection: { _id: 1 }, sort: { _id: 1 }, limit: READ_CHUNK })
-      .toArray() as Array<{ _id: string }>;
-    if (!page.length) break;
+  // A page of failed ids at a time, never the whole set, walked by `_id` (the one pager) so a job that stays failed is not read twice.
+  await eachIdPage<{ _id: string }>({ collection: spaceCollection(spaceId, 'mediaJobs'), filter: { status: 'failed' }, projection: { _id: 1 }, size: READ_CHUNK }, async page => {
     const part = page.map(f => f._id);
-    after = part[part.length - 1];
     // The rows first, as in retryJob's reasoning: a worker may claim a job the moment it is pending.
     await setFileProcessingState(spaceId, part, { embeddingStatus: 'pending', mediaJobError: undefined });
     const res = await jc.updateMany(
@@ -1159,7 +1161,7 @@ export async function retryFailedJobs(spaceId: string): Promise<number> {
       asUpdate<MediaJobDoc>({ $set: { ...RUN_RESET, claimableAfter: null, updatedAt: now }, $unset: { ...RUN_RESET_UNSET } }),
     );
     reset += res.matchedCount;
-  }
+  });
   if (reset === 0) return 0;
   // Same reason as retryJob: announce the work or the claim walk waits up to a full scan (~30 s).
   markSpaceMayHaveWork(spaceId);

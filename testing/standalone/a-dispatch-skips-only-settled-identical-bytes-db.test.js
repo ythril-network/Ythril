@@ -21,8 +21,10 @@
  *
  *   - identical bytes on a `complete`, `pending` or `processing` document: the job row is IDENTICAL (its poisoned `attempts`,
  *     `lastError` and `claimedAt` survive), the conversion's rows are still there, and the status is what it was;
- *   - identical bytes on a `failed`, `partial` or `skipped` document: converted again (a pending job, reset, the old rows gone);
- *   - CHANGED bytes, whatever the status: converted again (the control for the rule: a skip that is too eager shows here);
+ *   - identical bytes on a `failed`, `partial` or `skipped` document: converted again (a pending job, reset; the old rows gone when the
+ *     new run starts);
+ *   - CHANGED bytes, whatever the status: converted again (the control for the rule: a skip that is too eager shows here); the old rows
+ *     go when the new run STARTS, under its claim (`deleteConversionArtifactsUnderClaim`, bundle-236), not at the write that records the bytes;
  *   - every declined class (an unknown extension, a media file over the cap, a media class off, documents off) leaves the row
  *     with a status that is neither unset nor `pending`/`processing`/`failed`.
  *
@@ -39,6 +41,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { UPLOAD_DOORS } from './_byte-door-uploads.mjs';
 import { openDispatchDoor, sha256Of, SETTLED_STATUSES } from './_dispatch-door.mjs';
+import { seedClaim } from './_media-claim.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -50,15 +53,25 @@ const OTHER = '# Report\n\nA corrected version of the report.\n';
 /** The statuses under which identical bytes are NOT converted again: the work is done or is under way. The rest retry. */
 const LEAVE_ALONE = new Set(['complete', 'pending', 'processing']);
 
-let h;
+let h, pipeline;
 
 before(async () => {
   if (skip) return;
   h = await openDispatchDoor({ suite: 'dispatchskip', space: SPACE });
+  pipeline = await import('../../server/dist/files/converters/pipeline.js');
 });
 after(async () => { await h?.close(); });
 
 const accepted = (a) => [200, 201, 202].includes(a.code);
+
+/**
+ * The new text run STARTS: it holds the job's claim for the bytes now at the path and clears the previous conversion under it (the worker's
+ * text branch calls exactly this, bundle-236). The old passages and sidecar rows go HERE, not at the write that records the new bytes.
+ */
+async function startTheNewRun(sha256) {
+  const claim = await seedClaim(SPACE, DOC, { mediaType: 'text', sha256 });
+  await pipeline.deleteConversionArtifactsUnderClaim(SPACE, claim, DOC);
+}
 
 /** The first arrival through the door, a conversion's row beside it, then the worker's terminal write for `status`. */
 async function arrangeSettled(door, status) {
@@ -98,7 +111,8 @@ describe('a document is converted again only when that could change something', 
             assert.equal(after.row.embeddingStatus, 'pending', `a "${status}" document is exactly what a re-send exists to retry`);
             assert.equal(after.job?.status, 'pending');
             assert.equal(after.job?.attempts, 0, 'the job row was not reset for the retry');
-            assert.equal(await h.files().findOne({ _id: chunk }), null, 'the stale conversion was left beside the new one');
+            await startTheNewRun(sha256Of(FIRST));
+            assert.equal(await h.files().findOne({ _id: chunk }), null, 'the stale conversion was left beside the new one once the new run started');
           });
         }
 
@@ -111,7 +125,9 @@ describe('a document is converted again only when that could change something', 
           assert.equal(after.row.embeddingStatus, 'pending');
           assert.equal(after.job?.status, 'pending');
           assert.equal(after.job?.attempts, 0, 'the old job\'s attempts carried over to the new bytes');
-          assert.equal(await h.files().findOne({ _id: chunk }), null, 'the old conversion survived the new bytes');
+          await startTheNewRun(sha256Of(OTHER));
+          assert.equal(await h.files().findOne({ _id: chunk }), null, 'the old conversion survived the new bytes once the new run started');
+          assert.ok(await h.files().findOne({ _id: DOC }), 'the start clear removed the own row of the file');
         });
       }
     });

@@ -131,6 +131,10 @@ const EXEMPT = {
     'file sync: a peer\'s file tombstone removes the chunk and sidecar rows DERIVED from the file here, at every level (`removeFileHere`, '
     + 'through `deleteConversionArtifacts`, the step a directory\'s delete shares), as a local delete does — rows no peer sends '
     + '(`derived` in the writer), removed with the file they came from',
+  'server/src/files/derived-fields.ts:clearUnstampedRowsOfFile':
+    'the write door of a picture written with OTHER bytes (`replaceContent`, reached from a person\'s upload and a peer\'s arrival through '
+    + '`recordAndDispatchFile`) removes the caption and face rows an earlier release left under the replaced picture with no `sourceSha256` '
+    + '(bundle-236): rows DERIVED from the file (`parentFileId`), which no peer sends, removed with the bytes they were made from; the arriving record is written by the writer',
   'server/src/files/derived-rows.ts:deleteRowsDerivedFrom':
     'file sync: the row half of `removeSidecarRows` (above), shared with a peer\'s tombstone that removes only a record whose entry another '
     + 'live record names (`removeOnlyTheRecordNamed`): the rows DERIVED from the removed record at every level, which no peer sends',
