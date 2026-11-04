@@ -88,11 +88,16 @@ export function markdownWindow(text: string, skip: number, maxChars: number, max
   };
 }
 
+/** Whether `code` (a UTF-16 unit) is the first half of a surrogate pair: a cut right after it would split the pair. */
+export function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
 /**
  * Where to cut one paragraph too large for a window: the furthest line break the window can hold, else the furthest
  * character it can (never zero — a window always advances). A UTF-16 surrogate pair is never split.
  *
- * Exported for `util/bounded-text.ts`, which cuts a text to a byte ceiling by the same rule (the embedder's input bound and this
+ * Exported for `util/bounded-text.ts` (with `isHighSurrogate`), which cuts a text to a byte ceiling by the same rule (the embedder's input bound and this
  * reader's window are two questions that share one answer to "where may a text be cut").
  */
 export function splitPoint(text: string, start: number, paragraphEnd: number, fits: (to: number) => boolean): number {
@@ -106,7 +111,6 @@ export function splitPoint(text: string, start: number, paragraphEnd: number, fi
   let cut = Math.max(start + 1, lo);
   const newline = text.lastIndexOf('\n', cut - 1);
   if (newline >= start) cut = newline + 1;
-  const code = text.charCodeAt(cut - 1);
-  if (code >= 0xd800 && code <= 0xdbff && cut < paragraphEnd) cut = cut > start + 1 ? cut - 1 : cut + 1;
+  if (isHighSurrogate(text.charCodeAt(cut - 1)) && cut < paragraphEnd) cut = cut > start + 1 ? cut - 1 : cut + 1;
   return cut;
 }
