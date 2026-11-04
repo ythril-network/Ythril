@@ -7,9 +7,9 @@
  * `job-queue.ts` returned a job to pending in six places, each its own `$set` of a different handful of fields. They had drifted:
  * `retryJob` and `retryFailedJobs` forgot the deferral marks (S8: a retried job skipped the caption it was retried for), the text
  * enqueue reset the job without them either, the media enqueue unset them and the text one did not, and the one place that did NOT
- * forget anything was the one written last. A reset is one thing, a whole new run, and one spread says what it is: `RUN_RESET` (status
- * `pending`, attempts 0, `lastError`, `claimedAt` and `claimToken` null, `updatedAt`, progress and resolved format unset, and the
- * deferral marks unset). A seventh writer that spells its own `$set` is the next S8.
+ * forget anything was the one written last. A reset is one thing, a whole new run, and one spread says what it is: `RUN_RESET` (`RUN_RESET`:
+ * status `pending`, attempts 0, `lastError`, `claimedAt` and `claimToken` null; `RUN_RESET_UNSET`: `progress` and the deferral marks
+ * unset; `updatedAt` and `claimableAfter` are each writer's own). A seventh writer that spells its own `$set` is the next S8.
  *
  * The other half is what the spread must NOT carry. The job's identity (`mimeType`, `mediaType`, `arrival`, `sha256`) is set only by the
  * write door and by the enqueue: a reset that also set `arrival` would turn a peer's arrived image into one written here on every retry

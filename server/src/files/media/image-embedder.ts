@@ -27,7 +27,7 @@ export interface ImageRunOpts {
   arrival?: boolean;
   /** A deferred job's re-run (`job-queue.ts: deferJob`): the stored caption is reused when its row is there. */
   facesOnly?: boolean;
-  /** False once the job's deferral cap is spent: a face the gallery cannot match yet is stored unlabelled (`embedFaces`). */
+  /** False once the job's deferral cap is spent: a face the gallery cannot match yet is stored matched to no one by the gallery, a label it already had is kept (`embedFaces`). */
   galleryMayDefer?: boolean;
 }
 

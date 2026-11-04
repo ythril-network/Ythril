@@ -65,6 +65,8 @@ const EXEMPT_FUNCTIONS = new Map([
   // The two clears a media or text RUN makes at its start (bundle-236): each deletes rows in chunks under the run's claim and writes nothing else.
   ['server/src/files/converters/pipeline.ts:deleteConversionArtifactsUnderClaim', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/files/derived-fields.ts:clearRowsOfOtherBytes', { why: ONLY_REMOVES_OR_REFUSES }],
+  // The write door's half of that clear (bundle-236, residual 1): the rows of a replaced picture that carry no stamp, removed in chunks, nothing written.
+  ['server/src/files/derived-fields.ts:clearUnstampedRowsOfFile', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/brain/entities.ts:unlabelFacesWhere', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/files/derived-fields.ts:stripFlaggedRowsOnce', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/brain/retention-stamp-heal.ts:healStoredStamps', { why: UPDATES_EXISTING_ONLY }],

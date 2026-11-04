@@ -20,7 +20,7 @@ import { col, asFilter } from '../db/mongo.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { getMediaEmbeddingConfig, DEFAULT_MEDIA_MAX_FILE_SIZE_BYTES } from '../config/loader.js';
 import { sameKnownHash } from './same-known-hash.js';
-import { resolveInputFormat,deleteConversionArtifacts, isMediaFormat, type ResolvedFormat } from './converters/pipeline.js';
+import { resolveInputFormat, deleteConversionArtifacts, isMediaFormat, type ResolvedFormat } from './converters/pipeline.js';
 import { replaceContent, cancelMediaJob, reportDoorFailure } from './media/job-queue.js';
 import { setFileProcessingState, type FileProcessingState } from './derived-fields.js';
 import { documentsAreOff } from './converters/extraction-level.js';
@@ -74,13 +74,16 @@ async function readPriorProcessing(spaceId: string, filePath: string): Promise<P
  * one before, and the face gallery would keep matching a person the new file may not show. The job goes FIRST, so nothing is claimable
  * at the path to write a row after the delete (the removal is `deleteConversionArtifacts`: chunked by `READ_CHUNK` at every level).
  *
+ * A FIRST write (`prior` is `null`: the door read no row) with no job at the path has nothing of older bytes to remove, so the removal is
+ * skipped; an unknown `prior` (absent) removes, which is the direction that fails safe.
+ *
  * Answers whether it was done. A failure marks the row `failed` and logs ERROR (`reportDoorFailure`) and answers `false`: a row that
  * reads `skipped` over the caption of other bytes is the state this exists to end.
  */
-async function declineReplacement(spaceId: string, id: string, row: FileProcessingState): Promise<boolean> {
+async function declineReplacement(spaceId: string, id: string, row: FileProcessingState, prior: PriorProcessing | null | undefined): Promise<boolean> {
   try {
-    await cancelMediaJob(spaceId, id);
-    await deleteConversionArtifacts(spaceId, id);
+    const hadJob = await cancelMediaJob(spaceId, id);
+    if (hadJob || prior !== null) await deleteConversionArtifacts(spaceId, id);
   } catch (err) {
     await reportDoorFailure(spaceId, id, 'removing the job and the rows of the replaced bytes', err);
     return false;
@@ -201,7 +204,7 @@ export async function dispatchFileProcessing(
     // 'skipped' with a reason — not the old blanket 'disabled'. (Existing 'disabled' records still
     // render; that status just has no producer now.)
     if (input.bytes > maxBytes) {
-      if (!await declineReplacement(spaceId, normId, { mediaType, embeddingStatus: 'skipped' })) return { resolvedFormat };
+      if (!await declineReplacement(spaceId, normId, { mediaType, embeddingStatus: 'skipped' }, input.prior)) return { resolvedFormat };
       log.info(`Media file ${peerText(spaceId)}/${peerText(filePath)} skipped: ${input.bytes} bytes exceeds maxFileSizeBytes (${maxBytes})`);
       return { resolvedFormat, embeddingStatus: 'skipped' };
     }
@@ -209,7 +212,7 @@ export async function dispatchFileProcessing(
     // Enqueuing a job that will do nothing leaves the file at `pending` forever — indistinguishable
     // from a stuck queue, and the reason recall comes back empty would be nowhere to be found.
     if (mediaIsOff(spaceId, mediaType)) {
-      if (!await declineReplacement(spaceId, normId, { mediaType, embeddingStatus: 'skipped' })) return { resolvedFormat };
+      if (!await declineReplacement(spaceId, normId, { mediaType, embeddingStatus: 'skipped' }, input.prior)) return { resolvedFormat };
       log.info(`Media file ${peerText(spaceId)}/${peerText(filePath)} not analysed: ${mediaType} analysis is off for this space`);
       return { resolvedFormat, embeddingStatus: 'skipped' };
     }
@@ -225,13 +228,13 @@ export async function dispatchFileProcessing(
     // That is precisely the silent-failure shape the vector-index work was about: the UI shows a
     // spinner, recall returns nothing, and neither says why.
     if (documentsAreOff(spaceId)) {
-      if (!await declineReplacement(spaceId, normId, { embeddingStatus: 'skipped' })) return { resolvedFormat };
+      if (!await declineReplacement(spaceId, normId, { embeddingStatus: 'skipped' }, input.prior)) return { resolvedFormat };
       log.info(`Document ${peerText(spaceId)}/${peerText(filePath)} not analysed: document extraction is off for this space`);
       return { resolvedFormat, embeddingStatus: 'skipped' };
     }
     // The same rule as the media branch (`settledAndIdentical`): the same bytes on a document that converted, or whose job is
     // under way, are not converted again. Before it, the document branch had no skip at all: a repeat arrival deleted the
-    // conversion the file held and `enqueueTextJob` RESET a job that was `pending` or `processing`, throwing away a
+    // conversion the file held and the text enqueue RESET a job that was `pending` or `processing`, throwing away a
     // conversion that was half done every time the same bytes came again.
     if (settledAndIdentical(input.prior, input.sha256)) {
       log.debug(`Document ${peerText(spaceId)}/${peerText(filePath)}: identical bytes already ${peerText(input.prior.embeddingStatus)} — conversion skipped`);

@@ -22,7 +22,7 @@ import { declareStep } from '../../util/housekeeping-signals.js';
 import { CLAIM_OP_MS } from '../../db/write-bound.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { idsUnder, jobIdClausesOf, jobPathsOf, movedPairs, movedRoot, sidecarsOf, type PathKind } from '../moved-paths.js';
-import { setFileProcessingState } from '../derived-fields.js';
+import { setFileProcessingState, clearUnstampedRowsOfFile } from '../derived-fields.js';
 import { rekeyRows } from '../rekey-rows.js';
 import { moveTiming } from '../move-timing.js';
 import { sameKnownHash } from '../same-known-hash.js';
@@ -307,9 +307,12 @@ export interface ReplacedContent {
  *    does is the arrival rule: a LOCAL write onto an arrival job takes the mark off.
  *  - **A run per write.** The job is claimable only after {@link REPLACE_SETTLE_MS}, measured from the LAST write: a path written
  *    continuously settles into one run, not a caption per save. While a move is running or owed at the path (`moveIsRunningAt`,
- *    `moveCarriesRecordsAt`) it is held until the move's hold is over as well, and keeps a later hold the job already carries (read inside
- *    the write, so a hold taken between the read and the write is not lost): a job unheld in the middle of a move would be claimed at
- *    the OLD path.
+ *    `moveCarriesRecordsAt`, the second asked only when the job at the path carries a hold already) it is held until the move's hold is over
+ *    as well, and ALWAYS keeps a later hold the job already carries (read inside the write, so a hold taken between the read and the write
+ *    is not lost): a job unheld in the middle of a move would be claimed at the OLD path.
+ *  - **A picture's old rows under its new bytes.** A media file written with other bytes (a hash known, not the job's) loses the derived
+ *    rows that carry no `sourceSha256` ({@link clearUnstampedRowsOfFile}), after the write that revoked the old run: the run's own clear
+ *    counts such a row as the same bytes. A same-bytes write and a retry keep them (a person's face label may be on one).
  *  - **A run's own state overwritten.** The row is written `pending` BEFORE the job is reset, as every writer that makes a job claimable
  *    does (`a-file-row-reads-pending-before-its-job-can-be-claimed`): a `pending` written after could land on the `processing` of a run
  *    that already claimed. An old run still holding its claim between the two writes can only write its own finish, which the new run's
@@ -344,13 +347,15 @@ export async function replaceContent(spaceId: string, filePath: string, identity
     const now = Date.now();
     const iso = new Date(now).toISOString();
     const settled = new Date(now + REPLACE_SETTLE_MS).toISOString();
-    const moveHeld = await moveHoldsPath(spaceId, id);
+    const moveHeld = await moveMayHoldPath(spaceId, id, existing?.claimableAfter);
     const lit = (v: string) => ({ $literal: v });
     // One write, an aggregation pipeline so that what the job already carries is read INSIDE it (a move's hold, the first creation's
-    // stamp). `$literal` keeps a path or a type that starts with `$` from being read as a field.
-    const claimableAfter = moveHeld
-      ? { $max: [lit(settled), lit(new Date(now + moveTiming().holdMs).toISOString()), { $ifNull: ['$claimableAfter', ''] }] }
-      : lit(settled);
+    // stamp). `$literal` keeps a path or a type that starts with `$` from being read as a field. The later of the settle time, the move's
+    // hold (when one is running or owed) and whatever hold the job carries at the moment of the write: a hold taken after the read above
+    // is kept as well, move or no move.
+    const claimableAfter = {
+      $max: [lit(settled), ...(moveHeld ? [lit(new Date(now + moveTiming().holdMs).toISOString())] : []), { $ifNull: ['$claimableAfter', ''] }],
+    };
     await revokingClaims(() => jobCollection(spaceId).updateOne(
       asFilter<MediaJobDoc>({ _id: id }),
       [
@@ -378,6 +383,14 @@ export async function replaceContent(spaceId: string, filePath: string, identity
       ],
       { upsert: true },
     ));
+    // NEW bytes of a media file, a hash known: the rows an earlier release left with no stamp (`sourceSha256`) go now, AFTER the write
+    // that revoked the old run's claim, because the run's own clear counts an unstamped row as the same bytes. Nothing the new run writes
+    // can be taken by it: its rows are stamped (it has the hash), and it cannot claim before the settle delay is over. Not on a same-bytes
+    // write or a retry, where an unstamped row may hold a person's face label.
+    if (!isText && identity.sha256 && !sameBytes) {
+      step = 'removing the rows the replaced bytes made before rows carried a stamp';
+      await clearUnstampedRowsOfFile(spaceId, id);
+    }
     return 'queued';
   } catch (err) {
     await reportDoorFailure(spaceId, id, step, err);
@@ -394,6 +407,16 @@ export async function replaceContent(spaceId: string, filePath: string, identity
  */
 async function moveHoldsPath(spaceId: string, path: string): Promise<boolean> {
   return moveIsRunningAt(spaceId, path) || await moveCarriesRecordsAt(spaceId, path);
+}
+
+/**
+ * {@link moveHoldsPath} for the write door, which runs on every write: the in-memory question (a move running now) always, and the
+ * costly one (`moveCarriesRecordsAt`, a read of the move markers) only when the job at the path already carries a hold
+ * (`claimableAfter`), because a move owed its records holds the jobs it carries and a job with no hold at all has none to keep.
+ */
+async function moveMayHoldPath(spaceId: string, path: string, existingClaimableAfter: string | null | undefined): Promise<boolean> {
+  if (moveIsRunningAt(spaceId, path)) return true;
+  return existingClaimableAfter ? await moveCarriesRecordsAt(spaceId, path) : false;
 }
 
 /**
@@ -893,21 +916,27 @@ export async function resetStalledJobs(
  * It is also the revocation of the claim a RUNNING job holds: a run's writes are fenced by its job document (`media/lease.ts`), so a
  * run that has not yet written finds nothing to match and writes nothing, and one that is writing is waited for. That is why it comes
  * BEFORE anything a delete removes of the file's rows, and why its bound is the holder's (`revokingClaims`).
+ *
+ * Answers whether there was a job to cancel.
  */
-export async function cancelMediaJob(spaceId: string, filePath: string): Promise<void> {
-  await cancelMediaJobs(spaceId, [filePath]);
+export async function cancelMediaJob(spaceId: string, filePath: string): Promise<boolean> {
+  return await cancelMediaJobs(spaceId, [filePath]) > 0;
 }
 
 /**
  * {@link cancelMediaJob} for many files: one `$in` delete per {@link READ_CHUNK} ids, never one command per id (a page of the
  * leaked-rows repair cancels hundreds). The same revocation, with the same bound, and the same place in a remover's order: BEFORE
  * anything it removes of the files' rows (`every-remover-of-file-rows-revokes-claims-first` names it among the revokers).
+ *
+ * Answers how many jobs it removed.
  */
-export async function cancelMediaJobs(spaceId: string, filePaths: readonly string[]): Promise<void> {
+export async function cancelMediaJobs(spaceId: string, filePaths: readonly string[]): Promise<number> {
   const ids = [...new Set(filePaths.map(toDocId))];
+  let removed = 0;
   for (const part of inChunks(ids, READ_CHUNK)) {
-    await revokingClaims(() => jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ _id: { $in: part } })));
+    removed += (await revokingClaims(() => jobCollection(spaceId).deleteMany(asFilter<MediaJobDoc>({ _id: { $in: part } })))).deletedCount;
   }
+  return removed;
 }
 
 /**
@@ -1112,14 +1141,17 @@ export async function retryJob(
  */
 export async function retryFailedJobs(spaceId: string): Promise<number> {
   const jc = jobCollection(spaceId);
-  const failed = await jc
-    .find(asFilter<MediaJobDoc>({ status: 'failed' }), { projection: { _id: 1 } })
-    .toArray() as Array<{ _id: string }>;
-  if (!failed.length) return 0;
-
   const now = new Date().toISOString();
   let reset = 0;
-  for (const part of inChunks(failed.map(f => f._id), READ_CHUNK)) {
+  // A page of failed ids at a time, never the whole set, walked by `_id` so a job that stays failed is not read twice.
+  let after: string | undefined;
+  for (;;) {
+    const page = await jc
+      .find(asFilter<MediaJobDoc>({ status: 'failed', ...(after === undefined ? {} : { _id: { $gt: after } }) }), { projection: { _id: 1 }, sort: { _id: 1 }, limit: READ_CHUNK })
+      .toArray() as Array<{ _id: string }>;
+    if (!page.length) break;
+    const part = page.map(f => f._id);
+    after = part[part.length - 1];
     // The rows first, as in retryJob's reasoning: a worker may claim a job the moment it is pending.
     await setFileProcessingState(spaceId, part, { embeddingStatus: 'pending', mediaJobError: undefined });
     const res = await jc.updateMany(
@@ -1128,6 +1160,7 @@ export async function retryFailedJobs(spaceId: string): Promise<number> {
     );
     reset += res.matchedCount;
   }
+  if (reset === 0) return 0;
   // Same reason as retryJob: announce the work or the claim walk waits up to a full scan (~30 s).
   markSpaceMayHaveWork(spaceId);
   return reset;

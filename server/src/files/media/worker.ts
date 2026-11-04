@@ -503,7 +503,7 @@ async function processJob(
     switch (mediaType) {
       case 'image': {
         // A deferred job (`deferJob`) re-runs for its faces: the caption is skipped when its row is stored. Past the deferral cap the
-        // gallery is not waited for again, and a face it cannot match is stored unlabelled (`embedFaces`).
+        // gallery is not waited for again, and a face it cannot match is stored matched to no one by the gallery, a label it already had is kept (`embedFaces`).
         derivedDescription = await embedImage(spaceId, fileId, plaintext, mimeType, providers.vision,
           { onProgress: heartbeat, shouldStop: () => leaseLost, signal: lease.signal, steps: IMAGE_STEPS, claim, arrival: job.arrival === true,
             facesOnly: job.facesOnly === true, galleryMayDefer: mayDeferAgain(job) });
