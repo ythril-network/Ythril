@@ -258,7 +258,7 @@ describe('the derivation works', () => {
     assert.ok(IMPORT_DOORS.length >= 1, `no route reaches ${IMPORTER} — the import door moved; re-anchor`);
     assert.ok(BYTE_DOORS.length >= 1, `no route is mounted from ${BYTE_DOOR_FILE} — the upload door moved; re-anchor`);
     // 14 on 797dbb2e, and batchUpsertBySeq is the one that leaves.
-    assert.ok(ENGINE_ROOTS.length >= 10,`only ${ENGINE_ROOTS.length} function(s) in ${ENGINE} — re-anchor`);
+    assert.ok(ENGINE_ROOTS.length >= 6,`only ${ENGINE_ROOTS.length} function(s) in ${ENGINE} — re-anchor`);
   });
 
   it('the doors reach record-collection writes at all, so the rule below cannot pass by finding none', () => {

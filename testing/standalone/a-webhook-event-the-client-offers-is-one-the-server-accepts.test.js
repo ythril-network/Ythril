@@ -2,7 +2,7 @@
  * Every webhook event the Settings page offers is one the server accepts, and every event the server emits can be
  * picked there.
  *
- * The client keeps its own list (`WEBHOOK_EVENT_GROUPS` in `client/src/app/core/api.types.ts`) for the picker. When
+ * The client keeps its own list (`WEBHOOK_EVENT_GROUPS` in `client/src/app/core/webhook.types.ts`) for the picker. When
  * the knowledge type `memory` became `fact` in 5.0 (`A-2`), the server's event names moved to `fact.*` and the
  * client's did not: the page went on offering `memory.created`, `memory.updated` and `memory.deleted`, and the server
  * refused every subscription that ticked one with "Invalid event type" — from 5.0.0 until 5.4.0, on the one control
@@ -21,20 +21,20 @@ import { readFileSync } from 'node:fs';
 let ALL_WEBHOOK_EVENTS;
 before(async () => { ({ ALL_WEBHOOK_EVENTS } = await import('../../server/dist/webhooks/types.js')); });
 
-const src = readFileSync('client/src/app/core/api.types.ts', 'utf8');
+const src = readFileSync('client/src/app/core/webhook.types.ts', 'utf8');
 /** Not offered in the picker, by design: the test button sends it. */
 const NOT_PICKABLE = new Set(['test.ping']);
 
 function clientPicker() {
   const at = src.indexOf('export const WEBHOOK_EVENT_GROUPS');
-  assert.ok(at > -1, 'WEBHOOK_EVENT_GROUPS is gone from api.types.ts — re-point this gate');
+  assert.ok(at > -1, 'WEBHOOK_EVENT_GROUPS is gone from webhook.types.ts — re-point this gate');
   const body = src.slice(at, src.indexOf('];', at));
   return [...body.matchAll(/'([a-z_]+\.[a-z_]+)'/g)].map(m => m[1]);
 }
 
 function clientType() {
   const m = /export type WebhookEventType =([^;]+);/.exec(src);
-  assert.ok(m, 'WebhookEventType is gone from api.types.ts — re-point this gate');
+  assert.ok(m, 'WebhookEventType is gone from webhook.types.ts — re-point this gate');
   return [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1]);
 }
 
