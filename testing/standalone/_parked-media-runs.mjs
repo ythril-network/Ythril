@@ -85,7 +85,11 @@ export async function openParkedMediaRuns({ suite, space, faces = false }) {
 
   const vision = parkedEndpoint((n) => ({ message: { content: `caption of call ${n}` } }));
   const visionServer = await listenOnLoopback(http.createServer(vision.handler));
-  const face = faces ? parkedEndpoint(() => ({ faces: [{ embedding: Array.from({ length: FACE_DIMS }, (_, i) => (i + 1) / 200) }] })) : null;
+  // What the face provider answers, one entry per face; `setFaces` replaces it. `boxRaw` ([x, y, w, h], normalised) is what a stored face row's
+  // `faceBbox` is made of, which the label a re-run keeps is matched on (bundle-236, Q-698). The default is one face with no box, as before.
+  const defaultEmbedding = Array.from({ length: FACE_DIMS }, (_, i) => (i + 1) / 200);
+  let answeredFaces = [{}];
+  const face = faces ? parkedEndpoint(() => ({ faces: answeredFaces.map(f => ({ embedding: f.embedding ?? defaultEmbedding, ...(f.boxRaw ? { boxRaw: f.boxRaw } : {}) })) })) : null;
   let faceServer = null;
   let faceUrl = null;
   if (face) {
@@ -117,6 +121,8 @@ export async function openParkedMediaRuns({ suite, space, faces = false }) {
 
   return {
     acts, vision, face, queue, worker, space,
+    /** The faces the face provider answers with from now on: `[{ embedding?, boxRaw? }]`; an entry with neither is the default face. */
+    setFaces(list) { answeredFaces = list; },
     /**
      * Subscribe to the end of the NEXT run of `p`, and answer a promise of its log line. Call it BEFORE releasing the call the
      * run is parked in, and keep the promise: a run that ends first is otherwise waited for for ever.

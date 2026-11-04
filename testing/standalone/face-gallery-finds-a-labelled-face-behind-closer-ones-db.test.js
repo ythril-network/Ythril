@@ -100,7 +100,7 @@ describe('the face gallery finds a labelled face behind closer unlabelled ones',
 
   it('a labelled face behind more than a thousand closer unlabelled faces is matched', async () => {
     const match = await seam()(GALLERY, unitAt(0, FACE_DIMS), threshold);
-    assert.equal(match?.entityId, 'person-1',
+    assert.deepEqual({ kind: match?.kind, entityId: match?.entityId }, { kind: 'match', entityId: 'person-1' },
       `got ${JSON.stringify(match)}: the labelled face scores well above the threshold and ranks behind `
       + `${UNLABELLED} unlabelled ones, so a search that filters for labels AFTER a 1000-face window never sees it`);
   });
