@@ -57,7 +57,7 @@ export const PINNABLE_FIELD_PATHS: readonly string[] = [
   'rerank.baseUrl', 'rerank.model', 'rerank.apiKey', 'rerank.candidateMultiplier',
   'rerank.maxPassagesPerRequest',
   'embedding.provider', 'embedding.baseUrl', 'embedding.model', 'embedding.apiKey', 'embedding.dimensions',
-  'embedding.prefixScheme', 'embedding.embedConcurrency', 'embedding.similarity',
+  'embedding.prefixScheme', 'embedding.embedConcurrency', 'embedding.similarity', 'embedding.maxInputBytes',
   // Per-slot model call budgets, pinned at the SLOT rather than at `modelSlots.<slot>.timeoutMs`.
   //
   // Depth 2 matches how `documentProcessing.assistModel` and `faceRecognition.externalModel` pin a whole

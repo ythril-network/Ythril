@@ -5,9 +5,12 @@ import { allowPrivateForSlot } from '../config/model-egress-policy.js';
 import { embeddingsUrlFor } from '../files/converters/vlm-endpoint.js';
 import { log, peerText } from '../util/log.js';
 import { withJitter } from '../util/backoff.js';
-import { embeddingDurationSeconds, embeddingQueueDepth, embeddingRetryTotal } from '../metrics/registry.js';
+import { embeddingDurationSeconds, embeddingQueueDepth, embeddingRetryTotal, embedInputCutTotal } from '../metrics/registry.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
 import { runLocalInference, warmLocalInference } from './local-inference.js';
+import { embedInputCeiling } from './embed-ceiling.js';
+import { boundedPrefix, utf8Bytes } from '../util/bounded-text.js';
+import { warnOnce as onceNamed } from '../util/warn-once.js';
 
 export interface EmbeddingResult {
   vector: number[];
@@ -65,8 +68,20 @@ export function prepareInput(
 }
 
 /**
- * Above this many characters, a local embed is worth one `warn` — it is past the point where a single vector
- * can be about anything specific, and it means something upstream produced an unchunked body.
+ * The most bytes the task prefix can add to a text under this config: the larger of the two tasks' prefixes.
+ *
+ * The chunkers and `embedTextFor` split to the ceiling MINUS this, so what `prepareInput` then sends is at most the ceiling and
+ * `embed()`'s last guard never has to cut a chunk. It is here, beside the table it reads, because that table is private.
+ */
+export function largestTaskPrefixBytes(cfg: { baseUrl?: string; prefixScheme?: PrefixScheme }): number {
+  return Math.max(...(['document', 'query'] as const).map(task => utf8Bytes(prepareInput('', task, cfg))));
+}
+
+/**
+ * Above this many characters, a LOCAL embed is worth one `warn` — it is past the point where a single vector
+ * can be about anything specific, and it means something upstream produced an unchunked body. (The local model truncates
+ * to its context window; an HTTP embedder refuses an input over its own, so the HTTP branch of `embed()` has a cut of its own,
+ * at `embedding.maxInputBytes`.)
  *
  * ~8,000 chars is roughly 2,000 tokens: comfortably inside the model's window (so this is not the truncation
  * threshold, which the tokeniser owns) and comfortably past the point where averaging destroys the signal.
@@ -74,6 +89,12 @@ export function prepareInput(
 const MAX_LOCAL_EMBED_CHARS = 8_000;
 
 // ── HTTP endpoint fallback ─────────────────────────────────────────────────
+/**
+ * The HTTP branch's cut is said once per window, not once per call: a stream of oversized facts would fill the log ring. Named
+ * `warnOnce` (the factory is imported as `onceNamed`) because that is what the call reads as at its one site, in `embed()`.
+ */
+const warnOnce = onceNamed<string>({ max: 2, every: 10 * 60_000 });
+
 /** `input` is already task-prefixed by `prepareInput` — do not prefix again here. */
 /**
  * A refusal from the embedding endpoint, carrying enough to decide whether trying again is sensible.
@@ -258,13 +279,24 @@ export async function embed(
   embeddingQueueDepth.inc();
   try {
     if (cfg.baseUrl) {
+      // The last guard. An HTTP embedder REFUSES an input over its context (HTTP 400/413) where the bundled model truncates, and
+      // what reaches this line with no chunker in front of it (a fact, an entity's text, a search query, a long caption) has
+      // nothing else bounding it. Cut ONCE per call, outside the retry closure below, so a 503 retry sends the same text and does not
+      // count again. The chunkers and `embedTextFor` split to the ceiling less the task prefix, so a chunk never comes here cut.
+      const sent = boundedPrefix(input, embedInputCeiling(cfg));
+      if (sent.cut) {
+        embedInputCutTotal.labels({ producer: 'http' }).inc();
+        warnOnce('http-input', () => log.warn(
+          `Embedding input is ${utf8Bytes(input)} bytes, over the embedder's ceiling of ${embedInputCeiling(cfg)} (embedding.maxInputBytes); `
+          + `the HTTP embedder is sent the first ${utf8Bytes(sent.text)}. A vector of a cut text describes its beginning only.`));
+      }
       // External HTTP endpoint configured — delegate entirely
       // Retried here rather than inside `embedViaHttp` so the whole request — including building it — is what
       // gets re-attempted, and so the local path below is untouched: a local model queues you rather than
       // refusing you because it is busy.
       const end = embeddingDurationSeconds.startTimer();
       try {
-        return await embedViaHttpWithRetry(() => embedViaHttp(input, cfg));
+        return await embedViaHttpWithRetry(() => embedViaHttp(sent.text, cfg));
       } finally {
         end();
       }

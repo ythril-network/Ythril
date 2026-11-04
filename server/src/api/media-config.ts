@@ -168,6 +168,9 @@ export const EmbeddingPatchSchema = z.object({
   // the ceiling is the one `embedConcurrency()` clamps to, imported rather than repeated. Absent means "use
   // the per-embedder default", which is why there is no value that means that — clearing it is `null`.
   embedConcurrency: bounded('embedding.embedConcurrency').nullable(),
+  // The most bytes one embedder request may carry, task prefix included (default 6,000). A change re-chunks a file only on its
+  // re-conversion; the chunks already stored keep the size they were made at.
+  maxInputBytes: bounded('embedding.maxInputBytes'),
   apiKey: z.string().max(512).optional().nullable(),
 }).strict();
 
