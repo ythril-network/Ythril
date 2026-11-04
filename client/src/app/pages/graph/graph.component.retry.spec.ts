@@ -189,7 +189,7 @@ describe('Retry (Q-209)', () => {
     }, { timeout: 1500 });
   });
 
-  it('after a success the focus is inside the canvas zone, not on <body>', async () => {
+  it('after a success the focus is on the canvas itself (the handoff\'s `.cy-container`), not on <body> and not elsewhere in the zone', async () => {
     const gate = new Subject<any>();
     let n = 0;
     const { fixture, c } = mount(() => (n++ === 0 ? throwError(() => ({ status: 500 })) : gate));
@@ -205,7 +205,7 @@ describe('Retry (Q-209)', () => {
       fixture.detectChanges();
       const active = document.activeElement as HTMLElement | null;
       expect(active, 'not the page body').not.toBe(document.body);
-      expect(q(fixture, '.canvas-zone')!.contains(active), 'on the canvas zone').toBe(true);
+      expect(active, 'on the canvas the graph is drawn in').toBe(q(fixture, '.cy-container'));
     }, { timeout: 1500 });
     expect(getComputedStyle(q(fixture, '.cy-container')!).visibility, 'the graph is back').toBe('visible');
   });
