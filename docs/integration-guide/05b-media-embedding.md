@@ -60,6 +60,21 @@ follows the same rule (identical bytes already converted, or being converted, ar
 a file a peer delivers by push or sync: an arrival is processed by this instance's own rules, once. A file whose
 bytes change is analysed again even if its record said `"complete"`.
 
+##### Replacing a file with other bytes
+
+A file written again at the same path with **other bytes** gets a whole new run, whatever its job was doing. The job
+becomes claimable a few seconds after the **last** write (3 s), so a path written again and again is analysed once, after
+it settles, not once per save. A run already under way for the old bytes loses its claim and writes nothing more.
+
+The old caption, faces and passages stop matching when the new run starts, and the new run clears them before it calls
+any model. When the new bytes are **not analysed** (over `MAX_FILE_SIZE_BYTES`, or that class of analysis is `off` for the
+space, or documents are off) they are removed at once, in the same write, and the record reads `"skipped"`: a picture
+is never found by the caption of the one it replaced. Face labels go with the face rows (see
+[Face recognition](05c-face-recognition.md#a-label-the-face-already-had)).
+
+A write that cannot queue the new analysis does not fail the upload, and does not leave the record `"pending"`: the record
+reads `"failed"` with the reason in `mediaJobError`, and uploading the file again queues it.
+
 While processing, the filemeta record on the file reflects the current status. Read it with
 `POST /api/filter` — `{"collection": "files", "path": "<path>", "limit": 1}`:
 
@@ -106,11 +121,13 @@ POST /api/files/:spaceId/retry_embedding?path=uploads/photo.jpg
 Authorization: Bearer ythril_…
 ```
 
-**Response** `202` — job re-queued.
+**Response** `202` — job re-queued as a whole new run: its attempts, its error and anything a deferral carried over (a
+stored caption it would have reused) are cleared, and it is claimable a few seconds later. A job that came from a peer keeps
+that, so a retry does not analyse a peer's image for faces when the setting says not to.
 
 **Response** `404` — file does not exist or has no embedding job.
 
-**Response** `409` — job is currently processing; retry is blocked until it completes.
+**Response** `409` — a worker holds the job (or a move of the path is running); the job is left as it is, and retry is blocked until it completes.
 
 #### Configuration
 

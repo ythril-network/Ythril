@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MCP:** `retry_embed_file` converts a file that completed again, to split its passages.
 - **MCP:** each budgeted tool's `maxChars` says how its first item is treated (returned whole above the ceiling, or split at it for `read_file`) and names its continuation field.
 - **Media:** the Validate step shows as working, or warns with the vision steps when no vision model is set; a dimmed step says it will not run.
+- **Media:** a replaced file's old caption, faces and passages stop matching when its new analysis starts, or at once when the new bytes are not analysed.
 - **Settings:** a refused sync is a translated message; the tokens page shows its summary after the list; the server log colours a line by its own level only.
 - **Spaces:** turning embedding suppression on asks before Save, and says Save removes the stored text vectors and Backfill restores them.
 - **Tooling:** the changelog check covers `sidecars/` and `scripts/`; `npm run test:up` first clears a test stack left by a run without a project name.
@@ -42,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Embedding:** a table, fence or long line larger than an HTTP embedder accepts was sent whole and refused, leaving its passage with no vector; it is split at row or line breaks.
+- **Media:** a file written again with other bytes while its job ran was analysed under the old run's claim, and its old caption and faces stayed; its job is now a whole new run, a few seconds after the last write, and the old run writes nothing more.
+- **Media:** a retry kept what a deferral had carried over, such as the stored caption; a retry is a clean run, and never takes a job a worker has just claimed.
+- **Media:** a file whose new analysis could not be queued read `pending`; it reads `failed` with the cause.
+- **Faces:** a face the gallery could not answer for (index unavailable, deferrals spent) lost the label it had; it keeps it, matched by box overlap and only from the same bytes. A face the gallery answered no one for stores no label.
+- **Metrics:** `ythril_faces_stored_unmatched_total` counts faces the gallery could not match, a kept label included; `ythril_media_jobs_retried_total` includes superseded runs.
 - **Graph:** Retry was not clickable after a graph had been drawn; the stale graph, its counts and its controls are hidden while the error shows.
 - **Rendering:** a render window the sidecar ended early skipped the pages in between.
 - **Translations:** the retention line and nine other summaries kept the language of their first render; German and Polish said "Ausweis"/"dowód" for an ID; nine model fields had no input type.

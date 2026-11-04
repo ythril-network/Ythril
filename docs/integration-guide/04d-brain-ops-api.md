@@ -285,9 +285,9 @@ of them before truncation, so a view's grouping describes its members rather tha
 POST /api/brain/spaces/:spaceId/embedding-queue/media/retry-failed
 ```
 
-Re-queues **all** failed media jobs in the space. Requires `files: write`; it is a write, so a personal view id answers as a missing space (`404`) — name the member space.
+Re-queues **all** failed media jobs in the space, each as a whole new run (attempts and error cleared, nothing a deferral carried over). Requires `files: write`; it is a write, so a personal view id answers as a missing space (`404`) — name the member space.
 
-**Response** `202`: `{ "retried": 7 }`.
+**Response** `202`: `{ "retried": 7 }` — the number of jobs reset. A job that stopped being `failed` between the listing and the reset is not counted.
 
 Retry-all is offered here and deliberately **not** for brain records: a media failure is usually about the worker, where a
 brain record's failure is usually about that record. See the per-record retry above.
@@ -357,8 +357,8 @@ needs fixing" is unchanged.
 existed (6,000 bytes by default) is never embedded as a cut text, which would leave it `complete` with most of its words
 unfindable by meaning. Its job is `failed` with `attempts` at `maxAttempts` and `lastError` beginning `This passage is larger than
 the embedder accepts`, naming the bytes and the ceiling. **Re-convert its file** to split it into parts that fit: the MCP
-`retry_embed_file`, or `POST /api/files/:spaceId/retry_embedding?path=<file>`. Both work on a file that completed, and delete the file's old
-passages before they write the new ones. `ythril_embed_jobs_failed_total{reason}` counts every job left `failed`, by why.
+`retry_embed_file`, or `POST /api/files/:spaceId/retry_embedding?path=<file>`. Both work on a file that completed, and the new run deletes the file's old
+passages, in chunks, before it writes the new ones; both leave the file alone with `processing` (`409` on the route) while a worker holds it. `ythril_embed_jobs_failed_total{reason}` counts every job left `failed`, by why.
 
 `transientFailures` counts the times the embedder did not answer at all — connection refused, a timeout, a 429 or 5xx —
 which hand the attempt back rather than spend it; `attempts` is spent only on errors a retry cannot fix. A high
