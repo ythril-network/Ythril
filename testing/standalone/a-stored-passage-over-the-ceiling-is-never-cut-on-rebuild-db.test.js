@@ -16,7 +16,9 @@
  *  2. A media chunk (`#media-chunkN`: a transcript, a caption, captions with a transcript) has no chunker: its rebuild embeds the cut
  *     text, and `matchedText` is that cut text, `content` whole.
  *  3. The `embed` level (one vector for the whole document): its producer embeds the cut text, stores `matchedText` as that cut text and
- *     `content` whole (the lexical channel reads `content`).
+ *     `content` whole (the lexical channel reads `content`). It stores `wholeDocument: true`, and that marker is what the rebuild reads
+ *     (C13): a `#chunkN` WITH it over the budget takes the same deterministic cut and its job completes; one WITHOUT it (a chunker's
+ *     chunk, or an embed-level chunk stored before the marker existed) takes the fail-at-once path of case 1.
  *
  * Also held here, through a real conversion store: a chunk the embedder refuses for another reason is stored without a vector, counted
  * (`ythril_conversion_chunks_unembedded_total`), and does not end the conversion.
@@ -221,6 +223,73 @@ describe('a stored passage over the ceiling, and the one text the producer and t
       assert.equal(row.matchedText, seen[0]);
       assert.ok(row.content.length > 40_000, 'the stored content of an embed-level document stays whole');
       assert.equal(await counter('ythril_embed_input_cut_total') - cut, 1);
+    });
+
+    it('a fresh embed-level conversion stores its one chunk with wholeDocument: true; a chunker chunk is stored without it', async () => {
+      await seedParent('docs/marked.md');
+      const claim = await claimFor('docs/marked.md');
+      await pipeline.storeConversionResults(SPACE, 'docs/marked.md', await convert('a short note\n'.repeat(1_500), { textLevel: 'embed' }), null, [], { claim });
+      const marked = await files().find({ parentFileId: 'docs/marked.md' }).toArray();
+      assert.equal(marked.length, 1);
+      assert.equal(marked[0].wholeDocument, true, 'the embed level\'s chunk carries no marker, so a rebuild cannot tell it from a chunker chunk');
+
+      await seedParent('docs/sectioned.md');
+      const claim2 = await claimFor('docs/sectioned.md');
+      const md = '## One\n\n' + 'First section body sentence. '.repeat(20) + '\n\n## Two\n\n' + 'Second section body sentence. '.repeat(20) + '\n';
+      await pipeline.storeConversionResults(SPACE, 'docs/sectioned.md', await convert(md), null, [], { claim: claim2 });
+      const plain = await files().find({ parentFileId: 'docs/sectioned.md' }).toArray();
+      assert.ok(plain.length >= 2);
+      for (const r of plain) assert.notEqual(r.wholeDocument, true, `${r._id}: a chunker chunk was marked as a whole document`);
+    });
+  });
+
+  describe('3b. rebuild of a stored #chunkN over the budget: the marker decides (C13)', () => {
+    const whole = 'one line of a long document\n'.repeat(1_500).trimEnd();
+
+    it('with wholeDocument: true it takes the deterministic cut: the embedder gets embedTextFor\'s output, the job completes, content stays whole', async () => {
+      await seedParent('docs/whole.md');
+      const id = 'docs/whole.md#chunk0';
+      await files().insertOne({ ...derivedBase(id, 'docs/whole.md'), chunkIndex: 0, headingText: null, content: whole, wholeDocument: true });
+
+      await runQueuedJob(id);
+
+      assert.equal(seen.length, 1, 'the whole-document chunk was not sent to the embedder');
+      assert.ok(bytes(seen[0]) <= CEILING, `${bytes(seen[0])} bytes were sent for the whole-document chunk`);
+      assert.equal(seen[0], embedText.embedTextFor(null, whole), 'the vector input is not what the one builder builds');
+      assert.equal(await jobs().findOne({ _id: `file:${id}` }), null, 'the job did not complete');
+      const row = await files().findOne({ _id: id });
+      assert.equal(row.matchedText, seen[0]);
+      assert.equal(row.content, whole);
+      assert.equal(row.wholeDocument, true, 'a rebuild dropped the marker');
+      assert.ok(Array.isArray(row.embedding));
+    });
+
+    it('without the marker (an embed-level chunk stored before it existed) it fails at once with the re-conversion message', async () => {
+      await seedParent('docs/old-whole.md');
+      const id = 'docs/old-whole.md#chunk0';
+      await files().insertOne({ ...derivedBase(id, 'docs/old-whole.md'), chunkIndex: 0, headingText: null, content: whole });
+
+      await runQueuedJob(id);
+
+      assert.deepEqual(seen, [], 'an unmarked oversized passage was sent to the embedder');
+      const job = await jobs().findOne({ _id: `file:${id}` });
+      assert.ok(job, 'the job was completed: an unmarked passage ended with a cut vector');
+      assert.equal(job.status, 'failed');
+      assert.equal(job.attempts, queue.MAX_EMBED_ATTEMPTS);
+      assert.match(job.lastError, /\b4\d,?\d{3}\b/, 'the bytes');
+      assert.match(job.lastError, /6,?000/, 'the ceiling');
+      assert.match(job.lastError, /retry_embed_file/);
+    });
+
+    it('with wholeDocument: false it is a chunker chunk and fails at once too', async () => {
+      await seedParent('docs/odd.md');
+      const id = 'docs/odd.md#chunk0';
+      await files().insertOne({ ...derivedBase(id, 'docs/odd.md'), chunkIndex: 0, headingText: 'Odd', content: whole, wholeDocument: false });
+
+      await runQueuedJob(id);
+
+      assert.deepEqual(seen, []);
+      assert.equal((await jobs().findOne({ _id: `file:${id}` })).status, 'failed');
     });
   });
 
