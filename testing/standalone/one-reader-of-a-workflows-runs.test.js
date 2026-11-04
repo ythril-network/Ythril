@@ -23,6 +23,9 @@
  *   `gh` (ENOENT) and a logged-out one ("gh auth login") into errors that say so, by name, instead of a raw spawn failure.
  * - `skip-check` imports its step finder and its run reader from that module, and no other script in `scripts/` spawns `gh`: the
  *   set of readers is DERIVED from the tracked scripts, with a floor, not listed here.
+ * - (Q-710) The one place that SPAWNS `gh` is `scripts/_shared/gh-call.mjs`, a module of node built-ins only (the pull request's
+ *   `reuse` job installs nothing, so it has no YAML package); this module re-exports its `ghJson`, `ghText` and the two named
+ *   errors unchanged, and `repoSlug(env)` names the repository from `GITHUB_REPOSITORY`, validated, or the default for a local run.
  *
  * ## The assumption about the injected `gh`
  *
@@ -38,15 +41,18 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { bareImports, importClosure } from './_import-closure.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { loadCi } from '../_shared/ci-workflow.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
 
 const READER_FILE = 'scripts/_shared/ci-run-reader.mjs';
+/** The `gh` call core (argument array, decimal-id guard, 60 s bound, named errors): node built-ins only, so a job that installs nothing can import it. */
+const GH_CALL_FILE = 'scripts/_shared/gh-call.mjs';
 const SKIP_CHECK_FILE = 'scripts/skip-check.mjs';
 const REPO_SLUG = 'ythril-network/Ythril';
 
@@ -288,18 +294,54 @@ describe('skip-check and every other script read runs through the one module', (
     // `untracked`: the reader is written before it is committed, and a gate that cannot see it would say it does not exist.
     const scripts = trackedSources(['scripts'], { ext: ['.mjs'], floor: 10, untracked: true });
     assert.ok(scripts.includes(READER_FILE), `${READER_FILE} does not exist: there is no one reader`);
+    assert.ok(scripts.includes(GH_CALL_FILE), `${GH_CALL_FILE} does not exist: the call core a job that installs nothing can import is missing`);
     const spawners = scripts.filter((f) => {
       const src = stripComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
       return /\b(execFileSync|execFile|spawnSync|spawn|execSync|exec)\(\s*['"`]gh\b/.test(src);
     });
-    assert.deepEqual(spawners, [READER_FILE], `these scripts spawn gh: ${spawners.join(', ') || '(none)'}; only ${READER_FILE} may, so a second reader cannot drop the guards`);
+    // Q-710: the call core moved to a module of node built-ins only, so the reuse job (which installs nothing, and so has no js-yaml)
+    // can read runs; the reader re-exports it. Still exactly one place that spawns gh.
+    assert.deepEqual(spawners, [GH_CALL_FILE], `these scripts spawn gh: ${spawners.join(', ') || '(none)'}; only ${GH_CALL_FILE} may, so a second reader cannot drop the guards`);
   });
 
-  it('the shared reader spawns gh with an argument array and a 60 s bound, and never builds a shell line', () => {
-    const src = stripComments(readFileSync(join(REPO_ROOT, READER_FILE), 'utf8'));
+  it('the shared call core spawns gh with an argument array and a 60 s bound, and never builds a shell line', () => {
+    const src = stripComments(readFileSync(join(REPO_ROOT, GH_CALL_FILE), 'utf8'));
     assert.doesNotMatch(src, /\bexecSync\b|shell\s*:\s*true/, 'a shell line or `shell: true` lets a run id become a command');
     assert.match(src, /timeout\s*:\s*60[_]?000/, 'the call has a 60 s bound');
   });
+});
+
+describe('the call core is its own module of built-ins, and the one reader re-exports it unchanged (Q-710)', () => {
+  const callCore = async () => import(new URL(`file:///${join(REPO_ROOT, GH_CALL_FILE).replace(/\\/g, '/')}`).href);
+
+  it('the reader\'s ghJson, ghText and the two named errors ARE the call core\'s (one definition, not a copy)', async () => {
+    const [core, shared] = [await callCore(), await reader()];
+    for (const name of ['ghJson', 'ghText', 'GhNotInstalledError', 'GhNotLoggedInError']) {
+      assert.equal(typeof core[name], 'function', `${GH_CALL_FILE} must export ${name}`);
+      assert.equal(shared[name], core[name], `${READER_FILE} exports its own ${name}: a second definition is the weaker guard waiting to win`);
+    }
+  });
+
+  it('the core imports node built-ins and repository files only (no package: the reuse job installs none)', () => {
+    assert.ok(existsSync(join(REPO_ROOT, GH_CALL_FILE)), `${GH_CALL_FILE} does not exist`);
+    const packages = importClosure(GH_CALL_FILE).flatMap((f) => bareImports(f).filter((spec) => !spec.startsWith('node:')).map((spec) => `${f} imports ${spec}`));
+    assert.deepEqual(packages, []);
+  });
+
+  it('names the repository from GITHUB_REPOSITORY when the run sets it, and from the default slug for a local run', async () => {
+    const { repoSlug } = await callCore();
+    assert.equal(typeof repoSlug, 'function', `${GH_CALL_FILE} must export repoSlug(env)`);
+    assert.equal(repoSlug({}), REPO_SLUG);
+    assert.equal(repoSlug({ GITHUB_REPOSITORY: '' }), REPO_SLUG, 'an empty variable is unset');
+    assert.equal(repoSlug({ GITHUB_REPOSITORY: 'some-org/Some-Repo.js' }), 'some-org/Some-Repo.js');
+  });
+
+  for (const bad of ['a', 'a/b/c', '../x', 'a/..', 'a b/c', 'a/b?x=1', 'a/b\n']) {
+    it(`refuses a GITHUB_REPOSITORY of ${JSON.stringify(bad)} (it becomes part of an endpoint path)`, async () => {
+      const { repoSlug } = await callCore();
+      assert.throws(() => repoSlug({ GITHUB_REPOSITORY: bad }));
+    });
+  }
 });
 
 describe('the skip-check cases still pass, unchanged, against the shared reader', () => {

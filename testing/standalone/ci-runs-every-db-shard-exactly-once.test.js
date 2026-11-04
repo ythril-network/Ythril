@@ -32,7 +32,7 @@ import assert from 'node:assert/strict';
 import { splitStandalone } from '../_shared/standalone-split.mjs';
 import * as shardPlan from '../_shared/db-shard-plan.mjs';
 import {
-  loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, usesOf, expressionOf, mergeGateEntries, isTrue,
+  loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, usesOf, expressionOf, mergeGateEntries, isTrue, skipsWhenRunIsReused, REUSE_EMPTY,
 } from '../_shared/ci-workflow.mjs';
 import { REPO_ROOT } from './_sources.mjs';
 
@@ -64,9 +64,14 @@ function matrixAxisOf(job, indexExpr) {
   return { axis: m[1], values: matrix[m[1]] };
 }
 
-/** `test-results-*-${{ github.run_attempt }}`-style artifact patterns as a RegExp, the attempt taken as the literal 1. */
+/**
+ * `test-results-*-<attempt>` artifact patterns as a RegExp, the attempt taken as the literal 1. The attempt is `github.run_attempt`
+ * or (Q-710) an output of the step that checked which run the gate reads, `steps.<id>.outputs.attempt`: a pull request that reuses a
+ * Full run downloads THAT run's attempt, and any other expression there is a pattern this rule cannot read.
+ */
 function artifactPatternOf(pattern) {
-  const literal = String(pattern).replace(/\$\{\{\s*github\.run_attempt\s*\}\}/g, '1');
+  const literal = String(pattern).replace(/\$\{\{\s*(?:github\.run_attempt|steps\.[\w-]+\.outputs\.attempt)\s*\}\}/g, '1');
+  assert.ok(!/\$\{\{/.test(literal), `the artifact pattern ${pattern} holds an expression this rule cannot read: only github.run_attempt and steps.<id>.outputs.attempt`);
   return new RegExp(`^${literal.split('*').map(p => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
 }
 
@@ -210,6 +215,18 @@ describe('ci.yml runs every shard of the -db plan, once each', () => {
     assert.ok([].concat(gates[0].job.needs).includes(id), `Build & Test does not need ${id}`);
     const script = stepsOf(gates[0].job).map(s => shellOf(s)).join('\n');
     assert.ok(script.includes(`needs.${id}.result`), `Build & Test does not read needs.${id}.result`);
+  });
+
+  it('the matrix job stands down as ONE job on a reused run, and the gate then reads every shard of that run (Q-710)', () => {
+    const { id, job } = dbJobOf(ci);
+    // A matrix job's result is that of all its shards, and a skipped matrix is a single skipped job: the verdict's "skipped beside a
+    // named run" covers every shard together, so one shard cannot be skipped alone while another runs.
+    assert.ok(skipsWhenRunIsReused(job), `${id} does not stand down on a reused run: it must wait for \`reuse\` and carry \`if: !cancelled() && ${REUSE_EMPTY}\``);
+    // What the gate downloads for the reused run is every shard's evidence: its pattern selects each shard's name of the NAMED run's attempt.
+    const download = jobEntries(ci).flatMap(({ job: j }) => stepsOf(j)).filter(s => usesOf(s)?.action === 'actions/download-artifact' && s.with?.['run-id'] !== undefined);
+    assert.equal(download.length, 1, `${download.length} download step(s) read another run's results; exactly one (the gate's)`);
+    assert.match(String(download[0].with.pattern), /^test-results-\*-\$\{\{\s*steps\.[\w-]+\.outputs\.attempt\s*\}\}$/, 'the download is not of the verified run\'s attempt');
+    for (const name of artifactNames(ci)) assert.ok(artifactPatternOf(download[0].with.pattern).test(name), `${name} is not selected by the download of the reused run`);
   });
 });
 

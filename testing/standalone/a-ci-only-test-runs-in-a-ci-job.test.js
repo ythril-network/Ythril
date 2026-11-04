@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { splitStandalone, offlineRuns } from '../_shared/standalone-split.mjs';
-import { loadCi, jobEntries, stepsOf, shellOf, mergeGateEntries, transitiveNeeds } from '../_shared/ci-workflow.mjs';
+import { loadCi, jobEntries, stepsOf, shellOf, mergeGateEntries, transitiveNeeds, stepsUsing, skipsWhenRunIsReused, REUSE_EMPTY } from '../_shared/ci-workflow.mjs';
 import { REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
@@ -61,8 +61,16 @@ describe('a @ci-only file runs in a CI job', () => {
     for (const gate of gates) {
       assert.ok(transitiveNeeds(doc, gate.id).has(id), `the merge gate does not wait for ${id}: a red @ci-only file would block nothing`);
       const text = stepsOf(gate.job).map(s => shellOf(s)).join('\n');
-      assert.match(text, new RegExp(`check\\s+${id}\\s+"\\$\\{\\{\\s*needs\\.${id}\\.result\\s*\\}\\}"`), `the merge gate does not check ${id}'s result`);
+      // Q-710: the verdict is a function of the job's result AND of whether a reused run covers it, so the spelling of the check is
+      // the gate's own; what is held here is that the gate READS the result, and that the job stands down only on a reused run.
+      assert.ok(text.includes(`needs.${id}.result`), `the merge gate does not check ${id}'s result`);
     }
+    // A @ci-only file ran in the Full run of the same tree, so a reused pull request skips this job and the gate reads that run's
+    // results of it. A job that did not stand down would run the @ci-only files a second time; one that stood down without the
+    // condition would run them nowhere.
+    assert.ok(skipsWhenRunIsReused(doc.jobs[id]), `${id} (where the @ci-only files run) does not stand down on a reused run: it must wait for \`reuse\` and carry \`if: !cancelled() && ${REUSE_EMPTY}\``);
+    assert.ok(stepsUsing(doc.jobs[id], 'actions/upload-artifact').some(u => String(u.with?.name).startsWith(`test-results-${id}-`)),
+      `${id} uploads no test-results-${id}-<attempt> artifact: a reused run's results of the @ci-only files are never read`);
   });
 
   it('the pure runner runs the plan with the @ci-only files in it', () => {

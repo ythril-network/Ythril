@@ -83,6 +83,10 @@ function changelogWiringViolations(doc) {
   if (hits.length !== 1) return [`${hits.length} steps run scripts/check-changelog.mjs; exactly one`];
   const { id, job, i, s } = hits[0];
   const v = [];
+  // Q-710: the check is a job of its own, `changelog`. It was a step of `prepare`, which a pull request that reuses a Full run
+  // skips with every other suite job, so the check would have gone with them.
+  if (id !== 'changelog') v.push(`the check runs in the job \`${id}\`; it lives in the job \`changelog\` and nowhere else: a reused run skips the suite jobs, and the check is not one of them`);
+  if (job.needs != null) v.push(`the job ${id} waits for ${[].concat(job.needs).join(', ')}: a skipped or failed job it waits for keeps the check from running`);
   if (expressionOf(s.if) !== "github.event_name == 'pull_request'") {
     v.push(`the step's condition is \`${s.if ?? '(none)'}\`; it must be PR-only: a push to main has no base to diff against`);
   }
@@ -105,23 +109,30 @@ function changelogWiringViolations(doc) {
 describe('the wiring check itself, held to a conforming workflow and to each way of losing the rule', () => {
   const GOOD = parseWorkflow(GOOD_CI, 'the conforming fixture');
   const withChange = (mutate) => { const d = structuredClone(GOOD); mutate(d); return changelogWiringViolations(d); };
-  const checkStep = (d) => d.jobs.prepare.steps.find((x) => /check-changelog/.test(x.run ?? ''));
+  const checkStep = (d) => d.jobs.changelog.steps.find((x) => /check-changelog/.test(x.run ?? ''));
 
   it('the conforming shape is clean', () => assert.deepEqual(changelogWiringViolations(GOOD), []));
 
   const CASES = [
-    ['the checkout is shallow', (d) => { delete d.jobs.prepare.steps[0].with; }, /fetch-depth/],
-    ['the checkout is depth 1 explicitly', (d) => { d.jobs.prepare.steps[0].with = { 'fetch-depth': 1 }; }, /fetch-depth 1/],
-    ['the checkout is in another job than the check', (d) => { d.jobs.prepare.steps.shift(); }, /no checkout before the check/],
+    ['the checkout is shallow', (d) => { delete d.jobs.changelog.steps[0].with; }, /fetch-depth/],
+    ['the checkout is depth 1 explicitly', (d) => { d.jobs.changelog.steps[0].with = { 'fetch-depth': 1 }; }, /fetch-depth 1/],
+    ['the checkout is in another job than the check', (d) => { d.jobs.changelog.steps.shift(); }, /no checkout before the check/],
     ['the step runs on pushes too', (d) => { delete checkStep(d).if; }, /PR-only/],
     ['the step runs on pushes to main only', (d) => { checkStep(d).if = "github.event_name == 'push'"; }, /PR-only/],
-    ['the job is conditional', (d) => { d.jobs.prepare.if = "github.event_name == 'push'"; }, /has a condition/],
-    ['the step is run twice', (d) => { d.jobs.prepare.steps.push(structuredClone(checkStep(d))); }, /exactly one/],
-    ['the step is gone', (d) => { d.jobs.prepare.steps = d.jobs.prepare.steps.filter((x) => x !== checkStep(d)); }, /exactly one/],
+    ['the job is conditional', (d) => { d.jobs.changelog.if = "github.event_name == 'push'"; }, /has a condition/],
+    ['the step is run twice', (d) => { d.jobs.changelog.steps.push(structuredClone(checkStep(d))); }, /exactly one/],
+    ['the step is gone', (d) => { d.jobs.changelog.steps = d.jobs.changelog.steps.filter((x) => x !== checkStep(d)); }, /exactly one/],
     ['the gate stops waiting for the job that runs it', (d) => {
-      d.jobs.test.needs = d.jobs.test.needs.filter((n) => n !== 'prepare');
-      for (const id of ['standalone', 'integration', 'sync']) d.jobs[id].needs = 'client-tests';
+      d.jobs.test.needs = d.jobs.test.needs.filter((n) => n !== 'changelog');
     }, /does not wait for it/],
+    // Q-710: the check moved out of `prepare`, which a pull request that reuses a Full run skips, into a job of its own that
+    // nothing can skip: the rule states WHERE it lives, so a move back (a step in `prepare`) is red and not a quiet pass.
+    ['the step moves back into prepare (a reused run skips it)', (d) => {
+      const step = structuredClone(checkStep(d));
+      d.jobs.changelog.steps = d.jobs.changelog.steps.filter((x) => x.run !== step.run);
+      d.jobs.prepare.steps.push(step);
+    }, /lives in the job `changelog`/],
+    ['the job waits for another job (a skipped one would keep the check from running)', (d) => { d.jobs.changelog.needs = 'reuse'; }, /waits for/],
   ];
   for (const [what, mutate, expected] of CASES) {
     it(`flags: ${what}`, () => {

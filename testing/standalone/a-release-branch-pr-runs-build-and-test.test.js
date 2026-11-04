@@ -37,6 +37,14 @@ describe('Build & Test runs where a release is prepared', () => {
     assert.ok(ciBranchesOf('pull_request').some(b => b === 'release/**' || b === 'release/*'),
       `pull_request branches are ${JSON.stringify(ciBranchesOf('pull_request'))} — a patch PR would have no merge gate`);
   });
+
+  // Q-710: a pull request into a release branch has no Full run of its commit, so its `reuse` job decides "no reuse" and every suite
+  // runs, as before; the trigger that starts it is the same one, and now also starts a run when the force label is added.
+  it('a pull request run starts when it is opened, pushed to, reopened and LABELED (adding ci:full forces the whole graph)', () => {
+    const types = onOf(CI).pull_request?.types;
+    assert.ok(Array.isArray(types), 'pull_request has no `types`: the default never starts a run when a label is added, so ci:full would do nothing until the next push');
+    for (const t of ['opened', 'synchronize', 'reopened', 'labeled']) assert.ok(types.includes(t), `pull_request types lack ${t}: ${JSON.stringify(types)}`);
+  });
 });
 
 describe('branchesOf — a trigger\'s branch filter, read from the parsed workflow in whichever way it is written', () => {

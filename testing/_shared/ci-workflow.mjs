@@ -235,6 +235,30 @@ export function transitiveNeeds(doc, id, seen = new Set()) {
 }
 
 /**
+ * The job that decides whether a pull request's run reuses a Full run of its own tree, its one output, and the condition a
+ * test job carries to stand down when it does (bundle-244, Q-710). Named once: the rules over the job graph (the merge gate's
+ * verdict, the shard rule, the CI-only rule, the guide's names) all ask "does this job skip when a run is reused", and a
+ * second spelling of the condition is a second answer.
+ */
+export const REUSE_JOB_ID = 'reuse';
+export const REUSE_OUTPUT = 'full_run';
+export const REUSE_EMPTY = `needs.${REUSE_JOB_ID}.outputs.${REUSE_OUTPUT} == ''`;
+
+/** The `&&`-joined parts of a job's `if:`, each trimmed and normalised by `expressionOf`; `[]` for a job with no condition. */
+export const ifConjuncts = (job) => (job.if == null ? [] : expressionOf(job.if).split('&&').map((p) => p.trim()));
+
+/**
+ * Does this job stand down when the pull request reuses a Full run: it waits for the reuse job (the `needs` context holds only
+ * the jobs a job waits for directly, so it could not read the output otherwise) and its condition is `!cancelled()` and the
+ * reuse output being empty. `!cancelled()` and not the default `success()`: a failed or skipped reuse job must run the whole
+ * graph, never skip it.
+ */
+export function skipsWhenRunIsReused(job) {
+  const parts = ifConjuncts(job);
+  return [].concat(job.needs ?? []).includes(REUSE_JOB_ID) && parts.includes('!cancelled()') && parts.includes(REUSE_EMPTY);
+}
+
+/**
  * Is a workflow flag ON — the YAML boolean `true`, or the string `'true'` an expression or a quoted value gives.
  *
  * The one reading of "true" for a workflow's flags (`continue-on-error`, `merge-multiple`): a rule that tested only
