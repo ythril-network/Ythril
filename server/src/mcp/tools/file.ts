@@ -498,7 +498,10 @@ export const move_fileTool: ToolHandler = {
  */
 export const retry_embed_fileTool: ToolHandler = {
   name: 'retry_embed_file',
-  description: 'Re-queue a file whose media embedding failed or was skipped, so the worker picks it up again. '
+  description: 'Re-queue a file whose embedding failed or was skipped, so the worker picks it up again, and RE-CONVERT it: its '
+    + 'passages are made again from the file, at the current input ceiling of the embedder (`embedding.maxInputBytes`). That is the '
+    + 'cure for a passage `list_embed_jobs` reports as larger than the embedder accepts, and for the passages of a file '
+    + 'converted before the ceiling was lowered; it works on a file that completed too. '
     + 'Resets the job to pending and clears its attempt count and last error. Returns `processing` unchanged if '
     + 'the worker already holds it — that is not a failure, and retrying it would take the job away from a run in '
     + 'progress. Use the file path as it appears in list_dir.',
@@ -508,9 +511,9 @@ export const retry_embed_fileTool: ToolHandler = {
     type: 'object',
     properties: {
       space: s.requiredSpace,
-      path: filePathSchema('The file must already exist and its indexing must have FAILED — retrying '
-        + 'one that succeeded, or one still queued, does nothing useful. `list_embed_jobs` is where the '
-        + 'failures and their reasons are.'),
+      path: filePathSchema('The file must already exist. Retrying one still queued does nothing useful; one that '
+        + 'succeeded is converted again (to re-split its passages). `list_embed_jobs` is where the failures and '
+        + 'their reasons are.'),
     },
     required: ['space', 'path'],
     additionalProperties: false,

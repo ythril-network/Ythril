@@ -18,6 +18,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { scratchDir } from '../stored-bytes.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
+import { embedTextForProducer } from '../../brain/embed-text.js';
 import type { FileMetaDoc } from '../../config/types.js';
 import type { SttProvider, SttSegment } from './providers.js';
 import { log, peerText } from '../../util/log.js';
@@ -297,7 +298,10 @@ export async function embedAudio(
           throw new Error('STT returned non-string transcript; refusing to embed');
         }
 
-        const vectorFields = await vectors.fieldsFor(transcript);
+        // What is embedded is the ONE builder's text (the beginning of a transcript over the embedder's ceiling), and `matchedText` is
+        // exactly that: a rebuild of this chunk embeds the same string. `content` keeps the whole transcript.
+        const embedded = embedTextForProducer(null, transcript, 'media');
+        const vectorFields = await vectors.fieldsFor(embedded);
         const chunkId = `${fileId}#media-chunk${i}`;
 
         const chunkDoc: FileMetaDoc = {
@@ -312,7 +316,7 @@ export async function embedAudio(
           parentFileId: fileId,
           chunkIndex: i,
           content: transcript,
-          matchedText: transcript,
+          matchedText: embedded,
           ...vectorFields,
           chunkOffsetMs: startMs,
           chunkDurationMs: endMs - startMs,

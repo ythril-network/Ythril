@@ -8,6 +8,7 @@
 
 import { authorRef } from '../../config/author.js';
 import { chunkVectorsFor } from '../chunk-vectors.js';
+import { embedTextForProducer } from '../../brain/embed-text.js';
 import { getMediaEmbeddingConfig, getFaceRecognitionConfig } from '../../config/loader.js';
 import { log } from '../../util/log.js';
 import type { FileMetaDoc } from '../../config/types.js';
@@ -134,7 +135,9 @@ async function captionAndStore(
     throw new Error('Vision provider returned a non-string or empty caption; refusing to embed');
   }
 
-  const vectorFields = await vectors.fieldsFor(caption);
+  // The ONE builder's text (a caption over the embedder's ceiling is cut), which `matchedText` is exactly; `content` keeps the whole caption.
+  const embedded = embedTextForProducer(null, caption, 'media');
+  const vectorFields = await vectors.fieldsFor(embedded);
   const now = new Date().toISOString();
 
   const chunkDoc: FileMetaDoc = {
@@ -150,7 +153,7 @@ async function captionAndStore(
     chunkIndex: 0,
     // Store the caption text in `content` (parallel to text chunk records)
     content: caption,
-    matchedText: caption,
+    matchedText: embedded,
     ...vectorFields,
   };
 

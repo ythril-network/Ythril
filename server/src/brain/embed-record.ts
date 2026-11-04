@@ -20,7 +20,11 @@ import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { writeDerivedFields, type FileRowTier } from '../files/derived-fields.js';
 import type { SpacePart } from '../db/space-collection.js';
 import { embed } from './embedding.js';
-import { factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText, chunkEmbedText } from './embed-text.js';
+import {
+  factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText, chunkEmbedText, boundedEmbedText, embedTextFor, embedInputCeiling, noteInputCut,
+} from './embed-text.js';
+import { overCeilingMessage } from './embed-errors.js';
+import { utf8Bytes } from '../util/bounded-text.js';
 import { resolveEdgeEndpointNames, resolveEndpointNames } from './edge-endpoint-names.js';
 import { edgeEndpointKind } from './entity-refs.js';
 import { recordSuppressedMany } from './suppress-embeddings.js';
@@ -53,11 +57,30 @@ export function isDerived(doc: Record<string, unknown>): boolean {
   return isDerivedFileRow(doc);
 }
 
-/** A derived record's text, or `null` when it has none: a face chunk, a converted or extracted copy. */
+/**
+ * Is this derived row a passage the CHUNKERS made (a text conversion's `#chunkN`), as opposed to one whose text has no chunker: a
+ * media transcript or caption (`#media-chunkN`), or the `embed` level's one whole-document chunk (`wholeDocument: true`)?
+ *
+ * The chunkers' passages are bounded where they are made (`files/converters/bound-chunks.ts`), so one whose embed text still
+ * does not fit the budget was stored before the ceiling existed, and is never cut here (see {@link derivedText}).
+ */
+function isChunkerPassage(doc: Record<string, unknown>): boolean {
+  return typeof doc['_id'] === 'string' && /#chunk\d+$/.test(doc['_id']) && doc['wholeDocument'] !== true;
+}
+
+/**
+ * A derived record's text, or `null` when it has none: a face chunk, a converted or extracted copy.
+ *
+ * It is `embedTextFor`'s output, the ONE builder the producers call too (so a rebuilt vector describes what the producer's did):
+ * a media chunk's text and a whole-document chunk's text are cut to the budget, deterministically. A CHUNKER's passage over the
+ * budget is NOT cut: this answers its whole text, and `embedStoredRecord` refuses it with the cure named.
+ */
 function derivedText(doc: Record<string, unknown>): string | null {
   const content = doc['content'];
   if (typeof content !== 'string' || content === '') return null;
-  return chunkEmbedText(doc['headingText'] as string | null | undefined, content);
+  const heading = doc['headingText'] as string | null | undefined;
+  if (isChunkerPassage(doc) && boundedEmbedText(heading, content).cut) return chunkEmbedText(heading, content);
+  return embedTextFor(heading, content);
 }
 
 /**
@@ -432,6 +455,16 @@ export async function embedStoredRecord(
 
   let result: Awaited<ReturnType<typeof embed>>;
   try {
+    // A passage a chunker made before the ceiling existed, over it: not embedded cut (it would end `complete` with most of its text
+    // unfindable by meaning). The failure path below stores its text and ends the job at once (`failEmbedJob`, by these words).
+    if (recordType === 'file' && isDerived(doc) && isChunkerPassage(doc) && boundedEmbedText(doc['headingText'] as string | null | undefined, doc['content'] as string).cut) {
+      throw new Error(overCeilingMessage(utf8Bytes(toEmbed), embedInputCeiling()));
+    }
+    // A text that has no chunker (a media chunk, a whole document) is embedded cut: counted, as its producer counts it.
+    if (recordType === 'file' && isDerived(doc) && typeof doc['content'] === 'string') {
+      const built = boundedEmbedText(doc['headingText'] as string | null | undefined, doc['content']);
+      if (built.cut) noteInputCut(doc['wholeDocument'] === true ? 'whole-document' : 'media', utf8Bytes(doc['content']), utf8Bytes(built.text));
+    }
     result = await embed(toEmbed);
   } catch (err) {
     // A rebuild that fails because the EMBEDDER is away changes nothing. The record's text did not change, so its
