@@ -11,7 +11,9 @@
  *  - while the type is set to suppress, a `role="status"` notice says Save removes the stored text vectors of THIS TYPE's records and names the way
  *    back by the button's label and where it lives (the space's Danger Zone, Embeddings);
  *  - the select is described by the notice (`aria-describedby` -> its id) and named by its label (`label[for]` -> the select's `id`);
- *  - the notice is absent for "inherit" and "always embed": nothing is removed by them.
+ *  - the notice is absent for "inherit" and "always embed": nothing is removed by them;
+ *  - the removal sentence and the way back are said only when Save would CHANGE something: a type already saved as suppressed has nothing more to
+ *    remove, so the notice then says only what is still true (records written meanwhile are not embedded), as the space's Danger Zone does.
  *
  * The draft is the plain object a host edits in place, so each case builds the editor over a draft that already says what it says.
  */
@@ -28,12 +30,13 @@ const WORDS = {
   pl: { vector: /wektor/i, removed: /usun|usuw|kasuj|odrzuc/i },
 } as const;
 
-function mount(language: 'en' | 'de' | 'pl', suppress: boolean | null) {
+function mount(language: 'en' | 'de' | 'pl', suppress: boolean | null, savedSuppress = false) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({ imports: [SchemaTypeEditorComponent, getTranslocoModule({ translation: { en: dictionary(language) } })] });
   const fixture = TestBed.createComponent(SchemaTypeEditorComponent);
   fixture.componentRef.setInput('knowledgeType', 'fact');
   fixture.componentRef.setInput('draft', emptyTypeSchemaState({ suppressEmbeddings: suppress }));
+  fixture.componentRef.setInput('savedSuppress', savedSuppress);
   fixture.detectChanges();
   const el = fixture.nativeElement as HTMLElement;
   const dict = dictionary(language);
@@ -76,6 +79,22 @@ describe('the per-type suppression control (Q-368)', () => {
     expect(notice, 'the notice').toBeTruthy();
     expect(notice!.id, 'the notice has an id').toBeTruthy();
     expect(select?.getAttribute('aria-describedby') ?? '').toContain(notice!.id);
+  });
+
+  for (const language of ['en', 'de', 'pl'] as const) {
+    it(`${language}: a type already saved as suppressed does not say Save removes its vectors, and still says what is true`, () => {
+      const { notice, dict } = mount(language, true, true);
+      const said = notice?.textContent ?? '';
+      expect(notice, 'the status notice is still there, so the select stays described').toBeTruthy();
+      expect(said, 'the removal sentence is absent').not.toContain(dict['spaces.schema.suppressEmbeddings.removes']);
+      expect(said, 'and so is the way back').not.toContain(dict['spaces.dangerZone.embeddingsBackfill']);
+      expect(said, 'what stays true').toContain(dict['spaces.schema.suppressEmbeddings.noBackfill']);
+    });
+  }
+
+  it('turning suppression on in the editor, over a type saved as not suppressed, says Save removes the vectors', () => {
+    const { notice, dict } = mount('en', true, false);
+    expect(notice?.textContent ?? '').toContain(dict['spaces.schema.suppressEmbeddings.removes']);
   });
 
   it('"inherit" and "always embed" show no removal notice: nothing is removed by them', () => {
