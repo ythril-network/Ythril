@@ -160,7 +160,8 @@ export const GRAPH_STYLES = `
       border-radius: 50%;
       animation: graph-spin 0.75s linear infinite;
     }
-    @keyframes graph-spin { to { transform: rotate(360deg); } }    .loading-overlay { flex-direction: column; gap: 14px; }
+    @keyframes graph-spin { to { transform: rotate(360deg); } }
+    .loading-overlay { flex-direction: column; gap: 14px; }
     .loading-waiting { max-width: 420px; padding: 0 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
     .loading-waiting p { margin: 0 0 6px; }
     .loading-waiting .loading-waiting-title { color: var(--text-primary); }

@@ -97,7 +97,7 @@ import { lookupForNode, lookupForEdge } from './graph-record-lookup';
   host: { '[class.embedded]': 'isEmbedded()' },
   styles: [GRAPH_STYLES],
   template: `
-    @let notShown = loadError() !== null || loading(); <!-- ═══ Space selector: notShown = the drawn graph is hidden (error or load in flight) ═══ -->
+    @let notShown = loadError() !== null || loading();
     @if (unknownParam(); as n) { <app-unknown-space-notice [requested]="n.requested" [shown]="n.shown" /> }
     @if (!isEmbedded() && spaces().length > 0) {
       <div class="space-tabs">
@@ -381,6 +381,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   // Drawer state lives in the shared `RecordDrawerState` provided above. This page only opens it
   // and reacts to `lastSaved`; it holds no edit models of its own.
 
+  // The template's `notShown` is `loadError() !== null || loading()`: the drawn graph is hidden, by an error or by a load in flight.
   /** Failure reason for the last traversal; null when it succeeded (U3). A
    *  failed traversal must not render as an empty graph (which reads as "no
    *  connections"). */
