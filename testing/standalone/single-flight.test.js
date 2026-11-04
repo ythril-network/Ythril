@@ -123,9 +123,10 @@ describe('every scheduled pass runs one at a time', () => {
     {
       file: 'server/src/sync/scheduler.ts',
       why: 'The tick calls `runScheduledSync`, which calls `runSyncForNetwork`, and every sync cycle (scheduled, manual, on a join) goes through '
-        + 'the engine\'s per-network coalescing runner: a trigger that arrives while a cycle runs joins it and schedules one follow-up.',
-      holds: () => /createCoalescingRunner\b/.test(index.sources.get('server/src/sync/engine.ts'))
-        && /_syncRunner\.run\(/.test(index.sources.get('server/src/sync/engine.ts')),
+        + 'the per-network cycle runner (`sync/network-cycle-runner.ts`, to which the engine hands its cycle): a trigger that arrives while a cycle runs joins it and schedules one follow-up.',
+      holds: () => /createCoalescingRunner\b/.test(index.sources.get('server/src/sync/network-cycle-runner.ts'))
+        && /_syncRunner\.run\(/.test(index.sources.get('server/src/sync/network-cycle-runner.ts'))
+        && /runNetworkCycle\(/.test(index.sources.get('server/src/sync/engine.ts')),
     },
   ];
 

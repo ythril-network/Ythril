@@ -175,7 +175,9 @@ export const FROZEN = {
   // failure counting and PEER UNREACHABLE the engine carried twice. LOWERED 368 -> 367 with bundle-39 D5: the in-flight counter became a
   // `DetachedWork` (`util/detached-work.ts`). LOWERED 367 -> 360 with the bundle-39 duplicated-rule merge: both doors run a member's turn through
   // `CycleOutcome.runMember` (`sync/cycle-outcome.ts`), which holds the stop guard and the thrown-turn read the engine wrote twice.
-  'server/src/sync/engine.ts': 360,
+  // LOWERED 360 -> 353 with bundle-231 (Q-675): the progress holder and the sync-cycle boundary grew the file to 372, and the per-network cycle runner
+  // (the coalescing runner, the progress type, the cycle counter, `isNetworkSyncing`) moved out to `sync/network-cycle-runner.ts` to pay it back.
+  'server/src/sync/engine.ts': 353,
   // 958 -> 684: the per-type editor body moved into `schema-type-editor.component` so the Brain Overview
   // could open the same editor. Lowered rather than left — a frozen number 274 lines above the real size
   // is 274 lines this file could regrow into without the gate saying a word.

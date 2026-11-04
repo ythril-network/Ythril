@@ -233,8 +233,8 @@ export function topLevelObjects(src) {
  * expression, `start` its offset in `src`. A name `taken` already (a top-level function or object) is not one.
  *
  * **What this is for: a closure built at module scope runs when the file's functions use what it was handed to.**
- * The sync engine holds `const _syncRunner = createCoalescingRunner({ onQueued: (id) => log.debug(…) })`, and
- * `runSyncForNetwork` calls `_syncRunner.run(…)` — so the request that runs the cycle runs `onQueued`. With no key
+ * The sync engine's cycle runner (`sync/network-cycle-runner.ts`) holds `const _syncRunner = createCoalescingRunner({ onQueued: (id) => log.debug(…) })`, and
+ * `runSyncForNetwork` reaches `_syncRunner.run(…)` through `runNetworkCycle` — so the request that runs the cycle runs `onQueued`. With no key
  * for the binding, no walk could reach what its closures call (`Q-309`; the log gate read every reached file's module
  * scope by hand to cover it). As a key, it is reached the way a function handed on is: the closure walk follows a
  * body's REFERENCES, and `_syncRunner` is one.
