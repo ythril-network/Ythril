@@ -1800,14 +1800,15 @@ mediaJobsFailedTotal.labels({ space: '', media_type: 'image' }).inc(0);
 
 export const mediaJobsRetriedTotal = new Counter({
   name: 'ythril_media_jobs_retried_total',
-  help: 'Media embedding jobs that failed an attempt and were re-queued, by space and media type',
+  help: 'Media embedding jobs that failed an attempt or were superseded by a newer run, and were re-queued, by space and media type',
   labelNames: ['space', 'media_type'] as const,
   registers: [register],
 });
 mediaJobsRetriedTotal.labels({ space: '', media_type: 'image' }).inc(0);
 
 /**
- * Why a face was stored UNLABELLED although the space holds labelled faces: the gallery could not answer (Q-327).
+ * Why a face was stored matched to no one by the gallery although the space holds labelled faces: the gallery could not answer (Q-327).
+ * A label the face already had is kept (bundle-236), so "to no one" is the gallery's answer, not always the stored row's.
  *
  * `index_unavailable`: the face index refuses every search without action (a dimension mismatch, FAILED), so waiting would hold
  * every face photo of the space for ever. `deferral_spent`: the gallery was not serving yet, and the job's deferrals ran out
@@ -1817,7 +1818,7 @@ mediaJobsRetriedTotal.labels({ space: '', media_type: 'image' }).inc(0);
 export const FACES_STORED_UNMATCHED_REASONS = ['index_unavailable', 'deferral_spent'] as const;
 export const facesStoredUnmatchedTotal = new Counter({
   name: 'ythril_faces_stored_unmatched_total',
-  help: 'Faces stored unlabelled because the face gallery could not answer, by reason',
+  help: 'Faces the face gallery could not match (matched to no one by the gallery; a label the face already had is kept), by reason',
   labelNames: ['reason'] as const,
   registers: [register],
 });

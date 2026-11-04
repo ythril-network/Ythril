@@ -35,8 +35,8 @@
  * The real `embedFaces` over a real Mongo, with the external face provider answered by the parked harness (`_parked-media-runs.mjs`, which
  * now answers a `boxRaw`), under a claim made by `seedClaim`. The gallery that cannot answer is injected with `refuseVectorSearch` (a
  * dimension mismatch is `index_unavailable`; a not-yet refusal with deferrals spent is `deferral_spent`); the gallery that answers is a REAL
- * face index holding one labelled face far from the query. Same bytes only (a row made from other bytes carries nothing) is C3's rule and
- * needs the run's `sourceSha256`, whose shape the implementation fixes; it is not asserted here.
+ * face index holding one labelled face far from the query. Same bytes only (a row whose `sourceSha256` differs from the run's carries nothing; one
+ * with none, written before 6.5, counts as the same bytes) is asserted with a claim made by `seedClaim(.., { sha256 })`.
  *
  * Seen red on the base: the control face comes back unlabelled (`faceEntityId` undefined), and `gallerySearch` answers `null`.
  *
@@ -82,12 +82,13 @@ async function seedParent(p) {
 }
 
 /** One stored face row of `file`: the old run's. `label: null` is an unlabelled face; `box: undefined` a row with no `faceBbox`. */
-async function seedFaceRow(file, i, { box, label = PERSON, score = SCORE }) {
+async function seedFaceRow(file, i, { box, label = PERSON, score = SCORE, sha }) {
   const id = `${file}#face-chunk${i}`;
   await files().insertOne({
     _id: id, spaceId: S, path: id, tags: [], createdAt: T0, updatedAt: T0, sizeBytes: FACE_DIMS * 4, parentFileId: file, chunkIndex: i,
     faceEmbedding: unitAt(20 + i * 7, FACE_DIMS),
     ...(box ? { faceBbox: box } : {}), ...(label ? { faceEntityId: label, faceScore: score } : {}),
+    ...(sha ? { sourceSha256: sha } : {}),
   });
 }
 
@@ -108,11 +109,11 @@ function handleOf() {
  * Re-run the faces of `file`: the provider answers `boxes` (one face each, the embedding at 0 degrees from the query axis, so a gallery that
  * answers finds the labelled face far behind it), under `refusal` (a `REFUSALS` entry, or none for a gallery that answers).
  */
-async function rerun(file, boxes, { refusal = REFUSALS.dimensionMismatch, opts = {} } = {}) {
+async function rerun(file, boxes, { refusal = REFUSALS.dimensionMismatch, opts = {}, sha } = {}) {
   runs.setFaces(boxes.map(boxRaw => ({ boxRaw, embedding: unitAt(0, FACE_DIMS) })));
   const fault = refusal ? refuseVectorSearch(refusal) : null;
   try {
-    await embedFaces(S, file, handleOf(), { claim: await seedClaim(S, file), ...opts });
+    await embedFaces(S, file, handleOf(), { claim: await seedClaim(S, file, sha ? { sha256: sha } : {}), ...opts });
   } finally {
     fault?.restore();
   }
@@ -232,6 +233,22 @@ describe('a face keeps its label through a re-run only when the gallery could no
     assert.equal(rows.get(1)?.faceEntityId, PERSON, 'the box that overlaps best did not take the label');
     assert.equal(rows.get(1)?.faceScore, SCORE);
     assert.ok(unlabelled(rows.get(0)), 'the second box over the same old row took the label too: a label is one person\'s face, once');
+  });
+
+  it('keeps a label only from rows of the SAME bytes: a row another run\'s bytes made (a different sourceSha256) carries nothing; a row with none (pre-6.5) or the same does', async () => {
+    const RUN = 'a'.repeat(64);
+    const OTHER = 'b'.repeat(64);
+    const file = 'other-bytes.png';
+    await seedParent(file);
+    await seedFaceRow(file, 0, { box: A, sha: OTHER });       // the case: the old bytes' face over the same box
+    await seedFaceRow(file, 1, { box: CTL, sha: RUN });       // control: the same bytes, identical box
+    await seedFaceRow(file, 2, { box: [0.75, 0.0, 0.125, 0.125] }); // control: a row with no sourceSha256 counts as the same bytes
+    await rerun(file, [A, CTL, [0.75, 0.0, 0.125, 0.125]], { sha: RUN });
+    const rows = await faceRowsOf(file);
+    assertControlKept(rows, 1);
+    assertControlKept(rows, 2);
+    assert.ok(unlabelled(rows.get(0)),
+      `a row made from other bytes (sourceSha256 ${OTHER.slice(0, 8)}…) gave its label ${JSON.stringify(rows.get(0)?.faceEntityId)} to a face of the new bytes`);
   });
 
   it('does not keep the label of a person who no longer resolves', async () => {
