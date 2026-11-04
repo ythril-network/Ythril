@@ -5,12 +5,11 @@ import { allowPrivateForSlot } from '../config/model-egress-policy.js';
 import { embeddingsUrlFor } from '../files/converters/vlm-endpoint.js';
 import { log, peerText } from '../util/log.js';
 import { withJitter } from '../util/backoff.js';
-import { embeddingDurationSeconds, embeddingQueueDepth, embeddingRetryTotal, embedInputCutTotal } from '../metrics/registry.js';
+import { embeddingDurationSeconds, embeddingQueueDepth, embeddingRetryTotal } from '../metrics/registry.js';
 import { slotTimeoutMs } from '../config/model-slots.js';
 import { runLocalInference, warmLocalInference } from './local-inference.js';
-import { embedInputCeiling } from './embed-ceiling.js';
+import { embedInputCeiling, noteInputCut } from './embed-ceiling.js';
 import { boundedPrefix, utf8Bytes } from '../util/bounded-text.js';
-import { warnOnce } from '../util/warn-once.js';
 
 export interface EmbeddingResult {
   vector: number[];
@@ -89,11 +88,6 @@ export function largestTaskPrefixBytes(cfg: { baseUrl?: string; prefixScheme?: P
 const MAX_LOCAL_EMBED_CHARS = 8_000;
 
 // ── HTTP endpoint fallback ─────────────────────────────────────────────────
-/**
- * The HTTP branch's cut is said once per window, not once per call: a stream of oversized facts would fill the log ring.
- */
-const warnInputCut = warnOnce<string>({ max: 2, every: 10 * 60_000 });
-
 /** `input` is already task-prefixed by `prepareInput` — do not prefix again here. */
 /**
  * A refusal from the embedding endpoint, carrying enough to decide whether trying again is sensible.
@@ -283,12 +277,7 @@ export async function embed(
       // nothing else bounding it. Cut ONCE per call, outside the retry closure below, so a 503 retry sends the same text and does not
       // count again. The chunkers and `embedTextFor` split to the ceiling less the task prefix, so a chunk never comes here cut.
       const sent = boundedPrefix(input, embedInputCeiling(cfg));
-      if (sent.cut) {
-        embedInputCutTotal.labels({ producer: 'http' }).inc();
-        warnInputCut('http-input', () => log.warn(
-          `Embedding input is ${utf8Bytes(input)} bytes, over the embedder's ceiling of ${embedInputCeiling(cfg)} (embedding.maxInputBytes); `
-          + `the HTTP embedder is sent the first ${utf8Bytes(sent.text)}. A vector of a cut text describes its beginning only.`));
-      }
+      if (sent.cut) noteInputCut('http', utf8Bytes(input), utf8Bytes(sent.text));
       // External HTTP endpoint configured — delegate entirely
       // Retried here rather than inside `embedViaHttp` so the whole request — including building it — is what
       // gets re-attempted, and so the local path below is untouched: a local model queues you rather than
