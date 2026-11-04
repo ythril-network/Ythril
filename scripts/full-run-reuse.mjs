@@ -277,13 +277,24 @@ const annotate = (level, text) => workflowCommand(level, 'Full run reuse', text)
 /** Appends to a file the runner names (`GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`); no file named, nothing written. */
 const appendTo = (file, text) => { if (file) appendFileSync(file, text); };
 
-/** The head's tree against the checked-out one: `true`, `false`, or `null` when `git` could not say. The head is fetched by SHA, blobs not. */
-function treeMatchesHead(headSha, { deadline, env }) {
-  const git = (args) => spawnSync('git', args, { encoding: 'utf8', timeout: Math.max(1_000, Math.min(60_000, deadline - Date.now())), env: { ...env, GIT_TERMINAL_PROMPT: '0' } });
-  const fetched = git(['fetch', '--no-tags', '--filter=blob:none', '--depth=1', 'origin', headSha]);
-  if (fetched.status !== 0) return null;
+/**
+ * The head's tree against the checked-out one: `true`, `false`, or `null` when `git` could not say.
+ *
+ * A head already in the repository is not fetched. One that is not is fetched by SHA, and NARROWLY (one commit, no blobs) only in
+ * a checkout that is already shallow, as CI's is: in a full clone (a run on a developer's machine) `--depth=1` writes a shallow
+ * boundary that cuts the clone's history at that commit, and `--filter` turns the clone into a partial one, both for every later
+ * command (bundle-244's drive did exactly that to the main checkout).
+ */
+export function treeMatchesHead(headSha, { deadline, env, cwd }) {
+  const git = (args) => spawnSync('git', args, { cwd, encoding: 'utf8', timeout: Math.max(1_000, Math.min(60_000, deadline - Date.now())), env: { ...env, GIT_TERMINAL_PROMPT: '0' } });
+  if (git(['cat-file', '-e', `${headSha}^{commit}`]).status !== 0) {
+    const shallow = git(['rev-parse', '--is-shallow-repository']);
+    if (shallow.status !== 0) return null;
+    const narrow = shallow.stdout.trim() === 'true' ? ['--filter=blob:none', '--depth=1'] : [];
+    if (git(['fetch', '--no-tags', ...narrow, 'origin', headSha]).status !== 0) return null;
+  }
   const mine = git(['rev-parse', 'HEAD^{tree}']);
-  const theirs = git(['rev-parse', 'FETCH_HEAD^{tree}']);
+  const theirs = git(['rev-parse', `${headSha}^{tree}`]);
   if (mine.status !== 0 || theirs.status !== 0) return null;
   const [a, b] = [mine.stdout.trim(), theirs.stdout.trim()];
   return /^[0-9a-f]{40,64}$/.test(a) && a === b;
