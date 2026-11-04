@@ -52,6 +52,11 @@ describe('the file-row field sets agree', () => {
       + 'disagree about which file-row keys stay on this instance: a field added to one list and not the other is served, or hashed, wrongly');
   });
 
+  it('the bytes a derived row was made from (`sourceSha256`) is local: not hashed, not on the wire, stripped from a sender\'s page', () => {
+    assert.equal(isLocalFileField('sourceSha256'), true, '`sourceSha256` is derived from this instance\'s copy of the bytes: it never replicates');
+    assert.ok(Object.hasOwn(FILE_META_SENDER_KEYS, 'sourceSha256'), 'a sender must not serve `sourceSha256`: the strict incoming schema refuses it');
+  });
+
   it('no retagged field is a local field', () => {
     for (const field of RETAGGED_FIELDS) {
       assert.equal(isLocalFileField(field), false,

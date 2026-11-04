@@ -38,7 +38,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const SRC = readFileSync('server/src/api/media-config.ts', 'utf8');
-const TYPES = readFileSync('server/src/config/types.ts', 'utf8');
+// `types.ts` and the leaves it splits its records into (`types-face-recognition.ts` holds `FaceRecognitionConfig` since bundle-236): the interface is found wherever it lives.
+const TYPES = ['types.ts', 'types-face-recognition.ts'].map(f => readFileSync(`server/src/config/${f}`, 'utf8')).join('\n');
 const CLIENT = readFileSync(
   'client/src/app/pages/settings/media-processing/media-processing-state.service.ts', 'utf8');
 

@@ -41,7 +41,7 @@ import { retireFileMetaMany } from '../file-meta.js';
 import { READ_CHUNK, readStoredById } from '../../db/read-by-id.js';
 import { NOT_A_FLAGGED_ROW } from '../live-file-row.js';
 import { embedConcurrency } from './embed-concurrency.js';
-import { isLeaseLost, shouldHeartbeat, stopIfLeaseLost, type JobClaim } from '../media/lease.js';
+import { isLeaseLost, shouldHeartbeat, stopIfLeaseLost, fenceOnClaim, writeUnderClaim, type JobClaim } from '../media/lease.js';
 import { embedChunksTotal, conversionChunksUnembeddedTotal } from '../../metrics/registry.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { replaceDerivedFileRows, type DerivedWriteOutcome } from '../derived-fields.js';
@@ -649,6 +649,52 @@ export async function deleteConversionArtifacts(
   await removeWhatSidecarsLeft(spaceId, [originalId], await sidecarsOwnedBy(spaceId, originalId, 'file'));
 
   log.info(`Deleted conversion artifacts for ${peerText(spaceId)}/${peerText(originalId)}`);
+}
+
+/**
+ * {@link deleteConversionArtifacts} for the TEXT RUN that is about to convert the file again: the same set (every derived row at every level,
+ * the sidecar rows an arrival made, the jobs of the extracted images, the sidecar bytes), taken UNDER THE RUN'S CLAIM and in chunks.
+ *
+ * ## What it prevents
+ *
+ * The clear used to be unfenced and one command per level. A run that had lost its claim (the file was written again, which revokes it) and
+ * reached the clear late deleted the rows of the run that replaced it. Here the rows go per `READ_CHUNK` ids through `writeUnderClaim`, so a
+ * run that lost its claim stops at the next chunk with `JobLeaseLostError` and what the new run wrote is still there; and a conversion of
+ * 1 200 passages is three transactions, not one command of unbounded size.
+ *
+ * The steps that cannot join a transaction (the queue's cancel of the extracted images' jobs, the retire of an arrived sidecar's row, the
+ * byte removal) are each preceded by the fence's write (`fenceOnClaim`): a run that lost its claim does none of them. The window that remains
+ * is one step long, and a new run reaches those bytes and jobs only after its own clear and a whole conversion.
+ *
+ * `deleteConversionArtifacts` stays for the callers that hold no claim and own no run: a delete, a remove, a peer's tombstone, a
+ * declined replacement. The file's OWN job is never cancelled here (`cancelJobsOwnedBy`): it is the claim this run holds.
+ */
+export async function deleteConversionArtifactsUnderClaim(spaceId: string, claim: JobClaim, originalFilePath: string): Promise<void> {
+  assertSpaceTakesWrites(spaceId, 'files');
+  const originalId = toDocId(originalFilePath);
+  const owned = await sidecarsOwnedBy(spaceId, originalId, 'file');
+  const { atSidecars, ids } = await rowsOfFiles(spaceId, [originalId], owned);
+  const arrived = new Set(atSidecars.filter(r => r.parentFileId === undefined).map(r => r._id));
+  const derived = [...ids].filter(id => id !== originalId && !arrived.has(id));
+
+  // The jobs go first, so none starts over what is being removed — after the fence, so a run that lost its claim cancels none.
+  await fenceOnClaim(spaceId, claim);
+  await cancelJobsOwnedBy(spaceId, originalId, 'file');
+
+  const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  for (const part of inChunks(derived, READ_CHUNK)) {
+    await writeUnderClaim(spaceId, claim, session => files.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: part } }), { session }));
+    await retireEmbedWorkOfRemovedRows(spaceId, { ids: part });
+  }
+  if (arrived.size > 0) {
+    await fenceOnClaim(spaceId, claim);
+    await retireFileMetaMany(spaceId, [...arrived]);
+    await retireEmbedWorkOfRemovedRows(spaceId, { ids: [...arrived] });
+  }
+  await fenceOnClaim(spaceId, claim);
+  await removeSidecarBytesAndCache(spaceId, owned);
+
+  log.info(`Cleared the conversion artifacts of ${peerText(spaceId)}/${peerText(originalId)} under its run's claim`);
 }
 
 /**

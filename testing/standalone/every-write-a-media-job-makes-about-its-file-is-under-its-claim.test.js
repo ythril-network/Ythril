@@ -21,7 +21,8 @@
  *
  *  1. every subject call hands the run's claim over (its argument text names `claim`, or spreads the caller's own `opts` bag, which
  *     `MediaRunOpts` requires to carry it), except the calls a reasoned entry below
- *     excuses (the heartbeat, the release, the claim itself, the move's hold, the clean-up the text job does of its own sidecars);
+ *     excuses (the heartbeat, the release, the claim itself, the move's hold). The text job's clear of its own previous conversion is NOT
+ *     among them since bundle-236: `deleteConversionArtifactsUnderClaim` takes the run's claim like every other writer;
  *  2. no job file calls an operator-side writer — `setFileProcessingState` above all, which was the worker's own write of its
  *     file's state until the claim covered it.
  *
@@ -53,7 +54,6 @@ const NOT_ABOUT_ITS_FILE = {
   claimNextJob: 'takes a claim for a job that has none yet: there is no run, and so no claim, to hand over',
   resetStalledJobs: 'stall recovery over every job of a space: it is what takes a claim away, not a run\'s write about its file',
   holdJobsForMove: 'the worker\'s reconcile hands a job back HELD for a move that owes its records; it is asked only by a run that still holds its claim (`holdsClaim`), and it is a revoker',
-  deleteConversionArtifacts: 'the text job clears the sidecars of its own previous run before it re-chunks; the rows it removes are the file\'s own derived rows, and it spares the file\'s own job (`cancelJobsOwnedBy`)',
 };
 
 const { INDEX } = sourceTree();

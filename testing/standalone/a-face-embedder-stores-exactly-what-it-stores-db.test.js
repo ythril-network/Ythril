@@ -88,7 +88,8 @@ const parentRow = (id, over = {}, space = FACES) => ({ _id: id, spaceId: space, 
 const seedParent = async (id, over = {}, space = FACES) => { const d = parentRow(id, over, space); await files(space).insertOne(d); return d; };
 const faceRows = (id, space = FACES) => files(space).find({ parentFileId: id, faceEmbedding: { $exists: true } }).sort({ chunkIndex: 1 }).toArray();
 
-const FACE_KEYS = ['_id', 'spaceId', 'path', 'tags', 'createdAt', 'updatedAt', 'sizeBytes', 'author', 'parentFileId', 'chunkIndex', 'faceEmbedding'];
+const SOURCE = 'c'.repeat(64);
+const FACE_KEYS = ['_id', 'spaceId', 'path', 'tags', 'createdAt', 'updatedAt', 'sizeBytes', 'author', 'parentFileId', 'chunkIndex', 'faceEmbedding', 'sourceSha256'];
 const keysOf = (doc) => Object.keys(doc).sort();
 
 function configure({ reprocessSyncedImages = true } = {}) {
@@ -173,7 +174,7 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
         { embedding: descriptor(3) },
       ] });
 
-      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png') });
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png', { sha256: SOURCE }) });
 
       const rows = await faceRows('photos/group.png');
       assert.deepEqual(rows.map(r => r._id), ['photos/group.png#face-chunk0', 'photos/group.png#face-chunk2'], 'chunkIndex is the face\'s index in the answer, not a count');
@@ -202,7 +203,7 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
     it('what the provider is asked: the image as base64 in a JSON POST, nothing about the space or the file', async () => {
       await seedParent('photos/group.png');
       faceAnswer = () => ({ faces: [{ embedding: descriptor(1), boxRaw: BIG }] });
-      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png') });
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png', { sha256: SOURCE }) });
       assert.equal(faceRequests.length, 1);
       assert.equal(faceRequests[0].method, 'POST');
       assert.equal(faceRequests[0].url, '/detect');
@@ -213,17 +214,17 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
     it('a descriptor of the wrong width is dropped before anything is stored', async () => {
       await seedParent('photos/group.png');
       faceAnswer = () => ({ faces: [{ embedding: descriptor(1).slice(0, 64), boxRaw: BIG }, { embedding: descriptor(2), boxRaw: BIG }] });
-      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png') });
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png', { sha256: SOURCE }) });
       assert.deepEqual((await faceRows('photos/group.png')).map(r => r._id), ['photos/group.png#face-chunk0'], 'the surviving face takes the first index: the width filter runs inside the provider call');
     });
 
     it('no faces, or a provider that fails with the in-process fallback off (the default): nothing is stored and the call returns normally', async () => {
       await seedParent('photos/group.png');
-      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png') });
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png', { sha256: SOURCE }) });
       assert.equal((await faceRows('photos/group.png')).length, 0);
 
       faceStatus = 500;
-      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png') });
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png', { sha256: SOURCE }) });
       assert.equal((await faceRows('photos/group.png')).length, 0);
       assert.equal(faceRequests.length, 2, 'the provider was asked each time');
     });
@@ -246,9 +247,9 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
     it('a re-run replaces each row by id; it neither duplicates a row nor removes one the new run did not produce', async () => {
       await seedParent('photos/group.png');
       faceAnswer = () => ({ faces: [{ embedding: descriptor(1), boxRaw: BIG }, { embedding: descriptor(2), boxRaw: BIG }] });
-      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png') });
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png', { sha256: SOURCE }) });
       faceAnswer = () => ({ faces: [{ embedding: descriptor(9), boxRaw: BIG }] });
-      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png') });
+      await faceMod.embedFaces(FACES, 'photos/group.png', handleOf(png), { claim: await seedClaim(FACES, 'photos/group.png', { sha256: SOURCE }) });
 
       const rows = await faceRows('photos/group.png');
       assert.deepEqual(rows.map(r => [r._id, r.faceEmbedding[0]]), [['photos/group.png#face-chunk0', descriptor(9)[0]], ['photos/group.png#face-chunk1', descriptor(2)[0]]]);
@@ -306,7 +307,7 @@ describe('the face path stores exactly what it stores today (real MongoDB, real 
     const PLACE = '77777777-7777-4777-8777-777777777777';
     const faceChunk = (parent, i, over = {}) => ({
       _id: `${parent}#face-chunk${i}`, spaceId: FACES, path: `${parent}#face-chunk${i}`, tags: [], createdAt: T0, updatedAt: T0, sizeBytes: 512,
-      author: LOCAL, parentFileId: parent, chunkIndex: i, faceEmbedding: descriptor(i + 1), ...over,
+      author: LOCAL, parentFileId: parent, chunkIndex: i, faceEmbedding: descriptor(i + 1), sourceSha256: SOURCE, ...over,
     });
     const entity = (id, type) => ({ _id: id, spaceId: FACES, name: id, type, tags: [], createdAt: T0, seq: 1, author: LOCAL });
 
