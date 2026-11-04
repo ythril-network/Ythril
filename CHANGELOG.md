@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**A minor release: a mixed-case path no longer skips a space's rights, peer-bound tokens cannot approve AI connectors, model and sidecar answers are bounded, and many Brain and Settings pages read and translate better.**
+**A minor release: a mixed-case path no longer skips a space's rights, peer-bound tokens cannot approve AI connectors, model and sidecar answers are bounded, document passages are split to the size the embedder accepts, and many Brain and Settings pages read and translate better.**
 
 | Changes on upgrade | Action |
 |---|---|
@@ -17,17 +17,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A sync that times out (`504`) or fails (`500`, `503`) answers the members it had finished, `refused` and `membersTotal` | Read them; `ok: false` and the status are unchanged |
 | A page over `RENDER_MAX_PIXELS` (40 megapixels) renders at a lower DPI (`dpiUsed`), and below 72 DPI is skipped; a render answer past `RENDER_MAX_RESPONSE_BYTES` (128 MiB) ends with `truncated: true` | For larger pages at full DPI, raise both with `DOC_RENDER_MEM_LIMIT` |
 | Calls that were refused (`401`, `403`, `429`) or named a space this instance does not have are no longer counted as space activity | None |
+| A document passage stored earlier that is over `embedding.maxInputBytes` (6000 bytes) is not embedded as a cut text; its embed job ends `failed` at once | Run `retry_embed_file` on each file `list_embed_jobs` names; it converts the file again |
 | AI connectors approved earlier by a peer-bound token keep working | Find them in the `mcp.oauth.consent` audit rows (resolve the approving token with `GET /api/tokens`), treat one whose approving token is gone as suspect, and revoke them |
 
 ### Added
 
 - **Tokens:** a connector's record says which token approved it (`approvedByTokenId`), and the token list marks peer-bound tokens and the approver of each connector.
 - **Rendering:** `RENDER_MAX_PIXELS` and `RENDER_MAX_RESPONSE_BYTES` for both render sidecars, shown in their health answer.
+- **Embedding:** `embedding.maxInputBytes` (default 6000, 512 to 65536) sets the most bytes one embedder request may carry; document passages are split to it.
+- **Metrics:** `ythril_embed_jobs_failed_total`, `ythril_embed_input_cut_total` and `ythril_conversion_chunks_unembedded_total`.
 
 ### Changed
 
 - **Networks:** a network whose spaces were all removed is the instance admin's alone, as one with spaces is; a join that would carry no space is refused for a non-admin.
 - **Sync:** a waited sync that times out or fails says which members it had finished; the all-networks MCP sync records every network's answer instead of stopping at the first failure.
+- **Embedding:** an embedder's HTTP 413 ends the embed job at once (a 400 keeps its attempts); an input over the ceiling reaches an HTTP embedder as its beginning; a whole-document vector is made from the beginning of the text.
+- **MCP:** `retry_embed_file` converts a file that completed again, to split its passages.
 - **MCP:** each budgeted tool's `maxChars` says how its first item is treated (returned whole above the ceiling, or split at it for `read_file`) and names its continuation field.
 - **Media:** the Validate step shows as working, or warns with the vision steps when no vision model is set; a dimmed step says it will not run.
 - **Settings:** a refused sync is a translated message; the tokens page shows its summary after the list; the server log colours a line by its own level only.
@@ -36,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Embedding:** a table, fence or long line larger than an HTTP embedder accepts was sent whole and refused, leaving its passage with no vector; it is split at row or line breaks.
 - **Graph:** Retry was not clickable after a graph had been drawn; the stale graph, its counts and its controls are hidden while the error shows.
 - **Rendering:** a render window the sidecar ended early skipped the pages in between.
 - **Translations:** the retention line and nine other summaries kept the language of their first render; German and Polish said "Ausweis"/"dowód" for an ID; nine model fields had no input type.

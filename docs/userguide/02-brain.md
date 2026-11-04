@@ -750,6 +750,10 @@ when you click it. See the integration guide's graph page, *Bodies in one call*.
 
 ## Brain — Review tab
 
+> **A passage the embedder refuses as too large is not retried.** An embedder that answers *payload too large* fails the job at once instead of
+> after five attempts, and a file passage stored before a size limit existed, larger than the embedder accepts, is listed as failed with the way to fix it:
+> convert its file again (the file's **Retry** where it shows one, or the `retry_embed_file` tool); the document's text is then split into parts the embedder takes.
+>
 > **A failed embedding job is retried once per upgrade, automatically.** A job that fails is retried five
 > times with a growing pause — about twelve minutes in total — and then marked failed and left alone, which
 > is right for one bad record and wrong for an outage. If the embedding model is unreachable for longer than

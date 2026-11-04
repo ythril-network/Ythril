@@ -10,7 +10,7 @@ When a convertible file is uploaded, Ythril automatically:
 
 1. Converts it to clean Markdown (via unstructured sidecar for PDF/DOCX/EPUB, or in-process for HTML/MD/TXT).
 2. Normalises the Markdown (strips page numbers, collapses blank lines, levels headings).
-3. Splits it into heading- or paragraph-delimited chunks.
+3. Splits it into heading- or paragraph-delimited chunks, each at most `embedding.maxInputBytes` bytes once its heading and the embedder's task prefix are counted (6,000 by default; a larger block is cut into parts, see [Chunk size](#chunk-size)).
 4. Embeds each chunk independently for high-quality semantic recall.
 
 #### Timing — conversion is asynchronous
@@ -134,6 +134,8 @@ Pass `inputFormat` in the JSON body (or as a query parameter in raw uploads) to 
 | `"html"` | Extract article body with jsdom + @mozilla/readability + turndown, fully in-process |
 | `"md"` | Normalise + split on H2/H3 headings, in-process — no sidecar, no `_converted/` copy |
 | `"txt"` | Normalise + split on paragraph boundaries, in-process — `headingText` is null on all chunks |
+
+Every chunk is split to the embedder's input ceiling afterwards, whichever format made it ([Chunk size](#chunk-size)).
 | `"text"` | Legacy bypass: single flat embedding, no chunking, unchanged behaviour |
 
 Example — upload and convert a PDF:
@@ -180,6 +182,17 @@ UI; through the API they are ordinary records and you exclude them yourself — 
    - `headingText` — the H2/H3 heading that opened this chunk (`null` for `.txt` paragraph chunks)
    - `content` — the Markdown body of the chunk
    - An embedding derived from `headingText + " " + content`
+
+#### Chunk size
+
+Two limits apply, for different reasons. A **soft** cap of about 2,000 characters keeps a section's vector about one topic: the section chunker splits a longer section at paragraph boundaries and never cuts a paragraph. A **hard** ceiling, `embedding.maxInputBytes` (default 6,000 UTF-8 bytes, [configured in `config.json` or the admin media-config PATCH](05b-media-embedding.md)), keeps what the embedder is sent under what it accepts: an HTTP embedder refuses an input over its context with HTTP 400, where the bundled model truncates it. After both chunkers, every chunk whose heading, body and task prefix would pass the ceiling is split into parts:
+
+- a table (or any block with line breaks) is cut at the **last line break that fits**, so a part holds whole rows or lines; a table under the ceiling stays whole;
+- a fenced block or one line with no break is cut at the furthest character that fits, never inside a surrogate pair;
+- every part keeps the section's heading (a heading over a quarter of the budget is shortened to it, and the shortened heading is what is stored), and `chunkIndex` is renumbered in order;
+- the previous section's last paragraph, which the chunker prepends as context, is itself limited to the soft cap, so a table is never copied into the next section.
+
+**Passages stored before the ceiling existed are not changed.** A reindex or reembed re-embeds the stored passages; one over the ceiling is refused at its re-embed (its embed job ends `failed` at once and names the bytes, the ceiling and the cure). Convert the file again with `retry_embed_file` (`POST /api/files/:spaceId/retry_embedding`), which works on a file that completed. The same applies after you lower `embedding.maxInputBytes`.
 
 Chunk records and `_converted/` records share the same vector space as facts, entities, and edges. A standard `recall` query therefore covers document chunks alongside all other content — **no separate query path is required**.
 
@@ -415,7 +428,9 @@ hard-disables faces regardless of any ladder, and it is not accepted by `PATCH /
 from how it was read (`documentExtraction`). `chunk` stores a vector per section, so a recall can
 quote the passage; `embed` stores one vector for the whole document, which still finds the FILE but
 no longer answers "where does it say that?" — a real trade on long documents, and close to free on
-short notes. `off` stores the file and indexes nothing.
+short notes. That one vector is made from the **beginning** of the text, up to the embedder's input
+ceiling (`embedding.maxInputBytes`, less the task prefix); the stored `content` stays whole, so the
+document is still found by its words. `off` stores the file and indexes nothing.
 
 `videoAnalysis` chooses how much of a video is analysed. `audio` runs the **audio pipeline only** —
 extract the audio track, transcribe, embed — so a video is searchable by what is said without ever
@@ -687,5 +702,5 @@ This means a PDF containing five embedded photographs will produce:
 
 - The original PDF file record
 - A `_converted/{id}.md` Markdown record
-- One chunk record per heading/paragraph section
+- One chunk record per heading/paragraph section (split further where a section is larger than the embedder accepts)
 - Five `_extracted/{id}/image-{N}.jpg` records, each independently captioned and face-searched
