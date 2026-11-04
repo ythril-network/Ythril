@@ -72,9 +72,49 @@ export const DEFERRAL_CAP_MS = 30 * 60_000;
  *
  * `deferredSince` is stamped by the FIRST deferral and kept by every later one, so the cap is measured from it. `facesOnly` says the
  * caption of the job's file is already stored, so the re-run need not make it again (`image-embedder.ts` skips it only when the caption
- * row is there). Both go when the job ends ({@link endJob}) and when a new write re-queues it ({@link enqueueMediaJob}).
+ * row is there). Both go ({@link DEFERRAL_MARKS}) when the job ends ({@link endJob}) and whenever the job is returned to pending as a
+ * whole new run ({@link RUN_RESET}: a manual retry, a replacement of its bytes by {@link replaceContent}, the enqueue's terminal reset).
  */
 export type MediaJobDeferral = Pick<MediaJobDoc, 'deferredSince' | 'facesOnly'>;
+
+/**
+ * The `$unset` of a deferral's marks (`deferredSince`, `facesOnly`): what ends them, in one place, so a writer that ends a job or
+ * starts a new run cannot forget one (a retried job kept both and skipped the caption the retry was asked for: S8).
+ */
+export const DEFERRAL_MARKS: Readonly<Record<keyof MediaJobDeferral, ''>> = { deferredSince: '', facesOnly: '' };
+
+/**
+ * What returning a job to `pending` as a WHOLE NEW RUN sets, as a `$set` spread: the run state and nothing else (no attempt spent, no
+ * error, no claim). Every writer that does it spreads this and its {@link RUN_RESET_UNSET}, so a seventh cannot spell a reset that
+ * forgets a field (`every-write-returning-a-media-job-to-pending-goes-through-run-reset` reads job-queue.ts for it).
+ *
+ * It names no identity key: the job's `mimeType`, `mediaType`, `arrival` and `sha256` are set by the write door ({@link replaceContent})
+ * and by the enqueue, never by a reset, or a retry would turn a peer's arrived image into one written here. `updatedAt` and
+ * `claimableAfter` are the caller's: when the job may be claimed is a different question for each writer. A reset of a TEXT job keeps its
+ * `resolvedFormat`, which is the document format the run converts by and not run state.
+ */
+export const RUN_RESET = {
+  status: 'pending',
+  attempts: 0,
+  lastError: null,
+  claimedAt: null,
+  claimToken: null,
+} as const;
+
+/** The `$unset` that goes with {@link RUN_RESET}: the step report of the run that was (`progress`) and the deferral's marks. */
+export const RUN_RESET_UNSET: Readonly<Record<string, ''>> = { progress: '', ...DEFERRAL_MARKS };
+
+/**
+ * How long the write door and a manual retry keep a job unclaimable after they write it, in ms.
+ *
+ * Two things need the wait. The file ROW reads `pending` only after the job is written (a retry must leave the row alone when a
+ * worker had claimed the job first), so the job cannot be claimable before that second write lands: a worker that claimed, marked the
+ * row `processing` and finished in the gap would be overwritten by a late `pending`. And a path written again and again (an editor
+ * saving, a sync client re-sending) would cost a whole run, caption included, for every write if the first could start at once: with a
+ * wait, each write moves the start out again and the burst settles into ONE run. A few seconds: longer than a burst of saves and the
+ * row write behind it, short enough that a single upload does not visibly wait.
+ */
+export const REPLACE_SETTLE_MS = 3_000;
 
 /** May this job be deferred again: never deferred, or first deferred less than {@link DEFERRAL_CAP_MS} ago. */
 export function mayDeferAgain(job: MediaJobDeferral): boolean {
@@ -166,14 +206,20 @@ export async function getMediaJobCounts(spaceId: string): Promise<MediaJobCounts
 // ── Enqueue ────────────────────────────────────────────────────────────────
 
 /**
- * Enqueue a new media embedding job.  Idempotent: if a job already exists
- * for this file and is not in a terminal state, it is left unchanged.
- * A previously-failed job is reset to `pending` so a new upload re-triggers
- * processing.
+ * Make sure a file has a media job. For the callers that ask without knowing whether the bytes changed: the lazy repair of a
+ * pulled file (`file-meta.ts`) and the images extracted from a document (`converters/pipeline.ts`). Idempotent: a job that is
+ * `pending` or `processing` is left as it is (but for the arrival rule below); a terminal one (`complete` or `failed`) is returned
+ * to pending as a WHOLE new run ({@link RUN_RESET}), so the repair or re-extraction analyses again.
+ *
+ * It is NOT the write door. Bytes written or arrived at a path go through {@link replaceContent}, which also resets a queued job
+ * (new bytes make the run under way obsolete), carries the hash that says whether the bytes are new, and orders the file row before
+ * the claim. Here nothing says the bytes changed, so a queued job is never disturbed, and a terminal reset takes a stale hash off
+ * (`sha256`): the job is about bytes this call cannot name.
  *
  * `opts.arrival` says the bytes came from a peer (`MediaJobDoc.arrival`); it is the whole of what the job carries about that,
  * and it is stamped on EVERY enqueue (a reset included), so a later local write to the path is not held to the rule of the
- * arrival that came before it.
+ * arrival that came before it. A LOCAL call onto a queued arrival job takes the mark off, even for the same bytes: the file is
+ * now one a person wrote, and a person's image is analysed as a person's.
  */
 export async function enqueueMediaJob(
   spaceId: string,
@@ -191,39 +237,22 @@ export async function enqueueMediaJob(
   ) as MediaJobDoc | null;
 
   if (existing && (existing.status === 'pending' || existing.status === 'processing')) {
-    // Already queued — do not disturb. Two exceptions: a LOCAL write to a path whose queued job is an arrival's takes the
-    // arrival mark off, because the file is now one a person wrote and a person's image is analysed as a person's. And a
-    // deferred job's `facesOnly` goes: it says the caption of the OLD bytes is stored, and the new bytes owe their own.
-    const offArrival = existing.arrival && !arrival;
-    if (offArrival || existing.facesOnly) {
-      await jobCollection(spaceId).updateOne(
-        asFilter<MediaJobDoc>({ _id: id }),
-        asUpdate<MediaJobDoc>({
-          ...(offArrival ? { $set: { arrival: false } } : {}),
-          ...(existing.facesOnly ? { $unset: { facesOnly: '' } } : {}),
-        }),
-      );
+    // Already queued — do not disturb. The one exception is the arrival rule: a LOCAL call onto a queued arrival job takes the
+    // arrival mark off.
+    if (existing.arrival && !arrival) {
+      await jobCollection(spaceId).updateOne(asFilter<MediaJobDoc>({ _id: id }), asUpdate<MediaJobDoc>({ $set: { arrival: false } }));
     }
     return;
   }
 
   if (existing) {
-    // Terminal state (complete/failed) — reset so re-upload triggers re-processing
+    // Terminal state (complete/failed) — a whole new run, so a repair or a re-extraction analyses again. The identity is this call's
+    // (`mimeType`, `mediaType`, `arrival`); a stale hash and a text job's format go, because this call names neither.
     await jobCollection(spaceId).updateOne(
       asFilter<MediaJobDoc>({ _id: id }),
       asUpdate<MediaJobDoc>({
-        $set: {
-          status: 'pending',
-          attempts: 0,
-          lastError: null,
-          claimedAt: null,
-          claimableAfter: null,
-          updatedAt: now,
-          mimeType,
-          mediaType,
-          arrival,
-        },
-        $unset: { deferredSince: '', facesOnly: '' },
+        $set: { ...RUN_RESET, claimableAfter: null, updatedAt: now, mimeType, mediaType, arrival },
+        $unset: { ...RUN_RESET_UNSET, sha256: '', resolvedFormat: '' },
       }),
     );
   } else {
@@ -250,75 +279,132 @@ export async function enqueueMediaJob(
   markSpaceMayHaveWork(spaceId);
 }
 
+/** What the write door knows of the bytes it was handed: the job's identity, set by {@link replaceContent} and by nothing else. */
+export interface ReplacedContent {
+  mimeType: string;
+  /** `text` for a document the worker converts (`resolvedFormat` names its format), else the media class. */
+  mediaType: MediaJobDoc['mediaType'];
+  /** The document format of a text job (`md`, `pdf`, ...); the worker converts by it. Not for a media job. */
+  resolvedFormat?: string;
+  /** The hash of the bytes now at the path, when the caller has it: absent reads as "not the same bytes as any job's". */
+  sha256?: string | undefined;
+  /** The bytes came from a peer (`MediaJobDoc.arrival`). */
+  arrival: boolean;
+}
+
 /**
- * Enqueue a new text document embedding job.
- * Unlike enqueueMediaJob, this ALWAYS resets the job to `pending` even when
- * a job is currently `pending` or `processing` — a re-upload means we have
- * new file content that must replace any in-flight work.
+ * The write door's ONE call for "the bytes at this path were replaced", for media and for documents: whatever job the path had
+ * becomes a job for the NEW bytes, and the file row reads `pending` before any worker can claim it. It never throws: a failure sets the
+ * row `failed` and is logged at ERROR (below), and the answer says which happened.
  *
- * The caller is responsible for deleting stale chunk records before enqueueing
- * so that a concurrent in-flight job (if any) finds no old data to overwrite.
+ * ## What it prevents
+ *
+ *  - **The old run goes on over bytes that are gone.** A job that is `processing` for other bytes is taken over in the same write that
+ *    resets it ({@link RUN_RESET}, under {@link revokingClaims}): the old run's claim matches nothing, so nothing it does lands
+ *    (`writeUnderClaim`), and `deferJob` answers `'lost'`. A job for the SAME bytes (`sha256`) that is `pending` or `processing` is left
+ *    alone: the run under way is the right one, and a second arrival must not throw half a conversion away. The one thing it still
+ *    does is the arrival rule: a LOCAL write onto an arrival job takes the mark off.
+ *  - **A run per write.** The job is claimable only after {@link REPLACE_SETTLE_MS}, measured from the LAST write: a path written
+ *    continuously settles into one run, not a caption per save. While a move is running or owed at the path (`moveIsRunningAt`,
+ *    `moveCarriesRecordsAt`) it is held until the move's hold is over as well, and keeps a later hold the job already carries (read inside
+ *    the write, so a hold taken between the read and the write is not lost): a job unheld in the middle of a move would be claimed at
+ *    the OLD path.
+ *  - **A run's own state overwritten.** The row is written `pending` BEFORE the job is reset, as every writer that makes a job claimable
+ *    does (`a-file-row-reads-pending-before-its-job-can-be-claimed`): a `pending` written after could land on the `processing` of a run
+ *    that already claimed. An old run still holding its claim between the two writes can only write its own finish, which the new run's
+ *    `processing` replaces once it claims.
+ *  - **A spinner nothing ends.** A write that fails sets the row `failed` with the reason and logs ERROR with the path, the step and the cause; it is never
+ *    swallowed into `pending`, because a `pending` row under the same hash is what `settledAndIdentical` reads as "work under way", so a
+ *    re-upload, the one thing that would help, would be skipped too.
+ *
+ * `markSpaceMayHaveWork` runs in a `finally`, and again when the settle delay is over: a claim that finds the job not yet claimable
+ * drops the space from the probe hint, so without the second announcement the job would wait for the next full scan.
  */
-export async function enqueueTextJob(
-  spaceId: string,
-  filePath: string,
-  resolvedFormat: string,
-  mimeType = 'text/plain',
-): Promise<void> {
+export async function replaceContent(spaceId: string, filePath: string, identity: ReplacedContent): Promise<'queued' | 'failed'> {
   const id = toDocId(filePath);
-  const now = new Date().toISOString();
+  const isText = identity.mediaType === 'text';
+  let step = 'reading the job at the path';
+  try {
+    const existing = await jobCollection(spaceId).findOne(asFilter<MediaJobDoc>({ _id: id })) as MediaJobDoc | null;
+    const sameBytes = identity.sha256 !== undefined && identity.sha256 !== '' && existing?.sha256 === identity.sha256;
+    if (existing && sameBytes && (existing.status === 'pending' || existing.status === 'processing')) {
+      step = 'taking the arrival mark off the job at the path';
+      if (existing.arrival && !identity.arrival) {
+        await jobCollection(spaceId).updateOne(asFilter<MediaJobDoc>({ _id: id }), asUpdate<MediaJobDoc>({ $set: { arrival: false } }));
+      }
+      return 'queued';
+    }
 
-  // The file row reads `pending` BEFORE the job can be claimed, and before the worker is woken: a worker fast enough to
-  // claim it, mark the row `processing` and finish inside the gap would otherwise be overwritten by this late `pending`,
-  // and a finished file would read pending for ever. The media branch does the same (`dispatch.ts` marks, then enqueues).
-  await setFileProcessingState(spaceId, id, { embeddingStatus: 'pending' }).catch(err => {
-    log.debug(`enqueueTextJob: could not set embeddingStatus on file meta ${peerText(spaceId)}/${peerText(id)}: ${peerText(err)}`);
-  });
+    step = 'marking the file row pending';
+    await setFileProcessingState(spaceId, id,
+      { ...(identity.mediaType === 'text' ? {} : { mediaType: identity.mediaType }), embeddingStatus: 'pending', mediaJobError: undefined });
 
-  const existing = await jobCollection(spaceId).findOne(
-    asFilter<MediaJobDoc>({ _id: id }),
-  ) as MediaJobDoc | null;
-
-  if (existing) {
-    // Always reset — new upload supersedes any previous or in-progress job
-    await jobCollection(spaceId).updateOne(
+    step = 'writing the job at the path';
+    const now = Date.now();
+    const iso = new Date(now).toISOString();
+    const settled = new Date(now + REPLACE_SETTLE_MS).toISOString();
+    const moveHeld = moveIsRunningAt(spaceId, id) || await moveCarriesRecordsAt(spaceId, id);
+    const lit = (v: string) => ({ $literal: v });
+    // One write, an aggregation pipeline so that what the job already carries is read INSIDE it (a move's hold, the first creation's
+    // stamp). `$literal` keeps a path or a type that starts with `$` from being read as a field.
+    const claimableAfter = moveHeld
+      ? { $max: [lit(settled), lit(new Date(now + moveTiming().holdMs).toISOString()), { $ifNull: ['$claimableAfter', ''] }] }
+      : lit(settled);
+    await revokingClaims(() => jobCollection(spaceId).updateOne(
       asFilter<MediaJobDoc>({ _id: id }),
-      asUpdate<MediaJobDoc>({
-        $set: {
-          status: 'pending',
-          attempts: 0,
-          lastError: null,
-          claimedAt: null,
-          claimableAfter: null,
-          updatedAt: now,
-          mimeType,
-          mediaType: 'text',
-          resolvedFormat,
-        },
-      }),
-    );
-  } else {
-    const doc: MediaJobDoc = {
-      _id: id,
-      spaceId,
-      filePath: id,
-      mimeType,
-      mediaType: 'text',
-      resolvedFormat,
-      status: 'pending',
-      attempts: 0,
-      maxAttempts: MAX_ATTEMPTS,
-      lastError: null,
-      claimedAt: null,
-      claimableAfter: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await jobCollection(spaceId).insertOne(asDoc<MediaJobDoc>(doc));
+      [
+        { $set: {
+          ...RUN_RESET,
+          claimableAfter,
+          updatedAt: lit(iso),
+          spaceId: lit(spaceId),
+          filePath: lit(id),
+          mimeType: lit(identity.mimeType),
+          mediaType: lit(identity.mediaType),
+          arrival: identity.arrival,
+          maxAttempts: { $ifNull: ['$maxAttempts', MAX_ATTEMPTS] },
+          createdAt: { $ifNull: ['$createdAt', lit(iso)] },
+          ...(identity.sha256 ? { sha256: lit(identity.sha256) } : {}),
+          ...(isText && identity.resolvedFormat ? { resolvedFormat: lit(identity.resolvedFormat) } : {}),
+        } },
+        // The run that was: its step report and its deferral's marks; and what this write does not name (an unknown hash, the format of
+        // a text job on a media one, and the reverse).
+        { $unset: [
+          ...Object.keys(RUN_RESET_UNSET),
+          ...(identity.sha256 ? [] : ['sha256']),
+          ...(isText && identity.resolvedFormat ? [] : ['resolvedFormat']),
+        ] },
+      ],
+      { upsert: true },
+    ));
+    return 'queued';
+  } catch (err) {
+    await reportDoorFailure(spaceId, id, step, err);
+    return 'failed';
+  } finally {
+    markSpaceMayHaveWork(spaceId);
+    // A claim that found the job still waiting dropped the space from the probe hint; announce again when it may be claimed.
+    setTimeout(() => markSpaceMayHaveWork(spaceId), REPLACE_SETTLE_MS + 100).unref();
   }
+}
 
-  // Same as enqueueMediaJob: announce the work, or the claim walk will not probe this space.
-  markSpaceMayHaveWork(spaceId);
+/**
+ * Say that a write door could not do what it set out to with a file's job or rows: the file's row reads `failed` with the reason, and
+ * the cause is logged at ERROR with the path and the step. Never throws (the door's own failure is the one being reported); a row it
+ * cannot write is logged too.
+ *
+ * What it prevents: a row left `pending` with no job behind it, which `settledAndIdentical` reads as work under way for as long as the
+ * bytes stay the same, so the re-upload that would repair it is skipped (bundle-236, Q-698, C5).
+ */
+export async function reportDoorFailure(spaceId: string, id: string, step: string, err: unknown): Promise<void> {
+  const cause = peerText(err);
+  log.error(`Write door: ${peerText(step)} failed for ${peerText(spaceId)}/${peerText(id)}: ${cause}`);
+  await setFileProcessingState(spaceId, id, {
+    embeddingStatus: 'failed',
+    mediaJobError: sanitiseError(`Could not queue the file for analysis (${step}): ${cause}`),
+  }).catch(rowErr => {
+    log.error(`Write door: the row of ${peerText(spaceId)}/${peerText(id)} could not be marked failed either: ${peerText(rowErr)}`);
+  });
 }
 
 // ── Claim ─────────────────────────────────────────────────────────────────
@@ -459,8 +545,9 @@ async function endJob(
     await setFileProcessingState(spaceId, claim.jobId, row, { session });
     await jobCollection(spaceId).updateOne(
       asFilter<MediaJobDoc>({ _id: claim.jobId }),
-      // A deferral's marks end with the job: a manual retry or a re-upload of the path starts a whole run, caption included.
-      asUpdate<MediaJobDoc>({ $set: { ...job, claimedAt: null, updatedAt: new Date().toISOString() }, $unset: { deferredSince: '', facesOnly: '' } }),
+      // A deferral's marks end with the job ({@link DEFERRAL_MARKS}): a manual retry or a re-upload of the path starts a whole run
+      // ({@link RUN_RESET} takes them off too), caption included.
+      asUpdate<MediaJobDoc>({ $set: { ...job, claimedAt: null, updatedAt: new Date().toISOString() }, $unset: { ...DEFERRAL_MARKS } }),
       { session },
     );
   });
@@ -664,6 +751,9 @@ export async function releaseClaimedJob(spaceId: string, jobId: string, claimTok
   }
 }
 
+/** What {@link deferJob} did: `'deferred'` the job is back behind its wait; `'past_cap'` the cap is spent and the run goes on; `'lost'` the claim is gone. */
+export type DeferralOutcome = 'deferred' | 'past_cap' | 'lost';
+
 /**
  * Give a claimed job back behind a short wait WITHOUT spending an attempt, because something it needs is not ready yet (Q-327).
  *
@@ -677,15 +767,18 @@ export async function releaseClaimedJob(spaceId: string, jobId: string, claimTok
  * ## What bounds it
  *
  * `deferredSince` is stamped by the first deferral and kept by every later one; past {@link DEFERRAL_CAP_MS} from it the job is NOT
- * deferred again: it stays claimed and this answers `false`, and the run goes on to its end ({@link mayDeferAgain} is the same rule,
- * read by the worker before the run). A gallery that never comes back cannot hold a job for ever.
+ * deferred again: it stays claimed and this answers `'past_cap'`, and the run goes on to its end ({@link mayDeferAgain} is the same
+ * rule, read by the worker before the run). A gallery that never comes back cannot hold a job for ever.
  *
- * Fenced on the claim's token in the one conditional write, as every write a run makes: a holder that lost its claim defers nothing
- * and gets `false`. The deferred job carries `facesOnly`, so its re-run does not make the stored caption again. `reason` is the
+ * Fenced on the claim's token in the one conditional write, as every write a run makes: a holder that lost its claim (the job was
+ * re-queued, replaced by new bytes, moved or deleted) defers nothing and gets `'lost'`. The two refusals are told apart by one read
+ * of the job under the same claim, because they ask opposite things of the run: a lost claim ends it as abandoned, never as a failure,
+ * and a spent cap lets it go on. A boolean could not say which, and the worker treated both as "carry on and write under a claim it no
+ * longer holds". The deferred job carries `facesOnly`, so its re-run does not make the stored caption again. `reason` is the
  * caller's and is only said in the log: the queue stores no policy beyond the wait and the cap.
  */
-export async function deferJob(spaceId: string, jobId: string, claimToken: string | null | undefined, reason: string): Promise<boolean> {
-  if (!claimToken) return false;
+export async function deferJob(spaceId: string, jobId: string, claimToken: string | null | undefined, reason: string): Promise<DeferralOutcome> {
+  if (!claimToken) return 'lost';
   const now = new Date();
   const capStart = new Date(now.getTime() - DEFERRAL_CAP_MS).toISOString();
   const claimableAfter = new Date(now.getTime() + DEFERRAL_WAIT_MS).toISOString();
@@ -704,10 +797,15 @@ export async function deferJob(spaceId: string, jobId: string, claimToken: strin
       attempts: { $max: [0, { $subtract: ['$attempts', 1] }] },
     } }],
   );
-  if (res.matchedCount === 0) return false;
+  if (res.matchedCount === 0) {
+    // Nothing matched: the claim is gone, or it is the cap that refused. The same claim, read once, tells them apart.
+    const stillHeld = await jobCollection(spaceId).findOne(
+      asFilter<MediaJobDoc>({ _id: jobId, status: 'processing', claimToken }), { projection: { _id: 1 } });
+    return stillHeld ? 'past_cap' : 'lost';
+  }
   markSpaceMayHaveWork(spaceId);
   log.info(`Media job ${peerText(spaceId)}/${peerText(jobId)} deferred for ${DEFERRAL_WAIT_MS / 1000} s, no attempt spent: ${peerText(reason)}`);
-  return true;
+  return 'deferred';
 }
 
 export async function resetStalledJobs(
@@ -939,8 +1037,20 @@ export async function rekeyJobsForMove(
 // ── retry_embedding helper ─────────────────────────────────────────────────
 
 /**
- * Reset a specific job for manual re-trigger via the retry_embedding endpoint.
- * Returns 'ok', 'not_found', or 'processing'.
+ * Put a specific job back as a WHOLE new run for a manual re-trigger (the `retry_embedding` endpoint and tool).
+ * Returns 'ok', 'not_found', or 'processing' (a worker holds the job, or a move of the path is running or owed).
+ *
+ * ## What it prevents
+ *
+ *  - **Taking a claimed job.** The job is written FIRST, and only while it is not `processing` (`status: { $ne: 'processing' }`, in
+ *    the write itself). A worker that claimed it between this read and this write leaves the write matching nothing: the answer is
+ *    `'processing'` and the file row is as the run left it, never marked `pending` under a worker that is working. (It read, wrote the
+ *    row, then wrote the job with no condition, and put a claimed job back to pending under its own token.)
+ *  - **A retry that is not clean.** The reset is {@link RUN_RESET} with its {@link DEFERRAL_MARKS}: a deferred job retried skipped the
+ *    caption the retry was asked for (S8). The job's identity (`arrival`, the type) is untouched.
+ *  - **A late `pending` over a finished run.** The row is written after the job, so the job is not claimable for
+ *    {@link REPLACE_SETTLE_MS}: a worker that claimed it in the gap would mark the row `processing` and finish, and the late `pending`
+ *    would overwrite it. (A manual retry waits that long, and the space is announced again when it is over.)
  */
 export async function retryJob(
   spaceId: string,
@@ -955,33 +1065,33 @@ export async function retryJob(
   // A move of this path is running or owed: its hold is what keeps the job off the old path, and the reset below would end it.
   if (moveIsRunningAt(spaceId, fileId) || await moveCarriesRecordsAt(spaceId, fileId)) return 'processing';
 
-  const now = new Date().toISOString();
-  // The row first: once the job is pending a worker may claim it, and a `pending` written after the worker's `processing`
-  // would overwrite it (see enqueueTextJob).
-  await setFileProcessingState(spaceId, fileId, { embeddingStatus: 'pending', mediaJobError: undefined });
-  await jobCollection(spaceId).updateOne(
-    asFilter<MediaJobDoc>({ _id: fileId }),
+  const now = new Date();
+  const res = await jobCollection(spaceId).updateOne(
+    asFilter<MediaJobDoc>({ _id: fileId, status: { $ne: 'processing' } }),
     asUpdate<MediaJobDoc>({
-      $set: {
-        status: 'pending',
-        attempts: 0,
-        lastError: null,
-        claimedAt: null,
-        claimableAfter: null,
-        updatedAt: now,
-      },
+      $set: { ...RUN_RESET, claimableAfter: new Date(now.getTime() + REPLACE_SETTLE_MS).toISOString(), updatedAt: now.toISOString() },
+      $unset: { ...RUN_RESET_UNSET },
     }),
   );
-  // A manual retry must be picked up promptly — announce it, or the claim walk would not
+  if (res.matchedCount === 0) {
+    // A claim landed between the read and the write, or the job went. The row is not this retry's to write.
+    return await jobCollection(spaceId).countDocuments(asFilter<MediaJobDoc>({ _id: fileId }), { limit: 1 }) === 0 ? 'not_found' : 'processing';
+  }
+  // After the job, on purpose (see above): the job write itself made it unclaimable for REPLACE_SETTLE_MS, so no claim can precede this.
+  await setFileProcessingState(spaceId, fileId, { embeddingStatus: 'pending', mediaJobError: undefined });
+  // A manual retry must be picked up — announce it, now and when the settle delay is over, or the claim walk would not
   // probe this space until the next full scan (up to 30 s of the user staring at "pending").
   markSpaceMayHaveWork(spaceId);
+  setTimeout(() => markSpaceMayHaveWork(spaceId), REPLACE_SETTLE_MS + 100).unref();
   return 'ok';
 }
 
 /**
- * Reset every FAILED job in a space back to pending for a bulk manual re-trigger (F9 "retry all
- * failed"). Skips jobs currently processing (the `status: 'failed'` filter excludes them). Returns
- * the number reset. Mirrors `retryJob` for the whole failed set rather than one file at a time.
+ * Put every FAILED job in a space back as a whole new run, for a bulk manual re-trigger (F9 "retry all
+ * failed"). Skips jobs currently processing (a `failed` job is not). Returns the number reset. Mirrors `retryJob`'s reset
+ * ({@link RUN_RESET}, so a retried arrival job keeps its mark) for the whole failed set rather than one file at a time, a chunk of ids
+ * ({@link READ_CHUNK}) at a time: the rows of a chunk first (a worker may claim a job the moment it is pending), then its jobs, so no
+ * command carries the whole set.
  */
 export async function retryFailedJobs(spaceId: string): Promise<number> {
   const jc = jobCollection(spaceId);
@@ -991,17 +1101,19 @@ export async function retryFailedJobs(spaceId: string): Promise<number> {
   if (!failed.length) return 0;
 
   const now = new Date().toISOString();
-  // The rows first, as in retryJob: a worker may claim a job the moment it is pending.
-  await setFileProcessingState(spaceId, failed.map(f => f._id), { embeddingStatus: 'pending', mediaJobError: undefined });
-  await jc.updateMany(
-    asFilter<MediaJobDoc>({ status: 'failed' }),
-    asUpdate<MediaJobDoc>({
-      $set: { status: 'pending', attempts: 0, lastError: null, claimedAt: null, claimableAfter: null, updatedAt: now },
-    }),
-  );
+  let reset = 0;
+  for (const part of inChunks(failed.map(f => f._id), READ_CHUNK)) {
+    // The rows first, as in retryJob's reasoning: a worker may claim a job the moment it is pending.
+    await setFileProcessingState(spaceId, part, { embeddingStatus: 'pending', mediaJobError: undefined });
+    const res = await jc.updateMany(
+      asFilter<MediaJobDoc>({ _id: { $in: part }, status: 'failed' }),
+      asUpdate<MediaJobDoc>({ $set: { ...RUN_RESET, claimableAfter: null, updatedAt: now }, $unset: { ...RUN_RESET_UNSET } }),
+    );
+    reset += res.matchedCount;
+  }
   // Same reason as retryJob: announce the work or the claim walk waits up to a full scan (~30 s).
   markSpaceMayHaveWork(spaceId);
-  return failed.length;
+  return reset;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

@@ -32,9 +32,18 @@ export interface MediaJobDoc {
    */
   arrival?: boolean;
   /**
+   * The SHA-256 of the bytes this job analyses, set by the write door (`job-queue.ts:replaceContent`): the question it answers is "are
+   * the bytes that arrived the ones this job is already about". The same hash onto a `pending` or `processing` job leaves it alone;
+   * a different one resets it, because the run under way is reading bytes that are gone. Absent on a job queued without the bytes' hash
+   * (the lazy repair, an extracted image) and on one written before this field, which reads as "not the same bytes": the write door
+   * then resets it. The enqueue's terminal reset takes a stale hash off (`enqueueMediaJob`), so a job never names bytes it was not made for.
+   */
+  sha256?: string;
+  /**
    * Set by a deferral (`job-queue.ts:deferJob`, Q-327): when the job was FIRST deferred, so the deferral cap is measured from
-   * it, and that its file's caption is already stored, so the re-run need not make it again. Both go when the job ends or a new
-   * write re-queues it.
+   * it, and that its file's caption is already stored, so the re-run need not make it again. Both go (`DEFERRAL_MARKS`) when the job
+   * ends (`endJob`) and whenever the job is returned to pending as a WHOLE new run (`RUN_RESET`: a manual retry, a replacement of its
+   * bytes, the enqueue's terminal reset): a new run owes its caption.
    */
   deferredSince?: string | null;
   facesOnly?: boolean;
@@ -73,7 +82,9 @@ export interface MediaJobDoc {
    * ISO8601 — when set on a `pending` job, the worker MUST NOT claim it
    * until this timestamp has passed. Used for exponential retry backoff so
    * a fast-failing "poison pill" job can’t monopolise the queue and starve
-   * sibling jobs that would otherwise succeed. Cleared on success/manual retry.
+   * sibling jobs that would otherwise succeed. Also set a few seconds ahead by a replacement of the file's bytes and by a manual retry
+   * (`REPLACE_SETTLE_MS`: the file row reads `pending` before any claim, and a path written again and again settles into one run), and
+   * to the end of a move's hold while a move carries the path. Cleared by a claim and by a release.
    */
   claimableAfter?: string | null;
   /**

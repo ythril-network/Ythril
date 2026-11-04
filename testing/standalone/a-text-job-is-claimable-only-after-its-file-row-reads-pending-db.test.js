@@ -9,6 +9,11 @@
  * `complete` and nothing revisits a terminal job. `retryJob` and `retryFailedJobs` had the same order. The media branch has it
  * right already (`dispatch.ts` marks the row, then enqueues).
  *
+ * (bundle-236, Q-698) `enqueueTextJob` was folded into `replaceContent`, the write door's call for media and documents, which writes
+ * the JOB first and the row after it; the job is then not claimable for `REPLACE_SETTLE_MS`, and that wait, not the order of the two
+ * writes, is what keeps a worker out of the gap (`retryJob` does the same). The worker of these cases therefore claims once the wait is
+ * over (`workerRun` makes the job claimable, as the passing of the settle delay does); a claim made INSIDE the gap finds nothing.
+ *
  * ## How the gap is made a thing a test waits for
  *
  * The gap is a fact of ORDER, so the row's `pending` write is PARKED, before it reaches the store, on a latch the test holds
@@ -18,7 +23,7 @@
  *  1. **Nothing is announced while the row's mark is outstanding.** With the mark parked, the work-signal epoch must not have
  *     moved (the worker is not woken), and no claim finds the job. On the old order the job is pending and the wake has fired
  *     before the row write is even reached. This holds for each of the three writers.
- *  2. **The late mark cannot overwrite a finished job** (`enqueueTextJob`): when the worker did get in (old order) it claims,
+ *  2. **The late mark cannot overwrite a finished job** (`replaceContent`, once `enqueueTextJob`): when the worker did get in (old order) it claims,
  *     marks `processing` and completes inside the gap; when it did not (new order) it does so after the enqueue settles. Either
  *     way, once the enqueue has returned, the row reads what the worker left, `complete`, not `pending`.
  *  3. **The same, with a retryable failure**: the worker claims, marks `processing` and fails with retries left; once the
@@ -62,12 +67,20 @@ async function failedJob() {
   });
 }
 
+/** The write door's call for new document bytes at the path (what `enqueueTextJob` was). */
+const replaceTheText = () => queue.replaceContent(SPACE, FILE, {
+  mimeType: 'text/markdown', mediaType: 'text', resolvedFormat: 'markdown', sha256: 'a'.repeat(64), arrival: false,
+});
+
 /** Park the row's `pending` mark before it reaches the store; the write of any other state passes. */
 const parkThePendingMark = () => parkDriverCall(mongo, SPACE, 'files', 'updateMany',
   (_filter, update) => update?.$set?.embeddingStatus === 'pending', { before: true });
 
 /** What a worker does with one claimed job: claim it, mark the row `processing`, and `end` it. */
 async function workerRun(end) {
+  // The settle delay is over (the writers hold the job unclaimable for `REPLACE_SETTLE_MS` after they write it).
+  await jobs().updateOne({ _id: FILE }, { $set: { claimableAfter: null } });
+  queue.markSpaceMayHaveWork(SPACE);
   const job = await queue.claimNextJob([SPACE]);
   assert.ok(job, 'the worker found no claimable job');
   const claim = { jobId: job._id, claimToken: job.claimToken };
@@ -89,7 +102,7 @@ describe('a text job is claimable only after its file row reads pending (real Mo
   afterEach(() => { park?.restore(); park = undefined; });
 
   const WRITERS = {
-    enqueueTextJob: { arrange: () => seedRow('complete'), run: () => queue.enqueueTextJob(SPACE, FILE, 'markdown', 'text/markdown') },
+    replaceContent: { arrange: () => seedRow('complete'), run: () => replaceTheText() },
     retryJob: { arrange: async () => { await seedRow('failed'); await failedJob(); }, run: () => queue.retryJob(SPACE, FILE) },
     retryFailedJobs: { arrange: async () => { await seedRow('failed'); await failedJob(); }, run: () => queue.retryFailedJobs(SPACE) },
   };
@@ -123,7 +136,7 @@ describe('a text job is claimable only after its file row reads pending (real Mo
     await seedRow('complete');
     const epoch = queue.currentWorkEpoch();
     park = parkThePendingMark();
-    const done = queue.enqueueTextJob(SPACE, FILE, 'markdown', 'text/markdown');
+    const done = replaceTheText();
     await park.reached;
     const inGap = await queue.waitForWork(300, epoch);
     if (inGap) await workerRun(end);
@@ -136,13 +149,13 @@ describe('a text job is claimable only after its file row reads pending (real Mo
     return inGap;
   }
 
-  it('enqueueTextJob: a worker that finishes the job right after its wake is not overwritten by a late pending', async () => {
+  it('replaceContent: a worker that finishes the job right after its wake is not overwritten by a late pending', async () => {
     await enqueueWithWorker(claim => queue.completeJob(SPACE, claim, 'complete'));
     assert.equal((await jobs().findOne({ _id: FILE })).status, 'complete');
     assert.equal(await rowStatus(), 'complete', 'a finished file reads pending: the late mark overwrote the worker\'s');
   });
 
-  it('enqueueTextJob: a worker that fails the job with retries left leaves the row processing, not pending', async () => {
+  it('replaceContent: a worker that fails the job with retries left leaves the row processing, not pending', async () => {
     await enqueueWithWorker((claim, job) => queue.failJob(SPACE, claim, job.attempts, MAX, 'the embedder is down'));
     assert.equal((await jobs().findOne({ _id: FILE })).status, 'pending', 'the failed job is queued for its retry');
     assert.equal(await rowStatus(), 'processing', 'a job mid-retry reads pending over a row the worker had marked processing');

@@ -393,6 +393,20 @@ async function workerLoop(): Promise<void> {
   await poolDrained;
 }
 
+/**
+ * End a run whose claim was taken while it was still running: say so at WARN, count it, and write nothing. The ONE branch of "this run is
+ * superseded": an error that is an abandonment reaches it, and so does a deferral that the queue answered `'lost'` (`deferJob`), so the two
+ * cannot tell the reader different stories about the same event. Not a failure: failing the job would spend an attempt and record a
+ * `lastError` for work that did nothing wrong.
+ */
+function abandonLostClaim(spaceId: string, fileId: string, mediaType: MediaJobDoc['mediaType']): void {
+  log.warn(`Media worker: abandoning ${peerText(spaceId)}/${peerText(fileId)} — its claim was taken while it was still running,`
+    + ` and nothing it produced was written. Either the file was moved, deleted or re-uploaded (the job, if`
+    + ` any, now belongs to wherever the file went), or stall recovery re-queued it because it was slower`
+    + ` than stalledJobTimeoutMs — in that case see the re-queue warning above for how long it was silent.`);
+  mediaJobsRetriedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
+}
+
 async function processJob(
   job: MediaJobDoc,
   providers: { vision: import('./providers.js').VisionProvider; stt: import('./providers.js').SttProvider },
@@ -673,25 +687,26 @@ async function processJob(
       return;
     }
     if (isAbandonment(err)) {
-      log.warn(`Media worker: abandoning ${spaceId}/${fileId} — its claim was taken while it was still running,`
-        + ` and nothing it produced was written. Either the file was moved, deleted or re-uploaded (the job, if`
-        + ` any, now belongs to wherever the file went), or stall recovery re-queued it because it was slower`
-        + ` than stalledJobTimeoutMs — in that case see the re-queue warning above for how long it was silent.`);
-      mediaJobsRetriedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
+      abandonLostClaim(spaceId, fileId, mediaType);
       return;
     }
     // The face gallery could not answer yet (Q-327): not a failure, so the job is DEFERRED behind a short wait with no attempt spent,
-    // and its re-run skips the caption it already stored. `deferJob` refuses past the deferral cap or for a lost claim; the job then
-    // takes the failure path below like any other (a lost claim there is an abandonment, and the next run past the cap stores the
-    // face unlabelled instead of waiting).
+    // and its re-run skips the caption it already stored. `deferJob` says why it did not: `'lost'` (the claim is gone: the run ends as
+    // abandoned, through the same branch as above, never as a failure and never carrying on to write under a claim it no longer
+    // holds) and `'past_cap'` (the deferral's 30 minutes are spent: the job takes the failure path below like any other, and the run
+    // past the cap stores the face unlabelled instead of waiting).
     if (mediaType === 'image' && err instanceof (await import('./face-embedder.js')).GalleryIncompleteError) {
       const deferred = await deferJob(spaceId, claim.jobId, claim.claimToken, message).catch((innerErr: unknown) => {
         // A claim taken while the run was deferring is an abandonment: the job that holds the path now is not this run's to fail either.
-        if (isAbandonment(innerErr)) { log.info(`Media worker: ${spaceId}/${fileId} was deferring, but its claim was taken first — nothing more is written for it`); return true; }
+        if (isAbandonment(innerErr)) return 'lost' as const;
         log.warn(`Media worker: deferJob error: ${innerErr instanceof Error ? innerErr.message : String(innerErr)}`);
-        return false;
+        return 'error' as const;
       });
-      if (deferred) return;
+      if (deferred === 'deferred') return;
+      if (deferred === 'lost') {
+        abandonLostClaim(spaceId, fileId, mediaType);
+        return;
+      }
     }
     log.warn(`Media worker: job ${spaceId}/${fileId} failed:`, err);   // as meta, so a wrapper that says "see the log" (a file-system fault) has its cause in it
     // An oversized document will never shrink — fail permanently instead of
