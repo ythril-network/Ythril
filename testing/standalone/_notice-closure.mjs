@@ -14,7 +14,8 @@
  * ## What it decides, once
  *
  * - which edges are production: `dependencies`, `optionalDependencies` and `peerDependencies` of a package whose lock entry is not
- *   `dev`; a development-only package is a build tool and reaches no user;
+ *   `dev`; a development-only package is a build tool and reaches no user; a peer the declaring package's own lock entry marks optional
+ *   (`peerDependenciesMeta`) is left out, because npm installs no optional peer;
  * - how a name resolves: the nearest `node_modules/<name>` going up from the requiring package (npm's own rule), so a nested copy
  *   is the one that ships and a hoisted one is found;
  * - what counts as named: a `###` or `####` heading of NOTICE that lists the FULL scoped name (`@bufbuild/cel`), alone or in a
@@ -63,6 +64,16 @@ export function workspaceClosure(packages, workspaceKey) {
   return closureFromKey(packages, workspaceKey).filter(p => p.key !== workspaceKey);
 }
 
+/**
+ * Whether `entry` (a lock entry) marks its peer `dep` optional, in the entry's OWN `peerDependenciesMeta` and nowhere else: npm installs no
+ * optional peer, so the package ships none of it and owes it no heading (the schema package's `typescript`, which only its `from-typescript`
+ * entry reads, from the caller's own install). A peer with no meta, or `optional: false`, is installed and stays counted, and a meta on
+ * another package says nothing about this edge, so the skip is one the declaring package makes by its own lock entry.
+ */
+function isOptionalPeer(entry, dep) {
+  return entry.peerDependenciesMeta?.[dep]?.optional === true;
+}
+
 /** The production closure from one lock key, that key included. */
 function closureFromKey(packages, start) {
   const seen = new Map();
@@ -76,6 +87,7 @@ function closureFromKey(packages, start) {
     seen.set(key, { name, key, version: entry.version, license: entry.license ?? null });
     for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
       for (const dep of Object.keys(entry[field] ?? {})) {
+        if (field === 'peerDependencies' && isOptionalPeer(entry, dep)) continue;
         const next = resolveKey(packages, key, dep);
         if (next) queue.push(next);
       }

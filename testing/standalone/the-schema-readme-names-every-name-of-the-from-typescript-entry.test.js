@@ -50,7 +50,7 @@ function reasonGaps(readme, section, tuple) {
 const PLANTED = [
   '# pkg', '', `## ${SECTION}`, '',
   '| export | what it is |', '| --- | --- |',
-  `| \`${FROM_TYPESCRIPT_VALUES[0]}\`, \`${FROM_TYPESCRIPT_VALUES[1]}\` | values |`,
+  `| \`${FROM_TYPESCRIPT_VALUES.join('`, `')}\` | values |`,
   `| \`${FROM_TYPESCRIPT_TYPES.join('`, `')}\` | types |`, '',
   '- `first-reason`: one', '- `second-reason`: two', '', '## Next', '',
   '| `NotInThisSection` | x |', '- `not-a-reason`: y', '',

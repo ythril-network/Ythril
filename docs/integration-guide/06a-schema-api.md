@@ -449,15 +449,17 @@ const { source, untranslated } = typesOfSpaceMeta(metaAnswer, { library: entries
 - **Required members hold under `strict` only.** The types state the `strict` contract; under `warn` or `off` the server
   accepts writes the types refuse, and a stored record may lack a required key.
 - **A snapshot**: regenerate the source after a schema change or a `validationMode` change.
-- **Which package**: convert with the package of the server the meta was read from, or a newer one. A field a newer server
-  added is stripped and reported, not translated.
+- **Which package**: convert with the package of the server the meta was read from, or a newer one. A field a newer server added is stripped and reported, not translated.
 - **What it takes**: the `GET /api/spaces/:id/meta` answer or the MCP `space_meta` answer as it is (`spaceId`, `stats` and
   the server-owned fields are ignored; a library type is read from the definition beside its `$ref`), or a meta the app
   holds. `library` resolves a bare `$ref` and confirms an expanded one's kind.
 - **What it reports**: it never refuses as a whole. A type the parse refuses is skipped, and everything the source does not
   carry (CEL rules, naming patterns, retention, endpoints, unresolved or wrong-kind `$ref`s, renamed identifiers, an enum
-  longer than the package's bound, written as its base type) is an `untranslated` entry `{ reason, kind?, type?, field?, detail? }`.
-  The reasons are a fixed list the package exports; its README names it and the bound.
+  longer than the package's bound, written as its base type) is an `untranslated` entry `{ reason, kind?, type?, field?, detail? }`. The reasons are a fixed list the package exports; its README names it and the bound.
+
+### Read a space meta from TypeScript
+
+`spaceMetaFromTypeScript(source)` from `@ythril/schema/from-typescript` reads a space's type schemas back out of the source `typesOfSpaceMeta` writes: `{ ok: true, meta, notRead }`, or a refusal of up to ten named reasons for any member it cannot say exactly. It compiles with the app's own `typescript` (an optional peer, `>=5.4 <7`; without one it rejects naming `npm install typescript@6` and the `typescript` option) and reads nothing but the source and the compiler's lib. `notRead` names, by path, what the source cannot carry (a date's kind, a pattern, a bound, a default, a description): a write replaces each type whole, so merge the result over the stored meta first. The package's README has the export table and every reason ([Read a space meta from TypeScript](https://github.com/ythril-network/Ythril/blob/main/schema/README.md#read-a-space-meta-from-typescript)).
 
 ### Schema Validation
 

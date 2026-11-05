@@ -21,6 +21,10 @@
       "types": "./dist/internal.d.ts",
       "import": "./dist/internal.js"
     },
+    "./from-typescript": {
+      "types": "./dist/from-typescript.d.ts",
+      "import": "./dist/from-typescript.js"
+    },
     "./package.json": "./package.json"
   },
   "main": "./dist/index.js",
@@ -40,8 +44,17 @@
     "@bufbuild/protobuf": "2.16.0",
     "zod": "^4.3.6"
   },
+  "peerDependencies": {
+    "typescript": ">=5.4 <7"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "^22",
-    "typescript": "^5"
+    "typescript": "^5",
+    "typescript-6": "npm:typescript@^6"
   }
 }

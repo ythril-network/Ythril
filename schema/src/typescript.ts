@@ -110,8 +110,14 @@ const IRRELEVANT_SPACE_FIELDS: ReadonlySet<string> = new Set([
 /** The space fields reported when a meta sets them, read from the meta body. */
 const REPORTED_SPACE_FIELDS = Object.keys(SpaceMetaBody.shape).filter(f => f !== PER_TYPE_META_FIELD && !IRRELEVANT_SPACE_FIELDS.has(f));
 
-/** The top-level names the source declares besides the per-type interfaces; no type is allocated one of them. */
-const SPACE_TYPES = 'SpaceTypes';
+/**
+ * The name of the map the source declares besides the per-type interfaces (no type is allocated it), and the two members each of its
+ * entries has. Read by BOTH directions (`typesOfSpaceMeta` writes them, `@ythril/schema/from-typescript` reads them), so a rename of the
+ * map or a member is one edit and a source one direction wrote is never one the other cannot find. Not part of either entry's surface.
+ */
+export const SPACE_TYPES = 'SpaceTypes';
+export const SPACE_TYPE_PROPERTIES = 'properties';
+export const SPACE_TYPE_STORED = 'stored';
 
 /**
  * Schema text made safe inside a block comment: `*` `/` cannot close it, a line break (LF, CR, U+2028, U+2029) cannot start a new comment
@@ -331,7 +337,7 @@ function convert(meta: unknown, library: Map<string, SchemaLibraryEntryLike>): T
         for (const field of REPORTED_TYPE_FIELDS) if (read.schema[field] !== undefined) report({ reason: 'not-translated', field });
       }
       declared.push(...declarations(base, kind, read, report));
-      entries.push(`    ${literal(name)}: { properties: ${base}Properties; stored: ${base}StoredProperties };`);
+      entries.push(`    ${literal(name)}: { ${SPACE_TYPE_PROPERTIES}: ${base}Properties; ${SPACE_TYPE_STORED}: ${base}StoredProperties };`);
     }
     map.push(`  ${literal(kind)}: {${entries.length === 0 ? '' : `\n${entries.join('\n')}\n  `}};`);
   }

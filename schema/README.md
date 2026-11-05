@@ -35,6 +35,10 @@ npm install ./ythril-schema-*.tgz
 
 ESM only, Node 22 or later: the CEL rule engine (`@bufbuild/cel`) is loaded with a top-level `await`.
 
+An app that reads a space meta back from TypeScript (see [Read a space meta from TypeScript](#read-a-space-meta-from-typescript))
+also installs the compiler itself: `typescript` is an optional peer dependency (`>=5.4 <7`), loaded only by the
+`@ythril/schema/from-typescript` entry. An app that never reads TypeScript installs nothing more.
+
 ## Validate a space meta
 
 ```ts
@@ -158,6 +162,75 @@ reasons, the whole list (a reason added is a deliberate edit an app's switch can
 - `enum-too-long`: an enum longer than `ENUM_LITERAL_MAX`; the member is its base type.
 - `renamed`: a type whose identifier was taken; `detail` is the one it got.
 - `no-type-schemas`: a meta with no type schemas to read (missing, or not an object, or the meta itself is not one).
+
+## Read a space meta from TypeScript
+
+```ts
+import { spaceMetaFromTypeScript } from '@ythril/schema/from-typescript';
+
+const answer = await spaceMetaFromTypeScript(readFileSync('src/garden-types.ts', 'utf8'));
+if (!answer.ok) throw new Error(answer.refusals.map(r => `${r.path.join('.')}: ${r.reason}`).join('\n'));
+const { meta, notRead } = answer; // meta.typeSchemas: what the source declares; notRead: what it could not carry
+```
+
+`spaceMetaFromTypeScript` is the way back from `typesOfSpaceMeta`: it reads a space's type schemas out of TypeScript (the
+integration guide's [Schema API](https://github.com/ythril-network/Ythril/blob/main/docs/integration-guide/06a-schema-api.md#read-a-space-meta-from-typescript)
+tells the same from the app's side). The
+source is one exported interface or type alias, `SpaceTypes` unless `options.map` names another, shaped as the forward direction
+writes it: a knowledge type, then a type name as a string literal, then `{ properties: <object type> }` (a `stored` entry is
+ignored). It lives behind its own export, `@ythril/schema/from-typescript`, and the main entry never loads it.
+
+| Export | What it is |
+| --- | --- |
+| `spaceMetaFromTypeScript` | `(source, options?) => Promise<FromTypeScriptResult>`: the meta the source declares, or every reason it cannot be read |
+| `UNREPRESENTED_REASONS` | the closed list of reasons a source is refused, each below |
+| `SOURCE_MAX` | the most characters of source one call reads; a longer one is refused before anything is parsed |
+| `FromTypeScriptOptions` | `{ map?, typescript? }`: the interface that holds the map, and a loaded compiler to use |
+| `FromTypeScriptResult` | `{ ok: true, meta: { typeSchemas }, notRead }` or `{ ok: false, refusals, more }` |
+| `Refusal` | `{ path, reason, detail, code? }`: where in the source, one of `UNREPRESENTED_REASONS`, bounded text; `code` is the compiler's number for `source-does-not-compile` |
+| `NotRead` | `{ path }`: `[kind, type, 'propertySchemas', member, field]` for a field of a member the source cannot carry |
+
+**The compiler is yours.** `typescript` is an optional peer dependency (`>=5.4 <7`): npm does not install it for you, and the main
+entry never loads it. The first call loads it from your own install; with none, the call rejects with one error that names the
+fix, `npm install typescript@6`, and the `typescript` option, which takes a module you loaded yourself (a compiler of the range
+installed under an alias works the same). A module with no `createProgram` is refused the same way, and any other error loading it
+is thrown as it is. The compile is closed: it reads the source you gave it and the compiler's own lib, and nothing else on the
+machine; no import resolves.
+
+**Whole or nothing.** A source with one member this cannot say exactly is refused as a whole, with up to ten refusals and
+`more` counting the rest; a type is never read as one near it. A member reads as a kind (`string`, `number`, `boolean`), as an
+enum (a union of string or number literals, in the order the source lists them, at most `ENUM_LITERAL_MAX`), optional with `?` or
+`| undefined`, and untyped as the forward direction writes it (`string | number | boolean` on an entity, `unknown` on any
+other kind). An object whose only member is an index signature is an open type.
+
+**What the source cannot carry is named, not dropped.** A date reads back as a string; a boolean enum widens to boolean; a
+required property with a default reads back optional; a pattern, a minimum, a maximum, a default, a merge function and a
+description are only notes in the source. Each is an entry in `notRead`, by path, and none is read back. The server replaces each
+type it is handed whole, so merge the result over the stored meta before you write it, or the write strips what `notRead` names.
+
+The reasons, the whole list (a reason added is a deliberate edit an app's switch can see):
+
+- `imports-not-read`: an import, an `export ... from` or a `/// <reference>`; the compile resolves nothing, so the source must be whole.
+- `directive-not-read`: a `@ts-nocheck`, `@ts-ignore` or `@ts-expect-error` comment, which would switch off the diagnostics that judge the source.
+- `source-too-large`: more than `SOURCE_MAX` characters; refused before the compiler loads.
+- `map-not-found`: no interface or type alias of the map's name, or a type of it with no object `properties` member.
+- `unknown-kind`: a key of the map that is not one of the four knowledge types.
+- `internal-name`: a type or member named `__proto__`, `constructor` or `prototype`, which no plain object can carry as a key.
+- `null-not-representable`: a member that admits `null`.
+- `never-not-representable`: a member that is `never`, or has no value but `undefined`.
+- `untyped-not-read`: a member that is `any`, `unknown` on an entity (an entity value is a primitive), or an index signature that is typed.
+- `date-not-representable`: a `Date` (write the date as a string).
+- `object-not-representable`: an object type, or an index signature beside declared members.
+- `array-not-representable`: an array or a tuple.
+- `union-not-representable`: a union that is not literals of one base type.
+- `method-not-representable`: a method or a function type.
+- `generic-not-representable`: a generic type or alias.
+- `template-not-representable`: a template literal type.
+- `branded-not-representable`: an intersection, such as a branded string.
+- `enum-too-long`: a union of literals longer than `ENUM_LITERAL_MAX`.
+- `source-does-not-compile`: a diagnostic of the file (`code` is the compiler's number, `detail` its text); a `@ts-` comment cannot silence it.
+- `compiler-failed`: the compiler threw on the source (a nesting deeper than it can follow, for one).
+- `server-refuses`: what was read is not a meta the server stores; `detail` is the server's own sentence.
 
 ## What else is exported
 

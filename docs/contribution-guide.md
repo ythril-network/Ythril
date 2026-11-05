@@ -133,6 +133,9 @@ npm run build:server          # Compiles schema/src → schema/dist, then server
 The server imports `@ythril/schema` (the space-schema bodies, parses, tuples and limits) from `schema/dist`, and its
 `prebuild` and `predev` compile the package first. A change to a schema body, a limit or a rule check is a change to
 `schema/src`; `server/src` re-exports it and defines none of it (`an-outside-apps-schema-validates-through-the-schema-package.test.js`).
+The package's one door to a compiler is its `@ythril/schema/from-typescript` entry: `typescript` is its optional peer, named by one
+dynamic `import('typescript')` in `schema/src/from-typescript.ts` and nowhere else, never by the main entry, and the server and the
+client never import the entry (the same test and `the-server-and-client-never-import-the-from-typescript-entry.test.js`).
 
 ### Client (Angular production build)
 
@@ -476,7 +479,9 @@ Code should be boring to read. Clever tricks create maintenance debt.
 
 Ythril ships under the PolyForm Small Business License 1.0.0. Every contribution must respect this. The exception is
 `schema/` (`@ythril/schema`), which is Apache-2.0 with its own `schema/LICENSE` and `schema/NOTICE`: a dependency added to
-it is named in `schema/NOTICE` too (a gate reads the package's production closure from the lock file).
+it is named in `schema/NOTICE` too (a gate reads the package's production closure from the lock file). The one exception is the
+optional peer `typescript` of its `from-typescript` entry: the caller's own, never bundled or installed, so the closure leaves it
+out only because the package's own lock entry marks it optional (`peerDependenciesMeta`), and the published image is checked to carry none.
 
 - **No copyleft-contaminated code dependencies in shipped Node packages.** GPL and AGPL dependencies are not permitted in the application dependency tree. Runtime infrastructure (for example MongoDB deployment options) must be documented explicitly in [Dependencies](dependencies.md), with licensing impact explained.
 - **License header awareness.** Third-party code snippets adapted into the codebase must have their original license noted in the `NOTICE` file.
@@ -524,7 +529,7 @@ place**, and a change that adds a second is the defect this repository produces 
 - **A schema body is parsed once, before any store.** `spaces/body-schemas.ts` mints the parsed types every store takes
   (a space's meta, a type, a library entry); nothing else does. The bodies and parses themselves are `@ythril/schema`'s
   (`schema/src/`), re-exported by that shim; a server-only helper goes in the package's `./internal` entry, never its app
-  entry, whose names a test holds. A `$ref` is refused through `libraryRefRefusal` only, the package's one refusal. A key added to a meta body needs its merge kind in
+  entry, whose names a test holds (nor its `./from-typescript` entry, which only an app that reads TypeScript calls). A `$ref` is refused through `libraryRefRefusal` only, the package's one refusal. A key added to a meta body needs its merge kind in
   `spaces/meta-fields.ts` on the same commit (the body refuses to load without it), its rights row in
   `auth/space-field-rights.ts`, its first release in `sync/meta-skew.ts` so a write names the members that will refuse it, and the
   `schema_update` argument.
