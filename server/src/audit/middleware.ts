@@ -14,6 +14,7 @@ import { getConfig } from '../config/loader.js';
 import { classifyOperation, recordSpaceCall } from '../metrics/space-activity.js';
 import { currentRequestId } from '../util/log.js';
 import { isOidc } from '../auth/oidc-caller.js';
+import { requestAddress } from './request-address.js';
 // `req.recallOutcome` below is declared by `auth/middleware.ts` (a global `Express.Request` augmentation). This file reads it, so it names
 // the file that declares it: a program that reaches this module without reaching that one (the metric registry reads `MCP_TOOL_OPERATIONS`
 // through `audit-map`, which imports this) must still compile. Type-only, so nothing is imported at run time.
@@ -515,7 +516,7 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
       tokenLabel: token?.name ?? null,
       authMethod,
       oidcSubject: isOidc(token) ? token.id.replace(/^oidc:/, '') : null,
-      ip: req.ip ?? req.socket.remoteAddress ?? 'unknown',
+      ip: requestAddress(req),
       method: req.method,
       // A read through a personal view: the view's id is its owner's own text, so the recorded path names `@view` and the row names the
       // MEMBERS read (`spaces`), never the view.
@@ -694,7 +695,7 @@ export function logAuthFailure(req: Request): void {
     tokenLabel: null,
     authMethod: null,
     oidcSubject: null,
-    ip: req.ip ?? req.socket.remoteAddress ?? 'unknown',
+    ip: requestAddress(req),
     method: req.method,
     path: fullPath,
     spaceId: null,

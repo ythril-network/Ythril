@@ -2,12 +2,11 @@
 import type { Request, Response } from 'express';
 import { refusalOfParse } from '../util/log.js';
 import { requireAuth, requireAdminOrSpaceAdmin, requireAdminOrSpaceAdminMfa, isInstanceAdmin } from '../auth/middleware.js';
-import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
+import { authRateLimit, globalRateLimit, callerKeyOf } from '../rate-limit/middleware.js';
 import { rateLimitRefusalResponse } from '../rate-limit/per-token.js';
 import { createToken, initialRightsOf, listTokens, revokeToken, regenerateToken, renameToken, setTokenRights, setTokenMfa, setTokenRateLimit } from '../auth/tokens.js';
 import { isMfaEnabled } from '../auth/totp.js';
-import { tryMfaCode, mfaLockOfToken, mfaTokenIdOf } from '../auth/code-attempts.js';
-import { sendMfaLocked } from './mfa-locked-answer.js';
+import { mfaCodeHolds } from './mfa-code-door.js';
 import { specialPurposeApproverRefusal } from '../auth/peer-bound.js';
 import { z } from 'zod';
 import { SPACE_AREAS, RUNGS, RUNG_IMPLICATIONS, DERIVED_RUNGS } from '../config/rights-shape.js';
@@ -280,31 +279,12 @@ export const CreateTokenBody = z.object({
  */
 function exemptionNeedsLiveCode(req: Request, res: Response, mfa: string | undefined): boolean {
   if (mfa !== 'exempt' || !isMfaEnabled()) return true;
-  const code = (req.headers['x-totp-code'] as string | undefined ?? '').trim();
-  const tokenId = mfaTokenIdOf(req);
-  // A locked token is answered before it is asked for a code (the lock is the answer; no code can succeed), as `enforceMfa` does.
-  const lock = mfaLockOfToken(tokenId);
-  if (lock) {
-    sendMfaLocked(res, lock);
-    return false;
-  }
   const required = {
     error: 'MFA_REQUIRED',
     message: 'Granting an MFA exemption requires a current TOTP code, even from a token that is itself exempt',
   };
-  // A request with no code is never a guess: it is refused here and not counted.
-  if (!code) {
-    res.status(403).json(required);
-    return false;
-  }
-  // A code goes through the attempt counter, which answers an object: `.ok`, and `.reason` for a lock the address key began.
-  const attempt = tryMfaCode(code, { tokenId, req });
-  if (!attempt.ok) {
-    if (attempt.reason === 'locked') sendMfaLocked(res, attempt);
-    else res.status(403).json(required);
-    return false;
-  }
-  return true;
+  // The same door `enforceMfa` stands at (lock, then code, then the attempt counter); this one answers a refused code with the same body as a missing one.
+  return mfaCodeHolds(req, res, callerKeyOf(req), { missing: required, invalid: required });
 }
 
 // GET /api/tokens — list tokens (hashes excluded) — admin only

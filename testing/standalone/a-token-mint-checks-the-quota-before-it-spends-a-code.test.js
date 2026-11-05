@@ -60,12 +60,15 @@ describe('POST /api/tokens: the quota is asked before a code is spent or counted
       'a code is verified (and spent, and counted) before an over-ceiling body is refused: move rateLimitRefusalResponse above it');
   });
 
-  it('the exemption helper asks the code through tryMfaCode', () => {
+  it('the exemption helper asks the code through the one door sequence, which asks tryMfaCode', () => {
     const start = routes.indexOf('function exemptionNeedsLiveCode(');
     assert.ok(start >= 0, 'exemptionNeedsLiveCode is gone');
     const body = routes.slice(start, routes.indexOf('\n}\n', start));
-    assert.match(body, /(?<![\w$])tryMfaCode\s*\(/, 'exemptionNeedsLiveCode does not ask tryMfaCode');
+    assert.match(body, /(?<![\w$])mfaCodeHolds\s*\(/, 'exemptionNeedsLiveCode does not ask mfaCodeHolds');
     assert.doesNotMatch(body, /\b(?:verifyMfaCode|judgeMfaCode)\b/, 'exemptionNeedsLiveCode reaches the verifier without the counter');
+    const door = stripComments(readFileSync('server/src/api/mfa-code-door.ts', 'utf8'));
+    assert.match(door, /(?<![\w$])tryMfaCode\s*\(/, 'the door sequence does not ask tryMfaCode');
+    assert.doesNotMatch(door, /\b(?:verifyMfaCode|judgeMfaCode)\b/, 'the door sequence reaches the verifier without the counter');
   });
 
   it('the order check flags a handler with the code first (planted copy)', () => {

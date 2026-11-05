@@ -28,6 +28,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripComments } from './_strip-comments.mjs';
 
 const ROOT = process.cwd();
 let mfaRequiredFor;
@@ -75,16 +76,19 @@ describe('an MFA exemption cannot widen itself', () => {
   it('creating an exempt token verifies a live TOTP code', () => {
     assert.match(code, /mfa !== 'exempt' \|\| !isMfaEnabled\(\)/,
       'the guard must key on the REQUESTED exemption and the instance switch');
-    // Asked through the attempt counter (Q-694), whose answer is an object: the code must actually be verified, and the verdict read as
-    // `.ok` (or `.reason`), never as a boolean. The helper's own body is the window, so a call elsewhere in the file cannot satisfy this.
+    // Asked through the one door sequence (`mfaCodeHolds`, `api/mfa-code-door.ts`) and its answer returned as the helper's own: the helper's body
+    // is the window, so a call elsewhere in the file cannot satisfy this.
     const at = code.indexOf('function exemptionNeedsLiveCode(');
     assert.ok(at >= 0, 'exemptionNeedsLiveCode is gone');
     const helper = code.slice(at, code.indexOf('\n}\n', at));
-    const call = /(?<![\w$])tryMfaCode\(/.exec(helper);
-    assert.ok(call, 'the code must actually be verified, through tryMfaCode, not merely present');
-    assert.match(helper.slice(call.index), /\.(?:ok|reason)\b/, 'the verdict of tryMfaCode must be read as .ok or .reason');
-    assert.doesNotMatch(helper, /(?<![\w$])!\s*tryMfaCode\(/, 'tryMfaCode answers an object: a negated call is never true');
+    assert.match(helper, /return mfaCodeHolds\(/, 'the code must actually be verified, through mfaCodeHolds, and its answer is the helper\'s');
     assert.doesNotMatch(helper, /\bverifyMfaCode\(/, 'the exemption door verifies a code without the attempt counter');
+    // The door asks the attempt counter (Q-694), whose answer is an object: the verdict is read as `.ok` (or `.reason`), never as a boolean.
+    const door = stripComments(readFileSync(join(ROOT, 'server/src/api/mfa-code-door.ts'), 'utf8'));
+    const call = /(?<![\w$])tryMfaCode\(/.exec(door);
+    assert.ok(call, 'the door must actually verify the code, through tryMfaCode, not merely ask for it');
+    assert.match(door.slice(call.index), /\.(?:ok|reason)\b/, 'the verdict of tryMfaCode must be read as .ok or .reason');
+    assert.doesNotMatch(door, /(?<![\w$])!\s*tryMfaCode\(/, 'tryMfaCode answers an object: a negated call is never true');
   });
 
   it('checks BEFORE the token is created, not after', () => {

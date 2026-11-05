@@ -71,6 +71,17 @@ export function clientRateLimitKey(req: Request): string {
 }
 
 /**
+ * Who a request is, to the code that counts per token: its token's id, else (a caller with no stored id, an OIDC identity) the shared client
+ * key of its credential, so that caller is still counted and never exempt. The one definition, so the per-token quota (`tokenRateLimit`) and the
+ * second-factor attempt counter (`auth/code-attempts.ts`, through its three doors) bucket one caller under one key. A guard that runs before the
+ * token is attached to the request (`enforceMfa`) passes the record it resolved; everything behind the guards reads the attached one. Each caller
+ * adds its own `t:` prefix; this is not a key in any table by itself.
+ */
+export function callerKeyOf(req: Request, record?: { id?: string }): string {
+  return (record ?? (req.authToken as { id?: string } | undefined))?.id || clientRateLimitKey(req);
+}
+
+/**
  * The `SKIP_*_RATE_LIMIT` kill-switches exist only for the test harness. They are
  * honoured **outside production only**, so a leaked env var (copy-pasted compose,
  * shared `.env`) can never silently disable rate limiting on a live deployment —
@@ -280,12 +291,9 @@ export const tokenRateLimit = rateLimit({
   max: (req: Request) => resolveLimitFor(req.authToken as { rateLimitPerMinute?: number } | undefined),
   standardHeaders: 'draft-7',
   legacyHeaders: false,
-  keyGenerator: (req: Request) => {
-    const token = req.authToken as { id?: string } | undefined;
-    // An OIDC-derived identity has no stored token id; fall back to the shared client key so it is still
-    // bucketed rather than exempt. Exempting anything from a quota is how a quota stops being one.
-    return token?.id ? `t:${token.id}` : clientRateLimitKey(req);
-  },
+  // An OIDC-derived identity has no stored token id; `callerKeyOf` falls back to the shared client key so it is still
+  // bucketed rather than exempt. Exempting anything from a quota is how a quota stops being one.
+  keyGenerator: (req: Request) => `t:${callerKeyOf(req)}`,
   message: { error: 'Rate limit exceeded for this token, please slow down.' },
   handler: (req, res, _next, options) => {
     const token = req.authToken as { id?: string; name?: string } | undefined;

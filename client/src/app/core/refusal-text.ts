@@ -1,6 +1,7 @@
 import type { TranslocoService } from '@jsverse/transloco';
 import { formatList } from './list-format';
 import { pluralText } from './plural-text';
+import { retryAfterSecondsOf } from './retry-after';
 import { translatedOrEmpty } from './translated-text';
 
 /**
@@ -280,7 +281,7 @@ const MFA_LOCK_LONGEST_MINUTES = 15;
  */
 function mfaLockedSentence(transloco: Translate, language: string, body: Record<string, unknown>, err: RefusalSource | null | undefined): string {
   const fromBody = typeof body['retryAfterSeconds'] === 'number' ? body['retryAfterSeconds'] : NaN;
-  const fromHeader = Number(err?.headers?.get('Retry-After') ?? NaN);
+  const fromHeader = retryAfterSecondsOf(err) ?? NaN;
   const seconds = [fromBody, fromHeader].find(s => Number.isFinite(s) && s > 0);
   const minutes = seconds === undefined ? MFA_LOCK_LONGEST_MINUTES : Math.max(1, Math.ceil(seconds / 60));
   // Literal bases, so the plural-coverage gate can read both families' forms in every locale.

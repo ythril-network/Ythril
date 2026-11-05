@@ -74,36 +74,13 @@ import {
   configReloadPending,
 } from './metrics/registry.js';
 import { answeredUnknownSpace } from './api/write-target-answer.js';
+import { resolveTrustProxy } from './config/trust-proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** Path to the compiled Angular SPA — configurable via env for Docker flexibility */
 const clientDist =
   process.env['CLIENT_DIST'] ??
   path.resolve(__dirname, '..', '..', 'client', 'dist', 'browser');
-
-/**
- * Resolve the Express `trust proxy` setting from the TRUST_PROXY env var (takes
- * precedence) or `config.trustProxy`. Defaults to `false` so a directly-exposed
- * deployment derives `req.ip` from the socket, not a spoofable X-Forwarded-For.
- */
-function resolveTrustProxy(): boolean | number | string {
-  let raw: unknown = process.env['TRUST_PROXY'];
-  if (raw === undefined) {
-    try { raw = getConfig().trustProxy; } catch { raw = undefined; } // config not loaded on first run
-  }
-  if (raw === undefined || raw === null || raw === false || raw === '') return false;
-  if (raw === true) return true;
-  if (typeof raw === 'number') return raw;
-  if (Array.isArray(raw)) return raw.join(',');
-  if (typeof raw === 'string') {
-    const s = raw.trim();
-    if (s === 'true') return true;
-    if (s === 'false' || s === '') return false;
-    if (/^\d+$/.test(s)) return Number(s);
-    return s; // 'loopback' or a comma-separated CIDR/IP list — Express parses these
-  }
-  return false;
-}
 
 export function createApp() {
   const app = express();
