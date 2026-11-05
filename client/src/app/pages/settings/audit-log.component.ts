@@ -517,7 +517,7 @@ export class AuditLogComponent implements OnInit, OnDestroy {
     'token.create', 'token.delete',
     'webhook.create', 'webhook.update', 'webhook.delete',
     'config.reload',
-    'auth.failed',
+    'auth.failed', 'mfa.locked',
     'brain.recall', 'brain.recall_global', 'brain.query', 'brain.stats',
     'chrono.list', 'fact.list', 'entity.list', 'edge.list',
     'file.read', 'file.list', 'space.list',

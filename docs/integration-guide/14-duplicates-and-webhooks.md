@@ -454,7 +454,7 @@ would also be the same two records named twice under two different headings.
 
 ## Webhooks API
 
-Base path: `/api/admin/webhooks` — **requires an admin token on all endpoints** (`requireAdminMfa`), including the read-only `GET`s (`/`, `/:id`, `/:id/deliveries`). When MFA is enabled, every request must also carry an `X-TOTP-Code: <code>` header, or it returns `403 MFA_REQUIRED`.
+Base path: `/api/admin/webhooks` — **requires an admin token on all endpoints** (`requireAdminMfa`), including the read-only `GET`s (`/`, `/:id`, `/:id/deliveries`). When MFA is enabled, every request must also carry an `X-TOTP-Code: <code>` header, or it returns `403 MFA_REQUIRED`; a wrong code is `403 MFA_INVALID`, and five wrong codes in 15 minutes lock the token (`429 MFA_LOCKED`, `retryable: false`: wait `retryAfterSeconds`, see [the lockout](03-auth-and-limits.md#wrong-second-factor-codes-lock-the-token)).
 
 Webhooks allow external systems to receive real-time HTTP POST notifications when write events occur on Ythril spaces. This replaces the need to poll for changes.
 

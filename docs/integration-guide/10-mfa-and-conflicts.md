@@ -99,6 +99,32 @@ POST /api/mfa/verify
 { "valid": true }
 ```
 
+A code that is not the current one answers `200 { "valid": false }`, and a code that was already used (a replay) or is a few minutes old (a cached one) answers
+the same, so the answer never tells a guesser which of them it was. Only a wrong code is **counted** (below).
+
+**Response** `429` when the token is locked, a correct code included:
+
+```json
+{ "error": "MFA_LOCKED", "code": "MFA_LOCKED", "key": "token", "retryAfterSeconds": 540, "retryable": false, "message": "..." }
+```
+
+`Retry-After` carries the same number of seconds. Wait it; a locked attempt is not verified and spends no code.
+
+### The lockout: wrong codes are counted
+
+Every door that asks for a code counts the wrong ones, together and per token: the `X-TOTP-Code` header of any MFA-gated route, `POST /api/mfa/verify`, and the live code
+that granting `mfa: "exempt"` costs. **5 wrong codes inside 15 minutes lock the token** — and the source address, where the address can be told apart: behind a
+configured `TRUST_PROXY`, or when the socket's own address is a public one. Behind the default Docker gateway only the token is counted, so one token's guesses never lock
+every administrator. From the sixth attempt on, the answer is `429 MFA_LOCKED` (`key` is `token` or `address`; the token is named when both are locked), `retryable: false`.
+Each wrong code leaves the count 15 minutes after it was made, so a lock lifts one code at a time and `retryAfterSeconds` is the wait until the oldest leaves, never
+below 1. A locked token is answered `429` even when it sends no code, so a client is not asked to prompt for one that cannot succeed.
+
+Only a guess is counted. A request with no code, a replayed code, a stale (cached) code and a code sent while MFA is off are refused like a wrong code and counted for
+nothing, so an administrator whose client resends a cached code is never locked out by it. The lock is kept in the server's memory (a restart clears it); each lock that
+starts writes an `mfa.locked` [audit row](13-audit-log-api.md) and counts `ythril_mfa_lockouts_total` (see [metrics](11-setup-api.md)): **alert on a rise, and revoke the token**.
+There is no way to lift a lock from the API; waiting is the recovery. Confirming a new enrolment counts too: five mistyped confirmation codes lock the token for that long, and
+that includes the call that disables MFA.
+
 ---
 
 ### Disable MFA

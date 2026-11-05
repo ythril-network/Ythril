@@ -1,6 +1,7 @@
 /**
  * MFA prompt modal — shown by the mfaInterceptor when a request returns
- * 403 MFA_REQUIRED or MFA_INVALID.
+ * 403 MFA_REQUIRED or MFA_INVALID. It is never shown for a 429 MFA_LOCKED: a locked token cannot be
+ * unlocked by a code, so the lock is said where the request failed (with its wait), not asked for again here.
  *
  * Add <app-mfa-prompt /> once at the top-level layout (app shell).
  * It is invisible until the MfaService emits a challenge.

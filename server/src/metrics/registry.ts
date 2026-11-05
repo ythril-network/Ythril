@@ -1342,6 +1342,29 @@ export const authAttemptsTotal = new Counter({
   registers: [register],
 });
 
+/**
+ * Second-factor lockouts that STARTED (`auth/code-attempts.ts`), by what was locked: a `token` or a source `address`. One increment per lock
+ * start (the wrong code that brought the key to its limit), however many locked attempts follow. A rise is somebody guessing codes.
+ */
+export const mfaLockoutsTotal = new Counter({
+  name: 'ythril_mfa_lockouts_total',
+  help: 'Second-factor lockouts started, by the key locked: token or address (five wrong codes in 15 minutes)',
+  labelNames: ['key'] as const,
+  registers: [register],
+});
+for (const key of ['token', 'address'] as const) mfaLockoutsTotal.labels({ key }).inc(0);
+
+/**
+ * Wrong second-factor codes the lockout table could not record because it was full of running locks (`auth/code-attempts.ts`): the attempt was
+ * still refused, but it was not counted toward a lock. Absent must not be confusable with fine, so it is declared at zero.
+ */
+export const mfaLockoutEvictionsTotal = new Counter({
+  name: 'ythril_mfa_lockout_evictions_total',
+  help: 'Wrong second-factor codes not recorded because the lockout table was full of running locks',
+  registers: [register],
+});
+mfaLockoutEvictionsTotal.inc(0);
+
 export const tokensActive = new Gauge({
   name: 'ythril_tokens_active',
   help: 'Number of active (non-expired) tokens',

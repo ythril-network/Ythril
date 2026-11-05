@@ -59,8 +59,9 @@ describe('clientRateLimitKey', () => {
      * carrying `?token=` is unauthenticated, so bucketing by it would let an anonymous caller mint a fresh
      * bucket per request by varying a string nobody checks — and because `globalRateLimit` skips entirely
      * for a request that presents a credential, a bare `?token=anything` moved that caller off the 300/min
-     * global limit and onto the 3000/min IP flood backstop. Bounded by the backstop, so a tenfold
-     * amplification rather than an open door, but free to anyone with a query string.
+     * global limit and onto the per-address flood backstop (which counts it: no token's limit metered it). Bounded
+     * by the backstop, so a tenfold step up from the anonymous cap rather than an open door, but free to anyone
+     * with a query string.
      */
     const anon = clientRateLimitKey(req());
     assert.equal(clientRateLimitKey(req({ token: 'ythril_mcp' })), anon,

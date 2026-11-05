@@ -78,8 +78,13 @@ describe('the guide states the flood backstop\'s rule', () => {
   });
 
   it('the proxy sentence under it is still there: the count is per address, so a proxy needs TRUST_PROXY', () => {
-    const note = guide().replace(/\r?\n>\s?/g, ' ').replace(/\s+/g, ' ');
-    assert.match(note, /Behind a reverse proxy, set `TRUST_PROXY`.{0,500}flood backstop/,
-      'the TRUST_PROXY note that names the backstop is gone');
+    // The note is one blockquote: its own `>` lines, bounded by the first line that is not one.
+    const lines = guide().split(/\r?\n/);
+    const start = lines.findIndex(l => l.includes('Behind a reverse proxy, set `TRUST_PROXY`'));
+    assert.ok(start >= 0, 'the TRUST_PROXY note is gone');
+    let end = start;
+    while (end + 1 < lines.length && /^>/.test(lines[end + 1])) end++;
+    const note = lines.slice(start, end + 1).join(' ').replace(/>\s?/g, ' ').replace(/\s+/g, ' ');
+    assert.match(note, /flood backstop/, 'the TRUST_PROXY note no longer names the flood backstop');
   });
 });

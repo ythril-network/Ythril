@@ -31,6 +31,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { enclosingBlockAround } from './_structural-window.mjs';
 
 const AUDIT_GUIDE = readFileSync('docs/integration-guide/13-audit-log-api.md', 'utf8');
 const SETUP_GUIDE = readFileSync('docs/integration-guide/11-setup-api.md', 'utf8');
@@ -62,8 +63,11 @@ describe('the lockout is auditable and observable', () => {
 
   it('the registry declares both counters, the first by key', () => {
     const registry = stripComments(readFileSync('server/src/metrics/registry.ts', 'utf8'));
-    const lockouts = /name:\s*'ythril_mfa_lockouts_total'[\s\S]{0,400}?labelNames:\s*\[\s*'key'\s*\]/.exec(registry);
-    assert.ok(lockouts, "ythril_mfa_lockouts_total is not declared with labelNames: ['key']");
+    const at = registry.indexOf("name: 'ythril_mfa_lockouts_total'");
+    assert.ok(at >= 0, 'ythril_mfa_lockouts_total is not declared');
+    // The counter's own object literal, bounded by its braces: a label written on the NEXT declaration cannot count.
+    const declaration = enclosingBlockAround(registry, at, 'ythril_mfa_lockouts_total');
+    assert.match(declaration, /labelNames:\s*\[\s*'key'\s*\]/, "ythril_mfa_lockouts_total is not declared with labelNames: ['key']");
     assert.match(registry, /name:\s*'ythril_mfa_lockout_evictions_total'/, 'ythril_mfa_lockout_evictions_total is not declared');
   });
 

@@ -37,8 +37,9 @@
  * 1. **Retrieval before the corpus is searchable.** Two separate layers, and each looks exactly like poor
  *    recall: the embed queue still holding jobs, and the space's vector index still `building`. Both are
  *    gated by `waitForEmbeddings`, which FAILS rather than proceeds.
- * 2. **The rate limiter.** `globalRateLimit` is 300 requests/minute per credential
- *    (`server/src/rate-limit/middleware.ts:121`). A corpus of a few thousand records cannot be written
+ * 2. **The rate limiter.** A token's own per-minute limit (`DEFAULT_PER_MINUTE` in
+ *    `server/src/rate-limit/per-token.ts`, reported as `rateLimitEffective`) bounds what one credential
+ *    may send. A corpus of a few thousand records cannot be written
  *    faster than that, so a client that does not honour `429` does not slow down — it dies partway through
  *    and reports the recall of a half-written store. Retried with the server's own `Retry-After`.
  * 3. **A degraded recall counted as a bad recall.** `degraded: ["search_timeout"]` comes back with a `200`
@@ -226,6 +227,9 @@ function retryAfterMsFrom(headers) {
  * instead of matching our prose. Where the server says, the server wins. The write routes carry no such
  * field, so the status decides: 429 and 5xx are worth retrying, and no other 4xx ever is — a 400 for a bad
  * body will be a 400 six times and turn one visible mistake into a slow one.
+ *
+ * A body that says `retryable: false` wins over the status, a 429 included: the second-factor lockout (`429 MFA_LOCKED`) says it, and a
+ * client that kept retrying it would only wait out a lock that no retry lifts.
  */
 function isRetryable(status, body) {
   if (isPlainObject(body) && typeof body.retryable === 'boolean') return body.retryable;
@@ -402,8 +406,8 @@ export function makeYthril({ baseUrl, token, totpCode, timeoutMs = DEFAULT_TIMEO
    *
    * **The create routes do not accept `suppressEmbeddings`; only the PATCH routes do** (`entities.ts:291`
    * names it "the ONLY field a caller may send on its own"). So a record that must stay out of the ranked
-   * results is created and then patched, and the cost is stated rather than hidden: two requests against a
-   * 300/minute limiter, and one wasted embedding — the queue may compute a vector before the patch lands,
+   * results is created and then patched, and the cost is stated rather than hidden: two requests against
+   * the token's per-minute limit, and one wasted embedding — the queue may compute a vector before the patch lands,
    * which `embedStoredRecord` then unsets.
    *
    * Dropping the flag instead would have been silent, and silent is the expensive option here: a suppressed

@@ -50,6 +50,14 @@ import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { tempInstance, boot } from './_round-open-fixtures.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
+import { keepEnv } from '../_shared/env-kept.mjs';
+
+/**
+ * Asked before any test of this file starts. Asked later, beside the truth table's 3 002-request floods, the probe's
+ * 1.5 s socket timer fired before its connect callback on a busy event loop, and the real-app half failed as "the test
+ * Mongo is down" with the stack up (bundle-233, twice).
+ */
+const MONGO_SKIP = await mongoSkipReason();
 
 const MW_PATH = 'server/src/rate-limit/middleware.ts';
 const AUTH_PATH = 'server/src/auth/middleware.ts';
@@ -59,12 +67,14 @@ const src = (p) => stripComments(fs.readFileSync(p, 'utf8'));
 const BACKSTOP_MAX = Number(/max:\s*(\d+)/.exec(bodyOf(src(MW_PATH), 'ipFloodBackstop'))?.[1]);
 const WINDOW_BUDGET_MS = 45_000;
 
-/** Environment the limiter reads at call time; a kill-switch left set would make every row below vacuous. */
-/** Unset `names`; the returned function puts each back as it was. */
+/**
+ * Unset `names` (environment the limiter reads at call time; a kill-switch left set would make every row below
+ * vacuous); the returned function puts each back as it was, through the one shared keeper.
+ */
 function cleanEnv(names) {
-  const saved = Object.fromEntries(names.map(n => [n, process.env[n]]));
+  const restore = keepEnv(names);
   for (const n of names) delete process.env[n];
-  return () => { for (const [n, v] of Object.entries(saved)) { if (v === undefined) delete process.env[n]; else process.env[n] = v; } };
+  return restore;
 }
 
 /**
@@ -187,7 +197,7 @@ describe('the skip predicate, row by row (the real limiter, a distinct address p
   });
 
   it('the backstop\'s own answer says what it counts: an address, and that no token\'s limit covered it', async () => {
-    const ip = '10.78.0.1';
+    const ip = '10.9.9.9';
     const { answers } = await flood({
       count: BACKSTOP_MAX + 2, url: `${server.url}/answer/unset/200`, headers: () => ({ 'x-forwarded-for': ip }),
     });
@@ -200,7 +210,7 @@ describe('the skip predicate, row by row (the real limiter, a distinct address p
   });
 });
 
-describe('the flood, through the real application (valid tokens are not the flood; what no token meters is)', { skip: await mongoSkipReason() }, () => {
+describe('the flood, through the real application (valid tokens are not the flood; what no token meters is)', { skip: MONGO_SKIP }, () => {
   const dir = tempInstance('ythril-q693-flood-');
   const clientDist = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-q693-dist-'));
   fs.writeFileSync(path.join(clientDist, 'index.html'), '<!doctype html><title>spa</title>');

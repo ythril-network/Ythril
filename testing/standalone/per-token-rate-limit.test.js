@@ -301,11 +301,12 @@ describe('one rule, both write paths, and the read surface agrees', () => {
     const patch = routes.slice(start, routes.indexOf('tokensRouter.', start + 1));
     const refusedAt = patch.indexOf('rateLimitRefusalResponse(');
     assert.ok(refusedAt >= 0, 'the PATCH route no longer checks the quota');
-    for (const effect of ['exemptionNeedsLiveCode(', 'verifyMfaCode(', 'renameToken(', 'setTokenRights(', 'setTokenMfa(', 'setTokenRateLimit(']) {
+    for (const effect of ['exemptionNeedsLiveCode(', 'verifyMfaCode(', 'tryMfaCode(', 'renameToken(', 'setTokenRights(', 'setTokenMfa(', 'setTokenRateLimit(']) {
       const at = patch.indexOf(effect);
       if (at < 0) {
-        // The MFA verification may sit behind `exemptionNeedsLiveCode` and not be named in the route; every other name must be.
-        assert.equal(effect, 'verifyMfaCode(', `the PATCH route no longer calls ${effect}: re-derive the effects`);
+        // The MFA verification (`tryMfaCode`, the attempt counter since Q-694; `verifyMfaCode` before it) may sit behind
+        // `exemptionNeedsLiveCode` and not be named in the route; every other name must be.
+        assert.ok(['verifyMfaCode(', 'tryMfaCode('].includes(effect), `the PATCH route no longer calls ${effect}: re-derive the effects`);
         continue;
       }
       assert.ok(refusedAt < at, `${effect} runs before the quota is checked`);

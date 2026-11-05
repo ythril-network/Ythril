@@ -28,9 +28,10 @@ import { translatedOrEmpty } from './translated-text';
  * 2. a `schema_violation` body is rows: an undeclared key, a broken property, a rule that is violated, could not be
  *    evaluated or was too large to check. Each row is its own sentence, built from a translation key, with its numbers
  *    formatted for the reader (`Intl.NumberFormat`), its lists by `Intl.ListFormat` and its plural by `Intl.PluralRules`;
- * 3. a `code` the client knows, translated under `keyPrefix` (the network refusals by default, `files.refusal` for a file
+ * 3. a locked second factor (`code: 'MFA_LOCKED'`, a 429): one sentence in EVERY key family, with the wait in minutes;
+ * 4. a `code` the client knows, translated under `keyPrefix` (the network refusals by default, `files.refusal` for a file
  *    act: a code names a sentence only inside its own family);
- * 4. the body's own prose, and last the caller's `fallbackKey`.
+ * 5. the body's own prose, and last the caller's `fallbackKey`.
  */
 
 /** Translation service as this module needs it: `translate`, and `getActiveLang` when the caller wants the language read for it. */
@@ -260,6 +261,34 @@ function describeViolation(transloco: Translate, language: string, body: Record<
   return { headline, rows, more };
 }
 
+/** The `code` of the second-factor lockout's `429` (Q-694): five wrong codes in 15 minutes lock a token, or a source address. */
+const MFA_LOCKED_CODE = 'MFA_LOCKED';
+
+/**
+ * The longest a second-factor lock runs, in minutes (the server's window), said when an answer names no wait of its own. A lock never
+ * outlasts it, so "try again in this many minutes" is true. The server states the window in `auth/code-attempts.ts`; a client cannot import it.
+ */
+const MFA_LOCK_LONGEST_MINUTES = 15;
+
+/**
+ * The sentence for a locked second factor, in the reader's language and in every key family: one shared key per lock,
+ * `refusal.mfaLocked.<token|address>`, with the wait as `{{count}}` minutes in the language's plural form. The wait is
+ * `ceil(retryAfterSeconds / 60)` minutes, at least one, from the body, else the `Retry-After` header, else the longest a lock runs.
+ * '' when the locale has no words (the caller then falls to the server's own sentence). Never the raw code.
+ *
+ * What it prevents: a person typing code after code into a lock that cannot open, and being told so in English, or by "could not verify".
+ */
+function mfaLockedSentence(transloco: Translate, language: string, body: Record<string, unknown>, err: RefusalSource | null | undefined): string {
+  const fromBody = typeof body['retryAfterSeconds'] === 'number' ? body['retryAfterSeconds'] : NaN;
+  const fromHeader = Number(err?.headers?.get('Retry-After') ?? NaN);
+  const seconds = [fromBody, fromHeader].find(s => Number.isFinite(s) && s > 0);
+  const minutes = seconds === undefined ? MFA_LOCK_LONGEST_MINUTES : Math.max(1, Math.ceil(seconds / 60));
+  // Literal bases, so the plural-coverage gate can read both families' forms in every locale.
+  return body['key'] === 'address'
+    ? pluralText(transloco, language, 'refusal.mfaLocked.address', minutes)
+    : pluralText(transloco, language, 'refusal.mfaLocked.token', minutes);
+}
+
 /**
  * What a refused request says, as a sentence and as rows. See the module docblock for the order it reads the answer in.
  *
@@ -286,6 +315,10 @@ export function describeRefusal(
   }
 
   const code = nonEmpty(body?.['code']);
+  if (code === MFA_LOCKED_CODE && body) {
+    const sentence = mfaLockedSentence(transloco, lang, body, err);
+    if (sentence) return plain(sentence);
+  }
   if (code) {
     const members = Array.isArray(body?.['members']) ? (body!['members'] as unknown[]).filter((m): m is string => typeof m === 'string') : [];
     const sentence = translatedOrEmpty(transloco, `${keyPrefix}.${code}`, {

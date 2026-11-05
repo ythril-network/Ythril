@@ -24,7 +24,7 @@ import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Use separate instances to avoid exhausting rate limits:
-// - Instance A for brain/files tests (globalRateLimit 300/min)
+// - Instance A for brain/files tests (the token's own limit, `DEFAULT_PER_MINUTE`; `globalRateLimit` is the anonymous cap)
 // - Instance B for token tests (authRateLimit 10/min — separate from A and C)
 const TOKEN_FILE_A = path.join(__dirname, '..', 'sync', 'configs', 'a', 'token.txt');
 const TOKEN_FILE_B = path.join(__dirname, '..', 'sync', 'configs', 'b', 'token.txt');

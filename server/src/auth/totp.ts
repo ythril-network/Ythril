@@ -83,7 +83,75 @@ export function disableMfa(): void {
 const TOTP_STEP_SECONDS = 30;
 
 /**
- * Verify a 6-digit TOTP code against the stored secret.
+ * How far back a code still counts as STALE rather than WRONG: 15 minutes of steps, the span the client keeps the last code it was given
+ * (`mfa.service.ts`). A code from this span is one a person or a script once held, not a guess.
+ */
+const STALE_STEPS_BACK = 30;
+
+/** What {@link judgeMfaCode} says of one code. */
+export type MfaVerdict = 'ok' | 'wrong' | 'replay' | 'stale' | 'unset';
+
+/**
+ * Judge a 6-digit TOTP code against the stored secret, and say WHY it is refused, so that only a guess is counted as one.
+ *
+ * - `ok`     - the code of the current step or one beside it (±1, a 30 s window each way), above the last step consumed. That step is
+ *              burned: saved as `totpLastStep` before the answer is given.
+ * - `replay` - a code of that window whose step is at or below the last consumed one.
+ * - `stale`  - the code of a step within the last 15 minutes but outside the window (the client's cached code, a script's fixed code).
+ * - `wrong`  - matches no step in the window or the last 15 minutes.
+ * - `unset`  - no secret is stored; there is nothing to judge.
+ *
+ * ## What it prevents
+ *
+ * A boolean verifier lets a lockout counter treat every `false` as a guess. The client resends the code it was given on every change
+ * (`mfa.service.ts`) and each step is accepted once, so an honest administrator's resends are replays and a cached code is stale; counting
+ * them locks out the person the lockout protects. The caller (`tryMfaCode`) counts `wrong` and nothing else, and answers the other three
+ * exactly as it answers `wrong`, so the words never reach a caller that could use them as an oracle.
+ *
+ * ## How
+ *
+ * `crypto.timingSafeEqual` over every step, always all of them (the window and the stale span), so which step matched, and whether the
+ * code was a replay, stale or wrong, is not leaked by timing. A refused judgement burns nothing. A throw from the store while burning
+ * the step is not caught: it is neither a verdict nor a guess.
+ */
+export function judgeMfaCode(code: string): MfaVerdict {
+  const secrets = getSecrets();
+  const { totpSecret } = secrets;
+  if (!totpSecret) return 'unset';
+
+  const normalizedCode = Buffer.from(code.padStart(6, '0').slice(0, 6));
+  const now = Math.floor(Date.now() / 1000);
+
+  // Always iterate all windows to prevent timing leakage of which window matched.
+  // `matchedStep` records WHICH step matched so it can be burned below.
+  let matchedStep = -1;
+  for (const offset of [-TOTP_STEP_SECONDS, 0, TOTP_STEP_SECONDS]) {
+    const epoch = now + offset;
+    const expected = Buffer.from(computeTotp(totpSecret, epoch));
+    const isMatch = crypto.timingSafeEqual(normalizedCode, expected);
+    if (isMatch) matchedStep = Math.floor(epoch / TOTP_STEP_SECONDS);
+  }
+
+  // The steps before the window, up to 15 minutes back, always all of them: a replay, a stale code and a wrong one take the same time.
+  let stale = false;
+  for (let back = 2; back <= STALE_STEPS_BACK; back++) {
+    const expected = Buffer.from(computeTotp(totpSecret, now - back * TOTP_STEP_SECONDS));
+    if (crypto.timingSafeEqual(normalizedCode, expected)) stale = true;
+  }
+
+  if (matchedStep < 0) return stale ? 'stale' : 'wrong';
+
+  // Replay guard: refuse a step at or below the last consumed one.
+  const lastStep = secrets.totpLastStep ?? -1;
+  if (matchedStep <= lastStep) return 'replay';
+
+  secrets.totpLastStep = matchedStep;
+  saveSecrets(secrets);
+  return 'ok';
+}
+
+/**
+ * Verify a 6-digit TOTP code against the stored secret: true only for {@link judgeMfaCode}'s `ok`.
  * Returns false if MFA is not enabled or the code is wrong.
  *
  * Checks the current step ±1 (30 s window) using crypto.timingSafeEqual to
@@ -93,33 +161,10 @@ const TOTP_STEP_SECONDS = 30;
  * proxy log, a shoulder-surf, or a phished operator — stays replayable for the
  * remainder of its up-to-90 s validity window, which is exactly the window an
  * attacker with a stolen admin PAT needs to disable MFA.
+ *
+ * No door of the server calls this: each asks `tryMfaCode` (`auth/code-attempts.ts`), which counts the wrong codes. It stays for a test that
+ * asks whether a code is still spendable, which must not count one.
  */
 export function verifyMfaCode(code: string): boolean {
-  const secrets = getSecrets();
-  const { totpSecret } = secrets;
-  if (!totpSecret) return false;
-
-  const normalizedCode = Buffer.from(code.padStart(6, '0').slice(0, 6));
-  const now = Math.floor(Date.now() / 1000);
-
-  // Always iterate all windows to prevent timing leakage of which window matched.
-  // `matchedStep` records WHICH step matched so it can be burned below.
-  let matched = 0;
-  let matchedStep = -1;
-  for (const offset of [-TOTP_STEP_SECONDS, 0, TOTP_STEP_SECONDS]) {
-    const epoch = now + offset;
-    const expected = Buffer.from(computeTotp(totpSecret, epoch));
-    const isMatch = crypto.timingSafeEqual(normalizedCode, expected);
-    matched |= isMatch ? 1 : 0;
-    if (isMatch) matchedStep = Math.floor(epoch / TOTP_STEP_SECONDS);
-  }
-  if (matched !== 1 || matchedStep < 0) return false;
-
-  // Replay guard: refuse a step at or below the last consumed one.
-  const lastStep = secrets.totpLastStep ?? -1;
-  if (matchedStep <= lastStep) return false;
-
-  secrets.totpLastStep = matchedStep;
-  saveSecrets(secrets);
-  return true;
+  return judgeMfaCode(code) === 'ok';
 }
