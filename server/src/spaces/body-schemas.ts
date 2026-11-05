@@ -4,7 +4,7 @@
  * ## Where the schema bodies are
  *
  * The space meta body (`SpaceMetaBody`), the type-schema bodies (`TypeSchemasZ`, `TypeSchemaZ`, `PropertySchemaZ`) and the parses that
- * mint the only value a store accepts (`parseSpaceMeta`, `parseTypeSchema`, ...) are `@ythril/schema`'s (`schema/src/space-meta.ts`).
+ * mint the only value a store accepts (`parseSpaceMeta`, `parseTypeSchema`, ...) are `@ythril-network/schema`'s (`schema/src/space-meta.ts`).
  * An app that writes a schema runs that validator in its own CI instead of a hand-made mirror of it, so the server and the app cannot
  * disagree about what a schema is. They are re-exported below, so every module here that imported them from this file still does —
  * and the one place a parse reads the instance (the schema library a `$ref` names) is handed over in `library-ref-expansion.ts`, which
@@ -36,7 +36,7 @@
  * later without `.strict()` fails the build instead of quietly rejoining the lenient half.
  */
 import { z } from 'zod';
-import { SpaceMetaBody, TypeSchemasZ, type ParsedTypeSchema } from '@ythril/schema';
+import { SpaceMetaBody, TypeSchemasZ, type ParsedTypeSchema } from '@ythril-network/schema';
 import './library-ref-expansion.js';
 import { isSsrfSafeUrl, SSRF_SAFE_MESSAGE } from '../util/ssrf.js';
 import { DOC_EXTRACTION_MODES_IN, IMAGE_LEVELS, AUDIO_LEVELS, VIDEO_LEVELS, TEXT_LEVELS } from '../config/types.js';
@@ -49,12 +49,12 @@ export {
   SpaceMetaBody, SERVER_OWNED_META_FIELDS, stripServerOwnedMeta,
   parseSpaceMeta, parseTypeSchema, parseInlineDefinition, LIBRARY_SCHEMA_KEYS, libraryDeletePathProblem, libraryRefRefusal,
   type ParsedTypeSchema, type ParsedSpaceMeta, type MetaParse, type MetaParseOptions,
-} from '@ythril/schema';
+} from '@ythril-network/schema';
 // The server-only reads (a peer's meta, a stored one, a subset of a parsed one) and the network's drop of unresolvable refs: the
 // package keeps them behind `./internal`, not in an app's API (Q-668). The `$ref` refusal itself is `libraryRefRefusal`, above.
 export {
   withoutBrokenLibraryRefs, readPeerMeta, readStoredMeta, withTypeSchemas, derivedFromStored,
-} from '@ythril/schema/internal';
+} from '@ythril-network/schema/internal';
 
 /**
  * A schema-library entry whose `schema` the library's parse accepted (`parseInlineDefinition`), or one the library already held.

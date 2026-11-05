@@ -397,14 +397,14 @@ first write that meets such a guard clears it and goes on to land, so the list i
 
 ---
 
-### Validate a schema offline (`@ythril/schema`)
+### Validate a schema offline (`@ythril-network/schema`)
 
 An app that writes a schema — a space template, a generator, a flow — can run the validator the server runs, without an
-instance. The vocabulary and the validator are the package `@ythril/schema` (`schema/` in this repository); the server
+instance. The vocabulary and the validator are the package `@ythril-network/schema` (`schema/` in this repository); the server
 imports it, so its answer is the answer an instance gives, refusal text included.
 
 ```ts
-import { validateSpaceMeta } from '@ythril/schema';
+import { validateSpaceMeta } from '@ythril-network/schema';
 
 const result = validateSpaceMeta(meta, { library: entriesMyRefsName });
 if (!result.ok) throw new Error(`${result.message}\n${result.failed.join('\n')}`);
@@ -432,11 +432,11 @@ versioned with the release it was cut from; its README lists every export. It is
 
 ### Generate TypeScript types for a space's properties
 
-`typesOfSpaceMeta(meta, { library })` from `@ythril/schema` writes a space's type schemas as a TypeScript source, for an app
+`typesOfSpaceMeta(meta, { library })` from `@ythril-network/schema` writes a space's type schemas as a TypeScript source, for an app
 that reads and writes the space's records with types.
 
 ```ts
-import { typesOfSpaceMeta } from '@ythril/schema';
+import { typesOfSpaceMeta } from '@ythril-network/schema';
 
 const { source, untranslated } = typesOfSpaceMeta(metaAnswer, { library: entriesMyRefsName });
 ```
@@ -459,7 +459,7 @@ const { source, untranslated } = typesOfSpaceMeta(metaAnswer, { library: entries
 
 ### Read a space meta from TypeScript
 
-`spaceMetaFromTypeScript(source)` from `@ythril/schema/from-typescript` reads a space's type schemas back out of the source `typesOfSpaceMeta` writes: `{ ok: true, meta, notRead }`, or a refusal of up to ten named reasons for any member it cannot say exactly. It compiles with the app's own `typescript` (an optional peer, `>=5.4` with no ceiling, so an app on a newer one still installs the package; without a usable one it rejects naming `npm install typescript@6` and the `typescript` option) and reads nothing but the source and the compiler's lib. `notRead` names, by path, what the source cannot carry (a date's kind, a pattern, a bound, a default, a description): a write replaces each type whole, so merge the result over the stored meta first. The package's README has the export table and every reason ([Read a space meta from TypeScript](https://github.com/ythril-network/Ythril/blob/main/schema/README.md#read-a-space-meta-from-typescript)).
+`spaceMetaFromTypeScript(source)` from `@ythril-network/schema/from-typescript` reads a space's type schemas back out of the source `typesOfSpaceMeta` writes: `{ ok: true, meta, notRead }`, or a refusal of up to ten named reasons for any member it cannot say exactly. It compiles with the app's own `typescript` (an optional peer, `>=5.4` with no ceiling, so an app on a newer one still installs the package; without a usable one it rejects naming `npm install typescript@6` and the `typescript` option) and reads nothing but the source and the compiler's lib. `notRead` names, by path, what the source cannot carry (a date's kind, a pattern, a bound, a default, a description): a write replaces each type whole, so merge the result over the stored meta first. The package's README has the export table and every reason ([Read a space meta from TypeScript](https://github.com/ythril-network/Ythril/blob/main/schema/README.md#read-a-space-meta-from-typescript)).
 
 ### Schema Validation
 

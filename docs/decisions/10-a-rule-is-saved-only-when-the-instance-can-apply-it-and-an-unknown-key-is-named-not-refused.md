@@ -81,7 +81,7 @@ combination makes four things expensive to get wrong and impossible to take back
 - `server/src/spaces/meta-fields.ts` — how each meta key merges.
 - `server/src/sync/meta-skew.ts` — which members may refuse a new key, and the release table a gate holds to the previous
   release's own body.
-- Since decision 19 (6.3), the save-time checks, the engine load and the body parse live in the `@ythril/schema` package
+- Since decision 19 (6.3), the save-time checks, the engine load and the body parse live in the `@ythril-network/schema` package
   (`schema/src/rules.ts`, `schema/src/space-meta.ts`); the server files above re-export them and keep evaluation.
 - `docs/integration-guide/06a-schema-api.md` — the contract: rules, limits, outcomes, undeclared keys.
 - `docs/dependencies.md` and `NOTICE` — the engine's licences and what ships with it.

@@ -204,7 +204,7 @@ Source-available under the [PolyForm Small Business License 1.0.0](LICENSE). **F
 self-host** for individuals and small businesses (< 100 people, < $1M revenue). Larger organisations — or
 anyone offering Ythril as a paid managed or cloud service — need a commercial licence: `contact@ythril.net`.
 
-The one exception is `schema/`, the `@ythril/schema` package an app installs to validate the schemas it writes: it is
+The one exception is `schema/`, the `@ythril-network/schema` package an app installs to validate the schemas it writes: it is
 licensed under the [Apache License 2.0](schema/LICENSE), with its own [NOTICE](schema/NOTICE).
 
 **There is one build, and it is the whole product.** No feature gates, no activation key, no licence check,

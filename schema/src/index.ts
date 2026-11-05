@@ -1,5 +1,5 @@
 /**
- * `@ythril/schema` — the vocabulary of a Ythril space schema and the validator the server runs on it.
+ * `@ythril-network/schema` — the vocabulary of a Ythril space schema and the validator the server runs on it.
  *
  * Start with {@link validateSpaceMeta}: hand it a space meta (and the schema-library entries its `$ref`s name) and it answers what a
  * Ythril instance would answer, without one. The rest is what that call is built from, for an app that needs one piece of it: the

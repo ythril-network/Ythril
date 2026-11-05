@@ -577,7 +577,7 @@ export function ruleMapIssues(map: Record<string, unknown>, ruleZ: z.ZodType, ma
   return issues;
 }
 
-// ── What the server's evaluator reads from here (through `@ythril/schema/internal`) ─────────────────────────────────────────────────
+// ── What the server's evaluator reads from here (through `@ythril-network/schema/internal`) ─────────────────────────────────────────────────
 
 /**
  * The engine as this module loaded it: `cel` and its environment, or `null` and the reason it did not load. The server's evaluator and

@@ -20,6 +20,9 @@ permissions:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    # A multi-arch build and its verification take about half an hour; a hung step would otherwise hold the runner for the
+    # platform's six hours, with the publish-schema job waiting behind it.
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -163,7 +166,7 @@ jobs:
         run: |
           IMAGE="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
           echo "Checking $IMAGE"
-          # schema/LICENSE and schema/NOTICE: @ythril/schema is Apache-2.0 with its own notices, shipped beside its build.
+          # schema/LICENSE and schema/NOTICE: the schema package is Apache-2.0 with its own notices, shipped beside its build.
           for f in NOTICE LICENSE schema/LICENSE schema/NOTICE; do
             if docker run --rm --entrypoint sh "$IMAGE" -c "test -s /app/$f"; then
               echo "  ok: /app/$f present and non-empty"
@@ -211,10 +214,11 @@ jobs:
 
           # `--latest` is a DECISION, not a default. `gh` marks a new release latest unless told otherwise,
           # which is right for a forward release and wrong for a backfilled older one — that would announce an
-          # superseded version as newest. So it is claimed only when this tag really is the highest.
-          HIGHEST="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
-          if [ "$GITHUB_REF_NAME" = "$HIGHEST" ]; then LATEST=true; else LATEST=false; fi
-          echo "tag=$GITHUB_REF_NAME highest=$HIGHEST latest=$LATEST"
+          # superseded version as newest. So it is claimed only when this tag really is the highest release, by
+          # `scripts/release-latest.mjs`: the rule is `release-tags.mjs`'s, shared with the npm dist-tag, and it never
+          # ranks a prerelease above a release (the version sort that was here did).
+          LATEST="$(node scripts/release-latest.mjs "$GITHUB_REF_NAME")"
+          echo "tag=$GITHUB_REF_NAME latest=$LATEST"
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "Release already exists — updating its notes rather than failing the publish."
@@ -225,3 +229,55 @@ jobs:
               --notes-file release-notes.md \
               --latest="$LATEST"
           fi
+
+  # ── The schema package on npm, by trusted publishing ───────────────────────────────────────────────────────────────────────
+  #
+  # This job holds the ONLY OIDC token of the workflow: a short-lived npm credential is exchanged for it, with provenance, and no
+  # npm token is stored anywhere. A published npm version can never be taken back and the credential can publish any version, so the
+  # job is built so that nothing else can use it (`testing/standalone/the-schema-package-publishes-by-trusted-publishing.test.js`
+  # reads it from the parsed workflow):
+  #  - `id-token: write` is on this job alone, never at workflow level, where every job of the image build would have it;
+  #  - the environment `npm-publish` allows `v*` tags only, so no branch's copy of this workflow can reach the credential;
+  #  - every action is pinned to a commit, because a tag that moves would run with the token;
+  #  - the install runs no dependency lifecycle scripts, and no `${{ }}` expression sits in a script (a tag name would become shell);
+  #  - no token variable is set at any level: npm would use it INSTEAD of the OIDC exchange, and the script refuses one.
+  # It needs the image job, so a package version is never published for an image that failed its checks.
+  publish-schema:
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    concurrency:
+      group: publish-schema
+      cancel-in-progress: false
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The script reads the repository's tags (which tag is the highest release) and the commit (the version's recorded gitHead).
+          fetch-depth: 0
+          persist-credentials: false
+
+      # No `registry-url` and no `cache`: `registry-url` writes an `.npmrc` that reads NODE_AUTH_TOKEN and exports a placeholder for
+      # it, which the script refuses; a restored cache would be input to the job that holds the token. Node 24 ships npm 11.5.1 or
+      # later, the first npm that publishes by trusted publishing.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      # The schema workspace only, without lifecycle scripts: a dependency's install script would run with the OIDC token in reach.
+      # The package's own `prepack` builds `dist` when `npm pack` and `npm publish` run. ONNXRUNTIME_NODE_INSTALL_CUDA=skip is the
+      # same hermeticity flag as the first job's install (the CUDA binaries are fetched from a GitHub release by a postinstall).
+      - name: Install
+        run: npm ci --ignore-scripts --workspace=schema --include-workspace-root
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+      - name: Publish the schema package
+        run: node scripts/publish-schema.mjs

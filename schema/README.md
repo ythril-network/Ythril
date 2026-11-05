@@ -1,4 +1,4 @@
-# @ythril/schema
+# @ythril-network/schema
 
 The vocabulary of a Ythril space schema, and the validator a Ythril server runs on it.
 
@@ -23,26 +23,28 @@ its machine-checkable half.
 ## Install
 
 ```sh
-npm install @ythril/schema
+npm install @ythril-network/schema@<your server's version>
 ```
 
-The package is not on the npm registry yet. Until it is, pack it from a clone of the repository and install the tarball:
+The package is on the npm registry from 6.5.0, versioned with the Ythril release it was cut from (see [Versions](#versions));
+install the version of the server you write to. To install a build of your own instead, pack it from a clone of the
+repository and install the tarball:
 
 ```sh
-npm pack -w @ythril/schema
-npm install ./ythril-schema-*.tgz
+npm pack -w @ythril-network/schema
+npm install ./ythril-network-schema-*.tgz
 ```
 
 ESM only, Node 22 or later: the CEL rule engine (`@bufbuild/cel`) is loaded with a top-level `await`.
 
 An app that reads a space meta back from TypeScript (see [Read a space meta from TypeScript](#read-a-space-meta-from-typescript))
 also installs the compiler itself: `typescript` is an optional peer dependency (`>=5.4`), loaded only by the
-`@ythril/schema/from-typescript` entry. An app that never reads TypeScript installs nothing more.
+`@ythril-network/schema/from-typescript` entry. An app that never reads TypeScript installs nothing more.
 
 ## Validate a space meta
 
 ```ts
-import { validateSpaceMeta, type SpaceMeta } from '@ythril/schema';
+import { validateSpaceMeta, type SpaceMeta } from '@ythril-network/schema';
 
 const meta: SpaceMeta = {
   validationMode: 'strict',
@@ -86,7 +88,7 @@ A type may be declared `{ "$ref": "library:<name>" }`: its definition is an entr
 package never reads an instance, so hand it the entries your meta references:
 
 ```ts
-import { validateSpaceMeta } from '@ythril/schema';
+import { validateSpaceMeta } from '@ythril-network/schema';
 
 const library = [
   { name: 'service-v1', knowledgeType: 'entity', schema: { propertySchemas: { url: { type: 'string' } } } },
@@ -111,7 +113,7 @@ throws "no schema library installed" rather than answering as if the library wer
 ## One type at a time
 
 ```ts
-import { parseTypeSchema } from '@ythril/schema';
+import { parseTypeSchema } from '@ythril-network/schema';
 
 const r = parseTypeSchema('edge', 'reports_to', { endpoints: { from: ['person'], to: ['person'] }, functional: true });
 if (!r.ok) console.error(r.refusal.error, r.refusal.issues);
@@ -123,7 +125,7 @@ if (!r.ok) console.error(r.refusal.error, r.refusal.issues);
 
 ```ts
 import { writeFileSync } from 'node:fs';
-import { typesOfSpaceMeta } from '@ythril/schema';
+import { typesOfSpaceMeta } from '@ythril-network/schema';
 
 const meta = await (await fetch(`${base}/api/spaces/garden/meta`, { headers })).json();
 const { source, untranslated } = typesOfSpaceMeta(meta, { library: entries });
@@ -166,7 +168,7 @@ reasons, the whole list (a reason added is a deliberate edit an app's switch can
 ## Read a space meta from TypeScript
 
 ```ts
-import { spaceMetaFromTypeScript } from '@ythril/schema/from-typescript';
+import { spaceMetaFromTypeScript } from '@ythril-network/schema/from-typescript';
 
 const answer = await spaceMetaFromTypeScript(readFileSync('src/garden-types.ts', 'utf8'));
 if (!answer.ok) throw new Error(answer.refusals.map(r => `${r.path.join('.')}: ${r.reason}`).join('\n'));
@@ -178,7 +180,7 @@ integration guide's [Schema API](https://github.com/ythril-network/Ythril/blob/m
 tells the same from the app's side). The
 source is one exported interface or type alias, `SpaceTypes` unless `options.map` names another, shaped as the forward direction
 writes it: a knowledge type, then a type name as a string literal, then `{ properties: <object type> }` (a `stored` entry is
-ignored). It lives behind its own export, `@ythril/schema/from-typescript`, and the main entry never loads it.
+ignored). It lives behind its own export, `@ythril-network/schema/from-typescript`, and the main entry never loads it.
 
 | Export | What it is |
 | --- | --- |
@@ -255,13 +257,13 @@ The reasons, the whole list (a reason added is a deliberate edit an app's switch
 
 The entry's names are a fixed list, held by a test in the Ythril repository: a new export is a decision, not a side effect.
 This table names every one of them, and a second test holds the table to that list.
-`@ythril/schema/internal` exists for the Ythril server (its merges, its reads of a peer's and a stored meta, its library
+`@ythril-network/schema/internal` exists for the Ythril server (its merges, its reads of a peer's and a stored meta, its library
 installer) and moves with it; an app should not import it.
 
 ## Versions
 
-The package is versioned with the Ythril release it was cut from: `@ythril/schema@6.4.0` validates what a 6.4.0 server
-accepts. It is not on the npm registry yet; until it is, install it from the repository's `schema/` folder. A newer server may accept a field an older package refuses; validate against the package of the oldest server you
+The package is versioned with the Ythril release it was cut from: `@ythril-network/schema@6.4.0` validates what a 6.4.0 server
+accepts. It was first published as 6.5.0; no earlier version is on the registry. A newer server may accept a field an older package refuses; validate against the package of the oldest server you
 write to.
 
 ## Licence

@@ -112,7 +112,7 @@ const REPORTED_SPACE_FIELDS = Object.keys(SpaceMetaBody.shape).filter(f => f !==
 
 /**
  * The name of the map the source declares besides the per-type interfaces (no type is allocated it), and the two members each of its
- * entries has. Read by BOTH directions (`typesOfSpaceMeta` writes them, `@ythril/schema/from-typescript` reads them), so a rename of the
+ * entries has. Read by BOTH directions (`typesOfSpaceMeta` writes them, `@ythril-network/schema/from-typescript` reads them), so a rename of the
  * map or a member is one edit and a source one direction wrote is never one the other cannot find. Not part of either entry's surface.
  */
 export const SPACE_TYPES = 'SpaceTypes';
@@ -280,7 +280,7 @@ function declarations(base: string, kind: KnowledgeType, read: Read, report: Rep
 
 /** The leading comment of every source. Says in prose what the types leave out; it lists no value the server holds. */
 const HEADER = `/**
- * TypeScript types for a Ythril space's properties, written by @ythril/schema typesOfSpaceMeta. A snapshot: regenerate it after a
+ * TypeScript types for a Ythril space's properties, written by @ythril-network/schema typesOfSpaceMeta. A snapshot: regenerate it after a
  * schema change or a validationMode change.
  *
  * <Kind><Name>Properties is the strict create contract (validationMode strict): a required property without a default is required, and

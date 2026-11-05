@@ -11,6 +11,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { escapeRegExp } from './_shared/escape-regexp.mjs';
 import {
   capabilityMapModel, renderCapabilityMap, routeCell, rungCell, isToolDoorPath, GENERATED_REGIONS, regionMarkers,
 } from '../testing/standalone/_guide-tables.mjs';
@@ -78,7 +79,7 @@ const short = f => f.split('/').pop().replace(/\.md$/, '');
 /** Files in `list` naming either the tool or the route tail. */
 function hits(list, tool, route) {
   const tail = route ? route.split(' ')[1].replace(/^\/api\//, '') : null;
-  const loose = tail ? new RegExp(tail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/:\\?\w+/g, '[^/\\s)`"\']+')) : null;
+  const loose = tail ? new RegExp(escapeRegExp(tail).replace(/:\\?\w+/g, '[^/\\s)`"\']+')) : null;
   const byName = new RegExp(`\\b${tool}\\b`);
   const out = [];
   for (const { f, text } of list) if (byName.test(text) || (loose && loose.test(text))) out.push(short(f));

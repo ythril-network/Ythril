@@ -33,20 +33,20 @@
  * (`resolveMetaRefs`) and the peer-bound inlining (`inlineResolvableRefs`) answer other questions and stay where they
  * are.
  */
-import { libraryDefinitionOf } from '@ythril/schema';
-import { useSchemaLibrary } from '@ythril/schema/internal';
+import { libraryDefinitionOf } from '@ythril-network/schema';
+import { useSchemaLibrary } from '@ythril-network/schema/internal';
 import { getSchemaLibrary } from '../config/loader.js';
 import type { SpaceMeta, TypeSchema } from '../config/types.js';
 
 /*
- * The take-back runs inside the schema body, which is `@ythril/schema`'s and never reads an instance: the library a `$ref` names is
+ * The take-back runs inside the schema body, which is `@ythril-network/schema`'s and never reads an instance: the library a `$ref` names is
  * handed to it. This is where the instance hands over its own — read at the moment of each parse, so a library edit reaches the next
  * write. `body-schemas.ts` imports this module for that, so no parse can run before the library is installed.
  */
 useSchemaLibrary(getSchemaLibrary);
 
-/** The take-back of a round-tripped `{ $ref, ...definition }` is the body's preprocess, defined with it in `@ythril/schema`. */
-export { takeBackLibraryDefinition } from '@ythril/schema';
+/** The take-back of a round-tripped `{ $ref, ...definition }` is the body's preprocess, defined with it in `@ythril-network/schema`. */
+export { takeBackLibraryDefinition } from '@ythril-network/schema';
 
 /** The library entry's definition for a `library:<name>` reference, or undefined when there is none. */
 const definitionOf = libraryDefinitionOf;

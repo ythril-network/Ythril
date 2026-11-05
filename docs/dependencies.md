@@ -13,11 +13,11 @@ dependencies of its own — they live in `server/package.json`,
 across the three workspaces are reproduced in `NOTICE`. They are MIT, Apache 2.0,
 0BSD, BSD-3-Clause, or ISC licensed.
 
-The third workspace, `schema/` (`@ythril/schema`, the schema vocabulary and validator the server imports), is versioned with
-each release under the Apache License 2.0 and is meant for npm (not on the registry yet; packed from the repository until then). Its runtime dependencies (zod, `@bufbuild/cel` and what it pulls in) are the server's own,
+The third workspace, `schema/` (`@ythril-network/schema`, the schema vocabulary and validator the server imports), is versioned with
+each release under the Apache License 2.0 and is published to npm from 6.5.0, by the release workflow's `publish-schema` job through npm trusted publishing with provenance (no npm token is stored). Its runtime dependencies (zod, `@bufbuild/cel` and what it pulls in) are the server's own,
 at the same versions, and are named again in `schema/NOTICE`, which a gate holds to the package's production closure.
 
-The package has one **optional peer dependency**, `typescript` (`>=5.4`), used only by its `@ythril/schema/from-typescript`
+The package has one **optional peer dependency**, `typescript` (`>=5.4`), used only by its `@ythril-network/schema/from-typescript`
 entry, which reads a space's schemas back from TypeScript with the caller's own compiler (Apache License 2.0, Microsoft). It is
 neither bundled nor installed by npm and is not in the image, so it is not in the production closure and `schema/NOTICE` carries a
 sentence, not a heading, for it; the entry's error names the fix, `npm install typescript@6`. The package's own tests run the entry

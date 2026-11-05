@@ -10,7 +10,7 @@
  *
  *  - **an app** passes the entries it knows to `validateSpaceMeta(meta, { library })` (with none, `validateSpaceMeta` reads `[]`, and
  *    a `$ref` is refused as naming an entry that does not exist), or wraps any direct parse in {@link withSchemaLibrary};
- *  - **the server** installs its own library once ({@link useSchemaLibrary}, exported by `@ythril/schema/internal` and called in
+ *  - **the server** installs its own library once ({@link useSchemaLibrary}, exported by `@ythril-network/schema/internal` and called in
  *    `server/src/spaces/library-ref-expansion.ts`), read at the moment of each parse, so a library edit reaches the next write.
  *
  * A scoped library wins over the installed one for the length of the call. With neither — a parse that reads the library run outside
@@ -44,7 +44,7 @@ let installed: SchemaLibrarySource = NONE_INSTALLED;
 const scoped: (readonly SchemaLibraryEntryLike[])[] = [];
 
 /**
- * Install the library every parse reads when no call scopes its own. The server's, in `@ythril/schema/internal` only: an app scopes its
+ * Install the library every parse reads when no call scopes its own. The server's, in `@ythril-network/schema/internal` only: an app scopes its
  * entries with {@link withSchemaLibrary} instead, so no app replaces a library another part of the process reads.
  */
 export function useSchemaLibrary(source: SchemaLibrarySource): void {

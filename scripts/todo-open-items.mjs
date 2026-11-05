@@ -50,6 +50,8 @@
  * The trailing dot of the older `- [ ] **A-1.**` shape is punctuation rather than a sub-number, and the two
  * are told apart by what follows: a digit continues the id, anything else ends it.
  */
+import { escapeRegExp } from './_shared/escape-regexp.mjs';
+
 const ID = String.raw`[A-Z]+-[A-Z0-9-]+(?:\.\d+)*`;
 
 /** The first item id in a line of prose, or `null`. */
@@ -88,7 +90,7 @@ export function itemIdsIn(text) {
  * row, and treating it as cover is exactly the false green this rule exists to prevent.
  */
 export function isNamedIn(id, ordered) {
-  const lit = id.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+  const lit = escapeRegExp(id);
   return new RegExp(`(^|[^A-Z0-9-])${lit}([^A-Z0-9-]|$)`, 'm').test(ordered);
 }
 

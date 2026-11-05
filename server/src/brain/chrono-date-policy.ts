@@ -58,12 +58,12 @@
  * total: it takes the space meta as an argument and returns a value.
  */
 import type { SpaceMeta, DatePassedPolicy } from '../config/types-knowledge.js';
-import { DATE_PASSED_VALUES } from '@ythril/schema';
+import { DATE_PASSED_VALUES } from '@ythril-network/schema';
 
 /**
  * What a passed due moment may mean. Two, and the absence of a third is a decision — see the module note.
  *
- * Declared in `@ythril/schema` with the rest of the schema vocabulary and re-exported, so the admin PATCH schema, the MCP tool
+ * Declared in `@ythril-network/schema` with the rest of the schema vocabulary and re-exported, so the admin PATCH schema, the MCP tool
  * schema, the gate and an app writing a schema all read one tuple. A second copy of a vocabulary is the defect this repository
  * produces most.
  */
