@@ -126,7 +126,7 @@ function installError(why: string, cause?: unknown): Error {
 /** The rejection of a loaded `typescript` with no compiler API: the plain install would replace the app's own, so it also names the alias install. */
 function noCompilerApiError(): Error {
   return installError(
-    `the installed typescript has no compiler API; to keep it, \`${ALIAS_HINT}\` and pass \`(await import('typescript-6')).default\` as the \`typescript\` option`,
+    `the installed typescript has no compiler API; to keep it, \`${ALIAS_HINT}\` and pass that typescript-6 module (its default export) as the \`typescript\` option`,
   );
 }
 
