@@ -26,8 +26,23 @@
  *  - `checkDuplicates` under a not-yet refusal keeps the matches its fresh-write half finds (it ignores the reason: an
  *    insert-time hint stores nothing). Passes on the base; it guards the composition when recall starts throwing a signal.
  *
+ *  - a recall whose declared FLAT filter (`type`, `tags`) goes to the vector index - the NATIVE path, witnessed on
+ *    `observePath` - and finds nothing asks whether the index missed a match (Q-696). Written over the unfiltered rule's
+ *    own absence: the unfiltered path answered `index_not_ready` over aged records and the native-filtered one answered a
+ *    confident empty over the same collection. The question is the filtered holds-read (aged vectored records that satisfy
+ *    the predicate) and, when it says yes or cannot tell, a probe of the index itself:
+ *      - an ABSENT or DROPPED index over aged matches: `index_not_ready`;
+ *      - a SERVING index whose filter matches nothing, other aged records existing: no reason; an empty collection: no
+ *        reason (B1); a new space right after its first write: no reason (B2);
+ *      - a LAGGING index (serves, answers no hits to the filtered search, aged matches exist): `filter_window`, the predicate
+ *        path's reason for the same state;
+ *      - a holds-read that TIMES OUT (step 1 cannot tell) over a serving index: no reason - the one named fail-open, the
+ *        empty answer stands - and `ythril_recall_undecided_total` rises by one;
+ *      - a probe the index REFUSES: what the classifier says of that refusal, as the unfiltered rows above;
+ *      - the question is asked ONCE per collection when a `minPerType` floor makes the recall search the collection twice.
+ *
  * "Seen red" on the base: the not-yet cases answer reasonless, the absent cases answer reasonless, the will-not-serve cases
- * throw the mongot refusal.
+ * throw the mongot refusal, the filtered cases over an index that answered nothing answer reasonless and never ask.
  *
  * Needs a MongoDB with mongot (atlas-local): `npm run test:up`.
  *
@@ -44,6 +59,7 @@ import {
   unitAt, queryAxis, startStubEmbedder, createSpaceCollections, insertAll, waitUntilServing, waitUntilTrue,
 } from './_vector-harness.mjs';
 import { REFUSALS, refuseVectorSearch } from './_mongot-refusals.mjs';
+import { lagFilteredVectorSearch, filteredHoldsRead, watchHoldsRead } from './_index-lag-faults.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -64,9 +80,15 @@ const ABSENT = 'rsabsent';     // aged vectored entities and files, no index eve
 const DROPPED = 'rsdropped';   // an index that served, then was dropped
 const UNAVAIL = 'rsunavail';   // entities index with the wrong numDimensions (a real refusal); facts index fine
 const GOK = 'rsgok';           // a healthy space for the global recall
-const SPACES = [NYAGED, NYNEW, NYFRESH, ABSENT, DROPPED, UNAVAIL, GOK];
+const FSERVE = 'rsfserve';     // a SERVING index with its declared filter fields, aged records of two kinds, entities and facts
+const SPACES = [NYAGED, NYNEW, NYFRESH, ABSENT, DROPPED, UNAVAIL, GOK, FSERVE];
 
-let mongo, recallMod, vectorIndex, stub, resolveRecallFilter;
+/** The kind the filtered cases ask for, a kind nothing holds, and the tag the first record carries. Unique values: a probe of the read matches on them. */
+const KIND = 'kind-a';
+const NO_KIND = 'kind-none';
+const TAG = 'red';
+
+let mongo, recallMod, vectorIndex, stub, resolveRecallFilter, register;
 
 const entity = (spaceId, id, deg, extra = {}) => ({
   _id: id, spaceId, name: id, type: 'thing', tags: [], properties: { marker: 'x' }, description: `record ${id}`,
@@ -93,6 +115,37 @@ async function recallAnswer(spaceId, types, filter) {
     thrown = err instanceof Error ? err.message : String(err);
   }
   return { ids: results.map(r => r._id), degraded, thrown };
+}
+
+/**
+ * A recall with a DECLARED flat filter (`type` as a raw Mongo filter, or `tags`), the way the doors make it, and the path it took.
+ * `path` is what `observePath` witnessed: `prefilter` is the native path, which the case is about; anything else means
+ * the filter did not reach the index and the case tested another path.
+ */
+async function nativeAnswer(spaceId, types, { type, tags, minPerType } = {}) {
+  let filter;
+  if (type !== undefined) {
+    const resolved = resolveRecallFilter({ type });
+    assert.ok(resolved.ok, `the filter was refused: ${resolved.error}`);
+    filter = resolved.kind === 'mongo' ? resolved.filter : resolved.kind === 'expression' ? resolved.expression : undefined;
+  }
+  const degraded = [];
+  const observePath = recallMod.observeRecallPath();
+  let results = [];
+  let thrown;
+  try {
+    results = await recallMod.recall(spaceId, 'Q', 10, tags, types, minPerType, undefined, filter, { degraded, observePath });
+  } catch (err) {
+    thrown = err instanceof Error ? err.message : String(err);
+  }
+  return { ids: results.map(r => r._id), degraded, thrown, path: observePath.path() };
+}
+
+/** `ythril_recall_undecided_total`, summed over its series as a scrape would read it; `undefined` while no such metric exists. */
+async function undecidedCount() {
+  const metric = register.getSingleMetric('ythril_recall_undecided_total');
+  if (!metric) return undefined;
+  return (await metric.get()).values.reduce((sum, v) => sum + v.value, 0);
 }
 
 /** The predicate-path filter a caller sends (an undeclared `properties.*` key), resolved as the doors resolve it. */
@@ -123,6 +176,7 @@ describe('a recall over an index that cannot answer says which records may be mi
     recallMod = await import('../../server/dist/brain/recall.js');
     vectorIndex = await import('../../server/dist/spaces/vector-index.js');
     ({ resolveRecallFilter } = await import('../../server/dist/brain/recall-filter.js'));
+    ({ register } = await import('../../server/dist/metrics/registry.js'));
     for (const id of SPACES) await createSpaceCollections(mongo, id);
 
     await insertAll(mongo, `${NYAGED}_entities`, [entity(NYAGED, 'aged-1', 10), entity(NYAGED, 'aged-2', 20), entity(NYAGED, 'aged-3', 30),
@@ -134,6 +188,9 @@ describe('a recall over an index that cannot answer says which records may be mi
     await insertAll(mongo, `${UNAVAIL}_entities`, [entity(UNAVAIL, 'wide-1', 10), entity(UNAVAIL, 'wide-2', 20), entity(UNAVAIL, 'wide-fresh', 5, justNow())]);
     await insertAll(mongo, `${UNAVAIL}_facts`, [fact(UNAVAIL, 'fact-1', 12), fact(UNAVAIL, 'fact-2', 22)]);
     await insertAll(mongo, `${GOK}_entities`, [entity(GOK, 'ok-1', 11), entity(GOK, 'ok-2', 21), entity(GOK, 'ok-3', 31)]);
+    await insertAll(mongo, `${FSERVE}_entities`, [entity(FSERVE, 'fs-1', 10, { type: KIND, tags: [TAG] }),
+      entity(FSERVE, 'fs-2', 20, { type: KIND }), entity(FSERVE, 'fs-3', 30, { type: 'other-kind' })]);
+    await insertAll(mongo, `${FSERVE}_facts`, [fact(FSERVE, 'ff-1', 12, { type: KIND }), fact(FSERVE, 'ff-2', 22, { type: KIND })]);
     await mongo.checkVectorSearchAvailability();
 
     // Production's own builder, so the live definition is production's. UNAVAIL's entities index is built four wide over
@@ -143,6 +200,14 @@ describe('a recall over an index that cannot answer says which records may be mi
     await vectorIndex.ensureVectorSearchIndex(UNAVAIL, 'facts', DIMS, 'cosine', 'embedding', 'embedding', true, []);
     await vectorIndex.ensureVectorSearchIndex(GOK, 'entities', DIMS, 'cosine', 'embedding', 'embedding', true, []);
     await vectorIndex.ensureVectorSearchIndex(DROPPED, 'entities', DIMS, 'cosine', 'embedding', 'embedding', true, []);
+    // A serving index WITH its declared filter fields (production's own list): the native filter needs them, and without them
+    // the native search throws and the recall falls back to the predicate path, which is not what the filtered cases are about.
+    for (const suffix of ['entities', 'facts']) {
+      await vectorIndex.ensureVectorSearchIndex(FSERVE, suffix, DIMS, 'cosine', 'embedding', 'embedding', true,
+        vectorIndex.vectorFilterFieldsFor(FSERVE, suffix));
+    }
+    await waitUntilServing(mongo, `${FSERVE}_entities`, `${FSERVE}_entities_embedding`, { dims: DIMS, n: 3 });
+    await waitUntilServing(mongo, `${FSERVE}_facts`, `${FSERVE}_facts_embedding`, { dims: DIMS, n: 2 });
     await waitUntilServing(mongo, `${UNAVAIL}_facts`, `${UNAVAIL}_facts_embedding`, { dims: DIMS, n: 2 });
     await waitUntilServing(mongo, `${GOK}_entities`, `${GOK}_entities_embedding`, { dims: DIMS, n: 3 });
     await waitUntilServing(mongo, `${DROPPED}_entities`, `${DROPPED}_entities_embedding`, { dims: DIMS, n: 3 });
@@ -301,6 +366,150 @@ describe('a recall over an index that cannot answer says which records may be mi
       assert.ok(fault.refused() >= 1, 'the fault never reached the duplicate check');
       assert.deepEqual(dupes.map(d => d._id), ['fresh-1'],
         'a not-ready index over aged records must not take the fresh-write matches with it (the half that can answer without the index)');
+    });
+  });
+
+  describe('a filtered recall on the native path whose index answers nothing (Q-696)', () => {
+    const nativePath = (answer) => assert.equal(answer.path, 'prefilter',
+      `the recall took the "${answer.path}" path: the declared flat filter must reach the index, or the case is about another path`);
+
+    for (const [what, space] of [['absent (never built)', ABSENT], ['dropped after it served', DROPPED]]) {
+      it(`an index ${what}, aged matches: the empty answer says index_not_ready`, async () => {
+        const answer = await nativeAnswer(space, ['entity'], { type: 'thing' });
+        assert.equal(answer.thrown, undefined, `recall threw: ${answer.thrown}`);
+        nativePath(answer);
+        assert.deepEqual(answer.ids, [], 'fixture check: no index, so only the fresh-write scan can answer, and these are aged');
+        assert.deepEqual(answer.degraded, ['index_not_ready'],
+          `degraded is [${answer.degraded.join(', ')}]: aged records of that kind exist, the index served none, and the answer is `
+          + 'a confident empty - the unfiltered recall over the same collection says index_not_ready');
+      });
+    }
+
+    describe('over a SERVING index', () => {
+      it('control: the filter reaches the records the index serves, with no reason', async () => {
+        const answer = await nativeAnswer(FSERVE, ['entity'], { type: KIND });
+        assert.equal(answer.thrown, undefined);
+        nativePath(answer);
+        assert.deepEqual([...answer.ids].sort(), ['fs-1', 'fs-2'], 'fixture check: the native filter must select the two records of the kind');
+        assert.deepEqual(answer.degraded, []);
+      });
+
+      for (const [what, args] of [['a `type` filter', { type: NO_KIND }], ['a `tags` filter', { tags: ['no-such-tag'] }]]) {
+        it(`${what} that matches nothing, other aged records existing: empty, and no reason`, async () => {
+          const answer = await nativeAnswer(FSERVE, ['entity'], args);
+          assert.equal(answer.thrown, undefined);
+          nativePath(answer);
+          assert.deepEqual(answer.ids, []);
+          assert.deepEqual(answer.degraded, [], 'no aged record satisfies the filter, so the index missed none: an empty answer is complete');
+        });
+      }
+
+      it('a lagging index (it serves, and answers the filtered search with no hits, aged matches existing): filter_window', async () => {
+        const fault = lagFilteredVectorSearch({ only: name => name === `${FSERVE}_entities` });
+        let answer;
+        try { answer = await nativeAnswer(FSERVE, ['entity'], { type: KIND }); } finally { fault.restore(); }
+        assert.ok(fault.emptied() >= 1, 'the fault never reached the filtered search - the case did not produce the state it is about');
+        assert.equal(answer.thrown, undefined);
+        nativePath(answer);
+        assert.deepEqual(answer.ids, [], 'fixture check: the filtered search answered nothing and the records are aged');
+        assert.deepEqual(answer.degraded, ['filter_window'],
+          `degraded is [${answer.degraded.join(', ')}]: two aged records satisfy the filter, the index serves, and the answer is a `
+          + 'confident empty - the predicate path says filter_window for the same state');
+      });
+
+      it('the same lag over a `tags` filter: filter_window', async () => {
+        const fault = lagFilteredVectorSearch({ only: name => name === `${FSERVE}_entities` });
+        let answer;
+        try { answer = await nativeAnswer(FSERVE, ['entity'], { tags: [TAG] }); } finally { fault.restore(); }
+        assert.ok(fault.emptied() >= 1, 'the fault never reached the filtered search');
+        nativePath(answer);
+        assert.deepEqual(answer.ids, []);
+        assert.deepEqual(answer.degraded, ['filter_window']);
+      });
+
+      it('the same lag, but a filter no aged record satisfies: no reason (the lag is not what the answer is about)', async () => {
+        const fault = lagFilteredVectorSearch({ only: name => name === `${FSERVE}_entities` });
+        let answer;
+        try { answer = await nativeAnswer(FSERVE, ['entity'], { type: NO_KIND }); } finally { fault.restore(); }
+        assert.ok(fault.emptied() >= 1, 'the fault never reached the filtered search');
+        nativePath(answer);
+        assert.deepEqual(answer, { ids: [], degraded: [], thrown: undefined, path: 'prefilter' });
+      });
+
+      it('a holds-read that times out (step 1 cannot tell): the empty answer stands, and ythril_recall_undecided_total rises by one', async () => {
+        const before = await undecidedCount();
+        const lag = lagFilteredVectorSearch({ only: name => name === `${FSERVE}_entities` });
+        const holds = watchHoldsRead(filteredHoldsRead(KIND), { timeout: true });
+        let answer;
+        try { answer = await nativeAnswer(FSERVE, ['entity'], { type: KIND }); } finally { holds.restore(); lag.restore(); }
+        assert.ok(lag.emptied() >= 1, 'the fault never reached the filtered search');
+        assert.equal(answer.thrown, undefined, `recall threw: ${answer.thrown}`);
+        nativePath(answer);
+        assert.deepEqual(answer.ids, []);
+        assert.deepEqual(answer.degraded, [], 'the one named fail-open: a read that could not tell is not a reason, the empty answer stands');
+        const after = await undecidedCount();
+        assert.notEqual(after, undefined, 'ythril_recall_undecided_total does not exist: the fail-open is not counted, so nobody can see how often it happens');
+        assert.equal(after - (before ?? 0), 1, 'one undecided recall must count once');
+        assert.ok(holds.calls().length >= 1, 'the filtered holds-read was never asked - the case did not produce the state it is about');
+      });
+
+      for (const [what, make, expect] of [
+        ['a not-yet refusal', REFUSALS.notInitialized, { reason: 'index_not_ready' }],
+        ['a will-not-serve refusal', REFUSALS.dimensionMismatch, { reason: 'index_unavailable' }],
+        ['a dead mongot (a store failure)', REFUSALS.hostUnreachable, { thrown: true }],
+      ]) {
+        it(`a probe the index refuses (${what}): what the classifier says of that refusal`, async () => {
+          const fault = lagFilteredVectorSearch({ only: name => name === `${FSERVE}_entities`, probeRefusal: make });
+          let answer;
+          try { answer = await nativeAnswer(FSERVE, ['entity'], { type: KIND }); } finally { fault.restore(); }
+          assert.ok(fault.emptied() >= 1, 'the fault never reached the filtered search');
+          if (expect.thrown) {
+            assert.ok(answer.thrown, `degraded is [${answer.degraded.join(', ')}] and nothing was thrown: a store that cannot answer is a store failure (503), never a quietly shorter answer`);
+            assert.deepEqual(answer.degraded, []);
+          } else {
+            assert.equal(answer.thrown, undefined, `recall threw: ${answer.thrown}`);
+            assert.deepEqual(answer.degraded, [expect.reason], `degraded is [${answer.degraded.join(', ')}]: the index refused the probe over records it should serve`);
+          }
+          nativePath(answer);
+          assert.ok(fault.refusedProbes() >= 1, 'the probe was never asked: nothing checked whether the index missed a match');
+        });
+      }
+    });
+
+    describe('a collection with nothing the index should serve', () => {
+      it('an empty collection (no index, no records): empty, and no reason (B1)', async () => {
+        const answer = await nativeAnswer(NYNEW, ['entity', 'fact'], { type: KIND });
+        nativePath(answer);
+        assert.equal(answer.thrown, undefined);
+        assert.deepEqual(answer.ids, []);
+        assert.deepEqual(answer.degraded, [], 'an empty collection holds nothing the index should serve');
+      });
+
+      it('a space right after its first write (only a fresh record, no index yet): that record, and no reason (B2)', async () => {
+        const answer = await nativeAnswer(NYFRESH, ['entity'], { type: 'thing' });
+        nativePath(answer);
+        assert.equal(answer.thrown, undefined);
+        assert.deepEqual(answer.ids, ['only-fresh'], 'the fresh-write scan already holds every record of a new collection');
+        assert.deepEqual(answer.degraded, [], 'no aged record exists, so none can be missing');
+      });
+    });
+
+    describe('the question is asked once per collection', () => {
+      it('a minPerType recall searches each collection twice (floor and main) and asks the filtered holds-read once per collection', async () => {
+        const lag = lagFilteredVectorSearch({ only: name => name.startsWith(`${FSERVE}_`) });
+        const holds = watchHoldsRead(filteredHoldsRead(KIND));
+        let answer;
+        try {
+          answer = await nativeAnswer(FSERVE, ['entity', 'fact'], { type: KIND, minPerType: { entity: 2, fact: 2 } });
+        } finally { holds.restore(); lag.restore(); }
+        assert.equal(answer.thrown, undefined, `recall threw: ${answer.thrown}`);
+        nativePath(answer);
+        assert.ok(lag.emptied() >= 4, `the filtered search ran ${lag.emptied()} time(s): the floor and the main search must each have searched both collections`);
+        const perCollection = Object.fromEntries([`${FSERVE}_entities`, `${FSERVE}_facts`].map(c => [c, holds.calls().filter(n => n === c).length]));
+        assert.deepEqual(perCollection, { [`${FSERVE}_entities`]: 1, [`${FSERVE}_facts`]: 1 },
+          `the filtered holds-read ran ${JSON.stringify(perCollection)} times per collection: once is the question, a second is the memo missing`);
+        assert.ok(answer.degraded.includes('filter_window'), `degraded is [${answer.degraded.join(', ')}]: the question was asked and the answer is the lag's`);
+      });
     });
   });
 });

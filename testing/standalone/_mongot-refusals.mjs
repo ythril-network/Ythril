@@ -42,18 +42,27 @@ export const REFUSALS = {
     errmsg: executor(ns, 'Error connecting to localhost:27027 :: caused by :: Connection refused') }),
 };
 
+/** A `forQuery` that accepts the searches made with `vector` (a seed's stored embedding) and no other. */
+export const searchesWith = (vector) => (queryVector) =>
+  Array.isArray(queryVector) && queryVector.length === vector.length && queryVector.every((x, i) => Math.abs(x - vector[i]) < 1e-9);
+
 /**
  * Answer every `$vectorSearch` aggregate (optionally only those on collections `only(collectionName)` accepts) with the
  * refusal `make(namespace, indexName)` returns. `make` is a `REFUSALS` entry or a function giving the same shape.
  * Returns `{ refused(), restore() }`; always `restore()` in a `finally`, because the patch is process-wide.
+ *
+ * `forQuery(queryVector)` narrows it to the searches ONE seed asks (Q-697): a neighbour search is made with the seed's own stored
+ * vector, so a test that gives each record a distinct vector refuses the search of the one record it chose and lets every other seed
+ * reach the real index. The per-collection `only` could not say "the third seed of the batch", which is the state a held scan needs:
+ * a seed in mid-batch, with seeds before it that were settled and seeds after it that were not reached.
  */
-export function refuseVectorSearch(make, { only = () => true } = {}) {
+export function refuseVectorSearch(make, { only = () => true, forQuery = () => true } = {}) {
   const original = Collection.prototype.aggregate;
   let refused = 0;
   Collection.prototype.aggregate = function aggregate(pipeline, ...rest) {
     const cursor = original.call(this, pipeline, ...rest);
     const stage = Array.isArray(pipeline) ? pipeline[0]?.['$vectorSearch'] : undefined;
-    if (!stage || !only(this.collectionName)) return cursor;
+    if (!stage || !only(this.collectionName) || !forQuery(stage.queryVector)) return cursor;
     const err = new MongoServerError({ ok: 0, ...make(`${this.dbName}.${this.collectionName}`, stage.index) });
     cursor.toArray = async () => { refused++; await cursor.close(); throw err; };
     return cursor;
