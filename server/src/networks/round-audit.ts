@@ -15,7 +15,7 @@
  */
 import { logInternalAudit } from '../audit/audit.js';
 import { log, peerText } from '../util/log.js';
-import { warnOnce } from '../util/warn-once.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 
 /** A held passed `space_addition` retired by a later deletion of the same network space: it is never applied. */
 export const ROUND_ADDITION_RETIRED_OPERATION = 'network.round.addition_retired';
@@ -44,7 +44,7 @@ const PATH_PREFIX: Readonly<Record<RoundEffectOperation, string>> = {
   [ROUND_EXPIRED_OPERATION]: 'internal:round-expiry',
 };
 
-const saidOnce = warnOnce<string>({ max: 10, every: 10 * 60_000 });
+const saidOnce = warnOnce<string>({ max: 10, every: SAY_ONCE_WINDOW_MS });
 
 /**
  * One audit entry for `operation` on round `roundId` of network `networkId`. Never throws: an entry is a record, and a missing one must

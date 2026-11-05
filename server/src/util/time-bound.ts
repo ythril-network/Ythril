@@ -16,7 +16,7 @@
  * so once per step, never per call.
  */
 import { log, peerText } from './log.js';
-import { warnOnce } from './warn-once.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from './warn-once.js';
 
 /** The bound ended the wait. `ms` is the bound that did it, so a caller can say which. */
 export class TimeBoundEnded extends Error {
@@ -85,7 +85,7 @@ export async function settledWithin<T>(work: Promise<T>, ms: number): Promise<Se
   }
 }
 
-const orphanSaid = warnOnce<string>({ every: 10 * 60_000 });
+const orphanSaid = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
 
 /**
  * One file-system step of `what`, waited for at most `ms`. A step the bound ended leaves its call running (a file-system call cannot be

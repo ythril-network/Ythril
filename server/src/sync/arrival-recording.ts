@@ -59,7 +59,7 @@ import {
 import { resolveEdgeEndsOfPage } from '../brain/write-plan/plan-edge.js';
 import { schemaRecorderFailuresTotal, schemaViolationsRecordedTotal, type SCHEMA_RECORDING_SOURCES } from '../metrics/registry.js';
 import { log, logSafe, peerList, peerText, NAME_QUOTED } from '../util/log.js';
-import { warnOnce } from '../util/warn-once.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 import { RECORD_TYPE_OF } from './replicated-families.js';
 
@@ -76,7 +76,7 @@ export type RecordingSource = typeof SCHEMA_RECORDING_SOURCES[number];
 const YIELD_EVERY = 50;
 
 /** How long a (space, peer) is not told about again: one line per window, never one per page (`warnOnce`). */
-const SAID_WINDOW_MS = 10 * 60_000;
+const SAID_WINDOW_MS = SAY_ONCE_WINDOW_MS;
 
 /** The schema kind a collection's documents are judged by, or `undefined` for a family with no type schema (a file, a link). */
 export function schemaKindOf(collection: BrainCollection): KnowledgeType | undefined {

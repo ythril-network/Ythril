@@ -162,12 +162,15 @@ export async function createDir(spaceId: string, dirPath: string): Promise<void>
   });
 }
 
+/** An hour, not the ten minutes of `SAY_ONCE_WINDOW_MS`: a hard-link refusal is a property of the file system, so it does not change between moves and ten minutes of silence would repeat it all day. */
+const LINK_FALLBACK_WINDOW_MS = 60 * 60_000;
+
 /**
  * A move onto a file system that refuses a hard link is said ONCE per data root: the no-overwrite guarantee of a move needs hard-link
  * support, and what a move does without it (a rename, with a foreign writer's window) is the operator's to know, not every move's to repeat.
  * Operator log only; no door answer carries it.
  */
-const saidLinkFallback = warnOnce<string>({ max: 16, every: 60 * 60_000 });
+const saidLinkFallback = warnOnce<string>({ max: 16, every: LINK_FALLBACK_WINDOW_MS });
 
 /** A move fell back to a rename: counted every time, said once. */
 function linkFellBack(err: unknown): void {

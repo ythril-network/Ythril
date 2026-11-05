@@ -29,7 +29,7 @@ import { intervalJob, type IntervalJob, type IntervalJobDeps } from '../util/int
 import { mapLimit, mapLimitPerKey } from '../util/map-limit.js';
 import { keyedLimiter } from '../util/keyed-limiter.js';
 import { writeInOneCommands } from '../db/one-command.js';
-import { warnOnce } from '../util/warn-once.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 import { drainedQueue } from '../util/drained-queue.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 import { settledWithin } from '../util/time-bound.js';
@@ -485,7 +485,7 @@ const singleRetryWrites = new Set<Promise<void>>();
  * delivery is the burst's size in log lines (the log ring is bounded, so they push out what an operator needs). Said again after the
  * window, so a failure that goes on is still visible.
  */
-const DELIVERY_FAILURE_WINDOW_MS = 10 * 60_000;
+const DELIVERY_FAILURE_WINDOW_MS = SAY_ONCE_WINDOW_MS;
 const deliveryFailureSaid = warnOnce<string>({ max: 500, every: DELIVERY_FAILURE_WINDOW_MS });
 
 /**
