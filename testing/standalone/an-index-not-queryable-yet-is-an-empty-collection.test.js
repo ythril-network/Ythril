@@ -25,9 +25,10 @@
  *    alternatives swallowed code 125, STALE and `research_index`);
  *  - no other server source spells its own copy, where a copy is ANY regex literal naming a mongot index state, not
  *    only the three first seen (the shape of the defect: one rule, two spellings, the weaker wins).
- *  - the same holds for the tests (Q-698, bundle-236): no test under `testing/` spells its own injection of mongot's refusal (a patch of
- *    `Collection.prototype.aggregate` that reads `$vectorSearch` and builds the server's error, or the executor wording next to a built
- *    server error); `_mongot-refusals.mjs` is the one place. The gallery suite held a copy whose wordings had drifted.
+ *  - the same holds for the tests (Q-698, bundle-236): no test under `testing/` spells its own injection of mongot's refusal or its own patch of
+ *    the `$vectorSearch` aggregate (any patch of `Collection.prototype.aggregate` that reads `$vectorSearch` - refusing, answering no hits or only
+ *    watching - or the executor wording next to a built server error); `_mongot-refusals.mjs` (`patchVectorSearch`) is the one place. The gallery
+ *    suite held a copy whose wordings had drifted.
  *
  * The end-to-end half — recall, findSimilar and checkDuplicates answering through the refusal — is
  * `a-recall-while-the-index-initialises-is-answered-db.test.js`.
@@ -170,26 +171,26 @@ describe('an index not queryable yet is an empty collection', () => {
   });
 
   // ── The test side (Q-698, bundle-236): the injection of mongot's refusal lives in one module too ──────────────────────
-  // `testing/standalone/_mongot-refusals.mjs` holds the verbatim wordings and `refuseVectorSearch`, the one patch of
-  // `Collection.prototype.aggregate` that answers a `$vectorSearch` with the refusal. A suite that spells its own is the
-  // defect this file's server-side gate exists for, one layer down: the wordings drift (the gallery suite's copy missed a
-  // state the shared one learned) and a second injection is a second place a "not yet" can be made to look like a failure.
-  // The shape of the copy, not a name (`REFUSALS` is an unrelated constant elsewhere): a patch of the driver's aggregate
-  // that reads `$vectorSearch` and builds the server's error, or the executor wording next to a built server error.
-  // A spy that only WATCHES the search (it rethrows what the store gave) builds no error and is not a copy; a suite that
-  // feeds the wording to a classifier as data builds none either.
+  // `testing/standalone/_mongot-refusals.mjs` holds the verbatim wordings and `patchVectorSearch`, the one patch of
+  // `Collection.prototype.aggregate` for a `$vectorSearch` (`refuseVectorSearch`, the lagging index and the spy are built on it). A suite that
+  // spells its own is the defect this file's server-side gate exists for, one layer down: the wordings drift (the gallery suite's copy missed a
+  // state the shared one learned) and a second patch is a second place a search can be matched that was not meant to be, or a "not yet" made to
+  // look like a failure. The shape of the copy, not a name (`REFUSALS` is an unrelated constant elsewhere): ANY patch of the driver's aggregate
+  // that reads `$vectorSearch` (a spy that only watches is one too: it is the same skeleton, and a third copy of it already existed), or the
+  // executor wording next to a built server error. A suite that feeds the wording to a classifier as data patches nothing and builds none.
   const SHARED_REFUSALS = 'testing/standalone/_mongot-refusals.mjs';
   const THIS_GATE = 'testing/standalone/an-index-not-queryable-yet-is-an-empty-collection.test.js';
 
-  /** Does this comment-free test source spell its own injection of mongot's refusal? */
+  /** Does this comment-free test source spell its own patch of the `$vectorSearch` aggregate, or its own injection of mongot's refusal? */
   function spellsItsOwnRefusalInjection(code) {
     const buildsTheServerError = /new\s+(?:\w+\.)?MongoServerError\s*\(/.test(code);
-    const patchesAggregateReadingTheStage = /Collection\.prototype\.aggregate\s*=/.test(code) && /\$vectorSearch/.test(code);
+    const patchesAggregate = /\.prototype\.aggregate\s*=(?!=)|\.prototype\s*,\s*['"]aggregate['"]/.test(code);
+    const patchesAggregateReadingTheStage = patchesAggregate && /\$vectorSearch/.test(code);
     const spellsTheExecutorWording = /Executor error during aggregate/.test(code);
-    return buildsTheServerError && (patchesAggregateReadingTheStage || spellsTheExecutorWording);
+    return patchesAggregateReadingTheStage || (buildsTheServerError && spellsTheExecutorWording);
   }
 
-  it('no test spells its own injection of mongot\'s refusal: the wordings and refuseVectorSearch come from _mongot-refusals.mjs', () => {
+  it('no test spells its own patch of the $vectorSearch aggregate or injection of mongot\'s refusal: patchVectorSearch and the wordings come from _mongot-refusals.mjs', () => {
     const copies = [];
     let scanned = 0;
     for (const { file, text } of readTrackedSources('testing', { ext: ['.js', '.mjs'], floor: 100, exclude: [SHARED_REFUSALS, THIS_GATE] })) {
@@ -197,10 +198,10 @@ describe('an index not queryable yet is an empty collection', () => {
       if (spellsItsOwnRefusalInjection(stripComments(text))) copies.push(file);
     }
     assert.ok(scanned >= 100, `only ${scanned} test source(s) read - the sweep is broken, not the code`);
-    assert.deepEqual(copies, [], `these tests spell their own refusal injection instead of importing it from ${SHARED_REFUSALS}`);
+    assert.deepEqual(copies, [], `these tests patch the $vectorSearch aggregate or inject the refusal themselves instead of importing it from ${SHARED_REFUSALS}`);
   });
 
-  it('the test-side copy gate sees a planted copy of either shape, and not a spy, a classifier input or the shared import', () => {
+  it('the test-side copy gate sees a planted patch of any kind (refusing, emptying, or only watching), and not a classifier input or the shared import', () => {
     const patch = [
       "const original = Collection.prototype.aggregate;",
       "Collection.prototype.aggregate = function aggregate(pipeline) { const stage = pipeline[0]?.['$vectorSearch'];",
@@ -211,8 +212,17 @@ describe('an index not queryable yet is an empty collection', () => {
       'the executor wording next to a built server error was not seen');
     assert.ok(spellsItsOwnRefusalInjection("const e = new driver.MongoServerError({ errmsg: 'Executor error during aggregate command' });"),
       'a namespaced constructor was not seen');
+    // Planted copies that build NO server error: the lagging index (answers no hits) and the spy (rethrows what the store gave) are the same skeleton.
+    const emptying = "Collection.prototype.aggregate = function (p) { const s = p[0]?.['$vectorSearch']; if (!s) return c; cursor.toArray = async () => []; return cursor; };";
+    assert.ok(spellsItsOwnRefusalInjection(emptying), 'a patch of aggregate that answers no hits and builds no error was not seen');
     const spy = "Collection.prototype.aggregate = function (p) { if (!p[0]?.['$vectorSearch']) return c; cursor.toArray = async () => { try { return await t(); } catch (e) { throw e; } }; };";
-    assert.ok(!spellsItsOwnRefusalInjection(spy), 'a spy that rethrows what the store gave builds no error and is not a copy');
+    assert.ok(spellsItsOwnRefusalInjection(spy), 'a spy that only watches the search is the same skeleton and was not seen');
+    assert.ok(spellsItsOwnRefusalInjection("mongodb.Collection.prototype.aggregate = wrapped; const q = { $vectorSearch: {} };"), 'a namespaced Collection was not seen');
+    assert.ok(spellsItsOwnRefusalInjection("Object.defineProperty(Collection.prototype, 'aggregate', { value: f }); const q = { $vectorSearch: {} };"),
+      'a defineProperty patch was not seen');
+    assert.ok(!spellsItsOwnRefusalInjection("Collection.prototype.aggregate = function (p, ...r) { return original.call(this, [{ $match: {} }], ...r); };"),
+      'a patch of aggregate that names no $vectorSearch is not a copy');
+    assert.ok(!spellsItsOwnRefusalInjection("if (a.prototype.aggregate === b) {} const s = { $vectorSearch: {} };"), 'a comparison is not a patch');
     assert.ok(!spellsItsOwnRefusalInjection("const REPORTED = 'Executor error during aggregate command on namespace: x'; classify(mongoErr(REPORTED));"),
       'the wording as classifier input, with no server error built, is not a copy');
     assert.ok(!spellsItsOwnRefusalInjection("import { REFUSALS, refuseVectorSearch } from './_mongot-refusals.mjs'; refuseVectorSearch(REFUSALS.initialSync);"),

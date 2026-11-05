@@ -18,12 +18,17 @@ export interface ScanAnswer {
   indexHeld?: readonly unknown[];
 }
 
+/** The message a scan owes when a space could not be scanned (`failedSpaces`, Q-381): one key for both scans, so neither can word it differently. */
+function failedSpacesNotice(r: ScanAnswer): string[] {
+  return r.failedSpaces?.length ? ['duplicates.scanError'] : [];
+}
+
 /** The messages a contradiction scan's answer owes: the judge that was unreachable, a space that could not be scanned, a type whose index was not ready. */
 export function contradictionScanNotices(r: ScanAnswer): string[] {
   return [
     ...(r.nliStalled ? ['review.contradictions.scanStalled'] : []),
     // The tab scans ONE space, so a space the scan could not scan is the whole scan: a `200` that names it (Q-381) must not read as done.
-    ...(r.failedSpaces?.length ? ['duplicates.scanError'] : []),
+    ...failedSpacesNotice(r),
     ...(r.indexHeld?.length ? ['review.contradictions.scanHeld'] : []),
   ];
 }
@@ -31,7 +36,7 @@ export function contradictionScanNotices(r: ScanAnswer): string[] {
 /** The messages a duplicate scan's answer owes: a space that could not be scanned, a type whose index was not ready. */
 export function duplicatesScanNotices(r: ScanAnswer): string[] {
   return [
-    ...(r.failedSpaces?.length ? ['duplicates.scanError'] : []),
+    ...failedSpacesNotice(r),
     ...(r.indexHeld?.length ? ['duplicates.scanHeld'] : []),
   ];
 }

@@ -37,7 +37,7 @@ import { andPredicates } from '../db/and-predicates.js';
 import { FRESH_WINDOW_MS } from './fresh-writes.js';
 import { askIndexOnce, type ProbeTarget } from '../spaces/vector-index.js';
 import { recallUndecidedTotal } from '../metrics/registry.js';
-import { warnOnce } from '../util/warn-once.js';
+import { warnOnce, SAY_ONCE_WINDOW_MS } from '../util/warn-once.js';
 import { log, peerText } from '../util/log.js';
 
 export interface IndexShouldServeOptions {
@@ -105,7 +105,7 @@ export const HOLDS_READ_MS = 2_000;
 export type IndexMiss = 'none' | 'index_not_ready' | 'filter_window' | 'undecided';
 
 /** `undecided` is said once per collection per ten minutes: a read that keeps timing out would otherwise say it on every recall. */
-const undecidedSaid = warnOnce<string>({ every: 10 * 60_000 });
+const undecidedSaid = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
 
 export interface IndexMissOptions {
   collName: string;

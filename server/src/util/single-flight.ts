@@ -41,10 +41,10 @@
  * behaviour change. Every skip is still returned (`false`), so a caller that counts them (`intervalJob`) loses nothing.
  */
 import { log, peerText } from './log.js';
-import { warnOnce } from './warn-once.js';
+import { warnOnce, SAY_ONCE_WINDOW_MS } from './warn-once.js';
 
-/** A skipped tick is said once per this long, per instance. */
-export const SKIP_WARNING_WINDOW_MS = 10 * 60_000;
+/** A skipped tick is said once per this long, per instance: the say-once window ({@link SAY_ONCE_WINDOW_MS}), named for the tick it throttles. */
+export const SKIP_WARNING_WINDOW_MS = SAY_ONCE_WINDOW_MS;
 
 export interface SingleFlightDeps {
   /** The clock, for a test. */

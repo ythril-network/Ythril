@@ -49,7 +49,8 @@ import { openFileActDoors } from './_file-act-doors.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { MOVE_DOORS, sentenceOf } from './_move-destination.mjs';
 import { seedClaim } from './_media-claim.mjs';
-import { METRICS, metricValue } from './_leaked-rows-repair.mjs';
+import { METRICS } from './_leaked-rows-repair.mjs';
+import { metricValue } from './_metric-series.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 

@@ -666,7 +666,7 @@ contradictionsRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly
     let scanned = 0, found = 0, nliStalled = false, judgedPairs = 0, modelCalls = 0, budgetExhausted = false;
     // A space that fails is named in `failedSpaces` and the rest are still scanned; a store that is not answering ends the request
     // (the `catch` below answers it 503). `scannedSpaces` counts the spaces that were scanned, so it equals `spaces.length` on success.
-    const { results, failedSpaces } = await scanSpacesInRequest(SCAN_STEP, spaces, async (spaceId) => ({ spaceId, ...(await scanSpace(spaceId)) }));
+    const { results, failedSpaces } = await scanSpacesInRequest(SCAN_STEP, spaces, (spaceId) => scanSpace(spaceId));
     // Built from the spaces the scan covered, which are the token's own (`spacesWhereTokenMay` above): a token that cannot scan a space is
     // never told that space's index is not ready.
     const indexHeld: Array<{ spaceId: string; type: string; pass: string }> = [];

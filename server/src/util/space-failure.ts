@@ -56,10 +56,10 @@ import { isWriteTimeout } from '../db/write-timeout.js';
 import { LruMap } from './lru-map.js';
 import { signalHousekeeping, type SpaceFailureKind } from './housekeeping-signals.js';
 import { log, peerText } from './log.js';
-import { warnOnce } from './warn-once.js';
+import { warnOnce, SAY_ONCE_WINDOW_MS } from './warn-once.js';
 
-/** The longest one condition is said once for, ms. A constant the docs cite, never typed in prose. */
-export const SPACE_FAILURE_WINDOW_MS = 10 * 60_000;
+/** The longest one condition is said once for, ms: the say-once window ({@link SAY_ONCE_WINDOW_MS}), named for the failure it throttles. A constant the docs cite, never typed in prose. */
+export const SPACE_FAILURE_WINDOW_MS = SAY_ONCE_WINDOW_MS;
 /** The most conditions remembered at once: the keys are space ids and unit names, which a peer influences. */
 export const SPACE_FAILURE_MAX_KEYS = 20_000;
 

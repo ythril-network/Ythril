@@ -9,13 +9,15 @@
  * declared", which a row can refuse, and the label VALUES as the scrape names them, so a row derives the scanners from what the
  * registry declares and never lists them.
  */
+import { metricSeries } from './_metric-series.mjs';
 
-/** `{ '<labels as scraped>': value }` for every `ythril_scan_holds_total` series, or `null` when the scrape holds none. */
+/** `{ '<labels as scraped>': value }` for every `ythril_scan_holds_total` series (read by `metricSeries`), or `null` when none is declared. */
 export async function scanHoldSeries(registry) {
-  const text = await registry.register.metrics();
+  const declared = await metricSeries('ythril_scan_holds_total', { absent: 'null', registry });
+  if (declared === null) return null;
   const series = {};
-  for (const m of text.matchAll(/^ythril_scan_holds_total\{([^}]*)\}\s+(\S+)/gm)) series[m[1]] = Number(m[2]);
-  return Object.keys(series).length > 0 ? series : null;
+  for (const s of declared) series[Object.entries(s.labels).map(([k, v]) => `${k}="${v}"`).join(',')] = s.value;
+  return series;
 }
 
 /** The sum of a `scanHoldSeries` answer (0 for none). */

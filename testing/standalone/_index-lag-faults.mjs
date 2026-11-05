@@ -23,7 +23,7 @@
  * Both patches are process-wide: always `restore()` in a `finally`.
  */
 import { Collection } from 'mongodb';
-import { refusalError, maxTimeExpiredError } from './_mongot-refusals.mjs';
+import { refusalError, maxTimeExpiredError, patchVectorSearch, refusesWith, answersNothing } from './_mongot-refusals.mjs';
 
 /**
  * Answer every native-filtered `$vectorSearch` aggregate (optionally only on collections `only(collectionName)` accepts)
@@ -32,22 +32,15 @@ import { refusalError, maxTimeExpiredError } from './_mongot-refusals.mjs';
  * Returns `{ emptied(), refusedProbes(), restore() }`.
  */
 export function lagFilteredVectorSearch({ only = () => true, probeRefusal } = {}) {
-  const original = Collection.prototype.aggregate;
   let emptied = 0;
   let refusedProbes = 0;
-  Collection.prototype.aggregate = function aggregate(pipeline, ...rest) {
-    const cursor = original.call(this, pipeline, ...rest);
-    const stage = Array.isArray(pipeline) ? pipeline[0]?.['$vectorSearch'] : undefined;
-    if (!stage || !only(this.collectionName)) return cursor;
-    if (stage.filter !== undefined) {
-      cursor.toArray = async () => { emptied++; await cursor.close(); return []; };
-    } else if (probeRefusal) {
-      const err = refusalError(probeRefusal, `${this.dbName}.${this.collectionName}`, stage.index);
-      cursor.toArray = async () => { refusedProbes++; await cursor.close(); throw err; };
-    }
-    return cursor;
-  };
-  return { emptied: () => emptied, refusedProbes: () => refusedProbes, restore: () => { Collection.prototype.aggregate = original; } };
+  const patch = patchVectorSearch(({ stage, collectionName, namespace }) => {
+    if (!only(collectionName)) return undefined;
+    if (stage.filter !== undefined) return answersNothing(() => { emptied++; });
+    if (!probeRefusal) return undefined;
+    return refusesWith(refusalError(probeRefusal, namespace, stage.index), () => { refusedProbes++; });
+  });
+  return { emptied: () => emptied, refusedProbes: () => refusedProbes, restore: patch.restore };
 }
 
 /**
