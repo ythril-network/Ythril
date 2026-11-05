@@ -724,7 +724,7 @@ Marks the network's spaces as owed a full re-read from every member. `spaces` (l
 
 **Answer** `200 { status: "owed", networkId, spaces, started, cost, rereadOwed }`: `started` is how many member-space pairs became owed now. `rereadOwed` is the list `GET /api/networks/:id` carries.
 
-**Who may:** an instance administrator, **with the second factor** where the instance asks one (`403 MFA_REQUIRED` without it; `requireAdminMfa`, as the restore and the wipe). MCP `network_reread` takes the same `{ id, confirm, spaces? }` and answers the same body; **it refuses where a second factor is required, with "needs MFA step-up, which this door cannot present; use the web UI"**, because MCP has no channel for a code (the same refusal a personal-view copy gives). Audited on both doors as `network.reread`; the route has a not-area-scoped rights row (it is an instance operation, not a view of a space).
+**Who may:** an instance administrator, **with the second factor** where the instance asks one (`403 MFA_REQUIRED` without it, `403 MFA_INVALID` for a wrong code, and `429 MFA_LOCKED` once five wrong codes in 15 minutes have locked the token: [the lockout](03-auth-and-limits.md#wrong-second-factor-codes-lock-the-token); `requireAdminMfa`, as the restore and the wipe). MCP `network_reread` takes the same `{ id, confirm, spaces? }` and answers the same body; **it refuses where a second factor is required, with "needs MFA step-up, which this door cannot present; use the web UI"**, because MCP has no channel for a code (the same refusal a personal-view copy gives). Audited on both doors as `network.reread`; the route has a not-area-scoped rights row (it is an instance operation, not a view of a space).
 
 ---
 

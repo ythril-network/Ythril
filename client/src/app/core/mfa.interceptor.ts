@@ -17,6 +17,11 @@ const MFA_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
  *   3. On success, cache the code for the remainder of the window.
  *   4. On second failure (wrong code), invalidate cache and propagate the error.
  *
+ * A 429 `MFA_LOCKED` (five wrong codes in 15 minutes lock the token, or its address, a correct code included) is NOT a challenge: it
+ * is not a 403, so it passes through here untouched and no prompt opens, because a code typed into a lock cannot succeed. The
+ * caller's own error path says it, with the wait, through `refusalText` (`refusal.mfaLocked.*`). The code this interceptor caches and
+ * resends is a replay or a stale code to the server, which refuses it as a wrong one but never counts it.
+ *
  * Applies to mutations (POST/PUT/PATCH/DELETE) AND to GET requests on admin
  * paths (/api/admin/*) — some admin GET endpoints also require MFA.
  *

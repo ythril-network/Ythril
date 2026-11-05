@@ -112,8 +112,11 @@ export function createApp() {
   // Default false: the server is exposed directly in the default deployment, so
   // req.ip must come from the socket. Trusting a client-supplied X-Forwarded-For
   // would let an attacker spoof the IP that rate limiting and the audit log key
-  // on — bypassing the only throttle in front of admin TOTP. Set trustProxy to
+  // on — bypassing the throttles in front of admin TOTP and the per-address half of the
+  // second-factor lockout (`auth/code-attempts.ts`, which counts an address only when this
+  // is set or the socket's own address is a public one). Set trustProxy to
   // the exact hop count only when a known reverse proxy terminates connections.
+  // It is read once, here: a change of TRUST_PROXY applies on restart.
   const trustProxy = resolveTrustProxy();
   app.set('trust proxy', trustProxy);
   if (trustProxy === true) {

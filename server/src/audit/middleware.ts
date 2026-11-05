@@ -573,6 +573,14 @@ const CUT_OFF: AuditChange = { field: 'complete', to: false };
 export const AUTH_FAILED_OPERATION = 'auth.failed';
 
 /**
+ * A second-factor lockout that started (Q-694, `auth/code-attempts.ts`): the wrong code that brought a token, or a source address, to the
+ * limit. The route's own `429` is written with no token (the refusal runs before one is attached) and `POST /api/mfa/verify` is not a rule at
+ * all, so without a row of its own an operator reading the log sees nobody guessing. One row per lock start, with the token id and the
+ * address, written directly like `auth.failed`, so named here for the same reason: the documentation gate derives its operations from this module.
+ */
+export const MFA_LOCKED_OPERATION = 'mfa.locked';
+
+/**
  * What a config reload does to each space (S-10), written by `applyConfigFromDisk` for the watcher and for
  * `POST /api/admin/reload-config` alike — outside the route rules, like `auth.failed`, so named here for the same
  * reason: the documentation gate derives the operations it checks from this module.

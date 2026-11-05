@@ -5,7 +5,9 @@ import { requireAuth, requireAdminOrSpaceAdmin, requireAdminOrSpaceAdminMfa, isI
 import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { rateLimitRefusalResponse } from '../rate-limit/per-token.js';
 import { createToken, initialRightsOf, listTokens, revokeToken, regenerateToken, renameToken, setTokenRights, setTokenMfa, setTokenRateLimit } from '../auth/tokens.js';
-import { isMfaEnabled, verifyMfaCode } from '../auth/totp.js';
+import { isMfaEnabled } from '../auth/totp.js';
+import { tryMfaCode, mfaLockOfToken, mfaTokenIdOf } from '../auth/code-attempts.js';
+import { sendMfaLocked } from './mfa-locked-answer.js';
 import { specialPurposeApproverRefusal } from '../auth/peer-bound.js';
 import { z } from 'zod';
 import { SPACE_AREAS, RUNGS, RUNG_IMPLICATIONS, DERIVED_RUNGS } from '../config/rights-shape.js';
@@ -279,11 +281,27 @@ export const CreateTokenBody = z.object({
 function exemptionNeedsLiveCode(req: Request, res: Response, mfa: string | undefined): boolean {
   if (mfa !== 'exempt' || !isMfaEnabled()) return true;
   const code = (req.headers['x-totp-code'] as string | undefined ?? '').trim();
-  if (!code || !verifyMfaCode(code)) {
-    res.status(403).json({
-      error: 'MFA_REQUIRED',
-      message: 'Granting an MFA exemption requires a current TOTP code, even from a token that is itself exempt',
-    });
+  const tokenId = mfaTokenIdOf(req);
+  // A locked token is answered before it is asked for a code (the lock is the answer; no code can succeed), as `enforceMfa` does.
+  const lock = mfaLockOfToken(tokenId);
+  if (lock) {
+    sendMfaLocked(res, lock);
+    return false;
+  }
+  const required = {
+    error: 'MFA_REQUIRED',
+    message: 'Granting an MFA exemption requires a current TOTP code, even from a token that is itself exempt',
+  };
+  // A request with no code is never a guess: it is refused here and not counted.
+  if (!code) {
+    res.status(403).json(required);
+    return false;
+  }
+  // A code goes through the attempt counter, which answers an object: `.ok`, and `.reason` for a lock the address key began.
+  const attempt = tryMfaCode(code, { tokenId, req });
+  if (!attempt.ok) {
+    if (attempt.reason === 'locked') sendMfaLocked(res, attempt);
+    else res.status(403).json(required);
     return false;
   }
   return true;
@@ -401,7 +419,6 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
       return;
     }
   }
-  if (!exemptionNeedsLiveCode(req, res, mfa)) return;
   /*
    * The quota, checked with the SHARED refusal — the MCP tool calls the same function.
    *
@@ -409,12 +426,16 @@ tokensRouter.post('/', authRateLimit, requireAdminOrSpaceAdminMfa, async (req, r
    * field answers: the request is well-formed and the caller is not allowed to ask for that number. A malformed
    * value is still a `400`. Never accepted-and-clamped: storing a smaller number than was asked for and
    * answering 201 is the defect this file's `.strict()` comment is about, one field over.
+   *
+   * Asked BEFORE the live code (Q-694): a body this refuses anyway must neither burn a one-time code nor add a wrong one to the
+   * count that locks the token, the order the PATCH route already keeps (Q-656).
    */
   const quotaRefusal = rateLimitRefusalResponse(rateLimitPerMinute);
   if (quotaRefusal) {
     res.status(quotaRefusal.status).json({ error: quotaRefusal.error });
     return;
   }
+  if (!exemptionNeedsLiveCode(req, res, mfa)) return;
   /*
    * `admin && readOnly` is gone with the inputs — a matrix cannot express the contradiction, so there
    * is nothing left to refuse.

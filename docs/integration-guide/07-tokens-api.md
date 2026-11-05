@@ -486,7 +486,11 @@ sides of the diff.
 > the same rule create has, and for the same reason. Admin authentication here is satisfied by an admin token
 > that is itself exempt, so without it one exemption could grant the next until the instance-wide switch
 > protected nothing. Send the code as `x-totp-code`; without it the answer is `403 MFA_REQUIRED`. The check
-> runs before anything is written, so a refused exemption never leaves a half-applied edit.
+> runs before anything is written, so a refused exemption never leaves a half-applied edit. A wrong code is
+> counted: after five in 15 minutes the token is locked and the answer is `429 MFA_LOCKED` (`retryable: false`,
+> wait `retryAfterSeconds`; `MFA_INVALID` is the same refusal on the ordinary MFA-gated routes) — see
+> [the lockout](03-auth-and-limits.md#wrong-second-factor-codes-lock-the-token). The quota ceiling is asked
+> first on create, so a body it refuses neither spends nor counts a code.
 
 **Response** `200`: the updated token record (hash excluded).
 

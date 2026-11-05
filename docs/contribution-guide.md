@@ -243,9 +243,11 @@ that, and they are honoured **only when `NODE_ENV !== 'production'`**:
 | `SKIP_GLOBAL_RATE_LIMIT` | the general API limiter |
 | `SKIP_SYNC_RATE_LIMIT` | the peer-sync limiter |
 
-The production check is not belt-and-braces: these limiters are the **only** throttle in front of admin
+The production check is not belt-and-braces: these limiters are the first throttle in front of admin
 TOTP verification, so a leaked value — a copy-pasted compose file, a shared `.env` — must not be able to
-switch them off on a live instance. Setting any of them also logs a loud warning at startup, so a
+switch them off on a live instance. **No skip turns the second-factor lockout off** (`auth/code-attempts.ts`: five wrong
+codes lock a token, whatever these say), so a test that sends wrong codes counts them and locks its token; give each case
+its own token. Setting any of them also logs a loud warning at startup, so a
 misconfigured non-production deployment says so rather than quietly running unthrottled.
 
 ### Sync tests (the multi-instance test stack)

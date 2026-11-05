@@ -15,8 +15,8 @@
  *
  * ## Why a SECOND limiter rather than making the existing one token-aware
  *
- * The global limiter runs BEFORE authentication, deliberately — it is the only throttle in front of admin TOTP
- * verification, so it has to throttle requests carrying no valid credential at all. That means it cannot know
+ * The global limiter runs BEFORE authentication, deliberately — it is the first throttle in front of admin TOTP
+ * verification (the bound on wrong codes is `auth/code-attempts.ts`), so it has to throttle requests carrying no valid credential at all. That means it cannot know
  * which token a request holds: answering that needs a bcrypt compare against every stored token, per request.
  *
  * So the per-token quota is enforced after auth, where the record is already resolved and free. The pre-auth

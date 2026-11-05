@@ -85,7 +85,7 @@ describe('the global limiter steps aside for a credential', () => {
      * Put that together with the skip above and it was a hole rather than a design: a request presenting a
      * credential is not limited by `globalRateLimit`, and the credential test accepted an UNAUTHENTICATED
      * query string. So `?token=anything` on any request moved an anonymous caller off the 300/min limit and
-     * onto the 3000/min flood backstop — a tenfold amplification, bounded but free.
+     * onto the per-address flood backstop (which counts it: no token's limit metered it) — a tenfold step up, bounded but free.
      *
      * 4.0 removed the SSE transport and the URL-credential fallback with it (see
      * `no-credential-travels-in-a-url.test.js`), so this is the assertion that keeps the two decisions

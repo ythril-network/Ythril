@@ -13,7 +13,8 @@
  *
  * GET  /api/mfa/status          — { enabled: boolean, asked: boolean }
  * POST /api/mfa/setup           — generate & store secret; returns { secret, otpauth }
- * POST /api/mfa/verify          — verify a code without a state-changing side-effect
+ * POST /api/mfa/verify          — verify a code without a state-changing side-effect ({ valid }); a wrong code is counted,
+ *                                 and the sixth attempt in 15 minutes is 429 MFA_LOCKED (auth/code-attempts.ts)
  * DELETE /api/mfa               — disable MFA (removes secret from secrets.json)
  */
 
@@ -22,7 +23,9 @@ import { refusalOfParse } from '../util/log.js';
 import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
 import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
 import { callerIsAskedForMfa } from '../auth/mfa-asked.js';
-import { enableMfa, disableMfa, isMfaEnabled, verifyMfaCode } from '../auth/totp.js';
+import { enableMfa, disableMfa, isMfaEnabled } from '../auth/totp.js';
+import { tryMfaCode, mfaTokenIdOf } from '../auth/code-attempts.js';
+import { sendMfaLocked } from './mfa-locked-answer.js';
 import { getConfig } from '../config/loader.js';
 import { z } from 'zod';
 
@@ -61,8 +64,14 @@ mfaRouter.post('/verify', authRateLimit, requireAdmin, (req, res) => {
     res.status(409).json({ error: 'MFA is not enabled' });
     return;
   }
-  const ok = verifyMfaCode(parsed.data.code);
-  res.json({ valid: ok });
+  // Counted like every door that asks for a code (Q-694): five wrong codes lock the token, and this door answers the lock `429 MFA_LOCKED`.
+  // A wrong, a replayed and a stale code all answer `{ valid: false }`.
+  const attempt = tryMfaCode(parsed.data.code, { tokenId: mfaTokenIdOf(req), req });
+  if (!attempt.ok && attempt.reason === 'locked') {
+    sendMfaLocked(res, attempt);
+    return;
+  }
+  res.json({ valid: attempt.ok });
 });
 
 // DELETE /api/mfa — disable MFA. Requires a current TOTP code (requireAdminMfa)

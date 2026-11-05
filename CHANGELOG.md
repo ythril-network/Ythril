@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Rate limits:** three busy tokens behind one address no longer trip the per-address flood backstop; it counts only requests no token's own limit meters, and its `429` says so.
 - **Recall:** a filtered recall the vector index answered with nothing said nothing over an absent, dropped or lagging index; it now says `index_not_ready` or `filter_window` when an older record satisfies the filter, and stays a plain empty answer when none does.
 - **Contradictions and duplicates:** a contradiction scan passed over records searched on an unready index and showed a clean queue; it now keeps its place until the index serves. A hold 20 hours old is warned, scan answers name held types (`indexHeld`), and a deleted space loses its scan cursors.
 - **Embedding:** a table, fence or long line larger than an HTTP embedder accepts was sent whole and refused, leaving its passage with no vector; it is split at row or line breaks.
@@ -62,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Second factor:** five wrong codes in 15 minutes now lock the token (and a trusted address) with `429 MFA_LOCKED`, a correct code included; an `mfa.locked` audit row and two `ythril_mfa_lockout*` metrics report it. Replayed or stale codes are not counted.
 - **Rights:** a request path in a different letter case (`/Api/Brain/...`) skipped a space's area rung: a token without that rung could read the area. The rung is now asked of the registered route.
 - **MCP connectors:** a peer-bound or schema-library token could approve an AI connector that then outlived the peer's revocation; both are refused (`403`) at consent and at token creation.
 - **Logs:** a URL's password stayed in a log line when the scheme followed a digit or one of `+ . -`, or after an `@` inside the password; both are redacted.

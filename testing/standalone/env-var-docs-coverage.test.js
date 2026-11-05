@@ -87,6 +87,8 @@ const NOT_A_SETTING = new Map([
   ['INFRA_MANAGED', 'API error code'],
   ['FEATURE_DISABLED', 'API error code'],
   ['MFA_REQUIRED', 'API error code'],
+  ['MFA_INVALID', 'API error code'],
+  ['MFA_LOCKED', 'API error code'],
   ['MERKLE_DIVERGENCE', 'sync conflict code'],
   ['FILE_REPLACED', 'sync log code: a peer edit replaced an untouched local file'],
   ['REPARENT_REVERT_AVAILABLE', 'network notification code'],

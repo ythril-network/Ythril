@@ -50,7 +50,7 @@ by a read door and answered as a missing space by every write and configuration 
 |---|---|
 | `requireAuth` | Any valid token |
 | `requireAdmin` | Token with `admin: true` |
-| `requireAdminMfa` | Admin token + MFA verified (if MFA enabled) |
+| `requireAdminMfa` | Admin token + MFA verified (if MFA enabled); a token locked for wrong codes is a `429 MFA_LOCKED` — [the lockout](#wrong-second-factor-codes-lock-the-token) |
 | `requireSpaceAuth` | Token with access to the `:spaceId` in the URL |
 | `denyReadOnly` | Applied on mutating routes — blocks `readOnly` tokens |
 
@@ -206,7 +206,7 @@ to correct. The information is identical; only the envelope differs.
 | 410 | `code: "space_retired"`: the id belonged to a shared grouping of spaces that the 6.0 upgrade turned into personal views. It answers this on every door until an instance admin purges it ([Upgrading](02b-upgrading.md), [Personal views](06d-personal-views.md)) |
 | 413 | Payload too large (Express body limit: 10 MB for JSON). The admin import is the exception: it reads its own body, bounded by `importBodyMaxBytes` (inflated bytes) and `importMaxDocuments`, and answers `413` above either ([Admin API](12-admin-api.md#import-space)) |
 | 422 | On a file act, `code: "confirm_required"`: deleting a directory needs `confirm: true`, and nothing was deleted. Other `422`s are about the request body, so retrying the same request fails identically; see [Files](05-files-api.md#delete-a-file). On a record update, a `schema_violation` the `strict` space refuses; on a merge, `merge_too_large`; on a schema save and on the validate-schema dry run (`POST /api/spaces/:id/validate-schema`, MCP `schema_validate`), a `$ref` to a schema-library entry that does not exist or is filed under another knowledge type |
-| 429 | Rate limited — check `Retry-After` header. A stored-data schema check (`POST /api/spaces/:id/validate-schema`, `schema_validate`) is also held to five runs a minute per token, counted across both doors |
+| 429 | Rate limited — check `Retry-After` header. `MFA_LOCKED` (`retryable: false`) is the second-factor lockout, not a rate limit: wait the `retryAfterSeconds` it names and do not send another code ([below](#wrong-second-factor-codes-lock-the-token)). A stored-data schema check (`POST /api/spaces/:id/validate-schema`, `schema_validate`) is also held to five runs a minute per token, counted across both doors |
 | 423 | A sync peer's exchange of a space is held while a wipe or deletion is being applied on one side (`code: "space_held"`). A sync sender treats it as 'held', not as a failure, and retries next cycle. `code: "space_declined"`: the member left that space (pub/sub). A peer token's request for a held space on a space route, or a tool call that names it (`POST /api/<tool>`, MCP), gets the same `space_held` answer; a search that names no space leaves the held ones out instead. |
 | 500 | A server fault, in words that name no path or message of the runtime's: an error in our code answers `Internal server error` with `code: "internal"`, and every `500` here states `retryable: false`. A file delete or move whose deletion cannot be recorded is `code: "act_not_recorded"`: nothing was moved or deleted. A file act the server's storage refuses is `code: "file_system_fault"`. A deletion or wipe whose vote passed but whose change here failed during the call is `code: "space_act_failed"`, with `status: "passed"` and `rounds`: **do not retry**, the vote passed and the instance retries the change itself. The same failure of an unnetworked deletion or wipe (no vote decided it) carries neither `status` nor `rounds`, and the same rule: do not retry. |
 | 502 | An upstream service did not answer: the server could not reach another host while it served the call (`an upstream service did not answer`, `retryable: false`). The host and address are in the server log, not in the body. A waited sync trigger answers `code: "sync_failed"` when no member of the network synced (the servers behind this one failed); the body names each member's outcome in `members` in our words ([Trigger Sync](09-sync-api.md#trigger-sync)). |
@@ -228,7 +228,8 @@ to correct. The information is identical; only the envelope differs.
 | Notify | 60 / min | client | `GET /api/notify`, `POST /api/notify` |
 | Bulk wipe | 5 / min | client | `POST /api/delete_space_data` |
 | Heavy calls | 5 / min, **one count per token** across all of them and both doors | token id (the IP when it has none) | `delete_space_data`, starting an ingest run, and [`file_stamp_report`](06-spaces-api.md) (`POST /api/spaces/:id/file-stamp-report`, `POST /api/file_stamp_report`, the MCP tool). The sixth call in a minute is a `429` whose sentence names the call |
-| Flood backstop | 3 000 / min | source IP | Everything except `/health`, `/ready`, `/metrics` |
+| Second-factor lockout | 5 wrong codes in 15 minutes | token id, and the source address where it can be trusted | Every door that asks for a code. The sixth attempt is `429 MFA_LOCKED` ([below](#wrong-second-factor-codes-lock-the-token)) |
+| Flood backstop | 3 000 / min | source IP | Every request from an address that no token's own limit meters. A request a valid token's own limit meters is not counted, whatever its answer; the probes `/health`, `/ready`, `/metrics` are not counted either |
 
 **"Keyed by client" means your budget is your own.** The limiter buckets on the credential you present —
 the `Authorization: Bearer` token, or the MCP `?token=` parameter — so one busy integration cannot spend
@@ -299,7 +300,8 @@ creation, that 403 means infra owns the number and your request asked for more t
 **The global limiter STEPS ASIDE once you present a credential.** It runs before authentication and cannot
 know which token you are — the limit is a property of a record that has not been read yet — so it applies to
 requests carrying no credential at all: login, setup, an anonymous probe. Present one and the per-token quota
-is the only limit on the request.
+is the only rate limit on the request (the per-address flood backstop does not count a request your token's own
+limit meters, below).
 
 That changed in 3.6, and it is a fix rather than a loosening. Before it, the global limiter's fixed 300/min
 keyed on a hash of your credential, so it gave every token its own 300 bucket and the real limit was
@@ -309,16 +311,54 @@ why.**
 
 Nothing is now unbounded that was bounded before: the global limiter never restrained a flood of INVENTED
 credentials either, because it is keyed per credential and each new string minted a fresh bucket. The flood
-backstop below is what closes that, and it does not step aside for anything.
+backstop below is what closes that, and it never steps aside for a credential you merely present: an
+invented bearer is metered by nothing.
 
-The **flood backstop** is a per-IP ceiling in front of every route, set far above any legitimate single
-client. It exists because per-client keying alone would let a flood of random bearer strings mint an
-unbounded number of buckets. You should never see it in normal operation.
+The **flood backstop** is a per-address ceiling in front of every route. It counts the requests of an address
+that **no token's own limit meters**: anonymous requests, invented bearers, a valid token refused before its
+limit is asked (not an admin, `MFA_REQUIRED`, `MFA_INVALID`, `MFA_LOCKED`, a space it cannot reach), unknown
+paths, static files, the app's own pages, and a token's own `429`. A request that a valid token's own limit
+admitted is **not counted**, whatever its answer: that limit and the token's grant bound it, so three busy
+tokens behind one gateway, NAT or proxy address never reach the backstop together, however high the quotas are
+set. It exists because per-client keying alone would let a flood of random bearer strings mint an unbounded
+number of buckets. You should never see it in normal operation, and its `429` says it counts an address's
+requests that no token's own limit covered, so it never sends you to a token's quota. (A metered request that
+finishes in a later minute gives back that later minute's count: at most one request per stream.)
 
 > **Behind a reverse proxy, set `TRUST_PROXY`** (see the environment table above) to the exact number of
 > proxy hops. Without it `req.ip` is the proxy's address, so the auth limiter and the flood backstop
 > collapse to one bucket for all traffic through that proxy. Do not use `true`: it trusts the entire
-> client-supplied `X-Forwarded-For` chain, which lets a caller spoof the address those limits key on.
+> client-supplied `X-Forwarded-For` chain, which lets a caller spoof the address those limits key on. The
+> second-factor lockout's address key counts only behind a configured `TRUST_PROXY` (or for a public socket
+> address), for the same reason. A change of `TRUST_PROXY` applies on restart.
+
+### Wrong second-factor codes lock the token
+
+When MFA is on, every door that asks for a code counts the wrong ones: the `X-TOTP-Code` header of an MFA-gated
+route, `POST /api/mfa/verify`, and the live code a token needs to be made or edited `mfa: 'exempt'`. **5 wrong
+codes inside 15 minutes lock the token**, and the source address too where it can be trusted (behind a configured
+`TRUST_PROXY`, or when the socket's own address is a public one; behind the default Docker gateway only the
+token is counted). The 1st to 5th wrong code is answered as before (`403 MFA_INVALID`, `403 MFA_REQUIRED` at the
+exemption door, `200 { "valid": false }` at `verify`). From the sixth attempt on, a correct code included, the
+answer is:
+
+```text
+HTTP/1.1 429 Too Many Requests
+Retry-After: 540
+
+{ "error": "MFA_LOCKED", "code": "MFA_LOCKED", "key": "token", "retryAfterSeconds": 540,
+  "retryable": false, "message": "..." }
+```
+
+`key` is `token` or `address` (the token is named when both are locked); `retryAfterSeconds` is the wait until the
+oldest wrong code leaves the 15 minutes, never below 1, and `Retry-After` carries the same number. **Do not prompt
+for another code and do not retry:** a locked attempt is not verified, so it spends no code, and no code can
+open the lock before the wait is spent. A token that is locked is answered `429` even when it sends no code. Only a
+guess counts: a request with no code, a code already used (a replay), a code from a few minutes ago (a stale, cached
+code) and a request while MFA is off are refused like a wrong code, and counted for nothing. The count is kept in
+the server's memory: a restart clears it. Each lock that starts writes one `mfa.locked` [audit row](13-audit-log-api.md)
+and counts `ythril_mfa_lockouts_total` ([metrics](11-setup-api.md)); a lock cannot be lifted from the API, and waiting is the
+recovery. Making a token over the instance quota ceiling (`POST /api/tokens`) is refused before any code is asked, so a refused body neither spends nor counts a code.
 
 Rate limit headers follow the IETF draft-7 format: a single combined `RateLimit` header plus a `RateLimit-Policy` header (the legacy draft-6 `RateLimit-Limit` / `RateLimit-Remaining` / `RateLimit-Reset` headers are not emitted):
 

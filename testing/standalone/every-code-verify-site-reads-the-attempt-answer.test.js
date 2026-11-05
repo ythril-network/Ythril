@@ -11,9 +11,9 @@
  * ## What it holds
  *
  * `api/mfa.ts`, `api/tokens.ts` and `auth/middleware.ts` each call `tryMfaCode(` (the three doors that verify a code), and in any file
- * that calls it, outside `auth/code-attempts.ts`, every call (comments stripped, the call's own parentheses matched) is either followed
- * at once by `.ok`, `.reason` or `.key`, or is the initialiser of a `const`/`let` whose name is then read with one of them within the
- * next 1200 characters. A bare `!tryMfaCode(...)`, `if (tryMfaCode(...))`, `tryMfaCode(...) &&` or an answer passed on unread is an
+ * that calls it, outside `auth/code-attempts.ts`, every call (read as a syntax tree, so a comment is never a call) is either the object
+ * of a `.ok`, `.reason` or `.key` access, or the initialiser of a `const`/`let` whose name is read through one of them somewhere in the
+ * enclosing function. A bare `!tryMfaCode(...)`, `if (tryMfaCode(...))`, `tryMfaCode(...) &&` or an answer passed on unread is an
  * offender.
  *
  * ## Seen red
@@ -26,45 +26,82 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+import { parseSource } from '../_shared/syntax-tree.mjs';
 import { trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const SITES = ['server/src/api/mfa.ts', 'server/src/api/tokens.ts', 'server/src/auth/middleware.ts'];
 const COUNTER = 'server/src/auth/code-attempts.ts';
-/** A call, a member call on a namespace included. */
+/** A call, a member call on a namespace included: only for the "each door calls it" and "the scan holds something" counts. */
 const CALL = /(?<![\w$])tryMfaCode\s*\(/g;
+/** The members of the answer that say what it means. */
+const READ = new Set(['ok', 'reason', 'key']);
 
-/** The index just past the `)` that closes the one opened at `open`, or -1. */
-function closeOf(code, open) {
-  let depth = 0;
-  for (let i = open; i < code.length; i++) {
-    if (code[i] === '(') depth++;
-    else if (code[i] === ')' && --depth === 0) return i + 1;
+/** Whether `call` is `tryMfaCode(...)` or `<namespace>.tryMfaCode(...)`. */
+function isAttemptCall(call) {
+  const callee = call.expression;
+  if (ts.isIdentifier(callee)) return callee.text === 'tryMfaCode';
+  return ts.isPropertyAccessExpression(callee) && callee.name.text === 'tryMfaCode';
+}
+
+/**
+ * `node` with the wrappers that do not change what an expression IS peeled off upwards (the list `unwrapExpression` in
+ * `_shared/syntax-tree.mjs` peels downwards): the expression its parent sees.
+ */
+function outermost(node) {
+  let n = node;
+  const wraps = (p) => ts.isParenthesizedExpression(p) || ts.isNonNullExpression(p) || ts.isAsExpression(p)
+    || ts.isSatisfiesExpression(p) || ts.isAwaitExpression(p);
+  while (n.parent && wraps(n.parent)) n = n.parent;
+  return n;
+}
+
+/** Whether `name` is read through `.ok`, `.reason` or `.key` anywhere inside `scope`. */
+function readsMember(scope, name) {
+  let found = false;
+  const visit = (n) => {
+    if (found) return;
+    if (ts.isPropertyAccessExpression(n) && READ.has(n.name.text) && ts.isIdentifier(n.expression) && n.expression.text === name) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(scope);
+  return found;
+}
+
+/** The nearest function body (or the file) around `node`: the scope a bound answer must be read in. */
+function enclosingScope(node) {
+  for (let n = node.parent; n; n = n.parent) {
+    if (ts.isFunctionLike(n) && n.body) return n.body;
+    if (ts.isSourceFile(n)) return n;
   }
-  return -1;
+  return node.getSourceFile();
 }
 
 /** Descriptions of the calls in `source` whose answer is not read as an object. */
 function unreadCalls(source) {
-  const code = stripComments(source);
+  const sf = parseSource('scan.ts', source);
   const bad = [];
-  for (const m of code.matchAll(CALL)) {
-    const before = code.slice(Math.max(0, m.index - 80), m.index);
-    if (/function\s*$/.test(before)) continue; // a declaration, not a call
-    const end = closeOf(code, m.index + m[0].length - 1);
-    if (end < 0) { bad.push(`unbalanced call at ${m.index}`); continue; }
-    const after = code.slice(end, end + 200);
-    if (/^\s*\??\.(?:ok|reason|key)\b/.test(after)) continue;
-    const bound = /(?:const|let)\s+(\w+)\s*(?::[^=]+)?=\s*$/.exec(before.replace(/\s+/g, ' '));
-    if (bound) {
-      const name = bound[1];
-      const rest = code.slice(end, end + 1200);
-      if (new RegExp(`\\b${name}\\s*\\??\\.(?:ok|reason|key)\\b`).test(rest)) continue;
-      bad.push(`${name} = tryMfaCode(...) is never read through .ok, .reason or .key`);
-      continue;
+  const visit = (n) => {
+    if (ts.isCallExpression(n) && isAttemptCall(n)) {
+      const used = outermost(n);
+      const parent = used.parent;
+      if (ts.isPropertyAccessExpression(parent) && parent.expression === used && READ.has(parent.name.text)) {
+        // read at once
+      } else if (ts.isVariableDeclaration(parent) && parent.initializer === used && ts.isIdentifier(parent.name)) {
+        if (!readsMember(enclosingScope(parent), parent.name.text)) {
+          bad.push(`${parent.name.text} = tryMfaCode(...) is never read through .ok, .reason or .key`);
+        }
+      } else {
+        bad.push(n.getText(sf).replace(/\s+/g, ' ').slice(0, 120));
+      }
     }
-    bad.push(`${code.slice(Math.max(0, m.index - 12), end + 12).replace(/\s+/g, ' ')}`);
-  }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
   return bad;
 }
 

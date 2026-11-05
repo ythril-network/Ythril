@@ -235,13 +235,13 @@ describe('tryMfaCode: the address key counts only where the address is trustwort
     // [what, request, whether the address key counts]
     ['loopback, no trust proxy', fakeReq({ ip: '127.0.0.1' }), false],
     ['IPv6 loopback, no trust proxy', fakeReq({ ip: '::1' }), false],
-    ['the Docker gateway (172.17.0.1), no trust proxy', fakeReq({ ip: '172.17.0.1' }), false],
+    ['a Docker-gateway-like private address, no trust proxy', fakeReq({ ip: '172.16.0.9' }), false],
     ['a private 10.x address, no trust proxy', fakeReq({ ip: '10.1.2.3' }), false],
     ['a link-local address, no trust proxy', fakeReq({ ip: '169.254.7.7' }), false],
     ['a public address on the socket, no trust proxy', fakeReq({ ip: '93.184.216.34' }), true],
     ['a public IPv6 address on the socket, no trust proxy', fakeReq({ ip: '2606:4700:10:1::1' }), true],
     ['loopback socket, trust proxy configured, a public client address', fakeReq({ ip: '8.8.8.8', remote: '127.0.0.1', trust: 1 }), true],
-    ['a private socket, trust proxy configured, a public client address', fakeReq({ ip: '8.8.4.4', remote: '172.17.0.1', trust: true }), true],
+    ['a private socket, trust proxy configured, a public client address', fakeReq({ ip: '8.8.4.4', remote: '172.16.0.9', trust: true }), true],
   ];
   for (const [what, req, counts] of TABLE) {
     it(`${counts ? 'counts' : 'does not count'}: ${what}`, () => {

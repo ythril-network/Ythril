@@ -113,6 +113,9 @@ type MfaState = 'idle' | 'enrolling' | 'disabling';
             {{ 'mfa.disable.confirmButton' | transloco }}
           </button>
         </div>
+        @if (disableError()) {
+          <div class="alert alert-error spaced-above" role="alert">{{ disableError() }}</div>
+        }
 
       }
 
@@ -137,6 +140,8 @@ export class MfaComponent implements OnInit, OnDestroy {
   enrollError = signal('');
 
   disabling = signal(false);
+  /** What a refused disable says (the lock, with its wait); '' when it said nothing. */
+  disableError = signal('');
   successMsg = signal('');
   /** Cleared on destroy so a pending dismissal cannot fire into a torn-down component. */
   private successTimer: ReturnType<typeof setTimeout> | null = null;
@@ -199,20 +204,26 @@ export class MfaComponent implements OnInit, OnDestroy {
           this.enrollError.set(this.transloco.translate('mfa.error.invalidCode'));
         }
       },
-      error: () => {
+      error: (err) => {
         this.confirming.set(false);
-        this.enrollError.set(this.transloco.translate('mfa.error.verifyFailed'));
+        // A 429 is the lock (five wrong codes in 15 minutes, a correct code included): said with its wait, not "could not verify",
+        // because retyping cannot help until the wait is spent. Any other failure keeps the generic sentence.
+        this.enrollError.set(err?.status === 429
+          ? refusalText(this.transloco, err, 'mfa.error.verifyFailed')
+          : this.transloco.translate('mfa.error.verifyFailed'));
       },
     });
   }
 
   startDisable(): void {
     this.successMsg.set('');
+    this.disableError.set('');
     this.state.set('disabling');
   }
 
   confirmDisable(): void {
     this.disabling.set(true);
+    this.disableError.set('');
     this.authApi.disableMfa().subscribe({
       next: () => {
         this.disabling.set(false);
@@ -220,7 +231,11 @@ export class MfaComponent implements OnInit, OnDestroy {
         this.state.set('idle');
         this.flashSuccess(this.transloco.translate('mfa.success.disabled'));
       },
-      error: () => this.disabling.set(false),
+      error: (err) => {
+        this.disabling.set(false);
+        // Silent before the lockout (Q-694). A 429 is the lock: said with its wait, so the person does not keep pressing a button that cannot work.
+        if (err?.status === 429) this.disableError.set(refusalText(this.transloco, err, 'mfa.error.verifyFailed'));
+      },
     });
   }
 

@@ -3,7 +3,9 @@ import { log, peerText } from '../util/log.js';
 import { tokenRateLimit } from '../rate-limit/middleware.js';
 import { findMatchingToken, touchToken } from './tokens.js';
 import { consumeSseTicket } from './sse-ticket.js';
-import { isMfaEnabled, verifyMfaCode } from './totp.js';
+import { isMfaEnabled } from './totp.js';
+import { tryMfaCode, mfaLockOfToken, mfaTokenIdOf } from './code-attempts.js';
+import { sendMfaLocked } from '../api/mfa-locked-answer.js';
 import { validateOidcJwt, getOidcConfig } from './oidc.js';
 import type { TokenRecord } from '../config/types.js';
 import { isSpaceAdminFor, administersAnySpace } from './editor-scope.js';
@@ -93,6 +95,14 @@ declare global {
        * Set by the tool recorder, read by the audit middleware on `res.finish`.
        */
       auditedByTool?: boolean;
+    }
+    /** What a request's middleware hands the ones after it (`res.locals`). */
+    interface Locals {
+      /**
+       * `attachToken` admitted this request to the token's OWN limiter (`tokenRateLimit`), so that limit bounds it; the limiter's own `429`
+       * resets this to false. `ipFloodBackstop` gives such a request back to its count (Q-693) and counts every other.
+       */
+      meteredByToken?: boolean;
     }
   }
 }
@@ -228,6 +238,13 @@ function extractBearer(req: Request): string | null {
  * hash of the credential and identifies nothing.
  *
  * `tokenRateLimit` calls `next()` on a pass and answers 429 on a hit.
+ *
+ * ## The flag it sets, and why it sets it here
+ *
+ * `res.locals.meteredByToken` says "this token's own limit bounds this request", which is the one thing `ipFloodBackstop` gives back to its
+ * per-address count (Q-693). It is set on the line before the limiter is asked, so that the limiter's own refusal (its 429 handler) can reset
+ * it, and it is set nowhere else: a request that never reaches this function (anonymous, an invented bearer, a refusal before a record
+ * resolves) was metered by nobody and stays counted.
  */
 function attachToken(
   req: Request,
@@ -239,6 +256,7 @@ function attachToken(
   req.authToken = record;
   // Update lastUsed asynchronously for PAT tokens — do not block the request.
   if (isPat(bearer) && 'id' in record) touchToken(record.id);
+  res.locals.meteredByToken = true;
   tokenRateLimit(req, res, next);
 }
 
@@ -339,8 +357,11 @@ import { mfaRequiredFor } from './mfa-policy.js';
 
 /**
  * Enforce a current TOTP code for PAT sessions when this token needs one. Writes the
- * MFA_REQUIRED / MFA_INVALID 403 and returns false on failure. OIDC sessions are
+ * MFA_REQUIRED / MFA_INVALID 403, or the MFA_LOCKED 429, and returns false on failure. OIDC sessions are
  * exempt (the IdP handles its own step-up auth).
+ *
+ * The lock is asked FIRST (Q-694): a token locked for the second factor is answered `429 MFA_LOCKED` even with no code
+ * sent, so a client is not prompted for a code that cannot succeed. A request with no code is never a guess and is not counted.
  */
 function enforceMfa(
   req: Request,
@@ -352,13 +373,21 @@ function enforceMfa(
 ): boolean {
   const mfa = record && 'mfa' in record ? { mfa: record.mfa } : {};
   if (isPat(bearer) && mfaRequiredFor(mfa, isMfaEnabled())) {
+    const tokenId = mfaTokenIdOf(req, record as { id?: string } | undefined);
+    const lock = mfaLockOfToken(tokenId);
+    if (lock) {
+      sendMfaLocked(res, lock);
+      return false;
+    }
     const code = (req.headers['x-totp-code'] as string | undefined ?? '').trim();
     if (!code) {
       res.status(403).json({ error: 'MFA_REQUIRED' });
       return false;
     }
-    if (!verifyMfaCode(code)) {
-      res.status(403).json({ error: 'MFA_INVALID' });
+    const attempt = tryMfaCode(code, { tokenId, req });
+    if (!attempt.ok) {
+      if (attempt.reason === 'locked') sendMfaLocked(res, attempt);
+      else res.status(403).json({ error: 'MFA_INVALID' });
       return false;
     }
   }

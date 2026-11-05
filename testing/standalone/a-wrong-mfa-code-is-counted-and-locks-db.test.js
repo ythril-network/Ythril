@@ -46,12 +46,13 @@ import { listenApp } from '../_shared/in-process-app.mjs';
 import { tempInstance, boot } from './_round-open-fixtures.mjs';
 import { auditRowsOf } from './_audit-rows.mjs';
 import { codeAtStep, wrongCode, staleCode } from './_totp-codes.mjs';
+import { keepEnv } from '../_shared/env-kept.mjs';
 
 const dir = tempInstance('ythril-q694-lock-');
 const skip = await mongoSkipReason();
 const CEILING_ENV = 'YTHRIL_RATE_LIMIT_PER_MINUTE';
 const ENV = { SKIP_AUTH_RATE_LIMIT: 'true', SKIP_GLOBAL_RATE_LIMIT: 'true' };
-const kept = Object.fromEntries([...Object.keys(ENV), CEILING_ENV, 'TRUST_PROXY'].map(k => [k, process.env[k]]));
+const restoreEnv = keepEnv(['SKIP_AUTH_RATE_LIMIT', 'SKIP_GLOBAL_RATE_LIMIT', 'YTHRIL_RATE_LIMIT_PER_MINUTE', 'TRUST_PROXY']);
 const AUDIT = '/api/admin/audit-log/export'; // GET, requireAdminMfa, changes nothing
 
 describe('a wrong second-factor code is counted and locks (real app, MFA on)', { skip }, () => {
@@ -71,7 +72,7 @@ describe('a wrong second-factor code is counted and locks (real app, MFA on)', {
     delete process.env.TRUST_PROXY;
   });
   after(async () => {
-    for (const [k, v] of Object.entries(kept)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    restoreEnv();
     await plain?.close();
     await proxied?.close();
     await closeTestMongo();

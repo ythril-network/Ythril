@@ -1,6 +1,6 @@
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createHash } from 'node:crypto';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { log, peerText } from '../util/log.js';
 import { resolveLimitFor, WINDOW_MS } from './per-token.js';
 
@@ -36,8 +36,9 @@ import { resolveLimitFor, WINDOW_MS } from './per-token.js';
  * carrying `?token=` is now unauthenticated. Bucketing by it would let an anonymous caller mint a fresh
  * quota bucket per request by varying a string nobody checks, and — because `globalRateLimit` skips
  * entirely for a request that presents a credential — a bare `?token=anything` moved that caller off the
- * 300/min global limit of the time and onto the 3000/min IP flood backstop. The backstop bounded it, so this was a
- * tenfold amplification rather than an open door, but it was available to anyone with a query string.
+ * 300/min global limit of the time and onto the per-address flood backstop (3000/min, which counts it: no token's
+ * limit metered it). The backstop bounded it, so this was a tenfold step up from the anonymous cap rather than an open
+ * door, but it was available to anyone with a query string.
  *
  * Header only. A credential that cannot travel in a URL cannot be spoofed in one.
  */
@@ -51,19 +52,30 @@ export function hasCredential(req: Request): boolean {
   return presentedCredential(req) !== '';
 }
 
+/**
+ * The key of a request's SOURCE ADDRESS: `req.ip` with an IPv6 address folded to its subnet (`ipKeyGenerator`), so a client that owns a
+ * whole /64 cannot rotate through it. The one place an address becomes a key: `clientRateLimitKey` (an anonymous caller's bucket) and the
+ * second-factor lockout (`auth/code-attempts.ts`, which counts wrong codes per address) both ask it, so the two cannot disagree about
+ * which requests share an address.
+ */
+export function clientAddressKey(req: Request): string {
+  return ipKeyGenerator(req.ip ?? '');
+}
+
 export function clientRateLimitKey(req: Request): string {
   const credential = presentedCredential(req);
   if (credential) {
     return `c:${createHash('sha256').update(credential).digest('base64url').slice(0, 22)}`;
   }
-  return `ip:${ipKeyGenerator(req.ip ?? '')}`;
+  return `ip:${clientAddressKey(req)}`;
 }
 
 /**
  * The `SKIP_*_RATE_LIMIT` kill-switches exist only for the test harness. They are
  * honoured **outside production only**, so a leaked env var (copy-pasted compose,
  * shared `.env`) can never silently disable rate limiting on a live deployment —
- * the limiters are the only throttle in front of admin TOTP verification.
+ * the limiters are the first throttle in front of admin TOTP verification, and the
+ * second-factor lockout (`auth/code-attempts.ts`, which no kill-switch turns off) is the bound on wrong codes.
  */
 function skipRateLimit(envKey: string): boolean {
   return process.env['NODE_ENV'] !== 'production' && process.env[envKey] === 'true';
@@ -121,12 +133,35 @@ export const notifyRateLimit = rateLimit({
 });
 
 /**
- * 3000 requests/minute per SOURCE IP — the flood backstop, mounted once in front of every route.
+ * express-rate-limit asks "was this request successful" with the request AND the response; the backstop's rule reads the response alone.
+ * This hands `read` the response, so the rule is written as one expression over `res`.
+ */
+const ofResponse = (read: (res: Response) => boolean) => (_req: Request, res: Response): boolean => read(res);
+
+/**
+ * 3000 requests/minute per SOURCE IP — the flood backstop, mounted once in front of every route. It counts the requests of an address
+ * that NO TOKEN'S OWN LIMIT COVERED, and nothing else.
  *
  * Per-client keying (below) is what stops one client starving the others, but on its own it hands an
  * attacker an escape hatch: every distinct bearer string mints a fresh bucket, so a flood of random
- * credentials would never hit a limit. This limiter closes that — it is keyed purely on the IP and set
- * far above any legitimate single client, so it is invisible in normal operation and only bites a flood.
+ * credentials would never hit a limit. This limiter closes that — it is keyed purely on the IP and counts what no
+ * token's limiter bounds, so it is invisible in normal operation and only bites a flood.
+ *
+ * ## What it gives back, and why that is only safe for one thing
+ *
+ * A token's own limit is `DEFAULT_PER_MINUTE` by default and may be raised (D-68), so three busy tokens behind one
+ * address (a gateway, a NAT, the default Docker bridge, one reverse proxy) reach this `max` together, and a backstop that counted them
+ * answered a `429` that no token's own figure (`rateLimitEffective`) predicted (Q-693). A request that `attachToken` handed to
+ * `tokenRateLimit` and that limiter admitted is bounded by that limiter and the token's grant, so it is given back whatever its answer
+ * (`skipSuccessfulRequests`, with `res.locals.meteredByToken === true` as "successful"; the limiter's own 429 resets the flag, so a token
+ * over its limit still counts here). EVERYTHING ELSE counts, whatever its answer: anonymous requests, invented bearers, a valid token
+ * refused before metering (403 admin, MFA_REQUIRED, MFA_INVALID, MFA_LOCKED), 404s, static files, the SPA fallback, `/.well-known`,
+ * maintenance 503s. The status is never the question: a 200 nobody metered still counts.
+ *
+ * It never steps aside for a PRESENTED credential: an invented bearer is not metered by anything.
+ *
+ * Named cost: express-rate-limit gives a skipped request back when it FINISHES, in the window it finishes in, so a metered request that
+ * ends in a later window decrements that window: at most one request per such stream, and only for a token already metered by its own limit.
  *
  * It deliberately does NOT replace the per-route limiters; it sits behind them as the outer bound.
  */
@@ -135,11 +170,13 @@ export const ipFloodBackstop = rateLimit({
   max: 3000,
   standardHeaders: false,
   legacyHeaders: false,
-  message: { error: 'Rate limit exceeded, please slow down.' },
+  message: { error: 'Rate limit exceeded: too many requests from this address that no token\'s own limit covered, please slow down.' },
   handler: (req, res, _next, options) => {
-    log.warn(`ipFloodBackstop hit: ${peerText(req.ip)} on ${peerText(req.method)} ${peerText(req.path)}`);
+    log.warn(`ipFloodBackstop hit: ${peerText(req.ip)} on ${peerText(req.method)} ${peerText(req.path)} — the address sent more than its share of requests no token's own limit covered`);
     res.status(options.statusCode).json(options.message);
   },
+  skipSuccessfulRequests: true,
+  requestWasSuccessful: ofResponse(res => res.locals.meteredByToken === true),
   skip: () => skipRateLimit('SKIP_GLOBAL_RATE_LIMIT'),
 });
 
@@ -163,7 +200,8 @@ export const ipFloodBackstop = rateLimit({
  *
  * **A flood of INVENTED credentials is not a hole this opens.** This limiter never bounded one: it is keyed
  * per credential, so every distinct bearer string already minted a fresh bucket. `ipFloodBackstop` is what
- * closes that, keyed purely on the IP, and it does not step aside for anything.
+ * closes that, keyed purely on the IP, and it never steps aside for a presented credential: it gives back only a request a valid
+ * token's own limiter metered (see its own note).
  */
 export const globalRateLimit = rateLimit({
   windowMs: 60_000,
@@ -219,8 +257,8 @@ export const syncRateLimit = rateLimit({
  *
  * ## Why it is separate from `globalRateLimit`
  *
- * That one runs before auth, deliberately — it is the only throttle in front of admin TOTP verification, so it
- * must throttle requests carrying no valid credential at all. It therefore cannot know WHICH token a request
+ * That one runs before auth, deliberately — it is the first throttle in front of admin TOTP verification (the bound on
+ * wrong codes is `auth/code-attempts.ts`), so it must throttle requests carrying no valid credential at all. It therefore cannot know WHICH token a request
  * holds: answering that means a bcrypt compare against every stored token, per request. So it keys on a hash of
  * the credential, which buckets correctly and identifies nothing.
  *
@@ -255,6 +293,9 @@ export const tokenRateLimit = rateLimit({
     // themselves is the one thing they can act on.
     log.warn(`tokenRateLimit hit: token '${peerText(token?.name ?? 'unknown')}' (${peerText(token?.id ?? 'no id')}) `
       + `on ${peerText(req.method)} ${peerText(req.path)} — limit ${resolveLimitFor(token as { rateLimitPerMinute?: number })}/min`);
+    // `attachToken` marked this request metered before asking the limiter; a request the limiter REFUSES was not admitted by it, so it is
+    // counted by `ipFloodBackstop` again — one token over its own limit cannot flood an address for free.
+    res.locals.meteredByToken = false;
     res.status(options.statusCode).json(options.message);
   },
   // The same kill-switch the global limiter honours, and for the same reason: parallel test suites on one host
