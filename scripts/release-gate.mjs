@@ -9,11 +9,13 @@
  *
  * The individual coverage gates already run per PR. What nothing checked was **the tag itself**. A tag push goes
  * straight to `publish.yml`, so the sequence "cut the tag → build → push to two registries" had no documentation
- * precondition at all. Every one of these three failures could have shipped:
+ * precondition at all. Every one of these failures could have shipped:
  *
  *  - a version tagged with `[Unreleased]` still holding the entries, so the released CHANGELOG section is empty
  *    and every change in the release is filed under a heading that does not exist yet;
  *  - a version tagged where the four manifests disagree, so the image reports one number and the notes another;
+ *  - a tag that names another number than the manifests (`v6.5.1` cut on a tree that says 6.5.0), so the image, the Release and
+ *    the schema package's npm version all go out under the wrong number, and none of them can be taken back (Q-683);
  *  - a dependency added and attributed nowhere, published to two public registries under a licence that requires
  *    attribution.
  *
@@ -36,6 +38,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { changelogSection, sectionContentLines, headingFor } from './changelog-section.mjs';
+import { tagMatchesVersion, releaseTagOf } from './_shared/release-tags.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const R = '\x1b[0m';
@@ -92,7 +95,7 @@ function checkStoredShapeMatchesMajor(version) {
   }
 }
 function checkVersion() {
-  // `schema/package.json` is `@ythril/schema`, versioned with the release it is cut from: a package that says 6.3.0 validates what a 6.3.0
+  // `schema/package.json` is the schema package, versioned with the release it is cut from: a package that says 6.3.0 validates what a 6.3.0
   // server accepts, so it is bumped with the others or it lies about which server it speaks for.
   const manifests = ['package.json', 'server/package.json', 'client/package.json', 'schema/package.json'];
   const versions = new Map();
@@ -104,6 +107,22 @@ function checkVersion() {
     return null;
   }
   const version = distinct[0];
+
+  // The tag names the version. The manifests agreeing with EACH OTHER is not enough: a `v6.5.1` cut on a tree that says 6.5.0
+  // publishes an image, a Release and an npm version under a number nobody bumped, and none of the three can be taken back. Only
+  // when releasing, and only when there is a tag: a hand `--releasing` check before the tag exists has none to compare, and a
+  // mid-cycle run on a tagged commit is not a release. The comparison and the tag's discovery are `release-tags.mjs`'s.
+  if (RELEASING) {
+    const tag = releaseTagOf({
+      ref: process.env.GITHUB_REF,
+      refName: process.env.GITHUB_REF_NAME,
+      describe: () => execFileSync('git', ['describe', '--exact-match', '--tags', '--match', 'v*', 'HEAD'],
+        { cwd: ROOT, encoding: 'utf8', stdio: 'pipe' }),
+    });
+    if (tag && !tagMatchesVersion(tag, version)) {
+      fail('version', `the tag ${tag} does not match the manifests' version ${version} (a release tag is a "v" followed by the version)`);
+    }
+  }
 
   // The lockfile carries the workspace versions too, and it is the one that gets forgotten because nobody edits
   // it by hand.
@@ -177,6 +196,9 @@ function checkChangelog(version) {
  * `true` when HEAD is exactly a tag (which is the state `publish.yml` runs in, since a tag push is what triggers
  * it) or when `--releasing` is passed by hand for a pre-tag check. Everything else is mid-cycle, where a populated
  * `[Unreleased]` is correct and demanding otherwise would just train people to ignore this.
+ *
+ * It answers a different question from `releaseTagOf` (which `v*` tag a run is on): this asks whether HEAD is on ANY tag, so it
+ * names no `--match` and shares nothing with it.
  */
 function detectReleasing() {
   if (process.argv.includes('--releasing')) return true;
@@ -215,7 +237,7 @@ const NOTICE_GATES = [
   ['notice-coverage', 'every redistributed dependency is attributed in NOTICE'],
   ['notice-ships-in-the-image', 'NOTICE and LICENSE are inside the published image'],
   ['ffmpeg-licensing-is-stated', 'ffmpeg runs as a separate process and is attributed'],
-  ['the-schema-package-notice-names-its-production-closure', 'schema/NOTICE names every package @ythril/schema pulls into production'],
+  ['the-schema-package-notice-names-its-production-closure', 'schema/NOTICE names every package the schema package pulls into production'],
 ];
 
 function runTest(name) {

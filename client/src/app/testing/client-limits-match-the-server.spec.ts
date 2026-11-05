@@ -23,7 +23,7 @@ import { resolve } from 'node:path';
 import { CLIENT_ROOT } from './tracked-sources';
 import { interfaceBody, interfaceKeys, readClientSource, readRepoSource } from './server-source';
 
-// The rule limits and the space-schema bodies are `@ythril/schema`'s, which the server imports and re-exports
+// The rule limits and the space-schema bodies are `@ythril-network/schema`'s, which the server imports and re-exports
 // (`server/src/spaces/schema-rules.ts`, `server/src/spaces/body-schemas.ts`): the gate reads where they are declared.
 const SERVER_RULES = 'schema/src/rules.ts';
 const SERVER_BODIES = 'schema/src/space-meta.ts';

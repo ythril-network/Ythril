@@ -71,10 +71,10 @@ export function recordTitleOf(kind: Exclude<RefKind, 'file'>, record: object): s
 }
 
 /*
- * The fields of a view per kind — the ONE spelling of what `self` holds (R6-3) — are `@ythril/schema`'s (`schema/src/view-fields.ts`),
+ * The fields of a view per kind — the ONE spelling of what `self` holds (R6-3) — are `@ythril-network/schema`'s (`schema/src/view-fields.ts`),
  * because a schema rule is checked against them when it is saved. Re-exported, and read here for the view this module builds.
  */
-import { VIEW_FIELDS, ALL_VIEW_FIELDS, type ViewKind, type ViewField } from '@ythril/schema';
+import { VIEW_FIELDS, ALL_VIEW_FIELDS, type ViewKind, type ViewField } from '@ythril-network/schema';
 export { VIEW_FIELDS, ALL_VIEW_FIELDS, type ViewKind, type ViewField };
 
 /**

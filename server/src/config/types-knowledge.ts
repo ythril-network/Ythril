@@ -6,24 +6,24 @@
  *
  * **A leaf: it must import nothing of the server.** A cycle through `types.ts`'s re-export makes TypeScript silently degrade
  * the types involved to `any` while everything compiles clean. Same reason as `config/rights-shape.ts`. The one import is
- * `@ythril/schema`, which imports nothing of the server either.
+ * `@ythril-network/schema`, which imports nothing of the server either.
  */
 
 // ── Space meta / schema types ──────────────────────────────────────────────
 
 /*
  * The schema vocabulary — the merge functions, `PropertySchema`, `TypeSchema`, the rules, `KNOWLEDGE_TYPES` and `SpaceMeta` — is
- * `@ythril/schema`'s (`schema/src/vocabulary.ts`), so an app that writes a schema imports the definition instead of copying it.
+ * `@ythril-network/schema`'s (`schema/src/vocabulary.ts`), so an app that writes a schema imports the definition instead of copying it.
  * Re-exported here so every server module keeps reaching it by this path; `KNOWLEDGE_TYPES` is imported as well, because the
  * tuples below are built from it.
  */
-import { KNOWLEDGE_TYPES } from '@ythril/schema';
-import type { KnowledgeType } from '@ythril/schema';
-export { NUMERIC_MERGE_FNS, BOOLEAN_MERGE_FNS, MERGE_FNS, KNOWLEDGE_TYPES } from '@ythril/schema';
+import { KNOWLEDGE_TYPES } from '@ythril-network/schema';
+import type { KnowledgeType } from '@ythril-network/schema';
+export { NUMERIC_MERGE_FNS, BOOLEAN_MERGE_FNS, MERGE_FNS, KNOWLEDGE_TYPES } from '@ythril-network/schema';
 export type {
   NumericMergeFn, BooleanMergeFn, MergeFn, PropertySchema, TypeSchema, SchemaRule, SpaceSchemaRule, ValidationMode, KnowledgeType,
   DatePassedPolicy, SpaceMeta,
-} from '@ythril/schema';
+} from '@ythril-network/schema';
 
 /**
  * Every kind of record that can be embedded, recalled or retained — the knowledge types PLUS `file`.

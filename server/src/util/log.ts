@@ -5,7 +5,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { errorChain } from '../db/error-chain.js';
-import { errorHeader, textOf, render, escapeLineBreaks, redact, peerText, LOG_VALUE_MAX } from '@ythril/schema/internal';
+import { errorHeader, textOf, render, escapeLineBreaks, redact, peerText, LOG_VALUE_MAX } from '@ythril-network/schema/internal';
 
 const MAX_RING = 1000;
 const _ring: string[] = [];
@@ -92,13 +92,13 @@ export function currentRequestId(): string | undefined {
 
 /*
  * How a value from OUTSIDE is said in a line or a refusal — `peerText`, `peerList`, the secret redaction and `refusalOfParse` — is
- * `@ythril/schema`'s (`schema/src/text.ts`), because a schema refusal the package words and a line this logger writes must say a value
+ * `@ythril-network/schema`'s (`schema/src/text.ts`), because a schema refusal the package words and a line this logger writes must say a value
  * the same way. Re-exported, so every module (and every gate) that reads them from here reads the one definition.
  */
 export {
   redactSecrets, LOG_VALUE_MAX, peerText, logSafe, NAME_QUOTED, peerList, REFUSAL_NAMES_MAX, refusalOfParse, unrecognizedKeysIssue,
   type ParseRefusalIssue, type ParseRefusal, type ParseRefusalOptions, type ParseIssueLike,
-} from '@ythril/schema/internal';
+} from '@ythril-network/schema/internal';
 
 /**
  * An Error for the line `fmt` writes when it is the meta argument (bundle-30 `B4`): its stack is KEPT — the frames

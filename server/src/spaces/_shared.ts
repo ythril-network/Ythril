@@ -247,10 +247,10 @@ export const META_VERSION_CAP = 20;
 
 /**
  * The prose limits of a space schema — a space's directive (`meta.purpose`), a type's `description` and a property's. Declared in
- * `@ythril/schema` (`schema/src/limits.ts`, with why each is the number it is) and re-exported, so a door here and an app's editor
+ * `@ythril-network/schema` (`schema/src/limits.ts`, with why each is the number it is) and re-exported, so a door here and an app's editor
  * read one number.
  */
-export { SPACE_PURPOSE_MAX, SCHEMA_DESCRIPTION_MAX, PROPERTY_DESCRIPTION_MAX } from '@ythril/schema';
+export { SPACE_PURPOSE_MAX, SCHEMA_DESCRIPTION_MAX, PROPERTY_DESCRIPTION_MAX } from '@ythril-network/schema';
 
 /** Generate a URL-safe space ID from a label */
 export function slugify(label: string): string {

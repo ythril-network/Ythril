@@ -1,5 +1,5 @@
 {
-  "name": "@ythril/schema",
+  "name": "@ythril-network/schema",
   "version": "6.4.0",
   "description": "The vocabulary of a Ythril space schema and the validator a Ythril server runs on it, for apps that write schemas.",
   "license": "Apache-2.0",
@@ -35,6 +35,9 @@
     "LICENSE",
     "NOTICE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && node ../scripts/tsc.mjs -p tsconfig.json",
     "prepack": "npm run build"

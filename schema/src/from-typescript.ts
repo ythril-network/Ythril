@@ -1,5 +1,5 @@
 /**
- * `@ythril/schema/from-typescript`: a space's type schemas read back from TypeScript declarations, for an app that keeps its space's
+ * `@ythril-network/schema/from-typescript`: a space's type schemas read back from TypeScript declarations, for an app that keeps its space's
  * shape as types and wants the meta the server stores. One call, {@link spaceMetaFromTypeScript}, answering the meta or the reasons
  * the source cannot be read.
  *
@@ -118,7 +118,7 @@ const ALIAS_HINT = 'npm install typescript-6@npm:typescript@6';
 /** The one rejection of every "no usable compiler" path: what to install, and how to hand an installed one in. */
 function installError(why: string, cause?: unknown): Error {
   return new Error(
-    `@ythril/schema/from-typescript needs the TypeScript compiler (${why}): install it beside the app with \`${INSTALL_HINT}\`, or pass a loaded one as the \`typescript\` option`,
+    `@ythril-network/schema/from-typescript needs the TypeScript compiler (${why}): install it beside the app with \`${INSTALL_HINT}\`, or pass a loaded one as the \`typescript\` option`,
     cause === undefined ? undefined : { cause },
   );
 }

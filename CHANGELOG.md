@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**A minor release: a mixed-case path no longer skips a space's rights, peer-bound tokens cannot approve AI connectors, model and sidecar answers are bounded, a filtered recall over a vector index that missed a match says so, a scan whose vector index is not ready keeps its place and says so, document passages are split to the size the embedder accepts, `@ythril/schema` reads a space's schemas back from TypeScript, and many Brain and Settings pages read and translate better.**
+**A minor release: a mixed-case path no longer skips a space's rights, peer-bound tokens cannot approve AI connectors, model and sidecar answers are bounded, a filtered recall over a vector index that missed a match says so, a scan whose vector index is not ready keeps its place and says so, document passages are split to the size the embedder accepts, `@ythril-network/schema` reads a space's schemas back from TypeScript, and many Brain and Settings pages read and translate better.**
 
 | Changes on upgrade | Action |
 |---|---|
@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Embedding:** `embedding.maxInputBytes` (default 6000, 512 to 65536) sets the most bytes one embedder request may carry; document passages are split to it.
 - **Metrics:** `ythril_embed_jobs_failed_total`, `ythril_embed_input_cut_total`, `ythril_conversion_chunks_unembedded_total` and `ythril_recall_undecided_total` (filtered recalls that could not tell whether the index missed a match).
 - **Metrics:** `ythril_scan_holds_total` counts the types a background scan held over a vector index that was not ready, by scanner.
-- **Schema:** `spaceMetaFromTypeScript` in `@ythril/schema/from-typescript` reads a space's schemas back from TypeScript with the app's own `typescript` (an optional peer); what it cannot read is refused by name, what the source cannot carry is in `notRead`.
+- **Schema:** the schema package is published to npm as `@ythril-network/schema` from 6.5.0, by the release workflow through npm trusted publishing with provenance (no npm token is stored); the first version is published by hand once, and the steps are in the contribution guide.
+- **Schema:** `spaceMetaFromTypeScript` in `@ythril-network/schema/from-typescript` reads a space's schemas back from TypeScript with the app's own `typescript` (an optional peer); what it cannot read is refused by name, what the source cannot carry is in `notRead`.
 
 ### Changed
 
@@ -43,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Spaces:** turning embedding suppression on asks before Save, and says Save removes the stored text vectors and Backfill restores them.
 - **Tooling:** the changelog check covers `sidecars/` and `scripts/`; `npm run test:up` first clears a test stack left by a run without a project name.
 - **CI:** a pull request whose exact tree already passed a Full run reads that run's results instead of running every suite again; the `ci:full` label forces the whole graph.
+- **Schema:** the package is named `@ythril-network/schema`: a packed tarball is `ythril-network-schema-<version>.tgz`, and the header of the TypeScript it writes and the refusal of its from-typescript entry carry the new name.
+- **Releases:** the release gate refuses a tag that differs from the version of the manifests, and a prerelease tag is no longer marked Latest on GitHub.
 
 ### Fixed
 

@@ -1,6 +1,6 @@
 /**
  * Custom validation rules written in CEL (F-46): what a rule says about one record when it is EVALUATED, and the stored rules that went
- * bad. What a rule may be when it is SAVED is `@ythril/schema` (`schema/src/rules.ts`), re-exported below, so an app can ask it offline
+ * bad. What a rule may be when it is SAVED is `@ythril-network/schema` (`schema/src/rules.ts`), re-exported below, so an app can ask it offline
  * and no door here can save a rule this instance could not apply. The engine is loaded once, there, and run here through the same
  * analysis ({@link compileRule}), so a rule the save accepted and the rule the evaluator runs are judged alike.
  *
@@ -28,7 +28,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   ruleEngine, ENGINE_INPUT_CAPS, compileRule, rulesIn, namesKinds, spaceRuleKinds, LONGEST_CHECKED_STRING,
   type CompiledRule, type Refs, type StoredRule,
-} from '@ythril/schema/internal';
+} from '@ythril-network/schema/internal';
 import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import type { SpaceMeta, TypeSchema } from '../config/types.js';
 import { getConfig } from '../config/loader.js';
@@ -47,7 +47,7 @@ export {
   MAX_RULE_LENGTH, MAX_MESSAGE_LENGTH, MAX_RULES_PER_TYPE, MAX_RULES_PER_SPACE, MAX_APPLICABLE_RULES, RULE_NAME_PATTERN, LONGEST_CHECKED_STRING,
   TypeRuleZ, SpaceRuleZ, typeRuleIssues, spaceRuleIssues, applicableRuleIssues, ruleMapIssues, readingStoredRules,
   type RuleIssue, type ChangedRuleParts,
-} from '@ythril/schema';
+} from '@ythril-network/schema';
 
 const { cel, env, loadError: engineLoadError } = ruleEngine;
 const LIST_CAP = ENGINE_INPUT_CAPS.list;

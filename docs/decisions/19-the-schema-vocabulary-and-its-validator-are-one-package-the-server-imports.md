@@ -1,6 +1,8 @@
-# 19 — The space-schema vocabulary and its validator are one package, `@ythril/schema`, which the server imports and an app can run
+# 19 — The space-schema vocabulary and its validator are one package, `@ythril-network/schema`, which the server imports and an app can run
 
 **Status:** accepted, 2026-11-01 · **Scope:** the types, tuples and limits of a space schema, the zod bodies of a space meta and its type schemas, the parses that mint a stored meta (`parseSpaceMeta`, `parseTypeSchema`, `readStoredMeta`, `readPeerMeta`), the save-time CEL rule checks, and the text a refusal of them is worded in
+
+**Amended 2026-11-05 (Q-683):** the package is published to npm under the scope the owner holds there, as `@ythril-network/schema`, not under the workspace name it was first given; the first version published is **6.5.0** (the 6.3.2 named below, and every version before 6.5.0, was never published); and it is published by the release workflow's `publish-schema` job through npm trusted publishing (OIDC, with provenance), so no npm token is stored anywhere. Where this decision says 6.3.2 was the first version published, read 6.5.0. The first publish is by hand, once (`docs/contribution-guide.md`, "First publish of the schema package").
 
 ## Context
 
@@ -17,7 +19,7 @@ worded by `util/log.ts`, the logger itself.
 
 ## Decision
 
-- **The vocabulary and the validator are one npm workspace, `schema/` (`@ythril/schema`), and the server imports it.**
+- **The vocabulary and the validator are one npm workspace, `schema/` (`@ythril-network/schema`), and the server imports it.**
   The server modules that defined them (`config/types-knowledge.ts`, `spaces/body-schemas.ts`, `spaces/schema-rules.ts`,
   `spaces/meta-fields.ts`, `spaces/_shared.ts`, `util/log.ts`, `util/redos.ts`, ...) re-export the package's objects, so
   every importer keeps its path and no definition exists twice. The server's answers and refusal texts are unchanged.
@@ -25,7 +27,7 @@ worded by `util/log.ts`, the logger itself.
   (`validateSpaceMeta(meta, { library })`), and the server installs its own library once (`useSchemaLibrary`, in
   `spaces/library-ref-expansion.ts`), read at each parse. The package imports zod, the CEL engine and Node built-ins, and in one file,
   `from-typescript.ts`, the caller's own `typescript` by a dynamic import (an optional peer, Q-687 and D-70, for the
-  `@ythril/schema/from-typescript` entry, which reads TypeScript text and the compiler's own lib and nothing else on the machine).
+  `@ythril-network/schema/from-typescript` entry, which reads TypeScript text and the compiler's own lib and nothing else on the machine).
 - **What the server alone needs stays in the server**: the route bodies (create, update, rename, delete, reorder, dupe
   rules), rule EVALUATION (the program cache, the boot check, the metrics), and the logger's ring, request ids and stack
   formatting. Rule evaluation compiles through the package's `compileRule`, so the analysis a save runs and the program a
@@ -39,9 +41,9 @@ worded by `util/log.ts`, the logger itself.
 ## Consequences
 
 - **A change to a schema body, limit or rule check is a change to `schema/src`.** The server picks it up on its next
-  build (`server` runs the package's own build, `npm run build -w @ythril/schema`, before itself); the Docker image builds and ships `schema/dist` beside
+  build (`server` runs the package's own build, `npm run build -w @ythril-network/schema`, before itself); the Docker image builds and ships `schema/dist` beside
   `server/dist`.
-- **`@ythril/schema/internal` is not an app API.** It carries what the server shares beyond the schema (the text
+- **`@ythril-network/schema/internal` is not an app API.** It carries what the server shares beyond the schema (the text
   renderer, the bounded cache, the rule engine hook) and moves with the server.
 - **A gate that read a definition from a server source file reads it from the package now**; the re-exports keep every
   import path, not every source path.
@@ -59,7 +61,7 @@ worded by `util/log.ts`, the logger itself.
 - `schema/src/rules.ts` — the save-time CEL checks and `compileRule`; `server/src/spaces/schema-rules.ts` — evaluation.
 - Applied before it shipped (Q-668, owner 2026-11-01): the package is **Apache-2.0** with its own `schema/LICENSE` and
   `schema/NOTICE`, not the repository's licence; it is versioned with the release, 6.3.2 being the first version published; the server builds it through its
-  own build script (`npm run build -w @ythril/schema`, which clears `dist` first); its app entry names a fixed list and the
+  own build script (`npm run build -w @ythril-network/schema`, which clears `dist` first); its app entry names a fixed list and the
   server-only helpers (`useSchemaLibrary` among them) are in `./internal`; a parse with no library installed throws; the
   `$ref` refusal is one function, `libraryRefRefusal`.
 - `testing/standalone/an-outside-apps-schema-validates-through-the-schema-package.test.js` — an outside app's metas

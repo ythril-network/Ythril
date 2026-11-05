@@ -151,7 +151,11 @@ repository code in `ci.yml` at all, and the answer is short:
 Every checkout in `ci.yml` and the image-pin check sets `persist-credentials: false`, so the token a checkout would leave in
 `.git/config` is not on disk for the tests and dependencies that follow. The release workflow (`publish.yml`) is the stated
 exception: it runs only on a version tag or by hand, never for a pull request, and it holds the registry secret because it
-publishes the image. The dump of the stack's container logs on a failed job is the same channel: it
+publishes the image, plus a job-scoped OIDC token (`id-token: write`, on the `publish-schema` job alone, in the GitHub
+environment `npm-publish`, which admits only `v*` tags) with which npm publishes the schema package by trusted publishing: no npm
+token exists. `scripts/publish-schema.mjs` refuses to run when one is in its environment (`NODE_AUTH_TOKEN`, `NPM_TOKEN`, or an
+`npm_config_` key ending in `_auth` or `authtoken`), because npm would use it instead of the OIDC exchange.
+`the-schema-package-publishes-by-trusted-publishing` holds the job's shape. The dump of the stack's container logs on a failed job is the same channel: it
 prints to this public log, so what a container prints is as public as what a test prints. `ci-workflow-is-sound` holds
 the checkouts and every place the workflows hand a credential to repository code, and
 `a-test-child-environment-is-one-module` holds the stripped environment, so a credential added to a job fails a gate

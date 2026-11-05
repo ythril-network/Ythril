@@ -54,7 +54,7 @@ COPY server/package.json ./server/
 ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 RUN npm ci --workspace=server --workspace=schema
 
-# Copy source. `schema/` is `@ythril/schema`, the space-schema vocabulary and validator the server imports.
+# Copy source. `schema/` is `@ythril-network/schema`, the space-schema vocabulary and validator the server imports.
 COPY schema/ ./schema/
 COPY server/ ./server/
 # The build scripts run the compiler through it, so the `typescript` they depend on builds them, not whichever package's
@@ -91,7 +91,7 @@ COPY schema/package.json ./schema/
 COPY server/package.json ./server/
 # ONNXRUNTIME_NODE_INSTALL_CUDA=skip — see the client stage. This is the `npm ci` that produces the tree the
 # published image actually SHIPS, so it is the one where a GPU tarball would be both downloaded and carried.
-# `--workspace=schema` installs the package's own dependencies and links it as `node_modules/@ythril/schema`.
+# `--workspace=schema` installs the package's own dependencies and links it as `node_modules/@ythril-network/schema`.
 ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 RUN npm ci --workspace=server --workspace=schema --omit=dev
 
@@ -289,7 +289,7 @@ ENV HF_HUB_OFFLINE=1
 
 # Copy compiled output from builder
 COPY --from=builder /build/server/dist ./server/dist
-# The schema package the server imports: its manifest (what `node_modules/@ythril/schema` resolves through) and its build.
+# The schema package the server imports: its manifest (what `node_modules/@ythril-network/schema` resolves through) and its build.
 COPY schema/package.json ./schema/
 COPY --from=builder /build/schema/dist ./schema/dist
 # Its own licence and notices (Apache-2.0, unlike the server): the package travels with them, in the image as in its tarball.

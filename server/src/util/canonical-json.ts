@@ -30,11 +30,11 @@
  *   (`brain/merkle.ts` `withoutTopLevel`, `sync/authored-content.ts`), so a nested key is content whatever it is called (Q-624).
  * - **The hash** is `sha256Hex` (`util/sha256-hex.ts`) of the text as UTF-8, so a content hash is made one way.
  */
-import { canonicalJson } from '@ythril/schema/internal';
+import { canonicalJson } from '@ythril-network/schema/internal';
 import { sha256Hex } from './sha256-hex.js';
 
 /*
- * The text is `@ythril/schema`'s (`schema/src/canonical-json.ts`): the schema validator compares a library type's definition by it, so
+ * The text is `@ythril-network/schema`'s (`schema/src/canonical-json.ts`): the schema validator compares a library type's definition by it, so
  * it is defined there once and re-exported here, beside the hash this server makes of it.
  */
 export { canonicalJson };

@@ -61,7 +61,7 @@ points at an agent's local, untracked rule sheet instead: `no-tracked-file-cites
 ```text
 ythril/
 ├── client/          Angular 21 SPA (workspace: @ythril/client)
-├── schema/          The space-schema vocabulary and validator, published for apps (workspace: @ythril/schema)
+├── schema/          The space-schema vocabulary and validator, published for apps (workspace: @ythril-network/schema)
 ├── server/          Express 5 + TypeScript API (workspace: @ythril/server)
 ├── sidecars/        First-party sidecars (doc-render: PDF → page PNGs for the F11 VLM extraction path)
 ├── testing/
@@ -130,10 +130,10 @@ Or, to reuse the bundled container, expose its port with a dev-only `docker-comp
 npm run build:server          # Compiles schema/src → schema/dist, then server/src → server/dist
 ```
 
-The server imports `@ythril/schema` (the space-schema bodies, parses, tuples and limits) from `schema/dist`, and its
+The server imports `@ythril-network/schema` (the space-schema bodies, parses, tuples and limits) from `schema/dist`, and its
 `prebuild` and `predev` compile the package first. A change to a schema body, a limit or a rule check is a change to
 `schema/src`; `server/src` re-exports it and defines none of it (`an-outside-apps-schema-validates-through-the-schema-package.test.js`).
-The package's one door to a compiler is its `@ythril/schema/from-typescript` entry: `typescript` is its optional peer, named by one
+The package's one door to a compiler is its `@ythril-network/schema/from-typescript` entry: `typescript` is its optional peer, named by one
 dynamic `import('typescript')` in `schema/src/from-typescript.ts` and nowhere else, never by the main entry, and the server and the
 client never import the entry (the same test and `the-server-and-client-never-import-the-from-typescript-entry.test.js`).
 
@@ -372,13 +372,14 @@ docker compose up -d --build
 
 ## Releasing a New Version
 
-Images are built and pushed automatically by the CI workflow (`.github/workflows/publish.yml`) when a version tag is pushed.
+Images are built and pushed, and the schema package is published to npm, automatically by the release workflow (`.github/workflows/publish.yml`) when a version tag is pushed.
 
 ### Steps
 
 1. Update `version` in `package.json`, `server/package.json`, `client/package.json` and `schema/package.json`, the exact
-   `@ythril/schema` pin in `server/package.json`'s `dependencies`, and the lock file (`npm install --ignore-scripts` at the
-   root records both). The release gate refuses a tag whose package version differs.
+   `@ythril-network/schema` pin in `server/package.json`'s `dependencies`, and the lock file (`npm install --ignore-scripts` at the
+   root records both). The release gate refuses a tag whose version differs from the manifests' (`scripts/release-gate.mjs`
+   compares them through `scripts/_shared/release-tags.mjs`), so a tag cut from the wrong commit stops before anything is pushed.
 
 2. Commit and tag:
 
@@ -391,8 +392,44 @@ Images are built and pushed automatically by the CI workflow (`.github/workflows
 
 3. GitHub Actions builds for `linux/amd64` + `linux/arm64` and pushes to both GHCR and Docker Hub.
 
-4. After the release tag is pushed, publish the schema package from the tagged commit with the owner's npm token:
-   `npm publish -w @ythril/schema --access public` (its `prepack` builds it from a clean `dist`).
+4. When the image job has finished, the `publish-schema` job publishes the schema package, `@ythril-network/schema`, to npm
+   from the tagged commit. It is the only job that holds an OIDC token (`id-token: write`), it runs only for a tag, and it
+   runs in the GitHub environment `npm-publish`. npm accepts it through **trusted publishing**: no npm token is stored
+   anywhere, and the version carries provenance. `scripts/publish-schema.mjs` decides what the job does and prints why:
+   - the version is on the registry with this commit's `gitHead`: nothing to do, the job succeeds (a re-run is safe);
+   - the version is absent: it publishes, with `--tag next` for a prerelease and `--tag release-<major>.<minor>` for a tag
+     that is not the highest release (so a patch to an older line never becomes `latest`);
+   - anything it cannot account for (an old npm, a token in the environment, a pack list without `LICENSE`, `NOTICE` or
+     `dist/index.js`, a registry answer it cannot read, a version present from another commit) fails the job.
+
+   Re-running a tag's workflow never publishes twice: npm refuses a second publish of a version, and the script skips a version
+   that is already there.
+
+### First publish of the schema package (6.5.0, once)
+
+npm only lets you configure a trusted publisher for a package that exists, so the first version is published by hand:
+
+1. Tag `v6.5.0` as usual. The `publish-schema` job finds no package on the registry, and, because the version is the first
+   version the script names as published by hand (`scripts/publish-schema.mjs`), ends with a warning rather than a failure.
+2. From a clean checkout of the `v6.5.0` tag, sign in to npm as a member of the `ythril-network` organisation (with
+   two-factor authentication) and run `npm publish -w @ythril-network/schema` (`publishConfig.access` makes it public; its
+   `prepack` builds it from a clean `dist`).
+3. Re-run only the `publish-schema` job. It finds the version with the tag commit's `gitHead` and succeeds: that is the
+   check that the hand publish was cut from the tagged commit.
+4. On npmjs.com, package settings, **Trusted publisher**, add GitHub Actions: organisation `ythril-network`, repository
+   `Ythril`, workflow filename `publish.yml`, environment name `npm-publish`. Do it before the tag of the next release.
+5. After the first publish through OIDC (the next release), set the package's publishing access to **Require two-factor
+   authentication and disallow tokens**. A stolen token can then publish nothing; only the workflow can.
+
+The GitHub environment `npm-publish` has a deployment policy that admits only `v*` tags, so a branch or a pull request cannot
+reach the job's OIDC token.
+
+### Recovery
+
+If `publish-schema` fails after the image is pushed (the trusted publisher is not configured yet, npm is down, the
+registry answered something unreadable): fix the cause and re-run **only that job**; the image jobs are not repeated. If it
+cannot be fixed, publish by hand from a clean checkout of the tag with the same `--tag` the script would have used, then
+re-run only `publish-schema`, which verifies the registry holds the tag's commit.
 
 ### Required GitHub secrets
 
@@ -401,7 +438,8 @@ Images are built and pushed automatically by the CI workflow (`.github/workflows
 | `DOCKERHUB_USERNAME` | Docker Hub account username |
 | `DOCKERHUB_TOKEN` | Docker Hub access token (not password) |
 
-GHCR authentication uses the built-in `GITHUB_TOKEN` — no extra secret needed.
+GHCR authentication uses the built-in `GITHUB_TOKEN` — no extra secret needed. npm needs none either: the schema package is
+published by trusted publishing, and the job refuses to run if an npm token is in its environment.
 
 ### Post-first-publish
 
@@ -480,7 +518,7 @@ Code should be boring to read. Clever tricks create maintenance debt.
 ### 6. Legal
 
 Ythril ships under the PolyForm Small Business License 1.0.0. Every contribution must respect this. The exception is
-`schema/` (`@ythril/schema`), which is Apache-2.0 with its own `schema/LICENSE` and `schema/NOTICE`: a dependency added to
+`schema/` (`@ythril-network/schema`), which is Apache-2.0 with its own `schema/LICENSE` and `schema/NOTICE`: a dependency added to
 it is named in `schema/NOTICE` too (a gate reads the package's production closure from the lock file). The one exception is the
 optional peer `typescript` of its `from-typescript` entry: the caller's own, never bundled or installed, so the closure leaves it
 out only because the package's own lock entry marks it optional (`peerDependenciesMeta`), and the published image is checked to carry none.
@@ -529,7 +567,7 @@ A schema is stored, replicated, evaluated on every write and quoted back in ever
 place**, and a change that adds a second is the defect this repository produces most. What is one place now:
 
 - **A schema body is parsed once, before any store.** `spaces/body-schemas.ts` mints the parsed types every store takes
-  (a space's meta, a type, a library entry); nothing else does. The bodies and parses themselves are `@ythril/schema`'s
+  (a space's meta, a type, a library entry); nothing else does. The bodies and parses themselves are `@ythril-network/schema`'s
   (`schema/src/`), re-exported by that shim; a server-only helper goes in the package's `./internal` entry, never its app
   entry, whose names a test holds (nor its `./from-typescript` entry, which only an app that reads TypeScript calls). A `$ref` is refused through `libraryRefRefusal` only, the package's one refusal. A key added to a meta body needs its merge kind in
   `spaces/meta-fields.ts` on the same commit (the body refuses to load without it), its rights row in
@@ -587,7 +625,7 @@ Use conventional-commit-style prefixes:
 ## License and contributor agreement
 
 Ythril is distributed under the **PolyForm Small Business License 1.0.0**. See `LICENSE` for the full text. `schema/`
-(the `@ythril/schema` package) is the exception: it is licensed under the Apache License 2.0 (`schema/LICENSE`).
+(the `@ythril-network/schema` package) is the exception: it is licensed under the Apache License 2.0 (`schema/LICENSE`).
 
 **Contributing requires signing the Contributor License Agreement (`CLA.md` in the repository root).** It is a licence, not an assignment: **you keep the copyright in everything you write.** What you grant is a licence broad enough for the project to be maintained, redistributed, and — this is the operative part — **licensed to others under different terms in future**, whether commercial, a different open licence, or both.
 

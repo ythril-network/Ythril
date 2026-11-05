@@ -10,7 +10,7 @@
  * package would be a validator whose refusal text drifts from the server's on the first edit of either.
  *
  * `errorHeader`, `textOf`, `render`, `escapeLineBreaks` and `redact` are exported for the logger's own line format (`fmt`,
- * `errorWithStack`) through `@ythril/schema/internal`; an app has no use for them.
+ * `errorWithStack`) through `@ythril-network/schema/internal`; an app has no use for them.
  */
 
 const REDACTED = 'Bearer [redacted]';
