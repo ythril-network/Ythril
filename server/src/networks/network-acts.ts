@@ -49,7 +49,7 @@ import type { NetworkRefusalCode } from './refusal-codes.js';
 import type { SpaceWriteClosedCode } from '../config/types-space-acts.js';
 import { MAX_SPACE_IDS } from '../util/request-bounds.js';
 import { memberView } from './member-view.js';
-import { warnOnce } from '../util/warn-once.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 import { rereadOwedOf } from '../sync/full-reread.js';
 import { spaceRecordCount } from '../spaces/record-count.js';
 import { askerOwnerKey, unknownSpaceAnswer } from '../spaces/unknown-space.js';
@@ -166,7 +166,7 @@ export async function networkAnswer(net: NetworkConfig, caller: Caller, cfg: Con
   return view;
 }
 
-const countFailedOnce = warnOnce<string>({ max: 1_000, every: 10 * 60_000 });
+const countFailedOnce = warnOnce<string>({ max: 1_000, every: SAY_ONCE_WINDOW_MS });
 
 /**
  * The estimated record count of each space, for the admin view. A space whose count could not be read is LEFT OUT, not answered as 0: the view is read for much more than

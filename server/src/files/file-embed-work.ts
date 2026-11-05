@@ -30,7 +30,7 @@ import { embedJobId, enqueueEmbedJobs, retireEmbedJobs, EMBED_PRIORITY } from '.
 import { rootsOfDirectoryPages, rowsOfFiles } from './derived-rows.js';
 import { movedId, movedRoot, type PathKind } from './moved-paths.js';
 import { sidecarsOwnedBy } from './sidecar-disk.js';
-import { warnOnce } from '../util/warn-once.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 import { withinWriteBound } from '../db/write-bound.js';
 import { log, peerText } from '../util/log.js';
 import { NOT_A_FLAGGED_ROW } from './live-file-row.js';
@@ -46,7 +46,7 @@ export async function retireEmbedWorkOfRemovedRows(spaceId: string, rows: RowsRe
 }
 
 /** A failure after a move's commit, said once per space per window: the move is finished either way. */
-const requeueFailed = warnOnce<string>({ every: 10 * 60_000 });
+const requeueFailed = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
 
 /**
  * Queue the embed work of the rows a move carried from `src` to `dst`, and retire the work at their old ids — after the last batch has

@@ -41,7 +41,7 @@ import { faceRecognitionAllowed } from '../converters/media-level.js';
 import { updateFileMeta } from '../file-meta.js';
 import { linksStartingFrom } from '../../brain/link-adjacency.js';
 import { log, peerText } from '../../util/log.js';
-import { warnOnce } from '../../util/warn-once.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../../util/warn-once.js';
 import { isUsableDescriptor } from './face-descriptor.js';
 import { faceDescriptorDimsFor, liveIndexName } from '../../spaces/vector-index.js';
 import type { FileMetaDoc, EntityDoc } from '../../config/types.js';
@@ -238,10 +238,10 @@ function holdsLabelledFace(spaceId: string, startedAt: number): Promise<boolean>
 }
 
 /** "This space's face index refuses every search": said once per space per ten minutes, not once per face of a backlog. */
-const faceIndexRefusalSaid = warnOnce<string>({ every: 10 * 60_000 });
+const faceIndexRefusalSaid = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
 
 /** "A face was stored matched to no one by the gallery because the job's deferrals were spent (a label it already had is kept)": the same window, the same reason. */
-const deferralSpentSaid = warnOnce<string>({ every: 10 * 60_000 });
+const deferralSpentSaid = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
 
 /**
  * Search the face gallery (labelled face-chunk records in the space) for the closest match to the given

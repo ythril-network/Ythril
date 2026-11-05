@@ -27,6 +27,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openViewDoors, viewOf } from './_view-doors.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
+import { metricSeries, metricValue } from './_metric-series.mjs';
 
 const skip = await mongoSkipReason();
 const QA = 'va-qa';
@@ -56,10 +57,14 @@ function pairs(doc, out = [], at = '') {
   return out;
 }
 
-async function metricValue(name, label = '') {
-  const text = await register.getSingleMetricAsString(name);
-  const lines = text.split('\n').filter(l => l.startsWith(name) && l.includes(label));
-  return lines.reduce((s, l) => s + Number(l.slice(l.lastIndexOf(' ') + 1)), 0);
+/**
+ * What `ythril_views_deleted_total` says under one reason. A reason's series appears at its first increment (the counter is not declared at zero per
+ * reason), so the reading taken BEFORE a delete is a stated zero (`absent: 'null'`, then 0) and not a failure; the metric itself is asserted registered
+ * where each case starts. The two gauges below are declared, so they read through `metricValue`, whose absent series fails the case with the reason.
+ */
+async function deletedUnder(reason) {
+  const series = await metricSeries('ythril_views_deleted_total', { labels: { reason }, absent: 'null', registry: { register } });
+  return series === null ? 0 : series.reduce((n, s) => n + s.value, 0);
 }
 function poison(name) {
   const m = register.getSingleMetric(name);
@@ -163,7 +168,7 @@ describe('a view read is audited and counted by the members it read (Q-531)', { 
 
     it('ythril_views_deleted_total rises by the views deleted, under owner, revoke and sweep', async () => {
       assert.ok(register.getSingleMetric('ythril_views_deleted_total'), 'ythril_views_deleted_total is not registered');
-      const at = (reason) => metricValue('ythril_views_deleted_total', `reason="${reason}"`);
+      const at = deletedUnder;
       const t = await d.mint(uniq('va-del'), both());
       const v = uniq('va-own');
       await mustCreate(t.key, v, [QA]);

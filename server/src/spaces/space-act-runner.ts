@@ -60,7 +60,7 @@ import { forgetEveryMark, forgetWhatWasReceived } from '../sync/receive-marks.js
 import { SPACE_ACT_KINDS, isInstanceWide, perSpaceActKind, type SpaceActKeyField, type SpaceActLane } from '../config/types-space-acts.js';
 import type * as SpaceRounds from './apply-wipe-round.js';
 import { keyedLimiter, type KeyedLimiter } from '../util/keyed-limiter.js';
-import { warnOnce } from '../util/warn-once.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 import { backoffDelayMs } from '../util/backoff.js';
 import { withinTimeBound, withinFsBound, isTimeBoundEnded } from '../util/time-bound.js';
 import { eachSpace } from '../util/housekeeping-walk.js';
@@ -532,9 +532,9 @@ let runningCount = 0;
 let bodyRuns: Record<SpaceActKind, number> = perSpaceActKind(0);
 const startedAt = new Map<string, { kind: SpaceActKind; localId: string; at: number }>();
 
-const waitingSaid = warnOnce<string>({ every: 10 * 60_000 });
-const failureSaid = warnOnce<string>({ every: 10 * 60_000 });
-const slowSaid = warnOnce<string>({ every: 10 * 60_000 });
+const waitingSaid = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
+const failureSaid = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
+const slowSaid = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
 
 const readEntry = (id: string): SpaceActEntry | undefined => getConfig().pendingSpaceActs?.find(e => e.id === id);
 

@@ -29,7 +29,7 @@ import type { AdditionSettled } from './network-spaces.js';
 import { concludeRoundIfReady, sendMemberRemovedNotify } from '../sync/governance.js';
 import { roundSettleFailuresTotal } from '../metrics/registry.js';
 import { log, peerText } from '../util/log.js';
-import { warnOnce } from '../util/warn-once.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 import { applyPassedJoin } from './member-introductions.js';
 import { auditRoundEffect, ROUND_MEMBER_ADMITTED_OPERATION } from './round-audit.js';
 
@@ -63,7 +63,7 @@ export interface Settled {
   throwIfFailed(): void;
 }
 
-const failureSaid = warnOnce<string>({ max: 20, every: 10 * 60_000 });
+const failureSaid = warnOnce<string>({ max: 20, every: SAY_ONCE_WINDOW_MS });
 
 function recordFailure(failed: Settled['failed'], via: SettleVia, net: NetworkConfig, round: VoteRound, cause: unknown): void {
   failed.push({ round, cause });

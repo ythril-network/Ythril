@@ -10,7 +10,7 @@ import type { Filter, UpdateFilter, Sort } from 'mongodb';
 import { col } from '../db/mongo.js';
 import { ensureExpiryIndex } from '../db/expiry-index.js';
 import { log, peerText } from '../util/log.js';
-import { warnOnce } from '../util/warn-once.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 import { backoffDelayMs } from '../util/backoff.js';
 import { encryptSecret, decryptSecret, isEncrypted } from '../util/crypto.js';
 import type { WebhookSubscription, WebhookDelivery, WebhookEventType } from './types.js';
@@ -414,7 +414,7 @@ async function resetAfterSuccess(id: string): Promise<void> {
  * latest, and a busy healthy subscription pays one read per window, not one per success. Keyed by id and bounded by the subscriptions.
  */
 const successCheckStartedAt = new Map<string, number>();
-const successCheckFailed = warnOnce<string>({ max: 500, every: 10 * 60_000 });
+const successCheckFailed = warnOnce<string>({ max: 500, every: SAY_ONCE_WINDOW_MS });
 let successChecksStopped = false;
 
 /**
