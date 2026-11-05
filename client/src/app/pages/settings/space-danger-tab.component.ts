@@ -758,7 +758,7 @@ export class SpaceDangerTabComponent {
     if (!ok) return;
     this.networksApi.leaveNetwork(networkId).subscribe({
       next: () => this.store.refreshNetworks(),
-      error: () => this.toast.error(this.transloco.translate('spaces.error.leaveNetworkFailed')),
+      error: (err) => this.toast.error(refusalText(this.transloco, err, 'spaces.error.leaveNetworkFailed')),
     });
   }
 }
