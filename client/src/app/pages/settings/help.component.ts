@@ -139,6 +139,7 @@ export const HELP_DOCS = [
       'decisions/17-the-first-carry-is-an-owed-job-and-a-space-answers-positions-building-until-it-ends.md',
       'decisions/18-every-kind-keeps-both-edits-and-each-instance-decides-its-own-copy.md',
       'decisions/19-the-schema-vocabulary-and-its-validator-are-one-package-the-server-imports.md',
+      'decisions/20-a-scan-hold-warns-by-its-age-not-by-a-count-of-runs.md',
     ],
   },
   { id: 'workstation-mode-guide', file: 'workstation-mode-guide.md' },
