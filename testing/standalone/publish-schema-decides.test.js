@@ -4,7 +4,7 @@
  *
  * ## The rule this holds
  *
- * `publishDecision({ npmVersion, env, registry, versionDoc, version, tag, tags, pack })` returns
+ * `publishDecision({ npmVersion, env, environment, registry, versionDoc, version, tag, tags, pack })` returns
  * `{ action: 'skip' | 'publish' | 'refuse', argv?, level, message }` and touches nothing. Every branch the job can take is a
  * row here: each refusal, each registry answer, the argv per dist-tag, the npm floor (numeric, 11.5.1), the packed file list,
  * the recorded commit of an already-published version. The effects around it (the registry read, `npm -v`, `npm pack`,
@@ -28,6 +28,12 @@
  *    trusted publisher can only be configured on a package that exists) and a loud failure every time after;
  *  - anything the registry says that is not understood (a malformed body, an oversize body, a 5xx, a network error) refuses: a
  *    guess here is a publish or a skip nobody asked for.
+ *
+ * The pre-ship sweep added one more input, `environment` (`{ status, body, policies: { status, body } }`, a failed read `{ error }`):
+ * the job's tag restriction lives in the GitHub environment `npm-publish`, and GitHub creates a missing environment UNPROTECTED, so
+ * nothing but a read of it could say "only a `v*` tag reaches the credential". The decision refuses, before the registry is
+ * believed, unless the environment exists, has custom deployment policies, and lists the `v*` tag policy and no branch policy; a
+ * refusal names the setup step of `docs/contribution-guide.md`.
  *
  * ## The failure that bought it
  *
@@ -57,9 +63,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { publishDecision } from '../../scripts/publish-schema.mjs';
+import * as script from '../../scripts/publish-schema.mjs';
 import { BodyTooLargeError } from '../../scripts/_shared/capped-body.mjs';
 import { stripComments } from './_strip-comments.mjs';
+
+const { publishDecision, ENVIRONMENT_NAME, RELEASE_TAG_PATTERN } = script;
 
 const ROOT = process.cwd();
 const SCRIPT = 'scripts/publish-schema.mjs';
@@ -89,10 +97,22 @@ const GOOD_PACK = [
   { path: 'package.json', size: 1300 },
 ];
 
+/**
+ * The GitHub environment the job runs in, as the two public REST reads answer it (`GET /repos/{repo}/environments/{name}` and
+ * `.../deployment-branch-policies`): `{ status, body, policies: { status, body } }`, a failed read `{ error }`. This is the good
+ * one, which restricts the credential to `v*` tags and nothing else.
+ */
+const environmentBody = (policy = { protected_branches: false, custom_branch_policies: true }) => JSON.stringify({ name: ENVIRONMENT_NAME, deployment_branch_policy: policy });
+const policiesBody = (...policies) => JSON.stringify({ total_count: policies.length, branch_policies: policies.map((p, i) => ({ id: i + 1, ...p })) });
+const TAG_POLICY = { name: RELEASE_TAG_PATTERN, type: 'tag' };
+const environmentOf = (over = {}) => ({ status: 200, body: environmentBody(), ...over, policies: { status: 200, body: policiesBody(TAG_POLICY), ...over.policies } });
+const GOOD_ENVIRONMENT = environmentOf();
+
 /** A run that publishes 6.5.0 as the highest release: the decision every row changes ONE thing about. */
 const input = (over = {}) => ({
   npmVersion: '11.10.0',
   env: { GITHUB_ACTIONS: 'true', GITHUB_SHA: SHA, PATH: '/usr/bin' },
+  environment: GOOD_ENVIRONMENT,
   registry: ok(registryDoc(['6.4.0'])),
   versionDoc: undefined,
   version: '6.5.0',
@@ -310,6 +330,91 @@ describe('publishDecision: no token in the environment, because a token is used 
   });
 });
 
+describe('publishDecision: the environment that restricts the credential to v* tags exists and is set up (the pre-ship sweep, Q-683)', () => {
+  const GUIDE = 'docs/contribution-guide.md';
+  const refusesEnvironment = (environment, why) => assertRefuses(decide({ environment }), [ENVIRONMENT_NAME, GUIDE], why);
+
+  it('the script spells the environment name and the tag pattern once, as exports, and the right ones', () => {
+    assert.equal(ENVIRONMENT_NAME, 'npm-publish');
+    assert.equal(RELEASE_TAG_PATTERN, 'v*');
+  });
+
+  it('the environment restricts to the v* tag policy and nothing else: publish', () => {
+    const d = decide({ environment: GOOD_ENVIRONMENT });
+    assert.equal(d.action, 'publish', `the right environment was refused: ${d.message}`);
+  });
+
+  it('GitHub creates a missing environment UNPROTECTED, so a 404 refuses, naming the environment and the setup step', () => {
+    refusesEnvironment(environmentOf({ status: 404, body: '{"message":"Not Found"}' }), 'the environment does not exist');
+  });
+
+  it('no environment answer at all refuses (the effect never read it)', () => {
+    assertRefuses(decide({ environment: undefined }), [ENVIRONMENT_NAME, GUIDE], 'no environment read');
+  });
+
+  it('deployment_branch_policy null (any branch or tag may deploy): refuse', () => {
+    refusesEnvironment(environmentOf({ body: environmentBody(null) }), 'a null deployment policy');
+  });
+
+  it('protected branches only (a tag is not a protected branch, and a protected branch is not a tag): refuse', () => {
+    refusesEnvironment(environmentOf({ body: environmentBody({ protected_branches: true, custom_branch_policies: false }) }), 'protected_branches only');
+  });
+
+  it('custom policies with no policy at all: refuse', () => {
+    refusesEnvironment(environmentOf({ policies: { body: policiesBody() } }), 'custom policies, none listed');
+  });
+
+  it('custom policies with no tag policy (a branch policy named v*): refuse', () => {
+    refusesEnvironment(environmentOf({ policies: { body: policiesBody({ name: RELEASE_TAG_PATTERN, type: 'branch' }) } }), 'a v* branch policy is not a v* tag policy');
+  });
+
+  it('custom policies with another tag pattern and no v*: refuse', () => {
+    refusesEnvironment(environmentOf({ policies: { body: policiesBody({ name: 'release-*', type: 'tag' }) } }), 'a tag policy that is not v*');
+  });
+
+  it('the v* tag policy plus a branch policy (main): refuse, because a branch run could reach the credential', () => {
+    refusesEnvironment(environmentOf({ policies: { body: policiesBody(TAG_POLICY, { name: 'main', type: 'branch' }) } }), 'an extra branch policy');
+  });
+
+  it('a policy that carries no type is a branch policy (the API\'s default): refuse', () => {
+    refusesEnvironment(environmentOf({ policies: { body: policiesBody(TAG_POLICY, { name: 'main' }) } }), 'an untyped policy');
+  });
+
+  for (const [what, environment] of [
+    ['the environment answers 500', environmentOf({ status: 500, body: '' })],
+    ['the environment answers 403 (a rate limit)', environmentOf({ status: 403, body: '{"message":"API rate limit exceeded"}' })],
+    ['the environment body is not JSON', environmentOf({ body: '<html>502</html>' })],
+    ['the environment body is JSON null', environmentOf({ body: 'null' })],
+    ['the environment body is an array', environmentOf({ body: '[]' })],
+    ['the environment has no deployment_branch_policy key', environmentOf({ body: JSON.stringify({ name: ENVIRONMENT_NAME }) })],
+    ['the policy list answers 404', environmentOf({ policies: { status: 404, body: '{}' } })],
+    ['the policy list answers 500', environmentOf({ policies: { status: 500, body: '' } })],
+    ['the policy list body is not JSON', environmentOf({ policies: { body: 'Service Unavailable' } })],
+    ['the policy list is not a list', environmentOf({ policies: { body: JSON.stringify({ branch_policies: 'v*' }) } })],
+    ['the policy list has no branch_policies key', environmentOf({ policies: { body: '{}' } })],
+    ['a policy entry is not an object', environmentOf({ policies: { body: JSON.stringify({ branch_policies: [TAG_POLICY, 'main'] }) } })],
+  ]) {
+    it(`an answer that is not understood (${what}): refuse, never read as "set up"`, () => {
+      refusesEnvironment(environment, what);
+    });
+  }
+
+  it('a network error on either read: refuse, with the error\'s own text', () => {
+    const error = new TypeError('fetch failed');
+    assertRefuses(decide({ environment: { error } }), [error.message, ENVIRONMENT_NAME], 'the environment read failed');
+    assertRefuses(decide({ environment: { ...GOOD_ENVIRONMENT, policies: { error } } }), [error.message, ENVIRONMENT_NAME], 'the policy read failed');
+    const oversize = new BodyTooLargeError(5 * 1024 * 1024);
+    assertRefuses(decide({ environment: { ...GOOD_ENVIRONMENT, policies: { error: oversize } } }), [oversize.message], 'an oversize policy answer');
+  });
+
+  it('it refuses before the registry is believed: a 404 (the first publish), a present version and a network error cannot excuse it', () => {
+    const bad = environmentOf({ status: 404, body: '{}' });
+    assertRefuses(decide({ environment: bad, registry: { status: 404, body: '{}' } }), [ENVIRONMENT_NAME], 'a first-publish 404 with no environment');
+    assertRefuses(decide({ environment: bad, registry: ok(registryDoc(['6.5.0'])), versionDoc: versionManifest() }), [ENVIRONMENT_NAME], 'a present version with no environment');
+    assertRefuses(decide({ environment: bad, registry: { error: new TypeError('fetch failed') } }), [ENVIRONMENT_NAME], 'a registry error with no environment');
+  });
+});
+
 describe('publishDecision: the tarball carries LICENSE, NOTICE and dist/index.js, each with bytes', () => {
   const without = (file) => GOOD_PACK.filter((f) => f.path !== file);
   const emptied = (file) => GOOD_PACK.map((f) => (f.path === file ? { ...f, size: 0 } : f));
@@ -399,6 +504,14 @@ describe('the effects around the decision are bounded and shared (read on the co
     assert.match(src, /application\/vnd\.npm\.install-v1\+json/, 'the full packument is fetched; it grows with every version');
     assert.match(src, /AbortSignal\.timeout\(\s*30[_]?000\s*\)/, 'the registry read has no 30 s abort');
     assert.match(src, /5\s*\*\s*1024\s*\*\s*1024|5[_]?242[_]?880|5\s*\*\s*1[_]?048[_]?576/, 'the registry read has no 5 MB cap');
+  });
+
+  it('reads the environment and its deployment policies from the public GitHub API, unauthenticated, through the same bounded read', () => {
+    assert.match(src, /https:\/\/api\.github\.com/, 'the environment is not read from the GitHub REST API');
+    assert.match(src, /application\/vnd\.github\+json/, 'the GitHub read does not ask for the GitHub JSON type');
+    assert.match(src, /\/environments\/\$\{[^}]+\}/, 'the environment itself is not read');
+    assert.match(src, /deployment-branch-policies/, 'the deployment policies are not read');
+    assert.ok(!/authorization/i.test(src), 'a credential is sent to the GitHub read: it must stay unauthenticated, so no token reaches this job');
   });
 
   it('spawns npm with an args array, no shell, and a timeout each: 30 s for -v, 120 s for pack, 600 s for publish', () => {

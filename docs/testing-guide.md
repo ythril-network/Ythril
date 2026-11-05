@@ -155,7 +155,8 @@ publishes the image, plus a job-scoped OIDC token (`id-token: write`, on the `pu
 environment `npm-publish`, which admits only `v*` tags) with which npm publishes the schema package by trusted publishing: no npm
 token exists. `scripts/publish-schema.mjs` refuses to run when one is in its environment (`NODE_AUTH_TOKEN`, `NPM_TOKEN`, or an
 `npm_config_` key ending in `_auth` or `authtoken`), because npm would use it instead of the OIDC exchange.
-`the-schema-package-publishes-by-trusted-publishing` holds the job's shape. The dump of the stack's container logs on a failed job is the same channel: it
+It also reads that environment and its deployment policies from GitHub's public API (unauthenticated, so no token reaches the job) and
+refuses unless only the `v*` tag policy is set. `the-schema-package-publishes-by-trusted-publishing` holds the job's shape. The dump of the stack's container logs on a failed job is the same channel: it
 prints to this public log, so what a container prints is as public as what a test prints. `ci-workflow-is-sound` holds
 the checkouts and every place the workflows hand a credential to repository code, and
 `a-test-child-environment-is-one-module` holds the stripped environment, so a credential added to a job fails a gate

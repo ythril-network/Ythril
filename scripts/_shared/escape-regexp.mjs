@@ -8,7 +8,7 @@
  *
  * ## What it prevents
  *
- * About twenty sites spelled `text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')` by hand, each free to drift: a copy that left out the
+ * Sites all over `scripts/` and `testing/` spelled `text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')` by hand, each free to drift: a copy that left out the
  * backslash let a name with one end a pattern early, one that left out `|` or `(` turned a name into a group, and one that
  * added `-` or `/` broke under the `u` flag (`\-` outside a class is a SyntaxError there). The set is exactly the MDN one,
  * `[.*+?^${}()|[\]\\]`: it is valid with and without `u`. `testing/standalone/a-regex-escape-is-written-once.test.js` refuses the

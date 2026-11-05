@@ -88,6 +88,25 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Is this tag the highest release? Asked ONCE, by `scripts/release-latest.mjs` (the rule is `release-tags.mjs`'s, the one the
+      # npm dist-tag follows), and read twice: by the image's moving tags below and by the Release step at the end. `latest` and the
+      # `{{major}}` tag used to move on every tag, a release candidate and a backfilled older release included, so a person pulling
+      # `ythril:latest` could get a candidate while the Release and npm were already careful. Only a tag can be the highest: a run
+      # on a branch (a manual dispatch) writes false. `GITHUB_REF_TYPE` and `GITHUB_REF_NAME` are the runner's own variables, so no
+      # `${{ }}` expression sits in the script (a tag name would become shell).
+      - name: Is this tag the highest release
+        id: latest
+        run: |
+          LATEST=false
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            LATEST="$(node scripts/release-latest.mjs "$GITHUB_REF_NAME")"
+          fi
+          echo "tag=$GITHUB_REF_NAME latest=$LATEST"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+
+      # `{{major}}.{{minor}}` still moves when an older patch of a line is backfilled, within that line; `{{version}}` never moves.
+      # A manual dispatch from a branch gets the branch's name as its only tag (`type=ref,event=branch`), never `latest`: without it a
+      # branch run has no tag at all and the build refuses to push.
       - name: Extract version tags
         id: meta
         uses: docker/metadata-action@v5
@@ -98,8 +117,9 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest
+            type=semver,pattern={{major}},enable=${{ steps.latest.outputs.latest == 'true' }}
+            type=raw,value=latest,enable=${{ steps.latest.outputs.latest == 'true' }}
+            type=ref,event=branch
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -208,16 +228,18 @@ jobs:
       - name: Create the GitHub Release from the CHANGELOG
         env:
           GH_TOKEN: ${{ github.token }}
+          # The `latest` step's answer (see "Is this tag the highest release"), passed through the environment: an expression in
+          # `run:` would put its text into the shell.
+          LATEST: ${{ steps.latest.outputs.latest }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           node scripts/release-notes.mjs "$VERSION" release-notes.md
 
           # `--latest` is a DECISION, not a default. `gh` marks a new release latest unless told otherwise,
           # which is right for a forward release and wrong for a backfilled older one — that would announce an
-          # superseded version as newest. So it is claimed only when this tag really is the highest release, by
-          # `scripts/release-latest.mjs`: the rule is `release-tags.mjs`'s, shared with the npm dist-tag, and it never
-          # ranks a prerelease above a release (the version sort that was here did).
-          LATEST="$(node scripts/release-latest.mjs "$GITHUB_REF_NAME")"
+          # superseded version as newest. So it is claimed only when this tag really is the highest release, as
+          # `scripts/release-latest.mjs` answered in the `latest` step: the rule is `release-tags.mjs`'s, shared with
+          # the npm dist-tag, and it never ranks a prerelease above a release (the version sort that was here did).
           echo "tag=$GITHUB_REF_NAME latest=$LATEST"
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
@@ -237,7 +259,8 @@ jobs:
   # job is built so that nothing else can use it (`testing/standalone/the-schema-package-publishes-by-trusted-publishing.test.js`
   # reads it from the parsed workflow):
   #  - `id-token: write` is on this job alone, never at workflow level, where every job of the image build would have it;
-  #  - the environment `npm-publish` allows `v*` tags only, so no branch's copy of this workflow can reach the credential;
+  #  - the environment `npm-publish` allows `v*` tags only, so no branch's copy of this workflow can reach the credential (GitHub
+  #    creates a missing environment unprotected, so the script reads it at every publish and refuses unless it is set up);
   #  - every action is pinned to a commit, because a tag that moves would run with the token;
   #  - the install runs no dependency lifecycle scripts, and no `${{ }}` expression sits in a script (a tag name would become shell);
   #  - no token variable is set at any level: npm would use it INSTEAD of the OIDC exchange, and the script refuses one.

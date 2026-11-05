@@ -30,9 +30,11 @@ import {
   abridgeForRelease, RELEASE_BODY_MAX, RELEASE_BODY_TARGET, entriesWithSection, isBreaking, releasePreamble,
 } from '../../scripts/changelog-section.mjs';
 
-import { loadWorkflow, shellOf } from '../_shared/ci-workflow.mjs';
+import { loadWorkflow, shellOf, stepsOf, expressionOf } from '../_shared/ci-workflow.mjs';
 
 const wf = readFileSync('.github/workflows/publish.yml', 'utf8');
+/** The steps of the image job that create the Release, found on the parsed workflow. */
+const releaseSteps = () => stepsOf(loadWorkflow('.github/workflows/publish.yml').jobs['build-and-push']).filter((s) => /gh release create/.test(shellOf(s)));
 const changelog = readFileSync('CHANGELOG.md', 'utf8');
 
 /**
@@ -332,16 +334,53 @@ describe('the workflow announces what it published', () => {
     // `git tag --sort | head -n1`: that sort ranks `v7.0.0-rc.1` above `v6.9.0`, so a release candidate was announced as Latest.
     // The Release step is found by structure (the parsed step that creates the Release), and its SCRIPT is read with comments
     // gone, so the words of an explaining comment satisfy nothing.
-    const release = loadWorkflow('.github/workflows/publish.yml').jobs['build-and-push'].steps
-      .filter((s) => /gh release create/.test(shellOf(s)));
+    //
+    // The pre-ship sweep moved the ask: the answer is computed ONCE, by the `latest` step before the image's tags, and the Release
+    // step reads it (the next test holds the step and both readers), so the image's moving tags and the Release cannot disagree.
+    const release = releaseSteps();
     assert.equal(release.length, 1, 'exactly one step creates the Release');
     const script = shellOf(release[0]);
-    assert.match(script, /node\s+scripts\/release-latest\.mjs\s+"?\$\{?GITHUB_REF_NAME\}?"?/,
-      'the Release step does not ask scripts/release-latest.mjs about this tag, so "highest" is computed somewhere else');
     assert.ok(!/--sort/.test(script) && !/git\s+tag\s+--list/.test(script),
       'the Release step still sorts the tags inline: a second copy of "highest", which ranks a prerelease above a release');
-    assert.match(script, /LATEST=\$\(\s*node\s+scripts\/release-latest\.mjs|LATEST="\$\(\s*node\s+scripts\/release-latest\.mjs/,
-      'the answer of release-latest.mjs does not become LATEST, which --latest reads');
+    assert.ok(!/release-latest\.mjs/.test(script),
+      'the Release step asks release-latest.mjs itself: the answer is the `latest` step\'s, computed once for the image tags and the Release');
+    assert.match(script, /--latest="\$\{?LATEST\}?"/, 'the Release step does not pass --latest="$LATEST"');
+    assert.equal(expressionOf(release[0].env?.LATEST), 'steps.latest.outputs.latest',
+      'LATEST, which --latest reads, is not the `latest` step\'s output');
+  });
+
+  it('the image\'s moving tags (latest and the major) follow the highest release, computed once by a step before the tags', () => {
+    // The defect (the pre-ship sweep, Q-683): `type=raw,value=latest` was unconditional, so every tag moved the image's `latest` and
+    // `{{major}}` tag, a prerelease and a backfilled older release included, while the GitHub Release and the npm dist-tag were
+    // already careful. A person pulling `ythril:latest` got a release candidate.
+    const steps = stepsOf(loadWorkflow('.github/workflows/publish.yml').jobs['build-and-push']);
+    const latestAt = steps.findIndex((s) => s.id === 'latest');
+    const metaAt = steps.findIndex((s) => s.id === 'meta');
+    assert.ok(latestAt >= 0 && metaAt >= 0, 'the build job has no step with id `latest` and a step with id `meta`');
+    assert.ok(latestAt < metaAt, 'the `latest` step runs after the metadata step, so the tags read an output that does not exist yet');
+    assert.equal(steps.filter((s) => s.id === 'latest').length, 1, 'more than one step has the id `latest`');
+
+    const script = shellOf(steps[latestAt]);
+    assert.match(script, /node\s+scripts\/release-latest\.mjs\s+"?\$\{?GITHUB_REF_NAME\}?"?/,
+      'the `latest` step does not ask scripts/release-latest.mjs about this tag, so "highest" is computed somewhere else');
+    assert.match(script, /GITHUB_REF_TYPE/, 'the `latest` step does not look at the ref type: a branch dispatch must write false');
+    assert.match(script, /latest=[^\n]*>>\s*"?\$\{?GITHUB_OUTPUT\}?"?/, 'the `latest` step does not write latest=<true|false> to $GITHUB_OUTPUT');
+    assert.ok(!script.includes('${{'), 'the `latest` step puts a ${{ }} expression in its script: a tag name becomes shell');
+
+    const tags = String(steps[metaAt].with?.tags ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+    const ENABLE = "enable=${{ steps.latest.outputs.latest == 'true' }}";
+    const moving = tags.filter((l) => /^type=raw,value=latest(,|$)/.test(l) || /^type=semver,pattern=\{\{major\}\}(,|$)/.test(l));
+    assert.equal(moving.length, 2, `the image's moving tags are not exactly latest and {{major}}: ${JSON.stringify(moving)}`);
+    for (const line of moving) assert.ok(line.endsWith(`,${ENABLE}`), `${line} does not read the \`latest\` step's output (wanted ,${ENABLE})`);
+    for (const kept of ['type=semver,pattern={{version}}', 'type=semver,pattern={{major}}.{{minor}}']) {
+      assert.ok(tags.includes(kept), `${kept} is gone from the image's tags`);
+    }
+    // A manual dispatch from a branch has no semver and, now, no `latest`: without a branch tag it has no tag at all and the build
+    // refuses to push. It gets the branch's own name, never a moving release tag.
+    assert.ok(tags.includes('type=ref,event=branch'), 'a branch dispatch has no image tag: the build would refuse to push');
+
+    const releaseAt = steps.findIndex((s) => /gh release create/.test(shellOf(s)));
+    assert.ok(releaseAt > latestAt, 'the Release step runs before the `latest` output exists, or there is no Release step');
   });
 
   it('re-running a tag updates the notes instead of failing the publish', () => {
