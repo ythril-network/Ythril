@@ -409,6 +409,10 @@ Images are built and pushed, and the schema package is published to npm, automat
 
 npm only lets you configure a trusted publisher for a package that exists, so the first version is published by hand:
 
+0. Before tagging `v6.5.0`, create the GitHub environment `npm-publish`: repository Settings, Environments, New environment.
+   Under **Deployment branches and tags** choose **Selected branches and tags**, add one rule of type **Tag** with the pattern
+   `v*`, and no branch rule. The `publish-schema` job refuses to publish without this (it reads the environment at every
+   publish, see below), and GitHub would otherwise create a missing environment on the first run with no protection at all.
 1. Tag `v6.5.0` as usual. The `publish-schema` job finds no package on the registry, and, because the version is the first
    version the script names as published by hand (`scripts/publish-schema.mjs`), ends with a warning rather than a failure.
 2. From a clean checkout of the `v6.5.0` tag, sign in to npm as a member of the `ythril-network` organisation (with
@@ -417,12 +421,15 @@ npm only lets you configure a trusted publisher for a package that exists, so th
 3. Re-run only the `publish-schema` job. It finds the version with the tag commit's `gitHead` and succeeds: that is the
    check that the hand publish was cut from the tagged commit.
 4. On npmjs.com, package settings, **Trusted publisher**, add GitHub Actions: organisation `ythril-network`, repository
-   `Ythril`, workflow filename `publish.yml`, environment name `npm-publish`. Do it before the tag of the next release.
+   `Ythril`, workflow filename `publish.yml`, environment name `npm-publish`. npm requires the first publish through a new trusted-publisher configuration to
+   happen within 2 days, so configure it shortly before tagging the next release, not long before.
 5. After the first publish through OIDC (the next release), set the package's publishing access to **Require two-factor
    authentication and disallow tokens**. A stolen token can then publish nothing; only the workflow can.
 
-The GitHub environment `npm-publish` has a deployment policy that admits only `v*` tags, so a branch or a pull request cannot
-reach the job's OIDC token.
+The GitHub environment `npm-publish` (step 0) has a deployment policy that admits only `v*` tags, so a branch or a pull request
+cannot reach the job's OIDC token. Nothing in GitHub forces that setup, so `scripts/publish-schema.mjs` checks it at every
+publish: it reads the environment and its deployment policies from GitHub's public API and refuses unless the environment
+exists, has custom policies, and lists the `v*` tag policy and no branch policy.
 
 ### Recovery
 

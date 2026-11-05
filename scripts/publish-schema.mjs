@@ -9,7 +9,7 @@
  *
  * "Does this tag publish the schema package, and with which arguments?" {@link publishDecision} answers it as a pure function
  * (`{ action: 'skip' | 'publish' | 'refuse', argv?, level, message }`) over what the effects gathered: npm's version, the
- * environment, the registry's document and the version's manifest, the tag and the repository's tags, the packed file list. Every
+ * process environment, the GitHub environment and its deployment policies, the registry's document and the version's manifest, the tag and the repository's tags, the packed file list. Every
  * branch is a row in `testing/standalone/publish-schema-decides.test.js`; the effects around it only gather and carry out.
  *
  * ## What it prevents
@@ -20,6 +20,11 @@
  *  - npm below 11.5.1 (it cannot exchange the OIDC token and would fall back to an ambient one);
  *  - a token in the environment (`NODE_AUTH_TOKEN`, `NPM_TOKEN`, an `npm_config_*auth*` key), which npm uses INSTEAD of the OIDC
  *    exchange, so provenance would be claimed for a publish that never used it (the KEY is named, never its value);
+ *  - a GitHub environment that does not restrict the credential to `v*` tags: the job's tag restriction lives in the environment
+ *    {@link ENVIRONMENT_NAME}, GitHub creates a missing environment UNPROTECTED, and nothing else checks it, so every publish reads it
+ *    from the public REST API and refuses unless it exists, has custom deployment policies, and lists the {@link RELEASE_TAG_PATTERN}
+ *    tag policy and no branch policy (a refusal names the setup step of the contribution guide; the unauthenticated read can hit
+ *    GitHub's rate limit, which refuses loudly, and a re-run reads again);
  *  - a tarball without LICENSE, NOTICE or `dist/index.js`, or with one empty: Apache-2.0 4(d) unmet on a public registry for good;
  *  - a registry answer that is not understood (a 5xx, a malformed or oversize body, a network error);
  *  - a version already on npm whose recorded `gitHead` is not this tag's commit: "present" proves a number exists, not that this tag
@@ -55,14 +60,22 @@ export const FIRST_NPM_VERSION = '6.5.0';
 /** The first npm that publishes by trusted publishing. */
 const NPM_FLOOR = [11, 5, 1];
 
-/** The environment keys that carry an npm credential: any of them is used instead of the OIDC exchange. */
-const TOKEN_KEY = /^(NPM_TOKEN|NODE_AUTH_TOKEN)$|^npm_config_.*(_auth|authtoken)/i;
+/** The environment keys that carry an npm credential: any of them is used instead of the OIDC exchange. The one copy: the trusted-publishing gate imports it. */
+export const TOKEN_KEY = /^(NPM_TOKEN|NODE_AUTH_TOKEN)$|^npm_config_.*(_auth|authtoken)/i;
+
+/** The GitHub environment the `publish-schema` job runs in, and the one deployment policy it may have. Each is spelled here only; `publish.yml` and the gates read these. */
+export const ENVIRONMENT_NAME = 'npm-publish';
+export const RELEASE_TAG_PATTERN = 'v*';
+
+/** Where a refusal about the environment sends the maintainer. */
+const SETUP_GUIDE = 'docs/contribution-guide.md, "First publish of the schema package", step 0';
 
 /** The files a tarball must carry, each with bytes. */
 const REQUIRED_FILES = ['LICENSE', 'NOTICE', 'dist/index.js'];
 
 const REGISTRY = 'https://registry.npmjs.org';
-const REGISTRY_BODY_CAP = 5 * 1024 * 1024;
+const GITHUB_API = 'https://api.github.com';
+const READ_BODY_CAP = 5 * 1024 * 1024;
 
 /** `schema/package.json`: the package's own name and version, read once. This script never spells the name. */
 const MANIFEST = readSchemaPackage();
@@ -88,11 +101,43 @@ function npmIsRecentEnough(npmVersion) {
 }
 
 /**
+ * Why the GitHub environment cannot be trusted to restrict the credential to `v*` tags, or `null` when it can be. The question:
+ * "does only a tag reach the OIDC credential?" The defect (Q-683, the pre-ship sweep): the job's tag restriction lives in the
+ * environment, GitHub creates a missing environment UNPROTECTED, and nothing else checked it. An answer that is not understood is
+ * a reason, never a pass.
+ *
+ * @param {{ status?: number, body?: string, error?: Error, policies?: { status?: number, body?: string, error?: Error } } | undefined} environment
+ */
+function environmentRefusal(environment) {
+  const named = ENVIRONMENT_NAME;
+  if (!environment) return `the environment ${named} was not read`;
+  if (environment.error) return `the read of the environment ${named} failed: ${environment.error.message}`;
+  if (environment.status === 404) return `the environment ${named} does not exist, and GitHub would create it unprotected on the first run`;
+  if (environment.status !== 200) return `the read of the environment ${named} answered status ${environment.status}`;
+  const doc = parseJson(environment.body);
+  if (!isObject(doc) || !('deployment_branch_policy' in doc)) return `the answer for the environment ${named} is malformed`;
+  if (doc.deployment_branch_policy?.custom_branch_policies !== true) {
+    return `the environment ${named} has no custom deployment policies (any branch could run the job): select "Selected branches and tags"`;
+  }
+
+  const policies = environment.policies;
+  if (policies?.error) return `the read of the deployment policies of ${named} failed: ${policies.error.message}`;
+  if (policies?.status !== 200) return `the read of the deployment policies of ${named} answered status ${policies?.status}`;
+  const list = parseJson(policies.body)?.branch_policies;
+  if (!Array.isArray(list) || !list.every(isObject)) return `the deployment policy list of ${named} is malformed`;
+  const branch = list.find((policy) => policy.type !== 'tag');
+  if (branch) return `the environment ${named} admits the branch policy ${JSON.stringify(branch.name)}, so a branch run could reach the credential: only the tag policy ${RELEASE_TAG_PATTERN} may be set`;
+  if (!list.some((policy) => policy.name === RELEASE_TAG_PATTERN)) return `the environment ${named} has no tag policy ${RELEASE_TAG_PATTERN}`;
+  return null;
+}
+
+/**
  * What a tag publishes, as a pure function of what the effects gathered.
  *
  * @param {object} input
  * @param {string} input.npmVersion `npm -v`
  * @param {Record<string, string | undefined>} input.env the process environment
+ * @param {{ status?: number, body?: string, error?: Error, policies?: { status?: number, body?: string, error?: Error } }} input.environment the GitHub environment and its deployment policies, each read from the public REST API
  * @param {{ status?: number, body?: string, error?: Error }} input.registry the abbreviated package document
  * @param {{ status?: number, body?: string, error?: Error }} [input.versionDoc] the version's manifest, read for a version that is on npm
  * @param {string} input.version the package's version
@@ -101,12 +146,14 @@ function npmIsRecentEnough(npmVersion) {
  * @param {{ path: string, size: number }[]} [input.pack] the file list of `npm pack --dry-run --json`
  * @returns {{ action: 'skip' | 'publish' | 'refuse', argv?: string[], level: 'notice' | 'warning' | 'error', message: string }}
  */
-export function publishDecision({ npmVersion, env, registry, versionDoc, version, tag, tags, pack }) {
+export function publishDecision({ npmVersion, env, environment, registry, versionDoc, version, tag, tags, pack }) {
   if (!npmIsRecentEnough(npmVersion)) {
     return refuse(`npm ${JSON.stringify(npmVersion)} cannot publish by trusted publishing: ${NPM_FLOOR.join('.')} or later is required`);
   }
   const tokenKey = Object.keys(env ?? {}).find((key) => TOKEN_KEY.test(key));
   if (tokenKey) return refuse(`${tokenKey} is set in the environment: npm would use it instead of the OIDC exchange, and provenance would not describe the publish`);
+  const environmentProblem = environmentRefusal(environment);
+  if (environmentProblem) return refuse(`${environmentProblem}; see ${SETUP_GUIDE}`);
 
   if (registry?.error) return refuse(`the registry read failed: ${registry.error.message}`);
   if (registry?.status === 404) {
@@ -165,14 +212,29 @@ function runChild(label, command, args, timeoutMs) {
   return result;
 }
 
-/** One registry read, bounded in time and size. A failed read is `{ error }`, never a throw. */
-async function readRegistry(path, accept) {
+/** One unauthenticated read, bounded in time and size. A failed read is `{ error }`, never a throw. */
+async function readUrl(url, accept) {
   try {
-    const res = await fetch(`${REGISTRY}/${path}`, { headers: { Accept: accept }, signal: AbortSignal.timeout(30_000) });
-    return { status: res.status, body: (await readCappedBody(res, REGISTRY_BODY_CAP)).toString('utf8') };
+    const res = await fetch(url, { headers: { Accept: accept }, signal: AbortSignal.timeout(30_000) });
+    return { status: res.status, body: (await readCappedBody(res, READ_BODY_CAP)).toString('utf8') };
   } catch (error) {
     return { error };
   }
+}
+
+const readRegistry = (path, accept) => readUrl(`${REGISTRY}/${path}`, accept);
+
+/**
+ * The GitHub environment and its deployment policies, from the public REST API with no credential (so no token ever reaches this
+ * job). A repository name that is not `owner/name` is a failed read, never a request to some other path.
+ */
+async function readEnvironment(repository) {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository ?? '')) return { error: new Error(`GITHUB_REPOSITORY is ${JSON.stringify(repository)}, not owner/name`) };
+  const base = `${GITHUB_API}/repos/${repository}/environments/${ENVIRONMENT_NAME}`;
+  const accept = 'application/vnd.github+json';
+  const environment = await readUrl(base, accept);
+  if (environment.status !== 200) return environment;
+  return { ...environment, policies: await readUrl(`${base}/deployment-branch-policies`, accept) };
 }
 
 /** The file list of `npm pack --dry-run --json`, or `undefined` when npm's answer is not one. */
@@ -194,7 +256,9 @@ async function main() {
   const registry = await readRegistry(path, 'application/vnd.npm.install-v1+json');
   const versionDoc = await readRegistry(`${path}/${encodeURIComponent(version)}`, 'application/json');
 
-  const decision = publishDecision({ npmVersion, env: process.env, registry, versionDoc, version, tag: process.env.GITHUB_REF_NAME, tags, pack });
+  const environment = await readEnvironment(process.env.GITHUB_REPOSITORY);
+
+  const decision = publishDecision({ npmVersion, env: process.env, environment, registry, versionDoc, version, tag: process.env.GITHUB_REF_NAME, tags, pack });
   console.log(workflowCommand(decision.level, 'publish-schema', decision.message));
   if (decision.action === 'refuse') process.exit(1);
   if (decision.action !== 'publish') return;

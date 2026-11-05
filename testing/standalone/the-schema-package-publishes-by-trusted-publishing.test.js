@@ -13,8 +13,9 @@
  *    its permissions are `contents: read` and `id-token: write` and nothing else;
  *  - the workflow's own `permissions` carry no `id-token`, and neither the workflow nor any job says `write-all`: a workflow-level
  *    grant reaches every job, including the ones that run the third-party actions of the image build;
- *  - it needs `build-and-push`, runs for `refs/tags/v` only, in the environment `npm-publish` (whose deployment policy allows `v*`
- *    tags, so no branch's copy of the workflow can reach the credential), under the concurrency group `publish-schema` without
+ *  - it needs `build-and-push`, runs for `refs/tags/v` only, in the environment `scripts/publish-schema.mjs` exports as
+ *    `ENVIRONMENT_NAME` (`npm-publish`; its deployment policy allows `v*` tags, so no branch's copy of the workflow can reach the
+ *    credential, and the script reads that policy at every publish), under the concurrency group `publish-schema` without
  *    cancelling, with a `timeout-minutes` of at most 15; `build-and-push` has one of at most 90;
  *  - every `uses:` of the job is a commit, not a tag (an action whose tag moves runs with the OIDC token);
  *  - checkout fetches full history (the gitHead and tag rules read it) and keeps no credentials (`persist-credentials: false`);
@@ -44,14 +45,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadWorkflow, jobEntries, stepsOf, usesOf, isCommitPinned, shellOf, runsNpmCi, expressionOf, isTrue } from '../_shared/ci-workflow.mjs';
+// The environment's name and the credential's variable names are spelled once, in the script that checks them at every publish
+// (the pre-ship sweep, Q-683: a second copy here could drift from the one the script enforces).
+import { ENVIRONMENT_NAME as ENVIRONMENT, TOKEN_KEY } from '../../scripts/publish-schema.mjs';
 
 const PUBLISH = '.github/workflows/publish.yml';
 const JOB = 'publish-schema';
 const BUILD_JOB = 'build-and-push';
-const ENVIRONMENT = 'npm-publish';
 const SCRIPT_RUN = /(^|[\s;&|])node\s+scripts\/publish-schema\.mjs(\s|$)/m;
-/** The variable names that carry an npm credential: any of them in the job's environment is used instead of the OIDC exchange. */
-const TOKEN_KEY = /^(NPM_TOKEN|NODE_AUTH_TOKEN)$|^npm_config_.*(_auth|authtoken)/i;
 const REAL = loadWorkflow(PUBLISH);
 const clone = (doc) => structuredClone(doc);
 

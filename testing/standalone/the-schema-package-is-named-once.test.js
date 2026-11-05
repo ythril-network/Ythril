@@ -8,7 +8,7 @@
  * with it. Two failures are the same defect:
  *
  * - A STALE NAME. A lockfile entry, a comment, a doc line or a regex still naming the retired package. A regex is the worst case: a gate whose pattern
- *   spells a name no import uses matches nothing and PASSES, so the rule it stands for stops being held without a single red line. Nine gates of this
+ *   spells a name no import uses matches nothing and PASSES, so the rule it stands for stops being held without a single red line. Gates of this
  *   repository spelled the name by hand in a pattern or an assertion.
  * - A SECOND SPELLING OF THE NEW NAME. Every gate that spells the current name itself needs the next rename to find it again; one that builds the pattern
  *   from `schemaSpecifierSource` / `SCHEMA_PACKAGE_NAME` (testing/standalone/_relative-specifier.mjs, read once from schema/package.json) follows the

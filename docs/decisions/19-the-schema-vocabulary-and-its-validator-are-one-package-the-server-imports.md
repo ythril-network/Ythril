@@ -35,7 +35,7 @@ worded by `util/log.ts`, the logger itself.
 - **The text a refusal is worded in moved with the validator**: `peerText`, `peerList`, `refusalOfParse` and the secret
   redaction they apply are the package's, and the logger formats its lines with them. Two copies would be a validator
   whose refusal drifts from the server's on the first edit of either.
-- **The package is versioned with the release** (the package at X.Y.Z validates what an X.Y.Z server accepts; it is first published with 6.3.2) and is
+- **The package is versioned with the release** (the package at X.Y.Z validates what an X.Y.Z server accepts; it is first published with 6.5.0) and is
   Apache-2.0, with its own LICENSE and NOTICE (see Q-668 below). Publishing it is a release step, not part of this decision.
 
 ## Consequences
@@ -60,7 +60,7 @@ worded by `util/log.ts`, the logger itself.
 - `schema/src/library.ts` — how the schema library is handed in.
 - `schema/src/rules.ts` — the save-time CEL checks and `compileRule`; `server/src/spaces/schema-rules.ts` — evaluation.
 - Applied before it shipped (Q-668, owner 2026-11-01): the package is **Apache-2.0** with its own `schema/LICENSE` and
-  `schema/NOTICE`, not the repository's licence; it is versioned with the release, 6.3.2 being the first version published; the server builds it through its
+  `schema/NOTICE`, not the repository's licence; it is versioned with the release, 6.5.0 being the first version published; the server builds it through its
   own build script (`npm run build -w @ythril-network/schema`, which clears `dist` first); its app entry names a fixed list and the
   server-only helpers (`useSchemaLibrary` among them) are in `./internal`; a parse with no library installed throws; the
   `$ref` refusal is one function, `libraryRefRefusal`.
