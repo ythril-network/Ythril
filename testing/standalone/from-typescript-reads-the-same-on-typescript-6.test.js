@@ -4,7 +4,7 @@
  *
  * ## The rule held
  *
- * The peer range is `>=5.4 <7`, and the repository's own `typescript` is a 5.x. A range proved at one end is a claim about the other. So
+ * The peer range is `>=5.4`, and the repository's own `typescript` is a 5.x. A range proved at one end is a claim about the other. So
  * the 6.x end is run: `typescript-6` (an alias, `npm:typescript@^6`) is a devDependency of the schema package, outside the production
  * closure, and this file runs the harness with it injected as the compiler (the `typescript` option, which is also how an app on TS 7
  * hands the entry a 6.x it installed under an alias):

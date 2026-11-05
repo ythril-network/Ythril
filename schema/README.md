@@ -36,7 +36,7 @@ npm install ./ythril-schema-*.tgz
 ESM only, Node 22 or later: the CEL rule engine (`@bufbuild/cel`) is loaded with a top-level `await`.
 
 An app that reads a space meta back from TypeScript (see [Read a space meta from TypeScript](#read-a-space-meta-from-typescript))
-also installs the compiler itself: `typescript` is an optional peer dependency (`>=5.4 <7`), loaded only by the
+also installs the compiler itself: `typescript` is an optional peer dependency (`>=5.4`), loaded only by the
 `@ythril/schema/from-typescript` entry. An app that never reads TypeScript installs nothing more.
 
 ## Validate a space meta
@@ -190,11 +190,12 @@ ignored). It lives behind its own export, `@ythril/schema/from-typescript`, and 
 | `Refusal` | `{ path, reason, detail, code? }`: where in the source, one of `UNREPRESENTED_REASONS`, bounded text; `code` is the compiler's number for `source-does-not-compile` |
 | `NotRead` | `{ path }`: `[kind, type, 'propertySchemas', member, field]` for a field of a member the source cannot carry |
 
-**The compiler is yours.** `typescript` is an optional peer dependency (`>=5.4 <7`): npm does not install it for you, and the main
-entry never loads it. The first call loads it from your own install; with none, the call rejects with one error that names the
-fix, `npm install typescript@6`, and the `typescript` option, which takes a module you loaded yourself (a compiler of the range
-installed under an alias works the same). A module with no `createProgram` is refused the same way, and any other error loading it
-is thrown as it is. The compile is closed: it reads the source you gave it and the compiler's own lib, and nothing else on the
+**The compiler is yours.** `typescript` is an optional peer dependency (`>=5.4`): npm does not install it for you, and the main
+entry never loads it. The range has no ceiling, so an app whose own `typescript` is newer still installs the package. The first
+call loads it from your own install; with none, the call rejects with one error that names the fix, `npm install typescript@6`,
+and the `typescript` option, which takes a module you loaded yourself. A `typescript` with no compiler API (7.x has none) is refused
+the same way, and the error also names the install that keeps yours: `npm install typescript-6@npm:typescript@6`, then pass
+`(await import('typescript-6')).default` as the `typescript` option. Any other error loading it is thrown as it is. The compile is closed: it reads the source you gave it and the compiler's own lib, and nothing else on the
 machine; no import resolves.
 
 **Whole or nothing.** A source with one member this cannot say exactly is refused as a whole, with up to ten refusals and

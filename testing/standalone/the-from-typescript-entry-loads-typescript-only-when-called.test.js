@@ -4,15 +4,16 @@
  *
  * ## The rule held
  *
- * The schema package depends on no compiler: `typescript` is an OPTIONAL peer (`>=5.4 <7`) that only the one entry reads. So:
+ * The schema package depends on no compiler: `typescript` is an OPTIONAL peer (`>=5.4`, no ceiling, so an app on 7 still installs the package) that only
+ * the one entry reads. So:
  *
  * - **The main entry never loads it.** `dist/index.js` and `dist/internal.js` import, and run the converter and the validator, without
  *   one request for `typescript`. Held in a child whose resolve hook reports every request and refuses it, with a TRIPWIRE in the same
  *   child: a direct `import('typescript')` sees the hook's error, and the entry, imported and called, rejects naming the install. A hook
  *   that never fired would make "never asked" true of anything.
  * - **Without the compiler the call rejects, naming the fix.** One Error that names `npm install typescript@6` and the `typescript`
- *   option; a module with no `createProgram` (TS 7, whose API is another package's) says the same; every other load error is rethrown
- *   as it is.
+ *   option; a module with no `createProgram` (TS 7, whose API is another package's) says the same and also names the alias install that
+ *   keeps the app's own 7 (`npm install typescript-6@npm:typescript@6`); every other load error is rethrown as it is.
  * - **A source over SOURCE_MAX is refused before the compiler loads.** The child sees no request.
  * - **An injected compiler is used and never memoised.** The option beats whatever the entry loaded for itself, and it is never
  *   kept as the default.
@@ -56,6 +57,12 @@ function assertInstallError(rejected, why) {
   assert.match(message, /`typescript` option|typescript option|options\.typescript/i, `${why}: names the typescript option, got: ${message}`);
 }
 
+/** The Error for a loaded typescript with no compiler API: the install error, plus the alias install that keeps the app's own typescript. */
+function assertNoCompilerApiError(rejected, why) {
+  assertInstallError(rejected, why);
+  assert.ok(rejected.message.includes('npm install typescript-6@npm:typescript@6'), `${why}: names the alias install, got: ${rejected.message}`);
+}
+
 describe('the entry is built', () => {
   it('schema/dist/from-typescript.js exists and exports the names these tests read', async () => {
     await entry();
@@ -81,11 +88,11 @@ describe('without the compiler the entry rejects, naming the install', () => {
   });
 
   it('a module with a default export and no createProgram (TS 7 shaped) names typescript@6', () => {
-    assertInstallError(child('ts7').answer.rejected, 'a TS-7-shaped default export');
+    assertNoCompilerApiError(child('ts7').answer.rejected, 'a TS-7-shaped default export');
   });
 
   it('a module with only named exports and no createProgram names typescript@6', () => {
-    assertInstallError(child('ts7-named').answer.rejected, 'a TS-7-shaped namespace');
+    assertNoCompilerApiError(child('ts7-named').answer.rejected, 'a TS-7-shaped namespace');
   });
 
   it('every other load error is rethrown as it is, never taken for a missing install', () => {
@@ -150,7 +157,7 @@ describe('an injected typescript option', () => {
 
   it('with no createProgram (TS 7 shaped) rejects naming typescript@6, the way a missing install does', async () => {
     for (const shaped of [{}, { version: '7.0.0' }, { default: { version: '7.0.0' } }]) {
-      await assert.rejects(read(CONTROL_SOURCE, { typescript: shaped }), (error) => { assertInstallError(error, `injected ${JSON.stringify(shaped)}`); return true; });
+      await assert.rejects(read(CONTROL_SOURCE, { typescript: shaped }), (error) => { assertNoCompilerApiError(error, `injected ${JSON.stringify(shaped)}`); return true; });
     }
   });
 });
