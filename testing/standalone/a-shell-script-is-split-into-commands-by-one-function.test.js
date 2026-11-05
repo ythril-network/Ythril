@@ -72,7 +72,7 @@ describe('both readers of a workflow script agree on what it says', () => {
 });
 
 describe('no consumer splits a script itself', () => {
-  const CONSUMERS = ['scripts/unrun-tests.mjs', 'testing/_shared/compose-start-sets.mjs'];
+  const CONSUMERS = ['scripts/unrun-tests.mjs', 'testing/_shared/compose-start-sets.mjs', 'testing/standalone/_tsc-runner.mjs'];
   for (const file of CONSUMERS) {
     it(`${file} imports shellCommands and spells no splitter`, () => {
       const code = stripComments(readFileSync(join(REPO_ROOT, file), 'utf8'));

@@ -34,7 +34,7 @@ import { KNOWLEDGE_TYPES, type KnowledgeType, type TypeSchema } from './vocabula
 import { validateSpaceMeta } from './validate.js';
 import { ENUM_LITERAL_MAX, SPACE_TYPES, SPACE_TYPE_PROPERTIES } from './typescript.js';
 import { isObjectInternalKey } from './object-internal-keys.js';
-import { ownValue } from './plain-object.js';
+import { ownValue, setOwn } from './plain-object.js';
 import { NAME_QUOTED, REFUSAL_NAMES_MAX, peerText } from './text.js';
 
 /**
@@ -486,11 +486,6 @@ class Reader {
 // The call
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** Defines `key` as an own data property: never an assignment, so no name can reach a prototype. */
-function define(target: object, key: string, value: unknown): void {
-  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
-}
-
 /**
  * The space meta a TypeScript source declares, or every reason it cannot be read: the call the entry is for.
  *
@@ -581,7 +576,7 @@ function readMap(reader: Reader, mapName: string, refusals: Refusals): FromTypeS
       const members = checker.getPropertiesOfType(properties);
       const indexes = checker.getIndexInfosOfType(properties);
       const definition: TypeSchema = {};
-      define(types, typeName, definition);
+      setOwn(types, typeName, definition);
       if (members.length > 0 && indexes.length > 0) {
         refusals.add([kind, typeName], 'object-not-representable', 'an index signature beside declared members');
       } else if (members.length === 0) {
@@ -599,13 +594,13 @@ function readMap(reader: Reader, mapName: string, refusals: Refusals): FromTypeS
           if (isObjectInternalKey(key)) { refusals.add(at, 'internal-name', 'a member named for an object\'s internals'); continue; }
           const read = reader.member(symbol, kind as KnowledgeType, map);
           if (!read.ok) { refusals.add(at, read.reason, read.detail); continue; }
-          define(propertySchemas, key, read.property);
+          setOwn(propertySchemas, key, read.property);
           for (const field of [...reader.notedFields(symbol, read.property.required !== true), ...read.lost]) notRead.push({ path: [...at, field] });
         }
         definition.propertySchemas = propertySchemas;
       }
     }
-    if (Object.keys(types).length > 0) define(typeSchemas, kind, types);
+    if (Object.keys(types).length > 0) setOwn(typeSchemas, kind, types);
   }
   if (refusals.count > 0) return refusals.result();
 

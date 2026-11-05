@@ -29,6 +29,8 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { SCHEMA_PACKAGE_ENTRIES, resolveSpecifier } from './_relative-specifier.mjs';
 import { trackedSources } from './_sources.mjs';
+import { COMPILER_RUN } from './_tsc-runner.mjs';
+import { shellCommands } from '../_shared/ci-workflow.mjs';
 
 const json = (p) => JSON.parse(readFileSync(p, 'utf8'));
 const schema = json('schema/package.json');
@@ -53,9 +55,9 @@ describe('the package depends as the server does (I2, L1)', () => {
 
 describe('the package builds from a clean dist (I4)', () => {
   it('its build script removes dist with node\'s rmSync before tsc runs', () => {
-    const steps = String(schema.scripts?.build ?? '').split('&&').map(s => s.trim());
+    const steps = shellCommands(schema.scripts?.build);
     const clean = steps.findIndex(s => /^node -e\b/.test(s) && /rmSync\(\s*\\?['"]dist\\?['"]/.test(s) && /recursive\s*:\s*true/.test(s));
-    const compile = steps.findIndex(s => /^tsc\b/.test(s));
+    const compile = steps.findIndex(s => COMPILER_RUN.test(s));
     assert.ok(clean >= 0, `the build (${schema.scripts?.build}) has no portable dist clean (node -e ... rmSync('dist', { recursive: true, ... }))`);
     assert.ok(compile > clean, 'the dist clean must run before tsc');
     assert.ok(!steps.some(s => /\brm\s+-r|\brimraf\b|\brmdir\b|\bdel\b/.test(s)), 'the clean is a shell command that does not run on every platform');

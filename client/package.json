@@ -4,7 +4,7 @@
   "license": "PolyForm-Small-Business-1.0.0",
   "private": true,
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.spec.json",
+    "typecheck": "node ../scripts/tsc.mjs --noEmit -p tsconfig.app.json && node ../scripts/tsc.mjs --noEmit -p tsconfig.spec.json",
     "start": "ng serve",
     "build": "ng build",
     "build:prod": "ng build --configuration production",

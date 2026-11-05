@@ -57,6 +57,9 @@ RUN npm ci --workspace=server --workspace=schema
 # Copy source. `schema/` is `@ythril/schema`, the space-schema vocabulary and validator the server imports.
 COPY schema/ ./schema/
 COPY server/ ./server/
+# The build scripts run the compiler through it, so the `typescript` they depend on builds them, not whichever package's
+# `tsc` bin npm linked last (the schema's `typescript-6` devDependency claims the same bin).
+COPY scripts/tsc.mjs ./scripts/
 
 # Compile TypeScript (the server's `prebuild` compiles schema/ first)
 RUN npm run build --workspace=server

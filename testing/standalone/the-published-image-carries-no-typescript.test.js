@@ -26,29 +26,22 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { jobEntries, loadWorkflow, parseWorkflow, shellOf, stepsOf } from '../_shared/ci-workflow.mjs';
 
 const read = (p) => readFileSync(p, 'utf8');
 
-/** The workflow's steps, in order: `{ name, body }`, comment lines removed from the body. */
-function stepsOf(workflow) {
-  const lines = workflow.split(/\r?\n/);
-  const steps = [];
-  for (const line of lines) {
-    const m = /^\s*-\s+name:\s*(.+?)\s*$/.exec(line);
-    if (m) steps.push({ name: m[1], body: '' });
-    else if (steps.length && !/^\s*#/.test(line)) steps[steps.length - 1].body += `${line}\n`;
-  }
-  return steps;
-}
+/** Every step of a parsed workflow, its jobs in file order. */
+const workflowSteps = (doc) => jobEntries(doc).flatMap(({ job }) => stepsOf(job));
 
 /** The paths of the image a step asserts ABSENT: `docker run ... "test ! -d /app/<path>"` (or `-e`), on one command line. */
-const absentPaths = (body) => [...body.matchAll(/docker run\b[^\n]*?\btest\s+!\s+-[de]\s+(\/app\/[^\s"';&|]+)/g)].map(m => m[1]);
+const absentPaths = (script) => [...script.matchAll(/docker run\b[^\n]*?\btest\s+!\s+-[de]\s+(\/app\/[^\s"';&|]+)/g)].map(m => m[1]);
 
-/** Whether the workflow verifies `path` absent in a "Verify" step that precedes the release announcement. */
-function verifiesAbsent(workflow, path) {
-  const steps = stepsOf(workflow);
-  const verify = steps.findIndex(s => /^Verify\b/.test(s.name) && absentPaths(s.body).includes(path));
-  const announce = steps.findIndex(s => /\bRelease\b/.test(s.name) && /^Create\b/.test(s.name));
+/** Whether the parsed workflow verifies `path` absent in a "Verify" step that precedes the release announcement (`shellOf` drops comment lines). */
+function verifiesAbsent(doc, path) {
+  const steps = workflowSteps(doc);
+  const named = (s, re) => re.test(String(s.name ?? ''));
+  const verify = steps.findIndex(s => named(s, /^Verify\b/) && absentPaths(shellOf(s)).includes(path));
+  const announce = steps.findIndex(s => named(s, /\bRelease\b/) && named(s, /^Create\b/));
   return verify >= 0 && (announce < 0 || verify < announce);
 }
 
@@ -56,19 +49,20 @@ const TS_PATH = '/app/node_modules/typescript';
 
 describe('the reader this gate stands on (planted workflows)', () => {
   const step = (name, body) => `      - name: ${name}\n        run: |\n${body}\n`;
+  const planted = (...steps) => parseWorkflow(`on: push\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n${steps.join('')}`, 'planted');
   const check = `          docker run --rm --entrypoint sh "$IMAGE" -c "test ! -d ${TS_PATH}"`;
 
   it('accepts the check in a Verify step before the announcement', () => {
-    assert.equal(verifiesAbsent(step('Verify the image carries no typescript', check) + step('Create the GitHub Release from the CHANGELOG', '          echo go'), TS_PATH), true);
+    assert.equal(verifiesAbsent(planted(step('Verify the image carries no typescript', check), step('Create the GitHub Release from the CHANGELOG', '          echo go')), TS_PATH), true);
   });
 
   it('refuses a comment-only check, another path, the wrong test, no docker run, and a check after the announcement', () => {
-    assert.equal(verifiesAbsent(step('Verify x', `          # ${check.trim()}\n          echo hi`), TS_PATH), false, 'a comment is not a check');
-    assert.equal(verifiesAbsent(step('Verify x', check.replace('typescript', 'zod')), TS_PATH), false, 'another path');
-    assert.equal(verifiesAbsent(step('Verify x', check.replace('test ! -d', 'test -s')), TS_PATH), false, 'a presence test is the opposite check');
-    assert.equal(verifiesAbsent(step('Verify x', `          test ! -d ${TS_PATH}`), TS_PATH), false, 'no docker run asks nothing of the image');
-    assert.equal(verifiesAbsent(step('Create the GitHub Release', '          echo go') + step('Verify x', check), TS_PATH), false, 'after the announcement');
-    assert.equal(verifiesAbsent(step('Build x', check), TS_PATH), false, 'not a Verify step');
+    assert.equal(verifiesAbsent(planted(step('Verify x', `          # ${check.trim()}\n          echo hi`)), TS_PATH), false, 'a comment is not a check');
+    assert.equal(verifiesAbsent(planted(step('Verify x', check.replace('typescript', 'zod'))), TS_PATH), false, 'another path');
+    assert.equal(verifiesAbsent(planted(step('Verify x', check.replace('test ! -d', 'test -s'))), TS_PATH), false, 'a presence test is the opposite check');
+    assert.equal(verifiesAbsent(planted(step('Verify x', `          test ! -d ${TS_PATH}`)), TS_PATH), false, 'no docker run asks nothing of the image');
+    assert.equal(verifiesAbsent(planted(step('Create the GitHub Release', '          echo go'), step('Verify x', check)), TS_PATH), false, 'after the announcement');
+    assert.equal(verifiesAbsent(planted(step('Build x', check)), TS_PATH), false, 'not a Verify step');
   });
 });
 
@@ -95,8 +89,8 @@ describe('the image carries no typescript', () => {
   });
 
   it('publish.yml asks the pushed image that node_modules/typescript is absent, in a Verify step before the announcement', () => {
-    const wf = read('.github/workflows/publish.yml');
-    assert.ok(stepsOf(wf).length >= 8, 'the workflow was read as fewer than eight steps: the reader is broken');
+    const wf = loadWorkflow('.github/workflows/publish.yml');
+    assert.ok(workflowSteps(wf).length >= 8, 'the workflow was read as fewer than eight steps: the reader is broken');
     assert.ok(verifiesAbsent(wf, TS_PATH),
       `.github/workflows/publish.yml has no "Verify ..." step running docker run ... "test ! -d ${TS_PATH}" ahead of the release announcement: the licence sentence in schema/NOTICE (the compiler is the caller's own, never installed) is unchecked against the image`);
   });
