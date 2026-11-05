@@ -2594,7 +2594,7 @@
   "review.contradictions.cleanBody": "In diesem Space wurden keine Widersprüche gefunden.",
   "review.contradictions.judgeRan": "Beide Prüfungen sind hier gelaufen — die deterministische Feldprüfung und der Entailment-Richter.",
   "review.contradictions.scanStalled": "Der Scan ist beendet, aber der Entailment-Richter war nicht erreichbar, daher wurden modellbewertete Paare nicht entschieden. Er setzt dort fort, wo er stehen geblieben ist.",
-  "review.contradictions.scanHeld": "Der Scan wurde vorzeitig angehalten: Der Suchindex ist für einige Datensätze noch nicht bereit, daher wurde nur ein Teil davon geprüft. Er setzt dort fort, wo er stehen geblieben ist, sobald der Index bereit ist.",
+  "review.contradictions.scanHeld": "Der Scan wurde vorzeitig angehalten: Der Suchindex ist für einige Datensätze noch nicht bereit, daher wurde nur ein Teil davon geprüft. Der nächste Scan setzt dort fort, wo er stehen geblieben ist, sobald der Index bereit ist.",
   "review.contradictions.basis.structured": "Feldkonflikt",
   "review.contradictions.basis.nli": "Modell-Urteil",
   "review.contradictions.confidence": "Modell-Konfidenz",

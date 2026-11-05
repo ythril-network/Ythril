@@ -2594,7 +2594,7 @@
   "review.contradictions.cleanBody": "Nie znaleziono sprzeczności w tej przestrzeni.",
   "review.contradictions.judgeRan": "Oba przebiegi objęły tę przestrzeń — deterministyczne sprawdzenie pól oraz sędzia entailment.",
   "review.contradictions.scanStalled": "Skanowanie zakończone, ale sędzia entailment był nieosiągalny, więc pary oceniane przez model nie zostały rozstrzygnięte. Wznowi od miejsca zatrzymania.",
-  "review.contradictions.scanHeld": "Skanowanie zatrzymano wcześniej: indeks wyszukiwania nie jest jeszcze gotowy dla części rekordów, więc sprawdzono tylko ich część. Wznowi od miejsca zatrzymania, gdy indeks będzie gotowy.",
+  "review.contradictions.scanHeld": "Skanowanie zatrzymano wcześniej: indeks wyszukiwania nie jest jeszcze gotowy dla części rekordów, więc sprawdzono tylko ich część. Następne skanowanie wznowi od miejsca zatrzymania, gdy indeks będzie gotowy.",
   "review.contradictions.basis.structured": "Konflikt pola",
   "review.contradictions.basis.nli": "Werdykt modelu",
   "review.contradictions.confidence": "Pewność modelu",
