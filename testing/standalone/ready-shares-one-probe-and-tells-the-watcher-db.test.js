@@ -66,7 +66,12 @@ describe('/ready and the search watcher', { skip }, () => {
     // The search outage is reported as `vectorSearch` failing on its own (`checks.mongodb` is its own probe). Whether the database
     // probe ALSO passes is not asserted: on a loaded runner the shared harness can miss the 2 s probe bound (Full run 41493914149,
     // `mongodb is failing (timeout)` beside the outage), which is the database's state, not a fold of the two checks.
+    // What IS asserted (Q-696, D4): the database check answers `ok`, or fails only as the `timeout` just named. The search outage
+    // is injected below the server and leaves the admin ping alone, so any other reason (a `not_primary`, an `auth` or a
+    // `network` one) is the outage leaking into the database's own check - and `assert.ok(r.checks.mongodb)` held for every one.
     assert.ok(r.checks.mongodb, 'the database has its own check beside vectorSearch: /ready must tell the two apart');
+    assert.ok(r.checks.mongodb.status === 'ok' || r.checks.mongodb.reason === 'timeout',
+      `the database check is ${JSON.stringify(r.checks.mongodb)}: under a search outage it may be ok, or a timeout of the shared harness, nothing else`);
     assert.equal(readiness.searchReadinessSnapshot().state, 'unknown', '/ready set the state from a failure');
   });
 
