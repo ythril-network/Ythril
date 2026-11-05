@@ -21,7 +21,7 @@
  * Before the entry exists every row is red for the one reason the first row names.
  *
  * Run: node --test testing/standalone/every-typescript-the-reverse-direction-cannot-read-is-refused-by-name.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

@@ -1,5 +1,5 @@
 /**
- * `@ythril/schema`'s app entry (`.`) exports exactly the names listed here, values and types; the server-only helpers are behind
+ * The schema package's app entry (`.`) exports exactly the names listed here, values and types; the server-only helpers are behind
  * `./internal` (Q-668, 5', S2, S3, B6).
  *
  * ## The defect this prevents
@@ -21,7 +21,7 @@
  * export table is held to the same lists by `the-schema-readme-names-every-name-of-the-app-entry.test.js`.
  *
  * Run: node --test testing/standalone/the-schema-packages-app-entry-names-a-fixed-surface.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -73,7 +73,7 @@ describe('the app entry names a fixed surface', () => {
   });
 
   it('the app entry carries libraryRefRefusal and withSchemaLibrary, and ./internal hands on all of it', () => {
-    for (const name of ['libraryRefRefusal', 'withSchemaLibrary', 'validateSpaceMeta']) assert.ok(name in app, `@ythril/schema exports ${name}`);
+    for (const name of ['libraryRefRefusal', 'withSchemaLibrary', 'validateSpaceMeta']) assert.ok(name in app, `the schema package exports ${name}`);
     for (const name of Object.keys(app)) assert.equal(internal[name], app[name], `./internal re-exports ${name} as the same object`);
   });
 });

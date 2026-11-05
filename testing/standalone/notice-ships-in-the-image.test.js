@@ -105,7 +105,7 @@ describe('the licence and notices ship inside the image', () => {
   });
 
   it('a workspace that ships its own LICENSE and NOTICE has them copied beside it', () => {
-    // `@ythril/schema` is Apache-2.0 with its own LICENSE and NOTICE (owner, 2026-11-01), and the image carries the package
+    // The schema package is Apache-2.0 with its own LICENSE and NOTICE (owner, 2026-11-01), and the image carries the package
     // (`schema/package.json`, `schema/dist`). Its notices travel with it. Which workspaces: every one whose manifest ships a LICENSE
     // or NOTICE (`files`), read from the repository, so the next package with its own licence is covered on the day it is added.
     const shipping = ownNoticeWorkspaces();

@@ -20,8 +20,8 @@
  * sequence was the way to satisfy it. The package now declares `libraryRefRefusal(typeSchemas, library?)`, the finders and their
  * wording are package-internal, and this gate requires a call of `libraryRefRefusal(` and a 422 in the route's own handler or in the
  * server-side function it delegates to. Never the package's source: the earlier gate appended `schema/src` to any delegate that imported
- * the package, so a route whose delegate merely imported it passed (B2). A function imported from `@ythril/schema` or
- * `@ythril/schema/internal` is the package's, and a call of it is not the route consulting the refusal.
+ * the package, so a route whose delegate merely imported it passed (B2). A function imported from the schema package or
+ * its internal entry is the package's, and a call of it is not the route consulting the refusal.
  *
  * ## Why this is derived rather than a list of four routes
  *
@@ -38,11 +38,12 @@ import { readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
+import { SCHEMA_PACKAGE_NAME, RETIRED_SCHEMA_PACKAGE_NAME, schemaSpecifierSource } from './_relative-specifier.mjs';
 
 const ROOT = process.cwd();
 const ROUTER = 'server/src/api/spaces.ts';
-/** The package's two entries: a name imported from either is the package's, never a server-side delegate. */
-const PACKAGE_SPECIFIER = /^@ythril\/schema(?:\/internal)?$/;
+/** The package's two entries (named from its manifest through the one specifier source): a name imported from either is the package's, never a server-side delegate. The retired name is neither. */
+const PACKAGE_SPECIFIER = new RegExp(`^${schemaSpecifierSource(['', '/internal'])}$`);
 /** The one refusal, called. */
 const CHECK = /\blibraryRefRefusal\s*\(/;
 
@@ -58,7 +59,7 @@ function routesOf(src) {
 
 /**
  * `localName -> { file, exported } | { package }` for every named import of `text` (written in `fromFile`), static and dynamic. A
- * relative specifier resolves to the `.ts` file it names; `@ythril/schema` and `@ythril/schema/internal` are the package's.
+ * relative specifier resolves to the `.ts` file it names; the schema package and its internal entry are the package's.
  */
 function importsOf(text, fromFile) {
   const byName = new Map();
@@ -125,12 +126,14 @@ describe('the readers this gate stands on (proved on a planted router)', () => {
   const files = new Map([
     ['fx/api/router.ts', `
 import { planGood, planSkip } from '../spaces/plans.js';
-import { validateSpaceMeta } from '@ythril/schema/internal';
-import { parseSpaceMeta } from '@ythril/schema';
+import { validateSpaceMeta } from '${SCHEMA_PACKAGE_NAME}/internal';
+import { parseSpaceMeta } from '${SCHEMA_PACKAGE_NAME}';
+import { retiredCheck } from '${RETIRED_SCHEMA_PACKAGE_NAME}';
 spacesRouter.post('/', async (req, res) => { const d = planGood(req.body); res.status(d.status).json(d.body); });
 spacesRouter.put('/:id/schema', async (req, res) => { const { typeSchemas } = req.body; res.json({ typeSchemas }); });
 spacesRouter.patch('/:id', async (req, res) => { const d = planSkip(req.body); res.status(d.status).json(d.body); });
 spacesRouter.post('/:id/pkg', async (req, res) => { const { typeSchemas } = req.body; const r = validateSpaceMeta({ typeSchemas }); res.status(r.ok ? 200 : 422).json(r); });
+spacesRouter.post('/:id/retired', async (req, res) => { const { typeSchemas } = req.body; const r = retiredCheck({ typeSchemas }); res.status(r.ok ? 200 : 422).json(r); });
 spacesRouter.put('/:id/comment', async (req, res) => {
   const { typeSchemas } = req.body;
   // libraryRefRefusal(typeSchemas) would go here
@@ -139,7 +142,7 @@ spacesRouter.put('/:id/comment', async (req, res) => {
 spacesRouter.put('/:id/inline', async (req, res) => { const r = libraryRefRefusal(req.body.typeSchemas); if (r) return res.status(422).json({ error: r.message }); });
 `],
     ['fx/spaces/plans.ts', `
-import { libraryRefRefusal } from '@ythril/schema';
+import { libraryRefRefusal } from '${SCHEMA_PACKAGE_NAME}';
 export function planGood(body) {
   const refusal = libraryRefRefusal(body.typeSchemas);
   if (refusal) return { status: 422, body: { error: refusal.message } };
@@ -158,14 +161,18 @@ export function neighbour(body) {
   const imports = importsOf(routerText, 'fx/api/router.ts');
 
   it('reads both package entries as the package\'s, and a relative import as the file it names', () => {
-    assert.deepEqual(imports.get('validateSpaceMeta'), { package: '@ythril/schema/internal' });
-    assert.deepEqual(imports.get('parseSpaceMeta'), { package: '@ythril/schema' });
+    assert.deepEqual(imports.get('validateSpaceMeta'), { package: `${SCHEMA_PACKAGE_NAME}/internal` });
+    assert.deepEqual(imports.get('parseSpaceMeta'), { package: SCHEMA_PACKAGE_NAME });
     assert.deepEqual(imports.get('planGood'), { file: 'fx/spaces/plans.ts', exported: 'planGood' });
+  });
+
+  it('does not read an import of the RETIRED package name as the package\'s or as a server file (the name resolves to nothing)', () => {
+    assert.equal(imports.has('retiredCheck'), false);
   });
 
   it('flags a route that skips the call: inline, through a delegate whose NEIGHBOUR calls it, through the package, or in a comment', () => {
     assert.deepEqual(offendersOf(routesOf(routerText), imports, read).sort(),
-      ['PATCH /:id', 'POST /:id/pkg', 'PUT /:id/comment', 'PUT /:id/schema']);
+      ['PATCH /:id', 'POST /:id/pkg', 'POST /:id/retired', 'PUT /:id/comment', 'PUT /:id/schema']);
   });
 
   it('accepts a route that calls it inline or through its delegate, and says where', () => {

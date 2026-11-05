@@ -30,6 +30,8 @@ import {
   abridgeForRelease, RELEASE_BODY_MAX, RELEASE_BODY_TARGET, entriesWithSection, isBreaking, releasePreamble,
 } from '../../scripts/changelog-section.mjs';
 
+import { loadWorkflow, shellOf } from '../_shared/ci-workflow.mjs';
+
 const wf = readFileSync('.github/workflows/publish.yml', 'utf8');
 const changelog = readFileSync('CHANGELOG.md', 'utf8');
 
@@ -326,8 +328,20 @@ describe('the workflow announces what it published', () => {
     // filling the six-release backlog would do.
     assert.match(wf, /--latest="?\$\{?LATEST/,
       'the workflow must pass an explicit --latest computed from whether this tag is the highest');
-    assert.match(wf, /git tag --list 'v\*' --sort=-v:refname/,
-      'and compute it from the tags rather than assuming the newest push is the newest version');
+    // The rule is `scripts/release-latest.mjs`'s (bundle-225, Q-683), over `isHighestReleaseTag`, and no longer an inline
+    // `git tag --sort | head -n1`: that sort ranks `v7.0.0-rc.1` above `v6.9.0`, so a release candidate was announced as Latest.
+    // The Release step is found by structure (the parsed step that creates the Release), and its SCRIPT is read with comments
+    // gone, so the words of an explaining comment satisfy nothing.
+    const release = loadWorkflow('.github/workflows/publish.yml').jobs['build-and-push'].steps
+      .filter((s) => /gh release create/.test(shellOf(s)));
+    assert.equal(release.length, 1, 'exactly one step creates the Release');
+    const script = shellOf(release[0]);
+    assert.match(script, /node\s+scripts\/release-latest\.mjs\s+"?\$\{?GITHUB_REF_NAME\}?"?/,
+      'the Release step does not ask scripts/release-latest.mjs about this tag, so "highest" is computed somewhere else');
+    assert.ok(!/--sort/.test(script) && !/git\s+tag\s+--list/.test(script),
+      'the Release step still sorts the tags inline: a second copy of "highest", which ranks a prerelease above a release');
+    assert.match(script, /LATEST=\$\(\s*node\s+scripts\/release-latest\.mjs|LATEST="\$\(\s*node\s+scripts\/release-latest\.mjs/,
+      'the answer of release-latest.mjs does not become LATEST, which --latest reads');
   });
 
   it('re-running a tag updates the notes instead of failing the publish', () => {

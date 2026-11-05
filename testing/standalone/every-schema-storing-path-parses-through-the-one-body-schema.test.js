@@ -207,7 +207,7 @@ describe('every path that stores a schema parses it through the one body schema'
     const library = await import('../../server/dist/api/schema-library.js');
     parserNames = new Set([...Object.entries(bodies), ...Object.entries(library)]
       .filter(([, v]) => v && typeof v === 'object' && typeof v.safeParse === 'function').map(([k]) => k));
-    // The server's sources and `@ythril/schema`'s: the parses (and the helpers that parse through them) are the package's, imported by name.
+    // The server's sources and the schema package's: the parses (and the helpers that parse through them) are the package's, imported by name.
     sources = new Map(trackedSources(['server/src', 'schema/src'], { floor: 400 }).map(f => [f, readFileSync(join(REPO_ROOT, f), 'utf8')]));
   });
 
@@ -231,7 +231,7 @@ describe('every path that stores a schema parses it through the one body schema'
     const real = unparsed.filter(w => !EXEMPT.has(w.unit));
     assert.deepEqual(real.map(w => `${w.unit} (line ${w.line}: ${w.why})`), [],
       'these hand a meta to a store, or write one, without parsing it through a body schema. A schema that arrived by '
-      + 'the network or a vote is exactly as untrusted as one a caller sends: parse it, then store it (parseSpaceMeta / parseTypeSchema, @ythril/schema through body-schemas.ts).');
+      + 'the network or a vote is exactly as untrusted as one a caller sends: parse it, then store it (parseSpaceMeta / parseTypeSchema, the schema package through body-schemas.ts).');
   });
 
   it('an exemption names a writer that still exists and still parses nothing', () => {
@@ -280,7 +280,7 @@ describe('the brand a parsed schema carries is minted in one place', () => {
     assert.equal(typeof bodies.parseTypeSchema, 'function', 'body-schemas.ts does not export parseTypeSchema (mints ParsedTypeSchema)');
   });
 
-  // The bodies and the parses that mint the brand are `@ythril/schema`'s (`schema/src/space-meta.ts`); `body-schemas.ts` re-exports them.
+  // The bodies and the parses that mint the brand are the schema package's (`schema/src/space-meta.ts`); `body-schemas.ts` re-exports them.
   const HOME = 'schema/src/space-meta.ts';
   it('no file but the schema package\'s space-meta.ts casts a value to a parsed brand, and the brand types are declared there', () => {
     const files = trackedSources(['server/src', 'schema/src'], { floor: 400 });

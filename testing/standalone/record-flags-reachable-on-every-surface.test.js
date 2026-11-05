@@ -36,6 +36,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { argumentsOf, between } from './_structural-window.mjs';
@@ -166,7 +167,7 @@ function recordFlags() {
  * single loose regex covering all three would match the mention it is supposed to reject.
  */
 function forwards(flag) {
-  const f = flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const f = escapeRegExp(flag);
   return [
     // `updates.superseded = sus.value` / `updates['suppressEmbeddings'] = sup.value`
     new RegExp(`updates(?:\\.${f}|\\['${f}'\\]) = \\w+\\.value;`),

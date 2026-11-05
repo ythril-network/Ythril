@@ -1,5 +1,5 @@
 /**
- * The compile `@ythril/schema/from-typescript` runs is closed: its host serves the source it was given and the compiler's own lib files,
+ * The compile the schema package's from-typescript entry runs is closed: its host serves the source it was given and the compiler's own lib files,
  * and nothing else on the machine (Q-687, design v3 items 4 and 5; D-70, decision 19: the schema package imports no file of an app's,
  * and the entry's one file access is the lib; the lens: security S1).
  *
@@ -22,7 +22,7 @@
  * Before the entry exists every case is red for the one reason the first case names.
  *
  * Run: node --test testing/standalone/the-from-typescript-host-reads-only-the-source-and-the-compilers-lib.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

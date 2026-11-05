@@ -1,5 +1,5 @@
 /**
- * `@ythril/schema/from-typescript` exports exactly the names listed in `_schema-app-entry-names.mjs`, values and types, and neither `.` nor
+ * The schema package's from-typescript entry exports exactly the names listed in `_schema-app-entry-names.mjs`, values and types, and neither `.` nor
  * `./internal` carries any of them (Q-687, design v3 items 1, 11 and 12).
  *
  * ## The defect this prevents
@@ -24,7 +24,7 @@
  * README is held to the same lists by `the-schema-readme-names-every-name-of-the-from-typescript-entry.test.js`.
  *
  * Run: node --test testing/standalone/the-schema-packages-from-typescript-entry-names-a-fixed-surface.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

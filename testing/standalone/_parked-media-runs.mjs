@@ -29,6 +29,7 @@ import { openFileActDoors } from './_file-act-doors.mjs';
 import { privateHostAddress } from './_private-address.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 
 /** The width of a face descriptor the external provider answers with (`faceDescriptorDimsFor`'s default). */
 const FACE_DIMS = 128;
@@ -119,7 +120,7 @@ export async function openParkedMediaRuns({ suite, space, faces = false }) {
   loader.saveConfig(cfg);
 
   /** The log lines a run of `p` ends with: completed, abandoned, failed, or its source found gone. */
-  const endOf = (p) => new RegExp(`Media worker: (completed \\w+ job|abandoning|job|source file) ${space}/${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+  const endOf = (p) => new RegExp(`Media worker: (completed \\w+ job|abandoning|job|source file) ${space}/${escapeRegExp(p)}\\b`);
 
   return {
     acts, vision, face, queue, worker, space,

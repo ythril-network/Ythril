@@ -33,6 +33,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { verifyLineOf, parseVerifyLine, evaluateClause } from '../../scripts/verify-line.mjs';
 
 /** A stand-in tree. `readLines` is injected, so this test touches no filesystem and no git. */
@@ -76,7 +77,7 @@ describe('a pattern grep would read as an operator is REFUSED, not guessed', () 
     it(`refuses \`${meta}\` and names it`, () => {
       const r = parseVerifyLine(`still open while \`grep -c "${pattern}" server/src/brain/edges.ts\` returns 0`);
       assert.equal(r.ok, false, `${pattern} must not be accepted — grep and a literal matcher disagree on it`);
-      assert.match(r.reason, new RegExp(meta.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      assert.match(r.reason, new RegExp(escapeRegExp(meta)));
     });
   }
 

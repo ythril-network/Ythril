@@ -120,7 +120,7 @@ describe('both doors take the same space-meta fields', () => {
    * that already went wrong.
    */
   const restKeys = (() => {
-    // The space meta body is `@ythril/schema`'s (`schema/src/space-meta.ts`), re-exported by `spaces/body-schemas.ts`.
+    // The space meta body is the schema package's (`schema/src/space-meta.ts`), re-exported by `spaces/body-schemas.ts`.
     const src2 = src('schema/src/space-meta.ts');
     const at = src2.indexOf('export const SpaceMetaBody = z.object({');
     assert.ok(at > -1, 'SpaceMetaBody moved — re-anchor this gate');

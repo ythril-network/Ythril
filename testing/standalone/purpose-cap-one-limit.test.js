@@ -77,7 +77,7 @@ describe('the directive cap', () => {
     // The disagreement itself, asserted rather than assumed away: both sides now read one identifier, so
     // this fails if either is given its own literal again.
     const mcp = strip(readFileSync('server/src/mcp/tools/spaces.ts', 'utf8'));
-    // The REST body schema lives in `@ythril/schema` (`schema/src/space-meta.ts`), re-exported by spaces/body-schemas.ts. This
+    // The REST body schema lives in the schema package (`schema/src/space-meta.ts`), re-exported by spaces/body-schemas.ts. This
     // read api/spaces.ts, and passed on an import nothing used after the schema moved.
     const rest = strip(readFileSync('schema/src/space-meta.ts', 'utf8'));
     for (const [name, src] of [['mcp/tools/spaces.ts', mcp], ['schema/src/space-meta.ts', rest]]) {

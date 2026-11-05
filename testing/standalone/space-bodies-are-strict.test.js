@@ -34,7 +34,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const SRC = 'server/src/spaces/body-schemas.ts';
-/** The space-schema bodies (`SpaceMetaBody`, `PropertySchemaZ`, ...) are `@ythril/schema`'s; `body-schemas.ts` re-exports them. */
+/** The space-schema bodies (`SpaceMetaBody`, `PropertySchemaZ`, ...) are the schema package's; `body-schemas.ts` re-exports them. */
 const PACKAGE_SRC = 'schema/src/space-meta.ts';
 
 /** Line comments first, then block — a block-open inside a line comment otherwise swallows real code. */

@@ -47,7 +47,7 @@ const PAIRS = [
   // Both moved from `config/types.ts` to the `config/types-knowledge.ts` leaf in Q-3. This gate caught the move
   // by failing, which is the "assert it FOUND both blocks" property above doing exactly its job — a path that
   // silently resolved to nothing would have turned it into a gate that compares nothing and passes.
-  // Then to `@ythril/schema` (`schema/src/vocabulary.ts`), the package the server imports the schema vocabulary from.
+  // Then to the schema package (`schema/src/vocabulary.ts`), the package the server imports the schema vocabulary from.
   { name: 'TypeSchema', doc: 'docs/integration-guide/06a-schema-api.md', src: 'schema/src/vocabulary.ts' },
   { name: 'PropertySchema', doc: 'docs/integration-guide/06a-schema-api.md', src: 'schema/src/vocabulary.ts' },
 ];

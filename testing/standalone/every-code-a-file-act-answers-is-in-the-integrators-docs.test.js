@@ -204,7 +204,7 @@ describe('no doc names a code the server source does not spell', () => {
 
   // Every string literal the server source spells, so a code spelled once and renamed is found by its absence.
   const spelled = new Set();
-  // The server's sources and `@ythril/schema`'s, which the server imports: a refusal code the package spells is one the server answers.
+  // The server's sources and the schema package's, which the server imports: a refusal code the package spells is one the server answers.
   const sources = readTrackedSources(['server/src', 'schema/src'], { floor: 300, specs: false });
   for (const { text } of sources) for (const m of stripComments(text).matchAll(/['"]([a-z][a-z0-9_]*)['"]/g)) spelled.add(m[1]);
 

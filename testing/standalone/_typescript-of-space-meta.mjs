@@ -1,5 +1,5 @@
 /**
- * What the tests of `@ythril/schema`'s schema-to-TypeScript converter (`typesOfSpaceMeta`, Q-669) share: the in-memory compile, the
+ * What the tests of the schema package's schema-to-TypeScript converter (`typesOfSpaceMeta`, Q-669) share: the in-memory compile, the
  * type-level assertions a usage source states its expectations with, the guarded call of the converter, and the matcher for its
  * `untranslated` report.
  *
@@ -100,7 +100,7 @@ export function withLines(diagnostics, source) {
 
 /** The converter, called only once the package is known to export it: a missing export is a failing assertion that says so. */
 export function convert(meta, options) {
-  assert.equal(typeof schema.typesOfSpaceMeta, 'function', '@ythril/schema exports typesOfSpaceMeta(meta, { library? }) (Q-669)');
+  assert.equal(typeof schema.typesOfSpaceMeta, 'function', 'the schema package exports typesOfSpaceMeta(meta, { library? }) (Q-669)');
   return options === undefined ? schema.typesOfSpaceMeta(meta) : schema.typesOfSpaceMeta(meta, options);
 }
 

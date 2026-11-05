@@ -24,7 +24,7 @@
  * in-memory program (`_typescript-of-space-meta.mjs`).
  *
  * Run: node --test testing/standalone/a-space-schema-becomes-typescript-property-types.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

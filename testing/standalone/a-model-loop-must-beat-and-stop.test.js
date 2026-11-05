@@ -32,6 +32,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
@@ -118,7 +119,7 @@ describe('a model loop beats and stops', () => {
     const offenders = [];
     for (const { file, call } of loopedProviderCalls()) {
       const src = stripComments(readFileSync(file, 'utf8'));
-      const at = src.search(new RegExp(call.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      const at = src.search(new RegExp(escapeRegExp(call)));
       const tryBlock = enclosingBlockMatching(src, at, /\btry\s*\{/, `${file} try block`);
       if (tryBlock && /beat\(|onProgress/.test(tryBlock)) offenders.push(`${file}: \`${call}\``);
     }

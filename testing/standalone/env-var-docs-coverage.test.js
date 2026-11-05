@@ -110,6 +110,8 @@ const NOT_A_SETTING = new Map([
   // Other processes' environment, documented because an operator has to set them somewhere else.
   ['DOCKERHUB_USERNAME', 'a GitHub Actions secret, not read by the app'],
   ['DOCKERHUB_TOKEN', 'a GitHub Actions secret, not read by the app'],
+  ['NODE_AUTH_TOKEN', "npm's own credential variable: scripts/publish-schema.mjs REFUSES to run when it is set (npm would use it instead of the trusted-publishing exchange); no code of ours reads its value"],
+  ['NPM_TOKEN', "the conventional name of an npm credential variable: scripts/publish-schema.mjs REFUSES to run when it is set (see NODE_AUTH_TOKEN); no code of ours reads its value"],
   ['NUMBA_CACHE_DIR', "a third-party library's env, set in a sidecar image"],
   ['YTHRIL_MCP_TOKEN', 'the MCP CLIENT\'s variable, expanded by the assistant when it builds the Authorization header — the server never reads it. Named in the userguide\'s scoped-token example. The YTHRIL_ prefix is what real operators use (one per instance, e.g. YTHRIL_<INSTANCE>_MCP_TOKEN), which is exactly why this gate flagged it: in a doc, that prefix reads as a setting of ours'],
   // `HF_HUB_OFFLINE` used to sit here, exempted as "a third-party library's env, set in a sidecar image".

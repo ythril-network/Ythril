@@ -74,7 +74,7 @@ describe('the merge table covers every key the meta body accepts', () => {
 });
 
 describe('derivedFromStored has one home', () => {
-  // The server's sources and `@ythril/schema`'s, where the brand is minted (`body-schemas.ts` re-exports it).
+  // The server's sources and the schema package's, where the brand is minted (`body-schemas.ts` re-exports it).
   const calls = () => readTrackedSources(['server/src', 'schema/src'], { untracked: true, floor: 300 })
     .filter(({ text }) => /\bderivedFromStored\s*\(/.test(stripComments(text)))
     .map(f => f.file);

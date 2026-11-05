@@ -49,6 +49,7 @@ import ts from 'typescript';
 import { REPO_ROOT } from './_sources.mjs';
 import { serverProgram } from '../_shared/server-program.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { SCHEMA_PACKAGE_NAME, RETIRED_SCHEMA_PACKAGE_NAME, schemaSpecifierSource } from './_relative-specifier.mjs';
 
 const PARSE_METHODS = new Set(['parse', 'safeParse', 'parseAsync', 'safeParseAsync']);
 const THROWING = new Set(['parse', 'parseAsync']);
@@ -224,7 +225,7 @@ function sourceMentionsRefusal(sf, site) {
 
 const { program: PROGRAM, repoPath } = serverProgram();
 
-// The server's sources and `@ythril/schema`'s, which the server imports: the space-schema parses live there, and their failures are
+// The server's sources and the schema package's, which the server imports: the space-schema parses live there, and their failures are
 // answered through `refusalOfParse` like every other door's.
 const inServerSrc = (sf) => {
   const rel = repoPath(sf.fileName);
@@ -243,11 +244,16 @@ describe('every zod parse failure that is answered or logged goes through refusa
     }
   });
 
-  it('refusalOfParse is defined once (in @ythril/schema) and util/log.ts hands it on, so the rule below has something to be satisfied by', () => {
+  it('refusalOfParse is defined once (in the schema package) and util/log.ts hands it on, so the rule below has something to be satisfied by', () => {
     const text = stripComments(readFileSync(join(REPO_ROOT, 'schema/src/text.ts'), 'utf8'));
     assert.ok(/export\s+function\s+refusalOfParse\s*\(/.test(text), 'schema/src/text.ts has no `export function refusalOfParse`');
     const log = stripComments(readFileSync(join(REPO_ROOT, 'server/src/util/log.ts'), 'utf8'));
-    assert.match(log, /export\s*\{[^}]*\brefusalOfParse\b[^}]*\}\s*from\s*'@ythril\/schema\/internal'/, 'util/log.ts does not re-export refusalOfParse');
+    // The specifier comes from the package's manifest through the one specifier source; a fresh RegExp per use.
+    const handedOn = (text) => new RegExp(`export\\s*\\{[^}]*\\brefusalOfParse\\b[^}]*\\}\\s*from\\s*'${schemaSpecifierSource(['/internal'])}'`).test(text);
+    // Planted: the RETIRED name is not the package (it resolves to nothing), so a re-export from it hands nothing on.
+    assert.equal(handedOn(`export { refusalOfParse } from '${RETIRED_SCHEMA_PACKAGE_NAME}/internal';`), false);
+    assert.equal(handedOn(`export { refusalOfParse } from '${SCHEMA_PACKAGE_NAME}/internal';`), true);
+    assert.ok(handedOn(log), 'util/log.ts does not re-export refusalOfParse');
   });
 
   it('no failure is read outside refusalOfParse (the discarded class aside)', () => {

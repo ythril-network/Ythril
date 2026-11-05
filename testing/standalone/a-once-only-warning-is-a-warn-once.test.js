@@ -50,6 +50,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
@@ -82,13 +83,13 @@ export function latchesIn(src) {
 
     // (1) `if (!X) { X = true; … }` and `if (!S.has(k)) { S.add(k); … }`
     const negFlag = new RegExp(String.raw`(?:^|&&)\s*!\s*(${IDENT})\s*(?=&&|$)`).exec(cond)?.[1];
-    if (negFlag && new RegExp(String.raw`^\{\s*${esc(negFlag)}\s*=\s*true\s*;`).test(head)) {
+    if (negFlag && new RegExp(String.raw`^\{\s*${escapeRegExp(negFlag)}\s*=\s*true\s*;`).test(head)) {
       out.push({ at: m.index, kind: 'flag', name: negFlag, form: 'block', guardsLog: LOG_IN.test(balancedFrom(src, bodyAt, 'a latch block')) });
     }
     const negSet = new RegExp(String.raw`(?:^|&&)\s*!\s*(${IDENT})\.has\(([^()]*)\)\s*(?=&&|$)`).exec(cond);
     if (negSet) {
       const [, set, key] = negSet;
-      if (new RegExp(String.raw`^\{\s*${esc(set)}\.(?:add|set)\(\s*${esc(key)}\s*[,)]`).test(head)) {
+      if (new RegExp(String.raw`^\{\s*${escapeRegExp(set)}\.(?:add|set)\(\s*${escapeRegExp(key)}\s*[,)]`).test(head)) {
         out.push({ at: m.index, kind: 'set', name: set, form: 'block', guardsLog: LOG_IN.test(balancedFrom(src, bodyAt, 'a latch block')) });
       }
     }
@@ -102,10 +103,10 @@ export function latchesIn(src) {
         const afterAt = bodyAt + consequence.length;
         const rest = src.slice(afterAt).trimStart();
         const restAt = afterAt + (src.length - afterAt - rest.length);
-        if (posFlag && new RegExp(String.raw`^${esc(posFlag)}\s*=\s*true\s*;`).test(rest)) {
+        if (posFlag && new RegExp(String.raw`^${escapeRegExp(posFlag)}\s*=\s*true\s*;`).test(rest)) {
           out.push({ at: m.index, kind: 'flag', name: posFlag, form: 'early', guardsLog: nextStatementIsLog(src, restAt + rest.indexOf(';') + 1) });
         }
-        if (posSet && new RegExp(String.raw`^${esc(posSet[1])}\.(?:add|set)\(\s*${esc(posSet[2])}\s*[,)]`).test(rest)) {
+        if (posSet && new RegExp(String.raw`^${escapeRegExp(posSet[1])}\.(?:add|set)\(\s*${escapeRegExp(posSet[2])}\s*[,)]`).test(rest)) {
           out.push({ at: m.index, kind: 'set', name: posSet[1], form: 'early', guardsLog: nextStatementIsLog(src, restAt + statementFrom(rest, 0, 'a set insert').length) });
         }
       }
@@ -113,8 +114,6 @@ export function latchesIn(src) {
   }
   return out;
 }
-
-const esc = text => text.replace(/[.?$()[\]*+^|\\{}]/g, '\\$&');
 
 /**
  * Is the first statement after `from` a log call that is also the LAST statement of its block?

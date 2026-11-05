@@ -1,5 +1,5 @@
 /**
- * `schema/NOTICE` names every package `@ythril/schema` pulls into production, read from the lock file (Q-668, B1).
+ * `schema/NOTICE` names every package the schema package pulls into production, read from the lock file (Q-668, B1).
  *
  * ## The defect this prevents
  *
@@ -10,7 +10,7 @@
  *
  * ## Why the walk starts at the workspace key
  *
- * The first design walked from `node_modules/@ythril/schema`, and the second reader found it vacuous: that lock entry is a LINK
+ * The first design walked from the package's own `node_modules` entry, and the second reader found it vacuous: that lock entry is a LINK
  * (`{ resolved: 'schema', link: true }`) with no dependencies, so the closure was the package alone and every NOTICE passed. The walk
  * starts at the workspace's own key, `schema`, and a floor of five packages fails a walk that found nothing.
  *

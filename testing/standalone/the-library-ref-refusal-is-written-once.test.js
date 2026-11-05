@@ -24,6 +24,7 @@ import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { SCHEMA_PACKAGE_NAME } from './_relative-specifier.mjs';
 import { blankComments, stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
@@ -42,7 +43,7 @@ describe('the finder-call reader (proved on a planted copy)', () => {
   it('reports a call with its line, and ignores a comment, a declaration\'s neighbour and a longer name', () => {
     const planted = [
       '// findBrokenLibraryRefs(x) was called here once',
-      'import { findBrokenLibraryRefs } from \'@ythril/schema/internal\';',
+      `import { findBrokenLibraryRefs } from '${SCHEMA_PACKAGE_NAME}/internal';`,
       'const myfindBrokenLibraryRefs = () => 0;',
       'const broken = findBrokenLibraryRefs(meta.typeSchemas);',
       '/* findWrongKindLibraryRefs(meta) */ const wrong = findWrongKindLibraryRefs (meta.typeSchemas);',

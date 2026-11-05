@@ -42,6 +42,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readTrackedSources } from './_sources.mjs';
 import { REPLICATED_FAMILIES } from '../../server/dist/sync/replicated-families.js';
 
@@ -61,8 +62,7 @@ const FAMILY_NAMES = REPLICATED_FAMILIES.map(f => [...new Set([f.payloadKey, f.c
 const INDEX_OF = new Map(FAMILY_NAMES.flatMap((names, i) => names.map(n => [n.toLowerCase(), i])));
 const LIST_ORDER = REPLICATED_FAMILIES.map(f => f.payloadKey);
 
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const NAME = `(?:${[...INDEX_OF.keys()].sort((a, b) => b.length - a.length).map(escapeRe).join('|')})`;
+const NAME = `(?:${[...INDEX_OF.keys()].sort((a, b) => b.length - a.length).map(escapeRegExp).join('|')})`;
 /** Between two names of one run: a comma, a slash or a semicolon or just space, optionally followed by `then` / `and` / `or`. */
 const SEP = '(?:\\s*[,/;]\\s*|\\s+)(?:(?:then|and|or)\\s*,?\\s+)?';
 const RUN = () => new RegExp(`(?<![\\w])${NAME}(?![\\w])(?:${SEP}(?<![\\w])${NAME}(?![\\w]))+`, 'gi');

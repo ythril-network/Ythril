@@ -25,7 +25,7 @@
  * The non-ASCII characters are built from their code points (`cp`), so this file holds none raw.
  *
  * Run: node --test testing/standalone/hostile-schema-text-never-escapes-the-generated-typescript.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

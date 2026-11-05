@@ -4,7 +4,7 @@
  *
  * ## The defect this prevents
  *
- * `@ythril/schema/from-typescript` reads TypeScript source with the caller's own `typescript`; the package declares it an optional peer and ships none of it
+ * The schema package's from-typescript entry reads TypeScript source with the caller's own `typescript`; the package declares it an optional peer and ships none of it
  * (`schema/NOTICE` says so). That sentence is true of the image only while nothing installs the compiler there. Only one line keeps it out today: the
  * `prod-deps` stage's `npm ci ... --omit=dev` (`Dockerfile`), because `typescript` is `devOptional` in the lock. A change that made it a `dependency`
  * of the server, dropped the flag, or let npm install the optional peer would put an Apache-2.0 work (Microsoft) in the image with no NOTICE heading, and no gate

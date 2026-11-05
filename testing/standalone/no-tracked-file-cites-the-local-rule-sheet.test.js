@@ -13,8 +13,8 @@
  *
  * ## What is derived
  *
- * - **The files**: every tracked file (`git ls-files` through `trackedSources`, floored), whatever its extension, so a citation in a
- *   kind of file nobody listed is still seen. A file holding a NUL byte is binary and is not read.
+ * - **The files**: every tracked file (`git ls-files` through `readTrackedTextSources`, floored), whatever its extension, so a citation in a
+ *   kind of file nobody listed is still seen. A file holding a NUL byte in its first 8 KB is binary and is not read.
  * - **The readers**: a file that calls `localRuleSheets(` reads the sheet where a checkout has one; naming it is its job, not a citation.
  *   Derived from the source, so a new reader needs no entry here.
  * - **The exceptions**: `ALLOWED` below, each with its reason and a review date; an entry past its date, or one that no longer
@@ -24,9 +24,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { readTrackedTextSources } from './_sources.mjs';
 
 /** Files that may name the sheet, each with why and when to look again. */
 const ALLOWED = [
@@ -38,7 +36,6 @@ const ALLOWED = [
 ];
 
 const SHEET = /CLAUDE\.md/;
-const NUL = String.fromCharCode(0);
 const allowedBy = (file) => ALLOWED.find(a => (a.file ? a.file === file : file.startsWith(a.prefix)));
 
 let scanned;
@@ -46,8 +43,8 @@ let scanned;
 const scan = () => (scanned ??= scanOnce());
 
 function scanOnce() {
-  const files = trackedSources(['.'], { ext: null, floor: 2000 });
-  const texts = files.map(file => ({ file, text: readFileSync(join(REPO_ROOT, file), 'utf8') })).filter(({ text }) => !text.includes(NUL));
+  const texts = readTrackedTextSources(['.'], { floor: 2000 });
+  const files = texts.map(({ file }) => file);
   const readers = new Set(texts.filter(({ text }) => text.includes('localRuleSheets(')).map(({ file }) => file));
   const citing = [];
   for (const { file, text } of texts) {

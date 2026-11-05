@@ -22,10 +22,11 @@
  *   writes (`INSTANCE_WRITTEN_PROPERTY_KEYS`). A copy there is a third copy of a server list, wrong on the day the server's changes.
  *
  * Run: node --test testing/standalone/typescript-of-a-meta-answer-converts-the-servers-own-expansion.test.js
- * (requires a prior `npm run build -w @ythril/schema` and `npm run build -w server`)
+ * (requires a prior `npm run build -w schema` and `npm run build -w server`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { withLibraryDefinitions } from '../../server/dist/spaces/library-ref-expansion.js';
 import {
   SERVER_WRITTEN_EDGE_LABELS, INSTANCE_WRITTEN_PROPERTY_KEYS, getAllowedChronoTypes,
@@ -128,7 +129,7 @@ const LISTS = {
 /** The values of each server list a header quotes, by list: a quoted value is how a copied list reads. */
 function copiedInto(header) {
   return Object.entries(LISTS)
-    .map(([name, values]) => [name, values.filter(v => new RegExp(`['"\`]${v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"\`]`).test(header))])
+    .map(([name, values]) => [name, values.filter(v => new RegExp(`['"\`]${escapeRegExp(v)}['"\`]`).test(header))])
     .filter(([, copied]) => copied.length > 0);
 }
 

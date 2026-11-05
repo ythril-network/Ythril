@@ -23,7 +23,7 @@
  * - The reader is proven on planted shapes: an extra key and a dropped row are each named.
  *
  * Run: node --test testing/standalone/every-schema-key-is-translated-reported-or-irrelevant.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -163,7 +163,7 @@ describe('the converter does what each row says', () => {
 
 describe('the reasons are an exported tuple', () => {
   it('UNTRANSLATED_REASONS is the list, and every entry produced here gives one of them', () => {
-    assert.ok(Array.isArray(schema.UNTRANSLATED_REASONS), '@ythril/schema exports UNTRANSLATED_REASONS (Q-669, D3)');
+    assert.ok(Array.isArray(schema.UNTRANSLATED_REASONS), 'the schema package exports UNTRANSLATED_REASONS (Q-669, D3)');
     assert.deepEqual([...schema.UNTRANSLATED_REASONS], REASONS);
     assert.ok(produced.length > 0, 'the conversions above produced entries to check');
     const unknown = produced.filter(u => !schema.UNTRANSLATED_REASONS.includes(u.reason));

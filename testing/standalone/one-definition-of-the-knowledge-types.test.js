@@ -40,11 +40,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
+import { SCHEMA_PACKAGE_NAME, RETIRED_SCHEMA_PACKAGE_NAME, schemaSpecifierSource } from './_relative-specifier.mjs';
 
 const ROOT = process.cwd();
 
 /**
- * The files allowed to name the kinds: the tuple in `@ythril/schema` (the space-schema vocabulary the server imports), the server's leaf
+ * The files allowed to name the kinds: the tuple in the schema package (the space-schema vocabulary the server imports), the server's leaf
  * that hands it on and keys the collection maps by it, and the client's mirror on the other side of the wire.
  */
 const DECLARATIONS = [
@@ -55,6 +56,9 @@ const DECLARATIONS = [
 
 /** A declaration file that holds no tuple of its own: it re-exports the package's, so it is the same one definition. */
 const HANDS_ON = new Set(['server/src/config/types-knowledge.ts']);
+
+/** Whether comment-free `text` re-exports `KNOWLEDGE_TYPES` from the package's main entry. The specifier comes from the manifest through the one specifier source; a fresh RegExp per use. */
+const handsOnTuple = (text) => new RegExp(`export\\s*\\{[^}]*\\bKNOWLEDGE_TYPES\\b[^}]*\\}\\s*from\\s*'${schemaSpecifierSource([''])}'`).test(text);
 
 function sourceFiles() {
   return trackedSources(['server/src', 'schema/src', 'client/src'])
@@ -263,8 +267,8 @@ describe('the knowledge types are named in one place per side', () => {
     for (const f of DECLARATIONS) {
       const clean = stripComments(readFileSync(f, 'utf8'));
       if (HANDS_ON.has(f)) {
-        assert.match(clean, /export\s*\{[^}]*\bKNOWLEDGE_TYPES\b[^}]*\}\s*from\s*'@ythril\/schema'/,
-          `${f} is exempt because it hands on the package's tuple — so it has to re-export \`KNOWLEDGE_TYPES\` from @ythril/schema.`);
+        assert.ok(handsOnTuple(clean),
+          `${f} is exempt because it hands on the package's tuple — so it has to re-export \`KNOWLEDGE_TYPES\` from ${SCHEMA_PACKAGE_NAME}.`);
         continue;
       }
       assert.match(
@@ -274,5 +278,11 @@ describe('the knowledge types are named in one place per side', () => {
         + '`KNOWLEDGE_TYPES` tuple. Without one, the exemption is just a file where copies are allowed.',
       );
     }
+  });
+
+  it('a re-export counts as the package\'s tuple only from the package\'s own name (planted: the retired name hands nothing on)', () => {
+    assert.equal(handsOnTuple(`export { KNOWLEDGE_TYPES } from '${SCHEMA_PACKAGE_NAME}';`), true);
+    assert.equal(handsOnTuple(`export { KNOWLEDGE_TYPES } from '${RETIRED_SCHEMA_PACKAGE_NAME}';`), false);
+    assert.equal(handsOnTuple(`export { KNOWLEDGE_TYPES } from '${SCHEMA_PACKAGE_NAME}/internal';`), false);
   });
 });

@@ -74,7 +74,7 @@ const { mergeSpaceMeta } = await import('../../server/dist/spaces/meta-update.js
 const { mergeReplicatedMeta } = await import('../../server/dist/sync/replicated-meta.js');
 const { applyMetaRound } = await import('../../server/dist/sync/meta-round-merge.js');
 const { SERVER_OWNED_META_FIELDS: SERVER_OWNED } = await import('../../server/dist/spaces/body-schemas.js');
-// `SpaceMeta` and the merge table are `@ythril/schema`'s (`schema/src/`), re-exported by `config/types-knowledge.ts` and `spaces/meta-fields.ts`.
+// `SpaceMeta` and the merge table are the schema package's (`schema/src/`), re-exported by `config/types-knowledge.ts` and `spaces/meta-fields.ts`.
 const settable = interfaceKeys('schema/src/vocabulary.ts', 'SpaceMeta').filter(k => !SERVER_OWNED.includes(k));
 
 describe('a meta key keeps its merge kind through every merge', () => {
@@ -86,7 +86,7 @@ describe('a meta key keeps its merge kind through every merge', () => {
     assert.ok(TABLE.filter(r => r.until).every(r => r.until === 'F-46'), 'a row waits on something other than F-46');
   });
 
-  it('one table holds the kinds: meta-fields.ts (in @ythril/schema) exists and names every settable key', () => {
+  it('one table holds the kinds: meta-fields.ts (in the schema package) exists and names every settable key', () => {
     const file = 'schema/src/meta-fields.ts';
     assert.ok(existsSync(join(REPO_ROOT, file)), `${file} does not exist: R6-5 keeps each key's merge kind in one module that every merge reads`);
     const src = stripComments(readFileSync(join(REPO_ROOT, file), 'utf8'));

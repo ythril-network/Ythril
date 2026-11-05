@@ -51,7 +51,7 @@ export function serverProgram() {
       + 'a gate over this program would conclude about almost nothing');
   }
   /*
-   * `@ythril/schema` (the space-schema vocabulary and validator the server imports) resolves to its SOURCE here, not to the built
+   * The schema package (the space-schema vocabulary and validator the server imports) resolves to its SOURCE here, not to the built
    * `schema/dist/*.d.ts` the compiler reads: a gate that follows a call or a declaration into `peerText`, `parseSpaceMeta` or
    * `refusalOfParse` must land on the code that runs, and a declaration file has no bodies to read. Its files are `schema/src/...`.
    */

@@ -3,7 +3,7 @@
  *
  * ## The defect this prevents
  *
- * The library a `$ref` is read against is a module global of `@ythril/schema`, installed by the server at import
+ * The library a `$ref` is read against is a module global of the schema package, installed by the server at import
  * (`server/src/spaces/library-ref-expansion.ts`) and scoped by an app with `withSchemaLibrary`. Its default was `() => []`, so a parse
  * that ran before the install — a new server module importing a parse without the module that installs, a test, an app parsing
  * directly — read an EMPTY library and answered as if every entry were missing: a wrong refusal, or a `$ref` stripped, with nothing to
@@ -17,7 +17,7 @@
  * This file imports ONLY `schema/dist`: importing anything of the server would install the server's library and hide the default.
  *
  * Run: node --test testing/standalone/a-schema-parse-with-no-library-installed-throws.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,7 +38,7 @@ describe('with no library installed', () => {
   });
 
   it('libraryRefRefusal without a library throws (the broken-ref path reads the installed library)', () => {
-    assert.equal(typeof pkg.libraryRefRefusal, 'function', '@ythril/schema exports libraryRefRefusal');
+    assert.equal(typeof pkg.libraryRefRefusal, 'function', 'the schema package exports libraryRefRefusal');
     assert.throws(() => pkg.libraryRefRefusal({ entity: { service: { $ref: 'library:service-v1' } } }), NO_LIBRARY);
   });
 

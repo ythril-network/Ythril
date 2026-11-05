@@ -1,5 +1,5 @@
 /**
- * `@ythril/schema` resolves its dependencies to the server's copies, builds from a clean `dist`, and the tooling reads its entries from
+ * The schema package resolves its dependencies to the server's copies, builds from a clean `dist`, and the tooling reads its entries from
  * one table (Q-668: I2, L1, I4, S-A4).
  *
  * ## The defects this prevents
@@ -17,7 +17,7 @@
  * - **S-A4 — a second table of the entries.** `testing/_shared/server-program.mjs` wrote the package's two entry paths by hand beside
  *   `SCHEMA_PACKAGE_ENTRIES` (`_relative-specifier.mjs`), so a new entry would resolve in one reader and not the other.
  * - **Q-687 — a third entry with no row.** `./from-typescript` is exported by `package.json`; a gate that follows the server's imports resolves a bare
- *   `@ythril/schema/from-typescript` through the same table, so the table's keys are held to the package's `exports` (derived, never a second list) and
+ *   `<package>/from-typescript` through the same table, so the table's keys are held to the package's `exports` (derived, never a second list) and
  *   every row to a file of the package.
  *
  * Run: node --test testing/standalone/the-schema-package-builds-and-resolves-as-the-server-does.test.js
@@ -26,7 +26,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { SCHEMA_PACKAGE_ENTRIES, resolveSpecifier } from './_relative-specifier.mjs';
+import { SCHEMA_PACKAGE_ENTRIES, SCHEMA_PACKAGE_NAME, RETIRED_SCHEMA_PACKAGE_NAME, resolveSpecifier } from './_relative-specifier.mjs';
 import { trackedSources } from './_sources.mjs';
 import { COMPILER_RUN } from './_tsc-runner.mjs';
 import { shellCommands } from '../_shared/ci-workflow.mjs';
@@ -71,7 +71,7 @@ describe('the package builds from a clean dist (I4)', () => {
 });
 
 describe('the table holds every entry the package exports (Q-687: the from-typescript entry)', () => {
-  /** The bare specifier an `exports` key names: `.` is the package, `./internal` is `@ythril/schema/internal`. `./package.json` is no entry. */
+  /** The bare specifier an `exports` key names: `.` is the package, `./internal` is `<package>/internal`. `./package.json` is no entry. */
   const specifiersOf = (exportsMap) => Object.keys(exportsMap).filter(k => k !== './package.json')
     .map(k => (k === '.' ? schema.name : `${schema.name}/${k.slice(2)}`)).sort();
 
@@ -79,8 +79,8 @@ describe('the table holds every entry the package exports (Q-687: the from-types
     assert.deepEqual(Object.keys(SCHEMA_PACKAGE_ENTRIES).sort(), specifiersOf(schema.exports));
   });
 
-  it('it holds @ythril/schema/from-typescript, at its source module, and every row points at a file of the package', () => {
-    assert.equal(SCHEMA_PACKAGE_ENTRIES['@ythril/schema/from-typescript'], 'schema/src/from-typescript.ts');
+  it('it holds the package\'s from-typescript entry, at its source module, and every row points at a file of the package', () => {
+    assert.equal(SCHEMA_PACKAGE_ENTRIES[`${SCHEMA_PACKAGE_NAME}/from-typescript`], 'schema/src/from-typescript.ts');
     assert.ok('./from-typescript' in schema.exports, 'schema/package.json does not export ./from-typescript');
     const tracked = new Set(trackedSources('schema/src', { floor: 15, untracked: true }));
     const missing = Object.values(SCHEMA_PACKAGE_ENTRIES).filter(p => !tracked.has(p));
@@ -90,8 +90,17 @@ describe('the table holds every entry the package exports (Q-687: the from-types
   it('the reader resolves each row through the one specifier function (planted: an export with no row, a row with no export)', () => {
     const has = (p) => Object.values(SCHEMA_PACKAGE_ENTRIES).includes(p);
     for (const [spec, path] of Object.entries(SCHEMA_PACKAGE_ENTRIES)) assert.equal(resolveSpecifier(spec, 'server/src/x.ts', has), path);
-    assert.deepEqual(specifiersOf({ '.': {}, './internal': {}, './extra': {}, './package.json': './package.json' }).filter(s => !(s in SCHEMA_PACKAGE_ENTRIES)), ['@ythril/schema/extra']);
-    assert.equal(resolveSpecifier('@ythril/schema/extra', 'server/src/x.ts', has), null);
+    assert.deepEqual(specifiersOf({ '.': {}, './internal': {}, './extra': {}, './package.json': './package.json' }).filter(s => !(s in SCHEMA_PACKAGE_ENTRIES)), [`${SCHEMA_PACKAGE_NAME}/extra`]);
+    assert.equal(resolveSpecifier(`${SCHEMA_PACKAGE_NAME}/extra`, 'server/src/x.ts', has), null);
+  });
+
+  it('the table is keyed by the manifest name and the RETIRED name resolves to nothing (planted: a retired specifier of every entry)', () => {
+    assert.equal(SCHEMA_PACKAGE_NAME, schema.name, 'the table is built from the manifest name');
+    const has = (p) => Object.values(SCHEMA_PACKAGE_ENTRIES).includes(p);
+    for (const key of Object.keys(SCHEMA_PACKAGE_ENTRIES)) assert.ok(key === SCHEMA_PACKAGE_NAME || key.startsWith(`${SCHEMA_PACKAGE_NAME}/`), key);
+    for (const sub of ['', '/internal', '/from-typescript']) {
+      assert.equal(resolveSpecifier(`${RETIRED_SCHEMA_PACKAGE_NAME}${sub}`, 'server/src/x.ts', has), null, `the retired name${sub} must resolve to no file`);
+    }
   });
 });
 

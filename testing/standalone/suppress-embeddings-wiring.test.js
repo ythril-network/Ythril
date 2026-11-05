@@ -107,7 +107,7 @@ describe('suppression removes a stale vector', () => {
 });
 
 describe('the field exists on both tiers of the type', () => {
-  // `TypeSchema` and `SpaceMeta` are `@ythril/schema`'s (`schema/src/vocabulary.ts`), re-exported by `config/types-knowledge.ts`.
+  // `TypeSchema` and `SpaceMeta` are the schema package's (`schema/src/vocabulary.ts`), re-exported by `config/types-knowledge.ts`.
   const TYPES = readFileSync(new URL('../../schema/src/vocabulary.ts', import.meta.url), 'utf8');
 
   it('is declared on TypeSchema and on SpaceMeta', () => {
@@ -128,7 +128,7 @@ describe('both write surfaces accept it', () => {
     // both write surfaces call. Read together, because the pair IS the guarantee — a field the body accepts and
     // the merge drops is the same silent failure as one the body rejects.
     const read = p => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
-    // The space meta body is `@ythril/schema`'s (`schema/src/space-meta.ts`), re-exported by `spaces/body-schemas.ts`.
+    // The space meta body is the schema package's (`schema/src/space-meta.ts`), re-exported by `spaces/body-schemas.ts`.
     assert.match(read('schema/src/space-meta.ts'), /suppressEmbeddings: z\.boolean\(\)\.optional\(\)/);
     // The merge is table-driven now (`spaces/meta-fields.ts`, Q-217): the key's KIND is `scalar`, and the one loop that merges
     // (`mergeMetaFields`) replaces a stated value on `!== undefined` — `false` is how suppression is turned back OFF, and a truthy

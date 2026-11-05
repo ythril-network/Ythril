@@ -24,6 +24,7 @@
  */
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -107,7 +108,7 @@ describe('a half-made link is finished or undone (real MongoDB)', { skip }, () =
     const ans = acts.answerOf(answer);
     assert.equal(ans.status, 500, `answered ${ans.status}: ${sentenceOf(answer)}`);
     assert.equal(ans.code, 'file_system_fault');
-    assert.doesNotMatch(sentenceOf(answer), new RegExp(String(process.env['DATA_ROOT']).replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')), 'the answer names the data root');
+    assert.doesNotMatch(sentenceOf(answer), new RegExp(escapeRegExp(process.env['DATA_ROOT'])), 'the answer names the data root');
     assert.equal(acts.onDisk('b.txt'), false, 'the destination\'s link was not rolled back: the file has two names');
     assert.equal(read('a.txt'), 'content of a.txt', 'the source lost its bytes');
     assert.equal((await rowOf('a.txt'))?.description, 'A');
