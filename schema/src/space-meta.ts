@@ -28,7 +28,7 @@ import { hasReDoSRisk, REDOS_REFUSAL } from './redos.js';
 import { isObjectInternalKey } from './object-internal-keys.js';
 import { NAME_QUOTED, peerText, refusalOfParse, type ParseIssueLike, type ParseRefusal } from './text.js';
 import { META_FIELD_KINDS, MAX_UNKNOWN_NAMES, PER_TYPE_META_FIELD, boundedNames } from './meta-fields.js';
-import { isPlainObject } from './plain-object.js';
+import { isPlainObject, setOwn } from './plain-object.js';
 import { libraryEntryNameOf } from './library-ref-name.js';
 import {
   TypeRuleZ, SpaceRuleZ, MAX_RULES_PER_TYPE, MAX_RULES_PER_SPACE, ruleMapIssues, typeRuleIssues, spaceRuleIssues, applicableRuleIssues,
@@ -568,11 +568,6 @@ export type ParsedSpaceMeta = SpaceMeta & { readonly [PARSED]: 'space-meta' };
 
 
 type Obj = Record<string, unknown>;
-
-/** An OWN property, even for a name that would reach the prototype by assignment (a hostile type name must reach the parse intact). */
-function setOwn(into: Obj, key: string, value: unknown): void {
-  Object.defineProperty(into, key, { value, enumerable: true, writable: true, configurable: true });
-}
 
 /** The unknown names a tolerant reader met, collected up to the bound and counted beyond it (`boundedNames` says them). */
 class UnknownNames {
