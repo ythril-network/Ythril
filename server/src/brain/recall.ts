@@ -867,11 +867,6 @@ interface SearchBudget {
   missedMatchMemo?: IndexMissMemo;
 }
 
-/*
- * `HOLDS_READ_MS`, the bound on the holds-read a search with no deadline of its own makes, lives in
- * `brain/index-should-serve.ts` with the reads it bounds: the filtered read of `indexMissedAMatch` is capped by it too.
- */
-
 /**
  * `index_unavailable` is said once per collection per ten minutes (vet S10): the index will not serve until an
  * operator acts, every recall in the meantime meets it, and the reason already reaches each caller on its answer.
