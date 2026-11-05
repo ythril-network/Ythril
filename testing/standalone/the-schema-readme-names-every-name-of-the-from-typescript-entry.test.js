@@ -1,5 +1,5 @@
 /**
- * `schema/README.md` names every name `@ythril/schema/from-typescript` exports in a section of its own, and lists every reason of its closed lists, no
+ * `schema/README.md` names every name the schema package's from-typescript entry exports in a section of its own, and lists every reason of its closed lists, no
  * more and no fewer (Q-687, design v3 items 11, 12 and 14).
  *
  * ## The defect this prevents
@@ -19,7 +19,7 @@
  * - The readers have floors, and are proven on planted READMEs: a name dropped, one invented, one listed twice, a reason dropped, one invented.
  *
  * Run: node --test testing/standalone/the-schema-readme-names-every-name-of-the-from-typescript-entry.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

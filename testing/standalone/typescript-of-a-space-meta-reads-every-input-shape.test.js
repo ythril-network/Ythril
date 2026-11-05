@@ -23,7 +23,7 @@
  * `typescript-of-a-meta-answer-converts-the-servers-own-expansion.test.js`, which needs server/dist.
  *
  * Run: node --test testing/standalone/typescript-of-a-space-meta-reads-every-input-shape.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

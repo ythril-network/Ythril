@@ -22,6 +22,9 @@
  *  3. **Every release-specific rule fires.** Version disagreement, a missing dated section, an empty one, and
  *     `[Unreleased]` left populated at release time — each asserted against a synthetic CHANGELOG rather than by
  *     trusting the prose.
+ *  4. **The tag is compared, through the one module that knows tags.** The gate never compared the tag with the version
+ *     (Q-683); `tagMatchesVersion` and `releaseTagOf` (scripts/_shared/release-tags.mjs, rows in release-tags.test.js) now do,
+ *     and a describe block of its own holds that the gate calls them rather than spelling the rule itself.
  *
  * Run: node --test testing/standalone/release-gate-works.test.js
  */
@@ -166,6 +169,51 @@ describe('every release-specific rule actually fires', () => {
     // The lockfile is the manifest nobody edits by hand, so it is the one that gets left behind on a bump.
     assert.match(src, /package-lock\.json/,
       'the lockfile is not checked, so a version bump can leave it naming the previous release');
+  });
+});
+
+describe('the tag is compared with the version through release-tags.mjs, not re-derived in the gate', () => {
+  // Bundle-225 (Q-683). The gate used to check that the four manifests agree with EACH OTHER and never with the tag, so a `v6.5.1`
+  // cut on a tree that says 6.5.0 published an image, a Release and (now) an npm version under the wrong number, none of which can
+  // be taken back; `contribution-guide.md` claimed the check existed. The comparison is a pure function with its own truth table
+  // (release-tags.test.js: match, mismatch, no tag, non-v, prerelease, a dispatch on tagged main); this row holds that the GATE
+  // asks that function, on the comment-stripped source, so a comment that mentions the tag satisfies nothing.
+  const code = withoutComments(src);
+  const checkVersionBody = () => {
+    const start = code.indexOf('function checkVersion(');
+    assert.ok(start > 0, 'checkVersion moved: this test needs re-pointing, not deleting');
+    return code.slice(start, code.indexOf('\n}', start));
+  };
+
+  it('imports tagMatchesVersion and releaseTagOf from the shared module', () => {
+    const imp = /import\s*\{([^}]*)\}\s*from\s*['"]\.\/_shared\/release-tags\.mjs['"]/.exec(code);
+    assert.ok(imp, 'release-gate.mjs does not import from ./_shared/release-tags.mjs: the tag rule is spelled in the gate or not checked');
+    const names = imp[1].split(',').map(n => n.trim().split(/\s+as\s+/)[0]);
+    for (const needed of ['tagMatchesVersion', 'releaseTagOf']) {
+      assert.ok(names.includes(needed), `release-gate.mjs does not import ${needed} from release-tags.mjs`);
+    }
+  });
+
+  it('checkVersion decides the tag by calling both, only when releasing, and fails the version gate on a mismatch', () => {
+    const body = checkVersionBody();
+    assert.match(body, /\breleaseTagOf\s*\(/, 'checkVersion never asks which tag the run is on');
+    assert.match(body, /\btagMatchesVersion\s*\(/, 'checkVersion never compares the tag with the version');
+    const releasing = body.indexOf('RELEASING');
+    assert.ok(releasing > 0 && releasing < body.indexOf('tagMatchesVersion('),
+      'the tag comparison is not gated on RELEASING, so a mid-cycle run on any tagged commit would fail the gate');
+    assert.match(body.slice(body.indexOf('tagMatchesVersion(')), /fail\(\s*'version'/,
+      'a tag that differs from the version does not fail the version gate');
+  });
+
+  it('asks for the tag the way a run knows it: GITHUB_REF and GITHUB_REF_NAME, then git describe for a v* tag', () => {
+    assert.match(code, /GITHUB_REF\b/, 'the gate does not read GITHUB_REF, so a tag push is not told from a branch dispatch');
+    assert.match(code, /GITHUB_REF_NAME\b/, 'the gate does not read GITHUB_REF_NAME');
+    assert.match(code, /['"]--match['"]\s*,\s*['"]v\*['"]/, 'the described tag is not restricted to v* tags, so any tag on HEAD would be compared');
+  });
+
+  it('does not re-derive the tag rule beside the shared module', () => {
+    const body = checkVersionBody();
+    assert.ok(!/['"`]v['"`]\s*\+|`v\$\{/.test(body), 'checkVersion spells "v" + version itself: that is tagMatchesVersion\'s one job');
   });
 });
 

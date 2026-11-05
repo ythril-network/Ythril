@@ -18,7 +18,7 @@
  * Before the entry exists every case is red for the one reason the first case names.
  *
  * Run: node --test testing/standalone/from-typescript-stays-linear-and-bounded.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

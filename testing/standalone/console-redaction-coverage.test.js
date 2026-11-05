@@ -18,6 +18,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { balancedFrom } from './_structural-window.mjs';
+import { SCHEMA_PACKAGE_NAME, RETIRED_SCHEMA_PACKAGE_NAME, schemaSpecifierSource } from './_relative-specifier.mjs';
 
 const ROOT = 'server/src';
 
@@ -81,10 +82,15 @@ describe('console output cannot bypass the redactor', () => {
   });
 
   it('the redactor is actually exported for them to use', () => {
-    // Defined once with the rest of the text rules in `@ythril/schema` (`schema/src/text.ts`) and handed on by `util/log.ts`.
+    // Defined once with the rest of the text rules in the schema package (`schema/src/text.ts`) and handed on by `util/log.ts`.
     const textSrc = readFileSync(`${ROOT}/../../schema/src/text.ts`, 'utf8');
     assert.match(textSrc, /export function redactSecrets/);
     const logSrc = readFileSync(`${ROOT}/util/log.ts`, 'utf8');
-    assert.match(logSrc, /export\s*\{[^}]*\bredactSecrets\b[^}]*\}\s*from\s*'@ythril\/schema\/internal'/);
+    // The specifier comes from the package's manifest through the one specifier source; a fresh RegExp per use.
+    const handedOn = (text) => new RegExp(`export\\s*\\{[^}]*\\bredactSecrets\\b[^}]*\\}\\s*from\\s*'${schemaSpecifierSource(['/internal'])}'`).test(text);
+    // Planted: the RETIRED name is not the package (it resolves to nothing), so a re-export from it hands nothing on.
+    assert.equal(handedOn(`export { redactSecrets } from '${RETIRED_SCHEMA_PACKAGE_NAME}/internal';`), false);
+    assert.equal(handedOn(`export { redactSecrets } from '${SCHEMA_PACKAGE_NAME}/internal';`), true);
+    assert.ok(handedOn(logSrc), 'util/log.ts does not re-export redactSecrets from the schema package\'s internal entry');
   });
 });

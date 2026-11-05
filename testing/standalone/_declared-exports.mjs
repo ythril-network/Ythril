@@ -4,7 +4,7 @@
  * ## The question it answers
  *
  * *"Which values and which types does this `.d.ts` export, `export *` followed?"* `Object.keys` of the built module cannot see a type, and `export *`
- * hands types on as silently as values, so the answer comes from the TypeScript checker. Two gates ask it of two entries of `@ythril/schema` (the app
+ * hands types on as silently as values, so the answer comes from the TypeScript checker. Two gates ask it of two entries of the schema package (the app
  * entry's surface test and the from-typescript entry's); a copy in the second would read a type as a value on the day one of them was fixed.
  */
 import assert from 'node:assert/strict';

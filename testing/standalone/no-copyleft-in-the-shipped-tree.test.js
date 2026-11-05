@@ -35,6 +35,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { markdownSectionFrom } from './_structural-window.mjs';
@@ -128,7 +129,7 @@ describe('nothing copyleft is redistributed without a recorded election', () => 
       // entry's election (`Ythril elects Apache License 2.0`, dompurify's) at 18953 — 913 characters, so the
       // 900 window stopped just short of letting a NEIGHBOUR'S election satisfy jszip's check. Nobody
       // maintains a 13-character margin, and nothing would have reported it once a line was added.
-      const head = new RegExp(`^### ${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'm').exec(notice);
+      const head = new RegExp(`^### ${escapeRegExp(name)}\\b`, 'm').exec(notice);
       if (!head) { unrecorded.push(`${name}@${v.version} (${v.license}) — no NOTICE entry`); continue; }
       const section = markdownSectionFrom(notice, head.index);
       // An entry that just names the dual grant is not an election. It has to say which arm Ythril takes.

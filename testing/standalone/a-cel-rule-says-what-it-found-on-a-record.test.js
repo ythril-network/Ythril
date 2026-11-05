@@ -39,11 +39,11 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import {
   KINDS, rule, strictMeta, recordOf, validateRecord, ruleRows, schemaRules,
 } from './_cel-rules.mjs';
 
-const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** What follows the message in a violated rule's reason: the short hash. */
 const tailAfter = (reason, message) => reason.slice(reason.indexOf(message) + message.length);
 
@@ -179,7 +179,7 @@ describe('a rule that could not be evaluated says so, and says nothing of the re
     assert.equal(rows.length, 1, `a rule that could not run on the record has ${rows.length} rows: ${JSON.stringify(rows)}`);
     assert.equal(rows[0].field, 'rules.below');
     assert.match(rows[0].reason, /could not (be )?evaluate/i, `the reason does not say the rule could not be evaluated: ${rows[0].reason}`);
-    assert.doesNotMatch(JSON.stringify(rows[0]), new RegExp(escape(SECRET)), 'the row quotes the record\'s value');
+    assert.doesNotMatch(JSON.stringify(rows[0]), new RegExp(escapeRegExp(SECRET)), 'the row quotes the record\'s value');
     assert.doesNotMatch(rows[0].reason, /overload|no such|found no matching/i, 'the row quotes the engine\'s own message');
   });
 

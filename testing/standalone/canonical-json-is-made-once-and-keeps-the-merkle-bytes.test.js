@@ -1,5 +1,5 @@
 /**
- * The canonical JSON text of a value — keys sorted at every level — is made in one module, `canonical-json.ts` of `@ythril/schema`
+ * The canonical JSON text of a value — keys sorted at every level — is made in one module, `canonical-json.ts` of the schema package
  * (the schema validator compares a library type by it; the server's `util/canonical-json.ts` re-exports it beside the hash), and it
  * is byte for byte the text the space hash has always been computed over (bundle-23 wave 0, extraction 3).
  *

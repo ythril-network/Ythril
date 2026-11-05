@@ -150,7 +150,7 @@ describe('no UI field truncates below the API limit', () => {
   });
 
   it('the API really does allow 50 000 there — or the fix is aimed at nothing', () => {
-    // The space meta body is `@ythril/schema`'s (`schema/src/space-meta.ts`), re-exported by `spaces/body-schemas.ts`.
+    // The space meta body is the schema package's (`schema/src/space-meta.ts`), re-exported by `spaces/body-schemas.ts`.
     const src = readFileSync(join(ROOT, 'schema/src/space-meta.ts'), 'utf8');
     assert.match(src, /usageNotes:\s*z\.string\(\)\.max\(50_000\)/,
       'the server cap moved; update the UI constant and this gate together');

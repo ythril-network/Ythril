@@ -6,7 +6,7 @@
  *
  * `_notice-closure.mjs` walks `dependencies`, `optionalDependencies` and `peerDependencies` of every package whose lock entry is not `dev`, and three gates share
  * the walk (`a-notice-names-every-package-the-rule-engine-ships`, `the-schema-package-notice-names-its-production-closure`, `notice-coverage`'s transitive half).
- * `@ythril/schema/from-typescript` adds `typescript` as a peer of the schema package. The package ships none of it (the caller's own copy, Apache-2.0, Microsoft,
+ * The schema package's from-typescript entry adds `typescript` as a peer of the schema package. The package ships none of it (the caller's own copy, Apache-2.0, Microsoft,
  * neither bundled nor installed by npm), so no NOTICE heading is owed; but `typescript` is `devOptional` in the lock, not `dev`, so the walk counts the peer edge
  * and demands a heading for a package the image does not carry. Skipping every peer edge would be wrong the other way: a REQUIRED peer is installed by npm and is
  * owed its notice. The rule is the package manager's own: an edge is optional when `peerDependenciesMeta.<name>.optional` is true in the entry of the package that

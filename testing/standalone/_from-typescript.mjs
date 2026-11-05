@@ -1,5 +1,5 @@
 /**
- * What the tests of `@ythril/schema/from-typescript` (`spaceMetaFromTypeScript`, Q-687, design v3) share: the guarded load of the entry,
+ * What the tests of the schema package's from-typescript entry (`spaceMetaFromTypeScript`, Q-687, design v3) share: the guarded load of the entry,
  * the source builder, the refusal and result shape checks, the recording compiler that stands in for the loaded TypeScript module, and
  * the round-trip oracle over `typesOfSpaceMeta`'s output.
  *
@@ -41,7 +41,7 @@ import ts from 'typescript';
 import * as schema from '../../schema/dist/index.js';
 import { REPO_ROOT } from './_sources.mjs';
 
-/** The built entry: `@ythril/schema/from-typescript` (schema/src/from-typescript.ts, compiled to schema/dist). */
+/** The built entry: the schema package's from-typescript entry (schema/src/from-typescript.ts, compiled to schema/dist). */
 export const ENTRY_URL = new URL('../../schema/dist/from-typescript.js', import.meta.url);
 
 /**
@@ -54,7 +54,7 @@ export async function entry() {
     mod = await import(ENTRY_URL.href);
   } catch (error) {
     if (error?.code === 'ERR_MODULE_NOT_FOUND' && String(error.message).includes('from-typescript')) {
-      assert.fail(`@ythril/schema/from-typescript is built at schema/dist/from-typescript.js (Q-687, design v3 item 1): ${error.message}`);
+      assert.fail(`the schema package's from-typescript entry is built at schema/dist/from-typescript.js (Q-687, design v3 item 1): ${error.message}`);
     }
     throw error;
   }

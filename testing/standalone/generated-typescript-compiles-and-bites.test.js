@@ -15,7 +15,7 @@
  *   and without the required one (`StoredProperties`), with no directive.
  *
  * Run: node --test testing/standalone/generated-typescript-compiles-and-bites.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

@@ -22,6 +22,7 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { ALL_TOOLS } from '../../server/dist/mcp/tools/index.js';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { schemaSpecifierSource } from './_relative-specifier.mjs';
 
 /** What a tool schema's `space` parameter is built from — a fixed stand-in, since the gates read shape, not reach. */
 const SPACE_SCHEMAS = { requiredSpace: { type: 'string' }, optionalSpace: { type: 'string' } };
@@ -44,9 +45,10 @@ export function toolValidators({ floor = 60 } = {}) {
  */
 export async function zodValidators({ floor = 70 } = {}) {
   const files = trackedSources('server/src', { untracked: true, exclude: ['server/src/local-agent-connector/index.ts'] })
-    // A module that declares a zod schema, or hands on one `@ythril/schema` declares (the space-schema bodies and the rule bodies are the
+    // A module that declares a zod schema, or hands on one declared by the schema package (the space-schema bodies and the rule bodies are the
     // package's, and the server modules that held them re-export them under the same names a route refers to).
-    .filter(f => /from ['"](?:zod|@ythril\/schema(?:\/internal)?)['"]/.test(readFileSync(join(REPO_ROOT, f), 'utf8')));
+    // The package's specifier comes from its manifest (the one specifier source), never spelled here; the retired name imports nothing.
+    .filter(f => new RegExp(`from ['"](?:zod|${schemaSpecifierSource(['', '/internal'])})['"]`).test(readFileSync(join(REPO_ROOT, f), 'utf8')));
   const out = [];
   for (const file of files) {
     const dist = join(REPO_ROOT, file.replace(/^server\/src\//, 'server/dist/').replace(/\.ts$/, '.js'));

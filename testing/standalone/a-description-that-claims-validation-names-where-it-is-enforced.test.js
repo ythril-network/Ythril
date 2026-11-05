@@ -61,6 +61,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT } from './_sources.mjs';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
@@ -153,7 +154,7 @@ function enforced(kind, field) {
     const helper = bodyOf('validatePropertiesAgainstSchema') ?? '';
     return body.includes('validatePropertiesAgainstSchema(') && /field:\s*`properties\./.test(helper);
   }
-  return new RegExp(`field:\\s*'${field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`).test(body);
+  return new RegExp(`field:\\s*'${escapeRegExp(field)}'`).test(body);
 }
 
 describe('the claim scan reads before it concludes', () => {

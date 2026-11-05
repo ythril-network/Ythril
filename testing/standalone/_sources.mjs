@@ -109,6 +109,31 @@ export function readTrackedSources(dirs, opts = {}) {
 }
 
 /**
+ * Every tracked file read as TEXT, whatever its extension: `readTrackedSources` with `ext: null`, and a binary file (a NUL byte in its
+ * first 8 KB) left out. The floor is inside, so an empty listing THROWS; each caller says its own (`opts.floor`, default 100).
+ *
+ * ## What it prevents (Q-683, the bundle-225 diff pass)
+ *
+ * The gate that scans the whole tree for a cited name and the gate that scans it for a rule sheet each wrote the same "list every tracked
+ * file, read it, skip what has a NUL" loop, and each decided for itself what "binary" is. A copy that read a PNG as UTF-8 matched a pattern
+ * in noise or crashed on it; one that dropped the floor reported success about an empty scan.
+ *
+ * @param {string|string[]} dirs as `trackedSources` takes them
+ * @param {object} [opts] as `trackedSources` takes them, except `ext` (always `null`)
+ * @returns {{ file: string, text: string }[]}
+ */
+export function readTrackedTextSources(dirs, opts = {}) {
+  const { root = REPO_ROOT } = opts;
+  const out = [];
+  for (const file of trackedSources(dirs, { ...opts, ext: null })) {
+    const buf = readFileSync(join(root, file));
+    if (buf.subarray(0, 8192).includes(0)) continue;
+    out.push({ file, text: buf.toString('utf8') });
+  }
+  return out;
+}
+
+/**
  * What a TEST FILE is, written once: `*.test.{js,mjs,cjs,ts}` and `*.spec.{js,mjs,cjs,ts}` (not `tsconfig.spec.json`,
  * not `docker-compose.test.yml`). These are the suffixes `trackedSources` takes as `ext`, and {@link isTestFile} reads
  * the same list, so a listing and a one-path question cannot disagree.

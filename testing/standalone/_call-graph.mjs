@@ -278,7 +278,7 @@ export function namespaceImports(src, file, has) {
 /**
  * What one source hands on from another module: `export { a, b as c } from '…'` as `c -> { file, exported: 'b' }`, and the files of
  * every `export * from '…'`. A name a module re-exports has no body there; {@link indexSources} follows it to the module that has.
- * The server re-exports what moved to `@ythril/schema` from the modules that used to define it, so a call the server makes through
+ * The server re-exports what moved to the schema package from the modules that used to define it, so a call the server makes through
  * one of those names is followed into the package.
  */
 export function reExports(src, file, has) {
@@ -475,7 +475,7 @@ function callableText(body, closures) {
  */
 export function moduleIndex(dirs, opts = {}) {
   const { functionFloor = 500, ...sourceOpts } = opts;
-  // The server's code includes the package it imports by name (`@ythril/schema`): a walk from a door follows a call into it.
+  // The server's code includes the package it imports by name (the schema package): a walk from a door follows a call into it.
   const list = [dirs].flat();
   if (list.includes('server/src') && !list.includes('schema/src')) list.push('schema/src');
   const files = trackedSources(list, { untracked: true, ...sourceOpts });

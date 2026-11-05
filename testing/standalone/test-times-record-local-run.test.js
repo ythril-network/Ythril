@@ -46,6 +46,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { startFakeYthril, FAKE_SPACE } from '../_shared/fake-ythril-tool-server.mjs';
@@ -347,7 +348,6 @@ describe('a record that cannot be written is kept, said so in exact words, and n
     const folder = join(dir, 'test-results', 'unrecorded');
     return existsSync(folder) ? readdirSync(folder).filter(f => f.endsWith('.json')).map(f => join(folder, f)) : [];
   };
-  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const lines = (r, re) => everything(r).split(/\r?\n/).filter(l => re.test(l));
 
   it('with no URL configured: prints the exact line per kept payload, exits 0, writes nothing anywhere', async () => {
@@ -366,8 +366,8 @@ describe('a record that cannot be written is kept, said so in exact words, and n
   });
 
   const FAILURES = [
-    ['an instance that answers 500', (s) => { s.respond = () => ({ status: 500, body: { ok: false, error: 'boom', data: null } }); return {}; }, (s) => new RegExp(`^test-times: not recorded: 500 from ${escapeRe(s.url)}\\S*; kept test-results/unrecorded/\\S+\\.json$`)],
-    ['a token the instance refuses', () => ({ YTHRIL_TEST_RUNS_TOKEN: 'ythril_wrong_token_value_000' }), (s) => new RegExp(`^test-times: not recorded: 401 from ${escapeRe(s.url)}\\S*; kept test-results/unrecorded/\\S+\\.json$`)],
+    ['an instance that answers 500', (s) => { s.respond = () => ({ status: 500, body: { ok: false, error: 'boom', data: null } }); return {}; }, (s) => new RegExp(`^test-times: not recorded: 500 from ${escapeRegExp(s.url)}\\S*; kept test-results/unrecorded/\\S+\\.json$`)],
+    ['a token the instance refuses', () => ({ YTHRIL_TEST_RUNS_TOKEN: 'ythril_wrong_token_value_000' }), (s) => new RegExp(`^test-times: not recorded: 401 from ${escapeRegExp(s.url)}\\S*; kept test-results/unrecorded/\\S+\\.json$`)],
   ];
   for (const [what, arrange, expected] of FAILURES) {
     it(`${what}: keeps the payload, prints the exact line, exits 0, prints no secret`, async () => {

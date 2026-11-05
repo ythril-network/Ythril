@@ -20,6 +20,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readFileSync } from 'node:fs';
 import { moduleIndex, walkFrom } from './_call-graph.mjs';
 import { scheduledJobs, JOB_FLOORS } from './_scheduled-jobs.mjs';
@@ -37,8 +38,6 @@ const { jobs } = scheduledJobs(index);
 /** Where the process begins: the file `main()` lives in, and the one function it hands the instance's services to. */
 const BOOT_ROOTS = ['server/src/bootstrap.ts:startConfiguredInstanceServices', 'server/src/index.ts:main'];
 
-const escapeRe = text => text.replace(/[.?$()[\]*+^|\\{}]/g, '\\$&');
-
 /** Every file that imports `file` (a static or a dynamic import: `relativeImports` reads both). */
 const importersOf = file => [...index.imports].filter(([from, map]) => from !== file && [...map.values()].some(i => i.file === file)).map(([from]) => from);
 
@@ -48,7 +47,7 @@ const importersOf = file => [...index.imports].filter(([from, map]) => from !== 
  */
 function startersOf(job) {
   if (job.kind === 'cron' || !job.handle) return job.container ? [job.container] : null;
-  const calls = new RegExp(String.raw`\b${escapeRe(job.handle)}\s*\??\.\s*start\s*\(`);
+  const calls = new RegExp(String.raw`\b${escapeRegExp(job.handle)}\s*\??\.\s*start\s*\(`);
   return [...index.bodies].filter(([, entry]) => entry.file === job.file && !entry.synthetic && calls.test(entry.body)).map(([key]) => key);
 }
 

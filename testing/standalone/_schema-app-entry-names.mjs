@@ -1,5 +1,5 @@
 /**
- * The names `@ythril/schema`'s app entry (`.`) exports: the ONE list, for the gates that hold something else to it.
+ * The names the schema package's app entry (`.`) exports: the ONE list, for the gates that hold something else to it.
  *
  * ## The question it answers
  *
@@ -28,7 +28,7 @@ export const APP_VALUES = [
 ];
 
 /**
- * The from-typescript entry's values (`@ythril/schema/from-typescript`, `schema/dist/from-typescript.js`): the ONE list, held to the built
+ * The from-typescript entry's values (the package's `./from-typescript` export, `schema/dist/from-typescript.js`): the ONE list, held to the built
  * entry by `the-schema-packages-from-typescript-entry-names-a-fixed-surface.test.js` and to its README section by
  * `the-schema-readme-names-every-name-of-the-from-typescript-entry.test.js` (Q-687, design v3 items 1, 11, 12). The entry is behind its own
  * export and re-exported by neither `.` nor `./internal`, so none of these names is in `APP_VALUES` or `APP_TYPES`.

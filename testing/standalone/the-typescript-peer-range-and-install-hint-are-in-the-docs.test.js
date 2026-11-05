@@ -1,11 +1,11 @@
 /**
- * The `typescript` peer range of `@ythril/schema` and the install hint of the from-typescript entry's error appear, as `package.json` and the source state them,
+ * The `typescript` peer range of the schema package and the install hint of the from-typescript entry's error appear, as `package.json` and the source state them,
  * in the package README, the Schema API guide (06a) and `docs/dependencies.md` (Q-687, design v3 items 3, 8 and 14).
  *
  * ## The defects this prevents
  *
  * - **A ceiling on the peer blocks the whole package.** npm refuses (ERESOLVE) to install a package whose optional peer is already present at a version outside
- *   its range. With `>=5.4 <7`, an app whose own `typescript` is 7 (what `npm install typescript` gives since 7.0) could not install `@ythril/schema` at all,
+ *   its range. With `>=5.4 <7`, an app whose own `typescript` is 7 (what `npm install typescript` gives since 7.0) could not install the schema package at all,
  *   main entry included, though it never calls the from-typescript entry (bundle-220's pre-ship probe). So the range has a floor (5.4, the first release with
  *   the closed host's `libReplacement` option) and no ceiling; a module with no compiler API is refused when the entry is CALLED, with the hint, never at install.
  * - **The hint drifts from the compiler the entry is proven on.** An app author learns which compiler to install from three docs and from the entry's error
@@ -24,6 +24,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readFileSync } from 'node:fs';
 
 const DOCS = ['schema/README.md', 'docs/integration-guide/06a-schema-api.md', 'docs/dependencies.md'];
@@ -35,14 +36,11 @@ export function installHintOf(aliasSpec) {
   return m ? `typescript@${m[1]}` : null;
 }
 
-/** `text` escaped for use inside a RegExp. */
-const literal = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
 /** What `text` lacks of `{ range, hint }`, or states against them, as sentences. */
 export function docGaps(label, text, { range, hint }) {
   const gaps = [];
   if (!text.includes(range)) gaps.push(`${label} does not carry the peer range \`${range}\` as package.json states it`);
-  if (new RegExp(`${literal(range)}\\s*<`).test(text)) gaps.push(`${label} states a ceiling beside the peer range \`${range}\``);
+  if (new RegExp(`${escapeRegExp(range)}\\s*<`).test(text)) gaps.push(`${label} states a ceiling beside the peer range \`${range}\``);
   if (!text.includes(hint)) gaps.push(`${label} does not carry the install hint \`${hint}\``);
   return gaps;
 }

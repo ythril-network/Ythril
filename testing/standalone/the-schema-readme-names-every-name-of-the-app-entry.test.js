@@ -1,5 +1,5 @@
 /**
- * `schema/README.md`'s export table names every name `@ythril/schema`'s app entry exports, and no other (Q-668, docs lens S2).
+ * `schema/README.md`'s export table names every name the schema package's app entry exports, and no other (Q-668, docs lens S2).
  *
  * ## The defect this prevents
  *

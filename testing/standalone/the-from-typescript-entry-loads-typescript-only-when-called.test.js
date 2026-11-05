@@ -1,5 +1,5 @@
 /**
- * `@ythril/schema/from-typescript` loads the TypeScript compiler only when it is called, from the caller's own install, and says what to
+ * The schema package's from-typescript entry loads the TypeScript compiler only when it is called, from the caller's own install, and says what to
  * install when it cannot (Q-687, design v3 items 2 and 3; the lenses: testing S1 and S5, security S6, reliability).
  *
  * ## The rule held
@@ -23,7 +23,7 @@
  * Before the entry exists every case is red for the one reason the first case names (the entry is not built).
  *
  * Run: node --test testing/standalone/the-from-typescript-entry-loads-typescript-only-when-called.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

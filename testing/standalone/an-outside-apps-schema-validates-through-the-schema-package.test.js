@@ -1,5 +1,5 @@
 /**
- * An app that writes a space schema validates it through `@ythril/schema`, and the server runs the same code — never a copy of it.
+ * An app that writes a space schema validates it through the schema package, and the server runs the same code — never a copy of it.
  *
  * ## The defect this closes
  *
@@ -17,7 +17,7 @@
  * - **No second definition is left in the server**: the moved bodies, parses, tuples, limits and helpers are declared nowhere under
  *   `server/src`.
  * - **The package reads no instance**: its source imports zod, the CEL engine, Node built-ins and itself, with ONE carve-out: the
- *   `@ythril/schema/from-typescript` entry (`from-typescript.ts`) names `typescript` through a dynamic literal `import('typescript')` (and
+ *   from-typescript entry (`from-typescript.ts`) names `typescript` through a dynamic literal `import('typescript')` (and
  *   `import type`) and nowhere else, so the caller's own compiler is loaded on first use and never with the main entry (Q-687; the carve-out
  *   is `_schema-package-imports.mjs`, the same one decision 19's import sentence is held to). A static import of the compiler, a non-literal
  *   `import()`, `new Function`, `eval`, `createRequire` and `require` are refused in every file of `schema/src`; `.sys` and
@@ -35,6 +35,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
 import { trackedSources } from './_sources.mjs';
+import { SCHEMA_PACKAGE_NAME, RETIRED_SCHEMA_PACKAGE_NAME, schemaSpecifierSource } from './_relative-specifier.mjs';
 import { TYPESCRIPT_CARVE_OUT, schemaSourceProblems, carveOutUses, sentenceProblems } from './_schema-package-imports.mjs';
 import { isApacheLicenceText } from './_notice-closure.mjs';
 import * as pkg from '../../schema/dist/index.js';
@@ -59,7 +60,7 @@ const FIXTURES = 'testing/fixtures/outside-app-schemas';
 const fixtures = readdirSync(FIXTURES).filter(f => f.endsWith('.json'))
   .map(f => ({ name: f, meta: JSON.parse(readFileSync(join(FIXTURES, f), 'utf8')) }));
 
-describe('an outside app\'s schema validates through @ythril/schema', () => {
+describe('an outside app\'s schema validates through the schema package', () => {
   it('finds the fixtures it is about (three space metas an outside app generates)', () => {
     assert.deepEqual(fixtures.map(f => f.name).sort(), ['garden-beds.json', 'garden-plants.json', 'garden-season.json']);
     for (const { name, meta } of fixtures) {
@@ -143,7 +144,7 @@ describe('a $ref is checked against the library handed in, never an instance\'s'
 
   it('a library scoped to one call does not outlive it', () => {
     // Asked through the one $ref refusal every door runs (Q-668, 4'), never the finders behind it.
-    assert.equal(typeof pkg.libraryRefRefusal, 'function', '@ythril/schema exports libraryRefRefusal, the one $ref refusal');
+    assert.equal(typeof pkg.libraryRefRefusal, 'function', 'the schema package exports libraryRefRefusal, the one $ref refusal');
     pkg.withSchemaLibrary([entry], () => assert.equal(pkg.libraryRefRefusal(meta.typeSchemas), null));
     assert.equal(pkg.libraryRefRefusal(meta.typeSchemas, [])?.message, pkgInternal.brokenRefsError(['service-v1']));
   });
@@ -178,7 +179,7 @@ describe('the server\'s schema names are the package\'s, not copies', () => {
   for (const [mod, label, names] of REEXPORTS) {
     it(`${label} re-exports the package's own objects`, () => {
       for (const name of names) {
-        assert.ok(name in pkgInternal, `@ythril/schema/internal exports ${name}`);
+        assert.ok(name in pkgInternal, `the schema package's internal entry exports ${name}`);
         assert.ok(mod[name] !== undefined, `server ${label} exports ${name}`);
         assert.equal(mod[name], pkgInternal[name], `server ${label}.${name} is the package's, not a copy`);
       }
@@ -331,13 +332,16 @@ describe('the package reads no instance', () => {
   });
 });
 
+/** Whether an npm script runs the package's own build script, by workspace name. A fresh RegExp per use; the name comes from the manifest through the one specifier source. */
+const buildsThePackage = (script) => new RegExp(`npm run build -w ${schemaSpecifierSource([''])}(?:\\s|&&|$)`).test(script);
+
 describe('the package is publishable', () => {
   const manifest = JSON.parse(readFileSync('schema/package.json', 'utf8'));
   const root = JSON.parse(readFileSync('package.json', 'utf8'));
   const server = JSON.parse(readFileSync('server/package.json', 'utf8'));
 
   it('is named, versioned and not private', () => {
-    assert.equal(manifest.name, '@ythril/schema');
+    assert.equal(manifest.name, SCHEMA_PACKAGE_NAME);
     assert.equal(manifest.private, undefined);
     assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
     assert.equal(manifest.version, root.version, 'versioned with the release it is cut from');
@@ -364,10 +368,17 @@ describe('the package is publishable', () => {
 
   it('is a workspace of this repository, and the server depends on it and builds it first', () => {
     assert.ok(root.workspaces.includes('schema'));
-    assert.equal(server.dependencies['@ythril/schema'], manifest.version);
+    assert.equal(server.dependencies[SCHEMA_PACKAGE_NAME], manifest.version);
     // Through the package's OWN build script (Q-668, S-C4), so the dist clean it runs first is not skipped by a bare `tsc -p`.
     for (const script of ['predev', 'prebuild']) {
-      assert.match(server.scripts[script] ?? '', /npm run build -w @ythril\/schema(?:\s|&&|$)/, `server ${script} builds the package by its build script`);
+      assert.ok(buildsThePackage(server.scripts[script] ?? ''), `server ${script} builds the package by its build script`);
     }
+  });
+
+  it('the builds-the-package reader names the package by its manifest name only (planted: the retired name builds nothing)', () => {
+    assert.equal(buildsThePackage(`npm run build -w ${SCHEMA_PACKAGE_NAME}`), true);
+    assert.equal(buildsThePackage(`npm run build -w ${SCHEMA_PACKAGE_NAME} && tsx x`), true);
+    assert.equal(buildsThePackage(`npm run build -w ${RETIRED_SCHEMA_PACKAGE_NAME}`), false);
+    assert.equal(buildsThePackage(`npm run build -w ${SCHEMA_PACKAGE_NAME}-extra`), false);
   });
 });

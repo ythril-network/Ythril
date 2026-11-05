@@ -1,5 +1,5 @@
 /**
- * `@ythril/schema/from-typescript` reads the same on TypeScript 6.x as on the compiler the repository tests with (Q-687, design v3 item
+ * The schema package's from-typescript entry reads the same on TypeScript 6.x as on the compiler the repository tests with (Q-687, design v3 item
  * 3; the lens: testing S5 "the peer range is unproved at both ends").
  *
  * ## The rule held
@@ -17,7 +17,7 @@
  * exists they are red for the entry's.
  *
  * Run: node --test testing/standalone/from-typescript-reads-the-same-on-typescript-6.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

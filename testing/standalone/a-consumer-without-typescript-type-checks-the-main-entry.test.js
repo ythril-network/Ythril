@@ -1,10 +1,10 @@
 /**
- * A consumer that has no `typescript` installed type-checks `@ythril/schema` (`.`): `schema/dist/index.d.ts` and every declaration file it reaches never
+ * A consumer that has no `typescript` installed type-checks the schema package (`.`): `schema/dist/index.d.ts` and every declaration file it reaches never
  * reference the compiler (Q-687, design v3 item 12).
  *
  * ## The defect this prevents
  *
- * `typescript` is an OPTIONAL peer of the package: only `@ythril/schema/from-typescript` uses it, through the caller's own copy. If `index.d.ts` (or a module
+ * `typescript` is an OPTIONAL peer of the package: only the schema package's from-typescript entry uses it, through the caller's own copy. If `index.d.ts` (or a module
  * it reaches) wrote `import type ts from 'typescript'`, `export * from './from-typescript.js'`, or `import('typescript').Program` in a signature, every
  * consumer that does not install the compiler would get "Cannot find module 'typescript'" from its own `tsc` the day it imported the package, and
  * `skipLibCheck: false` consumers would fail outright; the runtime would be fine, so no test of the built JS would see it. The main entry never loads the
@@ -20,7 +20,7 @@
  *   type and a reference directive are each seen, and a clean one is not.
  *
  * Run: node --test testing/standalone/a-consumer-without-typescript-type-checks-the-main-entry.test.js
- * (requires a prior `npm run build -w @ythril/schema`)
+ * (requires a prior `npm run build -w schema`)
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

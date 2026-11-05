@@ -27,6 +27,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
@@ -134,6 +135,6 @@ describe('no warnOnce in server/src is given a literal window', () => {
     const plant = src.replace('every: SAY_ONCE_WINDOW_MS', 'every: 10 * 60_000');
     const found = literalWindowsIn(file, plant);
     assert.equal(found.length, 1, `planting \`every: 10 * 60_000\` in ${file} was not found`);
-    assert.match(found[0], new RegExp(`^${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\d+: `));
+    assert.match(found[0], new RegExp(`^${escapeRegExp(file)}:\\d+: `));
   });
 });

@@ -58,7 +58,7 @@ const SAMPLES = {
 
 /** The members of `interface TypeSchema`, read from the source. */
 function typeSchemaKeys() {
-  // `@ythril/schema`'s vocabulary, re-exported by `config/types-knowledge.ts`.
+  // The schema package's vocabulary, re-exported by `config/types-knowledge.ts`.
   const file = 'schema/src/vocabulary.ts';
   const sf = parseSource(file, stripComments(readFileSync(file, 'utf8')));
   let keys = null;

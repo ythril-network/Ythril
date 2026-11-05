@@ -36,6 +36,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readFileSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
@@ -88,7 +89,7 @@ describe('no product-facing instruction names a benchmark corpus', () => {
     for (const f of PRODUCT_FACING) {
       const lines = readFileSync(join(REPO_ROOT, f), 'utf8').split(/\r?\n/);
       for (const name of NAMES) {
-        const hit = new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        const hit = new RegExp(escapeRegExp(name), 'i');
         lines.forEach((line, i) => {
           if (hit.test(line)) offenders.push(`${f}:${i + 1} names the corpus '${name}'`);
         });

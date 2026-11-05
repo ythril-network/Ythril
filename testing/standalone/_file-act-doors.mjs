@@ -36,6 +36,7 @@ import express from 'express';
 import { openPushDoor } from './_push-door.mjs';
 import { privateHostAddress } from './_private-address.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { fakeRes } from './_vote-round-instance.mjs';
 
 process.env['SYNC_ALLOW_PRIVATE_PEERS'] = 'true';
@@ -276,7 +277,7 @@ export async function openFileActDoors({ suite, space: S, monitorCommands = fals
     },
     /** The ids of every link row whose source is `root` itself, a derived id of it (`root#…`), or anything under `root/`, sorted. */
     async idsUnder(root) {
-      const esc = root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const esc = escapeRegExp(root);
       return (await door.coll(S, 'links').find({ fromKind: 'file', from: { $regex: `^${esc}(?:[#/]|$)` } }, { projection: { _id: 1 } }).toArray())
         .map(r => r._id).sort();
     },

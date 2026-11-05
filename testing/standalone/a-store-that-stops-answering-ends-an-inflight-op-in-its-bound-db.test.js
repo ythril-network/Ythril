@@ -34,6 +34,7 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -152,7 +153,7 @@ describe('the boot line, on a real connection', { skip }, () => {
       // The harness's own password, read where the harness reads it: a fixed literal would go on passing when the stack's changes.
       const password = (process.env['YTHRIL_TEST_MONGO_CREDS'] ?? 'ythril:ythril-test-pw').split(':')[1];
       assert.ok(password, 'the harness runs without credentials, so this case proves nothing about them');
-      for (const line of lines) assert.doesNotMatch(line, new RegExp(password.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `a credential reached a log line: ${line}`);
+      for (const line of lines) assert.doesNotMatch(line, new RegExp(escapeRegExp(password)), `a credential reached a log line: ${line}`);
     } finally {
       await mongoModule.closeMongo().catch(() => {});
     }

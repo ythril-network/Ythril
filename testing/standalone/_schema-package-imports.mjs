@@ -11,7 +11,7 @@
  *
  * ## What the carve-out is, and why it is that narrow (Q-687, design v3 item 12)
  *
- * `@ythril/schema/from-typescript` reads TypeScript source with the CALLER'S OWN compiler, so the package may name `typescript`, and only
+ * The schema package's from-typescript entry reads TypeScript source with the CALLER'S OWN compiler, so the package may name `typescript`, and only
  * so: the dynamic literal `import('typescript')` (and `import type`, which erases) in `schema/src/from-typescript.ts`. A static import
  * would load the compiler with the main entry and install it for every app; a non-literal `import()`, `new Function`, `eval`,
  * `createRequire` and `require` are each a way to name a module the gate cannot read, so they are refused in EVERY file of the package,
