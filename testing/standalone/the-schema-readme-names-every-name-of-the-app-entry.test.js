@@ -25,36 +25,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT } from './_sources.mjs';
 import { APP_VALUES, APP_TYPES } from './_schema-app-entry-names.mjs';
+import { tableNames as readTableNames, tableGaps as readTableGaps } from './_readme-export-table.mjs';
 
 const README = join(REPO_ROOT, 'schema', 'README.md');
 const SECTION = 'What else is exported';
 
-/** The names the first column of the export table holds, in order: every backticked identifier of a row's first cell. HTML comments are not text. */
-export function tableNames(readme) {
-  const text = readme.replace(/<!--[\s\S]*?-->/g, '');
-  const lines = text.split(/\r?\n/);
-  const start = lines.findIndex(l => /^##\s+/.test(l) && l.replace(/^##\s+/, '').trim() === SECTION);
-  assert.ok(start >= 0, `schema/README.md has no "## ${SECTION}" section`);
-  const names = [];
-  for (let i = start + 1; i < lines.length && !/^##\s/.test(lines[i]); i++) {
-    if (!lines[i].startsWith('|')) continue;
-    const firstCell = lines[i].split('|')[1] ?? '';
-    for (const m of firstCell.matchAll(/`([A-Za-z_$][\w$]*)`/g)) names.push(m[1]);
-  }
-  return names;
-}
-
-/** What the table lacks, what it names that the entry does not have, and what it names twice, as `{ missing, extra, repeated }`. */
-export function tableGaps(readme, expected) {
-  const names = tableNames(readme);
-  const have = new Set(names);
-  const want = new Set(expected);
-  return {
-    missing: [...want].filter(n => !have.has(n)).sort(),
-    extra: [...have].filter(n => !want.has(n)).sort(),
-    repeated: names.filter((n, i) => names.indexOf(n) !== i).sort(),
-  };
-}
+/** The readers are `_readme-export-table.mjs`, the one reader every README gate shares; this gate reads its own section. */
+const tableNames = (readme) => readTableNames(readme, SECTION);
+const tableGaps = (readme, expected) => readTableGaps(readme, expected, SECTION);
 
 const EXPECTED = [...APP_VALUES, ...APP_TYPES];
 
