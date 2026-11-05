@@ -75,8 +75,16 @@ describe('an MFA exemption cannot widen itself', () => {
   it('creating an exempt token verifies a live TOTP code', () => {
     assert.match(code, /mfa !== 'exempt' \|\| !isMfaEnabled\(\)/,
       'the guard must key on the REQUESTED exemption and the instance switch');
-    assert.match(code, /verifyMfaCode\(code\)/,
-      'the code must actually be verified, not merely present');
+    // Asked through the attempt counter (Q-694), whose answer is an object: the code must actually be verified, and the verdict read as
+    // `.ok` (or `.reason`), never as a boolean. The helper's own body is the window, so a call elsewhere in the file cannot satisfy this.
+    const at = code.indexOf('function exemptionNeedsLiveCode(');
+    assert.ok(at >= 0, 'exemptionNeedsLiveCode is gone');
+    const helper = code.slice(at, code.indexOf('\n}\n', at));
+    const call = /(?<![\w$])tryMfaCode\(/.exec(helper);
+    assert.ok(call, 'the code must actually be verified, through tryMfaCode, not merely present');
+    assert.match(helper.slice(call.index), /\.(?:ok|reason)\b/, 'the verdict of tryMfaCode must be read as .ok or .reason');
+    assert.doesNotMatch(helper, /(?<![\w$])!\s*tryMfaCode\(/, 'tryMfaCode answers an object: a negated call is never true');
+    assert.doesNotMatch(helper, /\bverifyMfaCode\(/, 'the exemption door verifies a code without the attempt counter');
   });
 
   it('checks BEFORE the token is created, not after', () => {

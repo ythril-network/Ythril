@@ -103,16 +103,23 @@ describe('the global limiter steps aside for a credential', () => {
     assert.match(body, /max: 300/, 'the anonymous cap is unchanged');
   });
 
-  it('the flood backstop is untouched — it is what makes this safe', () => {
+  it('the flood backstop never steps aside for a credential — it steps aside only for a request a token metered', () => {
     /*
      * `globalRateLimit` never bounded a rotating attacker: it is keyed per credential, so every invented
      * bearer string already minted a fresh bucket. The backstop is keyed purely on the IP and exists for
      * exactly that. If it ever gains a credential skip, this change becomes a real hole.
+     *
+     * Q-693 (bundle-233) changed what it counts, not whom it trusts: a request that a valid token's own limiter
+     * admitted is bounded by that limiter, so the backstop gives it back (`res.locals.meteredByToken === true`,
+     * set by `attachToken` and reset by `tokenRateLimit`'s 429). A PRESENTED credential still buys nothing: an invented
+     * bearer is never metered. `the-ip-flood-backstop-counts-what-no-token-meters.test.js` drives the rule.
      */
     const body = bodyOf(MW(), 'ipFloodBackstop');
     assert.doesNotMatch(body, /hasCredential/,
       'the backstop must NOT step aside for a credential — it is the bound on inventing them');
-    assert.match(body, /max: 3000/, 'the backstop is unchanged');
+    assert.match(body, /max: 3000/, 'the backstop number is unchanged');
+    assert.match(body, /meteredByToken\s*===\s*true/,
+      'the one thing the backstop gives back is a request a token\'s own limiter metered, and the predicate is the flag, strictly');
   });
 });
 
