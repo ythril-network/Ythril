@@ -15,6 +15,7 @@ import { TokenRightsDialogComponent } from './token-rights-dialog.component';
 import { OwnTokenRightsComponent } from './own-token-rights.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { httpErrorReason } from '../../core/http-error';
+import { refusalText } from '../../core/refusal-text';
 import { pageTranslator } from '../../core/page-translator';
 import { TOKENS_PAGE_STYLES } from './tokens.styles';
 import { TokenTableComponent } from './token-table.component';
@@ -301,7 +302,7 @@ export class TokensComponent implements OnInit {
     this.clearRegen();
     this.authApi.regenerateToken(t.id).subscribe({
       next: ({ plaintext }) => this.regenToken.set(plaintext),
-      error: () => this.toast.error(this.transloco.translate('tokens.error.rotateFailed')),
+      error: (err) => this.toast.error(refusalText(this.transloco, err, 'tokens.error.rotateFailed')),
     });
   }
 
@@ -315,7 +316,7 @@ export class TokensComponent implements OnInit {
     if (!ok) return;
     this.authApi.revokeToken(t.id).subscribe({
       next: () => this.tokens.update(list => list.filter(x => x.id !== t.id)),
-      error: () => this.toast.error(this.transloco.translate('tokens.error.revokeFailed')),
+      error: (err) => this.toast.error(refusalText(this.transloco, err, 'tokens.error.revokeFailed')),
     });
   }
 
@@ -338,7 +339,7 @@ export class TokensComponent implements OnInit {
         this.tokens.update(list => list.map(x => x.id === t.id ? { ...x, name: token.name } : x));
         this.cancelEditLabel();
       },
-      error: () => this.toast.error(this.transloco.translate('tokens.error.renameFailed')),
+      error: (err) => this.toast.error(refusalText(this.transloco, err, 'tokens.error.renameFailed')),
     });
   }
 
