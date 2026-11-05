@@ -26,7 +26,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import ts from 'typescript';
+import { declaredExports } from './_declared-exports.mjs';
 import * as app from '../../schema/dist/index.js';
 import * as internal from '../../schema/dist/internal.js';
 import { APP_VALUES, APP_TYPES } from './_schema-app-entry-names.mjs';
@@ -39,21 +39,6 @@ const SERVER_ONLY = [
   // The server's machinery that never was app API (the earlier hand list), held here so it cannot drift in.
   'LruMap', 'compileRule', 'ruleEngine', 'render',
 ];
-
-/** Every name `dts` exports, split into values and type-only names, read by the TypeScript checker (`export *` followed). */
-function declaredExports(dts) {
-  const program = ts.createProgram([dts], { module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, noEmit: true });
-  const checker = program.getTypeChecker();
-  const source = program.getSourceFile(dts);
-  assert.ok(source, `the checker cannot read ${dts}: build the package first`);
-  const values = [];
-  const types = [];
-  for (const s of checker.getExportsOfModule(checker.getSymbolAtLocation(source))) {
-    const target = s.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(s) : s;
-    (target.flags & ts.SymbolFlags.Value ? values : types).push(s.name);
-  }
-  return { values: values.sort(), types: types.sort() };
-}
 
 describe('the readers this gate stands on', () => {
   it('the checker sees through export * and tells a type from a value', () => {

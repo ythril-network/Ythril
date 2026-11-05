@@ -25,7 +25,11 @@ export function resolveRelativeSpecifier(spec, fromFile, has) {
  * The repo file a bare `@ythril/schema` specifier names — the space-schema package the server imports by name — or null for any other
  * bare specifier. A gate that follows the server's imports lands on the package's SOURCE, where the code that runs is, never its build.
  */
-export const SCHEMA_PACKAGE_ENTRIES = Object.freeze({ '@ythril/schema': 'schema/src/index.ts', '@ythril/schema/internal': 'schema/src/internal.ts' });
+export const SCHEMA_PACKAGE_ENTRIES = Object.freeze({
+  '@ythril/schema': 'schema/src/index.ts',
+  '@ythril/schema/internal': 'schema/src/internal.ts',
+  '@ythril/schema/from-typescript': 'schema/src/from-typescript.ts',
+});
 
 /** {@link resolveRelativeSpecifier}, and a bare `@ythril/schema` specifier to the package's source entry when `has` holds it. */
 export function resolveSpecifier(spec, fromFile, has) {

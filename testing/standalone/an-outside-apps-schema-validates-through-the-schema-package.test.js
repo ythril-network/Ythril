@@ -16,8 +16,12 @@
  * - **The server's names ARE the package's**: every schema export a server module re-exports is the same object, not an equal one.
  * - **No second definition is left in the server**: the moved bodies, parses, tuples, limits and helpers are declared nowhere under
  *   `server/src`.
- * - **The package reads no instance**: its source imports zod, the CEL engine, Node built-ins and itself, and a `$ref` is checked
- *   against the library HANDED to it.
+ * - **The package reads no instance**: its source imports zod, the CEL engine, Node built-ins and itself, with ONE carve-out: the
+ *   `@ythril/schema/from-typescript` entry (`from-typescript.ts`) names `typescript` through a dynamic literal `import('typescript')` (and
+ *   `import type`) and nowhere else, so the caller's own compiler is loaded on first use and never with the main entry (Q-687; the carve-out
+ *   is `_schema-package-imports.mjs`, the same one decision 19's import sentence is held to). A static import of the compiler, a non-literal
+ *   `import()`, `new Function`, `eval`, `createRequire` and `require` are refused in every file of `schema/src`; `.sys` and
+ *   `createCompilerHost` outside `from-typescript.ts`. A `$ref` is checked against the library HANDED to it.
  * - **The package is publishable**: not private, with `exports`, `files`, a version, a README, and its own licence (Apache-2.0, owner
  *   2026-11-01) in its own committed LICENSE and NOTICE: the repository's licence is not the package's (Q-668).
  * - The app entry's names are held in `the-schema-packages-app-entry-names-a-fixed-surface.test.js`.
@@ -30,6 +34,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
+import { trackedSources } from './_sources.mjs';
+import { TYPESCRIPT_CARVE_OUT, schemaSourceProblems, carveOutUses, sentenceProblems } from './_schema-package-imports.mjs';
 import { isApacheLicenceText } from './_notice-closure.mjs';
 import * as pkg from '../../schema/dist/index.js';
 import * as pkgInternal from '../../schema/dist/internal.js';
@@ -227,23 +233,94 @@ describe('no second definition is left in the server', () => {
 });
 
 describe('the package reads no instance', () => {
-  it('its source imports zod, the CEL engine, Node built-ins and its own modules — nothing of the server', () => {
-    const allowed = /^(zod|@bufbuild\/cel|node:[a-z_/]+|\.\/[a-z-]+\.js)$/;
-    const bad = [];
-    let seen = 0;
-    for (const file of tsFiles('schema/src')) {
-      const src = stripComments(readFileSync(file, 'utf8'));
-      // A static import or re-export (`import ... from`, `export ... from`, a bare `import '...'`) and a dynamic `import('...')`.
-      const specifiers = [
-        ...[...src.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s*['"]([^'"]+)['"]/gm)].map(m => m[1]),
-        ...[...src.matchAll(/^\s*import\s*['"]([^'"]+)['"]/gm)].map(m => m[1]),
-        ...[...src.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g)].map(m => m[1]),
-      ];
-      seen += specifiers.length;
-      for (const spec of specifiers) if (!allowed.test(spec)) bad.push(`${file}: ${spec}`);
-    }
+  const ENTRY = TYPESCRIPT_CARVE_OUT.file;
+  /** Every file of the package's source, uncommitted ones too: the entry is written before it is committed. */
+  const sources = () => trackedSources('schema/src', { floor: 15, untracked: true });
+
+  it('its source imports zod, the CEL engine, Node built-ins and its own modules, and in the one carve-out file the dynamic literal import(\'typescript\') (typescript only through from-typescript.ts)', () => {
+    const files = sources();
+    const problems = files.flatMap(file => schemaSourceProblems(file, readFileSync(file, 'utf8')));
+    // The scanner has a floor: it saw imports (a blind scan passes about nothing).
+    const seen = files.reduce((n, f) => n + (stripComments(readFileSync(f, 'utf8')).match(/\b(?:import|export)\b[^;]*?\bfrom\s*['"]|\bimport\s*\(/g) ?? []).length, 0);
     assert.ok(seen >= 30, `the scanner found ${seen} imports in the package: it is blind`);
-    assert.deepEqual(bad, []);
+    assert.deepEqual(problems, []);
+  });
+
+  it('the carve-out is used: the entry is a file of the package and names typescript by the dynamic literal', () => {
+    assert.ok(sources().includes(ENTRY), `${ENTRY} is not a file of the package: the carve-out admits an import nobody makes`);
+    assert.ok(carveOutUses(readFileSync(ENTRY, 'utf8')) >= 1, `${ENTRY} has no dynamic literal import('typescript')`);
+  });
+
+  describe('the scanner bites (mutation rows, planted as strings: nothing of them is in the repository)', () => {
+    const OTHER = 'schema/src/vocabulary.ts';
+    const admitted = "import type ts from 'typescript';\nconst load = () => import('typescript');\nconst x = ts.sys.readFile;\n";
+
+    it('admits the carve-out in its own file: the dynamic literal, import type, and .sys', () => {
+      assert.deepEqual(schemaSourceProblems(ENTRY, admitted), []);
+    });
+
+    it('refuses the specifier in a second file', () => {
+      assert.match(schemaSourceProblems(OTHER, "const m = await import('typescript');").join(), /dynamic import of 'typescript' outside schema\/src\/from-typescript\.ts/);
+      assert.match(schemaSourceProblems(OTHER, "import type ts from 'typescript';").join(), /static import of 'typescript' outside/);
+    });
+
+    it('refuses the static form, in the entry too', () => {
+      assert.match(schemaSourceProblems(ENTRY, "import ts from 'typescript';").join(), /static import of 'typescript' loads the compiler/);
+      assert.match(schemaSourceProblems(ENTRY, "import { createProgram } from 'typescript';").join(), /static import of 'typescript'/);
+      assert.match(schemaSourceProblems(ENTRY, "import 'typescript';").join(), /static import of 'typescript'/);
+      assert.match(schemaSourceProblems(ENTRY, "export * from 'typescript';").join(), /static import of 'typescript'/);
+    });
+
+    it('refuses a non-literal import(), in the entry too', () => {
+      for (const form of ['const m = await import(name);', "const m = await import('type' + 'script');", 'const m = await import(`typescript`);', "const m = await import(...['typescript']);"]) {
+        assert.match(schemaSourceProblems(ENTRY, form).join(), /non-literal import\(\)/, form);
+        assert.match(schemaSourceProblems(OTHER, form).join(), /non-literal import\(\)/, form);
+      }
+    });
+
+    it('refuses a planted .sys and createCompilerHost outside the entry, and admits them inside', () => {
+      assert.match(schemaSourceProblems(OTHER, 'const f = ts.sys.readFile;').join(), /\.sys outside/);
+      assert.match(schemaSourceProblems(OTHER, "const f = ts['sys'];").join(), /\.sys outside/);
+      assert.match(schemaSourceProblems(OTHER, 'const h = ts.createCompilerHost(o);').join(), /createCompilerHost outside/);
+      assert.deepEqual(schemaSourceProblems(ENTRY, 'const h = ts.createCompilerHost(o); const f = ts.sys.readFile;'), []);
+    });
+
+    it('refuses new Function, eval, createRequire and require anywhere, the entry included', () => {
+      for (const [form, what] of [['new Function("return 1")', 'new Function'], ['eval(code)', 'eval'],
+        ["import { createRequire } from 'node:module'; createRequire(import.meta.url)", 'createRequire'], ["const t = require('typescript')", 'require']]) {
+        assert.match(schemaSourceProblems(ENTRY, form).join(), new RegExp(`${what} names a module`), form);
+        assert.match(schemaSourceProblems(OTHER, form).join(), new RegExp(`${what} names a module`), form);
+      }
+    });
+
+    it('refuses an import that is not the closure\'s, and an entry module reaching from-typescript', () => {
+      assert.match(schemaSourceProblems(OTHER, "import fs from 'node:fs'; import x from 'left-pad';").join(), /static import of 'left-pad'/);
+      assert.match(schemaSourceProblems(OTHER, "const m = await import('typescript-6');").join(), /dynamic import of 'typescript-6'/);
+      assert.match(schemaSourceProblems('schema/src/index.ts', "export * from './from-typescript.js';").join(), /reaches from-typescript/);
+      assert.match(schemaSourceProblems('schema/src/internal.ts', "export type { NotRead } from './from-typescript.js';").join(), /reaches from-typescript/);
+      assert.deepEqual(schemaSourceProblems(OTHER, "import { z } from 'zod'; import { a } from './limits.js'; const p = import('./x.js');"), []);
+    });
+
+    it('does not read comments as code, and counts the carve-out\'s literal only', () => {
+      assert.deepEqual(schemaSourceProblems(OTHER, "// import('typescript') and eval(x), ts.sys, new Function\n/* import ts from 'typescript' */\nconst a = 1;"), []);
+      assert.equal(carveOutUses("const a = () => import('typescript');"), 1);
+      assert.equal(carveOutUses("// import('typescript')\nconst a = import(name);"), 0);
+    });
+  });
+
+  it('this file\'s header and title state the closure with the carve-out (tied to the one carve-out, so the statement cannot go stale)', () => {
+    const self = readFileSync(new URL(import.meta.url), 'utf8');
+    const bullet = /\*\*The package reads no instance\*\*:[\s\S]*?(?=\n \* - \*\*|\n \*\n)/.exec(self)?.[0].replace(/\s*\n \*\s*/g, ' ');
+    assert.ok(bullet, 'the header has no "The package reads no instance" bullet');
+    assert.deepEqual(sentenceProblems(bullet), [], 'the header bullet does not state the closure the gate enforces');
+    const title = /it\('(its source imports[^\n]*?)', \(\) => \{/.exec(self)?.[1];
+    assert.ok(title, 'the closure test has no title starting "its source imports"');
+    assert.deepEqual(sentenceProblems(title.replace(/\\'/g, "'")), [], 'the test title does not state the closure the gate enforces');
+  });
+
+  it('the old wording of the closure is refused by the tie (planted copy)', () => {
+    const old = 'its source imports zod, the CEL engine, Node built-ins and its own modules — nothing of the server';
+    assert.ok(sentenceProblems(old).length >= 2, 'the old statement passed: the tie does not bite');
   });
 
   it('it reads no environment variable and no file', () => {
@@ -277,8 +354,8 @@ describe('the package is publishable', () => {
   });
 
   it('exports its built entry points with types, and ships only dist, the README and the licence', () => {
-    assert.deepEqual(Object.keys(manifest.exports).sort(), ['.', './internal', './package.json']);
-    for (const entry of ['.', './internal']) {
+    assert.deepEqual(Object.keys(manifest.exports).sort(), ['.', './from-typescript', './internal', './package.json']);
+    for (const entry of ['.', './internal', './from-typescript']) {
       for (const cond of ['types', 'import']) assert.match(manifest.exports[entry][cond], /^\.\/dist\//);
     }
     assert.deepEqual(manifest.files, ['dist', 'README.md', 'LICENSE', 'NOTICE']);

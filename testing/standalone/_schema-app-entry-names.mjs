@@ -27,6 +27,17 @@ export const APP_VALUES = [
   'withSchemaLibrary',
 ];
 
+/**
+ * The from-typescript entry's values (`@ythril/schema/from-typescript`, `schema/dist/from-typescript.js`): the ONE list, held to the built
+ * entry by `the-schema-packages-from-typescript-entry-names-a-fixed-surface.test.js` and to its README section by
+ * `the-schema-readme-names-every-name-of-the-from-typescript-entry.test.js` (Q-687, design v3 items 1, 11, 12). The entry is behind its own
+ * export and re-exported by neither `.` nor `./internal`, so none of these names is in `APP_VALUES` or `APP_TYPES`.
+ */
+export const FROM_TYPESCRIPT_VALUES = ['SOURCE_MAX', 'UNREPRESENTED_REASONS', 'spaceMetaFromTypeScript'];
+
+/** The from-typescript entry's types: the call's options, its answer, and the two entries of that answer (what was not read, what was refused). */
+export const FROM_TYPESCRIPT_TYPES = ['FromTypeScriptOptions', 'FromTypeScriptResult', 'NotRead', 'Refusal'];
+
 /** The app entry's types (names with no value). */
 export const APP_TYPES = [
   'BooleanMergeFn', 'ChangedRuleParts', 'DatePassedPolicy', 'KnowledgeType', 'MergeFn', 'MetaFieldKind', 'MetaParse',
