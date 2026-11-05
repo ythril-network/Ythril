@@ -20,6 +20,7 @@ import {
   purgeRetiredSpaceId, refuseCopyByNonManager, updateView, viewsMigrationReport, type ViewActor, type ViewAuditDoor,
 } from '../spaces/view-acts.js';
 import { VIEW_OPERATIONS, auditAuthMethod, auditOidcSubject } from '../audit/middleware.js';
+import { requestAddress } from '../audit/request-address.js';
 
 export const viewsRouter = Router();
 export const adminViewsRouter = Router();
@@ -34,7 +35,7 @@ function actorOf(req: Request): ViewActor {
 function doorOf(req: Request, pattern: string): ViewAuditDoor {
   const token = req.authToken;
   return {
-    ip: req.ip ?? req.socket.remoteAddress ?? 'unknown',
+    ip: requestAddress(req),
     method: req.method,
     path: pattern,
     tokenId: token && 'id' in token ? token.id : null,

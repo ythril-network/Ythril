@@ -35,6 +35,7 @@ import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, dockerExec } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { totpAt } from '../_shared/totp-codes.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -365,27 +366,8 @@ describe('M8 — a TOTP code cannot be replayed inside its validity window', () 
     }, 15_000, 100, 'instance A did not come back after restart', { what: 'instance A /health to answer ok' });
   }
 
-  // RFC 6238 TOTP (SHA-1, 30 s, 6 digits) — mirrors server/src/auth/totp.ts
-  const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  function base32Decode(input) {
-    let bits = '';
-    for (const c of input.toUpperCase().replace(/=+$/, '')) {
-      const v = BASE32.indexOf(c);
-      if (v === -1) continue;
-      bits += v.toString(2).padStart(5, '0');
-    }
-    const bytes = new Uint8Array(Math.floor(bits.length / 8));
-    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(bits.slice(i * 8, i * 8 + 8), 2);
-    return Buffer.from(bytes);
-  }
-  function totp(sec, epoch = Math.floor(Date.now() / 1000)) {
-    const buf = Buffer.alloc(8);
-    buf.writeBigUInt64BE(BigInt(Math.floor(epoch / 30)));
-    const hmac = crypto.createHmac('sha1', base32Decode(sec)).update(buf).digest();
-    const off = hmac[hmac.length - 1] & 0x0f;
-    const code = (((hmac[off] & 0x7f) << 24) | (hmac[off + 1] << 16) | (hmac[off + 2] << 8) | hmac[off + 3]) % 1e6;
-    return code.toString().padStart(6, '0');
-  }
+  // RFC 6238 TOTP (SHA-1, 30 s, 6 digits), computed by the shared test module and not by the server.
+  const totp = (sec, epoch = Math.floor(Date.now() / 1000)) => totpAt(sec, epoch);
 
   before(async () => {
     disableMfaViaRestart();

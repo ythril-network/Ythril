@@ -2,6 +2,7 @@ import { DestroyRef, Injectable, inject, signal } from '@angular/core';
 import { Subject } from 'rxjs';
 import { FilesApi } from '../../core/files-api.service';
 import { httpErrorReason } from '../../core/http-error';
+import { retryAfterSecondsOf } from '../../core/retry-after';
 import type { FileEntry } from '../../core/api.types';
 import type { refusalText } from '../../core/refusal-text';
 
@@ -58,10 +59,8 @@ const OWED_MAX_SECONDS = 60;
 
 /** The seconds an answer asks the caller to wait: its `Retry-After`, bounded, or the default when it names none. */
 function retryAfterSeconds(err: unknown): number {
-  const raw = (err as { headers?: { get(name: string): string | null } } | null)?.headers?.get('Retry-After');
-  const seconds = raw === null || raw === undefined ? NaN : Number(raw);
-  if (!Number.isFinite(seconds) || seconds < 0) return OWED_DEFAULT_SECONDS;
-  return Math.min(seconds, OWED_MAX_SECONDS);
+  const seconds = retryAfterSecondsOf(err);
+  return seconds === null ? OWED_DEFAULT_SECONDS : Math.min(seconds, OWED_MAX_SECONDS);
 }
 
 /**

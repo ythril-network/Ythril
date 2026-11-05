@@ -154,16 +154,6 @@ const GRANDFATHERED = new Map([
   ['testing/standalone/text-contrast-meets-aa.test.js', 1],
 
   /*
-   * `parseInt(bits.slice(i * 8, i * 8 + 8), 2)` — reading one byte out of a bit string.
-   *
-   * The same class as the hex pair above and found by the same widening: eight bits is what a byte IS. Both are
-   * fixed-width FIELD reads, and the fact that two of the three surviving entries are this shape is the argument for
-   * keeping the exemptions rather than contorting the pattern to exclude them — a pattern that tries to tell a field
-   * read from a window by its arithmetic will get it wrong in the other direction eventually.
-   */
-  ['testing/red-team-tests/auth-surface-hardening.test.js', 1],
-
-  /*
    * `JSON.stringify(src.slice(handlerStart, handlerStart + 90))` — inside an assertion MESSAGE.
    *
    * Nothing is asserted about those 90 characters. They are an excerpt shown to whoever reads the failure, so

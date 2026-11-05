@@ -48,6 +48,17 @@ describe('computeSecurityPosture', () => {
     assert.equal(find(p, 'transport.trustProxy'), undefined);
   });
 
+  it('TRUST_PROXY=false is not trustProxy (the app turns it into false, so the posture reads it as unset)', () => {
+    process.env.REQUIRE_ENCRYPTED_TRANSPORT = 'true';
+    for (const off of ['false', ' false ', '0']) {
+      process.env.TRUST_PROXY = off;
+      const p = computeSecurityPosture();
+      assert.equal(find(p, 'transport.trustProxy')?.level, 'fail', `TRUST_PROXY=${JSON.stringify(off)} was counted as a configured proxy`);
+    }
+    process.env.TRUST_PROXY = 'loopback';
+    assert.equal(find(computeSecurityPosture(), 'transport.trustProxy'), undefined, 'a named proxy range is a configured proxy');
+  });
+
   it('allowInsecurePeers env → peers WARN', () => {
     process.env.SYNC_ALLOW_INSECURE_PEERS = 'true';
     assert.equal(find(computeSecurityPosture(), 'transport.peers').level, 'warn');

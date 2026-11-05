@@ -206,7 +206,8 @@ describe('the metering cannot be forgotten on a new auth path', () => {
   it('it keys on the token ID, not the credential hash', () => {
     const rl = stripComments(readFileSync('server/src/rate-limit/middleware.ts', 'utf8'));
     const limiter = balancedFrom(rl, rl.indexOf('export const tokenRateLimit'), 'tokenRateLimit');
-    assert.match(limiter, /t:\$\{token\.id\}/,
+    // `callerKeyOf` is the token's id, else the client key (`rate-limit/middleware.ts`); the limiter adds its `t:` prefix to it.
+    assert.match(limiter, /t:\$\{callerKeyOf\(req\)\}/,
       'a rotated token is a new credential and the same grant — keying on the hash would hand every rotation '
       + 'a fresh bucket, which turns a quota into an inconvenience');
   });

@@ -45,7 +45,7 @@ import { removeInstanceDir } from './_vote-round-instance.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
 import { tempInstance, boot } from './_round-open-fixtures.mjs';
 import { auditRowsOf } from './_audit-rows.mjs';
-import { codeAtStep, wrongCode, staleCode } from './_totp-codes.mjs';
+import { codeAtStep, wrongCode, staleCode } from '../_shared/totp-codes.mjs';
 import { keepEnv } from '../_shared/env-kept.mjs';
 
 const dir = tempInstance('ythril-q694-lock-');

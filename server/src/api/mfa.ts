@@ -21,10 +21,10 @@
 import { Router } from 'express';
 import { refusalOfParse } from '../util/log.js';
 import { requireAdmin, requireAdminMfa } from '../auth/middleware.js';
-import { authRateLimit, globalRateLimit } from '../rate-limit/middleware.js';
+import { authRateLimit, globalRateLimit, callerKeyOf } from '../rate-limit/middleware.js';
 import { callerIsAskedForMfa } from '../auth/mfa-asked.js';
 import { enableMfa, disableMfa, isMfaEnabled } from '../auth/totp.js';
-import { tryMfaCode, mfaTokenIdOf } from '../auth/code-attempts.js';
+import { tryMfaCode } from '../auth/code-attempts.js';
 import { sendMfaLocked } from './mfa-locked-answer.js';
 import { getConfig } from '../config/loader.js';
 import { z } from 'zod';
@@ -66,7 +66,7 @@ mfaRouter.post('/verify', authRateLimit, requireAdmin, (req, res) => {
   }
   // Counted like every door that asks for a code (Q-694): five wrong codes lock the token, and this door answers the lock `429 MFA_LOCKED`.
   // A wrong, a replayed and a stale code all answer `{ valid: false }`.
-  const attempt = tryMfaCode(parsed.data.code, { tokenId: mfaTokenIdOf(req), req });
+  const attempt = tryMfaCode(parsed.data.code, { tokenId: callerKeyOf(req), req });
   if (!attempt.ok && attempt.reason === 'locked') {
     sendMfaLocked(res, attempt);
     return;

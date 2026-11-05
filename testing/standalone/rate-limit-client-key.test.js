@@ -90,3 +90,26 @@ describe('clientRateLimitKey', () => {
     assert.equal(a, b, 'addresses in one /64 belong to one client');
   });
 });
+
+describe('callerKeyOf', () => {
+  let callerKeyOf;
+  before(async () => {
+    ({ callerKeyOf, clientRateLimitKey } = await import('../../server/dist/rate-limit/middleware.js'));
+  });
+
+  it('is the id of the token attached to the request', () => {
+    assert.equal(callerKeyOf({ ...req({ bearer: 'ythril_a' }), authToken: { id: 'tok-1' } }), 'tok-1');
+  });
+
+  it('is the id of the record a guard passes when the token is not attached yet, and that record wins', () => {
+    assert.equal(callerKeyOf(req({ bearer: 'ythril_a' }), { id: 'tok-2' }), 'tok-2');
+    assert.equal(callerKeyOf({ ...req(), authToken: { id: 'attached' } }, { id: 'passed' }), 'passed');
+  });
+
+  it('falls back to the client key for a caller with no stored id (an OIDC identity, no token, an empty id)', () => {
+    const r = req({ bearer: 'ythril_oidc_like' });
+    assert.equal(callerKeyOf({ ...r, authToken: {} }), clientRateLimitKey(r));
+    assert.equal(callerKeyOf(r), clientRateLimitKey(r));
+    assert.equal(callerKeyOf({ ...r, authToken: { id: '' } }), clientRateLimitKey(r));
+  });
+});

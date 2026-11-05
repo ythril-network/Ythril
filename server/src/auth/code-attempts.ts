@@ -41,7 +41,10 @@
 import type { Request } from 'express';
 import { judgeMfaCode } from './totp.js';
 import { isBlockedIp } from '../util/ssrf.js';
-import { clientAddressKey, clientRateLimitKey } from '../rate-limit/middleware.js';
+import { clientAddressKey } from '../rate-limit/middleware.js';
+import { trustProxyConfigured } from '../config/trust-proxy.js';
+import { requestAddress } from '../audit/request-address.js';
+import { warnOnce } from '../util/warn-once.js';
 import { mfaLockoutsTotal, mfaLockoutEvictionsTotal } from '../metrics/registry.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { MFA_LOCKED_OPERATION } from '../audit/middleware.js';
@@ -72,8 +75,8 @@ const open = new Map<string, Entry>();
 const locked = new Map<string, Entry>();
 
 let clock: () => number = Date.now;
-/** The last time a full table was warned about, so a flood of dropped failures writes one line per window, not one per request. */
-let evictionWarnedAt: number | null = null;
+/** A full table is warned about once per window, so a flood of dropped failures writes one line per window, not one per request. Measured on the table's clock. */
+const evictionWarned = warnOnce<'full'>({ every: MFA_LOCKOUT_WINDOW_MS, now: () => clock() });
 
 /**
  * Replace the clock the window is measured on (milliseconds, `null` for the real one). For a test that must move time; reachable from server
@@ -87,7 +90,7 @@ export function setMfaClock(fn: (() => number) | null): void {
 export function resetMfaAttempts(): void {
   open.clear();
   locked.clear();
-  evictionWarnedAt = null;
+  evictionWarned.forgetAll();
 }
 
 /** The entry of `key`, in whichever map it is. */
@@ -143,7 +146,7 @@ function makeRoom(now: number): boolean {
 /** Everything a lock start writes: the counter, one log line and one audit row (not awaited; a failing audit write never changes the answer). */
 function announceLock(kind: MfaLockKey, tokenId: string, req: Request): void {
   mfaLockoutsTotal.inc({ key: kind });
-  const address = req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+  const address = requestAddress(req);
   log.warn(`MFA lockout started on the ${kind} key: ${MFA_FAILURES_MAX} wrong codes in ${MFA_LOCKOUT_WINDOW_MS / 60_000} minutes, token ${peerText(tokenId)}, address ${peerText(address)}`);
   try {
     logInternalAudit({
@@ -169,10 +172,7 @@ function recordFailure(key: string, kind: MfaLockKey, tokenId: string, req: Requ
   } else {
     if (!makeRoom(now)) {
       mfaLockoutEvictionsTotal.inc();
-      if (evictionWarnedAt === null || now - evictionWarnedAt >= MFA_LOCKOUT_WINDOW_MS) {
-        evictionWarnedAt = now;
-        log.warn(`The MFA lockout table is full of running locks (${MFA_KEYS_MAX} keys): a wrong code was refused but not recorded`);
-      }
+      evictionWarned('full', () => log.warn(`The MFA lockout table is full of running locks (${MFA_KEYS_MAX} keys): a wrong code was refused but not recorded`));
       return;
     }
     entry = { failures: [] };
@@ -193,7 +193,7 @@ function recordFailure(key: string, kind: MfaLockKey, tokenId: string, req: Requ
  */
 function addressIsTrustworthy(req: Request): boolean {
   // Read from the settings table, not through the app's getter: the route inventory takes a getter call with a string for a GET route.
-  if (req.app.settings['trust proxy']) return true;
+  if (trustProxyConfigured(req.app.settings['trust proxy'])) return true;
   const socketAddress = req.socket?.remoteAddress;
   return typeof socketAddress === 'string' && socketAddress !== '' && !isBlockedIp(socketAddress);
 }
@@ -222,7 +222,7 @@ export function mfaLockOfToken(tokenId: string): MfaLock | null {
  * The answer is an OBJECT: a site reads `.ok` (a gate holds that no call reads it as a boolean, which an object always is). A throw from the
  * store while a step is burned propagates: it is neither a verdict nor a guess.
  *
- * @param tokenId the id of the token the code is sent with (`mfaTokenIdOf`)
+ * @param tokenId the id of the token the code is sent with (`callerKeyOf`)
  */
 export function tryMfaCode(code: string, { tokenId, req }: { tokenId: string; req: Request }): MfaAttempt {
   const now = clock();
@@ -243,13 +243,4 @@ export function tryMfaCode(code: string, { tokenId, req }: { tokenId: string; re
     if (addressKey !== null) recordFailure(addressKey, 'address', tokenId, req, now);
   }
   return { ok: false, reason: 'invalid' };
-}
-
-/**
- * The id a request's second-factor attempts are counted under: its token's id, else (a caller with no stored id) the shared client key of its
- * credential. One definition so the three doors count one token under one key. A guard that runs before the token is attached to the request
- * (`enforceMfa`) passes the record it resolved; the doors behind the guards read the attached one.
- */
-export function mfaTokenIdOf(req: Request, record?: { id?: string }): string {
-  return (record ?? (req.authToken as { id?: string } | undefined))?.id ?? clientRateLimitKey(req);
 }

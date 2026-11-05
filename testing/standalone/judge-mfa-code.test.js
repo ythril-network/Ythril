@@ -34,7 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tempInstance, boot } from './_round-open-fixtures.mjs';
 import { removeInstanceDir } from './_vote-round-instance.mjs';
-import { codeAtStep, wrongCode, staleCode, ancientCode } from './_totp-codes.mjs';
+import { codeAtStep, wrongCode, staleCode, ancientCode } from '../_shared/totp-codes.mjs';
 
 const dir = tempInstance('ythril-q694-judge-');
 let totp; let attempts; let secret;

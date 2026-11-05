@@ -1,11 +1,10 @@
 import type { Request, Response, NextFunction } from 'express';
 import { log, peerText } from '../util/log.js';
-import { tokenRateLimit } from '../rate-limit/middleware.js';
+import { tokenRateLimit, callerKeyOf } from '../rate-limit/middleware.js';
 import { findMatchingToken, touchToken } from './tokens.js';
 import { consumeSseTicket } from './sse-ticket.js';
 import { isMfaEnabled } from './totp.js';
-import { tryMfaCode, mfaLockOfToken, mfaTokenIdOf } from './code-attempts.js';
-import { sendMfaLocked } from '../api/mfa-locked-answer.js';
+import { mfaCodeHolds } from '../api/mfa-code-door.js';
 import { validateOidcJwt, getOidcConfig } from './oidc.js';
 import type { TokenRecord } from '../config/types.js';
 import { isSpaceAdminFor, administersAnySpace } from './editor-scope.js';
@@ -373,23 +372,10 @@ function enforceMfa(
 ): boolean {
   const mfa = record && 'mfa' in record ? { mfa: record.mfa } : {};
   if (isPat(bearer) && mfaRequiredFor(mfa, isMfaEnabled())) {
-    const tokenId = mfaTokenIdOf(req, record as { id?: string } | undefined);
-    const lock = mfaLockOfToken(tokenId);
-    if (lock) {
-      sendMfaLocked(res, lock);
-      return false;
-    }
-    const code = (req.headers['x-totp-code'] as string | undefined ?? '').trim();
-    if (!code) {
-      res.status(403).json({ error: 'MFA_REQUIRED' });
-      return false;
-    }
-    const attempt = tryMfaCode(code, { tokenId, req });
-    if (!attempt.ok) {
-      if (attempt.reason === 'locked') sendMfaLocked(res, attempt);
-      else res.status(403).json({ error: 'MFA_INVALID' });
-      return false;
-    }
+    return mfaCodeHolds(req, res, callerKeyOf(req, record as { id?: string } | undefined), {
+      missing: { error: 'MFA_REQUIRED' },
+      invalid: { error: 'MFA_INVALID' },
+    });
   }
   return true;
 }

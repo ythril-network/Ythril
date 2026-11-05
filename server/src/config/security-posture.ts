@@ -16,6 +16,7 @@ import { publicBaseUrlIsFallback } from './public-url.js';
 import { atRestMigrationState } from '../files/at-rest-migration.js';
 import { unreadableCount } from '../files/unreadable-files.js';
 import { rulePostureCheck } from '../spaces/schema-rules.js';
+import { trustProxyConfigured } from './trust-proxy.js';
 
 export { POSTURE_LEVELS, type PostureLevel } from './posture-levels.js';
 import type { PostureLevel } from './posture-levels.js';
@@ -36,15 +37,6 @@ export interface SecurityPosture {
 export function securityStrict(): boolean {
   if (process.env['YTHRIL_SECURITY_STRICT'] === 'true') return true;
   try { return getConfig().security?.strict === true; } catch { return false; }
-}
-
-/** True when Express `trust proxy` is configured (needed for `req.secure` behind a TLS-terminating proxy). */
-function trustProxyConfigured(): boolean {
-  if (process.env['TRUST_PROXY']) return true;
-  try {
-    const tp = getConfig().trustProxy;
-    return tp !== undefined && tp !== false && tp !== 0 && tp !== '';
-  } catch { return false; }
 }
 
 /** True when the Mongo connection carries credentials (URI userinfo or MONGO_USERNAME). */

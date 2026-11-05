@@ -10,7 +10,9 @@
  *
  * ## What it holds
  *
- * `api/mfa.ts`, `api/tokens.ts` and `auth/middleware.ts` each call `tryMfaCode(` (the three doors that verify a code), and in any file
+ * `api/mfa.ts` and `api/mfa-code-door.ts` each call `tryMfaCode(`, and the two doors that demand a code (`enforceMfa` in
+ * `auth/middleware.ts`, the exemption grant in `api/tokens.ts`) each ask `mfaCodeHolds(` (the one sequence), so the three doors that verify a
+ * code are all held. In any file
  * that calls it, outside `auth/code-attempts.ts`, every call (read as a syntax tree, so a comment is never a call) is either the object
  * of a `.ok`, `.reason` or `.key` access, or the initialiser of a `const`/`let` whose name is read through one of them somewhere in the
  * enclosing function. A bare `!tryMfaCode(...)`, `if (tryMfaCode(...))`, `tryMfaCode(...) &&` or an answer passed on unread is an
@@ -31,7 +33,8 @@ import { parseSource } from '../_shared/syntax-tree.mjs';
 import { trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
-const SITES = ['server/src/api/mfa.ts', 'server/src/api/tokens.ts', 'server/src/auth/middleware.ts'];
+// `api/mfa-code-door.ts` is the one sequence that `enforceMfa` (`auth/middleware.ts`) and the exemption grant (`api/tokens.ts`) both stand at.
+const SITES = ['server/src/api/mfa.ts', 'server/src/api/mfa-code-door.ts'];
 const COUNTER = 'server/src/auth/code-attempts.ts';
 /** A call, a member call on a namespace included: only for the "each door calls it" and "the scan holds something" counts. */
 const CALL = /(?<![\w$])tryMfaCode\s*\(/g;
@@ -106,9 +109,17 @@ function unreadCalls(source) {
 }
 
 describe('every tryMfaCode call reads the object it answers', () => {
-  it('the three doors that verify a code each call tryMfaCode', () => {
+  it('the sites that verify a code each call tryMfaCode', () => {
     for (const site of SITES) {
       assert.ok(stripComments(readFileSync(site, 'utf8')).match(CALL), `${site} does not call tryMfaCode`);
+    }
+  });
+
+  it('the two doors that demand a code stand at the one sequence, and neither calls the counter on its own', () => {
+    for (const door of ['server/src/auth/middleware.ts', 'server/src/api/tokens.ts']) {
+      const text = stripComments(readFileSync(door, 'utf8'));
+      assert.match(text, /(?<![\w$])mfaCodeHolds\s*\(/, `${door} does not ask mfaCodeHolds`);
+      assert.doesNotMatch(text, new RegExp(CALL.source), `${door} calls tryMfaCode itself: the lock, code and counter sequence is written twice again`);
     }
   });
 
@@ -122,7 +133,7 @@ describe('every tryMfaCode call reads the object it answers', () => {
       const bad = unreadCalls(text);
       if (bad.length) found[f] = bad;
     }
-    assert.ok(calls >= 3, `found ${calls} calls of tryMfaCode in the server: the scan holds nothing`);
+    assert.ok(calls >= SITES.length, `found ${calls} calls of tryMfaCode in the server: the scan holds nothing`);
     assert.deepEqual(found, {}, 'an object is truthy: `!tryMfaCode(...)` is never true and the site accepts every code. Read `.ok`.');
   });
 

@@ -40,7 +40,7 @@ import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { tempInstance, boot } from './_round-open-fixtures.mjs';
 import { removeInstanceDir } from './_vote-round-instance.mjs';
-import { codeAtStep, wrongCode, staleCode } from './_totp-codes.mjs';
+import { codeAtStep, wrongCode, staleCode } from '../_shared/totp-codes.mjs';
 
 const dir = tempInstance('ythril-q694-attempts-');
 
