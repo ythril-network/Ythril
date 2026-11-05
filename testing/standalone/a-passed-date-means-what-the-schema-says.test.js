@@ -169,7 +169,7 @@ describe('every reader resolves it the same way', () => {
    */
   const READERS = [
     'server/src/brain/chrono.ts',
-    'server/src/brain/recall.ts',
+    'server/src/brain/recall-result.ts',   // the row-to-result mapping recall runs every hit through, where its status is derived
   ];
 
   it('no reader re-implements the resolution', () => {

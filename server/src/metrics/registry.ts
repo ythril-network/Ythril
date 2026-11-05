@@ -31,6 +31,7 @@ import { setBrainWriteSink } from './brain-write-count.js';
 import { setVersionRaiseSink, VERSION_RAISE_REASONS } from './version-raise-count.js';
 import { setConfigFlushFailureSink } from './config-flush-count.js';
 import { setEmbedJobFailedSink, EMBED_JOB_FAILED_REASONS } from './embed-job-failed-count.js';
+import { setScanHoldSink, SCAN_HOLD_SCANNERS } from './scan-hold-count.js';
 import { oldestRecordPositionHoldSeconds } from '../sync/record-position-stream.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
 import { schemaRefusalCounts } from '../brain/schema-refusal-tally.js';
@@ -2066,6 +2067,41 @@ export const recallDegradedTotal = new Counter({
 for (const reason of DEGRADED_REASONS) {
   recallDegradedTotal.labels({ reason }).inc(0);
 }
+
+/**
+ * Filtered recalls that found nothing and COULD NOT TELL whether the vector index missed a match (Q-696).
+ *
+ * A filtered search the index answered with no hits asks the collection whether an aged record satisfies the filter
+ * (`brain/index-should-serve.ts`, `indexMissedAMatch`). When that read times out or fails and the index serves other
+ * records, the recall cannot say `filter_window` or not, and answers the empty answer it has: the one named fail-open.
+ * It is not a reason on `ythril_recall_degraded_total` because the answer carries none (nothing is known to be missing);
+ * it is counted here so a read that keeps timing out is seen instead of read as "no match" for ever.
+ *
+ * Zero is meaningful: every filtered empty answer was decided.
+ */
+export const recallUndecidedTotal = new Counter({
+  name: 'ythril_recall_undecided_total',
+  help: 'Filtered recalls that found nothing and could not tell whether the vector index missed a match',
+  registers: [register],
+});
+recallUndecidedTotal.inc(0);
+
+/**
+ * Types a background scan HELD because the index its neighbour search ran over was not ready (Q-697), by `scanner` (`dupe`,
+ * `contradiction`): each hold is one scan of one cursor that ended without settling its seed and kept its position for the next run
+ * (`brain/scan-cursor.ts`, `noteScanHold`, counted through `metrics/scan-hold-count.ts`, which the cursor can import where it cannot
+ * import this). A stalled judge is not a hold here: `nliStalled` is the judge's signal, this is the index's.
+ *
+ * Zero is meaningful: no scan has waited for an index on this instance.
+ */
+export const scanHoldsCounter = new Counter({
+  name: 'ythril_scan_holds_total',
+  help: 'Types a background scan held because its vector index was not ready, by scanner',
+  labelNames: ['scanner'] as const,
+  registers: [register],
+});
+setScanHoldSink(scanner => scanHoldsCounter.labels({ scanner }).inc());
+for (const scanner of SCAN_HOLD_SCANNERS) scanHoldsCounter.labels({ scanner }).inc(0);
 
 /**
  * Writes that overwrote a record another writer had changed since it was read — a LOST UPDATE.

@@ -149,6 +149,16 @@ describe('ReviewTabComponent', () => {
     expect(clean.toastErrors).toEqual([]);
   });
 
+  it('scan says so when a type was held for an index that was not ready: "0 pairs" over part of the records is not a finished scan (Q-697)', () => {
+    const held = setup({ scanDuplicates: () => of({ scannedSpaces: 1, scanned: 3, pairs: 0, indexHeld: [{ spaceId: 'work', type: 'fact' }], failedSpaces: [] }) });
+    held.c.scan();
+    expect(held.toastErrors).toEqual(['duplicates.scanHeld']);
+
+    const clean = setup({ scanDuplicates: () => of({ scannedSpaces: 1, scanned: 3, pairs: 0, indexHeld: [], failedSpaces: [] }) });
+    clean.c.scan();
+    expect(clean.toastErrors).toEqual([]);
+  });
+
   it('re-rate on the "dismissed" filter removes the row (it is no longer dismissed)', () => {
     const reopen = vi.fn(() => of({ status: 'open' }));
     const { c } = setup({

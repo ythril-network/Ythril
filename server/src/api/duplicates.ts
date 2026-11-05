@@ -327,10 +327,13 @@ duplicatesRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly, as
 
     // A space that fails is named in `failedSpaces` and the rest are still scanned; a store that is not answering ends the request
     // (the `catch` below answers it 503). `scannedSpaces` counts the spaces that were scanned, so it equals `targets.length` on success.
-    const { results, failedSpaces } = await scanSpacesInRequest(SCAN_STEP, targets, (spaceId) => scanSpace(spaceId, { reset: true }));
+    const { results, failedSpaces } = await scanSpacesInRequest(SCAN_STEP, targets, async (spaceId) => ({ spaceId, ...(await scanSpace(spaceId, { reset: true })) }));
     const scanned = results.reduce((n, r) => n + r.scanned, 0);
     const pairs = results.reduce((n, r) => n + r.pairs, 0);
-    res.json({ scannedSpaces: results.length, scanned, pairs, failedSpaces });
+    // The types whose neighbour search ran over an index that was not ready (their position was kept, so a scan that held has looked at PART of
+    // the records and never reads as a finished one), in the spaces the scan covered: `targets` is already the token's own reach.
+    const indexHeld = results.flatMap(r => r.indexHeld.map(h => ({ spaceId: r.spaceId, type: h.type })));
+    res.json({ scannedSpaces: results.length, scanned, pairs, indexHeld, failedSpaces });
   } catch (err) {
     sendCaughtFailure(res, `POST /api/duplicates/scan`, err);
   }

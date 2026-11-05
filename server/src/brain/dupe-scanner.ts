@@ -47,7 +47,7 @@ import { emitWebhookEvent } from '../webhooks/dispatcher.js';
 import type { DupeCandidateDoc, DupeScanType, DupeActionRule } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
 import { readAfterPosition } from '../util/position-keyset.js';
-import { readScanStart, writeScanPosition, advanceScanPosition } from './scan-cursor.js';
+import { readScanCursor, writeScanPosition, advanceScanPosition, noteScanHold, clearScanHold } from './scan-cursor.js';
 import { summariseRecall } from './recall-shape.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { cronArmingRefused } from '../util/cron-arming.js';
@@ -55,7 +55,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { NotFoundError } from '../util/errors.js';
 import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
-import { seedsInRequest, seedsInWalk, type SeedRunner } from './scan-seed-runner.js';
+import { seedsInRequest, seedsInWalk, seedSearchOutcome, type SeedRunner } from './scan-seed-runner.js';
 import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 import { readStoredById } from '../db/read-by-id.js';
 
@@ -354,8 +354,8 @@ export async function handlePair(spaceId: string, type: DupeScanType, seed: Reca
  * which isolates a seed from its neighbours and ends the space on a timeout (`scan-seed-runner.ts`). This used to be an empty
  * `catch`, which read a hung space's timeout as one record's trouble and paid a bound for every record in it.
  *
- * `indexNotReady` says the answer came from an index still being built over records it should serve (`findSimilar`'s
- * `degraded` holds `index_not_ready`, `Q-326`): the record's duplicates were not all looked for, so the caller must not
+ * `indexNotReady` says the answer came from an index still being built over records it should serve (`seedSearchOutcome` of
+ * `findSimilar`'s `degraded` is `hold`, `Q-326`): the record's duplicates were not all looked for, so the caller must not
  * mark it scanned. An index that will not serve (`index_unavailable`) is not this: waiting does not help, the scan moves
  * on, and recall warns about the index (throttled, once per collection per ten minutes).
  */
@@ -365,7 +365,7 @@ async function evalOneRecord(spaceId: string, type: DupeScanType, recordId: stri
   let indexNotReady = false;
   try {
     const { source, results, degraded } = await findSimilar(spaceId, recordId, type as RecallKnowledgeType, TOPK, [type as RecallKnowledgeType], threshold);
-    indexNotReady = degraded?.includes('index_not_ready') ?? false;
+    indexNotReady = seedSearchOutcome(degraded) === 'hold';
     // A fork is an unchosen version of a record, not a duplicate of it, and automerge would absorb it with nobody having chosen (Q-624): never a counterpart.
     const unchosen = await unchosenVersionsAmong(spaceId, type, results.filter(m => m.type === type).map(m => m._id));
     for (const match of results) {
@@ -409,6 +409,8 @@ export async function evaluateRecordForDuplicates(spaceId: string, type: DupeSca
 export interface DupeScanResult {
   scanned: number;
   pairs: number;
+  /** The types whose neighbour search ran over an index that was not ready, so their position was kept for the next run (`Q-326`, `Q-697`). Empty when nothing held. */
+  indexHeld: Array<{ type: DupeScanType }>;
 }
 
 /**
@@ -424,8 +426,8 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
   const cfg = getConfig();
   const dc = cfg.dupeScanner ?? {};
   const space = cfg.spaces.find(s => s.id === spaceId);
-  if (!space) return { scanned: 0, pairs: 0 };
-  if (!isVectorSearchAvailable() || needsReindex(spaceId)) return { scanned: 0, pairs: 0 };
+  if (!space) return { scanned: 0, pairs: 0, indexHeld: [] };
+  if (!isVectorSearchAvailable() || needsReindex(spaceId)) return { scanned: 0, pairs: 0, indexHeld: [] };
 
   const threshold = effectiveThreshold(spaceId);
   const batchSize = clamp(dc.batchSize ?? DEFAULT_BATCH_SIZE, 1, 1000);
@@ -434,11 +436,14 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
 
   let scanned = 0;
   let pairs = 0;
+  const indexHeld: DupeScanResult['indexHeld'] = [];
 
   for (const type of types) {
     if (scanned >= maxPerRun) break;
     if (opts?.reset) await writeScanPosition(cursorId(spaceId, type), { spaceId, type }, null);
-    let cursor = opts?.reset ? { pos: 0 } : await readScanStart(cursorId(spaceId, type));
+    const { start, carriesHold } = await readScanCursor(cursorId(spaceId, type));
+    let cursor = opts?.reset ? { pos: 0 } : start;
+    let heldThisType = false;
 
     while (scanned < maxPerRun) {
       const take = Math.min(batchSize, maxPerRun - scanned);
@@ -472,15 +477,20 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
         }
       }, type);
       if (held) {
-        log.info(`Dupe scan '${spaceId}': the ${type} index is not ready over records it should serve — holding the scan position `
-          + 'for the next run');
+        // The hold's clock, count and line (`noteScanHold`); the position is NOT written, and the clock survives the next position write.
+        heldThisType = true;
+        indexHeld.push({ type });
+        await noteScanHold(cursorId(spaceId, type), { scanner: 'dupe', spaceId, type, now: Date.now() });
         break;
       }
       await writeScanPosition(cursorId(spaceId, type), { spaceId, type }, cursor);
     }
+    // The pass ended WITHOUT a hold (an empty batch included): a clock an earlier run started is over. Once per type, and only for a row that
+    // carried one, so a healthy instance writes nothing here.
+    if (!heldThisType && carriesHold) await clearScanHold(cursorId(spaceId, type));
   }
 
-  return { scanned, pairs };
+  return { scanned, pairs, indexHeld };
 }
 
 /**

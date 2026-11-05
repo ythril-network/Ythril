@@ -722,6 +722,12 @@ Lines of other jobs follow the same shape; the ones whose wording is worth knowi
   records it starts from in a space is said too, not skipped in silence. A scan an operator starts (**Scan now**, or the API) says
   the same line ending `— retried next scan`: a space that fails does not stop the others from being scanned, and the API
   answers which spaces failed.
+- `Scan hold (dupe|contradiction): the index is not ready over records it should serve — space '<id>', <type> keeps its position for
+  the next run (held since <time>)`: a scan met a vector index that is not ready (being built or rebuilt) and kept that type's
+  place, so the next run reads the same records again. One line per hold at info, which is the ordinary case right after an upgrade
+  or a database container recreate. When the same type has been held for **20 hours** or more the line is a **warning**
+  (`… has been held for <n> hours …`), said once per 20 hours: the scan is not reaching the records behind its place, so look at
+  that space's vector index. The scan's answer lists what it held (`indexHeld`), and `ythril_scan_holds_total` counts it.
 - `Suppression sweep failed for space '<id>': … — retried with the next meta write`.
 - `Embed claim`, `Embed revive`, `Embed stall reset`, `Media claim` and `Media stall reset` name the embedding and media
   queues. A space that fails to hand out a job does not stop the next space's jobs, and a queue is not marked empty

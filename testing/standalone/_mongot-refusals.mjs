@@ -42,6 +42,22 @@ export const REFUSALS = {
     errmsg: executor(ns, 'Error connecting to localhost:27027 :: caused by :: Connection refused') }),
 };
 
+/**
+ * The server's error for the refusal `make(namespace, indexName)` gives (a `REFUSALS` entry or a function of the same shape), as the driver delivers it.
+ * The one place a test builds mongot's refusal: a suite that builds its own `MongoServerError` is a second spelling of the wording, which is how one
+ * copy ends up missing a state the shared one learned (`an-index-not-queryable-yet-is-an-empty-collection.test.js` holds the tests to it).
+ */
+export function refusalError(make, namespace, indexName) {
+  return new MongoServerError({ ok: 0, ...make(namespace, indexName) });
+}
+
+/** The store's `MaxTimeMSExpired` (code 50) for a read that ran past its `maxTimeMS`, as the driver delivers it: what a bounded read of ours answers with when it is cut off. */
+export function maxTimeExpiredError() {
+  return new MongoServerError({
+    ok: 0, code: 50, codeName: 'MaxTimeMSExpired', errmsg: 'Executor error during find command :: caused by :: operation exceeded time limit',
+  });
+}
+
 /** A `forQuery` that accepts the searches made with `vector` (a seed's stored embedding) and no other. */
 export const searchesWith = (vector) => (queryVector) =>
   Array.isArray(queryVector) && queryVector.length === vector.length && queryVector.every((x, i) => Math.abs(x - vector[i]) < 1e-9);
@@ -63,7 +79,7 @@ export function refuseVectorSearch(make, { only = () => true, forQuery = () => t
     const cursor = original.call(this, pipeline, ...rest);
     const stage = Array.isArray(pipeline) ? pipeline[0]?.['$vectorSearch'] : undefined;
     if (!stage || !only(this.collectionName) || !forQuery(stage.queryVector)) return cursor;
-    const err = new MongoServerError({ ok: 0, ...make(`${this.dbName}.${this.collectionName}`, stage.index) });
+    const err = refusalError(make, `${this.dbName}.${this.collectionName}`, stage.index);
     cursor.toArray = async () => { refused++; await cursor.close(); throw err; };
     return cursor;
   };

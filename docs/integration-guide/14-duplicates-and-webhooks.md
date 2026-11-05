@@ -27,7 +27,7 @@ A background scanner can sweep a space for **semantically duplicate** records an
 > from cursor zero — that is a normal first pass, bounded by `maxPerRun` like any other. Set `types`
 > explicitly to opt back out.
 
-**How the sweep works.** Each run walks a space's records ordered by `seq` (the monotonic sequence number that advances on every create *and* update), resuming from a per-(space, type) cursor. For each record it runs a vector search using the record's **stored** embedding (no re-embedding) and, for every match at or above `threshold`, applies the space's rules. Because updates advance `seq`, an edited record is re-scanned automatically; because the cursor is `seq`-based (not time-based), a record inserted with insert-time checking disabled is still covered. `maxPerRun` bounds the work per run so the initial full pass spreads across nights rather than one heavy burst. Records relayed from several authors can share a `seq`, so the cursor is a position `(seq, _id)` within that order: a run that ends in the middle of records sharing a `seq` (a batch boundary, or `maxPerRun`) resumes at the next record rather than skipping the rest. A cursor written by an earlier build holds the `seq` alone, so the first run after an upgrade scans the records at that one `seq` once more — a pair already recorded is recorded again as itself, and nothing below it is read again. **A type whose vector index is not ready holds its position.** When a record's search answers `index_not_ready` (the index is being built or rebuilt over records it should serve), the run ends that type without moving its cursor, and the next run reads the same records once the index serves, so no record is marked scanned without its duplicates having been looked for. A type whose index is unavailable (it refuses the search for another reason, `index_unavailable`) does not hold the scan: waiting would not help, so the scanner moves on, and recall names the index in the server log (once per collection per ten minutes).
+**How the sweep works.** Each run walks a space's records ordered by `seq` (the monotonic sequence number that advances on every create *and* update), resuming from a per-(space, type) cursor. For each record it runs a vector search using the record's **stored** embedding (no re-embedding) and, for every match at or above `threshold`, applies the space's rules. Because updates advance `seq`, an edited record is re-scanned automatically; because the cursor is `seq`-based (not time-based), a record inserted with insert-time checking disabled is still covered. `maxPerRun` bounds the work per run so the initial full pass spreads across nights rather than one heavy burst. Records relayed from several authors can share a `seq`, so the cursor is a position `(seq, _id)` within that order: a run that ends in the middle of records sharing a `seq` (a batch boundary, or `maxPerRun`) resumes at the next record rather than skipping the rest. A cursor written by an earlier build holds the `seq` alone, so the first run after an upgrade scans the records at that one `seq` once more — a pair already recorded is recorded again as itself, and nothing below it is read again. **A type whose vector index is not ready holds its position.** When a record's search answers `index_not_ready` (the index is being built or rebuilt over records it should serve), the run ends that type without moving its cursor, and the next run reads the same records once the index serves, so no record is marked scanned without its duplicates having been looked for. The hold is counted (`ythril_scan_holds_total{scanner="dupe"}`), the scan's answer names it (`indexHeld`, [below](#a-scan-that-held-a-type)), and a type that has been held for **20 hours** or more is warned in the server log, once per 20 hours per type: a hold of one run is the ordinary case of an index that is being built, and the warning goes by the hold's age and not by a count of runs, because a manual scan is a run too. The clock starts at the first hold and only a run that ends without a hold clears it; a rescan (`POST /api/duplicates/scan`) keeps it. A type whose index is unavailable (it refuses the search for another reason, `index_unavailable`) does not hold the scan: waiting would not help, so the scanner moves on, and recall names the index in the server log (once per collection per ten minutes).
 
 **Real-time evaluation (optional).** Set `dupeRulesOnInsert: true` on a space (Settings → Spaces → Duplicates, or `PATCH /api/spaces/:id`) to also apply the rules the moment a record is inserted, not only on the scheduled scan. Evaluation is fire-and-forget (it never blocks or fails the write) and applies to **all** inserts, including bulk — leave it off for scan-time-only. Default off. Note that with an `automerge` rule, real-time evaluation can absorb a just-inserted entity moments after the write returns.
 
@@ -65,7 +65,7 @@ Base path: `/api/duplicates`.
 | `POST` | `/api/duplicates/:id/dismiss` | `dataQuality` write | Mark a pair reviewed / not-a-duplicate. A later re-embed/re-sync will not resurface it; a real content change will. |
 | `POST` | `/api/duplicates/:id/reopen` | `dataQuality` write | Manually re-rate a **dismissed** pair back onto the open list. `404` if the pair is not currently dismissed. |
 | `POST` | `/api/duplicates/:id/merge` | `dataQuality` write **and** `knowledge` write, in the pair's space | Merge an entity candidate losslessly. `409` with the merge plan if there is a value conflict; `422 merge_too_large` (with `relinks` and `bound`) or `400` for a survivor a `strict` schema refuses (the standard refusal body, naming only what the merge introduced), before anything is written — the same answers as the entity merge route ([04b](04b-graph-api.md#merge-two-entities)). When the too-large refusal says merging the other way round fits, this route takes its direction from the space's `dupeMergeSurvivor`, so it is the setting that changes it; the entity merge route and `graph_merge` take the two ids in either order. A merge deletes the absorbed entity, so it needs the same `knowledge` write as the entity merge and `graph_merge`. A candidate in a space where the token lacks either answers `404`, so the refusal does not reveal that the candidate exists. |
-| `POST` | `/api/duplicates/scan?space=<id>` | `dataQuality` write + MFA | Trigger an on-demand full re-scan. It only ever touches spaces where the token holds `dataQuality` write — naming one it does not answers `404`. Requires `X-TOTP-Code` when MFA is enabled. Answers `{ scannedSpaces, scanned, pairs, failedSpaces }` — see [a scan that could not scan a space](#a-scan-that-could-not-scan-a-space). |
+| `POST` | `/api/duplicates/scan?space=<id>` | `dataQuality` write + MFA | Trigger an on-demand full re-scan. It only ever touches spaces where the token holds `dataQuality` write — naming one it does not answers `404`. Requires `X-TOTP-Code` when MFA is enabled. Answers `{ scannedSpaces, scanned, pairs, indexHeld, failedSpaces }` — see [a scan that could not scan a space](#a-scan-that-could-not-scan-a-space) and [a scan that held a type](#a-scan-that-held-a-type). |
 
 These routes name no space: each one looks the candidate up only in the spaces where the token holds the rung in
 the Auth column, so a candidate in any other space is `404`, never `403`.
@@ -108,6 +108,7 @@ end the request: every other space is still scanned, the answer is `200`, and **
 
 ```json
 { "scannedSpaces": 3, "scanned": 412, "pairs": 7,
+  "indexHeld": [ { "spaceId": "work", "type": "fact" } ],
   "failedSpaces": [ { "spaceId": "notes", "reason": "A store-side failure stopped this operation. …" } ] }
 ```
 
@@ -123,6 +124,22 @@ end the request: every other space is still scanned, the answer is `200`, and **
 - There is no MCP tool for either scan (a scan is an operator action, started from the Brain's Review tab or this API), so this
   field has no MCP twin.
 
+#### A scan that held a type
+
+A scan can also finish without having looked at every record: a type whose neighbour search ran over a vector index that was **not
+ready** (being built, rebuilt or absent over records it should serve) keeps its position, and the next run reads the same records
+again once the index serves. The `200` says so, in **`indexHeld`**, so a count over a held scan is never read as a finished one
+("0 found" is "nothing disagrees" only over records that were compared).
+
+- `indexHeld` is **always present**, `[]` when nothing held. Each entry is `{ spaceId, type }`, and on `POST /api/contradictions/scan`
+  also **`pass`** (`structured` or `nli`): the contradiction scanner keeps one cursor per pass and type, and each holds on its own.
+- It lists only spaces the scan covered, which are the spaces where the token holds `dataQuality` write: a token is never told that
+  a space it cannot scan has an index that is not ready.
+- Only an index that is **not ready** holds. An index that exists and refuses for another reason (`index_unavailable`: a dimension
+  mismatch, a failed index) does not: waiting would stall the type until an operator repairs it, so the scan moves on and recall names
+  the index in the server log. A judge that was unreachable is its own signal, `nliStalled`, and is not an index hold.
+- The Review tab says so in its own message when `indexHeld` names a type, in every language, beside the judge's and a failed space's.
+
 ### Contradictions API
 
 Base path: `/api/contradictions`. Mirrors the duplicates API — same space scoping, same content-gated
@@ -134,7 +151,7 @@ sticky dismissal — because the Review tab presents both under one vocabulary.
 | `POST` | `/api/contradictions/:id/dismiss` | non-read-only | Reviewed / not a real disagreement. Content-gated exactly like a duplicate dismissal. A **resolved** finding is refused `409` `{ code: "alreadyResolved", resolution }` and left as it is (its edge and mark stand); `404` when there is no such finding. Releases an unfinished resolve's claim and answers its `notes` (below). |
 | `POST` | `/api/contradictions/:id/reopen` | non-read-only | Bring a **dismissed** pair back onto the open list. `404` if it is not currently dismissed. |
 | `POST` | `/api/contradictions/:id/resolve` | non-read-only | Body `{ "resolution": "edited" \| "linked" \| "superseded" }`. Records HOW a human settled it. `superseded` also needs `"winner": "a" \| "b"` — see below. |
-| `POST` | `/api/contradictions/scan?space=<id>` | `dataQuality` write + MFA | Run the sweep now, over the spaces where the token holds `dataQuality` write. Answers `{ scannedSpaces, scanned, found, judgedPairs, modelCalls, nliStalled, budgetExhausted, failedSpaces }`: `nliStalled: true` if it stopped because the judge was unavailable, and `failedSpaces` as [below](#a-scan-that-could-not-scan-a-space). |
+| `POST` | `/api/contradictions/scan?space=<id>` | `dataQuality` write + MFA | Run the sweep now, over the spaces where the token holds `dataQuality` write. Answers `{ scannedSpaces, scanned, found, judgedPairs, modelCalls, nliStalled, indexHeld, budgetExhausted, failedSpaces }`: `nliStalled: true` if it stopped because the judge was unavailable, `indexHeld` the types it kept for an index that was not ready ([below](#a-scan-that-held-a-type)), and `failedSpaces` as [below](#a-scan-that-could-not-scan-a-space). |
 
 A candidate is `{ id, spaceId, type, aId, aSummary, bId, bSummary, basis, confidence, fields?, truncated?,
 status, resolution?, supersededId?, resolvedBy?, notes?, resolving?, detectedAt, updatedAt }`. `resolving`
@@ -330,9 +347,12 @@ still received the record text. Compare your endpoint's counter against `modelCa
 > endpoint at all, and a pair is judged once per sweep. Expect a sweep of the same space to cost
 > substantially less than it used to.
 
-Plus two *distinct* incomplete endings: `nliStalled` means the judge was unreachable and **nothing** was
-settled (the cursor is parked), while `budgetExhausted` means the pairs it judged **are** settled and the next
-run continues from there. Neither should be read as a clean result.
+Plus *distinct* incomplete endings, each its own signal: `nliStalled` means the judge was unreachable and **nothing**
+was settled (the cursor is parked), `indexHeld` names a type whose neighbour search ran over an index that was not ready, so its
+cursors (both passes, each on its own) stay at the seed before the one that was not searched and nothing is judged for it or
+the seeds behind it, and `budgetExhausted` means the pairs it judged **are** settled and the next run continues from there.
+None should be read as a clean result. A hold is counted (`ythril_scan_holds_total{scanner="contradiction"}`) and warned in the
+server log once it has lasted **20 hours** or more, exactly as the duplicate scan's is; `nliStalled` is not counted there.
 
 Until it is enabled, contradictions are found **only** when somebody runs `POST /api/contradictions/scan`
 by hand — so the Review tab's Contradictions view stays empty on an instance nobody has scanned manually.

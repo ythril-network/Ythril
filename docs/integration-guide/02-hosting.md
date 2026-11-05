@@ -514,8 +514,9 @@ into a crashloop, which then looks like a failure to start rather than a probe t
 >
 > From 2.1, index builds are confirmed **in the background**: boot completes in seconds, affected spaces
 > report `indexStatus: "building"`, and each flips to `ready` when its build finishes. Semantic recall on
-> a space that is still building returns no results until it completes — the same behaviour a
-> newly-created space has always had. `INDEX_READY_TIMEOUT_MS` (default 10 minutes) bounds how long the
+> a space that is still building answers from what the fresh-write scan and the lexical channel find, and says so: the
+> recall's `degraded` array carries `index_not_ready` (filtered or not) when records older than the fresh-write window
+> may be missing, and none on a newly-created space, which holds nothing older. `INDEX_READY_TIMEOUT_MS` (default 10 minutes) bounds how long the
 > background check waits before marking a space `failed`; raise it for very large collections.
 >
 > **A search service that starts late heals by itself.** `mongot` (the search process next to `mongod`) can start
@@ -565,7 +566,8 @@ into a crashloop, which then looks like a failure to start rather than a probe t
 > restarting 2.0.x, and there is no need to raise the startup budget for it.
 
 Note also that a newly created space returns immediately with `indexStatus: "building"` — it is writable
-at once, but semantic recall stays empty until the index finishes. That is expected, not a fault.
+at once, and recall finds what it writes through the fresh-write scan while the index builds, with no `degraded` reason
+(a new space holds nothing the index should already serve). That is expected, not a fault.
 
 ### Running Multiple Brains on One Host
 

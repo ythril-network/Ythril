@@ -29,21 +29,19 @@ import type { DegradedReason } from './degraded-reasons.js';
 import { isMaxTimeExpired } from '../db/max-time.js';
 import { observeRecallPath, type RecallPathObservation } from './recall-path.js';
 export { observeRecallPath, type RecallPathObservation };
-import { deriveChronoStatus } from './chrono-status.js';
-import { datePassedPolicy } from './chrono-date-policy.js';
-import { getSpaceMeta } from '../spaces/schema-validation.js';
+import { mapToRecallResult } from './recall-result.js';
 import { rerankConfigured, candidateMultiplier } from './rerank-client.js';
 import { rerankPool } from './rerank-pool.js';
 import { lexicalSearch, stampFusion, fuseAcrossSpaces, hybridSearchEnabled, LEXICAL_LIMIT_MULTIPLIER, type LexicalHit } from './lexical-search.js';
 import { atlasVectorScore, scoresAgree } from './vector-score.js';
 import { matchFreshWrites, addFreshWrites } from './fresh-writes.js';
 import { isIndexNotQueryableYet } from './index-not-queryable.js';
-import { holdsRecordTheIndexShouldServe } from './index-should-serve.js';
+import { holdsRecordTheIndexShouldServe, indexMissedAMatch, HOLDS_READ_MS, type IndexMiss, type IndexMissMemo } from './index-should-serve.js';
 import { isStoreUnreachable } from '../db/store-condition.js';
 import { isStoreSide } from './store-failure.js';
 import { warnOnce } from '../util/warn-once.js';
 import { MongoServerError } from 'mongodb';
-import type { ChronoStatus, RecordType } from '../config/types.js';
+import type { RecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
 import { log, peerText } from '../util/log.js';
 import { recallDegradedTotal } from '../metrics/registry.js';
@@ -131,7 +129,7 @@ async function settleSearches(
 export type RecallKnowledgeType = RecordType;
 
 /** Fields shared by every knowledge-type recall result. */
-interface RecallBase {
+export interface RecallBase {
   _id: string;
   spaceId: string;
   /** Vector similarity, on the configured `similarity` scale. `minScore` always filters on THIS. */
@@ -373,9 +371,9 @@ export async function recall(
   const pathObs = opts?.observePath ?? observeRecallPath();
 
   // One budget for every collection search this call makes, read afresh before each round trip, plus the
-  // channel a search reports an incomplete answer through, and the matching-id sets the floor and the main
-  // search share rather than each reading them from the collection.
-  const budget: SearchBudget = { remaining: searchDeadline, noteDegraded, memo: new Map() };
+  // channel a search reports an incomplete answer through, and the matching-id sets and the "did the index miss
+  // a match" answers the floor and the main search share rather than each reading them from the collection.
+  const budget: SearchBudget = { remaining: searchDeadline, noteDegraded, memo: new Map(), missedMatchMemo: new Map() };
 
   // Phase 1: for each type with a minPerType floor > 0, guarantee that many results
   const guaranteed: RecallResult[] = [];
@@ -858,19 +856,21 @@ function recallProjection(knowledgeType: RecallKnowledgeType): {
  * - `noteDegraded` — the typed channel a search reports an incomplete answer through. Only a timeout could be
  *   reported before, by throwing; `filter_window` is an answer that DID come back and is incomplete.
  * - `memo` — the matching-id sets, so the floor search and the main search over one collection read them once.
+ * - `missedMatchMemo` — the answers to "did the index miss a match" (Q-696), by collection and predicate, so the floor
+ *   search and the main search over one collection ask the filtered holds-read and the probe once.
  */
 interface SearchBudget {
   /** Absent for a caller with no deadline (`findSimilar`), which still needs the reporting channel. */
   remaining?: () => number;
   noteDegraded: (reason: DegradedReason) => void;
   memo?: PredicateIdMemo;
+  missedMatchMemo?: IndexMissMemo;
 }
 
-/**
- * The bound on the holds-read a search with no deadline of its own makes after a refusal (`findSimilar`, the
- * insert-time check): one indexed `findOne`, so 2 s is generous, and a timeout answers "holds", the safe side.
+/*
+ * `HOLDS_READ_MS`, the bound on the holds-read a search with no deadline of its own makes, lives in
+ * `brain/index-should-serve.ts` with the reads it bounds: the filtered read of `indexMissedAMatch` is capped by it too.
  */
-const HOLDS_READ_MS = 2_000;
 
 /**
  * `index_unavailable` is said once per collection per ten minutes (vet S10): the index will not serve until an
@@ -1083,9 +1083,23 @@ async function recallByType(
   }
   // An unfiltered ANN search answering NOTHING is what an absent or dropped index gives (no error, no hits: PROBE M1
   // case (a)), and what an index lost while the process believes it built one gives for ever. Over records the index
-  // should serve it is not an empty collection (`Q-326`, O3). The filtered paths ask the same in `predicateRecall`.
+  // should serve it is not an empty collection (`Q-326`, O3). The predicate path asks the same in `predicateRecall`; the
+  // native-filter path, whose search answered nothing, asks `indexMissedAMatch` (Q-696): over an index that serves nothing
+  // it is `index_not_ready`, over one that missed a match older than the fresh window it is `filter_window`.
   if (unfiltered && docs.length === 0 && await holdsServable()) {
     throw new RecallSearchIncomplete(knowledgeType, 'index_not_ready');
+  }
+  if (usedNativeFilter && docs.length === 0) {
+    let missed: IndexMiss;
+    try {
+      missed = await indexMissedAMatch({
+        collName, indexName, target: { vectorPath: 'embedding', dims: queryVector.length },
+        predicate: recallPredicate(tags, filter, knowledgeType), budgetMs: deadline() ?? Infinity,
+      }, budget?.missedMatchMemo);
+    } catch (err) {
+      return answerRefusal(err);
+    }
+    if (missed === 'index_not_ready' || missed === 'filter_window') throw new RecallSearchIncomplete(knowledgeType, missed);
   }
   return docs.map(d => mapToRecallResult(d, knowledgeType));
 }
@@ -1148,36 +1162,6 @@ class RecallSearchIncomplete extends Error {
       ? `recall: the ${knowledgeType} search exceeded its deadline`
       : `recall: the ${knowledgeType} search could not be completed (${reason})`);
     this.name = 'RecallSearchIncomplete';
-  }
-}
-
-function mapToRecallResult(doc: Record<string, unknown>, knowledgeType: RecallKnowledgeType): RecallResult {
-  const base: RecallBase = {
-    _id: doc['_id'] as string,
-    spaceId: doc['spaceId'] as string,
-    score: doc['score'] as number,
-    createdAt: doc['createdAt'] as string | undefined,
-    updatedAt: doc['updatedAt'] as string | undefined,
-    seq: doc['seq'] as number | undefined,
-    embeddingModel: doc['embeddingModel'] as string | undefined,
-    tags: doc['tags'] as string[] | undefined,
-    description: doc['description'] as string | undefined,
-    properties: doc['properties'] as Record<string, string | number | boolean> | undefined,
-    matchedText: doc['matchedText'] as string | undefined,
-    superseded: doc['superseded'] as boolean | undefined,
-  };
-  switch (knowledgeType) {
-    case 'fact':
-      return { ...base, type: 'fact', fact: doc['fact'] as string };
-    case 'entity':
-      return { ...base, type: 'entity', name: doc['name'] as string, entityType: doc['type'] as string };
-    case 'edge':
-      return { ...base, type: 'edge', from: doc['from'] as string, to: doc['to'] as string, label: doc['label'] as string, weight: doc['weight'] as number | undefined, edgeType: doc['type'] as string | undefined };
-    case 'chrono':
-      return { ...base, type: 'chrono', title: doc['title'] as string, chronoType: doc['type'] as string, startsAt: doc['startsAt'] as string, status: deriveChronoStatus({ status: doc['status'] as ChronoStatus, startsAt: doc['startsAt'] as string, endsAt: doc['endsAt'] as string | undefined },
-        new Date(), datePassedPolicy(getSpaceMeta(doc['spaceId'] as string), doc['type'] as string | undefined)) };
-    case 'file':
-      return { ...base, type: 'file', path: doc['path'] as string, sizeBytes: doc['sizeBytes'] as number | undefined, headingText: doc['headingText'] as string | null | undefined, content: doc['content'] as string | undefined, parentFileId: doc['parentFileId'] as string | undefined, chunkIndex: doc['chunkIndex'] as number | undefined, mediaType: doc['mediaType'] as 'image' | 'audio' | 'video' | undefined, embeddingStatus: doc['embeddingStatus'] as RecallFile['embeddingStatus'], chunkOffsetMs: doc['chunkOffsetMs'] as number | undefined, chunkDurationMs: doc['chunkDurationMs'] as number | undefined };
   }
 }
 
