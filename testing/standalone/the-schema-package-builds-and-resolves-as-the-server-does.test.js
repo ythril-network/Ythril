@@ -20,7 +20,6 @@
  *   `@ythril/schema/from-typescript` through the same table, so the table's keys are held to the package's `exports` (derived, never a second list) and
  *   every row to a file of the package.
  *
-
  * Run: node --test testing/standalone/the-schema-package-builds-and-resolves-as-the-server-does.test.js
  */
 import { describe, it } from 'node:test';

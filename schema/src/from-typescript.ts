@@ -109,6 +109,12 @@ class EnvironmentProblem extends Error {}
 /** The install command every "no usable compiler" rejection names. */
 const INSTALL_HINT = 'npm install typescript@6';
 
+/**
+ * The install that keeps an app's own `typescript` (a release whose package has no compiler API, such as 7.x) and adds one that has it, under an alias the
+ * app then passes as the `typescript` option. The peer range has no ceiling for the same reason: npm refuses the whole package beside a typescript outside it.
+ */
+const ALIAS_HINT = 'npm install typescript-6@npm:typescript@6';
+
 /** The one rejection of every "no usable compiler" path: what to install, and how to hand an installed one in. */
 function installError(why: string, cause?: unknown): Error {
   return new Error(
@@ -117,11 +123,18 @@ function installError(why: string, cause?: unknown): Error {
   );
 }
 
+/** The rejection of a loaded `typescript` with no compiler API: the plain install would replace the app's own, so it also names the alias install. */
+function noCompilerApiError(): Error {
+  return installError(
+    `the installed typescript has no compiler API; to keep it, \`${ALIAS_HINT}\` and pass \`(await import('typescript-6')).default\` as the \`typescript\` option`,
+  );
+}
+
 /** The compiler a loaded module is: its default export when it has one (the CommonJS module's namespace), else the module. Anything without `createProgram` (a compiler whose API is another package's) is refused. */
 function compilerOf(loaded: unknown): Compiler {
   const holder = loaded as { default?: unknown } | null | undefined;
   const candidate = (holder?.default ?? loaded) as Partial<Compiler> | null | undefined;
-  if (typeof candidate?.createProgram !== 'function') throw installError('the loaded module has no createProgram');
+  if (typeof candidate?.createProgram !== 'function') throw noCompilerApiError();
   return candidate as Compiler;
 }
 
