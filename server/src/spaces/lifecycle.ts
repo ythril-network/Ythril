@@ -657,6 +657,17 @@ export async function dropSpaceData(
     log.warn(peerText(msg));
     errors.push(msg);
   }
+
+  // 2d. Drop the space's scan cursors (Q-697). The prefix drop cannot reach them: `ythril_dupe_scan_state` is instance-wide, keyed `<space>:<type>`.
+  // Left behind, a space created again under the id would scan from the old position and inherit the old hold clock. Here, with 2b and 2c, so a resumed delete does it too.
+  try {
+    const { dropScanCursorsOfSpace } = await import('../brain/scan-cursor.js');
+    await dropScanCursorsOfSpace(spaceId);
+  } catch (err) {
+    const msg = `Could not drop the scan cursors of '${spaceId}': ${err}`;
+    log.warn(peerText(msg));
+    errors.push(msg);
+  }
   // 3. Delete the space files directory
   const filesDir = path.resolve(getDataRoot(), 'files', spaceId);
   try {

@@ -21,6 +21,7 @@ import { ReviewCompletenessState } from './review-completeness-state';
 import { ReviewContradictionsPanelComponent } from './review-contradictions-panel.component';
 import { ReviewContradictionsState } from './review-contradictions-state';
 import { scorePct, scoreVariant, duplicatesSummaryOf } from './review-score';
+import { duplicatesScanNotices } from './review-scan-notices';
 
 @Component({
   selector: 'app-review-tab',
@@ -538,12 +539,9 @@ export class ReviewTabComponent implements OnInit, OnChanges {
   scan(): void {
     this.scanning.set(true);
     this.duplicatesApi.scanDuplicates(this.spaceId).subscribe({
-      next: (r) => {
-        this.scanning.set(false);
-        // The tab scans ONE space, so a space the scan could not scan is the whole scan: a `200` that names it (Q-381) must not read as done.
-        if (r.failedSpaces?.length) this.toast.error(this.transloco.translate('duplicates.scanError'));
-        this.load();
-      },
+      // The tab scans ONE space, so a space the scan could not scan (Q-381) or a type held for an index that was not ready (Q-697) is the whole scan:
+      // a `200` that names either must not read as done (`duplicatesScanNotices`).
+      next: (r) => { this.scanning.set(false); for (const key of duplicatesScanNotices(r)) this.toast.error(this.transloco.translate(key)); this.load(); },
       error: (e) => {
         this.scanning.set(false);
         this.toast.error(this.transloco.translate(e?.status === 403 ? 'duplicates.scanForbidden' : 'duplicates.scanError'));

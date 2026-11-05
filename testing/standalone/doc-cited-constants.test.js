@@ -453,6 +453,20 @@ const CITED = [
     doc: 'docs/userguide/02-brain.md',
     text: (v) => new RegExp(`taken over after \\*\\*${v === 1 ? 'a minute' : counted(v, 'minute')}\\*\\*`),
   },
+  // The age at which a scan hold is WARNED (Q-697): a time and not a count of runs, quoted by the pages an integrator and an operator read.
+  // An operator plans around "20 hours" (a daily scan that holds twice in a row warns), so a changed constant is a changed answer.
+  ...[
+    ['docs/integration-guide/14-duplicates-and-webhooks.md', (v) => `held for \\*\\*${v} hours\\*\\* or more`],
+    ['docs/userguide/05-storage-data-and-audit.md', (v) => `held for \\*\\*${v} hours\\*\\* or more`],
+    ['docs/userguide/02-brain.md', (v) => `lasted ${v} hours`],
+  ].map(([doc, sentence]) => ({
+    what: `how old a scan hold is before it is warned (${doc})`,
+    source: 'server/src/brain/scan-cursor.ts',
+    code: /export const HOLD_WARN_AFTER_MS = ([0-9_]+);/,
+    scale: 3_600_000,   // ms in code, hours in prose
+    doc,
+    text: (v) => new RegExp(sentence(v)),
+  })),
   // The file-stamp report's reach, said in the two pages an integrator and an operator read: a file whose row lies beyond it is
   // "not checked" on every call, so a changed figure is a changed answer.
   ...['docs/integration-guide/06-spaces-api.md', 'docs/userguide/05-storage-data-and-audit.md'].flatMap(doc => [

@@ -283,4 +283,9 @@ export interface DupeScanStateDoc {
   cursorSeq: number;
   cursorPos?: { seq: number; id: string };
   updatedAt: string;      // ISO8601
+  /**
+   * When a scan FIRST held this cursor's type because its index was not ready (ISO8601, `$min`, so a later hold never moves it), absent while it is not
+   * held. Cleared only by a pass that ended without a hold; a position write and a reset keep it (`brain/scan-cursor.ts`, `Q-697`).
+   */
+  heldSince?: string;
 }

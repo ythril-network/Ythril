@@ -36,8 +36,10 @@ export class DuplicatesApi {
   /**
    * `failedSpaces` names the spaces the scan could not scan, each with a reason in the server's words (Q-381): a scan of one space
    * whose scan failed is a `200` that says so, and the caller reads it from here. Optional only because an older server omits it.
+   * `indexHeld` names the types whose neighbour search ran over an index that was not ready, so the scan kept their position and looked at part of
+   * the records (Q-697); present and empty when nothing held, optional only because an older server omits it.
    */
-  scanDuplicates(space?: string): Observable<{ scannedSpaces: number; scanned: number; pairs: number; failedSpaces?: { spaceId: string; reason: string }[] }> {
-    return this.http.post<{ scannedSpaces: number; scanned: number; pairs: number; failedSpaces?: { spaceId: string; reason: string }[] }>(`/api/duplicates/scan${space ? `?space=${encodeURIComponent(space)}` : ''}`, {});
+  scanDuplicates(space?: string): Observable<{ scannedSpaces: number; scanned: number; pairs: number; indexHeld?: { spaceId: string; type: string }[]; failedSpaces?: { spaceId: string; reason: string }[] }> {
+    return this.http.post<{ scannedSpaces: number; scanned: number; pairs: number; indexHeld?: { spaceId: string; type: string }[]; failedSpaces?: { spaceId: string; reason: string }[] }>(`/api/duplicates/scan${space ? `?space=${encodeURIComponent(space)}` : ''}`, {});
   }
 }

@@ -126,7 +126,7 @@ describe('every chrono read path applies it, which is what makes the sentences t
   });
 
   it('recall derives too', () => {
-    assert.match(stripComments(readFileSync('server/src/brain/recall.ts', 'utf8')), /status: deriveChronoStatus\(/,
+    assert.match(stripComments(readFileSync('server/src/brain/recall-result.ts', 'utf8')), /status: deriveChronoStatus\(/,
       'recall presents a chrono hit\'s status, and `update_chrono` names it as one of the deriving paths');
   });
 

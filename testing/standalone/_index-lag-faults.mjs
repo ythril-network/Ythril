@@ -22,7 +22,8 @@
  *
  * Both patches are process-wide: always `restore()` in a `finally`.
  */
-import { Collection, MongoServerError } from 'mongodb';
+import { Collection } from 'mongodb';
+import { refusalError, maxTimeExpiredError } from './_mongot-refusals.mjs';
 
 /**
  * Answer every native-filtered `$vectorSearch` aggregate (optionally only on collections `only(collectionName)` accepts)
@@ -41,7 +42,7 @@ export function lagFilteredVectorSearch({ only = () => true, probeRefusal } = {}
     if (stage.filter !== undefined) {
       cursor.toArray = async () => { emptied++; await cursor.close(); return []; };
     } else if (probeRefusal) {
-      const err = new MongoServerError({ ok: 0, ...probeRefusal(`${this.dbName}.${this.collectionName}`, stage.index) });
+      const err = refusalError(probeRefusal, `${this.dbName}.${this.collectionName}`, stage.index);
       cursor.toArray = async () => { refusedProbes++; await cursor.close(); throw err; };
     }
     return cursor;
@@ -72,9 +73,7 @@ export function watchHoldsRead(matches, { timeout = false } = {}) {
     if (!matches(this.collectionName, filter)) return original.call(this, filter, ...rest);
     calls.push(this.collectionName);
     if (!timeout) return original.call(this, filter, ...rest);
-    return Promise.reject(new MongoServerError({
-      ok: 0, code: 50, codeName: 'MaxTimeMSExpired', errmsg: 'Executor error during find command :: caused by :: operation exceeded time limit',
-    }));
+    return Promise.reject(maxTimeExpiredError());
   };
   return { calls: () => [...calls], restore: () => { Collection.prototype.findOne = original; } };
 }

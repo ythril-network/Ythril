@@ -136,7 +136,10 @@ describe('search-index listing is never name-filtered', () => {
     const src = readFileSync(`${ROOT}/spaces/vector-index.ts`, 'utf8');
     // `indexOf(…) + 900` is the same magic window with the anchor inlined, and the ratchet's pattern did not match
     // it because the pattern required a bare identifier on both sides. Widened, and this is the bound it wanted.
-    const fn = bodyOf(src, 'indexServes');
+    // The question is asked by `askIndexOnce` (Q-696: it keeps the count of records the index served), and `indexServes` is the
+    // poll's reading of that one answer: so the shape is pinned on the former, and the latter must be built on it.
+    const fn = bodyOf(src, 'askIndexOnce');
+    assert.match(bodyOf(src, 'indexServes'), /await askIndexOnce\(/, 'the poll must ask the one probe, not spell a second copy of it');
     assert.match(fn, /\$vectorSearch/, 'the probe must be a real vector query');
     assert.match(fn, /index: indexName/, 'against the index being polled, by name');
     assert.match(fn, /limit: 1/, 'and cheap — this is a liveness question, not a search');
@@ -211,8 +214,10 @@ describe('the probe is told what to ask about, per call site', () => {
     // search would find the explanation and report the fix as missing.
     assert.doesNotMatch(src, /path: 'embedding'/,
       "a literal path in this file is the defect returning — pass a ProbeTarget");
-    assert.doesNotMatch(bodyOf(src, 'indexServes'), /getEmbeddingConfig\(\)/,
-      'the probe must not reach for the TEXT embedding width; the face gallery is not that width');
+    for (const probe of ['askIndexOnce', 'indexServes']) {
+      assert.doesNotMatch(bodyOf(src, probe), /getEmbeddingConfig\(\)/,
+        `the probe (${probe}) must not reach for the TEXT embedding width; the face gallery is not that width`);
+    }
   });
 
   it('the target is REQUIRED, not defaulted', () => {

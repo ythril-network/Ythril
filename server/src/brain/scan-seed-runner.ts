@@ -28,6 +28,41 @@
 import { storeIsNotAnswering } from '../db/store-condition.js';
 import { eachUnit } from '../util/housekeeping-walk.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
+import type { DegradedReason } from './degraded-reasons.js';
+
+/** What a scan does with a seed whose neighbour search answered `degraded`: wait for the index (`hold`) or settle the seed and go on (`advance`). */
+export type SeedSearchOutcome = 'hold' | 'advance';
+
+/**
+ * One decision per degraded reason, typed over the whole vocabulary: a reason added to `DEGRADED_REASONS` without a decision here does not compile,
+ * so no scan is left to guess for it (the guess a forgotten spelling made was "advance", which marks the seed scanned and loses its pairs).
+ */
+const SEED_SEARCH_OUTCOME: Record<DegradedReason, 'hold' | 'advance'> = {
+  // The only wait: an index being built over records it should serve, so the next run, once it serves, reads the same records again (`Q-326`).
+  index_not_ready: 'hold',
+  // An index that exists and refuses needs an operator, and a scan that waited on it would read the same records every night and stall the type
+  // for ever (bundle-72 A-S8). Recall warns about the index, throttled; the scan moves on.
+  index_unavailable: 'advance',
+  // The rest describe a RECALL's own pipeline or budget, not an index that did not answer; a seed's search carries no deadline and no reranker,
+  // so they cannot arrive from a scan's search today, and if one does, waiting for it would not make it go away.
+  rerank_unavailable: 'advance',
+  rerank_skipped_budget: 'advance',
+  search_timeout: 'advance',
+  filter_window: 'advance',
+  candidate_cap: 'advance',
+};
+
+/**
+ * Is the seed whose neighbour search answered `degraded` settled? The one answer both background scanners give, so neither spells the
+ * decision itself: the duplicate scanner held on `degraded?.includes('index_not_ready')` by hand and the contradiction scanner read no
+ * `degraded` at all, which settled every seed it met an unready index on (`Q-697`).
+ *
+ * The strictest reason of the answer decides: a hold anywhere holds, so a recall that was also `search_timeout` in another collection still
+ * holds the seed whose collection was not ready. An answer with no `degraded` (the field is absent when nothing degraded) advances.
+ */
+export function seedSearchOutcome(degraded: readonly DegradedReason[] | undefined): SeedSearchOutcome {
+  return degraded?.some(reason => SEED_SEARCH_OUTCOME[reason] === 'hold') ? 'hold' : 'advance';
+}
 
 /** Run `fn` over `seeds` (one batch of one type), each isolated from the others. Resolves when every seed has been asked. */
 export type SeedRunner = <S>(seeds: readonly S[], fn: (seed: S) => Promise<void>, type: string) => Promise<void>;

@@ -81,9 +81,13 @@ export class ContradictionsApi {
       { resolution: 'superseded', winner });
   }
 
-  /** `failedSpaces`: the spaces the scan could not scan, each with a reason in the server's words (Q-381); optional only because an older server omits it. */
-  scanContradictions(space?: string): Observable<{ scannedSpaces: number; scanned: number; found: number; nliStalled: boolean; failedSpaces?: { spaceId: string; reason: string }[] }> {
-    return this.http.post<{ scannedSpaces: number; scanned: number; found: number; nliStalled: boolean; failedSpaces?: { spaceId: string; reason: string }[] }>(
+  /**
+   * `failedSpaces`: the spaces the scan could not scan, each with a reason in the server's words (Q-381); optional only because an older server omits it.
+   * `indexHeld`: the types (and the pass, `structured` or `nli`) whose neighbour search ran over an index that was not ready, so the scan kept their
+   * position and looked at part of the records (Q-697); present and empty when nothing held, optional only because an older server omits it.
+   */
+  scanContradictions(space?: string): Observable<{ scannedSpaces: number; scanned: number; found: number; nliStalled: boolean; indexHeld?: { spaceId: string; type: string; pass?: string }[]; failedSpaces?: { spaceId: string; reason: string }[] }> {
+    return this.http.post<{ scannedSpaces: number; scanned: number; found: number; nliStalled: boolean; indexHeld?: { spaceId: string; type: string; pass?: string }[]; failedSpaces?: { spaceId: string; reason: string }[] }>(
       `/api/contradictions/scan${space ? `?space=${encodeURIComponent(space)}` : ''}`, {});
   }
 }

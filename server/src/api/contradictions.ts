@@ -666,22 +666,28 @@ contradictionsRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly
     let scanned = 0, found = 0, nliStalled = false, judgedPairs = 0, modelCalls = 0, budgetExhausted = false;
     // A space that fails is named in `failedSpaces` and the rest are still scanned; a store that is not answering ends the request
     // (the `catch` below answers it 503). `scannedSpaces` counts the spaces that were scanned, so it equals `spaces.length` on success.
-    const { results, failedSpaces } = await scanSpacesInRequest(SCAN_STEP, spaces, (spaceId) => scanSpace(spaceId));
+    const { results, failedSpaces } = await scanSpacesInRequest(SCAN_STEP, spaces, async (spaceId) => ({ spaceId, ...(await scanSpace(spaceId)) }));
+    // Built from the spaces the scan covered, which are the token's own (`spacesWhereTokenMay` above): a token that cannot scan a space is
+    // never told that space's index is not ready.
+    const indexHeld: Array<{ spaceId: string; type: string; pass: string }> = [];
     for (const r of results) {
       scanned += r.scanned; found += r.found; judgedPairs += r.judgedPairs; modelCalls += r.modelCalls;
       nliStalled = nliStalled || r.nliStalled;
       budgetExhausted = budgetExhausted || r.budgetExhausted;
+      for (const h of r.indexHeld) indexHeld.push({ spaceId: r.spaceId, type: h.type, pass: h.pass });
     }
-    // Two different reasons the list may be incomplete, and they are NOT interchangeable:
+    // Three different reasons the list may be incomplete, and they are NOT interchangeable:
     //   nliStalled       the judge was unreachable — nothing was settled, the cursor is parked.
+    //   indexHeld        a type's neighbour search ran over an index that was not ready — its position was kept, so what the scan looked at
+    //                    is PART of the records, and the next run reads the rest once the index serves (`pass` names the cursor that held).
     //   budgetExhausted  the pair budget ran out — what was judged IS settled; the next run continues.
-    // Neither may read as a clean result.
+    // None may read as a clean result.
     //
     // Two counts, because they answer different questions and an operator needs both: `judgedPairs` is what
     // the sweep SETTLED, `modelCalls` is what it SPENT — the number their endpoint's own request log shows,
     // and the one `maxJudgedPairsPerRun` bounds. Reporting only the first is what made our report look 2×
     // short of a judge's own counter.
-    res.json({ scannedSpaces: results.length, scanned, found, judgedPairs, modelCalls, nliStalled, budgetExhausted, failedSpaces });
+    res.json({ scannedSpaces: results.length, scanned, found, judgedPairs, modelCalls, nliStalled, indexHeld, budgetExhausted, failedSpaces });
   } catch (err) {
     sendCaughtFailure(res, `POST /api/contradictions/scan`, err);
   }

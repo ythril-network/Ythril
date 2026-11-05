@@ -19,15 +19,27 @@
  *
  * So the two passes keep their own cursors:
  *
- *   `{space}:{type}`       STRUCTURED — deterministic property conflicts. Always answers, so it always
- *                          advances. This pass is useful with **no NLI model configured at all**.
- *   `{space}:{type}:nli`   NLI — advances only over records the judge actually answered for. If the judge
- *                          is unavailable the cursor simply stalls where it is and resumes from exactly
+ *   `{space}:{type}:contradiction`      STRUCTURED — deterministic property conflicts. It never asks the judge,
+ *                          so it advances over every seed whose neighbour search ANSWERED. This pass is useful
+ *                          with **no NLI model configured at all**.
+ *   `{space}:{type}:contradiction:nli`  NLI — advances only over records the judge actually answered for. If the
+ *                          judge is unavailable the cursor simply stalls where it is and resumes from exactly
  *                          there once a model is configured. Nothing is lost, nothing is falsely settled.
  *
  * A *low-confidence* verdict is NOT a stall: the judge answered, just weakly, and re-asking would give the
  * same answer — so the NLI cursor moves past it. That is the whole reason `Verdict` distinguishes
  * `low-confidence` from `judge-unavailable`.
+ *
+ * ── Two reasons a seed is not settled, and each cursor stops at both ─────────────────────────────────────
+ *
+ * A seed whose neighbour search ran over an index that was NOT READY (`seedSearchOutcome`, `scan-seed-runner.ts`)
+ * got an empty answer that says nothing about its neighbours, so neither cursor may move past it: the type ENDS
+ * for this run with the position at the seed BEFORE it, and the next run reads it again once the index serves
+ * (the duplicate scanner has held the same way since Q-326). Each hold is counted and its clock kept
+ * (`noteScanHold`, `scan-cursor.ts`), and the scan answers `indexHeld` so a held scan never reads as a clean one.
+ * An index that refuses for another reason (`index_unavailable`) advances: waiting would stall the type until
+ * an operator acts. A stalled JUDGE is the other reason, and it keeps its own signal (`nliStalled`): it is not
+ * the index's, and it is not counted as a hold.
  */
 import { schedule, validate, type ScheduledTask } from 'node-cron';
 import { RECORD_COLLECTION as COLLECTION_SUFFIX } from '../config/types.js';
@@ -44,14 +56,14 @@ import { nliConfigured, nliIsLocal } from './nli-client.js';
 import type { ContradictionScannerConfig, DupeScanType } from '../config/types.js';
 import { runExclusive } from '../util/single-flight.js';
 import { readAfterPosition } from '../util/position-keyset.js';
-import { readScanStart, writeScanPosition, advanceScanPosition } from './scan-cursor.js';
+import { readScanCursor, writeScanPosition, advanceScanPosition, noteScanHold, clearScanHold } from './scan-cursor.js';
 import { summariseRecall } from './recall-shape.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { cronArmingRefused } from '../util/cron-arming.js';
 import { NotFoundError } from '../util/errors.js';
 import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
-import { seedsInRequest, seedsInWalk, type SeedRunner } from './scan-seed-runner.js';
+import { seedsInRequest, seedsInWalk, seedSearchOutcome, type SeedRunner } from './scan-seed-runner.js';
 
 /**
  * The step the scan's failures are reported and counted under: one name, declared once so its counters start at 0. Exported because
@@ -112,11 +124,15 @@ export function cursorKey(spaceId: string, type: DupeScanType, pass: Pass): stri
 
 // The cursor itself — read, stored, advanced as a pair `(seq, _id)` — is `brain/scan-cursor.ts`, shared with the duplicate scanner.
 
-/** What one record's evaluation did — the caller needs `judgeStalled` to decide about the NLI cursor. */
+/** What one record's evaluation did — the caller needs `unsettled` to decide where the cursor stops. */
 export interface RecordOutcomeSummary {
   found: number;
-  /** True when at least one pair could not be judged because the judge itself was unavailable. */
-  judgeStalled: boolean;
+  /**
+   * Why the seed is NOT settled, so the cursor must not move past it: `judge_stalled` (at least one pair could not be judged because the judge
+   * itself was unavailable: the NLI pass's own signal, `nliStalled`) or `index_not_ready` (the neighbour search ran over an index that was not
+   * ready, so its empty answer says nothing about the neighbours: both passes hold, and it is counted as a hold). Absent when the seed is settled.
+   */
+  unsettled?: 'judge_stalled' | 'index_not_ready' | undefined;
   /** Pairs the judge actually answered usefully for. What the sweep SETTLED. */
   judged: number;
   /**
@@ -198,8 +214,11 @@ export async function evalRecord(
   let judged = 0;
   let modelCalls = 0;
   try {
-    const { source, results } = await similar(
+    const { source, results, degraded } = await similar(
       spaceId, recordId, type as RecallKnowledgeType, TOPK, [type as RecallKnowledgeType], threshold);
+    // An answer from an index that was not asked says nothing about the seed's neighbours: no pair is judged against it, and the seed is
+    // reported unsettled so the caller keeps its position (`seedSearchOutcome` is the one decision, shared with the duplicate scanner).
+    if (seedSearchOutcome(degraded) === 'hold') return { found: 0, unsettled: 'index_not_ready', judged: 0, modelCalls: 0 };
     const sameType = results.filter(m => m.type === type);
 
     // The claims of EVERY type are read from the COLLECTION, for the seed and all its neighbours in one round trip, never
@@ -254,7 +273,7 @@ export async function evalRecord(
     // the space on a timeout. This was an empty catch, which paid a database bound for every record of a hung space.
     if (!(err instanceof NotFoundError)) throw err;
   }
-  return { found, judgeStalled, judged, modelCalls };
+  return { found, unsettled: judgeStalled ? 'judge_stalled' : undefined, judged, modelCalls };
 }
 
 export interface ContradictionScanResult {
@@ -262,6 +281,11 @@ export interface ContradictionScanResult {
   found: number;
   /** True when the NLI pass stopped early because the judge was unavailable. Reported, not swallowed. */
   nliStalled: boolean;
+  /**
+   * The cursors that HELD because their neighbour search ran over an index that was not ready: one entry per type and pass, whose position was kept
+   * for the next run (`Q-697`). Empty when nothing held. A held scan has looked at part of its records, so it is never a clean answer.
+   */
+  indexHeld: Array<{ type: DupeScanType; pass: Pass }>;
   /** Unique pairs the NLI judge answered usefully for — what the sweep SETTLED. */
   judgedPairs: number;
   /**
@@ -316,7 +340,7 @@ export function scanSpace(spaceId: string, opts?: { reset?: boolean }): Promise<
 
 async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefined, runSeeds: SeedRunner): Promise<ContradictionScanResult> {
   const cfg = getConfig();
-  const empty: ContradictionScanResult = { scanned: 0, found: 0, nliStalled: false, judgedPairs: 0, modelCalls: 0, budgetExhausted: false };
+  const empty: ContradictionScanResult = { scanned: 0, found: 0, nliStalled: false, indexHeld: [], judgedPairs: 0, modelCalls: 0, budgetExhausted: false };
   const space = cfg.spaces.find(s => s.id === spaceId);
   if (!space) return empty;
   if (!isVectorSearchAvailable() || needsReindex(spaceId)) return empty;
@@ -325,6 +349,7 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
   let scanned = 0;
   let found = 0;
   let nliStalled = false;
+  const indexHeld: ContradictionScanResult['indexHeld'] = [];
   let judgedPairs = 0;
   let modelCalls = 0;
   let budgetExhausted = false;
@@ -339,8 +364,11 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
       if (scanned >= tune.maxPerRun || budgetExhausted) break;
       const stateId = cursorKey(spaceId, type, pass);
       if (opts?.reset) await writeScanPosition(stateId, { spaceId, type }, null);
-      let cursor = opts?.reset ? { pos: 0 } : await readScanStart(stateId);
+      const { start, carriesHold } = await readScanCursor(stateId);
+      let cursor = opts?.reset ? { pos: 0 } : start;
       let stopThisType = false;
+      // Set when a seed's search met an index that was not ready: this cursor HELD (a stalled judge does not set it).
+      let held = false;
       // Pair ids settled during THIS pass over THIS type, so a mutually-near pair is judged from one side
       // only. Scoped here on purpose: a pair never spans two types, and a structured skip is not an NLI
       // skip. Bounded by maxPerRun x TOPK ids, which at the 5000-record default is a few tens of thousands
@@ -376,11 +404,18 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
           judgedPairs += out.judged;
           modelCalls += out.modelCalls;
           scanned++;
-          if (out.judgeStalled) {
-            // Stop this pass HERE, without advancing past the record. The pair is not settled, so the
-            // cursor must not claim it is — that is the whole point of the second cursor.
+          if (out.unsettled) {
+            // Stop this pass HERE, without advancing past the record. The pair is not settled, so the cursor must not claim it is — that is
+            // the whole point of the second cursor — and the stop is set FIRST: the bookkeeping below can fail, and never undoes it.
             stopThisType = true;
-            nliStalled = true;
+            if (out.unsettled === 'judge_stalled') {
+              nliStalled = true;   // the judge's own signal, which is not the index's: not counted as a hold
+              return;
+            }
+            // `index_not_ready`: the position written after this batch is the one of the seed BEFORE this one (`advance()` is not called).
+            held = true;
+            indexHeld.push({ type, pass });
+            await noteScanHold(stateId, { scanner: 'contradiction', spaceId, type, pass, now: Date.now() });
             return;
           }
           // The record itself IS settled, so the cursor advances before any budget check below.
@@ -399,12 +434,15 @@ async function scanOneSpace(spaceId: string, opts: { reset?: boolean } | undefin
         }, type);
         await writeScanPosition(stateId, { spaceId, type }, cursor);
       }
+      // The pass ended WITHOUT a hold (an empty batch, a stalled judge and a spent budget included): the index answered, so a clock an
+      // earlier run started is over. Once per pass, and only for a row that carried one, so a healthy instance writes nothing here.
+      if (!held && carriesHold) await clearScanHold(stateId);
     }
   }
 
   if (nliStalled) log.warn(`Contradiction scan (${spaceId}): the NLI judge was unavailable — its cursor is parked and will resume where it stopped`);
   if (budgetExhausted) log.info(`Contradiction scan (${spaceId}): spent ${modelCalls} judge calls (${judgedPairs} pairs settled) and stopped at its per-run budget; the next run resumes from there`);
-  return { scanned, found, nliStalled, judgedPairs, modelCalls, budgetExhausted };
+  return { scanned, found, nliStalled, indexHeld, judgedPairs, modelCalls, budgetExhausted };
 }
 
 /**

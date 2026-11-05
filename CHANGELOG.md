@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**A minor release: a mixed-case path no longer skips a space's rights, peer-bound tokens cannot approve AI connectors, model and sidecar answers are bounded, document passages are split to the size the embedder accepts, and many Brain and Settings pages read and translate better.**
+**A minor release: a mixed-case path no longer skips a space's rights, peer-bound tokens cannot approve AI connectors, model and sidecar answers are bounded, a filtered recall over a vector index that missed a match says so, a scan whose vector index is not ready keeps its place and says so, document passages are split to the size the embedder accepts, and many Brain and Settings pages read and translate better.**
 
 | Changes on upgrade | Action |
 |---|---|
@@ -25,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tokens:** a connector's record says which token approved it (`approvedByTokenId`), and the token list marks peer-bound tokens and the approver of each connector.
 - **Rendering:** `RENDER_MAX_PIXELS` and `RENDER_MAX_RESPONSE_BYTES` for both render sidecars, shown in their health answer.
 - **Embedding:** `embedding.maxInputBytes` (default 6000, 512 to 65536) sets the most bytes one embedder request may carry; document passages are split to it.
-- **Metrics:** `ythril_embed_jobs_failed_total`, `ythril_embed_input_cut_total` and `ythril_conversion_chunks_unembedded_total`.
+- **Metrics:** `ythril_embed_jobs_failed_total`, `ythril_embed_input_cut_total`, `ythril_conversion_chunks_unembedded_total` and `ythril_recall_undecided_total` (filtered recalls that could not tell whether the index missed a match).
+- **Metrics:** `ythril_scan_holds_total` counts the types a background scan held over a vector index that was not ready, by scanner.
 
 ### Changed
 
@@ -44,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Recall:** a filtered recall the vector index answered with nothing said nothing over an absent, dropped or lagging index; it now says `index_not_ready` or `filter_window` when an older record satisfies the filter, and stays a plain empty answer when none does.
+- **Contradictions and duplicates:** a contradiction scan passed over records searched on an unready index and showed a clean queue; it now keeps its place until the index serves. A hold 20 hours old is warned, scan answers name held types (`indexHeld`), and a deleted space loses its scan cursors.
 - **Embedding:** a table, fence or long line larger than an HTTP embedder accepts was sent whole and refused, leaving its passage with no vector; it is split at row or line breaks.
 - **Media:** a file written again with other bytes while its job ran was analysed under the old run's claim, and its old caption and faces stayed; its job is now a whole new run, a few seconds after the last write, and the old run writes nothing more.
 - **Media:** a retry kept what a deferral had carried over, such as the stored caption; a retry is a clean run, and never takes a job a worker has just claimed.

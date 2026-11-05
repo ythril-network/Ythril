@@ -507,8 +507,33 @@ export interface ProbeTarget {
   dims: number;
 }
 
-async function indexServes(
-  coll: ReturnType<ReturnType<typeof getDb>['collection']>,
+/**
+ * What one probe of an index came back with: how many records it served, or the refusal itself.
+ *
+ * `error` is what the store threw, UNTOUCHED (an `Error`, usually a `MongoServerError`), because the recall classifies a
+ * refusal by its type and its code (`isIndexNotQueryableYet`, `isStoreUnreachable`) and a message string would lose both.
+ * The poll reads its text through `indexServes`.
+ */
+export type IndexAnswer = { records: number } | { error: unknown };
+
+/**
+ * Ask an index ONE question: does it serve a record? Answers how many came back (0 or 1: `limit: 1`) or the store's refusal.
+ *
+ * ## What it prevents
+ *
+ * "No error, no hits" and "no error, a hit" are different answers, and `indexServes` threw the difference away, keeping only
+ * "served = no error". A filtered recall whose native search answered nothing could not tell an index that serves and missed a
+ * match (`filter_window`) from an index that serves NOTHING (`index_not_ready`): it said a confident empty over both. The count
+ * is kept here, once, so the recall's decision (`brain/index-should-serve.ts`) and the readiness poll ask the same question the
+ * same way, and `{ records: 0 }` is never mistaken for a refusal or for a record.
+ *
+ * A refusal carries NO `records` key, so no caller can read it as zero hits.
+ *
+ * `maxTimeMS` is the caller's bound: a probe must never be the thing that blocks. The poll gives it 5 s; the recall gives it what
+ * its own deadline leaves.
+ */
+export async function askIndexOnce(
+  coll: Pick<ReturnType<ReturnType<typeof getDb>['collection']>, 'aggregate'>,
   indexName: string,
   /**
    * The path this index actually indexes, and the width it was built at.
@@ -517,9 +542,10 @@ async function indexServes(
    * the one index whose path is not `embedding`. See the note above `ProbeTarget`.
    */
   target: ProbeTarget,
-): Promise<ProbeOutcome> {
+  maxTimeMS: number,
+): Promise<IndexAnswer> {
   try {
-    await coll.aggregate([{
+    const rows = await coll.aggregate([{
       $vectorSearch: {
         index: indexName,
         path: target.vectorPath,
@@ -527,17 +553,25 @@ async function indexServes(
         numCandidates: PROBE_NUM_CANDIDATES,
         limit: 1,
       },
-    }, { $limit: 1 }, { $project: { _id: 1 } }], {
-      // A probe must never be the thing that blocks. Without a cap, a mongot that accepts the query and
-      // then stalls holds this call — and 65 of those at boot is a plausible way to starve the event loop
-      // that answers /health, which is what the reporting fleet saw as kubelet restarts.
-      maxTimeMS: 5_000,
-    }).toArray();
-    return { serves: true };
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    return { serves: false, error, permanent: PERMANENT_PROBE_ERRORS.some(re => re.test(error)) };
+    }, { $limit: 1 }, { $project: { _id: 1 } }], { maxTimeMS }).toArray();
+    return { records: rows.length };
+  } catch (error) {
+    return { error };
   }
+}
+
+async function indexServes(
+  coll: ReturnType<ReturnType<typeof getDb>['collection']>,
+  indexName: string,
+  target: ProbeTarget,
+): Promise<ProbeOutcome> {
+  // A probe must never be the thing that blocks. Without a cap, a mongot that accepts the query and
+  // then stalls holds this call — and 65 of those at boot is a plausible way to starve the event loop
+  // that answers /health, which is what the reporting fleet saw as kubelet restarts.
+  const answer = await askIndexOnce(coll, indexName, target, 5_000);
+  if (!('error' in answer)) return { serves: true };
+  const error = answer.error instanceof Error ? answer.error.message : String(answer.error);
+  return { serves: false, error, permanent: PERMANENT_PROBE_ERRORS.some(re => re.test(error)) };
 }
 
 /**

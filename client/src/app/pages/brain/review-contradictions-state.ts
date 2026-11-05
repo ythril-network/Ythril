@@ -7,6 +7,7 @@ import { httpErrorReason } from '../../core/http-error';
 import { refusalText } from '../../core/refusal-text';
 import { ToastService } from '../../core/toast.service';
 import { translatedOrEmpty } from '../../core/translated-text';
+import { contradictionScanNotices } from './review-scan-notices';
 
 /** The family a failed contradiction resolve's `code` is said under (`resolvedOtherwise`, and the codes every family carries). */
 const RESOLVE_REFUSALS = 'review.contradictions.refusal';
@@ -196,12 +197,10 @@ export class ReviewContradictionsState {
     this.api.scanContradictions(spaceId).subscribe({
       next: (r) => {
         this.scanning.set(false);
-        // `nliStalled` means the judge was unreachable, so the NLI pass settled nothing and its cursor is
-        // parked. Silence here would leave "0 found" reading as "nothing disagrees" — the same conflation
-        // the empty state used to make, one layer up.
-        if (r.nliStalled) this.toast.error(this.transloco.translate('review.contradictions.scanStalled'));
-        // The tab scans ONE space, so a space the scan could not scan is the whole scan: a `200` that names it (Q-381) must not read as done.
-        if (r.failedSpaces?.length) this.toast.error(this.transloco.translate('duplicates.scanError'));
+        // A scan that did not finish must not read as a clean one — "0 found" is "nothing disagrees" only over records that were compared. Each
+        // cause says so in its own message (`nliStalled`: the judge was unreachable and its cursor is parked; `failedSpaces`: the space could not be
+        // scanned; `indexHeld`: a type's search ran over an index that was not ready and its position was kept): `contradictionScanNotices`.
+        for (const key of contradictionScanNotices(r)) this.toast.error(this.transloco.translate(key));
         this.load(spaceId);
       },
       error: (e) => {

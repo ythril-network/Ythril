@@ -102,9 +102,9 @@ describe('the derivation itself is not a second implementation', () => {
     const owners = ['server/src/brain/chrono-status.ts', 'server/src/brain/chrono.ts'];
     const offenders = trackedSources(['server/src'], { untracked: true, exclude: owners })
       .filter(f => src(f).includes('deriveChronoStatus('));
-    // `recall.ts` presents chrono results and is the one other legitimate caller — it derives for the
-    // same reason the list route does, through the same function. Anything else is a copy.
-    const unexpected = offenders.filter(f => f !== 'server/src/brain/recall.ts');
+    // `recall-result.ts` (the row-to-result mapping `recall.ts` runs every hit through) presents chrono results and is the one other
+    // legitimate caller — it derives for the same reason the list route does, through the same function. Anything else is a copy.
+    const unexpected = offenders.filter(f => f !== 'server/src/brain/recall-result.ts');
     assert.deepEqual(unexpected, [],
       `these derive a chrono status themselves rather than through the owning module: ${unexpected.join(', ')}`);
   });
