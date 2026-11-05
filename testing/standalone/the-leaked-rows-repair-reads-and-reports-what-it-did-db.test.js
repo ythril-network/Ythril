@@ -32,7 +32,8 @@ import { openFileActDoors } from './_file-act-doors.mjs';
 import { seedClaim, jobOf } from './_media-claim.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 import { elapse } from '../_shared/sleep.mjs';
-import { NOW, METRICS, fileRow, derivedRow, runPass, metricValue, repairSteps, spaceEntry, addedKeys, fileTombstoneRow, repairCountersOrZero, repairCounters, counterDelta } from './_leaked-rows-repair.mjs';
+import { NOW, METRICS, fileRow, derivedRow, runPass, repairSteps, spaceEntry, addedKeys, fileTombstoneRow, repairCountersOrZero, repairCounters, counterDelta } from './_leaked-rows-repair.mjs';
+import { metricValue } from './_metric-series.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'leakreport';

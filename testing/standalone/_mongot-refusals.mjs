@@ -63,6 +63,37 @@ export const searchesWith = (vector) => (queryVector) =>
   Array.isArray(queryVector) && queryVector.length === vector.length && queryVector.every((x, i) => Math.abs(x - vector[i]) < 1e-9);
 
 /**
+ * The ONE patch of `Collection.prototype.aggregate` for a `$vectorSearch`: every such aggregate reaches the real store (the cursor is made as ever), and
+ * `answerOf({ stage, collectionName, namespace })` says what its `toArray` answers instead. It returns `undefined` to leave that search alone, or an answer:
+ * `async (realToArray, cursor) => docs`, which may call `realToArray()` (a spy that watches what the store gave), or close the cursor and answer for it
+ * ({@link refusesWith}, {@link answersNothing}). `stage` is the `$vectorSearch` stage, `namespace` is `db.collection`.
+ *
+ * The refusal, the lagging index and the spy of a recall in the build window were three copies of this skeleton (patch, read `pipeline[0].$vectorSearch`, pick
+ * the searches, replace `toArray`, restore); a fourth would be a fourth place for one to match a search it was not meant to. Returns `{ restore() }`; always
+ * `restore()` in a `finally`, because the patch is process-wide. `an-index-not-queryable-yet-is-an-empty-collection.test.js` holds every test to it.
+ */
+export function patchVectorSearch(answerOf) {
+  const original = Collection.prototype.aggregate;
+  Collection.prototype.aggregate = function aggregate(pipeline, ...rest) {
+    const cursor = original.call(this, pipeline, ...rest);
+    const stage = Array.isArray(pipeline) ? pipeline[0]?.['$vectorSearch'] : undefined;
+    if (!stage) return cursor;
+    const answer = answerOf({ stage, collectionName: this.collectionName, namespace: `${this.dbName}.${this.collectionName}` });
+    if (!answer) return cursor;
+    const real = cursor.toArray.bind(cursor);
+    cursor.toArray = () => answer(real, cursor);
+    return cursor;
+  };
+  return { restore: () => { Collection.prototype.aggregate = original; } };
+}
+
+/** An answer for {@link patchVectorSearch}: close the cursor and throw `err` (the store's refusal). `onAnswered` is told each time, so a test can count them. */
+export const refusesWith = (err, onAnswered = () => {}) => async (_real, cursor) => { onAnswered(); await cursor.close(); throw err; };
+
+/** An answer for {@link patchVectorSearch}: close the cursor and answer no hits - an index that serves and has not ingested the matches yet. */
+export const answersNothing = (onAnswered = () => {}) => async (_real, cursor) => { onAnswered(); await cursor.close(); return []; };
+
+/**
  * Answer every `$vectorSearch` aggregate (optionally only those on collections `only(collectionName)` accepts) with the
  * refusal `make(namespace, indexName)` returns. `make` is a `REFUSALS` entry or a function giving the same shape.
  * Returns `{ refused(), restore() }`; always `restore()` in a `finally`, because the patch is process-wide.
@@ -73,15 +104,10 @@ export const searchesWith = (vector) => (queryVector) =>
  * a seed in mid-batch, with seeds before it that were settled and seeds after it that were not reached.
  */
 export function refuseVectorSearch(make, { only = () => true, forQuery = () => true } = {}) {
-  const original = Collection.prototype.aggregate;
   let refused = 0;
-  Collection.prototype.aggregate = function aggregate(pipeline, ...rest) {
-    const cursor = original.call(this, pipeline, ...rest);
-    const stage = Array.isArray(pipeline) ? pipeline[0]?.['$vectorSearch'] : undefined;
-    if (!stage || !only(this.collectionName) || !forQuery(stage.queryVector)) return cursor;
-    const err = refusalError(make, `${this.dbName}.${this.collectionName}`, stage.index);
-    cursor.toArray = async () => { refused++; await cursor.close(); throw err; };
-    return cursor;
-  };
-  return { refused: () => refused, restore: () => { Collection.prototype.aggregate = original; } };
+  const patch = patchVectorSearch(({ stage, collectionName, namespace }) => {
+    if (!only(collectionName) || !forQuery(stage.queryVector)) return undefined;
+    return refusesWith(refusalError(make, namespace, stage.index), () => { refused++; });
+  });
+  return { refused: () => refused, restore: patch.restore };
 }

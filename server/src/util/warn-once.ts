@@ -24,6 +24,14 @@
  */
 import { LruMap } from './lru-map.js';
 
+/**
+ * How long a repeated line is said ONCE for, ms: the `every` of a {@link warnOnce} whose line repeats on a schedule or per request (a refused search, a
+ * failed bookkeeping write, a skipped tick, a failed space). One number for the question "how long is a repeat the same news?", so the ten minutes is not
+ * typed again at each new site and a site cannot drift to another window by accident. A window that answers ANOTHER question (a hold's 20 hours, a token's
+ * time to live that also happens to be ten minutes) is not this constant. Written as one number (`N * 60_000`) for `doc-cited-constants`.
+ */
+export const SAY_ONCE_WINDOW_MS = 10 * 60_000;
+
 export interface WarnOnce<K> {
   /**
    * Run `report` when `(key, version)` is news — never seen, seen with another version, or (with `every`) last

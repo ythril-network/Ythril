@@ -39,7 +39,7 @@ import { isIndexNotQueryableYet } from './index-not-queryable.js';
 import { holdsRecordTheIndexShouldServe, indexMissedAMatch, HOLDS_READ_MS, type IndexMiss, type IndexMissMemo } from './index-should-serve.js';
 import { isStoreUnreachable } from '../db/store-condition.js';
 import { isStoreSide } from './store-failure.js';
-import { warnOnce } from '../util/warn-once.js';
+import { warnOnce, SAY_ONCE_WINDOW_MS } from '../util/warn-once.js';
 import { MongoServerError } from 'mongodb';
 import type { RecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
@@ -876,7 +876,7 @@ interface SearchBudget {
  * `index_unavailable` is said once per collection per ten minutes (vet S10): the index will not serve until an
  * operator acts, every recall in the meantime meets it, and the reason already reaches each caller on its answer.
  */
-const indexUnavailableSaid = warnOnce<string>({ every: 10 * 60_000 });
+const indexUnavailableSaid = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
 
 /** Run $vectorSearch against a single collection and map results to RecallResult. */
 /*

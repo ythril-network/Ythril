@@ -40,11 +40,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Collection } from 'mongodb';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { queryAxis, startStubEmbedder, createSpaceCollections } from './_vector-harness.mjs';
 // The injection and mongot's wordings live once, there (bundle-72): this file held its own copy of both.
-import { REFUSALS, refuseVectorSearch } from './_mongot-refusals.mjs';
+import { REFUSALS, refuseVectorSearch, patchVectorSearch } from './_mongot-refusals.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -94,27 +93,19 @@ async function writeFirstRecord(space) {
  * 37728673657).
  */
 function watchVectorSearch() {
-  const original = Collection.prototype.aggregate;
   const seen = new Map();
   const tally = (ns, key) => { const t = seen.get(ns) ?? { refused: 0, served: 0 }; t[key]++; seen.set(ns, t); };
-  Collection.prototype.aggregate = function aggregate(pipeline, ...rest) {
-    const cursor = original.call(this, pipeline, ...rest);
-    if (!(Array.isArray(pipeline) && pipeline[0]?.['$vectorSearch'])) return cursor;
-    const ns = this.collectionName;
-    const toArray = cursor.toArray.bind(cursor);
-    cursor.toArray = async () => {
-      try {
-        const docs = await toArray();
-        tally(ns, 'served');
-        return docs;
-      } catch (err) {
-        if (notQueryableYet(err)) tally(ns, 'refused');
-        throw err;
-      }
-    };
-    return cursor;
-  };
-  return { of: (ns) => seen.get(ns) ?? { refused: 0, served: 0 }, restore: () => { Collection.prototype.aggregate = original; } };
+  const patch = patchVectorSearch(({ collectionName: ns }) => async (real) => {
+    try {
+      const docs = await real();
+      tally(ns, 'served');
+      return docs;
+    } catch (err) {
+      if (notQueryableYet(err)) tally(ns, 'refused');
+      throw err;
+    }
+  });
+  return { of: (ns) => seen.get(ns) ?? { refused: 0, served: 0 }, restore: patch.restore };
 }
 
 

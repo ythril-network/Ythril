@@ -36,6 +36,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { REPO_ROOT } from './_sources.mjs';
+import { metricValue } from './_metric-series.mjs';
 
 /** The instant the first pass runs at: later than every `OLD` row and earlier than every `FUTURE` one. */
 export const NOW = new Date('2026-10-01T00:00:00.000Z');
@@ -66,19 +67,6 @@ export async function runPass(now = NOW) {
   return ttl.sweepExpired(now);
 }
 
-/**
- * The sample of one metric series, or a plain failure that the metric does not exist — so a build without it fails the case with the
- * reason and not with a TypeError. `labels` selects the series; a gauge or an unlabelled counter takes none.
- */
-export async function metricValue(name, labels = {}) {
-  const { register } = await import('../../server/dist/metrics/registry.js');
-  const metric = register.getSingleMetric(name);
-  assert.ok(metric, `metrics/registry.ts declares no \`${name}\``);
-  const { values } = await metric.get();
-  const hit = values.filter(v => Object.entries(labels).every(([k, want]) => v.labels?.[k] === want));
-  assert.ok(hit.length > 0, `\`${name}\` has no series for ${JSON.stringify(labels)}: it is not declared at zero (${JSON.stringify(values.map(v => v.labels))})`);
-  return hit.reduce((n, v) => n + v.value, 0);
-}
 /** The state of every counter the repair moves, to diff against after a pass. */
 export async function repairCounters() {
   const reading = {};

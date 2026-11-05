@@ -39,8 +39,8 @@ export interface FailedSpace {
 
 /** What a manual scan of several spaces did: what each scanned space returned, and the spaces that failed. */
 export interface RequestScan<R> {
-  /** The scanner's result for each space that was scanned, in the order they were asked. */
-  results: R[];
+  /** The scanner's result for each space that was scanned, in the order they were asked, each tagged with the space it is the result of. */
+  results: Array<{ spaceId: string } & R>;
   /** Always present — empty when every space was scanned. */
   failedSpaces: FailedSpace[];
 }
@@ -57,18 +57,21 @@ function reasonInOurWords(err: unknown): string {
  * Scan each of `spaceIds` with `scanOne`, one after the other (the scan is write-heavy and a request is no place to fan out), and answer
  * what was scanned and what failed. `step` is the reporter's name for the scan (`Dupe scan`, `Contradiction scan`).
  *
+ * Each result comes back TAGGED with its `spaceId` (the loop knows whose it is, so a route that reports per space — `indexHeld` — never rebuilds the tag
+ * by hand around its scanner, where one route could forget it).
+ *
  * Throws only a failure that says the store is not answering, which ends the request (see the module docblock).
  */
-export async function scanSpacesInRequest<R>(
+export async function scanSpacesInRequest<R extends object>(
   step: string,
   spaceIds: readonly string[],
   scanOne: (spaceId: string) => Promise<R>,
 ): Promise<RequestScan<R>> {
-  const results: R[] = [];
+  const results: Array<{ spaceId: string } & R> = [];
   const failedSpaces: FailedSpace[] = [];
   for (const spaceId of spaceIds) {
     try {
-      results.push(await scanOne(spaceId));
+      results.push({ spaceId, ...(await scanOne(spaceId)) });
     } catch (err) {
       if (storeIsNotAnswering(err)) throw err;
       reportSpaceFailure(step, spaceId, err, { when: 'next scan' });

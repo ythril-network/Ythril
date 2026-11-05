@@ -35,7 +35,7 @@ import { escapeRegex } from '../util/redos.js';
 import type { DupeScanStateDoc, DupeScanType } from '../config/types.js';
 import { comparePositionStarts, type PositionStart } from '../util/position-keyset.js';
 import { log, peerText } from '../util/log.js';
-import { warnOnce } from '../util/warn-once.js';
+import { warnOnce, SAY_ONCE_WINDOW_MS } from '../util/warn-once.js';
 import { scanHoldsTotal, type ScanHoldScanner } from '../metrics/scan-hold-count.js';
 
 /** The global collection both scanners keep their cursors in (and `spaces/rename.ts` moves). */
@@ -51,8 +51,8 @@ export const HOLD_WARN_AFTER_MS = 72_000_000;
 
 /** A hold that has lasted is said once per window, per cursor: the window is the threshold, so a daily run that holds again says it again. */
 const holdWarned = warnOnce<string>({ every: HOLD_WARN_AFTER_MS });
-/** A hold whose own bookkeeping failed is said once per ten minutes: it never stops the scan and never hides under it. */
-const holdNoteFailed = warnOnce<string>({ every: 10 * 60_000 });
+/** A hold whose own bookkeeping failed is said once per say-once window: it never stops the scan and never hides under it. */
+const holdNoteFailed = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
 
 /**
  * What a cursor's stored state says to a scan that is about to read it: where to read after ({@link readScanStart}) and whether the row carries a hold
@@ -174,12 +174,21 @@ export async function carryScanCursors(): Promise<number> {
 }
 
 /**
+ * The filter that names one space's cursor rows: every `_id` that starts `<spaceId>:`. The colon is the boundary, so a sibling space whose id merely starts with
+ * this one's (`victim-archive` beside `victim`) is never named, and the id is escaped so it matches as text. The one spelling for the rename (which moves the rows)
+ * and the delete (which drops them), so neither can reach a neighbour's cursor by dropping the colon or the escape.
+ */
+function cursorsOfSpace(spaceId: string): ReturnType<typeof asFilter<DupeScanStateDoc>> {
+  return asFilter<DupeScanStateDoc>({ _id: { $regex: `^${escapeRegex(spaceId)}:` } });
+}
+
+/**
  * A renamed space's scan cursors follow it: each is keyed `<space>:<type>`, `_id` is immutable, so it is copy then delete. Idempotent on a resumed rename. Losing a
  * cursor would only re-scan the space, but it would also leave a row behind that nothing reads.
  */
 export async function moveScanCursors(oldId: string, newId: string): Promise<void> {
   const state = col<DupeScanStateDoc>(SCAN_STATE);
-  const stale = await state.find(asFilter<DupeScanStateDoc>({ _id: { $regex: `^${escapeRegex(oldId)}:` } })).toArray();
+  const stale = await state.find(cursorsOfSpace(oldId)).toArray();
   for (const doc of stale) {
     const moved = { ...doc, _id: `${newId}:${doc._id.slice(oldId.length + 1)}` };
     await state.insertOne(asDoc(moved)).catch(async (err: unknown) => {
@@ -198,7 +207,7 @@ export async function moveScanCursors(oldId: string, newId: string): Promise<voi
  * first ordinary hold would be warned as one that has lasted weeks (`Q-697`). Answers how many rows it removed.
  */
 export async function dropScanCursorsOfSpace(spaceId: string): Promise<number> {
-  const r = await col<DupeScanStateDoc>(SCAN_STATE).deleteMany(asFilter<DupeScanStateDoc>({ _id: { $regex: `^${escapeRegex(spaceId)}:` } }));
+  const r = await col<DupeScanStateDoc>(SCAN_STATE).deleteMany(cursorsOfSpace(spaceId));
   return r.deletedCount;
 }
 

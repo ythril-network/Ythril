@@ -16,13 +16,13 @@
 import { getEmbeddingConfig } from '../config/loader.js';
 import { DUAL_DOOR_BOUNDS } from '../config/setting-bounds.js';
 import { log, peerText } from '../util/log.js';
-import { warnOnce } from '../util/warn-once.js';
+import { warnOnce, SAY_ONCE_WINDOW_MS } from '../util/warn-once.js';
 import { embedInputCutTotal } from '../metrics/registry.js';
 
 /** The ceiling when none is configured or the configured one is not valid. */
 export const DEFAULT_EMBED_INPUT_BYTES = 6_000;
 
-const invalidSaid = warnOnce<string>({ max: 4, every: 10 * 60_000 });
+const invalidSaid = warnOnce<string>({ max: 4, every: SAY_ONCE_WINDOW_MS });
 
 /** The embedding block as it is stored, or an empty one before the instance has a config (a unit that chunks a string, a first run). */
 export function storedEmbeddingConfig(): ReturnType<typeof getEmbeddingConfig> | Record<string, never> {
@@ -41,7 +41,7 @@ export function embedInputCeiling(cfg: { maxInputBytes?: unknown } = storedEmbed
   return DEFAULT_EMBED_INPUT_BYTES;
 }
 
-const cutSaid = warnOnce<string>({ max: 8, every: 10 * 60_000 });
+const cutSaid = warnOnce<string>({ max: 8, every: SAY_ONCE_WINDOW_MS });
 
 /**
  * Which producer's text was cut: a whole-document vector (the `embed` level), a media transcript, caption or combined text, or an input the

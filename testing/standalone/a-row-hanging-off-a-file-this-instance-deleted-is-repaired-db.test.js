@@ -49,9 +49,10 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { seedClaim } from './_media-claim.mjs';
 import {
-  NOW, FUTURE, hoursAfter, METRICS, fileRow, derivedRow, runPass, metricValue, repairCounters, repairCountersOrZero, counterDelta, repairSteps, spaceEntry,
+  NOW, FUTURE, hoursAfter, METRICS, fileRow, derivedRow, runPass, repairCounters, repairCountersOrZero, counterDelta, repairSteps, spaceEntry,
   addedKeys, maxAncestry,
 } from './_leaked-rows-repair.mjs';
+import { metricValue } from './_metric-series.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
