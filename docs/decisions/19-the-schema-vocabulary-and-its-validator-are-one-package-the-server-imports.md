@@ -23,7 +23,9 @@ worded by `util/log.ts`, the logger itself.
   every importer keeps its path and no definition exists twice. The server's answers and refusal texts are unchanged.
 - **The package reads no instance.** The schema library a `$ref` names is handed in: an app passes the entries it knows
   (`validateSpaceMeta(meta, { library })`), and the server installs its own library once (`useSchemaLibrary`, in
-  `spaces/library-ref-expansion.ts`), read at each parse. The package imports zod, the CEL engine and Node built-ins only.
+  `spaces/library-ref-expansion.ts`), read at each parse. The package imports zod, the CEL engine and Node built-ins, and in one file,
+  `from-typescript.ts`, the caller's own `typescript` by a dynamic import (an optional peer, Q-687 and D-70, for the
+  `@ythril/schema/from-typescript` entry, which reads TypeScript text and the compiler's own lib and nothing else on the machine).
 - **What the server alone needs stays in the server**: the route bodies (create, update, rename, delete, reorder, dupe
   rules), rule EVALUATION (the program cache, the boot check, the metrics), and the logger's ring, request ids and stack
   formatting. Rule evaluation compiles through the package's `compileRule`, so the analysis a save runs and the program a
@@ -44,7 +46,9 @@ worded by `util/log.ts`, the logger itself.
 - **A gate that read a definition from a server source file reads it from the package now**; the re-exports keep every
   import path, not every source path.
 - **This is the reversal to prevent:** a second definition of a schema body, tuple, limit or refusal wording in the server
-  "for convenience"; the package reading the instance's config, environment or files (an app has none); and an app keeping
+  "for convenience"; the package reading the instance's config, environment or files (an app has none), or the
+  `from-typescript` entry's compile reaching past the source it was given and the compiler's own lib, or the compiler
+  named anywhere but its one dynamic import (never by the main entry, never by the server); and an app keeping
   its own mirror of the vocabulary once the package is published.
 
 ## Where the detail lives

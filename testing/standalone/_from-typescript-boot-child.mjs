@@ -61,6 +61,7 @@ register(`data:text/javascript,${encodeURIComponent(hooks)}`, { data: { port: po
 
 /** The requests for `typescript` the hook has reported so far (it posts before it answers, so a short wait lets the port deliver). */
 async function asked() {
+  // waits-differently: the loader's hook thread posts before it answers; the port delivers a message in a later turn of the event loop, not after a time the subject owns
   await new Promise(resolve => setTimeout(resolve, 40));
   const out = [];
   for (let m = receiveMessageOnPort(port1); m; m = receiveMessageOnPort(port1)) out.push(m.message.parent);

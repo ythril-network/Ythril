@@ -17,6 +17,14 @@ The third workspace, `schema/` (`@ythril/schema`, the schema vocabulary and vali
 each release under the Apache License 2.0 and is meant for npm (not on the registry yet; packed from the repository until then). Its runtime dependencies (zod, `@bufbuild/cel` and what it pulls in) are the server's own,
 at the same versions, and are named again in `schema/NOTICE`, which a gate holds to the package's production closure.
 
+The package has one **optional peer dependency**, `typescript` (`>=5.4 <7`), used only by its `@ythril/schema/from-typescript`
+entry, which reads a space's schemas back from TypeScript with the caller's own compiler (Apache License 2.0, Microsoft). It is
+neither bundled nor installed by npm and is not in the image, so it is not in the production closure and `schema/NOTICE` carries a
+sentence, not a heading, for it; the entry's error names the fix, `npm install typescript@6`. The package's own tests run the entry
+on the compiler the repository develops with and, through an aliased development dependency (`typescript-6`), on a 6.x. The
+NOTICE walk leaves the peer out only because the package's own lock entry marks it optional, and the publish workflow asks the
+published image that `node_modules/typescript` is absent.
+
 **Two packages are dual-licensed with a copyleft arm**, and Ythril elects the permissive arm in both. A dual grant
 is a choice the distributor makes, so each election is recorded in its NOTICE entry rather than left to be inferred
 — "no copyleft applies" is a conclusion a reader should be able to check rather than take on trust.

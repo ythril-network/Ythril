@@ -174,6 +174,22 @@ jobs:
             fi
           done
 
+      # schema/NOTICE says the from-typescript entry uses the CALLER'S own typescript, neither bundled nor installed by npm. That is true of
+      # the image only while nothing installs the compiler there: the production install omits development dependencies, and the optional peer
+      # is not installed. Asked of the published image, where an image exists, so a change that made typescript a dependency of the server
+      # (or let npm install the peer) fails here and not in a person's report.
+      - name: Verify the image carries no typescript
+        run: |
+          IMAGE="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
+          echo "Checking $IMAGE"
+          if docker run --rm --entrypoint sh "$IMAGE" -c "test ! -d /app/node_modules/typescript"; then
+            echo "  ok: /app/node_modules/typescript is absent"
+          else
+            echo "  FAIL: /app/node_modules/typescript is in the published image."
+            echo "  schema/NOTICE says the compiler is the caller's own, neither bundled nor installed: the image must not carry it."
+            exit 1
+          fi
+
       # The half a PERSON reads. The images above are the half a machine consumes, and until 3.1.0 only that
       # half had a mechanism — six tags shipped with no Release and nothing noticed, because nothing was
       # watching for an absence.

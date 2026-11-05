@@ -54,3 +54,9 @@ port of Go's `regexp` package).
 
 License: MIT
 Copyright (c) 2023 Alexey Vasiliev
+
+---
+
+## The caller's own TypeScript compiler (neither bundled nor installed)
+
+The `@ythril/schema/from-typescript` entry reads TypeScript source with the caller's own `typescript` (Apache License 2.0, Microsoft Corporation), loaded only when that entry is called and neither bundled with this package nor installed by npm beside it: it is an optional peer dependency, so the production closure above does not include it.

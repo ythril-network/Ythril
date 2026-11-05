@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**A minor release: a mixed-case path no longer skips a space's rights, peer-bound tokens cannot approve AI connectors, model and sidecar answers are bounded, a filtered recall over a vector index that missed a match says so, a scan whose vector index is not ready keeps its place and says so, document passages are split to the size the embedder accepts, and many Brain and Settings pages read and translate better.**
+**A minor release: a mixed-case path no longer skips a space's rights, peer-bound tokens cannot approve AI connectors, model and sidecar answers are bounded, a filtered recall over a vector index that missed a match says so, a scan whose vector index is not ready keeps its place and says so, document passages are split to the size the embedder accepts, `@ythril/schema` reads a space's schemas back from TypeScript, and many Brain and Settings pages read and translate better.**
 
 | Changes on upgrade | Action |
 |---|---|
@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Embedding:** `embedding.maxInputBytes` (default 6000, 512 to 65536) sets the most bytes one embedder request may carry; document passages are split to it.
 - **Metrics:** `ythril_embed_jobs_failed_total`, `ythril_embed_input_cut_total`, `ythril_conversion_chunks_unembedded_total` and `ythril_recall_undecided_total` (filtered recalls that could not tell whether the index missed a match).
 - **Metrics:** `ythril_scan_holds_total` counts the types a background scan held over a vector index that was not ready, by scanner.
+- **Schema:** `spaceMetaFromTypeScript` in `@ythril/schema/from-typescript` reads a space's schemas back from TypeScript with the app's own `typescript` (an optional peer); what it cannot read is refused by name, what the source cannot carry is in `notRead`.
 
 ### Changed
 

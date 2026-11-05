@@ -71,7 +71,7 @@ describe('the typescript peer range and the install hint are stated alike everyw
     assert.ok(hint, `no install hint follows from the peer range ${range}`);
     const src = readFileSync(ENTRY, 'utf8');
     assert.ok(src.includes(`npm install ${hint}`), `${ENTRY} does not word its install error with "npm install ${hint}"`);
-    assert.match(src, /typescript['"`]?\s+option|option[^\n]{0,40}typescript/i, `${ENTRY}'s install error does not name the typescript option`);
+    assert.match(src, /typescript['"`]?\s+option|option\s+typescript/i, `${ENTRY}'s install error does not name the typescript option`);
   });
 
   for (const doc of DOCS) {
