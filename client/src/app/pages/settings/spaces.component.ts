@@ -1,4 +1,4 @@
-﻿import { ChangeDetectionStrategy, Component, HostListener, inject, signal, computed, OnInit } from '@angular/core';
+﻿import { ChangeDetectionStrategy, Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -6,6 +6,7 @@ import {
   SpaceActivity,
 } from '../../core/api.types';
 import { SpacesApi } from '../../core/spaces-api.service';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { pageTranslator } from '../../core/page-translator';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { DragDropModule } from '@angular/cdk/drag-drop';
@@ -288,20 +289,15 @@ export class SpacesComponent implements OnInit {
     return `${gib.toFixed(2)} GiB`;
   }
 
-  // ── Unsaved-changes guard (U4) ─────────────────────────────────────────────
+  // ── Unsaved-changes guard (U4, Q-701) ──────────────────────────────────────
 
-  /** CanDeactivate hook: block leaving the Spaces route while the editor has unsaved edits. */
-  canLeave(): boolean | Promise<boolean> {
-    // The prompt lives on the service now: the pop-up's (X) needs the identical question, and two
-    // copies of "are you sure you want to lose these edits" is two places for the answer to drift.
-    // This hook stays here — a modal openable from two pages must not own either page's guard.
-    return this.state.confirmDiscardIfDirty();
-  }
-
-  /** Native prompt on reload/tab-close while dirty — EventSource-style dialogs aren't allowed here. */
-  @HostListener('window:beforeunload', ['$event'])
-  onBeforeUnload(e: BeforeUnloadEvent): void {
-    if (this.state.isDirty()) { e.preventDefault(); e.returnValue = ''; }
+  /**
+   * The pop-up's draft is held by this page, which provides its state: leaving the route, reloading or closing the tab asks first
+   * while it is dirty (core/unsaved-edits.ts: the route guard and the reload warning are the shared ones now). The pop-up does not
+   * hold it itself: a modal openable from two pages must not own either page's guard.
+   */
+  constructor() {
+    holdUnsavedEdits(() => this.state.isDirty());
   }
 
   // ── Schema export / import ─────────────────────────────────────────────────

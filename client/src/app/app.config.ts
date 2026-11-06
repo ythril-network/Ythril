@@ -1,5 +1,5 @@
 import { ApplicationConfig, provideZonelessChangeDetection, APP_INITIALIZER, inject } from '@angular/core';
-import { provideRouter, withComponentInputBinding, withNavigationErrorHandler, TitleStrategy } from '@angular/router';
+import { provideRouter, withComponentInputBinding, withNavigationErrorHandler, withRouterConfig, TitleStrategy } from '@angular/router';
 import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { provideTransloco, provideTranslocoMissingHandler, Translation, TranslocoLoader, TranslocoService } from '@jsverse/transloco';
@@ -23,7 +23,11 @@ export class TranslocoHttpLoader implements TranslocoLoader {
 export const appConfig: ApplicationConfig = {
   providers: [
     provideZonelessChangeDetection(),
-    provideRouter(routes, withComponentInputBinding(), withNavigationErrorHandler(staleBuildNavigationErrorHandler)),
+    // `canceledNavigationResolution: 'computed'`: when the unsaved-edits guard refuses a Back or Forward (core/unsaved-edits.ts), the
+    // router returns the browser to the history entry it was on. With the default ('replace') the refused step is rewritten in place,
+    // so the page stays but one entry of the user's history is gone.
+    provideRouter(routes, withComponentInputBinding(), withNavigationErrorHandler(staleBuildNavigationErrorHandler),
+      withRouterConfig({ canceledNavigationResolution: 'computed' })),
     { provide: TitleStrategy, useClass: TranslocoTitleStrategy },
     provideHttpClient(withInterceptors([authInterceptor, mfaInterceptor])),
     provideAnimationsAsync(),
