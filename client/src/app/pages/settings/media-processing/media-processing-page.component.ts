@@ -20,9 +20,9 @@
  */
 import { ChangeDetectionStrategy, Component, OnInit, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { PhIconComponent } from '../../../shared/ph-icon.component';
-import { ConfirmDialogService } from '../../../core/confirm-dialog.service';
+import { UnsavedEdits, holdUnsavedEdits } from '../../../core/unsaved-edits';
 import { MediaProcessingStateService } from './media-processing-state.service';
 import { PipelineStatusService } from './pipeline-status.service';
 import { ModelsTabComponent } from './models-tab.component';
@@ -144,8 +144,15 @@ type Tab = 'models' | 'pipelines' | 'tools';
 export class MediaProcessingPageComponent implements OnInit {
   readonly s = inject(MediaProcessingStateService);
   readonly pipeline = inject(PipelineStatusService);
-  private readonly confirmDialog = inject(ConfirmDialogService);
-  private readonly transloco = inject(TranslocoService);
+  private readonly unsavedEdits = inject(UnsavedEdits);
+
+  /**
+   * The page's draft (every card and pipeline, typed API keys included: `s.isDirty()`) is held, so leaving the route, reloading or
+   * closing the tab asks first (core/unsaved-edits.ts). Until Q-701 only the tab switch below asked.
+   */
+  constructor() {
+    holdUnsavedEdits(() => this.s.isDirty());
+  }
 
   /**
    * Pipelines first, and the landing tab.
@@ -218,14 +225,8 @@ export class MediaProcessingPageComponent implements OnInit {
   async switchTo(t: Tab): Promise<void> {
     if (t === this.tab()) return;
     if (this.s.isDirty()) {
-      const ok = await this.confirmDialog.confirm({
-        title: this.transloco.translate('mediaProcessing.confirm.discardTitle'),
-        message: this.transloco.translate('mediaProcessing.confirm.discardMessage'),
-        confirmLabel: this.transloco.translate('mediaProcessing.confirm.discardConfirm'),
-        cancelLabel: this.transloco.translate('mediaProcessing.confirm.discardCancel'),
-        danger: true,
-      });
-      if (!ok) return;
+      // The app's one discard question (core/unsaved-edits.ts), the same words a route leave asks with.
+      if (!(await this.unsavedEdits.confirmDiscard(true))) return;
       // Discarding means going back to what the server has, not keeping the edits around invisibly on
       // a tab the operator can no longer see.
       this.s.load();

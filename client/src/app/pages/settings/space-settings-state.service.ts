@@ -7,7 +7,7 @@ import {
 import { TranslocoService } from '@jsverse/transloco';
 import { SpacesApi } from '../../core/spaces-api.service';
 import type { SchemaLayersView } from '../../core/schema-api.service';
-import { ConfirmDialogService } from '../../core/confirm-dialog.service';
+import { UnsavedEdits } from '../../core/unsaved-edits';
 import {
   addProp as addPropTo,
   removeProp as removePropFrom,
@@ -393,24 +393,17 @@ export function ruleLocationOf(path: unknown): RuleLocation | null {
 export class SpaceSettingsState {
   private spacesApi = inject(SpacesApi);
   private transloco = inject(TranslocoService);
-  private confirmDialog = inject(ConfirmDialogService);
+
+  private unsavedEdits = inject(UnsavedEdits);
 
   /**
-   * Ask before losing unsaved edits. Resolves true when it is safe to proceed.
-   *
-   * On the SERVICE rather than a component because two callers need the identical question: the pop-up's (X)
-   * and the Spaces route's CanDeactivate hook. It answers true immediately when nothing is dirty, so no
-   * caller has to pair it with its own isDirty() check and risk inverting one of them.
+   * Ask before losing this pop-up's unsaved edits (its (X) and its space switch). Resolves true when it is safe to proceed: at once
+   * when nothing is dirty, so no caller has to pair it with its own isDirty() check and risk inverting one of them. The question is
+   * the app's one discard question (core/unsaved-edits.ts); leaving the route is asked by the shared route guard, which this state's
+   * host page feeds with `isDirty()` through `holdUnsavedEdits`.
    */
-  async confirmDiscardIfDirty(): Promise<boolean> {
-    if (!this.isDirty()) return true;
-    return this.confirmDialog.confirm({
-      title:   this.transloco.translate('spaces.unsaved.title'),
-      message: this.transloco.translate('spaces.unsaved.message'),
-      confirmLabel: this.transloco.translate('spaces.unsaved.confirm'),
-      cancelLabel:  this.transloco.translate('spaces.unsaved.cancel'),
-      danger: true,
-    });
+  confirmDiscardIfDirty(): Promise<boolean> {
+    return this.unsavedEdits.confirmDiscard(this.isDirty());
   }
 
   readonly KINDS: readonly KnowledgeType[] = KNOWLEDGE_TYPES;
