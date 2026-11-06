@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Database:** under load, a timed database call the driver gave up on after sending could leave its answer on the connection, and every later call on it read the answer of the call before; that connection is now closed.
 - **Rate limits:** three busy tokens behind one address no longer trip the per-address flood backstop; it counts only requests no token's own limit meters, and its `429` says so.
 - **Recall:** a filtered recall the vector index answered with nothing said nothing over an absent, dropped or lagging index; it now says `index_not_ready` or `filter_window` when an older record satisfies the filter, and stays a plain empty answer when none does.
 - **Contradictions and duplicates:** a contradiction scan passed over records searched on an unready index and showed a clean queue; it now keeps its place until the index serves. A hold 20 hours old is warned, scan answers name held types (`indexHeld`), and a deleted space loses its scan cursors.
