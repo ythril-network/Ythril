@@ -119,9 +119,12 @@ describe('an Overview skeleton can always be dismissed', () => {
     // what keeps "blanked on a switch" true rather than merely "blanked somewhere".
     // The METHOD, bounded by the brace that closes it. 2 000 characters was the largest cap in the suite and
     // the clearest sign of a guess: nobody chooses that number, they raise it until the test passes.
-    const sel = src.indexOf('selectSpace(id: string): void {');
-    assert.ok(sel > -1, 'selectSpace is gone — re-anchor this gate');
-    assert.match(blockAfter(src, sel, 'selectSpace'), /this\.ov\.blankForSpaceSwitch\(\)/,
+    // Every space switch runs `showSpace` since Q-701: `selectSpace` (the person's choice, which may first ask about an unsaved
+    // draft) calls it, and so do the moves the page makes itself (a `?space=` link, a renamed or deleted view).
+    const sel = src.indexOf('private showSpace(id: string): void {');
+    assert.ok(sel > -1, 'showSpace is gone — re-anchor this gate');
+    assert.match(src, /async selectSpace\(id: string\)[^{]*\{[\s\S]*?this\.showSpace\(id\)/, 'selectSpace must switch through showSpace');
+    assert.match(blockAfter(src, sel, 'showSpace'), /this\.ov\.blankForSpaceSwitch\(\)/,
       'a space switch must still blank the panels, or the skeletons never go up in the first place');
     const at = src.indexOf('  blankForSpaceSwitch(): void {');
     assert.ok(at > 0, 'blankForSpaceSwitch method not found');

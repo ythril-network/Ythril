@@ -171,9 +171,10 @@ describe('both network routes ask before they save', () => {
      * "could not save" would make that work invisible in the one place it matters: the field the operator
      * just typed into. The server's sentence has to win over the local fallback.
      */
-    const ui = src('client/src/app/pages/settings/networks.component.ts');
-    const at = ui.indexOf('saveSchedule(net: Network)');
-    assert.notEqual(at, -1, 'saveSchedule is gone — this gate is reading the wrong component');
+    // The schedule box and its Save are their own component since Q-701 (network-sync-schedule.component.ts).
+    const ui = src('client/src/app/pages/settings/network-sync-schedule.component.ts');
+    const at = ui.indexOf('save(): void');
+    assert.notEqual(at, -1, 'the schedule save is gone — this gate is reading the wrong component');
     const fn = ui.slice(at, ui.indexOf('\n  }', at));
     // Read through the one refusal formatter (`refusalText`, bundle-23 R6-14), which shows the server's sentence and falls back to the
     // key it is given only when the body states none — the same promise `err.error?.error ?? 'could not save'` made by hand.

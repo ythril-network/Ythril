@@ -58,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Media:** a file whose new analysis could not be queued read `pending`; it reads `failed` with the cause.
 - **Faces:** a face the gallery could not answer for (index unavailable, deferrals spent) lost the label it had; it keeps it, matched by box overlap and only from the same bytes. A face the gallery answered no one for stores no label.
 - **Metrics:** `ythril_faces_stored_unmatched_total` counts faces the gallery could not match, a kept label included; `ythril_media_jobs_retried_total` includes superseded runs.
-- **Unsaved changes:** leaving a page with an unsaved edit lost it silently on every page except Spaces. Every page now asks first: the sidebar, Back, the Brain's tab and space switches, reload and closing the tab. This covers the Brain's forms, inline edits and record drawer, Media Processing, Networks, Database, Embedding, Webhooks, Tokens, the Schema Library, and a space's retention and embeddings settings.
+- **Unsaved changes:** leaving a page lost an unsaved edit everywhere but Spaces. Every page now asks first (sidebar, Back, reload, the Brain's tab and space switches), including a space's retention and embeddings settings.
 - **Graph:** Retry was not clickable after a graph had been drawn; the stale graph, its counts and its controls are hidden while the error shows.
 - **Rendering:** a render window the sidecar ended early skipped the pages in between.
 - **Translations:** the retention line and nine other summaries kept the language of their first render; German and Polish said "Ausweis"/"dowód" for an ID; nine model fields had no input type.
