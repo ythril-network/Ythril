@@ -30,9 +30,17 @@
  * or `timeoutMS` (they are not liveness defaults; `write-bound.ts` says what it does about them), and it never reads the
  * environment: a caller whose own figures differ (the connection test's 5 s) passes them as `callerDefaults`, and the
  * string still wins over those.
+ *
+ * ## The one thing it does besides the figures
+ *
+ * `mongoClientOptions` installs the abandoned-reply guard (`abandoned-reply-guard.ts`, `Q-715`): a connection the driver
+ * gave up on after writing a command is closed instead of handing that command's reply to the next operation. It lives
+ * here because every client in `server/src` is built from these options (a gate holds that), so no client can be built
+ * without it.
  */
 
 import { peerList } from '../util/log.js';
+import { guardAbandonedReplies } from './abandoned-reply-guard.js';
 
 /** The three options this module owns. */
 export interface ClientLivenessOptions {
@@ -107,9 +115,10 @@ function checkedCallerDefaults(callerDefaults: CallerDefaults): Required<ClientL
  * The options to hand `new MongoClient(uri, …)`: the defaults, minus every key the connection string names.
  *
  * A fresh object each call. Everything that builds a client from a connection string goes through this, so an operator's
- * option in `MONGO_URI` is the one the driver sees.
+ * option in `MONGO_URI` is the one the driver sees. It also installs the abandoned-reply guard (see the module docblock).
  */
 export function mongoClientOptions(uri: string, callerDefaults: CallerDefaults = {}): Partial<ClientLivenessOptions> {
+  guardAbandonedReplies();
   const defaults = checkedCallerDefaults(callerDefaults);
   const named = uriQueryOptions(uri);
   const options: Partial<ClientLivenessOptions> = {};
