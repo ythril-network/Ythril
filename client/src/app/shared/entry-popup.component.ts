@@ -19,6 +19,7 @@ import type { RefusalSource, WireRow } from '../core/refusal-text';
 import { refusalViewOf } from '../core/refusal-signals';
 import { splitWriteWarnings } from '../core/write-warnings';
 import { RetypeConfirmService } from '../core/retype-confirm.service';
+import { holdUnsavedEdits } from '../core/unsaved-edits';
 import { RefusalAlertComponent } from './refusal-alert.component';
 import { WriteWarningsComponent } from './write-warnings.component';
 
@@ -430,6 +431,11 @@ export class EntryPopupComponent {
 
   /** Snapshot of the record when it was last received/saved. */
   private snapshot = signal<Record<string, unknown>>({});
+
+  constructor() {
+    // Dirty while the working copy differs from the record as received or last saved (Reset and a successful save both restore it).
+    holdUnsavedEdits(() => !!this.record && JSON.stringify(this.draft()) !== JSON.stringify(this.snapshot()));
+  }
 
   recordId = computed(() => {
     const id = this.draft()['_id'];

@@ -22,6 +22,7 @@ import { refusalText } from '../../core/refusal-text';
 import { pageTranslator } from '../../core/page-translator';
 import { PluralText } from '../../core/plural-text.service';
 import { PluralPipe } from '../../core/plural.pipe';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /** Editable form model for the create/edit dialog. */
 interface WebhookForm {
@@ -33,6 +34,11 @@ interface WebhookForm {
   events: Set<WebhookEventType>;
   allSpaces: boolean;         // true = all spaces (sends spaces: [])
   spaces: Set<string>;
+}
+
+/** The form's values as text, the sets in sorted order, so two forms with the same picks compare equal. */
+function formSnapshot(f: WebhookForm): string {
+  return JSON.stringify({ ...f, events: [...f.events].sort(), spaces: [...f.spaces].sort() });
 }
 
 @Component({
@@ -271,7 +277,17 @@ export class WebhooksComponent implements OnInit {
   loadError = signal(false);
 
   form = signal<WebhookForm | null>(null);
+  /** The open form as it was opened (the form is edited in place by the dialog's bindings), for `holdUnsavedEdits`. */
+  private formAtOpen = '';
   saving = signal(false);
+
+  constructor() {
+    // An open dialog that differs from what it opened with; closing it (saved or not) ends the draft.
+    holdUnsavedEdits(() => {
+      const f = this.form();
+      return f !== null && formSnapshot(f) !== this.formAtOpen;
+    });
+  }
   formError = signal('');
 
   deliveriesFor = signal<WebhookSubscription | null>(null);
@@ -319,16 +335,21 @@ export class WebhooksComponent implements OnInit {
 
   openCreate(): void {
     this.formError.set('');
-    this.form.set({ id: null, url: '', secret: '', enabled: true, allEvents: true, events: new Set(), allSpaces: true, spaces: new Set() });
+    this.openWith({ id: null, url: '', secret: '', enabled: true, allEvents: true, events: new Set(), allSpaces: true, spaces: new Set() });
   }
 
   openEdit(w: WebhookSubscription): void {
     this.formError.set('');
-    this.form.set({
+    this.openWith({
       id: w.id, url: w.url, secret: '', enabled: w.enabled,
       allEvents: w.events.length === 0, events: new Set(w.events),
       allSpaces: w.spaces.length === 0, spaces: new Set(w.spaces),
     });
+  }
+
+  private openWith(f: WebhookForm): void {
+    this.formAtOpen = formSnapshot(f);
+    this.form.set(f);
   }
 
   closeForm(): void { this.form.set(null); }

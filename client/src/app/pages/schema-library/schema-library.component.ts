@@ -23,6 +23,7 @@ import { SpacesApi } from '../../core/spaces-api.service';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { TranslocoService } from '@jsverse/transloco';
 import { ToastService } from '../../core/toast.service';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { PropSchemaTableComponent } from '../../shared/prop-schema-table.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
@@ -766,6 +767,33 @@ export class SchemaLibraryComponent implements OnInit {
 
   form: LibraryFormState = this.blankForm();
 
+  /** What each form was opened with: a form is a draft while it differs from that (`holdUnsavedEdits`, Q-701). */
+  private formOpenedWith = '';
+  private catalogOpenedWith = '';
+  private applyOpenedGroup = '';
+
+  constructor() {
+    holdUnsavedEdits(() =>
+      (this.showDialog() && JSON.stringify(this.form) !== this.formOpenedWith)
+      || (this.showAddCatalog() && JSON.stringify(this.newCatalog) !== this.catalogOpenedWith)
+      || (this.showCreateLibToken() && this.libTokenName().trim() !== '')
+      || this.exportDraftHeld() || this.applyDraftHeld());
+  }
+
+  /**
+   * The export and apply dialogs stay open with a result line after they ran; what they were asked to do is done by then, so a dialog
+   * that shows a result holds no draft.
+   */
+  private exportDraftHeld(): boolean {
+    const d = this.exportSpaceDialog();
+    return d !== null && d.result === '' && (d.spaceId !== '' || d.groupName.trim() !== '' || d.namePrefix.trim() !== '');
+  }
+
+  private applyDraftHeld(): boolean {
+    const d = this.applyGroupDialog();
+    return d !== null && d.result === '' && (d.spaceId !== '' || d.group !== this.applyOpenedGroup);
+  }
+
   private blankForm(): LibraryFormState {
     return {
       name:          '',
@@ -810,6 +838,7 @@ export class SchemaLibraryComponent implements OnInit {
 
   openCreate(): void {
     this.form = this.blankForm();
+    this.formOpenedWith = JSON.stringify(this.form);
     this.editingName.set(null);
     this.dialogError.set('');
     this.showDialog.set(true);
@@ -817,6 +846,7 @@ export class SchemaLibraryComponent implements OnInit {
 
   openEdit(entry: SchemaLibraryEntry): void {
     this.form = entryToFormState(entry);
+    this.formOpenedWith = JSON.stringify(this.form);
     this.editingName.set(entry.name);
     this.dialogError.set('');
     this.showDialog.set(true);
@@ -988,6 +1018,7 @@ export class SchemaLibraryComponent implements OnInit {
 
   openAddCatalog(): void {
     this.newCatalog = { name: '', url: '', description: '', accessToken: '' };
+    this.catalogOpenedWith = JSON.stringify(this.newCatalog);
     this.catalogError.set('');
     this.showAddCatalog.set(true);
   }
@@ -1225,7 +1256,8 @@ export class SchemaLibraryComponent implements OnInit {
   // ── Apply group to space ──────────────────────────────────────────────────
 
   openApplyGroup(): void {
-    this.applyGroupDialog.set({ group: this.groupFilter() ?? '', spaceId: '', saving: false, error: '', result: '' });
+    this.applyOpenedGroup = this.groupFilter() ?? '';
+    this.applyGroupDialog.set({ group: this.applyOpenedGroup, spaceId: '', saving: false, error: '', result: '' });
   }
 
   doApplyGroup(): void {

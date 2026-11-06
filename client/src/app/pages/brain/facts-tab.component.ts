@@ -17,6 +17,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordTabBase } from './record-tab-base';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { SortableHeaderComponent } from './sortable-header.component';
 import { RecordOrderLineComponent } from './record-order-line.component';
 import { RecordSearchBarComponent } from './record-search-bar.component';
@@ -323,7 +324,16 @@ export class FactsTabComponent extends RecordTabBase {
   /** `type` is optional on the model: an edit model without one (an older caller's) leaves the memory's type alone. */
   editMemory: { fact: string; type?: string; tags: string[]; linkEntities: string; description: string; properties: Record<string, string | number | boolean> } =
     { fact: '', type: '', tags: [], linkEntities: '', description: '', properties: {} };
+  /** What the create form and the inline row were opened with: the draft is dirty while it differs (`holdUnsavedEdits`, Q-701). */
+  private createdFrom = '';
+  private editedFrom = JSON.stringify(this.editMemory);
 
+  constructor() {
+    super();
+    holdUnsavedEdits(() =>
+      (this.showMemoryForm() && JSON.stringify(this.memoryForm) !== this.createdFrom)
+      || (this.recordList.editingId() !== '' && JSON.stringify(this.editMemory) !== this.editedFrom));
+  }
 
   protected override resetOnSpaceChange(): void {
     this.recordFilter.set({ type: '', tag: '', description: '', properties: '', fromName: '', toName: '', entityName: '' });
@@ -405,6 +415,7 @@ export class FactsTabComponent extends RecordTabBase {
 
   openMemoryForm(): void {
     this.memoryForm = { fact: '', type: '', tags: [], linkEntities: '', description: '', properties: this.store.buildPropertiesObject('fact') };
+    this.createdFrom = JSON.stringify(this.memoryForm);
     this.createFailure.set(null);
     this.showMemoryForm.set(true);
   }
@@ -459,6 +470,7 @@ export class FactsTabComponent extends RecordTabBase {
       description: mem.description ?? '',
       properties: this.store.buildPropertiesObject('fact', mem.properties ?? {}, mem.type),
     };
+    this.editedFrom = JSON.stringify(this.editMemory);
   }
 
   saveEditMemory(id: string): void {

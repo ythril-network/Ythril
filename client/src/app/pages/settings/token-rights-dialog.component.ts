@@ -11,6 +11,7 @@ import type { TokenRights } from './rights-glyph.component';
 import type { Space, TokenRecord } from '../../core/api.types';
 import { refusalText } from '../../core/refusal-text';
 import { TokenViewCopyComponent } from './token-view-copy.component';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * Edit an existing token's rights.
@@ -237,12 +238,24 @@ export class TokenRightsDialogComponent {
 
   spaceIds = () => this.availableSpaces().map(s => s.id);
 
+  /** The draft as it was opened with (null until `ngOnInit` prefilled it), re-taken after a save the server accepted. */
+  private opened: string | null = null;
+
+  constructor() {
+    holdUnsavedEdits(() => this.opened !== null && this.draftText() !== this.opened);
+  }
+
+  private draftText(): string {
+    return JSON.stringify([this.draftName.trim(), this.draftRateLimit, this.draftMfa, this.totpCode, this.draft()]);
+  }
+
   ngOnInit(): void {
     const r = this.token().rights;
     if (r) this.draft.set({ ...r } as TokenRights);
     this.draftName = this.token().name;
     this.draftRateLimit = this.token().rateLimitPerMinute ?? null;
     this.draftMfa = this.token().mfa ?? 'inherit';
+    this.opened = this.draftText();
   }
 
   save(): void {
@@ -266,7 +279,7 @@ export class TokenRightsDialogComponent {
       ...(mfaChanged ? { mfa: this.draftMfa } : {}),
       ...(rateNow !== rateWas ? { rateLimitPerMinute: rateNow } : {}),
     }, this.totpCode.trim() || undefined).subscribe({
-      next: ({ token }) => { this.saving.set(false); this.saved.emit(token); },
+      next: ({ token }) => { this.saving.set(false); this.opened = this.draftText(); this.saved.emit(token); },
       error: (err) => {
         this.saving.set(false);
         // The exemption refusal is a 403 whose `message` carries the actionable half; `error` is the code

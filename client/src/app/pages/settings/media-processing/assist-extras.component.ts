@@ -161,6 +161,8 @@ export class AssistExtrasComponent {
     }
     if ('acknowledgedHostForConversations' in patch && !patch.acknowledgedHostForConversations) delete next.acknowledgedHostForConversations;
     this.s.assist.fallback = next;
+    // The consent buttons fire neither `input` nor `change`, so the page's delegated listener never saw them; `isDirty()` needs `touched`.
+    this.s.touched.set(true);
   }
   fallbackHost(): string { return hostOf(this.s.assist.fallback?.baseUrl); }
   fallbackLocal(): boolean { return isLocalEndpoint(this.s.assist.fallback?.baseUrl); }

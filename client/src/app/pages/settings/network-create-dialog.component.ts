@@ -8,6 +8,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { refusalText } from '../../core/refusal-text';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * Create-network dialog, extracted from the (large) NetworksComponent as the first slice of taming that
@@ -149,6 +150,17 @@ export class NetworkCreateDialogComponent {
   creating = signal(false);
   createError = signal('');
 
+  /** The form as it opened, re-taken after a create the server accepted: what `hold` compares the form against. */
+  private opened = this.draft();
+
+  constructor() {
+    holdUnsavedEdits(() => this.draft() !== this.opened);
+  }
+
+  private draft(): string {
+    return JSON.stringify([this.form, this.networkSpacesFallback.trim(), this.networkSelectedSpaces]);
+  }
+
   createNetwork(): void {
     if (!this.form.label.trim()) return;
     this.creating.set(true);
@@ -169,6 +181,7 @@ export class NetworkCreateDialogComponent {
     }).subscribe({
       next: (net) => {
         this.creating.set(false);
+        this.opened = this.draft();
         this.created.emit(net);
       },
       error: (err) => {

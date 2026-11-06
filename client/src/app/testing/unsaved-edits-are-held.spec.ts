@@ -39,7 +39,41 @@ const HOLDER_FLOOR = 20;
  * Components whose controls hold no draft. Keyed by the file, relative to `client/`. Each reason says why leaving loses nothing a user
  * would call an edit, or which host holds the draft its fields edit.
  */
-const NOT_A_DRAFT: Readonly<Record<string, string>> = {};
+const NOT_A_DRAFT: Readonly<Record<string, string>> = {
+  // Filters, queries and controls that act at once.
+  'src/app/pages/brain/query-tab.component.ts': 'a query builder: the recall form and the advanced query form only parameterise a read that a Run button sends, and nothing is written',
+  'src/app/pages/brain/recall-form.component.ts': 'the recall (search) parameters: every field only shapes a read that Run sends, nothing is stored',
+  'src/app/pages/brain/record-search-bar.component.ts': 'a record search box that emits its query at once to filter the list; it is a filter, not an edit',
+  'src/app/pages/brain/review-tab.component.ts': 'review filters (type, search, status) that narrow the pair list; the merge and dismiss actions act at once',
+  'src/app/pages/brain/review-contradictions-panel.component.ts': 'a search box and a status filter that narrow the contradiction list; its actions act at once',
+  'src/app/pages/graph/graph-toolbar.component.ts': 'the graph depth slider acts at once on the drawn graph, and the entity finder is a search that reports a pick',
+  'src/app/pages/graph/graph-linked-records.component.ts': 'a type filter and a description filter over the linked records of one node; they only narrow what is shown',
+  'src/app/pages/settings/audit-log.component.ts': 'filters held until Search is pressed; they only query the log and a navigation loses nothing a user wrote',
+  'src/app/pages/settings/preferences.component.ts': 'language buttons and date style/zone radios act at once (setLang, setStyle, setZone), so nothing waits for a save',
+  'src/app/pages/files/conflicts.component.ts': 'per-row choices made again in one click (default keep-local) and selection checkboxes; nothing is typed, and each Resolve sends its own choice',
+  // One-shot credentials and confirmations.
+  'src/app/pages/login/login.component.ts': 'a one-shot credential on a public route outside the shell, left only by its own sign-in',
+  'src/app/pages/setup/setup.component.ts': 'the first-run form on a public route outside the shell, left only by its own submit',
+  'src/app/pages/settings/mfa.component.ts': 'the confirm code is a one-shot six-digit code from the authenticator, typed to prove possession and not a draft anyone keeps',
+  'src/app/shared/mfa-prompt.component.ts': 'a one-shot six-digit code sent by Verify; it cannot be recovered or reused later, so nothing is lost by leaving',
+  'src/app/shared/confirm-dialog.component.ts': 'the type-to-confirm text is a one-shot confirmation of a destructive act that the dialog itself sends or cancels',
+  // Fields that edit a draft their host holds.
+  'src/app/pages/brain/chrono-ref-field.component.ts': 'a record picker whose search box finds a chrono entry to add; the picked ids land in its host\'s draft, which src/app/pages/files/file-meta-editor.component.ts holds',
+  'src/app/pages/brain/fact-ref-field.component.ts': 'a record picker whose search box finds a fact to add; the picked ids land in its host\'s draft, which chrono-tab.component.ts, record-drawer.component.ts and src/app/pages/files/file-meta-editor.component.ts hold',
+  'src/app/shared/tag-input.component.ts': 'edits the tag list of its host\'s draft, which the Brain tabs (facts, entities, edges, chrono), record-drawer.component.ts and file-meta-editor.component.ts hold',
+  'src/app/shared/properties-editor.component.ts': 'edits the properties map of its host\'s draft, which the Brain tabs and record-drawer.component.ts hold',
+  'src/app/shared/prop-schema-table.component.ts': 'edits the property rows of its host\'s draft: schema-library.component.ts holds the library form, and the settings schema editor is held by SpaceSettingsState.isDirty()',
+  'src/app/shared/rule-rows.component.ts': 'edits the rule list of its host\'s draft: schema-library.component.ts holds the library form, and the settings schema editor is held by SpaceSettingsState.isDirty()',
+  'src/app/shared/entity-search.component.ts': 'a finder: it holds a typed query and reports a pick; a pick lands in its host\'s draft (edges-tab.component.ts holds the edge form) and a typed query alone is no edit',
+  'src/app/pages/settings/space-settings-tab.component.ts': 'edits the SpaceSettingsState form, whose draft spaces.component.ts holds (and brain.component.ts holds when the pop-up is hosted there)',
+  'src/app/pages/settings/space-duplicates-tab.component.ts': 'edits the SpaceSettingsState duplicate-rule draft, which spaces.component.ts holds (and brain.component.ts when the pop-up is hosted there)',
+  'src/app/pages/settings/schema-type-editor.component.ts': 'edits a type draft in SpaceSettingsState, which spaces.component.ts holds (and brain.component.ts when hosted there)',
+  'src/app/pages/settings/media-processing/models-tab.component.ts': 'edits the MediaProcessingStateService draft, which media-processing-page.component.ts holds through s.isDirty()',
+  'src/app/pages/settings/media-processing/pipelines-tab.component.ts': 'edits the MediaProcessingStateService draft, which media-processing-page.component.ts holds through s.isDirty()',
+  'src/app/pages/settings/media-processing/decision-model-card.component.ts': 'edits the MediaProcessingStateService draft, which media-processing-page.component.ts holds through s.isDirty()',
+  'src/app/pages/settings/media-processing/slot-tuning.component.ts': 'edits the MediaProcessingStateService draft, which media-processing-page.component.ts holds through s.isDirty()',
+  'src/app/pages/settings/media-processing/assist-extras.component.ts': 'edits the MediaProcessingStateService draft, which media-processing-page.component.ts holds through s.isDirty()',
+};
 
 /** Depth-first walk of the route table, every route with its full path. */
 function walk(rs: Route[], prefix = ''): Array<{ path: string; route: Route }> {

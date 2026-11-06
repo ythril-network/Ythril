@@ -18,6 +18,7 @@ import { SortableHeaderComponent } from './sortable-header.component';
 import { RecordOrderLineComponent } from './record-order-line.component';
 import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordTabBase } from './record-tab-base';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { BRAIN_CHIP_STYLES } from './brain-form.styles';
 import { BRAIN_RECORD_TABLE_STYLES } from './brain-table.styles';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
@@ -321,6 +322,16 @@ export class EntitiesTabComponent extends RecordTabBase {
   private editOriginalType = '';
   entityForm = { name: '', type: '', tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
   editEntity = { name: '', type: '', tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
+  /** What the create form and the inline row were opened with: the draft is dirty while it differs (`holdUnsavedEdits`, Q-701). */
+  private createdFrom = '';
+  private editedFrom = JSON.stringify(this.editEntity);
+
+  constructor() {
+    super();
+    holdUnsavedEdits(() =>
+      (this.showEntityForm() && JSON.stringify(this.entityForm) !== this.createdFrom)
+      || (this.recordList.editingId() !== '' && JSON.stringify(this.editEntity) !== this.editedFrom));
+  }
 
   protected override resetOnSpaceChange(): void {
     // The deep-linked type is applied HERE rather than in the constructor, because this is where the
@@ -363,6 +374,7 @@ export class EntitiesTabComponent extends RecordTabBase {
   openEntityForm(): void {
     const firstType = Object.keys(this.store.spaceMeta()?.typeSchemas?.entity ?? {})[0] ?? '';
     this.entityForm = { name: '', type: firstType, tags: [], description: '', properties: this.store.buildPropertiesObject('entity', {}, firstType) };
+    this.createdFrom = JSON.stringify(this.entityForm);
     this.createFailure.set(null);
     this.showEntityForm.set(true);
   }
@@ -417,6 +429,7 @@ export class EntitiesTabComponent extends RecordTabBase {
       description: ent.description ?? '',
       properties: this.store.buildPropertiesObject('entity', ent.properties ?? {}, ent.type),
     };
+    this.editedFrom = JSON.stringify(this.editEntity);
   }
 
   saveEditEntity(id: string): void {

@@ -6,6 +6,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { SettingsCardComponent } from '../../shared/settings-card.component';
 import { refusalText } from '../../core/refusal-text';
 import { TranslocoService } from '@jsverse/transloco';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * Who may frame and restyle this instance.
@@ -134,12 +135,24 @@ export class EmbeddingComponent {
   saving = signal(false);
   savedAt = signal(false);
 
-  constructor() { this.load(); }
+  /** The list as the server last held it (loaded, or answered to a save), to tell an edit from what was opened. */
+  private savedOrigins = '[]';
+
+  constructor() {
+    holdUnsavedEdits(() => this.sent(this.origins()) !== this.savedOrigins);
+    this.load();
+  }
+
+  /** What a save would send for `list`: trimmed, blank rows dropped (an Add that was never typed into is not an edit). */
+  private sent(list: string[]): string {
+    return JSON.stringify(list.map(o => o.trim()).filter(Boolean));
+  }
 
   load(): void {
     this.http.get<{ allowedOrigins: string[]; invalid: string[] }>('/api/admin/embed-config').subscribe({
       next: r => {
         this.origins.set([...(r.allowedOrigins ?? [])]);
+        this.savedOrigins = this.sent(this.origins());
         /*
          * A stored entry the validator drops is shown as rejected on arrival, not only after a save. An operator
          * whose portal will not frame is looking at this page to find out why, and an invalid line in config.json
@@ -183,6 +196,7 @@ export class EmbeddingComponent {
     this.http.patch<{ allowedOrigins: string[] }>('/api/admin/embed-config', { allowedOrigins }).subscribe({
       next: r => {
         this.origins.set([...r.allowedOrigins]);
+        this.savedOrigins = this.sent(this.origins());
         this.rejected.set([]);
         this.saving.set(false);
         this.savedAt.set(true);

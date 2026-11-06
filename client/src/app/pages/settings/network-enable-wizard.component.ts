@@ -7,6 +7,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { refusalText, httpErrorReason } from '../../core/refusal-text';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * Enable-Networks wizard, extracted from the (large) NetworksComponent as the last of the three dialogs
@@ -177,6 +178,14 @@ export class NetworkEnableWizardComponent implements OnInit {
   localAgentChecking = signal(false);
   localAgentStatusMessage = signal('');
   enableAutoRunning = signal(false);
+  /** The setup ended in success (the host takes the public URL and closes this), so what was typed is no longer a draft. */
+  private finished = false;
+
+  constructor() {
+    // A hostname typed, or an option moved off its default (autostart on; DNS overwrite and the acknowledgement off).
+    holdUnsavedEdits(() => !this.finished
+      && (this.enableHostname.trim() !== '' || !this.enableAutostart || this.enableOverwriteDns || this.enableAcknowledgeCritical));
+  }
 
   ngOnInit(): void {
     this.enableOs = this.detectLocalOs();
@@ -211,6 +220,7 @@ export class NetworkEnableWizardComponent implements OnInit {
       message: this.transloco.translate('networks.wizard.confirm.verifyHealth', { host }),
     });
     if (!ok) return;
+    this.finished = true;
     this.enabled.emit(`https://${host}`);
     this.close.emit();
   }
@@ -251,6 +261,7 @@ export class NetworkEnableWizardComponent implements OnInit {
     }).subscribe({
       next: (result) => {
         this.enableAutoRunning.set(false);
+        this.finished = true;
         this.localAgentStatusMessage.set(result.message ?? this.transloco.translate('networks.wizard.status.autoSetupFinished'));
         this.enabled.emit(result.publicUrl || `https://${host}`);
       },

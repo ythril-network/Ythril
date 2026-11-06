@@ -6,6 +6,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { DIALOG_STYLES } from '../settings/dialog.styles';
 import { ViewsStore } from '../../core/views.store';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { EVERY_SPACE, viewRefusalText, type PersonalView } from '../../core/views-api.service';
 
 /** The shape of a space as this picker needs it: an id, and the label to show beside it. */
@@ -107,6 +108,14 @@ export class ViewCreateDialogComponent {
 
   protected readonly canSubmit = computed(() => this.mode() === 'all' || this.chosen().size > 0);
 
+  /** The view was made: the page closes this dialog and opens the view next, so from here the draft is spent (Q-701). */
+  private made = false;
+
+  constructor() {
+    // The dialog opens blank, in the "some" mode with nothing ticked: a draft is anything else.
+    holdUnsavedEdits(() => !this.made && (this.name.trim() !== '' || this.mode() !== 'some' || this.chosen().size > 0));
+  }
+
   protected toggle(spaceId: string): void {
     this.chosen.update(set => { const next = new Set(set); if (!next.delete(spaceId)) next.add(spaceId); return next; });
   }
@@ -118,7 +127,7 @@ export class ViewCreateDialogComponent {
     this.error.set('');
     const members = this.mode() === 'all' ? EVERY_SPACE : this.spaces().map(s => s.id).filter(id => this.chosen().has(id));
     this.views.create({ name, members }).pipe(finalize(() => this.saving.set(false))).subscribe({
-      next: view => this.created.emit(view),
+      next: view => { this.made = true; this.created.emit(view); },
       error: err => this.error.set(viewRefusalText(this.transloco, err)),
     });
   }

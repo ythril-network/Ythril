@@ -190,5 +190,8 @@ Not primitives, but the same class of thing — verify these on whatever page yo
 - `<ph-icon>` rather than a raw glyph.
 - A `<app-summary-strip>` on every list page.
 - A visible in-flight state on every async action.
-- An unsaved-changes guard on every editable form.
+- An unsaved-changes guard on every editable form: the component that owns the draft calls
+  `holdUnsavedEdits(() => <the draft differs from what it was opened with>)` (`core/unsaved-edits.ts`). Every page route already
+  carries the guard, and the reload warning is shared. `testing/unsaved-edits-are-held.spec.ts` fails on a component with an editable
+  control that holds no draft and is not listed with its reason.
 - Destructive actions: `danger` on the button *and* on the confirm dialog.

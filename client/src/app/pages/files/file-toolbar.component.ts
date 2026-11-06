@@ -5,6 +5,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { FILE_TOOLBAR_STYLES } from './file-manager.styles';
 import type { Space } from '../../core/api.types';
 import { injectIsView } from '../../core/views.store';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * One step of the breadcrumb: a label and the path clicking it navigates to.
@@ -112,6 +113,11 @@ export class FileToolbarComponent {
   /** Two-way, so a refused create can keep the form open with what was typed — see the class note. */
   readonly folderFormOpen = model(false);
   readonly newFolderName = model('');
+
+  constructor() {
+    // The page closes the form and clears the name on the ANSWER of a create, so an open box holding a name is a draft until then.
+    holdUnsavedEdits(() => this.folderFormOpen() && this.newFolderName().trim() !== '');
+  }
 
   readonly selectSpace = output<string>();
   readonly navigate = output<string>();

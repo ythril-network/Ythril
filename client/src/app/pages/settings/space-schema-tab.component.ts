@@ -42,6 +42,10 @@ import { proposalFor } from './space-schema-layers.component';
 import { refusalText } from '../../core/refusal-text';
 import { PluralText } from '../../core/plural-text.service';
 import { escapeHtml } from '../../shared/escape-html';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
+
+/** The name an import conflict's "add as" field starts with: the clashing name, made distinct. */
+const suggestedAddAsName = (name: string): string => name + '-2';
 
 @Component({
   selector: 'app-space-schema-tab',
@@ -563,6 +567,19 @@ export class SpaceSchemaTabComponent implements OnInit {
   }
 
   exportLibDialog = signal<{ groupName: string; namePrefix: string; saving: boolean; error: string } | null>(null);
+  /** What the export dialog's two fields held when it opened, for `holdUnsavedEdits`. */
+  private exportLibOpened = { groupName: '', namePrefix: '' };
+
+  constructor() {
+    // Two small drafts this tab owns outside `SpaceSettingsState`: the export-to-library dialog's fields (until the request is sent), and the
+    // import-conflict name typed over the suggested one. Closing either, or its action succeeding, ends the draft.
+    holdUnsavedEdits(() => {
+      const d = this.exportLibDialog();
+      if (d && !d.saving && (d.groupName !== this.exportLibOpened.groupName || d.namePrefix !== this.exportLibOpened.namePrefix)) return true;
+      const c = this.importConflict();
+      return !!c?.allowAddAs && this.importConflictAddAsName() !== suggestedAddAsName(c.name);
+    });
+  }
 
   libPickerLoading    = signal(false);
   /** Null until the picker's fetch failed — checked before its empty text, so a failure never reads as "the library is empty". */
@@ -918,7 +935,8 @@ export class SpaceSchemaTabComponent implements OnInit {
   openExportToLibrary(): void {
     const space = this.state.settingsSpace();
     if (!space) return;
-    this.exportLibDialog.set({ groupName: space.label || space.id, namePrefix: space.id, saving: false, error: '' });
+    this.exportLibOpened = { groupName: space.label || space.id, namePrefix: space.id };
+    this.exportLibDialog.set({ ...this.exportLibOpened, saving: false, error: '' });
   }
 
   closeExportToLibrary(): void { this.exportLibDialog.set(null); }
@@ -1075,7 +1093,7 @@ export class SpaceSchemaTabComponent implements OnInit {
         if (!this._typeImportTarget?.name && this.state.typeNames(kt).includes(name)) {
           // Stash parsed state and show conflict dialog instead of erroring
           this.importConflict.set({ kt, name, state: imported, allowAddAs: true });
-          this.importConflictAddAsName.set(name + '-2');
+          this.importConflictAddAsName.set(suggestedAddAsName(name));
           return;
         }
         this.state.schTypeSchemas = {

@@ -19,6 +19,7 @@ import { SortableHeaderComponent } from './sortable-header.component';
 import { RecordOrderLineComponent } from './record-order-line.component';
 import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordTabBase } from './record-tab-base';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { RecordSearchBarComponent } from './record-search-bar.component';
 import { BRAIN_CHIP_STYLES } from './brain-form.styles';
 import { BRAIN_RECORD_TABLE_STYLES } from './brain-table.styles';
@@ -315,7 +316,16 @@ export class EdgesTabComponent extends RecordTabBase {
   private editOriginalLabel = '';
   edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
   editEdge = { from: '', to: '', fromName: undefined as string | undefined, toName: undefined as string | undefined, label: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Record<string, string | number | boolean> };
+  /** What the create form and the inline row were opened with: the draft is dirty while it differs (`holdUnsavedEdits`, Q-701). */
+  private createdFrom = '';
+  private editedFrom = JSON.stringify(this.editEdge);
 
+  constructor() {
+    super();
+    holdUnsavedEdits(() =>
+      (this.showEdgeForm() && JSON.stringify(this.edgeForm) !== this.createdFrom)
+      || (this.recordList.editingId() !== '' && JSON.stringify(this.editEdge) !== this.editedFrom));
+  }
 
   protected override resetOnSpaceChange(): void {
     this.recordFilter.set({ type: '', tag: '', description: '', properties: '', fromName: '', toName: '', entityName: '' });
@@ -376,6 +386,7 @@ export class EdgesTabComponent extends RecordTabBase {
   openEdgeForm(): void {
     const firstLabel = Object.keys(this.store.spaceMeta()?.typeSchemas?.edge ?? {})[0] ?? '';
     this.edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: firstLabel, weight: null, tags: [], description: '', properties: this.store.buildPropertiesObject('edge', {}, firstLabel) };
+    this.createdFrom = JSON.stringify(this.edgeForm);
     this.createFailure.set(null);
     this.showEdgeForm.set(true);
   }
@@ -435,6 +446,7 @@ export class EdgesTabComponent extends RecordTabBase {
       description: edge.description ?? '',
       properties: this.store.buildPropertiesObject('edge', edge.properties ?? {}, edge.label),
     };
+    this.editedFrom = JSON.stringify(this.editEdge);
   }
 
   saveEditEdge(id: string): void {

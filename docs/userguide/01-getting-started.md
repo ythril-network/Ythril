@@ -51,6 +51,10 @@ contributing — is bundled with the application and rendered in place. It needs
 documentation are often the ones with no route to the outside. Each guide has its own link
 (`/settings/help?doc=userguide`), so a page can point at the guide that explains it.
 
+**Leaving a page with unsaved changes asks first.** If you have typed into a form and not yet saved it (a new memory, an inline edit,
+a network's sync schedule, a space's settings), clicking another page in the sidebar, going Back, switching the Brain's tab or space,
+reloading or closing the browser tab asks before discarding it. Choose **Keep editing** to go back to the form.
+
 There is no global space selector in the sidebar. Space switching happens per page — the Brain page shows a row of space chips **above the tab strip**, and every tab inside it, the Graph included, follows that choice. Everything you see is scoped to the space you pick there.
 
 > This said the Graph tab has *"its own space picker in the toolbar"*. It does not: that toolbar holds an > entity search, a depth slider, direction pills, a labels toggle, stats, fit and reset. The Graph page > does have space chips of its own, and they are hidden when it is embedded in the Brain — which is the > only way you reach it as a tab.

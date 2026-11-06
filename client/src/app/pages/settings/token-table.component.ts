@@ -12,6 +12,7 @@ import { TimestampComponent } from '../../shared/timestamp.component';
 import { isExpired, isExpiringSoon } from './token-table';
 import type { TokenSortField, SortDir } from './token-table';
 import type { TokenRecord } from '../../core/api.types';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * The Tokens list table — headers, sorting, the two search boxes, and the rows.
@@ -240,6 +241,17 @@ export class TokenTableComponent {
 
   /** Two-way, so the page keeps owning the value it will send. */
   editLabelValue = model('');
+
+  constructor() {
+    // The inline label edit: the open editor's text, when it is not blank and differs from the token's own name. The page owns the model
+    // (what Save sends) and ends the edit by clearing `editingId`; this is the one place that sees the editor and the rows together, and
+    // it is destroyed with the page, so the check cannot outlive it.
+    holdUnsavedEdits(() => {
+      const text = this.editLabelValue().trim();
+      const row = this.rows().find(t => t.id === this.editingId());
+      return !!row && text !== '' && text !== row.name;
+    });
+  }
 
   sort = output<string>();
   labelFilterChange = output<string>();
