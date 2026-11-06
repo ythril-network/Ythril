@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**A minor release: a mixed-case path no longer skips a space's rights, peer-bound tokens cannot approve AI connectors, model and sidecar answers are bounded, a filtered recall over a vector index that missed a match says so, a scan whose vector index is not ready keeps its place and says so, document passages are split to the size the embedder accepts, `@ythril-network/schema` reads a space's schemas back from TypeScript, and many Brain and Settings pages read and translate better.**
+## [6.5.0] — 2026-11-06
+
+**A minor release: security fixes for space rights, AI connector approval and database answers reaching the wrong call, bounded model and sidecar answers, recall and scans that say when an index missed or is not ready, passages split to the embedder's size, and clearer Brain and Settings pages.**
 
 | Changes on upgrade | Action |
 |---|---|
@@ -49,7 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Database:** under load, a timed database call the driver gave up on after sending could leave its answer on the connection, and every later call on it read the answer of the call before; that connection is now closed.
 - **Rate limits:** three busy tokens behind one address no longer trip the per-address flood backstop; it counts only requests no token's own limit meters, and its `429` says so.
 - **Recall:** a filtered recall the vector index answered with nothing said nothing over an absent, dropped or lagging index; it now says `index_not_ready` or `filter_window` when an older record satisfies the filter, and stays a plain empty answer when none does.
 - **Contradictions and duplicates:** a contradiction scan passed over records searched on an unready index and showed a clean queue; it now keeps its place until the index serves. A hold 20 hours old is warned, scan answers name held types (`indexHeld`), and a deleted space loses its scan cursors.
@@ -68,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Database:** a timed call the MongoDB driver gave up on after sending no longer leaves its answer for the next call on that connection, which could read another caller's documents (CVE-2026-119179).
 - **Second factor:** five wrong codes in 15 minutes now lock the token (and a trusted address) with `429 MFA_LOCKED`, a correct code included; an `mfa.locked` audit row and two `ythril_mfa_lockout*` metrics report it. Replayed or stale codes are not counted.
 - **Rights:** a request path in a different letter case (`/Api/Brain/...`) skipped a space's area rung: a token without that rung could read the area. The rung is now asked of the registered route.
 - **MCP connectors:** a peer-bound or schema-library token could approve an AI connector that then outlived the peer's revocation; both are refused (`403`) at consent and at token creation.
