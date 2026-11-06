@@ -104,12 +104,18 @@ function burst(tag, n = BURST) {
  * Release sink A and wait until every event of the burst is accounted for at A — delivered through the seam or persisted to the retry
  * queue — so no queued delivery outlives its case (the limiter is module-global: a slot left held, or a delivery left queued, is the next
  * case's).
+ *
+ * It then waits for the dispatcher's retry writes to SETTLE, not only for their rows to be readable: the overflow counter rises when
+ * the flush's insertMany resolves, after the rows are visible (Q-580). A case that ended on visible rows left its flush in flight, and
+ * the next case read its "before" figure of the counter ahead of that flush, so its delta held both bursts (Full run 42213606387:
+ * 2872 against 1436 rows, exactly two bursts' overflow; Q-712).
  */
 async function drainA(hold, state, tag, n = BURST) {
   hold?.release();
   await waitFor(async () => new Set([...(state.delivered.get(a) ?? []), ...(await retried(a))].filter(p => p.startsWith(`${tag}/`))).size === n, 60_000, 50,
     async () => `${state.delivered.get(a)?.size ?? 0} delivered and ${(await retried(a)).length} persisted of ${n} events for sink A: some were dropped by the bound`,
     { what: `every event of ${tag} delivered or persisted` });
+  await dispatcher.settledRetryWrites?.();
 }
 
 describe('the dispatcher bounds its first deliveries per subscription (Q-469)', { skip }, () => {
