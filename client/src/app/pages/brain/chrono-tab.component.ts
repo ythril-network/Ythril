@@ -17,6 +17,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordTabBase } from './record-tab-base';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { SortableHeaderComponent } from './sortable-header.component';
 import { RecordOrderLineComponent } from './record-order-line.component';
 import { RecordSearchBarComponent } from './record-search-bar.component';
@@ -315,7 +316,16 @@ export class ChronoTabComponent extends RecordTabBase {
   private editOriginalKind = '';
   chronoForm = { title: '', kind: 'event' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], linkEntities: '', linkFacts: [] as string[], properties: {} as Record<string, string | number | boolean> };
   editChrono = { title: '', kind: '' as string, status: '' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], linkEntities: '', linkFacts: [] as string[], properties: {} as Record<string, string | number | boolean> };
+  /** What the create form and the inline row were opened with: the draft is dirty while it differs (`holdUnsavedEdits`, Q-701). */
+  private createdFrom = '';
+  private editedFrom = JSON.stringify(this.editChrono);
 
+  constructor() {
+    super();
+    holdUnsavedEdits(() =>
+      (this.showChronoForm() && JSON.stringify(this.chronoForm) !== this.createdFrom)
+      || (this.recordList.editingId() !== '' && JSON.stringify(this.editChrono) !== this.editedFrom));
+  }
 
   /** Docked Status header filter. Its own signal: `status` is chrono-only, not part of RecordFilter. */
   statusFilter = signal('');
@@ -408,6 +418,7 @@ export class ChronoTabComponent extends RecordTabBase {
     // does not allow the built-ins, so opening on 'event' there armed the form with a value the server 400s on.
     const kind = this.store.chronoAllowedTypes()[0] ?? 'event';
     this.chronoForm = { title: '', kind, startsAt: '', endsAt: '', description: '', tags: [], linkEntities: '', linkFacts: [], properties: this.store.buildPropertiesObject('chrono', {}, kind) };
+    this.createdFrom = JSON.stringify(this.chronoForm);
     this.createFailure.set(null);
     this.showChronoForm.set(true);
   }
@@ -479,6 +490,7 @@ export class ChronoTabComponent extends RecordTabBase {
       linkFacts: [...(entry.linkFacts ?? [])],
       properties: this.store.buildPropertiesObject('chrono', entry.properties ?? {}, entry.type),
     };
+    this.editedFrom = JSON.stringify(this.editChrono);
     this.picker.resolveMemoryTitles(entry.linkFacts ?? []);
   }
 

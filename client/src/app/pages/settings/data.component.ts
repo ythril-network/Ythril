@@ -15,6 +15,7 @@ import { pollUntil, type PollHandle } from '../../core/poll-until';
 import { reportOf, type MaintenanceState, type MigrateReport, type RestoreReport } from '../../core/admin-data.types';
 import { ActSetProgressComponent } from './act-set-progress.component';
 import { ActiveLanguage } from '../../core/active-language';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { PluralText } from '../../core/plural-text.service';
 
 type UriSource = 'env' | 'config' | 'default';
@@ -513,12 +514,15 @@ export class DataComponent implements OnInit {
   maintenanceError = signal<string | null>(null);
 
   migrateUri = '';
+  /** The URI a migration was last started with, so the box that still shows it is not a draft. */
+  private migrateUriSent = '';
   testing = signal(false);
   testResult = signal<{ ok: boolean; error?: string } | null>(null);
   migrating = signal(false);
   migrateError = signal<string | null>(null);
 
   constructor() {
+    holdUnsavedEdits(() => this.configDirty() || (this.migrateUri.trim() !== '' && this.migrateUri.trim() !== this.migrateUriSent));
     inject(DestroyRef).onDestroy(() => {
       this.destroyed = true;
       this.restorePoll?.stop();
@@ -1034,6 +1038,7 @@ export class DataComponent implements OnInit {
     this.adminApi.startMigration(uri).subscribe({
       next: started => {
         this.migrating.set(false);
+        this.migrateUriSent = uri;
         if (this.destroyed) return;
         // One sentence, replaced in place by how the set ends.
         this.migrateNotice.set(this.plural.text('data.migrate.accepted', started.spaces.length) + ' ' + this.transloco.translate('data.migrate.success'));

@@ -11,6 +11,7 @@ import { DIALOG_STYLES } from './dialog.styles';
 import type { TokenRights } from './rights-glyph.component';
 import type { Space, TokenRecord } from '../../core/api.types';
 import { refusalText } from '../../core/refusal-text';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * The create-token dialog: a label, an optional expiry, and the rights matrix.
@@ -189,6 +190,17 @@ export class TokenCreateDialogComponent {
    */
   newRateLimit: number | null = null;
 
+  /** The form as it opened, re-taken after a create the server accepted: what `hold` compares the form against. */
+  private opened = this.draftText();
+
+  constructor() {
+    holdUnsavedEdits(() => this.draftText() !== this.opened);
+  }
+
+  private draftText(): string {
+    return JSON.stringify([this.newName.trim(), this.newExpiry, this.newRateLimit, this.draftRights()]);
+  }
+
   /**
    * The two instance-level flags, settable at MINT time — which they were not.
    *
@@ -228,6 +240,7 @@ export class TokenCreateDialogComponent {
         this.newName = '';
         this.newExpiry = '';
         this.newRateLimit = null;
+        this.opened = this.draftText();
       },
       error: (err) => {
         this.creating.set(false);

@@ -5,6 +5,7 @@ import { ToastService } from '../../core/toast.service';
 import { refusalText } from '../../core/refusal-text';
 import { SpaceSettingsState } from './space-settings-state.service';
 import { PluralText } from '../../core/plural-text.service';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 type Clash = SchemaLayersView['clashes'][number];
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
@@ -122,6 +123,8 @@ export class SpaceSchemaLayersComponent {
   proposing = signal(false);
 
   constructor() {
+    // A moved network not yet saved; `show()` (after a load or a save) re-takes the order and clears the flag.
+    holdUnsavedEdits(() => this.dirty());
     effect(() => {
       this.spaceId();
       // The Schema tab asks for a reload after it proposed something.

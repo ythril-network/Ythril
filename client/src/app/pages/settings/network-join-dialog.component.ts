@@ -11,6 +11,7 @@ import { ModalDirective } from '../../shared/modal.directive';
 import { formatList } from '../../core/list-format';
 import { ActiveLanguage } from '../../core/active-language';
 import { retiredAmong } from '../../core/retired-space-ids';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * Join-network dialog, extracted from the (large) NetworksComponent (PR-U3). Owns the invite-bundle
@@ -191,6 +192,12 @@ export class NetworkJoinDialogComponent {
   private joinParsedBundle: any = null;
   /** The publisher's base URL, asked for when a pub/sub's published invite key is pasted (F-41). */
   publisherUrl = '';
+
+  constructor() {
+    // A pasted invite (and its publisher URL) that Join has not sent; a successful join clears both. The per-space rows exist only while an invite is pasted.
+    holdUnsavedEdits(() => this.joinBundle.trim() !== '' || this.publisherUrl.trim() !== '');
+  }
+
   /** A published pub/sub key rather than a handshake invite: it joins by key, with no mapping step. */
   isPublishedKey(): boolean { return this.joinBundle.trim().startsWith('ythril_invite_'); }
 

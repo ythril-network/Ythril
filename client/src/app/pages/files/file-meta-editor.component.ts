@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, effect, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { TagInputComponent } from '../../shared/tag-input.component';
@@ -7,6 +7,7 @@ import { FactRefFieldComponent } from '../brain/fact-ref-field.component';
 import { ChronoRefFieldComponent } from '../brain/chrono-ref-field.component';
 import { FILE_META_EDITOR_STYLES } from './file-manager.styles';
 import { injectIsView } from '../../core/views.store';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * The edit model for a file's metadata record.
@@ -111,4 +112,21 @@ export class FileMetaEditorComponent {
   readonly save = output<void>();
   readonly cancel = output<void>();
   readonly retryEmbedding = output<void>();
+
+  /**
+   * The model as it was when the page handed it over. The page replaces the object wholesale when it seeds (opening the face, Cancel, and
+   * after a Save, from the answer), so a new object IS "opened or last saved"; the reference widgets then edit it in place.
+   */
+  private seededWith = '';
+
+  constructor() {
+    effect(() => {
+      const m = this.model();
+      this.seededWith = m ? JSON.stringify(m) : '';
+    });
+    holdUnsavedEdits(() => {
+      const m = this.model();
+      return m !== null && JSON.stringify(m) !== this.seededWith;
+    });
+  }
 }

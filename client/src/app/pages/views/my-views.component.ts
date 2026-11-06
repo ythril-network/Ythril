@@ -6,6 +6,7 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { ToastService } from '../../core/toast.service';
 import { ViewsStore } from '../../core/views.store';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { viewRefusalText, type PersonalView } from '../../core/views-api.service';
 import { ViewCreateDialogComponent, type ViewMemberChoice } from '../brain/view-create-dialog.component';
 
@@ -119,6 +120,12 @@ export class MyViewsComponent {
   protected readonly renaming = signal('');
   protected readonly error = signal('');
   protected draft = '';
+  /** The name the open rename box was opened with: the draft is dirty while the box holds another (a trailing blank is not one: the save trims). */
+  private renamedFrom = '';
+
+  constructor() {
+    holdUnsavedEdits(() => this.renaming() !== '' && this.draft.trim() !== this.renamedFrom);
+  }
   /** The views with a rename or delete in flight: their controls are disabled and busy, so a double submit sends one write. */
   protected readonly busy = signal<ReadonlySet<string>>(new Set());
   private hold(id: string): void { this.busy.update(s => new Set(s).add(id)); }
@@ -133,6 +140,7 @@ export class MyViewsComponent {
   protected startRename(view: PersonalView): void {
     this.error.set('');
     this.draft = view.name;
+    this.renamedFrom = view.name;
     this.renaming.set(view.id);
   }
 

@@ -97,6 +97,27 @@ export class RecordDrawerState {
   drawerEditEdge = { label: '', type: '', weight: null as number | null, tags: [] as string[], description: '', properties: {} as Props };
   drawerEditChrono = { title: '', kind: 'event' as string, status: 'upcoming' as string, startsAt: '', endsAt: '', description: '', tags: [] as string[], linkEntities: '', confidence: null as number | null, linkFacts: [] as string[], properties: {} as Props };
 
+  /** The open record's edit model as JSON, or '' while nothing is open: what `isDirty` compares. */
+  private draftJson(): string {
+    const dr = this.drawerRecord();
+    if (!dr) return '';
+    switch (dr.kind) {
+      case 'fact': return JSON.stringify(this.drawerEditMemory);
+      case 'entity': return JSON.stringify(this.drawerEditEntity);
+      case 'edge': return JSON.stringify(this.drawerEditEdge);
+      case 'chrono': return JSON.stringify(this.drawerEditChrono);
+    }
+  }
+
+  /** The draft as it was when the record was opened, and as it was when the save that last succeeded was sent. */
+  private openedWith = '';
+  private sentWith = '';
+
+  /** True when the open record's edit differs from what it was opened with (or last saved): leaving now would lose it (Q-701). */
+  isDirty(): boolean {
+    return this.drawerRecord() !== null && this.draftJson() !== this.openedWith;
+  }
+
   /** A memory's type changed (the type is a free choice, so it may also be cleared): re-seed from the new type's schema. */
   onMemoryTypeChange(type: string): void {
     const from = this.drawerEditMemory.type;
@@ -203,6 +224,7 @@ export class RecordDrawerState {
       };
       this.picker.resolveMemoryTitles(r.linkFacts ?? []);
     }
+    this.openedWith = this.draftJson();
   }
 
   close(): void {
@@ -222,6 +244,8 @@ export class RecordDrawerState {
     if (!dr) return;
     this.drawerSaving.set(true);
     this.drawerFailure.set(null);
+    // What this save sends: once it is stored, the draft is clean against it, and an edit typed while it was in flight is not.
+    this.sentWith = this.draftJson();
     const id = dr.record._id;
     const spaceId = this.spaceId();
     if (dr.kind === 'fact') {
@@ -316,6 +340,7 @@ export class RecordDrawerState {
         this.drawerWarningsTruncated.set(truncated);
         // Its keys are stored now: a later type change must not take them for seeds.
         this.stored = new Set(Object.keys(record.properties ?? {}));
+        this.openedWith = this.sentWith;
         onSaved(record);
       },
       error: err => {

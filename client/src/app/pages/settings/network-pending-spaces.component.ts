@@ -4,6 +4,7 @@ import { Network } from '../../core/api.types';
 import { NetworksApi } from '../../core/networks-api.service';
 import { ToastService } from '../../core/toast.service';
 import { refusalText } from '../../core/refusal-text';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * "Announced, waiting for you" on a network card (S-9): the spaces an upstream announced that this instance did not
@@ -63,6 +64,11 @@ export class NetworkPendingSpacesComponent {
   resolving: Record<string, boolean> = {};
   // `| undefined` because a network with nothing typed yet has no entry — the template's `?? ''` depends on it.
   mapTo: Record<string, string | undefined> = {};
+
+  constructor() {
+    // A local id typed for an accept that has not been pressed; `resolve()` drops the entry once the server answered.
+    holdUnsavedEdits(() => Object.values(this.mapTo).some(v => (v ?? '').trim() !== ''));
+  }
 
   resolve(spaceId: string, action: 'accept' | 'dismiss'): void {
     const mapTo = action === 'accept' ? (this.mapTo[spaceId] ?? '').trim() : '';

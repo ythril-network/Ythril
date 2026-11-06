@@ -6,6 +6,7 @@ import { PluralPipe } from '../../core/plural.pipe';
 import { PluralText } from '../../core/plural-text.service';
 import { DIALOG_STYLES } from './dialog.styles';
 import { rereadCycles } from './network-reread-estimate';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * "Re-read everything from peers": the danger dialog of a network-wide re-read, layout B "Estimate first" (bundle-81, design rev 8 section 7,
@@ -139,6 +140,11 @@ export class NetworkRereadDialogComponent implements AfterViewInit {
   /** The spaces taken OUT of the choice: every space is in until unticked, so a space the network gains while this is open is ticked too. */
   protected readonly unpicked = signal<ReadonlySet<string>>(new Set());
   private readonly typedField = viewChild<ElementRef<HTMLInputElement>>('typed');
+
+  constructor() {
+    // The typed name, or a space taken out of the choice, that Confirm has not sent; once the request is in flight (`busy`) it is sent.
+    holdUnsavedEdits(() => !this.busy() && (this.typedName() !== '' || this.unpicked().size > 0));
+  }
 
   protected readonly pickedIds = computed(() => this.spaces().filter(s => !this.unpicked().has(s.id)).map(s => s.id));
   private readonly pickedSpaces = computed(() => this.spaces().filter(s => !this.unpicked().has(s.id)));

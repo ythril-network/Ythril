@@ -5,6 +5,7 @@ import { Network, Space } from '../../core/api.types';
 import { refusalText } from '../../core/refusal-text';
 import { NetworksApi } from '../../core/networks-api.service';
 import { ToastService } from '../../core/toast.service';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * "Add a space" on a network card (`F-38.3`): pick one of this instance's spaces the network does not carry yet.
@@ -48,6 +49,11 @@ export class NetworkAddSpaceComponent {
 
   adding = signal(false);
   picked = '';
+
+  constructor() {
+    // A space picked and not yet added; `add()` clears it once the server accepted.
+    holdUnsavedEdits(() => this.picked !== '');
+  }
 
   /** The server accepts the add only from these positions; see `ADD_SPACE_POSITION` in `network-acts.ts`. */
   governs = computed(() => ['publisher', 'root', 'organiser'].includes(this.network().myRole?.role ?? '') || this.voted());

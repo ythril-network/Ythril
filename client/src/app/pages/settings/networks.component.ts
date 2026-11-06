@@ -38,10 +38,11 @@ import { NetworkEnableWizardComponent } from './network-enable-wizard.component'
 import { refusalText } from '../../core/refusal-text';
 import { PluralPipe } from '../../core/plural.pipe';
 import { pageTranslator } from '../../core/page-translator';
+import { NetworkSyncScheduleComponent } from './network-sync-schedule.component';
 @Component({
   selector: 'app-networks',
   standalone: true,
-  imports: [PluralPipe, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkVoteRowComponent, RecentDecisionsComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent, NetworkOwedActsComponent, NetworkRereadSectionComponent, NetworkSyncHistoryComponent],
+  imports: [PluralPipe, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, SummaryStripComponent, ErrorStateComponent, NetworkCreateDialogComponent, NetworkJoinDialogComponent, NetworkEnableWizardComponent, NetworkMemberRowComponent, NetworkVoteRowComponent, RecentDecisionsComponent, NetworkInvitePanelComponent, NetworkAddSpaceComponent, NetworkPendingSpacesComponent, NetworkConnectingComponent, NetworkChangeNotesComponent, NetworkOwedActsComponent, NetworkRereadSectionComponent, NetworkSyncHistoryComponent, NetworkSyncScheduleComponent],
   styles: [`
     .network-card {
       background: var(--bg-surface);
@@ -190,19 +191,7 @@ import { pageTranslator } from '../../core/page-translator';
               <div style="margin-bottom:16px;">
                 <div class="section-title">{{ 'networks.network.sync.title' | transloco }}</div>
                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                  <input
-                    type="text"
-                    [ngModel]="net.syncSchedule ?? ''"
-                    (ngModelChange)="netSchedule[net.id] = $event"
-                    [name]="'sched-' + net.id"
-                    [placeholder]="'networks.network.sync.schedulePlaceholder' | transloco"
-                    [attr.aria-label]="'networks.network.sync.scheduleAriaLabel' | transloco"
-                    style="flex:1; min-width:220px;"
-                  />
-                  <button class="btn-secondary btn btn-sm" [disabled]="savingSchedule[net.id]" (click)="saveSchedule(net)">
-                    @if (savingSchedule[net.id]) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> }
-                    {{ 'networks.network.sync.saveScheduleButton' | transloco }}
-                  </button>
+                  <app-network-sync-schedule [network]="net" (saved)="scheduleSaved(net.id, $event)" />
                   <button class="btn-secondary btn btn-sm" [disabled]="syncingNet[net.id]" (click)="sync(net.id)">
                     @if (syncingNet[net.id]) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> }
                     {{ 'networks.network.sync.syncNowButton' | transloco }}
@@ -319,8 +308,6 @@ export class NetworksComponent implements OnInit {
   showJoinDialog = signal(false);
   expanded = signal('');
 
-  netSchedule: Record<string, string> = {};
-
   availableSpaces = signal<Space[]>([]);
   /** Ids reserved since they were a proxy space (served to an admin): the join dialog counts them as taken. */
   retiredSpaceIds = signal<string[]>([]);
@@ -336,7 +323,6 @@ export class NetworksComponent implements OnInit {
   removingMember: Record<string, boolean> = {};
   // Per-network / per-round in-flight flags so each async action shows a spinner and disables its button
   // (default change detection re-renders on the settling HTTP response).
-  savingSchedule: Record<string, boolean> = {};
   syncingNet: Record<string, boolean> = {};
   votingRound: Record<string, boolean> = {};
 
@@ -447,21 +433,9 @@ export class NetworksComponent implements OnInit {
     });
   }
 
-  saveSchedule(net: Network): void {
-    const schedule = this.netSchedule[net.id] ?? net.syncSchedule ?? '';
-    this.savingSchedule[net.id] = true;
-    this.networksApi.updateNetworkSchedule(net.id, schedule).subscribe({
-      next: () => {
-        delete this.savingSchedule[net.id];
-        this.networks.update(list =>
-          list.map(n => n.id === net.id ? { ...n, syncSchedule: schedule || undefined } : n)
-        );
-      },
-      error: (err) => {
-        delete this.savingSchedule[net.id];
-        this.toast.error(refusalText(this.transloco, err, 'networks.error.saveScheduleFailed'));
-      },
-    });
+  /** The card's schedule component saved: keep the page's list in step with the server. */
+  scheduleSaved(id: string, schedule: string): void {
+    this.networks.update(list => list.map(n => n.id === id ? { ...n, syncSchedule: schedule || undefined } : n));
   }
 
   /** The join dialog (child) emits after a successful join; reload networks and refresh the spaces list

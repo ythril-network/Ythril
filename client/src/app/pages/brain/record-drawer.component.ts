@@ -16,6 +16,7 @@ import { injectIsView } from '../../core/views.store';
 import { BrainStore } from './brain-store.service';
 import { EntityRefPicker } from './entity-ref-picker.service';
 import { RecordDrawerState } from './record-drawer-state.service';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
 
 /**
@@ -324,6 +325,11 @@ export class RecordDrawerComponent {
   /** The last refused save, in words and rows; the properties editors mark the rows it names. */
   readonly refusal = refusalViewOf(this.transloco, this.state.drawerFailure, 'refusal.failed.save');
   readonly propertyErrors = propertyErrorsOf(this.refusal);
+
+  constructor() {
+    // The state is the page's (provided by the Brain or the Graph page), so the check goes away with this drawer, not with the session.
+    holdUnsavedEdits(() => this.state.isDirty());
+  }
 
   /** The instance an author wrote from, by the label it carries (an author that predates labels has the id only). */
   authorLabel(author: { instanceId: string; instanceLabel?: string }): string {

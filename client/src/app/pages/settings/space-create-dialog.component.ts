@@ -18,6 +18,7 @@ import { SpacesApi } from '../../core/spaces-api.service';
 import { SpaceMeta, ValidationMode } from '../../core/api.types';
 import { refusalText } from '../../core/refusal-text';
 import { retiredAmong } from '../../core/retired-space-ids';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 @Component({
   selector: 'app-space-create-dialog',
@@ -95,6 +96,13 @@ export class SpaceCreateDialogComponent {
     validationMode: 'strict' as ValidationMode,
     strictLinkage: true,
   };
+
+  /** The form as it opens, and as a created space leaves it reset: what `hold` compares the form against. */
+  private readonly opened = JSON.stringify(this.form);
+
+  constructor() {
+    holdUnsavedEdits(() => JSON.stringify(this.form) !== this.opened);
+  }
 
   /** The typed id when it is one of the reserved ids of a former proxy space, else ''; the server refuses it after the request. */
   retiredId(): string {

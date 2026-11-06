@@ -30,6 +30,7 @@ import { SpaceSettingsPopupComponent } from '../settings/space-settings-popup.co
 import { SpacesStore } from '../settings/spaces-store.service';
 import { SpaceSettingsState } from '../settings/space-settings-state.service';
 import { BrainApi } from '../../core/brain-api.service';
+import { UnsavedEdits, holdUnsavedEdits } from '../../core/unsaved-edits';
 import { AdminApi } from '../../core/admin-api.service';
 import { GraphComponent } from '../graph/graph.component';
 import { FileManagerComponent } from '../files/file-manager.component';
@@ -520,7 +521,12 @@ export class BrainComponent implements OnInit, OnDestroy {
   spaceTotal = spaceChipTotal;
   networkChipTitle = (space: Space): string => networkChipTitle(space, key => this.transloco.translate(key));
 
+  /** The one registry of unsaved drafts: asked before a tab or space switch destroys the tab that holds one. */
+  private readonly unsavedEdits = inject(UnsavedEdits);
+
   constructor() {
+    // The hosted space-settings pop-up's draft: `SpaceSettingsState` is provided by this page, so the check goes away with it.
+    holdUnsavedEdits(() => this.spaceSettings.isDirty());
     // A link to a view waits for the views list; when it arrives the pending `?space=` is decided (`readSpaceParam`).
     effect(() => {
       if (!this.viewsStore.loaded()) return;
@@ -593,7 +599,22 @@ export class BrainComponent implements OnInit, OnDestroy {
     }, 250);
   }
 
-  selectSpace(id: string): void {
+  /**
+   * The person chose another space (a chip, or one of their views). A space switch lands on the new space's Overview and so unmounts the
+   * open tab with any draft it holds, so while a draft is held the app's one discard question is asked first and a declined answer
+   * changes nothing (Q-701). Choosing the space already open is not a switch and asks nothing. With nothing dirty it switches at once.
+   * Resolves true when the space was shown.
+   *
+   * Moves the page makes itself (a `?space=` link, a renamed or deleted view that was open) call `showSpace` and never ask: the space
+   * they leave is gone or was changed by a link, and a declined question would leave the page on something that is not there.
+   */
+  async selectSpace(id: string): Promise<boolean> {
+    if (id !== this.activeSpaceId() && this.unsavedEdits.any() && !(await this.unsavedEdits.confirmLeave())) return false;
+    this.showSpace(id);
+    return true;
+  }
+
+  private showSpace(id: string): void {
     // Switching space lands on the new space's OVERVIEW — its landing view (F9). The tab used to
     // persist across the switch, so picking another space while on, say, Entities just swapped the
     // rows underneath you: the page looked unchanged until you clicked a tab, and the space you had
@@ -602,6 +623,8 @@ export class BrainComponent implements OnInit, OnDestroy {
     if (this.activeSpaceId() !== id) {
       this.activeTab.set('overview');
       this.rx.forget();
+      // The tab and its inline edit are left: drop the row id with them, or it comes back in edit mode over a blank model.
+      this.recordList.cancelEdit();
     }
     this.activeSpaceId.set(id);
     this.picker.spaceId.set(id);
@@ -716,7 +739,7 @@ export class BrainComponent implements OnInit, OnDestroy {
     const initial = asked.kind === 'open' ? asked.id : (current || spaces[0]!.id);
     // Only when it CHANGES: selectSpace reloads the space's data, so calling it on every query-param event
     // would refetch on each tab switch this component itself performs.
-    if (initial !== current) this.selectSpace(initial);
+    if (initial !== current) this.showSpace(initial);
     if (fresh && wanted) this.unknownParam.set(asked.kind === 'unknown' ? { requested: asked.id, shown: initial } : null);
 
     // Only a tab that exists. An unknown value in a hand-edited URL must land on the default rather than a
@@ -743,12 +766,23 @@ export class BrainComponent implements OnInit, OnDestroy {
     });
   }
 
-  setTab(tab: BrainTab): void {
+  /**
+   * Switch tab. The tab being left is UNMOUNTED, and with it any create form or inline edit it holds, so while a draft is held (any
+   * live `holdUnsavedEdits` check) the app's one discard question is asked first and a declined answer changes nothing (Q-701). With
+   * nothing dirty it switches at once, in this call, as it always did. Resolves true when the tab was switched.
+   *
+   * `graphFocus` is the entity the Graph tab should open rooted at; it is applied only when the switch happens.
+   */
+  async setTab(tab: BrainTab, graphFocus: string | null = null): Promise<boolean> {
+    if (tab !== this.activeTab() && this.unsavedEdits.any() && !(await this.unsavedEdits.confirmLeave())) return false;
+    // The row being inline-edited lives in page state, which outlives the tab: a switch that leaves the tab discards that edit, or
+    // coming back would show the row in edit mode over a blank model. Re-clicking the open tab keeps it.
+    if (tab !== this.activeTab()) this.recordList.cancelEdit();
     // Clearing the pending graph focus here (rather than only when leaving the Graph tab) is what stops
     // it becoming sticky: the Graph tab UNMOUNTS on leave and re-reads the input on every remount, so a
     // focus left in place would silently re-root the graph the next time the tab is opened by hand.
-    // `viewInGraph()` sets it AFTER calling this, which is why the order there matters.
-    this.graphFocusId.set(null);
+    // `viewInGraph()` passes the one it wants, so it is set with the tab and cleared by the next switch.
+    this.graphFocusId.set(graphFocus);
     this.activeTab.set(tab);
     this.store.memorySearch.set('');
     this.store.edgeSearch.set('');
@@ -756,6 +790,7 @@ export class BrainComponent implements OnInit, OnDestroy {
     this.store.fileMetaSearch.set('');
     this.recordList.confirmDeleteId.set('');
     this.writeTabToUrl(tab);
+    return true;
   }
 
   /**
@@ -763,11 +798,10 @@ export class BrainComponent implements OnInit, OnDestroy {
    *
    * The id goes into a signal on the SHELL rather than into the graph component, because the graph is
    * behind `@if (activeTab() === 'graph')` and does not exist yet at the moment the button is clicked.
-   * Setting it after `setTab` is deliberate — `setTab` clears it (see above).
+   * It is handed to `setTab`, which sets it after clearing the previous one and only if the switch happens.
    */
   viewInGraph(entityId: string): void {
-    this.setTab('graph');
-    this.graphFocusId.set(entityId);
+    void this.setTab('graph', entityId);
   }
 
   loadStats(spaceId: string): void {
@@ -793,13 +827,13 @@ export class BrainComponent implements OnInit, OnDestroy {
 
   /** A view was renamed: its id is its name, so the page follows it when it was the one open. */
   onViewRenamed(e: { from: string; to: string }): void {
-    if (this.activeSpaceId() === e.from) this.selectSpace(e.to);
+    if (this.activeSpaceId() === e.from) this.showSpace(e.to);
   }
 
   /** A view was deleted: leave it for the first space when it was the one open. */
   onViewRemoved(id: string): void {
     const first = this.spaces()[0]?.space.id;
-    if (this.activeSpaceId() === id && first) this.selectSpace(first);
+    if (this.activeSpaceId() === id && first) this.showSpace(first);
   }
 
   /** The Overview's usage reset: the panel confirmed, the request and its state are `OverviewDataService`'s. */

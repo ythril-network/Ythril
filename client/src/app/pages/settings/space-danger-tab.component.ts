@@ -28,9 +28,23 @@ import type { ActEntryView, SpaceActOutcome } from '../../core/space-act-outcome
 import { StatusPillComponent } from '../../shared/status-pill.component';
 import { actKindKey, actRepeatHintKey, actRowView, actWhenText } from '../../core/space-act-view';
 import { PluralText } from '../../core/plural-text.service';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /** How often a standing delete or wipe is asked after, while this tab is open. */
 const ACT_POLL_MS = 5000;
+
+/** The retention windows as Save sends them: every bucket, a whole number of days above zero or `null` (an empty or invalid field clears it). */
+function retentionWindowsOf(ttl: Record<TtlBucket, number | null>): RecordTtlWindows {
+  const windows: RecordTtlWindows = {};
+  for (const b of TTL_BUCKETS) {
+    const v = Number(ttl[b]);
+    windows[b] = Number.isInteger(v) && v > 0 ? v : null;
+  }
+  return windows;
+}
+
+/** The windows Save would send, as text, so the fields can be compared with what they were opened with or last saved as. */
+const retentionWindowsText = (ttl: Record<TtlBucket, number | null>): string => JSON.stringify(retentionWindowsOf(ttl));
 
 /** What the status region says about the last delete or wipe, besides a standing act (which it shows from the space itself). */
 type ActNotice =
@@ -473,7 +487,14 @@ export class SpaceDangerTabComponent {
   /** Seeded from the space the dialog opened on; re-seeds when that changes. */
   private seeded = '';
 
+  /** The retention windows as they were seeded, or as Save last sent them (in the shape Save sends), to tell an edit from what the tab opened with. */
+  private savedWindows = retentionWindowsText(this.ttl);
+
   constructor() {
+    // Three drafts, each with its own Save: the retention windows, the embeddings tick, and a typed new space id. Each reads clean again once its Save succeeded.
+    holdUnsavedEdits(() => retentionWindowsText(this.ttl) !== this.savedWindows
+      || this.suppress() !== this.savedSuppress()
+      || this.renameDraftDiffers());
     inject(DestroyRef).onDestroy(() => { this.destroyed = true; this.stopPoll(); });
     effect(() => {
       const s = this.state.settingsSpace();
@@ -490,6 +511,7 @@ export class SpaceDangerTabComponent {
       // `recordTtlWindows` widens a legacy scalar, so a space that set one number before the split shows it on
       // all five fields — which is what it has always meant — rather than appearing to have no policy.
       this.ttl = recordTtlWindows(s.recordTtlDays);
+      this.savedWindows = retentionWindowsText(this.ttl);
       // Absent reads as false, matching the server: suppression is opt-in, and the failure direction of getting
       // that backwards is records silently missing from recall, which nobody reports because there is nothing to
       // see. Re-seeded per space, and the previous space's backfill result is cleared with it.
@@ -624,11 +646,7 @@ export class SpaceDangerTabComponent {
       // Every bucket is sent explicitly, including the empty ones as `null`. The server MERGES a partial object
       // over what is stored, so omitting a cleared field would leave its old window in place — the operator
       // emptied it and the save would look like it worked.
-      const windows: RecordTtlWindows = {};
-      for (const b of TTL_BUCKETS) {
-        const v = Number(this.ttl[b]);
-        windows[b] = Number.isInteger(v) && v > 0 ? v : null;
-      }
+      const windows = retentionWindowsOf(this.ttl);
       // Five nulls is a valid write and clears everything: the route only refuses an object that mentions no
       // bucket at all, because THAT would make "clear everything" and "change nothing" the same request.
       //
@@ -638,6 +656,7 @@ export class SpaceDangerTabComponent {
       // nothing, from the moment retention moved to this tab. Every other call in this file uses `.subscribe`;
       // this was the one that did not, and the one nobody could see failing.
       await firstValueFrom(this.spacesApi.updateSpace(space.id, { recordTtlDays: windows }));
+      this.savedWindows = retentionWindowsText(this.ttl);
       this.store.load();
       this.toast.success(this.transloco.translate('spaces.dangerZone.retentionSaved'));
     } catch (err) {
@@ -675,6 +694,12 @@ export class SpaceDangerTabComponent {
         this.toast.error(refusalText(this.transloco, err as RefusalSource, 'spaces.dangerZone.rebuildIndexesFailed'));
       },
     });
+  }
+
+  /** A new id is typed in the rename box and differs from the space's own id (the box is seeded with it; a rename puts the new one back). */
+  private renameDraftDiffers(): boolean {
+    const typed = this.state.dangerRenameId.trim();
+    return typed !== '' && typed !== this.state.settingsSpace()?.id;
   }
 
   async submitDangerRename(): Promise<void> {

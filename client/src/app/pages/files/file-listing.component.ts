@@ -8,6 +8,7 @@ import { StepProgressBarComponent } from '../../shared/step-progress-bar.compone
 import { SortableHeaderComponent } from '../brain/sortable-header.component';
 import { HscrollTopDirective } from '../../shared/hscroll-top.directive';
 import { FileEntry } from '../../core/api.types';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { formatSize } from './file-format';
 import { FILE_LISTING_STYLES } from './file-manager.styles';
 
@@ -204,6 +205,11 @@ export class FileListingComponent {
   readonly retryLoad = output<void>();
 
   protected readonly formatSize = formatSize;
+
+  constructor() {
+    // The page opens a rename box on the entry's own name; a draft is another name in it (the page trims, so a trailing blank is not one).
+    holdUnsavedEdits(() => this.rows().some(r => r.renaming && this.renameValue().trim() !== r.entry.name));
+  }
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly emptyTitle = viewChild<ElementRef<HTMLElement>>('emptyTitle');

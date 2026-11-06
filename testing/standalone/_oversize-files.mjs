@@ -544,7 +544,10 @@ export const FROZEN = {
   //
   // 598 -> 506 with `Q-621`: the sync-history panel (markup, styles, state, load) is its own component,
   // network-sync-history.component.ts. It had grown back to 605 since `N-2`.
-  'client/src/app/pages/settings/networks.component.ts': 506,
+  //
+  // 506 -> 480 with `Q-701`: the sync schedule box (input, Save, its saving state and its unsaved draft) is its own
+  // component, network-sync-schedule.component.ts. Holding the draft in the page had taken it to 510.
+  'client/src/app/pages/settings/networks.component.ts': 480,
   // FIRST entry for this file: RAISED 650 -> 662 for the re-key branch in `updateEdgeById` — the If-Match
   // check that `writeFilterFor` cannot make on a path with no `findOneAndUpdate`, the call, the deleteFields
   // replay onto the moved document, and the metric.

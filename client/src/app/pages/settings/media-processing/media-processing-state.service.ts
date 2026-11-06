@@ -389,6 +389,8 @@ export class MediaProcessingStateService {
    * documents acknowledgement never covers them. Takes effect with the card's next save, like every field on it.
    */
   async setAssistConversations(on: boolean): Promise<void> {
+    // A click-only control, so the page's `input`/`change` listener never sets `touched`, which `isDirty()` needs.
+    this.touched.set(true);
     if (!on) { this.assist.acknowledgedHostForConversations = null; return; }
     const host = this.assistHost();
     if (!host) return;

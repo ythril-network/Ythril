@@ -12,6 +12,7 @@ import { httpErrorReason } from '../../core/http-error';
 import { MarkdownRenderService } from '../../shared/markdown-render.service';
 import { refusalText } from '../../core/refusal-text';
 import { PluralText } from '../../core/plural-text.service';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /** Roles with members BELOW them, so a note written here reaches somebody: a publisher, a tree root or inner node. */
 const SENDING_ROLES = new Set(['publisher', 'root', 'node']);
@@ -123,6 +124,11 @@ export class NetworkChangeNotesComponent {
   picked = signal(new Set<string>());
   received = signal<ChangeNote[]>([]);
   sent = signal<ChangeNote[]>([]);
+
+  constructor() {
+    // A note typed, or spaces ticked for it, that Send has not queued; `send()` clears both once the server accepted.
+    holdUnsavedEdits(() => this.draft().trim() !== '' || this.picked().size > 0);
+  }
 
   canSend(): boolean {
     const role = this.network().myRole;

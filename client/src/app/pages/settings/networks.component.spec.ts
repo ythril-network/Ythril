@@ -157,12 +157,12 @@ describe('NetworksComponent (characterization)', () => {
     expect(c.networks().map(n => n.id)).toEqual(['n2']);
   });
 
-  it('saveSchedule() sends the per-network override and reflects it on success', () => {
+  // The schedule box and its Save moved to network-sync-schedule.component.ts (Q-701); its send and in-flight flag are
+  // pinned in networks.unsaved-edits.spec.ts. The page only reflects the saved value, pinned here.
+  it('scheduleSaved() reflects the saved schedule on its network', () => {
     const c = make();
     c.networks.set([net({ id: 'n1' })]);
-    c.netSchedule = { n1: '0 * * * *' };
-    c.saveSchedule(net({ id: 'n1' }));
-    expect(api.updateNetworkSchedule).toHaveBeenCalledWith('n1', '0 * * * *');
+    c.scheduleSaved('n1', '0 * * * *');
     expect(c.networks()[0].syncSchedule).toBe('0 * * * *');
   });
 
@@ -247,16 +247,11 @@ describe('NetworksComponent (characterization)', () => {
   it('each async action flags in-flight while pending and clears it on completion', () => {
     const c = make();
     // `generateInvite` moved to `network-invite-panel.component.spec.ts` with the panel itself.
-    const ss = new Subject<any>(), sy = new Subject<any>(), cv = new Subject<any>();
-    api.updateNetworkSchedule.mockReturnValue(ss);
+    // The schedule save's in-flight flag moved with the schedule box (network-sync-schedule.component.ts).
+    const sy = new Subject<any>(), cv = new Subject<any>();
     api.triggerSync.mockReturnValue(sy);
     api.castVote.mockReturnValue(cv);
     c.networks.set([net({ id: 'n1' })]);
-
-    c.saveSchedule(net({ id: 'n1' }));
-    expect(c.savingSchedule['n1']).toBe(true);
-    ss.next({}); ss.complete();
-    expect(c.savingSchedule['n1']).toBeUndefined();
 
     c.sync('n1');
     expect(c.syncingNet['n1']).toBe(true);

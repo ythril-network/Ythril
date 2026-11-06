@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, input, output, signal } fro
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
+import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 /**
  * A declared type's NAME, and the affordance to change it.
@@ -60,6 +61,11 @@ export class SchemaTypeNameComponent {
   readonly editing = signal(false);
   readonly error = signal('');
   draft = '';
+
+  constructor() {
+    // A name typed in the open rename field that differs from the type's own; a commit or a cancel closes the field.
+    holdUnsavedEdits(() => this.editing() && this.draft !== this.name());
+  }
 
   start(): void {
     this.draft = this.name();
