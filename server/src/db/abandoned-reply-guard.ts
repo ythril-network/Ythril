@@ -42,6 +42,9 @@
  * from there (`every-mongo-client-goes-through-mongo-client-options.test.js`): no client can be built without the guard.
  * Installing is idempotent; the prototype is shared by every client in the process.
  */
+// Referenced, not left to `include`: a compile that names only some files (a type test's own tsconfig) reaches this one
+// through its imports and must find the declaration the same way.
+/// <reference path="./mongodb-connection.d.ts" />
 import * as driverConnection from 'mongodb/lib/cmap/connection.js';
 
 /** The mark of an installed guard: `Symbol.for`, so a second copy of this module in one process sees the first's mark. */
