@@ -43,6 +43,7 @@ import { startDelayedWriteRelay } from './_delayed-write-relay.mjs';
 import { openStalledWriteDoors, seedDoorSpace, stalledWriteDoors } from './_stalled-write-doors.mjs';
 import { holderCases, loadHolderModules, seedHolderSpace, serverCallsOfLocks, LOCK_MAY_CALL } from './_seq-hold-cases.mjs';
 import { elapse } from '../_shared/sleep.mjs';
+import { assertLaneHeld } from './_landing-verdict.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -65,6 +66,20 @@ const POLL_MS = 250;
 const WORKERS = 4;
 /** How long past the bound a call may take to answer. */
 let CAP_MS = BOUND.holdDeadlineMs + 2500;
+/**
+ * What one stalled repetition is granted: the cap on its answer and its settle window. The file's own timeout counts it per
+ * repetition, and a lane's lock is released with it as the drain's deadline.
+ *
+ * ## What it prevents
+ *
+ * The drain waits, after the lock went, until the server no longer runs the write it stalled, and throws when it does not stop in
+ * time. It waited a fixed 5 s (`DEFAULT_DRAIN_MS`), which a stalled database outlasts: in CI run 42108181905 both fork lanes of the
+ * client-timeout variant failed at once with "update … running 8 s, 106 write conflicts", while an unrelated write of the server
+ * timed out on a socket read in the same seconds. Frozen for 6 s right after the release (Q-712's probe), the killed write stayed
+ * alive 6.4 to 6.7 s, then answered its timeout and did not land. So the drain is given what the repetition is already given,
+ * and it still throws past that: a write that never ends is still reported.
+ */
+const repetitionBudgetMs = () => CAP_MS + SETTLE_MS;
 
 /** The server's `answered 5xx` log lines with the time they were said (`before` fills it, `after` stops it). */
 const answered5xx = [];
@@ -179,12 +194,12 @@ async function stallAndRelease(lane) {
     answeredAt = Date.now();
     res.elapsedMs = answeredAt - started;
     const reads = readLane(lane.space);
-    const released = lock.release().then(() => null, err => err);
+    const released = lock.release({ drainMs: repetitionBudgetMs() }).then(() => null, err => err);
     atAnswer = await step('the read at the answer', () => reads);
     releaseError = await released;
   } finally {
     answered = true;
-    await lock.release().catch(() => {});
+    await lock.release({ drainMs: repetitionBudgetMs() }).catch(() => {});
   }
   if (!res.settled) await res.rest;
   const sawLive = await step('the watch for a live write', () => watching);
@@ -402,39 +417,11 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
         for (const r of discarded[i]) {
           t.diagnostic(`${lane.name}: attempt ${r.attempt} of #${r.rep} proved nothing and was run again — answered after ${r.elapsedMs} ms (${r.thrown ?? r.status}), no write alive on ${lane.collection}: ${r.said || r.thrown}; the server said: ${r.serverSaid.join(' | ') || 'nothing'}`);
         }
-        assert.equal(rs.length, REPS, `only ${rs.length} of ${REPS} repetitions ran — ${seamError ? 'no seam' : 'the experiment stopped'}`);
         const took = rs.filter(r => r.answered).map(r => r.elapsedMs).sort((a, b) => a - b);
         if (took.length > 0) t.diagnostic(`${lane.name}: answered ${took[0]}..${took[took.length - 1]} ms after the call; ${rs.filter(r => r.fromStall).length} of ${rs.length} windows counted from the stall`);
-        if (clientTimeoutMs !== undefined) {
-          const early = rs.filter(r => r.answered && r.elapsedMs < clientTimeoutMs + CLOCK_WINDOW_MS);
-          assert.deepEqual(early.map(r => `#${r.rep}: answered after ${r.elapsedMs} ms`), [],
-            `${lane.name}: answered within ${CLOCK_WINDOW_MS} ms of the client's own clock (${clientTimeoutMs} ms), well before the server's deadline (${BOUND.writeTimeoutMs} ms) — a client-side clock, the \`timeoutMS\` this client inherited from `
-            + 'MONGO_URI, ended the write first; the bound must carry the server\'s deadline and no driver clock of its own');
-        }
-        const broken = rs.filter(r => r.fixtureError);
-        assert.deepEqual(broken.map(r => `#${r.rep}: ${r.fixtureError.slice(0, 500)}`), [],
-          `${lane.name}: a repetition could not run. An E11000 from holdDocumentLock means a write of an EARLIER repetition `
-          + 'landed after this one wiped its space, which is the defect itself, seen from the next case');
-        const unanswered = rs.filter(r => !r.answered);
-        assert.deepEqual(unanswered.map(r => `#${r.rep}`), [],
-          `${lane.name}: still waiting ${CAP_MS} ms into a write stalled behind a lock — no bound ended it`);
-        const unstalled = rs.filter(r => !r.sawStall);
-        assert.deepEqual(unstalled.map(r => `#${r.rep}: answered after ${r.elapsedMs} ms (${r.thrown ?? r.status}: ${r.said}), ${r.attempts} attempt(s); the server said: ${r.serverSaid.join(' | ') || 'nothing'}`), [],
-          `${lane.name}: no write was ever alive on ${lane.collection} while the call waited, in ${MAX_ATTEMPTS} attempts — the lock stalled nothing, so "nothing landed" proves nothing`);
-        // The bound's timeout, unless the lane's own designed answer says otherwise (`endedAs`, `_seq-hold-cases.mjs`: a move whose rows are not carried is OWED).
-        const notTimedOut = rs.filter(r => !(lane.endedAs ? lane.endedAs.test(r.thrown ?? '') : (r.status === 503 || /Timeout|timed out/i.test(r.thrown ?? ''))));
-        assert.deepEqual(notTimedOut.map(r => `#${r.rep}: ${r.thrown ?? r.status}`), [],
-          `${lane.name}: answered, but not with ${lane.endedAs ? `its designed answer (${lane.endedAs})` : 'the bound\'s timeout'} — the write was not ended by the bound`);
-        if (lane.expect503) {
-          assert.deepEqual(rs.filter(r => r.status !== 503).map(r => `#${r.rep}: ${r.status ?? r.thrown}`), [], `${lane.name}: not answered 503`);
-        }
-        assert.deepEqual(rs.filter(r => r.releaseError).map(r => `#${r.rep}: ${r.releaseError}`), [],
-          `${lane.name}: the lock could not be released cleanly`);
-        // An attempt that proved nothing and was run again is read for a landing too: a write it left must not appear later.
-        const landed = [...rs, ...discarded[i]].filter(r => r.landed.length > 0);
-        assert.deepEqual(landed.map(r => `#${r.rep}: ${r.landed.join('; ')}`), [],
-          `${lane.name}: in ${landed.length} of ${REPS} repetitions the write the caller was told had timed out LANDED after the answer — `
-          + `the client's deadline passed before the server's, so the server operation outlived the answer and the hold`);
+        assertLaneHeld(lane, rs, discarded[i], {
+          reps: REPS, capMs: CAP_MS, maxAttempts: MAX_ATTEMPTS, clockWindowMs: CLOCK_WINDOW_MS, clientTimeoutMs, boundMs: BOUND.writeTimeoutMs, seamError,
+        });
       });
     }
   }
@@ -444,7 +431,7 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
     skip,
     lateByMs,
     laneCount: lanes.length,
-    timeout: 120_000 + REPS * lanes.length * (CAP_MS + SETTLE_MS) / WORKERS,
+    timeout: 120_000 + REPS * lanes.length * repetitionBudgetMs() / WORKERS,
     async before() {
       relay = await startDelayedWriteRelay({ host: TEST_MONGO_HOST, port: TEST_MONGO_PORT });
       doors = await openStalledWriteDoors({ suite, spaces: lanes.map(l => l.space), mongoPort: relay.port, mongoQuery: query, fixtureClient: true });
