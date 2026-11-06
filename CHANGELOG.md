@@ -48,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI:** a pull request whose exact tree already passed a Full run reads that run's results instead of running every suite again; the `ci:full` label forces the whole graph.
 - **Schema:** the package is named `@ythril-network/schema`: a packed tarball is `ythril-network-schema-<version>.tgz`, and the header of the TypeScript it writes and the refusal of its from-typescript entry carry the new name.
 - **Releases:** the release gate refuses a tag that differs from the version of the manifests, and a prerelease tag is no longer marked Latest on GitHub.
+- **Docs:** changed integration guides: hosting, upgrading, auth and limits, recall, brain operations, choosing a search, files, conversion pipeline, media embedding and face recognition.
+- **Docs:** changed integration guides: spaces, schema, tokens, networks, sync, MFA and conflicts, setup, audit log, duplicates and webhooks, and MCP.
+- **Docs:** changed user guide pages: getting started, Brain, files and schemas, settings, media and embedding, storage, and connecting an AI assistant; and the workstation mode guide.
+- **Docs:** changed: the contribution, testing and UI primitives guides, the dependencies note, the decisions index with records 10, 19 and 20, and the `@ythril-network/schema` README.
 
 ### Fixed
 
