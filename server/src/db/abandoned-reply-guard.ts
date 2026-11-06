@@ -27,13 +27,14 @@
  * command expects one (`moreToCome` unset). The error is rethrown as it came. A timeout raised before anything was
  * written closes nothing: that connection is healthy.
  *
- * ## Why it loads a driver file by path, and why that is not silent
+ * ## Why it imports a driver file by path, and why that is not silent
  *
- * `Connection` is not exported from the package, so the file is loaded by path (`store-condition.ts` O9 warns that a
- * classifier doing so "stops matching, silently, on the upgrade that moves it"). Here it is not silent: the install
- * THROWS when the method it wraps or the one it calls is missing, so an upgrade that moves either fails every client at
- * construction and fails the test (`a-connection-the-driver-gave-up-on-after-writing-is-never-reused-db.test.js`),
- * rather than running unguarded.
+ * `Connection` is not exported from the package, so its file is imported by path, statically and by name (never through
+ * `createRequire`, which `store-condition.ts` O9 refuses: a class reached that way "stops matching, silently, on the upgrade
+ * that moves it"). Here nothing is silent: a moved file fails the import at boot, and the install THROWS when the class,
+ * the method it wraps or the one it calls is missing, so an upgrade fails every client at construction and fails the test
+ * (`a-connection-the-driver-gave-up-on-after-writing-is-never-reused-db.test.js`), rather than running unguarded. The
+ * file's types are declared in `mongodb-connection.d.ts`, the driver shipping none for it.
  *
  * ## Where it is installed
  *
@@ -41,7 +42,7 @@
  * from there (`every-mongo-client-goes-through-mongo-client-options.test.js`): no client can be built without the guard.
  * Installing is idempotent; the prototype is shared by every client in the process.
  */
-import { createRequire } from 'node:module';
+import * as driverConnection from 'mongodb/lib/cmap/connection.js';
 
 /** The mark of an installed guard: `Symbol.for`, so a second copy of this module in one process sees the first's mark. */
 const GUARDED: unique symbol = Symbol.for('ythril.abandonedReplyGuard');
@@ -62,8 +63,7 @@ interface ConnectionPrototype {
 }
 
 function driverConnectionPrototype(): ConnectionPrototype {
-  const require = createRequire(import.meta.url);
-  const loaded = require('mongodb/lib/cmap/connection.js') as { Connection?: { prototype: ConnectionPrototype } };
+  const loaded = driverConnection as unknown as { Connection?: { prototype: ConnectionPrototype } };
   if (!loaded.Connection) {
     throw new Error('abandoned-reply guard: mongodb/lib/cmap/connection.js exports no Connection; the driver moved it, and every client '
       + 'would run without the guard that keeps a timed-out command\'s reply from reaching the next operation');
