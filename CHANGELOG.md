@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [6.5.0] — 2026-11-06
+## [6.5.0] — 2026-11-07
 
 **A minor release: security fixes for space rights, AI connector approval and database answers reaching the wrong call, bounded model and sidecar answers, recall and scans that say when an index missed or is not ready, passages split to the embedder's size, and clearer Brain and Settings pages.**
 
