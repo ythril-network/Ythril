@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.5.1] — 2026-11-07
+
 **A patch release: Ythril stops using the MongoDB driver's client-side timeout, whose timeouts could hand one call another's answer, and moves to driver 7.8.0, with every database call still ended at its bound.**
 
 | Changes on upgrade | Action |
@@ -18,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Database:** no database call uses the MongoDB driver's client-side timeout any more, whose timeouts could leave one call's answer for another (CVE-2026-119179); calls are ended by the server's deadline and Ythril's own backstop.
 - **Database:** the MongoDB driver is 7.8.0, which also checks that the hosts a `mongodb+srv` record names belong to its domain.
+
+### Changed
+
+- **Docs:** changed: the hosting guide (`MONGO_URI`, `YTHRIL_WRITE_TIMEOUT_MS`), the storage page of the user guide, and the contribution guide's npm publishing steps.
 
 ## [6.5.0] — 2026-11-07
 
