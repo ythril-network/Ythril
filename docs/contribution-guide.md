@@ -417,12 +417,17 @@ npm only lets you configure a trusted publisher for a package that exists, so th
    version the script names as published by hand (`scripts/publish-schema.mjs`), ends with a warning rather than a failure.
 2. From a clean checkout of the `v6.5.0` tag, sign in to npm as a member of the `ythril-network` organisation (with
    two-factor authentication) and run `npm publish -w @ythril-network/schema` (`publishConfig.access` makes it public; its
-   `prepack` builds it from a clean `dist`).
+   `prepack` builds it from a clean `dist`). npm may stage a new package's first version instead of publishing it: the
+   package page then shows a placeholder `0.0.0-stage` and the registry answers `404`. Open the package's **Staged
+   Packages** tab and **Approve** the version (it asks for your second factor); only a maintainer can approve.
 3. Re-run only the `publish-schema` job. It finds the version with the tag commit's `gitHead` and succeeds: that is the
    check that the hand publish was cut from the tagged commit.
 4. On npmjs.com, package settings, **Trusted publisher**, add GitHub Actions: organisation `ythril-network`, repository
    `Ythril`, workflow filename `publish.yml`, environment name `npm-publish`. npm requires the first publish through a new trusted-publisher configuration to
-   happen within 2 days, so configure it shortly before tagging the next release, not long before.
+   happen within 2 days, so configure it shortly before tagging the next release, not long before. Tick **Allow npm
+   publish** (the job runs `npm publish`) and leave **Allow npm dist-tag** unticked (the job never runs `npm dist-tag`).
+   Until a release publishes through it, the configuration shows **Pending validation**. If its window passes first, delete
+   it and add it again shortly before the next tag.
 5. After the first publish through OIDC (the next release), set the package's publishing access to **Require two-factor
    authentication and disallow tokens**. A stolen token can then publish nothing; only the workflow can.
 
