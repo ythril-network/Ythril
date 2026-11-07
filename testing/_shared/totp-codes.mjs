@@ -41,8 +41,25 @@ export function totpAt(secret, epochSeconds) {
   return String(n % 1_000_000).padStart(6, '0');
 }
 
-/** The code of the step `offset` steps from the current one (-1, 0 and +1 are inside the server's window). */
+/**
+ * How close to the end of a step the code of the step before is not handed out, ms. That code is the trailing edge of the server's
+ * window: made in the last moments of a step, it is two steps back (stale, `MFA_INVALID`) by the time the server reads it, which failed
+ * a correct-code case of the MFA lockout file in CI (release 6.5.1). A request on a loaded runner takes well under this.
+ */
+const TRAILING_EDGE_MS = 2_000;
+
+/** Blocks the thread for `ms` without spinning: the callers are synchronous (`{ code: s.next() }`). */
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/**
+ * The code of the step `offset` steps from the current one (-1, 0 and +1 are inside the server's window). For -1, the window's trailing
+ * edge, it first waits out the last `TRAILING_EDGE_MS` of a step, so the code is still inside the window when the server reads it.
+ */
 export function codeAtStep(secret, offset) {
+  if (offset === -1) {
+    const left = STEP_SECONDS * 1000 - (Date.now() % (STEP_SECONDS * 1000));
+    if (left < TRAILING_EDGE_MS) pause(left + 50);
+  }
   return totpAt(secret, Math.floor(Date.now() / 1000) + offset * STEP_SECONDS);
 }
 
