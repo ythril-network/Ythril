@@ -44,7 +44,7 @@ export interface VisibilityFlags {
  * answered once per connection, before any space is named. `toolRightsRefusal` does the per-space, per-area
  * check at call time, and that is the one that decides whether a specific invocation is allowed.
  */
-export function toolIsVisible(tool: VisibilityFlags, rights: TokenRights | undefined, peerId?: string): boolean {
+export function toolIsVisible(tool: VisibilityFlags, rights: TokenRights | undefined, peerId: string | undefined): boolean {
   // A tool a peer-bound token is refused at the dispatcher is not offered to it (`peerTokenToolRefusal`, the one question both ask).
   if (tool.name !== undefined && peerTokenToolRefusal(peerId, tool.name) !== undefined) return false;
   if (tool.admin) return rights?.instanceAdmin === true;

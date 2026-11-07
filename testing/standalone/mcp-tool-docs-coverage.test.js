@@ -113,10 +113,10 @@ describe('MCP tool read-only classification matches the docs', () => {
      */
     const router = readFileSync(join(ROOT, 'server', 'src', 'mcp', 'router.ts'), 'utf8');
     const dispatch = readFileSync(join(ROOT, 'server', 'src', 'mcp', 'call-tool.ts'), 'utf8');
-    // The peer a token is bound to is the optional third argument (`peerTokenToolRefusal`, Q-245): a peer's listing hides what the dispatcher refuses.
-    assert.match(router, /ALL_TOOLS\.filter\(t => toolIsVisible\(t, rights(?:, peerId)?\)\)/,
+    // The peer a token is bound to is the required third argument (`peerTokenToolRefusal`): a peer's listing hides what the dispatcher refuses.
+    assert.match(router, /ALL_TOOLS\.filter\(t => toolIsVisible\(t, rights, peerId\)\)/,
       'expected tools/list to filter through the shared predicate');
-    assert.match(dispatch, /if \(tool && !toolIsVisible\(tool, rights\)\)/,
+    assert.match(dispatch, /if \(tool && !toolIsVisible\(tool, rights, peerId\)\)/,
       'expected a call-time rejection through the SAME predicate — filtering the list alone is advisory');
 
     // And the predicate must actually gate on something. A version returning `true` for everything would

@@ -1,5 +1,6 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { restOnlyCapabilityMap } from '../parity.js';
+import { peerBoundTo } from '../../auth/peer-bound.js';
 import { helpSections, renderHelp, renderHelpIndex, renderSection, searchHelp } from './help-sections.js';
 
 /**
@@ -75,7 +76,8 @@ export const helpTool: ToolHandler = {
     // The exact predicate tools/list uses — now literally the same function rather than the same
     // expression retyped, which is what the previous version of this comment claimed and was not.
     const { toolIsVisible } = await import('../tool-visibility.js');
-    const visible = ALL_TOOLS.filter(t => toolIsVisible(t, ctx.rights));
+    // With the token's peer binding, as tools/list asks: a peer-bound token's guide must not offer a tool the dispatcher refuses it.
+    const visible = ALL_TOOLS.filter(t => toolIsVisible(t, ctx.rights, peerBoundTo(ctx.callerRecord)));
     const sections = helpSections(ctx, visible, ALL_TOOLS.length - visible.length);
 
     const rawQuery = ctx.args['query'];
