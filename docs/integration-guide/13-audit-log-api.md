@@ -28,7 +28,7 @@ refusal, a record the call names and cannot find, a conflict, a store failure, a
 a call turned away before the handler ran (bad arguments, arguments that are not an object, a space that does not exist,
 the token's rights, the rate limit). The only filter is `audit.logReads`, which drops **read** tools at every status,
 exactly as it drops a REST read: a refused or failed `recall`, `filter` or `read_file` is a row when the log records
-reads, and none when it does not. The row names the space the call named, when that space exists; a name that does not
+reads, and none when it does not. The row names the space the call named, when that space exists (a `write_file` refused `403` to a peer-bound token included); a name that does not
 exist is not written to the log. A refusal carries **no change list** — a refused edit changed nothing, and its intended
 values would claim that it had. An unknown tool is no operation and writes nothing. A REST route that runs a tool and has
 its own audited path (`POST /api/brain/recall`, `/api/brain/similar`, `/api/brain/spaces/:spaceId/traverse`) leaves one row,

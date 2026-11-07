@@ -25,10 +25,9 @@ import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { log } from '../util/log.js';
 import { openStoredRead, statStored } from '../files/stored-bytes.js';
-import {
-  listDir,
-  type FileEntry,
-} from '../files/files.js';
+import { type FileEntry } from '../files/files.js';
+import { listAcrossMembers } from '../files/list-across-members.js';
+import { fileReadFaultOf } from '../files/read-fault.js';
 import { fetchJobProgress } from '../files/media/job-queue.js';
 import {
   getUploadReceived,
@@ -246,24 +245,28 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
   // Where the path is when it is held under another spelling (a decomposed name, Q-581): `heldEntryOf`, the lookup MCP's doors make too.
   let heldAbs: string | null = null;
   for (const mid of memberIds) {
-    const at = await heldEntryOf(mid, normalised);
+    let at: Awaited<ReturnType<typeof heldEntryOf>>;
+    try {
+      at = await heldEntryOf(mid, normalised);
+    } catch (err) {
+      // A member that holds nothing at the path (a name too long, a link loop) is skipped; a fault of the storage is answered 500 file_system_fault
+      // by the shared answer, never a bare 500 from the application's last-resort handler (`fileReadFaultOf`).
+      const fault = fileReadFaultOf(err);
+      if (fault) { sendCaughtFailure(res, `heldEntryOf for space ${mid}, path ${normalised}`, fault, { error: 'Failed to read file' }); return; }
+      continue;
+    }
     if (at) { foundMid = mid; stat = at.stat; heldAbs = at.heldAbs; break; }
   }
 
   if (!foundMid || !stat) {
     // For directory listing at root, aggregate even if some members have no dir
     if (normalised === '.') {
-      const allEntries: FileEntry[] = [];
-      const seen = new Set<string>();
-      for (const mid of memberIds) {
-        try {
-          const entries = await listDir(mid, normalised);
-          for (const e of entries) {
-            if (!seen.has(e.name)) { seen.add(e.name); allEntries.push(e); }
-          }
-        } catch { /* member may have no files dir */ }
+      try {
+        const allEntries = await listAcrossMembers(memberIds, normalised);
+        res.json({ path: normalised, type: 'dir', entries: await enrichEntries(memberIds, normalised, allEntries) });
+      } catch (err) {
+        sendCaughtFailure(res, `list for space ${spaceId}, path ${normalised}`, err, { error: 'Failed to list directory' });
       }
-      res.json({ path: normalised, type: 'dir', entries: await enrichEntries(memberIds, normalised, allEntries) });
       return;
     }
     res.status(404).json({ error: 'Path not found' });
@@ -272,15 +275,12 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
 
   if (stat.isDirectory()) {
     // Aggregate directory entries across all member spaces
-    const allEntries: FileEntry[] = [];
-    const seen = new Set<string>();
-    for (const mid of memberIds) {
-      try {
-        const entries = await listDir(mid, normalised);
-        for (const e of entries) {
-          if (!seen.has(e.name)) { seen.add(e.name); allEntries.push(e); }
-        }
-      } catch { /* dir may not exist in this member */ }
+    let allEntries: FileEntry[];
+    try {
+      allEntries = await listAcrossMembers(memberIds, normalised);
+    } catch (err) {
+      sendCaughtFailure(res, `list for space ${spaceId}, path ${normalised}`, err, { error: 'Failed to list directory' });
+      return;
     }
     res.json({
       path: normalised, type: 'dir',

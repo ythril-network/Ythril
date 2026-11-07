@@ -551,6 +551,11 @@ Choose a migration strategy by **whether the data syncs across networks**, becau
 - **Local, non-synced state → an idempotent boot migration is fine.** State the single instance owns and no peer overwrites — `config.json` (loader migrations), at-rest state-file encryption, index creation (`createIndex`/TTL) — converges once on boot and stays. Keep it idempotent (a no-op once applied) so re-running is free.
 - **A stored-field rename on a synced collection is the fragile case.** It changes the wire format, so mixed-version peers see a blank for the name they don't know until everyone upgrades. Do it only at a major release, document it as breaking, and prefer pairing it with a self-healing field for anything that must stay correct.
 
+### 8. A write merges or replaces, and says which; a peer token calls no user tool
+
+- **`properties` merge on every record write, a file rewrite included.** A writer stores the stored bag with the incoming one laid over it (`mergeProperties` / `mergePropertiesOrKeep` in `server/src/brain/merge-fields.ts`; a pipeline update uses `mergePropertiesStage(incoming)` as the `properties` key of its own `$set` stage, never inside a `$literal` mapping). Lists (`tags`, links) replace. Removing a key is `deleteFields`, never an absence. A site that sets a bag any other way is a named exception, with its reason, in `testing/standalone/_properties-write-sites.mjs`, which the update-tools gate reads.
+- **A peer-bound token's refusal is registered in one place.** `peerTokenToolRefusal(peerId, toolName)` in `server/src/auth/peer-bound.ts` names the tools a peer-bound token may not call. `callTool` asks it before anything else about the call, and `toolIsVisible` asks it so `tools/list` never offers a tool the dispatcher refuses. To refuse another tool, add its name to that set; nothing at the call sites changes. A door that reads the peer a token is bound to uses `peerBoundTo(`, and the gate `a-governance-relay-authorises-not-only-authenticates` lists the files that must.
+
 ---
 
 ## UI Primitives

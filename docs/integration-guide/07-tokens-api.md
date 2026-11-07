@@ -349,6 +349,12 @@ body: a peer token whose rights were raised would otherwise hand out tokens with
 which a peer's revocation would not reach. Mint with your own token. The same two kinds cannot approve an AI connector
 either (see [MCP](16-mcp.md)); a connector's own token can.
 
+**A peer-bound token stores no file as this instance's own upload.** A peer delivers files through the sync door
+(`POST /api/files/:spaceId`, as an arrival), and that door refuses `description`, `tags`, `properties` and `ttlDays` with a
+`400`: a peer's file metadata arrives by metadata sync. The `write_file` tool, on MCP and on `POST /api/write_file`, is a
+user door and answers a peer-bound token `403` (it is not offered in that token's `tools/list`). The other user doors a peer token can still
+reach are not closed by this.
+
 > **`readOnly` is not stored on a token, and sending it to `POST /api/tokens` is a `400`**, as the table above
 > says. Write `rights.floor` with read rungs instead.
 >

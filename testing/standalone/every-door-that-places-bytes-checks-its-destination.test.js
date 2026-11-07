@@ -66,7 +66,7 @@ const PRIMITIVE = () => /\b(?:writeStored|pipeToStored|moveStored|commitStaged|m
  * a placing callee. The reasons are claims about the callee, so they are what a reviewer reads, not a list to be kept short.
  */
 const NOT_PLACING = Object.freeze({
-  readFileWindow: 'reads', listDir: 'reads', openStoredRead: 'reads', statStored: 'reads', isMissingPath: 'classifies an error',
+  readFileWindow: 'reads', openStoredRead: 'reads', statStored: 'reads', isMissingPath: 'classifies an error',
   StoredFileUnreadable: 'an error class', getUploadReceived: 'reads the staged byte count', parseContentRange: 'parses a header',
   hashStagedChunks: 'reads staged chunks, writes nothing', discardStagedChunks: 'removes staged chunks',
   deleteStoredIfPresent: 'removes bytes; a delete places nothing', recordStoredFile: 'records the row of bytes already placed by the caller',

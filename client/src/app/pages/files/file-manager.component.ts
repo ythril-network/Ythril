@@ -221,7 +221,7 @@ import { PluralText } from '../../core/plural-text.service';
             [rows]="fileRows()"
             [sortField]="sortField()"
             [sortDir]="sortDir()"
-            [error]="listing.loadError()" [isView]="isView()"
+            [error]="listing.loadError()" [errorCode]="listing.loadErrorCode()" [isView]="isView()"
             [(renameValue)]="renameValue"
             (sort)="setSort($event)"
             (open)="open($event)"

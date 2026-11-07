@@ -63,6 +63,19 @@ function uploadBodyLimit(): number {
 /** The header a chunked upload carries the sha256 of the WHOLE file in: 64 hex digits, or the request is malformed. */
 const EXPECTED_HASH_HEADER = 'x-expected-sha256';
 
+// The refusal a peer-bound token earns for sending file metadata on the upload. A peer's metadata arrives by metadata sync (GET /filemeta), authored
+// and converged by seq; an upload that carries it is a bug on the sender's side or a way to write a record as this instance's own upload.
+const PEER_UPLOAD_METADATA_REASON = 'A peer\'s file metadata arrives by metadata sync, never on the upload: send the bytes alone, without description, tags, properties or ttlDays.';
+
+// Whether this request carries file metadata: a JSON body naming description, tags or properties, or a ttlDays in the query (any request shape).
+// A raw body is bytes and carries none; a chunked body is always raw bytes, so only its query is looked at.
+function carriesFileMetadata(req: Request): boolean {
+  if (req.query?.['ttlDays'] !== undefined) return true;
+  const body = req.body as Record<string, unknown> | Buffer | undefined;
+  if (body === undefined || body === null || Buffer.isBuffer(body) || typeof body !== 'object') return false;
+  return body['description'] !== undefined || body['tags'] !== undefined || body['properties'] !== undefined;
+}
+
 /**
  * The hash a chunked upload promises (`x-expected-sha256`), lowercase: `undefined` when the header is absent (any client that
  * does not promise one is assembled as before), `null` when it is present and is not a sha256 — a malformed promise is refused,
@@ -125,6 +138,12 @@ export function registerUploadRoute(router: Router): void {
 
       // ── Chunked upload (Content-Range) ───────────────────────────────────
       const range = parseContentRange(req.headers['content-range'] as string | undefined);
+      // A peer's metadata is refused before anything is staged: for a chunked upload the query (ttlDays) is on every range, so the FIRST one is turned
+      // away (and any later one, should a sender add it midway) and no range is staged or counted against the quota.
+      if (arrivedFrom && carriesFileMetadata(req)) {
+        res.status(400).json({ error: PEER_UPLOAD_METADATA_REASON });
+        return;
+      }
       if (range) {
         if (!Buffer.isBuffer(req.body)) {
           res.status(400).json({ error: 'Chunked upload requires raw bytes (not JSON)' });

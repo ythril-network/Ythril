@@ -601,7 +601,8 @@ PATCH /api/brain/spaces/:spaceId/files?path=…
 ```
 
 > **`properties` MERGE on all five, file metadata included**, and `deleteFields` is how a file property is
-> cleared. A caller that resends the whole object gets the same result; one that patches a single key keeps
+> cleared. That holds for a file's **content rewrite** too (`write_file`, `POST /api/write_file`, the upload): the
+> `properties` it sends are merged over the stored ones, and `{}` or no `properties` keeps the bag. A caller that resends the whole object gets the same result; one that patches a single key keeps
 > what it did not name.
 >
 > **The lists replace on every type**: `tags`, `linkEntities`, `linkFacts` and `linkChronos` are

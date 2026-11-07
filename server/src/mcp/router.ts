@@ -15,6 +15,7 @@ import { callTool, materialisedSchema } from './call-tool.js';
 import { validatorFor } from './validate-args.js';
 import { spaceScopeSentence } from './space-scope-sentence.js';
 import { callerRecordOf } from './caller-record.js';
+import { peerBoundTo } from '../auth/peer-bound.js';
 import { viewOwnerOf, viewsOfOwner } from '../config/views.js';
 import type { ToolCallerRecord } from './tools/types.js';
 
@@ -67,6 +68,8 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
   audit?: { ip: string; authMethod: 'pat' | 'oidc' | null; oidcSubject: string | null; transport: 'http' },
   rights?: TokenRights, record?: ToolCallerRecord): Server {
   const cfg = getConfig();
+  // The peer this connection's token is bound to, or none: a peer token is not offered the tools it is refused at the dispatcher.
+  const peerId = peerBoundTo(record);
   // The rights matrix decides this, with `tokenSpaces` as the fallback for records that carry no rights.
   //
   // Until now MCP answered from `tokenSpaces` ALONE while the HTTP guard used `reachesSpace`. Two surfaces, one rule,
@@ -98,7 +101,7 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
   const spacesLine = accessibleSpaces.length > 0
     ? accessibleSpaces.map(s => s.id + (s.label ? ` ("${s.label.replace(/[\x00-\x1f]/g, '').slice(0, 200)}")` : '')).join(', ')
     : '(none accessible)';
-  const instructions = `Ythril knowledge graph — global mode.\nAvailable spaces: ${spacesLine}.\n${spaceScopeSentence(ALL_TOOLS.filter(t => toolIsVisible(t, rights)), reach.schemas)} ${ownViewIds.length ? `Your personal views (read lenses over spaces you read; pass one as \`space\` to a read tool): ${ownViewIds.join(', ')}.
+  const instructions = `Ythril knowledge graph — global mode.\nAvailable spaces: ${spacesLine}.\n${spaceScopeSentence(ALL_TOOLS.filter(t => toolIsVisible(t, rights, peerId)), reach.schemas)} ${ownViewIds.length ? `Your personal views (read lenses over spaces you read; pass one as \`space\` to a read tool): ${ownViewIds.join(', ')}.
 ` : ''}Call list_spaces for details. Tool arguments are validated against each tool's inputSchema (from tools/list) — read it before calling.`;
 
   const server = new Server(
@@ -115,7 +118,7 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
   // tokens lose instance-level tools. Both gates are re-enforced on dispatch.
   // One predicate, shared with `help` and with the two dispatcher gates below. It used to be this
   // expression written out four times, twice under a comment claiming they were one source of truth.
-  const visibleTools = ALL_TOOLS.filter(t => toolIsVisible(t, rights));
+  const visibleTools = ALL_TOOLS.filter(t => toolIsVisible(t, rights, peerId));
 
   // ── tools/list ────────────────────────────────────────────────────────────
   server.setRequestHandler(ListToolsRequestSchema, async () => ({

@@ -4,7 +4,7 @@ import { sha256Hex } from '../util/sha256-hex.js';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { hardenPath, mkdirPrivate } from '../util/fs-modes.js';
 import { StringDecoder } from 'node:string_decoder';
-import { openStoredRead, writeStored, statStored, moveStoredIfFree, finishInterruptedLink, DestinationOccupied, lstatIfPresent } from './stored-bytes.js';
+import { openStoredRead, writeStored, statStored, moveStoredIfFree, finishInterruptedLink, DestinationOccupied, lstatIfPresent, isMissingPath } from './stored-bytes.js';
 import { heldSpellingOf, storedAbsOf, storedDirOf } from './held-spelling.js';
 import { markdownWindow, type MarkdownWindow } from './markdown-window.js';
 import { admitSpaceWrite, assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
@@ -13,7 +13,7 @@ import { DestinationExists, type DestinationAct } from './act-answers.js';
 import { fileMoveLinkFallbackTotal } from '../metrics/registry.js';
 import { getDataRoot } from '../config/loader.js';
 import { toDocId } from '../util/paths.js';
-import { warnOnce } from '../util/warn-once.js';
+import { warnOnce, SAY_ONCE_WINDOW_MS } from '../util/warn-once.js';
 import { log, peerText } from '../util/log.js';
 
 export interface FileEntry {
@@ -130,6 +130,9 @@ export async function writeFileBytes(
   return { sha256 };
 }
 
+/** A listing entry whose size could not be read for a reason other than being gone: said once per window per errno code. */
+const saidUnreadableEntry = warnOnce<string>({ max: 16, every: SAY_ONCE_WINDOW_MS });
+
 /** List entries in a directory (non-recursive) */
 export async function listDir(spaceId: string, dirPath: string): Promise<FileEntry[]> {
   const abs = await storedDirOf(spaceId, dirPath);
@@ -146,7 +149,12 @@ export async function listDir(spaceId: string, dirPath: string): Promise<FileEnt
         const stat = await statStored(path.join(abs, e.name));
         size = stat.size;
         modifiedAt = stat.mtime.toISOString();
-      } catch { /* stat failed — omit metadata */ }
+      } catch (err) {
+        // The folder stays listable: ONE entry that cannot be read is listed without its size (a vanished one is no news). A fault of the storage is
+        // said, once per window, so an unreadable disk is seen rather than read as files that have no size.
+        if (!isMissingPath(err)) saidUnreadableEntry((err as NodeJS.ErrnoException | null)?.code ?? 'unknown', () => log.warn(
+          `A file in a listing could not be read for its size (${peerText((err as NodeJS.ErrnoException | null)?.code ?? err)}); it is listed without one. The reason is in the file system under the data root.`));
+      }
       result.push({ name: e.name, type: 'file', size, modifiedAt });
     }
   }

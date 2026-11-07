@@ -66,9 +66,13 @@ describe('list_dir: the proxy merge loses a duplicate name', () => {
   });
 
   it('and the merge really is by name with first-wins', () => {
-    const s = src('server/src/mcp/tools/file.ts');
+    // The merge is ONE module since Q-538 (`files/list-across-members.ts`, `listAcrossMembers`), shared by MCP list_dir and both REST listings;
+    // the claim is pinned where the loop now lives, and list_dir must call it rather than carry a loop of its own.
+    const s = src('server/src/files/list-across-members.ts');
     assert.match(s, /if \(!seen\.has\(e\.name\)\)/,
       'dedupe is on the bare name — if that changes, so must the warning');
+    assert.match(src('server/src/mcp/tools/file.ts'), /listAcrossMembers\(/, 'list_dir merges its members through the shared module');
+    assert.doesNotMatch(src('server/src/mcp/tools/file.ts'), /if \(!seen\.has\(e\.name\)\)/, 'list_dir still carries a second copy of the merge');
   });
 
   it('says it is not recursive, and that names are not paths', () => {

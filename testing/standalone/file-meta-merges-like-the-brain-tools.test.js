@@ -30,6 +30,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { blockAfter } from './_structural-window.mjs';
+import { propertiesWriteSites, unmergedPropertiesWrites } from './_properties-write-sites.mjs';
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
 
@@ -44,9 +45,17 @@ const DESC = (() => {
 })();
 
 describe('all five record types now agree about properties', () => {
-  it('file meta merges', () => {
-    assert.match(src('server/src/files/file-meta.ts'), /mergePropertiesOrKeep\(existing\.properties, opts\.properties\)/,
-      'the fifth copy of a defect fixed four times');
+  it('file meta merges, at EVERY site that writes the bag', () => {
+    /*
+     * Per site (Q-197). This asserted that ONE merge call exists somewhere in the file, which `updateFileMeta` satisfied while
+     * `upsertFileMeta` (a file REWRITE, through every door) replaced the bag. Each writer is judged on its own right-hand side by the
+     * scan in `_properties-write-sites.mjs`, the one the update-tools gate uses over all of server/src.
+     */
+    const file = 'server/src/files/file-meta.ts';
+    const files = [{ file, text: readFileSync(file, 'utf8') }];
+    const sites = propertiesWriteSites(files);
+    assert.ok(sites.length >= 2, `only ${sites.length} properties-write site(s) in ${file}: upsert's rewrite and update's patch are two, so the scan is wrong`);
+    assert.deepEqual(unmergedPropertiesWrites(files), [], 'the fifth copy of a defect fixed four times');
   });
 
   it('and so do the four brain paths — the point is that they AGREE now', () => {

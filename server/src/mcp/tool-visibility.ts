@@ -2,9 +2,12 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { canWriteAnywhere } from '../auth/write-anywhere.js';
 import { administersAnySpace } from '../auth/editor-scope.js';
 import { mayCreateSpaces } from '../auth/create-spaces.js';
+import { peerTokenToolRefusal } from '../auth/peer-bound.js';
 
 /** The shape this needs off a tool — the two flags that decide whether it is reachable at all. */
 export interface VisibilityFlags {
+  /** The tool's name: what a peer-bound token's refusal is keyed on (`peerTokenToolRefusal`). */
+  name?: string;
   mutating?: boolean;
   admin?: boolean;
   spaceAdmin?: boolean;
@@ -41,7 +44,9 @@ export interface VisibilityFlags {
  * answered once per connection, before any space is named. `toolRightsRefusal` does the per-space, per-area
  * check at call time, and that is the one that decides whether a specific invocation is allowed.
  */
-export function toolIsVisible(tool: VisibilityFlags, rights: TokenRights | undefined): boolean {
+export function toolIsVisible(tool: VisibilityFlags, rights: TokenRights | undefined, peerId?: string): boolean {
+  // A tool a peer-bound token is refused at the dispatcher is not offered to it (`peerTokenToolRefusal`, the one question both ask).
+  if (tool.name !== undefined && peerTokenToolRefusal(peerId, tool.name) !== undefined) return false;
   if (tool.admin) return rights?.instanceAdmin === true;
   // The same predicate the REST create and a join ask (Q-134), so a token that may create spaces is shown the tool.
   // Not also "can write somewhere": a token whose only right is to create a space holds no rung in any existing one.

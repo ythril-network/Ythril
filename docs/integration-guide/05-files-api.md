@@ -58,7 +58,7 @@ path takes back bytes no record names once the database answers.
 
 **A peer's upload of a file this instance deleted is not stored.** Sync pushes a file's bytes to this route with a peer token. When this instance holds a deletion for that path, the path has not been re-created since (a live file there with other bytes, or a newer version written by the instance that issued the deletion — another author's higher version number does not count), and the arriving bytes are the content the deletion erased, the answer is `200 { "tombstoned": true }` and nothing is written, so the file does not come back from a peer that has not heard of the deletion yet. **A deletion counts from the moment its bytes are gone**, not from the moment its tombstone is published: a delete writes its tombstone first and publishes it once the file is removed, and an upload that arrives in between is answered the same `200 { "tombstoned": true }`. A deletion whose file is still there shadows nothing. If this instance cannot look at the path to tell which of the two it is (a file-system fault other than "it does not exist"), the answer is a retryable `503` with `Retry-After`, nothing is stored, and the sender does not remember it; it uploads again on its next cycle. It is a `200` on purpose: a sender that took it for a failure would upload the same bytes every cycle. Identical bytes re-created by the issuer as a newer version arrive with their metadata first and are stored. A user's own upload, with any other token, is **never** refused this way, and a chunked upload is decided before its target is written (see [Chunked Upload](#chunked-upload-content-range)). The `path` is resolved before anything is looked up by it, so `x/../file` is the deletion of `file` however it is spelled. A deletion held from before the upgrade names no version and shadows nothing. See [Sync API → File Sync Artifacts](09-sync-api.md#file-sync-artifacts).
 
-**What else a peer's upload does differently.** Bytes a peer token delivers are recorded as an **arrival**, by the one function the manifest pull also records through: size and hash, the peer as author of a row new here, no seq of its own, then processing by THIS instance's rules (conversion, chunking, the media pipeline; an image's face analysis follows `reprocessSyncedImages`). The body's `description`, `tags` and `properties` are ignored (they come by metadata sync), and **nothing is announced**: a peer's push fires no `file.created` webhook and no live-view event, as a synced record fires none (a person's upload, with a user or API token, still fires one). **A path inside a conversion tree** (`_converted/…` or `_extracted/…` at the root of the space) is not stored when a peer offers it, and is answered `200 { "ignored": "instance-local" }`, single or chunked (each instance converts by its own settings; an older sender reads the `200` as delivered and stops). A person's upload to such a path is never asked.
+**What else a peer's upload does differently.** Bytes a peer token delivers are recorded as an **arrival**, by the one function the manifest pull also records through: size and hash, the peer as author of a row new here, no seq of its own, then processing by THIS instance's rules (conversion, chunking, the media pipeline; an image's face analysis follows `reprocessSyncedImages`). A peer's upload carries **no file metadata**: a body that names `description`, `tags` or `properties`, or a `ttlDays` in the query (on a chunked upload, on any range, refused at the first), is refused `400` before anything is staged or stored, because a peer's metadata arrives by metadata sync, never on the upload (send the bytes alone; `inputFormat` and `encoding` say how to read the bytes and are not metadata). **Nothing is announced**: a peer's push fires no `file.created` webhook and no live-view event, as a synced record fires none (a person's upload, with a user or API token, still fires one). **A path inside a conversion tree** (`_converted/…` or `_extracted/…` at the root of the space) is not stored when a peer offers it, and is answered `200 { "ignored": "instance-local" }`, single or chunked (each instance converts by its own settings; an older sender reads the `200` as delivered and stops). A person's upload to such a path is never asked.
 
 ### Upload a File (JSON / base64)
 
@@ -145,6 +145,10 @@ The path is looked up as its Unicode NFC form (a path has one key), and a file t
 (a name written decomposed on a file system that keeps it so) is found and served all the same; the MCP `read_file` tool makes the same
 lookup. A path that leaves the space, or a link that points out of it, is refused as before.
 
+A path that names nothing answers `404` as before (a path through a file, a name too long for the file system and a link loop name nothing
+either). A file system that **fails** while the file is being looked up or read (a disk error, a permission the server lost) answers `500`
+with `code: "file_system_fault"`, never `404`: see [A file act the server's own storage refuses](#every-code-a-file-act-answers).
+
 The bytes are the file **as uploaded**, whether or not the instance encrypts files at rest
 ([Encryption at Rest](02a-encryption-at-rest.md#uploaded-files)); `Content-Length`, the listing's `size` and every hash are the
 plaintext's. A stored file this instance cannot decrypt — written under another master secret, altered on disk, or
@@ -193,6 +197,12 @@ GET /api/files/:spaceId?path=reports/
 
 A directory's `size` is the recursive sum of everything beneath it. Files carry their `embeddingStatus` and
 `tags` from the file's metadata record.
+
+**A directory that does not exist answers `404 { "error": "Path not found" }`; a storage fault is not that.** When the file system itself
+fails while a directory is listed (a disk error, a permission the server lost), the listing answers `500` with `code: "file_system_fault"` and
+`retryable: false`, naming no path, instead of an empty folder. A single entry whose size cannot be read stays in the listing, without its `size`.
+On a personal view the members are merged by name (the first member wins a collision), a member that has no such directory contributes nothing,
+and a fault in any member fails the listing.
 
 **The root `_converted/`, `_extracted/` and `_tmp/` directories are left out of a listing** unless you send
 `?includeDerived=true`. The first two are the conversion pipeline's output
@@ -316,7 +326,7 @@ them from outside and built a workaround they did not need.
 |---|---|
 | **A move carries the whole record, and re-embeds it** | `description`, `tags`, `properties`, `sha256` and the link arrays all arrive at the new path. The record is re-inserted under the new key with every field intact, and is then queued for embedding at the new path: a file's embedding text includes its path, so the vector it had described the old one. A passage or caption that had an embedding job waiting keeps it under its new name. A move never re-extracts text or re-runs media analysis. A move gives the moved records a new version (`seq`) above any deletion held for their new path; `updatedAt` and the author are kept. Asserted by `a-move-takes-everything-a-delete-would-db.test.js`. |
 | **What the file owns moves with it** | Its chunk records (`path#chunkN`), a converted document's Markdown (`_converted/…`) and extracted images (`_extracted/…`, with their captions and faces) are re-keyed to the new path, on disk and in the metadata, and each still names the moved file as its parent. A conversion still running when the move lands writes nothing under the old path: it is re-run where the file now is. Nothing is left under the old path to find with `filter`, and a later delete of the moved file removes all of it. The file's **links** (to entities, facts and chrono entries) follow it too, for a folder move as for a single rename. Asserted by `a-moved-file-leaves-nothing-at-its-old-path-db.test.js`. |
-| **A content rewrite touches only what you send** | `POST` with a body carrying no `description`, `tags` or `properties` changes the bytes, the size and the hash, and leaves those three exactly as they were. Sending one replaces that one. The one exception is a `description` the server made from the old bytes (`descriptionSource` `generated` or `extracted`): other bytes remove it, with the `excerpt` and the vector, in the same write, and the new run writes a new one ([Replacing a file with other bytes](05b-media-embedding.md#replacing-a-file-with-other-bytes)). A description a person wrote stays. |
+| **A content rewrite touches only what you send** | `POST` with a body carrying no `description`, `tags` or `properties` changes the bytes, the size and the hash, and leaves those three exactly as they were. Sending a `description` or `tags` replaces that one. Sending `properties` **merges** them over the stored ones, as `update_file_meta` does: a key you name is set, every other stored key stays, and `{}` changes nothing. To remove a key, send `update_file_meta` with `deleteFields`. The one exception is a `description` the server made from the old bytes (`descriptionSource` `generated` or `extracted`): other bytes remove it, with the `excerpt` and the vector, in the same write, and the new run writes a new one ([Replacing a file with other bytes](05b-media-embedding.md#replacing-a-file-with-other-bytes)). A description a person wrote stays. |
 
 **To hold a stable handle onto a file, mint your own id into `properties` and resolve it with a query**
 on that key:
@@ -335,7 +345,7 @@ Content-Type: application/json
 { "space": "…", "collection": "files", "filter": { "properties.externalId": "6f1c…" } }
 ```
 
-`update_file_meta` merges `properties`, so re-asserting the key is safe and idempotent — but with the
+`update_file_meta` merges `properties`, and so does a content rewrite, so re-asserting the key is safe and idempotent — but with the
 guarantee above you do not have to re-assert it after every write.
 
 The body takes the file's description, tags, properties and links, and nothing else. A field it does not take is
@@ -527,12 +537,14 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   is written before any byte goes, and an act that cannot record it does not begin: nothing was moved or deleted, and
   the cause is the server's, so a retry that fails the same way is a fault to report, not a request to change. It
   holds back the record TTL sweep's file deletes the same way. A store failure there is still `503`.
-- **A file act the server's own storage refuses answers `500` with `code: "file_system_fault"`, on every door.** The
+- **A file act, a listing or a read the server's own storage refuses answers `500` with `code: "file_system_fault"`, on every door.** The
   words name no path and carry the errno code only; the cause is in the server log. Nothing about it is the caller's
   path (a path a file blocks is `409`), so it carries no `path` and no `Retry-After`, and it says `retryable: false`: a retry that fails the same way
   is a fault to report. That includes the write itself: a `write_file`, an upload or a chunked upload whose own write fails answers it on REST
   and on `POST /api/write_file` and MCP alike, and so does a name that fits a path component whose temporary file does not (the write
-  stages its bytes under a longer name), which is the server's, never `path_blocked` about your path.
+  stages its bytes under a longer name), which is the server's, never `path_blocked` about your path. A **listing** (`GET /api/files/:spaceId` on
+  a directory, `list_dir`) and a **read** (the download, `read_file`) whose file-system call fails answer it too, where they used to answer an
+  empty folder, `404` or `File not found`; a path that names nothing (absent, through a file, too long, a link loop) keeps its answer.
 
 > **Removed at 5.0.** A `DELETE` on the file-meta path purged a metadata record without
 > touching disk, guarded by a `409` when the file was still there. It was a second door onto half of one

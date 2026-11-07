@@ -44,3 +44,29 @@ export function specialPurposeApproverRefusal(
   const remedy = act === 'approve a connector' ? 'Paste your own access token.' : 'Use your own access token.';
   return `This token is made for one purpose (a peer's sync or the schema library) and cannot ${act}. ${remedy}`;
 }
+
+/**
+ * The tools a peer-bound token may not call: the user doors that store a file as THIS instance's own upload.
+ *
+ * ONE named set, here and nowhere else. `write_file` is the only member today; Q-244 widens this set to every user write door
+ * (ingest, save_bulk, move_file, update_file_meta, the PATCH routes) and the callers need no change when it does.
+ */
+const PEER_REFUSED_TOOLS: ReadonlySet<string> = new Set(['write_file']);
+
+/**
+ * The refusal a peer-bound token earns when it calls a tool: `undefined` when it may, the words to say when it may not.
+ *
+ * ## The question it answers, and what it prevents
+ *
+ * "May the peer this token is bound to call this tool?" A peer token is a SYNC credential: the peer delivers arrivals through `/api/sync/*`
+ * and the byte door and calls no tool. `write_file` stored a file as this instance's own upload (authored here, announced, its metadata the
+ * caller's) for a token that was only ever meant to deliver arrivals. The dispatch (`callTool`) and the listing (`toolIsVisible`, what
+ * `tools/list` is built from) both ask this one function, so the list never offers a tool the dispatcher refuses, and an operator's token
+ * (`peerId` undefined) is never asked.
+ *
+ * @param peerId  The peer the calling token is bound to, as {@link peerBoundTo} read it; `undefined` for any other token.
+ */
+export function peerTokenToolRefusal(peerId: string | undefined, toolName: string): string | undefined {
+  if (peerId === undefined || !PEER_REFUSED_TOOLS.has(toolName)) return undefined;
+  return `Tool '${toolName}' stores a file as this instance's own upload, and this token is bound to a peer (a sync credential), which delivers files through the sync door only. Use an operator token.`;
+}

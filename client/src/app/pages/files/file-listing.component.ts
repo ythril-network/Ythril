@@ -166,7 +166,7 @@ export interface FileRow {
           } @empty {
             <tr><td colspan="7">
               @if (error() !== null) {
-                <app-error-state [message]="'files.error.loadFiles' | transloco" [reason]="error() ?? ''" (retry)="retryLoad.emit()" />
+                <app-error-state [message]="(errorCode() === 'file_system_fault' ? 'files.refusal.file_system_fault' : 'files.error.loadFiles') | transloco" [reason]="error() ?? ''" (retry)="retryLoad.emit()" />
               } @else {
               <div class="empty-state" style="padding:32px">
                 <div class="empty-state-icon"><ph-icon name="folder-open" [size]="48"/></div>
@@ -187,6 +187,9 @@ export class FileListingComponent {
   readonly sortDir = input<'asc' | 'desc'>('asc');
   /** The directory load's failure, shown in place of the empty state — an empty folder is not an error. */
   readonly error = input<string | null>(null);
+
+  /** The answer code of the failed listing: `file_system_fault` says the server's storage failed, in the sentence a failed rename shows. */
+  readonly errorCode = input<string | null>(null);
   /** THE flag, from the page: the open id is a personal view, which never writes, so no re-embed, rename or delete. */
   readonly isView = input(false);
 
