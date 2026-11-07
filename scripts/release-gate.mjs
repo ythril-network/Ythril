@@ -39,6 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { changelogSection, sectionContentLines, headingFor } from './changelog-section.mjs';
 import { tagMatchesVersion, releaseTagOf } from './_shared/release-tags.mjs';
+import { releaseDateProblem } from './_shared/release-date.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const R = '\x1b[0m';
@@ -50,6 +51,9 @@ const DIM = '\x1b[2m';
 const RELEASING = detectReleasing();
 const failures = [];
 const fail = (gate, why) => failures.push({ gate, why });
+/** What a release must hear before it tags but that is not yet wrong (a date that is not today, before the tag): said, never failing. */
+const warnings = [];
+const warn = (gate, why) => warnings.push({ gate, why });
 
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 
@@ -113,12 +117,7 @@ function checkVersion() {
   // when releasing, and only when there is a tag: a hand `--releasing` check before the tag exists has none to compare, and a
   // mid-cycle run on a tagged commit is not a release. The comparison and the tag's discovery are `release-tags.mjs`'s.
   if (RELEASING) {
-    const tag = releaseTagOf({
-      ref: process.env.GITHUB_REF,
-      refName: process.env.GITHUB_REF_NAME,
-      describe: () => execFileSync('git', ['describe', '--exact-match', '--tags', '--match', 'v*', 'HEAD'],
-        { cwd: ROOT, encoding: 'utf8', stdio: 'pipe' }),
-    });
+    const tag = currentReleaseTag();
     if (tag && !tagMatchesVersion(tag, version)) {
       fail('version', `the tag ${tag} does not match the manifests' version ${version} (a release tag is a "v" followed by the version)`);
     }
@@ -156,6 +155,17 @@ function checkChangelog(version) {
       + 'The version was bumped without closing [Unreleased] into it, so every change in this release is filed '
       + 'under a heading that does not exist.');
     return;
+  }
+
+  // (a2) dated the day its tag is cut, on the Europe/Berlin calendar (Q-717): 6.4.0 and 6.5.0 were dated the day their bump was
+  //      written and each needed a follow-up commit. On the tag a wrong date fails; before the tag exists it is said, not failed,
+  //      because a bump may be written the evening before it is tagged. A mid-cycle run after the version's tag exists asks nothing:
+  //      that release is out, and its date was checked when it was cut.
+  const datedBy = releaseDateMoment(version);
+  if (datedBy) {
+    const problem = releaseDateProblem({ sectionDate: m[1], tagInstant: datedBy.tagInstant, now: new Date() });
+    if (problem?.level === 'fail') fail('changelog', problem.why);
+    else if (problem) warn('changelog', problem.why);
   }
 
   // (b) that section has real content — a version can be tagged with an empty one, and an empty release section
@@ -200,6 +210,36 @@ function checkChangelog(version) {
  * It answers a different question from `releaseTagOf` (which `v*` tag a run is on): this asks whether HEAD is on ANY tag, so it
  * names no `--match` and shares nothing with it.
  */
+/** The `v*` tag this run is on (the publish workflow's ref, else git's exact tag of HEAD), or none. */
+function currentReleaseTag() {
+  return releaseTagOf({
+    ref: process.env.GITHUB_REF,
+    refName: process.env.GITHUB_REF_NAME,
+    describe: () => execFileSync('git', ['describe', '--exact-match', '--tags', '--match', 'v*', 'HEAD'],
+      { cwd: ROOT, encoding: 'utf8', stdio: 'pipe' }),
+  });
+}
+
+/**
+ * Which moment `version`'s section must be dated by: `{ tagInstant }` with the instant its tag was cut when this run is on that
+ * tag, `{ tagInstant: null }` before the tag exists (the release branch, a hand `--releasing` run), or `null` once the version is
+ * tagged and this run is not on it (mid-cycle after the release: nothing to ask).
+ *
+ * The instant is the tag's own date (`creatordate`: the tagger date of an annotated tag, the commit's of a lightweight one), so a
+ * publish re-run days later still checks the day the tag was cut.
+ */
+function releaseDateMoment(version) {
+  const git = (args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: 'pipe' }).trim();
+  const tag = RELEASING ? currentReleaseTag() : null;
+  if (tag) {
+    const when = git(['for-each-ref', `refs/tags/${tag}`, '--format=%(creatordate:iso-strict)']);
+    return { tagInstant: when || new Date() };
+  }
+  let tagged = '';
+  try { tagged = git(['tag', '--list', `v${version}`]); } catch { /* no git: treat as not tagged yet */ }
+  return tagged ? null : { tagInstant: null };
+}
+
 function detectReleasing() {
   if (process.argv.includes('--releasing')) return true;
   try {
@@ -318,6 +358,7 @@ console.log(`\n${YELLOW}NOTICE carries all attribution${R}`);
 checkGroup('notice', NOTICE_GATES);
 
 console.log(`\n${'='.repeat(78)}`);
+for (const w of warnings) console.log(`${YELLOW}  ! [${w.gate}]${R} ${w.why}\n`);
 if (failures.length === 0) {
   console.log(`${GREEN}Release gate PASSED${R} — docs match code, the CHANGELOG carries ${version}, NOTICE is complete.\n`);
   process.exit(0);

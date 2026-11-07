@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Releases:** the release gate refuses a tag whose CHANGELOG section is not dated the day the tag is cut (Europe/Berlin calendar), and warns before the tag when the date is not today.
+
 ## [6.5.1] — 2026-11-07
 
 **A patch release: Ythril stops using the MongoDB driver's client-side timeout, whose timeouts could hand one call another's answer, and moves to driver 7.8.0, with every database call still ended at its bound.**
