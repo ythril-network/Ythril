@@ -4,13 +4,13 @@
  *
  * ## What is pinned
  *
- * - the ping is sent with `timeoutMS: 3000`, on the raw client's `admin` database. Without a `timeoutMS` a ping against a store
- *   that stopped answering waits for server selection after the pool cleared: 54 s was measured (probe P6). With it, ~3 s in
- *   every phase, and always `MongoOperationTimeoutError`;
+ * - the ping is sent as `{ ping: 1, maxTimeMS: 3000 }` with an abort `signal`, on the raw client's `admin` database, and raced with a
+ *   timer at the same figure that answers `false`. Without that clock a ping against a store that stopped answering waits for server
+ *   selection after the pool cleared: 54 s was measured (probe P6). The driver's own `timeoutMS` is used for nothing (`Q-716`);
  * - the answer is a boolean and the function NEVER throws (a client that is not connected yet is `false`: nothing to ask);
  * - the answer is memoised for 10 s, so a walk that fails a hundred records asks once, not a hundred times (P-2).
  *
- * The ping goes through the raw client, deliberately outside `getDb()`: a ping carries its own `timeoutMS`, and a scope's bound
+ * The ping goes through the raw client, deliberately outside `getDb()`: a ping carries its own `maxTimeMS` and `signal`, and a scope's bound
  * on a ping about the bound would be a bound about itself. The real-store half is
  * `a-store-answers-ping-ends-in-its-bound-db.test.js`.
  *
@@ -49,16 +49,33 @@ describe('storeAnswers', () => {
     assert.equal(STORE_ANSWERS_TTL_MS, 10_000);
   });
 
-  it('sends { ping: 1 } to the admin database with timeoutMS: 3000', async () => {
+  it('sends { ping: 1, maxTimeMS: 3000 } to the admin database with an abort signal and no timeoutMS', async () => {
     const { sent, answers } = make('ok');
     assert.equal(await answers(), true);
-    assert.deepEqual(sent, [{ db: 'admin', cmd: { ping: 1 }, opts: { timeoutMS: 3000 } }]);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].db, 'admin');
+    assert.deepEqual(sent[0].cmd, { ping: 1, maxTimeMS: 3000 });
+    assert.ok(sent[0].opts.signal instanceof AbortSignal, 'the ping carries no signal: a call the timer gave up on would stay on its connection');
+    assert.equal('timeoutMS' in sent[0].opts, false, 'the driver\'s client-side timeout was set on the ping');
   });
 
   it('takes the ping\'s bound as an argument', async () => {
     const { sent, answers } = make('ok');
     await answers(1500);
-    assert.equal(sent[0].opts.timeoutMS, 1500);
+    assert.equal(sent[0].cmd.maxTimeMS, 1500);
+  });
+
+  it('is false past the bound when the ping never settles, and the ping\'s signal is aborted', async () => {
+    const hold = setInterval(() => {}, 60_000); // the ping's timer is unref'd on purpose: the case holds the loop open itself
+    try {
+      const { sent, answers } = make('ok', { client: () => ({ db: () => ({ command: (cmd, opts) => { sent.push({ cmd, opts }); return new Promise(() => {}); } }) }) });
+      const t0 = Date.now();
+      assert.equal(await answers(40), false);
+      assert.ok(Date.now() - t0 >= 30, 'answered before the bound');
+      assert.equal(sent[0].opts.signal.aborted, true, 'a ping the timer gave up on was left running on its connection');
+    } finally {
+      clearInterval(hold);
+    }
   });
 
   it('is false when the ping fails', async () => {

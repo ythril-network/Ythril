@@ -14,11 +14,11 @@
  * - `BOUNDED_DB_OPTIONS_ARGUMENT` names, at the Db level, where each bounded method takes its options (`listCollections`
  *   and `dropCollection`: argument 1). Inside a scope the call receives the bound there; outside, the arguments are the
  *   caller's own, the same objects. A collection's call still goes through the collection table, unchanged: there is ONE door.
- * - `dropCollection` is a WRITE: `maxTimeMS` = the bound, no `timeoutMS` (a client's is switched off), and the client backstop
- *   `SERVER_FIRST_MARGIN_MS` later answers `StoreTimeout`. A drop the bound ended cannot land afterwards (probe P8).
- *   `listCollections` is a READ that returns a cursor synchronously: it carries `maxTimeMS`, and a bound that is refused (a hold
- *   whose time is spent) THROWS where a write REJECTS.
- * - Never both `maxTimeMS` and a positive `timeoutMS`: the driver keeps `timeoutMS` and drops `maxTimeMS`.
+ * - `dropCollection` is a WRITE: `maxTimeMS` = the bound and a `signal`, no `timeoutMS` (the driver's client-side timeout is used for
+ *   nothing, `Q-716`), and the client backstop `SERVER_FIRST_MARGIN_MS` later answers `StoreTimeout`. A drop the bound ended cannot
+ *   land afterwards (probe P8). `listCollections` is a READ that returns a cursor synchronously: it carries `maxTimeMS` and a
+ *   `signal`, and a bound that is refused (a hold whose time is spent) THROWS where a write REJECTS.
+ * - No Db-level call carries a `timeoutMS`, whatever the database's own client carries.
  * - The Db-level table and the Db-level classification agree, DERIVED from the exported tables and from the driver's own
  *   `Db.prototype`: every method the driver's `Db` has is classified; every classified method is bounded or named in
  *   `UNBOUNDED_DB_METHODS` with its reason; a bounded one that writes is a plain write.
@@ -45,7 +45,7 @@ const { Db } = require('mongodb');
 const driverDbMethods = Object.getOwnPropertyNames(Db.prototype)
   .filter(k => k !== 'constructor' && typeof Object.getOwnPropertyDescriptor(Db.prototype, k).value === 'function');
 
-/** A recording stand-in `Db`: each method notes the arguments it was called with and answers; `timeoutMS` is the client's. */
+/** A recording stand-in `Db`: each method notes the arguments it was called with and answers; `timeoutMS` is a client's own. */
 function recordingDb({ timeoutMS, never = false } = {}) {
   const calls = [];
   const answer = (name) => (...args) => {
@@ -125,29 +125,36 @@ describe('through observeRecordWrites, over a recording Db', () => {
     await wb.withinHousekeepingBound(async () => { observed(db).listCollections({ name: 'x' }, { nameOnly: true }); });
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0].args[0], { name: 'x' });
-    assert.deepEqual(calls[0].args[1], { nameOnly: true, maxTimeMS: 7000 });
+    const { signal, ...rest } = calls[0].args[1];
+    assert.deepEqual(rest, { nameOnly: true, maxTimeMS: 7000 });
+    assert.ok(signal instanceof AbortSignal, 'a cursor read carries no backstop signal: a store that does not answer is waited on for ever');
   });
 
   it('listCollections with no arguments at all still receives the bound, with the filter left to the driver\'s default', async () => {
     const { db, calls } = recordingDb();
     await wb.withinHousekeepingBound(async () => { observed(db).listCollections(); });
-    assert.deepEqual(calls[0].args[1], { maxTimeMS: 7000 });
+    const { signal, ...rest } = calls[0].args[1];
+    assert.deepEqual(rest, { maxTimeMS: 7000 });
+    assert.ok(signal instanceof AbortSignal);
   });
 
-  it('inside a housekeeping scope dropCollection receives maxTimeMS = the figure and no driver timeoutMS', async () => {
+  it('inside a housekeeping scope dropCollection receives maxTimeMS = the figure, a signal and no driver timeoutMS', async () => {
     const { db, calls } = recordingDb();
     await wb.withinHousekeepingBound(() => observed(db).dropCollection('stray'));
     assert.equal(calls[0].args[0], 'stray');
     assert.deepEqual(calls[0].args[1].maxTimeMS, 7000);
+    assert.ok(calls[0].args[1].signal instanceof AbortSignal, 'a drop carries no backstop signal');
     assert.equal('timeoutMS' in calls[0].args[1], false);
   });
 
-  it('a client timeoutMS is switched off for both, so the figure is the one clock', async () => {
+  it('neither call carries a timeoutMS, whatever the database\'s client carries: the server\'s deadline is the one clock', async () => {
     const { db, calls } = recordingDb({ timeoutMS: 300 });
     await wb.withinHousekeepingBound(async () => { observed(db).listCollections({}, {}); await observed(db).dropCollection('x'); });
+    assert.equal(calls.length, 2);
     for (const c of calls) {
-      assert.equal(c.args[1].timeoutMS, 0, `${c.name}: the client's 300 ms clock would end it before the server's deadline`);
+      assert.equal('timeoutMS' in c.args[1], false, `${c.name}: a client-side timeout was set (CVE-2026-119179; a no-op from driver 7.8.0)`);
       assert.equal(c.args[1].maxTimeMS, 7000, c.name);
+      assert.ok(c.args[1].signal instanceof AbortSignal, `${c.name}: no backstop signal`);
     }
   });
 
@@ -208,7 +215,10 @@ describe('through observeRecordWrites, over a recording Db', () => {
       observed(db).collection('sp_facts').find({}, {});
       await observed(db).collection('sp_facts').insertOne({}, {});
     });
-    assert.equal(calls.find(c => c.name === 'sp_facts.find').args[1].timeoutMS, 7000, 'a read carries timeoutMS');
+    const read = calls.find(c => c.name === 'sp_facts.find').args[1];
+    assert.equal(read.maxTimeMS, 7000, 'a read carries maxTimeMS');
+    assert.ok(read.signal instanceof AbortSignal, 'a read carries its backstop signal');
+    assert.equal('timeoutMS' in read, false, 'a read carries no client-side timeout');
     assert.equal(calls.find(c => c.name === 'sp_facts.insertOne').args[1].maxTimeMS, 7000, 'a plain write carries maxTimeMS');
   });
 

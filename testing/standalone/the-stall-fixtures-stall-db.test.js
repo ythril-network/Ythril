@@ -157,11 +157,11 @@ describe('the stall and freeze fixtures stall, freeze and refuse for real', { sk
         const healthy = await client.db('admin').command({ ping: 1 });
         assert.equal(healthy.ok, 1);
         relay.freeze();
-        const frozen = await faults.settleWithin(client.db('admin').command({ ping: 1 }, { timeoutMS: 1500 }), 400);
+        const frozen = await faults.settleWithin(client.db('admin').command({ ping: 1 }, { signal: AbortSignal.timeout(1500) }), 400);
         assert.equal(frozen.settled, false, 'an op settled while the relay was frozen');
         relay.thaw();
         await frozen.rest;
-        assert.ok(await holdsWithin(async () => (await client.db('admin').command({ ping: 1 }, { timeoutMS: 1000 }).catch(() => ({ ok: 0 }))).ok === 1, 15_000, 100),
+        assert.ok(await holdsWithin(async () => (await client.db('admin').command({ ping: 1 }, { signal: AbortSignal.timeout(1000) }).catch(() => ({ ok: 0 }))).ok === 1, 15_000, 100),
           'the relay did not serve again after thaw');
       } finally {
         await client.close(true).catch(() => {});

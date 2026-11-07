@@ -278,15 +278,20 @@ describe('claimAcross: the quarantine of a space whose claim hung', () => {
 describe('claimAcross: every operation a claim issues is bounded by CLAIM_OP_MS', () => {
   after(() => wb.setWriteBoundForTest(null));
 
-  it('a read inside tryClaim carries timeoutMS === CLAIM_OP_MS, in every pass, whatever the housekeeping figure is', async () => {
+  it('a read inside tryClaim carries maxTimeMS === CLAIM_OP_MS and a signal, and no timeoutMS, in every pass, whatever the housekeeping figure is', async () => {
     wb.setWriteBoundForTest({ housekeepingOpMs: 4321 });
     const { signal } = make();
     const seen = [];
     await signal.claimAcross(['a'], ['p0', 'p1'], async () => {
-      await wb.callBounded('find', [{}, {}], (args) => { seen.push(args[1].timeoutMS); return Promise.resolve([]); }, { collection: 'a_embed_jobs', inheritedTimeoutMs: undefined });
+      // `find` returns its cursor synchronously: the stand-in is not a promise.
+      await wb.callBounded('find', [{}, {}], (args) => { seen.push(args[1]); return []; }, { collection: 'a_embed_jobs' });
       return null;
     }, { step: STEP });
-    assert.deepEqual(seen, [wb.CLAIM_OP_MS, wb.CLAIM_OP_MS]);
+    assert.deepEqual(seen.map(o => o.maxTimeMS), [wb.CLAIM_OP_MS, wb.CLAIM_OP_MS]);
+    for (const o of seen) {
+      assert.ok(o.signal instanceof AbortSignal, 'a claim read carries no backstop signal');
+      assert.equal('timeoutMS' in o, false, 'a client-side timeout on a claim read');
+    }
   });
 
   it('a timeout line names the claim\'s figure and not the housekeeping setting', async () => {
@@ -300,7 +305,7 @@ describe('claimAcross: every operation a claim issues is bounded by CLAIM_OP_MS'
     const { signal } = make();
     let seen;
     await wb.withinHousekeepingBound(() => signal.claimAcross(['a'], ['p0'], async () => {
-      await wb.callBounded('find', [{}, {}], (args) => { seen = args[1].timeoutMS; return Promise.resolve([]); }, { collection: 'a_embed_jobs', inheritedTimeoutMs: undefined });
+      await wb.callBounded('find', [{}, {}], (args) => { seen = args[1].maxTimeMS; return []; }, { collection: 'a_embed_jobs' });
       return null;
     }, { step: STEP }), { opMs: 1_500 });
     assert.equal(seen, 1_500);

@@ -312,16 +312,18 @@ describe('the caller-facing contract of a re-key', () => {
     const at = b.indexOf('rekeyEdge(');
     assert.ok(at > 0, 'the re-key branch is gone — re-point this gate');
     // Re-anchored (bundle-30 §A4, bundle-44 D2): the route runs `inHeldTransaction` (`brain/held-transaction.ts`, the seq
-    // hold), which runs `inBoundedTransaction` (`db/bounded-transaction.ts`): the `withTransaction` and the `finally` that
-    // ends the session are read THERE, in the one module every transaction goes through (every-transaction-is-bounded).
+    // hold), which runs `inBoundedTransaction` (`db/bounded-transaction.ts`): the transaction's own start and commit
+    // (`startTransaction`, `commitTransaction`: since `Q-716` its own loop against the scope's deadline, no `withTransaction`) and
+    // the `finally` that ends the session are read THERE, in the one module every transaction goes through (every-transaction-is-bounded).
     assert.match(b.slice(0, at), /inHeldTransaction\(/,
       'the delete and the insert are not in a transaction, so a failure between them loses the edge');
     const strip = stripComments;
     const held = strip(readFileSync(new URL('../../server/src/brain/held-transaction.ts', import.meta.url), 'utf8'));
     assert.match(held, /inBoundedTransaction\(/, 'inHeldTransaction no longer runs a bounded transaction');
     const bounded = strip(readFileSync(new URL('../../server/src/db/bounded-transaction.ts', import.meta.url), 'utf8'));
-    assert.match(bounded, /\.withTransaction\(/, 'inBoundedTransaction no longer runs a transaction');
-    assert.match(bounded, /finally\s*\{\s*await session\.endSession\(\)/, 'the session is never ended');
+    assert.match(bounded, /\.startTransaction\(/, 'inBoundedTransaction no longer starts a transaction');
+    assert.match(bounded, /\.commitTransaction\(/, 'inBoundedTransaction no longer commits a transaction');
+    assert.match(bounded, /finally\s*\{[^}]*\bsession\.endSession\(\)/, 'the session is never ended');
   });
 
   it('the re-key branch counts as a write, like every other outcome', () => {

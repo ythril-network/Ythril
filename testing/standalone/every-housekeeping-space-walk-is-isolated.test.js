@@ -28,11 +28,11 @@
  * 6. **Every database reacher inside a walk is bounded, or is a named exemption.** The set is read from the driver's tables
  *    (`COLLECTION_METHOD_EFFECT`, `DB_METHOD_EFFECT`, `BOUNDED_OPTIONS_ARGUMENT`, `BOUNDED_DB_OPTIONS_ARGUMENT`, `UNBOUNDED_DB_METHODS`): a
  *    driver method that nothing bounds and that a walk calls needs a row with a `why`. The index calls, `createCollection` and the
- *    arbitrary `command` are the rows; the raw client's `admin` ping carries its own `timeoutMS`.
+ *    arbitrary `command` are the rows; the raw client's `admin` ping carries its own `maxTimeMS` and `signal`.
  * 7. **A call that is not a database operation says so.** A model or network call inside a walk is not ended by the housekeeping figure;
  *    it carries an abort signal of its own, and the row says which — checked in the function's text, so a row cannot outlive the signal.
- * 8. **It really is bounded.** Behaviour on the built runner: inside an `eachSpace` callback a read carries `timeoutMS` = the housekeeping
- *    figure, a `listCollections` carries it through the one door, and inside a `claimAcross` claim a plain write carries `CLAIM_OP_MS`.
+ * 8. **It really is bounded.** Behaviour on the built runner: inside an `eachSpace` callback a read carries `maxTimeMS` = the housekeeping
+ *    figure and a `signal`, and no `timeoutMS`, a `listCollections` carries it through the one door, and inside a `claimAcross` claim a plain write carries `CLAIM_OP_MS`.
  *
  * ## What it does NOT conclude, stated so the title does not claim more than the body
  *
@@ -127,7 +127,7 @@ const UNBOUNDED_CALL_EXEMPTIONS = [
   {
     methods: ['command'], files: ['server/src/db/store-answers.ts'],
     why: 'The raw client\'s `admin` ping that answers "does the store answer at all?": it is the question a bound that ended asks, so it carries '
-      + 'its own `timeoutMS` (3 s) and is never inside a scope; it writes nothing.',
+      + 'its own `maxTimeMS` (3 s) and an abort `signal`, and is never inside a scope; it writes nothing.',
   },
   {
     methods: ['command'], files: ['server/src/db/write-bound.ts'],
@@ -137,7 +137,7 @@ const UNBOUNDED_CALL_EXEMPTIONS = [
   {
     methods: ['command'], files: ['server/src/db/bounded-transaction.ts'],
     why: 'The seal\'s fallback: `killSessions` on the session of a transaction the bound ended, run after that bound and outside it on '
-      + 'purpose, with its own `timeoutMS` (KILL_WAIT_MS). It is how a bound-ended transaction is ended, so it cannot be inside one.',
+      + 'purpose, with its own `maxTimeMS` and abort `signal` (KILL_WAIT_MS). It is how a bound-ended transaction is ended, so it cannot be inside one.',
   },
 ];
 
@@ -333,7 +333,7 @@ describe('what runs inside a walk is bounded, or says why not', () => {
 });
 
 describe('behaviour: the runner really bounds what a callback issues', () => {
-  const TARGET = { collection: 'sp_facts', inheritedTimeoutMs: undefined };
+  const TARGET = { collection: 'sp_facts' };
   const OP_MS = 7000;
   before(() => wb.setWriteBoundForTest({ writeTimeoutMs: 6000, holdDeadlineMs: 20_000, housekeepingOpMs: OP_MS }));
   after(() => wb.setWriteBoundForTest(null));
@@ -344,15 +344,18 @@ describe('behaviour: the runner really bounds what a callback issues', () => {
     const at = wb.BOUNDED_OPTIONS_ARGUMENT[method];
     const args = Array.from({ length: at + 1 }, () => ({}));
     let seen;
-    await wb.callBounded(method, args, (a) => { seen = a; return Promise.resolve({ ok: 1 }); }, TARGET);
+    // A cursor method returns its cursor synchronously, so its stand-in is not a promise.
+    await wb.callBounded(method, args, (a) => { seen = a; return wb.RETURNS_CURSOR.has(method) ? { fake: 'cursor' } : Promise.resolve({ ok: 1 }); }, TARGET);
     return seen[at];
   };
 
-  it('inside an eachSpace callback a read carries timeoutMS = the housekeeping figure', async () => {
+  it('inside an eachSpace callback a read carries maxTimeMS = the housekeeping figure and a signal, and no timeoutMS', async () => {
     let handed;
     const out = await runner().eachSpace('Isolation gate walk', ['sp'], async () => { handed = await optionsHanded('find'); });
     assert.deepEqual(out.failed, []);
-    assert.equal(handed?.timeoutMS, OP_MS, 'a read inside a walk callback carries no housekeeping bound: the scope is not entered');
+    assert.equal(handed?.maxTimeMS, OP_MS, 'a read inside a walk callback carries no housekeeping bound: the scope is not entered');
+    assert.ok(handed.signal instanceof AbortSignal, 'a read inside a walk callback carries no backstop signal');
+    assert.equal('timeoutMS' in handed, false, 'a client-side timeout on a walk\'s read');
   });
 
   it('inside an eachSpace callback a Db-level listCollections carries the bound through the one door', async () => {
@@ -377,6 +380,8 @@ describe('behaviour: the runner really bounds what a callback issues', () => {
   it('outside any walk the same read carries nothing', async () => {
     const handed = await optionsHanded('find');
     assert.equal('timeoutMS' in handed, false);
+    assert.equal('maxTimeMS' in handed, false, 'a call outside a scope was bounded');
+    assert.equal('signal' in handed, false, 'a call outside a scope was given a backstop');
   });
 });
 

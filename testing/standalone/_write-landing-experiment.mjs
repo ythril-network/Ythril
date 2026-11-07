@@ -31,8 +31,9 @@
  *   client's clock, which every OTHER operation of the lane inherits too (reads, seeds, the door's own lookups), can sit
  *   well above how long those take under load and still below the bound;
  * - `clientTimeoutMs`: the `timeoutMS` the client is given in `query`, or `undefined`. When it is given the experiment also
- *   asserts that the client really carries it, below the bound, and that no answer came before the server's deadline —
- *   the ORDER the bound promises: the server's deadline first, never a driver clock of the client's.
+ *   asserts that the URI names it, below the bound, that the driver set no clock from it (from driver 7.8.0 it is ignored,
+ *   `Q-716`), and that no answer came before the server's deadline — the ORDER the bound promises: the server's deadline
+ *   first, never a driver clock of the client's.
  */
 import assert from 'node:assert/strict';
 import { mongoSkipReason, TEST_MONGO_HOST, TEST_MONGO_PORT } from './_mongo-harness.mjs';
@@ -381,9 +382,12 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
     });
 
     if (clientTimeoutMs !== undefined) {
-      it('the client really carries the URI option, below the bound: the variant is not the harness\'s own client in disguise', () => {
+      it('the server\'s client was opened with the URI option, below the bound, and the driver set no clock from it', () => {
         assert.ok(clientTimeoutMs < BOUND.writeTimeoutMs, `the URI timeoutMS (${clientTimeoutMs}) must be below the bound (${BOUND.writeTimeoutMs}) or it proves nothing`);
-        assert.equal(env.door.mongo.getMongo().options.timeoutMS, clientTimeoutMs, 'MONGO_URI\'s timeoutMS did not reach the server\'s client');
+        // The variant is not the harness's own client in disguise: the URI the server's client was opened with names the option.
+        assert.match(process.env['MONGO_URI'] ?? '', new RegExp(`[?&]timeoutMS=${clientTimeoutMs}(&|$)`), 'MONGO_URI does not carry the timeoutMS this variant is about');
+        // From driver 7.8.0 the option is parsed and ignored (CVE-2026-119179, Q-716): an operator who still names it gets no clock on any call.
+        assert.equal(env.door.mongo.getMongo().options.timeoutMS, undefined, 'the driver set a client clock from MONGO_URI\'s timeoutMS');
       });
     }
 

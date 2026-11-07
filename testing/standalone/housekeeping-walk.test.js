@@ -147,16 +147,19 @@ describe('every callback runs inside the housekeeping bound', () => {
   async function findOptionsInside(walk, opts) {
     let seen;
     await walk.eachSpace(STEP, ['a'], async () => {
-      await wb.callBounded('find', [{}, {}], (args) => { seen = args[1]; return Promise.resolve([]); }, { collection: 'a_facts', inheritedTimeoutMs: undefined });
+      // `find` returns its cursor synchronously: the stand-in is not a promise.
+      await wb.callBounded('find', [{}, {}], (args) => { seen = args[1]; return []; }, { collection: 'a_facts' });
     }, opts);
     return seen;
   }
 
-  it('a read in the callback carries timeoutMS === housekeepingOpMs()', async () => {
+  it('a read in the callback carries maxTimeMS === housekeepingOpMs() and a signal, and no timeoutMS', async () => {
     wb.setWriteBoundForTest({ housekeepingOpMs: 4321 });
     const { walk } = make();
     const seen = await findOptionsInside(walk);
-    assert.equal(seen.timeoutMS, 4321);
+    assert.equal(seen.maxTimeMS, 4321);
+    assert.ok(seen.signal instanceof AbortSignal, 'a read in the callback carries no backstop signal');
+    assert.equal('timeoutMS' in seen, false, 'a client-side timeout on a walk\'s read');
     assert.equal(wb.housekeepingOpMs(), 4321, 'the seam set what the case is written against');
   });
 
@@ -164,7 +167,7 @@ describe('every callback runs inside the housekeeping bound', () => {
     wb.setWriteBoundForTest({ housekeepingOpMs: 4321 });
     const { walk } = make();
     const seen = await findOptionsInside(walk, { opMs: wb.CLAIM_OP_MS });
-    assert.equal(seen.timeoutMS, wb.CLAIM_OP_MS);
+    assert.equal(seen.maxTimeMS, wb.CLAIM_OP_MS);
   });
 
   it('outside a callback nothing is bound, and the scope ended with the callback', async () => {
@@ -172,7 +175,9 @@ describe('every callback runs inside the housekeeping bound', () => {
     const { walk } = make();
     await findOptionsInside(walk);
     let seen;
-    await wb.callBounded('find', [{}, {}], (args) => { seen = args[1]; return Promise.resolve([]); }, { collection: 'a_facts', inheritedTimeoutMs: undefined });
+    await wb.callBounded('find', [{}, {}], (args) => { seen = args[1]; return []; }, { collection: 'a_facts' });
+    assert.equal(seen.maxTimeMS, undefined);
+    assert.equal(seen.signal, undefined);
     assert.equal(seen.timeoutMS, undefined);
   });
 

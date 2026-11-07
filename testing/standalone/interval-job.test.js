@@ -340,15 +340,19 @@ describe('every tick runs inside the housekeeping bound and shares one walk budg
     let seen;
     const r = track(rig({
       run: async () => {
-        await wb.callBounded('find', [{}, {}], (args) => { seen = args[1]; return Promise.resolve([]); }, { collection: 'a_facts', inheritedTimeoutMs: undefined });
+        // `find` returns its cursor synchronously: the stand-in is not a promise.
+        await wb.callBounded('find', [{}, {}], (args) => { seen = args[1]; return []; }, { collection: 'a_facts' });
       },
     }));
     r.job.start();
     await r.vt.advance(1000);
-    assert.equal(seen?.timeoutMS, 4321);
+    assert.equal(seen?.maxTimeMS, 4321);
+    assert.ok(seen?.signal instanceof AbortSignal, 'a read made by a tick carries no backstop signal');
+    assert.equal('timeoutMS' in (seen ?? {}), false, 'a client-side timeout on a tick\'s read');
     let outside;
-    await wb.callBounded('find', [{}, {}], (args) => { outside = args[1]; return Promise.resolve([]); }, { collection: 'a_facts', inheritedTimeoutMs: undefined });
-    assert.equal(outside.timeoutMS, undefined);
+    await wb.callBounded('find', [{}, {}], (args) => { outside = args[1]; return []; }, { collection: 'a_facts' });
+    assert.equal(outside.maxTimeMS, undefined);
+    assert.equal(outside.signal, undefined);
   });
 
   /** A walk of its own, so no quarantine is shared with the process-wide one. */

@@ -139,14 +139,17 @@ async function seedJob(jobId) {
 }
 
 /**
- * A fenced write (`writeUnderClaim`) whose FIRST statement — the fence's update of the job row, which starts transaction `n`
- * — the relay holds, so the leased bound ends the call with that statement still undelivered: Q-530's CI failure, on demand.
+ * A fenced write (`writeUnderClaim`) whose FIRST statement — the one that starts transaction `n` — the relay holds, so the
+ * leased bound ends the call with that statement still undelivered: Q-530's CI failure, on demand. Since `Q-716` that statement
+ * is the bounded transaction's opening read, sent before the fence's update of the job row (driver 7.8.0 marks a transaction
+ * started only on its first answer); it is matched by what it does, starting the transaction, so the hold follows whichever
+ * statement that is. The test runs one transaction at a time, so the first one started is this call's.
  * `arm(orphan, n)` runs as soon as the statement is held (long before the bound ends), for what a row holds or records next.
  * Returns while the call is still running: `call` settles to `{ value }` / `{ error }`; `stopLog()` ends `lines`.
  */
 async function boundEndedFencedWrite(jobId, arm = () => {}) {
   await seedJob(jobId);
-  const fence = relay.hold((c) => c.update === JOBS && c.startTransaction === true && c.updates?.[0]?.q?._id === jobId);
+  const fence = relay.hold((c) => c.startTransaction === true);
   const lines = [];
   const stopLog = logLines.subscribeLogLines((l) => lines.push(l));
   const call = settled(lease.writeUnderClaim(S, { jobId, claimToken: CLAIM.claimToken }, async () => 'wrote'));
