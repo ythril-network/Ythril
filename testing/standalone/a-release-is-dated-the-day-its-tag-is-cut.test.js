@@ -23,6 +23,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { stripComments } from './_strip-comments.mjs';
 
 const mod = await import('../../scripts/_shared/release-date.mjs').catch((err) => ({ missing: err }));
 const need = (name) => {
@@ -78,8 +79,7 @@ describe('releaseDateProblem: on the tag a wrong date fails, before the tag it w
 });
 
 describe('the release gate asks the rule with the heading\'s date and the tag\'s instant', () => {
-  const gate = readFileSync(new URL('../../scripts/release-gate.mjs', import.meta.url), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const gate = stripComments(readFileSync(new URL('../../scripts/release-gate.mjs', import.meta.url), 'utf8'));
   it('imports releaseDateProblem from the shared module, so the rule is spelled once', () => {
     assert.match(gate, /import\s*\{[^}]*\breleaseDateProblem\b[^}]*\}\s*from\s*['"]\.\/_shared\/release-date\.mjs['"]/,
       'release-gate.mjs does not import releaseDateProblem from ./_shared/release-date.mjs');
