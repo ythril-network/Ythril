@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.5.4] — 2026-11-07
+
+**A patch release: rewriting a file keeps the properties you did not send, a peer's token can no longer store a file as this instance's own, and a failing storage answers as a fault instead of as an empty folder.**
+
 | Changes on upgrade | Action |
 |---|---|
 | A file rewrite (`write_file`, `POST /api/write_file`, the upload) merges its `properties` over the stored ones; `properties: {}` keeps the bag | Remove a key with `update_file_meta` `deleteFields` |
@@ -18,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** a rewrite of a file merges the `properties` it sends over the stored ones, as `update_file_meta` does; `description` and `tags` still replace.
 - **Files:** a peer-bound token's upload that carries file metadata is refused `400` before anything is stored; it was ignored.
 - **Files:** `list_dir`, `read_file` and the REST listing and download answer `500` `file_system_fault` when the storage fails, not an empty listing or "not found".
-- **Docs:** changed: the files guide, write semantics, MCP and capability map, personal views, tokens, sync, auth and limits, setup, audit log, upgrading and user guide pages, and the contribution guide.
+- **Docs:** changed: the files guide, write semantics, MCP, personal views, tokens, sync and the sync protocol, auth and limits, setup, audit log, upgrading and user guide pages, and the contribution guide.
 
 ### Security
 

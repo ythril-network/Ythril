@@ -262,7 +262,7 @@ installer) and moves with it; an app should not import it.
 
 ## Versions
 
-The package is versioned with the Ythril release it was cut from: `@ythril-network/schema@6.5.3` validates what a 6.5.3 server
+The package is versioned with the Ythril release it was cut from: `@ythril-network/schema@6.5.4` validates what a 6.5.4 server
 accepts. It was first published as 6.5.0; no earlier version is on the registry. A newer server may accept a field an older package refuses; validate against the package of the oldest server you
 write to.
 
