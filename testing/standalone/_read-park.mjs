@@ -76,9 +76,14 @@ export function parkReadsAfterAnswer(mongo) {
  * to finish while the first is parked, release the first and await both.
  *
  * @returns `{ secondFinishedWhileFirstWasParked }` — what a test may state about the code's own ordering, never what it
- *   must be: a lock is allowed to make the second wait.
+ *   must be: a lock is allowed to make the second wait. A test that asserts the second landed first asserts this flag first.
+ *
+ * The window is generous on purpose: it ends the moment `second` returns, so a run that finishes costs nothing, and it only has
+ * to outlast a slow runner. It was 400 ms, and a busy CI machine (a config reload running beside the first request, main's CI
+ * run 42411462667) took longer: the first writer was released while the second was still running, and a test that had not
+ * checked this flag read the other interleaving as a defect.
  */
-export async function holdWhileOtherRuns(park, { first, second, windowMs = 400, reachedWithinMs = 8_000 }) {
+export async function holdWhileOtherRuns(park, { first, second, windowMs = 10_000, reachedWithinMs = 8_000 }) {
   const firstP = first();
   firstP.catch(() => {});
   const reached = await Promise.race([park.reached.then(() => true), elapse(reachedWithinMs, 'race timeout: the park was never reached, which the assertion below names').then(() => false)]);
