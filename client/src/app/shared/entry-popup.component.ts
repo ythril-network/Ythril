@@ -228,7 +228,7 @@ interface FieldEntry {
   template: `
     @if (record) {
       <div class="popup-backdrop">
-        <div class="popup-modal" [appModal]="recordId() || ('entryPopup.defaultTitle' | transloco)" (dismiss)="closed.emit()" (click)="$event.stopPropagation()">
+        <div class="popup-modal" [appModal]="recordId() || ('entryPopup.defaultTitle' | transloco)" (dismiss)="requestClose()" (click)="$event.stopPropagation()">
           <!-- Header -->
           <div class="popup-header">
             <h2>
@@ -377,7 +377,7 @@ interface FieldEntry {
               <button class="btn btn-ghost btn-sm" (click)="undo()">
                 {{ 'common.reset' | transloco }}
               </button>
-              <button class="btn btn-sm" (click)="cancel()">{{ 'common.cancel' | transloco }}</button>
+              <button class="btn btn-sm" (click)="requestClose()">{{ 'common.cancel' | transloco }}</button>
               <button
                 class="btn btn-primary btn-sm"
                 (click)="save()"
@@ -386,7 +386,7 @@ interface FieldEntry {
                 {{ 'common.save' | transloco }}
               </button>
             } @else {
-              <button class="btn btn-sm" (click)="cancel()">{{ 'common.close' | transloco }}</button>
+              <button class="btn btn-sm" (click)="requestClose()">{{ 'common.close' | transloco }}</button>
             }
           </div>
         </div>
@@ -432,10 +432,8 @@ export class EntryPopupComponent {
   /** Snapshot of the record when it was last received/saved. */
   private snapshot = signal<Record<string, unknown>>({});
 
-  constructor() {
-    // Dirty while the working copy differs from the record as received or last saved (Reset and a successful save both restore it).
-    holdUnsavedEdits(() => !!this.record && JSON.stringify(this.draft()) !== JSON.stringify(this.snapshot()));
-  }
+  // Dirty while the working copy differs from the record as received or last saved (Reset and a successful save both restore it).
+  private readonly held = holdUnsavedEdits(() => !!this.record && JSON.stringify(this.draft()) !== JSON.stringify(this.snapshot()));
 
   recordId = computed(() => {
     const id = this.draft()['_id'];
@@ -546,8 +544,9 @@ export class EntryPopupComponent {
     this.clearStatus();
   }
 
-  cancel(): void {
-    this.closed.emit();
+  /** Escape, Cancel and Close: close the pop-up, asking first while the working copy differs from the record. */
+  requestClose(): void {
+    void this.held.closeIfConfirmed(() => this.closed.emit());
   }
 
   save(): void {

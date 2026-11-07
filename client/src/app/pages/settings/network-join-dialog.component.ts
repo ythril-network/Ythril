@@ -58,10 +58,10 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
   `],
   template: `
     <div class="dialog-backdrop">
-      <div class="dialog" [appModal]="'networks.dialog.join.title' | transloco" (dismiss)="close.emit()" (click)="$event.stopPropagation()">
+      <div class="dialog" [appModal]="'networks.dialog.join.title' | transloco" (dismiss)="requestClose()" (click)="$event.stopPropagation()">
         <div class="dialog-header">
           <div class="card-title">{{ 'networks.dialog.join.title' | transloco }}</div>
-          <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="close.emit()"><ph-icon name="x" [size]="14"/></button>
+          <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="requestClose()"><ph-icon name="x" [size]="14"/></button>
         </div>
 
         <!-- role=alert: a refusal is announced, not only painted — a screen-reader user otherwise hears nothing (Q-133). -->
@@ -144,7 +144,7 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
         }
 
         <div style="display:flex; gap:8px; justify-content:flex-end;">
-          <button class="btn-secondary btn" type="button" (click)="close.emit()">{{ 'common.cancel' | transloco }}</button>
+          <button class="btn-secondary btn" type="button" (click)="requestClose()">{{ 'common.cancel' | transloco }}</button>
           <button
             class="btn-primary btn"
             (click)="joinMapSpaces().length > 0 ? confirmJoin() : joinNetwork()"
@@ -193,9 +193,12 @@ export class NetworkJoinDialogComponent {
   /** The publisher's base URL, asked for when a pub/sub's published invite key is pasted (F-41). */
   publisherUrl = '';
 
-  constructor() {
-    // A pasted invite (and its publisher URL) that Join has not sent; a successful join clears both. The per-space rows exist only while an invite is pasted.
-    holdUnsavedEdits(() => this.joinBundle.trim() !== '' || this.publisherUrl.trim() !== '');
+  // A pasted invite (and its publisher URL) that Join has not sent; a successful join clears both. The per-space rows exist only while an invite is pasted.
+  private readonly draft = holdUnsavedEdits(() => this.joinBundle.trim() !== '' || this.publisherUrl.trim() !== '');
+
+  /** Escape, the X and Cancel: close, asking first while an invite or a publisher URL is typed. */
+  protected requestClose(): void {
+    void this.draft.closeIfConfirmed(() => this.close.emit());
   }
 
   /** A published pub/sub key rather than a handshake invite: it joins by key, with no mapping step. */

@@ -1,8 +1,8 @@
 /**
  * The Brain page's two dialogs hold their drafts (Q-701, bundle-238): the personal-view create dialog and the graph tab's entry pop-up.
  *
- * Their own dismiss (X, Escape, backdrop) is not changed here (Q-713, bundle-247): the dialogs only REGISTER the draft, so leaving the page,
- * reloading or closing the tab with one dirty and open asks.
+ * This file holds that the dialogs REGISTER the draft, so leaving the page, reloading or closing the tab with one dirty and open asks.
+ * Their own dismiss (X, Escape, backdrop) asking first is held in brain-dialogs.dismiss.spec.ts (Q-713).
  *
  * ## The rules
  *

@@ -49,11 +49,11 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
   `],
   template: `
     <div class="dialog-backdrop">
-      <div class="dialog" [appModal]="'networks.reread.title' | transloco" (dismiss)="closed.emit()" (click)="$event.stopPropagation()"
+      <div class="dialog" [appModal]="'networks.reread.title' | transloco" (dismiss)="requestClose()" (click)="$event.stopPropagation()"
            aria-labelledby="reread-title" (keydown)="onKeydown($event)" style="--dialog-max-width:520px">
         <div class="dialog-header">
           <h2 id="reread-title" class="card-title" style="margin:0;">{{ 'networks.reread.title' | transloco }}</h2>
-          <button type="button" class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="closed.emit()"><ph-icon name="x" [size]="14"/></button>
+          <button type="button" class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="requestClose()"><ph-icon name="x" [size]="14"/></button>
         </div>
 
         @if (spaces().length === 0) {
@@ -95,7 +95,7 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
                [value]="typedName()" (input)="typedName.set($any($event.target).value)" (keydown.enter)="confirm()">
 
         <div class="actions">
-          <button type="button" class="btn btn-secondary btn-sm" (click)="closed.emit()">{{ 'common.cancel' | transloco }}</button>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="requestClose()">{{ 'common.cancel' | transloco }}</button>
           <button type="button" class="btn btn-sm btn-danger-solid" data-confirm [disabled]="!canConfirm()" (click)="confirm()">
             @if (busy()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
             {{ 'networks.reread.confirm' | transloco }}
@@ -141,9 +141,12 @@ export class NetworkRereadDialogComponent implements AfterViewInit {
   protected readonly unpicked = signal<ReadonlySet<string>>(new Set());
   private readonly typedField = viewChild<ElementRef<HTMLInputElement>>('typed');
 
-  constructor() {
-    // The typed name, or a space taken out of the choice, that Confirm has not sent; once the request is in flight (`busy`) it is sent.
-    holdUnsavedEdits(() => !this.busy() && (this.typedName() !== '' || this.unpicked().size > 0));
+  // The typed name, or a space taken out of the choice, that Confirm has not sent; once the request is in flight (`busy`) it is sent.
+  private readonly draft = holdUnsavedEdits(() => !this.busy() && (this.typedName() !== '' || this.unpicked().size > 0));
+
+  /** Escape, the X and Cancel: close, asking first while a name is typed or a space was taken out. */
+  protected requestClose(): void {
+    void this.draft.closeIfConfirmed(() => this.closed.emit());
   }
 
   protected readonly pickedIds = computed(() => this.spaces().filter(s => !this.unpicked().has(s.id)).map(s => s.id));

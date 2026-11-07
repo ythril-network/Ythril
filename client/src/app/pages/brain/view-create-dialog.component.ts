@@ -44,10 +44,10 @@ let nextDialogId = 0;
   `],
   template: `
 <div class="dialog-backdrop">
-  <div class="dialog" [appModal]="'views.create.title' | transloco" (dismiss)="closed.emit()">
+  <div class="dialog" [appModal]="'views.create.title' | transloco" (dismiss)="requestClose()">
     <div class="dialog-header">
       <div class="card-title">{{ 'views.create.title' | transloco }}</div>
-      <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="closed.emit()"><ph-icon name="x" [size]="14"/></button>
+      <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="requestClose()"><ph-icon name="x" [size]="14"/></button>
     </div>
     <p class="hint">{{ 'views.create.hint' | transloco }}</p>
     @if (error()) { <div class="alert alert-error" role="alert">{{ error() }}</div> }
@@ -80,7 +80,7 @@ let nextDialogId = 0;
       </fieldset>
 
       <div style="display:flex;justify-content:flex-end;gap:8px;">
-        <button class="btn btn-secondary" type="button" (click)="closed.emit()">{{ 'common.cancel' | transloco }}</button>
+        <button class="btn btn-secondary" type="button" (click)="requestClose()">{{ 'common.cancel' | transloco }}</button>
         <button class="btn btn-primary" type="submit" [disabled]="!canSubmit() || saving()" [attr.aria-busy]="saving() ? 'true' : null">
           @if (saving()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'views.create.submit' | transloco }}
         </button>
@@ -111,9 +111,12 @@ export class ViewCreateDialogComponent {
   /** The view was made: the page closes this dialog and opens the view next, so from here the draft is spent (Q-701). */
   private made = false;
 
-  constructor() {
-    // The dialog opens blank, in the "some" mode with nothing ticked: a draft is anything else.
-    holdUnsavedEdits(() => !this.made && (this.name.trim() !== '' || this.mode() !== 'some' || this.chosen().size > 0));
+  // The dialog opens blank, in the "some" mode with nothing ticked: a draft is anything else.
+  private readonly draft = holdUnsavedEdits(() => !this.made && (this.name.trim() !== '' || this.mode() !== 'some' || this.chosen().size > 0));
+
+  /** Escape, the X and Cancel: close, asking first while the draft is dirty. */
+  protected requestClose(): void {
+    void this.draft.closeIfConfirmed(() => this.closed.emit());
   }
 
   protected toggle(spaceId: string): void {

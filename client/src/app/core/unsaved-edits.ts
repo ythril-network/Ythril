@@ -18,6 +18,9 @@
  *   when a live check is dirty.
  * - One `beforeunload` listener warns on reload or tab close while a check is dirty.
  * - `confirmDiscard(dirty)` is the same question for an in-page discard of one draft (a tab switch, a dialog's own close).
+ * - `holdUnsavedEdits` returns the draft's `HeldDraft`: `dirty()` and `closeIfConfirmed(close)`. A dialog that holds a draft keeps it and
+ *   routes Escape, the backdrop, the X and Cancel through one method that calls `closeIfConfirmed`, so it asks about its OWN draft without
+ *   restating the check (Q-713; `testing/dialog-dismiss-asks.spec.ts` reads every dialog for it). A close after a successful save stays direct.
  *
  * A check that throws counts as dirty: a broken check must not let an edit go silently.
  *
@@ -81,12 +84,36 @@ export class UnsavedEdits {
   }
 }
 
+/** One held draft, as `holdUnsavedEdits` hands it back: the check it was given, and the question about discarding exactly that draft. */
+export interface HeldDraft {
+  /** True when this draft differs from what it was opened with; a check that throws counts as dirty, as `any()` counts it. */
+  dirty(): boolean;
+  /**
+   * Close (`close`) only once it is safe to discard this draft: at once when it is clean, otherwise after the user answers the discard
+   * question with yes. Resolves true when `close` ran. A dialog's Escape, backdrop, X and Cancel all end here.
+   */
+  closeIfConfirmed(close: () => void): Promise<boolean>;
+}
+
 /**
  * Hold the calling component's draft: leaving its page, reloading or closing the tab asks first while `check` answers true. Call it
  * in a component's injection context (its constructor or a field initialiser); the check goes away with the component.
+ *
+ * Returns the draft's handle. A dialog keeps it and closes through `closeIfConfirmed`, so its own dismiss asks about its own draft and the
+ * check is never written a second time (Q-713). A component that holds several dialogs calls this once per dialog.
  */
-export function holdUnsavedEdits(check: UnsavedEditsCheck): void {
-  inject(UnsavedEdits).hold(check, inject(DestroyRef));
+export function holdUnsavedEdits(check: UnsavedEditsCheck): HeldDraft {
+  const edits = inject(UnsavedEdits);
+  edits.hold(check, inject(DestroyRef));
+  const dirty = (): boolean => { try { return check(); } catch { return true; } };
+  return {
+    dirty,
+    closeIfConfirmed(close) {
+      // A clean draft closes in the same tick, as a dismiss always did: nothing is asked, so nothing is awaited.
+      if (!dirty()) { close(); return Promise.resolve(true); }
+      return edits.confirmDiscard(true).then(yes => { if (yes) close(); return yes; });
+    },
+  };
 }
 
 /** Leaving a page asks first while any live component holds a dirty draft. */

@@ -65,10 +65,10 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
   template: `
     <div class="dialog-backdrop">
       <div class="dialog" [appModal]="'tokens.rights.title' | transloco"
-           (dismiss)="close.emit()" (click)="$event.stopPropagation()">
+           (dismiss)="requestClose()" (click)="$event.stopPropagation()">
         <div class="dialog-header">
           <h3>{{ 'tokens.rights.title' | transloco }} — {{ token().name }}</h3>
-          <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="close.emit()">
+          <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="requestClose()">
             <ph-icon name="x" [size]="14"/>
           </button>
         </div>
@@ -150,7 +150,7 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
         </div>
 
         <div class="form-grid-bottom" style="margin-top:12px;">
-          <button class="btn-secondary btn" type="button" (click)="close.emit()">
+          <button class="btn-secondary btn" type="button" (click)="requestClose()">
             {{ 'common.cancel' | transloco }}
           </button>
           <button class="btn-primary btn" type="button" style="margin-left:auto;"
@@ -241,8 +241,11 @@ export class TokenRightsDialogComponent {
   /** The draft as it was opened with (null until `ngOnInit` prefilled it), re-taken after a save the server accepted. */
   private opened: string | null = null;
 
-  constructor() {
-    holdUnsavedEdits(() => this.opened !== null && this.draftText() !== this.opened);
+  private readonly held = holdUnsavedEdits(() => this.opened !== null && this.draftText() !== this.opened);
+
+  /** Escape, the X and Cancel: close, asking first while the rights differ from what the dialog opened with. */
+  protected requestClose(): void {
+    void this.held.closeIfConfirmed(() => this.close.emit());
   }
 
   private draftText(): string {

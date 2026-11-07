@@ -38,7 +38,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
   template: `
       @if (state.drawerRecord(); as dr) {
         <div class="drawer-overlay">
-          <div class="drawer" [appModal]="'brain.drawer.recordDetailsAriaLabel' | transloco" (dismiss)="state.close()" (click)="$event.stopPropagation()">
+          <div class="drawer" [appModal]="'brain.drawer.recordDetailsAriaLabel' | transloco" (dismiss)="requestClose()" (click)="$event.stopPropagation()">
             <div class="drawer-header">
               <div style="flex:1; min-width:0;">
                 @if (dr.kind === 'fact') { <span class="badge badge-blue" style="margin-bottom:6px; display:inline-block;">{{ 'brain.drawer.badge.fact' | transloco }}</span> }
@@ -58,7 +58,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                     @if (state.drawerSaving()) { <span class="spinner" style="width:11px;height:11px;border-width:2px;"></span> } {{ 'common.save' | transloco }}
                   </button>
                 }
-                <button class="icon-btn" [attr.title]="'common.close' | transloco" [attr.aria-label]="'brain.drawer.closeDetailsAriaLabel' | transloco" (click)="state.close()"><ph-icon name="x" [size]="16"/></button>
+                <button class="icon-btn" [attr.title]="'common.close' | transloco" [attr.aria-label]="'brain.drawer.closeDetailsAriaLabel' | transloco" (click)="requestClose()"><ph-icon name="x" [size]="16"/></button>
               </div>
             </div>
             <app-refusal-alert [view]="refusal()" idPrefix="drw-refusal" />
@@ -326,9 +326,12 @@ export class RecordDrawerComponent {
   readonly refusal = refusalViewOf(this.transloco, this.state.drawerFailure, 'refusal.failed.save');
   readonly propertyErrors = propertyErrorsOf(this.refusal);
 
-  constructor() {
-    // The state is the page's (provided by the Brain or the Graph page), so the check goes away with this drawer, not with the session.
-    holdUnsavedEdits(() => this.state.isDirty());
+  // The state is the page's (provided by the Brain or the Graph page), so the check goes away with this drawer, not with the session.
+  private readonly draft = holdUnsavedEdits(() => this.state.isDirty());
+
+  /** Escape, the X: close the drawer, asking first while the record's edit draft is dirty. */
+  protected requestClose(): void {
+    void this.draft.closeIfConfirmed(() => this.state.close());
   }
 
   /** The instance an author wrote from, by the label it carries (an author that predates labels has the id only). */

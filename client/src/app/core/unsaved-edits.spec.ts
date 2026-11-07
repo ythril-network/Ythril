@@ -10,7 +10,7 @@ import type { Route } from '@angular/router';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ConfirmDialogService } from './confirm-dialog.service';
 import { getTranslocoModule } from '../testing/transloco-testing';
-import { UnsavedEdits, holdUnsavedEdits, unsavedEditsGuard, guardEveryPage } from './unsaved-edits';
+import { UnsavedEdits, holdUnsavedEdits, unsavedEditsGuard, guardEveryPage, type HeldDraft } from './unsaved-edits';
 
 const draft = signal('');
 
@@ -70,6 +70,42 @@ describe('UnsavedEdits (Q-701)', () => {
     confirm.mockResolvedValue(true);
     expect(await edits.confirmDiscard(true)).toBe(true);
     expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('the handle holdUnsavedEdits returns answers its own draft and closes only on a yes (Q-713)', async () => {
+    let handle!: HeldDraft;
+    @Component({ selector: 'spec-handle-holder', template: '' })
+    class HandleHolder { constructor() { handle = holdUnsavedEdits(() => draft() !== ''); } }
+    const f = TestBed.createComponent(HandleHolder);
+    const close = vi.fn();
+
+    expect(handle.dirty()).toBe(false);
+    const answer = handle.closeIfConfirmed(close);
+    expect(close, 'a clean draft closes in the same tick, before anything is awaited').toHaveBeenCalledTimes(1);
+    expect(await answer).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+
+    draft.set('typed');
+    expect(handle.dirty()).toBe(true);
+    expect(await handle.closeIfConfirmed(close), 'refused').toBe(false);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(close, 'a refusal keeps the dialog open').toHaveBeenCalledTimes(1);
+    confirm.mockResolvedValue(true);
+    expect(await handle.closeIfConfirmed(close)).toBe(true);
+    expect(close).toHaveBeenCalledTimes(2);
+    f.destroy();
+  });
+
+  it('a handle whose check throws counts as dirty and asks', async () => {
+    let handle!: HeldDraft;
+    @Component({ selector: 'spec-throwing-holder', template: '' })
+    class ThrowingHolder { constructor() { handle = holdUnsavedEdits(() => { throw new Error('boom'); }); } }
+    TestBed.createComponent(ThrowingHolder);
+    const close = vi.fn();
+    expect(handle.dirty()).toBe(true);
+    expect(await handle.closeIfConfirmed(close)).toBe(false);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
   });
 
   it('the route guard is confirmLeave', async () => {

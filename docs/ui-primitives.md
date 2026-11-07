@@ -193,5 +193,7 @@ Not primitives, but the same class of thing — verify these on whatever page yo
 - An unsaved-changes guard on every editable form: the component that owns the draft calls
   `holdUnsavedEdits(() => <the draft differs from what it was opened with>)` (`core/unsaved-edits.ts`). Every page route already
   carries the guard, and the reload warning is shared. `testing/unsaved-edits-are-held.spec.ts` fails on a component with an editable
-  control that holds no draft and is not listed with its reason.
+  control that holds no draft and is not listed with its reason. A dialog that holds a draft keeps the handle `holdUnsavedEdits` returns
+  and closes through `closeIfConfirmed(...)` from its Escape, backdrop, X and Cancel, so a dismiss asks before it discards the draft
+  (`testing/dialog-dismiss-asks.spec.ts` reads every such dialog).
 - Destructive actions: `danger` on the button *and* on the confirm dialog.
