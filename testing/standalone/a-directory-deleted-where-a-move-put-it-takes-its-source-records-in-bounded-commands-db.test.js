@@ -123,8 +123,9 @@ describe('a directory deleted where a stopped move put it', { skip }, () => {
     assert.deepEqual(await acts.links.idsUnder(dir), [...theirs].sort(), 'the links this instance wrote outlived the delete (or a link another instance wrote was removed)');
     assert.deepEqual(await acts.links.tombstoned(), [...own].sort(), 'a removed link has no tombstone');
     // A remover that asks about one file at a time issues a command or more per file; one that is bounded by its chunk issues a few per
-    // chunk. A tenth of the files is far above the second and far below the first.
-    assert.ok(commands.length < n / 10,
+    // chunk. A fifth of the files is far above the second and far below the first. (A tenth was 52 here against 51 sent, no margin:
+    // since `Q-716` each chunk's transaction also sends its opening read, one command per chunk, and the delete sent 53.)
+    assert.ok(commands.length < n / 5,
       `deleting ${n} files with a link each issued ${commands.length} commands: the cost grows with the files, not with the chunks of ${READ_CHUNK}`);
   });
 
