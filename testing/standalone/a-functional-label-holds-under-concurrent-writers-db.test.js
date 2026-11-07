@@ -612,8 +612,9 @@ describe('a functional label holds under concurrent local writers', { skip }, ()
         let seen = 0;
         const park = reads.arm(`${FLIP}_edges`, (f) => isFunctionalCountRead(f) && ++seen === last);
         const answers = {};
+        let hold;
         try {
-          await holdWhileOtherRuns(park, {
+          hold = await holdWhileOtherRuns(park, {
             first: async () => { answers.a = await writer.run(FLIP, TO_A, 'A'); },
             second: async () => {
               answers.b = await writer.run(FLIP, TO_B, 'B');
@@ -622,8 +623,12 @@ describe('a functional label holds under concurrent local writers', { skip }, ()
             },
           });
         } finally { disarm(); await setFunctional(FLIP, true); }
+        // The case asserts B landed first, which is so only if B finished while A was parked: said, not assumed. Main's CI run
+        // 42411462667 released A after the helper's old 400 ms window while B was still running, and A rightly landed first.
+        assert.ok(hold.secondFinishedWhileFirstWasParked,
+          `${writer.name}: the second writer did not finish while the first was parked, so the interleaving this case is about did not happen`);
+        assert.equal(answers.b.refused, false, `${writer.name}: B was refused, so it cannot be the edge that landed first — ${answers.b.text?.slice(0, 300)}`);
         assert.deepEqual(await writer.landed(FLIP), [TO_B], `${writer.name}: the edge that landed first is the only one the label may hold, whatever the flag did meanwhile`);
-        assert.equal(answers.b.refused, false);
         assert.deepEqual(writer.loser(answers.a, refusals[TO_A], TO_A), [], `${writer.name}: the stale writer did not answer the ordinary refusal — ${answers.a.text.slice(0, 300)}`);
       });
     }
