@@ -1,6 +1,6 @@
 /**
- * The shipped database container sizes mongot's heap from a setting an operator can see, and keeps mongot's and the runner's logs on a
- * volume that survives the container (Q-373, bundle-72).
+ * The shipped database container sizes mongot's heap from a setting an operator can see, keeps mongot's log on a volume that survives the
+ * container (Q-373, bundle-72), and gives the runner no log file, which would hold the database password (Q-695).
  *
  * ## The finding
  *
@@ -15,8 +15,11 @@
  *
  *  1. `JAVA_TOOL_OPTIONS` sets `-XX:MaxRAMPercentage` from `YTHRIL_MONGOT_HEAP_PERCENT`, default 25: today's heap made explicit, and still a
  *     share of the container limit, so an operator who raises `YTHRIL_MONGO_MEM_LIMIT` is not left with a fixed small heap.
- *  2. `MONGOT_LOG_FILE` and `RUNNER_LOG_FILE` are under `/var/log/mongodb`: the one directory the image owns for its own user. A named
- *     volume at a path the image does not own is root-owned, and the runner crash-loops on `permission denied` (probe P4).
+ *  2. `MONGOT_LOG_FILE` is under `/var/log/mongodb`: the one directory the image owns for its own user. A named volume at a path the image
+ *     does not own is root-owned, and the runner crash-loops on `permission denied` (probe P4).
+ *  2b. `RUNNER_LOG_FILE` is NOT set (Q-695): the atlas-local runner writes its connection string, root user and password included, to that
+ *     file twice per start, and on this volume it outlives the container, is world-readable and never rotates. Without the setting the
+ *     runner's output is discarded, as before 6.4; the cause of a mongot death is in mongot.log.
  *  3. A named volume `ythril-mongo-logs` is mounted at `/var/log/mongodb`, declared in the top-level `volumes`, and listed in
  *     `x-ythril: disposable-volumes`: a Docker wipe (`scripts/owner-instance.ps1`) refuses a volume that is not named there.
  *  4. The logging driver stays `"none"`: json-file would put command bodies from mongod's slow-operation lines into host files outside
@@ -45,7 +48,8 @@ const LOG_DIR = '/var/log/mongodb';
 /** The rule each violation names, so a planted failure can be matched to the rule it breaks. */
 const RULES = {
   heap: 'JAVA_TOOL_OPTIONS sets -XX:MaxRAMPercentage from YTHRIL_MONGOT_HEAP_PERCENT, default 25',
-  logFiles: `MONGOT_LOG_FILE and RUNNER_LOG_FILE are files under ${LOG_DIR}`,
+  logFiles: `MONGOT_LOG_FILE is a file under ${LOG_DIR}`,
+  noRunnerLog: 'RUNNER_LOG_FILE is not set: the runner writes the database password into it',
   mounted: `a named volume ${VOLUME} is mounted at ${LOG_DIR} and declared under volumes`,
   disposable: `${VOLUME} is listed in x-ythril disposable-volumes`,
   logging: 'the logging driver is "none"',
@@ -64,10 +68,9 @@ function violations(compose) {
     bad('heap', `JAVA_TOOL_OPTIONS is ${JSON.stringify(opts)}`);
   }
 
-  for (const key of ['MONGOT_LOG_FILE', 'RUNNER_LOG_FILE']) {
-    const file = String(env[key] ?? '');
-    if (!file.startsWith(`${LOG_DIR}/`) || file.endsWith('/')) bad('logFiles', `${key} is ${JSON.stringify(file)}`);
-  }
+  const mongotLog = String(env['MONGOT_LOG_FILE'] ?? '');
+  if (!mongotLog.startsWith(`${LOG_DIR}/`) || mongotLog.endsWith('/')) bad('logFiles', `MONGOT_LOG_FILE is ${JSON.stringify(mongotLog)}`);
+  if ('RUNNER_LOG_FILE' in env) bad('noRunnerLog', `RUNNER_LOG_FILE is ${JSON.stringify(env['RUNNER_LOG_FILE'])}`);
 
   const mount = (svc.volumes ?? []).map(String).find(v => v.split(':')[0] === VOLUME);
   if (!mount || mount.split(':')[1] !== LOG_DIR || !(VOLUME in (compose.volumes ?? {}))) {
@@ -100,6 +103,11 @@ describe('the shipped ythril-mongo sizes mongot and keeps its logs on a volume',
   it(RULES.logFiles, () => {
     assert.deepEqual(violations(shipped).filter(v => v.rule === 'logFiles'), [],
       'a mongot death is invisible: its log goes to /dev/null, and `docker logs` holds only the runner\'s SIGTERM to mongod');
+  });
+
+  it(RULES.noRunnerLog, () => {
+    assert.deepEqual(violations(shipped).filter(v => v.rule === 'noRunnerLog'), [],
+      'the runner writes mongodb://<user>:<password>@localhost into its log file, which this volume keeps world-readable past the container');
   });
 
   it(RULES.mounted, () => {
@@ -146,15 +154,17 @@ describe('the shipped ythril-mongo sizes mongot and keeps its logs on a volume',
      * the volume would be a duplicate key, which the reader refuses).
      */
     const conforming = () => [
-      [`JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=\${YTHRIL_MONGOT_HEAP_PERCENT:-25}\n      MONGOT_LOG_FILE: ${LOG_DIR}/mongot.log\n      RUNNER_LOG_FILE: ${LOG_DIR}/runner.log\n`,
+      [`JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=\${YTHRIL_MONGOT_HEAP_PERCENT:-25}\n      MONGOT_LOG_FILE: ${LOG_DIR}/mongot.log\n`,
         t => t.replace(/(\n    environment:\n)(      # SECURITY: authenticate the bundled database)/,
           `$1      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=\${YTHRIL_MONGOT_HEAP_PERCENT:-25}\n`
-          + `      MONGOT_LOG_FILE: ${LOG_DIR}/mongot.log\n      RUNNER_LOG_FILE: ${LOG_DIR}/runner.log\n$2`)],
+          + `      MONGOT_LOG_FILE: ${LOG_DIR}/mongot.log\n$2`)],
       [`      - ${VOLUME}:${LOG_DIR}\n`,
         t => t.replace('      - ythril-mongo-configdb:/data/configdb\n', `      - ythril-mongo-configdb:/data/configdb\n      - ${VOLUME}:${LOG_DIR}\n`)],
       [`  ythril-mongo-configdb:\n  ${VOLUME}:\n`, t => t.replace('  ythril-mongo-configdb:\n', `  ythril-mongo-configdb:\n  ${VOLUME}:\n`)],
       [`    - ythril-whisper-cache\n    - ${VOLUME}\n`, t => t.replace('    - ythril-whisper-cache\n', `    - ythril-whisper-cache\n    - ${VOLUME}\n`)],
-    ].reduce((t, [holds, add]) => (t.includes(holds) ? t : add(t)), text);
+    ].reduce((t, [holds, add]) => (t.includes(holds) ? t : add(t)), text)
+      // A runner log file is the one thing the rules forbid, so the conforming base never carries it, whatever the shipped file says.
+      .replace(/ *RUNNER_LOG_FILE: [^\n]*\n/g, '');
 
     it('the conforming copy used as the base of the plants passes every rule', () => {
       const found = violations(plant('conforming', () => conforming(), { mayEqual: true }));
@@ -165,7 +175,7 @@ describe('the shipped ythril-mongo sizes mongot and keeps its logs on a volume',
       heap: ['heap', 'a fixed -Xmx instead of the percentage', t => conforming().replace(/-XX:MaxRAMPercentage=\$\{YTHRIL_MONGOT_HEAP_PERCENT:-25\}/, '-Xmx1g')],
       'heap-default': ['heap', 'a default other than 25', t => conforming().replace('YTHRIL_MONGOT_HEAP_PERCENT:-25', 'YTHRIL_MONGOT_HEAP_PERCENT:-50')],
       logFiles: ['logFiles', 'a log file outside /var/log/mongodb', t => conforming().replace(`MONGOT_LOG_FILE: ${LOG_DIR}/mongot.log`, 'MONGOT_LOG_FILE: /tmp/mongot.log')],
-      'runner-log': ['logFiles', 'no runner log file', t => conforming().replace(`      RUNNER_LOG_FILE: ${LOG_DIR}/runner.log\n`, '')],
+      'runner-log': ['noRunnerLog', 'a runner log file, which would hold the database password', t => conforming().replace(`      MONGOT_LOG_FILE: ${LOG_DIR}/mongot.log\n`, `      MONGOT_LOG_FILE: ${LOG_DIR}/mongot.log\n      RUNNER_LOG_FILE: ${LOG_DIR}/runner.log\n`)],
       mounted: ['mounted', 'the volume mounted at a path the image does not own', t => conforming().replace(`- ${VOLUME}:${LOG_DIR}`, `- ${VOLUME}:/var/log/ythril-mongo`)],
       undeclared: ['mounted', 'the volume not declared under volumes', t => conforming().replace(`  ythril-mongo-configdb:\n  ${VOLUME}:\n`, '  ythril-mongo-configdb:\n')],
       disposable: ['disposable', 'the volume missing from disposable-volumes', t => conforming().replace(`    - ythril-whisper-cache\n    - ${VOLUME}\n`, '    - ythril-whisper-cache\n')],

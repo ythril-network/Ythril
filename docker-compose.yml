@@ -105,7 +105,7 @@
     # vector-search process, inside the same limit. Raise YTHRIL_MONGO_MEM_LIMIT for very large spaces.
     mem_limit: ${YTHRIL_MONGO_MEM_LIMIT:-4g}
     # "none": mongod's slow-operation lines carry command bodies, and json-file would keep them in host files outside
-    # Ythril's retention. Why the database stopped is read from mongot.log and runner.log on ythril-mongo-logs instead.
+    # Ythril's retention. Why the database stopped is read from mongot.log on ythril-mongo-logs instead.
     logging:
       driver: "none"
     environment:
@@ -116,9 +116,11 @@
       # stops the container); see docs/integration-guide/02-hosting.md "Database memory".
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=${YTHRIL_MONGOT_HEAP_PERCENT:-25}
       # Under /var/log/mongodb, the one directory the image owns for its own user: a volume at a path it does not own is
-      # root-owned and the runner crash-loops on "permission denied". Neither file rotates (see 02-hosting.md).
+      # root-owned and the runner crash-loops on "permission denied". It does not rotate (see 02-hosting.md).
       MONGOT_LOG_FILE: /var/log/mongodb/mongot.log
-      RUNNER_LOG_FILE: /var/log/mongodb/runner.log
+      # No RUNNER_LOG_FILE: the image's runner writes its connection string, root user and password included, to that file on
+      # every start, and on this volume it would outlive the container, readable by anyone who can read the volume. Without it
+      # the runner's output is discarded; a refused heap setting and a mongot death are in mongot.log.
       # SECURITY: authenticate the bundled database. Unauthenticated, anything that can reach
       # port 27017 can read and rewrite EVERY space — Ythril's tokens, space scoping and audit
       # log are enforced at the API layer only, not at the database (S7).
