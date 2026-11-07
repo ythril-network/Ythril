@@ -134,8 +134,8 @@ describe('the dispatch and the listing both ask the one peer-token question (sou
     const calls = [];
     for (const f of files) {
       const src = stripComments(readFileSync(f, 'utf8'));
-      for (const m of src.matchAll(/\btoolIsVisible\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) {
-        if (/export function toolIsVisible/.test(src.slice(Math.max(0, m.index - 20), m.index + 15))) continue;
+      // The declaration (`function toolIsVisible(`) is not a call: the lookbehind leaves it out without reading a window behind the match.
+      for (const m of src.matchAll(/(?<!function )\btoolIsVisible\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) {
         calls.push({ f, args: m[1].split(',').map(s => s.trim()).filter(Boolean) });
       }
     }
