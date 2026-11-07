@@ -124,6 +124,26 @@ describe('a peer-bound token cannot call write_file', { skip }, () => {
 });
 
 describe('the dispatch and the listing both ask the one peer-token question (source gate)', () => {
+  it('every toolIsVisible( call in server/src passes the peer binding, so no listing (tools/list, the instructions, help) offers a refused tool', () => {
+    // The `help` tool built its list with `toolIsVisible(t, ctx.rights)`, so a peer-bound token's help offered write_file while the
+    // dispatcher refused it (bundle-62 pre-ship sweep). A call with two arguments is that gap; the third must be the binding.
+    const root = 'server/src';
+    const files = [];
+    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.ts')) files.push(p); } };
+    walk(root);
+    const calls = [];
+    for (const f of files) {
+      const src = stripComments(readFileSync(f, 'utf8'));
+      for (const m of src.matchAll(/\btoolIsVisible\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)) {
+        if (/export function toolIsVisible/.test(src.slice(Math.max(0, m.index - 20), m.index + 15))) continue;
+        calls.push({ f, args: m[1].split(',').map(s => s.trim()).filter(Boolean) });
+      }
+    }
+    assert.ok(calls.length >= 3, `only ${calls.length} toolIsVisible( call(s) found: the scan is wrong, not the code`);
+    const short = calls.filter(c => c.args.length < 3).map(c => `${c.f}: toolIsVisible(${c.args.join(', ')})`);
+    assert.deepEqual(short, [], 'a listing built without the peer binding offers a tool the dispatcher refuses that token');
+  });
+
   it('callTool and toolIsVisible each call peerTokenToolRefusal(', () => {
     // `toolIsVisible` lives in tool-visibility.ts (the predicate `tools/list` is built from), not in call-tool.ts.
     const gate = (file, fn) => {
