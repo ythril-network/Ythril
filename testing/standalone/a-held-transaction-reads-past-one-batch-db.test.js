@@ -12,9 +12,13 @@
  *
  * ## The rule
  *
- * A cursor opened inside a timed transaction is asked for all of its rows in its FIRST batch (`db/write-bound.ts`),
- * so a read of up to the server's 16 MB per batch needs no `getMore`. A caller's own `batchSize` is kept. Asserted
- * for `find` and `aggregate` — the two cursor methods the bound table carries.
+ * A read inside a held transaction comes back whole, through as many `getMore`s as it needs. Asserted for `find` and
+ * `aggregate` — the two cursor methods the bound table carries — and for a caller's own small `batchSize`.
+ *
+ * Until `Q-716` the cure was to ask such a cursor for everything in its first batch, because the cause was the driver's
+ * client-side timeout on the session. The transaction no longer uses that timeout (it ran its retry loop to the bound, and
+ * desynchronised the pool on drivers before 7.8.0), so the driver sends no `maxTimeMS` on a `getMore` (probed, 7.8.0) and the
+ * workaround went with its cause. The rows are what holds that a read past one batch still works.
  *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-held-transaction-reads-past-one-batch-db.test.js
@@ -67,11 +71,10 @@ describe('a held transaction reads past one batch', { skip }, () => {
     assert.equal(n, ROWS, `the transaction aggregated ${n} of ${ROWS} rows`);
   });
 
-  it('a caller\'s own batchSize is kept', async () => {
-    // Asked for small batches on purpose, the read needs a getMore — and is refused, which is the driver behaviour
-    // the guard exists for. Kept rather than overridden: a caller that names a batch size has a reason.
-    await assert.rejects(held.inHeldTransaction(S, 'test.held-batch',
-      async (session) => mongo.col(`${S}_facts`).find({ spaceId: S }, { session, batchSize: 50 }).toArray()),
-    /getMore/, 'a batchSize the caller gave was replaced');
+  it('a caller\'s own small batchSize reads through every getMore inside the transaction', async () => {
+    // Asked for small batches on purpose, the read needs many getMores, each inside the transaction.
+    const ids = await held.inHeldTransaction(S, 'test.held-batch',
+      async (session) => (await mongo.col(`${S}_facts`).find({ spaceId: S }, { session, batchSize: 50, projection: { _id: 1 } }).toArray()).map(d => d._id));
+    assert.equal(ids.length, ROWS, `the transaction read ${ids.length} of ${ROWS} rows in batches of 50`);
   });
 });

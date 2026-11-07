@@ -404,6 +404,21 @@ describe('a bounded transaction ends, holds no horizon, and ends its session', {
     assert.equal(landedAsked, false, '`landed` is for a failed COMMIT; it was asked about a callback that threw');
   });
 
+  it('statements a callback sends together as the transaction\'s first all run and commit (Q-716: the driver refuses two that start it at once)', async () => {
+    // From driver 7.8.0 a transaction counts as started only once its first command is ANSWERED, so two statements sent together
+    // both carry the start flag and the server refuses the second (ConflictingOperationInProgress). The module opens the
+    // transaction itself before the callback runs; the callback's statements then join it, together or not.
+    // The first statement is held 300 ms by the server itself, so the others are certainly sent before its answer comes back.
+    await inBounded()(async (s) => Promise.all([
+      facts().findOne({ _id: 'f-00009', $where: 'sleep(300) || true' }, { session: s }),
+      facts().insertOne({ _id: 'together-1', spaceId: S }, { session: s }),
+      facts().insertOne({ _id: 'together-2', spaceId: S }, { session: s }),
+    ]));
+    const landed = await facts().countDocuments({ _id: { $in: ['together-1', 'together-2'] } });
+    assert.equal(landed, 2, `${landed} of the 2 inserts sent together landed`);
+    await facts().deleteMany({ _id: { $in: ['together-1', 'together-2'] } });
+  });
+
   it('ends its session when the transaction succeeds', async () => {
     let session;
     await inBounded()(async (s) => { session = s; await facts().findOne({ _id: 'f-00007' }, { session: s }); });

@@ -145,6 +145,15 @@ function hasLabel(e: MongoError, label: string): boolean {
   try { return e.hasErrorLabel(label); } catch { return false; }
 }
 
+/**
+ * Does `err` carry the driver error label `label` (`TransientTransactionError`, `UnknownTransactionCommitResult`)? False for
+ * anything that is not a driver error, and NEVER throws, for the reason {@link hasLabel} gives. The transaction loop
+ * (`bounded-transaction.ts`) decides a retry by it, before it asks whether the store stopped answering.
+ */
+export function carriesErrorLabel(err: unknown, label: string): boolean {
+  return err instanceof MongoError && hasLabel(err, label);
+}
+
 /** The pool refused to hand out a connection: closed, or none came free in time. A driver error by class AND by name. */
 function isPoolCheckoutFailure(e: MongoError): boolean {
   return e instanceof MongoDriverError && POOL_CHECKOUT_ERROR_NAMES.includes(e.name);
