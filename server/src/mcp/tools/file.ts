@@ -4,7 +4,9 @@ import { UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 import { type InputFormat } from '../../files/converters/pipeline.js';
 import { moveFileCascade } from '../../files/move-cascade.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
-import { createDir, listDir, readFileWindow } from '../../files/files.js';
+import { createDir, readFileWindow } from '../../files/files.js';
+import { listAcrossMembers } from '../../files/list-across-members.js';
+import { fileReadFaultOf } from '../../files/read-fault.js';
 import { assertDestinationReachable } from '../../files/destination.js';
 import { CONTENT_ENCODINGS, decodeContent } from '../../files/content-encoding.js';
 import { storeFile, type StoreFileMeta } from '../../files/store-file.js';
@@ -28,6 +30,7 @@ export const read_fileTool: ToolHandler = {
   name: 'read_file',
   description: 'Read the text contents of a file in the space file store, a window at a time. The window is whole paragraphs from `markdownSkip` (a character offset, default 0) that fit the answer budget (`maxChars` / `maxBytes` / `maxTokens`); `truncated` says more follows and `markdownNextSkip` is where — send it back as `markdownSkip`, and the windows joined are the file, character for character. A paragraph larger than the budget is split at a line break. The same two parameters page the converted Markdown on `GET /api/brain/spaces/:spaceId/files/extract`, which this tool is the twin of: `limit`, `skip`, `imagesLimit` and `imagesSkip` (all four, with the route\'s defaults and ceilings) add the file\'s chunk and extracted-image listing to the answer, and without them the answer is the text window alone. Prefer `recall` with `includeFileContent: false` to find WHICH file and WHICH passage first.\n\n'
     + 'It reads the STORED TEXT, which for an uploaded PDF or image is the extracted text rather than the original bytes. A file whose extraction has not finished, or whose type yields no text, reads as empty — that is a pending or unextractable document, not an empty file. `list_dir` shows what is present, and `list_embed_jobs` shows whether its indexing is still queued or failed.\n\n'
+    + 'A file system that FAILS while reading (a disk error, a permission the server lost) is refused `500` with `code: "file_system_fault"` and `retryable: false`, never read as a missing file.\n\n'
     + 'This is a path lookup, not a search: an unknown path is an error, not an empty result. A file held under another Unicode form of the path (a decomposed name) is found by the path as you spell it, as `GET /api/files/:space?path=` finds it.',
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -91,8 +94,12 @@ export const read_fileTool: ToolHandler = {
         break;
       } catch (err) {
         // A file that EXISTS but cannot be decoded is not "not found": the same refusal the REST download gives,
-        // so the two doors agree on a foreign key or altered bytes (F-43). Anything else tries the next member.
+        // so the two doors agree on a foreign key or altered bytes (F-43).
         if (err instanceof StoredFileUnreadable) throw new Error(err.message);
+        // A member that holds nothing at the path (absent, a directory, a refused path, a retired space) tries the next member; a fault of the
+        // storage is answered 500 file_system_fault, never read as "File not found" (`fileReadFaultOf`).
+        const fault = fileReadFaultOf(err);
+        if (fault) throw fault;
       }
     }
     if (w === null) throw new NotFoundError(`File not found: ${filePath}`);
@@ -173,12 +180,14 @@ export const write_fileTool: ToolHandler = {
             tags: {
               type: 'array', maxItems: MAX_TAGS, items: { type: 'string' },
               description: 'Tags stored on the file\'s metadata record. REPLACES the stored list on a '
-                + 'rewrite; `update_file_meta` replaces too, unlike the brain update tools, which merge. '
+                + 'rewrite; `update_file_meta` replaces lists too (its `properties` merge). '
                 + 'Filterable by `filter` on the `files` collection and by `recall`\'s own filter.',
             },
             properties: {
               type: 'object',
-              description: 'Optional structured key-value metadata for this file.',
+              description: 'Optional structured key-value metadata for this file. On a REWRITE these are MERGED over the stored '
+                + 'properties, as `update_file_meta` merges them: a key you name is set, every other stored key stays, and nothing is '
+                + 'removed by being left out, `{}` included. To remove a key, call `update_file_meta` with `deleteFields`.',
               additionalProperties: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
             },
             ttlDays: TTL_DAYS_SCHEMA,
@@ -241,10 +250,13 @@ export const list_dirTool: ToolHandler = {
     + 'ON A PERSONAL VIEW THE MEMBERS ARE MERGED, AND A COLLISION IS RESOLVED SILENTLY. Every member the view '
     + 'reads for you is listed and the results are combined by NAME — so if two members both hold `notes.md`, you '
     + 'see one entry and the other is dropped, with nothing saying which member won or that a second existed. '
+    + 'The first member wins a collision, even a name that is a file in one member and a folder in another. '
     + 'A member that has no such directory is skipped rather than erroring. When that ambiguity matters, list '
     + 'the member space directly instead of the view.\n\n'
     + 'A MISSING DIRECTORY IS AN EMPTY LISTING, not an error. So an empty result means "nothing here OR no '
-    + 'such path" and the two are indistinguishable — check the parent if you expected content.\n\n'
+    + 'such path" and the two are indistinguishable — check the parent if you expected content. A STORAGE FAULT '
+    + 'IS NOT AN EMPTY LISTING: when the file system itself fails (a disk error, a permission the server lost) the call '
+    + 'is refused `500` with `code: "file_system_fault"` and `retryable: false`, naming no path.\n\n'
     + 'PARAMETERS:\n'
     + '- `path` — relative to the space root. OMIT IT (or send `""`) for the root itself, which is the usual '
     + 'starting point.\n\n'
@@ -269,16 +281,8 @@ export const list_dirTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const dirPath = String(a['path'] ?? '');
     const memberIds = readSpacesOfCall(ctx, callSpace);
-    const seen = new Set<string>();
-    const allEntries: { name: string; type: 'file' | 'dir'; size?: number }[] = [];
-    for (const mid of memberIds) {
-      try {
-        const entries = await listDir(mid, dirPath || '.');
-        for (const e of entries) {
-          if (!seen.has(e.name)) { seen.add(e.name); allEntries.push(e); }
-        }
-      } catch { /* dir may not exist in this member */ }
-    }
+    // A directory a member does not hold contributes nothing; a storage fault is a `FileSystemFault`, answered 500 file_system_fault (`listAcrossMembers`).
+    const allEntries = await listAcrossMembers(memberIds, dirPath || '.');
     const text =
       allEntries.length === 0
         ? '(empty directory)'
@@ -566,7 +570,8 @@ export const update_file_metaTool: ToolHandler = {
   name: 'update_file_meta',
   description: 'Change a file record\'s description, tags, properties or links WITHOUT resending the file. '
     + '`write_file` can set those fields, but only together with new content, so correcting one tag used to '
-    + 'mean re-uploading the bytes. Only the fields you pass are touched; omit one to leave it alone.\n\n'
+    + 'mean re-uploading the bytes. Only the fields you pass are touched; omit one to leave it alone. A rewrite through '
+    + '`write_file` merges `properties` the same way this tool does.\n\n'
     + 'A FILE THIS INSTANCE HAS DELETED IS NOT A FILE TO EDIT. Where the operator keeps a record of deleted files, that record is refused here exactly as a path that never existed is — the same answer on the REST route — because an edit would put the file back into search and hang links off bytes that are gone.\n\n'
     + '`properties` MERGES, like every other record type: patch one key and the others survive. It REPLACED '
     + 'until 3.1, so a caller written against the old behaviour that resends the whole object is unaffected, '

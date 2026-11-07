@@ -119,7 +119,10 @@ describe('a rewrite touches only what it was sent', () => {
   for (const field of AUTHORED) {
     it(`${field} is written only when the caller provided it`, () => {
       const body = bodyOf(SRC, 'upsertFileMeta');
-      const guard = new RegExp(`if\\s*\\(\\s*opts\\.${field}\\s*!==\\s*undefined\\s*\\)\\s*\\$set\\[['"\`]${field}['"\`]\\]`);
+      // Two spellings of "only when provided": an assignment into the write's `$set`, and (properties, Q-197: merged in the write's own pipeline)
+      // the `properties` key of an extra pipeline `$set` stage that is present only when `opts.properties` is.
+      const guard = new RegExp(`if\\s*\\(\\s*opts\\.${field}\\s*!==\\s*undefined\\s*\\)\\s*\\$set\\[['"\`]${field}['"\`]\\]`
+        + `|opts\\.${field}\\s*!==\\s*undefined\\s*\\?\\s*\\[\\s*\\{\\s*\\$set:\\s*\\{\\s*${field}:`);
       assert.match(body, guard,
         `a content-only upload must leave a stored \`${field}\` alone. Without the guard the \`$set\` `
         + `assigns \`undefined\`-or-empty over it on every rewrite — and an upload answers 201 either way, `

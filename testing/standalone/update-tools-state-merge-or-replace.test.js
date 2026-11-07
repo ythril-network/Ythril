@@ -42,6 +42,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
+import { propertiesWriteSites, unmergedPropertiesWrites, PROPERTIES_WRITE_EXCEPTIONS } from './_properties-write-sites.mjs';
 
 const src = (p) => readFileSync(p, 'utf8');
 
@@ -92,19 +93,84 @@ describe('the store still behaves the way the descriptions claim', () => {
      * writer of properties, whatever it is called and wherever it lives. That is also the exact shape of the
      * defect — an assignment is what replaces the bag, and replacing it destroys keys the caller never named.
      */
-    const files = trackedSources('server/src');
-    const writers = files.filter(f => /\$set\[['"]properties['"]\]\s*=/.test(stripComments(src(f))));
-    assert.ok(writers.length >= 4,
-      `only ${writers.length} module(s) write a properties bag; the four record families are the minimum, `
+    /*
+     * PER SITE, not per file (Q-197). This asked whether a MODULE contained a merge call anywhere, so `files/file-meta.ts` passed on
+     * `updateFileMeta`'s merge while `upsertFileMeta`'s own line replaced the bag — a rewrite of a file destroyed every key the caller
+     * never named. The scan, what satisfies a site and the named exceptions are in `_properties-write-sites.mjs`.
+     */
+    const files = trackedSources('server/src').map(file => ({ file, text: src(file) }));
+    const sites = propertiesWriteSites(files);
+    assert.ok(sites.filter(s => s.ok).length >= 6,
+      `only ${sites.filter(s => s.ok).length} properties-write site(s) merge; the write planners and the update writers are at least six, `
       + 'so the scan is wrong rather than the code');
-
-    // Either spelling of the one merge (`brain/merge-fields.ts`): `mergePropertiesOrKeep` is `mergeProperties`
-    // with "absent leaves it alone" in front, and a converge path — the write planners since Q-99 part 3 — has
-    // already tested for an absent bag before it assigns, so it calls the merge directly.
-    for (const f of writers) {
-      assert.match(stripComments(src(f)), /\bmergeProperties(?:OrKeep)?\(/,
-        `${f} sets a properties bag without merging — replacing it destroys keys the caller never named`);
+    assert.deepEqual(unmergedPropertiesWrites(files), []);
+    console.log(`properties-write sites: ${sites.length}; named exceptions: ${PROPERTIES_WRITE_EXCEPTIONS.length}`);
+    for (const e of PROPERTIES_WRITE_EXCEPTIONS) {
+      assert.ok(e.reason.length > 20 && /^\d{4}-\d\d-\d\d$/.test(e.reviewed), `exception for ${e.file} carries no reason or no review date`);
     }
+  });
+
+  describe('the per-site scan goes red on the shapes that destroyed keys (planted)', () => {
+    const problemsOf = (text) => unmergedPropertiesWrites([{ file: 'planted.ts', text }], []);
+
+    it('a raw replace', () => {
+      assert.equal(problemsOf("function f(opts) {\n  const $set = {};\n  if (opts.properties !== undefined) $set['properties'] = opts.properties;\n}\n").length, 1);
+    });
+
+    it('a variable merged at its declaration and reassigned to a raw bag', () => {
+      const text = "function f(existing, incoming, merged) {\n  let p = mergeProperties(existing, incoming);\n"
+        + "  if (x) {\n    p = merged['properties'] as R;\n  }\n  $set['properties'] = p;\n}\n";
+      assert.equal(problemsOf(text).length, 1, 'a reassignment to a raw bag is a raw bag');
+    });
+
+    it('a stage put inside the $literal-mapped $set (stored as text)', () => {
+      const text = "function g(opts) {\n  const $set = {};\n  $set['properties'] = mergePropertiesStage(opts.properties);\n"
+        + "  const values = Object.fromEntries(Object.entries($set).map(([k, v]) => [k, { $literal: v }]));\n}\n";
+      assert.equal(problemsOf(text).length, 1);
+    });
+
+    it('an object-literal key headed for an update', () => {
+      assert.equal(problemsOf("async function h(opts) {\n  await c.updateOne(f, { $set: { updatedAt: now, properties: opts.properties } });\n}\n").length, 1);
+    });
+
+    it('and stays quiet on the right shapes', () => {
+      assert.deepEqual(problemsOf("function f(e, o) {\n  const $set = {};\n  $set['properties'] = mergeProperties(e.properties, o);\n}\n"), []);
+      assert.deepEqual(problemsOf("function f(e, o) {\n  const m = mergePropertiesOrKeep(e, o);\n  $set['properties'] = m;\n}\n"), []);
+      assert.deepEqual(problemsOf("async function f(o) {\n  await c.updateOne(f, [ { $set: { properties: mergePropertiesStage(o.properties) } } ]);\n}\n"), [],
+        'the stage as a key of a pipeline $set is the database spelling of the rule');
+    });
+  });
+});
+
+describe('write_file says what a rewrite does with the stored bag (Q-197)', () => {
+  // Not in TOOLS: that table also feeds the excludeFromVectorSearch rows below, which write_file has no such parameter for.
+  const tool = (() => {
+    const s = stripComments(src('server/src/mcp/tools/file.ts'));
+    const at = s.indexOf("name: 'write_file'");
+    assert.ok(at > 0, 'write_file not found — the scanner is wrong, not the code');
+    const end = s.indexOf('\nexport const ', at);
+    return s.slice(at, end === -1 ? undefined : end);
+  })();
+  /** One input property's description, from its key to the next sibling key of the schema. */
+  const schemaText = (name) => {
+    const at = tool.search(new RegExp(`\\n\\s+${name}: \\{\\s*type:`));
+    assert.ok(at > 0, `write_file's input schema has no ${name} — the scanner is wrong, not the code`);
+    const rest = tool.slice(at + 1);
+    const next = rest.slice(1).search(/\n\s{12}[a-zA-Z]+: [{A-Z]/);
+    return rest.slice(0, next > 0 ? next : undefined);
+  };
+
+  it('its `properties` text says MERGED over the stored bag, and that removal is deleteFields', () => {
+    const d = schemaText('properties');
+    assert.match(d, /MERGE/, 'a rewrite merges the bag; the text must say so, a caller cannot infer it');
+    assert.match(d, /deleteFields/, 'and that removing a key is update_file_meta deleteFields, never an omission');
+  });
+
+  it('its `tags` text no longer says update_file_meta replaces "unlike the brain update tools"', () => {
+    const d = schemaText('tags');
+    assert.match(d, /REPLACES/, 'a rewrite still replaces the tag list');
+    assert.doesNotMatch(d, /update_file_meta`? replaces too, unlike/, 'update_file_meta merges its properties: only its LISTS replace');
+    assert.match(d, /update_file_meta`? replaces lists too/, 'the sentence the plan names');
   });
 });
 

@@ -166,7 +166,8 @@ against the space's own overrides.
 
 > **Editing a file's custom properties got safer in 3.1.** Saving used to replace the whole set, so an API
 > caller that changed one property silently lost the others — the four Brain record types had been fixed
-> years earlier and files had been missed. Properties are now **merged**: the ones you do not touch are kept.
+> years earlier and files had been missed. Properties are now **merged**: the ones you do not touch are kept,
+> and uploading a file again over an existing one merges the properties it carries the same way.
 > Removing one still removes it. Tags and the entity / fact / chrono links are unchanged — those are
 > replaced by whatever you save, so save the full list you want.
 

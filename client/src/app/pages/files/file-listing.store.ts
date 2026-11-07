@@ -187,6 +187,9 @@ export class FileListingStore {
   /** Failure reason for the directory listing; null when it loaded (U3). */
   readonly loadError = signal<string | null>(null);
 
+  /** The answer code of the failed listing (`file_system_fault`: the server's storage failed), or null when it named none; set and cleared with `loadError`. */
+  readonly loadErrorCode = signal<string | null>(null);
+
   /** A listing landed: the path it was for, and the entries it returned. */
   readonly listed = new Subject<{ path: string; entries: FileEntry[] }>();
 
@@ -236,12 +239,13 @@ export class FileListingStore {
     this.requested = { spaceId, path };
     const isRefresh = this.loadedPath === path && this.entries().length > 0;
     if (isRefresh) this.refreshing.set(true);
-    else { this.loading.set(true); this.loadError.set(null); }
+    else { this.loading.set(true); this.loadError.set(null); this.loadErrorCode.set(null); }
     this.filesApi.listFiles(spaceId, path).subscribe({
       next: ({ entries }) => {
         this.entries.set(entries);
         this.loadedPath = path;
         this.loadError.set(null);
+        this.loadErrorCode.set(null);
         this.refreshFailed.set(false);
         this.loading.set(false);
         this.refreshing.set(false);
@@ -278,6 +282,8 @@ export class FileListingStore {
          */
         this.entries.set([]);
         this.loadError.set(reason);
+        const code = (e as { error?: { code?: unknown } } | null)?.error?.code;
+        this.loadErrorCode.set(typeof code === 'string' ? code : null);
         this.loading.set(false);
       },
     });

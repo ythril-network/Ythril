@@ -49,12 +49,41 @@ export function mergeTags(existing?: readonly string[] | null, incoming?: readon
   return Array.from(new Set([...(existing ?? []), ...(incoming ?? [])]));
 }
 
-/** The stored properties with the incoming ones laid over — one level deep, incoming wins per key. */
+/** Whether a stored value is a plain object, the only shape a properties bag is ever stored as (an array, a string, a number and null are not). */
+function isPlainBag(value: unknown): value is RecordProperties {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The stored properties with the incoming ones laid over — one level deep, incoming wins per key.
+ *
+ * A stored value that is not a plain object counts as ABSENT: spreading an array or a string into a map yields index keys, which no caller ever stored.
+ */
 export function mergeProperties(
   existing?: RecordProperties | null,
   incoming?: RecordProperties,
 ): RecordProperties {
-  return { ...(existing ?? {}), ...(incoming ?? {}) };
+  return { ...(isPlainBag(existing) ? existing : {}), ...(incoming ?? {}) };
+}
+
+/**
+ * {@link mergeProperties} in the database's spelling: the pipeline expression a write puts as the `properties` key of its own `$set` stage, so the
+ * merge happens in the same write that stores it and no edit landing between a read and that write can lose a key.
+ *
+ * ## The question it answers, and what it prevents
+ *
+ * "What does the database store when the incoming bag is laid over whatever it holds?" The same rule as `mergeProperties` (one level, incoming wins
+ * per key, a stored value that is not an object is absent), so the two cannot drift: `merge-properties-and-its-database-stage-agree-db` runs every
+ * row through both. The incoming bag goes under `$literal`, so a key or a value that starts with `$` or holds a dot is data, never an operator or a
+ * path. Put it OUTSIDE any `$literal` mapping of the same `$set` (a stage inside one is stored as text).
+ */
+export function mergePropertiesStage(incoming: RecordProperties): Record<string, unknown> {
+  return {
+    $mergeObjects: [
+      { $cond: [{ $eq: [{ $type: '$properties' }, 'object'] }, '$properties', {}] },
+      { $literal: incoming },
+    ],
+  };
 }
 
 /**

@@ -39,7 +39,7 @@ import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-g
 import { TOOL_RIGHTS, toolTakesAView } from '../auth/space-rights.js';
 import { isViewId, resolveOwnView, viewOwnerOf, viewReadMembers, viewsOfOwner } from '../config/views.js';
 import { ownViewNamedIn, retiredIdNamedIn, unknownSpaceAnswer } from '../spaces/unknown-space.js';
-import { peerBoundTo } from '../auth/peer-bound.js';
+import { peerBoundTo, peerTokenToolRefusal } from '../auth/peer-bound.js';
 import { withoutHeldFor } from '../sync/space-exchange-set.js';
 import { admitPeerToolCall } from '../sync/peer-space-admission.js';
 import { toolIsVisible } from './tool-visibility.js';
@@ -152,6 +152,15 @@ export interface ToolCallRequest {
  * has to catch is a door that gets to decide what the failure meant.
  */
 export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
+  // A peer-bound token is a sync credential: a tool in the one named set (`peerTokenToolRefusal`) is refused 403 before anything else about the
+  // call is asked (arguments, visibility, reach, rung, a held space), and the audit row of the refusal names the space the call named.
+  const peerRefusal = peerTokenToolRefusal(peerBoundToCall(req.caller), req.name);
+  if (peerRefusal !== undefined) {
+    return await auditedToolCall(req.name, req.caller, req.args, async facts => {
+      nameAuditSpace(req.args, getConfig(), facts);
+      return refuse(403, `Error (403): ${peerRefusal}`);
+    });
+  }
   // A peer token's call is counted in the fence of every space it names for as long as it runs; the release is HERE, in a `finally`, so no
   // return of the dispatch below (a refusal of a later space, a handler that threw) can leave a count behind.
   const admitted: (() => void)[] = [];
@@ -163,6 +172,21 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
   }
 }
 
+/** The peer this call's token is bound to, or none: a peer token is a peer's credential, every other token the operator's own tooling. */
+function peerBoundToCall(caller: ToolCaller): string | undefined {
+  return peerBoundTo(getConfig().tokens?.find(t => t.id === caller.tokenId));
+}
+
+/**
+ * Put the space a call named on its audit row, and only a space that EXISTS: a caller's spelling of one that does not is never written to the trail.
+ * Said before any refusal, so a call refused for what the token may see names its space as the REST route's does.
+ */
+function nameAuditSpace(args: unknown, cfg: ReturnType<typeof getConfig>, facts: ToolAuditFacts): void {
+  const named = args !== null && typeof args === 'object' ? (args as Record<string, unknown>)['space'] : undefined;
+  const namedSpace = typeof named === 'string' ? named.trim() : '';
+  if (cfg.spaces.some(s => s.id === namedSpace)) facts.auditSpace = namedSpace;
+}
+
 /**
  * The body of {@link callTool}: every release it owes is pushed onto `admitted`, which the caller releases however this ends.
  * It records NOTHING: what the audit row must say that only this function knows goes onto `facts`, and `auditedToolCall` writes the row.
@@ -172,7 +196,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
   const { rights } = caller;
   const cfg = getConfig();
   // The peer this call's token is bound to, or none: a peer token is a peer's credential, every other token the operator's own tooling.
-  const peerId = peerBoundTo(cfg.tokens?.find(t => t.id === caller.tokenId));
+  const peerId = peerBoundToCall(caller);
   const accessibleSpaceIds = reachableSpaceIds(rights, cfg.spaces.map(s => s.id));
   const accessibleSpaces = cfg.spaces.filter(s => accessibleSpaceIds.includes(s.id));
   // The caller's own personal views, offered to the tools that take one (and to no other), and resolved per call below.
@@ -199,8 +223,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
    * is never written to the trail. Said here, before any refusal below, so a call refused for what the token may see names its space as the REST
    * route's does; the loop below says it again for each space it checks, and after the loop it is the first one named.
    */
-  const namedSpace = typeof a['space'] === 'string' ? a['space'].trim() : '';
-  if (cfg.spaces.some(s => s.id === namedSpace)) facts.auditSpace = namedSpace;
+  nameAuditSpace(a, cfg, facts);
 
   // A retired proxy id answers 410 to every caller, before anything about the caller or the tool is asked (visibility, reach, rung): the id
   // was public, it is not a view, and what happened to it is the answer however little the caller may do.

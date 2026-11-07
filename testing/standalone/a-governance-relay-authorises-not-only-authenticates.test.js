@@ -114,7 +114,7 @@ describe('the peer a token is bound to has one reader', () => {
   });
 
   it('the doors that ask which peer a token is bound to call the one reader', () => {
-    for (const f of ['server/src/auth/peer-relay.ts', 'server/src/auth/middleware.ts', 'server/src/api/sync/_shared.ts', 'server/src/mcp/call-tool.ts']) {
+    for (const f of ['server/src/auth/peer-relay.ts', 'server/src/auth/middleware.ts', 'server/src/api/sync/_shared.ts', 'server/src/mcp/call-tool.ts', 'server/src/mcp/router.ts']) {
       assert.match(code(f), /\bpeerBoundTo\(/, `${f} no longer asks the one reader which peer a token is bound to`);
     }
   });

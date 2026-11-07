@@ -27,7 +27,7 @@ import { writeFilterFor } from '../brain/write-precondition.js';
 import { expiryForCreate } from '../brain/ttl.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
 import { embedArrivedFiles } from '../sync/embed-arrived-files.js';
-import { mergePropertiesOrKeep } from '../brain/merge-fields.js';
+import { mergePropertiesOrKeep, mergePropertiesStage } from '../brain/merge-fields.js';
 import { stampOfArrival } from '../sync/local-only-fields.js';
 import { NEVER_RETURNED_PROJECTION } from '../brain/read-projection.js';
 import { peerFileKey } from './sandbox.js';
@@ -140,7 +140,8 @@ export async function upsertFileMeta(
     const $set: Record<string, unknown> = { updatedAt: now, sizeBytes };
     if (opts.description !== undefined) $set['description'] = opts.description;
     if (opts.tags !== undefined) $set['tags'] = opts.tags;
-    if (opts.properties !== undefined) $set['properties'] = opts.properties;
+    // NOT in `$set`: that bag is mapped through `$literal` below, and a merge stage stored as a literal is text. The properties of a rewrite MERGE over the
+    // stored bag, as `updateFileMeta`'s do (X-6: an absence never deletes, removing a key is `deleteFields`), and they do so in this write's own pipeline.
     // Only when stated. A writer that does not compute a hash must not erase the one already there — that would
     // turn "unknown" into a permanent state and the skip below into dead code.
     if (opts.sha256 !== undefined) $set['sha256'] = opts.sha256;
@@ -163,6 +164,7 @@ export async function upsertFileMeta(
         [
           ...(opts.sha256 !== undefined ? replacedBytesStages(opts.sha256, 'authored') : []),
           { $set: values },
+          ...(opts.properties !== undefined ? [{ $set: { properties: mergePropertiesStage(opts.properties) } }] : []),
           { $unset: Object.keys($unset) },
         ] as never,
       );

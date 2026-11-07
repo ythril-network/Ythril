@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+| Changes on upgrade | Action |
+|---|---|
+| A file rewrite (`write_file`, `POST /api/write_file`, the upload) merges its `properties` over the stored ones; `properties: {}` keeps the bag | Remove a key with `update_file_meta` `deleteFields` |
+| A peer-bound token's upload that carries `description`, `tags`, `properties` or `ttlDays` is now `400` (it was ignored) | Send a peer's bytes alone; metadata arrives by metadata sync |
+| Listing or reading a file whose storage fails now answers `500` `file_system_fault` (it answered an empty listing, `404` or `File not found`) | Treat that `500` as a server fault to report |
+
+### Changed
+
+- **Files:** a rewrite of a file merges the `properties` it sends over the stored ones, as `update_file_meta` does; `description` and `tags` still replace.
+- **Files:** a peer-bound token's upload that carries file metadata is refused `400` before anything is stored; it was ignored.
+- **Files:** `list_dir`, `read_file` and the REST listing and download answer `500` `file_system_fault` when the storage fails, not an empty listing or "not found".
+- **Docs:** changed: the files guide, write semantics, MCP and capability map, personal views, tokens, sync, auth and limits, setup, audit log, upgrading and user guide pages, and the contribution guide.
+
+### Security
+
+- **Tokens:** a peer-bound token can no longer store a file as this instance's own upload through `write_file` (`403`, and the tool is not listed for it).
+
 ## [6.5.3] — 2026-11-07
 
 **A security patch: the bundled database stops writing its root password to a log file on its volume; delete the file an earlier 6.4 or 6.5 left there.**
