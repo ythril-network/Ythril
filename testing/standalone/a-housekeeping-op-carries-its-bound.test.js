@@ -13,8 +13,8 @@
  *
  * `withinHousekeepingBound(fn, { opMs? })` is the second constructor of the ONE scope type. Inside it:
  *
- * - **a read** carries `timeoutMS` = the figure (`housekeepingOpMs()`, or the scope's `opMs`); a numeric `maxTimeMS` the caller
- *   set keeps the lower and gets no `timeoutMS`;
+ * - **a read** carries `maxTimeMS` = the figure (`housekeepingOpMs()`, or the scope's `opMs`) and a backstop `signal`, and no
+ *   `timeoutMS` (`Q-716`); a numeric `maxTimeMS` the caller set keeps the lower;
  * - **a plain write** is ended by the SERVER at the figure (`maxTimeMS`, no `timeoutMS`) with the client backstop
  *   `SERVER_FIRST_MARGIN_MS` later, answered `StoreTimeout` — exactly the seq-hold path, so a housekeeping write the bound ended
  *   can never land afterwards (`Q-372`);
@@ -23,7 +23,8 @@
  *   of them. The bound is per operation, and the unit is bounded by its caller (a cycle's budget), not here;
  * - **an inner scope takes the smaller figure**: `min(own, enclosing active scope's)`, as the deadline already does. A hold's
  *   shorter bound inside a walk wins, and an operator who sets the housekeeping figure below a hold's sees it applied;
- * - a session's operation is untouched (the session bounds it), outside any scope the arguments are the caller's own, and a
+ * - a session's operation is bounded like any other, the session handed through (a statement of an open transaction without the
+ *   write's `comment`: its transaction is sealed instead), outside any scope the arguments are the caller's own, and a
  *   scope that has ended binds nothing.
  *
  * ## Seen red
@@ -41,8 +42,8 @@ import { elapse } from '../_shared/sleep.mjs';
 
 const { callBounded, withinWriteBound, SERVER_FIRST_MARGIN_MS } = wb;
 
-/** Where the calls go, and what the client inherits: stated at every call, as the module requires. */
-const TARGET = { collection: 'sp_facts', inheritedTimeoutMs: undefined };
+/** Where the calls go: stated at every call, as the module requires. */
+const TARGET = { collection: 'sp_facts' };
 const NOT_SETTLING = () => new Promise(() => {});
 
 /** The arguments a call's options position needs, so each method's own options argument is the one looked at. */
@@ -92,24 +93,29 @@ describe('the housekeeping bound is a scope of the one bound', () => {
 
   describe('a read', () => {
     for (const method of ['find', 'findOne', 'aggregate', 'countDocuments']) {
-      it(`${method} carries timeoutMS = the housekeeping figure`, async () => {
+      it(`${method} carries maxTimeMS = the housekeeping figure and a backstop signal, and no timeoutMS`, async () => {
         const o = await handed(housekeeping(), method);
-        assert.equal(o.timeoutMS, 7000);
-        assert.equal('maxTimeMS' in o, false, 'a read carries one clock, not both');
+        assert.equal(o.maxTimeMS, 7000);
+        assert.ok(o.signal instanceof AbortSignal, 'a read carries no backstop signal: a store that does not answer is waited on for ever');
+        assert.equal('timeoutMS' in o, false, 'a driver timeoutMS on a read (CVE-2026-119179; a no-op from driver 7.8.0)');
+        assert.equal('comment' in o, false, 'a read lands nothing: it carries no write comment');
       });
     }
 
     it('a numeric maxTimeMS the caller set keeps the lower, and gets no timeoutMS', async () => {
       const low = await handed(housekeeping(), 'find', { maxTimeMS: 150 });
       assert.equal(low.maxTimeMS, 150);
-      assert.equal('timeoutMS' in low, false, 'maxTimeMS and timeoutMS together: the driver keeps timeoutMS and drops maxTimeMS');
+      assert.equal('timeoutMS' in low, false, 'a caller\'s own lower maxTimeMS must not bring a client-side timeout with it');
       const high = await handed(housekeeping(), 'find', { maxTimeMS: 99_999 });
       assert.equal(high.maxTimeMS, 7000, 'a caller\'s maxTimeMS above the bound must be lowered to it');
     });
 
-    it('a timeoutMS the caller set is lowered to the figure and never raised', async () => {
-      assert.equal((await handed(housekeeping(), 'findOne', { timeoutMS: 100 })).timeoutMS, 100);
-      assert.equal((await handed(housekeeping(), 'findOne', { timeoutMS: 99_999 })).timeoutMS, 7000);
+    it('a signal the caller set still ends the call, beside the backstop\'s', async () => {
+      const own = new AbortController();
+      const o = await handed(housekeeping(), 'findOne', { signal: own.signal });
+      assert.equal(o.signal.aborted, false);
+      own.abort();
+      assert.equal(o.signal.aborted, true, 'the caller\'s own signal was replaced by the backstop\'s');
     });
   });
 
@@ -122,13 +128,12 @@ describe('the housekeeping bound is a scope of the one bound', () => {
       });
     }
 
-    it('a client timeoutMS the database carries is switched off for it, as inside a hold', async () => {
-      const { args, at } = argsFor('deleteMany', {});
-      let seen;
-      await wb.withinHousekeepingBound(async () => callBounded('deleteMany', args, (a) => { seen = a; return Promise.resolve(1); },
-        { collection: 'sp_facts', inheritedTimeoutMs: 300 }));
-      assert.equal(seen[at].timeoutMS, 0);
-      assert.equal(seen[at].maxTimeMS, 7000);
+    it('a write also carries the backstop signal and the unique comment its backstop ends it by, as inside a hold', async () => {
+      const o = await handed(housekeeping(), 'deleteMany');
+      assert.equal(o.maxTimeMS, 7000);
+      assert.ok(o.signal instanceof AbortSignal, 'a write carries no backstop signal: a command not yet sent could not be dropped');
+      assert.ok(typeof o.comment === 'string' && o.comment.startsWith('ythril-write-bound:'), 'a write carries no comment its backstop finds it by');
+      assert.notEqual((await handed(housekeeping(), 'deleteMany')).comment, o.comment, 'two writes shared a comment: one kill could end the other');
     });
 
     it('a call that never settles is answered StoreTimeout at the figure plus the backstop margin, never sooner', async () => {
@@ -152,7 +157,7 @@ describe('the housekeeping bound is a scope of the one bound', () => {
   describe('the scope', () => {
     it('the claim scope carries 10 000 ms, for a read and for a write alike', async () => {
       const scope = housekeeping(wb.CLAIM_OP_MS);
-      assert.equal((await handed(scope, 'find')).timeoutMS, wb.CLAIM_OP_MS);
+      assert.equal((await handed(scope, 'find')).maxTimeMS, wb.CLAIM_OP_MS);
       assert.equal((await handed(scope, 'findOneAndUpdate')).maxTimeMS, wb.CLAIM_OP_MS);
     });
 
@@ -166,7 +171,7 @@ describe('the housekeeping bound is a scope of the one bound', () => {
           return out;
         });
         assert.equal(sent.length, 5);
-        for (const o of sent) assert.equal(o.timeoutMS, 7000);
+        for (const o of sent) assert.equal(o.maxTimeMS, 7000);
         // The control: the same wait inside a hold refuses the operation unsent, so the comparison above is the scope's, not the clock's.
         const refused = await withinWriteBound(async () => { await elapse(80, 'ttl elapses: the hold\'s 30 ms deadline must run out before the operation is attempted'); try { callBounded('find', [{}, {}], (a) => a, TARGET); return null; } catch (e) { return e; } });
         assert.ok(refused instanceof StoreTimeout, 'a hold whose deadline passed must refuse the operation — the control for the case above');
@@ -176,8 +181,8 @@ describe('the housekeeping bound is a scope of the one bound', () => {
     });
 
     it('boundTimeLeft is never Infinity: a scope with no deadline has no time-left to hand a caller', async () => {
-      // `brain/held-transaction.ts` starts a session with `defaultTimeoutMS: boundTimeLeft() ?? writeTimeoutMs()`; an Infinity
-      // there is a transaction with no bound at all. A deadline-less scope answers `undefined`, so the fallback is the finite one.
+      // `db/bounded-transaction.ts` runs its retry loop against `boundTimeLeft()`; an Infinity there is a transaction with no
+      // bound at all. A deadline-less scope answers `undefined`, so it opens a write bound of its own, the finite one.
       assert.equal(await wb.withinHousekeepingBound(async () => wb.boundTimeLeft()), undefined);
       const inHold = await wb.withinHousekeepingBound(() => withinWriteBound(async () => wb.boundTimeLeft()));
       assert.ok(Number.isFinite(inHold) && inHold > 0, `a hold inside a walk is finite, got ${inHold}`);
@@ -215,16 +220,27 @@ describe('the housekeeping bound is a scope of the one bound', () => {
 
     it('an inner housekeeping scope cannot raise the enclosing walk\'s figure', async () => {
       const o = await housekeeping(2500)(async () => handed(housekeeping(9000), 'find'));
-      assert.equal(o.timeoutMS, 2500);
+      assert.equal(o.maxTimeMS, 2500);
       const claim = await housekeeping(wb.housekeepingOpMs())(async () => handed(housekeeping(wb.CLAIM_OP_MS), 'find'));
-      assert.equal(claim.timeoutMS, 7000, 'min(10 000, 7 000)');
+      assert.equal(claim.maxTimeMS, 7000, 'min(10 000, 7 000)');
     });
 
-    it('a session\'s operation is untouched: the session bounds it', async () => {
+    it('a session\'s operation is bounded like any other, the session handed through', async () => {
       const session = { inTransaction: () => false };
       const o = await handed(housekeeping(), 'updateMany', { session });
-      assert.deepEqual(Object.keys(o), ['session']);
       assert.equal(o.session, session);
+      assert.equal(o.maxTimeMS, 7000);
+      assert.ok(o.signal instanceof AbortSignal);
+      assert.equal('timeoutMS' in o, false);
+    });
+
+    it('a statement of an open transaction carries the figure and the signal, and not the write\'s comment', async () => {
+      const session = { inTransaction: () => true };
+      const o = await handed(housekeeping(), 'updateMany', { session });
+      assert.equal(o.session, session);
+      assert.equal(o.maxTimeMS, 7000);
+      assert.ok(o.signal instanceof AbortSignal);
+      assert.equal('comment' in o, false, 'its transaction is sealed by its owner: a kill by comment would end one statement of it');
     });
 
     it('outside any scope the caller\'s own arguments reach the driver, the same objects', () => {

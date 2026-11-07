@@ -78,6 +78,7 @@ import type { EndedOperation } from './write-bound.js';
 import { StoreTimeout } from './write-timeout.js';
 import { carriesErrorLabel, storeIsNotAnswering } from './store-condition.js';
 import { log, peerText } from '../util/log.js';
+import { backoffDelayMs } from '../util/backoff.js';
 
 /**
  * The seal's own bound, ms: one write of nothing, which must outlast a store that is slow but still answering, since a seal
@@ -89,7 +90,9 @@ export const SEAL_MS = 2_000;
 /** Where the seal writes. It matches nothing and creates nothing; it is a collection no reader or observer watches. */
 const SEAL_COLLECTION = 'transaction_seal';
 
-/** The longest pause between two attempts after a transient failure, ms; the first is a few ms, each doubles, none past the deadline. */
+/** The first pause between two attempts after a transient failure, ms; each doubles (with jitter) up to the next figure, none past the deadline. */
+const FIRST_BACKOFF_MS = 2;
+/** The longest pause between two attempts after a transient failure, ms. */
 const MAX_BACKOFF_MS = 100;
 
 /**
@@ -291,7 +294,7 @@ export async function inBoundedTransaction<T>(
         return await attempt(session, fn, deadline, commitCap, done);
       } catch (err) {
         if (!(err instanceof Retry)) throw err;
-        const pause = Math.min(MAX_BACKOFF_MS, 2 ** tries);
+        const pause = backoffDelayMs(tries - 1, FIRST_BACKOFF_MS, MAX_BACKOFF_MS);
         // A transient failure past the deadline is the bound ending the retrying: answered as the bound's, the failure as its cause.
         if (deadline - Date.now() <= pause) throw new StoreTimeout('the transaction', { cause: err.failure });
         await new Promise(resolve => setTimeout(resolve, pause));
