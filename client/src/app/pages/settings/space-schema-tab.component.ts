@@ -331,7 +331,7 @@ const suggestedAddAsName = (name: string): string => name + '-2';
 
 @if (importConflict(); as conflict) {
   <div style="position:fixed;inset:0;background:var(--bg-scrim);display:flex;align-items:center;justify-content:center;z-index:320;">
-    <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:440px;max-width:96vw;" [appModal]="'spaces.schema.conflict.title' | transloco" (dismiss)="dismissImportConflict()" (click)="$event.stopPropagation()">
+    <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:440px;max-width:96vw;" [appModal]="'spaces.schema.conflict.title' | transloco" (dismiss)="requestDismissImportConflict()" (click)="$event.stopPropagation()">
       <div style="font-weight:700;font-size:15px;margin-bottom:8px;">{{ 'spaces.schema.conflict.title' | transloco }}</div>
       <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;" [innerHTML]="'spaces.schema.conflict.body' | transloco: conflictNames(conflict)"></p>
       <div style="display:flex;flex-direction:column;gap:10px;">
@@ -343,7 +343,7 @@ const suggestedAddAsName = (name: string): string => name + '-2';
             <button class="btn btn-primary btn-sm" type="button" (click)="resolveImportConflictAddAs()" [disabled]="!importConflictAddAsName().trim()">{{ 'spaces.schema.conflict.addAs' | transloco }}</button>
           </div>
         }
-        <button class="btn btn-ghost" type="button" (click)="dismissImportConflict()">{{ 'common.cancel' | transloco }}</button>
+        <button class="btn btn-ghost" type="button" (click)="requestDismissImportConflict()">{{ 'common.cancel' | transloco }}</button>
       </div>
     </div>
   </div>
@@ -394,10 +394,10 @@ const suggestedAddAsName = (name: string): string => name + '-2';
 
 @if (exportLibDialog(); as d) {
   <div style="position:fixed;inset:0;background:var(--bg-scrim);display:flex;align-items:center;justify-content:center;z-index:320;">
-    <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:480px;max-width:96vw;" [appModal]="'spaces.schema.exportToLibrary.title' | transloco" appModalCloseOnBackdrop (dismiss)="closeExportToLibrary()" (click)="$event.stopPropagation()">
+    <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:480px;max-width:96vw;" [appModal]="'spaces.schema.exportToLibrary.title' | transloco" appModalCloseOnBackdrop (dismiss)="requestCloseExportToLibrary()" (click)="$event.stopPropagation()">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
         <strong>{{ 'spaces.schema.exportToLibrary.title' | transloco }}</strong>
-        <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="closeExportToLibrary()"><ph-icon name="x" [size]="14"/></button>
+        <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="requestCloseExportToLibrary()"><ph-icon name="x" [size]="14"/></button>
       </div>
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 14px;">{{ 'spaces.schema.exportToLibrary.hint' | transloco }}</p>
       @if (state.isDirty()) {
@@ -413,7 +413,7 @@ const suggestedAddAsName = (name: string): string => name + '-2';
       </div>
       @if (d.error) { <div class="alert alert-error" style="font-size:12px;margin-bottom:12px;">{{ d.error }}</div> }
       <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button class="btn btn-secondary btn-sm" type="button" (click)="closeExportToLibrary()">{{ 'common.cancel' | transloco }}</button>
+        <button class="btn btn-secondary btn-sm" type="button" (click)="requestCloseExportToLibrary()">{{ 'common.cancel' | transloco }}</button>
         <button class="btn btn-primary btn-sm" type="button" (click)="doExportToLibrary()" [disabled]="d.saving || state.isDirty() || !d.groupName.trim()">
           @if (d.saving) { <span class="spinner" style="width:12px;height:12px;border-width:2px;margin-right:5px;"></span> }
           {{ 'spaces.schema.exportToLibrary.confirm' | transloco }}
@@ -570,15 +570,25 @@ export class SpaceSchemaTabComponent implements OnInit {
   /** What the export dialog's two fields held when it opened, for `holdUnsavedEdits`. */
   private exportLibOpened = { groupName: '', namePrefix: '' };
 
-  constructor() {
-    // Two small drafts this tab owns outside `SpaceSettingsState`: the export-to-library dialog's fields (until the request is sent), and the
-    // import-conflict name typed over the suggested one. Closing either, or its action succeeding, ends the draft.
-    holdUnsavedEdits(() => {
-      const d = this.exportLibDialog();
-      if (d && !d.saving && (d.groupName !== this.exportLibOpened.groupName || d.namePrefix !== this.exportLibOpened.namePrefix)) return true;
-      const c = this.importConflict();
-      return !!c?.allowAddAs && this.importConflictAddAsName() !== suggestedAddAsName(c.name);
-    });
+  // Two small drafts this tab owns outside `SpaceSettingsState`, one per dialog: the export-to-library dialog's fields (until the request is
+  // sent), and the import-conflict name typed over the suggested one. Closing either, or its action succeeding, ends the draft.
+  private readonly exportDraft = holdUnsavedEdits(() => {
+    const d = this.exportLibDialog();
+    return !!d && !d.saving && (d.groupName !== this.exportLibOpened.groupName || d.namePrefix !== this.exportLibOpened.namePrefix);
+  });
+  private readonly conflictDraft = holdUnsavedEdits(() => {
+    const c = this.importConflict();
+    return !!c?.allowAddAs && this.importConflictAddAsName() !== suggestedAddAsName(c.name);
+  });
+
+  /** Escape, the X, Cancel and the backdrop of the export dialog: close it, asking first while its fields were changed. */
+  requestCloseExportToLibrary(): void {
+    void this.exportDraft.closeIfConfirmed(() => this.closeExportToLibrary());
+  }
+
+  /** Escape and Cancel of the import-conflict dialog: dismiss it, asking first while the name was typed over. */
+  requestDismissImportConflict(): void {
+    void this.conflictDraft.closeIfConfirmed(() => this.dismissImportConflict());
   }
 
   libPickerLoading    = signal(false);

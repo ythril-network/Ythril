@@ -64,10 +64,10 @@ function formSnapshot(f: WebhookForm): string {
     <!-- CREATE / EDIT DIALOG -->
     @if (form(); as f) {
       <div class="dialog-backdrop">
-        <div class="dialog" [appModal]="(f.id ? 'webhooks.dialog.editTitle' : 'webhooks.dialog.createTitle') | transloco" (dismiss)="closeForm()" (click)="$event.stopPropagation()">
+        <div class="dialog" [appModal]="(f.id ? 'webhooks.dialog.editTitle' : 'webhooks.dialog.createTitle') | transloco" (dismiss)="requestCloseForm()" (click)="$event.stopPropagation()">
           <div class="dialog-header">
             <div class="card-title">{{ (f.id ? 'webhooks.dialog.editTitle' : 'webhooks.dialog.createTitle') | transloco }}</div>
-            <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="closeForm()"><ph-icon name="x" [size]="16"/></button>
+            <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="requestCloseForm()"><ph-icon name="x" [size]="16"/></button>
           </div>
 
           @if (formError()) { <div class="alert alert-error" style="margin-bottom:14px;">{{ formError() }}</div> }
@@ -127,7 +127,7 @@ function formSnapshot(f: WebhookForm): string {
           </div>
 
           <div style="display:flex;gap:8px;justify-content:flex-end;">
-            <button class="btn btn-secondary btn-sm" type="button" (click)="closeForm()">{{ 'common.cancel' | transloco }}</button>
+            <button class="btn btn-secondary btn-sm" type="button" (click)="requestCloseForm()">{{ 'common.cancel' | transloco }}</button>
             <button class="btn btn-primary" type="button" (click)="save(f)" [disabled]="saving()">
               @if (saving()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
               {{ (f.id ? 'common.save' : 'webhooks.dialog.createButton') | transloco }}
@@ -281,12 +281,15 @@ export class WebhooksComponent implements OnInit {
   private formAtOpen = '';
   saving = signal(false);
 
-  constructor() {
-    // An open dialog that differs from what it opened with; closing it (saved or not) ends the draft.
-    holdUnsavedEdits(() => {
-      const f = this.form();
-      return f !== null && formSnapshot(f) !== this.formAtOpen;
-    });
+  // An open dialog that differs from what it opened with; closing it (saved or not) ends the draft.
+  private readonly draft = holdUnsavedEdits(() => {
+    const f = this.form();
+    return f !== null && formSnapshot(f) !== this.formAtOpen;
+  });
+
+  /** Escape, the X and Cancel of the create/edit dialog: close it, asking first while it differs from what it opened with. */
+  requestCloseForm(): void {
+    void this.draft.closeIfConfirmed(() => this.closeForm());
   }
   formError = signal('');
 

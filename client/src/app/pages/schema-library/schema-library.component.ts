@@ -329,10 +329,10 @@ export function entriesFromTypeSchemas(
     <!-- Add Catalog dialog -->
     @if (showAddCatalog()) {
       <div style="position:fixed;inset:0;background:var(--bg-scrim);display:flex;align-items:center;justify-content:center;z-index:200;">
-        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:92vw;max-width:480px;" [appModal]="'schemaLib.catalog.addTitle' | transloco" (dismiss)="showAddCatalog.set(false)" (click)="$event.stopPropagation()">
+        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:92vw;max-width:480px;" [appModal]="'schemaLib.catalog.addTitle' | transloco" (dismiss)="requestCloseAddCatalog()" (click)="$event.stopPropagation()">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
             <h3 style="margin:0;font-size:15px;">{{ 'schemaLib.catalog.addTitle' | transloco }}</h3>
-            <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="showAddCatalog.set(false)"><ph-icon name="x" [size]="18"/></button>
+            <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="requestCloseAddCatalog()"><ph-icon name="x" [size]="18"/></button>
           </div>
           <div class="field" style="margin-bottom:14px;">
             <label>{{ 'schemaLib.catalog.nameLabel' | transloco }}</label>
@@ -398,10 +398,10 @@ export function entriesFromTypeSchemas(
     <!-- Create library access token dialog -->
     @if (showCreateLibToken()) {
       <div style="position:fixed;inset:0;background:var(--bg-scrim);display:flex;align-items:center;justify-content:center;z-index:200;">
-        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:92vw;max-width:420px;" [appModal]="'schemaLib.share.tokenDialogTitle' | transloco" (dismiss)="closeCreateLibToken()" (click)="$event.stopPropagation()">
+        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:92vw;max-width:420px;" [appModal]="'schemaLib.share.tokenDialogTitle' | transloco" (dismiss)="requestCloseCreateLibToken()" (click)="$event.stopPropagation()">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
             <h3 style="margin:0;font-size:15px;">{{ 'schemaLib.share.tokenDialogTitle' | transloco }}</h3>
-            <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="closeCreateLibToken()"><ph-icon name="x" [size]="18"/></button>
+            <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="requestCloseCreateLibToken()"><ph-icon name="x" [size]="18"/></button>
           </div>
           <p style="font-size:13px;color:var(--text-secondary);margin:0 0 16px;">{{ 'schemaLib.share.tokenDialogHint' | transloco }}</p>
           <div class="field" style="margin-bottom:14px;">
@@ -410,7 +410,7 @@ export function entriesFromTypeSchemas(
           </div>
           @if (libTokenError()) { <p style="font-size:12px;color:var(--danger);margin:0 0 12px;">{{ libTokenError() }}</p> }
           <div style="display:flex;gap:8px;justify-content:flex-end;">
-            <button class="btn btn-secondary btn-sm" type="button" (click)="closeCreateLibToken()">{{ 'common.cancel' | transloco }}</button>
+            <button class="btn btn-secondary btn-sm" type="button" (click)="requestCloseCreateLibToken()">{{ 'common.cancel' | transloco }}</button>
             <button class="btn btn-primary" type="button" (click)="createLibraryToken()" [disabled]="libTokenCreating()">
               {{ libTokenCreating() ? ('common.saving' | transloco) : ('schemaLib.share.createTokenButton' | transloco) }}
             </button>
@@ -441,10 +441,10 @@ export function entriesFromTypeSchemas(
     <!-- Export space schema dialog -->
     @if (exportSpaceDialog()) {
       <div style="position:fixed;inset:0;background:var(--bg-scrim);display:flex;align-items:center;justify-content:center;z-index:200;">
-        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:92vw;max-width:500px;" [appModal]="'schemaLib.exportSpace.dialogTitle' | transloco" (dismiss)="exportSpaceDialog.set(null)" (click)="$event.stopPropagation()">
+        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:92vw;max-width:500px;" [appModal]="'schemaLib.exportSpace.dialogTitle' | transloco" (dismiss)="requestCloseExportSpace()" (click)="$event.stopPropagation()">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
             <h3 style="margin:0;font-size:15px;">{{ 'schemaLib.exportSpace.dialogTitle' | transloco }}</h3>
-            <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="exportSpaceDialog.set(null)"><ph-icon name="x" [size]="18"/></button>
+            <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="requestCloseExportSpace()"><ph-icon name="x" [size]="18"/></button>
           </div>
           <p style="font-size:13px;color:var(--text-secondary);margin:0 0 16px;">{{ 'schemaLib.exportSpace.dialogHint' | transloco }}</p>
           <div class="field" style="margin-bottom:14px;">
@@ -470,7 +470,7 @@ export function entriesFromTypeSchemas(
           }
           @if (exportSpaceDialog()!.error) { <p style="font-size:12px;color:var(--danger);margin:0 0 12px;">{{ exportSpaceDialog()!.error }}</p> }
           <div style="display:flex;gap:8px;justify-content:flex-end;">
-            <button class="btn btn-secondary btn-sm" type="button" (click)="exportSpaceDialog.set(null)">{{ 'common.cancel' | transloco }}</button>
+            <button class="btn btn-secondary btn-sm" type="button" (click)="requestCloseExportSpace()">{{ 'common.cancel' | transloco }}</button>
             <button class="btn btn-primary" type="button" (click)="doExportSpace()" [disabled]="exportSpaceDialog()!.saving">
               {{ exportSpaceDialog()!.saving ? ('common.saving' | transloco) : ('schemaLib.exportSpace.confirmButton' | transloco) }}
             </button>
@@ -482,10 +482,10 @@ export function entriesFromTypeSchemas(
     <!-- Apply group to space dialog -->
     @if (applyGroupDialog()) {
       <div style="position:fixed;inset:0;background:var(--bg-scrim);display:flex;align-items:center;justify-content:center;z-index:200;">
-        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:92vw;max-width:500px;" [appModal]="'schemaLib.applyGroup.dialogTitle' | transloco" (dismiss)="applyGroupDialog.set(null)" (click)="$event.stopPropagation()">
+        <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;width:92vw;max-width:500px;" [appModal]="'schemaLib.applyGroup.dialogTitle' | transloco" (dismiss)="requestCloseApplyGroup()" (click)="$event.stopPropagation()">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
             <h3 style="margin:0;font-size:15px;">{{ 'schemaLib.applyGroup.dialogTitle' | transloco }}</h3>
-            <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="applyGroupDialog.set(null)"><ph-icon name="x" [size]="18"/></button>
+            <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="requestCloseApplyGroup()"><ph-icon name="x" [size]="18"/></button>
           </div>
           <p style="font-size:13px;color:var(--text-secondary);margin:0 0 16px;">{{ 'schemaLib.applyGroup.dialogHint' | transloco }}</p>
           <div class="field" style="margin-bottom:14px;">
@@ -511,7 +511,7 @@ export function entriesFromTypeSchemas(
           }
           @if (applyGroupDialog()!.error) { <p style="font-size:12px;color:var(--danger);margin:0 0 12px;">{{ applyGroupDialog()!.error }}</p> }
           <div style="display:flex;gap:8px;justify-content:flex-end;">
-            <button class="btn btn-secondary btn-sm" type="button" (click)="applyGroupDialog.set(null)">{{ 'common.cancel' | transloco }}</button>
+            <button class="btn btn-secondary btn-sm" type="button" (click)="requestCloseApplyGroup()">{{ 'common.cancel' | transloco }}</button>
             <button class="btn btn-primary" type="button" (click)="doApplyGroup()" [disabled]="applyGroupDialog()!.saving">
               {{ applyGroupDialog()!.saving ? ('common.saving' | transloco) : ('schemaLib.applyGroup.confirmButton' | transloco) }}
             </button>
@@ -522,10 +522,10 @@ export function entriesFromTypeSchemas(
 
     @if (showDialog()) {
       <div class="dialog-backdrop">
-        <div class="dialog" [appModal]="editingName() ? ('schemaLib.dialog.editTitle' | transloco) : ('schemaLib.dialog.createTitle' | transloco)" (dismiss)="closeDialog()" (click)="$event.stopPropagation()">
+        <div class="dialog" [appModal]="editingName() ? ('schemaLib.dialog.editTitle' | transloco) : ('schemaLib.dialog.createTitle' | transloco)" (dismiss)="requestCloseDialog()" (click)="$event.stopPropagation()">
           <div class="dialog-header">
             <h3>{{ editingName() ? ('schemaLib.dialog.editTitle' | transloco) : ('schemaLib.dialog.createTitle' | transloco) }}</h3>
-            <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="closeDialog()"><ph-icon name="x" [size]="18"/></button>
+            <button class="icon-btn" type="button" [attr.aria-label]="'common.close' | transloco" (click)="requestCloseDialog()"><ph-icon name="x" [size]="18"/></button>
           </div>
 
           <!-- Entry metadata -->
@@ -772,13 +772,27 @@ export class SchemaLibraryComponent implements OnInit {
   private catalogOpenedWith = '';
   private applyOpenedGroup = '';
 
-  constructor() {
-    holdUnsavedEdits(() =>
-      (this.showDialog() && JSON.stringify(this.form) !== this.formOpenedWith)
-      || (this.showAddCatalog() && JSON.stringify(this.newCatalog) !== this.catalogOpenedWith)
-      || (this.showCreateLibToken() && this.libTokenName().trim() !== '')
-      || this.exportDraftHeld() || this.applyDraftHeld());
-  }
+  // One held draft per dialog, so each dialog's own dismiss asks about its own draft and no other (Q-713).
+  private readonly entryDraft = holdUnsavedEdits(() => this.showDialog() && JSON.stringify(this.form) !== this.formOpenedWith);
+  private readonly catalogDraft = holdUnsavedEdits(() => this.showAddCatalog() && JSON.stringify(this.newCatalog) !== this.catalogOpenedWith);
+  private readonly tokenDraft = holdUnsavedEdits(() => this.showCreateLibToken() && this.libTokenName().trim() !== '');
+  private readonly exportDraft = holdUnsavedEdits(() => this.exportDraftHeld());
+  private readonly applyDraft = holdUnsavedEdits(() => this.applyDraftHeld());
+
+  /** Escape, the X and the backdrop of the type entry dialog: close it, asking first while the form differs from what it opened with. */
+  requestCloseDialog(): void { void this.entryDraft.closeIfConfirmed(() => this.closeDialog()); }
+
+  /** Escape and the X of the add-catalog dialog: close it, asking first while a field was typed. */
+  requestCloseAddCatalog(): void { void this.catalogDraft.closeIfConfirmed(() => this.showAddCatalog.set(false)); }
+
+  /** Escape, the X and Cancel of the library-token dialog: close it, asking first while a name is typed. */
+  requestCloseCreateLibToken(): void { void this.tokenDraft.closeIfConfirmed(() => this.closeCreateLibToken()); }
+
+  /** Escape, the X and Cancel of the export-space dialog: close it, asking first while it holds a pick that was not run. */
+  requestCloseExportSpace(): void { void this.exportDraft.closeIfConfirmed(() => this.exportSpaceDialog.set(null)); }
+
+  /** Escape, the X and Cancel of the apply-group dialog: close it, asking first while it holds a pick that was not run. */
+  requestCloseApplyGroup(): void { void this.applyDraft.closeIfConfirmed(() => this.applyGroupDialog.set(null)); }
 
   /**
    * The export and apply dialogs stay open with a result line after they ran; what they were asked to do is done by then, so a dialog

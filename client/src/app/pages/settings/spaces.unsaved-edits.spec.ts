@@ -3,7 +3,8 @@
  * order, the create dialog, a type's rename field, and the Schema tab's export-to-library dialog and import-conflict name.
  *
  * Before this, the spaces route's guard asked only about what `SpaceSettingsState.isDirty()` reads; the Danger tab's three drafts and these
- * other fields were outside it, so one sidebar click lost them. The dialogs' own dismiss is not changed here (Q-713).
+ * other fields were outside it, so one sidebar click lost them. The dialogs' own dismiss asking first is held in
+ * settings-dialogs.dismiss.spec.ts (Q-713).
  */
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';

@@ -1,7 +1,8 @@
 /**
  * The tokens page asks before leaving with an inline label edit, an open create dialog or an open rights dialog that Save has not sent (Q-701).
  *
- * The dialogs' own close (X, Escape, backdrop) is not changed here (Q-713); each registers its draft, so a sidebar click or a reload asks.
+ * Each dialog registers its draft, so a sidebar click or a reload asks; its own close (X, Escape, backdrop) asking first is held in
+ * settings-dialogs.dismiss.spec.ts (Q-713).
  */
 import type { Type } from '@angular/core';
 import { TestBed } from '@angular/core/testing';

@@ -50,10 +50,10 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
   `],
   template: `
     <div class="dialog-backdrop">
-      <div class="dialog" [appModal]="'networks.wizard.title' | transloco" (dismiss)="close.emit()" (click)="$event.stopPropagation()">
+      <div class="dialog" [appModal]="'networks.wizard.title' | transloco" (dismiss)="requestClose()" (click)="$event.stopPropagation()">
         <div class="dialog-header">
           <div class="card-title">{{ 'networks.wizard.title' | transloco }}</div>
-          <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="close.emit()"><ph-icon name="x" [size]="14"/></button>
+          <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="requestClose()"><ph-icon name="x" [size]="14"/></button>
         </div>
 
         <div class="wizard-steps">
@@ -74,7 +74,7 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
             <li>{{ 'networks.wizard.step1.resultItem' | transloco }}</li>
           </ul>
           <div style="display:flex; gap:8px; justify-content:flex-end;">
-            <button class="btn-secondary btn" type="button" (click)="close.emit()">{{ 'common.cancel' | transloco }}</button>
+            <button class="btn-secondary btn" type="button" (click)="requestClose()">{{ 'common.cancel' | transloco }}</button>
             <button class="btn-primary btn" type="button" (click)="enableWizardStep.set(2)">{{ 'networks.wizard.continue' | transloco }}</button>
           </div>
         }
@@ -181,10 +181,13 @@ export class NetworkEnableWizardComponent implements OnInit {
   /** The setup ended in success (the host takes the public URL and closes this), so what was typed is no longer a draft. */
   private finished = false;
 
-  constructor() {
-    // A hostname typed, or an option moved off its default (autostart on; DNS overwrite and the acknowledgement off).
-    holdUnsavedEdits(() => !this.finished
-      && (this.enableHostname.trim() !== '' || !this.enableAutostart || this.enableOverwriteDns || this.enableAcknowledgeCritical));
+  // A hostname typed, or an option moved off its default (autostart on; DNS overwrite and the acknowledgement off).
+  private readonly draft = holdUnsavedEdits(() => !this.finished
+    && (this.enableHostname.trim() !== '' || !this.enableAutostart || this.enableOverwriteDns || this.enableAcknowledgeCritical));
+
+  /** Escape, the X and Cancel: close, asking first while a hostname or an option was changed. A close after the setup finished stays direct. */
+  protected requestClose(): void {
+    void this.draft.closeIfConfirmed(() => this.close.emit());
   }
 
   ngOnInit(): void {

@@ -69,10 +69,10 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
   `],
   template: `
       <div class="dialog-backdrop">
-        <div class="dialog" [appModal]="'tokens.create.title' | transloco" (dismiss)="close.emit()" (click)="$event.stopPropagation()">
+        <div class="dialog" [appModal]="'tokens.create.title' | transloco" (dismiss)="requestClose()" (click)="$event.stopPropagation()">
           <div class="dialog-header">
             <div class="card-title">{{ 'tokens.create.title' | transloco }}</div>
-            <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="close.emit()"><ph-icon name="x" [size]="14"/></button>
+            <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="requestClose()"><ph-icon name="x" [size]="14"/></button>
           </div>
 
           @if (createError()) {
@@ -156,7 +156,7 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
             </div>
 
             <div class="form-grid-bottom" style="margin-top:12px;">
-              <button class="btn-secondary btn" type="button" (click)="close.emit()">{{ 'common.cancel' | transloco }}</button>
+              <button class="btn-secondary btn" type="button" (click)="requestClose()">{{ 'common.cancel' | transloco }}</button>
               <button class="btn-primary btn" type="submit" style="margin-left:auto;" [disabled]="creating() || !newName.trim()">
                 @if (creating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
                 {{ 'tokens.create.submitButton' | transloco }}
@@ -193,8 +193,11 @@ export class TokenCreateDialogComponent {
   /** The form as it opened, re-taken after a create the server accepted: what `hold` compares the form against. */
   private opened = this.draftText();
 
-  constructor() {
-    holdUnsavedEdits(() => this.draftText() !== this.opened);
+  private readonly held = holdUnsavedEdits(() => this.draftText() !== this.opened);
+
+  /** Escape, the X and Cancel: close, asking first while the form differs from what it opened with. A close after a created token stays direct. */
+  protected requestClose(): void {
+    void this.held.closeIfConfirmed(() => this.close.emit());
   }
 
   private draftText(): string {

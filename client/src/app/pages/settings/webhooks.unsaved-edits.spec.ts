@@ -1,7 +1,8 @@
 /**
  * The webhooks page asks before leaving with an open create/edit dialog that differs from what it opened with (Q-701).
  *
- * The dialog's own close (X, Escape, Cancel) is not changed here (Q-713); it registers its draft, so a sidebar click or a reload asks.
+ * The dialog registers its draft, so a sidebar click or a reload asks; its own close (X, Escape, Cancel) asking first is held in
+ * settings-dialogs.dismiss.spec.ts (Q-713).
  */
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, vi } from 'vitest';

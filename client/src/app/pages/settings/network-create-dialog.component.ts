@@ -54,10 +54,10 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
   `],
   template: `
     <div class="dialog-backdrop">
-      <div class="dialog" [appModal]="'networks.dialog.create.title' | transloco" (dismiss)="close.emit()" (click)="$event.stopPropagation()">
+      <div class="dialog" [appModal]="'networks.dialog.create.title' | transloco" (dismiss)="requestClose()" (click)="$event.stopPropagation()">
         <div class="dialog-header">
           <div class="card-title">{{ 'networks.dialog.create.title' | transloco }}</div>
-          <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="close.emit()"><ph-icon name="x" [size]="14"/></button>
+          <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="requestClose()"><ph-icon name="x" [size]="14"/></button>
         </div>
 
         @if (createError()) { <div class="alert alert-error">{{ createError() }}</div> }
@@ -118,7 +118,7 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
             </div>
           }
           <div style="grid-column:span 2; display:flex; gap:8px; justify-content:flex-end;">
-            <button class="btn-secondary btn" type="button" (click)="close.emit()">{{ 'common.cancel' | transloco }}</button>
+            <button class="btn-secondary btn" type="button" (click)="requestClose()">{{ 'common.cancel' | transloco }}</button>
             <button class="btn-primary btn" type="submit" [disabled]="creating() || !form.label.trim()">
               @if (creating()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }
               {{ 'networks.dialog.create.submitButton' | transloco }}
@@ -153,8 +153,11 @@ export class NetworkCreateDialogComponent {
   /** The form as it opened, re-taken after a create the server accepted: what `hold` compares the form against. */
   private opened = this.draft();
 
-  constructor() {
-    holdUnsavedEdits(() => this.draft() !== this.opened);
+  private readonly held = holdUnsavedEdits(() => this.draft() !== this.opened);
+
+  /** Escape, the X and Cancel: close, asking first while the form differs from what it opened with. */
+  protected requestClose(): void {
+    void this.held.closeIfConfirmed(() => this.close.emit());
   }
 
   private draft(): string {

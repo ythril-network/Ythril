@@ -28,10 +28,10 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
   styles: [SPACE_DIALOG_STYLES],
   template: `
 <div class="dialog-backdrop">
-  <div class="dialog" [appModal]="'spaces.create.title' | transloco" (dismiss)="closed.emit()" (click)="$event.stopPropagation()">
+  <div class="dialog" [appModal]="'spaces.create.title' | transloco" (dismiss)="requestClose()" (click)="$event.stopPropagation()">
     <div class="dialog-header">
       <div class="card-title">{{ 'spaces.create.title' | transloco }}</div>
-      <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="closed.emit()"><ph-icon name="x" [size]="14"/></button>
+      <button class="icon-btn" [attr.aria-label]="'common.close' | transloco" (click)="requestClose()"><ph-icon name="x" [size]="14"/></button>
     </div>
     @if (createError()) { <div class="alert alert-error">{{ createError() }}</div> }
     @if (retiredId(); as retired) { <div class="alert alert-error" role="alert">{{ 'spaces.create.idRetired' | transloco: { id: retired } }}</div> }
@@ -100,8 +100,11 @@ export class SpaceCreateDialogComponent {
   /** The form as it opens, and as a created space leaves it reset: what `hold` compares the form against. */
   private readonly opened = JSON.stringify(this.form);
 
-  constructor() {
-    holdUnsavedEdits(() => JSON.stringify(this.form) !== this.opened);
+  private readonly draft = holdUnsavedEdits(() => JSON.stringify(this.form) !== this.opened);
+
+  /** Escape and the X: close, asking first while the form differs from what it opened with. */
+  protected requestClose(): void {
+    void this.draft.closeIfConfirmed(() => this.closed.emit());
   }
 
   /** The typed id when it is one of the reserved ids of a former proxy space, else ''; the server refuses it after the request. */
