@@ -380,6 +380,9 @@ Images are built and pushed, and the schema package is published to npm, automat
    `@ythril-network/schema` pin in `server/package.json`'s `dependencies`, and the lock file (`npm install --ignore-scripts` at the
    root records both). The release gate refuses a tag whose version differs from the manifests' (`scripts/release-gate.mjs`
    compares them through `scripts/_shared/release-tags.mjs`), so a tag cut from the wrong commit stops before anything is pushed.
+   Close `[Unreleased]` into `## [x.y.z] — YYYY-MM-DD`, dated the day you will cut the tag on the **Europe/Berlin** calendar (a
+   tag at 00:30 CET is the next day, though UTC still says the day before). On the tag, the gate refuses a section dated any other
+   day (`scripts/_shared/release-date.mjs`); before the tag, it warns when the date is not today there.
 
 2. Commit and tag:
 

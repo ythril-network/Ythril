@@ -196,7 +196,12 @@ describe('the tag is compared with the version through release-tags.mjs, not re-
 
   it('checkVersion decides the tag by calling both, only when releasing, and fails the version gate on a mismatch', () => {
     const body = checkVersionBody();
-    assert.match(body, /\breleaseTagOf\s*\(/, 'checkVersion never asks which tag the run is on');
+    // Which tag the run is on is asked once, in `currentReleaseTag`, which the date check (Q-717) shares; it is releaseTagOf's.
+    assert.match(body, /\bcurrentReleaseTag\s*\(/, 'checkVersion never asks which tag the run is on');
+    const helperStart = code.indexOf('function currentReleaseTag(');
+    assert.ok(helperStart > 0, 'currentReleaseTag is gone: this test needs re-pointing, not deleting');
+    assert.match(code.slice(helperStart, code.indexOf('\n}', helperStart)), /\breleaseTagOf\s*\(/,
+      'currentReleaseTag does not ask releaseTagOf, so the tag is decided beside the shared module');
     assert.match(body, /\btagMatchesVersion\s*\(/, 'checkVersion never compares the tag with the version');
     const releasing = body.indexOf('RELEASING');
     assert.ok(releasing > 0 && releasing < body.indexOf('tagMatchesVersion('),
