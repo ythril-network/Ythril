@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.5.2] — 2026-11-07
+
+**A patch release: a dialog you have typed into asks before Escape, the X or Cancel throws your draft away, and the release gate checks that a release is dated the day it is tagged.**
+
 ### Changed
 
+- **Docs:** changed: the UI primitives guide (a dialog's own dismiss is guarded too) and the contribution guide's release steps (how a release is dated).
 - **Releases:** the release gate refuses a tag whose CHANGELOG section is not dated the day the tag is cut (Europe/Berlin calendar), and warns before the tag when the date is not today.
 
 ### Fixed
