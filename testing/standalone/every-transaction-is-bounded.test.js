@@ -117,4 +117,13 @@ describe('every transaction is started inside db/bounded-transaction.ts', () => 
       + 'driver\'s 120 s), no read-back of a commit whose reply was lost, and no endSession in a finally, unless its writer remembered each one. '
       + 'Start it through inBoundedTransaction (or inHeldTransaction when it writes a seq-carrying record).');
   });
+
+  // `withTransaction` retries for a fixed 120 s from driver 7.8.0 (its budget came from the client-side timeout, which 7.8.0 ignores:
+  // `Q-716`), so not even the bounded module may call it: its own loop on startTransaction/commitTransaction ends at the scope's deadline.
+  // A test that hooks `withTransaction` to see a transaction then hooks nothing, which is how a tombstone row passed for the wrong reason.
+  it('no server code calls withTransaction, the bounded module included: its 120 s cannot be shortened', () => {
+    const calls = sources.flatMap(({ file, text }) => [...blankComments(text).matchAll(/\.withTransaction\s*\(/g)].map(m => `${file}:${blankComments(text).slice(0, m.index).split('\n').length}`));
+    assert.deepEqual(calls, [], `withTransaction is called in server/src (${calls.join(', ')}): it retries for the driver's fixed 120 s, past any bound`);
+    assert.match(blankComments(read(HOME)), /\.startTransaction\s*\(/, `${HOME} starts no transaction itself, so the rule above holds of nothing`);
+  });
 });
