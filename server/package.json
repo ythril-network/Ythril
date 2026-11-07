@@ -28,7 +28,7 @@
     "express-rate-limit": "^8.3.1",
     "jose": "^6.2.3",
     "jsdom": "^29.1.0",
-    "mongodb": "^7.1.1",
+    "mongodb": "^7.8.0",
     "node-cron": "^4.2.1",
     "otplib": "^13.4.0",
     "prom-client": "^15.1.3",

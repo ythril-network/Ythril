@@ -188,9 +188,9 @@ function transactionSessionOf(args: unknown[]): SessionLike | null {
   const unbounded = Object.entries(COLLECTION_METHOD_EFFECT)
     .filter(([m, e]) => e !== 'read' && !UNBOUNDABLE.has(m) && BOUNDED_OPTIONS_ARGUMENT[m] === undefined).map(([m]) => m);
   const cursorUnbounded = [...RETURNS_CURSOR].filter(m => BOUNDED_OPTIONS_ARGUMENT[m] === undefined && BOUNDED_DB_OPTIONS_ARGUMENT[m] === undefined);
-  // A write has TWO bound steps (the server's deadline, then the client's backstop — `write-bound.ts`), and a read has
-  // one. A write missing from `PLAIN_WRITE_METHODS` would be bounded by the driver's `timeoutMS`, whose client clock
-  // fires first: the write could land after the answer (`Q-372`). A read inside it would lose its cursor's deadline.
+  // A write's backstop ends the SERVER operation before the caller is answered (`write-bound.ts`); a read's only ends the
+  // driver call. A write missing from `PLAIN_WRITE_METHODS` would be answered while it is still alive on the server, and
+  // could land after the answer (`Q-372`); a read inside it would be held to a write's kill for nothing.
   const writesWithoutServerFirstBound = Object.entries(COLLECTION_METHOD_EFFECT)
     .filter(([m, e]) => e !== 'read' && BOUNDED_OPTIONS_ARGUMENT[m] !== undefined && !PLAIN_WRITE_METHODS.has(m)).map(([m]) => m);
   const readsBoundedAsWrites = [...PLAIN_WRITE_METHODS].filter(m => COLLECTION_METHOD_EFFECT[m] === 'read' || COLLECTION_METHOD_EFFECT[m] === undefined);
@@ -244,7 +244,7 @@ export function observeRecordWrites(db: Db, isObserved: (name: string) => boolea
         const method = Reflect.get(target, prop, receiver) as (...a: unknown[]) => unknown;
         return (...given: unknown[]) => {
           try {
-            return callBounded(prop, given, (a) => method.apply(target, a), { database: target.databaseName, inheritedTimeoutMs: target.timeoutMS, serverOperations });
+            return callBounded(prop, given, (a) => method.apply(target, a), { database: target.databaseName, serverOperations });
           } catch (err) {
             // A hold whose time is spent refuses the call unsent: THROWN for the call that returns a cursor, as a collection's
             // `find` does, and a rejection for the one that returns a promise.
@@ -255,10 +255,8 @@ export function observeRecordWrites(db: Db, isObserved: (name: string) => boolea
       }
       if (prop !== 'collection') return Reflect.get(target, prop, receiver);
       return (name: string, options?: object) =>
-        // `target.timeoutMS` is the `timeoutMS` every operation of this database inherits (the client's, from `MONGO_URI`), which
-        // a bounded plain write has to neutralise (`db/write-bound.ts`).
         observeCollection(target.collection(name, options as never), name, isObserved(name) ? listener : null,
-          { collection: name, inheritedTimeoutMs: target.timeoutMS, serverOperations });
+          { collection: name, serverOperations });
     },
   });
 }

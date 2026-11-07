@@ -11,9 +11,9 @@
  *
  * ## What is asserted
  *
- * - At the default write bound, the session of a leased write is given at least the server's own transaction lifetime, and its commit may take that long too: a
- *   commit that landed before still can. The figures are READ off the driver's session (`startSession`, `withTransaction`), at the
- *   point the write opens it; nothing here waits a minute.
+ * - At the default write bound, the transaction of a leased write is given at least the server's own transaction lifetime, and its commit may take that long
+ *   too: a commit that landed before still can. The figures are READ where they are used: the commit's off `startTransaction`
+ *   (`maxCommitTimeMS`), the transaction's deadline inside its callback (`boundTimeLeft`); nothing here waits a minute.
  * - An enclosing hold's shorter deadline still wins: a bound is never raised by the thing inside it.
  * - Control: a transaction that asks for no bound of its own (the move's batches) keeps the write bound.
  *
@@ -49,25 +49,26 @@ describe('a leased write is bounded no tighter than the server bounded it', { sk
     bounded = await import('../../server/dist/db/bounded-transaction.js');
     bound = await import('../../server/dist/db/write-bound.js');
     client = door.mongo.getMongo();
-    // The figures the driver is handed: the session's own timeout and the commit's, read where the transaction opens.
+    // The figure the driver is handed for the commit, read where each transaction starts (`startTransaction`'s `maxCommitTimeMS`).
+    // The transaction's deadline is read inside its callback (`boundTimeLeft`), the figure its retry loop runs against (`Q-716`:
+    // the loop is the module's own, no longer the driver's `withTransaction` under a session `defaultTimeoutMS`).
     realStart = client.startSession;
     client.startSession = function startSession(opts, ...rest) {
       const session = realStart.call(this, opts, ...rest);
       sessionProto ??= Object.getPrototypeOf(session);
       if (!realWithTransaction) {
-        realWithTransaction = sessionProto.withTransaction;
-        sessionProto.withTransaction = function withTransaction(fn, options) {
+        realWithTransaction = sessionProto.startTransaction;
+        sessionProto.startTransaction = function startTransaction(options) {
           seen.commitMs = options?.maxCommitTimeMS;
-          return realWithTransaction.call(this, fn, options);
+          return realWithTransaction.call(this, options);
         };
       }
-      seen.sessionMs = opts?.defaultTimeoutMS;
       return session;
     };
   });
   after(async () => {
     if (client && realStart) client.startSession = realStart;
-    if (sessionProto && realWithTransaction) sessionProto.withTransaction = realWithTransaction;
+    if (sessionProto && realWithTransaction) sessionProto.startTransaction = realWithTransaction;
     await door?.close();
   });
   beforeEach(async () => { seen = {}; await door.coll(S, 'media_jobs').deleteMany({}); });
@@ -75,9 +76,9 @@ describe('a leased write is bounded no tighter than the server bounded it', { sk
 
   it('the session and the commit of a leased write may take what the server\'s own transaction lifetime allowed', async () => {
     const claim = await claimedJob('job-1');
-    await lease.writeUnderClaim(S, claim, async () => 'written');
+    await lease.writeUnderClaim(S, claim, async () => { seen.sessionMs = bound.boundTimeLeft(); return 'written'; });
     assert.ok(seen.sessionMs >= SERVER_TRANSACTION_LIFETIME_MS - OPENING_SLACK_MS,
-      `the session of a leased write is bounded at ${seen.sessionMs} ms, below the ${SERVER_TRANSACTION_LIFETIME_MS} ms a commit had before: a large conversion that landed is now refused`);
+      `the transaction of a leased write is bounded at ${seen.sessionMs} ms, below the ${SERVER_TRANSACTION_LIFETIME_MS} ms a commit had before: a large conversion that landed is now refused`);
     assert.ok(seen.commitMs >= SERVER_TRANSACTION_LIFETIME_MS - OPENING_SLACK_MS,
       `the commit of a leased write is bounded at ${seen.commitMs} ms, below the ${SERVER_TRANSACTION_LIFETIME_MS} ms a commit had before`);
   });
@@ -85,14 +86,14 @@ describe('a leased write is bounded no tighter than the server bounded it', { sk
   it('an enclosing hold\'s shorter deadline still wins: the bound is never raised from inside', async () => {
     bound.setWriteBoundForTest({ holdDeadlineMs: 5_000, writeTimeoutMs: 4_000 });
     const claim = await claimedJob('job-2');
-    await bound.withinWriteBound(() => lease.writeUnderClaim(S, claim, async () => 'written'));
-    assert.ok(seen.sessionMs <= 5_000, `the session was given ${seen.sessionMs} ms inside a hold of 5000 ms`);
+    await bound.withinWriteBound(() => lease.writeUnderClaim(S, claim, async () => { seen.sessionMs = bound.boundTimeLeft(); return 'written'; }));
+    assert.ok(seen.sessionMs <= 5_000, `the transaction was given ${seen.sessionMs} ms inside a hold of 5000 ms`);
     assert.ok(seen.commitMs <= 4_000, `the commit was given ${seen.commitMs} ms inside a write bound of 4000 ms`);
   });
 
   it('control: a transaction that asks for no bound of its own keeps the write bound', async () => {
-    await bounded.inBoundedTransaction(async () => 'written');
-    assert.ok(seen.sessionMs <= bound.holdDeadlineMs(), `the default session was given ${seen.sessionMs} ms, above the hold deadline`);
+    await bounded.inBoundedTransaction(async () => { seen.sessionMs = bound.boundTimeLeft(); return 'written'; });
+    assert.ok(seen.sessionMs <= bound.holdDeadlineMs(), `the default transaction was given ${seen.sessionMs} ms, above the hold deadline`);
     assert.equal(seen.commitMs, bound.writeTimeoutMs(), 'the default commit is not capped at the write bound');
   });
 });

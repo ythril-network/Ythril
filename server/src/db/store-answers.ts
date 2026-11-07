@@ -11,14 +11,16 @@
  * ## What a hand-written ping drops
  *
  * **Its own bound.** A ping against a store that stopped answering waits for server selection once the pool has cleared: 54 s
- * measured (probe P6). With `timeoutMS` it settles in ~3 s in every phase — socket read, checkout, selection — and always as
- * `MongoOperationTimeoutError`. A walk that stops at the first timeout must not spend a second bound finding out it should.
+ * measured (probe P6). It settles in `STORE_PING_MS` in every phase — socket read, checkout, selection — by the server's own
+ * deadline (`maxTimeMS`), a `signal` that ends the driver call and closes its connection, and a race that answers whatever phase
+ * the driver is in. Not the driver's `timeoutMS` (`Q-716`): it desynchronised the pool on drivers before 7.8.0 and does nothing
+ * from 7.8.0 on. A walk that stops at the first timeout must not spend a second bound finding out it should.
  * **The memo.** Asked from a `catch`, it would be asked per failed record; it is answered from the last answer for 10 s
  * (`util/cached-probe.ts`: also never throws, and shared by callers that arrive while it is in flight).
  *
  * ## Why the raw client and not `getDb()`
  *
- * The ping goes to the `admin` database of the raw client, deliberately outside `getDb()`: a ping carries its own `timeoutMS`,
+ * The ping goes to the `admin` database of the raw client, deliberately outside `getDb()`: a ping carries its own bound,
  * and a housekeeping scope's bound laid over a ping about the bound would be a bound about itself. It is not a space's data
  * and reaches no collection. It lives here and not in `db/mongo.ts` so that the connection module has one owner.
  *
@@ -44,7 +46,16 @@ export function createStoreAnswers(
 ): (ms?: number) => Promise<boolean> {
   const probe = cache ? cache.probe.bind(cache) : cachedProbe;
   return (ms = STORE_PING_MS) => probe(MEMO_KEY, STORE_ANSWERS_TTL_MS, async () => {
-    await client().db('admin').command({ ping: 1 }, { timeoutMS: ms });
+    const abort = new AbortController();
+    let timer: NodeJS.Timeout | undefined;
+    const elapsed = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => { const e = new Error(`the store did not answer a ping within ${ms} ms`); abort.abort(e); reject(e); }, ms);
+      timer.unref?.();
+    });
+    // A raw command takes the server's deadline in the command itself; the driver's options for it carry only the signal.
+    const ping = client().db('admin').command({ ping: 1, maxTimeMS: ms }, { signal: abort.signal });
+    ping.catch(() => { /* answered by the race when it fires first */ });
+    try { await Promise.race([ping, elapsed]); } finally { clearTimeout(timer); }
     return true;
   });
 }

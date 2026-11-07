@@ -5,7 +5,7 @@ import { dbNameFromUri } from './db-name.js';
 import { backoffDelayMs } from '../util/backoff.js';
 import { envInt } from '../config/env-num.js';
 import { observeRecordWrites, EVERY_COLLECTION, type RecordWriteListener } from './record-write-observer.js';
-import { warnIfSocketTimeoutBelowWriteBound } from './write-bound.js';
+import { warnIfClientTimeoutNamed, warnIfSocketTimeoutBelowWriteBound } from './write-bound.js';
 import { mongoClientOptions, effectiveClientOptions, describeClientOptions } from './client-options.js';
 import { isStoreUnreachable } from './store-condition.js';
 
@@ -90,6 +90,7 @@ export async function connectMongo(): Promise<MongoClient> {
       else log.debug('MongoDB connected');
       // Once per connection, after it works: a string that cannot connect has a worse thing to say.
       warnIfSocketTimeoutBelowWriteBound(uri);
+      warnIfClientTimeoutNamed(uri);
       // A transaction the bound ends is sealed by a retryable write (db/bounded-transaction.ts); without retryable writes the
       // driver sends it with no transaction number, so it cannot seal, and a late statement can keep its documents locked.
       if (_client.options.retryWrites === false) {

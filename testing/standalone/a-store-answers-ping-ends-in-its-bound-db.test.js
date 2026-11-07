@@ -5,17 +5,18 @@
  * ## The defect it prevents
  *
  * `storeAnswers` is asked from a walk's `catch`, after an operation of the walk timed out. If the question itself can hang, a
- * walk meant to stop at the first timeout spends a second bound finding out it should. Without a `timeoutMS` a ping against a
- * frozen store waits for server selection once the pool is cleared: 54 s was measured. With `timeoutMS: 3000` it settles in
- * ~3 s in every phase (socket read, checkout, selection) and always as `MongoOperationTimeoutError`.
+ * walk meant to stop at the first timeout spends a second bound finding out it should. A ping with no bound of its own, against
+ * a frozen store, waits for server selection once the pool is cleared: 54 s was measured. `storeAnswers` settles at
+ * `STORE_PING_MS` in every phase (socket read, checkout, selection): the server's deadline, a `signal`, and a race. It did so
+ * with the driver's `timeoutMS` until `Q-716`; from driver 7.8.0 that option does nothing, and this file hung for 15 minutes on
+ * it before the ping was given a bound of its own.
  *
  * ## What is pinned, against a store that really freezes
  *
  * The freezable relay (`_freezable-relay.mjs`) drops bytes in both directions and keeps the sockets open - what a paused
  * store does. The client's own detection is scaled down (connect 1 s, heartbeat 0.5 s) so the pool CLEARS inside the case, and
- * its server-selection timeout is left long (20 s) so the ping's own `timeoutMS` is the only thing that can end the wait. Then:
- * the ping settles at its bound, as `MongoOperationTimeoutError`, `storeAnswers()` is false; and after `thaw()` the store
- * answers again and so does `storeAnswers()`.
+ * its server-selection timeout is left long (20 s) so the ping's own bound is the only thing that can end the wait. Then:
+ * `storeAnswers()` settles at its bound and is false; and after `thaw()` the store answers again and so does `storeAnswers()`.
  *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-store-answers-ping-ends-in-its-bound-db.test.js
@@ -23,7 +24,7 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { MongoClient, MongoOperationTimeoutError } from 'mongodb';
+import { MongoClient } from 'mongodb';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { startFreezableRelay } from './_freezable-relay.mjs';
 import { holdsWithin, waitFor } from '../_shared/wait-for.mjs';
@@ -48,7 +49,7 @@ describe('storeAnswers against a frozen store', { skip }, () => {
     client = new MongoClient(relay.uri);
     client.on('connectionPoolCleared', () => { poolClears += 1; });
     await client.connect();
-    await client.db('admin').command({ ping: 1 }, { timeoutMS: 5_000 });
+    await client.db('admin').command({ ping: 1 });
     // A fresh memo for each question: the memo is tested in the pure suite, and here it would hide the store's own answer.
     answers = () => createStoreAnswers({ client: () => client, cache: createProbeCache() })();
   });
@@ -63,22 +64,17 @@ describe('storeAnswers against a frozen store', { skip }, () => {
     assert.equal(await answers(), true);
   });
 
-  it('settles at its own bound as MongoOperationTimeoutError, with the pool already cleared, and answers false', async () => {
+  it('settles at its own bound, with the pool already cleared, and answers false', async () => {
     const clearsBefore = poolClears;
     relay.freeze();
     // Let the monitor's heartbeat notice and clear the pool: from here a ping waits for SERVER SELECTION, which is 20 s here.
     await waitFor(() => poolClears > clearsBefore, 25_000, 50, undefined, { what: 'the monitor to notice the frozen store and clear the pool' });
 
-    const started = Date.now();
-    const direct = await client.db('admin').command({ ping: 1 }, { timeoutMS: STORE_PING_MS }).then(() => null, (e) => e);
-    const tookMs = Date.now() - started;
-    assert.ok(direct instanceof MongoOperationTimeoutError, `the ping ended with ${direct?.name ?? 'an answer'}: ${direct?.message}`);
-    assert.ok(tookMs >= STORE_PING_MS - 300, `the ping ended after ${tookMs} ms, before its ${STORE_PING_MS} ms bound`);
-    assert.ok(tookMs <= STORE_PING_MS + SLACK_MS, `the ping took ${tookMs} ms: its bound is ${STORE_PING_MS} ms, so something else was waited for`);
-
     const asked = Date.now();
     assert.equal(await answers(), false, 'a store that does not answer is false');
-    assert.ok(Date.now() - asked <= STORE_PING_MS + SLACK_MS, `storeAnswers() took ${Date.now() - asked} ms`);
+    const tookMs = Date.now() - asked;
+    assert.ok(tookMs >= STORE_PING_MS - 300, `storeAnswers() answered after ${tookMs} ms, before its ${STORE_PING_MS} ms bound`);
+    assert.ok(tookMs <= STORE_PING_MS + SLACK_MS, `storeAnswers() took ${tookMs} ms: its bound is ${STORE_PING_MS} ms, so something else was waited for`);
   });
 
   it('answers true again after thaw, within one bound', async () => {

@@ -57,13 +57,15 @@ const RECOVERY_MS = 15_000;
  */
 export async function assertRelayFreezes(relay, { recoveryMs = RECOVERY_MS } = {}) {
   const client = new MongoClient(relay.uri, { serverSelectionTimeoutMS: 5_000, heartbeatFrequencyMS: 10_000, connectTimeoutMS: 5_000 });
-  const ping = (options) => client.db('admin').command({ ping: 1 }, options);
+  // Each ping ends at `ms` by a `signal`, which closes its connection: the driver's own `timeoutMS` does nothing from 7.8.0
+  // (`Q-716`), and a ping whose bytes the freeze dropped would otherwise be waited on for ever.
+  const ping = (ms) => client.db('admin').command({ ping: 1 }, { signal: AbortSignal.timeout(ms) });
   try {
     await client.connect();
-    await ping({ timeoutMS: 5_000 });
+    await ping(5_000);
     relay.freeze();
     const before = relay.flow();
-    const frozen = await settleWithin(ping({ timeoutMS: FROZEN_OP_TIMEOUT_MS }), FREEZE_WINDOW_MS);
+    const frozen = await settleWithin(ping(FROZEN_OP_TIMEOUT_MS), FREEZE_WINDOW_MS);
     const after = relay.flow();
     if (frozen.settled) {
       throw new Error(`assertRelayFreezes: an operation through the relay settled after ${frozen.elapsedMs}ms, inside the ${FREEZE_WINDOW_MS}ms window, `
@@ -79,7 +81,7 @@ export async function assertRelayFreezes(relay, { recoveryMs = RECOVERY_MS } = {
     relay.thaw();
     await frozen.rest.catch(() => {});
     const served = await eventually(async () => {
-      try { return (await ping({ timeoutMS: 1_000 })).ok === 1; } catch { return false; }
+      try { return (await ping(1_000)).ok === 1; } catch { return false; }
     }, recoveryMs, 100);
     if (!served) throw new Error(`assertRelayFreezes: the store did not answer again within ${recoveryMs}ms of thaw(), so the relay cannot be put back.`);
   } finally {

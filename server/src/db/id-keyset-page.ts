@@ -72,8 +72,8 @@ function checkedMaxTimeMS(maxTimeMS: unknown): number | undefined {
     throw new Error(`idKeysetPage: maxTimeMS must be a positive integer, got ${String(maxTimeMS)}`);
   }
   if (boundOperationMs() !== undefined) {
-    throw new Error('idKeysetPage: maxTimeMS is refused inside a bound scope - the scope bounds each page, and a caller maxTimeMS '
-      + 'there would take no driver timeoutMS');
+    throw new Error('idKeysetPage: maxTimeMS is refused inside a bound scope - the scope bounds each page with its own deadline, '
+      + 'so a figure of the caller\'s would be a second bound on the same page');
   }
   return maxTimeMS;
 }

@@ -1,6 +1,6 @@
 /**
  * The options of a MongoClient that work inside a bound scope opens on its own: the liveness figures every client takes
- * (`client-options.ts`), and the active scope's per-operation bound as the client's `timeoutMS` (bundle-157 slice I4a).
+ * (`client-options.ts`), and the active scope's per-operation bound as the client's socket timeout (bundle-157 slice I4a; `Q-716`).
  *
  * ## What it prevents
  *
@@ -11,33 +11,38 @@
  *
  * ## The rule
  *
- * Inside a scope the client carries `timeoutMS` = the scope's per-operation figure ({@link boundOperationMs}), lowered to a `timeoutMS`
- * the connection string itself names; outside any scope it carries none, as such a client always did (a scheduled backup is not inside
- * an act). The driver ends an operation at that figure with a `MongoOperationTimeoutError`, which the store-failure classification
- * reads as the store's timeout, so a body rethrows it and the runner retries it as an outage.
+ * Inside a scope the client carries `socketTimeoutMS` = the scope's per-operation figure ({@link boundOperationMs}) plus the write
+ * bound's backstop margin, lowered to a `socketTimeoutMS` the connection string itself names; outside any scope it carries none, as
+ * such a client always did (a scheduled backup is not inside an act). A wait on the socket longer than that ends the operation with
+ * a `MongoNetworkTimeoutError` and CLOSES the connection it was on (probed, driver 7.8.0), which the store-failure classification
+ * reads as the store not answering, so a body rethrows it and the runner retries it as an outage.
+ *
+ * It is a socket wait, so it bounds each batch of a cursor read and not the whole read, which a large collection would outlast. With
+ * the driver's retryable reads and writes, one call can wait about twice the figure before it fails (the retry's own wait).
+ *
+ * It was the driver's client-side `timeoutMS` until `Q-716`: that desynchronised the connection pool after a timeout on drivers
+ * before 7.8.0 (CVE-2026-119179) and does nothing from 7.8.0 on.
  *
  * What it does NOT promise: that a write ended this way cannot land later. The client's clock, not the server's, ends it
  * (`write-bound.ts` says why the one door orders it the other way round). A body that opens such a client is therefore one whose retry
  * replaces what it wrote - a migrate drops and reloads every collection of its target - and says so where it opens it.
- *
- * A cursor read across many batches takes {@link perBatchTimeout} as its options, so the figure bounds each batch and not the
- * whole read (the driver's default for a client `timeoutMS` is the cursor's whole lifetime, which a large collection would outlast).
  */
 import { mongoClientOptions, uriQueryOptions, type CallerDefaults, type ClientLivenessOptions } from './client-options.js';
-import { boundOperationMs } from './write-bound.js';
+import { SERVER_FIRST_MARGIN_MS, boundOperationMs } from './write-bound.js';
 
 /** The options for `new MongoClient(uri, …)` opened inside (or outside) a bound scope. A fresh object each call. */
-export function boundedClientOptions(uri: string, callerDefaults: CallerDefaults = {}): Partial<ClientLivenessOptions> & { timeoutMS?: number } {
+export function boundedClientOptions(uri: string, callerDefaults: CallerDefaults = {}): Partial<ClientLivenessOptions> & { socketTimeoutMS?: number } {
   const options = mongoClientOptions(uri, callerDefaults);
   const bound = boundOperationMs();
   if (bound === undefined) return options;
-  const named = Number(uriQueryOptions(uri).get('timeoutms'));
-  return { ...options, timeoutMS: Number.isFinite(named) && named > 0 ? Math.min(named, bound) : bound };
+  const figure = bound + SERVER_FIRST_MARGIN_MS;
+  const named = Number(uriQueryOptions(uri).get('sockettimeoutms'));
+  return { ...options, socketTimeoutMS: Number.isFinite(named) && named > 0 ? Math.min(named, figure) : figure };
 }
 
 /**
  * Close a client opened on its own (a dump's, a restore's, a migrate's target client), waiting at most one bound for it: the active
- * scope's per-operation figure, else the client's own `timeoutMS`, else its `connectTimeoutMS`. Never throws.
+ * scope's per-operation figure, else the client's own `socketTimeoutMS`, else its `connectTimeoutMS`. Never throws.
  *
  * ## What it prevents (Q-564)
  *
@@ -47,8 +52,9 @@ export function boundedClientOptions(uri: string, callerDefaults: CallerDefaults
  * (the driver squashes its failure) and the caller goes on; nothing it closes is used again. Every act body's client closes through
  * here, so the restore's close and the migrate's cannot differ.
  */
-export async function closeWithinBound(client: { close(): Promise<void>; readonly timeoutMS?: number; readonly options?: { connectTimeoutMS?: number } }): Promise<void> {
-  const ms = boundOperationMs() ?? (typeof client.timeoutMS === 'number' && client.timeoutMS > 0 ? client.timeoutMS : undefined)
+export async function closeWithinBound(client: { close(): Promise<void>; readonly options?: { connectTimeoutMS?: number; socketTimeoutMS?: number } }): Promise<void> {
+  const socket = client.options?.socketTimeoutMS;
+  const ms = boundOperationMs() ?? (typeof socket === 'number' && socket > 0 ? socket : undefined)
     ?? client.options?.connectTimeoutMS ?? 10_000;
   let timer: NodeJS.Timeout | undefined;
   const elapsed = new Promise<void>(resolve => { timer = setTimeout(resolve, ms); timer.unref?.(); });
@@ -57,9 +63,4 @@ export async function closeWithinBound(client: { close(): Promise<void>; readonl
   } finally {
     clearTimeout(timer);
   }
-}
-
-/** A cursor's options on a client of {@link boundedClientOptions}: each batch bounded when the client carries a figure, else none. */
-export function perBatchTimeout(client: { readonly timeoutMS?: number }): { timeoutMode?: 'iteration' } {
-  return typeof client.timeoutMS === 'number' && client.timeoutMS > 0 ? { timeoutMode: 'iteration' } : {};
 }

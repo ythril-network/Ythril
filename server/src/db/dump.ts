@@ -25,7 +25,7 @@ import { MongoClient } from 'mongodb';
 import { EJSON } from 'bson';
 import { log } from '../util/log.js';
 import { dbNameFromUri } from './db-name.js';
-import { boundedClientOptions, closeWithinBound, perBatchTimeout } from './bounded-client-options.js';
+import { boundedClientOptions, closeWithinBound } from './bounded-client-options.js';
 import { READ_SPILL_COLLECTIONS } from '../brain/read-spill-store.js';
 import { redactUri } from '../config/mongo-uri.js';
 
@@ -130,7 +130,8 @@ export async function dumpDatabase(uri: string, destDir: string, opts: DumpOptio
       const stream = fs.createWriteStream(destFile, { encoding: 'utf8', mode: FILE_MODE });
 
       let count = 0;
-      const cursor = col.find({}, perBatchTimeout(col)).batchSize(CURSOR_BATCH_SIZE);
+      // Each batch is bounded by the client's socket timeout inside an act (`bounded-client-options.ts`), never the whole read.
+      const cursor = col.find({}).batchSize(CURSOR_BATCH_SIZE);
 
       try {
         for await (const doc of cursor) {

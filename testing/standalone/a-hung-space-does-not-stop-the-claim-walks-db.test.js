@@ -237,7 +237,8 @@ describe('a hung space does not stop the claim walks (real MongoDB, through the 
       assert.equal(lines.filter((l) => /Embed claim failed for space/.test(l)).length, 0, 'a store-wide stop is not reported once per space');
     } finally { mongo.getMongo().off('connectionPoolCleared', onPoolCleared); relay.thaw(); }
     const back = await holdsWithin(async () => {
-      const done = await settleWithin(mongo.getMongo().db('admin').command({ ping: 1 }, { timeoutMS: 1_000 }), 1_500);
+      // A signal, not the driver's timeoutMS (a no-op from 7.8.0, `Q-716`): a ping the freeze dropped must still end.
+      const done = await settleWithin(mongo.getMongo().db('admin').command({ ping: 1 }, { signal: AbortSignal.timeout(1_000) }), 1_500);
       return done.settled && done.ok;
     }, 15_000, 200);
     assert.ok(back, 'the store did not answer again after thaw()');

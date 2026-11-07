@@ -23,14 +23,11 @@
  *
  * A plain write (no session) is bounded in TWO steps, and the order is the point:
  *
- *  1. **The server first.** The operation carries an explicit `maxTimeMS` = the bound, and NO driver `timeoutMS`.
- *     With `timeoutMS` the driver arms its own timer when the operation STARTS (before it has a connection) and
- *     derives the wire `maxTimeMS` from what is left when it builds the command, so the client's deadline is
- *     always earlier than the server's — by the connection wait and the send, which is only milliseconds on a
- *     quiet machine and as much as a busy one makes it. Measured with the command held back 80 ms on the wire:
- *     `maxTimeMS` AND `timeoutMS` together still answered at the client's deadline, because the driver's derived
- *     value wins over the explicit one. So the driver's `timeoutMS` is not used for a write — and one the CLIENT carries
- *     (`MONGO_URI`) is switched off for it (`timeoutMS: 0`, see `planBound`), because the driver inherits it otherwise.
+ *  1. **The server first.** The operation carries an explicit `maxTimeMS` = the bound. The driver's own client-side
+ *     timeout (`timeoutMS`) is used for NOTHING (`Q-716`): it ended a write on the client's clock, which starts before the
+ *     command has a connection, so earlier than the server's; it desynchronised the connection pool after a timeout on
+ *     drivers before 7.8.0, so one call could read another's answer (CVE-2026-119179); and from 7.8.0 it does nothing.
+ *     `no-server-code-uses-the-drivers-client-timeout` holds that.
  *  2. **The client later, as the backstop.** The caller is answered `StoreTimeout` at `bound +
  *     SERVER_FIRST_MARGIN_MS`, and the driver call is aborted (`signal`): a command not yet sent is dropped, one in
  *     flight loses its connection. This is for a server that cannot answer — and there is one: an UPSERT blocked
@@ -74,17 +71,19 @@
  * limit for any real record, not for an adversarial one): there is no kind for a bulk nothing bounds.
  * `a-bounded-bulk-write-is-one-command` derives the call sites from the source and holds each row against the code.
  *
- * A READ keeps the driver's `timeoutMS`: it lands nothing, so the order does not matter, and its cursor needs the
- * driver's deadline across batches. An operation that is a transaction's (a SESSION) is bounded by the session
- * (`db/bounded-transaction.ts`): the driver refuses a per-operation timeout inside a timed transaction, and an
- * aborted transaction applies nothing.
+ * A READ is bounded the same way, server first with the backstop behind it, but its backstop only ends the driver call: it
+ * lands nothing, so there is no server operation to end before answering, and its own `maxTimeMS` ends that at the same
+ * figure. A cursor-returning read hands its cursor back at once, so its backstop is the `signal` the driver honours on every
+ * batch (`withCursorBackstop`), aborted with `StoreTimeout` as the reason. A STATEMENT of an open transaction is bounded like
+ * a read: its transaction is sealed by its owner (`db/bounded-transaction.ts`), which refuses the statement should it arrive
+ * late. Every path that ends a driver call closes the connection the call was on (the driver's `signal`), or leaves the
+ * driver to read its own reply, so no reply is ever left for another call to read.
  *
- *  - **Per operation**: the bound is `min(writeTimeoutMs(), deadline − now)`. A write that already carries
- *    `maxTimeMS` keeps it, lowered to that figure (its callers read a code-50 timeout); one carrying `timeoutMS`
- *    is bounded by the smaller. A read that carries either keeps the smaller, as before.
+ *  - **Per operation**: the bound is `min(writeTimeoutMs(), deadline − now)`. A call that already carries `maxTimeMS` keeps
+ *    it, lowered to that figure (its callers read a code-50 timeout).
  *  - **Per scope**: a deadline, `holdDeadlineMs()` after the scope opened, or the enclosing scope's if that is
- *    sooner. When it has passed, an operation is not sent at all: `StoreTimeout` — a `timeoutMS` of 0 would mean
- *    NO bound to the driver, which is why the minimum is enforced here and not left to arithmetic.
+ *    sooner. When it has passed, an operation is not sent at all: `StoreTimeout` — a `maxTimeMS` of 0 would mean
+ *    NO bound to the server, which is why the minimum is enforced here and not left to arithmetic.
  *
  * The deadline defaults to three quarters of `BATCH_FETCH_TIMEOUT_MS`, the time a SENDER waits for a push answer,
  * so a stalled push answers a retryable `503` before the sender gives up and re-sends a page into the same stall.
@@ -163,7 +162,7 @@ export function holdWarnMs(): number { return Math.floor(bounds.holdDeadlineMs /
 /**
  * Say so, once, when the connection string carries a `socketTimeoutMS` below the write bound; `true` when it did.
  *
- * A `timeoutMS` in `MONGO_URI` is neutralised for a bounded write (`planBound`). A `socketTimeoutMS` cannot be: it is the
+ * A `timeoutMS` in `MONGO_URI` does nothing from driver 7.8.0 (`Q-716`). A `socketTimeoutMS` does act: it is the
  * socket's read timeout, below every operation clock, so one SHORTER than the bound ends the wait on the client while the
  * server still holds the write alive — the caller is answered before the write is known not to land, which is the order
  * the bound exists to keep. Nothing refuses it (a deployment may have its own reasons, and `0` or a larger number is
@@ -180,6 +179,21 @@ export function warnIfSocketTimeoutBelowWriteBound(uri: string): boolean {
   log.warn(`MongoDB connection string: socketTimeoutMS=${socketMs} is below the write bound (YTHRIL_WRITE_TIMEOUT_MS=${bounds.writeTimeoutMs}). `
     + 'A write the server is still holding can be ended by the socket before the server\'s own deadline, and the caller answered a timeout '
     + 'before the write is known not to land. Leave socketTimeoutMS unset, or above the bound.');
+  return true;
+}
+
+/**
+ * Say so, once, when the connection string names a `timeoutMS`; `true` when it did (`Q-716`).
+ *
+ * The driver's client-side timeout desynchronised the connection pool after a timeout on drivers before 7.8.0, so one call could
+ * read another's answer (CVE-2026-119179), and from 7.8.0 it is accepted and does NOTHING. An operator who set it to bound every
+ * database call would believe they had a bound they do not; the bound Ythril keeps is `YTHRIL_WRITE_TIMEOUT_MS` (and the
+ * housekeeping figure), on the server's deadline. The value is not quoted: `uri` carries credentials.
+ */
+export function warnIfClientTimeoutNamed(uri: string): boolean {
+  if (!uriQueryOptions(uri).has('timeoutms')) return false;
+  log.warn('MongoDB connection string: timeoutMS has no effect (the MongoDB driver ignores it from 7.8.0, after CVE-2026-119179). '
+    + `Database calls are bounded by YTHRIL_WRITE_TIMEOUT_MS (now ${bounds.writeTimeoutMs} ms) on the server's own deadline. Remove timeoutMS from MONGO_URI.`);
   return true;
 }
 
@@ -260,7 +274,7 @@ export async function withinWriteBoundOf<T>(ms: number, fn: () => Promise<T>): P
  * Run `fn` — one housekeeping unit — with every database operation it issues ended at a figure of its own: `opMs`, or
  * `housekeepingOpMs()`. The same scope as `withinWriteBound` and the same door: a plain write is ended by the SERVER at the
  * figure with the client backstop `SERVER_FIRST_MARGIN_MS` later, so a housekeeping write the bound ended can no more land
- * afterwards than a hold's can (`Q-372`); a read carries the driver's `timeoutMS`.
+ * afterwards than a hold's can (`Q-372`); a read carries the server's deadline and a backstop that ends the driver call.
  *
  * **There is no deadline across the unit.** A walk that touches every space, or sweeps a collection in batches, issues as
  * many operations as it has work for, and each is bounded; a deadline here would end a healthy unit part-way through for being
@@ -304,9 +318,9 @@ export function detachedWrite<T>(fn: () => Promise<T>): Promise<T> {
  * Milliseconds left before the active scope's DEADLINE, or `undefined` when there is none to be left before: outside any
  * scope, and inside a housekeeping scope that has no deadline. Never below 0, never `Infinity`.
  *
- * The transaction module (`db/bounded-transaction.ts`) hands the answer to the driver as a session's `defaultTimeoutMS`,
- * where an `Infinity` would be a transaction with no bound at all — so `undefined` is what tells it there is no deadline
- * to inherit, and it opens a write bound of its own rather than begin an unbounded transaction.
+ * The transaction module (`db/bounded-transaction.ts`) runs its retry loop against the answer, where an `Infinity` would be
+ * a transaction with no bound at all — so `undefined` is what tells it there is no deadline to inherit, and it opens a write
+ * bound of its own rather than begin an unbounded transaction.
  */
 export function boundTimeLeft(): number | undefined {
   const s = activeScope();
@@ -335,9 +349,9 @@ export const BOUNDED_OPTIONS_ARGUMENT: Readonly<Record<string, number>> = {
 };
 
 /**
- * The bounded methods that hand back a CURSOR, synchronously: a refused bound throws rather than rejects for them,
- * and a cursor in a timed transaction is the one that must not `getMore`. One set for both questions (bundle-30 I6,
- * C4: the observer and `inTimedTransactionCursor` each spelled it).
+ * The bounded methods that hand back a CURSOR, synchronously: a refused bound throws rather than rejects for them, and
+ * their backstop is a `signal` rather than a promise that answers instead of them (`withCursorBackstop`). One set for both
+ * questions (bundle-30 I6, C4: the observer and the bound each spelled it).
  */
 export const RETURNS_CURSOR: ReadonlySet<string> = new Set(['find', 'aggregate', 'listCollections']);
 
@@ -355,34 +369,21 @@ export const BOUNDED_DB_OPTIONS_ARGUMENT: Readonly<Record<string, number>> = {
   listCollections: 1, dropCollection: 1,
 };
 
-/** The first batch a cursor in a timed transaction asks for: everything, up to the server's own 16 MB per batch. */
-const IN_TRANSACTION_BATCH = 1_000_000;
-
 /**
- * A cursor opened inside a TIMED transaction (`db/bounded-transaction.ts`: a session with `defaultTimeoutMS`) is
- * asked for all of its rows in its FIRST batch.
- *
- * The driver (7.1) sends `maxTimeMS` on such a cursor's `getMore`, which the server refuses for a non-awaitData
- * cursor — so every read inside a held transaction that came back in more than one batch (more than 101 rows, the
- * default first batch) failed the whole transaction with "cannot set maxTimeMS on getMore command for a
- * non-awaitData cursor" (probe, bundle-30 I3). Asking for everything at once needs no `getMore` up to 16 MB, which
- * is the server's cap on one batch; a read larger than that inside a transaction still fails, loudly — it reads in
- * id chunks instead (`readStoredById`). A caller's own `batchSize` is kept.
+ * Is `options` the options of a statement of an open transaction? Such a statement is bounded like any call (the server's
+ * deadline and the client backstop), but its backstop ends nothing on the server: the transaction it belongs to is sealed
+ * instead (`db/bounded-transaction.ts`), which also refuses the statement should it arrive late.
  */
-function inTimedTransactionCursor(method: string, args: unknown[], at: number, options: Record<string, unknown>): unknown[] {
-  if (!RETURNS_CURSOR.has(method)) return args;
-  const session = options['session'] as { inTransaction?: () => boolean; timeoutMS?: number } | undefined;
-  if (!session?.inTransaction?.() || typeof session.timeoutMS !== 'number' || options['batchSize'] !== undefined) return args;
-  const out = [...args];
-  while (out.length < at) out.push(undefined);
-  out[at] = { ...options, batchSize: IN_TRANSACTION_BATCH };
-  return out;
+function inOpenTransaction(options: Record<string, unknown>): boolean {
+  const session = options['session'] as { inTransaction?: () => boolean } | undefined;
+  return session?.inTransaction?.() === true;
 }
 
 /**
- * The methods whose bound is a SERVER deadline with a client backstop (see the module docblock): the plain writes. A
- * read is not here — it lands nothing, so it keeps the driver's `timeoutMS`. `record-write-observer.ts` checks this
- * against its own table of which methods write, so a write added there and left out of here fails at load.
+ * The plain writes: the methods whose client backstop ENDS THE SERVER OPERATION before the caller is answered (see the module
+ * docblock). Every bounded call carries the server's deadline and a backstop; only a write can land after its answer, so only
+ * a write's backstop kills. `record-write-observer.ts` checks this against its own table of which methods write, so a write
+ * added there and left out of here fails at load.
  */
 export const PLAIN_WRITE_METHODS: ReadonlySet<string> = new Set([
   'insertOne', 'insertMany', 'bulkWrite', 'updateOne', 'updateMany', 'replaceOne',
@@ -494,20 +495,16 @@ async function endServerOperation(ops: ServerOperations | undefined, comment: st
 }
 
 /**
- * Where a bounded call is going and what the database it goes through carries — stated at EVERY call of `callBounded`,
- * never defaulted.
+ * Where a bounded call is going — stated at EVERY call of `callBounded`. `collection` (or `database`) is for the backstop's
+ * warning, which says where the server stalled (and in which space, read from the collection's name).
  *
- * `inheritedTimeoutMs` is the `timeoutMS` the CLIENT carries (`MONGO_URI`), which every operation that sets none of its
- * own inherits: a plain write has to switch it off (`timeoutMS: 0`, see `planBound`) or the driver's clock ends the write
- * before the server's deadline. It was an optional argument, so a call that left it out compiled and put that defect
- * back; it is required here, and `undefined` is stated, not implied. `collection` is only for the backstop's warning,
- * which says where the server stalled (and in which space, read from the collection's name).
+ * There is no `timeoutMS` the client carries to state any more (`Q-716`): from driver 7.8.0 a `timeoutMS` in `MONGO_URI` does
+ * nothing, so nothing has to switch it off, and `mongo.ts` says so at boot when the string names one.
  */
 export type BoundTarget = CollectionTarget | DatabaseTarget;
 
-/** What both levels state: the client's own `timeoutMS`, `undefined` when it carries none. */
-interface InheritedTimeout {
-  readonly inheritedTimeoutMs: number | undefined;
+/** What both levels state. */
+interface TargetMeans {
   /**
    * The means to end the SERVER's operation when the backstop fires (`endServerOperation`). Every production call states it
    * (`record-write-observer.ts` is the one door); it is optional only so a fake driver call in a test can leave it out, and
@@ -517,7 +514,7 @@ interface InheritedTimeout {
 }
 
 /** A call on a `Collection`: it goes through `BOUNDED_OPTIONS_ARGUMENT` and `PLAIN_WRITE_METHODS`. */
-export interface CollectionTarget extends InheritedTimeout {
+export interface CollectionTarget extends TargetMeans {
   /** The collection the call goes to, as the driver names it. */
   readonly collection: string;
 }
@@ -527,7 +524,7 @@ export interface CollectionTarget extends InheritedTimeout {
  * `PLAIN_DB_WRITE_METHODS`. The LEVEL is stated here, by which of the two shapes the target has, and never as a defaulted extra
  * parameter — an optional argument is how a call came to leave out what it inherits.
  */
-export interface DatabaseTarget extends InheritedTimeout {
+export interface DatabaseTarget extends TargetMeans {
   /** The database the call goes to, for the backstop's warning. */
   readonly database: string;
 }
@@ -541,12 +538,14 @@ const isPlainWrite = (method: string, target: BoundTarget): boolean =>
 /** The collection or database the target names, for the backstop's warning. */
 const placeOf = (target: BoundTarget): string => (isDatabaseTarget(target) ? target.database : target.collection);
 
-/** The bounded call: its arguments, and — for a plain write — the time its client backstop is armed for. */
+/** The bounded call: its arguments, and the time its client backstop is armed for. */
 interface BoundedCall {
   args: unknown[];
   options: Record<string, unknown>;
   at: number;
-  backstopMs?: number;
+  backstopMs: number;
+  /** A plain write outside a transaction: its backstop ends the server operation before the caller is answered. */
+  endsServerOperation: boolean;
   /** The bound is ours alone: the caller set no deadline of its own, so the server's answer to it is `StoreTimeout`. */
   ourDeadline?: boolean;
   /** The `comment` the plain write carries, which is how the backstop finds its operation in `$currentOp`. */
@@ -559,57 +558,57 @@ interface BoundedCall {
  * deadline has passed: the operation is not sent.
  */
 function planBound(method: string, args: unknown[], target: BoundTarget): BoundedCall | undefined {
-  const { inheritedTimeoutMs } = target;
   const at = optionsArgumentOf(method, target);
   if (at === undefined) return undefined;
   const scope = activeScope();
   if (!scope) return undefined;
   const given = args[at];
   const options = given && typeof given === 'object' ? given as Record<string, unknown> : {};
-  // A session's operations are bounded by the session (or are a transaction's, where a per-op timeout is refused).
-  if (options['session'] !== undefined) return { args: inTimedTransactionCursor(method, args, at, options), options, at };
   const left = scope.deadline - Date.now();
   if (left <= 0) throw new StoreTimeout();
   // The one place the per-operation figure enters: the scope's own (`writeTimeoutMs()` for a hold, the housekeeping figure
   // for a walk, the lower of it and the enclosing scope's), never a global read here — a global read is how a walk's figure
   // would be ignored inside a hold's.
   const bound = Math.min(scope.perOpMs, left);
-  const amended: Record<string, unknown> = { ...options };
+  // Every bounded call carries the SERVER's deadline, a caller's own lower `maxTimeMS` kept, and the client backstop behind it
+  // (`callBounded`). Never the driver's `timeoutMS` (`Q-716`): it desynchronised the pool on drivers before 7.8.0
+  // (CVE-2026-119179) and does nothing from 7.8.0 on.
+  const carried = typeof options['maxTimeMS'] === 'number' && options['maxTimeMS'] > 0 ? [options['maxTimeMS']] : [];
+  const serverMs = Math.min(bound, ...carried);
+  const amended: Record<string, unknown> = { ...options, maxTimeMS: serverMs };
   const out = [...args];
   while (out.length < at) out.push(undefined);
-  // A plain write is ended by the server first, with the client backstop behind it. A Db-level call carries the SERVER's
-  // deadline too, whether it writes or reads (`listCollections` takes `maxTimeMS`; probe P8: the driver keeps `timeoutMS` and
-  // drops `maxTimeMS` when both are sent, so only one is ever sent) — but only a write needs the backstop.
-  if (isPlainWrite(method, target) || isDatabaseTarget(target)) {
-    // The server's deadline, and no `timeoutMS`: the driver would derive the wire value from its own earlier clock.
-    const carried = [options['maxTimeMS'], options['timeoutMS']].filter((v): v is number => typeof v === 'number' && v > 0);
-    delete amended['timeoutMS'];
-    // A `timeoutMS` the CLIENT carries (`MONGO_URI`, a client option) is inherited by every operation that sets none of its
-    // own (`options?.timeoutMS ?? parent?.timeoutMS`, driver `utils.js`), and would arm the driver's clock — which ends the
-    // write before the server's deadline, so the 503 and the hold's release can precede a live write: the defect above,
-    // for any operator who sets one. `0` is the driver's "no client deadline" for THIS operation: its context then has an
-    // infinite remaining time, derives no `maxTimeMS` of its own, and the explicit one stays on the wire (probed on every
-    // method of `PLAIN_WRITE_METHODS`, with the client's `timeoutMS` below the bound: answered by the server at the bound).
-    // Only when one is inherited: with none, the operation carries no `timeoutMS` at all, as it always did.
-    if (inheritedTimeoutMs !== undefined && inheritedTimeoutMs > 0) amended['timeoutMS'] = 0;
-    const serverMs = Math.min(bound, ...carried);
-    amended['maxTimeMS'] = serverMs;
-    if (!isPlainWrite(method, target)) { out[at] = amended; return { args: out, options: amended, at }; }
-    // The write's own name in the server's operation list: the backstop finds the operation by it and ends it before it answers
-    // (`endServerOperation`). Unique per call, so one kill can never end another write; the bound owns this option of a plain write.
-    const comment = `${WRITE_COMMENT_PREFIX}${randomUUID()}`;
-    amended['comment'] = comment;
+  const backstopMs = serverMs + SERVER_FIRST_MARGIN_MS;
+  // A plain write outside a transaction is ended by the server first, and its backstop ENDS THE SERVER OPERATION before the
+  // caller is answered: the write's own name in the server's operation list is how the backstop finds it (`endServerOperation`),
+  // unique per call so one kill can never end another write. A read lands nothing, and a transaction's statement is sealed with
+  // its transaction (`db/bounded-transaction.ts`), so their backstop only ends the driver call.
+  if (isPlainWrite(method, target) && !inOpenTransaction(options)) {
+    amended['comment'] = `${WRITE_COMMENT_PREFIX}${randomUUID()}`;
     out[at] = amended;
-    return { args: out, options: amended, at, backstopMs: serverMs + SERVER_FIRST_MARGIN_MS, ourDeadline: carried.length === 0, comment };
-  }
-  if (typeof options['maxTimeMS'] === 'number') {
-    amended['maxTimeMS'] = Math.min(options['maxTimeMS'], bound);
-  } else {
-    amended['timeoutMS'] = typeof options['timeoutMS'] === 'number' && options['timeoutMS'] > 0
-      ? Math.min(options['timeoutMS'], bound) : bound;
+    return { args: out, options: amended, at, backstopMs, endsServerOperation: true, ourDeadline: carried.length === 0, comment: amended['comment'] as string };
   }
   out[at] = amended;
-  return { args: out, options: amended, at };
+  // A statement of an open transaction answers with the driver's own error, never re-dressed as `StoreTimeout`: its labels
+  // (`TransientTransactionError` on a write conflict) are how the transaction's loop knows to run it again
+  // (`db/bounded-transaction.ts`), and a write conflict is one `isWriteTimeout` counts as a bound's end.
+  return { args: out, options: amended, at, backstopMs, endsServerOperation: false, ourDeadline: carried.length === 0 && !inOpenTransaction(options) };
+}
+
+/**
+ * A cursor-returning call (`find`, `aggregate`, `listCollections`) hands its cursor back synchronously, so its backstop cannot be
+ * a promise that answers instead of it: it is a `signal` the driver honours on every batch of the cursor, aborted at the backstop
+ * with `StoreTimeout` as its reason, which is what the cursor's read then throws. The driver closes the connection the aborted
+ * read was on (probed, 7.8.0), so no reply is left for another call to read.
+ */
+function withCursorBackstop(plan: BoundedCall): unknown[] {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(new StoreTimeout()), plan.backstopMs);
+  timer.unref();
+  const given = plan.options['signal'] as AbortSignal | undefined;
+  const bounded = [...plan.args];
+  bounded[plan.at] = { ...plan.options, signal: given ? AbortSignal.any([given, abort.signal]) : abort.signal };
+  return bounded;
 }
 
 /**
@@ -627,7 +626,7 @@ export function callBounded(
 ): unknown {
   const plan = planBound(method, args, target);
   if (!plan) return call(args);
-  if (plan.backstopMs === undefined) return call(plan.args);
+  if (RETURNS_CURSOR.has(method)) return call(withCursorBackstop(plan));
   const { backstopMs, options, at, comment } = plan;
   const abort = new AbortController();
   const given = options['signal'] as AbortSignal | undefined;
@@ -643,6 +642,9 @@ export function callBounded(
       // The default reason (a `DOMException`, whose `name` is an enumerable accessor) and our `StoreTimeout` (which sets
       // its own `name`) both make the abandoned call fail with a `TypeError` about that instead of the abort.
       abort.abort(new Error('the write bound\'s backstop fired'));
+      // A read, or a statement of a transaction: nothing of it can land after the answer (the statement's transaction is sealed by
+      // its owner, `db/bounded-transaction.ts`), so the caller is answered now.
+      if (!plan.endsServerOperation) { reject(new StoreTimeout()); return; }
       // The caller is answered only once the SERVER operation is gone: the server's deadline starts when the command ARRIVES,
       // so a late one is still alive here, and answering now would release the hold under a write that can land (`Q-380`).
       void endServerOperation(target.serverOperations, comment ?? '').then((ended) => {
