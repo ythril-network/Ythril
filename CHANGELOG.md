@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+| Changes on upgrade | Action |
+|---|---|
+| The bundled database no longer writes `runner.log`; one left on `ythril-mongo-logs` by 6.4 to 6.5 holds the database password | Delete it: `docker exec ythril-mongo rm -f /var/log/mongodb/runner.log` |
+
+### Changed
+
+- **Docs:** the hosting guide says where a refused mongot heap setting is logged, and its log command works under any compose project name.
+
+### Security
+
+- **Database:** the bundled database no longer writes its root password in clear text to `runner.log` on its log volume.
+
 ## [6.5.2] — 2026-11-07
 
 **A patch release: a dialog you have typed into asks before Escape, the X or Cancel throws your draft away, and the release gate checks that a release is dated the day it is tagged.**

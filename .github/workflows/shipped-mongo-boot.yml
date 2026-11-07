@@ -1,17 +1,22 @@
 name: Shipped Mongo Boot
 
-# Boots the SHIPPED compose file's database service alone and reads the two log files it must keep on its volume (Q-373).
+# Boots the SHIPPED compose file's database service alone, with a root user and password, and reads its log volume (Q-373,
+# Q-695).
 #
 # Why this exists: `ythril-mongo` runs mongot (the vector-search process) inside the same container as mongod. When mongot
 # dies of an exhausted heap the image's runner stops mongod, the container exits 0, and `docker logs` holds nothing (its
 # logging driver is "none" on purpose: slow-operation lines carry command bodies). The cause is only in mongot.log, and only
-# because the compose file sets MONGOT_LOG_FILE and RUNNER_LOG_FILE on the `ythril-mongo-logs` volume. The standalone gate
+# because the compose file sets MONGOT_LOG_FILE on the `ythril-mongo-logs` volume. The standalone gate
 # `the-shipped-mongo-sizes-mongot-and-keeps-its-logs-on-a-volume` holds the SHAPE of that; this holds that the image honours
 # it: a volume at a path the image does not own is root-owned, and the runner crash-loops on "permission denied" (bundle-72
 # premise P4), which no reading of the YAML can see. Every other job starts the TEST compose file, never this one.
 #
-# It needs no secrets and no build: the atlas-local image is pulled by its pinned digest, and the database runs without
-# credentials, in a throwaway project of its own that `down -v` removes whatever happened.
+# And no file on that volume holds the database password (Q-695): with RUNNER_LOG_FILE set (6.4 to 6.5), the runner wrote its
+# connection string, `mongodb://<user>:<password>@localhost`, there twice per start, world-readable and never rotated. The
+# service is started with a throwaway root password made for this run, and the whole volume is searched for it.
+#
+# It needs no secrets and no build: the atlas-local image is pulled by its pinned digest, and the password is generated here,
+# in a throwaway project of its own that `down -v` removes whatever happened.
 
 on:
   pull_request:
@@ -43,21 +48,32 @@ jobs:
           # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every later step.
           persist-credentials: false
 
-      - name: Start the shipped database service alone
+      - name: Make a throwaway root password for this run
+        # Random per run and masked in the log; it guards a database that lives for this job only.
+        run: |
+          set -eu
+          pw="boot-check-$(openssl rand -hex 16)"
+          echo "::add-mask::$pw"
+          { echo "MONGO_USERNAME=boot-check"; echo "MONGO_PASSWORD=$pw"; } >> "$GITHUB_ENV"
+
+      - name: Start the shipped database service alone, with that root password
         run: docker compose -p "$PROJECT" -f docker-compose.yml up -d --wait --wait-timeout 600 ythril-mongo
 
-      - name: Both log files are on the volume, and mongot was given its heap setting
+      - name: mongot's log is on the volume with its heap setting, and no file there holds the password
         # Read through the VOLUME, from a second container, so a file written inside the container's own layer does not pass.
         run: |
           set -eu
           image=$(docker compose -p "$PROJECT" -f docker-compose.yml config --images ythril-mongo)
-          docker run --rm --entrypoint sh -v "${PROJECT}_ythril-mongo-logs:/l" "$image" -c '
+          docker run --rm --entrypoint sh -e PW="$MONGO_PASSWORD" -v "${PROJECT}_ythril-mongo-logs:/l" "$image" -c '
             set -eu
             ls -l /l
             test -s /l/mongot.log || { echo "::error::mongot.log is missing or empty on ythril-mongo-logs"; exit 1; }
-            test -s /l/runner.log || { echo "::error::runner.log is missing or empty on ythril-mongo-logs"; exit 1; }
             grep -q "Picked up JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=" /l/mongot.log \
               || { echo "::error::mongot did not pick up the heap share from JAVA_TOOL_OPTIONS"; exit 1; }
+            leaked=$(grep -rlF -- "$PW" /l || true)
+            if [ -n "$leaked" ]; then
+              echo "::error::the database root password is written in clear text on ythril-mongo-logs: $leaked"; exit 1
+            fi
           '
 
       - name: Remove the throwaway project

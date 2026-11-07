@@ -165,6 +165,7 @@ cp -r local-data/mongo local-data/mongo.backup
 # 3. Set MONGO_USERNAME / MONGO_PASSWORD in .env, then recreate the database from empty
 #    (this is the only path on which the image can enable auth).
 docker compose down
+#    The volume names start with the compose project name (`ythril` when the folder is named so; `docker volume ls` lists them).
 docker volume rm ythril_ythril-mongo-data ythril_ythril-mongo-configdb   # or clear the bind mount
 docker compose up -d ythril-mongo
 
