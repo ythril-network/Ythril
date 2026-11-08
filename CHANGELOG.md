@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.5.5] — 2026-11-08
+
+**A patch release: in a bulk write, an edge now follows what its records finally did when one of them lost a race with another request, and an edge with two new ends is stored only when both were written.**
+
 | Changes on upgrade | Action |
 |---|---|
 | A bulk edge whose record or other end in the same call was not written is no longer stored; its row and the `bulk.write` webhook's counts say so | Resend the failed record with its edges |
@@ -22,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** bytes that arrive from a peer move the file row's position, never its version: a reader paging by position hears of them, and the publisher's next edit still wins. Identical bytes again write nothing.
 - **Files:** a file deletion (own, folder, TTL, a peer's, a sidecar's) takes a position in the same write that flags or marks the row.
 - **Testing:** every `node --test` the standalone runner starts is time-bounded: a test or hook pending past 15 minutes fails, and a batch that never exits is ended and named.
+
+### Changed
+
+- **Docs:** changed: the brain API, bulk write and write semantics pages, and the `save_bulk` tool description.
 
 ### Fixed
 
