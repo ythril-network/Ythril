@@ -396,7 +396,9 @@ Losing that race a second time answers **409** on both doors (on MCP, the tool r
 ```
 
 It takes a record under continuous concurrent writes to see it. Resending the same request is the remedy. On a
-bulk write the same case is an item error with that reason, and the rest of the batch is written.
+bulk write the same case is an item error with that reason, and the rest of the batch is written — except what
+hangs off that record: its own `edges`, and a top-level edge with an end at it, are not written either, and each
+says it depends on an item of this request that was not written, carrying that reason.
 
 **A functional create that loses a race is decided again, and refused.** An edge under a `functional` label in a
 `strict` space is subject to the same re-decision. Two writers that both find the subject free cannot both store an

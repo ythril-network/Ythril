@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+| Changes on upgrade | Action |
+|---|---|
+| A bulk edge whose record or other end in the same call was not written is no longer stored; its row and the `bulk.write` webhook's counts say so | Resend the failed record with its edges |
+
+### Fixed
+
+- **Brain:** a bulk edge follows its records' final outcome: stored when a record lands on its re-try after a lost race, not stored when the record or either `$ref` end fails.
+- **Brain:** a bulk item whose record another request deleted mid-call is written as a new record; `refs` and its edges name the new id.
+
 ## [6.5.4] — 2026-11-07
 
 **A patch release: rewriting a file keeps the properties you did not send, a peer's token can no longer store a file as this instance's own, and a failing storage answers as a fault instead of as an empty folder.**

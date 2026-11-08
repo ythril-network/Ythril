@@ -238,7 +238,8 @@ describe('a bulk item is read as its collection declares (the one reader both do
   ];
 
   /** Helpers of this file that read a key of the item and are not in the shared map. */
-  const BULK_HELPERS = { refKeyDeclared: ['$ref'], itemConnectionError: 'both', reject: [], common: [], planEdgeItem: [] };
+  // `edgeEntry` hands the item only to `reject`; `planTopLevelEdge` is the edge window itself, called again for an edge planned again.
+  const BULK_HELPERS = { refKeyDeclared: ['$ref'], itemConnectionError: 'both', reject: [], common: [], planEdgeItem: [], edgeEntry: [], planTopLevelEdge: [] };
 
   for (const [collection, kind, windows] of COLLECTIONS) {
     it(`${collection}: the keys the reader takes from an item are the keys save_bulk declares for it`, () => {

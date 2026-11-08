@@ -26,6 +26,7 @@
  * disagreement is a mistake somewhere, and guessing which side is right is how the hazard comes back.
  */
 import type { RefKind } from '../config/types-knowledge.js';
+import { dependencyFailed } from './write-plan/types.js';
 
 /** How a caller declares a key on an item, and how they name it afterwards. */
 export const REF_DECLARE_FIELD = '$ref';
@@ -74,6 +75,16 @@ export class BatchRefs {
     }
     this.minted.set(key, { id, kind });
     return null;
+  }
+
+  /**
+   * The item declaring `key` finally landed as `id`. Usually the id it was declared with; a converge whose record another request
+   * deleted while it was being applied is re-planned as an insert under a fresh id, and the key then names THAT record — a key
+   * left on the deleted id hands the caller an id that names nothing. A key that was never declared, or already failed, is left as it is.
+   */
+  settle(key: string, id: string): void {
+    const at = this.minted.get(key);
+    if (at && at.id !== id) this.minted.set(key, { id, kind: at.kind });
   }
 
   /** What a key names, or undefined when nothing in this call declared it. */
@@ -148,7 +159,7 @@ export function resolveRef(value: unknown, refs: BatchRefs, statedKind?: RefKind
   const failed = refs.failure(key);
   if (!found && failed !== undefined) {
     const violation = refs.failureViolation(key);
-    return { error: `$ref "${key}" names an item of this request that was not written: ${failed}`, ...(violation ? { violation } : {}) };
+    return { error: dependencyFailed(failed, key), ...(violation ? { violation } : {}) };
   }
   if (!found) {
     return {

@@ -48,14 +48,21 @@ import { EndpointRemoved, ENDPOINT_REMOVED } from '../../util/errors.js';
 import type { AuthorRef, EdgeDoc, LinkDoc, TombstoneDoc } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import type { DesiredLinks } from '../links.js';
-import { COMMIT_ORDER, PLAN_KINDS, type CommitOutcome, type PlanKind, type WritePlan } from './types.js';
+import { COMMIT_ORDER, PLAN_KINDS, dependencyFailed, type CommitOutcome, type PlanKind, type WritePlan } from './types.js';
 import { admitSpaceWrite, admitSpaceWriteUnit, assertSpaceTakesWrites, isSpaceNotWritable } from '../../spaces/space-write-gate.js';
 
 /** Insert-time duplicate rules run at most this many at once — each is a vector search. */
 const DUPE_RULE_CONCURRENCY = 4;
 
-/** Write `plans` (all for `spaceId`) and say what happened to each, in the order given. */
-export async function commitPlans(spaceId: string, plans: readonly WritePlan[]): Promise<CommitOutcome[]> {
+/**
+ * Write `plans` (all for `spaceId`) and say what happened to each, in the order given.
+ *
+ * `somethingLanded`: an EARLIER commit of the same request already stored something (a batch writing the edges that waited on a
+ * re-planned record), so this commit is held to the promise above from its first stage: a failure is an outcome, never a throw.
+ */
+export async function commitPlans(
+  spaceId: string, plans: readonly WritePlan[], opts: { somethingLanded?: boolean } = {},
+): Promise<CommitOutcome[]> {
   for (const p of plans) {
     if (p.spaceId !== spaceId) {
       throw new Error(`commitPlans: a plan decided for space '${p.spaceId}' was handed to a commit for '${spaceId}'`);
@@ -63,6 +70,7 @@ export async function commitPlans(spaceId: string, plans: readonly WritePlan[]):
   }
   const outcomes = new Array<CommitOutcome | undefined>(plans.length);
   const landed: number[] = [];
+  const landedBefore = opts.somethingLanded === true;
 
   for (const kind of COMMIT_ORDER) {
     const ready: number[] = [];
@@ -70,7 +78,7 @@ export async function commitPlans(spaceId: string, plans: readonly WritePlan[]):
       if (plans[i]!.kind !== kind) continue;
       const failedDep = (plans[i]!.dependsOn ?? []).map(d => outcomes[d]).find(o => o !== undefined && !o.ok);
       if (failedDep && !failedDep.ok) {
-        outcomes[i] = { ok: false, reason: `it depends on an item of this request that was not written: ${failedDep.reason}` };
+        outcomes[i] = { ok: false, reason: dependencyFailed(failedDep.reason) };
       } else {
         ready.push(i);
       }
@@ -83,13 +91,13 @@ export async function commitPlans(spaceId: string, plans: readonly WritePlan[]):
     try {
       leaveWriteUnit = admitSpaceWriteUnit(spaceId, PLAN_KINDS[kind].collection);
     } catch (err) {
-      if (landed.length === 0 || !isSpaceNotWritable(err)) throw err;
+      if ((landed.length === 0 && !landedBefore) || !isSpaceNotWritable(err)) throw err;
       for (const i of ready) outcomes[i] = { ok: false, reason: err.message };
       continue;
     }
     let stageLanded: number[];
     try {
-      stageLanded = await writeStage(spaceId, kind, plans, ready, outcomes, landed.length > 0);
+      stageLanded = await writeStage(spaceId, kind, plans, ready, outcomes, landed.length > 0 || landedBefore);
     } finally {
       leaveWriteUnit();
     }
