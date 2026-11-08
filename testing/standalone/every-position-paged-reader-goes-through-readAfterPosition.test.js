@@ -112,6 +112,12 @@ const EXEMPT = [
     why: 'the key is the caller\'s `sort.field`, validated by `parseSortParam` against `SORTABLE_FIELDS`, which names no `pos` (asserted below), and `_id` is appended so the order is total',
     holds: (e) => (e.keys.at(-1) === '_id' ? null : 'toMongoSort no longer ends its sort in `_id`'),
   },
+  // bundle-255: the client file change feed's `head`/`through` below the cap: one row, read backwards on (pos, _id), so a maximum and not a page.
+  ...['range', 'ordering'].map((kind) => ({
+    file: 'server/src/files/file-changes.ts', fn: 'topFilePositionBelow', kind, by: 'slot',
+    why: 'the highest position below the read\'s cap (the cap taken by readAfterPosition\'s caller): a descending sort on (pos, _id) capped at one row, so there is no next page to continue',
+    holds: (e) => (/\.sort\(\{ pos: -1, _id: -1 \}\)\.limit\(1\)/.test(bodyOf(rawByFile.get(e.file) ?? '', e.function)) ? null : 'the read is no longer one row of a descending (pos, _id) sort'),
+  })),
   {
     file: 'server/src/brain/tombstone-prune.ts', fn: 'pruneTombstonesToFloor', kind: 'range', by: 'slot',
     why: 'the prune: delete every tombstone below the position every peer has acknowledged. A delete by bound, not a read',
@@ -243,6 +249,8 @@ describe('the horizon and the filters have named callers', () => {
     [KEYSET, 'the position reader: one cap for both finds, taken before either'],
     ['server/src/sync/served-watermark.ts', 'the served mark cannot exceed the cap (`ownPositionMark`), so a restart cannot seed a clock below what was served'],
     ['server/src/files/tombstones.ts', 'the file-tombstone stream\'s own cap (`settledPositionCap(spaceId)`), the one reader of that stream'],
+    // bundle-255: not a reader. A wipe or a restore raises the change feed's floor TO the settled head, so every cursor handed out before it re-lists.
+    ['server/src/files/file-feed-floor.ts', 'the change feed\'s floor raised to the settled head at a wipe or restore (`raiseFileFeedFloorToHead`): a write of a bound, no read'],
   ]);
   const callers = () => sources.filter(s => s.file !== CLOCK && /\bsettledPositionCap\b/.test(s.text)).map(s => s.file);
 

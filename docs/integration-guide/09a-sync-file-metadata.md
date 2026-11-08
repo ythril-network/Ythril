@@ -123,7 +123,14 @@ which is why it is the one that is validated; every other family's `updatedAt` a
 `GET /api/sync/filemeta/:id` answers `404` for it, a push never sends it, and no Merkle root hashes it. The
 deletion reaches a peer as the file tombstone below, which the peer applies by **its own** `softDeleteFileMeta`. A
 sender from before this release still pushes the flagged row stripped of its flag, which lands live on the
-receiver.
+receiver. Since bundle-255 the flag takes a local **position** (never a `seq`), and with `softDeleteFileMeta` off a
+delete leaves a stripped deletion marker instead (path, deletion time, position): both are what the client file change
+feed ([`GET /api/files/:spaceId/changes`](05-files-api.md)) reads a deletion by, and neither is paged, pushed or hashed here.
+
+**Bytes that arrive take a position, not a version** (Q-725). When a pulled or pushed file's bytes land, the row moves
+to a new local position and keeps the publisher's `seq`, `updatedAt` and author; bytes equal to what the live row
+already records write nothing. A peer paging this instance by position is therefore offered the row again (no bytes
+travel with it) and skips it at the equal `seq`.
 
 **Deletions travel on `/api/sync/file-tombstones`**, as they always have — a deleted file has a file
 tombstone rather than a brain one, so the metadata page carries no tombstones of its own. A metadata

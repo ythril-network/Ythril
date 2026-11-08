@@ -53,6 +53,7 @@ import { forgetVersionMark } from '../util/version-mark.js';
 import { builtInRefusal } from './built-in-space.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { CREATOR_GRANT_OPERATION } from '../audit/middleware.js';
+import { raiseFileFeedFloorToHead } from '../files/file-feed-floor.js';
 
 /**
  * Create a space's collections and indexes, and check what a boot checks of it. Runs for EVERY space at EVERY boot, before the
@@ -1027,6 +1028,8 @@ async function wipeSpaceUnqueued(ctx: SpaceActBodyContext): Promise<SpaceActBody
   if (targets.has('files')) {
     // Through the tombstones module, which marks the wipe: a publish in flight would otherwise write its tombstone again into
     // the emptied space (Q-406).
+    // Every file the change feed told a client of is about to vanish unreported: its floor goes to the head FIRST, so every cursor from before re-lists.
+    await raiseFileFeedFloorToHead(spaceId);
     counts['files'] = await ctx.deleteInBatches(spaceCollection(spaceId, 'files'), {}, ids => col(spaceCollection(spaceId, 'files')).deleteMany(byIds(ids)));
     await forgetFileTombstonesOf(spaceId, own);
     // What hangs off the file rows: their conflict copies, what is keyed by their paths (the hash cache) and their embed jobs (a wiped

@@ -23,6 +23,7 @@
  */
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { goneOrMarker } from './_feed-marker-row.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
@@ -99,7 +100,9 @@ describe('housekeeping finishes an owed move', { skip }, () => {
 
     await sweep.sweepExpired(LATER());
     assert.ok(await liveRow('hk/to.txt'), 'the record did not follow the file to its destination: nothing finished the move');
-    assert.equal(await row('hk/from.txt'), null, 'the record is still at the source');
+    // Since bundle-255 the finished move leaves a FEED MARKER at its source (soft delete off): the record has left when nothing but that stands there.
+    const atSource = await row('hk/from.txt');
+    assert.ok(goneOrMarker(atSource),`the record is still at the source: ${JSON.stringify(atSource)}`);
     assert.equal((await markerMod.moveMarkerOf(S, 'hk/from.txt', 'hk/to.txt')) !== undefined, false, 'a finished move kept its marker');
     assert.deepEqual((await acts.raw()).filter(t => !t.pending).map(t => t.path).sort(), ['hk/from.txt'], 'the path the move left is not tombstoned, once');
     assert.equal(await finishedCount(), before + 1, 'the finished move was not counted');

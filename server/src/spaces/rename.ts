@@ -5,6 +5,7 @@
  * then rewrites every config reference (networks, tokens, proxy members). Depends only on _shared.
  */
 import { moveCounterDoc } from '../sync/positions-owed.js';
+import { moveFileFeedFloor, FILE_FEED_FLOORS } from '../files/file-feed-floor.js';
 import { moveVersionMark } from '../util/version-mark.js';
 import { moveScanCursors } from '../brain/scan-cursor.js';
 import path from 'path';
@@ -156,6 +157,14 @@ export async function moveSpaceData(
     if (moved) log.debug(`Migrated the counter document ('ythril_counters') ${peerText(oldId)} → ${peerText(newId)} (seq=${moved.seq})`);
   } catch (err) {
     stepFailed(`Could not migrate the counter document ('ythril_counters') ${oldId} → ${newId}`, err, errors);
+  }
+
+  // The change feed's floor (`files/file-feed-floor.ts`) is the space's history, keyed by its id: a rename keeps the stream, so it keeps the floor, and a
+  // cursor from before the rename stays as valid as it was.
+  try {
+    await moveFileFeedFloor(oldId, newId);
+  } catch (err) {
+    stepFailed(`Could not migrate the file change feed floor ('${FILE_FEED_FLOORS}') ${oldId} → ${newId}`, err, errors);
   }
 
   // The duplicate-scanner cursor is keyed `${spaceId}:${type}`. Losing it is harmless

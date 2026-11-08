@@ -46,6 +46,7 @@ import { hideDerivedTrees } from '../files/derived-trees.js';
 import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 import { registerUploadRoute } from './files-upload.js';
 import { registerMkdirRoute } from './files-mkdir.js';
+import { registerFileChangesRoute } from './files-changes.js';
 import { webhookToken, requireWritePath, requireWriteTarget } from './files-request.js';
 import { answeredUnknownSpace } from './write-target-answer.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -331,6 +332,7 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
 
 // The mkdir route lives in `files-mkdir.ts`: the destination check made it the concern this frozen file moved out.
 registerMkdirRoute(fileStoreRouter);
+registerFileChangesRoute(fileStoreRouter);
 
 // ── GET /api/files/:spaceId/upload-status ─────────────────────────────────────
 // Returns bytes received for an in-progress chunked upload.

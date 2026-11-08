@@ -19,7 +19,7 @@
  */
 import type { Request } from 'express';
 import type { FileEntry } from './files.js';
-import { SPILL_DIR } from '../brain/spill-path.js';
+import { SPILL_DIR, spillIdFromPath } from '../brain/spill-path.js';
 
 export const DERIVED_TREES = new Set(['_converted', '_extracted', SPILL_DIR]);
 
@@ -42,5 +42,18 @@ export function hideDerivedTrees(dirPath: string, entries: FileEntry[], req: Req
   if (req.query['includeDerived'] === 'true') return entries;
   const atRoot = dirPath === '' || dirPath === '/' || dirPath === '.';
   if (!atRoot) return entries;
-  return entries.filter(e => !(e.type === 'dir' && DERIVED_TREES.has(e.name)));
+  return entries.filter(e => !(e.type === 'dir' && isDerivedTreeName(e.name)));
+}
+
+/** Whether a ROOT directory name is a derived tree: the one test the listing and {@link isHiddenFilePath} share. */
+export const isDerivedTreeName = (name: string): boolean => DERIVED_TREES.has(name);
+
+/**
+ * Whether a file row at `id` (a path from the space root) is hidden from a client the way the listing hides it: under a derived tree at the root, or a
+ * legacy read spill in any spelling (`spillIdFromPath`, the backup's rule too). The change feed asks it of every row, so a sidecar and an old spill never
+ * page to a client, and the rule is the listing's, not a second spelling of it.
+ */
+export function isHiddenFilePath(id: string): boolean {
+  const first = id.replace(/^[\\/]+/, '').split(/[\\/]/, 1)[0] ?? '';
+  return isDerivedTreeName(first) || spillIdFromPath(id) !== null;
 }

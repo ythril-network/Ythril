@@ -53,6 +53,7 @@ import { join } from 'node:path';
 import { splitStandalone, batched, offlineRuns, DB_TEST_CONCURRENCY } from '../_shared/standalone-split.mjs';
 import { timingReporterFlags, clearTimingResults } from '../_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
+import { boundedTestArgs, batchTimeoutMs } from '../_shared/test-file-bound.mjs';
 import { planDbShards, unitsOf, dbShardPort, dbFilesThisProcessRuns, dbBatchLabel } from '../_shared/db-shard-plan.mjs';
 import { resolveDbShardConfig, startDbShards, stopDbShards } from './db-shard-stack.mjs';
 
@@ -151,7 +152,10 @@ function runBatch(kind, args, files) {
   nextBatch[kind] = (nextBatch[kind] ?? 0) + 1;
   // Every batch of the selected third is part of a whole run of it: this runner takes no file or pattern arguments.
   const flags = timingReporterFlags({ suite: 'standalone', batch: `${kind}-${nextBatch[kind]}`, scope: 'full' });
-  const r = spawnSync('node', ['--test', ...args, ...flags.args, ...files], { stdio: 'inherit', env: testChildEnv(flags.env) });
+  // Time-bounded (`_shared/test-file-bound.mjs`): a test that waits for ever fails, and a batch that never exits is ended and named.
+  const r = spawnSync('node', boundedTestArgs(...args, ...flags.args, ...files),
+    { stdio: 'inherit', env: testChildEnv(flags.env), timeout: batchTimeoutMs(files.length), killSignal: 'SIGKILL' });
+  if (r.status === null) console.error(`standalone: the ${kind} batch ${nextBatch[kind]} was ended by ${r.signal} (over its time bound, or killed): ${files.join(', ')}`);
   if (r.status !== 0) failed++;
 }
 
@@ -178,12 +182,17 @@ async function runShardUnits(files, shardIndex, width, port, onUnitDone = () => 
       const flags = timingReporterFlags({ suite: 'standalone', batch: dbBatchLabel(shardIndex, n), scope: 'full' });
       const out = [];
       const code = await new Promise((resolve) => {
-        const child = spawn('node', ['--test', '--test-concurrency=1', ...flags.args, ...batch],
+        const child = spawn('node', boundedTestArgs('--test-concurrency=1', ...flags.args, ...batch),
           { env: testChildEnv({ ...flags.env, ...(port === undefined ? {} : { YTHRIL_TEST_MONGO_PORT: String(port) }) }), stdio: ['ignore', 'pipe', 'pipe'] });
+        // A unit that never exits (a handle left open after its tests) is ended at its bound and named, never waited on for ever.
+        const bound = setTimeout(() => {
+          out.push(Buffer.from(`standalone: unit ${n} ended at its time bound (${batchTimeoutMs(batch.length)} ms): ${batch.join(', ')}\n`));
+          child.kill('SIGKILL');
+        }, batchTimeoutMs(batch.length));
         child.stdout.on('data', d => out.push(d));
         child.stderr.on('data', d => out.push(d));
-        child.on('error', () => resolve(1));
-        child.on('close', (c) => resolve(c));
+        child.on('error', () => { clearTimeout(bound); resolve(1); });
+        child.on('close', (c) => { clearTimeout(bound); resolve(c ?? 1); });
       });
       const where = port === undefined ? '' : ` (127.0.0.1:${port})`;
       process.stdout.write(`# -db shard ${shardIndex}${where} unit ${n} of ${units.length}: ${batch.length} file(s), ${startedAt}s to ${((Date.now() - t0) / 1000).toFixed(0)}s, exit ${code}

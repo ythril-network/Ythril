@@ -24,6 +24,8 @@ import { carryLinksToKey } from './move-links.js';
 import { removeFileLinkRowsLocally } from '../brain/links.js';
 import { embedArrivedFiles } from '../sync/embed-arrived-files.js';
 import { LIVE_FILE_ROW } from './live-file-row.js';
+import { feedMarkerRow } from './feed-marker.js';
+import { raiseFileFeedFloorOver } from './file-feed-floor.js';
 import type { FileMetaDoc } from '../config/types.js';
 
 interface LegacyRow { seq?: number; author?: { instanceId?: string }; deliveredBy?: string }
@@ -51,12 +53,16 @@ export async function rekeyLegacy(spaceId: string, key: string, ids: readonly st
   const wins = !shadowed && (atKey === undefined || (keep.seq ?? 0) > (atKey.seq ?? 0));
   if (wins) {
     await admitSpaceWrite(spaceId, 'files', () => inHeldTransaction(spaceId, 'file.rekey-legacy', async (session) => {
-      await withLandingStamp(spaceId, [arrivalRow(keep.seq ?? 0)], async ([landing]) => {
+      // The audit row or marker the re-key replaces at the key is a deletion the change feed has served: the floor is raised over it FIRST.
+      if (flaggedAtKey) await raiseFileFeedFloorOver(spaceId, [...(await readStoredById<{ pos?: number }>(filesColl, [key], { pos: 1 }, { session })).values()]);
+      // Two positions: the row at its key, and the feed marker its old spelling leaves (bundle-255), so a client that listed the old spelling hears it went.
+      await withLandingStamp(spaceId, [arrivalRow(keep.seq ?? 0), arrivalRow(keep.seq ?? 0)], async ([landing, left]) => {
         await rekeyRows<FileMetaDoc>(filesColl, session, {
           moves: [{ from: best, to: key }],
           rebuild: (row) => rekeyedRow(row, { _id: key, path: key, ...landing }, { sameRecord: true }),   // the same file's row at its key: it keeps its deliverer and per-peer base
           refuse: (to) => new StaleRekeyPlan(`a row appeared at '${to}' since the re-key was planned`),
           ...(atKey !== undefined ? { replacements: { replaced: [key] } } : flaggedAtKey ? { replacements: { flagged: [key] } } : {}),
+          leave: (_row, from) => feedMarkerRow(spaceId, from, left!),
         });
       }, 'file.rekey-legacy');
       await carryPathKeyedCache(spaceId, session, [{ from: best, to: key }]);

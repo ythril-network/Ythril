@@ -31,6 +31,7 @@ import { warnOnce } from '../util/warn-once.js';
 import { type KeysetBuild } from './keyset-indexes.js';
 import { SPACE_INDEXES, buildSpaceIndexUnits } from './space-indexes.js';
 import { dropReplacedFileTombstoneIndexes, positionLegacyFileTombstones } from '../files/tombstones.js';
+import { positionUnpositionedFileRows } from '../files/unpositioned-file-rows.js';
 import { configuredSpaces } from './space-lookup.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
@@ -62,6 +63,8 @@ export async function ensureQueryIndexes(): Promise<number> {
     const others: Array<{ name: string; run: () => Promise<unknown> }> = [
       // The local position a tombstone stored before positions existed lacks (bundle-51): the paged read and the push read it.
       { name: 'file tombstone positions', run: () => positionLegacyFileTombstones(space.id) },
+      // The live file rows with no position (bytes that arrived before Q-725, pre-4.0 rows): the change feed's cursor-less listing reads by position (bundle-255).
+      { name: 'file row positions', run: () => positionUnpositionedFileRows(space.id) },
       // The file tombstone index a later release replaced (bundle-71, Q-352), after the one that replaced it was built.
       { name: 'replaced file tombstone indexes', run: () => dropReplacedFileTombstoneIndexes(space.id) },
     ];

@@ -13,6 +13,7 @@ import { save_linkTool, delete_linkTool } from './link.js';
 import { delete_entity_previewTool } from './entity-cascade.js';
 import { save_chronoTool, update_chronoTool, delete_chronoTool } from './chrono.js';
 import { read_fileTool, write_fileTool, update_file_metaTool, list_dirTool, delete_fileTool, create_dirTool, move_fileTool, retry_embed_fileTool } from './file.js';
+import { file_changesTool } from './file-changes.js';
 import { network_peersTool, network_syncTool } from './sync.js';
 import { network_member_admitTool, network_member_signing_keyTool, network_reparent_selfTool, network_member_adoptTool, network_member_revert_parentTool } from './network-topology.js';
 import { network_join_remoteTool, network_join_by_keyTool, network_member_addTool, network_member_removeTool, network_introduction_acceptTool } from './network-join.js';
@@ -67,6 +68,7 @@ export const ALL_TOOLS: ToolHandler[] = [
   write_fileTool,
   update_file_metaTool,
   list_dirTool,
+  file_changesTool,
   delete_fileTool,
   retry_embed_fileTool,
   file_stamp_reportTool,

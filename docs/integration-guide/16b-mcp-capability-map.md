@@ -73,6 +73,7 @@ and the two are identical by construction. The REST routes with no tool are in
 | | `retry_embed_file` | `POST /api/retry_embed_file` · legacy: `POST /api/files/:spaceId/retry_embedding` | write `files` |
 | | `read_file` | `POST /api/read_file` · legacy: `GET /api/brain/spaces/:spaceId/files/extract` | read `files` |
 | | `update_file_meta` | `POST /api/update_file_meta` · legacy: `PATCH /api/brain/spaces/:spaceId/files` | write `files` |
+| | `file_changes` | `POST /api/file_changes` · legacy: `GET /api/files/:spaceId/changes` | read `files` |
 | **Spaces** | | | |
 | | `list_spaces` | `POST /api/list_spaces` · legacy: `GET /api/spaces` | read (MCP) · REST exempt |
 | | `save_space` | `POST /api/save_space` · legacy: `POST /api/spaces` | write (MCP) · REST exempt — `createSpaces` (or instance admin) |

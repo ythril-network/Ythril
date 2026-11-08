@@ -32,6 +32,7 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { goneOrMarker } from './_feed-marker-row.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build, peerToken } from './_push-door.mjs';
@@ -115,7 +116,9 @@ describe('a row arriving bytes created is authorless to the deletion authority',
       const answer = await d.deliver(SCENARIOS.map(tombFor));
       const wrong = [];
       for (const s of SCENARIOS) {
-        const gone = (await rowOf(pathOf(s.id))) === null;
+        // bundle-255: soft delete off, a deleted row leaves exactly its feed marker (path, deletion time, position): gone as a file.
+        const after = await rowOf(pathOf(s.id));
+        const gone = goneOrMarker(after);
         const bytesGone = !door.localFileExists(S, pathOf(s.id));
         if (gone !== s.deleted) wrong.push(`${s.id} (${s.note}): the row is ${gone ? 'GONE' : 'STILL HERE'}, want ${s.deleted ? 'gone' : 'kept'}`);
         if (bytesGone !== s.deleted) wrong.push(`${s.id}: the bytes are ${bytesGone ? 'GONE' : 'STILL HERE'}, want ${s.deleted ? 'gone' : 'kept'}`);

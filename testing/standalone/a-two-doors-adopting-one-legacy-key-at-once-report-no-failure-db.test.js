@@ -22,6 +22,7 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { goneOrMarker } from './_feed-marker-row.mjs';
 import { Collection } from 'mongodb';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
@@ -80,7 +81,9 @@ describe('two doors adopting one legacy key at once', { skip }, () => {
       restore = afterTheKeyRowIsRead(() => rekeyLegacy(S, KEY, [LEGACY]));
       try { await adoptLegacyRow(S, KEY); } finally { restore(); }
     });
-    assert.equal(await rows().findOne({ _id: LEGACY }), null, 'the legacy row is still at its legacy id');
+    // Since bundle-255 a re-key leaves a FEED MARKER at the old spelling (soft delete off), so a client hears that path went: only that may stay.
+    const atLegacy = await rows().findOne({ _id: LEGACY });
+    assert.ok(goneOrMarker(atLegacy),`the legacy row is still at its legacy id: ${JSON.stringify(atLegacy)}`);
     assert.equal(await rows().countDocuments({ _id: KEY }), 1, 'the key does not hold its row exactly once');
     assert.deepEqual(lines.filter(l => STEP.test(l)), [], 'a door that found the work already done reported it as a failed re-key');
   });

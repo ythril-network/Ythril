@@ -89,12 +89,17 @@ const UPDATE_OPS = new Set(['updateOne', 'updateMany', 'findOneAndUpdate']);
  * what it excuses.
  */
 const EXEMPT = {
-  'server/src/files/file-meta.ts:markFileMetaDeleted':
+  // bundle-255: `markFileMetaDeleted` writes through `retireLivePage`, which flags (or, soft delete off, replaces by a feed marker) a page of rows
+  // in one bulk write, each taking a position.
+  'server/src/files/file-meta.ts:retireLivePage':
     'the deletion flag. It REMOVES every derived field in the same update that sets `deletedAt` (atomic: a crash between a flag and a '
     + 'separate strip would leave a flagged row holding a vector that nothing re-runs the strip for) and sets none',
   'server/src/files/file-meta.ts:markFileMetaDeletedByPrefix':
     'the deletion flag for a directory subtree, the primitive a directory delete reaches (`retireFileMetaUnder`): the same atomic strip, '
     + 'removes and never sets',
+  'server/src/files/file-meta.ts:recordArrivedFile':
+    'the byte door (bundle-255): `feedMarker` is in its FILTERS only, so a feed marker at the path is treated as absent and replaced by a clean '
+    + 'row; it sets no derived field, and what other bytes made goes through `replacedBytesStages` from the one module',
   'server/src/sync/arrivals.ts:writeArrivals':
     'the arrival writer CARRIES this instance\'s own stored vector across the replace of an arriving row (`carriedFields`) and writes none of '
     + 'its own: it computes nothing from bytes, and a vector that arrives is dropped (`an-arrival-is-written-by-one-writer`)',

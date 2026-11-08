@@ -88,7 +88,14 @@ export async function assertNewIdsFree(
  */
 export async function rekeyRows<T extends { _id: string }>(
   collName: string, session: ClientSession,
-  plan: { moves: readonly RowMove[]; rebuild: (row: T, to: string) => object; refuse: (to: string, from: string) => Error; replacements?: RekeyReplacements },
+  plan: {
+    moves: readonly RowMove[]; rebuild: (row: T, to: string) => object; refuse: (to: string, from: string) => Error; replacements?: RekeyReplacements;
+    /**
+     * What a moved row LEAVES at its old id, in the same session, or `null` for nothing: a file's feed marker, so the client change feed hears the old
+     * path went (bundle-255, `files/feed-marker.ts`). Never left at an id another row of the plan moves to.
+     */
+    leave?: (row: T, from: string) => object | null;
+  },
 ): Promise<number> {
   const coll = col<{ _id: string }>(collName);
   await assertNewIdsFree(collName, plan.moves, plan.refuse, { session, ...(plan.replacements ? { replacements: plan.replacements } : {}) });
@@ -114,5 +121,12 @@ export async function rekeyRows<T extends { _id: string }>(
 
   const rebuilt = rows.map(m => asDoc<{ _id: string }>(plan.rebuild(stored.get(m.from)!, m.to) as { _id: string }));
   await writeInOneCommands(rebuilt, (slice, { ordered }) => coll.insertMany(slice, { ordered, session }), { ordered: true });
+  if (plan.leave) {
+    const takenNow = new Set(plan.moves.map(m => m.to));
+    const left = rows.filter(m => !takenNow.has(m.from))
+      .map(m => plan.leave!(stored.get(m.from)!, m.from)).filter((d): d is object => d !== null)
+      .map(d => asDoc<{ _id: string }>(d as { _id: string }));
+    if (left.length > 0) await writeInOneCommands(left, (slice, { ordered }) => coll.insertMany(slice, { ordered, session }), { ordered: true });
+  }
   return rows.length;
 }

@@ -49,6 +49,7 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { goneOrMarker } from './_feed-marker-row.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
@@ -217,7 +218,10 @@ describe('deleting a file removes what its conversion and its peers left, and on
       await ttl.sweepExpired(new Date());
 
       for (const id of delivered) {
-        assert.equal(await rowOf(id), null, `the delivered sidecar row ${id} was kept: it is another instance's conversion in this one's place`);
+        // bundle-255: a sidecar retirement goes through the retire chokepoint, so (soft delete off) only its feed marker stays at the path.
+        const left = await rowOf(id);
+        assert.ok(goneOrMarker(left),
+          `the delivered sidecar row ${id} was kept: it is another instance's conversion in this one's place: ${JSON.stringify(left)}`);
         assert.ok(!onDisk(id), `the delivered sidecar's bytes ${id} were kept`);
       }
       for (const o of own) {

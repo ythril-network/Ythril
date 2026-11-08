@@ -41,6 +41,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -53,6 +54,8 @@ const PEER_SEQ = 7;
 let acts, cascade;
 
 const row = (id) => acts.door.coll(SPACE, 'files').findOne({ _id: id });
+/** A row at `id` other than the FEED MARKER a moved-away file leaves at its old path since bundle-255: the file has left when this is null. */
+const rowNotMarker = (id) => acts.door.coll(SPACE, 'files').findOne({ _id: id, ...NOT_A_FEED_MARKER });
 
 /** What a row holds after a peer's version of it arrived: the peer's seq, author and clock, delivered by the peer. */
 const peerFields = (extra = {}) => ({
@@ -94,7 +97,7 @@ describe('a move of a file this instance did not author keeps the author\'s cloc
     const before = await seed('docs/old.md', peerFields());
     await cascade.moveFileCascade(SPACE, 'docs/old.md', 'docs/new.md');
 
-    assert.equal(await row('docs/old.md'), null, 'fixture: the row is still under its old id, so nothing moved');
+    assert.equal(await rowNotMarker('docs/old.md'), null, 'fixture: the row is still under its old id, so nothing moved');
     const moved = await row('docs/new.md');
     assert.ok(moved, 'fixture: the row was not written under its new id');
     assert.equal(moved.path, 'docs/new.md', 'the moved row\'s path is not its new id');
@@ -113,7 +116,7 @@ describe('a move of a file this instance did not author keeps the author\'s cloc
     const wrong = [];
     for (const before of rows) {
       const id = `moved/${before._id.slice('dir/'.length)}`;
-      assert.equal(await row(before._id), null, `fixture: ${before._id} is still under its old id`);
+      assert.equal(await rowNotMarker(before._id), null, `fixture: ${before._id} is still under its old id`);
       const moved = await row(id);
       assert.ok(moved, `fixture: ${before._id} was not written under ${id}`);
       const why = clockWithoutVersion(before, moved);
@@ -140,7 +143,7 @@ describe('a move of a file this instance did not author keeps the author\'s cloc
   it('control: a single move of a file THIS instance authored still moves it (the rule is not "never touch updatedAt")', async () => {
     const mine = await seed('docs/mine.md', await localFields());
     await cascade.moveFileCascade(SPACE, 'docs/mine.md', 'docs/mine-too.md');
-    assert.equal(await row('docs/mine.md'), null);
+    assert.equal(await rowNotMarker('docs/mine.md'), null);
     const moved = await row('docs/mine-too.md');
     assert.ok(moved, 'a local file was not moved');
     assert.deepEqual(moved.author, mine.author);

@@ -661,7 +661,9 @@ answer is lost is read back while the hold is still held. On the serving instanc
   [Files API](05-files-api.md#delete-a-file).
 - **A peer's bytes are recorded by one function, whichever door they came through.** The upload door (`POST /api/files/:spaceId`
   with a peer token, single or chunked) and the manifest pull both record an arrival the same way: the row (size and hash,
-  the peer as author of a row new here, no seq of its own), then the file is processed by THIS instance's own rules (a
+  the peer as author of a row new here, no seq of its own; the row takes a new local position, never a version, so a relaying
+  peer pulling by position is offered the row again and skips it at its equal seq, and bytes identical to what the row records
+  write nothing), then the file is processed by THIS instance's own rules (a
   document is queued for conversion, an image, audio or video file for its media pipeline, anything it does not analyse
   is marked `skipped`), and **nothing is announced**: no `file.created` webhook and no live-view event, as for a synced
   record. A changed version replaces the previous version's passages. A peer's metadata in the upload body (`description`, `tags`, `properties`, or `ttlDays` in the query) is refused `400` before anything is staged: it arrives by metadata sync.

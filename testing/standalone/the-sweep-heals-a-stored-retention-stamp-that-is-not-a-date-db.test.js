@@ -33,6 +33,7 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { isFeedMarkerRow } from './_feed-marker-row.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -200,7 +201,11 @@ describe('the TTL sweep heals a stored retention stamp that is not a Date (Q-223
 
     await ttl.sweepExpired(new Date());
     const left = [];
-    for (const [c, id] of ids) if (await stored(c, id)) left.push(`${c}/${id}`);
+    // bundle-255: a file the sweep deletes leaves its feed marker (soft delete off), which is a deletion, not the record: only a record still LIVE is left.
+    for (const [c, id] of ids) {
+      const row = await stored(c, id);
+      if (row && !(c === 'files' && isFeedMarkerRow(row))) left.push(`${c}/${id}`);
+    }
     assert.deepEqual(left, [], 'a record whose stamp healed to the past was not deleted by the cycle after the heal');
   });
 

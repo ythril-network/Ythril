@@ -483,6 +483,7 @@ export const FILE_META_SENDER_KEYS: Readonly<Record<Exclude<keyof FileMetaDoc, F
   embeddingModel: true, chunkIndex: true, headingText: true, content: true, convertedFileId: true, chunkCount: true,
   conversionError: true, mediaType: true, embeddingStatus: true, chunkOffsetMs: true, chunkDurationMs: true,
   mediaJobError: true, faceEmbedding: true, faceEntityId: true, faceBbox: true, faceScore: true, wholeDocument: true, sourceSha256: true,
+  feedMarker: true,
 };
 
 /**

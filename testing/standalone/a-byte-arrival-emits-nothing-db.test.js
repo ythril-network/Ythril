@@ -194,7 +194,8 @@ describe('a write no user made emits nothing about a file', { skip }, () => {
         await seedPeersFile();
         await deliver();
         assert.equal(door.localFileExists(S, GONE), false, 'fixture: the tombstone did not remove the bytes');
-        assert.equal(await door.coll(S, 'files').findOne({ _id: GONE }), null, 'fixture: the tombstone did not remove the row');
+        // The row is no longer a live file: soft delete off leaves only its feed marker (bundle-255), which carries `deletedAt`.
+        assert.equal(await door.coll(S, 'files').findOne({ _id: GONE, deletedAt: { $exists: false } }), null, 'fixture: the tombstone did not remove the row');
 
         await controlDispatches('single');
         stopBus();

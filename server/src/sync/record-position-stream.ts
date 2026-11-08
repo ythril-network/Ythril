@@ -37,6 +37,7 @@ import { col } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { getConfig } from '../config/loader.js';
 import { eachMemberMarkOf } from './receive-marks.js';
+import { fileFeedFloorOf } from '../files/file-feed-floor.js';
 
 /**
  * The highest position this instance may already have handed out for `spaceId`, in microseconds: see the module docblock.
@@ -48,7 +49,9 @@ import { eachMemberMarkOf } from './receive-marks.js';
  */
 async function positionFloor(spaceId: string): Promise<number> {
   const stored = await highestStored<number>(SEQ_CARRYING.map(part => col(spaceCollection(spaceId, part))), 'pos', { $type: 'number' });
-  return Math.max(stored ?? 0, ownMarksFloor(spaceId));
+  // The file change feed's floor (`files/file-feed-floor.ts`) is a position this instance handed out and then forgot the row of (a purged deletion row,
+  // a wipe, a restore): a purged top marker must never let the clock hand the same position out again.
+  return Math.max(stored ?? 0, ownMarksFloor(spaceId), await fileFeedFloorOf(spaceId));
 }
 
 /** The highest `lastPosPushed` / `lastPosServed` any member of any network holds for the space: marks that were capped when they were recorded. */

@@ -165,6 +165,9 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/files/:spaceId', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
   { route: '/api/files/:spaceId', method: 'POST', area: 'files', needs: 'write', scope: 'path' },
   { route: '/api/files/:spaceId/upload-status', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
+  // The client file change feed (bundle-255): read rights on files, as the listing has. A view id passes the rights (a files read takes a view) and is
+  // answered as an unknown space by the handler (`fileChangesSpaceRefusal`): one cursor is one space's stream.
+  { route: '/api/files/:spaceId/changes', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/files/extract', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/embedding-queue/media', method: 'GET', area: 'files', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/embedding-queue/media/retry-failed', method: 'POST', area: 'files', needs: 'write', scope: 'path' },
@@ -358,6 +361,7 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'delete_file', area: 'files', needs: 'write' },
   { tool: 'move_file', area: 'files', needs: 'write' },
   { tool: 'list_dir', area: 'files', needs: 'read' },
+  { tool: 'file_changes', area: 'files', needs: 'read' },
   { tool: 'create_dir', area: 'files', needs: 'write' },
   { tool: 'retry_embed_file', area: 'files', needs: 'write' },
   { tool: 'update_file_meta', area: 'files', needs: 'write' },
