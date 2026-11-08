@@ -30,7 +30,10 @@ import type { DesiredLinks } from './links.js';
 import { ReadSet, mergeWants, tripletKey, type ReadWant, type Triplet } from './write-plan/read-set.js';
 import { commitPlans } from './write-plan/commit.js';
 import { planAndCommit } from './write-plan/plan-and-commit.js';
-import type { CommitOutcome, WritePlan } from './write-plan/types.js';
+import { dependencyFailed, type CommitOutcome, type WritePlan } from './write-plan/types.js';
+import { isWriteTimeout } from '../db/write-timeout.js';
+import { phraseWriteFailure } from '../db/write-errors.js';
+import { isSpaceNotWritable } from '../spaces/space-write-gate.js';
 import { linkTargets, refuseLinks } from './write-plan/plan-links.js';
 import { planFact, factWant, type FactInput } from './write-plan/plan-fact.js';
 import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
@@ -288,6 +291,11 @@ function itemConnectionError(item: unknown, kind: 'fact' | 'entity' | 'chrono', 
  * converged on — including a fact or chrono entry addressed by its `id`, which used to count as inserted.
  * A key whose item was not written is absent from `refs`, and anything depending on it says why.
  *
+ * What an edge depends on is decided by its records' FINAL outcome, not by the first commit's (`Q-201`): a record that lost a
+ * race to another write is planned once more before anything else is planned against it, and an edge on it — inline, or either
+ * end of a top-level one — is written only if every such record finally landed, at the id it finally landed under; otherwise it
+ * is refused with the record's reason (`dependencyFailed`). A lost race costs one more round trip, for the records that lost it.
+ *
  * An item's own inline `edges` are refused WITH the item (`edgeRefusal`, the one function the single-record doors ask
  * before they write): a refused entry — the schema, or under `strictLinkage` a far end of any kind that names nothing —
  * refuses the item before its record is planned, and the reason names the entry. A failure AFTER the record committed
@@ -361,7 +369,6 @@ export async function bulkWrite(
     await run.planTopLevelEdge(i, item, strict);
   }
   await run.flush();
-  await run.replanStale();
   run.nameWhatLanded();
   unknown.finish();
 
@@ -558,24 +565,38 @@ interface Pending {
   isUpdate: boolean;
   key?: string;
   warning?: string;
-  /** The pending entry this one needs written first. */
-  after?: Pending;
-  /** Re-plan once against a fresh read when the commit reports the record moved. */
-  replan?: (view: ReadSet) => Promise<{ plan: WritePlan }>;
-  want: ReadWant;
-  /** Set once committed: undefined while pending. */
-  result?: { ok: true } | { ok: false; reason: string; violation?: BulkViolation };
   /**
-   * Shared by an item's record and each of its own inline edges (by reference, so it survives the re-plans that copy a
-   * Pending): what the edges did, for the `written` a failed one reports.
+   * The RECORD entries this one needs written first: both ends of a top-level edge that name a record of this batch, an inline
+   * edge's record. Only edges wait, and only on records, so nothing ever waits on an entry that waits.
+   */
+  after: Pending[];
+  /** Plan this write again against a fresh read — once, when the commit set it aside because its record moved (`settle`). */
+  replan: (view: ReadSet) => Promise<Replanned>;
+  /**
+   * Plan this EDGE again from its item, after a record it waited on was re-planned and landed: against the record's FINAL id (a
+   * converge whose record was deleted meanwhile re-mints it) and a fresh read, so its ends are refused again. The new entry, or
+   * null when the item was refused (and reported).
+   */
+  again?: () => Promise<Pending | null>;
+  want: ReadWant;
+  /** Set once FINAL — committed, or settled by its re-plan: undefined while pending or set aside. */
+  result?: { ok: true } | Failed;
+  /**
+   * Shared by an item's record and each of its own inline edges (by reference, so it survives an edge planned again): what the
+   * edges did, for the `written` a failed one reports.
    */
   inline?: InlineEdges;
+  /** The schema-warning rows this entry's plan reported: a re-plan's rows REPLACE them, so a warning is said once, not once per plan. */
+  warned: BulkError[];
 }
 
+type Failed = { ok: false; reason: string; violation?: BulkViolation };
+/** What a re-plan answers: a record's planner (`warning`) or the edge planner (`existed`). */
+type Replanned = { plan: WritePlan; warning?: string; existed?: boolean };
 /** What one item's own inline edges did, gathered while the batch runs and read once it is done (`nameWhatLanded`). */
 interface InlineEdges {
   kind: RefKind;
-  /** The record the edges hang off. */
+  /** The record the edges hang off — its FINAL id, once its commit is known. */
   id: string;
   /** Whether the record's own commit landed, once it is known. */
   recordLanded?: boolean;
@@ -597,8 +618,10 @@ function batchRun(
 ) {
   let pending: Pending[] = [];
   const inlines: InlineEdges[] = [];
-  const targets = new Set<string>();
-  const stale: Pending[] = [];
+  /** What is pending, by the target it writes (`kind:id`, `edge:<triplet>`): the repeat check and an edge's ends, one lookup each. */
+  const pendingAt = new Map<string, Pending>();
+  /** Set once anything of this request landed: from then on the commit that writes released edges reports failures, never throws. */
+  let landedAny = false;
 
   async function planRecord(p: PreparedRecord): Promise<void> {
     const { type, counted } = REPORTED[p.kind];
@@ -630,10 +653,11 @@ function batchRun(
           edgeRefusal(spaceId, edge, view, subject, passed);
         });
       }
+      const mark = out.errors.length;
       const planned = await p.plan(view);
       entry = {
         plan: planned.plan, type, index: p.index, counted, isUpdate: planned.plan.op === 'converge',
-        ...(key ? { key } : {}), want: p.want, replan: p.plan,
+        ...(key ? { key } : {}), want: p.want, replan: p.plan, after: [], warned: out.errors.slice(mark),
         ...(planned.warning ? { warning: planned.warning } : {}),
       };
     } catch (err) {
@@ -645,20 +669,35 @@ function batchRun(
     push(entry, `${p.kind}:${entry.plan.id}`);
     // The item's own edges hang off the record just planned, and are written after it — the edge writes
     // `connectionsOf` derives, the same ones `applyConnections` makes after a single-record write.
-    const inlineEdges = connectionsOf(p.item, entry.plan.id, p.kind).edges;
-    if (inlineEdges.length > 0) {
+    const count = connectionsOf(p.item, entry.plan.id, p.kind).edges.length;
+    if (count > 0) {
       entry.inline = { kind: p.kind, id: entry.plan.id, landed: [], failed: [] };
       inlines.push(entry.inline);
     }
-    for (const [i, e] of inlineEdges.entries()) {
-      // A `warn` space reports what a `strict` one would refuse, for the item's own edges too — the row names the edge (`edges[1].properties.k`).
-      const reported: EdgeInput = { ...e, opts: { ...e.opts, onValidation: check => warn(type, p.index)({ ...check, warnings: inlineEdgeWarnings(i, check) }) } };
-      await planEdgeItem(reported, type, p.index, p.item, null, entry);
+    const record = entry;
+    for (let i = 0; i < count; i++) {
+      const again: () => Promise<Pending | null> = () => edgeEntry(inlineEdge(p, record, i, type), type, p.index, p.item, null, [], record.inline);
+      await planEdgeItem(inlineEdge(p, record, i, type), type, p.index, p.item, null, [record], record.inline, again);
     }
   }
 
-  async function planTopLevelEdge(i: number, item: Record<string, unknown>, strict: boolean): Promise<void> {
-    const refuse = (reason: string, violation?: BulkViolation) => reject('edge', i, item, reason, violation);
+  /**
+   * An item's `i`-th own edge, hanging off its record's id AS IT NOW STANDS — derived again when the edge is planned again, because
+   * a record re-planned after a lost race can land under another id. A `warn` space reports what a `strict` one would refuse, for
+   * the item's own edges too — the row names the edge (`edges[1].properties.k`).
+   */
+  function inlineEdge(p: PreparedRecord, record: Pending, i: number, type: string): EdgeInput {
+    const e = connectionsOf(p.item, record.plan.id, p.kind).edges[i]!;
+    return { ...e, opts: { ...e.opts, onValidation: check => warn(type, p.index)({ ...check, warnings: inlineEdgeWarnings(i, check) }) } };
+  }
+
+  /**
+   * Plan a top-level edge item: pending, waiting on every end that is a record of this batch. `again`: the edge is planned AGAIN
+   * after a record it waited on was settled — the same resolution, through `refs`, which by then name the records' FINAL ids, and
+   * the ends refused again — and its entry is answered for the caller to commit rather than left pending. Null when refused (and reported).
+   */
+  async function planTopLevelEdge(i: number, item: Record<string, unknown>, strict: boolean, again = false): Promise<Pending | null> {
+    const refuse = (reason: string, violation?: BulkViolation): null => { reject('edge', i, item, reason, violation); return null; };
     const rawFrom = typeof item['from'] === 'string' ? item['from'].trim() : '';
     const rawTo = typeof item['to'] === 'string' ? item['to'].trim() : '';
     const label = typeof item['label'] === 'string' ? item['label'].trim() : '';
@@ -718,109 +757,208 @@ function batchRun(
       const why = itemReason(err);
       return refuse(why.reason, why.violation);
     }
-    const after = pendingFor(fromRef.id && rawFrom !== from ? `${fromKind}:${from}` : undefined)
-      ?? pendingFor(toRef.id && rawTo !== to ? `${toKind}:${to}` : undefined);
-    await planEdgeItem(edgeInput, 'edge', i, item, 'edges', after);
+    // EVERY end that names a record this batch has pending, `from` before `to`: the edge is written only if all of them are.
+    const after = [
+      fromRef.id && rawFrom !== from ? pendingAt.get(`${fromKind}:${from}`) : undefined,
+      toRef.id && rawTo !== to ? pendingAt.get(`${toKind}:${to}`) : undefined,
+    ].filter((d): d is Pending => d !== undefined);
+    if (again) return edgeEntry(edgeInput, 'edge', i, item, 'edges', [], undefined);
+    await planEdgeItem(edgeInput, 'edge', i, item, 'edges', after, undefined, () => planTopLevelEdge(i, item, strict, true));
+    return null;
   }
 
   async function planEdgeItem(
-    edgeInput: EdgeInput, type: string, index: number, item: unknown, counted: keyof Counts | null, after?: Pending,
+    edgeInput: EdgeInput, type: string, index: number, item: unknown, counted: keyof Counts | null, after: Pending[],
+    inline: InlineEdges | undefined, again: () => Promise<Pending | null>,
   ): Promise<void> {
     const want = edgeWant(spaceId, edgeInput);
     const t = want.triplets![0]!;
     // Keyed by the edge's IDENTITY, so an end stated as `entity` and one left unstated are the same target.
     const target = `edge:${tripletKey(t)}`;
     await beforeTarget(target, { triplets: [t] });
+    // The commit that boundary made settled what this edge waits on, and it landed: planned from its item against the FINAL id.
+    // (One that failed stays an `after`, and the flush refuses the edge with its reason.)
+    const settled = after.length > 0 && after.every(d => d.result !== undefined) && !failedDependency(after);
+    const entry = settled ? await again() : await edgeEntry(edgeInput, type, index, item, counted, after, inline);
+    if (entry) push({ ...entry, again }, target);
+  }
+
+  /** Plan one edge against the read set: its pending entry, or null when it is refused (and reported). */
+  async function edgeEntry(
+    edgeInput: EdgeInput, type: string, index: number, item: unknown, counted: keyof Counts | null, after: Pending[],
+    inline: InlineEdges | undefined,
+  ): Promise<Pending | null> {
+    const want = edgeWant(spaceId, edgeInput);
     await view.load(want);
+    const mark = out.errors.length;
     try {
       const planned = await planEdge(spaceId, edgeInput, view);
-      push({
-        plan: planned.plan, type, index, counted, isUpdate: planned.existed, want,
-        replan: view => planEdge(spaceId, edgeInput, view),
-        ...(after ? { after } : {}),
-        ...(counted === null && after?.inline ? { inline: after.inline } : {}),
-      }, target);
+      return {
+        plan: planned.plan, type, index, counted, isUpdate: planned.existed, want, after, warned: out.errors.slice(mark),
+        replan: v => planEdge(spaceId, edgeInput, v),
+        ...(counted === null && inline ? { inline } : {}),
+      };
     } catch (err) {
       const why = itemReason(err);
-      if (counted !== null) { reject(type, index, item, why.reason, why.violation); return; }
+      if (counted !== null) { reject(type, index, item, why.reason, why.violation); return null; }
       // An item's own edge refused after its record was planned: the record is still written, so the row is kept to
       // say so once the record's commit is known (`nameWhatLanded`).
       const row: BulkError = { type, index, reason: why.reason, ...(why.violation ? { violation: why.violation } : {}) };
       out.errors.push(row);
-      after?.inline?.failed.push(row);
+      inline?.failed.push(row);
+      return null;
     }
   }
 
-  /** Commit everything pending and report it. */
+  /** Commit everything pending and report it, settled — see `flushEntries`. */
   async function flush(): Promise<void> {
     const batch = pending;
     pending = [];
-    targets.clear();
+    pendingAt.clear();
+    await flushEntries(batch, false);
+  }
+
+  /**
+   * Commit `batch` and report every entry by its FINAL outcome — a batch means its items written one at a time (`bulkWrite`), and
+   * one at a time an edge is written only if its records were.
+   *
+   * An entry the commit set aside because its record moved meanwhile is planned once more, right here (`settle`), so nothing a
+   * later item plans against is still undecided. The edges that waited on a set-aside record are decided by what it finally did:
+   * refused with its reason (`dependencyFailed`, the first failed end, `from` before `to`), or planned AGAIN from their item against
+   * its final id and committed by one more call of this function (`release`). That call has no waiters of its own — only edges
+   * wait, and nothing waits on an edge — so an edge it finds stale is planned once more and reported, and it never flushes again.
+   */
+  async function flushEntries(batch: Pending[], release: boolean): Promise<void> {
     if (batch.length === 0) return;
     const position = new Map(batch.map((e, k) => [e, k]));
-    const plans = batch.map(e => {
-      if (e.after?.result && !e.after.result.ok) return null;
-      const dep = e.after ? position.get(e.after) : undefined;
-      return dep === undefined ? e.plan : { ...e.plan, dependsOn: [dep] };
-    });
     // An entry whose dependency already failed in an earlier commit is not written at all.
-    const toWrite = plans.map((p, k) => ({ p, k })).filter((x): x is { p: WritePlan; k: number } => x.p !== null);
-    const outcomes = await commitPlans(spaceId, toWrite.map(x => x.p));
-    const byEntry = new Map<number, CommitOutcome>(toWrite.map((x, j) => [x.k, outcomes[j]!]));
-    batch.forEach((e, k) => {
-      const committed = byEntry.get(k);
-      if (committed) { report(e, committed); return; }
-      // Not written because what it hangs off was not: it is told why, and the structured refusal of that item travels with the reason.
-      const dependency = e.after!.result as { reason: string; violation?: BulkViolation };
-      report(e, { ok: false, reason: `it depends on an item of this request that was not written: ${dependency.reason}` }, dependency.violation);
+    const toWrite = batch.flatMap((e, k) => {
+      if (failedDependency(e.after)) return [];
+      const deps = e.after.map(d => position.get(d)).filter((d): d is number => d !== undefined);
+      return [{ k, p: deps.length > 0 ? { ...e.plan, dependsOn: deps } : e.plan }];
     });
-    // What was written is read again before an item addresses it, so a later converge plans against the truth.
+    const outcomes = await commitPlans(spaceId, toWrite.map(x => x.p), { somethingLanded: release && landedAny });
+    const outcome = new Map<Pending, CommitOutcome>(toWrite.map((x, j) => [batch[x.k]!, outcomes[j]!]));
+    // Set aside: its record moved meanwhile, decided by its re-plan below. By membership, never by a reason's wording.
+    const setAside = new Set(batch.filter(e => { const o = outcome.get(e); return o !== undefined && !o.ok && o.stale === true; }));
+    // Waiting: an edge whose record was set aside, and none of whose ends has failed already (one that has is refused at once).
+    const waiting: Pending[] = [];
+    // In batch order, so every record is reported before the edges that hang off it.
+    for (const e of batch) {
+      if (setAside.has(e)) continue;
+      if (e.after.some(d => setAside.has(d)) && !failedDependency(e.after)) { waiting.push(e); continue; }
+      decide(e, outcome.get(e));
+    }
+    // What the commit wrote is read again before anything is planned against it — the re-plans and the edges planned again below.
+    forgetWritten(batch);
+    if (setAside.size === 0) return;
+    if (release && waiting.length > 0) throw new Error('bulk write: an edge waits on an edge — only records are ever waited on');
+    const outage = await settle([...setAside]);
+    const released: Pending[] = [];
+    for (const e of waiting) {
+      if (failedDependency(e.after)) { decide(e, undefined); continue; }
+      // The store failed on a re-plan: no further attempts, the one reason for everything left (`settle`).
+      if (outage !== undefined) { report(e, { ok: false, reason: outage }); continue; }
+      const mark = out.errors.length;
+      const next = await e.again!();
+      replaceRows(e, mark);
+      if (next) released.push(next);
+    }
+    await flushEntries(released, true);
+    // The re-plans wrote under their final plans — a re-minted id among them.
+    forgetWritten([...setAside]);
+  }
+
+  /**
+   * Plan each set-aside entry once more against a fresh read and commit it (`planAndCommit(…, 1)`, the one place a lost race
+   * becomes a conflict): the batch's own commit was the first attempt, so this is the last, and losing again is the conflict a
+   * single write answers. The FINAL plan, its count and its warning are written onto the entry itself — the edges that wait on
+   * it read its result — and its `$ref` key follows the final id.
+   *
+   * The first failure of the STORE (a write timeout, a space no longer taking writes) ends the walk: every entry left is told
+   * that one reason, rather than an outage being tried once per item. The reason is returned for the waiting edges.
+   */
+  async function settle(list: readonly Pending[]): Promise<string | undefined> {
+    let outage: string | undefined;
+    for (const e of list) {
+      if (outage !== undefined) { report(e, { ok: false, reason: outage }); continue; }
+      const mark = out.errors.length;
+      try {
+        const { planned, outcome } = await planAndCommit(spaceId, e.want, e.replan, 1);
+        replaceRows(e, mark);
+        e.plan = planned.plan;
+        e.isUpdate = planned.existed ?? planned.plan.op === 'converge';
+        if (planned.warning) e.warning = planned.warning; else delete e.warning;
+        report(e, 'conflict' in outcome ? { ok: false, reason: outcome.reason } : outcome);
+      } catch (err) {
+        replaceRows(e, mark);
+        if (isWriteTimeout(err) || isSpaceNotWritable(err)) {
+          outage = isSpaceNotWritable(err) ? err.message : phraseWriteFailure(undefined);
+          report(e, { ok: false, reason: outage });
+          continue;
+        }
+        const why = itemReason(err);
+        report(e, { ok: false, reason: why.reason }, why.violation);
+      }
+    }
+    return outage;
+  }
+
+  /** Report an entry by its commit outcome — or, when an end it waits on finally failed, by that end's failure. */
+  function decide(e: Pending, o: CommitOutcome | undefined): void {
+    const failed = failedDependency(e.after);
+    if (failed && !o?.ok) {
+      // Not written because what it hangs off was not: it is told why, and the structured refusal of that item travels with the reason.
+      report(e, { ok: false, reason: dependencyFailed(failed.reason) }, failed.violation);
+      return;
+    }
+    report(e, o ?? { ok: false, reason: 'not written' });
+  }
+
+  /** The first of `after` that finally failed (`from` before `to`), or undefined. */
+  function failedDependency(after: readonly Pending[]): Failed | undefined {
+    for (const d of after) if (d.result && !d.result.ok) return d.result;
+    return undefined;
+  }
+
+  /**
+   * The rows a re-plan just reported (everything from `mark` on) take the place of the entry's earlier schema-warning rows: a
+   * warning is a fact about the item, said once however often it was planned.
+   */
+  function replaceRows(e: Pending, mark: number): void {
+    const fresh = out.errors.splice(mark);
+    const at = e.warned.length > 0 ? out.errors.indexOf(e.warned[0]!) : -1;
+    for (const row of e.warned) {
+      const k = out.errors.indexOf(row);
+      if (k >= 0) out.errors.splice(k, 1);
+    }
+    out.errors.splice(at >= 0 ? at : out.errors.length, 0, ...fresh);
+    e.warned = fresh;
+  }
+
+  /** What was written is read again before an item addresses it, so a later converge plans against the truth. */
+  function forgetWritten(batch: readonly Pending[]): void {
     view.forget(
       Object.fromEntries(['fact', 'entity', 'chrono'].map(kind => [kind, batch.filter(e => e.plan.kind === kind).map(e => e.plan.id)])),
       batch.filter(e => e.plan.kind === 'edge').map(e => e.plan.result as unknown as Triplet),
     );
   }
 
-  /**
-   * Re-plan each write whose record another write moved while this batch was being applied. The batch's own
-   * commit was the first attempt, so this is the last: losing again is the conflict a single write answers.
-   */
-  async function replanStale(): Promise<void> {
-    for (const e of stale.splice(0)) {
-      try {
-        const { planned, outcome } = await planAndCommit(spaceId, e.want, e.replan!, 1);
-        report({ ...e, plan: planned.plan, replan: undefined }, outcome.ok ? outcome : { ok: false, reason: outcome.reason });
-      } catch (err) {
-        const why = itemReason(err);
-        report({ ...e, replan: undefined }, { ok: false, reason: why.reason }, why.violation);
-      }
-    }
-  }
-
   /** Commit what is pending first when an item addresses something already planned — see `bulkWrite`. */
   async function beforeTarget(target: string, reread: ReadWant): Promise<void> {
-    if (!targets.has(target)) return;
+    if (!pendingAt.has(target)) return;
     await flush();
     await view.load(reread);
   }
 
-  function pendingFor(target: string | undefined): Pending | undefined {
-    if (!target) return undefined;
-    return pending.find(e => `${e.plan.kind}:${e.plan.id}` === target);
-  }
-
   function push(entry: Pending, target: string): void {
     pending.push(entry);
-    targets.add(target);
+    pendingAt.set(target, entry);
   }
 
+  /** Record an entry's FINAL outcome: its row, its count, its key. */
   function report(e: Pending, o: CommitOutcome, violation?: BulkViolation): void {
-    if (!o.ok && o.stale && e.replan) {
-      stale.push(e);
-      e.result = { ok: false, reason: o.reason };
-      return;
-    }
-    if (e.inline && e.counted !== null) e.inline.recordLanded = o.ok;
+    if (e.inline && e.counted !== null) { e.inline.recordLanded = o.ok; e.inline.id = e.plan.id; }
     if (!o.ok) {
       e.result = { ok: false, reason: o.reason, ...(violation ? { violation } : {}) };
       const row: BulkError = { type: e.type, index: e.index, reason: o.reason, ...(violation ? { violation } : {}), ...(o.code !== undefined ? { code: o.code } : {}) };
@@ -830,6 +968,9 @@ function batchRun(
       return;
     }
     e.result = { ok: true };
+    landedAny = true;
+    // A record re-planned after a lost race may have landed under a fresh id (its record was deleted meanwhile): the key names it.
+    if (e.key) refs.settle(e.key, e.plan.id);
     if (e.counted === null) { out.connections.edges++; e.inline?.landed.push(e.plan.id); }
     else if (e.isUpdate) out.updated[e.counted]++;
     else out.inserted[e.counted]++;
@@ -847,7 +988,7 @@ function batchRun(
       for (const row of item.failed) row.written = writtenRecord(item.kind, item.id, item.landed);
     }
   }
-  return { planRecord, planTopLevelEdge, flush, replanStale, nameWhatLanded };
+  return { planRecord, planTopLevelEdge, flush, nameWhatLanded };
 }
 
 /**

@@ -88,7 +88,10 @@ export interface WritePlan {
   readonly minted: boolean;
   /** Run the space's insert-time duplicate rules once the record lands (`dupeRulesOnInsert`). */
   readonly dupeRules: boolean;
-  /** Indexes of plans in the same commit this one needs written first — a `$ref` end, a connection edge's source. */
+  /**
+   * Indexes of plans in the same commit this one needs written first — EVERY end of an edge that is a record of the same batch
+   * (both, when both are `$ref`s), an inline edge's source. Any of them not written, and this plan is not written either.
+   */
   readonly dependsOn?: readonly number[];
 }
 
@@ -105,6 +108,19 @@ export class WriteConflict extends Error {
       + 'nothing was written — retry it');
     this.name = 'WriteConflict';
   }
+}
+
+/**
+ * What a row says when something it depends on was not written: an edge whose record, or either end, finally failed (`Q-201`).
+ *
+ * The ONE wording. The commit (a dependency that failed in the same commit), the batch (a dependency that failed in an earlier
+ * commit or on its re-plan) and the `$ref` resolver (a later item naming the key of a failed one) each say it by calling this, so
+ * the published sentence cannot drift between them (`a-dependency-failure-is-worded-once`). `reason` is the dependency's own
+ * reason, carried whole; `key`: the `$ref` form, naming the key the dependant used.
+ */
+export function dependencyFailed(reason: string, key?: string): string {
+  const what = 'an item of this request that was not written';
+  return key === undefined ? `it depends on ${what}: ${reason}` : `$ref "${key}" names ${what}: ${reason}`;
 }
 
 /** What the commit did with one plan. */

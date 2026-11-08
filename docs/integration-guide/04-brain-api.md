@@ -254,6 +254,8 @@ somewhere you did not intend.
 
 **A key whose item was not written is not a key.** It is absent from `refs`, and an item referencing it fails
 with a reason naming why that item was refused — not "unknown `$ref`", which would say it was never declared.
+That holds for an item that lost a race to another request twice too: an edge is decided by what its records
+finally did, so no edge is stored at an end that was never written.
 
 **References are checked for EXISTENCE under `strictLinkage`**, the same rule the single-record doors apply.
 This door used to be laxer — shape only, on a space that had not been converted to link records — and 5.0
