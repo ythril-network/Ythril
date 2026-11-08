@@ -75,6 +75,15 @@ export async function fileFeedStateOf(spaceId: string): Promise<{ stream: string
   return { stream: String(doc?.stream), floor: doc && isPositionNumber(doc.floor) ? doc.floor : 0 };
 }
 
+/**
+ * Drop the space's floor document (a delete): its stream tag and its floor. The prefix drop of a space's collections cannot reach it (the collection is
+ * instance-wide, keyed by the space id), and a space created again under the id would find the old tag, so a client's cursor from the deleted space would be
+ * served as if nothing was lost. Without the document the new space makes a new tag, and the old cursor is refused as one from another stream. Idempotent.
+ */
+export async function dropFileFeedFloor(spaceId: string): Promise<void> {
+  await floors().deleteOne(asFilter<FloorDoc>({ _id: spaceId }));
+}
+
 /** Carry the floor document of `oldId` to `newId` (a rename): the higher floor and the old stream tag stay, the old document goes. */
 export async function moveFileFeedFloor(oldId: string, newId: string): Promise<void> {
   const old = await floors().findOne(asFilter<FloorDoc>({ _id: oldId }));
