@@ -53,7 +53,7 @@ import { forgetVersionMark } from '../util/version-mark.js';
 import { builtInRefusal } from './built-in-space.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { CREATOR_GRANT_OPERATION } from '../audit/middleware.js';
-import { raiseFileFeedFloorToHead } from '../files/file-feed-floor.js';
+import { raiseFileFeedFloorToHead, dropFileFeedFloor } from '../files/file-feed-floor.js';
 
 /**
  * Create a space's collections and indexes, and check what a boot checks of it. Runs for EVERY space at EVERY boot, before the
@@ -666,6 +666,17 @@ export async function dropSpaceData(
     await dropScanCursorsOfSpace(spaceId);
   } catch (err) {
     const msg = `Could not drop the scan cursors of '${spaceId}': ${err}`;
+    log.warn(peerText(msg));
+    errors.push(msg);
+  }
+
+  // 2e. Drop the space's file feed floor document (bundle-255). The prefix drop cannot reach it: `ythril_file_feed_floors` is instance-wide, keyed by the space id.
+  // Left behind, a space created again under the id would find the old stream tag and serve a client's cursor from the deleted space as if nothing was lost: a silent
+  // gap. Here, with 2b to 2d, so a resumed delete does it too.
+  try {
+    await dropFileFeedFloor(spaceId);
+  } catch (err) {
+    const msg = `Could not drop the file feed floor of '${spaceId}': ${err}`;
     log.warn(peerText(msg));
     errors.push(msg);
   }
