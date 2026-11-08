@@ -31,6 +31,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { build, peerToken } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { caseInsensitiveAt } from './_move-destination.mjs';
+import { FEED_MARKER_KEYS } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -41,6 +42,9 @@ const SKIPPED = 'expected-in-ci: the file system is case-sensitive';
 
 let door, insensitive;
 const row = (id) => door.coll(S, 'files').findOne({ _id: id });
+/** A FEED MARKER's keys (bundle-255), sorted: what a removed record leaves where soft delete is off. `markerOrNull` answers them, or null for no row. */
+const MARKER = [...FEED_MARKER_KEYS];
+const markerOrNull = (r) => (r === null ? null : r.feedMarker === true ? Object.keys(r).sort() : r);
 const tree = () => path.join(door.localFilesRoot(S));
 const tomb = (p, n = 1, rowSeq = 3) => ({ _id: `ft-${p}-${n}`, spaceId: S, path: p, deletedAt: `2026-09-01T00:00:${String(n).padStart(2, '0')}.000Z`, issuer: PEER, rowSeq });
 const deliver = (tombstones) => door.push('/file-tombstones', { spaceId: S, tombstones }, { spaceId: S, token: peerToken(PEER) });
@@ -117,7 +121,8 @@ describe('a peer tombstone for an old spelling keeps the entry another record na
     await deliver([tomb('Case.txt', 3, 4)]);
 
     assert.deepEqual(fs.readdirSync(tree()).filter(n => n.toLowerCase() === 'case.txt'), [], 'a tombstone for the entry\'s own spelling left its bytes');
-    assert.equal(await row('Case.txt'), null, 'a tombstone for the entry\'s own spelling left its record');
+    // bundle-255: soft delete off, the removed record leaves exactly its feed marker (path, deletion time, position) and nothing of the file.
+    assert.deepEqual(markerOrNull(await row('Case.txt')), MARKER, 'a tombstone for the entry\'s own spelling left its record');
   });
 
   it('CONTROL: no other record names the entry: the tombstone of a.txt removes the bytes and the record', async () => {
@@ -127,6 +132,7 @@ describe('a peer tombstone for an old spelling keeps the entry another record na
     await deliver([tomb('only.txt', 4)]);
 
     assert.equal(door.localFileExists(S, 'only.txt'), false, 'a tombstone with no other record to protect left the bytes');
-    assert.equal(await row('only.txt'), null);
+    // bundle-255: soft delete off, the removed record leaves exactly its feed marker.
+    assert.deepEqual(markerOrNull(await row('only.txt')), MARKER, 'the tombstone left the record, or more than its feed marker');
   });
 });

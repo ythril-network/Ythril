@@ -77,6 +77,8 @@ const EXEMPT_FUNCTIONS = new Map([
   ['server/src/files/derived-fields.ts:setFileProcessingState', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/files/derived-fields.ts:setDerivedDescriptionIfUnset', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/files/tombstones.ts:positionLegacyFileTombstones', { why: UPDATES_EXISTING_ONLY }],
+  // bundle-255: the boot pass that gives a live file row with no position one; it updates rows that exist, by filter, and creates none.
+  ['server/src/files/unpositioned-file-rows.ts:positionUnpositionedFileRows', { why: UPDATES_EXISTING_ONLY }],
   ['server/src/files/tombstones.ts:publishSlice', { why: REFUSAL_AHEAD_OF_ADMITTED_WRITES, via: ['writeSlice'] }],
   ['server/src/files/tombstones.ts:forgetFileTombstonesOf', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/files/tombstones.ts:dropPendingById', { why: ONLY_REMOVES_OR_REFUSES }],

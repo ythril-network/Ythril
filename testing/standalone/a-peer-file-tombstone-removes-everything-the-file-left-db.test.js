@@ -32,6 +32,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build, peerToken } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
+import { isFeedMarkerRow } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -58,11 +59,15 @@ async function seedWholeFile(of) {
   await door.coll(S, 'file_hashes').insertOne({ _id: of, size: 11, mtimeMs: 1, sha256: `hash-${of}` });
   await door.coll(S, 'media_jobs').insertOne({ _id: of, spaceId: S, status: 'pending' });
 }
+/** Exactly a FEED MARKER (bundle-255): the keys `{ _id, spaceId, path, deletedAt, feedMarker, pos, posAtSeq }` and nothing else. */
+const isFeedMarker = isFeedMarkerRow;
 /** What is left of a file's artefacts, by name. */
 async function leftOf(of) {
   const left = [];
   if (door.localFileExists(S, of)) left.push('bytes');
-  if (await row(of)) left.push('row');
+  // bundle-255: with soft delete off a removed file leaves exactly its feed marker (path, deletion time, position), which is no row of the file.
+  const own = await row(of);
+  if (own && !isFeedMarker(own)) left.push('row');
   if (await row(`${of}#chunk-0`)) left.push('chunk row');
   if (await row(`_converted/${of}.md`)) left.push('converted row');
   if (door.localFileExists(S, `_converted/${of}.md`)) left.push('converted sidecar on disk');

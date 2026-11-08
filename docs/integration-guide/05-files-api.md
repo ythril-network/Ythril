@@ -58,7 +58,7 @@ path takes back bytes no record names once the database answers.
 
 **A peer's upload of a file this instance deleted is not stored.** Sync pushes a file's bytes to this route with a peer token. When this instance holds a deletion for that path, the path has not been re-created since (a live file there with other bytes, or a newer version written by the instance that issued the deletion — another author's higher version number does not count), and the arriving bytes are the content the deletion erased, the answer is `200 { "tombstoned": true }` and nothing is written, so the file does not come back from a peer that has not heard of the deletion yet. **A deletion counts from the moment its bytes are gone**, not from the moment its tombstone is published: a delete writes its tombstone first and publishes it once the file is removed, and an upload that arrives in between is answered the same `200 { "tombstoned": true }`. A deletion whose file is still there shadows nothing. If this instance cannot look at the path to tell which of the two it is (a file-system fault other than "it does not exist"), the answer is a retryable `503` with `Retry-After`, nothing is stored, and the sender does not remember it; it uploads again on its next cycle. It is a `200` on purpose: a sender that took it for a failure would upload the same bytes every cycle. Identical bytes re-created by the issuer as a newer version arrive with their metadata first and are stored. A user's own upload, with any other token, is **never** refused this way, and a chunked upload is decided before its target is written (see [Chunked Upload](#chunked-upload-content-range)). The `path` is resolved before anything is looked up by it, so `x/../file` is the deletion of `file` however it is spelled. A deletion held from before the upgrade names no version and shadows nothing. See [Sync API → File Sync Artifacts](09-sync-api.md#file-sync-artifacts).
 
-**What else a peer's upload does differently.** Bytes a peer token delivers are recorded as an **arrival**, by the one function the manifest pull also records through: size and hash, the peer as author of a row new here, no seq of its own, then processing by THIS instance's rules (conversion, chunking, the media pipeline; an image's face analysis follows `reprocessSyncedImages`). A peer's upload carries **no file metadata**: a body that names `description`, `tags` or `properties`, or a `ttlDays` in the query (on a chunked upload, on any range, refused at the first), is refused `400` before anything is staged or stored, because a peer's metadata arrives by metadata sync, never on the upload (send the bytes alone; `inputFormat` and `encoding` say how to read the bytes and are not metadata). **Nothing is announced**: a peer's push fires no `file.created` webhook and no live-view event, as a synced record fires none (a person's upload, with a user or API token, still fires one). **A path inside a conversion tree** (`_converted/…` or `_extracted/…` at the root of the space) is not stored when a peer offers it, and is answered `200 { "ignored": "instance-local" }`, single or chunked (each instance converts by its own settings; an older sender reads the `200` as delivered and stops). A person's upload to such a path is never asked.
+**What else a peer's upload does differently.** Bytes a peer token delivers are recorded as an **arrival**, by the one function the manifest pull also records through: size and hash, the peer as author of a row new here, no seq of its own (the row takes a new local position, so the [change feed](#file-change-feed) lists it again; bytes identical to what the row records write nothing), then processing by THIS instance's rules (conversion, chunking, the media pipeline; an image's face analysis follows `reprocessSyncedImages`). A peer's upload carries **no file metadata**: a body that names `description`, `tags` or `properties`, or a `ttlDays` in the query (on a chunked upload, on any range, refused at the first), is refused `400` before anything is staged or stored, because a peer's metadata arrives by metadata sync, never on the upload (send the bytes alone; `inputFormat` and `encoding` say how to read the bytes and are not metadata). **Nothing is announced**: a peer's push fires no `file.created` webhook and no live-view event, as a synced record fires none (a person's upload, with a user or API token, still fires one). **A path inside a conversion tree** (`_converted/…` or `_extracted/…` at the root of the space) is not stored when a peer offers it, and is answered `200 { "ignored": "instance-local" }`, single or chunked (each instance converts by its own settings; an older sender reads the `200` as delivered and stops). A person's upload to such a path is never asked.
 
 ### Upload a File (JSON / base64)
 
@@ -196,7 +196,8 @@ GET /api/files/:spaceId?path=reports/
 ```
 
 A directory's `size` is the recursive sum of everything beneath it. Files carry their `embeddingStatus` and
-`tags` from the file's metadata record.
+`tags` from the file's metadata record. The MCP `list_dir` tool answers the same children as lines of text (`f`/`d`, the
+name and, for a file, its size in bytes); it carries neither `embeddingStatus` nor `tags`.
 
 **A directory that does not exist answers `404 { "error": "Path not found" }`; a storage fault is not that.** When the file system itself
 fails while a directory is listed (a disk error, a permission the server lost), the listing answers `500` with `code: "file_system_fault"` and
@@ -225,6 +226,63 @@ Absence means "not known yet", **not** "no work to do": a job claimed a moment a
 its first report. Fall back to `embeddingStatus` rather than rendering an empty progress indicator. The
 lookup is best-effort server-side, so these fields may also be absent if the job store was briefly
 unreachable — the listing itself never fails over them.
+
+---
+
+### File Change Feed
+
+```http
+GET /api/files/:spaceId/changes?cursor=<nextCursor>&prefix=docs/&limit=200
+```
+
+What changed in a space's files since a cursor, in the order the changes happened — for a client that mirrors a space's
+files instead of re-listing every folder. The MCP tool `file_changes` takes the same parameters (plus `space`) and answers
+the same page. Rights: `files: read` on the space, as the listing. A personal view is not accepted (one cursor is one
+space's history): it answers `404` as an unknown space does. A peer-bound token is refused `403` (`peer_token_refused`).
+
+| Parameter | |
+|---|---|
+| `cursor` | The `nextCursor` of a previous answer, sent back unchanged. Omit it to start from the beginning. |
+| `prefix` | Only paths that start with this text (e.g. `docs/`). Plain text, never a pattern. |
+| `limit` | Items per page, 1–1000, default 200. |
+
+Any other query parameter is refused `400`.
+
+**Response** `200`:
+
+```json
+{
+  "items": [
+    { "path": "docs/a.md", "sha256": "9f2c…", "sizeBytes": 2048, "updatedAt": "2026-11-08T10:00:00.000Z", "deleted": false },
+    { "path": "docs/old.md", "deleted": true, "updatedAt": "2026-11-08T10:05:00.000Z" }
+  ],
+  "nextCursor": "f1.3c9a…",
+  "through": 1762596300000000,
+  "head": 1762596300000000
+}
+```
+
+- `items`: each changed path once, at its latest change, in position order. A live file carries `path`, `sha256` (when
+  known), `sizeBytes`, `updatedAt` and `deleted: false`; a deleted one carries `path`, `deleted: true` and `updatedAt` (the
+  deletion time) only. Derived trees (`_converted/`, `_extracted/`, `_tmp/`) and conversion chunks are never listed.
+- `nextCursor`: always a cursor, on the last page too. Keep the last one and send it next time.
+- `through`: the answer is complete through this position. `head`: the latest position the feed holds.
+
+**With no cursor it is the listing.** Page until a page answers no items: you hold every file (and the deletions still
+kept) and the cursor to resume from. A page never passes a write that has not committed, so resuming never skips one.
+**A file can be listed again unchanged**: its processing finished, or its bytes arrived from a peer. Compare `sha256`
+before fetching the bytes.
+
+**Refusals** (with the read's own codes; treat any other `code` as a failure):
+
+| Status | `code` | Meaning |
+|---|---|---|
+| `410` | `cursor_expired` | The cursor points into history the space no longer keeps: a deletion it would page past was purged (the Files retention window with soft-delete on, `fileChangeFeedWindowDays` otherwise, a folder delete or a move over a deleted path), or the space was wiped or restored. Start again with no cursor and replace what you hold. |
+| `400` | `invalid_cursor` | The cursor is not one this space handed out (malformed, or from another space). Never `cursor_expired`. |
+| `400` | — | A parameter out of bounds or not taken. |
+| `503` | `positions_building` | The space's positions are being carried or repaired after an upgrade or restore. Retry. |
+
+A file deleted before this release keeps the position it had: it is listed as deleted to a read with no cursor only.
 
 ---
 
@@ -429,7 +487,14 @@ sidecars with it. The same holds for a move, whose old paths are tombstoned.
 `false`), deleting a file **retains** its metadata record and flags it `deletedAt = <timestamp>`
 instead of removing it. A flagged record is this instance's own audit record: it is left out of the file
 listing, **never offered to a peer** (not pushed, not served by the sync routes, not hashed by the Merkle check)
-and the flag stamps no `seq` or `updatedAt`.
+and the flag stamps no `seq` or `updatedAt`; it takes a local position, so the [change feed](#file-change-feed) lists the path as deleted.
+
+**With soft-delete off a deleted file leaves a feed marker.** The record is replaced by a marker holding only the path, the
+deletion time and its position — nothing a person wrote and nothing the bytes made — so the change feed can say the path
+was deleted. A move leaves one at each old path, whatever the setting. A marker is local like a flagged record (never offered
+to a peer, not exported, absent from every listing and count) and is purged by the retention sweep once older than
+`fileChangeFeedWindowDays` (default 30; 0 purges at the next sweep). A write to the path replaces it and starts clean. A delete
+takes a position like a write does, so while the clock refuses positions it is refused like a move (`503 positions_clock_unusable`).
 
 **What a flagged record is not, and the one door that still reaches it.** It is not a file the space has, so it is
 absent from the listing and from every file count (`GET /spaces/:spaceId/stats`, the MCP `space_stats` tool and a
@@ -446,7 +511,7 @@ delivers) clear the flag, and so does a file **moved onto** the path: the flagge
 record stands there. **The deletion reaches peers as the file tombstone, and each peer applies it by its
 own `softDeleteFileMeta`**, whatever this instance's setting: one keeps its flagged row, another removes it.
 A restore from an admin export keeps the flag its backup row carried (the import summary counts them in
-`flagsKept`). Derived records (conversion chunks / `_converted` / `_extracted`) are always hard-removed
+`flagsKept`); a feed marker is never exported, so none is restored or counted. Derived records (conversion chunks / `_converted` / `_extracted`) are always hard-removed
 regardless of the setting.
 
 **A second delete of a flagged record is `404`, never a second success.** A delete that names a record already flagged `deletedAt`, or a derived record (a chunk of a document, a face found in a picture) rather than the file, answers `404` on `DELETE /api/files/:spaceId`, `POST /api/delete_file` and the MCP `delete_file` tool alike (an error result in MCP): no second tombstone is written, no second `file.deleted` webhook fires, and `seq` does not move. A first delete that was interrupted (a store failure, a restart in between) still completes on retry, because its record is not flagged yet. So after a delete that timed out, a `404` on the retry can mean the first one did complete: list the files before deleting again. With `softDeleteFileMeta` off the record is gone after the first delete, and the retry answers `404` for that reason.

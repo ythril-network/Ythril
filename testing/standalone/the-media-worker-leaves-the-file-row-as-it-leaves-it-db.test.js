@@ -45,6 +45,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { goneOrMarker } from './_feed-marker-row.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -89,6 +90,8 @@ const files = () => mongo.col(`${SPACE}_files`);
 const jobs = () => mongo.col(`${SPACE}_media_jobs`);
 const jobOf = (id) => jobs().findOne({ _id: id });
 const rowOf = (id) => files().findOne({ _id: id });
+/** No row, or exactly a FEED MARKER (bundle-255: what a retired row leaves where soft delete is off): the file is gone either way. */
+const goneAsFile = goneOrMarker;
 const derivedIds = async (id) => (await files().find({ parentFileId: id }).project({ _id: 1 }).sort({ _id: 1 }).toArray()).map(r => r._id);
 
 /** The fields a worker run is allowed to have written on a file's own row, read as one object (absent keys are absent). */
@@ -359,12 +362,14 @@ describe('the real media worker leaves the file row as it leaves it today (real 
       try {
         // Until the ROW is gone too: the reconcile cancels the job first and retires the row LAST (`removeFileHere`), so a wait on
         // the job alone read the row between the two steps and closed the store under the rest (Full run 39067730979).
-        await waitFor(async () => (await jobOf(rel)) === null && (await rowOf(rel)) === null, 60_000, 100,
+        // bundle-255: soft delete off, the retired row is replaced by exactly its feed marker (path, deletion time, position).
+        await waitFor(async () => (await jobOf(rel)) === null && goneAsFile(await rowOf(rel)), 60_000, 100,
           async () => JSON.stringify({ job: await jobOf(rel), row: await rowOf(rel) }));
       } finally { worker.stopMediaEmbeddingWorker(); }
 
       assert.equal(await jobOf(rel), null, 'the job is gone');
-      assert.equal(await rowOf(rel), null, 'the orphaned row is gone');
+      const left = await rowOf(rel);
+      assert.ok(goneAsFile(left), `the orphaned row is gone (bundle-255: only its feed marker may stay): ${JSON.stringify(left)}`);
       assert.deepEqual(await derivedIds(rel), []);
     });
   });

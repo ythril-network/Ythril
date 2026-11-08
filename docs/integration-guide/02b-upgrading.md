@@ -259,6 +259,12 @@ collections — about half, on a measured production instance. An index comes ba
 first record, and goes a minute after its last one is deleted (`SEARCH_INDEX_DROP_DELAY_MS`, default `60000`). A
 rollback recreates every one of these indexes at boot; the edge identity index is the exception, and the rollback tool (`server/dist/tools/positions-rollback.js`) drops the 6.0 one and refuses while entity, edge or chrono forks are stored (`--discard-unresolved-forks` deletes them), or a 5.6 build cannot index the edges.
 
+**Upgrading to the release with the file change feed changes what a deleted file leaves.** With
+`softDeleteFileMeta` off a deleted, moved or re-keyed file now leaves a feed marker (path, deletion time, position; nothing a person wrote) for
+`fileChangeFeedWindowDays` (default 30), and every deletion takes a local position. Files deleted before the upgrade keep the position they had: a
+feed read with no cursor lists them as deleted, a cursor never does. The first boot gives every live file row without a position one (bytes that
+arrived before, pre-4.0 rows), so the cursor-less listing is complete.
+
 **Upgrading past 5.6.8 strips the records of files deleted under `softDeleteFileMeta` by an earlier build.** The flag
 write removes everything the bytes made in the same operation now — the vector, its model, the matched text, the
 excerpt, `sha256`, `embeddingStatus`, and a machine-made `description` with its `descriptionSource` — but that is

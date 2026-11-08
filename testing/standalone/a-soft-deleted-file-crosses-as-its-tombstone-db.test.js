@@ -35,6 +35,7 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { goneOrMarker } from './_feed-marker-row.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { adminRights } from './_cel-doors.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
@@ -201,7 +202,9 @@ describe('with softDeleteFileMeta, a deletion travels as its tombstone and the f
           assert.equal(after.seq, SEQ_BEFORE, 'the flag took a seq of its own on the receiver');
           assert.equal(after.updatedAt, T_OLD, 'the flag stamped updatedAt on the receiver');
         } else {
-          assert.equal(after, null, 'the receiver\'s own setting is off and the row was kept');
+          // bundle-255: with the setting off the row is replaced by exactly its feed marker (path, deletion time, position), never kept as a file.
+          assert.ok(goneOrMarker(after),
+            `the receiver's own setting is off and the row was kept: ${JSON.stringify(after)}`);
         }
         assert.deepEqual((await tombstoneRows()).map(t => t.path), [GONE], 'the receiver does not hold the tombstone');
         // Kept: more cycles with the peer still serving it change nothing.

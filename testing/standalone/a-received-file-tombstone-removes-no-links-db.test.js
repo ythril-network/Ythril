@@ -20,6 +20,7 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { goneOrMarker } from './_feed-marker-row.mjs';
 import { readFileSync } from 'node:fs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
@@ -69,7 +70,10 @@ describe('a received file tombstone removes no links (real MongoDB)', { skip }, 
 
       await d.deliver([tomb(p)]);
 
-      assert.equal(await door.coll(S, 'files').findOne({ _id: p }), null, 'fixture: the peer\'s tombstone did not take the file\'s row');
+      // bundle-255: soft delete off, the taken row leaves exactly its feed marker (path, deletion time, position) and nothing of the file.
+      const fileRow = await door.coll(S, 'files').findOne({ _id: p });
+      assert.ok(goneOrMarker(fileRow),
+        `fixture: the peer's tombstone did not take the file's row: ${JSON.stringify(fileRow)}`);
       assert.equal(door.localFileExists(S, p), false, 'fixture: the peer\'s tombstone did not take the file\'s bytes');
       const left = (await door.coll(S, 'links').find({}).toArray()).map(l => String(l._id)).sort();
       assert.deepEqual(left, rows.map(r => r._id).sort(), 'a received file tombstone removed links: this instance did not delete the file, and its links are not the peer\'s to take');

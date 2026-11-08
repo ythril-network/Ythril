@@ -82,7 +82,9 @@ import { runMoveOnce } from './move-flight.js';
 import { StaleRekeyPlan, rekeyRows } from './rekey-rows.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { inHeldTransaction } from '../brain/held-transaction.js';
-import { withLandingStamp, localRow } from '../sync/record-position-stream.js';
+import { withLandingStamp, localRow, arrivalRow, type LandingRow, type LocalLanding, type ArrivalLanding } from '../sync/record-position-stream.js';
+import { feedMarkerRow } from './feed-marker.js';
+import { raiseFileFeedFloorOver } from './file-feed-floor.js';
 import { versionsFor } from '../util/version-stamp.js';
 import { isDuplicateKey } from '../db/write-errors.js';
 import { spaceCollection } from '../db/space-collection.js';
@@ -135,11 +137,12 @@ async function carryBatch(spaceId: string, plan: MovePlan, batch: MoveBatch, hel
   const first = batch.rows[0];
   const firstJob = batch.jobIds[0];
   const jobTo = firstJob === undefined ? undefined : movedId(firstJob, src, dst);
-  // A commit whose reply was lost has landed: the batch's first row is at its new id and no longer at its old one.
+  // A commit whose reply was lost has landed: the batch's first row is at its new id and no LIVE row is at its old one (the move leaves a feed marker
+  // there, bundle-255, which is not the row).
   const landed = async (): Promise<boolean> => {
     if (first) {
-      const seen = await readStoredById<{ _id: string }>(filesColl, [first.from, first.to], { _id: 1 });
-      return seen.has(first.to) && !seen.has(first.from);
+      const seen = await readStoredById<{ _id: string; feedMarker?: true }>(filesColl, [first.from, first.to], { _id: 1, feedMarker: 1 });
+      return seen.has(first.to) && (!seen.has(first.from) || seen.get(first.from)!.feedMarker === true);
     }
     if (firstJob !== undefined && jobTo) {
       const seen = await readStoredById<{ _id: string }>(spaceCollection(spaceId, 'mediaJobs'), [firstJob, jobTo], { _id: 1 });
@@ -158,18 +161,39 @@ async function carryBatch(spaceId: string, plan: MovePlan, batch: MoveBatch, hel
         // a peer holding the path's tombstone refuses a row at or below it (`shadowDecision`), and a file moved back to a path it left would come back at the
         // version that path's own tombstone names. A row with no version stays without one and is given no position. The author and `updatedAt` stay
         // the row's (Q-419; `rebuiltFileRow`).
-        const versions = await readStoredById<{ seq?: number }>(filesColl, moves.map(m => m.from), { seq: 1 }, { session });
+        const versions = await readStoredById<{ seq?: number; parentFileId?: string }>(filesColl, moves.map(m => m.from), { seq: 1, parentFileId: 1 }, { session });
         const stamped = moves.filter(m => typeof versions.get(m.from)?.seq === 'number');
         const had = new Map(stamped.map(m => [m.to, versions.get(m.from)!.seq!] as const));
         const stamps = await versionsFor(spaceId, stamped.map(m => m.to), { parts: ['files'], known: had, session });
-        await withLandingStamp(spaceId, stamps.map(s => localRow(s.version)), async (patches) => {
-          const landingTo = new Map(stamped.map((m, i) => [m.to, patches[i]!] as const));
+        // A FILE row (not a derived one) with no version (pre-4.0) still takes a position, so the change feed lists it at its new path (bundle-255).
+        const isFile = (from: string): boolean => versions.has(from) && versions.get(from)!.parentFileId === undefined;
+        const unstamped = moves.filter(m => typeof versions.get(m.from)?.seq !== 'number' && isFile(m.from));
+        // And each moved FILE row leaves a feed marker at its old path, positioned in the same block, so a client hears the old path went.
+        const leaving = moves.filter(m => isFile(m.from));
+        // The audit rows and markers the move replaces at its new ids are deletions the feed has served: the floor is raised over them FIRST.
+        if (batch.flagged.length > 0) {
+          const replacedRows = await readStoredById<{ pos?: number }>(filesColl, batch.flagged, { pos: 1 }, { session });
+          await raiseFileFeedFloorOver(spaceId, [...replacedRows.values()]);
+        }
+        const landings = [
+          ...stamps.map(s => localRow(s.version)),
+          ...unstamped.map(() => arrivalRow(0)),
+          ...leaving.map(m => arrivalRow(versions.get(m.from)?.seq ?? 0)),
+        ] as LandingRow[];
+        await withLandingStamp(spaceId, landings, async (patches) => {
+          const landingTo = new Map<string, LocalLanding | ArrivalLanding>([
+            ...stamped.map((m, i) => [m.to, patches[i]!] as const),
+            ...unstamped.map((m, i) => [m.to, patches[stamped.length + i]!] as const),
+          ]);
+          const markerAt = new Map(leaving.map((m, i) => [m.from, patches[stamped.length + unstamped.length + i]!] as const));
+          const deletedAt = new Date().toISOString();
           await rekeyRows<FileMetaDoc>(filesColl, session, {
             moves,
-            rebuild: (row, to) => rebuiltFileRow(row, to, src, dst, plan.unplacedSidecars, landingTo.get(to)),
+            rebuild: (row, to) => rebuiltFileRow(row, to, src, dst, plan.unplacedSidecars, landingTo.get(to) as LocalLanding | undefined),
             // A row at a new id that the plan did not name appeared since it was made: the plan is stale, and is made again.
             refuse: (to) => new StaleRekeyPlan(`a row appeared at '${to}' since the batch was planned`),
             replacements: { replaced: batch.replaced, flagged: batch.flagged },
+            leave: (_row, from) => { const at = markerAt.get(from); return at ? feedMarkerRow(spaceId, from, at, deletedAt) : null; },
           });
         }, 'file.move');
         // The hash cache entries of the moved rows, in the same transaction: the rows and their entries commit together.

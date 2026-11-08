@@ -138,7 +138,10 @@ describe('MCP tool schemas — universal invariants', () => {
     // 87 -> 89: `list_forks` and `resolve_fork` (bundle-81, D-23), the doors onto `brain/forks.ts` like `GET`/`POST /api/brain/spaces/:spaceId/forks`: `list_forks` not
     // mutating, `resolve_fork` mutating, both `spaceRequired`, TOOL_RIGHTS rows (knowledge read / write), audit-map entries (`fork.list`, `fork.resolve`), capability-map
     // rows, and `16-mcp.md` rows.
-    assert.equal(ALL_TOOLS.length, 89);
+    // 89 -> 90: `file_changes` (bundle-255, Q-724), the door onto `files/file-changes.ts` like `GET /api/files/:spaceId/changes`: not mutating,
+    // `spaceRequired` (a view is refused), a TOOL_RIGHTS row at files read, an audit-map entry under `file.changes`, a capability-map row, and
+    // `16-mcp.md` rows.
+    assert.equal(ALL_TOOLS.length, 90);
   });
 
   it('every tool advertises a closed object schema (type:object, additionalProperties:false)', () => {

@@ -51,7 +51,11 @@ export function specialPurposeApproverRefusal(
  * ONE named set, here and nowhere else. `write_file` is the only member today; Q-244 widens this set to every user write door
  * (ingest, save_bulk, move_file, update_file_meta, the PATCH routes) and the callers need no change when it does.
  */
-const PEER_REFUSED_TOOLS: ReadonlySet<string> = new Set(['write_file']);
+const PEER_REFUSED_TOOLS: ReadonlyMap<string, string> = new Map([
+  ['write_file', 'stores a file as this instance\'s own upload, and this token is bound to a peer (a sync credential), which delivers files through the sync door only'],
+  // bundle-255: the client file change feed lists deleted paths for the feed window; a peer reads deletions as file tombstones on its own protocol.
+  ['file_changes', 'is the client file change feed, and this token is bound to a peer (a sync credential), which reads deletions as file tombstones through the sync door'],
+]);
 
 /**
  * The refusal a peer-bound token earns when it calls a tool: `undefined` when it may, the words to say when it may not.
@@ -67,6 +71,7 @@ const PEER_REFUSED_TOOLS: ReadonlySet<string> = new Set(['write_file']);
  * @param peerId  The peer the calling token is bound to, as {@link peerBoundTo} read it; `undefined` for any other token.
  */
 export function peerTokenToolRefusal(peerId: string | undefined, toolName: string): string | undefined {
-  if (peerId === undefined || !PEER_REFUSED_TOOLS.has(toolName)) return undefined;
-  return `Tool '${toolName}' stores a file as this instance's own upload, and this token is bound to a peer (a sync credential), which delivers files through the sync door only. Use an operator token.`;
+  const why = PEER_REFUSED_TOOLS.get(toolName);
+  if (peerId === undefined || why === undefined) return undefined;
+  return `Tool '${toolName}' ${why}. Use an operator token.`;
 }

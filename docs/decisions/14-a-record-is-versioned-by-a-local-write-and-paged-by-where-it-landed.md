@@ -16,6 +16,8 @@
 2. **Every record lands at a position of this instance's own stream.** `pos` (with `posAtSeq`, the version that position was taken for) is local: never sent, never shown, never hashed. A pull pages by `afterPos` and answers `through` (never inside a run of equal positions), `head` and `positions: 1`; a mark is a position. Every brain list defaults to landing order (`pos` then `_id`, newest first).
 3. **`writtenHere` and `issuedHere` are marks, not inferences.** A mesh push sends the records written here and the tombstones issued here, decided by one predicate and one module, never by the author text a peer sent.
 
+*Amended (bundle-255, Q-725):* bytes that arrive for a file are an arrival like any other: they take a local position (`arrivalRow`) and never a version, so a reader paging by position (a client's file change feed, a relaying peer) hears of them while the publisher's next edit still wins; identical bytes again write nothing. A file's retirement (a delete's flag or feed marker) takes a local position the same way.
+
 ## Consequences
 
 - A relay forwards what it pulled, a tombstone-only cycle moves the marks, and a planted high `seq` cannot lift later writes of other records.

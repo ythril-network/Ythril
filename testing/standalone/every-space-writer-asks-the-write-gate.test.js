@@ -55,6 +55,7 @@ const EXEMPT = new Map([
   ['server/src/files/plaintext-file.ts', 'a primitive beneath the file door'],
   ['server/src/sync/fill-file-meta.ts', 'fills existing file rows from local stray state and creates nothing (P-41)'],
   ['server/src/brain/ttl-sweep.ts', 'the TTL sweep\'s deletes remove records and create or refill none'],
+  ['server/src/files/feed-marker.ts', 'the feed-window purge the TTL sweep runs (bundle-255): it removes expired feed markers and creates or refills none'],
   // Housekeeping that only prunes, or updates rows that already exist (design v5 §2.6b, ruling R-P8): a row an act is removing
   // matches nothing once it is gone, so none of these can refill a space an act empties.
   ['server/src/brain/candidate-prune.ts', 'prunes review findings: deletes only'],

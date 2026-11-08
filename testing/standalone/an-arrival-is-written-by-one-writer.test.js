@@ -124,9 +124,10 @@ const EXEMPT = {
     + 'stamps neither `updatedAt` nor `seq` by construction (`a-file-row-processing-write-goes-through-one-function`). Not an arrival write at any door',
   'server/src/files/file-meta.ts:deleteFileMeta':
     'file sync: a file tombstone removes the file and its metadata',
-  'server/src/files/file-meta.ts:markFileMetaDeleted':
-    'file sync: a peer\'s file tombstone, on an instance that keeps deleted rows for audit (`softDeleteFileMeta`), flags the row '
-    + 'deleted instead of removing it (`removeFileHere`, the steps of a local delete) — a delete, not an arrival',
+  // bundle-255: `markFileMetaDeleted` and `deleteFileMeta` retire a row through `retireLivePage`, its one bulk write of flags or feed markers.
+  'server/src/files/file-meta.ts:retireLivePage':
+    'file sync: a peer\'s file tombstone retires the row here as a local delete does (`removeFileHere`): flagged for audit with '
+    + '`softDeleteFileMeta` on, replaced by its feed marker with it off, each taking a local position — a delete, not an arrival',
   'server/src/files/converters/pipeline.ts:removeSidecarRows':
     'file sync: a peer\'s file tombstone removes the chunk and sidecar rows DERIVED from the file here, at every level (`removeFileHere`, '
     + 'through `deleteConversionArtifacts`, the step a directory\'s delete shares), as a local delete does — rows no peer sends '

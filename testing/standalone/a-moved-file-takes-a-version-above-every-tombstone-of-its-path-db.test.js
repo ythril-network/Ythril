@@ -25,6 +25,7 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { goneOrMarker } from './_feed-marker-row.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
@@ -90,7 +91,9 @@ describe('a moved or re-uploaded file takes a version above the deletions held f
     await acts.seed('x.md', localFields(5));
     await acts.seed('dst.md', localFields(8));
     await deleteCascade.deleteFileCascade(SPACE, 'dst.md');
-    assert.equal(await row('dst.md'), null, 'fixture: the file at dst.md was not deleted');
+    // Since bundle-255 the delete leaves its FEED MARKER at the path (soft delete off): deleted means nothing but that marker stands there.
+    const leftAtDst = await row('dst.md');
+    assert.ok(goneOrMarker(leftAtDst),'fixture: the file at dst.md was not deleted');
     const tomb = await highestTombstonedAt('dst.md');
     assert.ok(tomb >= 8, `fixture: the tombstone at dst.md names version ${tomb}, not the 8 of the erased row`);
 
@@ -105,7 +108,9 @@ describe('a moved or re-uploaded file takes a version above the deletions held f
   it('a file uploaded again at a path holding the tombstone of a peer-authored file deleted here lands above that tombstone', async () => {
     await acts.seed('re.md', localFields(1000, { author: PEER, deliveredBy: PEER.instanceId }));
     await deleteCascade.deleteFileCascade(SPACE, 're.md');
-    assert.equal(await row('re.md'), null, 'fixture: the peer-authored file was not deleted');
+    // Since bundle-255 the delete leaves its FEED MARKER at the path (soft delete off): deleted means nothing but that marker stands there.
+    const leftAtRe = await row('re.md');
+    assert.ok(goneOrMarker(leftAtRe),'fixture: the peer-authored file was not deleted');
     const tomb = await highestTombstonedAt('re.md');
     assert.ok(tomb >= 1000, `fixture: the tombstone at re.md names version ${tomb}, not the 1000 of the erased row`);
 

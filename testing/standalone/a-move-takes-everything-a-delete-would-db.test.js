@@ -58,6 +58,7 @@ import { openFileActDoors } from './_file-act-doors.mjs';
 import { fileWithEverything, sentinelSha, BYTE_KINDS } from './_file-with-everything.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { NOT_A_FEED_MARKER, isFeedMarkerRow } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -67,7 +68,9 @@ const STORED_UPDATED_AT = '2026-03-05T10:00:00.000Z';
 let acts, door, loader;
 const { derived, fileRow, seedFileWithEverything, seedNeighbour } = fileWithEverything(S, () => acts);
 
-const rowOf = (id) => door.coll(S, 'files').findOne({ _id: id });
+// A row that still stands at `id`. Since bundle-255 a deleted or moved-away file leaves a FEED MARKER at its path (soft delete is off here): the
+// file is gone from there, and the marker is not a row of the set. Only a marker is left out; a flagged or live row still counts.
+const rowOf = (id) => door.coll(S, 'files').findOne({ _id: id, ...NOT_A_FEED_MARKER });
 /** The id `id` has once `src` is at `dst`: the first occurrence of the old path, under the path itself or a sidecar root. Spelled here, not read from `movedId`. */
 const movedTo = (id, src, dst) => id.replace(src, dst);
 
@@ -308,7 +311,10 @@ describe('a move takes everything a delete would, and does it in a bounded numbe
       let calls = 0;
       let fired = 0;
       proto.insertMany = async function hooked(...args) {
-        if (this.collectionName === `${S}_files` && ++calls === n) {
+        // Counts the inserts that CARRY rows: since bundle-255 a batch also inserts the feed markers its file rows leave at their old ids, a second
+        // insertMany of the same batch that is not "the next batch".
+        const carries = Array.isArray(args[0]) && !args[0].every(isFeedMarkerRow);
+        if (this.collectionName === `${S}_files` && carries && ++calls === n) {
           fired++;
           if (act instanceof Error) throw act;
           await act();

@@ -27,6 +27,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
+import { carriesFeedMarker } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'delcmds';
@@ -38,7 +39,9 @@ let acts, loader;
 const chunkRows = (parent, n) => Array.from({ length: n }, (_, i) => ({ _id: `${parent}#chunk${i}`, spaceId: S, path: `${parent}#chunk${i}`, parentFileId: parent,
   sizeBytes: 1, tags: [], createdAt: T0, updatedAt: T0 }));
 const sidecarRow = (id, parent) => ({ _id: id, spaceId: S, path: id, parentFileId: parent, sizeBytes: 1, tags: [], createdAt: T0, updatedAt: T0 });
-const rows = () => acts.door.coll(S, 'files').find({}, { projection: { _id: 1, deletedAt: 1 } }).toArray();
+const rows = () => acts.door.coll(S, 'files').find({}, { projection: { _id: 1, deletedAt: 1, feedMarker: 1 } }).toArray();
+/** bundle-255: with soft delete off a deleted file leaves its feed marker (path, time, position); every other row must go. */
+const notMarkers = (left) => left.filter(r => !carriesFeedMarker(r));
 
 /** A document with `n` chunks and a converted sidecar with `m`: the rows a conversion leaves. */
 async function seedConverted(n, m) {
@@ -69,7 +72,10 @@ describe('a file delete costs commands per level, not per chunk', { skip }, () =
         const del = await acts.del('REST', 'doc.txt');
         assert.ok(!acts.failed(del), `the delete was refused: ${JSON.stringify(del.body ?? del.text)}`);
       });
-      assert.deepEqual((await rows()).map(r => r._id), [], `rows of the ${n}-chunk document survived its delete`);
+      // bundle-255: only the document's own feed marker stays; its chunks and its sidecar's rows go.
+      const left = await rows();
+      assert.deepEqual(notMarkers(left).map(r => r._id), [], `rows of the ${n}-chunk document survived its delete`);
+      assert.deepEqual(left.map(r => r._id), ['doc.txt'], 'the deleted document left no feed marker, or a chunk left one');
       counts[n] = filesCommands(commands, 'delete');
     }
     assert.equal(counts[1_200], counts[10],
@@ -92,7 +98,8 @@ describe('a file delete costs commands per level, not per chunk', { skip }, () =
         const left = await rows();
         const arrived = left.filter(r => r._id.startsWith('_extracted/'));
         if (soft) assert.ok(arrived.every(r => typeof r.deletedAt === 'string') && arrived.length === n, `soft: ${n} arrived rows should all be flagged, found ${JSON.stringify(arrived)}`);
-        else assert.deepEqual(arrived, [], `hard: the ${n} arrived sidecar rows survived`);
+        // bundle-255: an arrived sidecar row is a top-level file row, so its retirement leaves its feed marker like any file's.
+        else assert.ok(notMarkers(arrived).length === 0 && arrived.length === n, `hard: the ${n} arrived sidecar rows survived, or left no marker: ${JSON.stringify(arrived)}`);
         counts[n] = filesCommands(commands, 'update') + filesCommands(commands, 'delete');
       }
       assert.equal(counts[50], counts[5], `retiring 50 arrived sidecar rows cost ${counts[50]} writes, 5 cost ${counts[5]}: one write per row`);

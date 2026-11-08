@@ -39,6 +39,7 @@
  */
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { A_FEED_MARKER } from './_feed-marker-row.mjs';
 import { createRequire } from 'node:module';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
@@ -62,6 +63,8 @@ const claimState = (job) => job && ({
 
 async function seedPicture(p) {
   await acts.files.writeFile(S, p, png);
+  // Since bundle-255 a delete (soft delete off) leaves a FEED MARKER at the path, which an upload replaces: the seed takes its place the same way.
+  await files().deleteOne({ _id: p, ...A_FEED_MARKER });
   await files().insertOne({ _id: p, spaceId: S, path: p, sizeBytes: png.length, tags: [], createdAt: T0, updatedAt: T0, seq: 1 });
 }
 

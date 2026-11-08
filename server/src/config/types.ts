@@ -962,6 +962,13 @@ export interface Config extends BodyLimitsConfig {
    * hard-removed regardless of this setting.
    */
   softDeleteFileMeta?: boolean;
+  /**
+   * The client file change feed's window, in days (bundle-255): how long the FEED MARKER a deleted file leaves where `softDeleteFileMeta` is off
+   * (`{ path, deletedAt }` and its position, nothing else: `files/feed-marker.ts`) is kept before the TTL sweep purges it. A feed cursor older
+   * than a purged marker is refused `410 cursor_expired` and the client re-lists. A whole number of 0 or more; default 30. 0 purges every
+   * marker at the next sweep.
+   */
+  fileChangeFeedWindowDays?: number;
   // `maxUploadBodyBytes`, `maxChunkedUploadBytes` and the import's two limits: `BodyLimitsConfig` (`body-limits.ts`).
   /** Max input size (bytes) accepted by the document conversion pipeline
    *  (pdf/docx/epub/html/md/txt → markdown chunks). Default 100 MiB; HTML is
@@ -1771,6 +1778,9 @@ export interface FileMetaDoc {
    *  never offered to a peer, never hashed, absent from the file listing
    *  (`LIVE_FILE_ROW`, `files/live-file-row.ts`). Absent for live files. */
   deletedAt?: string;
+  /** True on a FEED MARKER (`files/feed-marker.ts`): the row a deleted file leaves where soft delete is off, holding only its path, `deletedAt` and
+   *  position, kept for the change feed's window. Local, never on a wire, never exported. Absent on every other row. */
+  feedMarker?: true;
   embedding?: number[];
   embeddingModel?: string;
   // ── Conversion pipeline fields ────────────────────────────────────────────

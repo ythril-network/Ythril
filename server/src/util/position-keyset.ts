@@ -40,6 +40,7 @@ import { tieThenRange } from './seq-keyset.js';
 import { MAX_CURSOR_ID_LENGTH } from './seq-keyset.js';
 import { recordPositions } from '../sync/record-position-stream.js';
 import { assertPositionsReady } from '../sync/positions-ready.js';
+import { isPositionNumber } from './position-number.js';
 
 /**
  * Where a position read starts: strictly after `pos`, and — with an `id` — after that record within the run at `pos`. `idDigest` names an id too long for a
@@ -57,15 +58,8 @@ export const POSITION_CURSOR_PREFIX = 'p1.';
 
 const CURSOR_TEXT = /^[A-Za-z0-9_-]+={0,2}$/;
 
-/**
- * Is `value` a position a request may name: a safe integer of 0 or more, up to `Number.MAX_SAFE_INTEGER`?
- *
- * Its own bound, deliberately not `isPositionSeq`'s (`MAX_SYNC_SEQ`): a clock-band position is above it and would be refused. What bounds the
- * damage of a huge one is not this parse but the cap every read applies and `ownPositionMark`'s cut of every mark recorded from it.
- */
-export function isPositionNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-}
+// `isPositionNumber` lives in a leaf module (`util/position-number.ts`) so the change feed's floor can ask it without a cycle; re-exported here.
+export { isPositionNumber };
 
 /** A position written as a whole decimal number, within {@link isPositionNumber}; `undefined` otherwise. */
 export function parsePositionText(text: string): number | undefined {
@@ -183,9 +177,9 @@ export interface PositionRead<T> {
  */
 export async function readAfterPosition<T extends Document>(
   spaceId: string, part: SpacePart, after: PositionStart,
-  opts: { limit: number; extra?: Readonly<Record<string, unknown>> | undefined; projection?: Document | undefined },
+  opts: { limit: number; extra?: Readonly<Record<string, unknown>> | undefined; projection?: Document | undefined; maxTimeMS?: number | undefined },
 ): Promise<PositionRead<T>> {
-  const { limit, extra } = opts;
+  const { limit, extra, maxTimeMS } = opts;
   const collName = spaceCollection(spaceId, part);
   await assertPositionsReady(spaceId);
   if (after.idDigest !== undefined) after = await resolveDigestStart(collName, after);
@@ -195,7 +189,7 @@ export async function readAfterPosition<T extends Document>(
   const projection = withPosition(opts.projection);
   const find = async (filter: Record<string, unknown>, n: number): Promise<Array<Record<string, unknown>>> =>
     await col<Record<string, unknown>>(collName)
-      .find(asFilter<Record<string, unknown>>(filter as Filter<Record<string, unknown>>), projection ? { projection } : {})
+      .find(asFilter<Record<string, unknown>>(filter as Filter<Record<string, unknown>>), { ...(projection ? { projection } : {}), ...(maxTimeMS !== undefined ? { maxTimeMS } : {}) })
       .sort({ ...POSITION_KEYSET_SORT }).limit(n).toArray();
   const rows = await tieThenRange(find, tie, range, limit);
   return {

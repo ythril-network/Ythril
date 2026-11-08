@@ -102,6 +102,8 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'DELETE', pattern: /^\/api\/files\/([^/]+)$/,                          operation: 'file.delete',    spaceGroup: 1 },
   { method: 'PATCH',  pattern: /^\/api\/files\/([^/]+)$/,                          operation: 'file.update',    spaceGroup: 1 },
   { method: 'GET',    pattern: /^\/api\/files\/([^/]+)$/,                          operation: 'file.read',      spaceGroup: 1, read: true },
+  // The client file change feed (bundle-255); `file_changes` is its MCP twin and records the same operation.
+  { method: 'GET',    pattern: /^\/api\/files\/([^/]+)\/changes$/,                 operation: 'file.changes',   spaceGroup: 1, read: true },
   { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/files/,       operation: 'file.list',      spaceGroup: 1, read: true },
   // File METADATA mutations live on the brain router and had no rules at all.
   // `file.meta.delete` had a rule here and its route is gone (5.0): the metadata-only delete was a second

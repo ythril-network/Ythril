@@ -429,6 +429,8 @@ const SPILL_ANY_SPELLING = (() => {
  * test over each row kind.
  */
 export const backupRow: { readonly filter: Readonly<Record<string, unknown>>; readonly predicate: (doc: Readonly<Record<string, unknown>>) => boolean } = {
-  filter: { parentFileId: { $not: { $type: 'string' } }, _id: { $not: SPILL_ANY_SPELLING } },
-  predicate: (doc) => !isDerivedFileRow(doc) && !(typeof doc['_id'] === 'string' && spillIdFromPath(doc['_id']) !== null),
+  // A FEED MARKER (`files/feed-marker.ts`, bundle-255) is left out too: it is this instance's record that a path was deleted, kept for the change feed's
+  // window, and a restore starts the feed's history again (its floor goes to the head), so a marker in a backup would announce nothing to anyone.
+  filter: { parentFileId: { $not: { $type: 'string' } }, _id: { $not: SPILL_ANY_SPELLING }, feedMarker: { $exists: false } },
+  predicate: (doc) => !isDerivedFileRow(doc) && !(typeof doc['_id'] === 'string' && spillIdFromPath(doc['_id']) !== null) && doc['feedMarker'] !== true,
 };

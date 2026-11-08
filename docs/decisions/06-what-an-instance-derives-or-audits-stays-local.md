@@ -26,6 +26,9 @@ queued no processing, a pulled document was never converted at all.
 - **`deletedAt` is local state.** It stamps no seq and no `updatedAt`, a flagged row is never offered on any wire and is
   never hashed (one live-row filter answers it everywhere), and the deletion reaches peers only as the file tombstone, which each applies by its own
   `softDeleteFileMeta`. A restore keeps the flag its backup row carried.
+  *Amended (bundle-255):* the flag takes a local POSITION in the same write (never a version), so the client file change feed
+  lists the deletion; and with `softDeleteFileMeta` off a deleted file leaves a **feed marker** (path, `deletedAt`, position,
+  nothing else), local in every way a flagged row is, never exported, purged after `fileChangeFeedWindowDays`.
 - **A sidecar is instance-local**, in the one predicate that already kept conflict copies and schema snapshots at home
   (`isInstanceLocalFile`): never in the manifest, never pushed or pulled, never hashed, and a peer's offer of one — bytes,
   metadata row or tombstone — is ignored, the byte door answering `200 { "ignored": "instance-local" }` so an older

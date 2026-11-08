@@ -68,6 +68,7 @@ import { log, peerText } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
 import { isTimeBoundEnded } from '../util/time-bound.js';
 import { readDiskAgainstRows, FILE_MISMATCH_CLASSES, type FileMismatchClass } from '../files/disk-against-rows.js';
+import { raiseFileFeedFloorToHead } from '../files/file-feed-floor.js';
 
 const KIND = 'restore' satisfies SpaceActKind;
 const COUNTERS = 'ythril_counters';
@@ -339,6 +340,9 @@ async function restoreSpace(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutco
   // to every sync door meanwhile.
   await owePositions(spaceId, 'carry');
   await finishPositionsOf(spaceId);
+  // The files are now the backup's: files written since are gone unreported and files deleted since are back below a client's cursor. The change feed's
+  // floor (outside every restored collection, so a purge's floor is kept) goes to the head: every cursor from before the restore re-lists.
+  await raiseFileFeedFloorToHead(spaceId);
 
   // Every declared unique index stands before the hold lifts (`Q-439`, `Q-445`): built on the empty collections above, asserted
   // here. One that does not is a plain error naming it - not an input failure: the act stays owed, the space held, and it is

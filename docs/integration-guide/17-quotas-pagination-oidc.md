@@ -69,6 +69,14 @@ merge ceiling of a read through a personal view — all three of which say so in
 so `offset`, `page`, `per_page`, `pageSize`, `sortBy`, `orderBy`, `order` and `direction` are a `400`
 naming the parameter to use instead of being accepted and ignored.
 
+### Cursor Pagination (File Change Feed)
+
+`GET /api/files/:spaceId/changes` (MCP `file_changes`) pages a space's file changes by the same kind of opaque cursor, with
+two differences a client relies on: **every page carries a `nextCursor`, the last one included** (keep it and resume from it),
+and a cursor older than the history the space keeps is refused `410` with `code: "cursor_expired"` — start again with no
+cursor. A cursor is bound to the space it was read from (another space's answers `400 invalid_cursor`) and survives a rename
+of that space. See [Files → File Change Feed](05-files-api.md#file-change-feed).
+
 ### Cursor Pagination (Sync API)
 
 Sync endpoints return a `nextCursor` for efficient sequential reads:

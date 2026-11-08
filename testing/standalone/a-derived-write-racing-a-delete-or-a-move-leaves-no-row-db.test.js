@@ -102,10 +102,11 @@ describe('a derived write racing a delete, a move or a wipe leaves no row (real 
       loader.getConfig().softDeleteFileMeta = soft;
       const p = `between-${how}.png`;
       const n = await runInCaptionCall(p);
-      // The delete's last step is the parent's flag (soft) or removal (hard). Parked BEFORE it runs, the children have gone.
-      const flag = soft
-        ? parkDriverCall(acts.door.mongo, S, 'files', 'updateMany', (f, u) => f?._id?.$in?.includes(p) && Array.isArray(u), { before: true })
-        : parkDriverCall(acts.door.mongo, S, 'files', 'deleteMany', (f) => f?._id?.$in?.includes(p), { before: true });
+      // The delete's last step is the parent's retirement: its flag (soft) or its feed marker (hard). Parked BEFORE it runs, the children have gone.
+      // Since bundle-255 both are ONE bulk write of per-row patches, each taking a position (`retireLivePage`, files/file-meta.ts), no longer an
+      // `updateMany` (soft) or a `deleteMany` (hard): a park keyed on those was never reached and the case waited for ever.
+      const flag = parkDriverCall(acts.door.mongo, S, 'files', 'bulkWrite',
+        (ops) => Array.isArray(ops) && ops.some(o => o?.updateOne?.filter?._id === p), { before: true });
       try {
         const del = acts.del('REST', p);
         await flag.reached;
@@ -184,7 +185,10 @@ describe('a derived write racing a delete, a move or a wipe leaves no row (real 
       assert.equal(acts.statusOf(await mv), 200, 'the move did not answer 200');
     } finally { write.restore(); }
     assert.deepEqual(await derivedOf(p), [], `a derived row stands under ${p}, the path the file left`);
-    assert.equal(await parentOf(p), null, 'the file is still at its old id');
+    // Since bundle-255 a move's source leaves a positioned deletion marker at the old id (the change feed reads the file's leaving by it): the file is
+    // gone from there when nothing LIVE stands at it.
+    const left = await parentOf(p);
+    assert.ok(left === null || typeof left.deletedAt === 'string', `the file is still at its old id: ${JSON.stringify(left)}`);
     assert.ok(await parentOf(to), 'the file is not at its new id');
     assert.ok(blocked, 'the move did not wait for the run that held its job');
   });

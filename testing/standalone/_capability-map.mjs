@@ -92,6 +92,8 @@ export const CAPABILITIES = [
   ['Files', 'retry_embed_file', 'POST /api/files/:spaceId/retry_embedding'],
   ['Files', 'read_file', 'GET /api/brain/spaces/:spaceId/files/extract'],
   ['Files', 'update_file_meta', 'PATCH /api/brain/spaces/:spaceId/files'],
+  // The client file change feed (bundle-255): one read, `files/file-changes.ts`, behind both doors.
+  ['Files', 'file_changes', 'GET /api/files/:spaceId/changes'],
 
   ['Spaces', 'list_spaces', 'GET /api/spaces'],
   ['Spaces', 'save_space', 'POST /api/spaces'],

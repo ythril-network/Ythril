@@ -87,7 +87,10 @@ before(async () => {
   // And the reasons a `degraded` list can carry (`index_not_ready`, ...): the recall and similar texts list them, from the constant.
   const { DEGRADED_REASONS } = await import('../../server/dist/brain/degraded-reasons.js');
   assert.ok(DEGRADED_REASONS.length >= 2, 'the degraded reasons were not read');
-  ANSWER_VALUES = [...DEGRADED_REASONS,...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
+  // And the `code` a refused read of the file change feed carries (`cursor_expired`, `invalid_cursor`: `file_changes` names them, bundle-255).
+  const { FILE_CHANGES_REFUSAL_CODES } = await import('../../server/dist/mcp/tools/file-changes.js');
+  assert.ok(FILE_CHANGES_REFUSAL_CODES?.length >= 2, 'the file change feed refusal codes were not read');
+  ANSWER_VALUES = [...DEGRADED_REASONS, ...FILE_CHANGES_REFUSAL_CODES,...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
     ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, SPACE_STILL_BEING_REMOVED, ...SYNC_ANSWER_CODES];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });

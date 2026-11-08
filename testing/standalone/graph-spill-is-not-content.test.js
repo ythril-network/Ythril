@@ -99,7 +99,8 @@ describe('the spill tree is hidden from browsing', () => {
     const trees = read('server/src/files/derived-trees.ts');
     assert.match(trees, /export const DERIVED_TREES = new Set\(\['_converted', '_extracted', SPILL_DIR\]\)/,
       'a second literal would drift from the one the writer uses');
-    assert.match(trees, /import \{ SPILL_DIR \} from '\.\.\/brain\/spill-path\.js'/);
+    // bundle-255: the module also imports `spillIdFromPath` (the hidden-path predicate the change feed shares); the rule is that SPILL_DIR comes from there.
+    assert.match(trees, /import \{ [^}]*\bSPILL_DIR\b[^}]* \} from '\.\.\/brain\/spill-path\.js'/);
     // And the route still applies it, or the set would be a fact nothing acts on.
     assert.match(read('server/src/api/files.ts'), /hideDerivedTrees\(/);
   });

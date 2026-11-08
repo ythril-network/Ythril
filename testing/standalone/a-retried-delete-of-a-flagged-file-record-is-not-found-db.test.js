@@ -29,6 +29,7 @@
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { isFeedMarkerRow } from './_feed-marker-row.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
@@ -137,9 +138,12 @@ describe('a delete of a file record already gone answers 404 on every door', { s
         await seed('b.txt');
         const first = await del(doorName, 'b.txt');
         assert.ok(succeeded(first), `${first.status} ${JSON.stringify(first.detail)}`);
-        assert.equal(await record('b.txt'), null, 'the first delete left the record');
+        // bundle-255: soft delete off leaves the file's feed marker (path, time, position) where the record was, nothing of the record.
+        const marker = await record('b.txt');
+        assert.ok(isFeedMarkerRow(marker),`the first delete left the record: ${JSON.stringify(marker)}`);
         const second = await del(doorName, 'b.txt');
         assert.equal(second.status, 404, `${second.status} ${JSON.stringify(second.detail)}`);
+        assert.deepEqual(await record('b.txt'), marker, 'the second delete touched the marker (a second deletion takes no new position)');
         assert.equal((await tombstones()).length, 1, 'the second delete wrote another tombstone');
       });
 
@@ -172,7 +176,8 @@ describe('a delete of a file record already gone answers 404 on every door', { s
           assert.ok(succeeded(retry), `the retry of an interrupted delete must complete it: ${retry.status} ${JSON.stringify(retry.detail)}`);
           const left = await record('c.txt');
           if (soft) assert.ok(left?.deletedAt, 'the completed delete did not flag the record');
-          else assert.equal(left, null, 'the completed delete left the record');
+          // bundle-255: soft delete off leaves the file's feed marker, never the record.
+          else assert.ok(isFeedMarkerRow(left),`the completed delete left the record: ${JSON.stringify(left)}`);
           assert.deepEqual((await tombstones()).map(t => t.path), ['c.txt'], 'the completed delete must tombstone the path');
           assert.equal(deletedEvents(), 1);
         });

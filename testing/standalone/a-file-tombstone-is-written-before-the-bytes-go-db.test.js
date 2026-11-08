@@ -30,6 +30,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { adminRights } from './_cel-doors.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { failWrites } from './_write-faults.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -45,6 +46,8 @@ const tombstoneStoreDown = () => faults.fail('insertMany', `${S}_file_tombstones
 
 const onDisk = (p) => fs.existsSync(path.join(process.env['DATA_ROOT'], 'files', S, p));
 const meta = (p) => door.mongo.col(`${S}_files`).findOne({ _id: p });
+/** bundle-255: a completed delete (soft delete off) leaves the file's feed marker at the path; the metadata is gone when only that is left. */
+const metaBeyondMarker = (p) => door.mongo.col(`${S}_files`).findOne({ _id: p, ...NOT_A_FEED_MARKER });
 const tombstoned = async () => (await door.mongo.col(`${S}_file_tombstones`).find({}).toArray()).map(t => t.path).sort();
 
 /** A stored file: its bytes on disk and its metadata row. */
@@ -97,7 +100,7 @@ describe('a file tombstone is written before the bytes go', { skip }, () => {
     faults.clear();
     await cascade.deleteFileCascade(S, 'a.txt');
     assert.equal(onDisk('a.txt'), false, 'the retried delete did not remove the bytes');
-    assert.equal(await meta('a.txt'), null, 'the retried delete did not remove the metadata');
+    assert.equal(await metaBeyondMarker('a.txt'), null, 'the retried delete did not remove the metadata');
     assert.deepEqual(await tombstoned(), ['a.txt'], 'the retried delete wrote no tombstone');
   });
 
@@ -137,7 +140,7 @@ describe('a file tombstone is written before the bytes go', { skip }, () => {
     faults.clear();
     await ttl.sweepExpired(new Date());
     assert.equal(onDisk('old.txt'), false, 'the next sweep did not remove the bytes');
-    assert.equal(await meta('old.txt'), null, 'the next sweep did not remove the expired metadata');
+    assert.equal(await metaBeyondMarker('old.txt'), null, 'the next sweep did not remove the expired metadata');
     assert.deepEqual(await tombstoned(), ['old.txt'], 'the next sweep wrote no tombstone');
   });
 
@@ -146,13 +149,13 @@ describe('a file tombstone is written before the bytes go', { skip }, () => {
     fs.rmSync(path.join(process.env['DATA_ROOT'], 'files', S, 'orphan.txt'));
     const r = await restDelete('orphan.txt');
     assert.equal(r.code, 204, `the orphan delete: ${r.code} ${JSON.stringify(r.body)}`);
-    assert.equal(await meta('orphan.txt'), null, 'the orphan delete left the metadata');
+    assert.equal(await metaBeyondMarker('orphan.txt'), null, 'the orphan delete left the metadata');
     assert.deepEqual(await tombstoned(), ['orphan.txt'], 'the orphan delete wrote no tombstone, so a peer re-pushes the file');
 
     await seed('gone.txt', { _expireAt: new Date('2026-01-01T00:00:00Z') });
     fs.rmSync(path.join(process.env['DATA_ROOT'], 'files', S, 'gone.txt'));
     await ttl.sweepExpired(new Date());
-    assert.equal(await meta('gone.txt'), null, 'the sweep left an expired record whose bytes were gone — it retries for ever');
+    assert.equal(await metaBeyondMarker('gone.txt'), null, 'the sweep left an expired record whose bytes were gone — it retries for ever');
     assert.deepEqual(await tombstoned(), ['gone.txt', 'orphan.txt'], 'the sweep wrote no tombstone for the expired orphan');
   });
 

@@ -57,6 +57,8 @@ import { stripFlaggedRowsOnce } from '../files/derived-fields.js';
 import { leakedRowsDeadline, publishLeakedRowScansOwed, repairLeakedRows } from '../files/leaked-rows-repair.js';
 import { retirePeerSidecars } from '../sync/peer-sidecar-retirement.js';
 import { logInternalAudit } from '../audit/audit.js';
+import { purgeFeedMarkers } from '../files/feed-marker.js';
+import { raiseFileFeedFloorOver } from '../files/file-feed-floor.js';
 import { TTL_EXPIRE_OPERATION } from '../audit/middleware.js';
 import { healStoredStamps } from './retention-stamp-heal.js';
 
@@ -73,6 +75,7 @@ type TtlCollection = (typeof TTL_COLLECTIONS)[number];
 
 const STEP = declareStep('TTL sweep');
 const SETTLE_STEP = declareStep('TTL sweep: settling file tombstones');
+const FEED_MARKER_STEP = declareStep('TTL sweep: purging feed markers past the feed window');
 const FINISH_MOVES_STEP = declareStep('TTL sweep: finishing interrupted file moves');
 const INDEX_STEP = declareStep('TTL sweep: indexes');
 const STRIP_STEP = declareStep('TTL sweep: stripping rows flagged before the strip');
@@ -140,6 +143,8 @@ async function flaggedPage(spaceId: string, _c: TtlCollection, now: Date, exclud
   const due = new Date(now.getTime() - days * 86_400_000).toISOString();
   const filter = {
     deletedAt: { $exists: true, $lte: due },
+    // A FEED MARKER is not an audit row: it is purged by the feed window (`purgeFeedMarkers`), whatever the Files window says (retention by kind).
+    feedMarker: { $exists: false },
     ...(exclude.length > 0 ? { _id: { $nin: exclude } } : {}),
   };
   const docs = await col(spaceCollection(spaceId, 'files')).find(asFilter(filter), { projection: { _id: 1 }, limit })
@@ -156,6 +161,11 @@ async function flaggedPage(spaceId: string, _c: TtlCollection, now: Date, exclud
  * which `sweepCollection` reads with the `exists` check below.
  */
 async function purgeFlagged(spaceId: string, _c: TtlCollection, id: string): Promise<boolean> {
+  // The change feed's floor is raised over the row's position BEFORE it goes (`files/file-feed-floor.ts`): a cursor from before this deletion is then
+  // refused (`cursor_expired`), never paged past it.
+  const row = await col<{ _id: string; pos?: number }>(spaceCollection(spaceId, 'files'))
+    .findOne(asFilter<{ _id: string }>({ _id: id, deletedAt: { $exists: true } }), { projection: { pos: 1 } });
+  if (row) await raiseFileFeedFloorOver(spaceId, [row]);
   const r = await col(spaceCollection(spaceId, 'files')).deleteOne(asFilter({ _id: id, deletedAt: { $exists: true } }));
   return r.deletedCount > 0;
 }
@@ -371,6 +381,10 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
   // was reported failed, or a restart came between. Settled from the disk (bundle-30 I15, `files/tombstones.ts`):
   // never served while pending, so nothing waits on this but the record of a removal that did happen.
   await eachSpace(SETTLE_STEP, configuredSpaces(), space => settleStalePendingFileTombstones(space.id, now));
+
+  // The feed markers older than the feed window (`files/feed-marker.ts`, bundle-255): their own retention, by kind, whatever the Files window is. Each
+  // batch raises the change feed's floor before it removes; a space that fails is passed over.
+  await eachSpace(FEED_MARKER_STEP, configuredSpaces(), async space => { await purgeFeedMarkers(space.id, now); });
 
   // Moves whose bytes moved and whose records did not, finished by the instance (`files/finish-owed-moves.ts`). After the settle,
   // never inside it: the settle clears the markers of moves that are over, so what is left to look at is what is owed — and a move's

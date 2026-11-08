@@ -57,6 +57,13 @@ const READER = 'server/src/db/read-by-id.ts';
  * function that defines them.
  */
 const ALLOWED = new Map([
+  // bundle-255: the retirement of file rows asks which of a page of ids is in a STATE, never for the stored copies.
+  ['server/src/files/file-meta.ts:retireLivePage',
+    'which of one page of ids (at most READ_CHUNK) is still a LIVE file row, projected to `_id` and `seq`: the rows the page retires and the version'
+    + ' each position is taken for. A flagged row, a marker or a chunk is not retired, so the filter is part of the question.'],
+  ['server/src/files/file-meta.ts:deleteFileMeta',
+    'after the live rows of a page became feed markers, which of the ids still holds anything else (a derived row, an older audit row), projected to'
+    + ' `_id` and `pos`: the change feed\'s floor is raised over those positions before they are removed. Not the stored copies.'],
   // Q-624 slice I3: the fork module's by-id reads, each a different question than "the stored copy of each id".
   ['server/src/brain/forks.ts:refuseForkRowsNamed',
     'an existence PROBE (`findOne`): is any of the ids a batch names a FORK row (`forkOf` exists), so the batch is refused whole. Not the copies.'],

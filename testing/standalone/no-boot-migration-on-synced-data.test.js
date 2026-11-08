@@ -230,9 +230,14 @@ const SANCTIONED = new Map([
    * entry is refused like any other.
    */
   ['server/src/bootstrap.ts:startConfiguredInstanceServices', {
-    writes: ['server/src/brain/write-plan/commit.ts:clearStaleWriteGuard'],
+    writes: ['server/src/brain/write-plan/commit.ts:clearStaleWriteGuard', 'server/src/files/unpositioned-file-rows.ts:positionUnpositionedFileRows'],
     why: 'The edges\' write-guard index build clears duplicate `_functionalGuard` markers before retrying (Q-439). The field is '
-      + 'local-only (`WRITE_GUARD_FIELDS`): it replicates nowhere, so a mixed-version peer can neither revert nor observe the clear.',
+      + 'local-only (`WRITE_GUARD_FIELDS`): it replicates nowhere, so a mixed-version peer can neither revert nor observe the clear. '
+      // bundle-255: the second argument, applied to the position fields. The pass sets ONLY `pos` and `posAtSeq` on live file rows that hold none
+      // (`POSITION_FIELDS`, sync/local-only-fields.ts): local-only exactly as `WRITE_GUARD_FIELDS` is (never hashed, never sent, never taken from an
+      // arrival), so no peer can carry or revert them. Its `seq`, `updatedAt` and every replicated field are untouched.
+      + 'The file-row position pass (bundle-255) writes only `pos` and `posAtSeq` (`POSITION_FIELDS`), local-only by the same rule: never hashed, '
+      + 'sent or taken from an arrival, so no peer can revert or observe it; no replicated field changes.',
   }],
 ]);
 

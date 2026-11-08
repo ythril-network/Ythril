@@ -44,12 +44,16 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { driverWriteFailures, failWrites } from './_write-faults.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { A_FEED_MARKER, NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'dirdeldoors';
 const DOORS = ['REST', 'TOOL', 'MCP'];
 let acts, ttl, F, faults;
 const files = () => acts.door.coll(S, 'files');
+/** bundle-255: a deleted file leaves its feed marker (soft delete off); a record the delete must remove is any row that is not one. */
+const MARKER = A_FEED_MARKER;
+const NOT_A_MARKER = NOT_A_FEED_MARKER;
 const abs = (p) => path.join(acts.root(), p);
 
 /** One delete through `via`; `confirm` is the same argument on every door, left out when `undefined`. */
@@ -135,7 +139,9 @@ describe('delete_file deletes a directory with confirm, as the same act on every
         const left = treeOf(acts.root());
         assert.deepEqual(left.filter(p => !p.endsWith('/')), [], 'a file of the tree or of its sidecars outlived the delete');
         assert.ok(!left.includes('d/') && !left.includes('_converted/d/'), `the directory or its converted tree is still there: ${left}`);
-        assert.deepEqual(await files().find({}).toArray(), [], 'a record of the tree, a derived row or a sidecar row outlived the delete');
+        // bundle-255: with soft delete off each deleted file leaves its feed marker (path, time, position) for the change feed; nothing else may stay.
+        assert.deepEqual(await files().find(NOT_A_MARKER).toArray(), [], 'a record of the tree, a derived row or a sidecar row outlived the delete');
+        assert.deepEqual((await files().find(MARKER).toArray()).map(r => r._id).sort(), ['d/a.txt', 'd/c.pdf', 'd/sub/b.txt'], 'a deleted file of the tree left no feed marker');
         assert.deepEqual(await acts.links.ids(), [], 'a link from a file of the tree (a row with no author is this instance\'s) outlived the delete');
         assert.deepEqual(await acts.published(), { served: EVERY_TOMBSTONE, pushed: EVERY_TOMBSTONE });
       });
@@ -172,7 +178,9 @@ describe('delete_file deletes a directory with confirm, as the same act on every
         assert.equal(await files().countDocuments({ _id: /^g\// }), 1, 'the unconfirmed delete touched the records');
         const done = await del(via, 'g', true);
         assert.ok(!acts.failed(done), JSON.stringify(done.body ?? done.sc ?? done.text));
-        assert.equal(await files().countDocuments({ _id: /^g\// }), 0);
+        // bundle-255: the completed delete leaves only the file's feed marker.
+        assert.equal(await files().countDocuments({ _id: /^g\//, ...NOT_A_MARKER }), 0);
+        assert.equal(await files().countDocuments({ _id: 'g/x.txt', ...MARKER }), 1, 'the deleted file left no feed marker');
         assert.deepEqual((await acts.published()).served, ['g/x.txt']);
       });
 
@@ -353,7 +361,8 @@ describe('delete_file deletes a directory with confirm, as the same act on every
           assert.ok(!acts.failed(retry), `the retry of a delete whose link step failed was refused (${acts.statusOf(retry)}): ${JSON.stringify(retry.body ?? retry.sc ?? retry.text)}`);
           assert.deepEqual(await acts.links.idsUnder('r/one.txt'), []);
           assert.deepEqual(await acts.links.tombstoned(), [...own].sort());
-          assert.equal(await files().findOne({ _id: 'r/one.txt' }), null, 'the row outlived the completed delete');
+          // bundle-255: the completed delete leaves the file's feed marker, never its live row.
+          assert.equal(await files().findOne({ _id: 'r/one.txt', ...NOT_A_MARKER }), null, 'the row outlived the completed delete');
           assert.deepEqual((await acts.published()).served, ['r/one.txt'], 'peers are not told of the file exactly once');
         });
 
@@ -373,7 +382,9 @@ describe('delete_file deletes a directory with confirm, as the same act on every
           assert.ok(!acts.failed(retry), `the retry was refused (${acts.statusOf(retry)}): ${JSON.stringify(retry.body ?? retry.sc ?? retry.text)}`);
           assert.deepEqual(await acts.links.idsUnder('r/dir'), []);
           assert.deepEqual(await acts.links.tombstoned(), [...own].sort());
-          assert.equal(await files().countDocuments({ _id: /^r\/dir\// }), 0);
+          // bundle-255: only the two files' feed markers stay.
+          assert.equal(await files().countDocuments({ _id: /^r\/dir\//, ...NOT_A_MARKER }), 0);
+          assert.equal(await files().countDocuments({ _id: /^r\/dir\//, ...MARKER }), 2, 'a deleted file left no feed marker');
         });
       }
     });

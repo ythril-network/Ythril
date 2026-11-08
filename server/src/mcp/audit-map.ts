@@ -148,6 +148,8 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   // decision; both are now.
   list_spaces: 'space.list',
   list_dir: 'file.list',
+  // The client file change feed (bundle-255): a read of what changed, under the operation its REST twin records.
+  file_changes: 'file.changes',
   read_file: 'file.read',
   /*
    * `brain.find_similar`, matching the REST route this tool mirrors.

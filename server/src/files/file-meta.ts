@@ -14,14 +14,17 @@
 
 import { toDocId } from '../util/paths.js';
 import { adoptLegacyRow, adoptLegacyRowsUnder, legacyIdsOf } from './legacy-file-keys.js';
-import { escapeRegex } from '../util/redos.js';
 import { authorRef } from '../config/author.js';
 import { col, asFilter, asDoc, asUpdate } from '../db/mongo.js';
 import { readRowsById, readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import { eachIdPage } from '../db/id-keyset-page.js';
 import { reconcileLinks, assertDesiredLinks } from '../brain/links.js';
 import { versionsFor, type VersionAllocation } from '../util/version-stamp.js';
-import { withLandingStamp, localRow, type LocalLanding } from '../sync/record-position-stream.js';
+import { withLandingStamp, localRow, arrivalRow, type LocalLanding } from '../sync/record-position-stream.js';
+import { writeInOneCommands } from '../db/one-command.js';
+import { underPrefix } from '../util/under-prefix.js';
+import { FEED_MARKER, feedMarkerStages, isFeedMarker } from './feed-marker.js';
+import { raiseFileFeedFloorOver } from './file-feed-floor.js';
 import { writeAtReadVersion } from '../brain/write-at-read-version.js';
 import { writeFilterFor } from '../brain/write-precondition.js';
 import { expiryForCreate } from '../brain/ttl.js';
@@ -123,9 +126,13 @@ export async function upsertFileMeta(
   const normalised = await fileRowIdFor(spaceId, filePath);
   const now = new Date().toISOString();
 
-  const existing = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
+  const stored = await col<FileMetaDoc>(spaceCollection(spaceId, 'files')).findOne(
     asFilter<FileMetaDoc>({ _id: normalised }),
   );
+  // A FEED MARKER at the path (what a deleted file left where soft delete is off, `files/feed-marker.ts`) is ABSENT to a write: the new file starts clean,
+  // carrying nothing of the marker or of the file that was deleted (vet-privacy). The create below replaces it.
+  const marker = isFeedMarker(stored);
+  const existing = marker ? null : stored;
 
   // The embedding is ENQUEUED after the write, for the same reason as `updateFileMeta` below.
   //
@@ -176,7 +183,7 @@ export async function upsertFileMeta(
     // disposable of the five, and they have no type, so the schema tier cannot reach them.
     const expireAt = expiryForCreate(spaceId, opts.ttlDays, { collection: 'file' });
     const [stamp] = await versionsFor(spaceId, [normalised], { parts: ['files'] }) as [VersionAllocation];
-    await admitSpaceWrite(spaceId, 'files', () => withLandingStamp(spaceId, [localRow(stamp.version)], ([landing]) => {
+    await admitSpaceWrite(spaceId, 'files', () => withLandingStamp(spaceId, [localRow(stamp.version)], async ([landing]): Promise<unknown> => {
       const doc: FileMetaDoc = {
         _id: normalised,
         spaceId,
@@ -192,7 +199,11 @@ export async function upsertFileMeta(
         ...landing!,
         ...(expireAt ? { _expireAt: expireAt } : {}),
       };
-      return col<FileMetaDoc>(spaceCollection(spaceId, 'files')).insertOne(asDoc<FileMetaDoc>(doc));
+      const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+      if (!marker) return files.insertOne(asDoc<FileMetaDoc>(doc));
+      // Only while it is still a marker: a row that became live meanwhile is not overwritten, and the insert then meets it as any concurrent create does.
+      const replaced = await files.replaceOne(asFilter<FileMetaDoc>({ _id: normalised, ...FEED_MARKER }), asDoc<FileMetaDoc>(doc));
+      return replaced.matchedCount > 0 ? replaced : files.insertOne(asDoc<FileMetaDoc>(doc));
     }, 'file.upsert'));
   }
 
@@ -229,44 +240,65 @@ export async function recordArrivedFile(
   // A record NEW here takes this instance's file retention window, as an upload does; one already stored keeps its
   // expiry, because arriving bytes are not an authored write and must not re-slide it.
   const expireAt = expiryForCreate(spaceId, undefined, { collection: 'file' });
+  /*
+   * Q-725: an arrival takes a POSITION and never a version (`arrivalRow`): the row's `seq` stays the publisher's, so it does not outrank the publisher's
+   * next edit, and its position moves, so a reader paging by position (a client's change feed, a peer) hears the file changed. The hold wraps the row
+   * write alone, never the byte copy (done before this is called). Bytes equal to what the live row already records are no change: nothing is written
+   * and no position taken, so a retried pull emits nothing.
+   */
   // An UPSERT: it creates the row when none is there, so it is ONE admitted and counted unit from its own check (`admitSpaceWrite`).
-  await admitSpaceWrite(spaceId, 'files', async () => {
+  const changed = await admitSpaceWrite(spaceId, 'files', async () => {
     const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-    /*
-     * A row already held takes the new bytes in a PIPELINE, so what OTHER bytes made this instance's copy match by (its excerpt, vector and
-     * `matchedText`) goes in the same write, asked by the database of the stored hash (`replacedBytesStages`, files/derived-fields.ts). The
-     * description is the publisher's and is not touched ('arrival'): its removal arrives as the publisher's own authored write. The
-     * upsert below is the new row's, and a pipeline cannot say `$setOnInsert`.
-     */
-    const held = await files.updateOne(
-      asFilter<FileMetaDoc>({ _id: normalised }),
-      [
-        ...replacedBytesStages(sha256, 'arrival'),
-        { $set: { sizeBytes: { $literal: sizeBytes }, sha256: { $literal: sha256 } } },
-        { $unset: ['deletedAt'] },
-      ] as never,
-    );
-    if (held.matchedCount > 0) return;
-    await files.updateOne(
-      asFilter<FileMetaDoc>({ _id: normalised }),
-      asUpdate<FileMetaDoc>({
-        $set: { sizeBytes, sha256 },
-        // Bytes on disk mean the file is live: a path soft-deleted here and re-created upstream comes back, as the
-        // upload writer has always made it (`Q-239`).
-        $unset: { deletedAt: '' },
-        $setOnInsert: {
-          spaceId, path: normalised, tags: [], author: from, createdAt: now, updatedAt: now, seq: 0,
-          // On INSERT only, by whom these bytes arrived (`deliveredBy`, bundle-51): a record new here is delivered by the peer
-          // whose bytes created it. A known row keeps its stamp — an upstream pushing bytes to a path this instance wrote, or
-          // that another peer delivered, gains nothing over it.
-          // Never an absent key (`stampOfArrival`): a row stamped with nothing is a row nobody can say who delivered.
-          deliveredBy: stampOfArrival({ restore: false, doc: {}, deliveredBy: from.instanceId }),
-          ...(expireAt ? { _expireAt: expireAt } : {}),
-        },
-      } as never),
-      { upsert: true },
-    );
+    const stored = await files.findOne(asFilter<FileMetaDoc>({ _id: normalised }),
+      { projection: { seq: 1, sha256: 1, sizeBytes: 1, deletedAt: 1, feedMarker: 1 } }) as Pick<FileMetaDoc, 'seq' | 'sha256' | 'sizeBytes' | 'deletedAt' | 'feedMarker'> | null;
+    if (stored && stored.deletedAt === undefined && stored.sha256 === sha256 && stored.sizeBytes === sizeBytes) return false;
+    if (stored && !isFeedMarker(stored)) {
+      /*
+       * A row already held takes the new bytes in a PIPELINE, so what OTHER bytes made this instance's copy match by (its excerpt, vector and
+       * `matchedText`) goes in the same write, asked by the database of the stored hash (`replacedBytesStages`, files/derived-fields.ts). The
+       * description is the publisher's and is not touched ('arrival'): its removal arrives as the publisher's own authored write. `posAtSeq` is
+       * the row's own `seq`, read inside the write, so an authored edit between the read and the write cannot leave the two apart.
+       */
+      const held = await withLandingStamp(spaceId, [arrivalRow(typeof stored.seq === 'number' ? stored.seq : 0)], ([landing]) => files.updateOne(
+        asFilter<FileMetaDoc>({ _id: normalised, feedMarker: { $exists: false } }),
+        [
+          ...replacedBytesStages(sha256, 'arrival'),
+          { $set: { sizeBytes: { $literal: sizeBytes }, sha256: { $literal: sha256 }, pos: { $literal: landing!.pos }, posAtSeq: { $ifNull: ['$seq', 0] } } },
+          { $unset: ['deletedAt'] },
+        ] as never,
+      ), 'file.arrival');
+      if (held.matchedCount > 0) return true;
+    }
+    // No row, or a FEED MARKER at the path (a file deleted here, its bytes arriving again): a new row, which starts clean - nothing of the marker.
+    await withLandingStamp(spaceId, [arrivalRow(0)], async ([landing]) => {
+      const created = {
+        spaceId, path: normalised, tags: [], author: from, createdAt: now, updatedAt: now, seq: 0,
+        // On INSERT only, by whom these bytes arrived (`deliveredBy`, bundle-51): a record new here is delivered by the peer
+        // whose bytes created it. A known row keeps its stamp — an upstream pushing bytes to a path this instance wrote, or
+        // that another peer delivered, gains nothing over it.
+        // Never an absent key (`stampOfArrival`): a row stamped with nothing is a row nobody can say who delivered.
+        deliveredBy: stampOfArrival({ restore: false, doc: {}, deliveredBy: from.instanceId }),
+        pos: landing!.pos, posAtSeq: landing!.posAtSeq,
+        ...(expireAt ? { _expireAt: expireAt } : {}),
+      };
+      const replaced = await files.replaceOne(asFilter<FileMetaDoc>({ _id: normalised, ...FEED_MARKER }),
+        asDoc<FileMetaDoc>({ _id: normalised, ...created, sizeBytes, sha256 } as FileMetaDoc));
+      if (replaced.matchedCount > 0) return;
+      await files.updateOne(
+        asFilter<FileMetaDoc>({ _id: normalised }),
+        asUpdate<FileMetaDoc>({
+          $set: { sizeBytes, sha256 },
+          // Bytes on disk mean the file is live: a path soft-deleted here and re-created upstream comes back, as the
+          // upload writer has always made it (`Q-239`).
+          $unset: { deletedAt: '' },
+          $setOnInsert: created,
+        } as never),
+        { upsert: true },
+      );
+    }, 'file.arrival');
+    return true;
   });
+  if (!changed) return;
   // A peer's bytes, not a local write: queued in the background lane, and by the RECEIVER's rules — the same step
   // every arriving file's metadata takes, so a file this instance suppresses is not queued and holds no vector
   // (bundle-30 I6, D3: this called `enqueueEmbedJob` directly, past the suppression check).
@@ -562,7 +594,35 @@ export async function updateFileMeta(
     .findOne(asFilter<FileMetaDoc>({ _id: normalised }), { projection: NEVER_RETURNED_PROJECTION }) as Promise<FileMetaDoc | null>;
 }
 
-/** Remove the metadata record when a file is deleted: one `deleteMany` per `READ_CHUNK` ids, so many rows are never one write each. */
+/**
+ * Retire the LIVE file rows among `ids` (one page, at most `READ_CHUNK`) as ONE position block and one bulk write of per-row patches: `'flag'` flags each
+ * and strips what its bytes made (soft delete on: the audit row), `'mark'` replaces each by its FEED MARKER (soft delete off, `files/feed-marker.ts`).
+ * Either way the retirement and its position are ONE write per row, so no crash can leave a row gone or flagged without the position a change feed
+ * reads it by (bundle-255). `posAtSeq` is the row's own `seq`, read inside the write. A row that is not live (already flagged, a marker, a chunk) is
+ * not touched: a second deletion takes no new position. Answers the ids it retired.
+ */
+async function retireLivePage(spaceId: string, ids: readonly string[], how: 'flag' | 'mark'): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
+  const rows = await coll.find(asFilter<FileMetaDoc>({ _id: { $in: [...ids] }, ...LIVE_FILE_ROW }), { projection: { _id: 1, seq: 1 } })
+    .toArray() as unknown as Array<{ _id: string; seq?: number }>;
+  if (rows.length === 0) return [];
+  const deletedAt = new Date().toISOString();
+  // The hold lasts one bulk write per page: the block is taken, the page's patches written, the hold released.
+  await withLandingStamp(spaceId, rows.map(r => arrivalRow(typeof r.seq === 'number' ? r.seq : 0)), (patches) => writeInOneCommands(rows.map((r, i) => ({
+    updateOne: {
+      filter: asFilter<FileMetaDoc>({ _id: r._id, ...LIVE_FILE_ROW }),
+      update: (how === 'flag' ? flagAndStrip(patches[i]!.pos, deletedAt) : feedMarkerStages(spaceId, patches[i]!.pos, deletedAt)) as never,
+    },
+  })), (slice, { ordered }) => coll.bulkWrite(slice, { ordered }), { ordered: false }), 'file.retire');
+  return rows.map(r => r._id);
+}
+
+/**
+ * Take a deleted file's metadata record out of view where soft delete is OFF: its live row becomes its FEED MARKER ({@link retireLivePage}), and what
+ * else is stored at the ids (a derived row keyed there, an audit row an earlier soft delete left) is removed, the change feed's floor raised over it
+ * FIRST (`files/file-feed-floor.ts`). One position block and one bulk write per `READ_CHUNK` ids, so many rows are never one write each.
+ */
 export async function deleteFileMeta(
   spaceId: string,
   filePaths: string | readonly string[],
@@ -571,7 +631,15 @@ export async function deleteFileMeta(
   if (ids.length === 0) return;
   await admitSpaceWrite(spaceId, 'files', async () => {
     const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-    for (let i = 0; i < ids.length; i += READ_CHUNK) await coll.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: ids.slice(i, i + READ_CHUNK) } }));
+    for (let i = 0; i < ids.length; i += READ_CHUNK) {
+      const part = ids.slice(i, i + READ_CHUNK);
+      await retireLivePage(spaceId, part, 'mark');
+      const rest = await coll.find(asFilter<FileMetaDoc>({ _id: { $in: part }, feedMarker: { $exists: false } }), { projection: { _id: 1, pos: 1 } })
+        .toArray() as unknown as Array<{ _id: string; pos?: number }>;
+      if (rest.length === 0) continue;
+      await raiseFileFeedFloorOver(spaceId, rest);
+      await coll.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: rest.map(r => r._id) }, feedMarker: { $exists: false }, $or: [{ parentFileId: { $exists: true } }, { deletedAt: { $exists: true } }] }));
+    }
   });
 }
 
@@ -589,16 +657,20 @@ export async function deleteFileMetaByPrefix(
 ): Promise<void> {
   const norm = await fileDirPrefixFor(spaceId, dirPath);
   if (!norm) return; // guard: empty path would match everything
-  // Escape regex special characters in the prefix so a path like "my.dir/"
-  // doesn't accidentally match "myXdir/" etc.
-  const escaped = escapeRegex(norm + '/');
   const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   // The removals are ONE admitted and counted unit, from their own check (`admitSpaceWrite`).
   await admitSpaceWrite(spaceId, 'files', async () => {
-    await coll.deleteMany(
-      asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, $or: [{ parentFileId: { $exists: true } }, { deletedAt: { $exists: true } }] }),
+    // What hangs off the files, and the deletion rows earlier deletes left under the folder (audit rows, feed markers), a page at a time: each page
+    // raises the change feed's floor over the positions it removes FIRST, so a cursor from before an erased deletion is refused, never served past it.
+    await eachIdPage<{ _id: string; pos?: number }>(
+      { collection: spaceCollection(spaceId, 'files'), filter: { _id: underPrefix(norm + '/'), $or: [{ parentFileId: { $exists: true } }, { deletedAt: { $exists: true } }] }, projection: { _id: 1, pos: 1 }, size: READ_CHUNK },
+      async rows => {
+        await raiseFileFeedFloorOver(spaceId, rows);
+        await coll.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: rows.map(r => String(r._id)) }, $or: [{ parentFileId: { $exists: true } }, { deletedAt: { $exists: true } }] }));
+      },
     );
-    await retireLiveRowsInPages(spaceId, norm + '/', ids => coll.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: ids } })), onRetired);
+    // The live files leave their feed markers, a page at a time, last.
+    await retireLiveRowsInPages(spaceId, norm + '/', ids => retireLivePage(spaceId, ids, 'mark'), onRetired);
   });
 }
 
@@ -623,7 +695,7 @@ async function retireLiveRowsInPages(
   spaceId: string, prefix: string, retirePage: (ids: string[]) => Promise<unknown>, onRetired?: (paths: readonly string[]) => void,
 ): Promise<void> {
   await eachIdPage<{ _id: string }>(
-    { collection: spaceCollection(spaceId, 'files'), filter: { _id: { $regex: `^${escapeRegex(prefix)}` }, ...LIVE_FILE_ROW }, projection: { _id: 1 }, size: READ_CHUNK },
+    { collection: spaceCollection(spaceId, 'files'), filter: { _id: underPrefix(prefix), ...LIVE_FILE_ROW }, projection: { _id: 1 }, size: READ_CHUNK },
     async rows => {
       const ids = rows.map(r => String(r._id));
       await retirePage(ids);
@@ -690,7 +762,7 @@ async function liveFileRecords(spaceId: string, path: string, scope: 'under' | '
   // A row stored under a legacy spelling is put at its key before the key is looked up (`fileRowIdFor`, `fileDirPrefixFor`).
   const norm = scope === 'exactly-at' ? (await fileRowIdFor(spaceId, path)).replace(/\/?$/, '') : await fileDirPrefixFor(spaceId, path);
   if (!norm) return null;
-  const under = { _id: { $regex: '^' + escapeRegex(norm + '/') } };
+  const under = { _id: underPrefix(norm + '/') };
   const reach = scope === 'under' ? under : scope === 'exactly-at' ? { _id: norm } : { $or: [{ _id: norm }, under] };
   return asFilter<FileMetaDoc>({ ...reach, ...LIVE_FILE_ROW });
 }
@@ -715,10 +787,7 @@ export async function markFileMetaDeleted(
   const ids = await fileRowIdsFor(spaceId, filePaths);
   if (ids.length === 0) return;
   await admitSpaceWrite(spaceId, 'files', async () => {
-    const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-    for (let i = 0; i < ids.length; i += READ_CHUNK) {
-      await coll.updateMany(asFilter<FileMetaDoc>({ _id: { $in: ids.slice(i, i + READ_CHUNK) }, ...LIVE_FILE_ROW }), flagAndStrip() as never);
-    }
+    for (let i = 0; i < ids.length; i += READ_CHUNK) await retireLivePage(spaceId, ids.slice(i, i + READ_CHUNK), 'flag');
   });
 }
 
@@ -746,8 +815,10 @@ export async function markFileMetaDeleted(
  * of rows flagged by a release before this write existed uses the same stages. Two spellings would differ by exactly
  * one field on the day somebody adds one, and the repair would be the half that still held it.
  */
-function flagAndStrip(): object[] {
-  return [{ $set: { deletedAt: new Date().toISOString() } }, ...stripDerivedStages()];
+function flagAndStrip(pos: number, deletedAt: string = new Date().toISOString()): object[] {
+  // The flag takes a POSITION (bundle-255: the change feed reads the deletion by it) and never a version: `posAtSeq` is the row's own `seq`, read in
+  // the write, so the position repair (which re-stamps a row whose `posAtSeq` is not its `seq`) leaves it alone.
+  return [{ $set: { deletedAt: { $literal: deletedAt }, pos: { $literal: pos }, posAtSeq: { $ifNull: ['$seq', 0] } } }, ...stripDerivedStages()];
 }
 
 /**
@@ -793,18 +864,16 @@ export async function markFileMetaDeletedByPrefix(
 ): Promise<void> {
   const norm = await fileDirPrefixFor(spaceId, dirPath);
   if (!norm) return; // guard: empty path would match everything
-  const escaped = escapeRegex(norm + '/');
   const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   // The removals and the flagging are ONE admitted and counted unit, from their own check (`admitSpaceWrite`).
   await admitSpaceWrite(spaceId, 'files', async () => {
     // Remove derived chunk records outright, first: the LIVE file rows are what tell a retry the delete is still owed, so they go last.
     await coll.deleteMany(
-      asFilter<FileMetaDoc>({ _id: { $regex: `^${escaped}` }, parentFileId: { $exists: true } }),
+      asFilter<FileMetaDoc>({ _id: underPrefix(norm + '/'), parentFileId: { $exists: true } }),
     );
     // Flag the user-visible file records, and strip what their bytes made, in the SAME write — the identical rule as
     // for one file, from the one place that states it. A directory delete reaches here and never through
     // `markFileMetaDeleted`, so a guard written there alone would simply not apply to a folder (`Q-418`).
-    await retireLiveRowsInPages(spaceId, norm + '/',
-      ids => coll.updateMany(asFilter<FileMetaDoc>({ _id: { $in: ids }, ...LIVE_FILE_ROW }), flagAndStrip() as never), onRetired);
+    await retireLiveRowsInPages(spaceId, norm + '/', ids => retireLivePage(spaceId, ids, 'flag'), onRetired);
   });
 }
