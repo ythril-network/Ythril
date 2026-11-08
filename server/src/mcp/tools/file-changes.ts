@@ -1,6 +1,8 @@
 /**
  * `file_changes` — the client file change feed's MCP door (bundle-255, Q-724). The read is `files/file-changes.ts`, shared with
- * `GET /api/files/:spaceId/changes`: the same parameters and bounds, the same refusals in the same words, the same page.
+ * `GET /api/files/:spaceId/changes`: the same parameters and bounds, the same refusals by
+ * status and `code` (the feed's own refusals, a cursor or a view, in the same words; a bounds or unknown-parameter refusal is
+ * worded by each door's own validator), the same page.
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { peerBoundTo } from '../../auth/peer-bound.js';
