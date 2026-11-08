@@ -27,7 +27,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOf } from './_structural-window.mjs';
+import { withoutBodyOf } from './_structural-window.mjs';
 
 const HOME = 'server/src/brain/derived-text-on-write.ts';
 const CLASSIFIER_FILE = 'server/src/brain/embed-record.ts';
@@ -35,12 +35,6 @@ const CLASSIFIER = 'embedOwed';
 
 /** `matchedText` on either side of a strict (in)equality, as a property, an element or a bare name. */
 const COPY = /matchedText['"]?\]?\s*[!=]==|[!=]==\s*[\w$.?]*(?:\[\s*['"])?matchedText\b/;
-
-/** `src` without the body of the declared function `name`, when it is declared there at all. */
-function withoutDeclaration(src, name) {
-  const declared = new RegExp(`^(?:export\\s+)?(?:async\\s+function|function|const)\\s+${name}\\b`, 'm');
-  return declared.test(src) ? src.replace(bodyOf(src, name), '') : src;
-}
 
 describe('a stale text is asked in one place', () => {
   it('textIsStale: a current text that is not the stored one, and nothing without a current text', async () => {
@@ -81,7 +75,7 @@ describe('a stale text is asked in one place', () => {
     for (const f of trackedSources('server/src', { floor: 200 })) {
       if (f === HOME) continue;
       let src = stripComments(readFileSync(f, 'utf8'));
-      if (f === CLASSIFIER_FILE) src = withoutDeclaration(src, CLASSIFIER);
+      if (f === CLASSIFIER_FILE) src = withoutBodyOf(src, CLASSIFIER).rest;
       if (COPY.test(src)) copies.push(f);
     }
     assert.deepEqual(copies, [], 'a module asks whether a stored text is stale itself instead of calling textIsStale (or the classifier, embedOwed)');

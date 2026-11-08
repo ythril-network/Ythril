@@ -28,26 +28,19 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { bodyOf } from './_structural-window.mjs';
+import { withoutBodyOf } from './_structural-window.mjs';
 
 const PHRASE = 'of this request that was not written';
 const HOME_DIR = 'server/src/brain/write-plan/';
-const DECLARATION = /^(?:export\s+)?(?:function|const)\s+dependencyFailed\b/m;
 
 /** Every tracked server source, comments out, with the function's own body taken out of the file that declares it. */
 function scan() {
   const declaredIn = [];
   const outside = [];
   for (const file of trackedSources('server/src', { floor: 200 })) {
-    // LF, as `bodyOf` joins the lines it returns: in a CRLF checkout the function's body would otherwise never match the file.
-    const src = stripComments(readFileSync(join(REPO_ROOT, file), 'utf8')).replace(/\r\n/g, '\n');
-    let rest = src;
-    let home = '';
-    if (DECLARATION.test(src)) {
-      declaredIn.push(file);
-      home = bodyOf(src, 'dependencyFailed', `${file}: dependencyFailed`);
-      rest = src.replace(home, '');
-    }
+    const src = stripComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
+    const { declared, body: home, rest } = withoutBodyOf(src, 'dependencyFailed', `${file}: dependencyFailed`);
+    if (declared) declaredIn.push(file);
     outside.push({ file, rest, home });
   }
   return { declaredIn, outside };
