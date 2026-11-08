@@ -70,6 +70,24 @@ export function bodyOf(src, name, label = name) {
 }
 
 /**
+ * `src` with the body of the top-level declaration `name` taken out, for a gate that asks "does this appear anywhere
+ * EXCEPT inside its one home". Returns `{ declared, body, rest }`; when `name` is not declared, `body` is '' and `rest` is
+ * `src` (as LF).
+ *
+ * **The source is read as LF first**, because `bodyOf` joins the lines it returns with LF: on this repository's CRLF
+ * checkout `src.replace(bodyOf(src, name), '')` matched nothing, left the body in, and the gate flagged the home itself
+ * (`Q-201`'s gate, 2026-11-08). Two gates had written that replace by hand; this is the one copy.
+ */
+export function withoutBodyOf(src, name, label = name) {
+  const lf = src.replace(/\r\n/g, '\n');
+  const declared = new RegExp(
+    `^(?:export\\s+)?(?:async\\s+function|function|const|class|interface|type|abstract\\s+class)\\s+${name}\\b`, 'm').test(lf);
+  if (!declared) return { declared, body: '', rest: lf };
+  const body = bodyOf(lf, name, label);
+  return { declared, body, rest: lf.replace(body, '') };
+}
+
+/**
  * The text between an opening marker and its closing marker.
  *
  * For markup and for blocks whose end is a literal, like `<thead>` … `</thead>`. **No cap**: the closing marker

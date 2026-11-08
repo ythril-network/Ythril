@@ -31,7 +31,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readTrackedSources } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
-import { bodyOf } from './_structural-window.mjs';
+import { withoutBodyOf } from './_structural-window.mjs';
 
 const SERVER_FLOOR = 300;
 
@@ -52,9 +52,7 @@ const declaring = (sources) => sources.filter(({ text }) => /export\s+(?:async\s
 export function keyBuilders(sources) {
   const out = [];
   for (const { file, text } of sources) {
-    // `bodyOf` joins its window with LF, so a CRLF checkout must be compared as LF or the body is never removed.
-    let code = blankComments(text).replace(/\r\n/g, '\n');
-    if (declaring([{ file, text }]).length > 0) code = code.replace(bodyOf(code, 'syncBasePath', 'the declaration of syncBasePath'), '');
+    const code = withoutBodyOf(blankComments(text), 'syncBasePath', 'the declaration of syncBasePath').rest;
     for (const [spelling, re] of BUILDERS) if (re.test(code)) out.push({ file, spelling });
   }
   return out;
