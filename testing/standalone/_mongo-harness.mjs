@@ -149,7 +149,6 @@ let _mongo = null;
  * @returns the live `db/mongo.js` module namespace (`col`, `asFilter`, `asUpdate`, `getDb`, …).
  */
 export async function openTestMongo(suite, { port, query } = {}) {
-  globalThis.setTimeout = REAL_SET_TIMEOUT; // a file that reopens after a close is not over (see lettingTheIndexPollLapse)
   process.env['MONGO_URI'] = testMongoUri(`ythril_harness_${suite}`, { port, query });
 
   const mongo = await import('../../server/dist/db/mongo.js');
@@ -202,51 +201,16 @@ export async function openFixtureMongo(suite) {
 }
 
 /**
- * After the database is closed, the server's search-index poll does not hold the process open (Q-623). ONLY that poll.
+ * Drop the harness database and disconnect. Call from `after()`.
  *
- * ## What it prevents
- *
- * A restore leaves the server's `pollVectorIndexReady` polling the swapped search index for up to 60 s, one `setTimeout` of
- * a second after another. The harness has closed the connection by then, so the poll only logs `Client must be connected
- * before running operations` and holds the process open until its own bound. Twelve restore-family files spent those 60 s
- * each AFTER their tests had passed and been reported (`a-restore-counts-the-files-out-of-step-db`: 63.8 s alone, 2.9 s
- * without the wait): 720 s of worker time in a full `-db` run, each one holding a slot of its shard.
- *
- * Two ways of ending the wait were measured and refused. `node --test --test-force-exit` crashes a file whose process still
- * has native work at exit (`a-notice-releases-the-answer-it-does-not-read-db`, 0xC0000409, every time), turning a passing
- * file into a failing one. A harness `process.exit()` after a delay ends the process before node:test has reported the file,
- * so its results line is missing. This takes neither: `closeTestMongo` makes the timers the POLL creates after it unref'd (the
- * poll's next tick included), so the process ends by itself, the way a file with nothing left to wait for always did,
- * reporting everything.
- *
- * **Scoped to the poll, and that is the part that matters.** The first version unref'd EVERY timer created after a close, and
- * CI's Full run caught what that does: `a-failed-harness-setup-leaves-no-connection-open-db` awaits `holdsWithin` (a timer)
- * after its harness closed, the unref'd timer let the event loop end, and node:test cancelled the case with "Promise
- * resolution is still pending but the event loop has already resolved". A timer a TEST awaits must keep the process alive
- * whatever was closed before it. So a timer is unref'd only when the call that creates it comes from the server's
- * `spaces/vector-index` module (`isIndexPollStack`, read off the creating call's stack); every other `setTimeout` is the
- * real one, unchanged. A later `openTestMongo` puts the real `setTimeout` back.
- *
- * The server-side poll that does not stop when its connection closes is the defect; this is the harness not paying for it.
+ * It touches no timer. Until Q-625 it unref'd the timers the server's search-index poll created after a close, because the
+ * poll asked the closed client once a second until its 60 s window ran out and held each restore-family file open that long
+ * after its tests had passed (Q-623). The poll now ends at its next tick once its client is closed or replaced
+ * (`isCurrentClient`, `db/mongo.ts`; pinned by `a-search-index-poll-ends-with-its-client-db`), so a test's timers are its own.
  */
-const REAL_SET_TIMEOUT = globalThis.setTimeout;
-
-/** Whether a call stack was made inside the server's search-index module (`pollVectorIndexReady` is the only timer there). Exported so its gate can test it. */
-export const isIndexPollStack = (stack) => /spaces[\\/]vector-index\.js/.test(String(stack));
-
-function lettingTheIndexPollLapse() {
-  globalThis.setTimeout = (...args) => {
-    const timer = REAL_SET_TIMEOUT(...args);
-    if (isIndexPollStack(new Error().stack)) timer.unref?.();
-    return timer;
-  };
-}
-
-/** Drop the harness database and disconnect. Call from `after()`. */
 export async function closeTestMongo() {
   if (!_mongo) return;
   try { await _mongo.getDb().dropDatabase(); } catch { /* best-effort */ }
   await _mongo.closeMongo();
   _mongo = null;
-  lettingTheIndexPollLapse();
 }

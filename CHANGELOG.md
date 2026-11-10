@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** bytes that arrive from a peer move the file row's position, never its version: a reader paging by position hears of them, and the publisher's next edit still wins. Identical bytes again write nothing.
 - **Files:** a file deletion (own, folder, TTL, a peer's, a sidecar's) takes a position in the same write that flags or marks the row.
 - **Testing:** every `node --test` the standalone runner starts is time-bounded: a test or hook pending past 15 minutes fails, and a batch that never exits is ended and named.
+- **Testing:** the standalone harness no longer changes `setTimeout` after a close; it worked around the search-index check fixed below.
+
+### Fixed
+
+- **Spaces:** a search-index readiness check stops within a second when its database connection closes, instead of asking the closed connection for up to a minute.
 
 ## [6.5.5] — 2026-11-08
 
