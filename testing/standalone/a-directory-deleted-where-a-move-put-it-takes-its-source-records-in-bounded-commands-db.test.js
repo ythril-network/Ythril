@@ -29,6 +29,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { driverWriteFailures, failWrites } from './_write-faults.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -38,7 +39,8 @@ const FILES = `${S}_files`;
 
 let acts, F, faults, tombstones, markerMod, READ_CHUNK;
 
-const row = (p) => acts.door.coll(S, 'files').findOne({ _id: p });
+// The record at `p`, never the FEED MARKER a deleted file leaves at its path since bundle-255 (soft delete is off here): the file is gone from there.
+const row = (p) => acts.door.coll(S, 'files').findOne({ _id: p, ...NOT_A_FEED_MARKER });
 const body = (a) => JSON.stringify(a.body ?? a.text);
 const names = (dir, n) => Array.from({ length: n }, (_, i) => `${dir}/f${i}.txt`);
 
@@ -65,7 +67,7 @@ describe('a directory deleted where a stopped move put it', { skip }, () => {
     tombstones = await import('../../server/dist/files/tombstones.js');
     markerMod = await import('../../server/dist/files/move-markers.js');
     ({ READ_CHUNK } = await import('../../server/dist/db/read-by-id.js'));
-    faults = failWrites(Object.getPrototypeOf(acts.door.mongo.col('probe')), ['insertMany', 'deleteOne', 'deleteMany']);
+    faults = failWrites(Object.getPrototypeOf(acts.door.mongo.col('probe')), ['insertMany', 'deleteOne', 'deleteMany', 'bulkWrite']);
   });
   after(async () => {
     faults?.restore();
@@ -133,8 +135,10 @@ describe('a directory deleted where a stopped move put it', { skip }, () => {
     const from = 'fail/src';
     const to = 'fail/dst';
     await directoryMoveStoppedAfterItsBytes(from, to, 4);
-    faults.fail('deleteMany', FILES, F.storeGone.single);
+    // The source records leave their feed markers by ONE bulk write per page since bundle-255 (`retireLivePage`): that is the removal that fails.
+    faults.fail('bulkWrite', FILES, F.storeGone.single);
     const first = await acts.rest('DELETE', { path: to }, { confirm: true });
+    assert.equal(faults.fired('bulkWrite', FILES), 1, 'the fault never fired: the removal of the source records does not go through the bulk write armed');
     assert.equal(acts.statusOf(first), 503, `the delete was not failed by the store: ${body(first)}`);
     assert.ok(names(to, 4).every(f => acts.onDisk(f)), 'the bytes went although the removal of the source records failed');
     faults.clear();

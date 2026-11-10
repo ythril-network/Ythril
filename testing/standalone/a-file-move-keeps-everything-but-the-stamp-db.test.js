@@ -29,6 +29,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
+import { NOT_A_FEED_MARKER, goneOrMarker } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -117,14 +118,15 @@ describe('a file move keeps everything but what it re-keys (real MongoDB)', { sk
 
       await move('docs/old.md', 'docs/new/renamed.md');
 
-      assert.equal(await files().findOne({ _id: 'docs/old.md' }), null, 'the row is still under its old id');
+      // Since bundle-255 the old id holds the move's FEED MARKER (soft delete is off): the file is gone from there, and a marker is not a row of the file.
+      assert.ok(goneOrMarker(await files().findOne({ _id: 'docs/old.md' })), 'the row is still under its old id');
       const moved = await files().findOne({ _id: 'docs/new/renamed.md' });
       assert.ok(moved, 'the row is not under its new id');
       assert.equal(moved.path, 'docs/new/renamed.md');
       assert.deepEqual(without(moved, MOVED_KEYS), without(before, MOVED_KEYS),
         'the move changed a field it does not own: it carries the row WHOLE — the authored half (author included), the vector, matchedText, processing state, retention stamp and the suppression flag');
       assert.equal(moved.convertedFileId, '_converted/docs/new/renamed.md.md', 'the pointer to the converted Markdown still names the old path');
-      assert.equal(await files().countDocuments({}), 1);
+      assert.equal(await files().countDocuments({ ...NOT_A_FEED_MARKER }), 1);
       // The version moves up (a deletion held for the new path names a version of its own, and a peer refuses a row at or below it); the author and the
       // clock stay (Q-419); the row LANDS here, at a position of its own, in the clock band, for the version it takes.
       assert.ok(moved.seq > before.seq, `a move left the row's version at ${moved.seq}, not above the ${before.seq} it had`);
@@ -184,7 +186,7 @@ describe('a file move keeps everything but what it re-keys (real MongoDB)', { sk
       await assert.rejects(() => move('docs/none.md', 'docs/elsewhere.md'), (e) => e.name === 'NotFoundError');
       assert.equal(await files().findOne({ _id: 'docs/elsewhere.md' }), null, 'a move invented a record at the destination');
       for (const [s, d] of [['', 'moved'], ['/', 'moved'], ['docs/same.md', '']]) await assert.rejects(() => move(s, d), undefined, `${JSON.stringify(s)} → ${JSON.stringify(d)}`);
-      assert.equal(await files().countDocuments({}), 1);
+      assert.equal(await files().countDocuments({ ...NOT_A_FEED_MARKER }), 1);
       assert.deepEqual(await acts.raw(), [], 'a refused move left a tombstone');
     });
 
@@ -192,7 +194,7 @@ describe('a file move keeps everything but what it re-keys (real MongoDB)', { sk
       await put('docs/old.md');
       await move('/docs//old.md', '/docs//new.md');
       assert.ok(await files().findOne({ _id: 'docs/new.md' }));
-      assert.equal(await files().findOne({ _id: 'docs/old.md' }), null);
+      assert.ok(goneOrMarker(await files().findOne({ _id: 'docs/old.md' })));
     });
 
     it('carries the file\'s links to the new path: every class re-created under the new id, none left under the old', async () => {
@@ -250,7 +252,7 @@ describe('a file move keeps everything but what it re-keys (real MongoDB)', { sk
   });
 
   describe('a directory', () => {
-    const rowsOf = async () => (await files().find({}).sort({ _id: 1 }).toArray());
+    const rowsOf = async () => (await files().find({ ...NOT_A_FEED_MARKER }).sort({ _id: 1 }).toArray());
 
     it('moves every file row at any depth, re-keying id and path by replacing the prefix, and carries each row whole', async () => {
       const before = [await put('dir/a.md'), await put('dir/sub/b.md'), await put('dir/sub/deeper/c.md')];

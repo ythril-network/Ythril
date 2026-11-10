@@ -46,6 +46,7 @@ const S = 'e2rd';
 const T0 = '2026-09-01T00:00:00.000Z';
 const LIVE = 'live.md';
 const GONE = 'gone.md';
+const MARKED = 'marked.md';
 const FLAGGED_BODY = 'FLAGGED-BODY-must-not-surface';
 const E1 = 'cccccccc-0000-4000-8000-0000000e2101';
 const E2 = 'cccccccc-0000-4000-8000-0000000e2102';
@@ -109,6 +110,8 @@ describe('a flagged file is not a result, a count or a link target', { skip }, (
       row(`${LIVE}#chunk1`, { parentFileId: LIVE, chunkIndex: 1, content: 'chunk one' }),
       // The audit row a soft delete left: no bytes, but a description, a hash and a finished state, as a field instance holds.
       row(GONE, { description: FLAGGED_BODY, sha256: 'gone-sha', embeddingStatus: 'complete', deletedAt: T0 }),
+      // The FEED MARKER a delete leaves where soft delete is off (bundle-255, `files/feed-marker.ts`), exactly its shape: no record of a file at all.
+      { _id: MARKED, spaceId: S, path: MARKED, deletedAt: T0, feedMarker: true, pos: 2, posAtSeq: 0 },
     ]);
     await door.coll(S, 'entities').insertMany([
       { _id: E1, spaceId: S, name: 'Hub', type: 'thing', tags: [], properties: {}, seq: 1, createdAt: T0, updatedAt: T0 },
@@ -125,10 +128,11 @@ describe('a flagged file is not a result, a count or a link target', { skip }, (
   });
 
   describe('fixture', () => {
-    it('holds one live file, two chunks and one flagged row', async () => {
+    it('holds one live file, two chunks, one flagged row and one feed marker', async () => {
       const all = await door.coll(S, 'files').find({}).toArray();
-      assert.deepEqual(all.map(r => r._id).sort(), [GONE, LIVE, `${LIVE}#chunk0`, `${LIVE}#chunk1`].sort());
-      assert.deepEqual(all.filter(r => r.deletedAt !== undefined).map(r => r._id), [GONE]);
+      assert.deepEqual(all.map(r => r._id).sort(), [GONE, LIVE, MARKED, `${LIVE}#chunk0`, `${LIVE}#chunk1`].sort());
+      assert.deepEqual(all.filter(r => r.deletedAt !== undefined && r.feedMarker === undefined).map(r => r._id), [GONE]);
+      assert.deepEqual(all.filter(r => r.feedMarker === true).map(r => r._id), [MARKED]);
     });
   });
 
@@ -159,6 +163,23 @@ describe('a flagged file is not a result, a count or a link target', { skip }, (
         // And it is still flagged, so a caller can tell an audit record from a file: the door does not hide the flag
         // it is being asked about.
         assert.equal(typeof rowsOf(asked)[0]?.['deletedAt'], 'string', 'the audit record came back without its deletion stamp');
+      });
+
+      // A FEED MARKER is not an audit record: where soft delete is off the operator keeps NO record of a deleted file, and the marker is the change
+      // feed's note that the path was emptied (bundle-255). Served here, a file deleted with soft delete off stayed in `filter` for the feed window
+      // (the Full run's files.test.js and mcp-tools.test.js "the metadata record is removed"). Not a row, not in `total`, not even asked by id.
+      it(`${transport === 'mcp' ? 'MCP filter' : 'POST /api/filter'}: a feed marker is never a result, nor counted in the total, even asked for by id`, async () => {
+        const out = await tool(transport, 'filter', { collection: 'files', limit: 100 });
+        assert.equal(out.isError, false, out.text.slice(0, 300));
+        const ids = rowsOf(out).map(r => String(r._id));
+        assert.ok(ids.includes(LIVE) && ids.includes(GONE), `control: the live file and the audit record are not both in [${ids.join(', ')}]`);
+        assert.ok(!ids.includes(MARKED), `the feed marker ${MARKED} is a result of filter: [${ids.join(', ')}]`);
+        assert.equal(out.sc.total, ids.length, `the total counts what the page does not serve: total ${out.sc.total}, rows [${ids.join(', ')}]`);
+        for (const filter of [{ _id: MARKED }, { feedMarker: true }]) {
+          const asked = await tool(transport, 'filter', { collection: 'files', filter });
+          assert.deepEqual(rowsOf(asked).map(r => String(r._id)), [], `filter ${JSON.stringify(filter)} answered the feed marker`);
+          assert.equal(asked.sc.total, 0, `filter ${JSON.stringify(filter)} counted the feed marker`);
+        }
       });
     }
   });

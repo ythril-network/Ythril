@@ -34,6 +34,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -70,9 +71,12 @@ const convert = (rel, claim, markdown = null) => pipeline.storeConversionResults
   SPACE, rel, [{ chunkIndex: 0, content: `text of ${rel}`, headingText: '' }], markdown, [], { claim },
 );
 
-/** Every file record that still belongs to `dir` — by its own path, or by the file it was derived from. */
+/**
+ * Every file record that still belongs to `dir` — by its own path, or by the file it was derived from. The FEED MARKERS a move leaves at the old
+ * ids since bundle-255 (soft delete is off here) say the files are gone from there: they are not records, and a write that lands over one is.
+ */
 async function recordsUnder(dir) {
-  const all = await files().find({}).toArray();
+  const all = await files().find({ ...NOT_A_FEED_MARKER }).toArray();
   return all.filter(d => d._id === dir || d._id.startsWith(`${dir}/`) || d._id.startsWith(`${dir}#`)
     || d._id.startsWith(`_converted/${dir}`) || d._id.startsWith(`_extracted/${dir}`)
     || (d.parentFileId && (d.parentFileId === dir || d.parentFileId.startsWith(`${dir}/`)))).map(d => d._id).sort();

@@ -44,6 +44,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { topologies as allTopologies, peerIsUpstream as peerIsUpstreamOf } from './_network-topologies.mjs';
 import { build, peerToken, ADMIN_TOKEN } from './_push-door.mjs';
 import { openPullDoor, PEER, LATERAL } from './_pull-door.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -177,7 +178,8 @@ describe('a peer file tombstone is judged by the deletion authority (D-14 = C)',
           let nDeclined = 0, nIssuer = 0, nUpstream = 0;
           for (const s of SCENARIOS) {
             const want = oracle(s, upstream);
-            const row = await stored('files', pathOf(s.id));
+            // Since bundle-255 an applied deletion leaves a FEED MARKER at the path (soft delete is off here): the file is gone, the marker is not its row.
+            const row = await door.coll(S, 'files').findOne({ _id: pathOf(s.id), ...NOT_A_FEED_MARKER });
             const t = await stored('file_tombstones', `ft-${s.id}`);
             if (!want.deleted) nDeclined++; else if (want.viaUpstream) nUpstream++; else nIssuer++;
             if ((row === null) !== want.deleted) wrong.push(`${s.id} (${s.note}): the file row is ${row === null ? 'GONE' : 'STILL HERE'}, want ${want.deleted ? 'gone' : 'kept'}`);
@@ -216,7 +218,7 @@ describe('a peer file tombstone is judged by the deletion authority (D-14 = C)',
       door.state.records = {};
       door.writeLocalFile(S, RELAYED, 'relayed bytes');
       await d.deliver([{ ...tombFor('relayed-e2e', THIRD, 60), rowSeq: here.seq }]);
-      return (await door.coll(S, 'files').findOne({ _id: RELAYED })) !== null;
+      return (await door.coll(S, 'files').findOne({ _id: RELAYED, ...NOT_A_FEED_MARKER })) !== null; // a feed marker is the deletion, not the row
     }
     const meta = () => build.filemeta(S, RELAYED, 3, { author: { instanceId: THIRD, instanceLabel: THIRD } });
     const pushBy = (token) => () => door.push('/batch-upsert', { filemeta: [meta()] }, { spaceId: S, token });

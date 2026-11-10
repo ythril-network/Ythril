@@ -64,6 +64,8 @@ export async function loadHolderModules() {
     fileMeta: await import('../../server/dist/files/file-meta.js'),
     files: await import('../../server/dist/files/files.js'),
     moveCascade: await import('../../server/dist/files/move-cascade.js'),
+    // The boot pass that positions live file rows that hold no position (bundle-255), a record-position holder.
+    unpositioned: await import('../../server/dist/files/unpositioned-file-rows.js'),
     // The re-key of a legacy file row onto its key (Q-413), a record-position holder.
     legacyRekey: await import('../../server/dist/files/legacy-file-rekey.js'),
     // The writers of what a file's bytes made, including the one record-position holder among them (bundle-89).
@@ -336,6 +338,25 @@ export function holderCases(ctx, S) {
     'server/src/files/file-meta.ts:upsertFileMeta': [{
       label: 'a file record created', collection: `${S}_files`, lock: idLock('files', 'new.md'),
       run: () => ctx.mods.fileMeta.upsertFileMeta(S, 'new.md', 10),
+    }],
+    // A peer's bytes arriving for a file held here take a POSITION (Q-725, bundle-255): the row's update, inside its landing hold, waits on the row.
+    'server/src/files/file-meta.ts:recordArrivedFile': [{
+      label: 'a peer\'s bytes arriving for a known file: the row\'s new position, inside its landing hold', collection: `${S}_files`,
+      lock: recordLock('files', HELD_FILE),
+      run: () => ctx.mods.fileMeta.recordArrivedFile(S, HELD_FILE, 7, 'a'.repeat(64), AUTHOR),
+    }],
+    // A deletion turns the live row into its feed marker in ONE write that takes the position the change feed reads it by (bundle-255). `retireLivePage` is
+    // not exported: the delete of one file is the shortest way in, and the row's update is what waits on the lock.
+    'server/src/files/file-meta.ts:retireLivePage': [{
+      label: 'a deleted file\'s row turned into its feed marker: its position, inside its landing hold', collection: `${S}_files`,
+      lock: recordLock('files', HELD_FILE),
+      run: () => ctx.mods.fileMeta.deleteFileMeta(S, HELD_FILE),
+    }],
+    // The boot pass that gives a live file row with no position one (bundle-255): the seeded rows hold none, so the page's update waits on the locked one.
+    'server/src/files/unpositioned-file-rows.ts:positionUnpositionedFileRows': [{
+      label: 'a live file row with no position given one: the page\'s positions, inside its landing hold', collection: `${S}_files`,
+      lock: recordLock('files', HELD_FILE),
+      run: () => ctx.mods.unpositioned.positionUnpositionedFileRows(S),
     }],
     // In `files/derived-fields.ts` since bundle-89, with the other writers of what the bytes produced. It takes its version only once its
     // conditions are answered, so the row it is pointed at must be writable — a decline would take no version and the hold this case is about would never be entered.

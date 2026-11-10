@@ -24,6 +24,7 @@ import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'dirroots';
@@ -57,7 +58,8 @@ describe('a directory delete reads its roots in pages', { skip }, () => {
     const del = await acts.rest('DELETE', { path: 'big' }, { confirm: true });
     assert.ok(!acts.failed(del), `the delete was refused: ${JSON.stringify(del.body)}`);
     assert.equal(acts.onDisk('big'), false);
-    assert.deepEqual(await acts.door.coll(S, 'files').find({}, { projection: { _id: 1 } }).toArray(), [], 'rows of the directory (or its orphan) survived');
+    // Since bundle-255 each deleted file leaves its FEED MARKER at its path (soft delete is off here): the files are gone, and a marker is not a row.
+    assert.deepEqual(await acts.door.coll(S, 'files').find({ ...NOT_A_FEED_MARKER }, { projection: { _id: 1 } }).toArray(), [], 'rows of the directory (or its orphan) survived');
 
     const byPrefix = seen.filter(c => c.name === 'find' && c.command.find === FILES
       && Object.entries(c.command.filter ?? {}).some(([k, v]) => (k === '_id' || k === 'parentFileId') && v && typeof v === 'object' && '$regex' in v));

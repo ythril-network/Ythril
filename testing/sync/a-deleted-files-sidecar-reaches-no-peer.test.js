@@ -90,8 +90,24 @@ async function hasBytes(base, token, p) {
   const r = await fetch(`${base}/api/files/${space.id}?path=${encodeURIComponent(p)}`, { headers: { Authorization: `Bearer ${token}` } });
   return r.status === 200;
 }
-/** The rows the instance's own store holds for the space, read out of its Mongo (the listing hides derived trees). */
-const rowIds = (x) => spaceFootprint(x, space.id).fileIds;
+/**
+ * The rows the instance's own store holds for the space, read out of its Mongo (the listing hides derived trees), never a FEED MARKER: since bundle-255 a
+ * file that goes leaves one at its path on each instance that applied the deletion (soft delete is off on the stack), the change feed's local note that
+ * the path was emptied. It is no row of the file; {@link markersAt} holds that it is nothing more than a marker.
+ */
+const rowIds = (x) => spaceFootprint(x, space.id).fileIds.filter(id => !markerIds(x).includes(id));
+/** The ids on instance `x` that hold a feed marker. */
+const markerIds = (x) => mongoEval(x, `
+    print(JSON.stringify(d.getCollection(${JSON.stringify(`${space.id}_files`)}).find({ feedMarker: true }).toArray().map(f => String(f._id))));
+  `);
+/**
+ * The keys of each feed marker on instance `x` whose id names the file, sorted: a marker carries the path, when and its position, and nothing a person wrote
+ * or the bytes made (`testing/standalone/_feed-marker-row.mjs`, `FEED_MARKER_KEYS`).
+ */
+const markersAt = (x) => mongoEval(x, `
+    print(JSON.stringify(d.getCollection(${JSON.stringify(`${space.id}_files`)}).find({ feedMarker: true }).toArray()
+      .filter(f => String(f._id).includes(${JSON.stringify(FILE)})).map(f => Object.keys(f).sort().join(','))));
+  `);
 /**
  * The sidecar's row on instance `x` as the store holds it: whether it is a DERIVED row (this instance's own conversion made it:
  * `parentFileId` is the file) and who delivered it (a peer's bytes that landed first leave a top-level row with a deliverer).
@@ -186,5 +202,8 @@ describe('a deleted file\'s sidecar reaches no peer of the chain', () => {
 
     assert.deepEqual(await holdings(), { a: { rows: [], bytes: [] }, b: { rows: [], bytes: [] }, c: { rows: [], bytes: [] } },
       'what each instance still holds of the deleted file: its row, its sidecar\'s row (the one arrived bytes made) or either one\'s bytes');
+    // What is left at the file's path is each instance's own feed marker, and exactly one: nothing of the file outlives it in the marker.
+    const MARKER = '_id,deletedAt,feedMarker,path,pos,posAtSeq,spaceId';
+    for (const x of ['a', 'b', 'c']) assert.deepEqual(markersAt(x), [MARKER], `instance ${x}: what the deletion left at ${FILE} is not exactly one feed marker`);
   });
 });

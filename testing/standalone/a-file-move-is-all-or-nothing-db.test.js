@@ -42,6 +42,7 @@ import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -57,10 +58,12 @@ const F1 = '44444444-4444-4444-8444-444444444444';
 let acts, door, meta, adjacency, cascade;
 
 const files = () => door.coll(S, 'files');
-const rowOf = (id) => files().findOne({ _id: id });
+// Every read of a row here leaves out the FEED MARKER a moved-away file leaves at its old id since bundle-255 (soft delete is off here): the file
+// is gone from there, and a marker is not a row of it.
+const rowOf = (id) => files().findOne({ _id: id, ...NOT_A_FEED_MARKER });
 const onDisk = (p) => acts.onDisk(p);
-/** The ids, among `ids`, that hold a row — live or flagged. */
-const rowsAmong = async (ids) => (await files().find({ _id: { $in: ids } }, { projection: { _id: 1 } }).toArray()).map(r => r._id).sort();
+/** The ids, among `ids`, that hold a row — live or flagged, never a feed marker. */
+const rowsAmong = async (ids) => (await files().find({ _id: { $in: ids }, ...NOT_A_FEED_MARKER }, { projection: { _id: 1 } }).toArray()).map(r => r._id).sort();
 const linkTargets = async (id) => (await adjacency.linksStartingFrom(S, [id])).map(r => `${r.toKind}:${r.to}`).sort();
 
 /** A file's record as a person left it: every field a move has to carry, each naming its own file. */

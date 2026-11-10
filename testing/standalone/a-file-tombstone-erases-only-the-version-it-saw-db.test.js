@@ -25,13 +25,16 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build, peerToken } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const S = 'ftver';
 let door;
 
-const row = (id) => door.coll(S, 'files').findOne({ _id: id });
+// The file's row at `id`, live or flagged. Since bundle-255 an erased file leaves a FEED MARKER at its path (soft delete is off here): the file is gone,
+// so a marker is not its row, and a kept file is a real row, never a marker.
+const row = (id) => door.coll(S, 'files').findOne({ _id: id, ...NOT_A_FEED_MARKER });
 async function seedFile(p, seq) {
   door.writeLocalFile(S, p, `bytes of ${p}`);
   await door.coll(S, 'files').insertOne(build.filemeta(S, p, seq, { author: PEER_AUTHOR, sizeBytes: 11 }));
