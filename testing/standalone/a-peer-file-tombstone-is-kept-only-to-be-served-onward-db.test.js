@@ -33,6 +33,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build, peerToken } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
+import { A_FEED_MARKER, NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -43,9 +44,13 @@ let door, register;
 
 const tombs = () => door.coll(S, 'file_tombstones').find({}).toArray();
 const tombOf = (path) => door.coll(S, 'file_tombstones').findOne({ path });
-const row = (id) => door.coll(S, 'files').findOne({ _id: id });
+// The file's row at `id`. Since bundle-255 an applied deletion leaves a FEED MARKER at the path (soft delete is off here): the file is gone, so a marker
+// is not its row, and a re-created file is a real row, never the marker.
+const row = (id) => door.coll(S, 'files').findOne({ _id: id, ...NOT_A_FEED_MARKER });
 async function seedFile(path, author = PEER_AUTHOR, seq = 3, extra = {}) {
   door.writeLocalFile(S, path, `bytes of ${path}`);
+  // A re-creation takes the path over from the feed marker a deletion left there, as every file write does (`upsertFileMeta`).
+  await door.coll(S, 'files').deleteOne({ _id: path, ...A_FEED_MARKER });
   await door.coll(S, 'files').insertOne(build.filemeta(S, path, seq, { author, sizeBytes: 11, ...extra }));
 }
 const tomb = (path, extra = {}) => ({ _id: `ft-${path}`, spaceId: S, path, deletedAt: '2026-09-01T00:00:05.000Z', issuer: PEER, rowSeq: 3, ...extra });

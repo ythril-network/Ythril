@@ -41,6 +41,7 @@ import { openPushDoor } from './_push-door.mjs';
 import { driverWriteFailures, eventually, failWrites } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { toolDoor } from './_file-act-doors.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -51,7 +52,8 @@ let door, files, tombstones, F, handlers, callTool, ADMIN, faults, tool, answerO
 
 const root = () => path.join(process.env['DATA_ROOT'], 'files', S);
 const onDisk = (p) => fs.existsSync(path.join(root(), p));
-const meta = (p) => door.mongo.col(`${S}_files`).findOne({ _id: p });
+// The file's row at `p`, never the FEED MARKER a deleted or moved-away file leaves at its path since bundle-255 (soft delete is off here).
+const meta = (p) => door.mongo.col(`${S}_files`).findOne({ _id: p, ...NOT_A_FEED_MARKER });
 /** The paths a peer is told are gone: what the `GET /api/sync/file-tombstones` door serves. */
 const tombstoned = async () => (await door.pull('/file-tombstones', { spaceId: S })).tombstones.map(t => t.path).sort();
 
@@ -184,8 +186,10 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
 
     it(`${via}: a delete whose metadata delete fails after the bytes went answers 503, and the retry completes it`, async () => {
       await seed('b.txt');
-      fail('deleteMany', 'files', F.storeGone.single);
+      // Since bundle-255 the metadata step is ONE bulk write per page that turns the row into its feed marker (`retireLivePage`), not a delete.
+      fail('bulkWrite', 'files', F.storeGone.single);
       const a = via === 'REST' ? await restDelete('b.txt') : await mcp('delete_file', { path: 'b.txt' });
+      assert.equal(faults.fired('bulkWrite', `${S}_files`), 1, 'the fault never fired: the metadata step does not go through the bulk write armed');
       assertStoreAnswer(`${via} delete`, a);
       const retry = via === 'REST' ? await restDelete('b.txt') : await mcp('delete_file', { path: 'b.txt' });
       assert.equal(retry.code ?? retry.status, via === 'REST' ? 204 : 200, `the retry: ${JSON.stringify(retry.body ?? retry.text)}`);
@@ -249,7 +253,7 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
   /** Which of a file's rows, its job and its links are held under the path `p`, by identity. */
   async function heldAt(p) {
     const adjacency = await import('../../server/dist/brain/link-adjacency.js');
-    const rows = await door.mongo.col(`${S}_files`).find({ _id: { $in: rowsOf(p) } }, { projection: { _id: 1 } }).toArray();
+    const rows = await door.mongo.col(`${S}_files`).find({ _id: { $in: rowsOf(p) }, ...NOT_A_FEED_MARKER }, { projection: { _id: 1 } }).toArray();
     return {
       rows: rows.map(r => r._id).sort(),
       job: (await door.mongo.col(`${S}_media_jobs`).findOne({ _id: jobOf(p) }))?._id ?? null,
@@ -335,8 +339,10 @@ describe('a file act answers true in an outage, and its retry repairs it', { ski
   it('a directory delete whose metadata delete fails after the tree went answers 503, and the retry completes it', async () => {
     await seed('dir/one.txt');
     await seed('dir/two.txt');
-    fail('deleteMany', 'files', F.storeGone.single);
+    // The live rows leave their feed markers by ONE bulk write per page since bundle-255 (`retireLivePage`): that is the metadata step that fails.
+    fail('bulkWrite', 'files', F.storeGone.single);
     const first = await restDelete('dir', { confirm: true });
+    assert.equal(faults.fired('bulkWrite', `${S}_files`), 1, 'the fault never fired: the metadata step does not go through the bulk write armed');
     assertStoreAnswer('REST directory delete', first);
     const retry = await restDelete('dir', { confirm: true });
     assert.equal(retry.code, 204, `the retried directory delete: ${retry.code} ${JSON.stringify(retry.body)}`);

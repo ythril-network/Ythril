@@ -42,6 +42,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { driverWriteFailures, failWrites } from './_write-faults.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'owedmove';
@@ -54,7 +55,8 @@ const PAST = () => new Date(Date.now() + DAY);
 
 let acts, tombstones, markerMod, F, faults, worker, queue;
 
-const row = (p) => acts.door.coll(S, 'files').findOne({ _id: p });
+// The row at `p`, never the FEED MARKER a moved-away file leaves at its old id since bundle-255 (soft delete is off here): the file is gone from there.
+const row = (p) => acts.door.coll(S, 'files').findOne({ _id: p, ...NOT_A_FEED_MARKER });
 /** A row a reader would list: there, and not flagged by a soft delete. */
 const liveRow = async (p) => { const r = await row(p); return r && !r.deletedAt ? r : null; };
 const jobOf = (p) => acts.door.coll(S, 'media_jobs').findOne({ _id: p });

@@ -48,6 +48,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { MOVE_DOORS, sentenceOf } from './_move-destination.mjs';
+import { goneOrMarker } from './_feed-marker-row.mjs';
 import { seedClaim } from './_media-claim.mjs';
 import { METRICS } from './_leaked-rows-repair.mjs';
 import { metricValue } from './_metric-series.mjs';
@@ -120,7 +121,8 @@ describe('a sidecar destination taken after the bytes moved finishes the move (r
 
       const row = await files().findOne({ _id: b });
       assert.equal(row?.description, 'A', 'the file\'s record was not carried to the new id');
-      assert.equal(await files().findOne({ _id: a }), null, 'a record stayed at the old id');
+      // Since bundle-255 the old id holds the move's FEED MARKER (soft delete is off here): the file is gone from there, the marker is not its record.
+      assert.ok(goneOrMarker(await files().findOne({ _id: a })), 'a record stayed at the old id');
       assert.equal((await files().findOne({ _id: `${b}#chunk0` }))?.parentFileId, b, 'the rows derived from the file were not carried');
       assert.equal(await files().findOne({ _id: `${a}#chunk0` }), null);
       assert.equal(row && 'convertedFileId' in row, false, 'the moved row still points at a converted copy: the extract view would show the occupant\'s text as the file\'s own');

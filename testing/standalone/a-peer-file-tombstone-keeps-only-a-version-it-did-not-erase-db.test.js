@@ -36,6 +36,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { topologies as allTopologies, peerIsUpstream as peerIsUpstreamOf } from './_network-topologies.mjs';
 import { build, peerToken } from './_push-door.mjs';
 import { openPullDoor, PEER } from './_pull-door.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -48,7 +49,8 @@ const ERASED_SEQ = 5;
 let door, upstreamOf, register;
 
 const pathOf = (id) => `${id}.txt`;
-const rowOf = (id) => door.coll(S, 'files').findOne({ _id: pathOf(id) });
+// The file's row, never the FEED MARKER an applied deletion leaves at its path since bundle-255 (soft delete is off here): that file is gone.
+const rowOf = (id) => door.coll(S, 'files').findOne({ _id: pathOf(id), ...NOT_A_FEED_MARKER });
 
 /** One file here: bytes and a row at `seq`; `author` absent means a row nobody authored, `stamp` is who delivered it. */
 async function seedFile(id, { author, stamp, seq }) {

@@ -16,6 +16,7 @@ import { UNSUPPORTED_PAGE_PARAMS } from '../util/pagination.js';
 import { skipRefusal } from '../util/strict-limit.js';
 import { LANDING_ORDER } from './list-sort.js';
 import { peerList, peerText, NAME_QUOTED } from '../util/log.js';
+import { withoutFeedMarkersIfFiles } from '../files/live-file-row.js';
 
 /*
  * Re-exported, not re-implemented. Several callers and gates import `sanitizeFilter` from here because this
@@ -370,7 +371,8 @@ export async function queryBrain(
   }
   // NOT re-checked here. The caller's filter was checked where it was still identifiable as theirs — see
   // `CallerCheckedFilter`, which is what makes this parameter impossible to pass a raw object to.
-  const safeFilter = filter as Record<string, never>;
+  // A feed marker is no record of a file, so this door never serves one (`withoutFeedMarkersIfFiles`); the audit rows soft delete keeps it still serves.
+  const safeFilter = withoutFeedMarkersIfFiles(collectionName, filter as Record<string, never>) as Record<string, never>;
   const safeMaxTime = Math.min(maxTimeMS, 10_000);
   const collName = `${spaceId}_${collectionName}`;
   const cursor = col(collName)
@@ -421,7 +423,8 @@ export async function countBrain(
     throw new Error(`Unknown collection '${collectionName}'`);
   }
   return await col(`${spaceId}_${collectionName}`).countDocuments(
-    filter as Record<string, never>,
+    // The same rows the read serves: never a feed marker.
+    withoutFeedMarkersIfFiles(collectionName, filter as Record<string, never>) as Record<string, never>,
     { maxTimeMS: Math.min(maxTimeMS, 10_000) },
   );
 }

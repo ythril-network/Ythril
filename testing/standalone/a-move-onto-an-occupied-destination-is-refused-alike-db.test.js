@@ -36,6 +36,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { MOVE_DOORS, stateOf, sentenceOf } from './_move-destination.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -44,7 +45,9 @@ const T0 = '2026-09-01T00:00:00.000Z';
 
 let acts;
 const files = () => acts.door.coll(S, 'files');
-const rowOf = (id) => files().findOne({ _id: id });
+// The row at `id`, never the FEED MARKER a deleted or moved-away file leaves at its path since bundle-255 (soft delete is off here): the file is
+// gone from there. A move onto a path that holds only a marker is a move onto a free path (the remedy cases below hold it).
+const rowOf = (id) => files().findOne({ _id: id, ...NOT_A_FEED_MARKER });
 const abs = (p) => path.join(acts.root(), p);
 const read = (p) => fs.readFileSync(abs(p), 'utf8');
 const put = (p, content) => { fs.mkdirSync(path.dirname(abs(p)), { recursive: true }); fs.writeFileSync(abs(p), content); };

@@ -32,6 +32,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { caseInsensitiveAt, stateOf, sentenceOf, withJobsHandedBack } from './_move-destination.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -42,7 +43,8 @@ const LATER = () => new Date(Date.now() + DAY);
 
 let acts, stored, tombstones, markerMod, reads, finish, walk, seen;
 const files = () => acts.door.coll(S, 'files');
-const rowOf = (id) => files().findOne({ _id: id });
+// The file's row at `id`, never the FEED MARKER a moved-away file leaves at its old id since bundle-255 (soft delete is off here).
+const rowOf = (id) => files().findOne({ _id: id, ...NOT_A_FEED_MARKER });
 const abs = (p) => path.join(acts.root(), p);
 const read = (p) => fs.readFileSync(abs(p), 'utf8');
 

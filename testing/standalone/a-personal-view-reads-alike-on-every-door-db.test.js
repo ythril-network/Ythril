@@ -52,6 +52,12 @@ const HINT = (id) => `'${id}' is a view; write to one of its member spaces`;
 const UNKNOWN = (id) => `Space '${id}' not found`;
 /** What `similar` answers once it has LOCATED its seed on a stack without vector search (see a-peer-token-meets-a-held-space...). */
 const SEED_LOCATED = /vectorSearch|Semantic recall is unavailable|unavailable|exists in space/i;
+/**
+ * The read doors that answer a view as an unknown space BY DESIGN: the client file change feed is ONE space's stream, and one cursor cannot cover
+ * several spaces' streams (bundle-255, `fileChangesSpaceRefusal` in server/src/files/file-changes.ts; its refusal of a view is held by
+ * the-file-change-feed-refuses-what-it-cannot-serve-db). Every other read door takes a view; these two are left out of the derivations below, and only these two.
+ */
+const ONE_SPACE_STREAM = { routes: new Set(['/api/files/:spaceId/changes']), tools: new Set(['file_changes']) };
 
 let d, owner, mixedOwner, admin, rowTok, floorTok, markers;
 const fmt = (a) => `${a.status ?? ''} ${(a.text ?? '').slice(0, 220)}`;
@@ -116,8 +122,8 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
   it('every derived read door accepts the owner\'s view id (REST path read rows, MCP read tools)', async () => {
     const { ROUTE_RIGHTS, TOOL_RIGHTS } = await import('../../server/dist/auth/space-rights.js');
     // The SSE stream is held open by design; its ticket door (POST .../events/ticket) is asked instead.
-    const paths = ROUTE_RIGHTS.filter(r => r.needs === 'read' && r.area !== 'schema' && r.scope === 'path' && r.route.includes(':spaceId') && !r.route.endsWith('/events'));
-    const tools = TOOL_RIGHTS.filter(r => r.needs === 'read' && r.area !== 'schema' && r.tool !== 'read_spill');
+    const paths = ROUTE_RIGHTS.filter(r => r.needs === 'read' && !ONE_SPACE_STREAM.routes.has(r.route) && r.area !== 'schema' && r.scope === 'path' && r.route.includes(':spaceId') && !r.route.endsWith('/events'));
+    const tools = TOOL_RIGHTS.filter(r => r.needs === 'read' && !ONE_SPACE_STREAM.tools.has(r.tool) && r.area !== 'schema' && r.tool !== 'read_spill');
     assert.ok(paths.length >= 8 && tools.length >= 9, `derived ${paths.length} path read route(s) and ${tools.length} read tool(s); the derivation is broken`);
     const refused = [];
     for (const r of paths) {
@@ -144,9 +150,9 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
     await db.collection(`${QA}_facts`).insertOne({ ...stored, _id: `${parent.body._id}-vp-fork`, fact: 'vp-solo fork', forkOf: parent.body._id, forkAt: stored.seq });
     await mustCreate(owner.key, 'solo', [QA]);
     // Only the doors that take no id but the space's: one with a record id would read 'x' on both sides and agree about nothing.
-    const paths = ROUTE_RIGHTS.filter(r => r.needs === 'read' && r.method === 'GET' && r.area !== 'schema' && r.scope === 'path'
+    const paths = ROUTE_RIGHTS.filter(r => r.needs === 'read' && !ONE_SPACE_STREAM.routes.has(r.route) && r.method === 'GET' && r.area !== 'schema' && r.scope === 'path'
       && /^[^:]*:spaceId[^:]*$/.test(r.route) && !r.route.endsWith('/events'));
-    const tools = TOOL_RIGHTS.filter(r => r.needs === 'read' && r.area !== 'schema' && r.tool !== 'read_spill');
+    const tools = TOOL_RIGHTS.filter(r => r.needs === 'read' && !ONE_SPACE_STREAM.tools.has(r.tool) && r.area !== 'schema' && r.tool !== 'read_spill');
     assert.ok(paths.length >= 6 && tools.length >= 9, `derived ${paths.length} path read route(s) and ${tools.length} read tool(s); the derivation is broken`);
     assert.ok(paths.some(r => r.route.endsWith('/forks')) && tools.some(t => t.tool === 'list_forks'), 'the fork list is not among the derived read doors');
     // The space's own name and the view's members list are the two things that differ by design; everything else must not.

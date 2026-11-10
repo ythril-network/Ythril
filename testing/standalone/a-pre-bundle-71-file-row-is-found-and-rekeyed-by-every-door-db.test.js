@@ -33,6 +33,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { build } from './_push-door.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -51,6 +52,8 @@ const SHAPES = [
 ];
 
 let d, forgetLegacyIndex, fileRowIdFor, getFileMeta;
+// Every read of a row below leaves out the FEED MARKER (`...NOT_A_FEED_MARKER`): since bundle-255 a re-key leaves one at the legacy spelling, and a
+// delete or move one at the key (soft delete is off here). A marker says the file is gone from that id; it is never the file's row.
 const rows = () => d.door.coll(S, 'files');
 
 /** A pre-bundle-71 row, as the doors of the base wrote it: a PEER's file with a description and tags, at `seq` 7. */
@@ -65,8 +68,8 @@ async function plant(shape, extra = {}) {
 }
 
 async function expectAtKey(shape, { seq, description } = {}) {
-  assert.equal(await rows().findOne({ _id: shape.legacy }), null, `the row is still at its legacy id '${shape.legacy}'`);
-  const row = await rows().findOne({ _id: shape.key });
+  assert.equal(await rows().findOne({ ...NOT_A_FEED_MARKER, _id: shape.legacy }), null, `the row is still at its legacy id '${shape.legacy}'`);
+  const row = await rows().findOne({ ...NOT_A_FEED_MARKER, _id: shape.key });
   assert.ok(row, `no row at the key '${shape.key}'`);
   assert.equal(row.path, shape.key);
   assert.equal(row.author?.instanceId, PEER, 'the row lost its author');
@@ -97,7 +100,7 @@ describe('a pre-bundle-71 file row is found and re-keyed by every door', { skip 
         assert.equal(meta._id, shape.key);
         assert.equal(meta.seq, 7);
         assert.equal(meta.description, 'the peer\'s description');
-        assert.ok(await rows().findOne({ _id: shape.legacy }), 'a read moved the row: a token holding only a read right caused a write');
+        assert.ok(await rows().findOne({ ...NOT_A_FEED_MARKER, _id: shape.legacy }), 'a read moved the row: a token holding only a read right caused a write');
         assert.deepEqual(await tombstonePaths(), []);
       });
 
@@ -132,8 +135,8 @@ describe('a pre-bundle-71 file row is found and re-keyed by every door', { skip 
           await plant(shape);
           const a = await d.del(via, shape.key);
           assert.equal(d.failed(a), false, JSON.stringify(a.body ?? a.text));
-          assert.equal(await rows().findOne({ _id: shape.legacy }), null, 'the legacy row survived the delete');
-          assert.equal(await rows().findOne({ _id: shape.key }), null, 'the row survived the delete');
+          assert.equal(await rows().findOne({ ...NOT_A_FEED_MARKER, _id: shape.legacy }), null, 'the legacy row survived the delete');
+          assert.equal(await rows().findOne({ ...NOT_A_FEED_MARKER, _id: shape.key }), null, 'the row survived the delete');
           assert.deepEqual(await tombstonePaths(), [shape.key], 'the delete left a tombstone at a path other than the key');
         });
 
@@ -141,9 +144,9 @@ describe('a pre-bundle-71 file row is found and re-keyed by every door', { skip 
           await plant(shape);
           const a = await d.move(via, shape.key, 'moved/there.txt');
           assert.equal(d.failed(a), false, JSON.stringify(a.body ?? a.text));
-          assert.equal(await rows().findOne({ _id: shape.legacy }), null, 'the legacy row survived the move');
-          assert.equal(await rows().findOne({ _id: shape.key }), null, 'the row stayed at the source');
-          const moved = await rows().findOne({ _id: 'moved/there.txt' });
+          assert.equal(await rows().findOne({ ...NOT_A_FEED_MARKER, _id: shape.legacy }), null, 'the legacy row survived the move');
+          assert.equal(await rows().findOne({ ...NOT_A_FEED_MARKER, _id: shape.key }), null, 'the row stayed at the source');
+          const moved = await rows().findOne({ ...NOT_A_FEED_MARKER, _id: 'moved/there.txt' });
           assert.ok(moved, 'the row did not arrive at the destination');
           assert.equal(moved.author?.instanceId, PEER, 'the move lost the row\'s author');
           assert.deepEqual(moved.tags, ['legacy', 'peer']);
@@ -154,11 +157,11 @@ describe('a pre-bundle-71 file row is found and re-keyed by every door', { skip 
         await plant(shape);
         const r = await d.door.push('/batch-upsert', { filemeta: [build.filemeta(S, shape.key, 8, { description: 'newer', tags: ['legacy', 'peer'], sizeBytes: 3 })] }, { spaceId: S });
         assert.equal(r.code, 200, JSON.stringify(r.body));
-        assert.equal(await rows().findOne({ _id: shape.legacy }), null, 'the legacy row survived the arrival');
-        const row = await rows().findOne({ _id: shape.key });
+        assert.equal(await rows().findOne({ ...NOT_A_FEED_MARKER, _id: shape.legacy }), null, 'the legacy row survived the arrival');
+        const row = await rows().findOne({ ...NOT_A_FEED_MARKER, _id: shape.key });
         assert.equal(row.seq, 8);
         assert.equal(row.description, 'newer');
-        assert.equal(await rows().countDocuments({}), 1, 'the key has two rows');
+        assert.equal(await rows().countDocuments({ ...NOT_A_FEED_MARKER }), 1, 'the key has two rows');
       });
 
       it('a sync cycle re-keys it, so a peer stops refusing it', async () => {
@@ -184,7 +187,7 @@ describe('a pre-bundle-71 file row is found and re-keyed by every door', { skip 
   describe('a row already at the key (3)', () => {
     const shape = SHAPES[2];
     const atKey = (seq, description) => build.filemeta(S, shape.key, seq, { description, tags: ['legacy', 'peer'], sizeBytes: 3, createdAt: T0, updatedAt: T0 });
-    const settle = async () => { await fileRowIdFor(S, shape.key); return { legacy: await rows().findOne({ _id: shape.legacy }), key: await rows().findOne({ _id: shape.key }) }; };
+    const settle = async () => { await fileRowIdFor(S, shape.key); return { legacy: await rows().findOne({ ...NOT_A_FEED_MARKER, _id: shape.legacy }), key: await rows().findOne({ ...NOT_A_FEED_MARKER, _id: shape.key }) }; };
 
     it('a legacy row of a HIGHER version replaces the one at the key', async () => {
       await plant(shape);

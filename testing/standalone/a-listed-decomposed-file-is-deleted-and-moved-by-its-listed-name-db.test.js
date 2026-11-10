@@ -34,6 +34,7 @@ import { Writable } from 'node:stream';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
+import { goneOrMarker } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -123,7 +124,8 @@ describe('a listed decomposed file is deleted and moved by the name the listing 
         assert.equal(d.failed(a), false, JSON.stringify(a.body ?? a.text));
         assert.deepEqual(onDisk(), [], 'the delete answered success and left the bytes on the disk');
         assert.deepEqual(await tombstonePaths(), [NAME], 'the delete did not leave exactly one tombstone, at the key');
-        assert.equal(await rows().findOne({ _id: NAME }), null, 'the row survived the delete');
+        // Since bundle-255 the delete leaves the FEED MARKER at the key (soft delete is off here): the file is gone, the marker is not its row.
+        assert.ok(goneOrMarker(await rows().findOne({ _id: NAME })), 'the row survived the delete');
         assert.equal(await heldSpellingOf(S, NAME), null, 'the file is still held under a spelling of its key');
         assert.equal((await restGet(NAME)).code, 404, 'the byte door still serves a deleted file');
       });
@@ -147,7 +149,7 @@ describe('a listed decomposed file is deleted and moved by the name the listing 
         assert.equal(d.failed(a), false, `a file the listing names and GET serves cannot be moved by that name: ${JSON.stringify(a.body ?? a.text)}`);
         assert.deepEqual(onDisk(), ['moved/there.txt'], 'the bytes are not at the destination alone');
         assert.equal(fs.readFileSync(path.join(rootDir(), 'moved/there.txt'), 'utf8'), CONTENT);
-        assert.equal(await rows().findOne({ _id: NAME }), null, 'the row stayed at the source');
+        assert.ok(goneOrMarker(await rows().findOne({ _id: NAME })), 'the row stayed at the source');
         assert.ok(await rows().findOne({ _id: 'moved/there.txt' }), 'the row did not follow the bytes');
         assert.deepEqual(await tombstonePaths(), [NAME], 'the old key is not tombstoned exactly once');
         assert.equal((await restGet(NAME)).code, 404);

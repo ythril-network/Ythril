@@ -32,6 +32,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { driverWriteFailures, loseNextCommitReply } from './_write-faults.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { NOT_A_FEED_MARKER, isFeedMarkerRow } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -45,7 +46,8 @@ const E2 = '22222222-2222-4222-8222-222222222222';
 let acts, F, tombstones, markerMod, finish, walk, timing, queue, worker, meta, adjacency;
 
 const files = () => acts.door.coll(S, 'files');
-const row = (id) => files().findOne({ _id: id });
+// The row at `id`, never the FEED MARKER a moved-away file leaves at its old id since bundle-255 (soft delete is off here): that file is gone from there.
+const row = (id) => files().findOne({ _id: id, ...NOT_A_FEED_MARKER });
 const status = (a) => acts.statusOf(a);
 const body = (a) => JSON.stringify(a.body ?? a.text);
 const linkTargets = async (id) => (await adjacency.linksStartingFrom(S, [id])).map(r => `${r.toKind}:${r.to}`).sort();
@@ -60,7 +62,10 @@ function failFilesInsertOnCall(n, err) {
   let calls = 0;
   let fired = 0;
   proto.insertMany = async function counted(...args) {
-    if (this.collectionName === `${S}_files` && ++calls === n) { fired++; throw err; }
+    // Counts the inserts that CARRY rows: since bundle-255 a batch also inserts the feed markers its rows leave at their old ids, a second
+    // insertMany of the same batch that is not "the next batch".
+    const carries = Array.isArray(args[0]) && !args[0].every(isFeedMarkerRow);
+    if (this.collectionName === `${S}_files` && carries && ++calls === n) { fired++; throw err; }
     return original.apply(this, args);
   };
   return { restore: () => { proto.insertMany = original; }, fired: () => fired };

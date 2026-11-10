@@ -30,6 +30,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { sentenceOf } from './_move-destination.mjs';
+import { NOT_A_FEED_MARKER } from './_feed-marker-row.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -40,7 +41,8 @@ const LATER = (n = 1) => new Date(Date.now() + n * DAY);
 
 let acts, tombstones, markerMod, finish, walk, timing, plan, registry, seen;
 const files = () => acts.door.coll(S, 'files');
-const row = (id) => files().findOne({ _id: id });
+// The row at `id`, never the FEED MARKER a moved-away file leaves at its old id since bundle-255 (soft delete is off here): the file is gone from there.
+const row = (id) => files().findOne({ _id: id, ...NOT_A_FEED_MARKER });
 const chunkRow = (parent, i, content) => ({
   _id: `${parent}#chunk-${i}`, spaceId: S, path: `${parent}#chunk-${i}`, parentFileId: parent, chunkIndex: i, content, tags: [], createdAt: T0, updatedAt: T0, sizeBytes: content.length,
 });

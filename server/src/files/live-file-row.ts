@@ -59,3 +59,24 @@ export const NOT_A_FLAGGED_ROW = Object.freeze({
 export function notFlaggedIfFile(kind: string | undefined): typeof NOT_A_FLAGGED_ROW | undefined {
   return kind === 'file' || kind === 'files' ? NOT_A_FLAGGED_ROW : undefined;
 }
+
+/**
+ * "Not a FEED MARKER": the row a deletion leaves at a file's path where soft delete is off (`files/feed-marker.ts`, bundle-255). Frozen.
+ *
+ * ## What it prevents
+ *
+ * A feed marker is the client change feed's record that a path was emptied, not a record of the file: where soft delete is off the operator chose to keep
+ * NO record of a deleted file. The live-row reads already leave it out (it carries `deletedAt`), but the `filter` door reads `files` raw, on purpose, so
+ * it can answer the audit rows soft delete keeps — and so it served every marker as a row: a file deleted with soft delete off stayed in `filter` for the
+ * whole feed window (`files.test.js` and `mcp-tools.test.js` "the metadata record is removed", bundle-255 Full run). {@link withoutFeedMarkersIfFiles}
+ * puts it under the caller's predicate.
+ */
+export const NOT_A_FEED_MARKER = Object.freeze({ feedMarker: Object.freeze({ $exists: false }) });
+
+/**
+ * The caller's `filter` over the collection `kind`, with feed markers left out when `kind` is the files collection: `{ $and: [filter, NOT_A_FEED_MARKER] }`,
+ * so a caller's own `feedMarker` key narrows, never widens. Any other kind answers `filter` itself.
+ */
+export function withoutFeedMarkersIfFiles<F extends object>(kind: string, filter: F): F | { $and: [F, typeof NOT_A_FEED_MARKER] } {
+  return kind === 'files' ? { $and: [filter, NOT_A_FEED_MARKER] } : filter;
+}
