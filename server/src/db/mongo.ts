@@ -192,6 +192,21 @@ export function getMongo(): MongoClient {
 }
 
 /**
+ * Is `client` the one the store uses now? False once `closeMongo` has run, and once a later `connectMongo` replaced it.
+ *
+ * ## What it prevents
+ *
+ * A loop that outlives its connection. `pollVectorIndexReady` asked the store once a second for up to a minute whatever
+ * happened to the client in between; after a close every ask threw, the throw was recorded as "not ready yet", and the
+ * poll ran out its window against a client nobody would open again (Q-625). A loop that keeps the client it started on
+ * and asks this before each read ends at its next tick instead. It is an identity test on purpose, not an error class: an
+ * outage on the SAME client throws the same driver errors, and a poll must keep waiting through one.
+ */
+export function isCurrentClient(client: MongoClient): boolean {
+  return _client === client;
+}
+
+/**
  * Who hears about writes to a space's record collections (Q-165) — see `db/record-write-observer.ts`.
  *
  * A registry rather than an import, so the db layer does not depend on the modules that listen:

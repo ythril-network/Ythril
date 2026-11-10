@@ -6,7 +6,7 @@
  * of an exhaustive ENN scan. Cohesive and self-contained — it does not reach back into space
  * lifecycle; spaces.ts calls in, not the other way round.
  */
-import { getDb, asDoc } from '../db/mongo.js';
+import { getDb, getMongo, isCurrentClient, asDoc } from '../db/mongo.js';
 import { FACE_DESCRIPTOR_DIMS } from '../files/media/face-descriptor.js';
 import { getConfig, getEmbeddingConfig, getFaceRecognitionConfig } from '../config/loader.js';
 import { mutateConfigRetrying } from '../config/mutate-config-retrying.js';
@@ -612,6 +612,9 @@ export async function pollVectorIndexReady(
   target: ProbeTarget,
   opts: { timeoutMs?: number } = {},
 ): Promise<boolean> {
+  // The client this poll asks through. Once the store closes it (shutdown) or replaces it, every further ask would throw
+  // and be read as "not ready yet" until the window ran out (Q-625), so the loop ends at its next tick instead.
+  const startedOn = getMongo();
   const coll = getDb().collection(`${spaceId}_${collectionSuffix}`);
   const attempts = Math.max(1, Math.round((opts.timeoutMs ?? 60_000) / 1000));
   let lastSeen = 'nothing yet';
@@ -620,6 +623,10 @@ export async function pollVectorIndexReady(
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     await new Promise(r => setTimeout(r, 1000));
+    if (!isCurrentClient(startedOn)) {
+      log.debug(`Vector search index ${peerText(indexName)}: the database connection this poll started on was closed — abandoning the poll`);
+      return false;
+    }
     /*
      * THE SPACE IS GONE — stop, rather than waiting out the window for indexes nobody will ever create.
      *
