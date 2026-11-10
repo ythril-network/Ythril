@@ -50,7 +50,7 @@ import { openPullDoor } from './_pull-door.mjs';
 import { openByteDoor } from './_byte-door.mjs';
 import { UPLOAD_DOORS } from './_byte-door-uploads.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
-import { waitFor } from '../_shared/wait-for.mjs';
+import { runWorkerUntil } from './_media-worker-run.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -100,16 +100,8 @@ function configure(reprocessSyncedImages) {
 
 /** Run the real worker until the job for `id` has finished, and say whether the face analysis ran in it. */
 async function facesRanWhileWorking(id) {
-  const { lines } = await door.logsDuring(async () => {
-    worker.startMediaEmbeddingWorker();
-    try {
-      await waitFor(async () => ['complete', 'failed'].includes((await jobOf(id))?.status), 30_000, 100,
-        async () => `the worker never finished the job for ${id}: ${JSON.stringify(await jobOf(id))}`);
-    } finally {
-      worker.stopMediaEmbeddingWorker();
-    }
-  });
-  const job = await jobOf(id);
+  // A timeout says what the worker logged and how the claim walk saw the space (Q-729): this wait is where it was once silent.
+  const { job, lines } = await runWorkerUntil({ worker, jobOf, space: S, id });
   assert.equal(job?.status, 'complete', `fixture: the media job did not complete (${JSON.stringify(job)})`);
   assert.ok(await captionOf(id), `fixture: the caption chunk was not stored for ${id}: the job did not run the image embedder`);
   return lines.some(l => l.includes(`image decode failed for ${S}/${id}`));

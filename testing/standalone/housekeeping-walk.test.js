@@ -31,6 +31,7 @@ import { spaceFailureReporter } from '../../server/dist/util/space-failure.js';
 import { onHousekeepingSignal } from '../../server/dist/util/housekeeping-signals.js';
 import * as wb from '../../server/dist/db/write-bound.js';
 import { StoreTimeout } from '../../server/dist/db/write-timeout.js';
+import { PositionsBuilding } from '../../server/dist/util/errors.js';
 import { elapse } from '../_shared/sleep.mjs';
 
 const STEP = 'Test step';
@@ -427,6 +428,31 @@ describe('quarantine: a space that hung is not asked again for a while', () => {
     const { walk } = make();
     assert.doesNotThrow(() => walk.liftQuarantine('nobody'));
     assert.deepEqual(walk.quarantinedSpaces(), []);
+  });
+
+  it('a probe that answers not-ready keeps the quarantine but is not the last probe: the space is asked again after its window', async () => {
+    // Q-729: the not-ready branch left the space marked as being probed, and a space being probed is refused by every walk, so
+    // a quarantined space that once answered "positions owed" was never asked again by any walk, claims included.
+    const { walk, clock } = make();
+    await walk.eachSpace(STEP, ['a'], script({ a: timeout }).fn);
+    clock.t += QUARANTINE_BASE_MS;
+    const notReady = await walk.eachSpace(STEP, ['a'], script({ a: () => new PositionsBuilding('a') }).fn);
+    assert.deepEqual(notReady.skipped, ['a'], 'fixture: the probe did not answer not-ready');
+    clock.t += QUARANTINE_MAX_MS;
+    const next = script();
+    await walk.eachSpace(STEP, ['a'], next.fn);
+    assert.deepEqual(next.ran, ['a'], 'a space that answered not-ready on its probe was refused by every later walk');
+  });
+
+  it('a probe a write lifted that answers not-ready leaves the next write able to lift it again', async () => {
+    const { walk } = make();
+    await walk.eachSpace(STEP, ['a'], script({ a: timeout }).fn);
+    walk.liftQuarantine('a');
+    await walk.eachSpace(STEP, ['a'], script({ a: () => new PositionsBuilding('a') }).fn);
+    walk.liftQuarantine('a');
+    const lifted = script();
+    await walk.eachSpace(STEP, ['a'], lifted.fn);
+    assert.deepEqual(lifted.ran, ['a'], 'a second write could not lift a space whose lifted probe answered not-ready');
   });
 
   it('an ordinary failure on the probe ends the quarantine: the space answered, it is not hung', async () => {

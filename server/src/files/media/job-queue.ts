@@ -494,6 +494,9 @@ const STALL_RESET_STEP = declareStep('Media stall reset');
 /** Test seam: forget the probe hint, so the next claim is a full scan (the embed queue's twin is `resetEmbedPendingHint`). */
 export const resetMediaPendingHint = (): void => _signal.reset();
 
+/** Diagnostics: will the claim walk probe this space on its next claim, before a full scan is due? Read only. */
+export const mediaSpaceIsHinted = (spaceId: string): boolean => _signal.isHinted(spaceId);
+
 // ── Worker wake-up ──────────────────────────────────────────────────────────
 //
 // On an empty queue the worker backs its poll interval off to workerMaxPollIntervalMs (30s by
