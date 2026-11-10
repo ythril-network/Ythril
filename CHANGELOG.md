@@ -22,10 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** a file deletion (own, folder, TTL, a peer's, a sidecar's) takes a position in the same write that flags or marks the row.
 - **Testing:** every `node --test` the standalone runner starts is time-bounded: a test or hook pending past 15 minutes fails, and a batch that never exits is ended and named.
 - **Testing:** the standalone harness no longer changes `setTimeout` after a close; it worked around the search-index check fixed below.
+- **Testing:** a test that waits on the media worker and times out says what the worker logged during the wait, and whether the queue was still checking the job's space or had set it aside.
 
 ### Fixed
 
 - **Spaces:** a search-index readiness check stops within a second when its database connection closes, instead of asking the closed connection for up to a minute.
+- **Housekeeping:** a space set aside after a slow answer is checked again once its pause ends, even when its last check found it still building its positions. Before, no background task, the media queue included, checked that space again until a restart.
 
 ## [6.5.5] — 2026-11-08
 

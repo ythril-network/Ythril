@@ -45,6 +45,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { runWorkerUntil } from './_media-worker-run.mjs';
 import { goneOrMarker } from './_feed-marker-row.mjs';
 
 const skip = await mongoSkipReason();
@@ -111,14 +112,8 @@ async function run({ rel, bytes, contentType, description, until = ['complete', 
   await metaMod.upsertFileMeta(SPACE, rel, bytes.length, { ...(description !== undefined ? { description } : {}), sha256 });
   await dispatch.dispatchFileProcessing(SPACE, rel, { bytes: bytes.length, sha256, contentType });
   const before = await rowOf(rel);
-  worker.startMediaEmbeddingWorker();
-  try {
-    await waitFor(async () => (typeof until === 'function' ? until(await jobOf(rel)) : until.includes((await jobOf(rel))?.status)), 60_000, 100,
-      async () => `the worker never ended the job for ${rel}: ${JSON.stringify(await jobOf(rel))}`);
-  } finally {
-    worker.stopMediaEmbeddingWorker();
-  }
-  return { before, after: await rowOf(rel), job: await jobOf(rel), abs };
+  const { job } = await runWorkerUntil({ worker, jobOf, space: SPACE, id: rel, until, timeoutMs: 60_000 });
+  return { before, after: await rowOf(rel), job, abs };
 }
 
 describe('the real media worker leaves the file row as it leaves it today (real MongoDB, model endpoints and ffmpeg stubbed)', { skip }, () => {
@@ -335,10 +330,9 @@ describe('the real media worker leaves the file row as it leaves it today (real 
       await metaMod.upsertFileMeta(SPACE, rel, 100, {});
       await dispatch.dispatchFileProcessing(SPACE, rel, { bytes: 100, sha256: 'ee'.repeat(32), contentType: 'image/png' });
 
-      worker.startMediaEmbeddingWorker();
       try {
-        await waitFor(async () => ['complete', 'failed'].includes((await jobOf(rel))?.status), 60_000, 100, async () => JSON.stringify(await jobOf(rel)));
-      } finally { worker.stopMediaEmbeddingWorker(); delete process.env['YTHRIL_MASTER_KEY']; stored.resetStoredKeyCacheForTests(); }
+        await runWorkerUntil({ worker, jobOf, space: SPACE, id: rel, timeoutMs: 60_000 });
+      } finally { delete process.env['YTHRIL_MASTER_KEY']; stored.resetStoredKeyCacheForTests(); }
 
       const job = await jobOf(rel);
       const row = await rowOf(rel);

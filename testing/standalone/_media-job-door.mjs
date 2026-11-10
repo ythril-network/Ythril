@@ -39,7 +39,7 @@ import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
 import { openPushDoor } from './_push-door.mjs';
-import { waitFor } from '../_shared/wait-for.mjs';
+import { runWorkerUntil } from './_media-worker-run.mjs';
 
 export { MARKER, streamOfSize } from './_sized-stream.mjs';
 
@@ -167,16 +167,10 @@ export async function openMediaJobDoor({ suite, faces = false, secret = false, v
     const now = new Date().toISOString();
     await door.coll(space, 'files').insertOne({ _id: rel, spaceId: space, path: rel, tags: [], createdAt: now, updatedAt: now, sizeBytes: size, seq: 1, mimeType: mime });
     await queue.enqueueMediaJob(space, rel, mime, mediaType);
-    worker.startMediaEmbeddingWorker();
-    try {
-      const running = whileRunning ? whileRunning({ abs, rel }) : Promise.resolve();
-      await waitFor(async () => until.includes((await jobOf(rel))?.status), timeoutMs, 100,
-        async () => `the worker never ended the job for ${rel}: ${JSON.stringify(await jobOf(rel))}`);
-      await running;
-    } finally {
-      worker.stopMediaEmbeddingWorker();
-    }
-    return { job: await jobOf(rel), abs, size };
+    const { job } = await runWorkerUntil({
+      worker, jobOf, space, id: rel, until, timeoutMs, whileRunning: whileRunning ? () => whileRunning({ abs, rel }) : undefined,
+    });
+    return { job, abs, size };
   }
 
   return {

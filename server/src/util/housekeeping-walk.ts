@@ -309,6 +309,18 @@ export function createHousekeepingWalk(
     return Math.round(((q.cooldown.until() ?? at) - at) / 1000);
   };
 
+  /**
+   * A probe of a quarantined space ended without saying whether the space is hung (the store was down, or the space owes its
+   * positions): the quarantine stands, and the next probe is allowed once its window ends or a write lifts it.
+   *
+   * What it prevents: a space refused for ever. `admit` lets one probe through and marks it; a branch that returns without
+   * ending the probe leaves the mark, and `admit` refuses a marked space on every walk, claims included (Q-729).
+   */
+  const endProbe = (spaceId: string): void => {
+    const held = quarantine.get(spaceId);
+    if (held) held.probing = false;
+  };
+
   /** The space answered: it is not hung. */
   const endQuarantine = (spaceId: string): void => {
     const q = quarantine.get(spaceId);
@@ -372,14 +384,14 @@ export function createHousekeepingWalk(
       const verdict = await walkVerdict(err, { storeAnswers });
       if (verdict === 'space-not-ready') {
         // Not a failure and not a hang: the space owes its positions (`PositionsBuilding`). Skipped this tick, said once per window, and the store
-        // did answer, so a quarantine or a stall run is not begun and a hung one is not ended by it.
+        // did answer, so a quarantine or a stall run is not begun and a hung one is not ended by it. Its probe is over all the same.
+        endProbe(spaceId);
         slots[index] = { spaceId, status: 'skipped' };
         reporter.spaceFailure(ctx.step, spaceId, err, { kind: verdict, when });
         return;
       }
       if (verdict === 'store-down') {
-        const held = quarantine.get(spaceId);
-        if (held) held.probing = false;
+        endProbe(spaceId);
         failed.push({ spaceId, step: ctx.step, reason: failureReason(verdict, err) });
         reporter.storeDown(step, err);
         budget.noteStoreDown(err);
