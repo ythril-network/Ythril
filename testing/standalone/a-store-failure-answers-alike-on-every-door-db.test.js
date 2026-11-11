@@ -271,7 +271,26 @@ const REPORTS_THE_STORE = new Map([
   // space whose count failed is listed without one rather than failing the whole listing.
   ['GET /api/spaces?counts=true', 'the space listing with optional counts: a space whose count failed is listed without them'],
   // Asked since the probes find a stored file (bundle-30 I14): an empty directory never reached the store.
-  ['GET /api/files/:spaceId', 'the Files listing is read from disk; the metadata it adds (status, tags, folder sizes, live stage) is optional per member, and a member whose read failed is listed without it (`enrichEntries`)'],
+  // The listing REPORTS the failure: it answers 200 with the entries and names the metadata read that failed in `metadataIncomplete`
+  // (a closed vocabulary of reasons, never the driver's text), as `usageIncomplete` does for a space's usage (bundle-70, Q-341).
+  // `REPORTS_ITS_FAILURE` below holds it to saying so; before, it swallowed the failure and listed the files bare.
+  ['GET /api/files/:spaceId', 'the Files listing is read from disk and reports the metadata read that failed: `metadataIncomplete` names it (a closed vocabulary of reasons) beside the entries, which are listed without that metadata (`enrichEntries`)'],
+]);
+
+/**
+ * What a door in {@link REPORTS_THE_STORE} must say when the store failed under it, judged on its answer: a door excused from the 503
+ * because it reports is held to the report. Each check returns what is wrong with the answer, or `null`. A door whose reason says it
+ * reports and whose check is missing here is the same slip as a door that answers around the store with no reason.
+ */
+const REPORTS_ITS_FAILURE = new Map([
+  ['GET /api/files/:spaceId', (a) => {
+    let body; try { body = JSON.parse(a.raw); } catch { return `not JSON: ${a.raw.slice(0, 80)}`; }
+    if (a.status !== 200) return `status ${a.status}, not the listing`;
+    const reasons = body?.metadataIncomplete;
+    if (!Array.isArray(reasons) || reasons.length === 0) return `the listing answered 200 and does not say its metadata read failed (metadataIncomplete ${JSON.stringify(reasons)})`;
+    const outside = reasons.filter(r => typeof r !== 'string' || !/^[a-z]+(?:[-_][a-z]+)*$/.test(r));
+    return outside.length ? `reasons outside the closed vocabulary: ${JSON.stringify(outside)}` : null;
+  }],
 ]);
 
 describe('a store failure answers alike on every door', { skip }, () => {
@@ -478,6 +497,18 @@ describe('a store failure answers alike on every door', { skip }, () => {
         .filter(l => l.includes(a.requestId) && l.includes(MARKER));
       if (logged.length > 1) why.push(`driver text logged ${logged.length} times: ${logged.map(l => l.slice(0, 140)).join(' | ')}`);
       if (why.length) wrong.push(`${d.name}: ${why.join(', ')} — ${a.raw.slice(0, 160)}`);
+    }
+    // A door excused because it REPORTS the store reports it, for the faults that fail reads (the write-only one never reaches it).
+    if (answers === 'retry') {
+      for (const [name, says] of REPORTS_ITS_FAILURE) {
+        const hit = reached.find(({ d }) => d.name === name);
+        if (!hit) { wrong.push(`${name}: reports the store failure, and no request of it reached the failing store (the probe stopped finding a stored file)`); continue; }
+        const problem = says(hit.a);
+        if (problem) wrong.push(`${name}: ${problem}`);
+      }
+    }
+    for (const name of REPORTS_ITS_FAILURE.keys()) {
+      assert.ok(REPORTS_THE_STORE.has(name), `${name} is held to its report here and is not in REPORTS_THE_STORE`);
     }
     if (messages.size > 1) {
       wrong.push(`one failure, ${messages.size} spellings: ${[...messages].map(([m, ds]) => `${JSON.stringify(m)} (${ds.length} doors, e.g. ${ds[0]})`).join(' | ')}`);
