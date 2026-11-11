@@ -617,6 +617,15 @@ Caches are writes to a shared store with a size limit, so the rule is about who 
 - `ONNXRUNTIME_NODE_INSTALL_CUDA=skip` is set for every `npm ci`, because that package's install script otherwise
   downloads GPU binaries from a GitHub release no runner here can use, and the build then depends on that download. A gate
   holds it for every install in every workflow.
+- **A build refuses an install that is not the lock's, by name, before the compiler runs.** `scripts/tsc.mjs`, which every
+  package's build goes through, compares each package installed under a `node_modules` folder with the version
+  `package-lock.json` pins, and stops on the first difference: `installed mongodb 7.1.1, package-lock.json pins 7.8.0: run
+  npm ci`. It also stops on a package the workspace being built depends on (directly or through another) that the lock
+  requires and the install does not hold: `package-lock.json requires mongodb 7.8.0, which is not installed: run npm ci`.
+  A checkout whose packages fell behind the lock used to fail the server build with type errors that named code and never
+  the install. It leaves alone an optional entry that is not installed (a platform binary for another platform), a package
+  only another workspace needs (the image installs the server and the schema only), and a build with no lock beside the
+  scripts folder. The cure is always `npm ci`.
 
 To see what a run's cache did, read the build step's log in `prepare`: the layers it restored are marked cached.
 
