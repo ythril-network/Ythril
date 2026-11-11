@@ -288,8 +288,10 @@ describe('the sync manifest names what it could not look at', { skip }, () => {
       assert.equal(res.body.code, 'file_system_fault');
       assert.equal(res.body.retryable, false);
       const wire = JSON.stringify(res.body);
-      for (const form of [process.env['DATA_ROOT'], process.env['DATA_ROOT'].replaceAll('\\', '\\\\'), process.env['DATA_ROOT'].replaceAll('\\', '/'), 'EACCES']) {
-        assert.ok(!wire.includes(form), `the answer carries the data root or the errno: ${wire}`);
+      // The errno class is allowed: it is part of the one sentence every door gives a file_system_fault (fileSystemRefusalMessage,
+      // pinned by a-space-rename-into-a-leftover-destination-db). A path, the data root or an entry's name is not.
+      for (const form of [process.env['DATA_ROOT'], process.env['DATA_ROOT'].replaceAll('\\', '\\\\'), process.env['DATA_ROOT'].replaceAll('\\', '/'), 'a.txt']) {
+        assert.ok(!wire.includes(form), `the answer carries the data root or an entry: ${wire}`);
       }
     });
 
