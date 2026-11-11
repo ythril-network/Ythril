@@ -42,8 +42,16 @@ import { bodyOf } from './_structural-window.mjs';
  * - a stat promise ending `.then(ok, fail)` with both arms constant — `() => true, () => false` and the inverted
  *   `() => false, () => true`.
  *
- * Not hunted: `existsSync`, which swallows every failure by its own definition; its callers read config and backup
- * paths, never a stored file's bytes, so they do not ask this question.
+ * ## What is hunted below (Q-350 a, bundle-70 S1)
+ *
+ * `existsSync` swallows every failure by its own definition, and "its callers read config and backup paths, never a stored file's
+ * bytes" was the reason it was not hunted. That was a reason about WHICH file, and the defect does not care: a backup that skips
+ * the users' files, a restore that condemns a whole backup as "holds no file", a config that opens first-run setup, were all the
+ * same answer, "unreadable" read as "not there", given to a caller that could not tell. So the other half of the rule is gated
+ * here too: no source under `server/src` asks `existsSync` / `accessSync` / `fs.exists` (use `pathPresentSync`, `util/path-present.ts`,
+ * which throws what is not a missing path), and none walks a directory with a `readdir` whose failure it swallows (a partial list
+ * read as the whole). A caller that really means "absent or unreadable are the same to me" is in the exemption table below WITH
+ * the reason, and a row whose file no longer holds the shape fails the gate as stale, so the table cannot outlive its cause.
  */
 const ARROW = String.raw`(?:\(\s*(?:\w+(?:\s*:\s*[\w.]+)?)?\s*\)|\w+)\s*=>\s*`;
 const SWALLOWED_STAT_SPELLINGS = () => [
@@ -53,6 +61,59 @@ const SWALLOWED_STAT_SPELLINGS = () => [
 ];
 /** Every match of every spelling in `code`, by index. */
 const swallowedStats = (code) => SWALLOWED_STAT_SPELLINGS().flatMap(re => [...code.matchAll(re)].map(m => m.index));
+
+/**
+ * Every spelling of a synchronous "is it there" whose only answers are yes and no: the call, a named import
+ * (`import { existsSync } from 'node:fs'`), a renamed one (`existsSync as exists`), `accessSync`, and the callback `fs.exists`.
+ */
+const EXISTENCE_CHECK_SPELLINGS = () => [/\bexistsSync\b/g, /\baccessSync\b/g, /\bfs\.exists\b/g];
+
+/**
+ * Every spelling of a directory read whose failure is swallowed, so a partial or empty list stands for the directory:
+ * a `try` holding a `readdir` / `readdirSync` / `opendir` whose `catch` is empty, comment-only, or only `return …;` /
+ * `continue` / `break`; and a read ending `.catch(() => [])` (or null / undefined / 0). The `try` body may hold one level of
+ * braces (the options object of `readdir(dir, { withFileTypes: true })`).
+ */
+const SWALLOWING_CATCH = String.raw`catch\s*(?:\(\s*\w*\s*\))?\s*\{\s*(?:return\b[^;}]*;?|continue\s*;?|break\s*;?)?\s*\}`;
+const TRY_BODY = String.raw`(?:[^{}]|\{[^{}]*\})*?`;
+const SWALLOWED_READDIR_SPELLINGS = () => [
+  new RegExp(String.raw`try\s*\{${TRY_BODY}\b(?:readdir|readdirSync|opendir|opendirSync)\(${TRY_BODY}\}\s*${SWALLOWING_CATCH}`, 'g'),
+  new RegExp(String.raw`\b(?:readdir|readdirSync|opendir)\([^;]*?\.catch\(\s*${ARROW}(?:\[\]|null|undefined|0)\s*\)`, 'g'),
+];
+
+/**
+ * Callers that mean "absent and unreadable are the same to me", by file, with the reason. A row is STALE (and fails) when its file
+ * no longer holds the shape: the table lists what is left to justify, and never a place the defect used to be.
+ */
+const EXISTENCE_CHECK_EXEMPT = {
+  'server/src/local-agent-connector/index.ts': 'a separate process\'s own files (its token, tunnel pid and cloudflared credentials in its own home): absent and unreadable both mean "set it up again", and it reads no instance state',
+  'server/src/brain/local-pipeline.ts': 'the local model cache: absent and unreadable both mean "download the model", and a download that cannot write fails loudly',
+  'server/src/util/entry-path.ts': 'chooses which of this install\'s two entry files to spawn: a refused look falls to the next candidate and the spawn itself fails loudly',
+};
+const SWALLOWED_READDIR_EXEMPT = {
+  'server/src/files/stored-bytes.ts': 'sweepStoredTmp: a best-effort boot sweep of orphaned temp files; an unreadable temp directory leaves them for the next boot and no reader depends on the list',
+  'server/src/files/manifest.ts': 'the manifest walk: its unreadable directories are Q-350(b) (bundle-70 S2), which names them in `unreadable`; this row goes with that change, and the stale check fails it then',
+};
+
+/**
+ * The hits of `spellings` over `sources` (`{ file, code }`, comments already blanked), minus the exempt files; and the exempt files
+ * that hold no hit (stale). Takes the sources as data so a planted copy of the defect is proven through the same function.
+ */
+function gateOver(sources, spellings, exempt) {
+  const hits = [];
+  const hitFiles = new Set();
+  for (const { file, code } of sources) {
+    for (const re of spellings()) {
+      for (const m of code.matchAll(re)) {
+        hitFiles.add(file);
+        if (!(file in exempt)) hits.push(`${file}:${code.slice(0, m.index).split('\n').length}`);
+      }
+    }
+  }
+  const stale = Object.keys(exempt).filter(f => !hitFiles.has(f));
+  return { hits, stale };
+}
+const tracked = () => trackedSources('server/src').map(f => ({ file: f, code: blankComments(readFileSync(path.join(REPO_ROOT, f), 'utf8')) }));
 
 /** The one place a failure may be read as "this path does not exist" by its code. */
 const MISSING_BY_CODE = () => /(['"])(?:ENOENT|ENOTDIR)\1/g;
@@ -147,5 +208,90 @@ describe('are the bytes here: one answer', () => {
       assert.doesNotMatch(bodyOf(at(f), fn), /\bfileRecordPaths\(/,
         `${f} ${fn} loads every record id under a path to answer yes or no — ask hasLiveFileRecordAt/Under`);
     }
+  });
+
+  describe('an unreadable path is not read as absent by a synchronous check or a swallowed readdir (Q-350 a)', () => {
+    it('the existence-check patterns match every spelling, and the one answer matches none', () => {
+      const spellings = [
+        'if (!fs.existsSync(p)) return null;',
+        'import { existsSync } from \'node:fs\';',
+        'import { existsSync as exists } from \'fs\';',
+        'if (fsSync.existsSync(path.join(dir, \'manifest.json\'))) {}',
+        'try { fs.accessSync(p); return true; } catch { return false; }',
+        'fs.exists(p, cb);',
+      ];
+      for (const s of spellings) {
+        const n = EXISTENCE_CHECK_SPELLINGS().flatMap(re => [...s.matchAll(re)]).length;
+        assert.ok(n >= 1, `the patterns do not match this spelling — fix them first:\n${s}`);
+      }
+      for (const answer of ['if (pathPresentSync(p)) return 1;', 'const gone = isMissingPath(err);', 'await bytesPresent(abs);']) {
+        assert.deepEqual(EXISTENCE_CHECK_SPELLINGS().flatMap(re => [...answer.matchAll(re)]), [], `the patterns match the one answer: ${answer}`);
+      }
+    });
+
+    it('the swallowed-readdir patterns match every spelling, and a readdir that rethrows or reports matches none', () => {
+      const spellings = [
+        'let names;\n  try {\n    names = await fs.readdir(dir);\n  } catch {\n    return;\n  }',
+        'let entries;\n    try {\n      entries = await fs.readdir(dir, { withFileTypes: true });\n    } catch {\n      return;\n    }',
+        'try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return []; }',
+        'try { names = fs.readdirSync(dir); } catch (err) { continue; }',
+        'try { names = fs.readdirSync(dir); } catch { }',
+        'const names = await fs.readdir(dir).catch(() => []);',
+        'const names = await fsp.readdir(dir, { withFileTypes: true }).catch(() => null);',
+      ];
+      for (const s of spellings) {
+        const n = SWALLOWED_READDIR_SPELLINGS().flatMap(re => [...s.matchAll(re)]).length;
+        assert.ok(n >= 1, `the patterns do not match this spelling — fix them first:\n${s}`);
+      }
+      const answers = [
+        'try { names = await fs.readdir(dir); } catch (err) { if (isMissingPath(err)) return; throw err; }',
+        'try { names = await fs.readdir(dir); } catch (err) { unreadable.push(dir); return; }',
+        'const names = await fs.readdir(dir);',
+        'try { await fs.writeFile(p, x); } catch { return; }',
+      ];
+      for (const answer of answers) {
+        assert.deepEqual(SWALLOWED_READDIR_SPELLINGS().flatMap(re => [...answer.matchAll(re)]), [], `the patterns match an answer that is not the defect: ${answer}`);
+      }
+    });
+
+    it('the gate finds a planted copy of each defect, honours an exemption, and fails a stale one', () => {
+      const planted = [
+        { file: 'server/src/x/planted-exists.ts', code: 'export const here = (p: string) => fs.existsSync(p);\n' },
+        { file: 'server/src/x/planted-readdir.ts', code: 'async function walk(d: string) {\n  let e;\n  try { e = await fs.readdir(d, { withFileTypes: true }); } catch { return; }\n}\n' },
+        { file: 'server/src/x/exempt.ts', code: 'const a = fs.existsSync(p);\n' },
+        { file: 'server/src/x/clean.ts', code: 'const a = pathPresentSync(p);\n' },
+      ];
+      const exists = gateOver(planted, EXISTENCE_CHECK_SPELLINGS, { 'server/src/x/exempt.ts': 'a reason', 'server/src/x/gone.ts': 'a reason' });
+      assert.deepEqual(exists.hits, ['server/src/x/planted-exists.ts:1'], 'the planted existsSync was not found, or the exemption was not honoured');
+      assert.deepEqual(exists.stale, ['server/src/x/gone.ts'], 'an exemption row whose file holds no such check was not reported stale');
+      const dirs = gateOver(planted, SWALLOWED_READDIR_SPELLINGS, {});
+      assert.deepEqual(dirs.hits, ['server/src/x/planted-readdir.ts:3'], 'the planted swallowed readdir was not found');
+    });
+
+    it('every exemption row names a reason and a tracked file', () => {
+      const trackedFiles = new Set(trackedSources('server/src'));
+      for (const table of [EXISTENCE_CHECK_EXEMPT, SWALLOWED_READDIR_EXEMPT]) {
+        for (const [file, reason] of Object.entries(table)) {
+          assert.ok(trackedFiles.has(file), `${file} is exempted and is not a tracked source`);
+          assert.ok(reason.length > 40, `${file} is exempted without a reason`);
+        }
+      }
+    });
+
+    it('no source under server/src asks existsSync / accessSync / fs.exists, outside the exemption table', () => {
+      const { hits, stale } = gateOver(tracked(), EXISTENCE_CHECK_SPELLINGS, EXISTENCE_CHECK_EXEMPT);
+      assert.deepEqual(stale, [], 'these exempted files no longer ask an existence check: delete their rows');
+      assert.deepEqual(hits,  [],
+        'these answer "is it here" with a call that reads ANY failure (a permission refusal, a path on the way that cannot be searched) as "no" — '
+        + 'use pathPresentSync (util/path-present.ts), which throws what is not a missing path; or add the file to EXISTENCE_CHECK_EXEMPT with the reason');
+    });
+
+    it('no source under server/src walks a directory with a readdir whose failure it swallows, outside the exemption table', () => {
+      const { hits, stale } = gateOver(tracked(), SWALLOWED_READDIR_SPELLINGS, SWALLOWED_READDIR_EXEMPT);
+      assert.deepEqual(stale, [], 'these exempted files no longer swallow a readdir: delete their rows');
+      assert.deepEqual(hits, [],
+        'these read a directory whose failure they swallow, so an unreadable subtree is a shorter list (a delete or a move acts on part of a tree) — '
+        + 'rethrow what is not a missing directory, or report the subtree and go on; or add the file to SWALLOWED_READDIR_EXEMPT with the reason');
+    });
   });
 });

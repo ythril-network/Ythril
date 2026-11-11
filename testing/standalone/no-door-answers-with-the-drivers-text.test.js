@@ -64,7 +64,7 @@ function sent(door, err) {
 describe('no door answers with the driver\'s text', () => {
   for (const [what, err] of LEAKS) {
     it(`${what}: the one answer (REST write handler, MCP tool) says it in our words, with the store's code`, () => {
-      const { out: answer } = withLog(() => storeFailureAnswer(err));
+      const { out: answer } = withLog(() => storeFailureAnswer(err, 'driver text probe'));
       assert.ok(answer, 'a store failure must still be identified as the store\'s');
       assert.equal(answer.status, 503);
       assert.doesNotMatch(JSON.stringify(answer.body), HOSTLIKE,
@@ -96,7 +96,7 @@ describe('no door answers with the driver\'s text', () => {
     });
 
     it(`${what}: the operator still reads the driver's text, in the log`, () => {
-      const { lines } = withLog(() => storeFailureAnswer(err));
+      const { lines } = withLog(() => storeFailureAnswer(err, 'driver text probe'));
       assert.ok(lines.some(l => l.includes(err.message.split(' :: ')[0])),
         `the driver's message must reach the log — logged: ${JSON.stringify(lines)}`);
     });
