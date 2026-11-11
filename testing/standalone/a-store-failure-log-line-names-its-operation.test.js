@@ -26,7 +26,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
-import { argumentsOf } from './_structural-window.mjs';
+import { argumentsOf, bodyOf } from './_structural-window.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 
 const { MongoNetworkError } = createRequire(path.resolve('server/package.json'))('mongodb');
@@ -46,6 +46,40 @@ describe('a store failure\'s log line names its operation', () => {
     assert.ok(calls.length >= 4, `only ${calls.length} calls of storeFailureAnswer found — the derivation looks in the wrong place`);
     const unnamed = calls.filter(c => c.args.length < 2 || /^(?:undefined|null|''|"")$/.test(c.args[1])).map(c => c.at);
     assert.deepEqual(unnamed, [], 'these write a store failure\'s log line naming no operation, so an operator cannot tell what failed');
+  });
+
+  it('every call of storeFailureAnswer in the tests passes an operation too (the parameter is required; untyped JS may not leave it out)', () => {
+    // A test written in plain JS is not checked by the compiler, so a call without the operation compiled and ran, and it kept alive the
+    // `where ? … : ''` arm below that no typed caller can reach (Q-350 c, bundle-70 S1). The line such a call writes names no operation.
+    // The untyped shape is a call with ONE argument (an identifier or a member path): `storeFailureAnswer(err)`. A test's source holds
+    // template literals and regexes that a structural argument reader cannot always close, so this reads the shape, not the arguments.
+    const ANY_CALL = () => /(?<!function\s+)\bstoreFailureAnswer\(/g;
+    const ONE_ARGUMENT = () => /(?<!function\s+)\bstoreFailureAnswer\(\s*[\w$.]+\s*\)/g;
+    // (The planted calls are built from two strings so this file holds no call of its own for the scan below to find.)
+    const NAME = 'storeFailure' + 'Answer';
+    assert.equal([...`sf.${NAME}(err)`.matchAll(ONE_ARGUMENT())].length, 1, 'the pattern does not match the untyped call — fix it first');
+    assert.equal([...`${NAME}(err, 'op')`.matchAll(ONE_ARGUMENT())].length, 0, 'the pattern matches a call that passes an operation');
+    let calls = 0;
+    const unnamed = [];
+    for (const f of trackedSources('testing/standalone', { ext: ['.js'] })) {
+      const code = blankComments(readFileSync(path.join(REPO_ROOT, f), 'utf8'));
+      calls += [...code.matchAll(ANY_CALL())].length;
+      for (const m of code.matchAll(ONE_ARGUMENT())) unnamed.push(`${f}:${code.slice(0, m.index).split('\n').length}`);
+    }
+    assert.ok(calls >= 8, `only ${calls} calls of storeFailureAnswer found in the tests — the derivation looks in the wrong place`);
+    assert.deepEqual(unnamed, [], 'these tests call storeFailureAnswer without an operation: pass one (a string naming the door under test)');
+  });
+
+  it('storeFailureAnswer does not branch on an operation being empty: it is required, so the arm is dead code that reads as optional', () => {
+    const body = bodyOf(blankComments(readFileSync(path.join(REPO_ROOT, 'server/src/brain/store-failure.ts'), 'utf8')).replace(/\r\n/g, '\n'), 'storeFailureAnswer');
+    // The spellings of "the operation may be empty": a conditional on it, a negation, a default.
+    const EMPTY_WHERE = () => [/\bwhere\s*\?\s*[`'"]/g, /!\s*where\b/g, /\bwhere\s*(?:\|\||\?\?)/g, /\bwhere\s*===?\s*(?:''|""|undefined|null)/g];
+    for (const planted of ['const at = where ? ` (${x})` : \'\';', 'if (!where) return;', 'const w = where || "?";', 'if (where === "") {}']) {
+      assert.ok(EMPTY_WHERE().some(re => re.test(planted)), `the patterns do not match this spelling — fix them first: ${planted}`);
+    }
+    assert.ok(body.length > 200, 'storeFailureAnswer\'s body was not found');
+    const found = EMPTY_WHERE().flatMap(re => [...body.matchAll(re)].map(m => m[0]));
+    assert.deepEqual(found, [], 'storeFailureAnswer branches on its required operation being empty; name it unconditionally');
   });
 
   it('the read helper\'s line carries the operation its caller named', async () => {

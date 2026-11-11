@@ -104,7 +104,7 @@ const said = (answer) => JSON.stringify(answer?.body ?? null);
 
 /** The answer, with the log it wrote captured so the console stays quiet. */
 async function answerFor(err) {
-  const { result, lines } = await logLinesDuring(() => storeFailureAnswer(err));
+  const { result, lines } = await logLinesDuring(() => storeFailureAnswer(err, 'class probe'));
   return { answer: result, lines };
 }
 

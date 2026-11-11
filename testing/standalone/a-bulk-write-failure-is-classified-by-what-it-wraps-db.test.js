@@ -58,7 +58,7 @@ const produced = () => Object.entries(F).filter(([k]) => k !== 'address')
 
 /** The answer a door gives, with its log captured so the console stays quiet. */
 async function answerFor(err) {
-  const { result } = await logLinesDuring(() => sf.storeFailureAnswer(err));
+  const { result } = await logLinesDuring(() => sf.storeFailureAnswer(err, 'bulk write'));
   return result;
 }
 
