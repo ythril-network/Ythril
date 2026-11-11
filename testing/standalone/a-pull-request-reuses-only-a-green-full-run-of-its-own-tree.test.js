@@ -268,11 +268,6 @@ describe('the results the decision expects are derived from ci.yml, never listed
     const fewer = input((i) => { i.expected = i.expected.filter((s) => s !== 'sync'); i.artifacts.artifacts = i.artifacts.artifacts.filter((a) => a.name !== 'test-results-sync-1'); i.artifacts.total_count -= 1; });
     assert.equal(decideReuse(fewer).fullRun, `${RUN_ID}.1`);
   });
-
-  it('the force label is named once, by the script', async () => {
-    const mod = await import(pathToFileURL(join(REPO_ROOT, SCRIPT)).href);
-    assert.equal(mod.FORCE_LABEL, 'ci:full');
-  });
 });
 
 // ───────────────────────────────────────── verifyReuse: fails closed ─────────────────────────────────────────

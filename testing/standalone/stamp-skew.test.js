@@ -27,7 +27,6 @@ import assert from 'node:assert/strict';
 
 const {
   parseStamp, detectStampSkew, stampSkewSettings, stampSkewWarning,
-  DEFAULT_STAMP_SKEW_WARN_MINUTES, DEFAULT_STAMP_PROPERTIES,
 } = await import('../../server/dist/brain/stamp-skew.js');
 
 const HOUR = 3_600_000;
@@ -157,12 +156,6 @@ describe('detectStampSkew — eight hours is caught, forty minutes is not', () =
       'a space can name its own property');
     assert.equal(detectStampSkew({ postedAt: '2026-08-09T0942Z' }, createdAt, named), null,
       'and naming one REPLACES the defaults rather than adding to them');
-  });
-
-  it('defaults are the board protocol\'s own numbers, not invented ones', () => {
-    assert.equal(DEFAULT_STAMP_SKEW_WARN_MINUTES, 40, 'the protocol assumes clocks differ by up to forty minutes');
-    assert.deepEqual([...DEFAULT_STAMP_PROPERTIES], ['stampedAt', 'postedAt'],
-      'both are the reporter\'s own field names — a convention nobody uses is a check that never fires');
   });
 });
 

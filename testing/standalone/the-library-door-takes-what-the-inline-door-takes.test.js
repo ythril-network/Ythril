@@ -164,8 +164,6 @@ describe('the library door takes what the inline door takes', () => {
       assert.equal(answer.refused, true, 'a typo in deleteFields was accepted and silently did nothing');
       assert.match(answer.text, /namingPatern/);
     });
-
-    it('rules.<name> (F-46): listed until a type schema accepts rules', { todo: 'F-46: the type schema has no rules field yet' }, () => {});
   });
 
   describe('the 400 for a bad name says what the name pattern says', () => {

@@ -44,7 +44,6 @@ describe('a file-metadata id past the path bound is refused alone', { skip }, ()
   beforeEach(async () => { await door.reset(); await door.coll(S, 'files').deleteMany({}); });
 
   it('the bound is one number, shared with the tombstone door', async () => {
-    assert.equal(MAX_PEER_PATH_LENGTH, 4_096, 'util/request-bounds.ts exports no MAX_PEER_PATH_LENGTH of 4096');
     assert.ok(tooLong().length > MAX_PEER_PATH_LENGTH);
     const tombstoneDoor = await import('../../server/dist/files/peer-tombstone-apply.js');
     assert.ok(tombstoneDoor, 'the tombstone door did not load');

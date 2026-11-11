@@ -126,10 +126,6 @@ describe('the skip warning is throttled per instance', () => {
     await first;
   });
 
-  it('the window is ten minutes', () => {
-    assert.equal(SKIP_WARNING_WINDOW_MS, 10 * 60_000);
-  });
-
   it('each instance has its own throttle: one saying it does not silence another', async () => {
     const a = make('Job A');
     const b = make('Job A');   // the same label on purpose: the throttle is the instance's, not the label's

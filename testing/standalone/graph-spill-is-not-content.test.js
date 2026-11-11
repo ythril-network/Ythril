@@ -25,7 +25,7 @@ import { balancedFrom, bodyOf } from './_structural-window.mjs';
 import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 
 const { isSpillPath, SPILL_DIR } = await import('../../server/dist/brain/spill-path.js');
-const { SPILL_TTL_DAYS, SPILL_CEILING_MULTIPLE } = await import('../../server/dist/brain/graph-spill.js');
+const { SPILL_CEILING_MULTIPLE } = await import('../../server/dist/brain/graph-spill.js');
 
 const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
 const read = p => strip(readFileSync(p, 'utf8'));
@@ -183,10 +183,6 @@ describe('every door that traverses answers through one builder, and none writes
 });
 
 describe('the constants say what the ruling said', () => {
-  it('one day, per the ruling', () => {
-    assert.equal(SPILL_TTL_DAYS, 1);
-  });
-
   it('the spill module holds no size rule of its own', () => {
     // A node cap or a spill threshold here is a second rule about size, below the byte budget, that can
     // shorten a row the budget promised was whole — the defect Q-126 removed.

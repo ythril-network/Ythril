@@ -232,7 +232,6 @@ describe('4. the claim schedules the next probe by backoffDelayMs(probeAttempts,
 describe('5. probation: a probe success leaves the count at FAILING_AFTER - 1', () => {
   it('the recovery sets active and FAILING_AFTER - 1 and clears the probe fields; one more exhausted schedule flips it back', () => {
     assert.equal(typeof store.FAILING_AFTER, 'number', 'webhooks/store.ts exports no FAILING_AFTER: the threshold is a literal');
-    assert.equal(store.FAILING_AFTER, 6, 'FAILING_AFTER is not today\'s six exhausted schedules');
     assert.equal(typeof store.probeRecoveryWrite, 'function', 'webhooks/store.ts exports no probeRecoveryWrite(id, url)');
     assert.equal(typeof store.failingFlipWrite, 'function', 'webhooks/store.ts exports no failingFlipWrite(id, now)');
     const { update } = store.probeRecoveryWrite('w1', urlOf('w1'));

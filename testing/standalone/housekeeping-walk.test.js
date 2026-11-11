@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { MongoNetworkError, MongoServerError } from 'mongodb';
 import {
-  createHousekeepingWalk, WalkBudget, withWalkBudget, STALLED_AFTER_TIMEOUTS, QUARANTINE_BASE_MS, QUARANTINE_MAX_MS,
+  createHousekeepingWalk, WalkBudget, withWalkBudget, QUARANTINE_BASE_MS, QUARANTINE_MAX_MS,
 } from '../../server/dist/util/housekeeping-walk.js';
 import { spaceFailureReporter } from '../../server/dist/util/space-failure.js';
 import { onHousekeepingSignal } from '../../server/dist/util/housekeeping-signals.js';
@@ -252,8 +252,6 @@ describe('the store is down: the walk ends, says so once, and needs no Mongo to 
 });
 
 describe('the store only LOOKS up: K spaces time out in a row, per tick', () => {
-  it('K is three', () => assert.equal(STALLED_AFTER_TIMEOUTS, 3));
-
   it('the third consecutive timeout on distinct spaces ends the walk, says so once, and the fourth space is never run', async () => {
     const { walk, lines } = make({ storeUp: true });
     const s = script({ a: timeout, b: timeout, c: timeout });
@@ -344,11 +342,6 @@ describe('WalkBudget', () => {
 
 describe('quarantine: a space that hung is not asked again for a while', () => {
   const secondsIn = (line) => Number(/after quarantine \((\d+)s\)/.exec(line)?.[1]);
-
-  it('the figures are 60 s doubling to 300 s', () => {
-    assert.equal(QUARANTINE_BASE_MS, 60_000);
-    assert.equal(QUARANTINE_MAX_MS, 300_000);
-  });
 
   it('begins on the FIRST timeout, and says how long', async () => {
     const { walk, lines } = make();

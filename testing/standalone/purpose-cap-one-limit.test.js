@@ -27,7 +27,7 @@ import assert from 'node:assert/strict';
 import { trackedSources } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 
-let SPACE_PURPOSE_MAX;
+let SpaceMetaBody;
 
 /** Files that could plausibly bound this field — enumerated from the repo, not listed here. */
 const sources = trackedSources(['server/src', 'schema/src']);
@@ -36,13 +36,14 @@ const strip = s => s.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '
 
 describe('the directive cap', () => {
   before(async () => {
-    ({ SPACE_PURPOSE_MAX } = await import('../../server/dist/spaces/_shared.js'));
+    ({ SpaceMetaBody } = await import('../../server/dist/spaces/body-schemas.js'));
   });
 
-  it('is exported as one constant, at the value the writer actually stores', () => {
-    // Unified UP: `updateSpace` truncates at this value, so a lower advertised limit would claim a bound
+  it('the meta body the doors validate with accepts 4000 characters of purpose and refuses 4001', () => {
+    // Unified UP: `updateSpace` truncates at 4000, so a lower advertised limit would claim a bound
     // smaller than the data already in the database.
-    assert.equal(SPACE_PURPOSE_MAX, 4000);
+    assert.equal(SpaceMetaBody.safeParse({ purpose: 'x'.repeat(4000) }).success, true, '4000 characters of purpose are accepted');
+    assert.equal(SpaceMetaBody.safeParse({ purpose: 'x'.repeat(4001) }).success, false, '4001 characters of purpose are refused');
   });
 
   /**

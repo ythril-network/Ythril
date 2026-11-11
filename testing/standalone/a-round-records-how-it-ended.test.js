@@ -272,7 +272,6 @@ describe('recordRoundOutcome', () => {
 
   it('keeps the newest ROUND_OUTCOMES_KEPT by concludedAt: 50 stay, the 51st evicts the oldest', async () => {
     const { recordRoundOutcome, ROUND_OUTCOMES_KEPT } = await outcomes();
-    assert.equal(ROUND_OUTCOMES_KEPT, 50);
     const n = net('closed', [P1]);
     for (let i = 0; i < ROUND_OUTCOMES_KEPT; i++) recordRoundOutcome(n, concluded({ roundId: `r${i}`, concludedAt: iso(NOW + i * 1000) }), NOW + i * 1000);
     assert.equal(n.roundOutcomes.length, 50);

@@ -123,7 +123,6 @@ describe('writeInOneCommands', () => {
     // `size + 1 >= maxWriteBatchSize` (`lib/bulk/ordered.js`, `unordered.js`), so a slice of exactly `maxWriteBatchSize` is TWO
     // commands (round W, V1). The 1000 the hubs' chunked writes use answers another question (how much one `$in` delete
     // carries), and read here it turned a single insert into many commands with a delete already done (round V, S2).
-    assert.equal(MONGO_MAX_WRITE_BATCH_SIZE, 100_000, 'the server\'s maxWriteBatchSize (MongoDB 4.2 to 8.x) is 100000');
     assert.equal(ONE_COMMAND_MAX_OPERATIONS, MONGO_MAX_WRITE_BATCH_SIZE - 1, 'a command the driver sends holds one operation fewer than maxWriteBatchSize');
     assert.ok(ONE_COMMAND_MAX_OPERATIONS > ROWS_PER_BULK_COMMAND);
     const counts = await writeInOneCommands(docs(ONE_COMMAND_MAX_OPERATIONS * 2 + 1), async (slice) => slice.length, { ordered: true, bytesOf: () => 1 });

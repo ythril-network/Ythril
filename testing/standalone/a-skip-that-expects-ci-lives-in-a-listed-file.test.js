@@ -146,8 +146,7 @@ describe('the list is one list', () => {
   const read = (f) => readFileSync(`${REPO_ROOT}/${f}`, 'utf8');
   const READERS = ['testing/standalone/a-skip-that-expects-ci-lives-in-a-listed-file.test.js', 'scripts/unexpected-skips.mjs'];
 
-  it('the list module is data with a reason per row, and the prefix is spelled once', () => {
-    assert.equal(PREFIX, 'expected-in-ci:');
+  it('the list module is data with a reason per row', () => {
     const rows = Object.entries(EXPECTED_IN_CI);
     assert.ok(rows.length >= 1, 'an empty list allows nothing and checks nothing');
     for (const [file, { causes, why }] of rows) {

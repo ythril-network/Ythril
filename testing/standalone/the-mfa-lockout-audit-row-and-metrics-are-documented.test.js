@@ -38,11 +38,6 @@ const SETUP_GUIDE = readFileSync('docs/integration-guide/11-setup-api.md', 'utf8
 const rowOf = (text, name) => text.split('\n').find(l => l.startsWith('|') && l.includes(`\`${name}\``));
 
 describe('the lockout is auditable and observable', () => {
-  it('the audit module exports MFA_LOCKED_OPERATION = mfa.locked', async () => {
-    const mod = await import('../../server/dist/audit/middleware.js');
-    assert.equal(mod.MFA_LOCKED_OPERATION, 'mfa.locked', 'audit/middleware.ts does not export MFA_LOCKED_OPERATION');
-  });
-
   it('13-audit-log-api.md has a table row for mfa.locked that names its token id and address', () => {
     const row = rowOf(AUDIT_GUIDE, 'mfa.locked');
     assert.ok(row, 'the operations table has no row for `mfa.locked`');

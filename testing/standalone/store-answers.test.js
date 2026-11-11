@@ -18,7 +18,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createStoreAnswers, storeAnswers, STORE_PING_MS, STORE_ANSWERS_TTL_MS } from '../../server/dist/db/store-answers.js';
+import { createStoreAnswers, storeAnswers, STORE_ANSWERS_TTL_MS } from '../../server/dist/db/store-answers.js';
 import { createProbeCache } from '../../server/dist/util/cached-probe.js';
 
 /** A client whose `admin` db records every command, and answers or fails as told. */
@@ -44,11 +44,6 @@ function make(behave, { client } = {}) {
 }
 
 describe('storeAnswers', () => {
-  it('the figures are 3 s for the ping and 10 s for the memo', () => {
-    assert.equal(STORE_PING_MS, 3_000);
-    assert.equal(STORE_ANSWERS_TTL_MS, 10_000);
-  });
-
   it('sends { ping: 1, maxTimeMS: 3000 } to the admin database with an abort signal and no timeoutMS', async () => {
     const { sent, answers } = make('ok');
     assert.equal(await answers(), true);

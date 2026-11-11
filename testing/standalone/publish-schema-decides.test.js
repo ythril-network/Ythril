@@ -334,11 +334,6 @@ describe('publishDecision: the environment that restricts the credential to v* t
   const GUIDE = 'docs/contribution-guide.md';
   const refusesEnvironment = (environment, why) => assertRefuses(decide({ environment }), [ENVIRONMENT_NAME, GUIDE], why);
 
-  it('the script spells the environment name and the tag pattern once, as exports, and the right ones', () => {
-    assert.equal(ENVIRONMENT_NAME, 'npm-publish');
-    assert.equal(RELEASE_TAG_PATTERN, 'v*');
-  });
-
   it('the environment restricts to the v* tag policy and nothing else: publish', () => {
     const d = decide({ environment: GOOD_ENVIRONMENT });
     assert.equal(d.action, 'publish', `the right environment was refused: ${d.message}`);

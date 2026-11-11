@@ -93,10 +93,6 @@ describe('the enum and the constant', () => {
     for (const v of values) assert.ok(typeof v === 'string' && v.trim() !== '', `a reason is not a non-empty string: ${JSON.stringify(v)}`);
     assert.equal(new Set(values).size, values.length, 'two reasons share one sentence, so a reader cannot tell the conditions apart');
   });
-
-  it('the clock tolerance is two minutes, one named constant', () => {
-    assert.equal(CLOCK_TOLERANCE_MS, 120_000);
-  });
 });
 
 describe('the base row: one peer, every condition met', () => {

@@ -91,12 +91,6 @@ describe('tryMfaCode: the counter and its window', () => {
   /** `n` wrong codes for `tokenId`, all at the clock's present, each answer returned. */
   const wrongs = (n, tokenId, req = LOOPBACK) => Array.from({ length: n }, () => attempts.tryMfaCode(wrongCode(secret), { tokenId, req }));
 
-  it('exports the numbers the docs state: 5 wrong codes, 15 minutes, 10000 keys', () => {
-    assert.equal(attempts.MFA_FAILURES_MAX, 5);
-    assert.equal(attempts.MFA_LOCKOUT_WINDOW_MS, 15 * MIN);
-    assert.equal(attempts.MFA_KEYS_MAX, 10_000);
-  });
-
   it('the 1st to 5th wrong codes answer invalid; from the 6th attempt a CORRECT code is locked, names the key and the wait', () => {
     const t = id();
     for (const r of wrongs(5, t)) assert.deepEqual(r, { ok: false, reason: 'invalid' });

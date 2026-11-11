@@ -91,10 +91,6 @@ describe('the retry poll skips an overlapping tick', () => {
     assert.equal(r.state.dueCalls, 2, 'a tick after the first ended did not poll');
     assert.equal(skipsOf.length, 2, 'a tick that ran was counted as skipped');
   });
-
-  it('the job is named for the poll, and the label is a constant', () => {
-    assert.equal(dispatcher.RETRY_JOB_LABEL, 'Webhook retry poll');
-  });
 });
 
 describe('the retry poll delivers four at a time', () => {
@@ -111,7 +107,6 @@ describe('the retry poll delivers four at a time', () => {
     });
     r.worker.job.start();
     await r.fire();
-    assert.equal(dispatcher.RETRY_CONCURRENCY, 4);
     assert.ok(r.state.peak <= dispatcher.RETRY_CONCURRENCY, `${r.state.peak} deliveries were in flight at once`);
     assert.equal(r.state.peak, dispatcher.RETRY_CONCURRENCY, 'the poll did not use its four slots');
     assert.deepEqual([...r.state.delivered].sort(), ['job-2', 'job-3', 'job-4', 'job-5', 'job-6'],

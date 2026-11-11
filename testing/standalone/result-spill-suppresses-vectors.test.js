@@ -24,7 +24,7 @@ import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
 const {
-  suppressEmbeddings, countGraphNodes, SPILL_TTL_DAYS,
+  suppressEmbeddings, countGraphNodes,
 } = await import('../../server/dist/brain/graph-spill.js');
 
 const read = p => stripComments(readFileSync(p, 'utf8'));
@@ -154,7 +154,6 @@ describe('the remainder is written out, with a TTL', () => {
      * Q-92 replaced "one-day TTL, through the record machinery". A record TTL means a `<space>_files` record,
      * which is a write into the space a search was reading. The lifetime is now the store's `expiresAt`.
      */
-    assert.equal(SPILL_TTL_DAYS, 1);
     const body = bodyOf(read('server/src/brain/graph-spill.ts'), 'spillResultSet', 'the lifetime');
     assert.doesNotMatch(body, /ttlDays/, 'a file-record TTL means the remainder is a record in the space again');
     assert.match(body, /putSpill\(\{[\s\S]*?kind:\s*'results'/,

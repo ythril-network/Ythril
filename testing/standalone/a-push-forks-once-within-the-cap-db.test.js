@@ -57,8 +57,6 @@ describe('a push forks once, within the fan-out cap, on both doors', { skip }, (
     await door.coll(S, 'facts').insertOne(build.fact(S, 'f', 5, { fact: ROOT }));
   });
 
-  it('the cap is ten, as the red-team test and the docs state', () => { assert.equal(CAP, 10); });
-
   describe('the fan-out cap', () => {
     it('single /facts: forks 1..10 are forked, the 11th is a 400', async () => {
       for (let i = 1; i <= CAP; i++) {

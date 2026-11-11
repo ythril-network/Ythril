@@ -131,7 +131,10 @@ describe('a peer that holds one family is classified, and does not end the space
 
   it('transferRefusal reads 503 edge_identity_building as family-held, and every other 503 as before', async () => {
     const errors = await import('../../server/dist/util/errors.js');
-    assert.equal(errors.EDGE_IDENTITY_BUILDING, 'edge_identity_building', 'util/errors.ts does not export EDGE_IDENTITY_BUILDING');
+    // The code a receiver sends is the wire contract docs/sync-protocol.md states; read it from there, not from a literal restated here.
+    const protocol = readFileSync(`${REPO_ROOT}/docs/sync-protocol.md`, 'utf8');
+    assert.ok(errors.EDGE_IDENTITY_BUILDING, 'util/errors.ts does not export EDGE_IDENTITY_BUILDING');
+    assert.ok(protocol.includes(`{ code: "${errors.EDGE_IDENTITY_BUILDING}", retryable: true }`), `docs/sync-protocol.md does not state the wire code ${JSON.stringify(errors.EDGE_IDENTITY_BUILDING)} a peer answers a held edges family with`);
     const { transferRefusal } = await import('../../server/dist/sync/held-answer.js');
     assert.equal(await transferRefusal(answer(503, { error: 'x', code: errors.EDGE_IDENTITY_BUILDING, retryable: true })), 'family-held');
     assert.equal(await transferRefusal(answer(503, { error: 'x' })), 'failed', 'a bare 503 stays a failure');

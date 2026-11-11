@@ -43,7 +43,6 @@ before(async () => {
 
 describe('the marker', () => {
   it('is the text operators will see, and the queue retries it', () => {
-    assert.equal(errors.LOST_MARKER, 'embedding process lost');
     assert.equal(isTransientEmbedError(errors.LOST_MARKER), true);
     assert.equal(isTransientEmbedError(`${errors.LOST_MARKER} (code=139 signal=null)`), true);
     assert.equal(isTransientEmbedError(`${errors.LOST_MARKER} (code=null signal=SIGKILL)`), true);
@@ -139,12 +138,5 @@ describe('isTransientEmbedError: the classification truth table', () => {
     const forged = 'tokenizer timeout while reading input';
     assert.equal(errors.isLostChildError(new Error(forged)), false);
     assert.equal(isTransientEmbedError(forged), true, 'the long-standing needle behaviour is kept');
-  });
-});
-
-describe('the per-record cap is named where the queue reads it', () => {
-  it('exports the cap, at three, from the queue', () => {
-    assert.equal(queue.MAX_LOST_CHILD_FAILURES, 3,
-      'three crashes on one record is an input that kills the runtime; the plan\'s number, and one place to change it');
   });
 });

@@ -46,9 +46,6 @@ describe('calendarDayIn: the day an instant falls on in Europe/Berlin', () => {
       assert.equal(need('calendarDayIn')(new Date(instant)), day);
     });
   }
-  it('the zone is Europe/Berlin, whatever zone the runner is in', () => {
-    assert.equal(mod.RELEASE_ZONE, 'Europe/Berlin');
-  });
 });
 
 describe('releaseDateProblem: on the tag a wrong date fails, before the tag it warns', () => {

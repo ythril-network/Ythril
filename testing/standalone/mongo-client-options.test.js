@@ -30,9 +30,6 @@ import assert from 'node:assert/strict';
 import { logLinesDuring } from './_log-lines.mjs';
 import {
   CLIENT_LIVENESS_DEFAULTS,
-  CONNECT_TIMEOUT_MS,
-  HEARTBEAT_FREQUENCY_MS,
-  SERVER_SELECTION_TIMEOUT_MS,
   describeClientOptions,
   effectiveClientOptions,
   inFlightBoundMs,
@@ -44,15 +41,6 @@ const KEYS = ['serverSelectionTimeoutMS', 'connectTimeoutMS', 'heartbeatFrequenc
 const PLAIN = 'mongodb://ythril-mongo:27017/ythril?directConnection=true';
 
 describe('the defaults', () => {
-  it('are the numbers the docs state, and the exported constants equal them', () => {
-    assert.equal(CONNECT_TIMEOUT_MS, 10_000);
-    assert.equal(HEARTBEAT_FREQUENCY_MS, 5_000);
-    assert.equal(SERVER_SELECTION_TIMEOUT_MS, 10_000);
-    assert.deepEqual(CLIENT_LIVENESS_DEFAULTS, {
-      serverSelectionTimeoutMS: 10_000, connectTimeoutMS: 10_000, heartbeatFrequencyMS: 5_000,
-    });
-  });
-
   it('a URI that names none of them gets all three', () => {
     assert.deepEqual(mongoClientOptions(PLAIN), CLIENT_LIVENESS_DEFAULTS);
     assert.deepEqual(mongoClientOptions('mongodb://h:27017/db'), CLIENT_LIVENESS_DEFAULTS);

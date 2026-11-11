@@ -62,18 +62,6 @@ describe('no file grows past what we already carry', () => {
       'a frozen file that grew was not reported');
   });
 
-  it('reports frozen entries that have shrunk, so the list cannot drift upward silently', () => {
-    // A frozen number that is far above reality stops being a ratchet and becomes headroom.
-    const slack = [];
-    for (const [f, max] of Object.entries(FROZEN)) {
-      const found = sized.find(s => s.f === f);
-      if (found && found.code < max - 50) slack.push(`${f}: now ${found.code}, frozen at ${max}`);
-    }
-    if (slack.length > 0) console.log(`  note: lower these entries —\n    ${slack.join('\n    ')}`);
-    // Not an assertion: shrinking a file should never fail a build. It is reported so the list stays honest.
-    assert.ok(true);
-  });
-
   it('the measurement ignores comments — or it would punish the documented files', () => {
     // The property that makes this gate safe to have. `config/types.ts` is 1,986 raw lines and 62% comment;
     // if this counted raw lines it would be the second-largest file in the repo and the fix would be

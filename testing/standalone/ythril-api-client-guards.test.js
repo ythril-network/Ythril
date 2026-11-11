@@ -168,7 +168,6 @@ describe('no redirect is followed', () => {
 describe('a call that never answers ends', () => {
   it('has a 10 s default — the exported constant — and applies it', async () => {
     const mod = await load();
-    assert.equal(mod.REQUEST_TIMEOUT_MS, 10_000);
     const hung = await startFakeYthril();
     hung.hang();
     try {

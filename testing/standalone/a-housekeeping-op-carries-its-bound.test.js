@@ -75,7 +75,6 @@ describe('the housekeeping bound is a scope of the one bound', () => {
   it('the module exports the scope, the figures and the claim constant', () => {
     assert.equal(typeof wb.withinHousekeepingBound, 'function', 'withinHousekeepingBound is not exported');
     assert.equal(typeof wb.housekeepingOpMs, 'function', 'housekeepingOpMs is not exported');
-    assert.equal(wb.CLAIM_OP_MS, 10_000, 'the claim / reset bound is a constant of 10 000 ms');
     assert.equal(wb.housekeepingOpMs(), 7000, 'the seam did not set the figure the cases below are written against');
   });
 

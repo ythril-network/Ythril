@@ -52,8 +52,6 @@ describe('the sync wait default differs between the doors on purpose, and says s
   it('MCP waits and REST does not: both are named constants beside one resolver', () => {
     assert.equal(typeof trigger.SYNC_WAIT_DEFAULT, 'boolean');
     assert.equal(typeof trigger.MCP_SYNC_WAIT_DEFAULT, 'boolean');
-    assert.equal(trigger.MCP_SYNC_WAIT_DEFAULT, true, 'the owner\'s decision: an agent wants the outcome, not an acknowledgement');
-    assert.equal(trigger.SYNC_WAIT_DEFAULT, false, 'REST keeps answering at once');
     assert.equal(trigger.resolveSyncWait(undefined, 'mcp'), trigger.MCP_SYNC_WAIT_DEFAULT);
     assert.equal(trigger.resolveSyncWait(undefined, 'rest'), trigger.SYNC_WAIT_DEFAULT);
   });

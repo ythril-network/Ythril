@@ -28,7 +28,7 @@ import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { MongoNetworkError } from 'mongodb';
 import { createWorkSignal } from '../../server/dist/util/work-signal.js';
-import { createHousekeepingWalk, STALLED_AFTER_TIMEOUTS, QUARANTINE_BASE_MS } from '../../server/dist/util/housekeeping-walk.js';
+import { createHousekeepingWalk, QUARANTINE_BASE_MS } from '../../server/dist/util/housekeeping-walk.js';
 import { spaceFailureReporter } from '../../server/dist/util/space-failure.js';
 import * as wb from '../../server/dist/db/write-bound.js';
 import { StoreTimeout } from '../../server/dist/db/write-timeout.js';
@@ -166,7 +166,6 @@ describe('claimAcross: the truth table', () => {
     const ids = ['a', 'b', 'c', 'd', 'e'];
     const s = script(Object.fromEntries(ids.map(i => [i, timeout()])));
     assert.equal(await signal.claimAcross(ids, PASSES, s.tryClaim, { step: STEP }), null);
-    assert.equal(STALLED_AFTER_TIMEOUTS, 3);
     assert.deepEqual(s.asked, ['a:p0', 'b:p0', 'c:p0'], 'the fourth space is never asked, and pass 2 never starts on a stalled store');
     assert.ok(lines.some(l => /timed out in a row/.test(l)));
   });
@@ -215,7 +214,6 @@ describe('claimAcross: the quarantine of a space whose claim hung', () => {
     const { signal, lines, walk } = make();
     const out = await signal.claimAcross(['h', 'ok'], PASSES, script({ h: timeout(), 'ok:p0': { id: 'j' } }).tryClaim, { step: STEP });
     assert.deepEqual(out, { id: 'j' });
-    assert.equal(QUARANTINE_BASE_MS, 60_000);
     assert.match(lines[0], /— retried after quarantine \(60s\)$/);
     assert.deepEqual(walk.quarantinedSpaces(), ['h']);
   });

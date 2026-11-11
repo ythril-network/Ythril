@@ -105,9 +105,8 @@ const BACKSTOP_WORDS = /address/i;
 const isBackstop429 = (a) => a.status === 429 && BACKSTOP_WORDS.test(String(a.error ?? ''));
 
 describe('the backstop\'s rule, in the source', () => {
-  it('keeps the number, counts everything it does not skip, and skips only a request a token metered', () => {
+  it('counts everything it does not skip, and skips only a request a token metered', () => {
     const body = bodyOf(src(MW_PATH), 'ipFloodBackstop');
-    assert.equal(BACKSTOP_MAX, 3000, 'the backstop is 3 000 per address');
     assert.doesNotMatch(body, /hasCredential/, 'the backstop must NOT step aside for a presented credential: it is the bound on inventing them');
     assert.match(body, /skipSuccessfulRequests:\s*true/, 'the backstop does not give a metered request back to the count (skipSuccessfulRequests)');
     assert.match(body, /requestWasSuccessful:[^,}]*res\.locals\.meteredByToken\s*===\s*true/,

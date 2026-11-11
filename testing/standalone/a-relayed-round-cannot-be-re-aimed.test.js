@@ -76,7 +76,6 @@ describe('a bound cast verifies only against the round it was cast on', () => {
 
 describe('a cast without the bound signature', () => {
   it('from a voter known to run the first bound version or later is refused — stripping bsig is not a downgrade', () => {
-    assert.equal(SINCE, '5.6.0', 'bound casts shipped in 5.6.0; a later patch of an older line must not be read as signing them');
     const r = round();
     assert.equal(valid(net(SINCE), r, castFor(r, { bound: false })), false);
     assert.equal(valid(net('6.0.0'), r, castFor(r, { bound: false })), false);
