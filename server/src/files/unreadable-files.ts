@@ -2,7 +2,14 @@ import { warnOnce } from '../util/warn-once.js';
 
 /**
  * Stored files this process found present but undecodable — a foreign key, altered bytes, or an encrypted file on
- * an instance with no secret (F-43).
+ * an instance with no secret (F-43) — and the paths whose LOOK failed (a refused `stat` or `readdir`, an I/O error at the open).
+ *
+ * **Two different things, one memory.** This module only answers "is this news, so should it be logged": the first time a path is met, and
+ * again after it changed. What the manifest ENDS UP SAYING about a path is not decided here. A CONTENT verdict (the file was read and cannot
+ * be decoded) is a skip the peer's copy answers by landing beside it, so the manifest leaves it out and does not name it. A failure to LOOK
+ * (a path that is neither present nor absent as far as this process could tell) is named in the manifest's `unreadable`
+ * (`files/manifest.ts`, `files/unreadable-paths.ts`), and every reader of the manifest (the hash cache's prune, the wire, file sync, the
+ * restore check) keeps it apart from a path that is gone. This module is the log's, never a reader's.
  *
  * Two reasons it is kept, and both are why it is one module rather than a Set in each reader:
  *

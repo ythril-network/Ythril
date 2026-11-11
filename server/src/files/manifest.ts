@@ -21,9 +21,13 @@ import { getDataRoot } from '../config/loader.js';
 import { col, asFilter, asBulk } from '../db/mongo.js';
 import { writeInOneCommands } from '../db/one-command.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { isMissingPath, openStoredRead, StoredFileUnreadable } from './stored-bytes.js';
+import { openStoredRead, StoredFileUnreadable } from './stored-bytes.js';
+import { cannotExist } from '../util/path-present.js';
+import { isFileSystemError } from '../util/fs-failure-words.js';
+import { isInstanceLocalFile } from '../sync/file-conflict.js';
 import { log, peerText } from '../util/log.js';
 import { noteUnreadable, clearUnreadable } from './unreadable-files.js';
+import { MAX_UNREADABLE_PATHS, UnreadablePaths } from './unreadable-paths.js';
 import { spillIdFromPath } from '../brain/spill-path.js';
 import { toDocId } from '../util/paths.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
@@ -81,9 +85,34 @@ async function hashFile(absPath: string): Promise<{ sha256: string; size: number
 }
 
 /**
+ * A built manifest: the files it could read, and the paths it could not LOOK AT (Q-350 b).
+ *
+ * `unreadable` holds I/O look failures only: an entry whose `stat` failed, a file whose hash read failed, with anything but "cannot exist"
+ * ({@link cannotExist}: ENOENT, ENOTDIR, ENAMETOOLONG, ELOOP), named by its KEY (`toDocId`, NFC); and a directory whose `readdir` failed so,
+ * named as its key and a trailing `/`, once, never once per file under it (`files/unreadable-paths.ts`). A path that is gone is not named: a
+ * peer is right to see it as absent. A CONTENT verdict (`StoredFileUnreadable`: a foreign key, altered bytes) is not an I/O failure and stays
+ * out, as before, so a peer's good copy of such a path still arrives (as a conflict copy). A path an instance keeps to itself
+ * (`isInstanceLocalFile`) is not named, as it is never offered.
+ *
+ * At most {@link MAX_UNREADABLE_PATHS} are named, sorted; past that the list is cut and `unreadableTruncated` is true, so a reader knows a path
+ * it does not find in `unreadable` may still be one the build could not look at.
+ */
+export interface FileManifest {
+  entries: ManifestEntry[];
+  unreadable: string[];
+  unreadableTruncated: boolean;
+}
+
+/**
  * Build a full or incremental file manifest for a space.
  *
- * @param since  when set, only files modified at/after this time are included.
+ * The walk answers "could not look" apart from "not there": a `readdir` or a `stat` that failed with a cannot-exist code is a path that is
+ * not there, any other failure names the path in `unreadable` ({@link FileManifest}). A SPACE ROOT that cannot be listed is thrown as it
+ * came (an empty list would tell every peer the space holds nothing), a root that is absent is an empty manifest. The hash cache's prune
+ * keeps the entry of every unreadable path and of everything under an unreadable directory, and is skipped when the list was cut.
+ *
+ * @param since  when set, only files modified at/after this time are included (the unreadable list is never narrowed by it: a path whose
+ *   `stat` or `readdir` failed is named whatever its time; a file older than `since` is not hashed, so a hash failure of one is not seen).
  * @param opts.force  bypass the hash cache and re-read every file (reconciliation
  *   safety valve for the rare out-of-band edit that preserves size AND mtime).
  * @param opts.readOnly  read the cache and never write it: no new hashes persisted, no stale entry pruned. For a caller that
@@ -94,7 +123,7 @@ export async function buildFileManifest(
   spaceId: string,
   since?: Date,
   opts: { force?: boolean; readOnly?: boolean } = {},
-): Promise<ManifestEntry[]> {
+): Promise<FileManifest> {
   const root = spaceFilesRoot(spaceId);
   const cacheColl = col<HashCacheDoc>(spaceCollection(spaceId, 'fileHashes'));
 
@@ -110,21 +139,41 @@ export async function buildFileManifest(
   const updates: HashCacheDoc[] = [];
   /** Every file the walk found, by KEY, then by the spelling it is held under. */
   const byKey = new Map<string, Map<string, { abs: string; stat: Stats }>>();
+  /** What the build could not look at, by key ({@link FileManifest}); bounded, and `unreadableCut` says when it was cut. */
+  const unreadable = new Set<string>();
+  let unreadableCut = false;
+  const nameUnreadable = (name: string): void => {
+    if (isInstanceLocalFile(name) || unreadable.has(name)) return;
+    if (unreadable.size >= MAX_UNREADABLE_PATHS) { unreadableCut = true; return; }
+    unreadable.add(name);
+  };
 
   async function walk(dir: string): Promise<void> {
     let names: string[];
     try {
       names = await fs.readdir(dir);
-    } catch {
-      return; // directory doesn't exist — no files
+    } catch (err) {
+      if (cannotExist(err)) return; // directory doesn't exist — no files
+      // The root cannot be listed: the whole space cannot be looked at, and "no files" would be told to every peer as the truth.
+      if (dir === root) throw err;
+      // A directory that cannot be listed is named by its prefix (and its files are not named one by one), said once as a file is.
+      const rel = path.relative(root, dir).replace(/\\/g, '/');
+      const prefix = `${toDocId(rel)}/`;
+      nameUnreadable(prefix);
+      if (noteUnreadable(spaceId, prefix, String((err as NodeJS.ErrnoException).code))) {
+        log.warn(`manifest: skipped the files under '${peerText(prefix)}' in ${peerText(spaceId)}: it cannot be listed: ${peerText(err)}`);
+      }
+      return;
     }
     for (const name of names) {
       const abs = path.join(dir, name);
       // Gone since the listing: nothing to offer. A file that cannot be looked at is left out too — offering it
-      // would advertise bytes this instance cannot serve — but said once, as an unreadable file is (preship-4 P4-5).
+      // would advertise bytes this instance cannot serve — but named in `unreadable` and said once, as an unreadable file is (preship-4 P4-5).
       const stat = await fs.stat(abs).catch((err: unknown) => {
+        if (cannotExist(err)) return null;
         const rel = path.relative(root, abs).replace(/\\/g, '/');
-        if (!isMissingPath(err) && noteUnreadable(spaceId, rel, String((err as NodeJS.ErrnoException).code))) {
+        nameUnreadable(toDocId(rel));
+        if (noteUnreadable(spaceId, rel, String((err as NodeJS.ErrnoException).code))) {
           log.warn(`manifest: skipped '${peerText(rel)}' in ${peerText(spaceId)}: it cannot be looked at: ${peerText(err)}`);
         }
         return null;
@@ -171,10 +220,19 @@ export async function buildFileManifest(
          * ONE unreadable file is left out, never the manifest. A file under a foreign key or with altered
          * bytes throwing out of here would fail the manifest route, file sync and the Merkle root for the
          * whole space on every cycle — a whole space stopped over one file. It is logged, and the refusal
-         * reaches anyone who reads the file itself.
+         * reaches anyone who reads the file itself. That is a CONTENT verdict: it is not named in `unreadable`.
+         *
+         * A file the read could not LOOK at (a permission refused at the open, an I/O error) is left out the same way, and named in
+         * `unreadable`: to a peer it must not look absent. A file that is gone since the listing is neither offered nor named.
          */
         if (err instanceof StoredFileUnreadable) {
           if (noteUnreadable(spaceId, relPath, `${stat.size}:${stat.mtimeMs}`)) log.warn(`manifest: skipped '${peerText(relPath)}' in ${peerText(spaceId)}: ${peerText(err.message)}`);
+          continue;
+        }
+        if (cannotExist(err)) continue;
+        if (isFileSystemError(err)) {
+          nameUnreadable(key);
+          if (noteUnreadable(spaceId, relPath, `${stat.size}:${stat.mtimeMs}`)) log.warn(`manifest: skipped '${peerText(relPath)}' in ${peerText(spaceId)}: it cannot be read: ${peerText(err)}`);
           continue;
         }
         throw err;
@@ -201,14 +259,17 @@ export async function buildFileManifest(
   }
   // Prune cache entries for files that no longer exist (only on a full walk, where
   // `seen` is complete). Bounded by the number of deletions since the last build.
-  if (!since && !opts.force && !opts.readOnly) {
-    const stale = [...cache.keys()].filter(p => !seen.has(p));
+  // A path the walk could not look at is not a path that is gone: its entry stays (and every entry under an unreadable directory),
+  // until the path reads again or is really gone. When the unreadable list was cut the walk does not know every such path, so nothing is pruned.
+  if (!since && !opts.force && !opts.readOnly && !unreadableCut) {
+    const unlooked = new UnreadablePaths(unreadable);
+    const stale = [...cache.keys()].filter(p => !seen.has(p) && !unlooked.covers(toDocId(p)));
     if (stale.length > 0) {
       await cacheColl.deleteMany(asFilter<HashCacheDoc>({ _id: { $in: stale } }));
     }
   }
 
-  return results;
+  return { entries: results, unreadable: [...unreadable].sort(), unreadableTruncated: unreadableCut };
 }
 
 /**

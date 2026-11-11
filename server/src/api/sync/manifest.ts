@@ -21,8 +21,8 @@ export const syncManifestRouter = Router();
 
 /**
  * GET /api/sync/manifest?spaceId=&networkId=&since=<isoTimestamp>
- * Returns list of { path, sha256, size, modifiedAt } for files changed since timestamp.
- * Omit `since` for a full manifest.
+ * Returns list of { path, sha256, size, modifiedAt } for files changed since timestamp, with `unreadable` (the paths this instance could
+ * not look at) and `unreadableTruncated`. Omit `since` for a full manifest.
  */
 syncManifestRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res) => {
   try {
@@ -34,12 +34,17 @@ syncManifestRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res)
     // A conflict copy or schema snapshot is this instance's own and is never offered (Q-66, sync/file-conflict.ts).
     // Exactly the four wire keys, chosen by name: `diskPath` (where THIS instance keeps the file, in the spelling its disk has) is local
     // only and never leaves it, and `path` is the file's NFC key, so a peer asks for the same name whatever our disk keeps (Q-581).
-    const manifest = (await buildFileManifest(spaceId, sinceDate))
+    const built = await buildFileManifest(spaceId, sinceDate);
+    const manifest = built.entries
       .filter(e => !isInstanceLocalFile(e.path))
       .map(({ path, sha256, size, modifiedAt }) => ({ path, sha256, size, modifiedAt }));
+    // `unreadable` (additive: an older peer ignores it) names what this instance could NOT look at, by key, so a peer does not take a path
+    // missing from `manifest` for one that is absent here and push over it. Already filtered like the entries (the build leaves out what
+    // is never offered), capped with `unreadableTruncated`, and never narrowed by `since`. A space root that cannot be listed is not an empty
+    // manifest: the build throws and the catch below answers `500 file_system_fault`.
     // `spaceId` is the LOCAL id this request resolved to (the alias middleware translated the network's id), so a
     // peer addresses the plain file routes by it (Q-68, `sync/space-map.ts` peerFileSpaceId).
-    res.json({ manifest, spaceId });
+    res.json({ manifest, unreadable: built.unreadable, unreadableTruncated: built.unreadableTruncated, spaceId });
   } catch (err) {
     sendCaughtFailure(res, `sync GET manifest`, err);
   }

@@ -22,6 +22,7 @@ import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { getConfig } from '../config/loader.js';
 import { resolveSafePath, assertNoSymlinkEscape, fileKeyOf } from '../files/sandbox.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
+import { existingEntryUnreadable, PATH_UNREADABLE_CODE } from '../files/unreadable-paths.js';
 import { countFileArrival } from '../files/bytes-arrived.js';
 import { decodeContent } from '../files/content-encoding.js';
 import { parseContentRange, storeChunk, assembleChunks, hashStagedChunks, discardStagedChunks } from '../files/chunks.js';
@@ -125,13 +126,22 @@ export function registerUploadRoute(router: Router): void {
       // KEY (`x/../_converted/y` is `_converted/y`), before the body is looked at or anything is staged; a person's upload is never asked.
       if (arrivedFrom) {
         let key: string;
-        try { key = fileKeyOf(targetSpace, filePath).key; } catch (err) {
+        let keyAbs: string;
+        try { ({ key, abs: keyAbs } = fileKeyOf(targetSpace, filePath)); } catch (err) {
           if (err instanceof RequestRefusal) { res.status(400).json({ error: err.message }); return; }
           throw err;
         }
         if (isInstanceLocalFile(key)) {
           countFileArrival('push', 'ignored_instance_local');
           res.status(200).json({ ignored: 'instance-local' });
+          return;
+        }
+        // A path whose existing entry this instance cannot look at (a permission refused on the file or a directory above it, an I/O fault) cannot be
+        // judged: it is not known whether the pushed bytes replace, conflict with or duplicate what is there. Answered `409 path_unreadable` BEFORE the
+        // body is read (one `lstat`, no hash of existing bytes): the sender reads it as a refusal about the path and stops sending the same file
+        // every cycle (`sync/file-push.ts`). The answer names no path and no errno. A person's upload is never asked.
+        if (await existingEntryUnreadable(keyAbs)) {
+          res.status(409).json({ error: 'The path cannot be looked at here, so the push was not taken', code: PATH_UNREADABLE_CODE });
           return;
         }
       }

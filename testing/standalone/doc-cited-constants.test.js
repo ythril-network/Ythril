@@ -538,6 +538,13 @@ const CITED = [
     doc: 'docs/integration-guide/05b-media-embedding.md',
     text: (v) => new RegExp(`and ${v} s for the four document slots and for \`decision\``),
   })),
+  {
+    what: 'the most paths a file manifest names as unreadable',
+    source: 'server/src/files/unreadable-paths.ts',
+    code: /export const MAX_UNREADABLE_PATHS = ([0-9_]+);/,
+    doc: 'docs/integration-guide/09-sync-api.md',
+    text: (v) => new RegExp(`at most ${v} paths, sorted`),
+  },
 ];
 
 /**

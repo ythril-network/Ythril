@@ -45,6 +45,7 @@ import { pushStoredFile, type SendUpload } from './file-push.js';
 import { assertSpaceTakesWrites, isActRefusal } from '../spaces/space-write-gate.js';
 import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import { adoptAllLegacyRows } from '../files/legacy-file-keys.js';
+import { peerUnreadableOf, UnreadablePaths } from '../files/unreadable-paths.js';
 
 /**
  * The most files whose held bytes are looked at for a repair, per space per sync cycle: a row that names another hash than the
@@ -67,6 +68,7 @@ const REPAIR_STEP = declareStep('File pull repair');
 const BODY_STEP = declareStep('File pull body');
 const OUTSIDE_STEP = declareStep('File manifest entry outside the space');
 const ENTRY_STEP = declareStep('File sync entry');
+const UNLOOKED_HERE_STEP = declareStep('File pull at a path this instance cannot look at');
 
 // What the pull reads of a space's file rows, and why a held file needs its record brought up to date, are the classifier's
 // (`files/disk-against-rows.ts`): the restore asks the same question of the same rows, and one answer serves both.
@@ -215,14 +217,26 @@ export async function syncFiles(
       if (verdict === 'failed') log.warn(`File manifest from ${peerText(member.label)}: ${resp.status}`);
       return { pulledFiles, pushedFiles, pulledPaths };
     }
-    const { manifest, spaceId: peerSpaceId } = await boundedJson<{ manifest: { path: string; sha256: string; size: number; modifiedAt: string }[]; spaceId?: string }>(resp, 'sync peer');
+    const peerAnswer = await boundedJson<{ manifest: { path: string; sha256: string; size: number; modifiedAt: string }[]; unreadable?: unknown; unreadableTruncated?: unknown; spaceId?: string }>(resp, 'sync peer');
+    const { manifest, spaceId: peerSpaceId } = peerAnswer;
     const fileSpaceId = peerFileSpaceId(peerSpaceId, remoteSpaceId); // Q-68: the plain file routes know only the peer's local id
+    // What the peer could not look at (its manifest leaves such a path out, which is not "absent there"): typed, bounded and resolved to our keys
+    // like an entry (`peerUnreadableOf`); only ever matched against our own keys. An older peer sends none: nothing is named.
+    const peerUnreadable = peerUnreadableOf(spaceId, peerAnswer);
 
     // Build our manifest for comparison
-    const ours = await buildFileManifest(spaceId);
+    const built = await buildFileManifest(spaceId);
+    const ours = built.entries;
+    // What WE could not look at is the same hole in our manifest: a peer's file at such a path is not "a file this side lacks" and is left alone
+    // (neither written nor saved beside the file we hold). When our own list was cut, a path our manifest lacks may be one of the cut ones: only
+    // a path we hold (which we know) is judged.
+    const ourUnreadable = new UnreadablePaths(built.unreadable);
     // Keyed by the entry's `path`, which IS the key (`toDocId`) the rows and the arriving keys carry, not by its on-disk spelling (`diskPath`): a name stored NFD is the one file its NFC key
     // names, where the raw spelling made it a file this instance "did not have" and fetched a second time.
     const oursMap = new Map(ours.map(e => [e.path, e]));
+    const unreadableHere = (key: string): boolean => ourUnreadable.covers(key) || (built.unreadableTruncated && !oursMap.has(key));
+    let leftAlone = 0;
+    let firstLeftAlone: string | undefined;
     // One read of the space's top-level rows per call: the agreed hash of each path (`syncBase.<peer>`, Q-66) and what each row
     // records of its bytes (`repairReasonOf`). Replaces the read that returned the bases alone.
     // Every top-level row this instance holds under a spelling bundle-71 no longer writes is put at its key before the cycle reads them: a networked
@@ -258,7 +272,7 @@ export async function syncFiles(
     // by the same predicate every other arrival of a file's bytes asks (`decideArrivals`). An entry it could not decide (the
     // path of a pending delete cannot be looked at) waits for the next cycle, as a shadowed one is not fetched.
     const wanted = (a: { remote: (typeof manifest)[number]; key: string }): boolean =>
-      !isInstanceLocalFile(a.key) && decideFilePull(oursMap.get(a.key), a.remote, bases.get(a.key)) !== 'skip';
+      !isInstanceLocalFile(a.key) && !unreadableHere(a.key) && decideFilePull(oursMap.get(a.key), a.remote, bases.get(a.key)) !== 'skip';
     const verdicts = await decideArrivals(spaceId, arriving.filter(wanted)
       .map(a => ({ id: a.key, path: a.key, kind: 'bytes' as const, sha256: a.remote.sha256 })));
     const notNow = new Set([...verdicts.shadowed, ...verdicts.undecided]);
@@ -282,6 +296,8 @@ export async function syncFiles(
       // Between files: an act registered on the space stops the turn here, and the file in flight was cut by its signal.
       if (turn && !turn.mayContinue()) break;
       if (isInstanceLocalFile(key)) continue; // a peer's conflict copy or schema snapshot is the peer's own
+      // A path this instance could not look at is neither fetched, written nor saved as a conflict copy: to this side it is not absent.
+      if (unreadableHere(key)) { if (leftAlone++ === 0) firstLeftAlone = key; continue; }
       const local = oursMap.get(key);
       // See ./file-conflict.ts — a file has no `seq`, so a differing hash cannot be resolved by last-writer-wins the way
       // records are. When ours is still the version this peer and we last agreed on, theirs replaces it (Q-66);
@@ -464,6 +480,10 @@ export async function syncFiles(
       }
     }
 
+    // Said ONCE per window for the peer's files left alone above, with the count (the shared reporter keeps one line per window).
+    if (leftAlone > 0) reportSpaceFailure(UNLOOKED_HERE_STEP, spaceId, new Error(`a file of the peer lies at a path this instance cannot look at, first '${peerText(firstLeftAlone ?? '')}'`), { unit: member.label ?? member.instanceId, count: leftAlone, when: 'when the path can be looked at' });
+    else reportSpaceRecovered(UNLOOKED_HERE_STEP, spaceId, member.label ?? member.instanceId);
+
     // ── 3. Push our files the peer does not have, or holds only in the version we last agreed on ─
     // decideFilePush (./file-conflict.ts): a peer copy changed since that agreement is left for the peer's own pull to
     // raise as a conflict; with no agreement recorded yet, the newer file wins as before.
@@ -473,6 +493,9 @@ export async function syncFiles(
       if (turn && !turn.mayContinue()) break;
       // Taken from this peer a moment ago: `localEntry` predates that write, so pushing it would undo it (Q-66).
       if (pulledPaths.includes(localPath) || isInstanceLocalFile(localPath)) continue;
+      // A path the peer could not look at is not one it lacks: its upload door would refuse the push, and a list it cut may hide more of them, so
+      // a path its manifest does not carry is not pushed either while the list is cut. A path it carries is judged as ever.
+      if (peerUnreadable.paths.covers(localPath) || (peerUnreadable.truncated && !peerManifestMap.has(localPath))) continue;
       // Push only over a copy the peer has not changed since we last agreed; see decideFilePush.
       // A path the peer has told us it holds a tombstone for is not sent again while our hash for it is unchanged.
       // Two answers a peer has already given to exactly these bytes, and does not need asking again for: that it holds a tombstone

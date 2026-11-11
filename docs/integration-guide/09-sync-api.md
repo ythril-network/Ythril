@@ -607,6 +607,23 @@ answer is lost is read back while the hold is still held. On the serving instanc
 ### File Sync Artifacts
 
 - `GET /api/sync/manifest?spaceId=general` returns file digest metadata for delta detection. The answer also names `spaceId`, the local id the responder resolved the request to, which a peer uses for the file transfers that follow.
+  It also carries **`unreadable`**, the paths the responder could **not look at**, and **`unreadableTruncated`**
+  (`{ manifest, unreadable, unreadableTruncated, spaceId }`; both additive, an older responder sends neither). A file
+  that the responder could not read is left out of `manifest`, and without this field it would look **absent** there
+  to a peer, which would then push its own copy over it. A name is the file's key (NFC, as in `manifest`); a directory
+  whose listing failed is named once as its key and a trailing `/` (`d/`) and covers everything under it, a path that only
+  shares the text (`dd/`) is not covered. Only failures to **look** are named (a `stat` or a read refused or failed with
+  anything but "it cannot exist"): a path that is gone is not, and neither is a file whose bytes were read but cannot be
+  decoded (a foreign key, altered bytes), whose peer copy still arrives as a conflict copy. A path the responder keeps to
+  itself (a conflict copy, a conversion's sidecar, a schema snapshot, a legacy spill) is not named, as it is never
+  offered. The list holds at most 1000 paths, sorted; past that it is cut and `unreadableTruncated` is `true`, which
+  says a path that is not named may still be one the responder could not look at. `since` narrows `manifest` and never
+  `unreadable`. A space whose files root itself cannot be looked at is not an empty manifest: the answer is `500` with
+  `code: "file_system_fault"`. **What a peer does with it:** a sender does not push to a path the responder names (nor
+  under a named directory), and while the list is cut it pushes nothing for a path the manifest does not carry; its
+  own list is used the same way on its side, so a file the peer offers at a path it could not look at is neither
+  written nor saved beside the file it holds. A field of the wrong shape, an entry past the longest path a peer may
+  name, or a path that leaves the space is ignored.
 - `GET /api/sync/file-tombstones?spaceId=general&cursor=<cursor>&since=<ISO>` returns file delete tombstones, each
   `{ _id, spaceId, path, deletedAt, issuer?, rowSeq? }`: `issuer` is the instance whose act deleted the file and
   `rowSeq` the seq of the file record that act deleted, the version it erased (neither carries content, and an older
@@ -654,8 +671,9 @@ answer is lost is read back while the hold is still held. On the serving instanc
   tombstone first and publishes it once the file is removed, and in between it shadows exactly as a published one does —
   by version for metadata, by content hash for bytes, at the metadata writer, the manifest download (re-asked right
   before the bytes are written) and both byte doors. A delete whose file is still there shadows nothing; one whose path
-  cannot be looked at is neither: the byte door answers a retryable `503` (the sender does not remember it) and the
-  manifest download leaves the path for the next cycle. A chunked upload is decided before its target is written, and a peer that promises the whole file's hash (`x-expected-sha256`, below) is asked at its FIRST range, by path and promised hash, so a shadowed file is turned away (`200 { "tombstoned": true }`) before any range is staged; the last range's check of the staged bytes stays the authoritative one. A path a
+  cannot be looked at is neither: a peer's push there is refused before its body is read (`409 path_unreadable`, which the
+  sender remembers per hash and does not resend until the file changes; a look that fails only after that first one is a
+  retryable `503` the sender does not remember) and the manifest download leaves the path for the next cycle. A chunked upload is decided before its target is written, and a peer that promises the whole file's hash (`x-expected-sha256`, below) is asked at its FIRST range, by path and promised hash, so a shadowed file is turned away (`200 { "tombstoned": true }`) before any range is staged; the last range's check of the staged bytes stays the authoritative one. A path a
   peer supplies is resolved before it is looked up (`x/../file` is `file`). A user's own upload is never refused, and a
   tombstone held from before the upgrade carries no `rowSeq` and shadows nothing. See
   [Files API](05-files-api.md#delete-a-file).
