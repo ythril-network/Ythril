@@ -55,7 +55,7 @@ import { timingReporterFlags, clearTimingResults } from '../_shared/timing-repor
 import { testChildEnv } from '../_shared/test-child-env.mjs';
 import { boundedTestArgs, batchTimeoutMs } from '../_shared/test-file-bound.mjs';
 import { planDbShards, unitsOf, dbShardPort, dbFilesThisProcessRuns, dbBatchLabel } from '../_shared/db-shard-plan.mjs';
-import { resolveDbShardConfig, startDbShards, stopDbShards } from './db-shard-stack.mjs';
+import { resolveDbShardConfig, startDbShards, stopDbShards, attachDbShards } from './db-shard-stack.mjs';
 
 /**
  * REFUSE a stale `server/dist`, rather than testing the wrong build and reporting either answer.
@@ -212,11 +212,12 @@ async function runShardUnits(files, shardIndex, width, port, onUnitDone = () => 
  * nobody can read, and the `# fail` / `not ok` lines every reader greps stay at the start of their lines. A heartbeat
  * says the run is alive in between.
  */
-async function runDbSharded(shardCount, width) {
+async function runDbSharded(shardCount, width, started) {
   const plan = planDbShards(offlineDb, shardCount);
-  console.log(`standalone: -db third on ${shardCount} Mongo shards, ${width} files at a time each: ${plan.map(f => f.length).join(', ')} files`);
-  const shards = await startDbShards(shardCount);
-  const stop = () => stopDbShards(shards);
+  console.log(`standalone: -db third on ${shardCount} Mongo shards${started ? ' started outside this run' : ''}, ${width} files at a time each: ${plan.map(f => f.length).join(', ')} files`);
+  // Shards started outside (a container runner's host) are attached to and left for their starter to remove (Q-731).
+  const shards = await (started ? attachDbShards(shardCount) : startDbShards(shardCount));
+  const stop = () => (started ? Promise.resolve() : stopDbShards(shards));
   const onSignal = (sig) => { stop().finally(() => process.exit(sig === 'SIGINT' ? 130 : 143)); };
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);
@@ -244,7 +245,7 @@ if (oneShardFiles !== null) {
   const index = Number(process.env['YTHRIL_TEST_DB_SHARD_INDEX']);
   console.log(`standalone: -db shard ${index} of ${dbShards.count}: ${oneShardFiles.length} files, ${dbShards.width} at a time, on the Mongo at YTHRIL_TEST_MONGO_PORT`);
   await runShardUnits(oneShardFiles, index, dbShards.width, undefined);
-} else if (wants('db') && dbShards.count > 1) await runDbSharded(dbShards.count, dbShards.width);
+} else if (wants('db') && dbShards.count > 1) await runDbSharded(dbShards.count, dbShards.width, dbShards.started);
 
 /*
  * ONE AT A TIME, and against the live stack. These drive :3200, so two of them at once would interleave
