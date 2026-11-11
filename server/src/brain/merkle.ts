@@ -389,7 +389,7 @@ async function computeInto(spaceId: string, entry: CachedSpace): Promise<MerkleR
   // ── File manifest ──────────────────────────────────────────────────────
   // Only the files that replicate: a conflict copy or a schema snapshot is this instance's own, and the peer
   // manifest leaves it out for the same reason (`isInstanceLocalFile`).
-  const files = (await buildFileManifest(spaceId))
+  const files = (await buildFileManifest(spaceId)).entries
     .filter(f => !isInstanceLocalFile(f.path))
     .map(f => sha256hex(`file:${f.path}:${f.sha256}`))
     .sort();

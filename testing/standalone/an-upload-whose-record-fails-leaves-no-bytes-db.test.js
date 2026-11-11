@@ -57,7 +57,7 @@ const rowOf = (id) => door.coll(S, 'files').findOne({ _id: id });
 const onDisk = (rel) => door.localFileExists(S, rel);
 const readLocal = (rel) => fs.readFileSync(path.join(door.localFilesRoot(S), rel), 'utf8');
 /** The manifest a peer would be offered, hashed afresh (no cache). */
-const manifestPaths = async () => (await buildFileManifest(S, undefined, { force: true })).map(e => e.path).sort();
+const manifestPaths = async () => (await buildFileManifest(S, undefined, { force: true })).entries.map(e => e.path).sort();
 
 /** A file that was there before the upload: its bytes and the row that names them. */
 async function seedHeld(rel, content) {

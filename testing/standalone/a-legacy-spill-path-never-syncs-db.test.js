@@ -90,7 +90,7 @@ describe('a legacy spill path never syncs', { skip }, () => {
   it('the manifest omits root spill files and keeps a user\'s own _tmp folder', async () => {
     put(GRAPH_SPILL, '{"kind":"graph-traversal"}');
     put(RESULT_SPILL, '{"kind":"recall-results"}');
-    const paths = (await manifestMod.buildFileManifest(SPACE)).map(e => e.path).sort();
+    const paths = (await manifestMod.buildFileManifest(SPACE)).entries.map(e => e.path).sort();
 
     assert.ok(paths.includes(NOTE), `the scan must still see ordinary files: ${paths.join(', ')}`);
     assert.ok(paths.includes(USERS_OWN), 'a `_tmp` folder below the root is the user\'s and syncs like any other');

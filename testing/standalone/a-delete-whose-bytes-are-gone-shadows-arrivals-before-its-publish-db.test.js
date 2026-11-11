@@ -234,23 +234,28 @@ describe('a delete whose bytes are gone shadows arrivals before its publish', { 
     });
 
     describe('a door that cannot look at the path', () => {
-      it('answers a retryable 503 for a single upload and stores nothing', async () => {
+      // Bundle-70 (Q-350 b) moved this answer: a peer's push at a path whose existing entry cannot be looked at is refused BEFORE the body is read,
+      // `409 path_unreadable` (a statement about the path, which the sender stops resending), where it was a retryable 503 after the body. What the
+      // cases pin is unchanged: the sender is not told the path is tombstoned, and nothing is stored.
+      it('answers 409 path_unreadable for a single upload and stores nothing', async () => {
         await pending('cl-single.txt');
         const fault = cannotLook('cl-single.txt');
         let res;
         try { res = await postWhole(bytes, { space: S, path: 'cl-single.txt', content: ERASED, token: peer() }); } finally { fault.restore(); }
-        assert.equal(res.code, 503, `a door that cannot tell whether the delete happened answered ${JSON.stringify(res)}`);
+        assert.equal(res.code, 409, `a door that cannot tell whether the delete happened answered ${JSON.stringify(res)}`);
+        assert.equal(res.body?.code, 'path_unreadable', JSON.stringify(res));
         assert.equal(res.body?.tombstoned, undefined, 'the sender was told the path is tombstoned, and will not retry');
         assert.deepEqual(await nothingStored('cl-single.txt'), { onDisk: false, row: false });
         assert.ok(fault.hits.length > 0, 'the path was never looked at — the fault is not reached');
       });
 
-      it('answers a retryable 503 at the last chunk and stores nothing', async () => {
+      it('answers 409 path_unreadable for a chunked upload (at its range, as the single one) and stores nothing', async () => {
         await pending('cl-chunked.txt');
         const fault = cannotLook('cl-chunked.txt');
         let out;
         try { out = await postInHalves(bytes, { space: S, path: 'cl-chunked.txt', content: ERASED, token: peer() }); } finally { fault.restore(); }
-        assert.equal(out.last.code, 503, `a door that cannot tell whether the delete happened answered ${JSON.stringify(out.last)}`);
+        assert.equal(out.last.code, 409, `a door that cannot tell whether the delete happened answered ${JSON.stringify(out.last)}`);
+        assert.equal(out.last.body?.code, 'path_unreadable', JSON.stringify(out.last));
         assert.equal(out.last.body?.tombstoned, undefined);
         assert.deepEqual(await nothingStored('cl-chunked.txt'), { onDisk: false, row: false });
         assert.ok(fault.hits.length > 0, 'the path was never looked at — the fault is not reached');

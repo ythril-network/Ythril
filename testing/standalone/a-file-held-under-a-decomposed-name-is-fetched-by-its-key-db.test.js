@@ -117,7 +117,7 @@ describe('a file held under a decomposed name is advertised and fetched by its k
     put(NFD_NAME, 'bytes held decomposed');
     put(path.join(NFD_DIR, NFD_NAME), 'bytes in a decomposed directory');
     put('plain.txt', 'bytes under a plain name');
-    const entries = await buildFileManifest(S);
+    const { entries } = await buildFileManifest(S);
     const byKey = Object.fromEntries(entries.map(e => [e.path, e.diskPath]));
     assert.deepEqual(Object.keys(byKey).sort(), [`${NFC_DIR}/${NFC_NAME}`, NFC_NAME, 'plain.txt'].sort(), 'an entry is advertised under a spelling that is not its key');
     assert.equal(byKey[NFC_NAME], NFD_NAME, 'the disk spelling is not kept for local use');
@@ -207,13 +207,13 @@ describe('a file held under a decomposed name is advertised and fetched by its k
     if (!needsDecomposed(t)) return;
     put(NFC_NAME, 'composed');
     put(NFD_NAME, 'decomposed');
-    const first = await logLinesDuring(() => buildFileManifest(S));
+    const first = await logLinesDuring(async () => (await buildFileManifest(S)).entries);
     const entries = first.result.filter(e => e.path === NFC_NAME);
     assert.equal(first.result.length, 1, `the file is ${first.result.length} manifest entries`);
     assert.equal(entries[0].diskPath, NFC_NAME, 'the spelling that IS the key did not win');
     const said = (lines) => lines.filter(l => l.includes('two spellings of one file'));
     assert.equal(said(first.lines).length, 1, `said ${said(first.lines).length} times: ${JSON.stringify(first.lines)}`);
-    const second = await logLinesDuring(() => buildFileManifest(S));
+    const second = await logLinesDuring(async () => (await buildFileManifest(S)).entries);
     assert.equal(said(second.lines).length, 0, 'said again inside its window');
   });
 });

@@ -92,7 +92,6 @@ const EXISTENCE_CHECK_EXEMPT = {
 };
 const SWALLOWED_READDIR_EXEMPT = {
   'server/src/files/stored-bytes.ts': 'sweepStoredTmp: a best-effort boot sweep of orphaned temp files; an unreadable temp directory leaves them for the next boot and no reader depends on the list',
-  'server/src/files/manifest.ts': 'the manifest walk: its unreadable directories are Q-350(b) (bundle-70 S2), which names them in `unreadable`; this row goes with that change, and the stale check fails it then',
 };
 
 /**

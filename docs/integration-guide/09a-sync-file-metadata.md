@@ -28,6 +28,13 @@ instance keeps the file on its own disk is never sent. The byte route (`GET /api
 another spelling of the key it is asked for, so what the manifest advertises can always be fetched. Two spellings of one key on one
 disk are one entry (the one that is the key, else the smallest), and the instance says so once per window.
 
+**A path the manifest could not look at is named, not left to look absent.** Beside `manifest` the answer carries `unreadable`
+(the keys of the files and directories the builder was refused a look at, a directory as its key and a trailing `/`) and
+`unreadableTruncated` ([Sync API](09-sync-api.md#file-sync-artifacts) has the rules). The key is spelled as an entry's is, so a peer
+that holds the file under a decomposed name still matches it. A receiver of the list leaves those paths alone: it does not push to
+them, and it takes the same list from its own manifest to leave a file the peer offers at a path it could not look at where it is.
+The file's metadata is not touched by this; only the bytes' look is.
+
 The bytes have always moved through the manifest and `/api/files`. From 4.0 the file's **metadata record**
 moves too — its description, tags and properties. Its LINKS travel as link records of their own, on the
 same channel.

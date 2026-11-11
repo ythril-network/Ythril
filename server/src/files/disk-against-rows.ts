@@ -21,7 +21,9 @@
  * - `stale_row`: a live row whose sha256 is not the bytes';
  * - `unprocessed`: a live row of a class that processes, with no processing state;
  * - `row_without_bytes`: a live row that records bytes (a sha256) and finds none on disk. A row with no sha256 records no bytes (an import
- *   drops them) and is not this;
+ *   drops them) and is not this, and neither is a row at a path the walk could not LOOK AT (the manifest's `unreadable`: a file whose `stat`
+ *   failed, anything under a directory whose `readdir` failed): its bytes may be there, and the report would ask for them to be restored
+ *   over bytes that are;
  * - `soft_deleted_with_bytes`: a soft-deleted row whose path has bytes again. A soft-deleted row with no bytes is as it should be.
  *
  * Never a file of a derived or instance-local tree (`isInstanceLocalFile`: conversion sidecars, conflict copies, schema snapshots, legacy
@@ -38,6 +40,7 @@ import { withinHousekeepingBound } from '../db/write-bound.js';
 import { toDocId } from '../util/paths.js';
 import { isInstanceLocalFile } from '../sync/file-conflict.js';
 import { buildFileManifest, type ManifestEntry } from './manifest.js';
+import { UnreadablePaths } from './unreadable-paths.js';
 import { resolveInputFormat } from './converters/pipeline.js';
 import type { FileRepairReason } from './bytes-arrived.js';
 import { FILE_MISMATCH_CLASSES, type FileMismatchClass } from './file-mismatch-classes.js';
@@ -93,12 +96,15 @@ export async function heldRowsFor(spaceId: string, peer?: HeldRowsPeer): Promise
 
 /**
  * The paths of each class, sorted, for the bytes `disk` lists against the rows `held`. Pure. Both sides are matched by `toDocId`, so a
- * name stored NFD is one file, and a path is reported in that spelling.
+ * name stored NFD is one file, and a path is reported in that spelling. `unreadable` is what the walk could not look at (keys, a directory with
+ * a trailing `/`, as the manifest names them): a row at such a path is in no class.
  */
 export function classifyDiskAgainstRows(
   disk: readonly Pick<ManifestEntry, 'path' | 'sha256'>[],
   held: ReadonlyMap<string, HeldRow>,
+  unreadable: readonly string[] = [],
 ): Record<FileMismatchClass, string[]> {
+  const unlooked = new UnreadablePaths(unreadable);
   const found: Record<FileMismatchClass, string[]> = {
     missing_row: [], stale_row: [], unprocessed: [], row_without_bytes: [], soft_deleted_with_bytes: [],
   };
@@ -114,7 +120,7 @@ export function classifyDiskAgainstRows(
   }
   for (const [id, row] of held) {
     if (row.deletedAt !== undefined || row.sha256 === undefined) continue;
-    if (!onDisk.has(id) && !isInstanceLocalFile(id)) found.row_without_bytes.push(id);
+    if (!onDisk.has(id) && !isInstanceLocalFile(id) && !unlooked.covers(id)) found.row_without_bytes.push(id);
   }
   for (const cls of FILE_MISMATCH_CLASSES) found[cls].sort();
   return found;
@@ -129,5 +135,5 @@ export async function readDiskAgainstRows(
   walk: <T>(fn: () => Promise<T>) => Promise<T>,
 ): Promise<Record<FileMismatchClass, string[]>> {
   const disk = await walk(() => buildFileManifest(spaceId, undefined, { readOnly: true }));
-  return classifyDiskAgainstRows(disk, await heldRowsFor(spaceId));
+  return classifyDiskAgainstRows(disk.entries, await heldRowsFor(spaceId), disk.unreadable);
 }

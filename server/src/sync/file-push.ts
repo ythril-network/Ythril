@@ -29,6 +29,7 @@ import { Readable } from 'node:stream';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import { openStoredRead } from '../files/stored-bytes.js';
 import { LruMap } from '../util/lru-map.js';
+import { PATH_UNREADABLE_CODE } from '../files/unreadable-paths.js';
 
 /** One request to the peer's upload door: what `send` is given. */
 export interface UploadRequest {
@@ -49,7 +50,7 @@ export type PushOutcome =
   | { kind: 'delivered' }
   /** The peer holds a tombstone that erased exactly these bytes and stored nothing (`200 { tombstoned: true }`). */
   | { kind: 'tombstoned' }
-  /** The peer refused THESE BYTES (a hash that is not the one promised, a malformed range): the same bytes will be refused again. */
+  /** The peer refused THESE BYTES (a hash that is not the one promised, a malformed range), or the PATH (it cannot look at it, `409 path_unreadable`): the same bytes will be refused again. */
   | { kind: 'refused'; status: number; error: string | undefined }
   /** Not delivered, and not because of the bytes: a status about the moment (quota, rate, auth, a server error). Tried again next cycle. */
   | { kind: 'failed'; status: number; error: string | undefined };
@@ -118,10 +119,18 @@ const errorOf = (answer: UploadAnswer): string | undefined => typeof answer.json
 /** Whether a status says the BYTES are what was refused, so asking again with the same bytes asks for the same refusal. */
 const aboutTheBytes = (status: number): boolean => status === 400 || status === 422;
 
+/**
+ * Whether an answer is a refusal about what was sent: its bytes ({@link aboutTheBytes}) or the path the peer cannot look at
+ * ({@link PATH_UNREADABLE_CODE}: a statement about THE PATH, not the moment, so the same bytes sent again are answered the same way for as long as
+ * the path stays unreadable). A `409` with any other code (a destination a file blocks, `path_blocked`) is about the moment and is tried again next cycle.
+ */
+const isRefusal = (answer: UploadAnswer): boolean =>
+  aboutTheBytes(answer.status) || (answer.status === 409 && answer.json['code'] === PATH_UNREADABLE_CODE);
+
 /** The outcome of an answer to the request that completed an upload (or the only request of one). */
 function settled(answer: UploadAnswer): PushOutcome {
   if (answer.status >= 200 && answer.status < 300) return answer.json['tombstoned'] === true ? { kind: 'tombstoned' } : { kind: 'delivered' };
-  return aboutTheBytes(answer.status)
+  return isRefusal(answer)
     ? { kind: 'refused', status: answer.status, error: errorOf(answer) }
     : { kind: 'failed', status: answer.status, error: errorOf(answer) };
 }

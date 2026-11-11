@@ -365,7 +365,7 @@ restore itself.
 
 **`files` in detail.** The classes: `missing_row` (bytes on disk no live record names), `stale_row` (a live record whose `sha256`
 is not the bytes'), `unprocessed` (a live record of a kind that is converted or analysed, with no processing state),
-`row_without_bytes` (a live record that holds a `sha256` and finds no bytes on disk) and `soft_deleted_with_bytes` (a
+`row_without_bytes` (a live record that holds a `sha256` and finds no bytes on disk; **a record at a path the walk could not look at is in no class**: a file whose look was refused and everything under a directory that could not be listed are neither present nor absent, so the restore does not report them as missing) and `soft_deleted_with_bytes` (a
 soft-deleted record whose path has bytes again; with soft delete off, the deletion marker a delete leaves for the file
 change feed counts the same way). `count` is every file of the class. `paths` holds at most 10 of them, fewer
 when the whole restore's cap on named paths (200, shared equally between its spaces) is reached; each is quoted bounded (256
