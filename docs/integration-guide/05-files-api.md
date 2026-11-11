@@ -205,6 +205,24 @@ fails while a directory is listed (a disk error, a permission the server lost), 
 On a personal view the members are merged by name (the first member wins a collision), a member that has no such directory contributes nothing,
 and a fault in any member fails the listing.
 
+**A listing whose metadata could not be read says so: `metadataIncomplete`.** The files and folders come from the disk; the `embeddingStatus`, `tags` and
+folder `size` come from each member space's file records, a separate read. When that read fails for a member (the database did not answer), the listing
+still answers `200` with the entries, which are listed **without** that member's status, tags and folder sizes, and carries
+`"metadataIncomplete": ["store-unavailable"]`: a non-empty array of reasons from a closed vocabulary, one entry per distinct reason across the members
+that failed, never the database's own text. A file with no `embeddingStatus` in such a listing has not been found to be unprocessed; its record could not be
+read. The field is **absent** when every read answered (as `usageIncomplete` is on [spaces](06-spaces-api.md)), so a client treats its presence as the
+signal and never reads an empty or missing field as a failure. On a personal view only the member that failed is bare; the other members' entries keep their
+metadata. A member with no file records is not a failure. Every way a directory is listed carries it (the root as `.` or `/`, and a sub-directory), and
+the failure is logged once per window per space, naming the space. The reasons:
+
+| Reason | Meaning |
+|---|---|
+| `store-unavailable` | The database's own condition, one retrying may clear (a connection lost, an operation that ran out of time). |
+| `store-fault` | The database driver failed in a way that retrying will not clear; the cause is in the server log. |
+| `unknown` | The read failed for a reason that is not the database's; the cause is in the server log. |
+
+The Files tab shows one line, "Some file details could not be loaded; the files are listed without them.", while the listing it shows carries the field.
+
 **The root `_converted/`, `_extracted/` and `_tmp/` directories are left out of a listing** unless you send
 `?includeDerived=true`. The first two are the conversion pipeline's output
 ([Conversion Pipeline](05a-conversion-pipeline.md)). `_tmp/` is where versions before 5.6.0 wrote read spills;
@@ -225,7 +243,7 @@ worker has reported at least one step:
 Absence means "not known yet", **not** "no work to do": a job claimed a moment ago has no `progress` until
 its first report. Fall back to `embeddingStatus` rather than rendering an empty progress indicator. The
 lookup is best-effort server-side, so these fields may also be absent if the job store was briefly
-unreachable — the listing itself never fails over them.
+unreachable — the listing itself never fails over them, and (unlike the file records' read above) says nothing about it.
 
 ---
 

@@ -217,6 +217,9 @@ import { PluralText } from '../../core/plural-text.service';
           @if (listing.refreshFailed()) {
             <div class="fm-stale">{{ 'files.refreshFailed' | transloco }}</div>
           }
+          @if (listing.metadataIncomplete()) {
+            <div class="fm-stale" role="status">{{ 'files.metadataIncomplete' | transloco }}</div>
+          }
           <app-file-listing
             [rows]="fileRows()"
             [sortField]="sortField()"

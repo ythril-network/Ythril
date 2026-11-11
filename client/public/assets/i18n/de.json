@@ -2084,6 +2084,7 @@
   "files.error.loadFiles": "Dateien konnten nicht geladen werden.",
   "files.refreshing": "Suche nach Änderungen",
   "files.refreshFailed": "Aktualisierung fehlgeschlagen — die Liste unten ist möglicherweise nicht aktuell. Neuer Versuch folgt.",
+  "files.metadataIncomplete": "Einige Dateidetails konnten nicht geladen werden; die Dateien werden ohne sie aufgelistet.",
   "schemaLib.error.load": "Schema-Bibliothek konnte nicht geladen werden.",
   "graph.error.load": "Graph konnte nicht geladen werden.",
   "graph.waiting.title": "Der Server hat noch nicht geantwortet.",

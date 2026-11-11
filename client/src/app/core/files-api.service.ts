@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams, HttpHeaders } from '@angular/common/http';
 import { Observable, Subscription, of } from 'rxjs';
 import { map, switchMap } from 'rxjs/operators';
-import type { FileEntry, FileMeta, FileExtract, UploadProgress, ConflictRecord, BulkConflictFailure } from './api.types';
+import type { FileEntry, FileListing, FileMeta, FileExtract, UploadProgress, ConflictRecord, BulkConflictFailure } from './api.types';
 import { filterCall } from './filter-call';
 import { hydrateLinks } from './record-links';
 
@@ -13,7 +13,7 @@ export class FilesApi {
 
   // ── Files ─────────────────────────────────────────────────────────────────
 
-  listFiles(spaceId: string, path = '/'): Observable<{ entries: FileEntry[] }> {
+  listFiles(spaceId: string, path = '/'): Observable<FileListing> {
     const params = new HttpParams().set('path', path);
     return this.http.get<any>(`/api/files/${spaceId}`, { params }).pipe(
       map(res => ({
@@ -29,6 +29,8 @@ export class FilesApi {
           progress: e.progress,
           progressAt: e.progressAt,
         } as FileEntry)),
+        // Only a non-empty list is a report: an absent field and an empty one both mean nothing failed, and the page never reads "no reasons" as a failure.
+        ...(Array.isArray(res.metadataIncomplete) && res.metadataIncomplete.length > 0 ? { metadataIncomplete: res.metadataIncomplete as string[] } : {}),
       })),
     );
   }

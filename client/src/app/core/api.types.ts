@@ -752,6 +752,16 @@ export interface FileEntry {
 }
 
 /**
+ * One directory listing as the Files page reads it. `metadataIncomplete` is present only when the server could not read some member
+ * space's file records (a closed vocabulary of reasons, for the log and the tests; the page says one sentence): the entries are then
+ * listed without their status, tags and folder sizes, which is not the same as "nothing processed yet".
+ */
+export interface FileListing {
+  entries: FileEntry[];
+  metadataIncomplete?: string[];
+}
+
+/**
  * What retrieval actually sees for one converted file (the Extract tab).
  *
  * Not new data: every field is a record conversion already wrote. It exists as one shape because the three

@@ -2084,6 +2084,7 @@
   "files.error.loadFiles": "Couldn't load files.",
   "files.refreshing": "Checking for changes",
   "files.refreshFailed": "Could not refresh — the list below may be out of date. Retrying.",
+  "files.metadataIncomplete": "Some file details could not be loaded; the files are listed without them.",
   "schemaLib.error.load": "Couldn't load the schema library.",
   "graph.error.load": "Couldn't load the graph.",
   "graph.waiting.title": "Still waiting for the server to answer.",
