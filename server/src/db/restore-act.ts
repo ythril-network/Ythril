@@ -54,6 +54,7 @@ import { initSpace } from '../spaces/lifecycle.js';
 import { assertUniqueIndexesStand } from '../spaces/space-indexes.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
+import { restartAbsentBytesSweeps } from '../files/absent-bytes-sweep.js';
 import {
   defineSpaceActBody, defineSpaceActSetHooks, registerSpaceActSet, runSpaceAct, instanceWideActStanding, spaceActSetOf, spaceActKnob,
   SpaceActInputFailure, type SpaceActBodyContext, type SpaceActBodyOutcome,
@@ -214,6 +215,8 @@ function onRestoreEnd(set: Readonly<SpaceActSet>): void {
   wholeBackupChecks.delete(set.id);
   reportDatabaseReplaced();
   restartLeakedRowScans(Object.keys(set.members));
+  // Every record now there waits the longest window for its bytes, and no stamp from before the restore ages it (Q-337).
+  void restartAbsentBytesSweeps(Object.keys(set.members));
   logInternalAudit({
     method: 'RESTORE', path: `internal:restore:${set.backupId ?? ''}:${set.id}`,
     operation: set.outcome === 'abandoned' ? RESTORE_ABANDONED_OPERATION : RESTORE_COMPLETED_OPERATION,

@@ -763,10 +763,8 @@ export function normalizeDocExtractionMode(mode: string | undefined | null): Doc
  *            full         keyframes as images as well — NOT BUILT YET; reserved so the ladder reads
  *                         complete, and rejected rather than silently treated as `audio`
  */
-export type ImageLevel = 'off' | 'caption' | 'recognition' | 'auto';
-export type AudioLevel = 'off' | 'on' | 'auto';
-export type VideoLevel = 'off' | 'audio' | 'full' | 'auto';
-export type TextLevel = 'off' | 'embed' | 'chunk' | 'auto';
+export type { ImageLevel, AudioLevel, VideoLevel, TextLevel } from './media-levels.js';
+import type { ImageLevel, AudioLevel, VideoLevel, TextLevel } from './media-levels.js';
 
 export const IMAGE_LEVELS = ['off', 'caption', 'recognition', 'auto'] as const;
 export const AUDIO_LEVELS = ['off', 'on', 'auto'] as const;
@@ -1737,6 +1735,7 @@ export interface FileMetaDoc {
   createdAt: string;    // ISO8601 — first write timestamp
   updatedAt: string;    // ISO8601 — last write timestamp
   sizeBytes: number;    // file size in bytes at last write
+  bytesAbsentSince?: string; // LOCAL: when this disk was first found without the bytes (files/absent-bytes-sweep.ts, Q-337)
   /**
    * SHA-256 of the bytes as last written, when the writer supplied it.
    *

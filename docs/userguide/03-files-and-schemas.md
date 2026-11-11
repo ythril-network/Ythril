@@ -107,9 +107,11 @@ body of the API call, the `confirm` parameter of the tool), which finds what the
 refused and nothing is deleted. An MCP token with write access to files can delete a folder this way, as the API can.
 
 **A file whose bytes were removed outside Ythril while its metadata stayed has no row here** — the list is read
-from disk — although the **Files** count still includes it. Delete it through the API
+from disk — and the **Files** count leaves it out too: it is counted apart, as *awaiting bytes* (`filesAwaitingBytes` in the space's stats). You can still delete it through the API
 (`DELETE /api/files/:spaceId?path=…`) or the MCP `delete_file` tool: the delete is completed, and synced peers are
 told to remove their copy too (which ones apply it is explained next).
+
+**You do not have to delete it: Ythril removes the record itself, on this instance only, after waiting.** A background sweep ([what it checks and what it never touches](05-storage-data-and-audit.md#settings--audit-log)) notes the day a file's bytes were first found missing and removes the record once the wait is over and the network has had its say. The wait is **1 day**, **30 days** for a record that never had a content hash (its bytes were still arriving) and **30 days** for every file of a space that was just restored or imported. It also needs every peer this instance receives the space from to have finished a file sync since the bytes were noticed, without naming the file and without a path it could not look at; **30 days** after the bytes were noticed, that wait for peers is dropped, the others are not. Nothing is removed while a move of the file is owed, a deletion of it is in flight, the space is not taking writes, a chunked upload of it is open, or when most of the space's files (or all the files under one top-level folder) are missing at once, which looks like a disk that is not mounted. The removal is this instance's alone: it leaves no deletion notice for peers, fires no webhook, and the change feed reports the path as `{ deleted: true, reason: 'bytes_lost' }`. A peer that still holds the file sends its bytes back and the record returns; links to the file stay. A **delete you make yourself** is unchanged and keeps its deletion notice.
 
 **Deleting a file twice is not a second success.** Where the instance keeps a deleted file's record for audit
 ([Keeping a record of deleted files](04-settings.md#keeping-a-record-of-deleted-files)), that

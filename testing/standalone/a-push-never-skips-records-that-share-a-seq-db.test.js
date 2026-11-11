@@ -56,6 +56,8 @@ const LOCAL_VALUE = {
   syncBase: { somePeer: 'abc' },
   // bundle-51: who delivered the stored version — names a peer, so it never goes out.
   deliveredBy: 'some-peer',
+  // bundle-70 (Q-337): when THIS disk was first found without a file's bytes — about this disk, so it never goes out.
+  bytesAbsentSince: '2026-10-01T00:00:00.000Z',
   // Q-439: an edge's write guard - this instance's lock on a functional subject, never sent.
   _functionalGuard: '4:from5:label',
   // bundle-81: where this instance stored the record and whether it wrote it — its own, never sent.

@@ -24,7 +24,7 @@
  * own, not bolted onto a file move.
  */
 import type { RecallResult, RecallKnowledgeType } from './recall.js';
-import { WRITE_GUARD_FIELDS, POSITION_FIELDS, WRITTEN_HERE } from '../sync/local-only-fields.js';
+import { WRITE_GUARD_FIELDS, POSITION_FIELDS, WRITTEN_HERE, BYTES_ABSENT_SINCE } from '../sync/local-only-fields.js';
 
 /**
  * The fields a recall result carries for the SYSTEM rather than for the caller.
@@ -133,6 +133,8 @@ export const NEVER_RETURNED_FIELDS: readonly string[] = [
   // back. `writtenHere` for an author-less row is exactly "not delivered by a peer", the bit the filter sanitizer exists to withhold.
   // `pos` is NOT here: it is the order-only class below, because a field named here never reaches a cross-space merge.
   ...[...POSITION_FIELDS].filter(f => !ORDER_ONLY_FIELDS.includes(f)), WRITTEN_HERE,
+  // When THIS disk was found without a file's bytes (Q-337): bookkeeping of the absent-bytes sweep, which a reader would take for the file's state.
+  BYTES_ABSENT_SINCE,
 ];
 
 /**

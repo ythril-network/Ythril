@@ -46,7 +46,7 @@ import { col } from '../db/mongo.js';
 import { spaceStamp, readAtStamp, type Stamped } from '../db/space-generation.js';
 import { LruMap } from '../util/lru-map.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { LIVE_FILE_ROW } from '../files/live-file-row.js';
+import { COUNTED_FILE_ROW } from '../files/live-file-row.js';
 import { readErShape, joinDeclared, declaredEntityTypes, type ErModel, type ErObserved } from './er-model.js';
 
 /** The record counts a space meta reports. */
@@ -76,7 +76,7 @@ async function build(spaceId: string): Promise<SpaceShape> {
   // because this feeds `space_meta`, and REST stats already counts it that way (api/brain/search.ts). Three surfaces
   // answering one question have to answer it alike.
   const count = (part: typeof READ_PARTS[number]) =>
-    col(spaceCollection(spaceId, part)).countDocuments(part === 'files' ? { ...LIVE_FILE_ROW } : {});
+    col(spaceCollection(spaceId, part)).countDocuments(part === 'files' ? { ...COUNTED_FILE_ROW } : {});
   const [observed, facts, entities, edges, chrono, files] = await Promise.all([
     readErShape(spaceId), count('facts'), count('entities'), count('edges'), count('chrono'), count('files'),
   ]);

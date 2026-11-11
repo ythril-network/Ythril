@@ -55,7 +55,13 @@ export type FileChangesParams = z.infer<typeof FileChangesQuery>;
 /** One change: a live file, or a deleted one (no hash, no size: the deletion stripped them). */
 export type FileChangeItem =
   | { path: string; sha256?: string; sizeBytes: number; updatedAt: string; deleted: false }
-  | { path: string; deleted: true; updatedAt: string };
+  | { path: string; deleted: true; updatedAt: string; reason?: FileChangeReason };
+
+/**
+ * Why a deletion row is in the feed when it is not a person's delete: `bytes_lost` is the absent-bytes sweep (Q-337), which removed the record of
+ * a file whose bytes THIS instance lost, here only. A client that mirrors the space keeps its own copy, which may be the last one. Absent on a delete.
+ */
+export type FileChangeReason = 'bytes_lost';
 
 export interface FileChangesAnswer { items: FileChangeItem[]; nextCursor: string; through: number; head: number }
 /** A read's outcome: the page, or the refusal with its status and code (both doors send it as they send any refusal). */
@@ -104,11 +110,13 @@ export function fileChangesSpaceRefusal(spaceId: string, peerId: string | undefi
 }
 
 /** The fields a row is read with: what an item says, and what tells a deletion row from a live one. */
-const PROJECTION = { _id: 1, sha256: 1, sizeBytes: 1, updatedAt: 1, deletedAt: 1, feedMarker: 1 } as const;
-type FeedRow = { _id: string; sha256?: string; sizeBytes?: number; updatedAt?: string; deletedAt?: string; feedMarker?: true };
+const PROJECTION = { _id: 1, sha256: 1, sizeBytes: 1, updatedAt: 1, deletedAt: 1, feedMarker: 1, retiredBy: 1 } as const;
+type FeedRow = { _id: string; sha256?: string; sizeBytes?: number; updatedAt?: string; deletedAt?: string; feedMarker?: true; retiredBy?: string };
 
 function itemOf(row: FeedRow): FileChangeItem {
-  if (row.deletedAt !== undefined || row.feedMarker === true) return { path: row._id, deleted: true, updatedAt: String(row.deletedAt ?? row.updatedAt ?? '') };
+  if (row.deletedAt !== undefined || row.feedMarker === true) {
+    return { path: row._id, deleted: true, updatedAt: String(row.deletedAt ?? row.updatedAt ?? ''), ...(row.retiredBy === 'bytes-lost' ? { reason: 'bytes_lost' as const } : {}) };
+  }
   return {
     path: row._id,
     ...(typeof row.sha256 === 'string' ? { sha256: row.sha256 } : {}),

@@ -110,7 +110,7 @@ const FILE_META_KEYS: Readonly<Record<keyof FileMetaDoc, true>> = {
   seq: true, deletedAt: true, embedding: true, embeddingModel: true, parentFileId: true, chunkIndex: true,
   headingText: true, content: true, convertedFileId: true, chunkCount: true, conversionError: true, mediaType: true,
   embeddingStatus: true, chunkOffsetMs: true, chunkDurationMs: true, mediaJobError: true, faceEmbedding: true,
-  faceEntityId: true, faceBbox: true, faceScore: true, wholeDocument: true, sourceSha256: true, feedMarker: true,
+  faceEntityId: true, faceBbox: true, faceScore: true, wholeDocument: true, sourceSha256: true, feedMarker: true, bytesAbsentSince: true,
 };
 
 /**

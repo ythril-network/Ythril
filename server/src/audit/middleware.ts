@@ -659,6 +659,12 @@ export const FILE_MOVE_FINISH_OPERATION = 'file.move.finish';
 export const LEAKED_ROWS_REPAIR_OPERATION = 'file.leaked_rows.repair';
 
 /**
+ * Records of files whose bytes this instance lost, removed here only by the absent-bytes sweep (`files/absent-bytes-sweep.ts`, Q-337): one entry
+ * per space per pass that retired any, with no token, naming the paths it really retired (capped) and how many.
+ */
+export const FILES_ABSENT_BYTES_SWEEP_OPERATION = 'file.absent_bytes.sweep';
+
+/**
  * The records a TTL sweep cycle deleted from one space once their expiry had passed (`brain/ttl-sweep.ts`, bundle-40): one entry per space per
  * cycle that deleted any, with no token, and one change per record collection naming how many it took. Every deletion is every peer's (a tombstone
  * is issued), and no request asked for it, so it is audited as the other work no request named.

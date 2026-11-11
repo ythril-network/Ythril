@@ -39,14 +39,22 @@ export function feedMarkerRow(
  * The update PIPELINE that turns a live row into its feed marker in one write: the row is replaced by {@link feedMarkerRow}'s shape, `posAtSeq` read from
  * the row's own `seq` inside the write (0 for a row with none), so an edit between the read and the write cannot leave a position taken for another version.
  */
-export function feedMarkerStages(spaceId: string, pos: number, deletedAt: string): object[] {
+export function feedMarkerStages(spaceId: string, pos: number, deletedAt: string, retiredBy?: RetiredBy): object[] {
   return [{
     $replaceWith: {
       _id: '$_id', spaceId: { $literal: spaceId }, path: '$_id', deletedAt: { $literal: deletedAt }, feedMarker: true,
       pos: { $literal: pos }, posAtSeq: { $ifNull: ['$seq', 0] },
+      ...(retiredBy !== undefined ? { retiredBy: { $literal: retiredBy } } : {}),
     },
   }];
 }
+
+/**
+ * Why a row was retired, when it was not a person's delete: `'bytes-lost'` is the absent-bytes sweep (`files/absent-bytes-sweep.ts`, Q-337),
+ * which took the record of a file whose bytes this disk lost. Carried on the feed marker (or the soft-delete flag) so the change feed can say
+ * `reason: 'bytes_lost'` and a client mirroring the space keeps its own copy. A retirement with no reason is a delete.
+ */
+export type RetiredBy = 'bytes-lost';
 
 /** Whether a stored row is a feed marker. */
 export const isFeedMarker = (row: { feedMarker?: unknown } | null | undefined): boolean => row?.feedMarker === true;

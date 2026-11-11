@@ -144,6 +144,8 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   'ttl.expire': BRAIN_COLLECTIONS.filter(c => c !== 'links'),
   // The entity the duplicate scanner absorbed into the entry's survivor: its id, `to: null` (it no longer exists). The id alone, never its name.
   'duplicate.automerge': ['absorbed'],
+  // The records the absent-bytes sweep retired (Q-337): their paths (`added`, at most the sweep's cap), how many in all, and how many past the cap.
+  'file.absent_bytes.sweep': ['retiredPaths', 'removed', 'pathsNotListed'],
 };
 
 /** Scalars only — anything else is dropped rather than stringified. */
@@ -170,7 +172,7 @@ function scalarOrDrop(v: unknown): string | number | boolean | null | undefined 
  * Recording added/removed rather than the whole before/after list keeps the entry proportional to the
  * change. Re-tagging one fact should not copy forty tags into the audit log twice.
  */
-const LIST_FIELDS: ReadonlySet<string> = new Set(['tags', 'linkEntities', 'linkFacts', 'linkChronos']);
+const LIST_FIELDS: ReadonlySet<string> = new Set(['tags', 'linkEntities', 'linkFacts', 'linkChronos', 'retiredPaths']);
 
 /** An array of primitives, or undefined if it is not one. Nested values disqualify the whole field. */
 function primitiveListOrDrop(v: unknown): (string | number | boolean)[] | undefined {

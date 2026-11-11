@@ -205,7 +205,7 @@ Chunk records and `_converted/` file records carry a `parentFileId` field. The f
   `filter: { parentFileId: { "$exists": false } }`. The list route this replaced excluded them by default;
   `filter` has no default, because a default is a decision about what somebody meant and this door takes
   what they said. A listing without that predicate looks like the same file many times over.
-- **`GET /api/brain/spaces/:spaceId/stats`** — the `files` count reflects only top-level files.
+- **`GET /api/brain/spaces/:spaceId/stats`** — the `files` count reflects only top-level files, and leaves out a record whose bytes are gone from this instance (`filesAwaitingBytes` counts those).
 
 Recall results (`recall`, `similar`) **do** include chunk records by design. When a result has `parentFileId` set, the caller can follow it to retrieve the original file record.
 

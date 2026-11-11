@@ -922,6 +922,30 @@ export const leakedRowsRepairPendingSpaces = new Gauge({
   registers: [register],
 });
 
+/** Records of files whose bytes this instance lost, removed here only by the absent-bytes sweep (Q-337, `files/absent-bytes-sweep.ts`). */
+export const filesAbsentBytesRemovedTotal = new Counter({
+  name: 'ythril_files_absent_bytes_removed_total',
+  help: 'File records the absent-bytes sweep removed on this instance only (no tombstone) because their bytes were gone past the window',
+  registers: [register],
+});
+filesAbsentBytesRemovedTotal.inc(0);
+
+/** File records waiting for their bytes (stamped by the absent-bytes sweep), per space, as of each space's last pass. */
+export const filesAwaitingBytesGauge = new Gauge({
+  name: 'ythril_files_awaiting_bytes',
+  help: 'Live file records whose bytes this disk lacks, stamped by the absent-bytes sweep and waiting out their window, by space (as of the space\'s last pass)',
+  labelNames: ['space'] as const,
+  registers: [register],
+});
+
+/** Stamped records the sweep's last decision kept, by why (the due rule's reason vocabulary, `absentRowIsDue`). */
+export const filesAbsentBytesHeldGauge = new Gauge({
+  name: 'ythril_files_absent_bytes_held',
+  help: 'File records waiting for their bytes that the absent-bytes sweep kept at its last decision, by reason (window, legs, mass_loss, mass_loss_directory, owed_move, tombstone, not_writable, chunk_session, no_complete_pass)',
+  labelNames: ['reason'] as const,
+  registers: [register],
+});
+
 /**
  * Rows a finishing move replaced at the destination ids it took, counted BY ROW: the late or stale writes (a straggler at an id the
  * batch already moved, debris of a deleted file), never a live file, because a move onto one is refused.

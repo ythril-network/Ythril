@@ -47,9 +47,10 @@ import { STRAY_FILEMETA_DRAIN_OPERATION } from '../audit/middleware.js';
 import { log } from '../util/log.js';
 import { walkSpaces, type WalkContext } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
+import { WAIT_DAYS_FOR_BYTES } from '../files/bytes-wait.js';
 
-/** How long a record whose file has no row waits for the file's bytes before it is discarded. */
-const WAIT_DAYS = 30;
+/** How long a record whose file has no row waits for the file's bytes before it is discarded: the one figure the absent-bytes sweep waits too. */
+const WAIT_DAYS = WAIT_DAYS_FOR_BYTES;
 /*
  * A stuck read or write must not hold the sweep cycle, and it does not: the drain walks the spaces through `walkSpaces`
  * (`util/housekeeping-walk.ts`), which runs each space's callback inside the housekeeping bound

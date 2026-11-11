@@ -115,6 +115,8 @@ export interface FileManifest {
  *   `stat` or `readdir` failed is named whatever its time; a file older than `since` is not hashed, so a hash failure of one is not seen).
  * @param opts.force  bypass the hash cache and re-read every file (reconciliation
  *   safety valve for the rare out-of-band edit that preserves size AND mtime).
+ * @param opts.listOnly  walk and name, never hash: each entry's `sha256` is empty and its `size` the size on disk, the cache is neither read
+ *   nor written. For a caller that asks only which keys are here and which could not be looked at (the absent-bytes sweep).
  * @param opts.readOnly  read the cache and never write it: no new hashes persisted, no stale entry pruned. For a caller that
  *   looks at the disk while the space is held (a restore's file report, `files/disk-against-rows.ts`) and must leave the
  *   cache exactly as it found it - a walk the bound ended keeps running, and a write from it would land after the hold.
@@ -122,14 +124,14 @@ export interface FileManifest {
 export async function buildFileManifest(
   spaceId: string,
   since?: Date,
-  opts: { force?: boolean; readOnly?: boolean } = {},
+  opts: { force?: boolean; readOnly?: boolean; listOnly?: boolean } = {},
 ): Promise<FileManifest> {
   const root = spaceFilesRoot(spaceId);
   const cacheColl = col<HashCacheDoc>(spaceCollection(spaceId, 'fileHashes'));
 
-  // Load the existing hash cache once (empty on a forced rebuild).
+  // Load the existing hash cache once (empty on a forced rebuild, unread for a listing).
   const cache = new Map<string, HashCacheDoc>();
-  if (!opts.force) {
+  if (!opts.force && !opts.listOnly) {
     const docs = await cacheColl.find(asFilter<HashCacheDoc>({})).toArray() as HashCacheDoc[];
     for (const d of docs) cache.set(d._id, d);
   }
@@ -206,6 +208,11 @@ export async function buildFileManifest(
     if (spellings.size > 1) {
       reportSpaceFailure(TWO_SPELLINGS_STEP, spaceId, new Error(`${spellings.size} spellings on disk: ${[...spellings.keys()].map(k => peerText(k)).join(', ')}`), { unit: key, when: 'never: the file system holds both' });
     }
+    // A LISTING (the absent-bytes sweep's walk, Q-337) asks which keys are here and what could not be looked at: nothing is hashed or cached.
+    if (opts.listOnly) {
+      results.push({ path: key, diskPath: relPath, sha256: '', size: stat.size, modifiedAt: stat.mtime.toISOString() });
+      continue;
+    }
     const cached = cache.get(relPath);
     let sha256: string;
     let plainSize: number;
@@ -261,7 +268,7 @@ export async function buildFileManifest(
   // `seen` is complete). Bounded by the number of deletions since the last build.
   // A path the walk could not look at is not a path that is gone: its entry stays (and every entry under an unreadable directory),
   // until the path reads again or is really gone. When the unreadable list was cut the walk does not know every such path, so nothing is pruned.
-  if (!since && !opts.force && !opts.readOnly && !unreadableCut) {
+  if (!since && !opts.force && !opts.readOnly && !opts.listOnly && !unreadableCut) {
     const unlooked = new UnreadablePaths(unreadable);
     const stale = [...cache.keys()].filter(p => !seen.has(p) && !unlooked.covers(toDocId(p)));
     if (stale.length > 0) {

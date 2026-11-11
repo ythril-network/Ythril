@@ -24,6 +24,15 @@ export const WRITTEN_HERE = 'writtenHere' as const;
 export const RESOLVED_ELSEWHERE = '_resolvedElsewhere' as const;
 
 /**
+ * The name of the stamp the absent-bytes sweep puts on a file row whose bytes THIS disk lacks (`files/absent-bytes-sweep.ts`, Q-337): the
+ * ISO instant of the pass that first found them gone. Spelled once, as the guard is, so the sweep, every writer of bytes (which clears it in
+ * its own write), the count doors (`COUNTED_FILE_ROW`) and the retire's filter cannot drift apart. It is a fact about this disk, never about
+ * the file: a peer that took it would read the file as gone for everybody. Classified derived ({@link DERIVED_LOCAL_FIELDS}): never
+ * restored, and a restore or an import clears it anyway.
+ */
+export const BYTES_ABSENT_SINCE = 'bytesAbsentSince' as const;
+
+/**
  * The fields a record holds that belong to THIS INSTANCE and must never be taken from a peer.
  *
  * ## Why they are one list with two consumers
@@ -94,6 +103,9 @@ export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([
   // A decision owed here (Q-624, design rev 4 §9a): who resolved this fork elsewhere, behind a tombstone this instance declined. It is a fact
   // about THIS instance's copy and what its user still has to decide; a peer's copy of it would decide for this instance.
   RESOLVED_ELSEWHERE,
+  // When this instance's disk was first found without the row's bytes (Q-337, `files/absent-bytes-sweep.ts`): a fact about THIS disk. A peer that
+  // took it would count a file it holds as waiting for bytes, and an arrival that kept a peer's would make a live file look like an orphan.
+  BYTES_ABSENT_SINCE,
 ]);
 
 /**
@@ -392,6 +404,8 @@ export function rekeyedRow<T extends object, P extends object>(old: T, patch: P,
   // knows of it stays: who delivered it and the per-peer hash it agreed on. A copy to another identity drops both, as above (bundle-88 review F7).
   if (opts.sameRecord !== true) { out['deliveredBy'] = ''; delete out['syncBase']; }
   for (const f of WRITE_GUARD_FIELDS) delete out[f];
+  // What THIS disk lacked at the old path says nothing of the bytes at the new one: the next pass of the sweep looks again.
+  delete out[BYTES_ABSENT_SINCE];
   // The old row's position sits where the OLD record landed, below peers' marks, so a re-keyed row that kept it would never be
   // offered on; and the old row's provenance (`writtenHere`) says nothing of this write. The caller's `withLandingStamp` patch puts
   // fresh ones on. A field `patch` names is the caller's own and stays, whatever class it is in.

@@ -449,7 +449,10 @@ describe('a move takes everything a delete would, and does it in a bounded numbe
       });
     }
 
-    it('(d) the media worker, finding a job\'s source gone from disk, removes the file\'s embed jobs with its rows', async () => {
+    // bundle-70 (Q-337): the worker no longer removes a record whose source is gone (it drops the job; the record is the absent-bytes sweep's,
+    // after its window and holds). What this case holds is unchanged: whoever removes the vanished file's rows takes their embed jobs too. The
+    // remover is now the sweep, driven through the TTL sweep with healthy files beside it (a space whose every file is gone is held).
+    it('(d) a job\'s source gone from disk: the worker drops the job and keeps the row, and the sweep that removes the rows removes their embed jobs', async () => {
       const loader2 = await import('../../server/dist/config/loader.js');
       const saved = loader2.getConfig().mediaEmbedding;
       loader2.getConfig().mediaEmbedding = {
@@ -462,9 +465,16 @@ describe('a move takes everything a delete would, and does it in a bounded numbe
         await mediaQueue.enqueueMediaJob(S, f, 'image/png', 'image');
         fs.rmSync(path.join(acts.root(), f));               // the source is gone; no move owes it
         worker.startMediaEmbeddingWorker();
-        await waitFor(async () => (await rowOf(f)) === null, 30_000, 50,
-          async () => `the worker never reconciled the vanished source: ${JSON.stringify(await door.coll(S, 'media_jobs').findOne({ _id: f }))}`);
+        await waitFor(async () => (await door.coll(S, 'media_jobs').findOne({ _id: f })) === null, 30_000, 50,
+          async () => `the worker never dropped the job of the vanished source: ${JSON.stringify(await door.coll(S, 'media_jobs').findOne({ _id: f }))}`);
         worker.stopMediaEmbeddingWorker();
+        assert.ok(await rowOf(f), 'the worker removed the record of a file whose bytes are gone: that is the absent-bytes sweep\'s');
+        for (const p of ['healthy-1.txt', 'healthy-2.txt', 'healthy-3.txt']) await acts.seed(p, { sha256: 'cd'.repeat(32) });
+        const { runPass, NOW, DAY } = await import('./_absent-bytes-sweep.mjs');
+        await runPass(NOW);
+        await runPass(new Date(NOW.getTime() + 31 * DAY));
+        const gone = await rowOf(f);
+        assert.ok(gone === null || gone.feedMarker === true || gone.deletedAt !== undefined, `the sweep did not remove the vanished file's record: ${JSON.stringify(gone)}`);
         const left = [];
         for (const [kind, id] of Object.entries(ids)) if (await jobOf(id)) left.push(`${kind}: ${id}`);
         assert.deepEqual(left, [], 'the reconcile removed the rows of a vanished file and left their embed jobs');

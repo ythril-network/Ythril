@@ -12,7 +12,8 @@ import { spacePurpose, unknownWriteFieldsToReport, spaceActPendingField } from '
 import { SPACE_PURPOSE_MAX } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { LIVE_FILE_ROW } from '../../files/live-file-row.js';
+import { COUNTED_FILE_ROW } from '../../files/live-file-row.js';
+import { filesAwaitingBytes } from '../../files/absent-bytes-sweep.js';
 import { spaceForWire } from '../../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
@@ -101,7 +102,7 @@ export const space_statsTool: ToolHandler = {
   name: 'space_stats',
   description: 'Return counts of facts, entities, edges, chrono entries and files for one space — the cheapest call there is, and the right way to check whether a space holds anything before spending a recall on it.\n\n'
     + 'These are TOTALS, not search coverage. A record retired from semantic ranking is counted here and cannot be reached by `recall`, and a record written seconds ago is counted before its embedding exists. So a count that exceeds what a search returns is normal and is not evidence of a broken index — `list_embed_jobs` is what answers "is anything still queued or failed".\n\n'
-    + 'THE FILES NUMBER IS THE SPACE\'S FILES: not the passages a document was split into, and not the record a deleted file leaves behind where the operator keeps one. The REST stats route and a space\'s own shape answer that same number, so a count never depends on which door you asked.\n\n'
+    + 'THE FILES NUMBER IS THE SPACE\'S FILES: not the passages a document was split into, not the record a deleted file leaves behind where the operator keeps one, and not a record whose bytes this instance lost. The REST stats route and a space\'s own shape answer that same number, so a count never depends on which door you asked. `filesAwaitingBytes` is how many records are left out because their bytes are gone from this instance: each waits out its window (a day, or longer for a record with no recorded hash or a restored space) for a peer to deliver the bytes back, and is then removed here only.\n\n'
     + 'Through a personal view (`space: "@name"`) the numbers are the members\' totals combined, so a per-member breakdown means asking each member by id.',
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
@@ -123,16 +124,14 @@ export const space_statsTool: ToolHandler = {
       // LIVE files, as REST stats counts them (api/brain/search.ts): not the chunk rows a document is split into,
       // and not the audit rows of deleted files. This door counted all three, so the same space answered two numbers
       // depending on which door was asked.
-      files: await col(spaceCollection(mid, 'files')).countDocuments({ ...LIVE_FILE_ROW }),
+      // Not a record whose bytes this disk lost either (Q-337): answered as `filesAwaitingBytes`, as REST stats does.
+      files: await col(spaceCollection(mid, 'files')).countDocuments({ ...COUNTED_FILE_ROW }),
+      filesAwaitingBytes: await filesAwaitingBytes(mid),
     })));
-    const facts = counts.reduce((s, c) => s + c.facts, 0);
-    const entities = counts.reduce((s, c) => s + c.entities, 0);
-    const edges = counts.reduce((s, c) => s + c.edges, 0);
-    const chrono = counts.reduce((s, c) => s + c.chrono, 0);
-    const files = counts.reduce((s, c) => s + c.files, 0);
+    const sum = (k: 'facts' | 'entities' | 'edges' | 'chrono' | 'files' | 'filesAwaitingBytes'): number => counts.reduce((s, c) => s + c[k], 0);
     // Built ONCE and carried in both halves. Two literals is two places for a field to be added to
     // one of them, which is this whole file's defect with a smaller blast radius.
-    const stats = { spaceId: callSpace, facts, entities, edges, chrono, files };
+    const stats = { spaceId: callSpace, facts: sum('facts'), entities: sum('entities'), edges: sum('edges'), chrono: sum('chrono'), files: sum('files'), filesAwaitingBytes: sum('filesAwaitingBytes') };
     return {
       content: [{
         type: 'text' as const,

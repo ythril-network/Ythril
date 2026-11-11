@@ -358,7 +358,8 @@ snapshots - are not compared.
 
 If a space is shared over a network, the file may come back by itself: sync fetches a file again when a peer holds exactly
 the same bytes, a few files per space per cycle, and only in the direction the network allows. A file no peer has, such as
-one uploaded here after the backup, stays as it is until you deal with it.
+one uploaded here after the backup, no longer stays for ever: its record, which has no bytes, waits **30 days** from the restore and is then
+removed on this instance, unless its bytes arrive by then ([the sweep that does it](#settings--audit-log) waits for every file of a restored space, however long the file was without bytes).
 
 **What it does bring back, and you may not expect:** records erased after the backup, erasure requests included. The audit
 log still records the erasure, so erase them again. A record deleted here after the backup that the peers have since
@@ -705,6 +706,30 @@ they are also `ythril_leaked_rows_removed_total` (by `kind`: `derived` or `link`
 anything is audited as `file.leaked_rows.repair` (one entry per space, with no token). A scan counts as finished only
 when every path of its last pass could be looked at. Going back to an earlier release afterwards is harmless: it
 ignores the scan's place and does nothing it did.
+
+**The same sweep removes the records of files whose bytes are gone.** A file record whose bytes are not on this instance's disk
+cannot be listed or deleted by a person, and is not counted as a file: it is counted apart as *awaiting bytes*. Each cycle the
+sweep (`TTL sweep: removing records whose bytes are gone`) lists every space's folders once (nothing is read or hashed), notes
+the day a record's bytes were first found missing (`bytesAbsentSince`, kept on this instance only: never sent to a peer, never
+shown in an answer) and forgets the note when the bytes come back. A later cycle **removes** a noted record when its wait is over:
+**1 day** for a record with a content hash, **30 days** for one without, and **30 days** for every record of a space restored or
+imported within the last 30 days (the restore and the import clear every note and start the wait over). On a space that syncs, every peer
+this instance receives it from must also have finished a file sync, after the note, that did not name the file,
+was not cut short and left no path unread; **30 days** after the note that requirement ends. The removal is on this instance only: no deletion notice for
+peers, no webhook, no live event, and the change feed carries `{ deleted: true, reason: 'bytes_lost' }`; links to the file stay. A
+peer that still holds the file delivers its bytes again and the record comes back; a record no peer holds bytes for may be offered back by
+a sync, wait again and be removed again, audited each time. A record is held back, and the sweep says which hold in
+`ythril_files_absent_bytes_held` (`reason`: `unstamped`, `no_complete_pass`, `mass_loss`, `mass_loss_directory`, `owed_move`,
+`tombstone`, `not_writable`, `chunk_session`, `window` or `legs`), while a move of it is owed, a deletion of it is pending or
+published, the space is not taking writes, a chunked upload of it is open, or the last complete pass found nothing present or more than half of
+the space's records absent (a disk that is not mounted looks like that; the same is checked for each top-level folder). A path
+the sweep cannot look at, because of an error or a bound on the time a look may take, is never noted or removed. At most **200**
+records are removed per cycle across all spaces. **A removal cannot be undone**, and going back to an earlier release keeps what
+was removed (the earlier release ignores the note). The log says one line per space and cycle that noted or removed anything; the
+counters are `ythril_files_absent_bytes_removed_total` and the gauges `ythril_files_awaiting_bytes` (per space) and
+`ythril_files_absent_bytes_held`. A cycle that removed anything is audited as `file.absent_bytes.sweep` (one entry per space,
+with no token, naming at most **50** paths). A delete you make yourself, through the API or the MCP `delete_file` tool, is unchanged and keeps
+its deletion notice. The media worker no longer removes the record of a file whose source is gone: it drops the job and nothing else.
 
 Lines of other jobs follow the same shape; the ones whose wording is worth knowing:
 

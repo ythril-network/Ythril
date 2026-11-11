@@ -20,9 +20,33 @@
  * flagged rows themselves (the sweep that removes a flagged file's chunks, the soft delete that flags the parents) it asks
  * for exactly that, and does not borrow this.
  */
+import { BYTES_ABSENT_SINCE } from '../sync/local-only-fields.js';
+
 export const LIVE_FILE_ROW = Object.freeze({
   parentFileId: Object.freeze({ $exists: false }),
   deletedAt: Object.freeze({ $exists: false }),
+});
+
+/**
+ * The files a COUNT counts: {@link LIVE_FILE_ROW} and not waiting for its bytes (no `bytesAbsentSince`, Q-337).
+ *
+ * ## What it prevents
+ *
+ * A record whose bytes are gone from this disk is still a live row (the brain keeps it searchable until the absent-bytes sweep removes it,
+ * `files/absent-bytes-sweep.ts`), but the Files listing cannot show it: a count that took it said more files than the page lists, and none
+ * of the extra ones could be deleted from it. The four count doors (REST stats, MCP `space_stats`, `space_meta`, the completeness facts) ask
+ * this; the brain and every other reader keep asking {@link LIVE_FILE_ROW}. How many it leaves out is answered beside the count as
+ * `filesAwaitingBytes`, so the lower number is explained.
+ */
+export const COUNTED_FILE_ROW = Object.freeze({
+  ...LIVE_FILE_ROW,
+  [BYTES_ABSENT_SINCE]: Object.freeze({ $exists: false }),
+});
+
+/** The rows {@link COUNTED_FILE_ROW} leaves out: live, and waiting for their bytes. What `filesAwaitingBytes` counts. */
+export const AWAITING_BYTES_ROW = Object.freeze({
+  ...LIVE_FILE_ROW,
+  [BYTES_ABSENT_SINCE]: Object.freeze({ $exists: true }),
 });
 
 /**

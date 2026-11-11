@@ -31,7 +31,10 @@ receiver's **tree**, which can change.
 - **Whether a move is owed is one question, asked by everything that could forget it.** A move is owed when its marker is
   present, its bytes are at the destination and not at the source, something of the file (a record, a link or a queued
   job) is still at the source, and the bytes at the destination are the ones the move carried. Every remover of a marker
-  and the media worker's "source is gone" reconcile ask it; none decides by age or by "no bytes here".
+  and the media worker's "source is gone" reconcile ask it; none decides by age or by "no bytes here" — except the
+  absent-bytes sweep ([decision 21](21-a-file-whose-bytes-are-gone-is-removed-here-only-after-evidence-and-an-explicit-delete-keeps-its-tombstone.md)),
+  which alone removes a record for its lost bytes, and asks `moveIsOwed` and `pathsCarriedByOwedMoves` first. The media worker
+  no longer removes a record whose source is gone: it drops its job.
 - **The instance finishes the moves it began, in housekeeping, as its own step after the settle** — not inside the settle
   and not in the worker. It takes the same single-flight lock as the request's retry, so the two never interleave, runs
   under the per-space walk and its bound, and works within a budget per pass. A move that keeps failing backs off and

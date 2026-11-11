@@ -76,6 +76,8 @@ const LOCAL_VALUES = {
   // Q-624 (design rev 4 section 9a): a decision owed here, the fifth local-only class: who resolved this fork elsewhere behind a tombstone this
   // instance declined. A literal entry in the mark's own shape; the field SET is still the module's.
   _resolvedElsewhere: [{ by: 'instance-that-resolved-it', at: '2026-10-25T00:00:00.000Z', seq: 4, proven: true }],
+  // bundle-70 (Q-337): when THIS disk was first found without a file's bytes. A fact about this instance, carried across a peer's replace.
+  bytesAbsentSince: '2026-10-01T00:00:00.000Z',
 };
 
 /**
