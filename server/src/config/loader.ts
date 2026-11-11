@@ -12,6 +12,7 @@ import { envIntOpt } from './env-num.js';
 import { migrateTokenRightsOnBoot } from '../auth/backfill-token-rights.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { renameOverSync } from '../util/rename-over.js';
+import { pathPresentSync } from '../util/path-present.js';
 import { settledWithin } from '../util/time-bound.js';
 import { migrateProxiesToViews, holdsLegacyProxies } from './migrate-proxies-to-views.js';
 import { validateViews } from './view-shape.js';
@@ -206,7 +207,8 @@ export function migrateStateFilesAtRest(): void {
   for (const p of STATE_FILES) {
     let raw: string;
     try {
-      if (!fs.existsSync(p)) continue;
+      // A state file the OS refuses to look at is thrown (named below), never skipped as "not there": its plaintext would stay.
+      if (!pathPresentSync(p)) continue;
       raw = fs.readFileSync(p, 'utf8');
     } catch (err) {
       throw new Error(`At-rest migration: cannot read ${path.basename(p)}: ${err instanceof Error ? err.message : String(err)}`);
@@ -224,14 +226,70 @@ export function migrateStateFilesAtRest(): void {
   }
 }
 
+/**
+ * Whether this instance has been set up: `true` for a readable, parsed `config.json`, `false` for NO file (the first run), and a THROWN
+ * named error for a file that is there and is neither (empty, whitespace, `null`, not JSON, unreadable by this process).
+ *
+ * ## What it prevents
+ *
+ * First run is "no identity yet": the status door says `configured: false`, and `POST /api/setup/json` (unauthenticated) writes a NEW
+ * config over the file, a new instance id and a first admin token for whoever asked first. It used to answer `false` for a present
+ * file it could not read or parse, so a permission slip on the config volume, or an empty file a crash left, handed the instance to
+ * the first visitor. First run is exactly one state, an absent file. (An unmounted config volume is an absent file and stays a first
+ * run; `02-hosting.md` says so.)
+ *
+ * The answer is taken ONCE, at boot ({@link decideFirstRunAtBoot}); a request asks {@link isFirstRun}, which never reads the disk
+ * once boot has answered and never throws.
+ */
 export function configExists(): boolean {
-  if (!fs.existsSync(CONFIG_PATH)) return false;
+  if (!pathPresentSync(CONFIG_PATH)) return false;
+  let raw: string;
   try {
-    const raw = fs.readFileSync(CONFIG_PATH, 'utf8').trim();
-    return raw.length > 0 && JSON.parse(raw) !== null;
-  } catch {
-    return false;
+    raw = fs.readFileSync(CONFIG_PATH, 'utf8');
+  } catch (err) {
+    throw new Error(`config.json (${CONFIG_PATH}) is there but cannot be read (${peerText(err)}). The instance is not treated as new: first-run setup would write over it. `
+      + 'Fix the permissions of the file and of the directory that holds it, or restore it from a backup, and start again.');
   }
+  let parsed: unknown;
+  try {
+    parsed = raw.trim().length === 0 ? null : JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`config.json (${CONFIG_PATH}) is there but is not valid JSON (${peerText(err)}). The instance is not treated as new: first-run setup would write over it. `
+      + 'Restore the file from a backup (or repair it by hand), or delete it only if this really is a new instance, and start again.');
+  }
+  if (parsed === null) {
+    throw new Error(`config.json (${CONFIG_PATH}) is there but holds no configuration (it is empty or "null"). The instance is not treated as new: first-run setup would write over it. `
+      + 'Restore the file from a backup, or delete it only if this really is a new instance, and start again.');
+  }
+  return true;
+}
+
+/** The boot's answer to "is this a first run": `undefined` until {@link decideFirstRunAtBoot} runs. */
+let _firstRunAtBoot: boolean | undefined;
+
+/**
+ * Boot, once, before anything is loaded: is there no config yet? Throws {@link configExists}'s named error for a present file that cannot
+ * be used, which stops the boot (`index.ts`). Every request asks {@link isFirstRun}, which reads this answer.
+ */
+export function decideFirstRunAtBoot(): boolean {
+  _firstRunAtBoot = !configExists();
+  return _firstRunAtBoot;
+}
+
+/**
+ * Whether a request should treat this instance as new (the status door, the setup door, the theme, the root redirect). The boot's answer
+ * ({@link decideFirstRunAtBoot}), never the disk, and it never throws: a public route that read the file per request would answer a
+ * permission failure to anonymous callers, or open setup on it. Setup completing flips it ({@link markConfigured}). In a process that
+ * never booted (a test mounting a router) it asks {@link configExists} and reads a file it cannot use as configured, so no path opens setup on it.
+ */
+export function isFirstRun(): boolean {
+  if (_firstRunAtBoot !== undefined) return _firstRunAtBoot;
+  try { return !configExists(); } catch { return false; }
+}
+
+/** Setup wrote the config: this instance is no longer new. */
+export function markConfigured(): void {
+  _firstRunAtBoot = false;
 }
 
 /**
@@ -398,7 +456,8 @@ function backUpBeforeProxyMigration(config: Config): void {
   if (holdsLegacyProxies(config)) {
     try {
       const backup = `${CONFIG_PATH}.pre-6.0`;
-      if (!fs.existsSync(backup)) fs.copyFileSync(CONFIG_PATH, backup);
+      // A copy that cannot be looked at is a failure (named below, config.json untouched), never "no copy yet": the copy is the way back to 5.x and must not be overwritten.
+      if (!pathPresentSync(backup)) fs.copyFileSync(CONFIG_PATH, backup);
       fs.chmodSync(backup, 0o600);
     } catch (err) {
       throw new Error(`config.json has proxy spaces to convert to personal views and the pre-6.0 copy could not be written (${peerText(err)}); config.json was not changed`);
@@ -921,14 +980,42 @@ export async function flushConfig(): Promise<void> {
 
 // ── Secrets ────────────────────────────────────────────────────────────────
 
+/**
+ * Whether the state file `file` is there; a file this process may not look at or read THROWS, naming it, and is never "not there" (an
+ * empty secrets file, an empty library or catalog list would replace what the file holds at the next save). The boot stops on it; a
+ * reload that meets it keeps the copy already loaded (the reload paths catch and log).
+ */
+function stateFilePresent(file: string): boolean {
+  try {
+    return pathPresentSync(file);
+  } catch (err) {
+    throw unreadableStateFile(file, err);
+  }
+}
+
+/** The named failure for a state file that is there and cannot be read: what file, why, and the fix. */
+function unreadableStateFile(file: string, err: unknown): Error {
+  return new Error(`${path.basename(file)} (${file}) cannot be read (${peerText(err)}); it is not treated as empty. `
+    + 'Fix the permissions of the file and of the directory that holds it, or restore it from a backup, and start again.');
+}
+
+/** Read the state file `file` (known to be there); a read failure is thrown naming the file ({@link stateFilePresent}). */
+function readStateFile(file: string): string {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    throw unreadableStateFile(file, err);
+  }
+}
+
 export function loadSecrets(): SecretsFile {
   checkPermissions(SECRETS_PATH);
-  if (!fs.existsSync(SECRETS_PATH)) {
+  if (!stateFilePresent(SECRETS_PATH)) {
     // Pre-setup: no secrets file yet — return empty shell
     _secrets = { peerTokens: {} };
     return _secrets;
   }
-  const raw = fs.readFileSync(SECRETS_PATH, 'utf8');
+  const raw = readStateFile(SECRETS_PATH);
   _secrets = JSON.parse(decodeStateFile(raw, 'secrets.json')) as SecretsFile;
   return _secrets;
 }
@@ -966,13 +1053,14 @@ export function entriesAsHeld(entries: SchemaLibraryEntry[]): ParsedLibraryEntry
  * does not exist yet (first run before any entry is created).
  */
 export function loadSchemaLibrary(): ParsedLibraryEntry[] {
-  if (!fs.existsSync(SCHEMA_LIB_PATH)) {
+  if (!stateFilePresent(SCHEMA_LIB_PATH)) {
     _schemaLibrary = [];
     return _schemaLibrary;
   }
+  checkPermissions(SCHEMA_LIB_PATH);
+  // A file that cannot be READ stops the load (named); one that reads and does not parse or decode is still treated as empty and said, as it always was.
+  const raw = readStateFile(SCHEMA_LIB_PATH);
   try {
-    checkPermissions(SCHEMA_LIB_PATH);
-    const raw = fs.readFileSync(SCHEMA_LIB_PATH, 'utf8');
     _schemaLibrary = entriesAsHeld(JSON.parse(decodeStateFile(raw, 'schema-library.json')) as SchemaLibraryEntry[]);
   } catch (err) {
     log.warn(`schema-library.json could not be loaded — treating as empty: ${peerText(err)}`);
@@ -1003,13 +1091,14 @@ let _schemaCatalogs: SchemaCatalog[] | null = null;
 
 /** Load schema-catalogs.json from disk. Returns empty array if not found. */
 export function loadSchemaCatalogs(): SchemaCatalog[] {
-  if (!fs.existsSync(SCHEMA_CATALOGS_PATH)) {
+  if (!stateFilePresent(SCHEMA_CATALOGS_PATH)) {
     _schemaCatalogs = [];
     return _schemaCatalogs;
   }
+  checkPermissions(SCHEMA_CATALOGS_PATH);
+  // A file that cannot be READ stops the load (named); one that reads and does not parse or decode is still treated as empty and said, as it always was.
+  const raw = readStateFile(SCHEMA_CATALOGS_PATH);
   try {
-    checkPermissions(SCHEMA_CATALOGS_PATH);
-    const raw = fs.readFileSync(SCHEMA_CATALOGS_PATH, 'utf8');
     _schemaCatalogs = JSON.parse(decodeStateFile(raw, 'schema-catalogs.json')) as SchemaCatalog[];
   } catch (err) {
     log.warn(`schema-catalogs.json could not be loaded — treating as empty: ${err}`);

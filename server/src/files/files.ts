@@ -9,7 +9,7 @@ import { heldSpellingOf, storedAbsOf, storedDirOf } from './held-spelling.js';
 import { markdownWindow, type MarkdownWindow } from './markdown-window.js';
 import { admitSpaceWrite, assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
 import { fsRefusalOf } from './destination.js';
-import { DestinationExists, type DestinationAct } from './act-answers.js';
+import { DestinationExists, FileSystemFault, type DestinationAct } from './act-answers.js';
 import { fileMoveLinkFallbackTotal } from '../metrics/registry.js';
 import { getDataRoot } from '../config/loader.js';
 import { toDocId } from '../util/paths.js';
@@ -261,34 +261,18 @@ export async function finishHalfLinkedMove(spaceId: string, srcPath: string, dst
   return finishInterruptedLink(await storedAbsOf(spaceId, srcPath), await resolveSafePathChecked(spaceId, dstPath));
 }
 
-/** Recursively sum file sizes under a directory. Returns 0 if dir doesn't exist. */
-export async function getDirSizeBytes(dir: string): Promise<number> {
-  let total = 0;
-  let entries;
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch {
-    return 0;
-  }
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      total += await getDirSizeBytes(full);
-    } else if (entry.isFile()) {
-      try {
-        const st = await fs.stat(full);
-        total += st.size;
-      } catch { /* skip inaccessible files */ }
-    }
-  }
-  return total;
-}
-
 /**
  * Recursively list every file under a space-relative directory, returning
  * space-relative forward-slash paths (e.g. `notes/2024/jan.md`). Returns [] if the
  * directory does not exist. Used to enumerate a subtree before deleting it so a sync
- * tombstone can be written for each removed file.
+ * tombstone can be written for each removed file, and before a move so each file's old path gets one.
+ *
+ * ## What it prevents
+ *
+ * A directory that could not be read was skipped, so the list was SHORTER than the tree and a delete or a move acted on the part it was
+ * told about: the unlisted files got no tombstone, and the directory went with them (or stayed half moved). A directory that is not
+ * there ({@link isMissingPath}) is an empty branch; any other failure to read one is a {@link FileSystemFault} (`500 file_system_fault`
+ * on every door, words that name no path), and nothing is listed.
  */
 export async function listFilesRecursive(spaceId: string, dirPath: string): Promise<string[]> {
   const root = spaceRoot(spaceId);
@@ -303,8 +287,9 @@ export async function listFilesRecursive(spaceId: string, dirPath: string): Prom
     let entries;
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      return; // missing or unreadable — nothing to list
+    } catch (err) {
+      if (isMissingPath(err)) return; // not there: nothing to list
+      throw new FileSystemFault(err);
     }
     for (const entry of entries) {
       const full = path.join(dir, entry.name);

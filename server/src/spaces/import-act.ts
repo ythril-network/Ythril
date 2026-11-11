@@ -33,6 +33,7 @@ import type { SpaceActEntry } from '../config/types.js';
 import { mkdirPrivateSync } from '../util/fs-modes.js';
 import { LruMap } from '../util/lru-map.js';
 import { isMissingPath } from '../files/stored-bytes.js';
+import { pathPresentSync } from '../util/path-present.js';
 import { log, peerText } from '../util/log.js';
 import { ChunkedEnvelopeError } from '../config/secretbox.js';
 import { ExportBodyMalformed, indexExportBody, type ExportBodyIndex } from '../sync/export-stream.js';
@@ -135,7 +136,9 @@ async function importBody({ entry }: { entry: Readonly<SpaceActEntry> }): Promis
   const spoolId = entry.spoolId ?? '';
   const file = spoolPathOf(spoolId);
   const forget = (): void => { indexes.delete(spoolId); removeSpool(spoolId); };
-  if (!file || !fs.existsSync(file)) {
+  // Only a spool that is not there is the final verdict (and is removed with the act): one the process may not look at throws, so the act retries
+  // and the body the person gave is neither declared gone nor deleted by `forget`.
+  if (!file || !pathPresentSync(file)) {
     return {
       failedFinally: {
         status: 410,

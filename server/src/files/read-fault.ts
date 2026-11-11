@@ -1,12 +1,13 @@
 import { RequestRefusal } from '../util/errors.js';
 import { FileSystemFault, SpaceRetired } from './act-answers.js';
 import { isMissingPath } from './stored-bytes.js';
+import { NAME_CANNOT_EXIST_CODES } from '../util/path-present.js';
 
 /** What an errno's code looks like (`EIO`, `EACCES`, `EMFILE`): an `E` and upper-case letters or digits. Other codes on an error (`ERR_...` from Node itself are matched too, which is intended: a runtime fault on a read is the server's). */
 const ERRNO_TOKEN = /^E[A-Z0-9_]+$/;
 
 /** The errno codes that say the path the CALLER named is not a thing here (a directory where a file was asked for, a name or a link chain the file system cannot hold). */
-const CALLER_MADE_PATH_CONDITIONS: ReadonlySet<string> = new Set(['EISDIR', 'ENAMETOOLONG', 'ELOOP']);
+const CALLER_MADE_PATH_CONDITIONS: ReadonlySet<string> = new Set(['EISDIR', ...NAME_CANNOT_EXIST_CODES]);
 
 /**
  * What a failed LISTING or READ of one member's files means: `null` when this member holds nothing at the path (skip it, try the next), a

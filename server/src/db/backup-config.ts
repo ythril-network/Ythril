@@ -20,7 +20,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { log, refusalOfParse } from '../util/log.js';
+import { log, peerText, refusalOfParse } from '../util/log.js';
+import { pathPresentSync } from '../util/path-present.js';
 
 const CONFIG_PATH = process.env['CONFIG_PATH'] ?? '/config/config.json';
 
@@ -111,7 +112,14 @@ export { BackupConfigSchema };
  * Never throws.
  */
 export function loadBackupConfig(): BackupConfig | null {
-  if (!fs.existsSync(BACKUP_CONFIG_PATH)) return null;
+  // A backup.json that is not there is the normal state; one the process cannot look at is said (it never throws), so scheduled backups
+  // do not stop in silence.
+  try {
+    if (!pathPresentSync(BACKUP_CONFIG_PATH)) return null;
+  } catch (err) {
+    log.warn(`backup.json: cannot be looked at — ${peerText(err)} — backup config ignored`);
+    return null;
+  }
 
   let raw: string;
   try {

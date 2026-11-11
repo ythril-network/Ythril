@@ -25,7 +25,7 @@ import { getMongoUri, getDataRoot } from '../config/loader.js';
 import { dumpDatabase, type DumpManifest } from './dump.js';
 import { copyBackupOffsite, copyFilesOffsite, pruneBackups } from './offsite.js';
 import { loadBackupConfig } from './backup-config.js';
-import { log, outsideRequest } from '../util/log.js';
+import { log, outsideRequest, peerText } from '../util/log.js';
 import { armedSchedules } from '../util/armed-schedule.js';
 import { cronArmingRefused } from '../util/cron-arming.js';
 import { runExclusive } from '../util/single-flight.js';
@@ -93,7 +93,8 @@ export async function runBackupNow({ underAct }: { underAct?: SpaceActKind } = {
   try {
     manifest = await dumpDatabase(getMongoUri(), destDir, { encrypt: cfg?.encrypt === true });
   } catch (err) {
-    removeBackup(ts);
+    // The dump's own failure is the one to report: a leftover directory the cleanup cannot look at is said beside it, never in its place.
+    try { removeBackup(ts); } catch (cleanup) { log.warn(`Backup cleanup: the failed dump ${peerText(ts)} could not be removed: ${peerText(cleanup)}`); }
     throw err;
   }
   log.info(`Backup dump complete: ${ts}`);

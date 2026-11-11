@@ -161,6 +161,28 @@ The `config/` directory is a host bind mount — `config.json`, `secrets.json`, 
 >
 > **Backup note:** All three files are required for a complete restore. `schema-library.json` holds the instance-level schema library; spaces using `$ref: "library:<name>"` will have broken validation if this file is missing after a restore.
 
+### A config that is there but cannot be used
+
+First-run setup starts in exactly one case: **there is no `config.json`**. A `config.json` that is there but is empty, holds only whitespace or
+`null`, is not valid JSON, or cannot be read by the server user does **not** start setup: the server refuses to start, and the last line it writes
+names the file and what to do, for example `config.json (/config/config.json) is there but cannot be read (EACCES: …). The instance is not treated
+as new: first-run setup would write over it.` Setup is unauthenticated and writes a new instance id and a first admin token, so an unreadable or
+damaged file must never open it to whoever connects first. Fix the file's permissions (and those of the directory that holds it), or put the file back
+from a backup; delete it only if this really is a new instance. If your supervisor restarts the container in a loop, that line is the cause.
+
+An **unmounted** config volume is a file that is absent, so it still starts first-run setup (on an empty directory inside the container): check that the
+`config/` mount is there before you open the setup page on an instance you expect to be configured.
+
+`secrets.json`, `schema-library.json` and `schema-catalogs.json` follow the same rule: one that is there and cannot be read stops the start with a line
+naming it (before, the server went on with an empty secrets file, an empty library or no catalogs, and the next save replaced what the file held),
+and the at-rest encryption step at start refuses an unreadable state file by name instead of skipping it, so a plaintext file never stays plaintext
+unnoticed. A reload of these files while the instance runs that meets such a file keeps what is loaded and logs the failure. A file that reads but does
+not parse is treated as before: the library and the catalogs start empty and the log says so.
+
+The same rule holds for the backup configuration and the backups themselves: a `backup.json`, a backup directory or a file inside a backup that the
+server cannot look at is a failure that is logged or answered, never "no backup configured", "no such backup" or "the backup holds no file for this
+collection". An offsite copy that cannot look at the uploaded files stops with an error instead of copying a backup without them.
+
 ### Config File Permissions
 
 On startup, Ythril checks that `config.json` and `secrets.json` are owner-read/write only (`0600`). If the files have looser permissions (e.g. `0644`, `0666`), the server automatically tightens them to `0600` and logs a `SECURITY:` warning:

@@ -1,5 +1,5 @@
 ﻿import { createServer } from 'http';
-import { configExists, getConfig, loadConfig, loadSecrets, loadSchemaLibrary, getMongoUri, flushConfig, migrateStateFilesAtRest, requireEncryptedAtRest, atRestEncryptionActive } from './config/loader.js';
+import { decideFirstRunAtBoot, getConfig, loadConfig, loadSecrets, loadSchemaLibrary, getMongoUri, flushConfig, migrateStateFilesAtRest, requireEncryptedAtRest, atRestEncryptionActive } from './config/loader.js';
 import { runShutdown } from './shutdown.js';
 import { configureConnections } from './http-connections.js';
 import { connectMongo, checkVectorSearchAvailability } from './db/mongo.js';
@@ -38,7 +38,9 @@ async function main(): Promise<void> {
   // name that is still set configures nothing, so the built-in default takes its place silently.
   assertNoRemovedEnvVarsOrExit();
 
-  const isFirstRun = !configExists();
+  // First run is one state: no config.json. A file that is there and cannot be read or parsed stops the boot here, naming the file and the fix
+  // (`configExists`), and is never first-run setup. The answer is kept for every request (`isFirstRun` in the loader).
+  const isFirstRun = decideFirstRunAtBoot();
 
   if (!isFirstRun) {
     // At-rest encryption (PR-S2): if a master secret is configured, transparently encrypt any

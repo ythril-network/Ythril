@@ -42,6 +42,7 @@ import {
 import { getDataRoot } from '../config/loader.js';
 import { FILE_MODE, harden, mkdirPrivate } from '../util/fs-modes.js';
 import { keyedLock } from '../util/keyed-lock.js';
+import { isMissingPath } from '../util/path-present.js';
 import { log, peerText } from '../util/log.js';
 import { sha256Tap, type TapExpectation } from '../util/sha256-tap.js';
 import { resolveSafePathChecked } from './sandbox.js';
@@ -335,18 +336,11 @@ export async function bytesPresentAt(spaceId: string, relPath: string): Promise<
 }
 
 /**
- * Whether a filesystem failure says the path does not exist — the one failure {@link bytesPresent} reads as an answer,
- * and the one place a failure's code is read that way (`are-the-bytes-here-has-one-answer.test.js`).
- *
- * `ENOTDIR` too: a path THROUGH a regular file (`a.txt/x`) names nothing. Linux, the deployment, says `ENOTDIR` for
- * it where Windows says `ENOENT`, so an ENOENT-only test passed every Windows run and on Linux threw the condition as
- * "cannot look" — a move answering `400` with the absolute data path, and the settle leaving such a tombstone pending
- * for ever (bundle-30 I16, preship-4 P4-1).
+ * Whether a filesystem failure says the path does not exist — the one failure {@link bytesPresent} reads as an answer. Defined in
+ * `util/path-present.ts` (the config loader asks it too, and this file imports the loader) and re-exported here, so every caller that
+ * imports it from this file keeps doing so.
  */
-export const isMissingPath = (err: unknown): boolean => {
-  const code = (err as NodeJS.ErrnoException | null)?.code;
-  return code === 'ENOENT' || code === 'ENOTDIR';
-};
+export { isMissingPath };
 
 /**
  * Whether what is at `abs` is a DIRECTORY: `false` for a regular file and for a path that does not exist, and any other

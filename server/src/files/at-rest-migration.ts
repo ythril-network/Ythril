@@ -24,8 +24,8 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { getDataRoot } from '../config/loader.js';
-import { log } from '../util/log.js';
-import { activeSecret, encryptInPlace, isStoredEncrypted } from './stored-bytes.js';
+import { log, peerText } from '../util/log.js';
+import { activeSecret, encryptInPlace, isStoredEncrypted, isMissingPath } from './stored-bytes.js';
 import { seedFileHash } from './manifest.js';
 import { getFileMeta } from './file-meta.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
@@ -74,14 +74,23 @@ export async function runAtRestMigration(): Promise<AtRestMigrationState> {
   const filesRoot = path.join(getDataRoot(), 'files');
   let spaces: string[];
   try { spaces = (await fsp.readdir(filesRoot, { withFileTypes: true })).filter(d => d.isDirectory()).map(d => d.name); }
-  catch { spaces = []; }
+  catch (err) {
+    // No files directory yet is no files; one that cannot be read stops the pass (named by `startAtRestMigration`), never "no spaces".
+    if (!isMissingPath(err)) throw err;
+    spaces = [];
+  }
   if (keyed) log.info(`Files at rest: encrypting plaintext files in ${spaces.length} space(s) in the background`);
 
   let visited = 0;
+  let unreadableFolders = 0;
   let stop: string | undefined;
   for (const spaceId of spaces) {
     const spaceRoot = path.join(filesRoot, spaceId);
-    for await (const abs of walkFiles(spaceRoot)) {
+    const saysUnreadable = (dir: string, err: unknown): void => {
+      unreadableFolders++;
+      log.warn(`Files at rest: cannot read the folder ${peerText(spaceId)}/${peerText(path.relative(spaceRoot, dir).replace(/\\/g, '/'))}: ${peerText(err)}; the files under it were not checked`);
+    };
+    for await (const abs of walkFiles(spaceRoot, saysUnreadable)) {
       if (stop) {
         // Stopped: only count what is left, so the posture can say how much stayed plaintext.
         if (!(await isStoredEncrypted(abs).catch(() => true))) state.plaintextLeft++;
@@ -122,20 +131,29 @@ export async function runAtRestMigration(): Promise<AtRestMigrationState> {
   }
 
   state = { ...state, phase: stop ? 'stopped' : 'finished', ...(stop ? { stoppedBecause: stop } : {}), finishedAt: new Date().toISOString() };
-  if (keyed) log.info(`Files at rest: pass finished; ${visited} files checked, ${state.encrypted} encrypted, ${state.plaintextLeft} left as plaintext`);
+  if (keyed) log.info(`Files at rest: pass finished; ${visited} files checked, ${state.encrypted} encrypted, ${state.plaintextLeft} left as plaintext${unreadableFolders > 0 ? `, ${unreadableFolders} folder(s) not readable (their files were not checked)` : ''}`);
   else if (state.encryptedWithoutSecret > 0) {
     log.warn(`Files at rest: ${state.encryptedWithoutSecret} stored file(s) are encrypted and no master secret is set; they cannot be read until it is`);
   }
   return atRestMigrationState();
 }
 
-/** Every regular file under `dir`, depth first. A directory that vanishes mid-walk is skipped, not an error. */
-async function* walkFiles(dir: string): AsyncGenerator<string> {
+/**
+ * Every regular file under `dir`, depth first. A directory that vanishes mid-walk is skipped, not an error. A directory that cannot be
+ * READ is reported to `onUnreadable` and the walk goes on without it: one unreadable subtree must not stall the pass, and must not be
+ * skipped in silence either (its plaintext files would stay plaintext with nothing said).
+ */
+async function* walkFiles(dir: string, onUnreadable: (dir: string, err: unknown) => void): AsyncGenerator<string> {
   let entries;
-  try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch (err) {
+    if (!isMissingPath(err)) onUnreadable(dir, err);
+    return;
+  }
   for (const e of entries) {
     const abs = path.join(dir, e.name);
-    if (e.isDirectory()) yield* walkFiles(abs);
+    if (e.isDirectory()) yield* walkFiles(abs, onUnreadable);
     else if (e.isFile()) yield abs;
   }
 }

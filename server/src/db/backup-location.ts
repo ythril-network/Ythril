@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getDataRoot } from '../config/loader.js';
+import { pathPresentSync } from '../util/path-present.js';
 
 /** `<dataRoot>/backups`: every local backup is a directory here, named by its id. */
 export function backupsRoot(): string {
@@ -27,7 +28,8 @@ export function isBackupId(id: string): boolean {
 export function backupDirOf(id: string): string | null {
   if (!isBackupId(id)) return null;
   const dir = path.join(backupsRoot(), id);
-  return fs.existsSync(path.join(dir, 'manifest.json')) ? dir : null;
+  // A manifest the process may not look at throws: "no such backup" would send a restore act's caller away from a backup that is there.
+  return pathPresentSync(path.join(dir, 'manifest.json')) ? dir : null;
 }
 
 /**
@@ -37,7 +39,7 @@ export function backupDirOf(id: string): string | null {
 export function removeBackup(id: string): boolean {
   if (!isBackupId(id)) return false;
   const dir = path.join(backupsRoot(), id);
-  if (!fs.existsSync(dir)) return false;
+  if (!pathPresentSync(dir)) return false;
   fs.rmSync(dir, { recursive: true, force: true });
   return true;
 }

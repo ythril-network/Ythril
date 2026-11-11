@@ -14,7 +14,8 @@
 import fs from 'node:fs';
 import { mkdirPrivateSync } from '../util/fs-modes.js';
 import path from 'node:path';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
+import { isMissingPath, pathPresentSync } from '../util/path-present.js';
 
 /**
  * Every directory under `root` that cannot be opened, as relative paths.
@@ -98,7 +99,8 @@ export function copyFilesOffsite(
   destRoot: string,
   backupId: string,
 ): string | null {
-  if (!fs.existsSync(filesDir)) return null;
+  // Only a directory that is not there is "no files": one the process may not look at is a failure the backup says, never a copy without the users' files.
+  if (!pathPresentSync(filesDir)) return null;
   const destDir = path.join(destRoot, `${backupId}-files`);
   // Same reasoning as above, and it applies more here: these are the users' UPLOADED FILES, verbatim.
   assertCopyable(filesDir, 'the uploaded files');
@@ -123,7 +125,7 @@ export function copyFilesOffsite(
  * Returns the number of backup sets deleted.
  */
 export function pruneBackups(dir: string, keepCount: number, keep: ReadonlySet<string> = new Set()): number {
-  if (!fs.existsSync(dir)) return 0;
+  if (!pathPresentSync(dir)) return 0;
 
   const entries: string[] = [];
   for (const name of fs.readdirSync(dir)) {
@@ -132,12 +134,13 @@ export function pruneBackups(dir: string, keepCount: number, keep: ReadonlySet<s
       if (
         !keep.has(name) &&
         fs.statSync(fullPath).isDirectory() &&
-        fs.existsSync(path.join(fullPath, 'manifest.json'))
+        pathPresentSync(path.join(fullPath, 'manifest.json'))
       ) {
         entries.push(name);
       }
-    } catch {
-      /* skip unreadable entries */
+    } catch (err) {
+      // An entry that cannot be looked at is kept (never pruned on a guess), and said, so a backup set that stays is not a mystery.
+      if (!isMissingPath(err)) log.warn(`pruneBackups: cannot look at ${peerText(name)}, keeping it: ${peerText(err)}`);
     }
   }
 
@@ -152,11 +155,8 @@ export function pruneBackups(dir: string, keepCount: number, keep: ReadonlySet<s
       fs.rmSync(path.join(dir, name), { recursive: true, force: true });
       deleted++;
 
-      // Remove the corresponding files copy if present
-      const filesCopy = path.join(dir, `${name}-files`);
-      if (fs.existsSync(filesCopy)) {
-        fs.rmSync(filesCopy, { recursive: true, force: true });
-      }
+      // Remove the corresponding files copy if present (`force` skips one that is not there and fails on one that cannot be removed)
+      fs.rmSync(path.join(dir, `${name}-files`), { recursive: true, force: true });
     } catch (err) {
       log.warn(`pruneBackups: failed to delete ${name}: ${err}`);
     }

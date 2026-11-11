@@ -89,7 +89,8 @@ describe('the SPA owns /setup', () => {
     // The guard that makes an unauthenticated route safe at all. It is unchanged by this removal, and it is
     // the one thing that must not be lost while moving the entry point.
     const routes = strip(readFileSync('server/src/setup/routes.ts', 'utf8'));
-    assert.match(routes, /configExists\(\)/, 'setup must still be first-run only');
+    // `isFirstRun()` is the boot's answer to "no config.json yet" (a file that is there and unusable stopped the boot, Q-350 a): the guard on both doors.
+    assert.match(routes, /isFirstRun\(\)/, 'setup must still be first-run only');
   });
 
   it('and the server-rendered FORM is gone, not merely unmounted', () => {
