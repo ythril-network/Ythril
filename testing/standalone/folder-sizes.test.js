@@ -12,7 +12,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { rollUpDirRows } from '../../server/dist/api/files.js';
+import { rollUpDirRows } from '../../server/dist/files/merged-listing.js';
 
 const row = (path, sizeBytes, embeddingStatus, tags) => ({ path, sizeBytes, embeddingStatus, tags });
 

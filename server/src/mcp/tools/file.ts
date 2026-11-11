@@ -257,6 +257,8 @@ export const list_dirTool: ToolHandler = {
     + 'such path" and the two are indistinguishable — check the parent if you expected content. A STORAGE FAULT '
     + 'IS NOT AN EMPTY LISTING: when the file system itself fails (a disk error, a permission the server lost) the call '
     + 'is refused `500` with `code: "file_system_fault"` and `retryable: false`, naming no path.\n\n'
+    + 'IT READS NO FILE METADATA: an entry is a name and, for a file, its size, with no status, tags or folder sizes, so it has no '
+    + '`metadataIncomplete` to report (the REST listing `GET /api/files/:spaceId` adds those and carries that field when a read of them failed).\n\n'
     + 'PARAMETERS:\n'
     + '- `path` — relative to the space root. OMIT IT (or send `""`) for the root itself, which is the usual '
     + 'starting point.\n\n'

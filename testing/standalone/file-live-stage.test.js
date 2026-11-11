@@ -48,7 +48,7 @@ function spyLookup(answer = { step: 'vlm', steps: ['render', 'vlm'], done: 2, to
  */
 describe('directory prefix — the root has many spellings', () => {
   before(async () => {
-    ({ dirPrefix } = await import('../../server/dist/api/files.js'));
+    ({ dirPrefix } = await import('../../server/dist/files/merged-listing.js'));
   });
 
   it('treats every spelling of the root as the empty prefix', () => {
@@ -78,7 +78,7 @@ describe('directory prefix — the root has many spellings', () => {
 
 describe('live stage — only in-flight files cost a query', () => {
   before(async () => {
-    ({ attachLiveStage } = await import('../../server/dist/api/files.js'));
+    ({ attachLiveStage } = await import('../../server/dist/files/merged-listing.js'));
   });
 
   it('issues NO lookup at all for a listing of finished files', async () => {
@@ -107,7 +107,7 @@ describe('live stage — only in-flight files cost a query', () => {
 
 describe('live stage — a proxy listing asks each member for its own jobs', () => {
   before(async () => {
-    ({ attachLiveStage } = await import('../../server/dist/api/files.js'));
+    ({ attachLiveStage } = await import('../../server/dist/files/merged-listing.js'));
   });
 
   it('groups the lookup by the member space the file came from', async () => {
@@ -131,7 +131,7 @@ describe('live stage — a proxy listing asks each member for its own jobs', () 
 
 describe('live stage — absence is preserved, not invented', () => {
   before(async () => {
-    ({ attachLiveStage } = await import('../../server/dist/api/files.js'));
+    ({ attachLiveStage } = await import('../../server/dist/files/merged-listing.js'));
   });
 
   it('leaves the row undecorated when the job has not reported a step yet', async () => {

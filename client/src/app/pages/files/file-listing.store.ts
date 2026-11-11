@@ -184,6 +184,13 @@ export class FileListingStore {
   /** Set when a background refresh failed, so stale rows are not passed off as current. Cleared on success. */
   readonly refreshFailed = signal(false);
 
+  /**
+   * True while the rows on screen came from a listing that said some file details could not be read (`metadataIncomplete`): they are
+   * listed without status, tags or folder sizes, which the page must not leave to read as "nothing processed yet". Set by every
+   * successful listing from its own answer (never remembered from the last one); cleared with the rows on a failed navigation.
+   */
+  readonly metadataIncomplete = signal(false);
+
   /** Failure reason for the directory listing; null when it loaded (U3). */
   readonly loadError = signal<string | null>(null);
 
@@ -241,8 +248,9 @@ export class FileListingStore {
     if (isRefresh) this.refreshing.set(true);
     else { this.loading.set(true); this.loadError.set(null); this.loadErrorCode.set(null); }
     this.filesApi.listFiles(spaceId, path).subscribe({
-      next: ({ entries }) => {
+      next: ({ entries, metadataIncomplete }) => {
         this.entries.set(entries);
+        this.metadataIncomplete.set((metadataIncomplete?.length ?? 0) > 0);
         this.loadedPath = path;
         this.loadError.set(null);
         this.loadErrorCode.set(null);
@@ -281,6 +289,7 @@ export class FileListingStore {
          * could pin.
          */
         this.entries.set([]);
+        this.metadataIncomplete.set(false);
         this.loadError.set(reason);
         const code = (e as { error?: { code?: unknown } } | null)?.error?.code;
         this.loadErrorCode.set(typeof code === 'string' ? code : null);
