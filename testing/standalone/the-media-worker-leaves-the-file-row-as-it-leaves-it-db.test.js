@@ -342,7 +342,7 @@ describe('the real media worker leaves the file row as it leaves it today (real 
       assert.deepEqual(await derivedIds(rel), []);
     });
 
-    it('a source deleted while its job was queued is reconciled, never retried: the job and the orphaned row are removed', async () => {
+    it('a source whose bytes are gone while its job was queued: the job is dropped, never retried, and the ROW STAYS for the absent-bytes sweep (bundle-70, Q-337: one remover of rows judged by their bytes being gone)', async () => {
       const rel = 'photos/gone.png';
       const bytes = Buffer.from('png-gone');
       const abs = path.join(sandbox.spaceRoot(SPACE), rel);
@@ -354,17 +354,18 @@ describe('the real media worker leaves the file row as it leaves it today (real 
 
       worker.startMediaEmbeddingWorker();
       try {
-        // Until the ROW is gone too: the reconcile cancels the job first and retires the row LAST (`removeFileHere`), so a wait on
-        // the job alone read the row between the two steps and closed the store under the rest (Full run 39067730979).
-        // bundle-255: soft delete off, the retired row is replaced by exactly its feed marker (path, deletion time, position).
-        await waitFor(async () => (await jobOf(rel)) === null && goneAsFile(await rowOf(rel)), 60_000, 100,
-          async () => JSON.stringify({ job: await jobOf(rel), row: await rowOf(rel) }));
+        // The job goes first. Where the worker still removed the row it did so LAST (`removeFileHere` retires the row after the job and its
+        // artefacts), so the row is read only after a bounded wait for that removal: a worker that keeps the row has nothing to wait for, and the
+        // wait ends at its bound; one that retires it (today) ends the wait at once and fails the assertion below with what it left.
+        await waitFor(async () => (await jobOf(rel)) === null, 60_000, 100, async () => JSON.stringify({ job: await jobOf(rel), row: await rowOf(rel) }));
+        await waitFor(async () => goneAsFile(await rowOf(rel)), 2_500, 100, 'the worker kept the row', { what: 'the worker\'s removal of the row' }).catch(() => {});
       } finally { worker.stopMediaEmbeddingWorker(); }
 
       assert.equal(await jobOf(rel), null, 'the job is gone');
       const left = await rowOf(rel);
-      assert.ok(goneAsFile(left), `the orphaned row is gone (bundle-255: only its feed marker may stay): ${JSON.stringify(left)}`);
-      assert.deepEqual(await derivedIds(rel), []);
+      assert.ok(left && !goneAsFile(left),
+        `the worker removed the record of a file whose bytes are gone from its path (it left ${JSON.stringify(left)}): a path with no bytes is not always a deleted file, and a record is removed only by the absent-bytes sweep, after its window and its holds`);
+      assert.equal(left.deletedAt, undefined, 'the worker flagged the row');
     });
   });
 });
