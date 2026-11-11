@@ -76,7 +76,13 @@ file stays put when others are added), starts the slowest files first (`testing/
 when it is interrupted. Measured on a 24-core machine with a 16-CPU, 15.6 GiB Docker VM: 1 179 s on one MongoDB, 340 s on four,
 the same 5 426 tests and the same verdicts. The count follows the Docker VM (four CPUs and 3 GiB per shard, at most
 four shards); a host the size of CI's runner (4 CPUs) gets one, which is the old path against the MongoDB you started. Set
-`YTHRIL_TEST_DB_SHARDS=1` to force that path, or a number up to 8 to force a count. A file's process also ends 10 s after
+`YTHRIL_TEST_DB_SHARDS=1` to force that path, or a number up to 8 to force a count. Where `docker` does not answer (inside a
+container) and no count is set, the run is refused rather than quietly put on one MongoDB. A runner in a container starts
+the shards from its host instead, with `node testing/_init/db-shard-stack.mjs up` (it prints the count) and
+`node testing/_init/db-shard-stack.mjs down <count>` after. It forwards the ports 27400 and up into the container and sets
+`YTHRIL_TEST_DB_SHARDS=<count>` with `YTHRIL_TEST_DB_SHARDS_STARTED=1`. The run then checks that every shard answers before a
+file runs, and leaves the shards to be removed by whoever started them. One sharded run at a time: a second run's start removes
+the first run's shards. A file's process also ends 10 s after
 its database is closed (`closeTestMongo`), because a restore leaves a server-side poll running that held twelve files for 60 s
 each after their tests had passed.
 
@@ -646,6 +652,7 @@ Every variable the scripts and runners in `scripts/` and `testing/_init/` read i
 |---|---|---|
 | `YTHRIL_TEST_MONGO_HOST`, `YTHRIL_TEST_MONGO_PORT` | `testing/_shared/test-mongo-address.mjs` | Where the database-backed standalone tests find the test MongoDB (CI's Full run and `npm run test:up`; local preflight runs none of them). Defaults are the test stack's loopback address and published port. |
 | `YTHRIL_TEST_DB_SHARDS`, `YTHRIL_TEST_DB_SHARD_WIDTH` | `testing/_init/db-shard-stack.mjs` | How many fresh MongoDBs the database third is spread over (1 is the one at `YTHRIL_TEST_MONGO_PORT`; default from the Docker VM, at most 4; up to 8) and how many files run at once on each (default 4). |
+| `YTHRIL_TEST_DB_SHARDS_STARTED` | `testing/_init/db-shard-stack.mjs` | `1`: the shard MongoDBs were started outside this run (`db-shard-stack.mjs up`), so the run checks each answers, uses them and does not remove them. Needs `YTHRIL_TEST_DB_SHARDS` of 2 or more; any other value is refused. |
 | `YTHRIL_TEST_DB_SHARD_INDEX` | `testing/_shared/db-shard-plan.mjs` (`dbFilesThisProcessRuns`) | With `YTHRIL_TEST_DB_SHARDS`, run exactly one shard of the database third (the files of `planDbShards(files, count)[index]`) against the MongoDB at `YTHRIL_TEST_MONGO_PORT`, starting none; CI sets it from its matrix. An index with no count, or outside 0 to the count minus one, is refused (non-zero). Only with `--only=db`. |
 | `YTHRIL_TEST_DB_SHARD_PORT` | `testing/docker-compose.db-shard.yml` | The loopback port of one shard's MongoDB. Set by the runner for each shard; never by hand. |
 | `YTHRIL_TEST_RUNS_URL`, `YTHRIL_TEST_RUNS_TOKEN` | `scripts/test-times.mjs`, `scripts/trade.mjs` | The recorder's instance and token (trade: `--record` and `--history`). See [recording](#recording-runs-to-a-ythril-instance-optional). Stripped from every test's environment. |
