@@ -38,7 +38,7 @@ import { warnOnce } from '../util/warn-once.js';
 /** Idle sleep. Work announces itself, so this is only the backstop for a missed announcement. */
 const IDLE_POLL_MS = 30_000;
 /** A claimed job with no sign of life for this long is assumed dead and returned to the pool. */
-const STALL_TIMEOUT_MS = 120_000;
+export const STALL_TIMEOUT_MS = 120_000;
 /** How often to sweep for stalled jobs while running. */
 const STALL_SWEEP_MS = 60_000;
 /** How often an embed in flight says it is alive: a quarter of the stall window, so three beats can be lost. */

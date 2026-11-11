@@ -78,8 +78,13 @@ describe('drainedQueue', () => {
   });
 
   it('settled() on an idle queue resolves at once', async () => {
-    const q = drainedQueue(async () => {}, { onError: () => {} });
-    await q.settled();
+    let handled = 0;
+    const q = drainedQueue(async () => { handled++; }, { onError: () => assert.fail('no failure was expected') });
+    // At once: before the next turn of the event loop, so it does not wait for a drain nobody started.
+    const first = await Promise.race([q.settled().then(() => 'settled'), tick().then(() => 'waited')]);
+    assert.equal(first, 'settled', 'settled() on a queue nobody pushed to held for a drain');
+    assert.equal(handled, 0, 'settling an idle queue ran the handler');
+    assert.equal(q.size, 0);
   });
 });
 

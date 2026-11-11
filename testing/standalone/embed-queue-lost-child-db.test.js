@@ -118,7 +118,6 @@ describe('the brain embed queue and a lost inference process (real MongoDB)', { 
       await runOnce(id);
       const job = await runOnce(id);
 
-      assert.equal(queue.MAX_LOST_CHILD_FAILURES, 3);
       assert.equal(job.status, 'failed', 'an input that kills the runtime must not loop for ever');
       assert.equal(job.lostChildFailures, 3);
       assert.ok(job.lastError.includes(errors.LOST_MARKER), job.lastError);
@@ -233,7 +232,7 @@ describe('the brain embed queue and a lost inference process (real MongoDB)', { 
         await held.promise;
         return { vector: [0.1, 0.2], modelId: r.modelId, inferenceMs: 5 };
       };
-      assert.equal(worker.EMBED_HEARTBEAT_MS, 30_000, 'the documented beat: a quarter of the stall window');
+      assert.ok(worker.EMBED_HEARTBEAT_MS < worker.STALL_TIMEOUT_MS, `the default beat (${worker.EMBED_HEARTBEAT_MS} ms) must come before the stall sweep's window (${worker.STALL_TIMEOUT_MS} ms), or a live embed is revived while it runs`);
       const { id } = await enqueue('slow');
 
       const run = worker.runOneEmbedJob({ heartbeatMs: 25 });

@@ -39,7 +39,11 @@ describe('the embed-queue listing', () => {
 
   it('the caps are the act\'s, stated once, and a limit past them is refused, not served smaller', async () => {
     assert.equal(typeof act.embedJobsPage, 'function', 'there is no shared act');
-    assert.equal(act.MAX_JOB_PAGE, 200);
+    const served = await act.embedJobsPage([], { limit: act.MAX_JOB_PAGE });
+    assert.equal(served.ok, true, `a limit of the act's own ceiling (${act.MAX_JOB_PAGE}) was refused: ${served.error}`);
+    assert.equal(served.body.limit, act.MAX_JOB_PAGE, 'and it is served at that size');
+    const past = await act.embedJobsPage([], { limit: act.MAX_JOB_PAGE + 1 });
+    assert.equal(past.ok, false, `a limit one past the ceiling (${act.MAX_JOB_PAGE + 1}) was accepted`);
     const props = materialisedSchema(TOOLS_BY_NAME.get('list_embed_jobs'), toolSchemasFor(['a']), ['a']).properties;
     assert.equal(props.limit.maximum, act.MAX_JOB_PAGE, 'the tool schema states a different ceiling from the act');
     const refused = await act.embedJobsPage([], { limit: 500 });

@@ -89,7 +89,6 @@ describe('the gate: instance admin on every door, beside a control that is serve
 describe('the rail: five calls a minute per token, the sixth is a 429, on every door', { skip }, () => {
   for (const doorName of DOOR_NAMES) {
     it(`${doorName}: the first ${5} calls are answered and the sixth is refused with a sentence of the tool's own`, async () => {
-      assert.equal(HEAVY_CALLS_PER_WINDOW, 5, 'the rail is no longer five a minute: the doors and the docs say five');
       const tok = await drivers.token('admin');
       const statuses = [];
       let sixth;

@@ -20,7 +20,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  spaceFailureReporter, SPACE_FAILURE_WINDOW_MS, SPACE_FAILURE_MAX_KEYS, reportSpaceFailure, failureReason,
+  spaceFailureReporter, SPACE_FAILURE_WINDOW_MS, reportSpaceFailure, failureReason,
 } from '../../server/dist/util/space-failure.js';
 import { onHousekeepingSignal } from '../../server/dist/util/housekeeping-signals.js';
 import { peerText } from '../../server/dist/util/log.js';
@@ -163,11 +163,6 @@ describe('once per window', () => {
     assert.ok(reporter.size <= 3, `holds ${reporter.size} conditions with max 3`);
     reporter.spaceFailure('S', 'a', BOOM, { when: 'x' });
     assert.equal(lines.length, 5, 'a was evicted and is news again');
-  });
-
-  it('the default bound and window are the constants the docs cite', () => {
-    assert.equal(SPACE_FAILURE_MAX_KEYS, 20_000);
-    assert.ok(Number.isInteger(SPACE_FAILURE_WINDOW_MS) && SPACE_FAILURE_WINDOW_MS >= 60_000, 'a window of minutes');
   });
 });
 

@@ -86,20 +86,7 @@ describe('every slot has a default, and the list is the one that already exists'
     assert.deepEqual(Object.keys(MODEL_SLOT_DEFAULT_MS).sort(), [...EGRESS_SLOTS].sort());
   });
 
-  it('keeps the shipped values, so this change alters nothing by itself', () => {
-    // set-claim: the four slots that share the vlm-client fallback value, inside a case pinning SHIPPED
-    // numbers. Exhaustiveness against EGRESS_SLOTS is the case immediately above this one.
-    // A settability change that also moves the defaults would make any regression impossible to attribute.
-    assert.equal(MODEL_SLOT_DEFAULT_MS.vision, 120_000);
-    assert.equal(MODEL_SLOT_DEFAULT_MS.stt, 300_000);
-    assert.equal(MODEL_SLOT_DEFAULT_MS.faceExternal, 30_000);
-    assert.equal(MODEL_SLOT_DEFAULT_MS.nli, 20_000);
-    assert.equal(MODEL_SLOT_DEFAULT_MS.rerank, 20_000);
-    assert.equal(MODEL_SLOT_DEFAULT_MS.embedding, 30_000);
-    for (const s of ['docVlm', 'docRepair', 'docVerify', 'assist']) {
-      assert.equal(MODEL_SLOT_DEFAULT_MS[s], 60_000, `${s} kept the vlm-client fallback`);
-    }
-  });
+  // The shipped values themselves are held where the docs state them: `doc-cited-constants` pairs each slot's default with `05b-media-embedding.md`.
 });
 
 describe('the resolver', () => {

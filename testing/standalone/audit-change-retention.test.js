@@ -106,7 +106,6 @@ describe('the redaction decision', () => {
 
 describe('the retention window', () => {
   it('defaults to 14 days', () => {
-    assert.equal(mod.DEFAULT_RECORD_CHANGE_RETENTION_DAYS, 14);
     assert.equal(mod.recordChangeRetentionDays(), 14, 'falls back to the default outside a loaded config');
   });
 

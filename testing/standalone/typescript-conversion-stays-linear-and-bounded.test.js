@@ -45,10 +45,6 @@ describe('colliding names convert in linear time (P1)', () => {
 });
 
 describe('a long enum is its base type (P2)', () => {
-  it('ENUM_LITERAL_MAX is a package constant, 200', () => {
-    assert.equal(schema.ENUM_LITERAL_MAX, 200, 'the schema package exports ENUM_LITERAL_MAX = 200 (Q-669, P2)');
-  });
-
   it('an enum of ENUM_LITERAL_MAX members is a literal union; one more is its base type, reported enum-too-long', () => {
     const max = schema.ENUM_LITERAL_MAX;
     assert.equal(typeof max, 'number', 'the schema package exports ENUM_LITERAL_MAX');

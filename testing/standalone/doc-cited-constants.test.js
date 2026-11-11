@@ -520,6 +520,24 @@ const CITED = [
     doc: 'docs/integration-guide/12-admin-api.md',
     text: (v) => new RegExp(`documents or about \\*\\*${v} MiB\\*\\* of them,\\s+whichever\\s+comes\\s+first`),
   },
+  // The shipped budget of each model slot (`MODEL_SLOT_DEFAULT_MS`), which `05b-media-embedding.md` states in the `modelSlots.<slot>.timeoutMs` row:
+  // "vision 120 s, stt 300 s, ... and 60 s for the four document slots and for `decision`". An operator sizes a gateway timeout from it.
+  ...['vision', 'stt', 'embedding', 'rerank', 'nli', 'faceExternal'].map(slot => ({
+    what: `the ${slot} model slot's default budget`,
+    source: 'server/src/config/model-slots.ts',
+    code: new RegExp(`^\\s*${slot}: ([0-9_]+),`, 'm'),
+    scale: 1000,
+    doc: 'docs/integration-guide/05b-media-embedding.md',
+    text: (v) => new RegExp(`\\b${slot} ${v} s\\b`),
+  })),
+  ...['assist', 'docVlm', 'docRepair', 'docVerify', 'decision'].map(slot => ({
+    what: `the ${slot} model slot's default budget (the document slots and decision)`,
+    source: 'server/src/config/model-slots.ts',
+    code: new RegExp(`^\\s*${slot}: ([0-9_]+),`, 'm'),
+    scale: 1000,
+    doc: 'docs/integration-guide/05b-media-embedding.md',
+    text: (v) => new RegExp(`and ${v} s for the four document slots and for \`decision\``),
+  })),
 ];
 
 /**

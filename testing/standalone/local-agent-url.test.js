@@ -13,6 +13,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { isLoopbackHost, LOCAL_AGENT_DEFAULT_URL } from '../../server/dist/api/local-agent-url.js';
 
 describe('local-agent URL validation', () => {
@@ -33,7 +34,11 @@ describe('local-agent URL validation', () => {
   });
 
   it('the default URL is a numeric-loopback host the validator accepts (matches compose base default)', () => {
-    assert.equal(LOCAL_AGENT_DEFAULT_URL, 'http://127.0.0.1:38123');
+    // The port is the connector's own default, read from where the connector sets it (importing it would start the connector).
+    const connector = readFileSync('server/src/local-agent-connector/index.ts', 'utf8');
+    const connectorPort = connector.match(/envInt\(\s*'YTHRIL_CONNECTOR_PORT'\s*,\s*(\d+)\s*\)/)?.[1];
+    assert.ok(connectorPort, 'local-agent-connector/index.ts no longer reads its port as envInt(\'YTHRIL_CONNECTOR_PORT\', <default>): re-anchor this read');
+    assert.equal(new URL(LOCAL_AGENT_DEFAULT_URL).port, connectorPort, 'the server dials the connector on a port the connector does not listen on by default');
     assert.equal(isLoopbackHost(new URL(LOCAL_AGENT_DEFAULT_URL).hostname), true);
   });
 });

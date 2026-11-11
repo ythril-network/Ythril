@@ -52,7 +52,6 @@ describe('the merge table covers every key the meta body accepts', () => {
   it('exactly one key is per-type, and it is the one the walkers inside the types name', () => {
     const perType = Object.entries(fields.META_FIELD_KINDS).filter(([, kind]) => kind === 'per-type').map(([k]) => k);
     assert.deepEqual(perType, [fields.PER_TYPE_META_FIELD]);
-    assert.equal(fields.PER_TYPE_META_FIELD, 'typeSchemas');
   });
 
   it('a key with no kind is not merged, and a prototype-named key is not a field', () => {

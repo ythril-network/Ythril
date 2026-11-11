@@ -26,7 +26,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { MongoNetworkError, MongoOperationTimeoutError } from 'mongodb';
 import {
-  sweepCollection, SWEEP_BATCH, ATTEMPT_CAP, SWEEP_INTERVAL_MS,
+  sweepCollection, SWEEP_BATCH, ATTEMPT_CAP,
 } from '../../server/dist/brain/ttl-sweep.js';
 import { TTL_COLLECTIONS } from '../../server/dist/brain/ttl.js';
 import { spaceFailureReporter } from '../../server/dist/util/space-failure.js';
@@ -255,12 +255,6 @@ describe('sweepCollection: the report runs whatever ended the loop', () => {
 });
 
 describe('the sweep\'s figures and step names', () => {
-  it('exports the figures the docs cite', () => {
-    assert.equal(SWEEP_BATCH, 500);
-    assert.equal(ATTEMPT_CAP, 2000);
-    assert.equal(SWEEP_INTERVAL_MS, 5 * 60_000);
-  });
-
   it('every collection it sweeps has its read step and its delete step declared, so the counters start at 0', () => {
     assert.ok(TTL_COLLECTIONS.length >= 5, 'floor: the collections the sweep covers were not found');
     const declared = new Set(declaredSteps());

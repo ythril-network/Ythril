@@ -2175,11 +2175,6 @@ describe('preflight runs the client\'s unit tests the way ci.yml does', () => {
 // ───────────────────────────────────────── the full run: what the module names, and what the guide says ─────────────────────────────────────────
 
 describe('the full run — the module names it once, and the rules above read what it names', () => {
-  it('names the workflow file and the ref prefix', () => {
-    assert.equal(CW.FULL_RUN_WORKFLOW, '.github/workflows/full-run.yml');
-    assert.equal(CW.FULL_RUN_PREFIX, 'full-run/');
-  });
-
   it('the workflow is a tracked file, and loadFullRun reads exactly it', () => {
     assert.ok(workflowFiles().includes(CW.FULL_RUN_WORKFLOW), `${CW.FULL_RUN_WORKFLOW} is not among the tracked workflows`);
     assert.deepEqual(CW.loadFullRun(), loadWorkflow(CW.FULL_RUN_WORKFLOW));

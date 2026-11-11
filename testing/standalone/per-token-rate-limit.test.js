@@ -30,7 +30,7 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf, balancedFrom } from './_structural-window.mjs';
 
-let resolveLimitFor, rateLimitRefusalResponse, instanceCeiling, DEFAULT_PER_MINUTE, MAX_PER_MINUTE;
+let resolveLimitFor, rateLimitRefusalResponse, instanceCeiling, MAX_PER_MINUTE;
 
 /** The refusal sentence a door would send, or `null` when the value is acceptable. */
 const refusalText = (requested) => rateLimitRefusalResponse(requested)?.error ?? null;
@@ -38,7 +38,7 @@ const ENV = 'YTHRIL_RATE_LIMIT_PER_MINUTE';
 const original = process.env[ENV];
 
 before(async () => {
-  ({ resolveLimitFor, rateLimitRefusalResponse, instanceCeiling, DEFAULT_PER_MINUTE, MAX_PER_MINUTE } =
+  ({ resolveLimitFor, rateLimitRefusalResponse, instanceCeiling, MAX_PER_MINUTE } =
     await import('../../server/dist/rate-limit/per-token.js'));
 });
 
@@ -51,7 +51,6 @@ describe('which number applies', () => {
     // would silently tighten every existing instance on upgrade.
     assert.equal(resolveLimitFor(undefined), 1200);
     assert.equal(resolveLimitFor({}), 1200);
-    assert.equal(DEFAULT_PER_MINUTE, 1200);
   });
 
   it('infra sets it: every token inherits that', () => {

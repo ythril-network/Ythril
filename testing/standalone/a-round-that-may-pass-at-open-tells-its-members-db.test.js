@@ -25,6 +25,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { listenOnPrivateAddress } from '../_shared/local-server.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { privateHostAddress } from './_private-address.mjs';
 import { removeInstanceDir, startFakePeer, allowEngineToDialPrivatePeers, callRoute } from './_vote-round-instance.mjs';
@@ -71,11 +72,36 @@ describe('a round that may pass at open is told to every member from one module'
   const eventsAt = (peer) => peer.seen.filter(s => s.method === 'POST' && s.url === '/api/notify').map(s => JSON.parse(s.body));
   const bootClub = (extra, spaces) => boot(dir, { spaces: ['notes', 'extra'], networks: [club(extra, spaces)], peerTokens: { [A]: 'ta', [B]: 'tb', [C]: 'tc' } });
 
-  it('the module names its timeout and the tell function the openers call (design: NOTIFY_SEND_TIMEOUT_MS = 5 000, notifyMembersToPull)', async () => {
+  it('a member that never answers is given up on after the bound, and the members before and after it are still told', async () => {
     const mod = await import('../../server/dist/networks/notify-members.js').catch(() => null);
     assert.ok(mod, 'server/src/networks/notify-members.ts does not exist: the three copies of "tell the members to pull" are still three');
-    assert.equal(mod.NOTIFY_SEND_TIMEOUT_MS, 5000);
-    assert.equal(typeof mod.notifyMembersToPull, 'function');
+    await bootClub();
+    // A peer that takes the connection and the request and never answers: only the send's own bound ends it.
+    let hungRequests = 0;
+    const hung = await listenOnPrivateAddress(http.createServer((req) => { hungRequests++; req.on('data', () => {}); }), privateHostAddress());
+    try {
+      // The bound itself, with a small one: the send rejects when it passes, instead of holding for ever.
+      const t0 = Date.now();
+      await assert.rejects(mod.sendNotice('net-1', { instanceId: A, url: hung.url }, 'sync_available', undefined, 300), /timeout|abort/i, 'a send to a peer that never answers must end by its bound');
+      assert.equal(hungRequests, 1, 'the send reached the peer, so the rejection is the bound and not a refused address');
+      assert.ok(Date.now() - t0 < 5000, `the 300 ms bound ended the send after ${Date.now() - t0} ms`);
+
+      // The whole tell, with the default bound: the hung member sits between two that answer, the tell still resolves, both others are told, and the log names the one given up on.
+      a.seen.length = 0;
+      const { lines } = await capturingLog(async () => {
+        const told = mod.notifyMembersToPull({
+          networkId: 'net-1', roundId: 'round-hung', type: 'space_deletion', spaceId: 'notes',
+          members: [{ instanceId: A, url: hung.url }, { instanceId: B, url: b.url }, { instanceId: C, url: a.url }],
+        });
+        let timer;
+        const deadline = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('notifyMembersToPull never resolved: a member that does not answer holds the whole tell')), 30_000); });
+        try { await Promise.race([told, deadline]); } finally { clearTimeout(timer); }
+      });
+      assert.equal(eventsAt(a).filter(e => e.event === 'space_deletion_pending').length, 1, 'the member after the hung one was told');
+      assert.ok(lines.some(l => l.includes(A) && l.includes('space_deletion_pending') && l.includes('round-hung') && l.includes('failed')), 'the member given up on is logged with the event and the round');
+    } finally {
+      await hung.close();
+    }
   });
 
   it('a club deletion that passed at open: every member is told space_deletion_pending with the NETWORK\'s space id, though the space already left the network', async () => {
