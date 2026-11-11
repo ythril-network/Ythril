@@ -215,7 +215,7 @@ signal and never reads an empty or missing field as a failure. On a personal vie
 metadata. A member with no file records is not a failure. Every way a directory is listed carries it (the root as `.` or `/`, and a sub-directory), and
 the failure is logged once per window per space, naming the space. The reasons:
 
-| Reason | Meaning |
+| Value | What it says |
 |---|---|
 | `store-unavailable` | The database's own condition, one retrying may clear (a connection lost, an operation that ran out of time). |
 | `store-fault` | The database driver failed in a way that retrying will not clear; the cause is in the server log. |
