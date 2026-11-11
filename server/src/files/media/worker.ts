@@ -782,7 +782,7 @@ async function reconcileDeletedSource(spaceId: string, claim: JobClaim): Promise
   // The JOB only (bundle-70, Q-337). A path with no bytes is not always a deleted file: a peer may still deliver them, a restore may have
   // brought the record back first. A record whose bytes are gone is removed by ONE remover, the absent-bytes sweep (`files/absent-bytes-sweep.ts`),
   // after its window and its holds; what this job wrote (a chunk row) goes with that record, or with the delete that took it.
-  await cancelMediaJob(spaceId, claim.jobId).catch(err => log.warn(`Media worker: dropping the job of ${peerText(spaceId)}/${peerText(claim.jobId)}: ${peerText(err)}`));
+  await cancelMediaJob(spaceId, claim.jobId).catch(err => { if (isAbandonment(err)) throw err; log.warn(`Media worker: dropping the job of ${peerText(spaceId)}/${peerText(claim.jobId)}: ${peerText(err)}`); });
   return true;
 }
 

@@ -953,6 +953,16 @@ export async function deletedHereSince(spaceId: string, rows: ReadonlyArray<{ pa
   return out;
 }
 
+/**
+ * Which of `paths` hold ANY file tombstone, pending or published: a delete in flight owns the path, whether or not its act has happened. What the
+ * absent-bytes sweep holds a record for (Q-337): a record a delete is about to retire, or one a peer's delete still governs, is not its to remove.
+ */
+export async function pathsWithAnyFileTombstone(spaceId: string, paths: readonly string[]): Promise<Set<string>> {
+  if (paths.length === 0) return new Set();
+  const rows = await tombstonesAtPaths<StoredFileTombstone>(spaceId, paths, chunk => ({ path: { $in: chunk } }), HELD_PROJECTION);
+  return new Set(rows.map(t => t.path));
+}
+
 /** Which of `ids` are published tombstones already held here: an id held is never applied a second time. */
 export async function heldFileTombstoneIds(spaceId: string, ids: readonly string[]): Promise<Set<string>> {
   const rows = await readTombstonesById<object>(spaceId, ids, { _id: 1 }, PUBLISHED);

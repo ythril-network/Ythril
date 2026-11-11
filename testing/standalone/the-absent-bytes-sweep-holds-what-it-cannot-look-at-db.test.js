@@ -59,6 +59,27 @@ describe('the absent-bytes sweep holds what it cannot look at, and what was brou
   });
   afterEach(async () => { await resetSweepSteps(); });
 
+  describe('the cadence: a complete pass per space at most once a day', () => {
+    it('a pass within a day of a completed one walks nothing; a pass a day later does', async () => {
+      await healthy(3);
+      await runPass(NOW);                                    // completes, nothing absent
+      await lose('late.txt');
+      await runPass(at(DAY - 60_000));
+      assert.equal((await rowOf('late.txt')).bytesAbsentSince, undefined, 'a pass ran within a day of the last complete one: every space is walked every tick');
+      await runPass(at(DAY));
+      assert.equal((await rowOf('late.txt')).bytesAbsentSince, at(DAY).toISOString(), 'no pass ran a day after the last complete one');
+    });
+
+    it('the seam narrows the wait (rescanAfterMs), so a test can run passes back to back', async () => {
+      await healthy(3);
+      (await sweepSteps())({ rescanAfterMs: 0 });
+      await runPass(NOW);
+      await lose('soon.txt');
+      await runPass(NOW);
+      assert.equal((await rowOf('soon.txt')).bytesAbsentSince, STAMP, 'rescanAfterMs: 0 did not start a pass again at once');
+    });
+  });
+
   describe('a look that fails or does not return', () => {
     it('a record whose look FAILS is never stamped and never removed, while a plain orphan beside it is', async () => {
       await healthy(4);

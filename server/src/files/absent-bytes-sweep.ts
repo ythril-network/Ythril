@@ -21,7 +21,9 @@
  * ## How a pass runs
  *
  * A step of the TTL sweep (`brain/ttl-sweep.ts`), with its own pages per tick, its own deadline and at most {@link ABSENT_BYTES_REMOVALS_PER_TICK}
- * removals per tick across the spaces, whose order rotates each tick so one large space cannot starve the rest. Per space and tick:
+ * removals per tick across the spaces, whose order rotates each tick so one large space cannot starve the rest. A pass under way resumes from its
+ * cursor every tick; a pass that completed is not started again within {@link ABSENT_BYTES_RESCAN_AFTER_MS} (a day: the walk lists every
+ * directory of the space, so it is not repeated every tick). Per space and tick of a pass:
  *
  * 1. **The walk**: the read-only manifest walk (`buildFileManifest(..., { listOnly: true })`: one listing per directory, nothing hashed, and the
  *    paths it could not look at named in `unreadable`), under {@link withinFsBound}: a walk the bound ends counts the space's pass as incomplete.
@@ -60,7 +62,7 @@ import { getConfig } from '../config/loader.js';
 import { changeSpaceEntries } from '../config/change-space-entries.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { FILES_ABSENT_BYTES_SWEEP_OPERATION } from '../audit/middleware.js';
-import { assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite, isSpaceNotWritable, spaceWriteRefusal } from '../spaces/space-write-gate.js';
 import { networksHolding } from '../spaces/wipe-vote.js';
 import { exchangeDirections } from '../sync/space-exchange.js';
 import { lastCompleteFileLeg, type FileLegEvidence } from '../sync/file-legs.js';
@@ -77,6 +79,8 @@ import { UnreadablePaths } from './unreadable-paths.js';
 import { bytesHeldAt, heldEntryOf, storedAbsOf } from './held-spelling.js';
 import { withPathLock } from './stored-bytes.js';
 import { pathsCarriedByOwedMoves } from './move-markers.js';
+import { pathsWithAnyFileTombstone } from './tombstones.js';
+import { underPrefix } from '../util/under-prefix.js';
 import { chunkSessionOpenAt } from './chunks.js';
 import { removeFileHere } from './remove-file-here.js';
 import { WAIT_DAYS_FOR_BYTES, WAIT_FOR_BYTES_MS } from './bytes-wait.js';
@@ -106,6 +110,8 @@ export const ABSENT_BYTES_REMOVALS_PER_TICK = 200;
 export const ABSENT_BYTES_AUDIT_PATHS = 50;
 /** How long the step may go on STARTING pages, ms. */
 const STEP_BUDGET_MS = 30_000;
+/** A pass that completed is not started again before this much time has passed, ms: the walk lists every directory of the space. */
+export const ABSENT_BYTES_RESCAN_AFTER_MS = 24 * 3_600_000;
 /** The bound on the walk of one space, ms. */
 const WALK_BOUND_MS = 120_000;
 /** The bound on one look at one path, ms. */
@@ -188,6 +194,8 @@ interface SweepSteps {
   look: (spaceId: string, key: string) => Promise<boolean>;
   /** The bound on one look, ms. */
   lookBoundMs: number;
+  /** How long a finished pass waits before the next starts, ms. */
+  rescanAfterMs: number;
 }
 let steps: Partial<SweepSteps> | null = null;
 /** A test seam only: `null` puts the real behaviour back. */
@@ -197,6 +205,12 @@ export function setAbsentBytesSweepStepsForTest(next: Partial<SweepSteps> | null
 export interface AbsentBytesTick { deadlineAt: number; removalsLeft: number; reached?: string }
 /** Where the last tick got to: the next starts after it. */
 let lastReached: string | undefined;
+
+/** Whether a pass of a space is owed at `now`: one under way, none completed yet, or the last completed a day ago or more. */
+function passIsOwed(state: AbsentBytesScan | undefined, now: Date): boolean {
+  if (state?.running !== undefined || state?.last === undefined) return true;
+  return now.getTime() - Date.parse(state.last.completedAt) >= (steps?.rescanAfterMs ?? ABSENT_BYTES_RESCAN_AFTER_MS);
+}
 
 /** A new tick's budget. */
 export function absentBytesTick(from: number = Date.now()): AbsentBytesTick {
@@ -244,7 +258,9 @@ export async function restartAbsentBytesSweeps(spaceIds: readonly string[], at: 
   });
   for (const id of spaceIds) {
     heldBySpace.delete(id);
-    await col<FileMetaDoc>(spaceCollection(id, 'files')).updateMany(asFilter<FileMetaDoc>({ [BYTES_ABSENT_SINCE]: { $exists: true } }), { $unset: { [BYTES_ABSENT_SINCE]: '' } } as never)
+    // A write to the space's files collection: it asks the write gate and is counted like every other (`admitSpaceWrite`). A space an act still
+    // holds refuses it; its stamps keep their age, and `filesRestoredAt` still holds every row to the longest window.
+    await admitSpaceWrite(id, 'files', () => col<FileMetaDoc>(spaceCollection(id, 'files')).updateMany(asFilter<FileMetaDoc>({ [BYTES_ABSENT_SINCE]: { $exists: true } }), { $unset: { [BYTES_ABSENT_SINCE]: '' } } as never))
       .catch(err => log.warn(`Absent-bytes sweep: the stamps of space '${peerText(id)}' could not be cleared after its records were brought back: ${peerText(err)}`));
   }
   publishHeld();
@@ -295,13 +311,9 @@ async function removeDue(spaceId: string, stamped: readonly SweptRow[], now: Dat
   const keys = stamped.map(r => r._id);
   const owed = await pathsCarriedByOwedMoves(spaceId, keys);
   // Pending and published alike: a delete in flight owns the path, whether or not its act has happened.
-  const tombstoned = new Set<string>();
-  for (const part of inChunks(keys, 500)) {
-    const held = await col<{ _id: string; path: string }>(spaceCollection(spaceId, 'fileTombstones')).find(asFilter<{ _id: string; path: string }>({ path: { $in: part } }), { projection: { path: 1 } }).toArray();
-    for (const t of held) tombstoned.add(String(t.path));
-  }
-  let notWritable = false;
-  try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (!isSpaceNotWritable(err)) throw err; notWritable = true; }
+  const tombstoned = await pathsWithAnyFileTombstone(spaceId, keys);
+  // A fact for the due rule, read without asking for a write unit (the writes below each admit their own).
+  const notWritable = spaceWriteRefusal(spaceId, 'files') !== null;
   const entry = getConfig().spaces.find(s => s.id === spaceId);
   const restoredAt = entry?.filesRestoredAt !== undefined ? Date.parse(entry.filesRestoredAt) : Number.NaN;
   const members = pullingMembers(spaceId);
@@ -309,7 +321,7 @@ async function removeDue(spaceId: string, stamped: readonly SweptRow[], now: Dat
   const directoryOf = async (top: string): Promise<{ recorded: number; absent: number; gone: boolean }> => {
     const known = dirs.get(top);
     if (known) return known;
-    const under = { _id: { $gte: `${top}/`, $lt: `${top}0` } };   // '0' follows '/': every key under the directory, by the id index
+    const under = { _id: underPrefix(`${top}/`) };   // every key under the directory, by the shared anchored prefix
     const recorded = await files.countDocuments(asFilter<FileMetaDoc>({ ...LIVE_FILE_ROW, ...under }));
     const absent = await files.countDocuments(asFilter<FileMetaDoc>({ ...AWAITING_BYTES_ROW, ...under }));
     // A directory that cannot be looked at is read as gone: the hold counts against removal, never for it.
@@ -361,7 +373,7 @@ async function removeDue(spaceId: string, stamped: readonly SweptRow[], now: Dat
     const taken = await removeFileHere(spaceId, row._id, { failure: 'throw', retireOnlyIf: asDecided(row), retiredBy: 'bytes-lost' });
     if (taken) { outcome.removed.push(row._id); tick.removalsLeft--; continue; }
     // Rewritten since it was decided on: still stamped (its bytes still absent), its window starts again; cleared (bytes back), it is left alone.
-    await files.updateOne(asFilter<FileMetaDoc>({ _id: row._id, ...LIVE_FILE_ROW, [BYTES_ABSENT_SINCE]: { $exists: true } }), { $set: { [BYTES_ABSENT_SINCE]: now.toISOString() } } as never)
+    await admitSpaceWrite(spaceId, 'files', () => files.updateOne(asFilter<FileMetaDoc>({ _id: row._id, ...LIVE_FILE_ROW, [BYTES_ABSENT_SINCE]: { $exists: true } }), { $set: { [BYTES_ABSENT_SINCE]: now.toISOString() } } as never))
       .catch(err => log.warn(`Absent-bytes sweep: '${peerText(row._id)}' of space '${peerText(spaceId)}' could not be stamped again: ${peerText(err)}`));
   }
 }
@@ -374,6 +386,8 @@ export async function sweepAbsentBytes(spaceId: string, now: Date, tick: AbsentB
   const outcome: AbsentBytesOutcome = { stamped: 0, cleared: 0, removed: [], unlooked: 0, held: 0, completed: false };
   const entry = getConfig().spaces.find(s => s.id === spaceId);
   if (entry === undefined || Date.now() >= tick.deadlineAt) return outcome;
+  // A complete pass per space at most once a day (the leaked-rows repair's cadence): a pass under way resumes every tick; a finished one waits.
+  if (!passIsOwed(entry.absentBytesScan, now)) return outcome;
   tick.reached = spaceId;
   heldBySpace.set(spaceId, new Map());   // the held gauge says this space's latest decisions, never a sum over ticks
   const generation = generationOf(spaceId);
@@ -388,8 +402,6 @@ export async function sweepAbsentBytes(spaceId: string, now: Date, tick: AbsentB
     const here = new Set(walk.entries.map(e => e.path));
     const unreadable = new UnreadablePaths(walk.unreadable);
     const lookedAway = (key: string): boolean => unreadable.covers(key) || (walk.unreadableTruncated && !here.has(key));
-    let writable = true;
-    try { assertSpaceTakesWrites(spaceId, 'files'); } catch (err) { if (!isSpaceNotWritable(err)) throw err; writable = false; }
 
     for (let pages = 0; pages < (steps?.pagesPerTick ?? ABSENT_BYTES_PAGES_PER_TICK) && Date.now() < tick.deadlineAt; pages++) {
       const page = await idKeysetPage<SweptRow>({
@@ -419,15 +431,16 @@ export async function sweepAbsentBytes(spaceId: string, now: Date, tick: AbsentB
         if (row[BYTES_ABSENT_SINCE] === undefined) toStamp.push(row._id);
         else stampedBefore.push(row);
       }
-      if (writable) {
-        // One write per chunk each way, and nothing else on the row: the stamp is local bookkeeping (no seq, no updatedAt).
+      // One counted write unit per page (`admitSpaceWrite`: an act registering on the space drains it, and a space not taking writes refuses it,
+      // which stamps and clears nothing this tick). One write per chunk each way, and nothing else on the row: the stamp is local bookkeeping.
+      await admitSpaceWrite(spaceId, 'files', async () => {
         for (const part of inChunks(toStamp, 500)) {
           outcome.stamped += (await files.updateMany(asFilter<FileMetaDoc>({ _id: { $in: part }, ...LIVE_FILE_ROW, [BYTES_ABSENT_SINCE]: { $exists: false } }), { $set: { [BYTES_ABSENT_SINCE]: stampNow } } as never)).modifiedCount;
         }
         for (const part of inChunks(toClear, 500)) {
           outcome.cleared += (await files.updateMany(asFilter<FileMetaDoc>({ _id: { $in: part }, [BYTES_ABSENT_SINCE]: { $exists: true } }), { $unset: { [BYTES_ABSENT_SINCE]: '' } } as never)).modifiedCount;
         }
-      }
+      }).catch((err: unknown) => { if (!isSpaceNotWritable(err)) throw err; });
       await removeDue(spaceId, stampedBefore, now, last, tick, outcome);
       if (generationOf(spaceId) !== generation) return outcome;
       if (page.end) {

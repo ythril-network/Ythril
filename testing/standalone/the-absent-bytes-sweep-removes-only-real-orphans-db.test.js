@@ -185,7 +185,8 @@ describe('the absent-bytes sweep removes only real orphans (real MongoDB)', { sk
       await elapse(300, 'absence window: no audit entry for a pass that removed nothing (the positive control follows in this case)');
       assert.deepEqual(await auditRows(), [], 'a pass that removed nothing was audited');
       await lose('one.txt', 'two.txt');
-      await passesAt(NOW, THE_TWO_PASSES[1]);
+      // A day apart: a pass that completed (the one at NOW above) is not started again within a day (fix round: the daily cadence).
+      await passesAt(at(DAY + 3_600_000), at(2 * DAY + 7_200_000));
 
       await waitFor(async () => (await auditRows()).length >= 1, 5000, 50, 'no audit entry', { what: 'the sweep\'s audit entry' }).catch(() => {});
       const audit = await auditRows();
