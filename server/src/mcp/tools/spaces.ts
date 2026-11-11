@@ -13,7 +13,7 @@ import { SPACE_PURPOSE_MAX } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { COUNTED_FILE_ROW } from '../../files/live-file-row.js';
-import { filesAwaitingBytes } from '../../files/absent-bytes-sweep.js';
+import { filesAwaitingBytes as awaitingBytesIn } from '../../files/absent-bytes-sweep.js';
 import { spaceForWire } from '../../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
@@ -126,12 +126,17 @@ export const space_statsTool: ToolHandler = {
       // depending on which door was asked.
       // Not a record whose bytes this disk lost either (Q-337): answered as `filesAwaitingBytes`, as REST stats does.
       files: await col(spaceCollection(mid, 'files')).countDocuments({ ...COUNTED_FILE_ROW }),
-      filesAwaitingBytes: await filesAwaitingBytes(mid),
+      filesAwaitingBytes: await awaitingBytesIn(mid),
     })));
-    const sum = (k: 'facts' | 'entities' | 'edges' | 'chrono' | 'files' | 'filesAwaitingBytes'): number => counts.reduce((s, c) => s + c[k], 0);
+    const facts = counts.reduce((s, c) => s + c.facts, 0);
+    const entities = counts.reduce((s, c) => s + c.entities, 0);
+    const edges = counts.reduce((s, c) => s + c.edges, 0);
+    const chrono = counts.reduce((s, c) => s + c.chrono, 0);
+    const files = counts.reduce((s, c) => s + c.files, 0);
+    const filesAwaitingBytes = counts.reduce((s, c) => s + c.filesAwaitingBytes, 0);
     // Built ONCE and carried in both halves. Two literals is two places for a field to be added to
     // one of them, which is this whole file's defect with a smaller blast radius.
-    const stats = { spaceId: callSpace, facts: sum('facts'), entities: sum('entities'), edges: sum('edges'), chrono: sum('chrono'), files: sum('files'), filesAwaitingBytes: sum('filesAwaitingBytes') };
+    const stats = { spaceId: callSpace, facts, entities, edges, chrono, files, filesAwaitingBytes };
     return {
       content: [{
         type: 'text' as const,

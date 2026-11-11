@@ -158,7 +158,8 @@ describe('the vector never leaves the database', () => {
     // The vector, and `deliveredBy` (bundle-51): which peer delivered a record here is local state that names a peer of this
     // instance's network, so no read returns it either. Written out, not derived — a derivation would assert the list equals itself.
     // And the write guard (`Q-439`): this instance's lock on an edge's subject, withheld from every answer.
-    assert.deepEqual(NEVER_RETURNED_PROJECTION, { embedding: 0, deliveredBy: 0, _functionalGuard: 0, posAtSeq: 0, writtenHere: 0, pos: 0 });
+    // bundle-70 (Q-337): `bytesAbsentSince`, the absent-bytes sweep's local stamp, is withheld from every answer too.
+    assert.deepEqual(NEVER_RETURNED_PROJECTION, { embedding: 0, deliveredBy: 0, _functionalGuard: 0, posAtSeq: 0, writtenHere: 0, bytesAbsentSince: 0, pos: 0 });
   });
 
   it('an EXCLUSION projection, so a new record field is never silently absent from the API', () => {

@@ -707,29 +707,12 @@ anything is audited as `file.leaked_rows.repair` (one entry per space, with no t
 when every path of its last pass could be looked at. Going back to an earlier release afterwards is harmless: it
 ignores the scan's place and does nothing it did.
 
-**The same sweep removes the records of files whose bytes are gone.** A file record whose bytes are not on this instance's disk
-cannot be listed or deleted by a person, and is not counted as a file: it is counted apart as *awaiting bytes*. Each cycle the
-sweep (`TTL sweep: removing records whose bytes are gone`) lists every space's folders once (nothing is read or hashed), notes
-the day a record's bytes were first found missing (`bytesAbsentSince`, kept on this instance only: never sent to a peer, never
-shown in an answer) and forgets the note when the bytes come back. A later cycle **removes** a noted record when its wait is over:
-**1 day** for a record with a content hash, **30 days** for one without, and **30 days** for every record of a space restored or
-imported within the last 30 days (the restore and the import clear every note and start the wait over). On a space that syncs, every peer
-this instance receives it from must also have finished a file sync, after the note, that did not name the file,
-was not cut short and left no path unread; **30 days** after the note that requirement ends. The removal is on this instance only: no deletion notice for
-peers, no webhook, no live event, and the change feed carries `{ deleted: true, reason: 'bytes_lost' }`; links to the file stay. A
-peer that still holds the file delivers its bytes again and the record comes back; a record no peer holds bytes for may be offered back by
-a sync, wait again and be removed again, audited each time. A record is held back, and the sweep says which hold in
-`ythril_files_absent_bytes_held` (`reason`: `unstamped`, `no_complete_pass`, `mass_loss`, `mass_loss_directory`, `owed_move`,
-`tombstone`, `not_writable`, `chunk_session`, `window` or `legs`), while a move of it is owed, a deletion of it is pending or
-published, the space is not taking writes, a chunked upload of it is open, or the last complete pass found nothing present or more than half of
-the space's records absent (a disk that is not mounted looks like that; the same is checked for each top-level folder). A path
-the sweep cannot look at, because of an error or a bound on the time a look may take, is never noted or removed. At most **200**
-records are removed per cycle across all spaces. **A removal cannot be undone**, and going back to an earlier release keeps what
-was removed (the earlier release ignores the note). The log says one line per space and cycle that noted or removed anything; the
-counters are `ythril_files_absent_bytes_removed_total` and the gauges `ythril_files_awaiting_bytes` (per space) and
-`ythril_files_absent_bytes_held`. A cycle that removed anything is audited as `file.absent_bytes.sweep` (one entry per space,
-with no token, naming at most **50** paths). A delete you make yourself, through the API or the MCP `delete_file` tool, is unchanged and keeps
-its deletion notice. The media worker no longer removes the record of a file whose source is gone: it drops the job and nothing else.
+**The same sweep removes the records of files whose bytes are gone.** Such a record cannot be listed or deleted by a person and is counted apart, as *awaiting bytes*. Once a day per space the step `TTL sweep: removing records whose bytes are gone` lists the space's folders (nothing is read or hashed), notes when a record's bytes were first found missing (`bytesAbsentSince`, kept on this instance only) and drops the note when they come back.
+A later pass **removes** a noted record when its wait is over: **1 day** for a record with a content hash, **30 days** for one without, and **30 days** for every record of a space restored or
+imported within the last 30 days (the restore and the import clear every note). On a space that syncs, every peer it is received from must also have finished a complete file sync after the note; **30 days** after the note that requirement ends.
+Nothing is removed while a move of the record is owed, a deletion of it is pending or published, the space takes no writes, a chunked upload of it is open, or the last complete pass found nothing present or more than half of the space's records (or all of one top-level folder's) absent; a path that cannot be looked at is never noted. `ythril_files_absent_bytes_held` says which hold, by `reason`.
+The removal is on this instance only: no deletion notice for peers, no webhook, no live event; the change feed says `reason: 'bytes_lost'`, links stay, and a peer that holds the file delivers it back. At most **200** records are removed per cycle across all spaces.
+**A removal cannot be undone**; an earlier release ignores the note. Counted by `ythril_files_absent_bytes_removed_total` and `ythril_files_awaiting_bytes` (per space); a cycle that removed anything is audited as `file.absent_bytes.sweep` (one entry per space, with no token, naming at most **50** paths). Your own delete keeps its deletion notice, and the media worker no longer removes such a record: it drops the job.
 
 Lines of other jobs follow the same shape; the ones whose wording is worth knowing:
 
