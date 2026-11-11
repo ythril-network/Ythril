@@ -122,7 +122,7 @@ function recordDecline(networkId: string, memberId: string, networkSpaceId: stri
  * direction is stored from THIS instance's side) only the ways its direction names. The one reading of it for the held space's schema pull
  * and for the turn, so a held space's meta travels exactly when its records would have.
  */
-function exchangeDirections(net: NetworkConfig, member: NetworkMember): { shouldPull: boolean; shouldPush: boolean } {
+export function exchangeDirections(net: NetworkConfig, member: NetworkMember): { shouldPull: boolean; shouldPush: boolean } {
   const isDirectional = isDirectionalNetwork(net);
   return {
     shouldPull: !isDirectional || member.direction === 'both' || member.direction === 'pull',

@@ -38,7 +38,8 @@ import type { MediaJobDoc } from '../../config/types.js';
 import { log, peerText } from '../../util/log.js';
 import { createMediaProviders } from './providers.js';
 import type { MediaProviderBundle } from './providers.js';
-import { removeFileHere } from '../remove-file-here.js';
+import { cancelMediaJob } from './job-queue.js';
+import { storedAbsOf } from '../held-spelling.js';
 import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob, holdJobsForMove, deferJob, mayDeferAgain } from './job-queue.js';
 import { moveCarriesRecordsAt } from '../move-markers.js';
 import { embedImage } from './image-embedder.js';
@@ -454,7 +455,8 @@ async function processJob(
      * SNAPSHOT ffmpeg needs across its several passes) and one streamed copy for an encrypted one, under the swept
      * scratch directory so a kill cannot leave plaintext behind.
      */
-    const absolutePath = resolveFilePath(spaceId, filePath);
+    // Where the bytes ARE: a file held under another spelling of its path (a decomposed name) is read there, never reported gone (Q-337).
+    const absolutePath = await storedAbsOf(spaceId, filePath).catch(() => resolveFilePath(spaceId, filePath));
     try {
       // Through the file door: with a master secret the bytes on disk are ciphertext (F-43).
       // Named for its MIME type, not for the stored path: the extension is what ffmpeg picks its demuxer from, and a
@@ -470,7 +472,7 @@ async function processJob(
         // dropping the job and any orphaned metadata/artifacts, and stop (no retry, no
         // "exhausted retries" churn — that infinite loop is exactly what this avoids).
         if (await reconcileDeletedSource(spaceId, claim)) {
-          log.info(`Media worker: source file ${spaceId}/${fileId} no longer exists — removed job and orphaned metadata (no retry)`);
+          log.info(`Media worker: source file ${spaceId}/${fileId} no longer exists — dropped its job (no retry); its record is the absent-bytes sweep's`);
         } else {
           log.info(`Media worker: source file ${spaceId}/${fileId} is not at its old path — a move owes its records; nothing removed, job held`);
         }
@@ -637,7 +639,7 @@ async function processJob(
     // throws a failure to look: read as "deleted", a permission refused here removed what this job wrote (preship-4 P4-5).
     if (!(await bytesPresent(absolutePath))) {
       if (await reconcileDeletedSource(spaceId, claim)) {
-        log.info(`Media worker: source file ${spaceId}/${fileId} was deleted during its job — removed what the job wrote`);
+        log.info(`Media worker: source file ${spaceId}/${fileId} was deleted during its job — dropped its job; what it wrote goes with its record`);
       } else {
         log.info(`Media worker: source file ${spaceId}/${fileId} left its path during its job — a move owes its records; nothing removed, job held`);
       }
@@ -757,12 +759,10 @@ async function processJob(
 }
 
 /**
- * Reconcile a media job whose source file has been deleted: remove the job, its
- * orphaned file-meta record, and any conversion artifacts (chunks / converted /
- * extracted). Disk is the source of truth for the file store, so a job pointing at
- * a file that no longer exists is stale and must be cleaned up, not retried.
- * Best-effort throughout — each step swallows its own error. Returns whether it removed anything: it does not when a move that
- * began here still owes the records at this path (they are the move's to carry, and the job is held for it).
+ * Reconcile a media job whose source file is gone from its path: drop the JOB, never retried. The record stays: a record whose bytes are gone is
+ * removed by one remover, the absent-bytes sweep (`files/absent-bytes-sweep.ts`, Q-337), after its window and its holds (a peer may still deliver
+ * the bytes; a restore may have brought the record back first). Best-effort: a failure to drop the job is said. Returns whether it dropped the
+ * job: it does not when a move that began here still owes the records at this path (they are the move's to carry, and the job is held for it).
  *
  * Only while this run still holds its claim, and otherwise it throws `JobLeaseLostError` and touches nothing. A file
  * gone from its path is not always a deleted file: a MOVE takes the claim first and then carries the file, its
@@ -779,9 +779,10 @@ async function reconcileDeletedSource(spaceId: string, claim: JobClaim): Promise
     await holdJobsForMove(spaceId, claim.jobId, 'file');
     return false;
   }
-  // The job, the artefacts, the cached hash and the record — honouring softDeleteFileMeta (flag the orphan for audit, or
-  // remove it) — by the one list of what a file leaves; each step swallows its own failure, there being nothing to retry with.
-  await removeFileHere(spaceId, claim.jobId, { failure: 'swallow' });
+  // The JOB only (bundle-70, Q-337). A path with no bytes is not always a deleted file: a peer may still deliver them, a restore may have
+  // brought the record back first. A record whose bytes are gone is removed by ONE remover, the absent-bytes sweep (`files/absent-bytes-sweep.ts`),
+  // after its window and its holds; what this job wrote (a chunk row) goes with that record, or with the delete that took it.
+  await cancelMediaJob(spaceId, claim.jobId).catch(err => log.warn(`Media worker: dropping the job of ${peerText(spaceId)}/${peerText(claim.jobId)}: ${peerText(err)}`));
   return true;
 }
 

@@ -135,7 +135,9 @@ describe('a derived row hanging off a file this instance deleted is repaired (re
     assert.deepEqual(leaked.filter(id => id in left), [], 'a derived row whose file is gone (absent, flagged or another file) is still stored after the repair pass');
     const seeded = byId(rows);
     for (const id of kept) {
-      assert.deepEqual(left[id], seeded[id], `the repair changed or removed ${id}, a row a person can still reach (a live file's row, a flagged parent, a row it cannot explain, a row newer than the scan)`);
+      // bundle-70 (Q-337): the same sweep's absent-bytes step stamps a fixture row with no bytes on disk; that local stamp is not the repair's.
+      const { bytesAbsentSince: _stamp, ...kept_ } = left[id] ?? {};
+      assert.deepEqual(left[id] ? kept_ : left[id], seeded[id], `the repair changed or removed ${id}, a row a person can still reach (a live file's row, a flagged parent, a row it cannot explain, a row newer than the scan)`);
     }
   });
 

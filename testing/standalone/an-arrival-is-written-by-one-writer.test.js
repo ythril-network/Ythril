@@ -72,6 +72,9 @@ const SYNC_ROUTES_DIR = 'server/src/api/sync/';
  * collection, fails — so this cannot outlive what it excuses.
  */
 const EXEMPT = {
+  'server/src/files/absent-bytes-sweep.ts:restartAbsentBytesSweeps':
+    'not the storage of an arriving record: after an import has landed (through the writer), it clears the absent-bytes sweep\'s local stamp '
+    + '(`bytesAbsentSince`, Q-337) from every row of the space, one local field, no seq, nothing counted as landed',
   'server/src/sync/arrivals.ts:convergeFileStamps':
     'not the storage of an arriving record: it adopts the AUTHOR\'s timestamp on a file row this instance already holds at '
     + 'that author\'s seq and with that author\'s content (Q-419). It stores no version — one field, no seq stamped, '

@@ -46,6 +46,7 @@ import { assertSpaceTakesWrites, isActRefusal } from '../spaces/space-write-gate
 import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import { adoptAllLegacyRows } from '../files/legacy-file-keys.js';
 import { peerUnreadableOf, UnreadablePaths } from '../files/unreadable-paths.js';
+import { FileLegAccumulator } from './file-legs.js';
 
 /**
  * The most files whose held bytes are looked at for a repair, per space per sync cycle: a row that names another hash than the
@@ -131,6 +132,10 @@ export async function syncFiles(
 ): Promise<{ pulledFiles: number; pushedFiles: number; pulledPaths: string[] }> {
   let pulledFiles = 0, pushedFiles = 0;
   const pulledPaths: string[] = [];
+  // Whether this leg is evidence for the absent-bytes sweep (Q-337, `sync/file-legs.ts`): every way the pull below leaves a file undone feeds it,
+  // and it records the leg at the end only when nothing did.
+  const leg = new FileLegAccumulator(spaceId, member.instanceId);
+  if (!doPull) leg.refused('not_pulled');
   try {
     // ── 1. Apply peer's file tombstones (deletions) first ─────────────────
     // Fetch tombstones before the manifest so that files deleted on the peer
@@ -207,7 +212,7 @@ export async function syncFiles(
     // Only fetch the peer manifest if we need to pull or push (manifest comparison
     // drives both directions). When neither direction needs manifest, skip entirely.
     if (!doPull && !doPush) return { pulledFiles, pushedFiles, pulledPaths };
-    if (turn && !turn.mayContinue()) return { pulledFiles, pushedFiles, pulledPaths };
+    if (turn && !turn.mayContinue()) { leg.refused('turn_stopped'); return { pulledFiles, pushedFiles, pulledPaths }; }
     const manifestInit = opts();
     const resp = await peerSafeFetch(`${member.url}/api/sync/manifest?spaceId=${encodeURIComponent(remoteSpaceId)}&networkId=${encodeURIComponent(networkId)}`,
       { ...manifestInit, signal: turnSignal(manifestInit.signal, turn) });
@@ -215,14 +220,17 @@ export async function syncFiles(
       const verdict = await transferRefusal(resp);
       turn?.refusedBy(verdict);
       if (verdict === 'failed') log.warn(`File manifest from ${peerText(member.label)}: ${resp.status}`);
+      leg.refused('manifest_refused');
       return { pulledFiles, pushedFiles, pulledPaths };
     }
+    const manifestReadAt = Date.now();
     const peerAnswer = await boundedJson<{ manifest: { path: string; sha256: string; size: number; modifiedAt: string }[]; unreadable?: unknown; unreadableTruncated?: unknown; spaceId?: string }>(resp, 'sync peer');
     const { manifest, spaceId: peerSpaceId } = peerAnswer;
     const fileSpaceId = peerFileSpaceId(peerSpaceId, remoteSpaceId); // Q-68: the plain file routes know only the peer's local id
     // What the peer could not look at (its manifest leaves such a path out, which is not "absent there"): typed, bounded and resolved to our keys
     // like an entry (`peerUnreadableOf`); only ever matched against our own keys. An older peer sends none: nothing is named.
     const peerUnreadable = peerUnreadableOf(spaceId, peerAnswer);
+    leg.manifestRead(manifestReadAt, peerAnswer, peerUnreadable);
 
     // Build our manifest for comparison
     const built = await buildFileManifest(spaceId);
@@ -265,6 +273,7 @@ export async function syncFiles(
         if (outside++ === 0) firstOutside = err;
       }
     }
+    if (outside > 0) leg.refused('outside');
     if (outside > 0) reportSpaceFailure(OUTSIDE_STEP, spaceId, firstOutside, { unit: member.label ?? member.instanceId, count: outside, when: 'next cycle' });
     else reportSpaceRecovered(OUTSIDE_STEP, spaceId, member.label ?? member.instanceId);
 
@@ -294,10 +303,10 @@ export async function syncFiles(
 
     for (const { remote, key } of arriving) {
       // Between files: an act registered on the space stops the turn here, and the file in flight was cut by its signal.
-      if (turn && !turn.mayContinue()) break;
+      if (turn && !turn.mayContinue()) { leg.refused('turn_stopped'); break; }
       if (isInstanceLocalFile(key)) continue; // a peer's conflict copy or schema snapshot is the peer's own
       // A path this instance could not look at is neither fetched, written nor saved as a conflict copy: to this side it is not absent.
-      if (unreadableHere(key)) { if (leftAlone++ === 0) firstLeftAlone = key; continue; }
+      if (unreadableHere(key)) { leg.refused('unreadable_here'); if (leftAlone++ === 0) firstLeftAlone = key; continue; }
       const local = oursMap.get(key);
       // See ./file-conflict.ts — a file has no `seq`, so a differing hash cannot be resolved by last-writer-wins the way
       // records are. When ours is still the version this peer and we last agreed on, theirs replaces it (Q-66);
@@ -310,6 +319,9 @@ export async function syncFiles(
         // A candidate the deletion question above shadowed or could not decide is not repaired and does not use the budget.
         const reason = local && repairs < MAX_FILE_REPAIRS_PER_CYCLE && !notRepairedNow.has(key)
           ? repairReasonOf(held.get(key), local.sha256, key) : null;
+        if (local && reason === null && (repairs >= MAX_FILE_REPAIRS_PER_CYCLE || notRepairedNow.has(key)) && repairReasonOf(held.get(key), local.sha256, key) !== null) {
+          leg.refused(notRepairedNow.has(key) ? 'not_now' : 'repair_budget');
+        }
         if (local && reason) {
           try {
             repairs++;
@@ -328,12 +340,13 @@ export async function syncFiles(
             await recordArrivedBytes(spaceId, key, { sizeBytes: local.size, sha256: local.sha256, door: 'pull', repair: reason });
             reportSpaceRecovered(REPAIR_STEP, spaceId, key);
           } catch (err) {
+            leg.refused('pull_failed');
             sayPullFailure(REPAIR_STEP, spaceId, key, err);   // counted as `record_failed` by the recorder; tried again next cycle
           }
         }
         continue;
       }
-      if (notNow.has(key)) continue;
+      if (notNow.has(key)) { leg.refused('not_now'); continue; }
 
       try {
         // The one place this entry's path meets the disk: resolved WITH the symlink check, before a byte is fetched for a path
@@ -349,6 +362,7 @@ export async function syncFiles(
           await checkQuota('files', pulledBytes + remote.size, { maxAgeMs: REPEATED_CHECK_USAGE_WINDOW_MS });
         } catch (err) {
           if (!(err instanceof QuotaError)) throw err;
+          leg.refused('quota');
           countFileArrival('pull', 'quota');
           sayPullFailure(QUOTA_STEP, spaceId, key, err);
           continue;
@@ -376,6 +390,7 @@ export async function syncFiles(
           { timeoutMs: PEER_TRANSFER_TIMEOUT_MS, streamBody: true },
         );
         if (!dl.ok) {
+          leg.refused('pull_failed');
           turn?.refusedBy(await transferRefusal(dl));
           await dl.body?.cancel().catch(() => undefined);   // a body nobody reads holds the connection until the signal fires
           log.warn(`DL file ${peerText(remote.path)} from ${peerText(member.label)}: ${dl.status}`);
@@ -398,6 +413,7 @@ export async function syncFiles(
             // A body that is not what the manifest declared (another hash, past its size, short of it): nothing was stored, the peer
             // is asked again next cycle. Counted every time and said once per window, as the quota refusal and the record failure are:
             // a peer that serves wrong bodies is otherwise a line per cycle for ever, and invisible on the counter.
+            leg.refused('pull_failed');
             countFileArrival('pull', 'refused_body');
             sayPullFailure(BODY_STEP, spaceId, key, err);
             continue;
@@ -409,7 +425,7 @@ export async function syncFiles(
           // The download took time, and a delete here may have begun since the cycle's first read: asked again, for this one path,
           // right before the bytes are written (one indexed read). Decided or not, a path a deletion covers is not written.
           const again = await decideArrivals(spaceId, [{ id: key, path: key, kind: 'bytes', sha256: remote.sha256 }]);
-          if (again.shadowed.has(key) || again.undecided.has(key)) continue;
+          if (again.shadowed.has(key) || again.undecided.has(key)) { leg.refused('not_now'); continue; }
 
           // New here, or changed only on the peer since we last agreed: renamed over the original path (`abs`: the resolved
           // and symlink-checked path — a plain join let a manifest entry such as `../../other-space/x` write outside this space).
@@ -434,6 +450,7 @@ export async function syncFiles(
               // live row still names the path, an overwrite, or the lookup could not say), no base is written, and the next cycle delivers the file again with
               // its true deliverer (Q-254).
               await removeUnrecordedBytes(spaceId, local ? { held: local.diskPath } : key, err);
+              leg.refused('pull_failed');
               sayPullFailure(RECORD_STEP, spaceId, key, err);   // counted `record_failed` by the recorder
               continue;
             }
@@ -475,6 +492,7 @@ export async function syncFiles(
           await staged.discard();   // every exit: shadowed, committed (nothing left), refused, failed
         }
       } catch (err) {
+        leg.refused('pull_failed');
         // Once per window per path, counted every time (the shared reporter), not a line per entry per cycle.
         sayPullFailure(ENTRY_STEP, spaceId, key, err);
       }
@@ -545,7 +563,10 @@ export async function syncFiles(
     }
     } // end doPush
   } catch (err) {
+    leg.refused('failed');
     log.warn(`syncFiles for ${peerText(member.label)} space ${peerText(spaceId)}: ${peerText(err)}`);
+  } finally {
+    leg.end();
   }
   return { pulledFiles, pushedFiles, pulledPaths };
 }

@@ -70,7 +70,79 @@ const counted = (v, unit) => {
  * `code` must capture the number in group 1. `doc` must MATCH (the value is interpolated into it), so
  * a changed constant makes the pattern stop matching and the test names both sides.
  */
+/**
+ * The figures of the absent-bytes sweep (Q-337) the guides state in prose: the wait of a record with a `sha256` (one day), the wait
+ * without one and after a restore (30 days, `WAIT_DAYS_FOR_BYTES`), the removals per cycle and the paths one audit entry names.
+ * Each is read from the module that owns it, and every guide page that quotes a figure has its own row, so a figure that moves makes
+ * the sentence stop matching and the failure names the page.
+ */
+const ABSENT_BYTES_SWEEP = 'server/src/files/absent-bytes-sweep.ts';
+const absentBytesRows = [
+  ...[
+    ['docs/integration-guide.md', '(setup API)', (v) => new RegExp(`\\*\\*${v} day\\*\\* with a \`sha256\``)],
+    ['docs/integration-guide.md', '(files API)', (v) => new RegExp(`\\*\\*${v} day\\*\\* from the day its bytes were first found missing`)],
+    ['docs/integration-guide.md', '(upgrading)', (v) => new RegExp(`after \\*\\*${v} day\\*\\* \\(a record with a \`sha256\``)],
+    ['docs/userguide.md', '(file page)', (v) => new RegExp(`The wait is \\*\\*${v} day\\*\\*`)],
+    ['docs/userguide.md', '(storage page)', (v) => new RegExp(`\\*\\*${v} day\\*\\* for a record with a content hash`)],
+    ['docs/decisions/21-a-file-whose-bytes-are-gone-is-removed-here-only-after-evidence-and-an-explicit-delete-keeps-its-tombstone.md', '(decision 21)',
+      (v) => new RegExp(`\\(${v} day for a record with a \`sha256\``)],
+  ].map(([doc, where, text]) => ({
+    what: `how long a record whose bytes are gone waits when it has a sha256 ${where}`,
+    source: ABSENT_BYTES_SWEEP,
+    code: /export const ABSENT_BYTES_WINDOW_MS = ([0-9_]+);/,
+    scale: 86_400_000,   // ms in code, days in prose
+    doc,
+    text,
+  })),
+  ...[
+    ['docs/integration-guide.md', '(setup API, without a hash)', (v) => new RegExp(`\\*\\*${v} days\\*\\* without, and \\*\\*${v} days\\*\\* for every record`)],
+    ['docs/integration-guide.md', '(setup API, the peers\' evidence ends)', (v) => new RegExp(`\\*\\*${v} days\\*\\* after the stamp that requirement ends`)],
+    ['docs/integration-guide.md', '(setup API, a restored space)', (v) => new RegExp(`imported within the last ${v} days, \`filesRestoredAt\``)],
+    ['docs/integration-guide.md', '(files API)', (v) => new RegExp(`\\*\\*${v} days\\*\\* for one\\s+without, and \\*\\*${v} days\\*\\* for every record`)],
+    ['docs/integration-guide.md', '(upgrading)', (v) => new RegExp(`or \\*\\*${v} days\\*\\* \\(one without, and every record`)],
+    ['docs/integration-guide.md', '(files API, the peers\' evidence ends)', (v) => new RegExp(`\\*\\*${v} days\\*\\* after that day this evidence requirement is dropped`)],
+    ['docs/integration-guide.md', '(upgrading, the peers\' evidence ends)', (v) => new RegExp(`\\*\\*${v} days\\*\\* after the note the requirement for peers ends`)],
+    ['docs/userguide.md', '(file page, the peers\' evidence ends)', (v) => new RegExp(`\\*\\*${v} days\\*\\* after the bytes were noticed, that wait for peers is dropped`)],
+    ['docs/userguide.md', '(storage page, the peers\' evidence ends)', (v) => new RegExp(`\\*\\*${v} days\\*\\* after the note that requirement ends`)],
+    ['docs/userguide.md', '(storage page, a restored space)', (v) => new RegExp(`imported within the last ${v} days \\(the restore`)],
+    ['docs/integration-guide.md', '(restore, data management API)', (v) => new RegExp(`wait \\*\\*${v} days\\*\\* from the restore`)],
+    ['docs/userguide.md', '(file page)', (v) => new RegExp(`\\*\\*${v} days\\*\\* for a record that never had a content hash`)],
+    ['docs/userguide.md', '(storage page)', (v) => new RegExp(`\\*\\*${v} days\\*\\* for one without, and \\*\\*${v} days\\*\\* for every record`)],
+    ['docs/userguide.md', '(restore)', (v) => new RegExp(`waits \\*\\*${v} days\\*\\* from the restore`)],
+    ['docs/decisions/21-a-file-whose-bytes-are-gone-is-removed-here-only-after-evidence-and-an-explicit-delete-keeps-its-tombstone.md', '(decision 21)',
+      (v) => new RegExp(`${v} days without one, and ${v} days for every record`)],
+  ].map(([doc, where, text]) => ({
+    what: `how long a record whose bytes are gone waits when it has no sha256, or its space was restored ${where}`,
+    source: 'server/src/files/bytes-wait.ts',
+    code: /export const WAIT_DAYS_FOR_BYTES = ([0-9_]+);/,
+    doc,
+    text,
+  })),
+  ...[
+    ['docs/integration-guide.md', '(setup API)', (v) => new RegExp(`removes at most \\*\\*${v}\\*\\* records per cycle`)],
+    ['docs/integration-guide.md', '(files API)', (v) => new RegExp(`At most ${v} records are removed per cycle across spaces`)],
+    ['docs/userguide.md', '(storage page)', (v) => new RegExp(`At most \\*\\*${v}\\*\\*\\s+records are removed per cycle`)],
+  ].map(([doc, where, text]) => ({
+    what: `the most records the absent-bytes sweep removes in one cycle ${where}`,
+    source: ABSENT_BYTES_SWEEP,
+    code: /export const ABSENT_BYTES_REMOVALS_PER_TICK = ([0-9_]+);/,
+    doc,
+    text,
+  })),
+  ...[
+    ['docs/integration-guide.md', '(audit log API)', (v) => new RegExp(`\`retiredPaths\` \\(the paths, at most ${v}\\)`)],
+    ['docs/userguide.md', '(storage page)', (v) => new RegExp(`naming at most \\*\\*${v}\\*\\* paths`)],
+  ].map(([doc, where, text]) => ({
+    what: `the most paths one absent-bytes audit entry names ${where}`,
+    source: ABSENT_BYTES_SWEEP,
+    code: /export const ABSENT_BYTES_AUDIT_PATHS = ([0-9_]+);/,
+    doc,
+    text,
+  })),
+];
+
 const CITED = [
+  ...absentBytesRows,
   {
     what: 'sync peer request timeout',
     source: 'server/src/sync/peer-timeouts.ts',

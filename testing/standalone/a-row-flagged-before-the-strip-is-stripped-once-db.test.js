@@ -120,7 +120,9 @@ describe('a row flagged before the strip existed is stripped by one idempotent p
   it('leaves a live row exactly as it was', async () => {
     await runPass();
     for (const s of [BAD, GOOD]) {
-      assert.deepEqual(await door.coll(s, 'files').findOne({ _id: 'f/live.txt' }), seedRows(s).find(r => r._id === 'f/live.txt'),
+      // bundle-70 (Q-337): the same sweep's absent-bytes step stamps this fixture row (it has no bytes on disk); that local stamp is not the strip's.
+      const { bytesAbsentSince: _stamp, ...live } = (await door.coll(s, 'files').findOne({ _id: 'f/live.txt' })) ?? {};
+      assert.deepEqual(live, seedRows(s).find(r => r._id === 'f/live.txt'),
         `${s}: the pass changed a LIVE file's row`);
     }
   });

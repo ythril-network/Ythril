@@ -20,9 +20,17 @@ GET /api/brain/spaces/:spaceId/stats
   "edges": 89,
   "chrono": 23,
   "files": 31,
+  "filesAwaitingBytes": 0,
   "embedQueue": { "pending": 0, "processing": 0, "failed": 0 }
 }
 ```
+
+**`files` counts the files the space has, and `filesAwaitingBytes` counts the records left out of it.** A file record whose
+bytes are gone from this instance's disk is not a file it can list or serve, so it is not in `files` (nor in `space_meta`'s
+`stats.files` or the completeness facts, which answer the same number). It is counted in `filesAwaitingBytes` while it waits for a
+peer to deliver the bytes back, and is then removed on this instance only
+([the rule and its waits](05-files-api.md#delete-a-file)). A count that stays above 0 for longer than the waits is held by
+one of the reasons `ythril_files_absent_bytes_held` names ([Setup API](11-setup-api.md)).
 
 **`embedQueue` — how much of this space is not searchable yet.** Writes do not wait for the embedding
 model; a background worker embeds each record moments later. Until it does, the record exists but is

@@ -55,6 +55,7 @@ import { spaceTtlDays } from './chrono-retention.js';
 import { findSpace } from '../spaces/space-lookup.js';
 import { stripFlaggedRowsOnce } from '../files/derived-fields.js';
 import { leakedRowsDeadline, publishLeakedRowScansOwed, repairLeakedRows } from '../files/leaked-rows-repair.js';
+import { absentBytesSpaceOrder, absentBytesTick, endAbsentBytesTick, sweepAbsentBytes } from '../files/absent-bytes-sweep.js';
 import { retirePeerSidecars } from '../sync/peer-sidecar-retirement.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { purgeFeedMarkers } from '../files/feed-marker.js';
@@ -80,6 +81,7 @@ const FINISH_MOVES_STEP = declareStep('TTL sweep: finishing interrupted file mov
 const INDEX_STEP = declareStep('TTL sweep: indexes');
 const STRIP_STEP = declareStep('TTL sweep: stripping rows flagged before the strip');
 const REPAIR_STEP = declareStep('TTL sweep: repairing rows a deleted file left');
+const ABSENT_BYTES_STEP = declareStep('TTL sweep: removing records whose bytes are gone');
 const HEAL_STEP = declareStep('TTL sweep: healing retention stamps that are not dates');
 /** The step a collection's READ failure is said under. */
 /**
@@ -439,6 +441,13 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
   // end. After the strip, so what is repaired here is what the strip left; the spaces share the budget, and a space that fails is passed over.
   const repairUntil = leakedRowsDeadline();
   await eachSpace(REPAIR_STEP, configuredSpaces(), space => repairLeakedRows(space.id, now, { deadlineAt: repairUntil }));
+
+  // Records of files whose bytes this instance lost (Q-337, `files/absent-bytes-sweep.ts`): stamped, then removed here only once the due rule
+  // holds. Its own pages, deadline and removal cap; the spaces in an order that rotates each tick; a space that fails is passed over.
+  const absentTick = absentBytesTick();
+  try {
+    await eachSpace(ABSENT_BYTES_STEP, absentBytesSpaceOrder(configuredSpaces()), space => sweepAbsentBytes(space.id, now, absentTick));
+  } finally { endAbsentBytesTick(absentTick); }
 
   return total;
 }

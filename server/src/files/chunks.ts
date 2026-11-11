@@ -20,6 +20,7 @@ import { declareStep } from '../util/housekeeping-signals.js';
 import { log } from '../util/log.js';
 import { admitSpaceWrite, assertSpaceTakesWrites, isSpaceNotWritable } from '../spaces/space-write-gate.js';
 import { RequestRefusal } from '../util/errors.js';
+import { toDocId } from '../util/paths.js';
 
 /** Deterministic upload ID from (spaceId, path, total). */
 export function uploadId(spaceId: string, filePath: string, total: number): string {
@@ -27,6 +28,23 @@ export function uploadId(spaceId: string, filePath: string, total: number): stri
     .update(`${spaceId}\0${filePath}\0${total}`)
     .digest('hex')
     .slice(0, 32);
+}
+
+/**
+ * The chunked uploads this process has open, by space and file key, with when a range last arrived (Q-337). The staged directory is named by a
+ * hash of the path and the total, so the disk cannot say which path an upload is for; this can. The absent-bytes sweep holds a record whose
+ * upload is still arriving (`chunkSessionOpenAt`). In memory only: a restart forgets the sessions until their next range, which only lets the
+ * sweep's window (a day at the least) and the finish's own write decide, as for an upload that has not started.
+ */
+const openSessions = new Map<string, number>();
+const sessionKey = (spaceId: string, filePath: string): string => `${spaceId}\0${toDocId(filePath)}`;
+/** How long a session with no new range still counts as open: the stale-chunk cleanup's own age. */
+const SESSION_OPEN_MS = 24 * 60 * 60 * 1000;
+
+/** Whether a chunked upload to `filePath` in `spaceId` has had a range within the last day and has not finished or been discarded. */
+export function chunkSessionOpenAt(spaceId: string, filePath: string, nowMs: number = Date.now()): boolean {
+  const at = openSessions.get(sessionKey(spaceId, filePath));
+  return at !== undefined && nowMs - at < SESSION_OPEN_MS;
 }
 
 /** Chunk storage root: /data/.chunks */
@@ -115,6 +133,7 @@ export async function storeChunk(
 
     // PLAINTEXT sizes, read from the names, or resume would count tags.
     const received = await stagedBytes(dir);
+    openSessions.set(sessionKey(spaceId, filePath), Date.now());
     return { received, complete: received >= total };
   });
 }
@@ -156,6 +175,7 @@ export async function assembleChunks(
 
     // Clean up chunk directory
     await removeTree(dir);
+    openSessions.delete(sessionKey(spaceId, filePath));
 
     return sha256;
   });
@@ -224,6 +244,7 @@ export async function hashStagedChunks(spaceId: string, filePath: string, total:
 /** Drop the staged chunks of an upload that is not to be assembled (the door's answer was `200 { tombstoned: true }`). */
 export async function discardStagedChunks(spaceId: string, filePath: string, total: number): Promise<void> {
   await removeTree(uploadDir(spaceId, uploadId(spaceId, filePath, total)));
+  openSessions.delete(sessionKey(spaceId, filePath));
 }
 
 /** Get total received bytes for an upload. Returns 0 if upload doesn't exist. */

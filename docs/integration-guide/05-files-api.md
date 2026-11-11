@@ -284,7 +284,10 @@ Any other query parameter is refused `400`.
 
 - `items`: each changed path once, at its latest change, in position order. A live file carries `path`, `sha256` (when
   known), `sizeBytes`, `updatedAt` and `deleted: false`; a deleted one carries `path`, `deleted: true` and `updatedAt` (the
-  deletion time) only. Derived trees (`_converted/`, `_extracted/`, `_tmp/`) and conversion chunks are never listed.
+  deletion time) only, plus `reason: "bytes_lost"` when this instance removed the record because its bytes were gone
+  ([the absent-bytes sweep](#delete-a-file)): that deletion is this instance's alone, so no peer was
+  told and no tombstone was written, and the file may reappear in the feed if a peer delivers its bytes again. A deletion by a
+  person or by a peer's tombstone carries no `reason`. Derived trees (`_converted/`, `_extracted/`, `_tmp/`) and conversion chunks are never listed.
 - `nextCursor`: always a cursor, on the last page too. Keep the last one and send it next time.
 - `through`: the answer is complete through this position. `head`: the latest position the feed holds.
 
@@ -540,7 +543,23 @@ regardless of the setting.
 every file has a metadata record, and `DELETE /api/files/:spaceId?path=…` removes both. An **orphan** —
 a record whose bytes went missing out of band — is completed by that same call, which answers `204`
 rather than `404` when it finds one and writes the sync tombstone the file never got, so a peer does not
-push it back. MCP `delete_file` and the record TTL sweep complete an orphan the same way. A path with
+push it back. MCP `delete_file` completes an orphan the same way. The record TTL sweep does **not**: an orphan
+is not counted as a file (`filesAwaitingBytes` counts it, see [the stats route](04d-brain-ops-api.md)) and the sweep's step
+`TTL sweep: removing records whose bytes are gone` removes it **on this instance only**, with no tombstone, no webhook and no live
+event, once its wait is over: **1 day** from the day its bytes were first found missing for a record with a `sha256`, **30 days** for one
+without, and **30 days** for every record of a space restored or imported within the last 30 days. The removal also needs every
+network member this instance pulls the space from to have completed a file sync, read after that day, that did not name the path, did not
+truncate and listed its unreadable paths; **30 days** after that day this evidence requirement is dropped and the
+others stay. It never removes a record while a move of it is owed, a pending or published file tombstone names the path, the space is not
+taking writes or a chunked upload is open at the path, nor when the last complete pass found nothing present or more than half of the space's
+records absent (the same per top-level folder whose records are all absent and which is gone from disk). A path the sweep cannot look at is
+never touched. It re-checks under the path lock and retires the row only if it is unchanged: with soft-delete off a feed marker carrying
+`retiredBy: "bytes-lost"`, with soft-delete on the `deletedAt` flag with the same mark. Links to the path stay. A peer holding the file
+re-delivers its bytes, and the next Merkle re-read brings the record's tags back; a record no peer has bytes for may be offered back by
+that re-read, wait again and be removed again, audited each time. **At most 200 records are removed per cycle across spaces**; a cycle
+that removed any is audited as `file.absent_bytes.sweep` ([Audit log](13-audit-log-api.md)); the metrics are `ythril_files_absent_bytes_removed_total`,
+`ythril_files_awaiting_bytes{space}` and `ythril_files_absent_bytes_held{reason}` ([Setup API](11-setup-api.md)). The media worker no longer
+removes a record whose source is gone: it drops the job only. A path with
 neither bytes nor a record is `404` on both doors (an error result in MCP, which used to carry the
 filesystem's `ENOENT` and the absolute data path); a move whose source is not there is `404` too, unless
 it is a move to finish (below). A **source** path that runs through a regular file (`a.txt/x`) names nothing, so it

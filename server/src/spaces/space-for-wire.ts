@@ -18,7 +18,7 @@
 import type { SpaceConfig } from '../config/types.js';
 
 /** The keys of a space's config entry that are local bookkeeping and never answered. */
-export const LOCAL_BOOKKEEPING_KEYS = ['leakedRowScan'] as const satisfies ReadonlyArray<keyof SpaceConfig>;
+export const LOCAL_BOOKKEEPING_KEYS = ['leakedRowScan', 'absentBytesScan', 'filesRestoredAt'] as const satisfies ReadonlyArray<keyof SpaceConfig>;
 
 /** `space` without its local bookkeeping: what a route or a tool answers where it answers a space's entry. */
 export function spaceForWire(space: SpaceConfig): SpaceConfig {

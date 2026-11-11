@@ -289,7 +289,12 @@ longer whole, or that holds records one of the space's unique indexes refuses, i
   restore a file can be listed without its bytes, or bytes can be on disk that no record names. The restore does not repair
   that, and it says where it happened: each restored space's row of [`GET /api/admin/data/restore`](#get-apiadmindatarestore)
   carries a `files` report (below), changing no byte, record, tombstone or hash-cache entry (a tombstone written by a restore
-  would delete the file on every peer).
+  would delete the file on every peer). The restore itself removes nothing, but the records that come back without bytes
+  do not stay for ever: every restored space has its file records wait **30 days** from the restore (`filesRestoredAt`,
+  kept on this instance only), and the absent-bytes sweep then removes, **on this instance only**, each one whose bytes have
+  not arrived (a peer holding the file delivers them) under the evidence and holds of
+  [the sweep](05-files-api.md#delete-a-file). Every `bytesAbsentSince` a backup carried is cleared by the restore, and the
+  `files` count and `filesAwaitingBytes` of the space leave out and count those records.
 
 **What comes back that you may not expect.** Records erased after the backup come back, erasure requests included, while the
 kept audit log still records the erasure: erase them again. A record deleted here after the backup whose deletion the peers have

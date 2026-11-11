@@ -82,6 +82,7 @@ import { REPLICATED_FAMILIES, RECORD_TYPE_OF } from './replicated-families.js';
 import { readPageTombstones } from './push-reads.js';
 import { deletedHereSince } from '../files/tombstones.js';
 import { restartLeakedRowScans } from '../files/leaked-rows-repair.js';
+import { restartAbsentBytesSweeps } from '../files/absent-bytes-sweep.js';
 import { resetStampHealLatch } from '../brain/retention-stamp-heal.js';
 import { edgeIdentityAdmitsForks } from '../spaces/edge-identity-index.js';
 import { EdgeIdentityBuilding } from '../util/errors.js';
@@ -447,16 +448,17 @@ async function* pagesOfSpool(file: string, index: ExportBodyIndex): ImportPages 
  *
  * **It restarts the space's leaked-rows scan before it answers** (`files/leaked-rows-repair.ts`), whatever the payload carried and
  * however far it got: the records it brought were never read, and a scan that had completed would sit out its day over them. The scan
- * is not run here; the next tick of the sweep does it.
+ * is not run here; the next tick of the sweep does it. **And it restarts the absent-bytes sweep** (Q-337): every stamp in the space is cleared and
+ * `filesRestoredAt` set, so each record it brought waits the longest window for its bytes (`restartAbsentBytesSweeps`).
  */
 export async function importDocuments(spaceId: string, payload: Record<string, unknown>, opts: ImportOptions = {}): Promise<ImportResult> {
   try { return await importInto(spaceId, pagesOfPayload(payload), opts); }
-  finally { afterImport(spaceId); }
+  finally { afterImport(spaceId); await restartAbsentBytesSweeps([spaceId]); }
 }
 
 /** Import the body spooled at `file`, read and validated whole before (`indexExportBody`), a page at a time: the door's import act. */
 export async function importSpool(spaceId: string, file: string, index: ExportBodyIndex, opts: ImportOptions = {}): Promise<ImportResult> {
   try { return await importInto(spaceId, pagesOfSpool(file, index), opts); }
-  finally { afterImport(spaceId); }
+  finally { afterImport(spaceId); await restartAbsentBytesSweeps([spaceId]); }
 }
 

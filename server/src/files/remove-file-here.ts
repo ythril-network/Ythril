@@ -46,17 +46,36 @@ import { cancelMediaJob } from './media/job-queue.js';
 import { deleteConversionArtifacts } from './converters/pipeline.js';
 import { forgetPathKeyedCache } from './path-keyed-cache.js';
 import { retireEmbedWorkOfRemovedRows } from './file-embed-work.js';
-import { retireFileMeta } from './file-meta.js';
+import { retireFileMeta, retireFileMetaMany } from './file-meta.js';
+import type { RetiredBy } from './feed-marker.js';
 import { deleteStoredIfPresent } from './stored-bytes.js';
 
 export type RemovalFailure = 'throw' | 'swallow';
 
-export async function removeFileHere(spaceId: string, rel: string, { failure }: { failure: RemovalFailure }): Promise<void> {
+export async function removeFileHere(
+  spaceId: string, rel: string,
+  { failure, retireOnlyIf, retiredBy }: { failure: RemovalFailure; retireOnlyIf?: Readonly<Record<string, unknown>>; retiredBy?: RetiredBy },
+): Promise<boolean> {
   const at = `for ${peerText(spaceId)}/${peerText(rel)}`;
   const step = async (what: string, run: () => Promise<unknown>): Promise<void> => {
     if (failure === 'throw') { await unlessTheStoreFailed(`${what} error ${at}`, run); return; }
     await run().catch(err => log.warn(`removeFileHere: ${peerText(what)} ${at}: ${peerText(err)}`));
   };
+  // A NARROWED removal (the absent-bytes sweep, Q-337) retires the row FIRST and only if it still matches what the caller decided on: the row is the
+  // one thing that says whether the file is still the orphan it was, and the steps below would take a re-upload's job and derivatives with it. Only a
+  // row this write took has the rest removed; one rewritten meanwhile (a re-upload, an arrival) keeps everything. What a failure after the retire
+  // leaves (a derived row, a job) belongs to a file with no row, which the leaked-rows repair and the media worker already clear.
+  if (retireOnlyIf !== undefined) {
+    let taken = 0;
+    await step('retireFileMeta', async () => { taken = await retireFileMetaMany(spaceId, [rel], { onlyIf: retireOnlyIf, ...(retiredBy ? { retiredBy } : {}) }); });
+    if (taken === 0) return false;
+    invalidateUsageCache();
+    await step('cancelMediaJob', () => cancelMediaJob(spaceId, rel));
+    await step('deleteConversionArtifacts', () => deleteConversionArtifacts(spaceId, rel));
+    await step('forgetPathKeyedCache', () => forgetPathKeyedCache(spaceId, { ids: [rel] }));
+    await step('retireEmbedWorkOfRemovedRows', () => retireEmbedWorkOfRemovedRows(spaceId, { ids: [toDocId(rel)] }));
+    return true;
+  }
   invalidateUsageCache(); // freed disk — reflect it in the next quota check
   // Cancel any queued media/text job so it cannot outlive the file and retry forever.
   await step('cancelMediaJob', () => cancelMediaJob(spaceId, rel));
@@ -67,6 +86,7 @@ export async function removeFileHere(spaceId: string, rel: string, { failure }: 
   // LAST: while the record remains, a retry (or the TTL sweep) completes this delete as an orphan.
   // Soft-flag it (retained for audit) or hard-delete it, per softDeleteFileMeta — as every sidecar row an arrival made went above.
   await step('retireFileMeta', () => retireFileMeta(spaceId, rel));
+  return true;
 }
 
 /**

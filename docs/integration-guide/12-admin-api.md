@@ -118,7 +118,10 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   The import drops by the same rule, so an export and an import never disagree about what a backup is.
 - What this instance DERIVES with its own model is left out — `embedding`, `embeddingModel` and `matchedText` — so
   exported data is model-independent; the import re-embeds. So is an edge's write guard (`_functionalGuard`): this
-  instance's own lock on a functional label's subject, never a backup's to carry.
+  instance's own lock on a functional label's subject, never a backup's to carry. So is a file record's `bytesAbsentSince`
+  (the day this instance's disk was first found without the file's bytes): a restore or an import clears it, because the
+  disk it described is not the disk the backup came from, and the space's files then wait out the absent-bytes sweep's longer
+  wait again.
 - The record's own local state is kept: the retention stamps (`_expireAt`, `_contentExpireAt`), a file's
   `syncBase`, who delivered the record (`deliveredBy`), whether this instance wrote its current version
   (`writtenHere`), and on a fork row the decision still owed here (`_resolvedElsewhere`). The record's landing position

@@ -63,6 +63,8 @@ const LOCAL_VALUES = {
   // Who delivered the stored version (bundle-51): a fixture so the table covers it, and the one local-only field an arrival
   // REPLACES rather than keeps — it names who delivered THIS version, so the new delivery's stamp wins (`BY_THE_ARRIVAL`).
   deliveredBy: 'the-earlier-deliverer',
+  // bundle-70 (Q-337): when THIS disk was first found without a file's bytes; local, carried across an arrival like the rest.
+  bytesAbsentSince: '2026-10-01T00:00:00.000Z',
   // The write guard (`Q-439`): this instance's lock on an edge's subject. A literal, because the table is about whether it
   // CROSSES an arrival, not about what it is a function of.
   _functionalGuard: 'a-subject-key-this-instance-stamped',

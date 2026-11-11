@@ -20,7 +20,7 @@ import { col } from '../db/mongo.js';
 import type { BrainCollection } from '../config/types.js';
 import type { SpaceMeta, KnowledgeType } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { LIVE_FILE_ROW } from '../files/live-file-row.js';
+import { COUNTED_FILE_ROW } from '../files/live-file-row.js';
 import { HOLDS_NO_VECTOR } from '../brain/holds-vector.js';
 
 /** The knowledge collections a check can point at. `file` is not a `KnowledgeType` — it has no schema. */
@@ -223,9 +223,10 @@ export async function gatherCompletenessFacts(memberIds: string[]): Promise<Comp
     // A file is recallable if it carries its own embedding OR something chunked it. Chunk records
     // (`parentFileId` set) and the audit rows a soft delete leaves (`deletedAt`) are not files the space has and are excluded
     // from both sides.
-    facts.files += await col(spaceCollection(sid, 'files')).countDocuments({ ...LIVE_FILE_ROW });
+    // A record whose bytes this disk lost (Q-337) is on neither side: the count doors leave it out, so "affected" never exceeds "total".
+    facts.files += await col(spaceCollection(sid, 'files')).countDocuments({ ...COUNTED_FILE_ROW });
     const [orphaned] = await col(spaceCollection(sid, 'files')).aggregate<{ n: number; sample: string[] }>([
-      { $match: { ...LIVE_FILE_ROW, ...HOLDS_NO_VECTOR } },
+      { $match: { ...COUNTED_FILE_ROW, ...HOLDS_NO_VECTOR } },
       { $lookup: { from: spaceCollection(sid, 'files'), localField: '_id', foreignField: 'parentFileId', pipeline: [{ $limit: 1 }, { $project: { _id: 1 } }], as: 'chunks' } },
       { $match: { chunks: { $size: 0 } } },
       { $group: { _id: null, n: { $sum: 1 }, sample: { $firstN: { input: { $ifNull: ['$path', '$_id'] }, n: SAMPLE_CAP } } } },

@@ -23,7 +23,7 @@ import { versionsFor, type VersionAllocation } from '../util/version-stamp.js';
 import { withLandingStamp, localRow, arrivalRow, type LocalLanding } from '../sync/record-position-stream.js';
 import { writeInOneCommands } from '../db/one-command.js';
 import { underPrefix } from '../util/under-prefix.js';
-import { FEED_MARKER, feedMarkerStages, isFeedMarker } from './feed-marker.js';
+import { FEED_MARKER, feedMarkerStages, isFeedMarker, type RetiredBy } from './feed-marker.js';
 import { raiseFileFeedFloorOver } from './file-feed-floor.js';
 import { writeAtReadVersion } from '../brain/write-at-read-version.js';
 import { writeFilterFor } from '../brain/write-precondition.js';
@@ -31,7 +31,7 @@ import { expiryForCreate } from '../brain/ttl.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
 import { embedArrivedFiles } from '../sync/embed-arrived-files.js';
 import { mergePropertiesOrKeep, mergePropertiesStage } from '../brain/merge-fields.js';
-import { stampOfArrival } from '../sync/local-only-fields.js';
+import { stampOfArrival, BYTES_ABSENT_SINCE } from '../sync/local-only-fields.js';
 import { NEVER_RETURNED_PROJECTION } from '../brain/read-projection.js';
 import { peerFileKey } from './sandbox.js';
 import { getConfig } from '../config/loader.js';
@@ -153,7 +153,8 @@ export async function upsertFileMeta(
     // turn "unknown" into a permanent state and the skip below into dead code.
     if (opts.sha256 !== undefined) $set['sha256'] = opts.sha256;
     // A write to a soft-deleted path means the file is live again — clear the flag.
-    const $unset: Record<string, unknown> = { deletedAt: '' };
+    // And the bytes are here: a stamp of the absent-bytes sweep goes in this write (Q-337), or the next pass reads a live file as an orphan.
+    const $unset: Record<string, unknown> = { deletedAt: '', [BYTES_ABSENT_SINCE]: '' };
     // Only an EXPLICIT ttlDays on a re-upload touches expiry: >0 (re)stamps, 0/null clears it. A plain
     // overwrite (ttlDays omitted) leaves any existing TTL untouched — it must not silently reset.
     if (opts.ttlDays !== undefined) {
@@ -250,8 +251,15 @@ export async function recordArrivedFile(
   const changed = await admitSpaceWrite(spaceId, 'files', async () => {
     const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
     const stored = await files.findOne(asFilter<FileMetaDoc>({ _id: normalised }),
-      { projection: { seq: 1, sha256: 1, sizeBytes: 1, deletedAt: 1, feedMarker: 1 } }) as Pick<FileMetaDoc, 'seq' | 'sha256' | 'sizeBytes' | 'deletedAt' | 'feedMarker'> | null;
-    if (stored && stored.deletedAt === undefined && stored.sha256 === sha256 && stored.sizeBytes === sizeBytes) return false;
+      { projection: { seq: 1, sha256: 1, sizeBytes: 1, deletedAt: 1, feedMarker: 1, [BYTES_ABSENT_SINCE]: 1 } }) as Pick<FileMetaDoc, 'seq' | 'sha256' | 'sizeBytes' | 'deletedAt' | 'feedMarker'> & { [BYTES_ABSENT_SINCE]?: string } | null;
+    if (stored && stored.deletedAt === undefined && stored.sha256 === sha256 && stored.sizeBytes === sizeBytes) {
+      // No change to the record, but the bytes it records are here again: the absent-bytes sweep's stamp goes (Q-337). This is the one arrival that
+      // writes no row, so a clearing that rode on the row write would never run for it, and the sweep could retire a file that is on disk.
+      if (stored[BYTES_ABSENT_SINCE] !== undefined) {
+        await files.updateOne(asFilter<FileMetaDoc>({ _id: normalised, [BYTES_ABSENT_SINCE]: { $exists: true } }), { $unset: { [BYTES_ABSENT_SINCE]: '' } } as never);
+      }
+      return false;
+    }
     if (stored && !isFeedMarker(stored)) {
       /*
        * A row already held takes the new bytes in a PIPELINE, so what OTHER bytes made this instance's copy match by (its excerpt, vector and
@@ -264,7 +272,7 @@ export async function recordArrivedFile(
         [
           ...replacedBytesStages(sha256, 'arrival'),
           { $set: { sizeBytes: { $literal: sizeBytes }, sha256: { $literal: sha256 }, pos: { $literal: landing!.pos }, posAtSeq: { $ifNull: ['$seq', 0] } } },
-          { $unset: ['deletedAt'] },
+          { $unset: ['deletedAt', BYTES_ABSENT_SINCE] },
         ] as never,
       ), 'file.arrival');
       if (held.matchedCount > 0) return true;
@@ -290,7 +298,7 @@ export async function recordArrivedFile(
           $set: { sizeBytes, sha256 },
           // Bytes on disk mean the file is live: a path soft-deleted here and re-created upstream comes back, as the
           // upload writer has always made it (`Q-239`).
-          $unset: { deletedAt: '' },
+          $unset: { deletedAt: '', [BYTES_ABSENT_SINCE]: '' },
           $setOnInsert: created,
         } as never),
         { upsert: true },
@@ -601,21 +609,37 @@ export async function updateFileMeta(
  * reads it by (bundle-255). `posAtSeq` is the row's own `seq`, read inside the write. A row that is not live (already flagged, a marker, a chunk) is
  * not touched: a second deletion takes no new position. Answers the ids it retired.
  */
-async function retireLivePage(spaceId: string, ids: readonly string[], how: 'flag' | 'mark'): Promise<string[]> {
+async function retireLivePage(spaceId: string, ids: readonly string[], how: 'flag' | 'mark', opts: RetireOptions = {}): Promise<string[]> {
   if (ids.length === 0) return [];
   const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
-  const rows = await coll.find(asFilter<FileMetaDoc>({ _id: { $in: [...ids] }, ...LIVE_FILE_ROW }), { projection: { _id: 1, seq: 1 } })
+  // `onlyIf` narrows both the read and the write: a row rewritten since the caller decided is neither read here nor retired.
+  const live = { ...LIVE_FILE_ROW, ...(opts.onlyIf ?? {}) };
+  const rows = await coll.find(asFilter<FileMetaDoc>({ _id: { $in: [...ids] }, ...live }), { projection: { _id: 1, seq: 1 } })
     .toArray() as unknown as Array<{ _id: string; seq?: number }>;
   if (rows.length === 0) return [];
   const deletedAt = new Date().toISOString();
   // The hold lasts one bulk write per page: the block is taken, the page's patches written, the hold released.
   await withLandingStamp(spaceId, rows.map(r => arrivalRow(typeof r.seq === 'number' ? r.seq : 0)), (patches) => writeInOneCommands(rows.map((r, i) => ({
     updateOne: {
-      filter: asFilter<FileMetaDoc>({ _id: r._id, ...LIVE_FILE_ROW }),
-      update: (how === 'flag' ? flagAndStrip(patches[i]!.pos, deletedAt) : feedMarkerStages(spaceId, patches[i]!.pos, deletedAt)) as never,
+      filter: asFilter<FileMetaDoc>({ _id: r._id, ...live }),
+      update: (how === 'flag' ? flagAndStrip(patches[i]!.pos, deletedAt, opts.retiredBy) : feedMarkerStages(spaceId, patches[i]!.pos, deletedAt, opts.retiredBy)) as never,
     },
   })), (slice, { ordered }) => coll.bulkWrite(slice, { ordered }), { ordered: false }), 'file.retire');
-  return rows.map(r => r._id);
+  // With a filter, a row read live may have changed before the write: only what the write retired is answered, read back by the retirement's own
+  // instant (the marker and the flag both carry it).
+  if (opts.onlyIf === undefined) return rows.map(r => r._id);
+  const taken = await coll.find(asFilter<FileMetaDoc>({ _id: { $in: rows.map(r => r._id) }, deletedAt }), { projection: { _id: 1 } }).toArray();
+  return taken.map(r => String(r._id));
+}
+
+/**
+ * How a retirement may be narrowed and said (Q-337). `onlyIf` is merged into the filter of the read and of the write, so a row rewritten after the
+ * caller decided is not retired (the absent-bytes sweep passes the stamp, hash and update time it decided on); `retiredBy` is carried on the
+ * marker or the flag ({@link RetiredBy}).
+ */
+export interface RetireOptions {
+  onlyIf?: Readonly<Record<string, unknown>>;
+  retiredBy?: RetiredBy;
 }
 
 /**
@@ -626,14 +650,18 @@ async function retireLivePage(spaceId: string, ids: readonly string[], how: 'fla
 export async function deleteFileMeta(
   spaceId: string,
   filePaths: string | readonly string[],
-): Promise<void> {
+  opts: RetireOptions = {},
+): Promise<number> {
   const ids = await fileRowIdsFor(spaceId, filePaths);
-  if (ids.length === 0) return;
+  if (ids.length === 0) return 0;
+  let retired = 0;
   await admitSpaceWrite(spaceId, 'files', async () => {
     const coll = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
     for (let i = 0; i < ids.length; i += READ_CHUNK) {
       const part = ids.slice(i, i + READ_CHUNK);
-      await retireLivePage(spaceId, part, 'mark');
+      retired += (await retireLivePage(spaceId, part, 'mark', opts)).length;
+      // A narrowed retirement takes the live rows it matched and nothing else stored at the ids.
+      if (opts.onlyIf !== undefined) continue;
       const rest = await coll.find(asFilter<FileMetaDoc>({ _id: { $in: part }, feedMarker: { $exists: false } }), { projection: { _id: 1, pos: 1 } })
         .toArray() as unknown as Array<{ _id: string; pos?: number }>;
       if (rest.length === 0) continue;
@@ -641,6 +669,7 @@ export async function deleteFileMeta(
       await coll.deleteMany(asFilter<FileMetaDoc>({ _id: { $in: rest.map(r => r._id) }, feedMarker: { $exists: false }, $or: [{ parentFileId: { $exists: true } }, { deletedAt: { $exists: true } }] }));
     }
   });
+  return retired;
 }
 
 /**
@@ -783,12 +812,15 @@ async function liveFileRecords(spaceId: string, path: string, scope: 'under' | '
 export async function markFileMetaDeleted(
   spaceId: string,
   filePaths: string | readonly string[],
-): Promise<void> {
+  opts: RetireOptions = {},
+): Promise<number> {
   const ids = await fileRowIdsFor(spaceId, filePaths);
-  if (ids.length === 0) return;
+  if (ids.length === 0) return 0;
+  let retired = 0;
   await admitSpaceWrite(spaceId, 'files', async () => {
-    for (let i = 0; i < ids.length; i += READ_CHUNK) await retireLivePage(spaceId, ids.slice(i, i + READ_CHUNK), 'flag');
+    for (let i = 0; i < ids.length; i += READ_CHUNK) retired += (await retireLivePage(spaceId, ids.slice(i, i + READ_CHUNK), 'flag', opts)).length;
   });
+  return retired;
 }
 
 /**
@@ -815,10 +847,12 @@ export async function markFileMetaDeleted(
  * of rows flagged by a release before this write existed uses the same stages. Two spellings would differ by exactly
  * one field on the day somebody adds one, and the repair would be the half that still held it.
  */
-function flagAndStrip(pos: number, deletedAt: string = new Date().toISOString()): object[] {
+function flagAndStrip(pos: number, deletedAt: string = new Date().toISOString(), retiredBy?: RetiredBy): object[] {
   // The flag takes a POSITION (bundle-255: the change feed reads the deletion by it) and never a version: `posAtSeq` is the row's own `seq`, read in
   // the write, so the position repair (which re-stamps a row whose `posAtSeq` is not its `seq`) leaves it alone.
-  return [{ $set: { deletedAt: { $literal: deletedAt }, pos: { $literal: pos }, posAtSeq: { $ifNull: ['$seq', 0] } } }, ...stripDerivedStages()];
+  return [{
+    $set: { deletedAt: { $literal: deletedAt }, pos: { $literal: pos }, posAtSeq: { $ifNull: ['$seq', 0] }, ...(retiredBy !== undefined ? { retiredBy: { $literal: retiredBy } } : {}) },
+  }, ...stripDerivedStages()];
 }
 
 /**
@@ -835,9 +869,8 @@ export async function retireFileMeta(spaceId: string, filePath: string): Promise
  * `deleteMany` per `READ_CHUNK` ids, inside one admitted unit. The rows an ARRIVED sidecar made (a peer that never converted delivers its sidecars as
  * ordinary files) were retired one write per row, so a file with fifty of them cost fifty writes.
  */
-export async function retireFileMetaMany(spaceId: string, filePaths: readonly string[]): Promise<void> {
-  if (getConfig().softDeleteFileMeta === true) await markFileMetaDeleted(spaceId, filePaths);
-  else await deleteFileMeta(spaceId, filePaths);
+export async function retireFileMetaMany(spaceId: string, filePaths: readonly string[], opts: RetireOptions = {}): Promise<number> {
+  return getConfig().softDeleteFileMeta === true ? markFileMetaDeleted(spaceId, filePaths, opts) : deleteFileMeta(spaceId, filePaths, opts);
 }
 
 /**

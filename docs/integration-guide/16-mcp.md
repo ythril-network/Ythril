@@ -768,9 +768,13 @@ Response:
   "entities": 156,
   "edges": 89,
   "chrono": 23,
-  "files": 31
+  "files": 31,
+  "filesAwaitingBytes": 0
 }
 ```
+
+`files` leaves out a record whose bytes this instance lost; `filesAwaitingBytes` counts those records, which wait for a peer to
+deliver the bytes and are then removed here only ([the rule](05-files-api.md#delete-a-file)). The REST stats route answers the same two numbers.
 
 Works with any valid token (including read-only). Given one of the caller's personal views as `space`, it returns the counts summed across the members the view read, and `viewMembers` names them.
 
