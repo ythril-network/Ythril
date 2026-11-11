@@ -51,7 +51,7 @@ import { pipelineStatusRouter } from './api/pipeline-status.js';
 import { spaceActivityRouter } from './api/space-activity.js';
 import { maintenanceMiddleware } from './maintenance.js';
 import { globalRateLimit, ipFloodBackstop } from './rate-limit/middleware.js';
-import { configExists, reloadConfig, getConfig, loadSecrets, saveConfig, startConfigWatcher, runConfigReload } from './config/loader.js';
+import { isFirstRun, reloadConfig, getConfig, loadSecrets, saveConfig, startConfigWatcher, runConfigReload } from './config/loader.js';
 import { reloadSpaceDiff } from './config/reload-space-diff.js';
 import { restoreViewsMissingAfterReload, snapshotViews } from './config/views.js';
 import { logInternalAudit } from './audit/audit.js';
@@ -287,7 +287,7 @@ export function createApp() {
   // The Angular SPA handles all routing. The root redirect below is only a
   // safety fallback if the static middleware cannot find index.html.
   app.get('/', (_req, res) => {
-    res.redirect(302, configExists() ? '/brain' : '/setup');
+    res.redirect(302, isFirstRun() ? '/setup' : '/brain');
   });
 
   // ── API routes ───────────────────────────────────────────────────────────

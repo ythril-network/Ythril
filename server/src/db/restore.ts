@@ -24,6 +24,7 @@ import { log } from '../util/log.js';
 import { RequestRefusal } from '../util/errors.js';
 import { isFileSystemError } from '../util/fs-failure-words.js';
 import { isMissingPath } from '../files/stored-bytes.js';
+import { pathPresentSync } from '../util/path-present.js';
 import { dbNameFromUri } from './db-name.js';
 import { boundedClientOptions, closeWithinBound } from './bounded-client-options.js';
 import { isNamespaceExists, isNamespaceNotFound } from './namespace-answers.js';
@@ -173,7 +174,8 @@ export async function backupManifestHolds(dir: string): Promise<DumpManifest> {
   const decryptLine = makeLineDecryptor();
   for (const { name, count } of manifest.collections) {
     const file = path.join(dir, `${name}.ndjson`);
-    if (!fs.existsSync(file)) throw new BackupNotWhole(`the backup names collection '${name}' and holds no file for it`);
+    // Only a file that is not there is the backup's verdict; a file the OS refuses to look at throws as itself (a restore act retries it).
+    if (!pathPresentSync(file)) throw new BackupNotWhole(`the backup names collection '${name}' and holds no file for it`);
     try {
       const first = await firstLineOf(file);
       // A file with no record where the manifest counts some is truncated: found here, where it costs no read of a record.
@@ -207,7 +209,7 @@ export async function backupIsWhole(dir: string, { only }: { only?: (name: strin
   for (const { name, count } of manifest.collections) {
     if (only && !only(name)) continue;
     const file = path.join(dir, `${name}.ndjson`);
-    if (!fs.existsSync(file)) throw new BackupNotWhole(`the backup names collection '${name}' and holds no file for it`);
+    if (!pathPresentSync(file)) throw new BackupNotWhole(`the backup names collection '${name}' and holds no file for it`);
     let n = 0;
     try {
       for await (const _record of recordsOf(file, decryptLine)) n++;
@@ -237,7 +239,7 @@ export function backupLoader(): BackupLoad {
   const decryptLine = makeLineDecryptor();
   return async (db, dir, { name, count: expectedCount }) => {
     const srcFile = path.join(dir, `${name}.ndjson`);
-    if (!fs.existsSync(srcFile)) throw new BackupNotWhole(`the backup names collection '${name}' and holds no file for it`);
+    if (!pathPresentSync(srcFile)) throw new BackupNotWhole(`the backup names collection '${name}' and holds no file for it`);
     const col = db.collection(name);
     let batch: Record<string, unknown>[] = [];
     let insertedCount = 0;

@@ -53,6 +53,7 @@ import fs from 'fs/promises';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
 import { storedAbsOf } from './held-spelling.js';
 import { bytesPresent, deleteStoredIfPresent, isMissingPath } from './stored-bytes.js';
+import { NAME_CANNOT_EXIST_CODES } from '../util/path-present.js';
 import { ConfirmRequired, FileSystemFault, SpaceRootRefused } from './act-answers.js';
 import { fileRecordPaths, hasLiveFileRecordExactlyAt, hasLiveFileRecordUnder, retireFileMetaUnder } from './file-meta.js';
 import { forgetPathKeyedCache } from './path-keyed-cache.js';
@@ -144,10 +145,11 @@ function confirmOf(confirm: unknown): boolean | undefined {
 
 /**
  * The filesystem's answers to "what is at this path" that mean nothing can be there: a name too long to exist, a loop of symbolic
- * links. For a delete these are "not found", like a missing path; the move's destination check reads the same two as refusals about
- * CREATING the name (`destination.ts`), which is the wrong sentence for a path being removed.
+ * links ({@link NAME_CANNOT_EXIST_CODES}, the list `util/path-present.ts` keeps for every reader of it). For a delete these are
+ * "not found", like a missing path; the move's destination check reads the same two as refusals about CREATING the name
+ * (`destination.ts`), which is the wrong sentence for a path being removed.
  */
-const CANNOT_EXIST = new Set(['ENAMETOOLONG', 'ELOOP']);
+const CANNOT_EXIST = NAME_CANNOT_EXIST_CODES;
 
 /**
  * Delete what a caller's path names: one file, or — with `confirm: true` — a whole directory tree. The one decision, for

@@ -21,6 +21,16 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 
 **Breaking changes**, when they occur, will be listed in `CHANGELOG.md` with migration steps.
 
+**After upgrading, a `config.json` that is there but cannot be read or parsed stops the start instead of opening first-run setup.** An empty
+file, one holding only whitespace or `null`, one that is not valid JSON and one the server user may not read each stop the boot with a line naming
+`config.json` and the fix; before, the instance came up as a new one, `GET /api/setup/status` said `configured: false` and the unauthenticated
+`POST /api/setup/json` wrote a new identity over the file. If a supervisor restarts the container in a loop after the upgrade, read that last log
+line: restore the file from a backup or repair its permissions ([Hosting](02-hosting.md#a-config-that-is-there-but-cannot-be-used)). A **missing**
+`config.json` is unchanged: it is still a first run. `secrets.json`, `schema-library.json` and `schema-catalogs.json` that are there and cannot be
+read stop the start in the same way, where an empty one was used before. A directory delete or move over a subdirectory the server cannot read now
+answers `500` `file_system_fault` and changes nothing, where it used to act on the part of the tree it could list
+([Files API](05-files-api.md#every-code-a-file-act-answers)).
+
 **After upgrading to the release that repairs stale embeddings, run `POST /api/spaces/:id/reembed` once per space.** It now also queues
 every record whose stored text is not its current text (`stale` in its answer): a record whose text changed while its embedding job could
 not be queued, which kept the vector and the lexical text of its previous content, and a record a peer sent that this instance

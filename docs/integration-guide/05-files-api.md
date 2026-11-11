@@ -610,6 +610,12 @@ in MCP — it used to answer `204` or `200` when it came after the bytes, with t
   stages its bytes under a longer name), which is the server's, never `path_blocked` about your path. A **listing** (`GET /api/files/:spaceId` on
   a directory, `list_dir`) and a **read** (the download, `read_file`) whose file-system call fails answer it too, where they used to answer an
   empty folder, `404` or `File not found`; a path that names nothing (absent, through a file, too long, a link loop) keeps its answer.
+- **A directory delete or move whose tree cannot be read all the way down answers `500` with `code: "file_system_fault"`, and nothing is deleted
+  or moved.** Both acts first list every file under the directory, to write a tombstone for each (a peer would otherwise push the unlisted files
+  back). A subdirectory the server may not read used to be left out of that list silently: the delete acted on the part it was told about, took the
+  directory with it and left the rest without a tombstone, and the move re-keyed part of the tree. It is refused now, on `DELETE /api/files/:spaceId`,
+  `PATCH /api/files/:spaceId` and `POST /api/delete_file` / `POST /api/move_file` as on the MCP `delete_file` and `move_file`, in the same words; fix the
+  permission and repeat the call. A directory that is not there is still an empty branch, not a fault.
 
 > **Removed at 5.0.** A `DELETE` on the file-meta path purged a metadata record without
 > touching disk, guarded by a `409` when the file was still there. It was a second door onto half of one

@@ -1,7 +1,7 @@
 ﻿import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { authRateLimit } from '../rate-limit/middleware.js';
-import { configExists, saveConfig, saveSecrets, loadSecrets, loadConfig } from '../config/loader.js';
+import { isFirstRun, markConfigured, saveConfig, saveSecrets, loadSecrets, loadConfig } from '../config/loader.js';
 import { createToken } from '../auth/tokens.js';
 import { ensureInstanceKeypair } from '../util/signing.js';
 import { startConfiguredInstanceServices } from '../bootstrap.js';
@@ -21,8 +21,16 @@ export const setupRouter = Router();
 
 // ── GET /status — used by Angular SPA to check first-run state ───────────
 setupRouter.get('/status', (_req, res) => {
-  res.json({ configured: configExists() });
+  // The boot's answer (`isFirstRun`), never the disk and never a throw: a config.json that is there and unusable stopped the boot, and
+  // is never reported as "not configured".
+  res.json({ configured: !isFirstRun() });
 });
+
+/**
+ * True while one `POST /json` is running. Claimed BEFORE the first await and released at the end, so two first visitors cannot both pass
+ * the "not configured" check and each write an identity: the second would overwrite the first's config and its admin token's hash.
+ */
+let setupRunning = false;
 
 /*
  * The server-rendered HTML form used to live here: `GET /` rendered it and `POST /` processed it, with
@@ -49,8 +57,12 @@ setupRouter.get('/status', (_req, res) => {
 // POST /api/setup — JSON variant for the Angular SPA
 // Creates instance config + first admin PAT; returns { plaintext }
 setupRouter.post('/json', authRateLimit, async (req, res) => {
-  if (configExists()) {
+  if (!isFirstRun()) {
     res.status(404).json({ error: 'Already configured' });
+    return;
+  }
+  if (setupRunning) {
+    res.status(409).json({ error: 'Setup is already running; wait for it to finish' });
     return;
   }
 
@@ -78,10 +90,22 @@ setupRouter.post('/json', authRateLimit, async (req, res) => {
     return;
   }
 
+  // Claimed here, before the first await (everything above is synchronous), and released whatever the setup does.
+  setupRunning = true;
+  try {
+    const done = await completeSetup(label.trim());
+    res.status(201).json(done);
+  } finally {
+    setupRunning = false;
+  }
+});
+
+/** Write the identity, start the services, issue the first admin token. The body of `POST /json`, run by one caller at a time. */
+async function completeSetup(label: string): Promise<{ token: Record<string, unknown>; plaintext: string }> {
   const instanceId = uuidv4();
   const config: Config = {
     instanceId,
-    instanceLabel: label.trim(),
+    instanceLabel: label,
     tokens: [],
     spaces: [],
     networks: [],
@@ -89,6 +113,8 @@ setupRouter.post('/json', authRateLimit, async (req, res) => {
   };
 
   await saveConfig(config);
+  // The file is there from here: no request may treat this instance as new, whatever happens next.
+  markConfigured();
   const secrets: SecretsFile = { peerTokens: {} };
   await saveSecrets(secrets);
   loadConfig();
@@ -110,5 +136,5 @@ setupRouter.post('/json', authRateLimit, async (req, res) => {
   log.info(`Setup complete (JSON). Brain ID: ${instanceId}`);
 
   const { hash: _h, ...safeRecord } = record;
-  res.status(201).json({ token: safeRecord, plaintext });
-});
+  return { token: safeRecord, plaintext };
+}

@@ -183,7 +183,7 @@ describe('are the bytes here: one answer', () => {
     // A second ENOENT test is a second answer, and it is the one that forgets ENOTDIR (preship-4 P4-1).
     assert.equal(['x === \'ENOENT\'', 'y !== "ENOTDIR"'].filter(s => MISSING_BY_CODE().test(s)).length, 2,
       'the pattern does not match the comparison it hunts — fix it first');
-    const owner = 'server/src/files/stored-bytes.ts';
+    const owner = 'server/src/util/path-present.ts';
     const hits = [];
     let ownerFound = 0;
     for (const f of trackedSources('server/src')) {

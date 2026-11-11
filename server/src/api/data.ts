@@ -43,6 +43,7 @@ import { isSsrfSafeMongoUri } from '../util/ssrf.js';
 import { refusalOfParse } from '../util/log.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { isMissingPath } from '../files/stored-bytes.js';
+import { pathPresentSync } from '../util/path-present.js';
 
 export const dataRouter = Router();
 
@@ -78,12 +79,13 @@ function readBackupManifest(dir: string): object | null {
 /** List all valid backup directories under backupsRoot(), sorted newest first. */
 function listBackups(): Array<{ id: string; dir: string; createdAt: string; collections: unknown[] }> {
   const root = backupsRoot();
-  if (!fs.existsSync(root)) return [];
+  // A backups directory (or a manifest) the process may not look at throws, and the door answers the failure: a shorter list would hide backups that are there.
+  if (!pathPresentSync(root)) return [];
 
   return fs.readdirSync(root)
     .filter(name => {
       const dir = path.join(root, name);
-      return fs.statSync(dir).isDirectory() && fs.existsSync(path.join(dir, 'manifest.json'));
+      return fs.statSync(dir).isDirectory() && pathPresentSync(path.join(dir, 'manifest.json'));
     })
     .map(name => {
       const dir = path.join(root, name);
@@ -360,7 +362,14 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     return;
   }
 
-  const backupDir = backupDirOf(backupId);
+  let backupDir: string | null;
+  try {
+    backupDir = backupDirOf(backupId);
+  } catch (err) {
+    // A manifest the process may not look at is not "no such backup".
+    sendCaughtFailure(res, 'POST /api/admin/data/restore', err, { error: err instanceof Error ? err.message : String(err) });
+    return;
+  }
   if (!backupDir) {
     res.status(404).json({ error: `Backup '${backupId}' not found` });
     return;

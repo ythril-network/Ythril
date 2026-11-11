@@ -19,6 +19,10 @@
  *  6. **Two imports sent at once: one is let in, the other is answered 409 `space_being_imported`** (pre-ship R2). Red on 505b5790c: the
  *     one-at-a-time check ran before the body was spooled, so both doors spooled, both registered and both landed.
  *
+ *  7. **A resumed act whose spool the OS refuses to look at is retried** (Q-350 a, bundle-70 S1): it is not completed as "the body is no longer on disk"
+ *     and its spool is not removed; once the spool can be looked at again the retry lands the import. Red on ee681bf3: `existsSync` read the refusal
+ *     as "no spool", the act failed 410 and `forget` deleted the body.
+ *
  * ## How it is driven
  *
  * The runner's own seams (`setSpaceActHooksForTest`: `afterDrain` parks the act, `beforeComplete` throwing is the crash), the restart the in-process
@@ -41,6 +45,7 @@ import { ADMIN_TOKEN, build } from './_push-door.mjs';
 import { openImportDoor, exportText, fact, idsOf, paddedFacts } from './_import-door.mjs';
 import { clearActEntries, deferred, resetRunnerForTest, untilRunnerIdle, auditRowsOf } from './_space-act-harness.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
+import { withBlockedPaths } from './_unreadable-paths.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'importact';
@@ -142,6 +147,38 @@ describe('an import is a space act: it holds its space, resumes from its spool a
     // successful completion of the resumed import the test before this one ran.
     const own = rows.filter(r => String(r.path).includes(actId));
     assert.ok(own.every(r => typeof r.status === 'number' && r.status >= 400), `the completion row of an import with no spool reads as a success: ${JSON.stringify(own.map(r => [r.path, r.status]))}`);
+  });
+
+  it('a resumed act whose spool the OS refuses to look at is retried, never completed as "the body is no longer on disk" and never deleted (Q-350 a)', T, async () => {
+    // `existsSync` answered false for a spool the process could not look at (a permission slip on the data volume), so the body completed the act
+    // as failed 410 ("import the export again") and `forget` REMOVED the spool: a person's import lost to a permission slip. Red on ee681bf3.
+    await crashedImport();
+    await door.coll(SPACE, 'facts').deleteMany({});
+    const [spool] = door.spoolFiles();
+    assert.ok(spool, 'fixture check: the crashed import kept no spool');
+    const spoolFile = path.join(door.spoolDir, spool);
+    const actId = door.importActs()[0].id;
+    await restart();
+    const later = Date.now() + DAY;
+    await withBlockedPaths([spoolFile], async (hits) => {
+      await logLinesDuring(() => runner.resumeSpaceActs(later));
+      // The body threw, so the act is OWED with a retry time in the future (real clock): idle as the runner counts it, and still standing.
+      await untilRunnerIdle(runner, door.loader);
+      assert.ok(hits.count > 0, 'the spool was never looked at: the case checks nothing');
+      // Judged while the spool is still unreadable, so a retry after the permission returns cannot change what is asserted.
+      assert.deepEqual(door.importActs().map(e => [e.id, e.state]), [[actId, 'owed']], 'an import whose spool could not be looked at was completed or dropped instead of being retried');
+      assert.deepEqual(door.spoolFiles(), [spool], 'an import whose spool could not be looked at had its spool removed');
+      assert.deepEqual(await idsOf(door, SPACE), [], 'fixture check: nothing may land while the spool cannot be read');
+      const failed = (await auditRowsOf(door.mongo, 'space.act_completed', { atLeast: 0 })).filter(r => String(r.path).includes(actId));
+      assert.deepEqual(failed, [], 'the import act was reported completed (as failed) for a spool that was only unreadable for a while');
+    });
+    // The permission comes back: the retry finds the spool and lands the import.
+    await restart();
+    const afterwards = later + DAY;
+    await runner.resumeSpaceActs(afterwards);
+    await untilRunnerIdle(runner, door.loader, { now: afterwards });
+    assert.deepEqual(door.importActs(), [], 'the retried import did not complete once its spool could be read');
+    assert.deepEqual(await idsOf(door, SPACE), IDS, 'the retried import did not land its rows from the spool that was never lost');
   });
 
   describe('a resumed act whose spool can no longer be read completes as failed (422), lands nothing and removes itself and its spool', () => {

@@ -375,7 +375,7 @@ export function storeFailureAnswer(err: unknown, where: string): StoreFailureAns
   // through here. Optional, only a route's own catch passed it (bundle-30 I13, O2): the read helper, the app's error
   // handler and the MCP dispatcher logged a store failure naming no route and no tool (I15, preship-3 P3-4).
   // `a-store-failure-log-line-names-its-operation.test.js` holds every call to it.
-  const at = where ? ` (${logSafe(where)})` : '';
+  const at = ` (${logSafe(where)})`;
   if (!f.retryable) {
     if (f.code !== undefined) {
       // A write concern the deployment cannot meet: every write meets it until an operator changes it, so ONE line per

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { configExists, getConfig, loadConfig } from '../config/loader.js';
+import { isFirstRun, getConfig, loadConfig } from '../config/loader.js';
 import { getAllowedEmbedOrigins } from '../config/embed.js';
 
 export const themeRouter = Router();
@@ -15,7 +15,7 @@ themeRouter.use(globalRateLimit);
  * (see `embedding.allowedOrigins`), in which case only same-origin theming is honoured.
  */
 themeRouter.get('/', (_req, res) => {
-  if (!configExists()) {
+  if (isFirstRun()) {
     res.json({ cssUrl: null, allowedOrigins: [] });
     return;
   }

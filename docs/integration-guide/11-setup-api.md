@@ -355,6 +355,14 @@ GET /api/setup/status
 { "configured": false }
 ```
 
+**The rule for `configured`.** It is `false` for exactly one state: there was **no `config.json`** when the instance started (an instance that has
+never been set up, or whose config volume is not mounted). A `config.json` that is there is never "not configured": a file that is empty,
+holds only whitespace or `null`, is not valid JSON, or cannot be read by the server **stops the boot**, with a line that names the file and the fix
+(see [Hosting](02-hosting.md#a-config-that-is-there-but-cannot-be-used)), so the instance never answers `configured: false` for it and never offers
+first-run setup, which would write a new identity over the file. The answer is taken **once, at start**: the status door, the setup door, the
+public theme and the redirect from `/` read it and never the disk, so a `config.json` that appears or disappears under a running instance changes
+nothing until the next start, and no public request fails on it. Completing setup (below) flips it.
+
 ---
 
 ### The HTML setup form was REMOVED in 4.0
@@ -398,5 +406,9 @@ The `label` names this brain instance.
   "plaintext": "ythril_initialAdminToken..."
 }
 ```
+
+Only one setup completes. An instance that is already configured answers `404` (`Already configured`), and a request that arrives while another
+setup is still running answers `409` (`Setup is already running; wait for it to finish`); neither writes anything. A label that is missing or too
+long is `400`.
 
 ---
