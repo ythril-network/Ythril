@@ -25,7 +25,8 @@
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isEntryPoint } from '../../scripts/_shared/script-cli.mjs';
 import { dbShardPort, defaultDbShardCount, DB_SHARDS_MAX } from '../_shared/db-shard-plan.mjs';
 
 const TESTING = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -188,6 +189,6 @@ async function cli([command, n]) {
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isEntryPoint(import.meta.url)) {
   cli(process.argv.slice(2)).catch((e) => { console.error(e.message); process.exit(1); });
 }
