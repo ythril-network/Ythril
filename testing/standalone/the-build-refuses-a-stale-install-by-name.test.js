@@ -132,6 +132,59 @@ describe('the build refuses an install that differs from package-lock.json, by n
   });
 });
 
+describe('the build refuses a package the lock requires and the install does not hold', () => {
+  function assertMissing(r, name, pinned) {
+    assert.notEqual(r.status, 0, `the build went on with a package missing; stdout: ${r.stdout}`);
+    assert.match(r.stderr, new RegExp(`package-lock\\.json requires ${name.replace(/[/@.]/g, '\\$&')} ${pinned.replace(/\./g, '\\.')}, which is not installed: run npm ci`),
+      `the refusal does not name the package, its pinned version and the fix; stderr: ${r.stderr}`);
+    assert.doesNotMatch(r.stdout, new RegExp(MARKER), 'the compiler ran although a required package is missing');
+  }
+
+  it('names a required package (one the workspace depends on, directly or through another) that is not installed at all', () => {
+    const direct = repo({
+      locked: {
+        ws: { name: 'ws', version: '1.0.0', dependencies: { mongodb: '^7.0.0' } },
+        'node_modules/mongodb': '7.8.0',
+      },
+      installed: {},
+    });
+    assertMissing(build(direct), 'mongodb', '7.8.0');
+    const nested = repo({
+      locked: {
+        ws: { name: 'ws', version: '1.0.0', dependencies: { a: '^1.0.0' } },
+        'node_modules/a': { version: '1.0.0', dependencies: { '@scope/pkg': '^3.0.0' } },
+        'node_modules/@scope/pkg': '3.2.1',
+      },
+      installed: { 'node_modules/a': '1.0.0' },
+    });
+    assertMissing(build(nested), '@scope/pkg', '3.2.1');
+  });
+
+  it('does not count a package of another workspace that the install left out (the image installs only the server and the schema)', () => {
+    const root = repo({
+      locked: {
+        ws: { name: 'ws', version: '1.0.0', dependencies: { mongodb: '^7.0.0' } },
+        'node_modules/mongodb': '7.8.0',
+        'node_modules/@angular/core': '20.0.0',
+        'client/node_modules/left-pad': '1.3.0',
+      },
+      installed: { 'node_modules/mongodb': '7.8.0' },
+    });
+    assertAccepted(build(root));
+  });
+
+  it('does not count an optional dependency of the workspace that the install does not hold', () => {
+    const root = repo({
+      locked: {
+        ws: { name: 'ws', version: '1.0.0', optionalDependencies: { fsevents: '^2.3.0' } },
+        'node_modules/fsevents': { version: '2.3.3', optional: true },
+      },
+      installed: {},
+    });
+    assertAccepted(build(root));
+  });
+});
+
 describe('the guard reads each package at its own path', () => {
   it('names a stale package under a nested node_modules by its own name', () => {
     const root = repo({
