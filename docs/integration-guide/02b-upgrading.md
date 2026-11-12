@@ -539,7 +539,9 @@ restored, and an older build goes back to writing new spills into the space.
 
 **Rolling back from 6.6 to 6.5 leaves the schema snapshots behind.** A 6.5 build does not know the `<space>_schema_snapshots`
 collections: it leaves them unused, a space delete still drops them with the space, and its backups include them. It writes the
-per-type files under `schemas/` again on the next schema save.
+per-type files under `schemas/` again on the next schema save. The records keep their `schemaFingerprint`, and a 6.5 build
+hashes it into the space's Merkle root where 6.6 leaves it out: on a network with `merkle: true`, a member below 6.6 (or one
+rolled back to 6.5) reports divergence against the 6.6 members. Upgrade or roll back every member of such a network together.
 
 **Vector indexes are rebuilt on boot**, so a rollback that changes the embedding model or its dimensions costs a
 reindex, not data. Check `GET /ready` before sending traffic — see [Runtime Model Downloads](02-hosting.md#runtime-model-downloads)
