@@ -10,7 +10,7 @@ import { peerBoundTo } from '../../auth/peer-bound.js';
 import { joinRoundOf } from '../../networks/round-state.js';
 import { deliveryOf, type Delivery, type DeliveryAuth } from '../../sync/deletion-authority.js';
 import { networksHolding } from '../../spaces/wipe-vote.js';
-import { isDirectionalNetwork } from '../../networks/network-spaces.js';
+import { isDirectionalNetwork, networksSharedWith } from '../../networks/network-spaces.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { decodePositionCursor, parsePositionText, type PositionStart } from '../../util/position-keyset.js';
 import type { FileMetaDoc, AuthorRef } from '../../config/types.js';
@@ -19,8 +19,7 @@ import { spaceHold } from '../../sync/space-exchange-set.js';
 import { SPACE_DECLINED_ANSWER } from '../../sync/held-answer.js';
 import { admitPeerOnResponse, answerSpaceHeld } from '../../sync/peer-space-admission.js';
 import { isSpaceNotWritable } from '../../spaces/space-write-gate.js';
-import { effectiveRung } from '../../auth/mint-cap.js';
-import { satisfies } from '../../auth/required-rung.js';
+import { holdsRung, rungRefusal } from '../../auth/reachable-spaces.js';
 
 /*
  * What a landed edge or link points at that is not here is `sync/linkage-check.ts`'s question (bundle-30 I8): checked
@@ -290,8 +289,8 @@ export function refusePeerReach(
  */
 export function refuseSchemaRung(res: import('express').Response, spaceId: string, authToken: unknown): boolean {
   const rights = (authToken as { rights?: TokenRights } | undefined)?.rights;
-  if (rights && satisfies(effectiveRung(rights, spaceId, 'schema'), 'read')) return false;
-  res.status(403).json({ error: `Token needs 'read' on schema in space '${spaceId}'`, code: 'schema_rung' });
+  if (rights && holdsRung(rights, spaceId, 'schema', 'read')) return false;
+  res.status(403).json({ error: rights ? rungRefusal('read', 'schema', spaceId) : rungRefusal('read', 'schema'), code: 'schema_rung' });
   return true;
 }
 
@@ -372,7 +371,7 @@ export function refusePeerWrite(res: import('express').Response, err: unknown, a
 export function isDirectionalWriteBlocked(spaceId: string, authToken: Record<string, unknown> | undefined): boolean {
   const peerInstanceId = peerBoundTo(authToken);
   if (!peerInstanceId) return false;
-  const nets = networksHolding(spaceId, { networks: peerMemberNetworks(peerInstanceId) });
+  const nets = networksSharedWith(spaceId, peerInstanceId);
   if (nets.length === 0) return false;
   return !nets.some(n => {
     if (!isDirectionalNetwork(n)) return true;

@@ -16,6 +16,7 @@
  * `api/sync/_shared.ts` and `sync/arrival-shape.ts` re-export what they held, so no importer changes.
  */
 import { z } from 'zod';
+import { SCHEMA_FINGERPRINT_FIELD, isSchemaFingerprint } from '@ythril-network/schema/internal';
 import { isComparableIso } from '../util/comparable-iso.js';
 import { REF_KINDS, type BrainCollection } from '../config/types-knowledge.js';
 import { MAX_SYNC_SEQ } from '../util/seq-ceiling.js';
@@ -33,11 +34,8 @@ import { MAX_FACT_LENGTH, MAX_PEER_PATH_LENGTH, MAX_TAGS } from '../util/request
  */
 const ForkAtSchema = z.number().int().nonnegative().max(MAX_SYNC_SEQ).optional();
 
-/** The schema stamp (`schemaFingerprint`): the sha256 of a schema's canonical text, lowercase hex. Anything else is not one. */
-const SCHEMA_STAMP = /^[0-9a-f]{64}$/;
-
-/** What a stamp the writer sent is read as: its fingerprint, or `undefined` for anything that is not one. */
-const stampOrAbsent = (value: unknown): string | undefined => (typeof value === 'string' && SCHEMA_STAMP.test(value) ? value : undefined);
+/** What a stamp the writer sent is read as: its fingerprint, or `undefined` for anything that is not one (`isSchemaFingerprint`: the sha256 of a schema's canonical text, lowercase hex). */
+const stampOrAbsent = (value: unknown): string | undefined => (isSchemaFingerprint(value) ? value : undefined);
 
 /**
  * The ONE reading of "a malformed stamp is absent" (bundle-265, Q-737): a copy of `doc` with its `schemaFingerprint` left as it is when it is a fingerprint and
@@ -47,9 +45,9 @@ const stampOrAbsent = (value: unknown): string | undefined => (typeof value === 
  * stamp is returned as it is.
  */
 export function withoutMalformedStamp<T extends object>(doc: T): T {
-  if (!('schemaFingerprint' in doc) || stampOrAbsent(doc.schemaFingerprint) !== undefined) return doc;
+  if (!(SCHEMA_FINGERPRINT_FIELD in doc) || stampOrAbsent((doc as Record<string, unknown>)[SCHEMA_FINGERPRINT_FIELD]) !== undefined) return doc;
   const kept: Record<string, unknown> = { ...doc };
-  delete kept['schemaFingerprint'];
+  delete kept[SCHEMA_FINGERPRINT_FIELD];
   return kept as T;
 }
 
@@ -102,7 +100,7 @@ export const IncomingFactDoc = z.object({
   /** See `IncomingFactDoc`: the shared version at which the two copies diverged, the seq the fork id is derived from (`forkRowVerdict`). */
   forkAt: ForkAtSchema,
   /** See `SchemaStampSchema`: the schema its writer held this record to; a malformed one is read as absent. */
-  schemaFingerprint: SchemaStampSchema,
+  [SCHEMA_FINGERPRINT_FIELD]: SchemaStampSchema,
 }).overwrite(withoutMalformedStamp);
 
 /** How many authored keys, and how long a key name, a peer's `authoredKeys` may carry (a file has a handful today). */
@@ -195,7 +193,7 @@ export const IncomingEntityDoc = z.object({
   /** See `IncomingFactDoc`: the shared version at which the two copies diverged, the seq the fork id is derived from (`forkRowVerdict`). */
   forkAt: ForkAtSchema,
   /** See `SchemaStampSchema`: the schema its writer held this record to; a malformed one is read as absent. */
-  schemaFingerprint: SchemaStampSchema,
+  [SCHEMA_FINGERPRINT_FIELD]: SchemaStampSchema,
 }).overwrite(withoutMalformedStamp);
 
 /**
@@ -233,7 +231,7 @@ export const IncomingEdgeDoc = z.object({
   /** See `IncomingFactDoc`: the shared version at which the two copies diverged, the seq the fork id is derived from (`forkRowVerdict`). */
   forkAt: ForkAtSchema,
   /** See `SchemaStampSchema`: the schema its writer held this record to; a malformed one is read as absent. */
-  schemaFingerprint: SchemaStampSchema,
+  [SCHEMA_FINGERPRINT_FIELD]: SchemaStampSchema,
 }).overwrite(withoutMalformedStamp);
 
 /**
@@ -298,7 +296,7 @@ export const IncomingChronoDoc = z.object({
   /** See `IncomingFactDoc`: the shared version at which the two copies diverged, the seq the fork id is derived from (`forkRowVerdict`). */
   forkAt: ForkAtSchema,
   /** See `SchemaStampSchema`: the schema its writer held this record to; a malformed one is read as absent. */
-  schemaFingerprint: SchemaStampSchema,
+  [SCHEMA_FINGERPRINT_FIELD]: SchemaStampSchema,
 }).overwrite(withoutMalformedStamp);
 
 /** A family's wire key: the name its documents travel under in a page and in the push and pull routes. */

@@ -68,14 +68,28 @@ export function transferRefusal(resp: Pick<Response, 'status' | 'clone'>): Promi
   return readVerdict(resp);
 }
 
-async function readVerdict(resp: Pick<Response, 'clone'>): Promise<TransferRefusal> {
+/**
+ * What a peer's refusal says in its own words: the `code` and the `error` sentence of its JSON body, each `undefined` when the body is not JSON, is cut
+ * at 4096 characters into something that is not, or names none. The ONE reader of a refusal's body: it reads a CLONE (the caller still holds the response
+ * to cancel or read), and it never throws. {@link transferRefusal} maps its code to a verdict, and a door that reads a refusal's code for its own
+ * answers (the schema snapshot fetch) asks it too, so no second reader decides what a body that cannot be read means.
+ */
+export async function refusalOf(resp: Pick<Response, 'clone'>): Promise<{ code?: string; error?: string }> {
   try {
     const text = await resp.clone().text();
-    const body = JSON.parse(text.slice(0, 4096)) as { code?: unknown };
-    return typeof body?.code === 'string' ? VERDICT_OF_CODE[body.code] ?? 'failed' : 'failed';
+    const body = JSON.parse(text.slice(0, 4096)) as { code?: unknown; error?: unknown };
+    return {
+      ...(typeof body?.code === 'string' ? { code: body.code } : {}),
+      ...(typeof body?.error === 'string' ? { error: body.error } : {}),
+    };
   } catch {
-    return 'failed';
+    return {};
   }
+}
+
+async function readVerdict(resp: Pick<Response, 'clone'>): Promise<TransferRefusal> {
+  const { code } = await refusalOf(resp);
+  return code === undefined ? 'failed' : VERDICT_OF_CODE[code] ?? 'failed';
 }
 
 /**

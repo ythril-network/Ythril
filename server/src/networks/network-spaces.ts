@@ -87,6 +87,15 @@ export function isUpstreamPeer(net: NetworkConfig, id: string | undefined): bool
   return !!id && upstreamOf(net) === id;
 }
 
+/**
+ * The networks of `cfg` (the live config by default) that carry `spaceId` and list `peerId` as a member: where this instance and that peer share the
+ * space. The one spelling of "the networks a peer and this server both hold a space in", for every door and leg that cuts what it says or sends to
+ * them (the snapshot route's links, the snapshot fetch's hint, the directional write block, the hold's judgement of a request that names no network).
+ */
+export function networksSharedWith(spaceId: string, peerId: string, cfg: Pick<Config, 'networks'> = getConfig()): NetworkConfig[] {
+  return cfg.networks.filter(n => n.spaces.includes(spaceId) && n.members.some(m => m.instanceId === peerId));
+}
+
 /** The spaces this instance announces for `net`, in the network's ids — a local alias is never what a peer calls it. */
 export function announcedSpaces(net: NetworkConfig): string[] {
   return net.spaces.map(s => localToRemote(net, s));

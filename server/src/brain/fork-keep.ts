@@ -19,6 +19,7 @@
  */
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { readSeqOf } from '../db/at-read-seq.js';
 import { admitSpaceWrite } from '../spaces/space-write-gate.js';
 import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
 import { writeFilterFor } from './write-precondition.js';
@@ -89,7 +90,7 @@ export async function writeKeptBody(
   const { check } = await classifyKeep(spaceId, family, parent, $set, $unset, write);
   if (check.blocked) throw new SchemaViolationError(check);
   const coll = col<Record<string, unknown> & { _id: string }>(spaceCollection(spaceId, family));
-  const validatedSeq = typeof parent['seq'] === 'number' ? parent['seq'] : null;
+  const validatedSeq = readSeqOf(parent);
   return admitSpaceWrite(spaceId, family, () => writeAtReadVersion<StoredRow>(spaceId, family, parent._id, ifMatchSeq, (at) => {
     // Stamped only when the parent it lands on is the one judged (DI-4); the kept side's own stamp is never what is written.
     const stamp = stampOpIfUnmoved(at, validatedSeq, write, check);

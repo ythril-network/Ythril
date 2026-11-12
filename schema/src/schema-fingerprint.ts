@@ -23,6 +23,12 @@ import { canonicalJson } from './canonical-json.js';
 /** The format the text names, so a later format is told from this one. Part of the text, so changing it changes every fingerprint. */
 export const SCHEMA_FINGERPRINT_FORMAT = 1;
 
+/** The field a record carries its stamp in (and the meta carries its own variation's fingerprint in): the one spelling of the name. */
+export const SCHEMA_FINGERPRINT_FIELD = 'schemaFingerprint';
+
+/** A schema fingerprint as it is stamped and sent: 64 lowercase hex. The one test of that shape; anything else is not a fingerprint. */
+export const isSchemaFingerprint = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+
 /** The parts of a meta the text is made of. */
 export interface FingerprintedMeta {
   typeSchemas?: Readonly<Record<string, Readonly<Record<string, unknown>> | undefined>>;

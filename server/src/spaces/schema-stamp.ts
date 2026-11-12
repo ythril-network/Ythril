@@ -32,12 +32,14 @@
  * Imports `getConfig` and the two ref resolvers in one direction: `schema-validation.ts` imports nothing from here, so `getSpaceMeta` is untouched
  * and no import cycle forms.
  */
-import { schemaFingerprintTextOf } from '@ythril-network/schema/internal';
+import { schemaFingerprintTextOf, SCHEMA_FINGERPRINT_FIELD, isSchemaFingerprint } from '@ythril-network/schema/internal';
 import type { SpaceMeta, TypeSchema } from '../config/types.js';
 import { getConfig } from '../config/loader.js';
 import { inlineResolvableRefs, resolveMetaRefs, resolveTypeSchema } from './schema-validation.js';
-import { metaForNetwork } from '../sync/replicated-meta.js';
+import { servedMetaFor } from '../sync/replicated-meta.js';
 import { layersFor } from './network-layers.js';
+import { findSpace } from './space-lookup.js';
+import { LruMap } from '../util/lru-map.js';
 import { sha256Hex } from '../util/sha256-hex.js';
 
 /** A schema version: its fingerprint and the canonical text the fingerprint is the hash of. */
@@ -57,14 +59,14 @@ export interface SchemaCheckOutcome {
   readonly all: readonly unknown[];
 }
 
-/** The field a record carries its stamp in, spelled once. */
-export const SCHEMA_FINGERPRINT_FIELD = 'schemaFingerprint';
+/** The field a record carries its stamp in: spelled once, in `@ythril-network/schema` (`schema-fingerprint.ts`), and re-exported here for the writers. */
+export { SCHEMA_FINGERPRINT_FIELD, isSchemaFingerprint };
 
 /** The op that removes the stamp: what every write spreads that changes schema-relevant content without a conforming validation. */
-export const UNSTAMP: { readonly $unset: { readonly schemaFingerprint: '' } } = Object.freeze({ $unset: Object.freeze({ [SCHEMA_FINGERPRINT_FIELD]: '' as const }) });
+export const UNSTAMP: { readonly $unset: { readonly [SCHEMA_FINGERPRINT_FIELD]: '' } } = Object.freeze({ $unset: Object.freeze({ [SCHEMA_FINGERPRINT_FIELD]: '' as const }) });
 
 /** `$set` of the stamp when the written record conforms, else {@link UNSTAMP}. */
-export type StampOp = { readonly $set: { readonly schemaFingerprint: string } } | typeof UNSTAMP;
+export type StampOp = { readonly $set: { readonly [SCHEMA_FINGERPRINT_FIELD]: string } } | typeof UNSTAMP;
 
 interface Memo {
   /** Each stored `$ref` type and the library definition it resolved to when the stamp was made. */
@@ -100,7 +102,7 @@ function stampOf(stored: SpaceMeta | undefined): Stamp {
 }
 
 /** The stored meta of `spaceId`, read once. */
-const storedMetaOf = (spaceId: string): SpaceMeta | undefined => getConfig().spaces.find(s => s.id === spaceId)?.meta;
+const storedMetaOf = (spaceId: string): SpaceMeta | undefined => findSpace(spaceId)?.meta;
 
 /**
  * The meta a write of `spaceId` validates with and the stamp it may write, from ONE synchronous read of the stored meta. `meta` is
@@ -173,7 +175,7 @@ export function stampOpIfUnmoved(at: { readonly readSeq: number | null }, valida
  */
 export function foldStampOp(op: StampOp, $set: Record<string, unknown>, $unset: Record<string, unknown>): void {
   if ('$set' in op) {
-    $set[SCHEMA_FINGERPRINT_FIELD] = op.$set.schemaFingerprint;
+    $set[SCHEMA_FINGERPRINT_FIELD] = op.$set[SCHEMA_FINGERPRINT_FIELD];
     delete $unset[SCHEMA_FINGERPRINT_FIELD];
   } else {
     $unset[SCHEMA_FINGERPRINT_FIELD] = '';
@@ -226,7 +228,7 @@ export function variationOf(spaceId: string): Variation | undefined {
     links: {
       own: stampOf(own).fp,
       layers: layers.map(l => ({ networkId: l.networkId, fp: stampOf(l.meta).fp })),
-      served: layers.map(l => ({ networkId: l.networkId, fp: stampOf(metaForNetwork(space.ownMeta, l)).fp })),
+      served: layers.map(l => ({ networkId: l.networkId, fp: stampOf(servedMetaFor(space, l)).fp })),
     },
     layers: layers.map(l => ({ networkId: l.networkId, stamp: stampOf(l.meta) })),
   };
@@ -241,7 +243,7 @@ export function layerStampOf(layer: SpaceMeta): Stamp {
 
 /** The most fingerprints remembered per space; the oldest noted is forgotten past it, and the next write of it asks the store again. */
 const HELD_PER_SPACE = 256;
-const held = new Map<string, Set<string>>();
+const held = new Map<string, LruMap<string, true>>();
 
 /** The empty schema's fingerprint: what a space with no type and no rule stamps with. */
 export const EMPTY_SCHEMA_FINGERPRINT = EMPTY.fp;
@@ -251,16 +253,14 @@ export const EMPTY_SCHEMA_FINGERPRINT = EMPTY.fp;
  * instance and with no row: its text is fixed, so a space that never had a schema keeps nothing and no member ever needs to fetch it.
  */
 export function knownHeld(spaceId: string, fp: string): boolean {
-  return fp === EMPTY.fp || held.get(spaceId)?.has(fp) === true;
+  return fp === EMPTY.fp || held.get(spaceId)?.peek(fp) === true;
 }
 
-/** Record that `spaceId` holds a snapshot row of `fp` (it was written, or found). */
+/** Record that `spaceId` holds a snapshot row of `fp` (it was written, or found): the most recently noted, the oldest forgotten past the bound. */
 export function noteHeld(spaceId: string, fp: string): void {
-  let set = held.get(spaceId);
-  if (!set) held.set(spaceId, set = new Set());
-  set.delete(fp);
-  set.add(fp);
-  if (set.size > HELD_PER_SPACE) set.delete(set.values().next().value as string);
+  let known = held.get(spaceId);
+  if (!known) held.set(spaceId, known = new LruMap<string, true>(HELD_PER_SPACE));
+  known.set(fp, true);
 }
 
 /** Forget what is known of `spaceId`'s rows (its collection was dropped or renamed away), or of one row of it. */

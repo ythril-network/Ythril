@@ -30,6 +30,7 @@
  * registration and nothing that throws on load order. `the-schema-leaf-imports-no-sync-machinery` holds it; `every-server-entry-module-loads` holds what
  * a cycle would do.
  */
+import { SCHEMA_FINGERPRINT_FIELD } from '@ythril-network/schema/internal';
 import { INCOMING_SCHEMA_OF } from './incoming-schemas.js';
 import { canonicalJson } from '../util/canonical-json.js';
 import { sha256Hex } from '../util/sha256-hex.js';
@@ -41,7 +42,7 @@ import { REDACTED_CHRONO_FIELDS } from '../brain/redacted-chrono-fields.js';
  * because it names the schema its writer held the record to, which is a fact about the write: two copies of one version that differ only in it say the
  * same thing, and must not fork (ADR 15) over a member that dropped it on arrival or stamped with another variation of the same schema.
  */
-export const VERSION_META = Object.freeze(['_id', 'spaceId', 'seq', 'createdAt', 'updatedAt', 'author', 'forkOf', 'forkAt', 'schemaFingerprint'] as const);
+export const VERSION_META = Object.freeze(['_id', 'spaceId', 'seq', 'createdAt', 'updatedAt', 'author', 'forkOf', 'forkAt', SCHEMA_FINGERPRINT_FIELD] as const);
 
 /**
  * Per family that forks: the keys of its body, DERIVED from its `Incoming*` schema less the version metadata. The families are the ones whose schema

@@ -147,6 +147,13 @@ export function peerRunsAtLeast(versionOrMember: string | { version?: string | n
 }
 
 /**
+ * The version a member reports, trimmed, `''` when it reports none: the key a memory about a member is kept under when a change of the report (an
+ * upgrade, a rollback) is news and makes the memory stale (a wire a peer refused, a route it lacks). The one spelling, so two memories of a member
+ * cannot read "no version" two ways.
+ */
+export const reportedVersion = (member: { version?: string | null }): string => member.version?.trim() ?? '';
+
+/**
  * `null` if this peer may sync, otherwise the refusal to send back.
  *
  * **The message names both numbers on purpose.** The instance being refused is the one that has to be

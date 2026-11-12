@@ -25,7 +25,7 @@ import { unknownWriteFieldsToReport } from './spaces.js';
 import { withLibraryDefinitions } from './library-ref-expansion.js';
 import { actualSchemaOf, spaceStatsOf, type SpaceStats } from '../brain/space-shape.js';
 import { invalidRulesOf } from './schema-rules.js';
-import { schemaFingerprintOf } from './schema-stamp.js';
+import { SCHEMA_FINGERPRINT_FIELD, schemaFingerprintOf } from './schema-stamp.js';
 
 /** What `resolve` is when the caller does not say — the same on both doors: library types carry their definition. */
 export const META_RESOLVE_DEFAULT = true;
@@ -76,7 +76,7 @@ export async function spaceMetaAnswer(input: {
     ...(unknownWriteFields ? { unknownWriteFields } : {}),
     // Q-734: the fingerprint of this space's variation (its effective schema), the one its records are stamped with while they conform. Derived,
     // so server-owned on the meta door (`SERVER_OWNED_META_FIELDS`): a GET-then-PATCH strips it rather than refuses it.
-    schemaFingerprint: schemaFingerprintOf(space),
+    [SCHEMA_FINGERPRINT_FIELD]: schemaFingerprintOf(space),
     /*
      * WHAT THE SPACE ACTUALLY HOLDS, beside what it declares, in the declared schema's own format so a type the
      * space really holds can be promoted into it. Per member on a proxy, never merged: two types sharing a name
