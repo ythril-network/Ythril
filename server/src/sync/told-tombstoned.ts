@@ -14,7 +14,9 @@
  * A REFUSAL is the same shape with a worse bill. A chunked upload is judged at its last chunk (the assembled hash is not the
  * one promised, `x-expected-sha256`), so a file the receiver will refuse costs the whole file before it says so, and the
  * sender's next cycle finds the peer still without the file and sends the whole file again. Refused once, the same bytes of
- * the same path are not offered to the same peer again until they change.
+ * the same path are not offered to the same peer again until they change. A refusal of the PATH (`409 path_unreadable`: the peer cannot look
+ * at what it holds there) is about the peer's disk, which its operator can mend: it is remembered for {@link PATH_REFUSAL_FORGET_MS} only, in a
+ * memory of its own, so the bytes are offered again after that and never on every cycle.
  *
  * ## One module, two memories
  *
@@ -45,18 +47,34 @@ export interface UploadAnswerMemory {
 
 const keyOf = (peerId: string, spaceId: string, path: string): string => JSON.stringify([peerId, spaceId, path]);
 
-/** One bounded memory of a peer's answers to uploads. Each answer worth remembering has its own instance. */
-export function uploadAnswerMemory(): UploadAnswerMemory {
-  const answers = new LruMap<string, string>(MAX_REMEMBERED);
+/**
+ * How long a peer's refusal of a PATH (`409 path_unreadable`: it cannot look at what it holds there) is remembered, ms. The answer is about the
+ * peer's disk at that moment, not about the bytes: its operator may mend the permissions, so the same bytes are offered again after this, not
+ * on every cycle and not never.
+ */
+export const PATH_REFUSAL_FORGET_MS = 3_600_000;
+
+/** The clock the memories read; a test moves it. */
+let clock: () => number = () => Date.now();
+/** A test seam only: `null` puts the real clock back. */
+export function setUploadAnswerClockForTest(next: (() => number) | null): void { clock = next ?? (() => Date.now()); }
+
+/** One bounded memory of a peer's answers to uploads. Each answer worth remembering has its own instance; `forgetAfterMs` ages its answers out. */
+export function uploadAnswerMemory(opts: { forgetAfterMs?: number } = {}): UploadAnswerMemory {
+  const answers = new LruMap<string, { sha256: string; at: number }>(MAX_REMEMBERED);
   return {
-    note: (peerId, spaceId, path, sha256) => { answers.set(keyOf(peerId, spaceId, path), sha256); },
-    was: (peerId, spaceId, path, sha256) => answers.get(keyOf(peerId, spaceId, path)) === sha256,
+    note: (peerId, spaceId, path, sha256) => { answers.set(keyOf(peerId, spaceId, path), { sha256, at: clock() }); },
+    was: (peerId, spaceId, path, sha256) => {
+      const answer = answers.get(keyOf(peerId, spaceId, path));
+      return answer?.sha256 === sha256 && (opts.forgetAfterMs === undefined || clock() - answer.at < opts.forgetAfterMs);
+    },
     clear: () => { answers.clear(); },
   };
 }
 
 const told = uploadAnswerMemory();
 const refused = uploadAnswerMemory();
+const refusedPath = uploadAnswerMemory({ forgetAfterMs: PATH_REFUSAL_FORGET_MS });
 
 /** Remember that `peerId` answered an upload of `path` with `sha256` as a deleted file's bytes. */
 export function noteToldTombstoned(peerId: string, spaceId: string, path: string, sha256: string): void {
@@ -71,15 +89,18 @@ export function wasToldTombstoned(peerId: string, spaceId: string, path: string,
 /** Forget everything told. For tests. */
 export function forgetToldTombstoned(): void { told.clear(); }
 
-/** Remember that `peerId` REFUSED an upload of `path` with `sha256` (a 4xx that is about these bytes, not about the moment). */
-export function noteRefusedUpload(peerId: string, spaceId: string, path: string, sha256: string): void {
-  refused.note(peerId, spaceId, path, sha256);
+/**
+ * Remember that `peerId` REFUSED an upload of `path` with `sha256`: about these bytes (`'bytes'`, a 4xx that is not about the moment), remembered
+ * while the bytes are unchanged; or about the path (`'path'`, `409 path_unreadable`), remembered for {@link PATH_REFUSAL_FORGET_MS} only.
+ */
+export function noteRefusedUpload(peerId: string, spaceId: string, path: string, sha256: string, about: 'bytes' | 'path' = 'bytes'): void {
+  (about === 'path' ? refusedPath : refused).note(peerId, spaceId, path, sha256);
 }
 
-/** Did `peerId` refuse exactly this content of `path`? A changed hash is a new version: not refused. */
+/** Did `peerId` refuse exactly this content of `path`, and is the refusal still remembered? A changed hash is a new version: not refused. */
 export function wasRefusedUpload(peerId: string, spaceId: string, path: string, sha256: string): boolean {
-  return refused.was(peerId, spaceId, path, sha256);
+  return refused.was(peerId, spaceId, path, sha256) || refusedPath.was(peerId, spaceId, path, sha256);
 }
 
 /** Forget every refusal. For tests. */
-export function forgetRefusedUploads(): void { refused.clear(); }
+export function forgetRefusedUploads(): void { refused.clear(); refusedPath.clear(); }

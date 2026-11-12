@@ -555,7 +555,8 @@ export async function syncFiles(
         } else {
           log.warn(`Push file '${peerText(localPath)}' to ${peerText(member.label)}: HTTP ${outcome.status}${outcome.error !== undefined ? `: ${peerText(outcome.error)}` : ''}`);
           // A refusal of the BYTES is remembered: the same bytes of the same path would be refused again, after the whole file had been sent.
-          if (outcome.kind === 'refused') noteRefusedUpload(member.instanceId, spaceId, localPath, localEntry.sha256);
+          // A refusal of the PATH (the peer cannot look at it) is remembered for a while only: the peer's operator can mend its disk.
+          if (outcome.kind === 'refused') noteRefusedUpload(member.instanceId, spaceId, localPath, localEntry.sha256, outcome.about);
         }
       } catch (err) {
         log.warn(`Push file '${peerText(localPath)}' to ${peerText(member.label)}: ${peerText(err)}`);

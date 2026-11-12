@@ -980,6 +980,8 @@ export class SpaceSettingsState {
       { label: this.transloco.translate('spaces.stats.edges'),    value: s.edges    },
       { label: this.transloco.translate('spaces.stats.chrono'),   value: s.chrono   },
       { label: this.transloco.translate('spaces.stats.files'),    value: s.files    },
+      // Left out of `files` while their bytes are gone from this disk (`files-awaiting-bytes.component.ts`): said only when there are some.
+      ...(s.filesAwaitingBytes ? [{ label: this.transloco.translate('spaces.stats.filesAwaitingBytes'), value: s.filesAwaitingBytes }] : []),
     ];
   }
 }

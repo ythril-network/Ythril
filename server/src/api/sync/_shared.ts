@@ -485,6 +485,7 @@ export const FILE_META_SENDER_KEYS: Readonly<Record<Exclude<keyof FileMetaDoc, F
   mediaJobError: true, faceEmbedding: true, faceEntityId: true, faceBbox: true, faceScore: true, wholeDocument: true, sourceSha256: true,
   feedMarker: true,
   bytesAbsentSince: true,
+  retiredBy: true,
 };
 
 /**

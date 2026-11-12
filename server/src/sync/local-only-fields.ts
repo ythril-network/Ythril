@@ -33,6 +33,15 @@ export const RESOLVED_ELSEWHERE = '_resolvedElsewhere' as const;
 export const BYTES_ABSENT_SINCE = 'bytesAbsentSince' as const;
 
 /**
+ * The name of the reason a RETIRED file row carries when no person deleted it (`files/feed-marker.ts`, `RetiredBy`: `'bytes-lost'`, the
+ * absent-bytes sweep): what the change feed says as `reason`. Spelled once, so every writer that makes a row live again (an upload, an arrival)
+ * and every retirement without a reason (a person's delete) clears it in its own write: a revived row that kept it would be served to a peer,
+ * whose strict schema refuses the key, and a person's later delete would be told as bytes lost. Local and derived: about this instance's
+ * retirement of its own row, never on the wire.
+ */
+export const RETIRED_BY = 'retiredBy' as const;
+
+/**
  * The fields a record holds that belong to THIS INSTANCE and must never be taken from a peer.
  *
  * ## Why they are one list with two consumers
@@ -106,6 +115,9 @@ export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([
   // When this instance's disk was first found without the row's bytes (Q-337, `files/absent-bytes-sweep.ts`): a fact about THIS disk. A peer that
   // took it would count a file it holds as waiting for bytes, and an arrival that kept a peer's would make a live file look like an orphan.
   BYTES_ABSENT_SINCE,
+  // Why THIS instance retired a file row when no person deleted it (Q-337, `files/feed-marker.ts`): a fact about this instance's own retirement.
+  // A peer's would tell a delete there as bytes lost here.
+  RETIRED_BY,
 ]);
 
 /**

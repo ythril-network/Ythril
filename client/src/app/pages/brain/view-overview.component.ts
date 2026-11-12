@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import type { SpaceStats } from '../../core/api.types';
+import { FilesAwaitingBytesComponent } from '../../shared/files-awaiting-bytes.component';
 
 /**
  * The Overview of a personal view: what it holds, and the panels that are not its to show (Q-531, plan rev 3.2 "Client").
@@ -14,7 +15,7 @@ import type { SpaceStats } from '../../core/api.types';
   selector: 'app-view-overview',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [TranslocoPipe],
+  imports: [TranslocoPipe, FilesAwaitingBytesComponent],
   template: `
     <section class="card" style="padding:16px;" aria-labelledby="view-overview-title">
       <h3 id="view-overview-title" style="margin:0 0 8px;font-size:15px;">{{ 'views.overview.title' | transloco }}</h3>
@@ -25,7 +26,7 @@ import type { SpaceStats } from '../../core/api.types';
           <div><dt style="display:inline;color:var(--text-muted);">{{ 'brain.tab.edges' | transloco }}:</dt> <dd style="display:inline;margin:0;">{{ s.edges }}</dd></div>
           <div><dt style="display:inline;color:var(--text-muted);">{{ 'brain.tab.facts' | transloco }}:</dt> <dd style="display:inline;margin:0;">{{ s.facts }}</dd></div>
           <div><dt style="display:inline;color:var(--text-muted);">{{ 'brain.tab.chrono' | transloco }}:</dt> <dd style="display:inline;margin:0;">{{ s.chrono }}</dd></div>
-          <div><dt style="display:inline;color:var(--text-muted);">{{ 'brain.tab.files' | transloco }}:</dt> <dd style="display:inline;margin:0;">{{ s.files }}</dd></div>
+          <div><dt style="display:inline;color:var(--text-muted);">{{ 'brain.tab.files' | transloco }}:</dt> <dd style="display:inline;margin:0;">{{ s.files }}<app-files-awaiting-bytes [count]="s.filesAwaitingBytes"/></dd></div>
         </dl>
       }
       <p style="margin:0;font-size:13px;"><strong>{{ 'views.notAvailable' | transloco }}</strong></p>

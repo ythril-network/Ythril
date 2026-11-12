@@ -21,6 +21,7 @@ import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { getConfig } from '../config/loader.js';
 import { raiseFileFeedFloorOver } from './file-feed-floor.js';
+import { RETIRED_BY } from '../sync/local-only-fields.js';
 
 /** The feed window's default, in days: how long a feed marker is kept before the sweep purges it. */
 export const DEFAULT_FILE_CHANGE_FEED_WINDOW_DAYS = 30;
@@ -44,7 +45,7 @@ export function feedMarkerStages(spaceId: string, pos: number, deletedAt: string
     $replaceWith: {
       _id: '$_id', spaceId: { $literal: spaceId }, path: '$_id', deletedAt: { $literal: deletedAt }, feedMarker: true,
       pos: { $literal: pos }, posAtSeq: { $ifNull: ['$seq', 0] },
-      ...(retiredBy !== undefined ? { retiredBy: { $literal: retiredBy } } : {}),
+      ...(retiredBy !== undefined ? { [RETIRED_BY]: { $literal: retiredBy } } : {}),
     },
   }];
 }
@@ -55,6 +56,17 @@ export function feedMarkerStages(spaceId: string, pos: number, deletedAt: string
  * `reason: 'bytes_lost'` and a client mirroring the space keeps its own copy. A retirement with no reason is a delete.
  */
 export type RetiredBy = 'bytes-lost';
+
+declare module '../config/types.js' {
+  interface FileMetaDoc {
+    /**
+     * LOCAL, on a RETIRED row only (a feed marker or a soft-delete flag): why this instance retired it when no person did ({@link RetiredBy}).
+     * Spelled `RETIRED_BY` (`sync/local-only-fields.ts`); every writer that makes a row live again clears it. Declared here, beside the type it
+     * holds, rather than in the frozen `types.ts`.
+     */
+    retiredBy?: RetiredBy;
+  }
+}
 
 /** Whether a stored row is a feed marker. */
 export const isFeedMarker = (row: { feedMarker?: unknown } | null | undefined): boolean => row?.feedMarker === true;

@@ -50,8 +50,11 @@ export type PushOutcome =
   | { kind: 'delivered' }
   /** The peer holds a tombstone that erased exactly these bytes and stored nothing (`200 { tombstoned: true }`). */
   | { kind: 'tombstoned' }
-  /** The peer refused THESE BYTES (a hash that is not the one promised, a malformed range), or the PATH (it cannot look at it, `409 path_unreadable`): the same bytes will be refused again. */
-  | { kind: 'refused'; status: number; error: string | undefined }
+  /**
+   * The peer refused THESE BYTES (`about: 'bytes'`: a hash that is not the one promised, a malformed range; the same bytes will be refused again), or
+   * the PATH (`about: 'path'`: it cannot look at it, `409 path_unreadable`; refused again until the peer's disk is mended).
+   */
+  | { kind: 'refused'; about: 'bytes' | 'path'; status: number; error: string | undefined }
   /** Not delivered, and not because of the bytes: a status about the moment (quota, rate, auth, a server error). Tried again next cycle. */
   | { kind: 'failed'; status: number; error: string | undefined };
 
@@ -120,18 +123,20 @@ const errorOf = (answer: UploadAnswer): string | undefined => typeof answer.json
 const aboutTheBytes = (status: number): boolean => status === 400 || status === 422;
 
 /**
- * Whether an answer is a refusal about what was sent: its bytes ({@link aboutTheBytes}) or the path the peer cannot look at
- * ({@link PATH_UNREADABLE_CODE}: a statement about THE PATH, not the moment, so the same bytes sent again are answered the same way for as long as
- * the path stays unreadable). A `409` with any other code (a destination a file blocks, `path_blocked`) is about the moment and is tried again next cycle.
+ * Whether an answer is a refusal about what was sent, and of what: its bytes ({@link aboutTheBytes}) or the path the peer cannot look at
+ * ({@link PATH_UNREADABLE_CODE}: a statement about THE PATH, so the same bytes sent again are answered the same way for as long as the path stays
+ * unreadable, which its operator can end: the caller remembers it for a while, not for good, `sync/told-tombstoned.ts`). A `409` with any other
+ * code (a destination a file blocks, `path_blocked`) is about the moment and is tried again next cycle; `null` is no refusal.
  */
-const isRefusal = (answer: UploadAnswer): boolean =>
-  aboutTheBytes(answer.status) || (answer.status === 409 && answer.json['code'] === PATH_UNREADABLE_CODE);
+const refusalOf = (answer: UploadAnswer): 'bytes' | 'path' | null =>
+  aboutTheBytes(answer.status) ? 'bytes' : answer.status === 409 && answer.json['code'] === PATH_UNREADABLE_CODE ? 'path' : null;
 
 /** The outcome of an answer to the request that completed an upload (or the only request of one). */
 function settled(answer: UploadAnswer): PushOutcome {
   if (answer.status >= 200 && answer.status < 300) return answer.json['tombstoned'] === true ? { kind: 'tombstoned' } : { kind: 'delivered' };
-  return isRefusal(answer)
-    ? { kind: 'refused', status: answer.status, error: errorOf(answer) }
+  const about = refusalOf(answer);
+  return about !== null
+    ? { kind: 'refused', about, status: answer.status, error: errorOf(answer) }
     : { kind: 'failed', status: answer.status, error: errorOf(answer) };
 }
 
