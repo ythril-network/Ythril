@@ -85,7 +85,6 @@ const EXEMPT = Object.freeze({
   [`${SRC}/api/spaces.ts`]: 'writes `_schema-backup-<timestamp>.json` at the space root, a name the instance builds, never a caller path',
   [`${SRC}/sync/file-sync.ts`]: 'a pulled arrival: a destination blocked by a local file is a sync conflict (decided there), not a refusal to a caller',
   [`${SRC}/extractor/conversation/write-extraction.ts`]: 'writes the extraction\'s own transcript paths, derived by the instance',
-  [`${SRC}/spaces/_shared.ts`]: 'writes the schema snapshot at the space root, a name the instance builds',
 });
 
 /**

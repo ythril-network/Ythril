@@ -170,7 +170,9 @@ describe('a restore reports which files no longer match their records (real Mong
         await row(S, '_converted/gone.pdf.md', 'sidecar row, bytes gone', { parentFileId: 'gone.pdf' });
         await row(S, 'ok.pdf#1', 'chunk row, no bytes of its own', { parentFileId: 'ok.pdf' });
         bytes(S, 'notes_2026-10-01T10-00-00-000Z_peer.json', 'a conflict copy');
-        bytes(S, 'schemas/rf-a_fact_note.json', '{"schema":"snapshot"}');
+        // A retired per-type schema file (6.5 wrote it, bytes and no row): instance-local, never a file a restore reports. No other schema
+        // file exists in a space any more (the versions are kept privately, `<space>_schema_snapshots`).
+        bytes(S, 'schemas/rf-a_fact_note.json', '{"propertySchemas":{}}');
         await row(S, 'imported.json', undefined);   // an import drops size and sha256: it records no bytes
       }, async () => {
         const S = 'rf-a';

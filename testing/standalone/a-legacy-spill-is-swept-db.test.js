@@ -123,6 +123,22 @@ describe('legacy read spills are swept from the space', { skip }, () => {
       'a space with no `_tmp` directory has no spills: the directory not being there is an answer, and nothing to report');
   });
 
+  it('takes everything a spill left, through the one remover (bundle-265): its embed job and the rows derived from it go with it, and a neighbour keeps its own', async () => {
+    // The spill sweep used to delete the bytes, the cache entry and the row by hand and nothing else (the walk now shared with the retired
+    // per-type schema files, `files/retired-local-path-sweep.ts`, removes each file through `removeOneStoredFileHere`: the job, the conversion
+    // artefacts, the cached hash, the embed jobs of the file and of every row derived from it, then the row).
+    await mongo.col(`${SPACE}_embed_jobs`).deleteMany({});
+    const derived = { ...meta(`${BOTH}#1`), parentFileId: BOTH };
+    await mongo.col(`${SPACE}_files`).insertOne(derived);
+    await mongo.col(`${SPACE}_embed_jobs`).insertMany([
+      { _id: `file:${BOTH}`, recordType: 'file', recordId: BOTH, status: 'pending' },
+      { _id: `file:${NOTE}`, recordType: 'file', recordId: NOTE, status: 'pending' },
+    ]);
+    await sweepMod.sweepLegacySpills();
+    assert.deepEqual(await idsIn(`${SPACE}_embed_jobs`), [`file:${NOTE}`], 'the spill\'s embed job outlived it (and the note\'s must stay)');
+    assert.equal((await idsIn(`${SPACE}_files`)).includes(derived._id), false, 'a row derived from the spill outlived it');
+  });
+
   it('writes no tombstone, and a second run finds nothing', async () => {
     await sweepMod.sweepLegacySpills();
     assert.equal(await mongo.col(`${SPACE}_fileTombstones`).countDocuments({}), 0,

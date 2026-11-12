@@ -66,7 +66,7 @@ const EXEMPT = new Map([
   ['server/src/sync/positions-rollback.ts', 'the rollback tool: runs with no instance up, so there is no gate to ask; updates existing rows only'],
   ['server/src/sync/delivered-by-backfill.ts', 'stamps deliveredBy on records that exist, once: updates existing rows only'],
   ['server/src/files/leaked-rows-repair.ts', 'removes derived rows and links a deleted file left behind: deletes only'],
-  ['server/src/files/legacy-spill-sweep.ts', 'removes legacy read spills: deletes only'],
+  ['server/src/files/retired-local-path-sweep.ts', 'removes what a retired writer left at a local-only path (legacy read spills, retired per-type schema files): deletes only'],
   ['server/src/files/move-markers.ts', 'updates and removes the move markers on file tombstones that exist: creates no row'],
   // Boot conversions, run before listen: an act standing then is resumed only AFTER listen and acts on what they wrote.
   ['server/src/brain/links-conversion.ts', 'the boot conversion of link arrays, run before listen; a standing act resumes after it'],

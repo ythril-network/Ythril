@@ -67,9 +67,6 @@ const EXEMPT = {
     forget: 'removes rows a delete ALREADY flagged (`deletedAt` exists), after their retention: the delete that flagged the row went through removeFileHere, which forgot the path\'s cache entry then',
     retire: 'removes rows a delete ALREADY flagged (`deletedAt` exists), after their retention: the delete that flagged the row went through removeFileHere, which retired its embed work then',
   },
-  'server/src/files/legacy-spill-sweep.ts:sweepSpace': {
-    retire: 'a legacy read spill under `_tmp/` is never queued for embedding (`embeddable` in brain/embed-queue.ts refuses a spill path), so there is no embed work to retire',
-  },
   'server/src/files/derived-fields.ts:replaceDerivedFileRows': {
     forget: 'the WRITER of a derived row replaces the previous run\'s derived rows of a file that stays: the file\'s bytes and their cache entry are unchanged, and a derived row has no bytes of its own',
     retire: 'the WRITER of a derived row replaces the previous run\'s rows inside its own claim fence and queues the rows it writes (writeDerivedFields): it is the producer of the embed work, not a remover of the file',

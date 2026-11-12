@@ -50,8 +50,6 @@ const REVOKER_NAMES = ['cancelMediaJob', 'cancelMediaJobs', 'cancelJobsOwnedBy',
 const EXEMPT = {
   'server/src/brain/ttl-sweep.ts:purgeFlagged':
     'removes rows a delete ALREADY flagged (`deletedAt` exists), after their retention: the delete that flagged a row revoked its claims first, and a flagged row has no live job to write for it',
-  'server/src/files/legacy-spill-sweep.ts:sweepSpace':
-    'empties the instance\'s own legacy read-spill cache under `_tmp/` by path (a retired mechanism, which sync never carries) and is not a file delete a person or a peer asked for: it is named here, not hidden, so a media job queued for one of those paths is a question for the spill\'s own retirement',
   'server/src/files/derived-fields.ts:replaceDerivedFileRows':
     'the WRITER of a derived row removes the previous run\'s rows by id and inserts the new ones inside its own claim fence (`writeUnderClaim`): it is the holder, not a remover of the file',
 };

@@ -41,6 +41,12 @@ const OWNED_BECAUSE = {
   version: 'a counter the server increments on every meta write; a caller-set value would break the If-Match precondition',
   updatedAt: 'the time of the last meta write, stamped by the server',
   previousVersions: 'the capped history of earlier metas, kept by updateSpace; a caller cannot rewrite history',
+  needsReindex: 'derived: whether the stored vectors no longer match the schema; answered on the meta so a caller can poll after a reindex',
+  reindexRun: 'derived: the progress of a running reindex, answered beside needsReindex',
+  actualSchema: 'derived: what the space really holds, per member, in the schema\'s own format',
+  invalidRules: 'derived: the stored rules that no longer compile, named on the answer',
+  unknownWriteFields: 'a local setting answered on the meta so a reader can learn it; set at the top level of the space, never in the shared definition',
+  schemaFingerprint: 'derived: the hash of the schema this space\'s records are checked and stamped against, so a caller-set value would name a schema that is not the one in force',
 };
 
 /** The members of an interface declared in `file`, read from the source. */
@@ -81,11 +87,12 @@ describe('every SpaceMeta key is accepted by the body or owned by the server', (
       + 'the type declares it and the docs may call it writable, yet no door can set it and a peer layer carrying it is refused whole.');
   });
 
-  it('every server-owned key the interface declares says why a caller may not set it, and no reason outlives its key', () => {
-    const owned = interfaceMetaKeys.filter(k => SERVER_OWNED.includes(k));
-    assert.ok(owned.length >= 3, `only ${owned.length} owned keys found on the interface`);
-    assert.deepEqual(owned.filter(k => !(k in OWNED_BECAUSE)), [], 'a server-owned key has no reason here: say why a caller may not set it');
-    assert.deepEqual(Object.keys(OWNED_BECAUSE).filter(k => !owned.includes(k)), [], 'a reason names a key that is no longer on the interface or no longer owned');
+  it('every server-owned key says why a caller may not set it, and no reason outlives its key', () => {
+    // EVERY owned key, not only the ones the interface declares: the answer carries derived fields (the reindex state, the fingerprint) that
+    // are no member of `SpaceMeta`, and each of them is the same question — why does this door strip what it returns.
+    assert.ok(SERVER_OWNED.length >= 3, `only ${SERVER_OWNED.length} owned keys found`);
+    assert.deepEqual(SERVER_OWNED.filter(k => !(k in OWNED_BECAUSE)), [], 'a server-owned key has no reason here: say why a caller may not set it');
+    assert.deepEqual(Object.keys(OWNED_BECAUSE).filter(k => !SERVER_OWNED.includes(k)), [], 'a reason names a key that is no longer owned');
   });
 
   it('every meta key the server READS is one of those (the scan reads the source, not the interface)', () => {
