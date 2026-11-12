@@ -121,7 +121,8 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   instance's own lock on a functional label's subject, never a backup's to carry. So is a file record's `bytesAbsentSince`
   (the day this instance's disk was first found without the file's bytes): a restore or an import clears it, because the
   disk it described is not the disk the backup came from, and the space's files then wait out the absent-bytes sweep's longer
-  wait again.
+  wait again. A retired file record's `retiredBy` (why this instance retired it, `bytes-lost`) is not kept either: a restored
+  retired record is told by the change feed as a plain delete.
 - The record's own local state is kept: the retention stamps (`_expireAt`, `_contentExpireAt`), a file's
   `syncBase`, who delivered the record (`deliveredBy`), whether this instance wrote its current version
   (`writtenHere`), and on a fork row the decision still owed here (`_resolvedElsewhere`). The record's landing position
