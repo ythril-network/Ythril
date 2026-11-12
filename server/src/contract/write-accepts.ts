@@ -43,6 +43,7 @@ import { unknownWriteFieldsMode } from '../spaces/spaces.js';
 import { findSpace } from '../spaces/space-lookup.js';
 import { NAME_QUOTED, REFUSAL_NAMES_MAX, peerText, unrecognizedKeysIssue, type ParseRefusalIssue } from '../util/log.js';
 import { isPlainObject } from '../util/plain-object.js';
+import { SCHEMA_FINGERPRINT_FIELD } from '../spaces/schema-stamp.js';
 import { unknownWriteFieldsTotal } from '../metrics/registry.js';
 import type { UnknownWriteFieldAnswer } from '../config/types.js';
 import { JUDGED_WRITE_OPERATIONS, isJudgedWriteOperation, toolOfJudgedOperation } from './judged-write-operations.js';
@@ -233,11 +234,14 @@ export function carriesAnyAcceptedField(body: unknown, operation: string): boole
 /**
  * The own keys of `bag` that are neither accepted nor a RETIRED name (a retired name is answered by its own sentence, by name), in the
  * order the body carries them. The one membership test every door and every bulk item uses: `Set.has`, own keys only.
+ *
+ * The record's schema stamp is neither: a client that read a record and writes it back echoes it, and it is the server's own field, so it is
+ * silently ignored (never named, never refused, never stored: the stamp is written only by the write's own stamp op, Q-736).
  */
 export function unknownKeysOf(bag: Record<string, unknown>, accepted: ReadonlySet<string>): string[] {
   const out: string[] = [];
   for (const key of Object.keys(bag)) {
-    if (!accepted.has(key) && retiredWriteFieldHint(key) === null) out.push(key);
+    if (!accepted.has(key) && key !== SCHEMA_FINGERPRINT_FIELD && retiredWriteFieldHint(key) === null) out.push(key);
   }
   return out;
 }

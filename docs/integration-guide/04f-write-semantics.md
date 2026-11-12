@@ -619,7 +619,7 @@ PATCH /api/brain/spaces/:spaceId/files?path=…
 > absent field means "leave alone".
 >
 > Chrono's **required** fields — `title`, `startsAt`, `status` — are refused by name, alongside the
-> server-owned `id` / `type` / `spaceId` / `createdAt` / `updatedAt`. A path that cannot be honoured answers
+> server-owned `id` / `type` / `spaceId` / `createdAt` / `updatedAt` and the schema stamp `schemaFingerprint` (on every record type). A path that cannot be honoured answers
 > `400` naming it rather than being accepted and doing nothing, so a delete that silently misses is not a
 > state this API can reach. A *property* of the same name (`properties.title`) is an ordinary user key and
 > stays deletable.

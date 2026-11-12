@@ -9,7 +9,7 @@ import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-p
 import { refuseForkEdit, remintForks } from './forks.js';
 import { classifyEdgeUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { applyExpiryToUpdate } from './ttl.js';
-import { getSpaceMeta } from '../spaces/schema-validation.js';
+import { readMetaForWrite, stampOp, stampOpIfUnmoved, stampSetOf, stampUnsetOf, foldStampOp, carryStamp } from '../spaces/schema-stamp.js';
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
@@ -19,7 +19,7 @@ import type { EdgeDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { planEdge, edgeWant, resolveEdgeEndsForWrite, guardFor, type EdgeInput } from './write-plan/plan-edge.js';
+import { planEdge, edgeWant, resolveEdgeEndsForWrite, guardIn, type EdgeInput } from './write-plan/plan-edge.js';
 import { writeRelabel } from './write-plan/guarded-relabel.js';
 import { FUNCTIONAL_GUARD, UNSET_GUARD } from '../sync/local-only-fields.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
@@ -236,6 +236,10 @@ export async function updateEdgeById(
    * prompted it named the upsert. A patch may CHANGE THE LABEL, which selects a different type schema
    * entirely, so an edge could be moved onto a label whose rules its stored properties break.
    */
+  // The meta and the schema stamp in ONE read (Q-736): the check, the relabel's guard and the stamp the write lands all come from it.
+  const write = readMetaForWrite(spaceId);
+  /** The last classification: a relabel asked again (below) stamps by what it answered then. */
+  let check!: UpdateValidation;
   // A closure, because a relabel the store refuses with a duplicate key asks it AGAIN against what the winner wrote (`writeRelabel`).
   const classify = async (): Promise<void> => {
     const finalLabel = ('label' in $set ? $set['label'] : existing.label) as string;
@@ -249,7 +253,7 @@ export async function updateEdgeById(
       opts: { ...(existing.fromKind ? { fromKind: existing.fromKind } : {}),
         ...(existing.toKind ? { toKind: existing.toKind } : {}) },
     });
-    const check = classifyEdgeUpsertAgainst(getSpaceMeta(spaceId), existing,
+    check = classifyEdgeUpsertAgainst(write.meta, existing,
       recordAfterPatch(existing, $set, $unset), resolvedEnds);
     if (check.blocked) throw new SchemaViolationError(check);
     onValidation?.(check);
@@ -259,11 +263,11 @@ export async function updateEdgeById(
   /*
    * THE WRITE GUARD of a relabel (`Q-439`): the marker is a function of `(from, label)`, so a write that changes the label sets it
    * afresh or drops it IN THE SAME WRITE — on the re-key (`rekeyEdge`) and on the in-place update a peer-authored edge falls back to
-   * alike. Stamped when the new label is functional and the space refuses (`guardFor`, the one place that asks).
+   * alike. Stamped when the new label is functional and the space refuses (`guardIn`, the one place that asks, with the meta the check read).
    */
   const relabelled = updates.label !== undefined && updates.label !== existing.label;
   const kindChanged = updates.fromKind !== undefined || updates.toKind !== undefined;
-  const functionalGuard = relabelled ? guardFor(spaceId, existing.from, newLabel) : undefined;
+  const functionalGuard = relabelled ? guardIn(write.meta, existing.from, newLabel) : undefined;
   const relabelTarget = { id: existing._id, from: existing.from, to: existing.to, label: newLabel, fromKind: existing.fromKind, toKind: existing.toKind };
 
   applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
@@ -308,7 +312,10 @@ export async function updateEdgeById(
     // A duplicate key on the guard (or on the identity it moves onto) is answered by `writeRelabel`, never raised raw.
     const moved: EdgeRekey | null = await writeRelabel(spaceId, relabelTarget, functionalGuard, () => inHeldTransaction(spaceId, 'edge.relabel',
       async (session) => {
-        const rekeyed = await rekeyEdge(spaceId, existing, { label: newLabel }, carried, Object.keys($unset), session, functionalGuard);
+        // The schema stamp rides the re-key: the moved row is `existing` with this patch, exactly what the last classification judged.
+        const relabelStamp = stampOp(write, check);
+        const rekeyed = await rekeyEdge(spaceId, existing, { label: newLabel }, { ...carried, ...stampSetOf(relabelStamp) },
+          [...Object.keys($unset), ...Object.keys(stampUnsetOf(relabelStamp))], session, functionalGuard);
         // The subject's forks follow it onto the new id by a re-mint, in this transaction; their own label is authored body and stays (Q-624 §7).
         if (rekeyed) await remintForks(spaceId, 'edge', [{ oldSubject: existing._id, newSubject: rekeyed.edge._id }], { session, now });
         return rekeyed;
@@ -353,6 +360,9 @@ export async function updateEdgeById(
   // Admitted and counted from its own check (`admitSpaceWrite`), each time it is attempted; a relabel that moved the edge was counted by `rekeyEdges`.
   const writeInPlace = () => admitSpaceWrite(spaceId, 'edges', () => writeAtReadVersion<EdgeDoc>(spaceId, 'edges', id, ifMatchSeq, (at) => {
     seq = at.version;
+    // The schema stamp rides `$set`/`$unset`, so the answer below carries it; only when the row it lands on is the one validated (DI-4).
+    const stamp = stampOpIfUnmoved(at, existing.seq ?? null, write, check);
+    foldStampOp(stamp, $set, $unset);
     const updateOp: Record<string, unknown> = { $set: { ...$set, ...at.patch } };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
     return collection.findOneAndUpdate(
@@ -386,6 +396,7 @@ export async function updateEdgeById(
   } as EdgeDoc;
   if ('_expireAt' in $set) result._expireAt = $set['_expireAt'] as Date;
   else if ('_expireAt' in $unset) delete (result as { _expireAt?: unknown })._expireAt;
+  carryStamp(result, $set, $unset);
 
   // Apply deleteFields to the returned doc for consistency
   if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {

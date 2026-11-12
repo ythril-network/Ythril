@@ -9,7 +9,7 @@ import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, LANDING_ORDER, type SortSpec } from './list-sort.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
 import { applyExpiryToUpdate } from './ttl.js';
-import { getSpaceMeta } from '../spaces/schema-validation.js';
+import { readMetaForWrite, stampOpIfUnmoved, foldStampOp, carryStamp } from '../spaces/schema-stamp.js';
 import { classifyEntityUpsertAgainst, recordAfterPatch, resultingEntityType, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
@@ -272,7 +272,9 @@ export async function updateEntityById(
    * reason — re-typing re-validates against the NEW type's schema, which is what #1047 fixed at the route and
    * this brings inside.
    */
-  const check = classifyEntityUpsertAgainst(getSpaceMeta(spaceId), existing, recordAfterPatch(existing, $set, $unset));
+  // The meta and the schema stamp in ONE read (Q-736): the stamp the write lands names the schema this check judged with.
+  const write = readMetaForWrite(spaceId);
+  const check = classifyEntityUpsertAgainst(write.meta, existing, recordAfterPatch(existing, $set, $unset));
   if (check.blocked) throw new SchemaViolationError(check);
   onValidation?.(check);
 
@@ -289,6 +291,9 @@ export async function updateEntityById(
   // ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
   const beforeWrite = await admitSpaceWrite(spaceId, 'entities', () => writeAtReadVersion<EntityDoc>(spaceId, 'entities', id, ifMatchSeq, (at) => {
     seq = at.version;
+    // The schema stamp rides `$set`/`$unset`, so the answer below carries it; only when the row it lands on is the one validated (DI-4).
+    const stamp = stampOpIfUnmoved(at, existing.seq ?? null, write, check);
+    foldStampOp(stamp, $set, $unset);
     const updateOp: Record<string, unknown> = { $set: { ...$set, ...at.patch } };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
     return collection.findOneAndUpdate(
@@ -318,6 +323,7 @@ export async function updateEntityById(
   } as EntityDoc;
   if ('_expireAt' in $set) result._expireAt = $set['_expireAt'] as Date;
   else if ('_expireAt' in $unset) delete (result as { _expireAt?: unknown })._expireAt;
+  carryStamp(result, $set, $unset);
 
   // Apply deleteFields to the returned doc for consistency
   if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {

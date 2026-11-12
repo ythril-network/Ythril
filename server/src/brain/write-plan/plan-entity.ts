@@ -11,7 +11,8 @@ import { type ContradictionWarning } from '../insert-contradictions.js';
 import { entityEmbedText } from '../embed-text.js';
 import { derivedFieldsForWrite } from '../derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
-import { getSpaceMeta, applyPropertyDefaults } from '../../spaces/schema-validation.js';
+import { applyPropertyDefaults } from '../../spaces/schema-validation.js';
+import { readMetaForWrite, stampOp, stampSetOf, stampUnsetOf } from '../../spaces/schema-stamp.js';
 import { classifyEntityUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
 import { mergeTagsAndProperties } from '../merge-fields.js';
 import { type SimilarMatch } from '../recall.js';
@@ -62,10 +63,11 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
    * THE SCHEMA IS ENFORCED HERE, against the merged record. Declared defaults fill in what the caller omitted
    * BEFORE validation and only on an INSERT — on an update an absent property may be one just removed.
    */
-  const meta = getSpaceMeta(spaceId);
-  const properties = (existing ? input.properties : applyPropertyDefaults(meta?.typeSchemas?.entity?.[type], input.properties))
+  // The meta and the schema stamp in ONE read (Q-736): the stamp names the schema this check judged with, never a later one.
+  const write = readMetaForWrite(spaceId);
+  const properties = (existing ? input.properties : applyPropertyDefaults(write.meta?.typeSchemas?.entity?.[type], input.properties))
     ?? input.properties ?? {};
-  const check = classifyEntityUpsertAgainst(meta, existing, { name, type, description, properties, tags }, input.instanceWrittenKeys);
+  const check = classifyEntityUpsertAgainst(write.meta, existing, { name, type, description, properties, tags }, input.instanceWrittenKeys);
   if (check.blocked) throw new SchemaViolationError(check);
   input.onValidation?.(check);
 
@@ -88,9 +90,13 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
   const derived = await derivedFieldsForWrite({ text: () => embedText, vector, suppressed, onto: existing ? 'stored' : 'insert' });
 
   if (existing) {
-    const $set: Record<string, unknown> = { name, type, tags: merged.tags, properties: merged.properties, updatedAt: now, ...derived.set };
+    // Stamped when the converged record conforms, unstamped when it does not (a stamp means "conforms as stored").
+    const stamp = stampOp(write, check);
+    const $set: Record<string, unknown> = {
+      name, type, tags: merged.tags, properties: merged.properties, updatedAt: now, ...derived.set, ...stampSetOf(stamp),
+    };
     if (description !== undefined) $set['description'] = description;
-    const $unset: Record<string, unknown> = { ...derived.unset };
+    const $unset: Record<string, unknown> = { ...derived.unset, ...stampUnsetOf(stamp) };
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'entity', existing: existing as unknown as Record<string, unknown> }); // F10
     const result = convergeResult(existing, $set, $unset);
@@ -124,7 +130,7 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
   if (description !== undefined) doc.description = description;
   // `typed` is what makes the SCHEMA tier reachable for retention.
   stampExpiryOnCreate(spaceId, doc, ttlDays, { collection: 'entity', type: doc.type });
-  const insert = finishInsert({ view, kind: 'entity', doc, opts, meta });
+  const insert = finishInsert({ view, kind: 'entity', doc, opts, write, check });
   return {
     plan: {
       kind: 'entity', spaceId, id: doc._id, op: 'insert', doc: insert, result: insert,

@@ -31,6 +31,7 @@ import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { validateEdge } from '../spaces/schema-validation.js';
 import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } from '../spaces/schema-validation.js';
+import { readMetaForWrite, stampOpIfUnmoved, foldStampOp, carryStamp, type MetaForWrite, type SchemaCheckOutcome } from '../spaces/schema-stamp.js';
 import { classifyMergedEntity, countSchemaRefusal, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { recordViewOf } from './record-view.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
@@ -739,14 +740,15 @@ export async function executeMerge(
    * Judged as the write it is: what the merge INTRODUCES, against the survivor as stored (`classifyMergedEntity`). A key the survivor
    * already stores is not blamed, whether its type declares it or not; a key the absorbed brings in that the survivor lacks is.
    */
-  const meta = getSpaceMeta(spaceId);
-  const afterRows = validateEntity(meta ?? {}, recordViewOf('entity', { ...survivor, properties: mergedProperties }));
-  const beforeRows = validateEntity(meta ?? {}, recordViewOf('entity', survivor));
-  const check = classifyMergedEntity(meta, survivor, mergedProperties, beforeRows, afterRows);
+  // The meta and the schema stamp in ONE read (Q-736): the survivor is judged with it and stamped from it.
+  const write = readMetaForWrite(spaceId);
+  const afterRows = validateEntity(write.meta ?? {}, recordViewOf('entity', { ...survivor, properties: mergedProperties }));
+  const beforeRows = validateEntity(write.meta ?? {}, recordViewOf('entity', survivor));
+  const check = classifyMergedEntity(write.meta, survivor, mergedProperties, beforeRows, afterRows);
   // What the refusal and the warning name: the violations THIS merge introduced, never the survivor's own stored ones.
   const violations = check.introduced;
   if (check.blocked) throw new MergeSchemaViolation(survivor._id, absorbed._id, spaceId, check);
-  const verdict = applyValidation(meta, violations);
+  const verdict = applyValidation(write.meta, violations);
   if (verdict.warnings.length > 0) {
     log.warn(
       `merge: the survivor '${peerText(survivor._id)}' in space '${peerText(spaceId)}' violates its own schema after merging `
@@ -782,16 +784,18 @@ export async function executeMerge(
   const embeddingFields = derived.set;
 
   const entityColl = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
+  // The survivor's update; `relinkAndAbsorb` folds the schema stamp into it, so the answer below carries what was stored.
+  const set: Record<string, unknown> = { properties: mergedProperties, tags: mergedTags, updatedAt: now, ...embeddingFields };
+  const unset: Record<string, ''> = { ...derived.unset };
   const written = await inHeldTransaction(spaceId, 'entity.merge',
-    (session) => admitSpaceWrite(spaceId, undefined, () => relinkAndAbsorb(spaceId, survivor, absorbed, {
-      now, session, set: { properties: mergedProperties, tags: mergedTags, updatedAt: now, ...embeddingFields }, unset: derived.unset,
-    })),
+    (session) => admitSpaceWrite(spaceId, undefined, () => relinkAndAbsorb(spaceId, survivor, absorbed, { now, session, set, unset, write, check })),
     // A commit whose answer was lost may have landed: the survivor at the seq this transaction gave it IS the commit.
     { landed: async (w) => (await entityColl.countDocuments(asFilter<EntityDoc>(atReadSeq(survivor._id, w.seq)), { limit: 1 })) === 1 });
 
   Object.assign(survivor, { properties: mergedProperties, tags: mergedTags, updatedAt: now, seq: written.seq, ...embeddingFields });
   // What the write removed is gone from the answer and the webhook too, so neither names a vector the record no longer holds.
   for (const key of Object.keys(derived.unset)) delete (survivor as unknown as Record<string, unknown>)[key];
+  carryStamp(survivor, set, unset);
 
   /*
    * An edge or link written to the absorbed entity while the merge ran touches no document the merge's transaction wrote, so it is no write conflict and
@@ -841,7 +845,11 @@ export async function executeMerge(
  */
 async function relinkAndAbsorb(
   spaceId: string, survivor: EntityDoc, absorbed: EntityDoc,
-  { now, session, set, unset }: { now: string; session: ClientSession; set: Record<string, unknown>; unset: Record<string, ''> },
+  { now, session, set, unset, write, check }: {
+    now: string; session: ClientSession; set: Record<string, unknown>; unset: Record<string, ''>;
+    /** The pair `executeMerge` judged the survivor with, and its check: the survivor is stamped from them. */
+    write: MetaForWrite; check: SchemaCheckOutcome;
+  },
 ): Promise<MergeWrite> {
   // A merge rewrites entities, edges, links and their tombstones. Its one caller runs it inside `admitSpaceWrite`, which asks the gate and counts
   // the whole merge, so an act standing for the space refuses it and an act registered mid-merge waits for it.
@@ -903,6 +911,9 @@ async function relinkAndAbsorb(
 
   // ── 4. Update the survivor, delete the absorbed entity + its tombstone ──
   const entityColl = col<EntityDoc>(spaceCollection(spaceId, 'entities'));
+  // The schema stamp: only when the survivor this transaction read is the one `executeMerge` judged (DI-4), unstamped otherwise.
+  const stamp = stampOpIfUnmoved(survivorVersion!, survivor.seq ?? null, write, check);
+  foldStampOp(stamp, set, unset);
   const seq = await withLandingStamp(spaceId, [localRow(survivorVersion!.version)], async ([patch]) => {
     await entityColl.updateOne(asFilter<EntityDoc>({ _id: survivor._id }), asUpdate<EntityDoc>({ $set: { ...set, ...patch! }, ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}) }), { session });
     return patch!.seq;
