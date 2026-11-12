@@ -183,6 +183,16 @@ export interface StampSkew {
  * Extend this rather than copying the field: a new record type that forgot the field would look exactly like
  * a record whose stamp agreed.
  */
+/**
+ * The schema stamp a fact, entity, edge or chrono entry carries (Q-736): the fingerprint of the schema it conforms to AS STORED. Set only
+ * by the stamp op (`spaces/schema-stamp.ts`) of a write that validated it, removed by a write that leaves it unchecked or non-conforming,
+ * kept as sent by an arrival (the writer's claim). A caller's own value in a write body is ignored. Absent on a record written before
+ * 6.6.0 and not updated since. A file row and a link row carry none: neither has a schema of its own.
+ */
+export interface SchemaStamped {
+  schemaFingerprint?: string;
+}
+
 export interface StampSkewable {
   /**
    * Set only when this record's own timestamp property disagreed with the server's `createdAt` beyond the space's

@@ -247,6 +247,22 @@ export function storedEdgeKind(kind: RefKind | undefined): RefKind | undefined {
 }
 
 /**
+ * Fold an update's corrected end kinds into its `$set`/`$unset`: a stated kind is set in its stored form, and a kind corrected back to
+ * `entity` is UNSET (absent is the canonical form, see {@link storedEdgeKind}; a stored `'entity'` would make the edge unfindable by its own
+ * triplet lookup). A side the update does not state is left as stored. The edge update and the planner's converge both correct kinds; one
+ * rule, so the two never disagree about which form a corrected end is stored in.
+ */
+export function foldEdgeKinds(
+  given: { fromKind?: RefKind | undefined; toKind?: RefKind | undefined }, $set: Record<string, unknown>, $unset: Record<string, unknown>,
+): void {
+  for (const side of ['fromKind', 'toKind'] as const) {
+    if (given[side] === undefined) continue;
+    const stored = storedEdgeKind(given[side]);
+    if (stored) $set[side] = stored; else $unset[side] = '';
+  }
+}
+
+/**
  * Read an edge endpoint's kind. Absent means `entity` — the one place that reading lives.
  *
  * It answers "what kind of record does this endpoint point at?" and prevents a second spelling of the default: the REST route, the MCP
