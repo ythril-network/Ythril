@@ -78,6 +78,8 @@ const LOCAL_VALUES = {
   _resolvedElsewhere: [{ by: 'instance-that-resolved-it', at: '2026-10-25T00:00:00.000Z', seq: 4, proven: true }],
   // bundle-70 (Q-337): when THIS disk was first found without a file's bytes. A fact about this instance, carried across a peer's replace.
   bytesAbsentSince: '2026-10-01T00:00:00.000Z',
+  // bundle-70 lens fix: why THIS instance retired a file row no person deleted. Only a retired row carries it; carried like the flag it sits on.
+  retiredBy: 'bytes-lost',
 };
 
 /**

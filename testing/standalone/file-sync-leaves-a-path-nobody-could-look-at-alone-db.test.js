@@ -18,8 +18,9 @@
  *  3. PUSH: a path the peer names in `unreadable` is not uploaded to, matched by key (an NFD spelling names the NFC key), the directory prefix
  *     covering everything under it. When the peer says its list is cut (`unreadableTruncated`) nothing is uploaded for a path its manifest
  *     does not carry. A field of the wrong shape is ignored, never fatal.
- *  4. SENDER: a `409` carrying `code: 'path_unreadable'` is a refusal: the same file is not sent again until something changes (the
- *     `noteRefusedUpload` skip), and it is said once. A `409` with any other code (a destination blocked by a file) is still retried.
+ *  4. SENDER: a `409` carrying `code: 'path_unreadable'` is a refusal: the same file is not sent again for a while (the `noteRefusedUpload`
+ *     skip, `PATH_REFUSAL_FORGET_MS`), and it is said once; after that while it is sent again, since the peer's operator may have mended its
+ *     disk (bundle-70 lens fix; red on 92e1ca8f: never sent again). A `409` with any other code (a destination blocked by a file) is still retried.
  *
  * ## How
  *
@@ -198,6 +199,25 @@ describe('file sync leaves a path nobody could look at alone', { skip }, () => {
       const sent = door.state.fileUploads.filter(u => u.path === 'u.txt').length;
       assert.equal(sent, 1, `the refused path was sent ${sent} times over two cycles: the whole file again every cycle`);
       assert.equal(lines.filter(l => l.includes('u.txt')).length, 1, `the refusal was said ${lines.filter(l => l.includes('u.txt')).length} times, not once: ${lines.join(' | ')}`);
+    });
+
+    it('the refusal of the path is forgotten after a while: once the peer may have mended its disk, the file is sent again (bundle-70 lens fix)', async () => {
+      const memory = await import('../../server/dist/sync/told-tombstoned.js');
+      assert.equal(typeof memory.setUploadAnswerClockForTest, 'function', 'sync/told-tombstoned.ts has no clock seam: a path refusal cannot be aged, it is remembered for good');
+      door.writeLocalFile(S, 'u.txt', 'unreadable on the peer, for now');
+      scriptPeerManifest({});
+      door.state.fileUpload = answer409('path_unreadable');
+      const start = Date.now();
+      try {
+        memory.setUploadAnswerClockForTest(() => start);
+        await door.sync();
+        await door.sync();
+        assert.equal(door.state.fileUploads.filter(u => u.path === 'u.txt').length, 1, 'fixture: the refusal was not remembered within its while');
+        memory.setUploadAnswerClockForTest(() => start + memory.PATH_REFUSAL_FORGET_MS + 1);
+        await door.sync();
+      } finally { memory.setUploadAnswerClockForTest(null); }
+      assert.equal(door.state.fileUploads.filter(u => u.path === 'u.txt').length, 2,
+        'a peer that could not look at the path once is never offered the file again until a restart: its operator mended the permissions for nothing');
     });
 
     it('a 409 with another code (a destination a file blocks) is tried again on the next cycle (control)', async () => {

@@ -42,7 +42,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { argumentsOf, balancedFrom } from './_structural-window.mjs';
 import { MUTATORS, receiverBefore } from './_space-writers.mjs';
-import { REPO_ROOT } from './_sources.mjs';
+import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const MERKLE = 'server/src/brain/merkle.ts';
@@ -68,6 +68,14 @@ export function fileMetaDocFields() {
   const body = src.slice(at, src.indexOf('\n}', at));
   const fields = [...body.matchAll(/^ {2}([a-zA-Z_]\w*)\??:/gm)].map(m => m[1]);
   assert.ok(fields.length >= 25, `only ${fields.length} FileMetaDoc field(s) read — the interface moved; re-anchor`);
+  // A field declared beside its only writer by module augmentation (`declare module '../config/types.js' { interface FileMetaDoc { … } }`), as
+  // the frozen `types.ts` asks: `retiredBy` in `files/feed-marker.ts` (bundle-70).
+  for (const rel of trackedSources(['server/src']).filter(f => f.endsWith('.ts'))) {
+    const text = stripComments(read(rel));
+    for (const m of text.matchAll(/declare module '[^']*config\/types\.js'\s*\{\s*interface FileMetaDoc\s*\{([^}]*)\}/g)) {
+      fields.push(...[...m[1].matchAll(/^\s*([a-zA-Z_]\w*)\??:/gm)].map(x => x[1]));
+    }
+  }
   return fields;
 }
 

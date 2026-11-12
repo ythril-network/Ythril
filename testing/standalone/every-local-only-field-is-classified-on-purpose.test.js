@@ -40,6 +40,7 @@ const DERIVED_ON_PURPOSE = new Map([
   ['embeddingModel', 'names the model that made `embedding`; meaningless without it, wrong the moment the vector is recomputed'],
   ['matchedText', 'the snippet a query matched — an artefact of a search, not content, and the lexical channel\'s copy of text the record may no longer have'],
   ['bytesAbsentSince', 'when THIS disk was first found without a file\'s bytes (the absent-bytes sweep, Q-337): a fact about one disk, which a restore or an import clears anyway, and which a peer would read as the file being gone for everybody'],
+  ['retiredBy', 'why THIS instance retired a file row no person deleted (`bytes-lost`, the absent-bytes sweep, Q-337): only a retired row carries it, which no peer is offered and no answer returns; a restore that drops it tells the change feed a plain delete, which is what a peer was told anyway'],
 ]);
 
 let loaded;
