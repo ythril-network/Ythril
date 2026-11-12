@@ -53,9 +53,20 @@ describe('what an instance derives for itself', () => {
     assert.equal(F.isInstanceLocalFile(p), true, p);
     assert.equal(F.isInstanceLocalFile('docs/guide.md'), false);
   });
-  it('a schema snapshot is instance-local; an ordinary file under schemas/ is not', () => {
+  it('a retired per-type schema file is instance-local, so a leftover never starts to travel; an ordinary file under schemas/ is not', () => {
+    // 6.6.0 writes no per-type file (the versions are kept privately, `<space>_schema_snapshots`); the pattern stays so what 6.5 wrote is never
+    // offered to a peer, and is the one the retired-file sweep removes by.
     assert.equal(F.isInstanceLocalFile('schemas/y-flows_entity_Phase.json'), true);
     assert.equal(F.isInstanceLocalFile('schemas/y-tickets_chrono_Work-Log.json'), true);
     assert.equal(F.isInstanceLocalFile('schemas/my-notes.json'), false);
+    assert.equal(F.isInstanceLocalFile(`schemas/versions/${'0'.repeat(64)}.json`), false, 'a hex name under schemas/versions/ is a user\'s file: there is no snapshot FILE any more, so no path of that shape is special');
+  });
+  it('the retired pattern is exported under its name, and says the same as the instance-local rule for the shapes the old writer produced', () => {
+    const retired = (p) => (typeof F.RETIRED_SCHEMA_FILE === 'function' ? F.RETIRED_SCHEMA_FILE(p) : F.RETIRED_SCHEMA_FILE.test(p));
+    assert.equal(retired('schemas/y-flows_entity_Phase.json'), true);
+    assert.equal(retired('schemas/y-tickets_chrono_Work-Log.json'), true);
+    assert.equal(retired('schemas/my-notes.json'), false);
+    assert.equal(retired('notes/schemas/y-flows_entity_Phase.json'), false, 'anchored at the root, as the old writer wrote it');
+    assert.equal(retired(`schemas/versions/${'0'.repeat(64)}.json`), false);
   });
 });

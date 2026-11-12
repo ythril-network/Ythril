@@ -29,7 +29,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const { SERVER_OWNED_META_FIELDS } = await import('../../server/dist/spaces/body-schemas.js');
+const { SERVER_OWNED_META_FIELDS, stripServerOwnedMeta } = await import('../../server/dist/spaces/body-schemas.js');
 
 /** Line comments first — see `Q-1`: a `/*` inside a `//` comment otherwise opens a phantom block. */
 const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -84,17 +84,18 @@ describe('the meta response and the PATCH strip agree', () => {
     assert.ok(SERVER_OWNED_META_FIELDS.includes('needsReindex'), 'and must still be stripped on the way back in');
   });
 
+  it('schemaFingerprint is on the answer and stripped on the way back in: the fingerprint of the space\'s schema is derived, server-written and never a caller\'s to set (Q-734)', () => {
+    assert.ok(keys.includes('schemaFingerprint'), 'the meta answer does not carry the schema fingerprint: a caller has nowhere to read which schema its records are stamped with');
+    assert.ok(SERVER_OWNED_META_FIELDS.includes('schemaFingerprint'), 'the answer carries it but a GET-then-PATCH would be refused for it: strip it on the way in');
+    const answer = { purpose: 'p', typeSchemas: {}, schemaFingerprint: 'f'.repeat(64) };
+    assert.deepEqual(stripServerOwnedMeta(answer), { purpose: 'p', typeSchemas: {} }, 'the strip left the fingerprint in the body it hands to the parse');
+  });
+
   it('the strip stays SMALL — it is not a licence to ignore unknown keys', () => {
-    // The distinction is the whole design: an echoed-back field costs the caller nothing to drop, while
-    // silently ignoring `validationMdoe` would let someone believe they had turned validation on. Every field on the list is DERIVED and
-    // server-written (version, history, reindex state, actualSchema, invalidRules), and the bound moved only when F-46 added one. A field a caller
-    // could mean to set never belongs here, whatever the count.
-    //
-    // The bound moved to 8 for Q-320 (bundle-128): `unknownWriteFields` is surfaced on the meta answer so a reader can learn this instance's
-    // answer to an unknown write field, and stripped on PATCH because the answer is spread flat and a GET-then-PATCH would otherwise be
-    // refused. It is the one entry that is a local setting rather than derived state, and it is stripped on this door only: the meta is the
-    // shared definition, the setting is set at the top level of `PATCH /api/spaces/:id` or by `update_space`.
-    assert.ok(SERVER_OWNED_META_FIELDS.length <= 8,
+    // The distinction is the whole design: an echoed-back field costs the caller nothing to drop, while silently ignoring `validationMdoe`
+    // would let someone believe they had turned validation on. Every field on the list is derived or server-written, and each says why in
+    // `every-space-meta-field-is-accepted-or-server-owned` (`OWNED_BECAUSE`): a field a caller could mean to set never belongs here, whatever the count.
+    assert.ok(SERVER_OWNED_META_FIELDS.length <= 9,
       `${SERVER_OWNED_META_FIELDS.length} stripped fields is heading towards "accept anything": `
       + SERVER_OWNED_META_FIELDS.join(', '));
   });

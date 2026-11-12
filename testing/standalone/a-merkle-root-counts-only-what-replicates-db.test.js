@@ -11,9 +11,10 @@
  *   arrival writer), and under a `spaceMap` alias that id is not the sender's. `brain/merkle.ts` hashed `spaceId`
  *   in every leaf — through the exclusion list for five collections and the inclusion list for `files` — so an
  *   aliased space differed in every leaf, for ever, on identical content.
- * - **Instance-local files.** A conflict copy and a schema snapshot never travel (`isInstanceLocalFile`, `Q-66`), and
- *   the peer manifest leaves them out. The root hashed the unfiltered manifest, so any conflict copy, or any snapshot
- *   that differs between members, made the roots differ for ever.
+ * - **Instance-local files.** A conflict copy and a retired per-type schema file never travel (`isInstanceLocalFile`, `Q-66`), and
+ *   the peer manifest leaves them out. The root hashed the unfiltered manifest, so any conflict copy, or any schema file
+ *   that differs between members, made the roots differ for ever. (6.6.0 keeps every schema version in a private collection,
+ *   `<space>_schema_snapshots`, which is no brain family and no file: the last case holds that it moves no root.)
  *
  * A permanent false alarm teaches an operator to ignore the one signal that means data really is missing.
  *
@@ -23,8 +24,8 @@
  *   spaces with different ids — stamped with each space's id by the arrival writer's own retag — gives equal roots.
  *   One collection at a time, so a fix that reaches the exclusion list and forgets the `files` inclusion list (or the
  *   reverse) names the collection it missed. The same file bytes on both sides are part of every comparison.
- * - **The instance-local files, written by their real writers**: a conflict copy named by `conflictCopyPath` and a
- *   schema snapshot written by `syncSchemaFiles`, each first shown to be what `isInstanceLocalFile` covers, leave the
+ * - **The instance-local files**: a conflict copy named by `conflictCopyPath` and a retired per-type schema file
+ *   (bytes without a row, as 6.5 wrote them), each first shown to be what `isInstanceLocalFile` covers, leave the
  *   root where it was.
  * - **Sensitivity**, so "equal" means something: a changed record, and an ordinary added file, move the root.
  *
@@ -38,6 +39,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { holdsWithin } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -52,7 +54,7 @@ const THERE = 'beta';
 const NOTE = 'notes/a.md';
 const NOTE_BYTES = 'the same note on both sides';
 
-let mongo, merkle, spaceCollection, BRAIN_COLLECTIONS, retagToLocalSpace, files, conflictCopyPath, isInstanceLocalFile, syncSchemaFiles;
+let mongo, merkle, spaceCollection, BRAIN_COLLECTIONS, retagToLocalSpace, files, conflictCopyPath, isInstanceLocalFile;
 
 const root = async (space) => (await merkle.computeMerkleRoot(space)).root;
 
@@ -90,7 +92,6 @@ describe('a merkle root counts only what replicates', { skip }, () => {
     ({ retagToLocalSpace } = await import('../../server/dist/sync/upsert-plan.js'));
     files = await import('../../server/dist/files/files.js');
     ({ conflictCopyPath, isInstanceLocalFile } = await import('../../server/dist/sync/file-conflict.js'));
-    ({ syncSchemaFiles } = await import('../../server/dist/spaces/_shared.js'));
   });
 
   after(async () => {
@@ -125,25 +126,36 @@ describe('a merkle root counts only what replicates', { skip }, () => {
       + 'MERKLE_DIVERGENCE every cycle on identical content');
   });
 
-  it('a conflict copy and a schema snapshot leave the root where it was', async () => {
+  it('a conflict copy and a retired per-type schema file leave the root where it was', async () => {
     const before = await root(HERE);
 
-    // Each written by the code that writes it in production, and shown to be what the predicate calls instance-local.
+    // Each shown to be what the predicate calls instance-local. The retired file is what a 6.5 writer left (bytes, no row); 6.6.0 writes none.
     const copy = conflictCopyPath(NOTE, 'peer-b', new Date('2026-09-02T10:11:12.345Z'));
     await files.writeFile(HERE, copy, 'the peer\'s version of the note');
-    await syncSchemaFiles(HERE, { typeSchemas: { entity: { person: { propertySchemas: { born: { type: 'string' } } } } } });
-    const snapshots = fs.readdirSync(path.join(tmpDir, 'files', HERE, 'schemas')).map(n => `schemas/${n}`);
-    assert.ok(snapshots.length > 0, 'syncSchemaFiles wrote no snapshot — the fixture is not the thing under test');
-    const local = [copy, ...snapshots];
+    const retired = `schemas/${HERE}_entity_person.json`;
+    await files.writeFile(HERE, retired, JSON.stringify({ propertySchemas: { born: { type: 'string' } } }, null, 2));
+    const local = [copy, retired];
     assert.deepEqual(local.filter(p => !isInstanceLocalFile(p)), [],
       'the fixture names files the predicate does not call instance-local — re-anchor it on file-conflict.ts');
 
     assert.equal(await root(HERE), before,
       `the root counts files that never leave this instance (${local.join(', ')}), so two members diverge for ever `
-      + 'over a conflict copy or a schema snapshot');
+      + 'over a conflict copy or a retired schema file');
 
     // Sensitivity: an ordinary file must still move the root.
     await files.writeFile(HERE, 'notes/b.md', 'another note');
     assert.notEqual(await root(HERE), before, 'an ordinary file left the root where it was — the comparison sees nothing');
+  });
+
+  it('a schema snapshot (the private `<space>_schema_snapshots` row a schema change writes) leaves the root where it was, on both sides of the comparison', async () => {
+    const spaces = await import('../../server/dist/spaces/spaces.js');
+    const before = await root(HERE);
+    const kept = (space) => mongo.col(`${space}_schema_snapshots`).countDocuments({});
+    spaces.updateSpace(HERE, { meta: { typeSchemas: { entity: { person: { propertySchemas: { born: { type: 'string' } } } } } } });
+    spaces.updateSpace(THERE, { meta: { typeSchemas: { entity: { person: { propertySchemas: { born: { type: 'string' } } } } } } });
+    assert.ok(await holdsWithin(async () => (await kept(HERE)) > 0 && (await kept(THERE)) > 0, 15_000, 50),
+      'a schema change wrote no snapshot row: the fixture is not the thing under test');
+    assert.equal(await root(HERE), before, 'a schema snapshot moved the Merkle root: the collection is no brain family and no file, so nothing of it is a leaf');
+    assert.equal(await root(HERE), await root(THERE), 'two spaces holding one schema differ in root over their private snapshots');
   });
 });
