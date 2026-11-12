@@ -10,6 +10,7 @@
 
 import { MAX_DELETE_FIELDS, countError } from '../util/request-bounds.js';
 import { isObjectInternalKey } from '../util/object-internal-keys.js';
+import { SCHEMA_FINGERPRINT_FIELD } from '../spaces/schema-stamp.js';
 
 const SYSTEM_FIELDS = new Set([
   'id', '_id', 'name', 'type', 'spaceId', 'createdAt', 'updatedAt',
@@ -22,6 +23,9 @@ const SYSTEM_FIELDS = new Set([
   // `properties.title` is still deletable everywhere, and no entity, edge or fact has a bare `title` or
   // `startsAt` to remove.
   'title', 'startsAt', 'status',
+  // The schema stamp (Q-736): the server's own claim that the record conforms as stored, set and removed only by the write that checked it.
+  // Refused by name rather than ignored: a caller who asks to remove it is told it cannot, and no write `$unset`s and `$set`s one path.
+  SCHEMA_FINGERPRINT_FIELD,
 ]);
 
 // ── Public API ──────────────────────────────────────────────────────────────

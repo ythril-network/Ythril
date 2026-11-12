@@ -24,7 +24,7 @@ import { NEVER_RETURNED_PROJECTION } from './read-projection.js';
 import { writeFilterFor } from './write-precondition.js';
 import { writeAtReadVersion } from './write-at-read-version.js';
 import { BODY_FIELDS_OF } from '../sync/authored-content.js';
-import { getSpaceMeta } from '../spaces/schema-validation.js';
+import { readMetaForWrite, stampOpIfUnmoved, foldStampOp, type MetaForWrite } from '../spaces/schema-stamp.js';
 import {
   classifyEntityUpsertAgainst, classifyEdgeUpsertAgainst, classifyFactUpsertAgainst, classifyChronoUpsertAgainst, recordAfterPatch,
   SchemaViolationError, type UpdateValidation,
@@ -33,26 +33,33 @@ import { resolveEdgeEndsForWrite } from './write-plan/plan-edge.js';
 import { FUNCTIONAL_GUARD } from '../sync/local-only-fields.js';
 import type { BrainCollection } from '../config/types.js';
 
+/** A stored row of any forking family, as the keep reads and returns it. */
+type StoredRow = Record<string, unknown>;
+
 /** The fields an edge's identity is made of: equal in a fork and its subject by construction, never written by the keep. */
 export const EDGE_IDENTITY_FIELDS = Object.freeze(['from', 'to', 'fromKind', 'toKind', 'label'] as const);
 
-/** What the keep's `$set`/`$unset` leave of `parent`, judged as the family's own update judges its patch. */
+/**
+ * What the keep's `$set`/`$unset` leave of `parent`, judged as the family's own update judges its patch, with the pair the keep-writer read
+ * (`write`), handed back with the check so the keep stamps from the very meta it judged with (Q-736).
+ */
 async function classifyKeep(
   spaceId: string, family: BrainCollection, parent: Record<string, unknown>, $set: Record<string, unknown>, $unset: Record<string, ''>,
-): Promise<UpdateValidation> {
-  const meta = getSpaceMeta(spaceId);
+  write: MetaForWrite,
+): Promise<{ write: MetaForWrite; check: UpdateValidation }> {
   const left = recordAfterPatch(parent, $set, $unset);
+  const judged = (check: UpdateValidation) => ({ write, check });
   switch (family) {
-    case 'entities': return classifyEntityUpsertAgainst(meta, parent as never, left);
-    case 'facts': return classifyFactUpsertAgainst(meta, parent as never, left);
-    case 'chrono': return classifyChronoUpsertAgainst(meta, parent as never, left);
+    case 'entities': return judged(classifyEntityUpsertAgainst(write.meta, parent as never, left));
+    case 'facts': return judged(classifyFactUpsertAgainst(write.meta, parent as never, left));
+    case 'chrono': return judged(classifyChronoUpsertAgainst(write.meta, parent as never, left));
     case 'edges': {
       // The keep never writes an edge's identity, so its ends and label are the parent's, as the family's own update resolves them.
       const ends = await resolveEdgeEndsForWrite(spaceId, {
         from: parent['from'] as string, to: parent['to'] as string, label: parent['label'] as string,
         opts: { ...(parent['fromKind'] ? { fromKind: parent['fromKind'] as never } : {}), ...(parent['toKind'] ? { toKind: parent['toKind'] as never } : {}) },
       });
-      return classifyEdgeUpsertAgainst(meta, parent as never, left, ends);
+      return judged(classifyEdgeUpsertAgainst(write.meta, parent as never, left, ends));
     }
     default: throw new Error(`a keep of the '${family}' family is not a keep of a forking kind`);
   }
@@ -77,10 +84,16 @@ export async function writeKeptBody(
     if (kept[f] !== undefined) $set[f] = kept[f];
     else if (parent[f] !== undefined) $unset[f] = '';
   }
-  const check = await classifyKeep(spaceId, family, parent, $set, $unset);
+  // The meta and the schema stamp in ONE read (Q-736): the keep is judged with it and stamped from it.
+  const write = readMetaForWrite(spaceId);
+  const { check } = await classifyKeep(spaceId, family, parent, $set, $unset, write);
   if (check.blocked) throw new SchemaViolationError(check);
   const coll = col<Record<string, unknown> & { _id: string }>(spaceCollection(spaceId, family));
-  return admitSpaceWrite(spaceId, family, () => writeAtReadVersion<Record<string, unknown>>(spaceId, family, parent._id, ifMatchSeq, (at) => {
+  const validatedSeq = typeof parent['seq'] === 'number' ? parent['seq'] : null;
+  return admitSpaceWrite(spaceId, family, () => writeAtReadVersion<StoredRow>(spaceId, family, parent._id, ifMatchSeq, (at) => {
+    // Stamped only when the parent it lands on is the one judged (DI-4); the kept side's own stamp is never what is written.
+    const stamp = stampOpIfUnmoved(at, validatedSeq, write, check);
+    foldStampOp(stamp, $set, $unset);
     const update: Record<string, unknown> = { $set: { ...$set, ...at.patch } };
     if (Object.keys($unset).length > 0) update['$unset'] = $unset;
     return coll.findOneAndUpdate(asFilter<{ _id: string }>(writeFilterFor(parent._id, { readSeq: at.readSeq, ifMatchSeq })), update as never,

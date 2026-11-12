@@ -42,6 +42,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 import { remintForks, type ForkRepoint } from './forks.js';
 import { rekeyedRow, UNSET_GUARD } from '../sync/local-only-fields.js';
+import { UNSTAMP } from '../spaces/schema-stamp.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { EdgeDoc, LinkDoc } from '../config/types.js';
 
@@ -185,8 +186,10 @@ export async function relinkEdgesOfRecord(
    * Where it declines (`null`) the endpoints are written IN PLACE: an edge a PEER authored is not moved (its copy would refuse our tombstone and hold
    * two rows), and dropping the write would leave the edge pointing at the record this relink's caller deletes.
    */
+  // UNSTAMP (Q-736, D-N1), re-keyed and in place alike: a relink moves an edge onto new ends, which an endpoint-kind rule or a functional label
+  // may forbid there, and checks nothing, so the schema stamp ("conforms as stored") no longer holds and goes with the move.
   const moved = await rekeyEdges(spaceId, toRelink.map(r => ({ existing: r.edge, next: { from: r.from, to: r.to } })),
-    { updatedAt: now }, [], session, undefined, { moveForeign });
+    { updatedAt: now }, Object.keys(UNSTAMP.$unset), session, undefined, { moveForeign });
   const inPlace = toRelink.filter((_, i) => moved[i] === null);
   if (inPlace.length > 0) {
     // A relink moves `from`, and the write guard (`_functionalGuard`, cleared by `UNSET_GUARD`) is a function of `(from, label)`: it is DROPPED, never
@@ -200,7 +203,7 @@ export async function relinkEdgesOfRecord(
       // The ends the relink moved (`relinkedEnds`), by kind as well as id: `r.from`/`r.to` already hold them.
       updates['from'] = r.from;
       updates['to'] = r.to;
-      return { updateOne: { filter: { _id: r.edge._id }, update: { $set: updates, $unset: UNSET_GUARD } } };
+      return { updateOne: { filter: { _id: r.edge._id }, update: { $set: updates, $unset: { ...UNSET_GUARD, ...UNSTAMP.$unset } } } };
     }), (slice, { ordered }) => edgeColl.bulkWrite(asBulk<EdgeDoc>(slice), { ordered, session }), { ordered: true }), 'relink.edge');
   }
 

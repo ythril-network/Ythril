@@ -17,6 +17,7 @@ import { deriveChronoStatus } from './chrono-status.js';
 import { datePassedPolicy, typesWhereDatePassedMeansNothing } from './chrono-date-policy.js';
 import { applyExpiryToUpdate } from './ttl.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
+import { readMetaForWrite, stampOpIfUnmoved, foldStampOp, carryStamp } from '../spaces/schema-stamp.js';
 import { classifyChronoUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { mergePropertiesOrKeep } from './merge-fields.js';
 import { applyDeleteFields } from './delete-fields.js';
@@ -248,11 +249,11 @@ export async function updateChrono(
    * same ordering `updateEntityById` and `updateFact` need, and for the same reason: a patch that REMOVES a
    * required property has only broken the record once the deletion is applied.
    */
-  {
-    const check = classifyChronoUpsertAgainst(getSpaceMeta(spaceId), existing, recordAfterPatch(existing, $set, $unset));
-    if (check.blocked) throw new SchemaViolationError(check);
-    takenBack.onValidation?.(check);
-  }
+  // The meta and the schema stamp in ONE read (Q-736): the stamp the write lands names the schema this check judged with.
+  const write = readMetaForWrite(spaceId);
+  const check = classifyChronoUpsertAgainst(write.meta, existing, recordAfterPatch(existing, $set, $unset));
+  if (check.blocked) throw new SchemaViolationError(check);
+  takenBack.onValidation?.(check);
 
   applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
     { collection: 'chrono', existing: existing as unknown as Record<string, unknown> }); // F10
@@ -264,6 +265,9 @@ export async function updateChrono(
   // prepared refuses it, and one registered after waits for it.
   const beforeWrite = await admitSpaceWrite(spaceId, 'chrono', () => writeAtReadVersion<ChronoEntry>(spaceId, 'chrono', id, ifMatchSeq, (at) => {
     $set['seq'] = at.version;
+    // The schema stamp rides `$set`/`$unset`, so the answer below carries it; only when the row it lands on is the one validated (DI-4).
+    const stamp = stampOpIfUnmoved(at, existing.seq ?? null, write, check);
+    foldStampOp(stamp, $set, $unset);
     const updateOp: Record<string, unknown> = { $set: { ...$set, ...at.patch } };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
     return col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).findOneAndUpdate(
@@ -278,7 +282,7 @@ export async function updateChrono(
   }).inc();
   // Nothing matched, so nothing was written; the response below is built from `existing`.
   if (!beforeWrite) return null;
-  const updatedChrono = { ...existing, ...($set as Partial<ChronoEntry>) } as ChronoEntry;
+  const updatedChrono = carryStamp({ ...existing, ...($set as Partial<ChronoEntry>) } as ChronoEntry, $set, $unset);
   if ('_expireAt' in $unset) delete (updatedChrono as { _expireAt?: unknown })._expireAt;
   // Toggling exclusion always ends in an embed job, and the job handles BOTH directions — it unsets
   // the vector when the flag is on and computes one when it is off. So this path never has to know

@@ -11,7 +11,8 @@ import { type ContradictionWarning } from '../insert-contradictions.js';
 import { chronoEmbedText } from '../embed-text.js';
 import { derivedFieldsForWrite } from '../derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
-import { getSpaceMeta, applyPropertyDefaults } from '../../spaces/schema-validation.js';
+import { applyPropertyDefaults } from '../../spaces/schema-validation.js';
+import { readMetaForWrite, stampOp, stampSetOf, stampUnsetOf } from '../../spaces/schema-stamp.js';
 import { classifyChronoUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
 import { mergeTags, mergeProperties, mergePropertiesOrKeep } from '../merge-fields.js';
 import { type SimilarMatch } from '../recall.js';
@@ -75,11 +76,12 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   const existing = fields.id ? view.stored('chrono', fields.id) as unknown as ChronoEntry | null : null;
 
   // THE SCHEMA IS ENFORCED HERE, against the merged record; defaults on insert only.
-  const meta = getSpaceMeta(spaceId);
+  // The meta and the schema stamp in ONE read (Q-736): the stamp names the schema this check judged with, never a later one.
+  const write = readMetaForWrite(spaceId);
   const withDefaults = existing
     ? fields.properties
-    : applyPropertyDefaults(meta?.typeSchemas?.chrono?.[fields.type], fields.properties);
-  const check = classifyChronoUpsertAgainst(meta, existing,
+    : applyPropertyDefaults(write.meta?.typeSchemas?.chrono?.[fields.type], fields.properties);
+  const check = classifyChronoUpsertAgainst(write.meta, existing,
     { title: fields.title, type: fields.type, description: fields.description, tags: fields.tags, properties: withDefaults });
   if (check.blocked) throw new SchemaViolationError(check);
   opts?.onValidation?.(check);
@@ -109,16 +111,18 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
 
   // The idempotent branch: a supplied id that names an entry converges rather than duplicating.
   if (existing) {
+    // Stamped when the converged record conforms, unstamped when it does not (a stamp means "conforms as stored").
+    const stamp = stampOp(write, check);
     const $set: Record<string, unknown> = {
       title: fields.title, type: fields.type, startsAt: fields.startsAt, status,
-      tags: mergeTags(existing.tags, tags), updatedAt: now, ...derived.set,
+      tags: mergeTags(existing.tags, tags), updatedAt: now, ...derived.set, ...stampSetOf(stamp),
     };
     if (fields.endsAt !== undefined) $set['endsAt'] = fields.endsAt;
     if (fields.description !== undefined) $set['description'] = fields.description;
     if (fields.confidence !== undefined) $set['confidence'] = fields.confidence;
     if (fields.properties !== undefined) $set['properties'] = mergeProperties(existing.properties, fields.properties);
     if (fields.recurrence !== undefined) $set['recurrence'] = fields.recurrence;
-    const $unset: Record<string, unknown> = { ...derived.unset };
+    const $unset: Record<string, unknown> = { ...derived.unset, ...stampUnsetOf(stamp) };
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'chrono', existing: existing as unknown as Record<string, unknown> });
     const result = convergeResult(existing, $set, $unset);
@@ -149,7 +153,7 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   if (fields.recurrence !== undefined) doc.recurrence = fields.recurrence;
   // The collection+type is passed so the SCHEMA tier applies (record > schema > space).
   stampExpiryOnCreate(spaceId, doc, ttlDays, { collection: 'chrono', type: doc.type });
-  const insert = finishInsert({ view, kind: 'chrono', doc, opts, meta });
+  const insert = finishInsert({ view, kind: 'chrono', doc, opts, write, check });
   return {
     plan: {
       kind: 'chrono', spaceId, id: doc._id, op: 'insert', doc: insert, result: insert,

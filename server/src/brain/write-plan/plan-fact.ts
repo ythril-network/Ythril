@@ -10,7 +10,8 @@ import { type ContradictionWarning } from '../insert-contradictions.js';
 import { factEmbedText } from '../embed-text.js';
 import { derivedFieldsForWrite } from '../derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
-import { getSpaceMeta, applyPropertyDefaults } from '../../spaces/schema-validation.js';
+import { applyPropertyDefaults } from '../../spaces/schema-validation.js';
+import { readMetaForWrite, stampOp, stampSetOf, stampUnsetOf } from '../../spaces/schema-stamp.js';
 import { classifyFactUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
 import { mergeTags, mergeProperties, mergePropertiesOrKeep } from '../merge-fields.js';
 import { type SimilarMatch } from '../recall.js';
@@ -68,11 +69,12 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
    * validation: a `required` property with a `default` is not a violation, and on an update an absent property
    * may be one the caller has just removed.
    */
-  const meta = getSpaceMeta(spaceId);
+  // The meta and the schema stamp in ONE read (Q-736): the stamp names the schema this check judged with, never a later one.
+  const write = readMetaForWrite(spaceId);
   const properties = existing
     ? input.properties
-    : applyPropertyDefaults(type ? meta?.typeSchemas?.fact?.[type] : undefined, input.properties);
-  const check = classifyFactUpsertAgainst(meta, existing, { fact, type, description, tags, properties }, input.instanceWrittenKeys);
+    : applyPropertyDefaults(type ? write.meta?.typeSchemas?.fact?.[type] : undefined, input.properties);
+  const check = classifyFactUpsertAgainst(write.meta, existing, { fact, type, description, tags, properties }, input.instanceWrittenKeys);
   if (check.blocked) throw new SchemaViolationError(check);
   opts?.onValidation?.(check);
 
@@ -107,13 +109,15 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
     // The vector and the text it was made from go in together or not at all: with no vector computed the previous pair
     // stays, describing each other, while the queued job catches up (rule I, `derivedFieldsForWrite`).
     const derived = await derivedFieldsForWrite({ text: () => embedText, vector, suppressed, onto: 'stored' });
+    // Stamped when the converged record conforms, unstamped when it does not (a stamp means "conforms as stored").
+    const stamp = stampOp(write, check);
     const $set: Record<string, unknown> = {
-      fact, tags: mergeTags(existing.tags, tags), updatedAt: now, ...derived.set,
+      fact, tags: mergeTags(existing.tags, tags), updatedAt: now, ...derived.set, ...stampSetOf(stamp),
     };
     if (type !== undefined) $set['type'] = type;
     if (description !== undefined) $set['description'] = description;
     if (properties !== undefined) $set['properties'] = mergeProperties(existing.properties, properties);
-    const $unset: Record<string, unknown> = { ...derived.unset };
+    const $unset: Record<string, unknown> = { ...derived.unset, ...stampUnsetOf(stamp) };
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'fact', existing: existing as unknown as Record<string, unknown> });
     const result = convergeResult(existing, $set, $unset);
@@ -142,7 +146,7 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
   if (description !== undefined) doc.description = description;
   if (properties !== undefined) doc.properties = properties;
   stampExpiryOnCreate(spaceId, doc, ttlDays, { collection: 'fact', type: doc.type });
-  const insert = finishInsert({ view, kind: 'fact', doc, opts, meta });
+  const insert = finishInsert({ view, kind: 'fact', doc, opts, write, check });
   return {
     plan: {
       kind: 'fact', spaceId, id: doc._id, op: 'insert', doc: insert, result: insert,

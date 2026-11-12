@@ -39,6 +39,7 @@ import { planFact, factWant, type FactInput } from './write-plan/plan-fact.js';
 import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
 import { planChrono, chronoWant, type ChronoInput } from './write-plan/plan-chrono.js';
 import { planEdge, edgeWant, edgeRefusal, type EdgeInput, type EdgeSubject } from './write-plan/plan-edge.js';
+import { readMetaForWrite } from '../spaces/schema-stamp.js';
 
 /** Max items processed per collection in a single bulk call. */
 export const BULK_MAX_PER_TYPE = 500;
@@ -649,8 +650,10 @@ function batchRun(
         type: typeof p.item['type'] === 'string' ? p.item['type'].trim() : undefined,
       });
       if (subject) {
+        // A refusal only: nothing is stamped from this read, the planner reads its own pair when it plans the edge.
+        const write = readMetaForWrite(spaceId);
         refuseEachEdge(connectionsOf(p.item, subject.id, p.kind).edges, (edge, passed) => {
-          edgeRefusal(spaceId, edge, view, subject, passed);
+          edgeRefusal(spaceId, edge, view, subject, passed, write);
         });
       }
       const mark = out.errors.length;
@@ -752,7 +755,8 @@ function batchRun(
      */
     await view.load(edgeWant(spaceId, edgeInput));
     try {
-      edgeRefusal(spaceId, edgeInput, view, undefined, []);
+      // A refusal only: nothing is stamped from this read, the planner reads its own pair when it plans the edge.
+      edgeRefusal(spaceId, edgeInput, view, undefined, [], readMetaForWrite(spaceId));
     } catch (err) {
       const why = itemReason(err);
       return refuse(why.reason, why.violation);

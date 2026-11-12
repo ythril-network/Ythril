@@ -14,7 +14,7 @@ import { brainWriteSeqTotal } from '../metrics/registry.js';
 import { parseLimit, parseSkip } from '../util/pagination.js';
 import { toMongoSort, LANDING_ORDER, type SortSpec } from './list-sort.js';
 import { applyExpiryToUpdate } from './ttl.js';
-import { getSpaceMeta } from '../spaces/schema-validation.js';
+import { readMetaForWrite, stampOpIfUnmoved, foldStampOp, carryStamp } from '../spaces/schema-stamp.js';
 import { classifyFactUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { applyDeleteFields } from './delete-fields.js';
 import { mergePropertiesOrKeep } from './merge-fields.js';
@@ -198,11 +198,11 @@ export async function updateFact(
    * is what "validate the merged record" means, and what neither door was doing for a fact before there was
    * a classifier for one.
    */
-  {
-    const check = classifyFactUpsertAgainst(getSpaceMeta(spaceId), existing, recordAfterPatch(existing, $set, $unset));
-    if (check.blocked) throw new SchemaViolationError(check);
-    takenBack.onValidation?.(check);
-  }
+  // The meta and the schema stamp in ONE read (Q-736): the stamp the write lands names the schema this check judged with.
+  const write = readMetaForWrite(spaceId);
+  const check = classifyFactUpsertAgainst(write.meta, existing, recordAfterPatch(existing, $set, $unset));
+  if (check.blocked) throw new SchemaViolationError(check);
+  takenBack.onValidation?.(check);
 
   // Re-embed whenever any content field changes
   // There is no longer a "did the content change?" branch here. It existed to decide whether to pay for an
@@ -226,6 +226,9 @@ export async function updateFact(
   // ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
   const before = await admitSpaceWrite(spaceId, 'facts', () => writeAtReadVersion<FactDoc>(spaceId, 'facts', memoryId, ifMatchSeq, (at) => {
     $set['seq'] = at.version;
+    // The schema stamp rides `$set`/`$unset`, so the answer below carries it; only when the row it lands on is the one validated (DI-4).
+    const stamp = stampOpIfUnmoved(at, existing.seq ?? null, write, check);
+    foldStampOp(stamp, $set, $unset);
     // The stamp's own fields ride in the write, not in `$set`: `result` below is built from `$set` and must not carry a position.
     const updateOp: Record<string, unknown> = { $set: { ...$set, ...at.patch } };
     if (Object.keys($unset).length > 0) updateOp['$unset'] = $unset;
@@ -245,7 +248,7 @@ export async function updateFact(
   // a write that did not happen.
   if (!before) return null;
 
-  const result = { ...existing, ...($set as Partial<FactDoc>) } as FactDoc;
+  const result = carryStamp({ ...existing, ...($set as Partial<FactDoc>) } as FactDoc, $set, $unset);
   if ('_expireAt' in $unset) delete (result as { _expireAt?: unknown })._expireAt;
 
   // Apply deleteFields to the returned doc for consistency

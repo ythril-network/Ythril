@@ -52,6 +52,7 @@ import type { ChronoEntry, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { healStoredStamps } from './retention-stamp-heal.js';
+import { UNSTAMP } from '../spaces/schema-stamp.js';
 
 /** Every collection the schema tier can reach. `files` is absent: a file has no type, so no schema window. */
 const TYPED_COLLECTIONS: readonly KnowledgeType[] = KNOWLEDGE_TYPES;
@@ -168,6 +169,9 @@ export async function redactLapsedChronoContent(spaceId: string, now: Date): Pro
     const $unset: Record<string, ''> = {};
     if (needsContentRedaction(r)) {
       for (const f of REDACTED_CHRONO_FIELDS) if (r[f] !== undefined) $unset[f] = '';
+      // UNSTAMP (Q-736, D-N4): redaction removes `description`, which a space or type rule may read (`self.description`), and checks
+      // nothing, so the schema stamp ("conforms as stored") no longer holds and goes with it.
+      Object.assign($unset, UNSTAMP.$unset);
     }
     await col<ChronoEntry>(spaceCollection(spaceId, 'chrono')).updateOne(
       asFilter<ChronoEntry>({ _id: r._id }),

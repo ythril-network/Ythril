@@ -34,7 +34,8 @@ import { type RecordFlags } from '../record-flag.js';
 import { edgeIdFor } from '../edge-id.js';
 import { storedEdgeKind, edgeEndpointKind, missingRefsRefusal } from '../entity-refs.js';
 import { resolveEdgeEndpointNames } from '../edge-endpoint-names.js';
-import type { EdgeDoc } from '../../config/types.js';
+import type { EdgeDoc, SpaceMeta } from '../../config/types.js';
+import { readMetaForWrite, stampOp, stampSetOf, stampUnsetOf, type MetaForWrite } from '../../spaces/schema-stamp.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import { yieldToEventLoop } from '../../util/yield-to-event-loop.js';
 import { ReadSet, type ForkRows, type ReadWant, type Triplet } from './read-set.js';
@@ -121,7 +122,15 @@ export function edgeWant(spaceId: string, input: EdgeInput, subject?: EdgeSubjec
  * for the want and the plan: if they disagreed, the plan would ask the read set for a count it never loaded.
  */
 export function isFunctionalLabel(spaceId: string, label: string): boolean {
-  return getSpaceMeta(spaceId)?.typeSchemas?.edge?.[label]?.functional === true;
+  return functionalIn(getSpaceMeta(spaceId), label);
+}
+
+/**
+ * {@link isFunctionalLabel} asked of a meta the caller already holds: a write that validates with `write.meta` asks this, so the label's
+ * rule and the schema it stamps are read once, from one meta (Q-736, Q1). The spaceId form stays for what decides what to LOAD.
+ */
+export function functionalIn(meta: SpaceMeta | undefined, label: string): boolean {
+  return meta?.typeSchemas?.edge?.[label]?.functional === true;
 }
 
 /**
@@ -136,7 +145,15 @@ export function isFunctionalLabel(spaceId: string, label: string): boolean {
  * that. One function, so the condition and the key are never spelled apart.
  */
 export function guardFor(spaceId: string, from: string, label: string): string | undefined {
-  return isFunctionalLabel(spaceId, label) && validationRefuses(getSpaceMeta(spaceId)) ? functionalSubjectKey(from, label) : undefined;
+  return guardIn(getSpaceMeta(spaceId), from, label);
+}
+
+/**
+ * {@link guardFor} decided from a meta the caller already holds: THE one place the guard is decided. A stamping write asks it with the meta it
+ * validated with (`write.meta`), so the guard and the schema stamp come from one read of the schema (Q-736, Q1).
+ */
+export function guardIn(meta: SpaceMeta | undefined, from: string, label: string): string | undefined {
+  return functionalIn(meta, label) && validationRefuses(meta) ? functionalSubjectKey(from, label) : undefined;
 }
 
 /**
@@ -284,6 +301,8 @@ export interface EdgeAllowed {
   /** The caller's properties with the space's defaults filled in — on an insert only, so an update cannot resurrect a deletion. */
   withDefaults: EdgeInput['properties'];
   check: UpdateValidation;
+  /** The pair the classification judged with, handed back so the planner stamps from the very meta the check read (Q-736). */
+  write: MetaForWrite;
 }
 
 /**
@@ -311,9 +330,13 @@ export interface EdgeAllowed {
  *
  * A violation the stored edge already had does not refuse an unrelated write (`classifyEdgeUpsertAgainst`); only what
  * this write introduces does.
+ *
+ * `write` is the caller's one read of the meta and its stamp (`readMetaForWrite`): the schema, the functional rule and the stamp the
+ * planner writes all come from it, never from a second read here (Q-736, Q1).
  */
 export function edgeRefusal(
   spaceId: string, input: EdgeInput, view: ReadSet, subject: EdgeSubject | undefined, sameBody: readonly EdgeInput[],
+  write: MetaForWrite,
 ): EdgeAllowed {
   const { from, to, label, properties, opts } = input;
   if (isStrictLinkage(spaceId)) {
@@ -331,23 +354,23 @@ export function edgeRefusal(
    * 2026-08-29: "upsertEdge should validate of course." Defaults fill in what the caller omitted before
    * validation and only on an INSERT.
    */
-  const meta = getSpaceMeta(spaceId);
-  const withDefaults = existing ? properties : applyPropertyDefaults(meta?.typeSchemas?.edge?.[label], properties);
-  const functional = isFunctionalLabel(spaceId, label);
+  const withDefaults = existing ? properties : applyPropertyDefaults(write.meta?.typeSchemas?.edge?.[label], properties);
+  const functional = functionalIn(write.meta, label);
   const passed = sameBody.map(e => ({ from: e.from, to: e.to, label: e.label, fromKind: e.opts?.fromKind, toKind: e.opts?.toKind }));
   const ends = resolvedEnds(view, input, functional, subject, passed);
-  const check = classifyEdgeUpsertAgainst(meta, existing,
+  const check = classifyEdgeUpsertAgainst(write.meta, existing,
     { label, description: input.description, tags: input.tags, properties: withDefaults }, ends, input.instanceWrittenKeys);
   if (check.blocked) throw new EdgeSchemaViolation(check);
-  return { existing, withDefaults, check };
+  return { existing, withDefaults, check, write };
 }
 
 export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet): Promise<EdgePlanned> {
   const { from, to, label, weight, type, description, tags, ttlDays, properties, opts } = input;
+  // The meta and the schema stamp in ONE read (Q-736): the refusal judges with it, and the guard and the stamp below come from it.
+  const write = readMetaForWrite(spaceId);
   // The refusal first: nothing below is decided, noted or embedded for an edge the space does not allow.
-  const { existing, withDefaults, check } = edgeRefusal(spaceId, input, view, undefined, []);
+  const { existing, withDefaults, check } = edgeRefusal(spaceId, input, view, undefined, [], write);
   opts?.onValidation?.(check);
-  const meta = getSpaceMeta(spaceId);
 
   const now = new Date().toISOString();
   const effectiveDesc = description ?? existing?.description;
@@ -375,14 +398,16 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet)
   const derived = await derivedFieldsForWrite({ text, vector, suppressed, onto: 'stored' });
 
   if (existing) {
-    const $set: Record<string, unknown> = { updatedAt: now, ...derived.set };
+    // Stamped when the converged edge conforms, unstamped when it does not (a stamp means "conforms as stored").
+    const stamp = stampOp(write, check);
+    const $set: Record<string, unknown> = { updatedAt: now, ...derived.set, ...stampSetOf(stamp) };
     if (weight !== undefined) $set['weight'] = weight;
     if (type !== undefined) $set['type'] = type;
     if (description !== undefined) $set['description'] = description;
     // When tags are provided, persist the merged result; otherwise leave existing tags unchanged.
     if (tags !== undefined) $set['tags'] = effectiveTags;
     if (properties !== undefined) $set['properties'] = effectiveProps;
-    const $unset: Record<string, unknown> = { ...derived.unset };
+    const $unset: Record<string, unknown> = { ...derived.unset, ...stampUnsetOf(stamp) };
     // Correcting a kind back to `entity` must UNSET it: absent is the canonical form, and a stored `'entity'`
     // would make this edge unfindable by its own triplet lookup.
     for (const side of ['fromKind', 'toKind'] as const) {
@@ -415,7 +440,7 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet)
    * REFUSES — a `warn` or `off` space lets a second edge through, and a marker would turn that into a duplicate-key error
    * nobody can explain. "Refuses" is `validationRefuses`, the predicate `applyValidation` asks, never a spelling of its own.
    */
-  const functionalGuard = guardFor(spaceId, from, label);
+  const functionalGuard = guardIn(write.meta, from, label);
   const doc: EdgeDoc = {
     _id: edgeIdFor(from, to, label, opts?.fromKind, opts?.toKind),
     spaceId, from, to,
@@ -435,7 +460,7 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet)
   };
   // `doc.label`, NOT `doc.type` — an edge has both, and the schema is keyed by label.
   stampExpiryOnCreate(spaceId, doc, ttlDays, { collection: 'edge', type: doc.label });
-  const insert = finishInsert({ view, kind: 'edge', doc, opts, meta });
+  const insert = finishInsert({ view, kind: 'edge', doc, opts, write, check });
   return {
     plan: {
       kind: 'edge', spaceId, id: doc._id, op: 'insert', doc: insert, result: insert,

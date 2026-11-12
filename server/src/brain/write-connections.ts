@@ -55,6 +55,7 @@ import { resultingEntityType, EdgeSchemaViolation, type UpdateValidation } from 
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { ReadSet, mergeWants } from './write-plan/read-set.js';
 import { edgeWant, edgeRefusal, type EdgeSubject } from './write-plan/plan-edge.js';
+import { readMetaForWrite } from '../spaces/schema-stamp.js';
 import { primitivePropertyError } from './property-values.js';
 import { reconcileLinks, assertDesiredLinks } from './links.js';
 import { linksStartingFrom, linkClassesFrom } from './link-adjacency.js';
@@ -563,7 +564,9 @@ export async function assertConnections(
   const asked = connectionsOf(body, subject.id, fromKind).edges;
   const view = new ReadSet(spaceId);
   await view.load(mergeWants(asked.map(e => edgeWant(spaceId, e, subject))));
-  refuseEachEdge(asked, (edge, passed) => { edgeRefusal(spaceId, edge, view, subject, passed); });
+  // A refusal only: nothing is stamped from this read, the planner reads its own pair when it plans each edge.
+  const write = readMetaForWrite(spaceId);
+  refuseEachEdge(asked, (edge, passed) => { edgeRefusal(spaceId, edge, view, subject, passed, write); });
 }
 
 /**

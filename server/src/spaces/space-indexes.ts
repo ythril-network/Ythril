@@ -125,6 +125,16 @@ const TTL_INDEXES: readonly SpaceIndex[] = [
   // Files only: the flagged-row repair (`stripFlaggedRowsOnce`) and the purge of deleted files' audit records (`flaggedPage`)
   // both ask `deletedAt: { $exists: true }` of every space every cycle. Sparse, so it holds the deleted files' records alone.
   { part: 'files', keys: { deletedAt: 1 }, options: { name: 'ttl_deletedAt', sparse: true }, policy: 'report', bootSafe: false, sweep: true },
+  /*
+   * The schema stamp (Q-736) on the four record collections: the owed-snapshot gap scan asks the distinct stamps of every space each housekeeping
+   * cycle, and later readers filter by it. PARTIAL on the stamp's presence, so every row written before 6.6.0 (unstamped) costs nothing; built by the
+   * sweep like the retention indexes, `report`: a space without it is scanned, slowly and correctly, and never blocked at boot.
+   */
+  ...Object.values(COLLECTION_SUFFIX).map((part): SpaceIndex => ({
+    part, keys: { schemaFingerprint: 1 },
+    options: { name: 'schemaFingerprint_present', partialFilterExpression: { schemaFingerprint: { $exists: true } } },
+    policy: 'report', bootSafe: false, sweep: true,
+  })),
 ];
 
 /** The `(pos, _id)` index of one collection the position stream covers: see the comment where {@link SPACE_INDEXES} spreads it. */

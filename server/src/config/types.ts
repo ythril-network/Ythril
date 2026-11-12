@@ -1286,12 +1286,22 @@ export interface SecretsFile {
 
 // ── MongoDB document shapes ────────────────────────────────────────────────
 
+/**
+ * The schema stamp a record carries (Q-736): the fingerprint of the schema it conforms to AS STORED. Set only by the stamp op
+ * (`spaces/schema-stamp.ts`) of a write that validated it, removed by a write that leaves it unchecked or non-conforming, kept as sent
+ * by an arrival (the writer's claim). A caller's own value in a write body is ignored. Absent on a record written before 6.6.0 and not
+ * updated since. A file row and a link row carry none: neither has a schema of its own.
+ */
+export interface SchemaStamped {
+  schemaFingerprint?: string;
+}
+
 export interface AuthorRef {
   instanceId: string;
   instanceLabel: string;
 }
 
-export interface FactDoc extends StampSkewable {
+export interface FactDoc extends StampSkewable, SchemaStamped {
   /**
    * Keep this record stored, but stop it being EMBEDDED — the top tier of the switch a type schema and the
    * space also carry under this same name, resolving `record > schema > space`.
@@ -1356,7 +1366,7 @@ export interface FactDoc extends StampSkewable {
   _expireAt?: Date;
 }
 
-export interface EntityDoc extends StampSkewable {
+export interface EntityDoc extends StampSkewable, SchemaStamped {
   /**
    * Keep this record stored, but stop it being EMBEDDED — the top tier of the switch a type schema and the
    * space also carry under this same name, resolving `record > schema > space`.
@@ -1412,7 +1422,7 @@ export interface EntityDoc extends StampSkewable {
   _expireAt?: Date;
 }
 
-export interface EdgeDoc extends StampSkewable {
+export interface EdgeDoc extends StampSkewable, SchemaStamped {
   /**
    * Keep this record stored, but stop it being EMBEDDED — the top tier of the switch a type schema and the
    * space also carry under this same name, resolving `record > schema > space`.
@@ -1565,7 +1575,7 @@ import { CHRONO_STATUSES } from './chrono-statuses.js';
 /** @see CHRONO_STATUSES — derived, never written out a second time. */
 export type ChronoStatus = typeof CHRONO_STATUSES[number];
 
-export interface ChronoEntry extends StampSkewable {
+export interface ChronoEntry extends StampSkewable, SchemaStamped {
   /**
    * Keep this record stored, but stop it being EMBEDDED — the top tier of the switch a type schema and the
    * space also carry under this same name, resolving `record > schema > space`.

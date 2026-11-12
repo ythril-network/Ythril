@@ -167,6 +167,37 @@ export function stampOpIfUnmoved(at: { readonly readSeq: number | null }, valida
   return stampOp(write, check);
 }
 
+/**
+ * Fold `op` into the `$set` and `$unset` a write builds, taking the field out of the other one, so the stamp is never set and unset by one
+ * write (Mongo refuses that) and a retried attempt replaces what an earlier attempt folded in.
+ */
+export function foldStampOp(op: StampOp, $set: Record<string, unknown>, $unset: Record<string, unknown>): void {
+  if ('$set' in op) {
+    $set[SCHEMA_FINGERPRINT_FIELD] = op.$set.schemaFingerprint;
+    delete $unset[SCHEMA_FINGERPRINT_FIELD];
+  } else {
+    $unset[SCHEMA_FINGERPRINT_FIELD] = '';
+    delete $set[SCHEMA_FINGERPRINT_FIELD];
+  }
+}
+
+/** What `op` sets, as a map a write spreads (empty for {@link UNSTAMP}). */
+export const stampSetOf = (op: StampOp): Readonly<Record<string, string>> => ('$set' in op ? op.$set : {});
+
+/** What `op` removes, as a map a write's `$unset` spreads (empty for a stamp); its keys are what a re-key takes as `alsoUnset`. */
+export const stampUnsetOf = (op: StampOp): Readonly<Record<string, ''>> => ('$unset' in op ? op.$unset : {});
+
+/**
+ * The record a write ANSWERS with, carrying the stamp as the write's folded `$set`/`$unset` left it: the stored stamp when one was set, none
+ * when it was removed. An answer built from the record as read would otherwise name a stamp the write just took away.
+ */
+export function carryStamp<T extends object>(answer: T, $set: Readonly<Record<string, unknown>>, $unset: Readonly<Record<string, unknown>>): T {
+  const out = answer as Record<string, unknown>;
+  if (SCHEMA_FINGERPRINT_FIELD in $set) out[SCHEMA_FINGERPRINT_FIELD] = $set[SCHEMA_FINGERPRINT_FIELD];
+  else if (SCHEMA_FINGERPRINT_FIELD in $unset) delete out[SCHEMA_FINGERPRINT_FIELD];
+  return answer;
+}
+
 // ── What the snapshot writer keeps for a space ──────────────────────────────────────────────────────────────────────────────────────────
 
 /** What a snapshot of a variation was built from: its own definitions, each layer it received, and what it serves each network. */

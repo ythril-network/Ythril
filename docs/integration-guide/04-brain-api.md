@@ -503,13 +503,22 @@ reasoning, and the `$in` form for a set of ids, are in
 
 > **What a stored record carries beyond the fields you wrote.** A read by id or a list returns the
 > document as stored, minus the embedding vector, `deliveredBy` and an edge's write guard — which, as
-> everywhere else, are never returned and cannot be requested by projection or read by a filter. Three of the remaining fields are the system's rather than yours:
+> everywhere else, are never returned and cannot be requested by projection or read by a filter. Four of the remaining fields are the system's rather than yours:
 >
 > | field | what it is |
 > |---|---|
 > | `seq` | The sync counter, and the value to send as `If-Match` on a conditional write. Useful, not internal |
 > | `matchedText` | The exact text this record's vector was built from. Derived from the fields above it, and for a file chunk it is the heading plus the passage — so the passage a SECOND time |
 > | `embeddingModel` | Which model produced the vector. Identical for every record in a space |
+> | `schemaFingerprint` | The fingerprint of the space's schema this record **conforms to as stored** (the one GET meta and `space_meta` answer). A fact, entity, edge or chrono entry only; absent on a record written before 6.6.0 and not updated since |
+>
+> **`schemaFingerprint` is the server's claim, and it is kept true.** A create or update whose record fully conforms to the
+> schema it was checked against is stamped with that schema's fingerprint, and the write's answer carries it. Every write
+> that leaves the record unchecked or not conforming removes it: an update that leaves a violation (a `warn` or `off` space
+> lets one through), an update whose record moved under it before it landed, the redaction of a chrono entry's content
+> (it removes `description`, which a rule may read), and the relink of an edge onto new ends (a merge). A sync arrival
+> keeps the stamp its writer gave it: that is the writer's claim, not checked here. A `schemaFingerprint` sent in a write
+> body is ignored (not named as an unknown field, not stored), and `deleteFields` refuses it by name. Recall hits withhold it.
 >
 > **`matchedText` and `embeddingModel` are withheld by DEFAULT here** — `matchedText` is the passage a
 > second time, on the read most likely to be made in bulk. Send `includeDiagnostics: true` to get them

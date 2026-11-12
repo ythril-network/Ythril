@@ -24,7 +24,7 @@ import { findInsertContradictions, type ContradictionWarning } from '../insert-c
 import { suppressedAfterWrite } from '../suppress-embeddings.js';
 import { applyRecordFlags, type RecordFlags } from '../record-flag.js';
 import { stampSkewOnCreate } from '../stamp-skew.js';
-import type { SpaceMeta } from '../../config/types.js';
+import { stampOp, stampSetOf, type MetaForWrite, type SchemaCheckOutcome } from '../../spaces/schema-stamp.js';
 import type { DupeCheckOpts } from '../write-options.js';
 import type { ReadSet } from './read-set.js';
 import type { PlanKind } from './types.js';
@@ -110,13 +110,19 @@ export function finishInsert<D extends { _id: string; seq: number; createdAt: st
   kind: PlanKind;
   doc: D;
   opts: RecordFlags | undefined;
-  meta: SpaceMeta | undefined;
+  /** The pair the planner validated with (`readMetaForWrite`): the insert is stamped from it, never from a meta read again here. */
+  write: MetaForWrite;
+  /** The planner's check of this record: the insert carries the stamp only when it found nothing. */
+  check: SchemaCheckOutcome;
 }): Record<string, unknown> {
-  const { doc } = args;
+  const { doc, write } = args;
   // Stored, not merely consulted: everything that revisits a record later reads the tiers off the document.
   applyRecordFlags(doc, args.opts);
   // Warn-not-refuse: a caller's own stamp checked against ours; stored only when it disagrees.
-  stampSkewOnCreate(doc as never, args.meta);
+  stampSkewOnCreate(doc as never, write.meta);
+  // The schema stamp (Q-736): the field when the record conforms as written, nothing when it does not (an insert has no stamp to remove).
+  const stamp = stampOp(write, args.check);
+  Object.assign(doc, stampSetOf(stamp));
   const { seq: _seq, ...insert } = doc;
   args.view.noteWritten(args.kind, doc, true);
   return insert;
