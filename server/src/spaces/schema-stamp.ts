@@ -40,7 +40,7 @@ import { servedMetaFor } from '../sync/replicated-meta.js';
 import { layersFor } from './network-layers.js';
 import { findSpace } from './space-lookup.js';
 import { LruMap } from '../util/lru-map.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { sha256Hex } from '../util/sha256-hex.js';
 
 /** A schema version: its fingerprint and the canonical text the fingerprint is the hash of. */
@@ -137,7 +137,8 @@ const spaceOfWrite = new WeakMap<MetaForWrite, string>();
  */
 function keepStampedSnapshotLater(spaceId: string, stamp: Stamp): void {
   void import('./schema-snapshot-store.js').then(store => store.keepStampedSnapshot(spaceId, stamp),
-    (err: unknown) => log.error(`Schema snapshot writer could not be loaded, so the snapshot of fingerprint ${stamp.fp.slice(0, 12)} of space '${spaceId}' was not kept: ${String(err)}`));
+    (err: unknown) => log.error(`Schema snapshot writer could not be loaded, so the snapshot of fingerprint ${peerText(stamp.fp.slice(0, 12))} of space '${peerText(spaceId)}' `
+      + `was not kept: ${peerText(err)}`));
 }
 
 /**

@@ -81,6 +81,9 @@ const EXEMPT = {
   ...reasoned('the relink partitions forks out and hands them to the re-mint; `rekeyEdges` asserts that no row handed to it carries `forkOf`', [
     'brain/edge-rekey.ts:rekeyEdges', 'brain/relink-references.ts:relinkEdgesOfRecord',
   ]),
+  ...reasoned('an entity re-type takes the schema stamp off every edge that names it, forks included: a fork edge was judged against the old type too, and only the stamp is removed, never an authored field', [
+    'brain/retyped-entity-edges.ts:unstampEdgesOfRetypedEntity',
+  ]),
   ...reasoned('retention applies to a fork as to any record: the sweep selects fork rows by their own stamp and writes no authored field (R14)', [
     'brain/chrono-redaction.ts:redactLapsedChronoContent', 'brain/chrono-redaction.ts:backfillTypedExpiry', 'brain/retention-stamp-heal.ts:healStoredStamps',
   ]),

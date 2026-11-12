@@ -109,9 +109,9 @@ export function forgetSchemaSnapshotOutcomes(): void {
 }
 
 /** Say a failed ask of `member` for `fp`, once per window per member and space. */
-function sayFailed(member: NetworkMember, spaceId: string, fp: string, why: string): void {
+function sayFailed(member: NetworkMember, spaceId: string, fp: string, why: unknown): void {
   failureSaid(`${member.instanceId}:${spaceId}`, () => log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} `
-    + `for space '${peerText(spaceId)}': ${why} (said once per ${SAY_ONCE_WINDOW_MS / 60_000} minutes while it fails)`));
+    + `for space '${peerText(spaceId)}': ${peerText(why)} (said once per ${SAY_ONCE_WINDOW_MS / 60_000} minutes while it fails)`));
 }
 
 /** The members of `spaceId` that may be asked at all: they share it with this server and run a release that serves snapshots. */
@@ -225,7 +225,7 @@ async function askMemberFor(a: SnapshotFetch, fp: string, memberKey: string, tur
   } catch (err) {
     // The turn was cut (an act on the space, shutdown): the member did not fail. Otherwise it is unreachable, and the next fingerprint would wait too.
     if (!turn.mayContinue() || isShuttingDown()) return 'stop';
-    sayFailed(member, spaceId, fp, peerText(err));
+    sayFailed(member, spaceId, fp, err);
     return failed('stop');
   }
   if (resp.status === 200) return await keepFetched(a, fp, memberKey, resp, failed, turn);
@@ -278,7 +278,7 @@ async function keepFetched(a: SnapshotFetch, fp: string, memberKey: string, resp
   } catch (err) {
     if (err instanceof ResponseTooLargeError) return refuse(spaceId, member, fp, memberKey, 'over_cap');
     if (!turn.mayContinue() || isShuttingDown()) return 'stop';
-    sayFailed(member, spaceId, fp, peerText(err));
+    sayFailed(member, spaceId, fp, err);
     return failed('next');
   }
   if (typeof body?.text !== 'string') return refuse(spaceId, member, fp, memberKey, 'refused_shape');
