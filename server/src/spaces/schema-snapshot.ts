@@ -16,9 +16,19 @@
  */
 import { schemaFingerprintTextOf } from '@ythril-network/schema/internal';
 import { readPeerMeta } from './body-schemas.js';
-import { isOverSnapshotCap } from './schema-snapshot-store.js';
 import type { SnapshotLinks } from './schema-stamp.js';
+import { JSON_BODY_MAX_BYTES } from '../config/body-limits.js';
 import { sha256Hex } from '../util/sha256-hex.js';
+
+/**
+ * The largest snapshot text a peer takes: a schema that came in through a JSON body is at most that body's limit. A larger text (library
+ * inlining can grow one) is still kept by its writer, and said once; peers refuse to fetch it. Here, in the pure module, so the receiver's
+ * refusal does not load the store to read a number.
+ */
+export const SCHEMA_SNAPSHOT_MAX_BYTES = JSON_BODY_MAX_BYTES;
+
+/** Is `text` larger than a peer takes? In UTF-8 bytes, never `length` (a letter can be two): the one test of the cap, for the writer's note and the receiver's refusal. */
+export const isOverSnapshotCap = (text: string): boolean => Buffer.byteLength(text, 'utf8') > SCHEMA_SNAPSHOT_MAX_BYTES;
 
 /** The fields of a snapshot row the route decides on: how this server came to hold it, the network of a layer row, and what it was built from. */
 export interface ServableRow {

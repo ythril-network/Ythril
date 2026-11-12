@@ -40,6 +40,7 @@ import { servedMetaFor } from '../sync/replicated-meta.js';
 import { layersFor } from './network-layers.js';
 import { findSpace } from './space-lookup.js';
 import { LruMap } from '../util/lru-map.js';
+import { log } from '../util/log.js';
 import { sha256Hex } from '../util/sha256-hex.js';
 
 /** A schema version: its fingerprint and the canonical text the fingerprint is the hash of. */
@@ -128,12 +129,15 @@ export function schemaFingerprintOf(space: { readonly meta?: SpaceMeta } | undef
 /** Which space a pair was read for, so the backstop below knows where to keep its snapshot without a third field on the pair. */
 const spaceOfWrite = new WeakMap<MetaForWrite, string>();
 
-/** The backstop's hand-off: set by the snapshot writer, which this module may not import (it imports this one). */
-let keepStamped: ((spaceId: string, stamp: Stamp) => void) | undefined;
-
-/** Install what a stamping write calls when its fingerprint has no known snapshot row. The snapshot writer does it at import. */
-export function onStampWithoutSnapshot(keep: (spaceId: string, stamp: Stamp) => void): void {
-  keepStamped = keep;
+/**
+ * The per-write backstop's call into the snapshot writer, which imports this module: a static import back would be a runtime cycle, so the writer is
+ * imported when a stamp first needs it (once; the module is cached after). Never a hook the writer installs as a side effect of being imported: such a
+ * hook was called with `?.`, so a process that had not loaded the writer stamped records whose snapshot nobody kept, and said nothing. A writer that
+ * cannot be loaded is a broken build, said at error.
+ */
+function keepStampedSnapshotLater(spaceId: string, stamp: Stamp): void {
+  void import('./schema-snapshot-store.js').then(store => store.keepStampedSnapshot(spaceId, stamp),
+    (err: unknown) => log.error(`Schema snapshot writer could not be loaded, so the snapshot of fingerprint ${stamp.fp.slice(0, 12)} of space '${spaceId}' was not kept: ${String(err)}`));
 }
 
 /**
@@ -152,7 +156,7 @@ export function stampOp(write: MetaForWrite, check: SchemaCheckOutcome): StampOp
   }
   if (check.all.length > 0) return UNSTAMP;
   const spaceId = spaceOfWrite.get(write);
-  if (spaceId !== undefined && !knownHeld(spaceId, write.stamp.fp)) keepStamped?.(spaceId, write.stamp);
+  if (spaceId !== undefined && !knownHeld(spaceId, write.stamp.fp)) keepStampedSnapshotLater(spaceId, write.stamp);
   return { $set: { [SCHEMA_FINGERPRINT_FIELD]: write.stamp.fp } } as StampOp;
 }
 

@@ -132,6 +132,32 @@ describe('a record stamped with a snapshot this server lacks fetches it from the
       assert.deepEqual(askedFor(), [snap.fp], 'a fingerprint already held was asked for again');
     });
 
+    it('two turns that want one fingerprint ask for it once: a turn that chose it in its batch skips it when another turn asked for it, or kept it, meanwhile', async () => {
+      // Seen red at c244852b: the batch was the only check, so the first turn asked for `b` again after the second turn had kept it ([a, b, b]).
+      const fetch = await import('../../server/dist/sync/schema-snapshot-fetch.js');
+      const [a, b] = await Promise.all([snapshotNamed('twoa'), snapshotNamed('twob')]);
+      let release;
+      const held = new Promise(r => { release = r; });
+      let firstAsked;
+      const asked = new Promise(r => { firstAsked = r; });
+      peer.snapshot = async ({ fp }) => {
+        if (fp === a.fp) { firstAsked(); await held; return ok(a); }
+        return ok(b);
+      };
+      arrives(a.fp); arrives(b.fp);
+      const first = sync();
+      await asked;
+      // The second turn, of the same member and space, while the first awaits `a`: it chooses `b` (a is in flight) and keeps it.
+      await fetch.fetchOwedSchemaSnapshots({
+        member: door.member(), spaceId: S, remoteSpaceId: door.remoteOf(S), networkId: door.NET, requestInit: () => ({}),
+        turn: { signal: new AbortController().signal, mayContinue: () => true, refusedBy() {} },
+      });
+      assert.ok(await heldRow(b.fp), 'the second turn did not keep b');
+      release();
+      await first;
+      assert.deepEqual(askedFor(), [a.fp, b.fp], 'a fingerprint another turn asked for or kept meanwhile was asked for again');
+    });
+
     it('asks for nothing it holds: a row already there (written by something this process does not know of) is found by the held check, not overwritten', async () => {
       const snap = await snapshotNamed('held');
       await rows().insertOne(snapshotRow({ fp: snap.fp, text: snap.text, origin: 'own', links: linksOf(snap.fp) }));
@@ -301,6 +327,20 @@ describe('a record stamped with a snapshot this server lacks fetches it from the
       upgrade();
       await scan(); await sync();
       assert.ok(await heldRow(y.fp), 'the member was not asked again after its version changed');
+    });
+
+    it('a member that fails every ask is said once per window for the space, not once per failed fingerprint; each failure is still counted', async () => {
+      // Seen red at c244852b: one warn line per failed ask (two here, and one per space per minute for as long as the member fails).
+      const [x, y] = await Promise.all([snapshotNamed('fail1'), snapshotNamed('fail2')]);
+      peer.snapshot = () => ({ status: 500, body: { error: 'scripted failure' } });
+      // The window starts here: an earlier case's failure of this member and space would otherwise have said it already.
+      (await import('../../server/dist/sync/schema-snapshot-fetch.js')).forgetSchemaSnapshotOutcomes();
+      arrives(x.fp); arrives(y.fp);
+      const before = await snapshotCount('failed');
+      const { lines } = await logLinesDuring(() => sync());
+      assert.equal(await snapshotCount('failed') - before, 2, 'each failed ask is counted');
+      const said = lines.filter(l => l.includes('Schema snapshot') && l.includes('HTTP 500'));
+      assert.equal(said.length, 1, `the member's failure was said ${said.length} times in one window: ${JSON.stringify(said)}`);
     });
 
     it('409 not_shared: terminal for that member, version and fingerprint (the records keep their stamp; the snapshot is unavailable there)', async () => {
