@@ -73,7 +73,8 @@ describe('a record the absent-bytes sweep removed, between two instances', () =>
   before(async () => {
     [tA, tB] = ['a', 'b'].map(read);
     space = await createTestSpace('absent-bytes', [[INSTANCES.a, tA], [INSTANCES.b, tB]]);
-    net = await mirroredNetwork({ label: `absent-bytes-${RUN}`, spaces: [space.id], a: [INSTANCES.a, tA], b: [INSTANCES.b, tB] });
+    // The Merkle check is opt-in, and the re-read both cases rest on runs only after a check found the roots differ (`sync/file-meta-reread.ts`).
+    net = await mirroredNetwork({ label: `absent-bytes-${RUN}`, spaces: [space.id], a: [INSTANCES.a, tA], b: [INSTANCES.b, tB], merkle: true });
   });
   after(async () => { await net?.remove?.().catch(() => {}); await space?.remove?.().catch(() => {}); });
 

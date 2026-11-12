@@ -207,24 +207,28 @@ export function injectPeerToken(container, instanceId, token) {
  * `direction` is what each instance's member record for the other says (`'both'` by default; `'pull'` makes each only PULL from the other, so a case can
  * see the pull leg of an arrival without the push leg of the same cycle).
  *
- * @param {{ label: string, spaces: string[], a: [string, string], b: [string, string], type?: string, containers?: [string, string], direction?: 'both' | 'pull' | 'push' }} opts  `[baseUrl, token]` each
+ * `merkle: true` turns the network's Merkle check on, on both instances: it is opt-in, and only a check that finds the roots differ arms the
+ * file-row re-read (`sync/file-meta-reread.ts`), so a case about what that re-read brings needs it.
+ *
+ * @param {{ label: string, spaces: string[], a: [string, string], b: [string, string], type?: string, containers?: [string, string], direction?: 'both' | 'pull' | 'push', merkle?: boolean }} opts  `[baseUrl, token]` each
  * @returns {Promise<{ networkId: string, remove: () => Promise<void> }>}
  */
-export async function mirroredNetwork({ label, spaces, a, b, type = 'closed', containers = ['ythril-a', 'ythril-b'], direction = 'both' }) {
+export async function mirroredNetwork({ label, spaces, a, b, type = 'closed', containers = ['ythril-a', 'ythril-b'], direction = 'both', merkle }) {
   const [baseA, tokenA] = a, [baseB, tokenB] = b;
   const [hostA, hostB] = containers;
   const idA = getInstanceId(hostA), idB = getInstanceId(hostB);
   const must = (r, what) => { if (r.status >= 300) throw new Error(`${what}: ${r.status} ${JSON.stringify(r.body)}`); return r; };
   const forA = must(await post(baseB, tokenB, '/api/tokens', { name: `${label}-a-${Date.now()}`, peerInstanceId: idA }), 'peer token for A');
   const forB = must(await post(baseA, tokenA, '/api/tokens', { name: `${label}-b-${Date.now()}`, peerInstanceId: idB }), 'peer token for B');
-  const net = must(await post(baseA, tokenA, '/api/networks', { label, type, spaces, votingDeadlineHours: 1 }), 'network on A');
+  const opt = merkle === undefined ? {} : { merkle };
+  const net = must(await post(baseA, tokenA, '/api/networks', { label, type, spaces, votingDeadlineHours: 1, ...opt }), 'network on A');
   const networkId = net.body.id;
   const add = async (base, token, instanceId, memberLabel, url, peerToken) => {
     const r = must(await post(base, token, `/api/networks/${networkId}/members`, { instanceId, label: memberLabel, url, token: peerToken, direction }), `member ${memberLabel}`);
     if (r.status === 202) await post(base, token, `/api/networks/${networkId}/votes/${r.body.roundId}`, { vote: 'yes' });
   };
   await add(baseA, tokenA, idB, `${label} B`, `http://${hostB}:3200`, forA.body.plaintext);
-  const onB = await post(baseB, tokenB, '/api/networks', { id: networkId, label, type, spaces, votingDeadlineHours: 1 });
+  const onB = await post(baseB, tokenB, '/api/networks', { id: networkId, label, type, spaces, votingDeadlineHours: 1, ...opt });
   if (onB.status !== 201 && onB.status !== 409) throw new Error(`network on B: ${onB.status} ${JSON.stringify(onB.body)}`);
   await add(baseB, tokenB, idA, `${label} A`, `http://${hostA}:3200`, forB.body.plaintext);
   injectPeerToken(hostA, idB, forA.body.plaintext);

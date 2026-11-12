@@ -216,7 +216,9 @@ function onRestoreEnd(set: Readonly<SpaceActSet>): void {
   reportDatabaseReplaced();
   restartLeakedRowScans(Object.keys(set.members));
   // Every record now there waits the longest window for its bytes, and no stamp from before the restore ages it (Q-337).
-  void restartAbsentBytesSweeps(Object.keys(set.members));
+  // No door answers here, so a store failure is said; the restore stands, and `filesRestoredAt` already holds every row to the longest window.
+  restartAbsentBytesSweeps(Object.keys(set.members))
+    .catch(err => log.warn(`Restore: the absent-bytes sweep could not clear its stamps after the restore: ${peerText(err)}`));
   logInternalAudit({
     method: 'RESTORE', path: `internal:restore:${set.backupId ?? ''}:${set.id}`,
     operation: set.outcome === 'abandoned' ? RESTORE_ABANDONED_OPERATION : RESTORE_COMPLETED_OPERATION,

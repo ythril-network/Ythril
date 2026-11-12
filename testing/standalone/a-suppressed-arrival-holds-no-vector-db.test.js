@@ -65,6 +65,8 @@ const LOCAL_VALUES = {
   deliveredBy: 'the-earlier-deliverer',
   // bundle-70 (Q-337): when THIS disk was first found without a file's bytes; local, carried across an arrival like the rest.
   bytesAbsentSince: '2026-10-01T00:00:00.000Z',
+  // bundle-70 lens fix: why THIS instance retired a file row no person deleted. Only a retired row carries it; carried like the flag it sits on.
+  retiredBy: 'bytes-lost',
   // The write guard (`Q-439`): this instance's lock on an edge's subject. A literal, because the table is about whether it
   // CROSSES an arrival, not about what it is a function of.
   _functionalGuard: 'a-subject-key-this-instance-stamped',
