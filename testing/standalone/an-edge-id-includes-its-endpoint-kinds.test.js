@@ -168,8 +168,11 @@ describe('there is exactly ONE stored representation of an entity endpoint', () 
 
   it('and correcting a kind back to entity UNSETS the field', () => {
     // `$set` with `'entity'` would leave the edge unfindable by its own triplet lookup, which filters on null.
+    // The correction is one rule, `foldEdgeKinds` (entity-refs.ts), shared by the edge update and the planner's converge: the update
+    // must ask it, and it must unset.
     const body = bodyOf(src('server/src/brain/edges.ts'), 'updateEdgeById');
-    assert.match(body, /\$unset\[side\]/,
+    assert.match(body, /\bfoldEdgeKinds\(/, 'the edge update corrects a kind by a rule of its own, not by foldEdgeKinds');
+    assert.match(bodyOf(src('server/src/brain/entity-refs.ts'), 'foldEdgeKinds'), /\$unset\[side\]/,
       'a kind corrected back to entity is stored as a string rather than removed');
   });
 });
