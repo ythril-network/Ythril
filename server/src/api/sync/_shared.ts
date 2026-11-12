@@ -19,6 +19,8 @@ import { spaceHold } from '../../sync/space-exchange-set.js';
 import { SPACE_DECLINED_ANSWER } from '../../sync/held-answer.js';
 import { admitPeerOnResponse, answerSpaceHeld } from '../../sync/peer-space-admission.js';
 import { isSpaceNotWritable } from '../../spaces/space-write-gate.js';
+import { effectiveRung } from '../../auth/mint-cap.js';
+import { satisfies } from '../../auth/required-rung.js';
 
 /*
  * What a landed edge or link points at that is not here is `sync/linkage-check.ts`'s question (bundle-30 I8): checked
@@ -268,14 +270,28 @@ export function pushAllowed(
 
 /**
  * May the caller REACH `spaceId` at all? Answers `403` itself and returns true when not. The one place the sync routes ask
- * `spaceAllowed`: a route that asked it by hand and wrote its own 403 was a door the hold could not reach. The schema door
- * (`GET /meta`) asks this only - schema propagation is not data, and a wipe changes no schema (X17).
+ * `spaceAllowed`: a route that asked it by hand and wrote its own 403 was a door the hold could not reach. The schema doors
+ * (`GET /meta`, `GET /schema-snapshot`) ask this and the schema rung (`refuseSchemaRung`) and never the hold - schema propagation
+ * is not data, and a wipe changes no schema (X17).
  */
 export function refusePeerReach(
   res: import('express').Response, spaceId: string, networkId: string | undefined, authToken: unknown,
 ): boolean {
   if (spaceAllowed(spaceId, networkId, authToken as Record<string, unknown>)) return false;
   res.status(403).json({ error: 'Forbidden' });
+  return true;
+}
+
+/**
+ * May the caller READ the schema of `spaceId`? Answers `403 { code: 'schema_rung' }` itself and returns true when not. The ONE check both schema
+ * doors ask after reach (`GET /meta`, `GET /schema-snapshot`, bundle-265 S-N2), so the two cannot differ: the sync surface sits outside the mounts the
+ * area gate governs, and reach alone handed the schema to a token that holds no schema right (a files-only token). A token with no rights matrix holds
+ * none (the owner's "no matrix = refuse"); `knowledge: write` holds `schema: read` by implication, which `effectiveRung` resolves.
+ */
+export function refuseSchemaRung(res: import('express').Response, spaceId: string, authToken: unknown): boolean {
+  const rights = (authToken as { rights?: TokenRights } | undefined)?.rights;
+  if (rights && satisfies(effectiveRung(rights, spaceId, 'schema'), 'read')) return false;
+  res.status(403).json({ error: `Token needs 'read' on schema in space '${spaceId}'`, code: 'schema_rung' });
   return true;
 }
 

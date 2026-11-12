@@ -75,6 +75,7 @@ import { readPageTombstones, readPushStored, readForkContext, deleteSupersededTo
 import { watchArrivals, recordedOf, sayRecorded, summarise, type ArrivalWatch, type RecordedSummary } from './arrival-recording.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { assertPositionsReady } from './positions-ready.js';
+import { noteOwedSchemaSnapshots } from './schema-snapshot-owed.js';
 import { edgeIdentityAdmitsForks } from '../spaces/edge-identity-index.js';
 import { EdgeIdentityBuilding } from '../util/errors.js';
 import { syncInvalidForksTotal, syncArrivalsSetAsideTotal, recordsFailingTheirSchema } from '../metrics/registry.js';
@@ -414,6 +415,9 @@ export async function acceptArrivingPage(
     // What landed is handed to the door's linkage check, which checks it once the door's transfer is whole — never
     // here, page by page, where a target later in the same transfer would be recorded missing (bundle-30 I8).
     for (const { key, doc } of landed) opts.linkage.add(key, doc);
+    // The schema versions the landed records are stamped with (Q-738): noted as owed in memory, with the deliverer. Nothing is read or fetched here; the
+    // member's turn asks for the ones no snapshot holds. Never a restore: this accept is the doors' (push and pull).
+    noteOwedSchemaSnapshots(spaceId, landed.map(l => l.doc), deliveredBy);
     log.debug(`${peerText(where)}: page accepted for space '${peerText(spaceId)}': ${peerList(REPLICATED_FAMILIES.map(({ payloadKey: k }) =>
       `${k} ${summary(results[k].verdicts)}`), '; ')}`);
     return results;

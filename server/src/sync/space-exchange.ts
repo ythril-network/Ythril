@@ -42,6 +42,7 @@ import { LinkageCheck } from './linkage-check.js';
 import { syncFiles } from './file-sync.js';
 import { checkMerkleWithPeer } from './merkle-check.js';
 import { recordFileMetaMerkleComparison, rereadFileMeta } from './file-meta-reread.js';
+import { fetchOwedSchemaSnapshots } from './schema-snapshot-fetch.js';
 import { readMemberSpaceMark, setMemberSpaceMark } from './member-space-mark.js';
 import { RereadSlot, beginFullReread, endFullReread } from './full-reread.js';
 import { REPLICATED_FAMILIES, addCounts, countsOf, familiesNotComplete, zeroCounts, type PayloadKey } from './replicated-families.js';
@@ -245,6 +246,10 @@ async function exchangeSpaceWithMember(
       if (pc.refused.length > 0) out.refused.push(`space '${spaceId}' push: ${pc.refused.join(', ')}`);
       pushEnded = legEnded(pc) && turn.mayContinue();
     }
+    // The schema versions this space's records are stamped with and no snapshot holds (Q-738): asked of the member, whatever the direction. Its own leg,
+    // so a throw of this instance's store is not reported as the push to the member failing.
+    leg = 'schema-snapshot';
+    if (turn.mayContinue() && !isShuttingDown()) await fetchOwedSchemaSnapshots({ member, spaceId, remoteSpaceId, networkId: net.id, requestInit: fetchOpts, turn });
     leg = 'files';
     // File manifest, tombstones and bytes — the same direction guards as above. A pulled file is processed where it is recorded. Not begun once shutdown has.
     if ((shouldPull || shouldPush) && turn.mayContinue() && !isShuttingDown()) {

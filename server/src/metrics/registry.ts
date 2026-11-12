@@ -32,6 +32,7 @@ import { setVersionRaiseSink, VERSION_RAISE_REASONS } from './version-raise-coun
 import { setConfigFlushFailureSink } from './config-flush-count.js';
 import { setEmbedJobFailedSink, EMBED_JOB_FAILED_REASONS } from './embed-job-failed-count.js';
 import { setScanHoldSink, SCAN_HOLD_SCANNERS } from './scan-hold-count.js';
+import { setSchemaSnapshotSink, SCHEMA_SNAPSHOT_OUTCOMES } from './schema-snapshot-count.js';
 import { oldestRecordPositionHoldSeconds } from '../sync/record-position-stream.js';
 import { fileActAnswerCounts } from '../files/act-answers.js';
 import { schemaRefusalCounts } from '../brain/schema-refusal-tally.js';
@@ -2008,6 +2009,20 @@ export const embedJobsFailedCounter = new Counter({
 });
 setEmbedJobFailedSink(reason => embedJobsFailedCounter.labels({ reason }).inc());
 for (const reason of EMBED_JOB_FAILED_REASONS) embedJobsFailedCounter.labels({ reason }).inc(0);
+
+/**
+ * What became of a schema snapshot (`spaces/schema-snapshot-store.ts`, `sync/schema-snapshot-fetch.ts`, counted through
+ * `metrics/schema-snapshot-count.ts`, which both can import where they cannot import this): `written`, `fetched`, `not_held`, `route_missing`,
+ * `lost_space`, `not_shared`, `refused_rung`, `refused_hash`, `refused_shape`, `over_cap`, `failed` and `behind`.
+ */
+export const schemaSnapshotCounter = new Counter({
+  name: 'ythril_schema_snapshot_total',
+  help: 'Schema snapshots by outcome (written, fetched, not_held, route_missing, lost_space, not_shared, refused_rung, refused_hash, refused_shape, over_cap, failed, behind)',
+  labelNames: ['outcome'] as const,
+  registers: [register],
+});
+setSchemaSnapshotSink(outcome => schemaSnapshotCounter.labels({ outcome }).inc());
+for (const outcome of SCHEMA_SNAPSHOT_OUTCOMES) schemaSnapshotCounter.labels({ outcome }).inc(0);
 
 /**
  * Text cut to the embedder's input ceiling before it was embedded, by who produced it (`brain/embed-text.ts`): a whole-document

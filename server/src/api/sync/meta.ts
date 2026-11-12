@@ -1,8 +1,8 @@
 /**
  * Peer-facing space meta — the schema, purpose and notes a downstream instance merges into its copy (`F-39.1`).
  *
- * Served to a caller that may REACH the space (`refusePeerReach`): a peer that may sync the space's data may read what
- * describes it, and nothing else. It is NOT held while a wipe is applied on one side (design v5 X17): a wipe changes no schema,
+ * Served to a caller that may REACH the space (`refusePeerReach`) and may read its schema (`refuseSchemaRung`, the one check this door and
+ * `GET /schema-snapshot` share): a peer that may sync the space's data may read what describes it, and nothing else. It is NOT held while a wipe is applied on one side (design v5 X17): a wipe changes no schema,
  * and a subscriber takes its type schemas through this door, so holding it would delay schema propagation for the hold's length. What is served is `replicatedMetaOf` — everything a network governs,
  * nothing the server owns — so the receiver keeps its own version counter and history.
  */
@@ -11,7 +11,8 @@ import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth } from '../../auth/middleware.js';
 import { getConfig } from '../../config/loader.js';
 import { metaForNetwork, replicatedMetaOf } from '../../sync/replicated-meta.js';
-import { refusePeerReach } from './_shared.js';
+import { refusePeerReach, refuseSchemaRung } from './_shared.js';
+import { registerSchemaSnapshotRoute } from './schema-snapshot.js';
 import { inlineResolvableRefs } from '../../spaces/schema-validation.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { sendLostSpace } from '../write-target-answer.js';
@@ -24,6 +25,7 @@ syncMetaRouter.get('/meta', syncRateLimit, requireAuth, (req, res) => {
     const { spaceId, networkId } = req.query as Record<string, string>;
     if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
     if (refusePeerReach(res, spaceId, networkId, req.authToken)) return;
+    if (refuseSchemaRung(res, spaceId, req.authToken)) return;
     const space = getConfig().spaces.find(s => s.id === spaceId);
     if (!space) { sendLostSpace(req, res, spaceId); return; }
     // Own definitions plus THIS network's layer only — never another network's, never the effective mix (F-39.2).
@@ -35,3 +37,6 @@ syncMetaRouter.get('/meta', syncRateLimit, requireAuth, (req, res) => {
     sendCaughtFailure(res, 'sync GET /meta', err);
   }
 });
+
+// GET /api/sync/schema-snapshot: the other schema door, registered here so it rides this router inside the peer-authenticated syncRouter.
+registerSchemaSnapshotRoute(syncMetaRouter);

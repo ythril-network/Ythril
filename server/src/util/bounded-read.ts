@@ -52,6 +52,14 @@ export function maxUpstreamResponseBytes(): number {
   return n;
 }
 
+/**
+ * The refusal of a body past its ceiling, a class of its own so a caller that has a word for "too large" (a schema snapshot over its cap, `over_cap`)
+ * tells it from a body that failed to parse or a connection that broke, without reading the message.
+ */
+export class ResponseTooLargeError extends Error {
+  constructor(message: string) { super(message); this.name = 'ResponseTooLargeError'; }
+}
+
 /** How much of an upstream error body is worth keeping. Three call sites chose 200 independently; that is the standard. */
 export const ERROR_BODY_CHARS = 200;
 
@@ -69,7 +77,7 @@ export async function boundedJson<T>(
   label: string,
   maxBytes: number = maxUpstreamResponseBytes(),
 ): Promise<T> {
-  const tooBig = (detail: string): Error => new Error(
+  const tooBig = (detail: string): Error => new ResponseTooLargeError(
     `${label} response ${detail} (max ${maxBytes} bytes). If this is legitimate, raise `
     + 'YTHRIL_MAX_UPSTREAM_RESPONSE_BYTES.',
   );
