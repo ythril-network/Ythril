@@ -6,9 +6,10 @@
  * ## Why the filter matters
  *
  * A partial index serves a query only when the planner can PROVE the query implies its `partialFilterExpression` (`{ schemaFingerprint: { $exists: true } }`).
- * The scan's `distinct` (`distinctStringsOf`) adds `{ schemaFingerprint: { $type: 'string' } }` to the caller's filter; with an empty filter that is all it
- * asked, and the planner chose a collection scan of every record collection per cycle, growing with the user's data. The scan now passes the index's own
- * filter, so the `$and` contains it verbatim.
+ * The scan's `distinct` (`distinctStringsOf`) adds `{ schemaFingerprint: { $type: 'string' } }` to the caller's filter. The lens sweep suspected an empty
+ * caller filter left the planner unable to prove it; the explain below showed MongoDB does take `$type: 'string'` as implying it, so that read was index-served
+ * already. The scan now passes the index's own filter anyway, so the `$and` contains it verbatim and no planner reasoning is relied on, and this case keeps
+ * a later change of either from turning the scan into a collection scan of every record collection per cycle.
  *
  * ## How it is checked
  *
@@ -18,7 +19,8 @@
  *
  * ## Seen red
  *
- * At c244852b the captured aggregation's plan is a `COLLSCAN`, and the scan sends one `find` per owed fingerprint (1 + 12 commands here).
+ * At c244852b the scan sends one `find` per owed fingerprint (1 + 12 commands here: P2). The plan assertion is not red there (see above): it is a guard,
+ * and it was seen to read the plan, IXSCAN on `schemaFingerprint_present`, with the old `{}` filter and with the new one.
  *
  * Run: a Mongo the harness accepts, then node --test testing/standalone/the-schema-snapshot-gap-scan-reads-its-index-db.test.js
  */
