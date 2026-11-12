@@ -21,7 +21,8 @@
  *
  * ## Seen red
  *
- * The two refusals fail on the base: the outcome is `failed`. The two controls are green on the base and hold what must not widen.
+ * The two refusals fail on the base: the outcome is `failed`. The two controls are green on the base and hold what must not widen. The case
+ * that tells a refusal of the path from one of the bytes (`about`, bundle-70 lens fix) is red on 92e1ca8f: neither carries `about`.
  *
  * Run: node --test testing/standalone/a-409-path-unreadable-is-a-refusal-to-the-sender.test.js
  * (requires a prior `npm run build:server`)
@@ -65,6 +66,14 @@ describe('how the sender reads a peer\'s 409', () => {
     assert.ok(seen.length >= 1 && seen[0].headers['Content-Range'], 'fixture: the push did not go through the chunked door');
     assert.equal(seen.length, 1, 'the sender went on sending ranges to a peer that refused the path');
     assert.equal(out.kind, 'refused', `read as ${out.kind}`);
+  });
+
+  it('the refusal says what it is about: the path for 409 path_unreadable, the bytes for a 400 (the caller remembers the first for a while only)', async () => {
+    const f = fileOf('about.bin', Buffer.from('what was refused'));
+    const path409 = await push.pushStoredFile({ peerId: 'p4', ...f, send: sendOf(409, { error: 'The path cannot be looked at', code: 'path_unreadable' }).send });
+    const bytes400 = await push.pushStoredFile({ peerId: 'p4', ...f, send: sendOf(400, { error: 'hash mismatch' }).send });
+    assert.deepEqual([path409.kind, path409.about, bytes400.kind, bytes400.about], ['refused', 'path', 'refused', 'bytes'],
+      'a refusal of the path is not told from one of the bytes: the sender remembers both for good, and a peer whose disk is mended is never offered the file again');
   });
 
   for (const [what, json] of [['another code', { error: 'blocked by a file', code: 'path_blocked' }], ['no code', { error: 'conflict' }]]) {

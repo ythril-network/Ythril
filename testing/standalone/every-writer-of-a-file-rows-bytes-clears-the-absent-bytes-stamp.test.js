@@ -17,7 +17,11 @@
  * `sync/local-only-fields.ts`) or carry a reasoned row here; a row whose function no longer matches fails, so the table cannot go stale. A floor
  * on the derived set fails a derivation that stopped matching.
  *
- * Red on f423dd6e: `BYTES_ABSENT_SINCE` does not exist, so neither `upsertFileMeta` nor `recordArrivedFile` names it.
+ * The same holds for the retirement reason (`RETIRED_BY`, `retiredBy: 'bytes-lost'`): every writer that unsets `deletedAt` (it makes a retired
+ * row live again) names it, and the flag a person's delete writes removes it (bundle-70 lens fix).
+ *
+ * Red on f423dd6e: `BYTES_ABSENT_SINCE` does not exist, so neither `upsertFileMeta` nor `recordArrivedFile` names it. The reason's two cases are
+ * red on 92e1ca8f: `RETIRED_BY` does not exist.
  *
  * Run: node --test testing/standalone/every-writer-of-a-file-rows-bytes-clears-the-absent-bytes-stamp.test.js
  */
@@ -30,6 +34,9 @@ const WRITES = /\.(updateOne|updateMany|replaceOne|insertOne|insertMany|bulkWrit
 const FILES = /spaceCollection\([^)]*'files'\)|col<FileMetaDoc>/;
 const BYTES = /\b(sizeBytes|sha256)\b/;
 const NAMES_STAMP = /\bBYTES_ABSENT_SINCE\b/;
+/** An `$unset` (an update's object or array, a pipeline stage, or a `$unset` bag built first) that names `deletedAt`: the write revives the row. */
+const REVIVES = /\$unset\b[^=;]*[:=]\s*[{[][^\]}]*\bdeletedAt\b/;
+const NAMES_REASON = /\bRETIRED_BY\b/;
 
 /** Writers of a bytes field that put no bytes at a path, each with why. */
 const EXEMPT = new Map([
@@ -55,6 +62,24 @@ describe('every writer of a file row\'s bytes clears the absent-bytes stamp (sou
     const keys = new Set(writers().map(([k]) => k));
     const stale = [...EXEMPT.keys()].filter(k => !keys.has(k));
     assert.deepEqual(stale, [], 'an exempt writer no longer matches: remove its row');
+  });
+
+  it('every writer that makes a retired row live again (it unsets `deletedAt`) clears the retirement reason in the same function (bundle-70 lens fix)', () => {
+    // The reason (`retiredBy: 'bytes-lost'`) left on a revived row is served to a peer, whose strict schema refuses the key, and tells a person's
+    // later delete as bytes lost. Derived like the stamp: a function writing the files collection whose `$unset` names `deletedAt`.
+    const revivers = [...INDEX.bodies].filter(([key, { body }]) => key.startsWith('server/src/') && WRITES.test(body) && FILES.test(body) && REVIVES.test(body));
+    const keys = revivers.map(([k]) => k);
+    for (const k of ['server/src/files/file-meta.ts:upsertFileMeta', 'server/src/files/file-meta.ts:recordArrivedFile']) {
+      assert.ok(keys.includes(k), `the derivation no longer finds ${k} as a writer that revives a row: re-anchor this gate (found ${keys.join(', ')})`);
+    }
+    const offenders = revivers.filter(([, { body }]) => !NAMES_REASON.test(body)).map(([k]) => k);
+    assert.deepEqual(offenders, [], 'these functions make a retired file row live again and never name RETIRED_BY: the row keeps `retiredBy`');
+  });
+
+  it('a retirement with no reason (a person\'s delete) removes a reason the row still carries: flagAndStrip names RETIRED_BY and $$REMOVE', () => {
+    const body = INDEX.bodies.get('server/src/files/file-meta.ts:flagAndStrip')?.body;
+    assert.ok(body, 'flagAndStrip is not where this gate looks — re-anchor');
+    assert.match(body, /\[\s*RETIRED_BY\s*\]\s*:[^\n]*'\$\$REMOVE'/, 'flagAndStrip leaves a stale retiredBy on a row a person deletes: the feed says bytes_lost');
   });
 
   it('a re-keyed row (a move, a legacy re-key) drops the stamp: rekeyedRow names it', () => {
