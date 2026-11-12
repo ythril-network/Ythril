@@ -260,7 +260,9 @@ export async function restartAbsentBytesSweeps(spaceIds: readonly string[], at: 
     heldBySpace.delete(id);
     // A write to the space's files collection: it asks the write gate and is counted like every other (`admitSpaceWrite`). A space an act still
     // holds refuses it; its stamps keep their age, and `filesRestoredAt` still holds every row to the longest window.
-    await admitSpaceWrite(id, 'files', () => col<FileMetaDoc>(spaceCollection(id, 'files')).updateMany(asFilter<FileMetaDoc>({ [BYTES_ABSENT_SINCE]: { $exists: true } }), { $unset: { [BYTES_ABSENT_SINCE]: '' } } as never))
+    await admitSpaceWrite(id, 'files', async () => {
+      await col<FileMetaDoc>(spaceCollection(id, 'files')).updateMany(asFilter<FileMetaDoc>({ [BYTES_ABSENT_SINCE]: { $exists: true } }), { $unset: { [BYTES_ABSENT_SINCE]: '' } } as never);
+    })
       .catch(err => log.warn(`Absent-bytes sweep: the stamps of space '${peerText(id)}' could not be cleared after its records were brought back: ${peerText(err)}`));
   }
   publishHeld();
