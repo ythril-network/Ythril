@@ -50,6 +50,8 @@ import { settleStalePendingFileTombstones } from '../files/tombstones.js';
 import { finishOwedMoves, moveFinishDeadline } from '../files/finish-owed-moves.js';
 import { sweepChronoRetention } from './chrono-redaction.js';
 import { sweepLegacySpills } from '../files/legacy-spill-sweep.js';
+import { sweepRetiredSchemaFiles } from '../files/retired-schema-file-sweep.js';
+import { ensureSchemaSnapshots } from '../spaces/schema-snapshot-store.js';
 import { drainStrayFileMeta } from '../sync/stray-filemeta-drain.js';
 import { spaceTtlDays } from './chrono-retention.js';
 import { findSpace } from '../spaces/space-lookup.js';
@@ -405,6 +407,10 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
   // Read spills older versions wrote into spaces (Q-92), on the same clock and every cycle: older peers keep
   // sending them until they upgrade. The catch is the last resort, as above.
   await sweepLegacySpills().catch(err => log.warn(`Legacy spill sweep: ${peerText(err)}`));
+  // The per-type schema files 6.5 wrote (Q-735): every cycle, because a 6.5 backup restored later brings them back.
+  await sweepRetiredSchemaFiles().catch(err => log.warn(`Retired schema file sweep: ${peerText(err)}`));
+  // Every space's current schema version and its layers, kept privately (Q-735): writes what a refused gate or a failed write left owed.
+  await ensureSchemaSnapshots().catch(err => log.warn(`Schema snapshots: ${peerText(err)}`));
   await retirePeerSidecars().catch(err => log.warn(`Peer sidecar retirement: ${peerText(err)}`));
 
   // File metadata a 4.0-5.6.1 pull left in `<space>_filemeta` (Q-219), a bounded amount per cycle. Each space is

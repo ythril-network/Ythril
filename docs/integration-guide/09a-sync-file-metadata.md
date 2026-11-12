@@ -103,7 +103,7 @@ holds no derived text at all. An older peer's offer is ignored without a refusal
 `200 { "ignored": "instance-local" }` and stores nothing (the older sender reads it as delivered and stops),
 and a metadata row or a file tombstone for such a path is dropped; each is counted in
 `ythril_sync_file_arrivals_total{outcome="ignored_instance_local"}` under its door. The same holds at every door for
-the other instance-local paths: a conflict copy, a schema snapshot and a legacy spill. Sidecars a peer
+the other instance-local paths: a conflict copy, a retired per-type schema file and a legacy spill. Sidecars a peer
 delivered before this release are retired, bytes and row, by the retention sweep.
 
 **A file row at an EQUAL seq can now change one field: its `updatedAt`.** Two instances could hold one file row at the

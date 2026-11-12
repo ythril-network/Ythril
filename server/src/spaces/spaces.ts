@@ -13,7 +13,8 @@ import { actEntryView, spaceActsOfSpace, type ActEntryView } from './space-act-r
 import { normalizeUnknownWriteFields } from '../config/types.js';
 import { reconcileSpaceSearchIndexes } from './search-index-presence.js';
 import type { ParsedSpaceMeta } from './body-schemas.js';
-import { syncSchemaFiles, META_VERSION_CAP } from './_shared.js';
+import { META_VERSION_CAP } from './_shared.js';
+import { keepVariationSnapshots } from './schema-snapshot-store.js';
 import { sweepAfterMetaWrite } from '../brain/suppression-sweep.js';
 
 /**
@@ -194,8 +195,9 @@ export function updateSpace(
   }
 
   saveConfig(cfg);
-  // Fire-and-forget schema file sync
-  syncSchemaFiles(spaceId, space.meta).catch(err => log.warn(`syncSchemaFiles: ${peerText(err)}`));
+  // The schema this meta write stored is kept privately under its fingerprint, with every layer it was built from (Q-735; the per-type
+  // files the 6.5 writer put under `schemas/` are retired). Detached: the write never waits for its snapshot.
+  if (updates.meta !== undefined) keepVariationSnapshots(spaceId);
   /*
    * What the new meta suppresses holds no vector afterwards — asked for HERE, by the one writer of `space.meta`, so
    * no meta write can skip it (bundle-30 `I5`): a schema route's edit of a space no network carries wrote through

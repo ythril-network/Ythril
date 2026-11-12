@@ -119,7 +119,7 @@ export function registerUploadRoute(router: Router): void {
       // `arrivedFrom` in files/store-file.ts. Both branches below pass it.
       const arrivedFrom = callerPeerAuthor(req.authToken as Record<string, unknown> | undefined);
 
-      // A path that is instance-local (`isInstanceLocalFile`: a conversion's sidecar, a conflict copy, a schema snapshot, a legacy
+      // A path that is instance-local (`isInstanceLocalFile`: a conversion's sidecar, a conflict copy, a retired per-type schema file, a legacy
       // read spill — no instance sends one) is not stored when a PEER offers it — each instance derives them by its own
       // configuration. Answered `200`, not an error: an older sender reads
       // an error as a failure and uploads the file again every cycle, and `200` is what lets it record a base and stop. Asked by the

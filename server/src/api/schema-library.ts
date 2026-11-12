@@ -45,6 +45,8 @@ import rateLimit from 'express-rate-limit';
 import type { SchemaCatalog, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { libraryUsages } from '../spaces/library-usages.js';
+// A save changes what every space linking the entry validates against, so its fingerprint: each keeps its new version (Q-735).
+import { keepSnapshotsOfSpacesLinking } from '../spaces/schema-snapshot-store.js';
 import { mergeTypeDefinition } from '../spaces/meta-fields.js';
 import { applyDeleteFields, validateDeleteFields } from '../brain/delete-fields.js';
 import { log, peerText, peerList, refusalOfParse } from '../util/log.js';
@@ -390,6 +392,7 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
   }
 
   saveSchemaLibrary(library);
+  keepSnapshotsOfSpacesLinking(resultEntries.map(e => e.name));
   res.json({
     created, updated, entries: resultEntries,
     ...(skipped.length ? { skipped } : {}),
@@ -522,6 +525,7 @@ schemaLibraryRouter.post('/', globalRateLimit, requireAdminMfa, (req, res) => {
   };
 
   saveSchemaLibrary([...library, entry]);
+  keepSnapshotsOfSpacesLinking([entry.name]);
   res.status(201).json({ entry });
 });
 
@@ -582,6 +586,7 @@ schemaLibraryRouter.put('/:name', globalRateLimit, requireAdminMfa, (req, res) =
       updatedAt: now,
     };
     saveSchemaLibrary([...library, newEntry]);
+    keepSnapshotsOfSpacesLinking([name]);
     res.status(201).json({ entry: newEntry });
   } else {
     const existing = library[existingIdx]!;
@@ -613,6 +618,7 @@ schemaLibraryRouter.put('/:name', globalRateLimit, requireAdminMfa, (req, res) =
     const updatedLibrary = [...library];
     updatedLibrary[existingIdx] = updatedEntry;
     saveSchemaLibrary(updatedLibrary);
+    keepSnapshotsOfSpacesLinking([name]);
     // A library entry is referenced by `$ref` from any number of spaces, so editing one changes what all
     // of them validate against. The audit layer records the scalar metadata plus the property-key names
     // that changed — never the property schemas, which can carry example values.
@@ -730,6 +736,7 @@ schemaLibraryRouter.patch('/:name', globalRateLimit, requireAdminMfa, (req, res)
   const next = [...library];
   next[idx] = updated;
   saveSchemaLibrary(next);
+  keepSnapshotsOfSpacesLinking([updated.name]);
   // Same reasoning as PUT: this entry is `$ref`d from any number of spaces, so editing it changes what all of
   // them validate against. The audit layer records the scalar metadata and which property KEYS changed, never
   // the property schemas themselves, which can carry example values.
@@ -758,6 +765,7 @@ schemaLibraryRouter.delete('/:name', globalRateLimit, requireAdminMfa, (req, res
   }
 
   saveSchemaLibrary(library.filter(e => e.name !== name));
+  keepSnapshotsOfSpacesLinking([name]);
   res.status(204).end();
 });
 

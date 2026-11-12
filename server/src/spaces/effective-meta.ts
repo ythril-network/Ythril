@@ -20,27 +20,16 @@
  * recomputes. A passed `meta_change` is such an edit.
  */
 import { isDeepStrictEqual } from 'node:util';
-import type { Config, SpaceConfig, SpaceMeta } from '../config/types.js';
+import type { SpaceConfig, SpaceMeta } from '../config/types.js';
 import { getConfig, saveConfig } from '../config/loader.js';
-import { effectiveMeta, replicatedMetaOf, type MetaLayer } from '../sync/replicated-meta.js';
+import { effectiveMeta, replicatedMetaOf } from '../sync/replicated-meta.js';
 import { PER_TYPE_META_FIELD } from './meta-fields.js';
 import { derivedFromStored, type ParsedSpaceMeta, type ParsedTypeSchema } from './body-schemas.js';
 import { updateSpace } from './spaces.js';
+import { layersFor } from './network-layers.js';
+import { keepLayerSnapshot } from './schema-snapshot-store.js';
 
-/** The layers that apply to `spaceId`, highest precedence first: the operator's order, then the order joined. */
-export function layersFor(cfg: Config, spaceId: string): MetaLayer[] {
-  const space = cfg.spaces.find(s => s.id === spaceId);
-  const carrying = cfg.networks.filter(n => n.spaces.includes(spaceId) && n.schemaLayers?.[spaceId]);
-  const rank = (id: string) => {
-    const i = space?.networkPrecedence?.indexOf(id) ?? -1;
-    return i < 0 ? Number.MAX_SAFE_INTEGER : i;
-  };
-  // Stable: networks the operator did not rank keep config order, which is the order they were created or joined.
-  return carrying
-    .map((n, i) => ({ n, i }))
-    .sort((a, b) => rank(a.n.id) - rank(b.n.id) || a.i - b.i)
-    .map(({ n }) => ({ networkId: n.id, meta: n.schemaLayers![spaceId] }));
-}
+export { layersFor };
 
 /**
  * Rebuild `space.meta` from `ownMeta` and the layers; writes only when it changed. @returns whether it did.
@@ -95,7 +84,11 @@ export function storeNetworkLayer(networkId: string, spaceId: string, meta: Pars
   // The same layer again — every cycle, for a network whose schema did not change — is nothing to do and nothing to write.
   if (isDeepStrictEqual(net.schemaLayers?.[spaceId], meta)) return false;
   (net.schemaLayers ??= {})[spaceId] = meta;
-  return recomputeEffectiveMeta(spaceId, true);
+  const changed = recomputeEffectiveMeta(spaceId, true);
+  // The layer as received is a schema version of its own: kept privately under its fingerprint (`origin: 'layer'`), which is also the
+  // fingerprint this space stamps with while it adds nothing to the layer (Q-735). Detached; the housekeeping cycle repairs a miss.
+  keepLayerSnapshot(networkId, spaceId, meta);
+  return changed;
 }
 
 /**

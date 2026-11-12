@@ -90,8 +90,10 @@ export function decideFilePush(
  * Files an instance derives for ITSELF, which never travel in either direction (`Q-66`):
  * - a CONFLICT COPY, named by `conflictCopyPath` (`<base>_<ISO time>_<peer label><ext>`): it is this instance's half of
  *   an open conflict, and replicated it landed on the peer as a copy of the peer's own conflict;
- * - a SCHEMA SNAPSHOT, `schemas/<space>_<entity|fact|edge|chrono>_<type>.json` (`spaces/_shared.ts` syncSchemaFiles):
- *   each instance writes it from its OWN effective meta, so every schema change conflicted on every member.
+ * - a RETIRED PER-TYPE SCHEMA FILE, `schemas/<space>_<entity|fact|edge|chrono>_<type>.json` ({@link RETIRED_SCHEMA_FILE}): 6.5 wrote one
+ *   from each instance's OWN effective meta after every schema save, so every schema change conflicted on every member. 6.6.0 writes none
+ *   (each schema version is kept privately, `<space>_schema_snapshots`) and the housekeeping cycle removes what 6.5 left
+ *   (`files/retired-schema-file-sweep.ts`); the pattern stays here so a leftover never STARTS travelling.
  * - a LEGACY READ SPILL, `_tmp/graph-<uuid>.json` / `_tmp/results-<uuid>.json` at the root (`Q-92`): one caller's
  *   search result, written into the space by versions before 5.6.0. Spills now live outside every space; the copies
  *   older versions wrote are swept locally, and the ones older peers still offer are refused here.
@@ -103,9 +105,10 @@ export function decideFilePush(
  * Matched by name, so a copy an older peer still offers is refused on pull as well.
  */
 const CONFLICT_COPY = /_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[A-Za-z0-9_-]{1,20}(\.[^/]*)?$/;
-const SCHEMA_SNAPSHOT = /^schemas\/[a-z0-9][a-z0-9-]*_(entity|fact|edge|chrono)_[A-Za-z0-9_-]+\.json$/;
+/** The path the retired 6.5 per-type schema writer wrote, anchored at the space root. */
+export const RETIRED_SCHEMA_FILE = /^schemas\/[a-z0-9][a-z0-9-]*_(entity|fact|edge|chrono)_[A-Za-z0-9_-]+\.json$/;
 export function isInstanceLocalFile(relPath: string): boolean {
-  return CONFLICT_COPY.test(relPath) || SCHEMA_SNAPSHOT.test(relPath) || isLegacyReadSpill(relPath) || isInDerivedTree(relPath);
+  return CONFLICT_COPY.test(relPath) || RETIRED_SCHEMA_FILE.test(relPath) || isLegacyReadSpill(relPath) || isInDerivedTree(relPath);
 }
 
 /**
@@ -123,7 +126,7 @@ export function isInDerivedTree(relPath: string): boolean {
  *
  * Asked ALONE by one door: a RESTORE (an import of this instance's own export, `sync/arrivals.ts`), which is never judged by
  * the peer rules and leaves out only the spill, which no instance keeps any more. Every PEER's file-metadata arrival
- * (push, pull) asks the whole {@link isInstanceLocalFile}: a conflict copy's, a schema snapshot's, a sidecar's and a spill's
+ * (push, pull) asks the whole {@link isInstanceLocalFile}: a conflict copy's, a retired per-type schema file's, a sidecar's and a spill's
  * row are all ignored, never stored, and counted (`ythril_sync_file_arrivals_total{door="metadata",
  * outcome="ignored_instance_local"}`), as their bytes and tombstones are.
  */

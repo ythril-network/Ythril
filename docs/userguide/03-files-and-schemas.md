@@ -242,7 +242,7 @@ list that is perfectly good.
 
 ## Conflict resolution
 
-When two connected brains **both** modify the same file before syncing, a conflict is created. When only one of them changed it since they last agreed, the other simply takes the new version, with no conflict. Conflict copies and the `schemas/` snapshots each instance writes for itself stay on that instance and are never synced. A dedicated **Conflicts** item then appears in the sidebar's Workspace section, carrying a red count badge of how many are waiting.
+When two connected brains **both** modify the same file before syncing, a conflict is created. When only one of them changed it since they last agreed, the other simply takes the new version, with no conflict. Conflict copies stay on the instance that made them and are never synced. (Versions before 6.6 also wrote one file per type under `schemas/` after each schema save; those stay on their instance too, and the instance removes the ones it wrote. Every schema version a space has used is now kept privately, outside the space's files, named by its fingerprint: the space's current fingerprint is `schemaFingerprint` in `GET /api/spaces/:id/meta` and `space_meta`.) A dedicated **Conflicts** item then appears in the sidebar's Workspace section, carrying a red count badge of how many are waiting.
 
 Open **Conflicts** from the sidebar to see them. For each conflict choose what to do:
 

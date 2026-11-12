@@ -31,7 +31,7 @@ syncManifestRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res)
     if (refusePeerSpace(res, spaceId, networkId, req.authToken)) return;
 
     const sinceDate = since ? new Date(since) : undefined;
-    // A conflict copy or schema snapshot is this instance's own and is never offered (Q-66, sync/file-conflict.ts).
+    // A conflict copy or a retired per-type schema file is this instance's own and is never offered (Q-66, sync/file-conflict.ts).
     // Exactly the four wire keys, chosen by name: `diskPath` (where THIS instance keeps the file, in the spelling its disk has) is local
     // only and never leaves it, and `path` is the file's NFC key, so a peer asks for the same name whatever our disk keeps (Q-581).
     const built = await buildFileManifest(spaceId, sinceDate);

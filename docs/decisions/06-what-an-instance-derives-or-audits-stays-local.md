@@ -29,7 +29,7 @@ queued no processing, a pulled document was never converted at all.
   *Amended (bundle-255):* the flag takes a local POSITION in the same write (never a version), so the client file change feed
   lists the deletion; and with `softDeleteFileMeta` off a deleted file leaves a **feed marker** (path, `deletedAt`, position,
   nothing else), local in every way a flagged row is, never exported, purged after `fileChangeFeedWindowDays`.
-- **A sidecar is instance-local**, in the one predicate that already kept conflict copies and schema snapshots at home
+- **A sidecar is instance-local**, in the one predicate that already kept conflict copies and the per-type schema files (retired in 6.6) at home
   (`isInstanceLocalFile`): never in the manifest, never pushed or pulled, never hashed, and a peer's offer of one — bytes,
   metadata row or tombstone — is ignored, the byte door answering `200 { "ignored": "instance-local" }` so an older
   sender records a base and stops. Each instance converts a file by its own configuration, and a receiver with conversion

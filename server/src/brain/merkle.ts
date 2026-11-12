@@ -273,7 +273,7 @@ async function collectionLeaves(spaceId: string, collType: BrainCollection): Pro
     .project(collType === 'files' ? FILE_HASH_PROJECTION : DERIVED_PROJECTION);
 
   for await (const doc of cursor) {
-    // A file that never leaves this instance — a conflict copy, a schema snapshot, a legacy spill (Q-92) —
+    // A file that never leaves this instance — a conflict copy, a retired per-type schema file, a legacy spill (Q-92) —
     // replicates in neither direction, so hashing its record reports a divergence every cycle between two
     // members that hold the same data. The predicate the peer manifest uses, imported (`Q-307`, `R8`).
     if (collType === 'files' && isInstanceLocalFile(String((doc as { _id?: unknown })._id ?? ''))) continue;
@@ -387,7 +387,7 @@ async function computeInto(spaceId: string, entry: CachedSpace): Promise<MerkleR
   }
 
   // ── File manifest ──────────────────────────────────────────────────────
-  // Only the files that replicate: a conflict copy or a schema snapshot is this instance's own, and the peer
+  // Only the files that replicate: a conflict copy or a retired per-type schema file is this instance's own, and the peer
   // manifest leaves it out for the same reason (`isInstanceLocalFile`).
   const files = (await buildFileManifest(spaceId)).entries
     .filter(f => !isInstanceLocalFile(f.path))

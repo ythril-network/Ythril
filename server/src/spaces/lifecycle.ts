@@ -33,6 +33,8 @@ import { removeTree } from '../files/remove-tree.js';
 import { unlabelAllFaces } from '../brain/entities.js';
 import { forgetMerkleLeaves } from '../brain/merkle.js';
 import { forgetSpaceShape } from '../brain/space-shape.js';
+import { forgetHeld } from './schema-stamp.js';
+import { keepVariationSnapshots } from './schema-snapshot-store.js';
 import { cancelEveryJobOfSpace } from '../files/media/job-queue.js';
 import { dropReplacedFileTombstoneIndexes, forgetFileTombstonesOf } from '../files/tombstones.js';
 import { forgetPathKeyedCache } from '../files/path-keyed-cache.js';
@@ -560,6 +562,8 @@ export async function createSpace(opts: {
   cfg.spaces.push(space);
   const grant = grantCreatorAdmin(cfg, creator.tokenId, opts.id);
   saveConfig(cfg);
+  // The schema the space was created with is its first version, kept privately under its fingerprint (Q-735), detached.
+  keepVariationSnapshots(opts.id);
   if (grant === 'granted') {
     logInternalAudit({
       method: 'CREATE', path: 'internal:creator-grant', spaceId: opts.id, tokenId: creator.tokenId,
@@ -825,6 +829,7 @@ function commitSpaceDeletion(spaceId: string, write: (apply: (cfg: Config) => vo
   forgetMerkleLeaves(spaceId);
   forgetSpaceShape(spaceId);
   forgetSpaceIndexWarnings(spaceId);
+  forgetHeld(spaceId);
 }
 
 /** What a wipe clears: every knowledge collection, so a new one cannot be left behind by one. */

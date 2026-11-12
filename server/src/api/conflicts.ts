@@ -53,7 +53,7 @@ type Resolution = 'resolved' | 'nothing-to-place';
  *
  *  1. the destination through the sandbox's CHECKED resolve (a lexical one follows a link on the way out of the space);
  *  2. a path this instance keeps for itself (`isInstanceLocalFile`) is refused when the CALLER named it: a conversion's output tree, a
- *     schema snapshot, a conflict copy's own name. The default destination of a save (the copy's own name) is not the caller's choice;
+ *     retired per-type schema file, a conflict copy's own name. The default destination of a save (the copy's own name) is not the caller's choice;
  *  3. a file standing where a directory is needed (`assertDestinationReachable`: `409 path_blocked`, not the `500` a rename gave);
  *  4. NOTHING TO PLACE (the destination is the copy's own path, or the copy is gone: a retry after a placement whose record delete
  *     failed) closes the record and moves nothing. It comes before the next question, because the placement of an earlier attempt is
@@ -70,7 +70,7 @@ async function placeIncomingCopy(
     const dstAbs = await resolveSafePathChecked(dstSpaceId, dstPath);
     if (dstSpaceId === spaceId && dstAbs === srcAbs) return 'nothing-to-place';
     if (callerChose && isInstanceLocalFile(fileKeyOf(dstSpaceId, dstPath).key)) {
-      throw new RequestRefusal(`'${toDocId(dstPath)}' is a path this instance keeps for itself (a conversion's output, a conflict copy or a schema snapshot), and a resolution does not place a file there.`);
+      throw new RequestRefusal(`'${toDocId(dstPath)}' is a path this instance keeps for itself (a conversion's output, a conflict copy or a retired per-type schema file), and a resolution does not place a file there.`);
     }
     await assertDestinationReachable(dstSpaceId, dstPath);
     if (await lstatIfPresent(srcAbs) === null) return 'nothing-to-place';

@@ -52,15 +52,37 @@ import { deleteStoredIfPresent } from './stored-bytes.js';
 
 export type RemovalFailure = 'throw' | 'swallow';
 
+/** One step of a removal, run as `failure` says: the store's failure thrown (`'throw'`) or every failure logged and survived (`'swallow'`). */
+function stepOf(spaceId: string, rel: string, failure: RemovalFailure): (what: string, run: () => Promise<unknown>) => Promise<void> {
+  const at = `for ${peerText(spaceId)}/${peerText(rel)}`;
+  return async (what, run) => {
+    if (failure === 'throw') { await unlessTheStoreFailed(`${what} error ${at}`, run); return; }
+    await run().catch(err => log.warn(`removeFileHere: ${peerText(what)} ${at}: ${peerText(err)}`));
+  };
+}
+
+/**
+ * Everything ONE file left besides its bytes and its row, in the one order every removal takes it: the usage figure, its queued media job,
+ * its conversion's artefacts and every row derived from it (with their embed jobs), its cached content hash, and its own embed job.
+ * {@link removeFileHere} runs it before the row goes; the retired-local-path sweep (`files/retired-local-path-sweep.ts`) runs it before it
+ * removes the rows a retired writer left, which it removes itself, hard and with no feed marker, because no transport ever carried them.
+ */
+export async function removeFileLeavingsHere(spaceId: string, rel: string, failure: RemovalFailure): Promise<void> {
+  const step = stepOf(spaceId, rel, failure);
+  invalidateUsageCache(); // freed disk — reflect it in the next quota check
+  // Cancel any queued media/text job so it cannot outlive the file and retry forever.
+  await step('cancelMediaJob', () => cancelMediaJob(spaceId, rel));
+  await step('deleteConversionArtifacts', () => deleteConversionArtifacts(spaceId, rel));
+  await step('forgetPathKeyedCache', () => forgetPathKeyedCache(spaceId, { ids: [rel] }));
+  // The file's own embed job; its derived rows' jobs went with their rows (`deleteConversionArtifacts`), resolved from the rows.
+  await step('retireEmbedWorkOfRemovedRows', () => retireEmbedWorkOfRemovedRows(spaceId, { ids: [toDocId(rel)] }));
+}
+
 export async function removeFileHere(
   spaceId: string, rel: string,
   { failure, retireOnlyIf, retiredBy }: { failure: RemovalFailure; retireOnlyIf?: Readonly<Record<string, unknown>>; retiredBy?: RetiredBy },
 ): Promise<boolean> {
-  const at = `for ${peerText(spaceId)}/${peerText(rel)}`;
-  const step = async (what: string, run: () => Promise<unknown>): Promise<void> => {
-    if (failure === 'throw') { await unlessTheStoreFailed(`${what} error ${at}`, run); return; }
-    await run().catch(err => log.warn(`removeFileHere: ${peerText(what)} ${at}: ${peerText(err)}`));
-  };
+  const step = stepOf(spaceId, rel, failure);
   // A NARROWED removal (the absent-bytes sweep, Q-337) retires the row FIRST and only if it still matches what the caller decided on: the row is the
   // one thing that says whether the file is still the orphan it was, and the steps below would take a re-upload's job and derivatives with it. Only a
   // row this write took has the rest removed; one rewritten meanwhile (a re-upload, an arrival) keeps everything. What a failure after the retire
@@ -73,15 +95,7 @@ export async function removeFileHere(
     else taken = await retireFileMetaMany(spaceId, [rel], { onlyIf: retireOnlyIf, ...(retiredBy ? { retiredBy } : {}) });
   });
   // What the file leaves besides its row, in the one order both removals take it.
-  const clearLeavings = async (): Promise<void> => {
-    invalidateUsageCache(); // freed disk — reflect it in the next quota check
-    // Cancel any queued media/text job so it cannot outlive the file and retry forever.
-    await step('cancelMediaJob', () => cancelMediaJob(spaceId, rel));
-    await step('deleteConversionArtifacts', () => deleteConversionArtifacts(spaceId, rel));
-    await step('forgetPathKeyedCache', () => forgetPathKeyedCache(spaceId, { ids: [rel] }));
-    // The file's own embed job; its derived rows' jobs went with their rows (`deleteConversionArtifacts`), resolved from the rows.
-    await step('retireEmbedWorkOfRemovedRows', () => retireEmbedWorkOfRemovedRows(spaceId, { ids: [toDocId(rel)] }));
-  };
+  const clearLeavings = (): Promise<void> => removeFileLeavingsHere(spaceId, rel, failure);
   if (retireOnlyIf !== undefined) {
     await retire();
     if (taken === 0) return false;

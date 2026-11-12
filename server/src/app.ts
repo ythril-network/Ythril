@@ -35,6 +35,7 @@ import { metricsRouter } from './api/metrics.js';
 import { themeRouter } from './api/theme.js';
 import { frameAncestorsDirective } from './config/embed.js';
 import { requireEncryptedTransport } from './config/transport-security.js';
+import { JSON_BODY_MAX_BYTES } from './config/body-limits.js';
 import { auditRouter } from './api/audit.js';
 import { setupRouter } from './setup/routes.js';
 import { mcpRouter } from './mcp/router.js';
@@ -120,8 +121,8 @@ export function createApp() {
   // The admin import reads its own body (`api/admin-space-transfer.ts`): marked here, by Express's own match of its path, so neither parser
   // buffers it; its route, below every middleware, spools it once the caller is let in.
   app.post(IMPORT_PATH, markImportBody);
-  app.use(express.json({ limit: '10mb', type: (req) => !skipsGlobalParsers(req) && Boolean((req as express.Request).is('application/json')) }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb', type: (req) => !skipsGlobalParsers(req) && Boolean((req as express.Request).is('application/x-www-form-urlencoded')) }));
+  app.use(express.json({ limit: JSON_BODY_MAX_BYTES, type: (req) => !skipsGlobalParsers(req) && Boolean((req as express.Request).is('application/json')) }));
+  app.use(express.urlencoded({ extended: true, limit: JSON_BODY_MAX_BYTES, type: (req) => !skipsGlobalParsers(req) && Boolean((req as express.Request).is('application/x-www-form-urlencoded')) }));
 
   // ── Security headers ─────────────────────────────────────────────────────
   app.use((_req, res, next) => {

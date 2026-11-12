@@ -80,6 +80,8 @@ export const SPACE_COLLECTIONS = {
   mediaJobs: 'media_jobs',
   linkViolations: 'link_violations',
   fileHashes: 'file_hashes',
+  // Every schema version the space's server has used, named by fingerprint: private, never a brain family (`spaces/schema-snapshot-store.ts`).
+  schemaSnapshots: 'schema_snapshots',
 } as const;
 
 export type SpacePart = keyof typeof SPACE_COLLECTIONS;

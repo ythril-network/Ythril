@@ -1769,7 +1769,7 @@ export const FILE_ARRIVAL_DOORS = ['push', 'pull', 'metadata', 'tombstone'] as c
  * or it held no row at all, and the bytes were taken back to be delivered again with their true deliverer), `refused_body` (a
  * pulled body that was not what the manifest declared: another hash, longer or shorter than its size; nothing was stored),
  * `quota` (refused before the body was fetched) and `ignored_instance_local` (a peer offered a path no instance sends — a
- * conversion's sidecar, a conflict copy, a schema snapshot, a legacy spill — by ANY door, bytes, metadata or tombstone, and
+ * conversion's sidecar, a conflict copy, a retired per-type schema file, a legacy spill — by ANY door, bytes, metadata or tombstone, and
  * nothing was stored).
  */
 export const FILE_ARRIVAL_OUTCOMES = [

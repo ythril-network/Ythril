@@ -26,7 +26,7 @@
  *   over bytes that are;
  * - `soft_deleted_with_bytes`: a soft-deleted row whose path has bytes again. A soft-deleted row with no bytes is as it should be.
  *
- * Never a file of a derived or instance-local tree (`isInstanceLocalFile`: conversion sidecars, conflict copies, schema snapshots, legacy
+ * Never a file of a derived or instance-local tree (`isInstanceLocalFile`: conversion sidecars, conflict copies, retired per-type schema files, legacy
  * spills) on either side - none of them travels or is recorded as a file - and never a chunk or sidecar ROW (`parentFileId`).
  *
  * ## What it does not do

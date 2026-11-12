@@ -171,7 +171,7 @@ export const space_metaTool: ToolHandler = {
         + 'the link and the fields side by side. Send it back as it came and the link is kept; to change such a '
         + 'type’s fields, change its library entry or drop `$ref` and define the type inline — an edited '
         + 'field beside a `$ref` is refused with the field named, because it would otherwise be lost. '
-        + '`resolve: false` returns only the stored `{ $ref }`.\n\n'
+        + '`resolve: false` returns only the stored `{ $ref }`. `schemaFingerprint` names the schema as it stands (the SHA-256 of its canonical text; the same schema is the same fingerprint on every instance); it is derived, and stripped when the meta is sent back.\n\n'
         + 'WHAT `validationMode` MEANS FOR YOUR WRITE: `off` accepts anything; `warn` accepts the write and '
         + 'reports violations; `strict` REFUSES a write that breaks a schema. With `strictLinkage` on, a '
         + 'reference that does not resolve is refused too. A space with no `typeSchemas` yet accepts every '

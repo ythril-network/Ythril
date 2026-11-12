@@ -51,6 +51,8 @@ arrival it shadows would be. The row's links follow it to its key (each under th
 leave this instance's own link rows. **No tombstone is written, for the file or for a link, and nothing a peer holds is deleted.** A failure is logged once per window and the row
 stays where it was until the next touch.
 
+**Upgrading to 6.6.0 retires the per-type schema files.** The files `schemas/<space>_<kind>_<type>.json` that earlier versions wrote into a space after every schema save are no longer written, and the housekeeping cycle removes the ones this instance wrote, locally and without a tombstone; a file you uploaded at such a path has a record and is kept. Every schema version a space uses is kept privately instead, in the space's `<space>_schema_snapshots` collection, named by its fingerprint. A reader of the old files reads the schema from `GET /api/spaces/:id/meta` or MCP `space_meta`, whose `schemaFingerprint` names the version in force.
+
 **Upgrading to 6.5.0 splits no passage you already have: a file converted earlier whose passages are larger than the embedder accepts must be converted again.** Every document passage is now split so that what the embedder is sent (heading, body and task prefix) is at most `embedding.maxInputBytes` bytes (6,000 by default; a table is cut at its row lines, a fence or a long line at the furthest character). Passages already stored are not changed, and one over the ceiling is not embedded as a cut text, with the built-in model as with an HTTP embedder (a passage that had a vector of its cut text loses it at its next reindex or reembed): its embed job ends `failed` at once with `lastError` beginning `This passage is larger than the embedder accepts`, and the file stays findable by its words only. Find them with `list_embed_jobs` (status `failed`) or `ythril_embed_jobs_failed_total{reason="over_ceiling"}`, or by a file reading *partial* when the embedder refused its passages during conversion (`ythril_conversion_chunks_unembedded_total`). Then run `retry_embed_file` (or `POST /api/files/:spaceId/retry_embedding?path=<file>`) on each affected file: it works on a file that completed, deletes the file's old passages and converts it again. A reindex or reembed does not do this, because it re-embeds the stored passages. A file whose passages already fit needs nothing.
 
 **Upgrading to 6.0 turns every proxy space into personal views. It is breaking, and a 5.x build cannot read the result.**
@@ -534,6 +536,10 @@ old build is still stored and still returned, just unvalidated.
 MongoDB TTL index keeps running, so every spill in them is gone within a day. Until then an older build's
 backups include them, because it does not know to leave them out. The legacy spills the upgrade swept are not
 restored, and an older build goes back to writing new spills into the space.
+
+**Rolling back from 6.6 to 6.5 leaves the schema snapshots behind.** A 6.5 build does not know the `<space>_schema_snapshots`
+collections: it leaves them unused, a space delete still drops them with the space, and its backups include them. It writes the
+per-type files under `schemas/` again on the next schema save.
 
 **Vector indexes are rebuilt on boot**, so a rollback that changes the embedding model or its dimensions costs a
 reindex, not data. Check `GET /ready` before sending traffic — see [Runtime Model Downloads](02-hosting.md#runtime-model-downloads)
