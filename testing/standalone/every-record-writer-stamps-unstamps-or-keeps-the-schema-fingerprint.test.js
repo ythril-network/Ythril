@@ -258,9 +258,10 @@ function classify(index) {
         }
         // The op is used: spread, or bound and read again.
         for (const c of ownOps) {
-          const before = text.slice(Math.max(0, c.at - 3), c.at);
-          const bound = /(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(text.slice(Math.max(0, c.at - 80), c.at));
-          const used = before.endsWith('...') || (bound && new RegExp(`(?<![\\w$])${bound[1]}(?![\\w$])`).test(text.slice(c.end)));
+          // Everything before the call, read at its end: a spread right before it, or a binding it is assigned to.
+          const head = text.slice(0, c.at);
+          const bound = /(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(head);
+          const used = /\.\.\.\s*$/.test(head) || (bound && new RegExp(`(?<![\\w$])${bound[1]}(?![\\w$])`).test(text.slice(c.end)));
           if (!used) say(st, 'computes the stamp op and never spreads it into the write');
         }
       }
