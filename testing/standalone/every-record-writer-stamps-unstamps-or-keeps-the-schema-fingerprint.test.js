@@ -96,6 +96,12 @@ const STAMP = {
 const UNSTAMP = {
   [S('brain/chrono-redaction.ts:redactLapsedChronoContent')]: 'redaction removes `description` (REDACTED_CHRONO_FIELDS), which a space or type rule may read (`self.description`)',
   [S('brain/relink-references.ts:relinkEdgesOfRecord')]: 'relink moves an edge onto new ends (re-keyed or in place), which an endpoint-kind rule or a functional label may forbid there',
+  [S('brain/retyped-entity-edges.ts:unstampEdgesOfRetypedEntity')]: 'an entity re-type changes the type an endpoint rule reads for every edge that names it, and checks none of them',
+};
+
+/** The writers that must CALL an UNSTAMP writer, and when: a re-type that did not would leave its edges stamped against the entity's old type. */
+const CALLS_UNSTAMP = {
+  [S('brain/entities.ts:updateEntityById')]: { fn: 'unstampEdgesOfRetypedEntity', why: 'the entity update re-types: the edges that name the entity were judged against its old type (bundle-265 DI1)' },
 };
 
 const keep = (reason, keys) => Object.fromEntries(keys.map(k => [S(k), reason]));
@@ -297,6 +303,10 @@ function classify(index) {
     }
   }
 
+  for (const [k, { fn, why }] of Object.entries(CALLS_UNSTAMP)) {
+    if (callsOf(body(k) ?? '', fn).length === 0) say(k, `calls no ${fn}(: ${why}`);
+  }
+
   for (const [name, map] of [['KEEP', KEEP], ['ARRIVAL', ARRIVAL]]) {
     for (const k of Object.keys(map)) {
       const text = body(k) ?? '';
@@ -362,6 +372,12 @@ describe('the gate fails on a planted defect (T1 mutation runs)', () => {
     const findings = mutant('server/src/brain/chrono-redaction.ts', t => t.replace(/\.\.\.\s*UNSTAMP\b|\bUNSTAMP\s*\.\s*\$unset\b/g, '...{}'), 'brain/chrono-redaction.ts:redactLapsedChronoContent');
     assert.ok(findings.some(f => f.startsWith('brain/chrono-redaction.ts:redactLapsedChronoContent')),
       `a redaction that keeps the stamp passed the gate: ${findings.join(' | ')}`);
+  });
+
+  it('the edge unstamp removed from the entity re-type fails it', () => {
+    const findings = mutant('server/src/brain/entities.ts', t => t.replace(/(?<![.\w$])unstampEdgesOfRetypedEntity\s*\(/g, 'notTheUnstamp('), 'brain/entities.ts:updateEntityById');
+    assert.ok(findings.some(f => f.startsWith('brain/entities.ts:updateEntityById') && /unstampEdgesOfRetypedEntity/.test(f)),
+      `an entity re-type that leaves its edges stamped passed the gate: ${findings.join(' | ')}`);
   });
 });
 
