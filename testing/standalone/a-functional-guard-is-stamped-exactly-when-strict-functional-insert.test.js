@@ -35,6 +35,9 @@
  * green today (converge, warn, off, non-functional) are proven by a mutation: make the stamp unconditional and each of
  * them goes red; make it follow `meta.validationMode !== 'off'` and the `warn` row goes red.
  *
+ * Bundle-265 (Q-736, Q1): the stamping sites decide the guard with `guardIn(meta, from, label)`, the meta the write already read for
+ * its schema stamp, never with `guardFor(spaceId, …)`, a second read. Red on ce37b83a: `guardIn` does not exist.
+ *
  * Run: node --test testing/standalone/a-functional-guard-is-stamped-exactly-when-strict-functional-insert.test.js
  * (requires a prior `npm run build` in server/)
  */
@@ -178,24 +181,30 @@ describe('"strict" is ONE predicate, `validationRefuses`', () => {
     assert.ok(calls(bodyOf(read(SCHEMA), 'applyValidation', 'applyValidation')), 'applyValidation spells the strict test itself');
   });
 
-  // The stamp is decided in ONE function, `guardFor` (plan-edge.ts): a site that decides it asks `guardFor`, and `guardFor` asks the
-  // predicate — a site that spelled the strict test itself would be the second implementation this section is about.
-  const asksGuardFor = (body) => /\bguardFor\(/.test(body);
+  // The stamp is decided in ONE function, `guardIn(meta, from, label)` (plan-edge.ts), which takes the meta the write already read
+  // (bundle-265 Q1: one meta read per write, so the guard and the schema stamp are decided from the same schema). `guardFor(spaceId, …)`
+  // stays for the sites that decide what to LOAD before planning, and asks `guardIn`. A site that decides the stamp asks `guardIn`, and
+  // `guardIn` asks the predicate — a site that spelled the strict test itself would be the second implementation this section is about.
+  const asksGuardIn = (body) => /\bguardIn\(/.test(body);
   const PLAN_EDGE = 'server/src/brain/write-plan/plan-edge.ts';
 
-  it('`guardFor` is the one place that decides a stamp, and it asks validationRefuses', () => {
-    assert.ok(calls(bodyOf(read(PLAN_EDGE), 'guardFor', 'guardFor')), 'guardFor decides the stamp without asking validationRefuses');
+  it('`guardIn` is the one place that decides a stamp, and it asks validationRefuses; `guardFor` asks `guardIn`', () => {
+    const src = read(PLAN_EDGE);
+    assert.ok(/function\s+guardIn\s*\(/.test(src), 'plan-edge.ts declares no guardIn(meta, from, label): the guard cannot be decided from the meta the write read');
+    assert.ok(calls(bodyOf(src, 'guardIn', 'guardIn')), 'guardIn decides the stamp without asking validationRefuses');
+    const forBody = bodyOf(src, 'guardFor', 'guardFor');
+    assert.ok(asksGuardIn(forBody) || calls(forBody), 'guardFor decides the stamp by a rule of its own');
   });
 
-  it('the planner\'s stamp asks it (through guardFor, in edgeRefusal or planEdge, wherever the stamp is decided)', () => {
+  it('the planner\'s stamp asks it (through guardIn, in edgeRefusal or planEdge, wherever the stamp is decided)', () => {
     const src = read(PLAN_EDGE);
     const decided = ['edgeRefusal', 'planEdge'].map(n => bodyOf(src, n, n)).join('\n');
-    assert.ok(calls(decided) || asksGuardFor(decided), 'the planner decides which writes are stamped without asking guardFor or validationRefuses');
+    assert.ok(asksGuardIn(decided), 'the planner decides which writes are stamped without asking guardIn with the meta it validated with');
   });
 
   it('the relabel (`updateEdgeById`) asks it, so a relabel stamps by the same rule as a create', () => {
     const body = bodyOf(read('server/src/brain/edges.ts'), 'updateEdgeById', 'updateEdgeById');
-    assert.ok(calls(body) || asksGuardFor(body), 'updateEdgeById decides the stamp of a relabel without asking guardFor or validationRefuses');
+    assert.ok(asksGuardIn(body), 'updateEdgeById decides the stamp of a relabel without asking guardIn with the meta it validated with');
   });
 
   it('`validationMode === \'strict\'` is spelled in exactly one place, inside validationRefuses', () => {
