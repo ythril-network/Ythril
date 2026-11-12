@@ -72,6 +72,21 @@ declare module '../config/types.js' {
 export const isFeedMarker = (row: { feedMarker?: unknown } | null | undefined): boolean => row?.feedMarker === true;
 
 /**
+ * The update-pipeline stage that turns a stored FEED MARKER back into a plain row before a peer's version is merged onto it: the marker's own keys
+ * (`feedMarker`, `deletedAt`, `retiredBy`) go, read inside the write. Any other row passes unchanged, a soft-delete FLAG included (that row is this
+ * instance's audit record of a deletion, `Q-257`, and the merge keeps it).
+ *
+ * What it prevents: a peer's version that the accept admitted over a marker (no tombstone shadows it, and a marker has no `seq` to lose to) was
+ * merged INTO the marker, so the row kept `feedMarker` and `deletedAt` beside everything the peer wrote. Every live read leaves it out, the merkle
+ * root still lacks it, and the re-read that offered it back (ADR 21: a record the absent-bytes sweep removed here, which a peer still holds) did so
+ * on every attempt until it gave up, the record never visible again.
+ */
+export function feedMarkerClearedStage(): object {
+  const ifMarker = (field: string): object => ({ $cond: [{ $eq: ['$feedMarker', true] }, '$$REMOVE', `$${field}`] });
+  return { $set: { feedMarker: '$$REMOVE', deletedAt: ifMarker('deletedAt'), [RETIRED_BY]: ifMarker(RETIRED_BY) } };
+}
+
+/**
  * The feed window in days (`fileChangeFeedWindowDays`): a whole number of 0 or more, the default when unset or not one. 0 purges every feed marker at the
  * next sweep, so every cursor from before it re-lists.
  */

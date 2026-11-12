@@ -55,6 +55,7 @@ import { readStoredById } from '../db/read-by-id.js';
 import { removedFileMetaKeys, FILE_META_AUTHORED_KEYS } from '../api/sync/_shared.js';
 import { carriedFields, stampOfArrival, isLandingStamped, LOCAL_ONLY_FIELDS, RESTORED_LOCAL_FIELDS, WRITTEN_HERE } from './local-only-fields.js';
 import type { ArrivalLanding } from './record-position-stream.js';
+import { feedMarkerClearedStage } from '../files/feed-marker.js';
 
 /** What `fileMetaUpdate` is told besides the document. */
 export interface FileMetaUpdateOptions {
@@ -113,7 +114,8 @@ export function fileMetaUpdate(doc: Readonly<Record<string, unknown>>, opts: Fil
   // Absent for a caller that is not an arrival from a peer (the stray drain's fill): the stored stamp is left alone.
   if (restore || opts.deliveredBy !== undefined) set['deliveredBy'] = { $literal: stampOfArrival({ restore, doc, deliveredBy: opts.deliveredBy }) };
   const removed = removedFileMetaKeys(doc, { restore });
-  const stages: object[] = removed.length > 0 ? [{ $set: set }, { $unset: removed }] : [{ $set: set }];
+  // A FEED MARKER at the path is no row to merge into: its keys go first, so the version that arrived is live (and a restore's own flag, set below, stays).
+  const stages: object[] = [feedMarkerClearedStage(), { $set: set }, ...(removed.length > 0 ? [{ $unset: removed }] : [])];
   // The landing is a stage of its own, holding the caller's object BY REFERENCE (its values are numbers, which a `$set` stage reads as
   // literals): the arrival writer measures the page with a stand-in and sets the real positions in place once its chunk has taken them.
   // A landing is an ARRIVAL's (a local write's patch is its own `set`): the version that arrived was written by someone else, so the `writtenHere` bit the
