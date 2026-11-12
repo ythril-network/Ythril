@@ -17,6 +17,7 @@
  *
  * - `config/types-knowledge.ts`: the property NAME of the `SchemaStamped` interface, which a type declaration cannot take from a value without importing the
  *   schema package into the config types;
+ * - `spaces/space-meta-answer.ts`: the META answer's own field, a different object from the record's stamp, which `meta-response-round-trips` reads by its text;
  * - `mcp/tools/spaces.ts`: the sentence of the `space_meta` tool description, prose an agent reads, which names the field it will see in the answer.
  *
  * Run: node --test testing/standalone/the-schema-fingerprint-field-is-spelled-in-one-module.test.js
@@ -33,6 +34,7 @@ const WORD = /\bschemaFingerprint\b/g;
 const ALLOWED = Object.freeze({
   'server/src/config/types-knowledge.ts': 'the property name of the SchemaStamped interface',
   'server/src/mcp/tools/spaces.ts': 'the sentence of the space_meta tool description',
+  'server/src/spaces/space-meta-answer.ts': 'the meta answer\'s own field (a different object from the record stamp), which meta-response-round-trips reads by its text',
 });
 
 /** The lines of `source` (comments blanked, line numbers kept) that spell the field. */
