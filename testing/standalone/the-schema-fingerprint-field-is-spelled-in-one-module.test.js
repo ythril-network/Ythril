@@ -49,7 +49,7 @@ describe('the schema fingerprint field is spelled in one module', () => {
       if (file in ALLOWED) continue;
       for (const line of spellings(readFileSync(join(REPO_ROOT, file), 'utf8'))) found.push(`${file}:${line}`);
     }
-    assert.deepEqual(found, [], `these lines spell the stamp field themselves; import SCHEMA_FINGERPRINT_FIELD (spaces/schema-stamp.ts, or @ythril-network/schema/internal for a module that must not import the config loader):\n  ${found.join('\n  ')}`);
+    assert.deepEqual(found, [], `these lines spell the stamp field themselves; import SCHEMA_FINGERPRINT_FIELD (spaces/schema-stamp.ts, or the schema package's internal entry for a module that must not import the config loader):\n  ${found.join('\n  ')}`);
   });
 
   it('every allowed file still spells it, so an exemption cannot outlive its reason', () => {

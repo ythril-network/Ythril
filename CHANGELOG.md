@@ -22,11 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Schema:** `schemaFingerprint` on `GET /api/spaces/:id/meta` and MCP `space_meta`: the SHA-256 of the space schema's canonical text, the same on every instance holding the same schema; derived, and stripped when the meta is sent back.
 - **Schema:** every schema version a space has used is kept privately in `<space>_schema_snapshots`, named by its fingerprint, with what it was built from (own types, network layers). A database backup carries it, an export does not yet.
-- **Records:** records carry `schemaFingerprint` exactly while they conform as stored to the space's schema. A create or update whose record fully conforms is stamped with that schema's fingerprint, and its answer carries it. An update that leaves the record non-conforming or lands on a moved version, a chrono redaction and an edge relink remove it. Recall hits withhold it.
+- **Records:** a record carries `schemaFingerprint` exactly while it conforms to the space's schema: a conforming write stamps it, and its answer shows it; a non-conforming update, a redaction or a relink removes it. Recall hits omit it.
 - **Sync:** a record's `schemaFingerprint` travels with it on push, pull and import as its writer sent it; a value that is not a 64-character lowercase hex fingerprint is read as absent (stored without a stamp, never refused).
-- **Sync:** `GET /api/sync/schema-snapshot?spaceId=&networkId=&fp=`: a member that receives a record stamped with a schema version it does not hold fetches that version from the member that sent it. A version built from a network the asker is not in is never served (`409 not_shared`). Metric `ythril_schema_snapshot_total`.
-- **Audit:** `file.retired_schema_file.sweep`.
-
+- **Sync:** `GET /api/sync/schema-snapshot`: a member fetches a schema version it lacks from the member that sent the stamped record; one built from a network the asker is not in answers `409 not_shared`.
+- **Sync:** metric `ythril_schema_snapshot_total`; audit event `file.retired_schema_file.sweep`.
 - **Files:** the file change feed, `GET /api/files/:spaceId/changes` and the MCP tool `file_changes`: the changes to a space's files after a cursor, in order; with no cursor it lists every file. An expired cursor answers `410 cursor_expired`.
 - **Files:** `filesAwaitingBytes` on REST stats and MCP `space_stats`: records whose bytes are missing here, which file counts leave out. The change feed gains reason `bytes_lost` and the audit log `file.absent_bytes.sweep`.
 - **Files:** the Brain page's Files tab, a view's Overview and the Danger zone show "+N awaiting bytes" beside the file count when some records wait for their bytes.
@@ -36,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Schema:** the per-type files `schemas/<space>_<kind>_<type>.json` are no longer written; the housekeeping cycle removes the ones this instance wrote, locally and without a tombstone.
 - **Records:** a `schemaFingerprint` sent in a write body is ignored (not named as an unknown field, never stored); `deleteFields` refuses it by name.
-- **Sync:** the space hash (Merkle root) does not include `schemaFingerprint`: it replicates and is left out of the leaf, so copies that differ only in it do not diverge (ADR 22).
+- **Sync:** the space hash (Merkle root) leaves out `schemaFingerprint`; copies that differ only in it count as equal (ADR 22).
 - **Sync:** `GET /api/sync/meta` asks `schema: read` on the space.
 - **Files:** bytes that arrive from a peer move the file row's position, never its version: a reader paging by position hears of them, and the publisher's next edit still wins. Identical bytes again write nothing.
 - **Files:** a file deletion (own, folder, TTL, a peer's, a sidecar's) takes a position in the same write that flags or marks the row.
