@@ -32,7 +32,7 @@ import { boundedJson } from '../util/bounded-read.js';
 import { LruMap } from '../util/lru-map.js';
 import { warnOnce } from '../util/warn-once.js';
 import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
-import { peerRunsAtLeast } from './peer-floor.js';
+import { peerRunsAtLeast, reportedVersion } from './peer-floor.js';
 import { parsePushAnswer, type PushAnswer } from './wire-answer.js';
 import { PeerPagesBySeq } from '../util/errors.js';
 
@@ -119,9 +119,6 @@ export function warnPushRefusals(payloadKey: string, peerLabel: string, spaceId:
  */
 const MAX_PEERS_REMEMBERED = 1_000;
 const refusedTheNewerWire = new LruMap<string, string>(MAX_PEERS_REMEMBERED);
-
-/** The version a member reports, as this module compares it: a change of the report (an upgrade, a rollback) is news. */
-const reportedVersion = (member: { version?: string | null }): string => member.version?.trim() ?? '';
 
 /**
  * Does this peer take a wire introduced in `since`? It does when its reported version says so

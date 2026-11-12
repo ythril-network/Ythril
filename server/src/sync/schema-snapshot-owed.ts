@@ -33,7 +33,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { COLLECTION_SUFFIX, KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import { SCHEMA_SNAPSHOT_STEP, type SnapshotRow } from '../spaces/schema-snapshot-store.js';
-import { knownHeld, noteHeld, SCHEMA_FINGERPRINT_FIELD } from '../spaces/schema-stamp.js';
+import { isSchemaFingerprint, knownHeld, noteHeld, SCHEMA_FINGERPRINT_FIELD } from '../spaces/schema-stamp.js';
 import { owedFingerprints } from '../spaces/schema-snapshot.js';
 
 /** The record collections that carry a stamp: every brain collection but `files` (no type, so no schema) and `links` (a link row has no schema). */
@@ -46,9 +46,6 @@ const MAX_FINGERPRINTS_PER_SPACE = 256;
 /** The first back-off when every candidate said "not held", doubled each time, and its ceiling. */
 export const BACKOFF_FIRST_MS = 60_000;
 export const BACKOFF_MAX_MS = 60 * 60_000;
-
-/** A schema fingerprint as it is stamped: 64 lowercase hex. */
-const FINGERPRINT = /^[0-9a-f]{64}$/;
 
 interface Owed {
   /** The members that delivered a record carrying it. */
@@ -86,7 +83,7 @@ const forgetIn = (space: OwedSpace | undefined, fp: string): void => { space?.by
  * is not noted. A new deliverer resets a back-off: that member may hold what the others did not.
  */
 export function noteOwedSchemaSnapshot(spaceId: string, fp: unknown, peerId?: string): void {
-  if (typeof fp !== 'string' || !FINGERPRINT.test(fp) || knownHeld(spaceId, fp)) return;
+  if (!isSchemaFingerprint(fp) || knownHeld(spaceId, fp)) return;
   const space = ofSpace(spaceId);
   const entry = space.byFp.get(fp) ?? { peers: new Set<string>(), any: false, notHeld: new Set<string>(), retryAt: 0, backoffs: 0 };
   if (peerId) {
@@ -165,7 +162,7 @@ export async function scanOwedSchemaSnapshots(): Promise<void> {
     const carriedIn = new Map<string, (typeof STAMPED_COLLECTIONS)[number]>();
     await eachUnit(STAMPED_COLLECTIONS, async (collection) => {
       const found = await distinctStringsOf(col<Record<string, unknown>>(spaceCollection(space.id, collection)), SCHEMA_FINGERPRINT_FIELD, {});
-      for (const fp of found) if (FINGERPRINT.test(fp) && !carriedIn.has(fp)) carriedIn.set(fp, collection);
+      for (const fp of found) if (isSchemaFingerprint(fp) && !carriedIn.has(fp)) carriedIn.set(fp, collection);
     });
     const carried = [...carriedIn.keys()].filter(fp => !knownHeld(space.id, fp));
     if (carried.length === 0) return;

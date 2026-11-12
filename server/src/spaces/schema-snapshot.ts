@@ -16,7 +16,7 @@
  */
 import { schemaFingerprintTextOf } from '@ythril-network/schema/internal';
 import { readPeerMeta } from './body-schemas.js';
-import { SCHEMA_SNAPSHOT_MAX_BYTES } from './schema-snapshot-store.js';
+import { isOverSnapshotCap } from './schema-snapshot-store.js';
 import type { SnapshotLinks } from './schema-stamp.js';
 import { sha256Hex } from '../util/sha256-hex.js';
 
@@ -62,7 +62,7 @@ export type SnapshotRefusal = 'over_cap' | 'refused_hash' | 'refused_shape';
  * is another text with another hash, and is refused).
  */
 export function verifySnapshot(text: string, fp: string): { ok: true } | { ok: false; outcome: SnapshotRefusal } {
-  if (Buffer.byteLength(text, 'utf8') > SCHEMA_SNAPSHOT_MAX_BYTES) return { ok: false, outcome: 'over_cap' };
+  if (isOverSnapshotCap(text)) return { ok: false, outcome: 'over_cap' };
   if (sha256Hex(text) !== fp) return { ok: false, outcome: 'refused_hash' };
   const refused = { ok: false, outcome: 'refused_shape' } as const;
   let parsed: unknown;

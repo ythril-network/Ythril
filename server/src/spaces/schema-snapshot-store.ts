@@ -57,6 +57,9 @@ import { log, peerText } from '../util/log.js';
  */
 export const SCHEMA_SNAPSHOT_MAX_BYTES = JSON_BODY_MAX_BYTES;
 
+/** Is `text` larger than a peer takes? In UTF-8 bytes, never `length` (a letter can be two): the one test of the cap, for the writer's note and the receiver's refusal. */
+export const isOverSnapshotCap = (text: string): boolean => Buffer.byteLength(text, 'utf8') > SCHEMA_SNAPSHOT_MAX_BYTES;
+
 /** The name the cycle's step, and every failure of a snapshot write, is reported under. */
 export const SCHEMA_SNAPSHOT_STEP = declareStep('Schema snapshots');
 
@@ -77,7 +80,7 @@ export interface SnapshotRow extends KeptAs {
   at: string;
 }
 
-const snapshots = (spaceId: string): Collection<SnapshotRow> => col<SnapshotRow>(spaceCollection(spaceId, 'schemaSnapshots'));
+export const snapshots = (spaceId: string): Collection<SnapshotRow> => col<SnapshotRow>(spaceCollection(spaceId, 'schemaSnapshots'));
 
 const overCapSaid = warnOnce<string>();
 
@@ -87,7 +90,7 @@ const overCapSaid = warnOnce<string>();
  */
 export async function ensureSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs): Promise<'written' | 'held' | 'refused'> {
   if (knownHeld(spaceId, stamp.fp)) return 'held';
-  if (Buffer.byteLength(stamp.text, 'utf8') > SCHEMA_SNAPSHOT_MAX_BYTES) {
+  if (isOverSnapshotCap(stamp.text)) {
     overCapSaid(`${spaceId}:${stamp.fp}`, () => log.warn(`Schema snapshot ${peerText(stamp.fp)} of space '${peerText(spaceId)}' is larger than a peer `
       + 'takes: it is kept here, and no member can fetch it'));
   }

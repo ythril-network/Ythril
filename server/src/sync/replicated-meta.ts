@@ -126,6 +126,17 @@ export function metaForNetwork(own: SpaceMeta | undefined, layer: MetaLayer | un
 }
 
 /**
+ * What `GET /api/sync/meta` serves a member of the network `layer` names for `space`, before the server-owned fields are stripped and the library
+ * `$ref`s are written inline: the space's OWN definitions (`ownMeta`, and the whole stored `meta` for a space that never split the two) with that one
+ * layer over them. The ONE reading of it: the route sends it and the snapshot writer fingerprints it as what the space `serves` that network
+ * (`variationOf`), so the fingerprint a peer is told it is served is the one the route serves by construction, and a space with no `ownMeta` cannot
+ * be read as empty by one of them and as its `meta` by the other.
+ */
+export function servedMetaFor(space: { readonly ownMeta?: SpaceMeta; readonly meta?: SpaceMeta }, layer: MetaLayer | undefined): SpaceMeta {
+  return metaForNetwork(space.ownMeta ?? space.meta, layer);
+}
+
+/**
  * One place a definition lives in a meta: a top-level field, a property of a type, or one of a type's own fields. The same address
  * for a clash between layers and for a field's own value against the one the space runs on, so the two views name a thing alike.
  */

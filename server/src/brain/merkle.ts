@@ -28,6 +28,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { SCHEMA_FINGERPRINT_FIELD } from '@ythril-network/schema/internal';
 import { col, asFilter } from '../db/mongo.js';
 import { buildFileManifest } from '../files/manifest.js';
 import { BRAIN_COLLECTIONS, type BrainCollection, type RefKind } from '../config/types-knowledge.js';
@@ -100,7 +101,7 @@ function sha256hex(input: string): string {
  * `RETAGGED_FIELDS` (nothing rewrites it on arrival). The gate `a-replicated-field-reaches-its-incoming-schema` reads this set: a field that replicates and is
  * not hashed must be named here with its reason.
  */
-const REPLICATED_UNHASHED_FIELDS: ReadonlySet<string> = new Set(['schemaFingerprint']);
+const REPLICATED_UNHASHED_FIELDS: ReadonlySet<string> = new Set([SCHEMA_FINGERPRINT_FIELD]);
 
 const DERIVED_FIELDS: ReadonlySet<string> = new Set([...LOCAL_ONLY_FIELDS, ...RETAGGED_FIELDS, ...REPLICATED_UNHASHED_FIELDS]);
 

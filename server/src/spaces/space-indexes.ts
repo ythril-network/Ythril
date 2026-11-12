@@ -40,6 +40,7 @@
  * built by their own modules; the vector search indexes are search indexes, reconciled by `spaces/search-index-presence.ts`.
  */
 import type { Document } from 'mongodb';
+import { SCHEMA_FINGERPRINT_FIELD } from '@ythril-network/schema/internal';
 import { col } from '../db/mongo.js';
 import { indexNamesOf } from '../db/index-names.js';
 import { boundOperationMs, housekeepingOpMs } from '../db/write-bound.js';
@@ -131,8 +132,8 @@ const TTL_INDEXES: readonly SpaceIndex[] = [
    * sweep like the retention indexes, `report`: a space without it is scanned, slowly and correctly, and never blocked at boot.
    */
   ...Object.values(COLLECTION_SUFFIX).map((part): SpaceIndex => ({
-    part, keys: { schemaFingerprint: 1 },
-    options: { name: 'schemaFingerprint_present', partialFilterExpression: { schemaFingerprint: { $exists: true } } },
+    part, keys: { [SCHEMA_FINGERPRINT_FIELD]: 1 },
+    options: { name: `${SCHEMA_FINGERPRINT_FIELD}_present`, partialFilterExpression: { [SCHEMA_FINGERPRINT_FIELD]: { $exists: true } } },
     policy: 'report', bootSafe: false, sweep: true,
   })),
 ];

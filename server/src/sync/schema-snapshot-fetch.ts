@@ -25,8 +25,9 @@
  *   asking again would get the same text. Otherwise the row is kept (`origin: 'fetched'`, `from` the member, `links` as sent and shape-checked), and the
  *   links are read as a HINT of whether this variation is behind the sender's (`behindVerdict`; logged once, counted `behind`, nothing kept because of it).
  * - `404` with code `unknown_fingerprint`: the member holds no such version (`not_held`); when every candidate has said so the fingerprint backs off.
- * - `404` with NO code: the member has no such route (`route_missing`), remembered per member and version.
- * - `410` `lost_space`: the member no longer has the space; not asked about it again at this version.
+ * - `404` with NO code and any other words: the member has no such route (`route_missing`), remembered per member and version.
+ * - `404` with NO code whose sentence is `unknownSpaceSentence` of the id asked about, or `410` `space_retired`: the answers the member's one existence rule gives
+ *   for a space it does not have (`sendLostSpace`, as `GET /meta` answers it): the member no longer has the space (`lost_space`); not asked about it again at this version.
  * - `409` `not_shared`: TERMINAL, like a refusal: the version was built from a network this member is not in, and the records keep their stamp.
  * - `403` `schema_rung`: this token may not read the schema there; warned once, counted `refused_rung`, the member is paused for the space and tried later.
  * - anything else: backs off per member, space and fingerprint (`failed`).
@@ -46,10 +47,11 @@ import { readStoredById } from '../db/read-by-id.js';
 import { storeIsNotAnswering } from '../db/store-condition.js';
 import { withinWriteBound } from '../db/write-bound.js';
 import { isShuttingDown } from '../lifecycle.js';
-import { isDirectionalNetwork, isUpstreamPeer } from '../networks/network-spaces.js';
-import { ensureSnapshot, SCHEMA_SNAPSHOT_MAX_BYTES, type SnapshotRow } from '../spaces/schema-snapshot-store.js';
+import { isDirectionalNetwork, isUpstreamPeer, networksSharedWith } from '../networks/network-spaces.js';
+import { ensureSnapshot, SCHEMA_SNAPSHOT_MAX_BYTES, snapshots, type SnapshotRow } from '../spaces/schema-snapshot-store.js';
 import { behindVerdict, verifySnapshot, type SharedNetwork, type SnapshotRefusal } from '../spaces/schema-snapshot.js';
-import { SCHEMA_FINGERPRINT_FIELD, variationOf, type SnapshotLinks } from '../spaces/schema-stamp.js';
+import { isSchemaFingerprint, SCHEMA_FINGERPRINT_FIELD, variationOf, type SnapshotLinks } from '../spaces/schema-stamp.js';
+import { unknownSpaceSentence } from '../spaces/unknown-space.js';
 import { networksHolding } from '../spaces/wipe-vote.js';
 import { schemaSnapshotTotal } from '../metrics/schema-snapshot-count.js';
 import { boundedJson, ResponseTooLargeError } from '../util/bounded-read.js';
@@ -58,9 +60,9 @@ import { LruMap } from '../util/lru-map.js';
 import { log, peerText } from '../util/log.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { warnOnce } from '../util/warn-once.js';
-import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
+import { refusalOf, transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import { peerSafeFetch, transferInit } from './peer-fetch.js';
-import { peerRunsAtLeast } from './peer-floor.js';
+import { peerRunsAtLeast, reportedVersion } from './peer-floor.js';
 import { BACKOFF_FIRST_MS, dropOwedSchemaSnapshot, forgetOwedSchemaSnapshot, noteNotHeld, owedTo, STAMPED_COLLECTIONS } from './schema-snapshot-owed.js';
 
 /** The first release that serves snapshots; a member not known to run it is never asked. */
@@ -84,9 +86,6 @@ const HELD_CHECK_WINDOW = 64;
 /** An answer's body, past the text it carries (its links, its quotes): the text itself is held to {@link SCHEMA_SNAPSHOT_MAX_BYTES} by bytes, after the read. */
 const BODY_MAX_BYTES = 2 * SCHEMA_SNAPSHOT_MAX_BYTES + 64 * 1024;
 
-/** How much of a refusal's body is read to find its code. */
-const REFUSAL_BODY_MAX_BYTES = 16 * 1024;
-
 const REMEMBERED = 4_096;
 /** Refused for good: `member@version:space:fp`. A new version of the member is a new key, so it is asked again. */
 const terminal = new LruMap<string, SnapshotRefusal | 'not_shared'>(REMEMBERED);
@@ -101,8 +100,6 @@ const inFlight = new Set<string>();
 
 const rungSaid = warnOnce<string>();
 const behindSaid = warnOnce<string>();
-
-const versionOf = (member: { version?: string | null }): string => member.version?.trim() ?? '';
 
 /** Forget every outcome this module remembers, for tests. */
 export function forgetSchemaSnapshotOutcomes(): void {
@@ -119,8 +116,6 @@ function candidatesOf(spaceId: string): string[] {
   return [...ids];
 }
 
-const isFingerprint = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
-
 /** The links a member sent, if they are the shape of links: three fields, fingerprints, at most 64 entries per list. Anything else is no links. */
 function linksFrom(raw: unknown): SnapshotLinks | null {
   if (typeof raw !== 'object' || raw === null) return null;
@@ -129,22 +124,14 @@ function linksFrom(raw: unknown): SnapshotLinks | null {
     if (!Array.isArray(v) || v.length > 64) return undefined;
     const out: SnapshotLinks['layers'] = [];
     for (const e of v as Array<Record<string, unknown> | null>) {
-      if (typeof e?.['networkId'] !== 'string' || e['networkId'].length === 0 || e['networkId'].length > 128 || !isFingerprint(e['fp'])) return undefined;
+      if (typeof e?.['networkId'] !== 'string' || e['networkId'].length === 0 || e['networkId'].length > 128 || !isSchemaFingerprint(e['fp'])) return undefined;
       out.push({ networkId: e['networkId'], fp: e['fp'] });
     }
     return out;
   };
   const layers = list(l['layers']);
   const served = list(l['served']);
-  return isFingerprint(l['own']) && layers && served ? { own: l['own'], layers, served } : null;
-}
-
-/** The `code` a refusal's body carries, or `undefined` for a body that is not JSON, is too large or names none. */
-async function codeOf(resp: Response): Promise<string | undefined> {
-  try {
-    const code = (await boundedJson<{ code?: unknown }>(resp, 'schema snapshot refusal', REFUSAL_BODY_MAX_BYTES))?.code;
-    return typeof code === 'string' ? code : undefined;
-  } catch { return undefined; }
+  return isSchemaFingerprint(l['own']) && layers && served ? { own: l['own'], layers, served } : null;
 }
 
 /** Which of `fps` a stored record of `spaceId` still carries: one `distinct` per record collection, over the stamp's index. */
@@ -177,8 +164,7 @@ type Next = 'next' | 'stop' | 'not_held';
  */
 export async function fetchOwedSchemaSnapshots(a: SnapshotFetch): Promise<void> {
   const { member, spaceId } = a;
-  const version = versionOf(member);
-  const memberKey = `${member.instanceId}@${version}`;
+  const memberKey = `${member.instanceId}@${reportedVersion(member)}`;
   const now = Date.now();
   if (!peerRunsAtLeast(member, SCHEMA_SNAPSHOT_SINCE) || noRoute.peek(memberKey) || noSpace.peek(`${memberKey}:${spaceId}`)) return;
   if ((pausedUntil.peek(`${memberKey}:${spaceId}`) ?? 0) > now) return;
@@ -236,7 +222,8 @@ async function askMemberFor(a: SnapshotFetch, fp: string, memberKey: string, tur
   // A hold or a decline the member answers is its own word for "not now" (a 423 `space_held`): the turn is held, not failed.
   const refusal = await transferRefusal(resp);
   if (refusal !== 'failed') { turn.refusedBy(refusal); return 'stop'; }
-  const code = await codeOf(resp);
+  const { code, error } = await refusalOf(resp);
+  const lostSpace = (): Next => { schemaSnapshotTotal.note('lost_space'); noSpace.set(`${memberKey}:${spaceId}`, true); return 'stop'; };
   switch (resp.status) {
     case 404:
       if (code === 'unknown_fingerprint') {
@@ -244,10 +231,15 @@ async function askMemberFor(a: SnapshotFetch, fp: string, memberKey: string, tur
         noteNotHeld(spaceId, fp, member.instanceId, candidatesOf(spaceId), Date.now());
         return 'not_held';
       }
-      if (code === undefined) { schemaSnapshotTotal.note('route_missing'); noRoute.set(memberKey, true); return 'stop'; }
+      if (code === undefined) {
+        // The sentence the member's one existence rule answers an unknown space with (`sendLostSpace`, as `GET /meta` answers it): no code, so told from
+        // a missing route by its words, which are the ones `unknownSpaceSentence` spells for the id this server asked about.
+        if (error?.startsWith(unknownSpaceSentence(a.remoteSpaceId))) return lostSpace();
+        schemaSnapshotTotal.note('route_missing'); noRoute.set(memberKey, true); return 'stop';
+      }
       break;
     case 410:
-      if (code === 'lost_space') { schemaSnapshotTotal.note('lost_space'); noSpace.set(`${memberKey}:${spaceId}`, true); return 'stop'; }
+      if (code === 'space_retired') return lostSpace();
       break;
     case 409:
       if (code === 'not_shared') { schemaSnapshotTotal.note('not_shared'); terminal.set(`${memberKey}:${spaceId}:${fp}`, 'not_shared'); return 'next'; }
@@ -315,9 +307,9 @@ function refuse(spaceId: string, member: NetworkMember, fp: string, memberKey: s
 async function sayBehind(spaceId: string, member: NetworkMember, sender: { fp: string; links: SnapshotLinks | null; layerOf?: string }): Promise<void> {
   try {
     const variation = variationOf(spaceId);
-    const nets = networksHolding(spaceId, getConfig()).filter(n => n.members.some(m => m.instanceId === member.instanceId));
+    const nets = networksSharedWith(spaceId, member.instanceId);
     if (!variation || nets.length === 0) return;
-    const layerRows = await col<SnapshotRow>(spaceCollection(spaceId, 'schemaSnapshots'))
+    const layerRows = await snapshots(spaceId)
       .find(asFilter<SnapshotRow>({ origin: 'layer', networkId: { $in: nets.map(n => n.id) } }), { projection: { _id: 1, networkId: 1 } }).toArray();
     const mine: SharedNetwork[] = nets.map(n => ({
       networkId: n.id,
