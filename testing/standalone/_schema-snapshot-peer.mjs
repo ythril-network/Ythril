@@ -18,6 +18,7 @@
 import http from 'node:http';
 import { createHash } from 'node:crypto';
 import { privateHostAddress } from './_private-address.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 export const sha256 = (text) => createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
 
@@ -79,7 +80,7 @@ export async function openSnapshotPeer(door) {
         const ask = { n: peer.requests.length + 1, fp: query.fp, spaceId: query.spaceId, networkId: query.networkId, query, headers: req.headers };
         peer.requests.push(ask);
         const answer = (await peer.snapshot(ask)) ?? { status: 404, body: { error: 'scripted: nothing' } };
-        if (answer.delayMs) await new Promise(r => setTimeout(r, answer.delayMs));
+        if (answer.delayMs) await elapse(answer.delayMs, 'simulated latency: a peer that is slow to answer a snapshot');
         const payload = Buffer.from(typeof answer.body === 'string' ? answer.body : JSON.stringify(answer.body ?? {}), 'utf8');
         const headers = { 'content-type': 'application/json', ...(answer.headers ?? {}) };
         if (!answer.chunked) headers['content-length'] = String(payload.length);

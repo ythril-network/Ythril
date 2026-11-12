@@ -1,0 +1,331 @@
+/**
+ * The receiver's half of the schema snapshot fetch (Q-738, bundle-265): a leg of the member's turn that asks the member for the schema versions this
+ * server's records are stamped with and holds no snapshot of, verifies each, and keeps it.
+ *
+ * ## Where it runs, and why there
+ *
+ * `fetchOwedSchemaSnapshots` is its OWN leg of `exchangeSpaceWithMember` (`leg = 'schema-snapshot'`, after the push leg and before the files leg, whatever
+ * the direction: a schema read is not a data transfer), so a throw is attributed to it and not to the push to the peer. Never per arrival and never
+ * awaited by a write: an arrival only notes what it is owed (`sync/schema-snapshot-owed.ts`) and the turn asks for it. Only while the turn may continue.
+ *
+ * ## What it asks, in order
+ *
+ * 1. A member that is not known to run {@link SCHEMA_SNAPSHOT_SINCE} (`peerRunsAtLeast`: unknown reads as old) is not asked, nor one that answered "no such
+ *    route" or "no such space" at its current version.
+ * 2. The fingerprints owed to this member, minus those refused for good at this member and version and those backing off, at most 64 looked at.
+ * 3. The held check, first: one `find({ _id: { $in } })` on the snapshot collection. A row that is there (another member's answer, this server's own write)
+ *    leaves the owed set, and nothing left means no request.
+ * 4. At most {@link SNAPSHOT_FETCHES_PER_TURN} of what is left, one at a time, each as `GET /api/sync/schema-snapshot` with `transferInit(requestInit)`:
+ *    the control plane's own ten-second signal would win over the transfer budget and abort a snapshot of up to 10 MiB for ever; the turn's own signal still
+ *    ends the request with the turn.
+ *
+ * ## What each answer becomes
+ *
+ * - `200`: {@link verifySnapshot}. A refusal (`over_cap`, `refused_hash`, `refused_shape`) is TERMINAL for this member, this version and this fingerprint:
+ *   asking again would get the same text. Otherwise the row is kept (`origin: 'fetched'`, `from` the member, `links` as sent and shape-checked), and the
+ *   links are read as a HINT of whether this variation is behind the sender's (`behindVerdict`; logged once, counted `behind`, nothing kept because of it).
+ * - `404` with code `unknown_fingerprint`: the member holds no such version (`not_held`); when every candidate has said so the fingerprint backs off.
+ * - `404` with NO code: the member has no such route (`route_missing`), remembered per member and version.
+ * - `410` `lost_space`: the member no longer has the space; not asked about it again at this version.
+ * - `409` `not_shared`: TERMINAL, like a refusal: the version was built from a network this member is not in, and the records keep their stamp.
+ * - `403` `schema_rung`: this token may not read the schema there; warned once, counted `refused_rung`, the member is paused for the space and tried later.
+ * - anything else: backs off per member, space and fingerprint (`failed`).
+ *
+ * ## This server's own store
+ *
+ * A failure of the write is this instance's: reported through `reportSpaceFailure` (the shared throttled reporter), never a bare log line. A store that is
+ * not answering (`storeIsNotAnswering`) ends the leg for the turn, since the next fingerprint would wait the driver's timeout again, and is rethrown to the
+ * turn, which files it as this instance's own fault and not the member's.
+ */
+import { getConfig } from '../config/loader.js';
+import type { NetworkMember } from '../config/types.js';
+import { col, asFilter } from '../db/mongo.js';
+import { spaceCollection } from '../db/space-collection.js';
+import { storeIsNotAnswering } from '../db/store-condition.js';
+import { withinWriteBound } from '../db/write-bound.js';
+import { isShuttingDown } from '../lifecycle.js';
+import { isDirectionalNetwork, isUpstreamPeer } from '../networks/network-spaces.js';
+import { ensureSnapshot, SCHEMA_SNAPSHOT_MAX_BYTES, type SnapshotRow } from '../spaces/schema-snapshot-store.js';
+import { behindVerdict, verifySnapshot, type SharedNetwork, type SnapshotRefusal } from '../spaces/schema-snapshot.js';
+import { SCHEMA_FINGERPRINT_FIELD, variationOf, type SnapshotLinks } from '../spaces/schema-stamp.js';
+import { networksHolding } from '../spaces/wipe-vote.js';
+import { schemaSnapshotTotal } from '../metrics/schema-snapshot-count.js';
+import { boundedJson, ResponseTooLargeError } from '../util/bounded-read.js';
+import { declareStep } from '../util/housekeeping-signals.js';
+import { LruMap } from '../util/lru-map.js';
+import { log, peerText } from '../util/log.js';
+import { reportSpaceFailure } from '../util/space-failure.js';
+import { warnOnce } from '../util/warn-once.js';
+import { turnSignal, type ExchangeTurn } from './held-answer.js';
+import { peerSafeFetch, transferInit } from './peer-fetch.js';
+import { peerRunsAtLeast } from './peer-floor.js';
+import { BACKOFF_FIRST_MS, dropOwedSchemaSnapshot, forgetOwedSchemaSnapshot, noteNotHeld, owedTo, STAMPED_COLLECTIONS } from './schema-snapshot-owed.js';
+
+/** The first release that serves snapshots; a member not known to run it is never asked. */
+export const SCHEMA_SNAPSHOT_SINCE = '6.6.0';
+
+/** The most snapshots asked of one member for one space in one turn; the rest wait for the next. */
+export const SNAPSHOT_FETCHES_PER_TURN = 4;
+
+/** The step a failure of the fetch is reported under. */
+export const SCHEMA_SNAPSHOT_FETCH_STEP = declareStep('Schema snapshot fetch');
+
+/**
+ * The budget of one snapshot request, body included: a snapshot is at most 10 MiB, so the control plane's ten seconds is too short for a slow link and the
+ * file transfer's ten minutes is far too long for a text. The explicit signal wins over `peerSafeFetch`'s own budget, so it carries the same bound.
+ */
+const SNAPSHOT_TIMEOUT_MS = 2 * 60_000;
+
+/** The most owed fingerprints one turn looks at for the held check. */
+const HELD_CHECK_WINDOW = 64;
+
+/** An answer's body, past the text it carries (its links, its quotes): the text itself is held to {@link SCHEMA_SNAPSHOT_MAX_BYTES} by bytes, after the read. */
+const BODY_MAX_BYTES = 2 * SCHEMA_SNAPSHOT_MAX_BYTES + 64 * 1024;
+
+/** How much of a refusal's body is read to find its code. */
+const REFUSAL_BODY_MAX_BYTES = 16 * 1024;
+
+const REMEMBERED = 4_096;
+/** Refused for good: `member@version:space:fp`. A new version of the member is a new key, so it is asked again. */
+const terminal = new LruMap<string, SnapshotRefusal | 'not_shared'>(REMEMBERED);
+/** A member with no such route, `member@version`. */
+const noRoute = new LruMap<string, true>(REMEMBERED);
+/** A member without the space, `member@version:space`. */
+const noSpace = new LruMap<string, true>(REMEMBERED);
+/** Not before this time: `member:space:fp` after a failure, `member:space` after a refused rung. */
+const pausedUntil = new LruMap<string, number>(REMEMBERED);
+/** In flight, `space:fp`: one request for a fingerprint at a time, however many members' turns want it. */
+const inFlight = new Set<string>();
+
+const rungSaid = warnOnce<string>();
+const behindSaid = warnOnce<string>();
+
+const versionOf = (member: { version?: string | null }): string => member.version?.trim() ?? '';
+
+/** Forget every outcome this module remembers, for tests. */
+export function forgetSchemaSnapshotOutcomes(): void {
+  terminal.clear(); noRoute.clear(); noSpace.clear(); pausedUntil.clear(); inFlight.clear();
+}
+
+/** The members of `spaceId` that may be asked at all: they share it with this server and run a release that serves snapshots. */
+function candidatesOf(spaceId: string): string[] {
+  const cfg = getConfig();
+  const ids = new Set<string>();
+  for (const net of networksHolding(spaceId, cfg)) {
+    for (const m of net.members) if (m.instanceId !== cfg.instanceId && peerRunsAtLeast(m, SCHEMA_SNAPSHOT_SINCE)) ids.add(m.instanceId);
+  }
+  return [...ids];
+}
+
+const isFingerprint = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+
+/** The links a member sent, if they are the shape of links: three fields, fingerprints, at most 64 entries per list. Anything else is no links. */
+function linksFrom(raw: unknown): SnapshotLinks | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const l = raw as Record<string, unknown>;
+  const list = (v: unknown): SnapshotLinks['layers'] | undefined => {
+    if (!Array.isArray(v) || v.length > 64) return undefined;
+    const out: SnapshotLinks['layers'] = [];
+    for (const e of v as Array<Record<string, unknown> | null>) {
+      if (typeof e?.['networkId'] !== 'string' || e['networkId'].length === 0 || e['networkId'].length > 128 || !isFingerprint(e['fp'])) return undefined;
+      out.push({ networkId: e['networkId'], fp: e['fp'] });
+    }
+    return out;
+  };
+  const layers = list(l['layers']);
+  const served = list(l['served']);
+  return isFingerprint(l['own']) && layers && served ? { own: l['own'], layers, served } : null;
+}
+
+/** The `code` a refusal's body carries, or `undefined` for a body that is not JSON, is too large or names none. */
+async function codeOf(resp: Response): Promise<string | undefined> {
+  try {
+    const code = (await boundedJson<{ code?: unknown }>(resp, 'schema snapshot refusal', REFUSAL_BODY_MAX_BYTES))?.code;
+    return typeof code === 'string' ? code : undefined;
+  } catch { return undefined; }
+}
+
+/** Which of `fps` a stored record of `spaceId` still carries: one `distinct` per record collection, over the stamp's index. */
+async function carriedNow(spaceId: string, fps: readonly string[]): Promise<Set<string>> {
+  const carried = new Set<string>();
+  for (const collection of STAMPED_COLLECTIONS) {
+    const found = await col<Record<string, unknown>>(spaceCollection(spaceId, collection))
+      .distinct(SCHEMA_FINGERPRINT_FIELD, asFilter<Record<string, unknown>>({ [SCHEMA_FINGERPRINT_FIELD]: { $in: [...fps] } }));
+    for (const fp of found) if (typeof fp === 'string') carried.add(fp);
+  }
+  return carried;
+}
+
+/** The arguments of one turn's fetch. `requestInit` is the engine's, which carries the control plane's signal: it is passed through `transferInit`. */
+export interface SnapshotFetch {
+  member: NetworkMember;
+  spaceId: string;
+  remoteSpaceId: string;
+  networkId: string;
+  requestInit: () => RequestInit;
+  turn: ExchangeTurn;
+}
+
+/** What asking for one fingerprint ended in: go on to the next (`not_held`: and keep this one owed to the other members), or end the leg for this turn. */
+type Next = 'next' | 'stop' | 'not_held';
+
+/**
+ * The turn's fetch leg for one member and space (see the module docblock). Never throws for the member's failures; a failure of this instance's own
+ * store that is not answering is rethrown, for the turn to file as this instance's.
+ */
+export async function fetchOwedSchemaSnapshots(a: SnapshotFetch): Promise<void> {
+  const { member, spaceId } = a;
+  const version = versionOf(member);
+  const memberKey = `${member.instanceId}@${version}`;
+  const now = Date.now();
+  if (!peerRunsAtLeast(member, SCHEMA_SNAPSHOT_SINCE) || noRoute.peek(memberKey) || noSpace.peek(`${memberKey}:${spaceId}`)) return;
+  if ((pausedUntil.peek(`${memberKey}:${spaceId}`) ?? 0) > now) return;
+  const wanted = owedTo(spaceId, member.instanceId, candidatesOf(spaceId), now)
+    .filter(fp => !terminal.peek(`${memberKey}:${spaceId}:${fp}`) && (pausedUntil.peek(`${memberKey}:${spaceId}:${fp}`) ?? 0) <= now)
+    .slice(0, HELD_CHECK_WINDOW);
+  if (wanted.length === 0) return;
+  // Still carried: a record that was deleted or rewritten since the fingerprint was noted no longer needs its snapshot, and nothing is asked for it.
+  const { owed, held } = await withinWriteBound(async () => {
+    const carried = await carriedNow(spaceId, wanted);
+    for (const fp of wanted) if (!carried.has(fp)) forgetOwedSchemaSnapshot(spaceId, fp);
+    const stillOwed = wanted.filter(fp => carried.has(fp));
+    // The held check, before any request: a row another member's answer or this server's own write put there is not asked for.
+    const rows = stillOwed.length === 0 ? [] : await col<SnapshotRow>(spaceCollection(spaceId, 'schemaSnapshots'))
+      .find(asFilter<SnapshotRow>({ _id: { $in: stillOwed } }), { projection: { _id: 1 } }).toArray();
+    return { owed: stillOwed, held: new Set(rows.map(r => String(r._id))) };
+  });
+  for (const fp of held) dropOwedSchemaSnapshot(spaceId, fp);
+  for (const fp of owed.filter(f => !held.has(f) && !inFlight.has(`${spaceId}:${f}`)).slice(0, SNAPSHOT_FETCHES_PER_TURN)) {
+    if (!a.turn.mayContinue() || isShuttingDown()) return;
+    const flight = `${spaceId}:${fp}`;
+    inFlight.add(flight);
+    try {
+      const next = await ask(a, fp, memberKey, a.turn);
+      // Asked for, and the answer is in: the owed set is a queue from arrivals to the turn, not a memory of what failed. Whatever the answer was (kept, refused,
+      // no route, no space, a failure) the entry leaves it, and the gap scan owes the fingerprint again while a stored record carries it and no row holds it;
+      // what was refused or is backing off is remembered below, per member and version, so the scan does not make the member answer it again. Only "not
+      // held" stays: the OTHER members it may be asked of have not answered yet.
+      if (next !== 'not_held') forgetOwedSchemaSnapshot(spaceId, fp);
+      if (next === 'stop') return;
+    } finally { inFlight.delete(flight); }
+  }
+}
+
+/** Ask the member for `fp`, decide the answer, and keep the snapshot when it verifies. */
+async function ask(a: SnapshotFetch, fp: string, memberKey: string, turn: ExchangeTurn): Promise<Next> {
+  const { member, spaceId } = a;
+  const failedKey = `${memberKey}:${spaceId}:${fp}`;
+  const failed = (next: Next): Next => { schemaSnapshotTotal.count('failed'); pausedUntil.set(failedKey, Date.now() + BACKOFF_FIRST_MS); return next; };
+  const q = new URLSearchParams({ spaceId: a.remoteSpaceId, networkId: a.networkId, fp });
+  let resp: Response;
+  try {
+    resp = await peerSafeFetch(`${member.url}/api/sync/schema-snapshot?${q}`,
+      { ...transferInit(a.requestInit()), signal: turnSignal(AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS), turn) }, { timeoutMs: SNAPSHOT_TIMEOUT_MS });
+  } catch (err) {
+    // The turn was cut (an act on the space, shutdown): the member did not fail. Otherwise it is unreachable, and the next fingerprint would wait too.
+    if (!turn.mayContinue() || isShuttingDown()) return 'stop';
+    log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} for space '${peerText(spaceId)}': ${peerText(err)}`);
+    return failed('stop');
+  }
+  if (resp.status === 200) return await keep(a, fp, memberKey, resp, failed, turn);
+  const code = await codeOf(resp);
+  switch (resp.status) {
+    case 404:
+      if (code === 'unknown_fingerprint') {
+        schemaSnapshotTotal.count('not_held');
+        noteNotHeld(spaceId, fp, member.instanceId, candidatesOf(spaceId), Date.now());
+        return 'not_held';
+      }
+      if (code === undefined) { schemaSnapshotTotal.count('route_missing'); noRoute.set(memberKey, true); return 'stop'; }
+      break;
+    case 410:
+      if (code === 'lost_space') { schemaSnapshotTotal.count('lost_space'); noSpace.set(`${memberKey}:${spaceId}`, true); return 'stop'; }
+      break;
+    case 409:
+      if (code === 'not_shared') { schemaSnapshotTotal.count('not_shared'); terminal.set(`${memberKey}:${spaceId}:${fp}`, 'not_shared'); return 'next'; }
+      break;
+    case 403:
+      if (code === 'schema_rung') {
+        schemaSnapshotTotal.count('refused_rung');
+        pausedUntil.set(`${memberKey}:${spaceId}`, Date.now() + BACKOFF_FIRST_MS);
+        rungSaid(`${member.instanceId}:${spaceId}`, () => log.warn(`${peerText(member.label ?? member.instanceId)} refused this instance the schema of space '${peerText(spaceId)}': `
+          + 'the token it holds for that member has no `schema: read` there, so the schema versions its records are stamped with cannot be fetched. Grant it on that member.'));
+        return 'stop';
+      }
+      break;
+    default:
+  }
+  log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} for space '${peerText(spaceId)}': HTTP ${resp.status}`);
+  return failed('next');
+}
+
+/** A 200: verify the text against the fingerprint asked for, then keep it. */
+async function keep(a: SnapshotFetch, fp: string, memberKey: string, resp: Response, failed: (next: Next) => Next, turn: ExchangeTurn): Promise<Next> {
+  const { member, spaceId } = a;
+  let body: { text?: unknown; links?: unknown; layerOf?: unknown };
+  try {
+    body = await boundedJson(resp, 'schema snapshot', BODY_MAX_BYTES);
+  } catch (err) {
+    if (err instanceof ResponseTooLargeError) return refuse(spaceId, member, fp, memberKey, 'over_cap');
+    if (!turn.mayContinue() || isShuttingDown()) return 'stop';
+    log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} for space '${peerText(spaceId)}': ${peerText(err)}`);
+    return failed('next');
+  }
+  if (typeof body?.text !== 'string') return refuse(spaceId, member, fp, memberKey, 'refused_shape');
+  const verdict = verifySnapshot(body.text, fp);
+  if (!verdict.ok) return refuse(spaceId, member, fp, memberKey, verdict.outcome);
+  const links = linksFrom(body.links);
+  try {
+    // Bounded: the turn is no request, so nothing ends a write that waits on a locked document for ever but this scope.
+    const kept = await withinWriteBound(() => ensureSnapshot(spaceId, { fp, text: body.text as string }, { origin: 'fetched', from: member.instanceId, links }));
+    // An act stands on the space: nothing is written now, and what it still owes is asked for in a later turn.
+    if (kept === 'refused') return 'stop';
+  } catch (err) {
+    schemaSnapshotTotal.count('failed');
+    reportSpaceFailure(SCHEMA_SNAPSHOT_FETCH_STEP, spaceId, err, { unit: fp, when: 'a later turn' });
+    if (storeIsNotAnswering(err)) throw err;
+    return 'next';
+  }
+  dropOwedSchemaSnapshot(spaceId, fp);
+  await sayBehind(spaceId, member, { fp, links, ...(typeof body.layerOf === 'string' ? { layerOf: body.layerOf } : {}) });
+  return 'next';
+}
+
+/** A text that was refused: counted, said, and terminal for this member, version and fingerprint. */
+function refuse(spaceId: string, member: NetworkMember, fp: string, memberKey: string, outcome: SnapshotRefusal): Next {
+  schemaSnapshotTotal.count(outcome);
+  terminal.set(`${memberKey}:${spaceId}:${fp}`, outcome);
+  log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} for space '${peerText(spaceId)}' REFUSED (${outcome}): `
+    + 'it is not the canonical schema text that fingerprint names (or it is over the size a snapshot may have). It is not asked for again from this member at this version.');
+  return 'next';
+}
+
+/**
+ * Read the links of a snapshot just kept as a HINT that this variation is behind the sender's (S-N3: a peer's claim, input to nothing this server keeps):
+ * said once per space, network and fingerprint, counted `behind`. The layer rows this server holds are the history it compares against.
+ */
+async function sayBehind(spaceId: string, member: NetworkMember, sender: { fp: string; links: SnapshotLinks | null; layerOf?: string }): Promise<void> {
+  try {
+    const variation = variationOf(spaceId);
+    const nets = networksHolding(spaceId, getConfig()).filter(n => n.members.some(m => m.instanceId === member.instanceId));
+    if (!variation || nets.length === 0) return;
+    const layerRows = await col<SnapshotRow>(spaceCollection(spaceId, 'schemaSnapshots'))
+      .find(asFilter<SnapshotRow>({ origin: 'layer', networkId: { $in: nets.map(n => n.id) } }), { projection: { _id: 1, networkId: 1 } }).toArray();
+    const mine: SharedNetwork[] = nets.map(n => ({
+      networkId: n.id,
+      role: isUpstreamPeer(n, member.instanceId) ? 'upstream' : isDirectionalNetwork(n) ? 'downstream' : 'closed',
+      layerFp: variation.layers.find(l => l.networkId === n.id)?.stamp.fp ?? '',
+      heldLayerFps: layerRows.filter(r => r.networkId === n.id).map(r => String(r._id)),
+    }));
+    for (const networkId of behindVerdict({ networks: mine }, sender)) {
+      behindSaid(`${spaceId}:${networkId}:${sender.fp}`, () => {
+        schemaSnapshotTotal.count('behind');
+        log.info(`Schema snapshot ${peerText(sender.fp.slice(0, 12))} kept for space '${peerText(spaceId)}': the links ${peerText(member.label ?? member.instanceId)} sent, `
+          + `a hint only, say this variation's layer from network '${peerText(networkId)}' is not the one it uses. Nothing is changed: the layer arrives by the meta pull or a round.`);
+      });
+    }
+  } catch (err) {
+    // A hint is never a reason to fail a turn.
+    log.debug(`Schema snapshot behind-verdict for space '${peerText(spaceId)}': ${peerText(err)}`);
+  }
+}
