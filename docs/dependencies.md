@@ -23,7 +23,9 @@ neither bundled nor installed by npm and is not in the image, so it is not in th
 sentence, not a heading, for it; the entry's error names the fix, `npm install typescript@6`. The package's own tests run the entry
 on the compiler the repository develops with and, through an aliased development dependency (`typescript-6`), on a 6.x. That
 alias declares the same `tsc` bin, so every package script compiles through `scripts/tsc.mjs`, which resolves `typescript` by
-name, and a gate refuses a bare `tsc` in a script. The NOTICE walk leaves the peer out only because the package's own lock entry marks it optional, and the publish workflow asks the
+name, and a gate refuses a bare `tsc` in a script. Before it runs the compiler, `scripts/tsc.mjs` compares the install with
+package-lock.json and stops with one line naming the package and `run npm ci` when an installed version differs from the lock, or
+when a package the workspace being built depends on is not installed. The NOTICE walk leaves the peer out only because the package's own lock entry marks it optional, and the publish workflow asks the
 published image that `node_modules/typescript` is absent.
 
 **Two packages are dual-licensed with a copyleft arm**, and Ythril elects the permissive arm in both. A dual grant

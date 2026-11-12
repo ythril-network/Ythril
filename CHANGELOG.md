@@ -11,25 +11,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 |---|---|
 | With `softDeleteFileMeta` off, a deleted, moved or re-keyed file leaves a feed marker (path, deletion time, position; nothing else) for `fileChangeFeedWindowDays` (default 30) | None; set the key to change the window, 0 to purge at the next sweep |
 | A file deleted before this release has an old position: it is listed as deleted only to a feed read with no cursor | None |
+| A `config.json` that is there but empty, not JSON or unreadable stops the start, naming the file, instead of opening first-run setup | Repair or restore the file; delete it only to set the instance up anew |
+| Irreversible: records of files whose bytes this instance lost are removed here only, with no tombstone, once their window has passed and every peer we pull from completed a sync | Put lost bytes back before upgrading to keep their records |
 
 ### Added
 
 - **Files:** the file change feed, `GET /api/files/:spaceId/changes` and the MCP tool `file_changes`: the changes to a space's files after a cursor, in order; with no cursor it lists every file. An expired cursor answers `410 cursor_expired`.
+- **Files:** `filesAwaitingBytes` on REST stats and MCP `space_stats`: records whose bytes are missing here, which file counts leave out. The change feed gains reason `bytes_lost` and the audit log `file.absent_bytes.sweep`.
+- **Files:** metrics `ythril_files_absent_bytes_removed_total`, `ythril_files_awaiting_bytes` and `ythril_files_absent_bytes_held`.
 
 ### Changed
 
 - **Files:** bytes that arrive from a peer move the file row's position, never its version: a reader paging by position hears of them, and the publisher's next edit still wins. Identical bytes again write nothing.
 - **Files:** a file deletion (own, folder, TTL, a peer's, a sidecar's) takes a position in the same write that flags or marks the row.
+- **Files:** a record whose bytes this instance lost is removed here only, with no tombstone: checked once a day per space, after 1 day (30 without a recorded hash or after a restore or import), once every peer completed a sync; mass losses are held.
+- **Files:** the media worker no longer removes a record whose source file is gone; it drops the job.
 - **Testing:** every `node --test` the standalone runner starts is time-bounded: a test or hook pending past 15 minutes fails, and a batch that never exits is ended and named.
 - **Testing:** the standalone harness no longer changes `setTimeout` after a close; it worked around the search-index check fixed below.
 - **Testing:** a test that waits on the media worker and times out says what the worker logged during the wait, and whether the queue was still checking the job's space or had set it aside.
 - **Testing:** the database-backed test files can run sharded from inside a container, on shard databases its host started. A run that cannot reach Docker and has no shard count stops and says so, instead of running every file on one database.
 - **Testing:** tests that could only restate a constant's value are removed or rewritten to drive the behaviour the value controls, and a gate refuses new ones.
+- **Build:** the build stops with one line naming the package and `run npm ci` when the install differs from package-lock.json or lacks a package the build needs, instead of failing with misleading type errors.
 
 ### Fixed
 
 - **Spaces:** a search-index readiness check stops within a second when its database connection closes, instead of asking the closed connection for up to a minute.
 - **Housekeeping:** a space set aside after a slow answer is checked again once its pause ends, even when its last check found it still building its positions. Before, no background task, the media queue included, checked that space again until a restart.
+- **Startup:** a `config.json` that is there but empty, null, not JSON or unreadable stops the start, naming the file, instead of opening first-run setup; the status door reports the boot's answer.
+- **Startup:** an unreadable `secrets.json`, `schema-library.json` or `schema-catalogs.json` stops the start by name instead of loading empty; the at-rest migration refuses an unreadable state file.
+- **Backups:** backups, offsite copy, restore and `backup.json` no longer read an unreadable path as absent: the offsite copy no longer skips users' files, and a restore no longer rejects a backup as holding no file.
+- **Files:** the Files listing (`GET /api/files/:spaceId`) adds `metadataIncomplete` (`store-unavailable`, `store-fault` or `unknown`) when a space's file records could not be read, and the Files tab says so, instead of listing the files bare.
+- **Files:** a folder delete or move over an unreadable subtree answers `500 file_system_fault` and changes nothing.
+- **Files:** a resumed import whose spool cannot be read is retried, not failed and deleted; the at-rest file pass names an unreadable folder and goes on.
+- **Sync:** an unreadable file or folder is named in the sync manifest (`unreadable`) instead of looking absent to peers, the hash cache and the restore check; a push over it answers `409 path_unreadable`.
 
 ## [6.5.5] — 2026-11-08
 

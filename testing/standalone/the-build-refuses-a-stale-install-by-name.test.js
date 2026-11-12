@@ -16,7 +16,10 @@
  * - A package the lock marks optional and the install does not hold (a platform binary for another platform) is not an error.
  * - A package under a nested `node_modules/<a>/node_modules/<b>` (and a scoped one) is read at its own path: stale there is
  *   refused by its own name, and two copies of one name that each agree with their own lock entry are accepted.
- * - No package-lock.json beside the scripts folder (the image's build stages copy only scripts/tsc.mjs) never refuses.
+ * - A package the lock requires and the install does not hold is refused by name, judged along the dependencies of the workspace
+ *   being built (directly or through another): a package of another workspace the install left out (the image copies the whole
+ *   lock but installs only the server and the schema) and an optional dependency that is not installed are not errors.
+ * - No package-lock.json beside the scripts folder means nothing to compare with, and never refuses.
  * - The repository's own lock and the tree installed for it are accepted, so the guard cannot refuse a healthy checkout
  *   (workspace links, bundled and platform-specific entries included).
  *
