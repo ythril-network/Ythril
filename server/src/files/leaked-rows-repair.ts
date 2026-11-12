@@ -71,19 +71,12 @@ import { bytesPresentAt } from './stored-bytes.js';
 import { heldFileTombstones } from './tombstones.js';
 import { forgetPathKeyedCache } from './path-keyed-cache.js';
 import { retireEmbedWorkOfRemovedRows } from './file-embed-work.js';
+import { PassGenerations, passIsOwed, rememberPass, sweepStepDeadline } from './sweep-pass.js';
 
 /** Rows (and link sources) one page reads. */
 export const REPAIR_PAGE_SIZE = 500;
 /** The most pages one space reads in one tick of the sweep; the cursor carries the rest to the next. */
 export const REPAIR_PAGES_PER_TICK = 20;
-/** How long the step may go on STARTING pages, ms. A page already running is never interrupted. */
-const REPAIR_STEP_BUDGET_MS = 30_000;
-/** A scan that completed is not started again before this much time has passed, ms. */
-export const REPAIR_RESCAN_AFTER_MS = 24 * 3_600_000;
-
-/** The instant after which the step starts no new page, for a step beginning at `from` (default now). */
-export const leakedRowsDeadline = (from: number = Date.now()): number => from + REPAIR_STEP_BUDGET_MS;
-
 /** The seams a test narrows. Production passes none. */
 interface RepairSteps {
   /** Runs after a page's leaked set was decided, claims revoked, and before the delete is issued: the interval a re-upload can land in. */
@@ -110,20 +103,10 @@ export interface RepairOutcome {
 
 /** Whether the scan of a space is owed at `now`: running, never completed, or completed a day ago or more. */
 const scanIsOwed = (state: ScanState | undefined, now: Date): boolean =>
-  state?.phase !== undefined || state?.completedAt === undefined || now.getTime() - Date.parse(state.completedAt) >= REPAIR_RESCAN_AFTER_MS;
+  passIsOwed({ running: state?.phase !== undefined, completedAt: state?.completedAt }, now);
 
 /** Bumped by a restart, so a page already running does not write a cursor over the one the restart cleared. */
-const generations = new Map<string, number>();
-const generationOf = (spaceId: string): number => generations.get(spaceId) ?? 0;
-
-/**
- * Where the scan of a space is, set on its LIVE config entry (read at once by the next page) and written down SOON: coalesced with the
- * next ones (`saveConfigSoon`), so a tick of many pages is not a config write per page. A crash costs the progress since the last write,
- * and the pages are idempotent.
- */
-function remember(spaceId: string, state: ScanState): void {
-  changeSpaceEntries([spaceId], entry => { entry.leakedRowScan = state; return true; }, { save: 'soon' });
-}
+const generations = new PassGenerations();
 
 /**
  * Start the scan of these spaces again from the beginning, before the caller answers: what a restore and an import do, because the rows
@@ -131,7 +114,7 @@ function remember(spaceId: string, state: ScanState): void {
  * sweep scans. A space with no scan state costs nothing.
  */
 export function restartLeakedRowScans(spaceIds: readonly string[]): void {
-  for (const id of spaceIds) generations.set(id, generationOf(id) + 1);
+  generations.bump(spaceIds);
   changeSpaceEntries(spaceIds, entry => {
     if (entry.leakedRowScan === undefined) return false;
     delete entry.leakedRowScan;
@@ -257,11 +240,11 @@ export async function repairLeakedRows(spaceId: string, now: Date, opts: { deadl
   const outcome: RepairOutcome = { derivedRemoved: 0, linksRemoved: 0, kept: { depth: 0, recent: 0, live: 0 }, completed: false };
   const state = getConfig().spaces.find(s => s.id === spaceId)?.leakedRowScan;
   if (!scanIsOwed(state, now)) return outcome;
-  const deadlineAt = opts.deadlineAt ?? leakedRowsDeadline();
+  const deadlineAt = opts.deadlineAt ?? sweepStepDeadline();
   const size = steps?.pageSize ?? REPAIR_PAGE_SIZE;
   const stamp = now.toISOString();
   const startedAt = Date.now();
-  const generation = generationOf(spaceId);
+  const generation = generations.of(spaceId);
 
   let at: ScanState = state?.phase !== undefined ? state : { phase: 'rows' };
   let failure: Error | undefined;
@@ -270,14 +253,14 @@ export async function repairLeakedRows(spaceId: string, now: Date, opts: { deadl
       const phase = at.phase ?? 'rows';
       const page = await (phase === 'rows' ? derivedRowsPage : deletedFileLinksPage)(spaceId, at.after, stamp, size, outcome);
       // A restore or an import cleared the scan while this page ran: what it read is not what the space holds now, so it records nothing.
-      if (generationOf(spaceId) !== generation) return outcome;
+      if (generations.of(spaceId) !== generation) return outcome;
       // A final page with a path it could not look at is NOT the end of the scan: nothing is recorded as complete while a path of the pass
       // was unlooked, so the gauge and the daily wait never claim a scan that did not see every path. The cursor passes the page, and the
       // next tick (an empty final page, if nothing else arrived) completes it.
       if (!page.end || (page.failure && phase === 'links')) at = { phase, ...(page.last !== undefined ? { after: page.last } : {}) };
       else if (phase === 'rows') at = { phase: 'links' };
       else at = { completedAt: now.toISOString() };
-      remember(spaceId, at);
+      rememberPass(spaceId, 'leakedRowScan', at);
       outcome.completed = at.phase === undefined;
       if (page.failure) failure = page.failure;
       if (outcome.completed || failure) break;

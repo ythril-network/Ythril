@@ -205,14 +205,9 @@ export function migrateStateFilesAtRest(): void {
   const secret = resolveMasterSecret();
   if (!secret) return;
   for (const p of STATE_FILES) {
-    let raw: string;
-    try {
-      // A state file the OS refuses to look at is thrown (named below), never skipped as "not there": its plaintext would stay.
-      if (!pathPresentSync(p)) continue;
-      raw = fs.readFileSync(p, 'utf8');
-    } catch (err) {
-      throw new Error(`At-rest migration: cannot read ${path.basename(p)}: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    // A state file the OS refuses to look at or read is thrown naming the file, never skipped as "not there": its plaintext would stay.
+    if (!stateFilePresent(p)) continue;
+    const raw = readStateFile(p);
     if (!raw.trim() || isEnvelope(raw)) continue; // empty or already encrypted
     const enc = encryptEnvelope(raw, secret);
     if (decryptEnvelope(enc, secret) !== raw) {

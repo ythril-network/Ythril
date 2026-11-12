@@ -38,13 +38,13 @@ export function uploadId(spaceId: string, filePath: string, total: number): stri
  */
 const openSessions = new Map<string, number>();
 const sessionKey = (spaceId: string, filePath: string): string => `${spaceId}\0${toDocId(filePath)}`;
-/** How long a session with no new range still counts as open: the stale-chunk cleanup's own age. */
-const SESSION_OPEN_MS = 24 * 60 * 60 * 1000;
+/** How long a staged upload with no new range still counts as open, and the age past which the stale-chunk cleanup removes it: one figure, so a session reads as open exactly until the cleanup may take it. */
+export const STAGED_UPLOAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Whether a chunked upload to `filePath` in `spaceId` has had a range within the last day and has not finished or been discarded. */
 export function chunkSessionOpenAt(spaceId: string, filePath: string, nowMs: number = Date.now()): boolean {
   const at = openSessions.get(sessionKey(spaceId, filePath));
-  return at !== undefined && nowMs - at < SESSION_OPEN_MS;
+  return at !== undefined && nowMs - at < STAGED_UPLOAD_MAX_AGE_MS;
 }
 
 /** Chunk storage root: /data/.chunks */
@@ -295,7 +295,7 @@ const orMissing = async <T>(read: Promise<T>, whenMissing: T): Promise<T> => {
  * system. A directory on a hung network mount holds the pass (and its hourly job's lock, which the job names as a
  * long-running tick); it is not a database operation and no figure of the walk ends it (risk R5 of bundle-53).
  */
-export async function cleanupStaleChunks(maxAgeMs = 24 * 60 * 60 * 1000): Promise<number> {
+export async function cleanupStaleChunks(maxAgeMs = STAGED_UPLOAD_MAX_AGE_MS): Promise<number> {
   const root = chunksRoot();
   let cleaned = 0;
   const now = Date.now();

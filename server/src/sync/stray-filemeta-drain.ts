@@ -22,7 +22,7 @@
  *   dropped with an unread record in it, and the next cycle resumes on its own.
  * - **A record with no file row WAITS**: its bytes may still arrive and create the row (`recordArrivedFile`). It is
  *   discarded only when the file is known to be deleted (a file tombstone holds its path) or after waiting
- *   `WAIT_DAYS`. Waiting records are read after fresh ones, so they never use up a cycle's pages.
+ *   `WAIT_FOR_BYTES_MS`. Waiting records are read after fresh ones, so they never use up a cycle's pages.
  * - **One space's trouble is that space's** (`Q-274`, `Q-358`). The spaces are walked through `walkSpaces`
  *   (`util/housekeeping-walk.ts`): a space's drain runs inside the housekeeping bound, so a database operation that hangs
  *   ends at its figure (the `Db`-level listing and drop included), and a failure — or a bound that fired — is reported once
@@ -47,10 +47,8 @@ import { STRAY_FILEMETA_DRAIN_OPERATION } from '../audit/middleware.js';
 import { log } from '../util/log.js';
 import { walkSpaces, type WalkContext } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
-import { WAIT_DAYS_FOR_BYTES } from '../files/bytes-wait.js';
+import { WAIT_FOR_BYTES_MS } from '../files/bytes-wait.js';
 
-/** How long a record whose file has no row waits for the file's bytes before it is discarded: the one figure the absent-bytes sweep waits too. */
-const WAIT_DAYS = WAIT_DAYS_FOR_BYTES;
 /*
  * A stuck read or write must not hold the sweep cycle, and it does not: the drain walks the spaces through `walkSpaces`
  * (`util/housekeeping-walk.ts`), which runs each space's callback inside the housekeeping bound
@@ -168,7 +166,7 @@ async function drainSpace(spaceId: string, pageSize: number, maxPages: number, c
 
 /**
  * Which of a page's records with no file row to discard, and which wait: discarded when a file tombstone covers the
- * record (the file was deleted here or by a peer) or the record has waited `WAIT_DAYS`; otherwise it waits for bytes.
+ * record (the file was deleted here or by a peer) or the record has waited `WAIT_FOR_BYTES_MS` (how long a record whose file has no row waits for the file's bytes: the one figure the absent-bytes sweep waits too); otherwise it waits for bytes.
  *
  * "Covers" is the version rule where a tombstone has a version (`shadowDecision`: a record NEWER than the deletion waits,
  * its file may still arrive), and the old rule — the path alone — where it has none: a tombstone held from before versions
@@ -181,7 +179,7 @@ async function settleUnstored(spaceId: string, page: StrayDoc[], unstored: strin
   // Published tombstones only: a pending one names an act that may not happen (bundle-30 I15, `files/tombstones.ts`).
   const held = await heldFileTombstones(spaceId, unstored);
   const byId = new Map(page.map(d => [d._id, d]));
-  const expired = Date.now() - WAIT_DAYS * 86_400_000;
+  const expired = Date.now() - WAIT_FOR_BYTES_MS;
   const discard: string[] = [], wait: string[] = [];
   for (const id of unstored) {
     const here = held.get(id) ?? [];

@@ -242,7 +242,7 @@ export async function syncFiles(
     // Keyed by the entry's `path`, which IS the key (`toDocId`) the rows and the arriving keys carry, not by its on-disk spelling (`diskPath`): a name stored NFD is the one file its NFC key
     // names, where the raw spelling made it a file this instance "did not have" and fetched a second time.
     const oursMap = new Map(ours.map(e => [e.path, e]));
-    const unreadableHere = (key: string): boolean => ourUnreadable.covers(key) || (built.unreadableTruncated && !oursMap.has(key));
+    const unreadableHere = (key: string): boolean => ourUnreadable.couldNotLook(key, built.unreadableTruncated, oursMap);
     let leftAlone = 0;
     let firstLeftAlone: string | undefined;
     // One read of the space's top-level rows per call: the agreed hash of each path (`syncBase.<peer>`, Q-66) and what each row
@@ -513,7 +513,7 @@ export async function syncFiles(
       if (pulledPaths.includes(localPath) || isInstanceLocalFile(localPath)) continue;
       // A path the peer could not look at is not one it lacks: its upload door would refuse the push, and a list it cut may hide more of them, so
       // a path its manifest does not carry is not pushed either while the list is cut. A path it carries is judged as ever.
-      if (peerUnreadable.paths.covers(localPath) || (peerUnreadable.truncated && !peerManifestMap.has(localPath))) continue;
+      if (peerUnreadable.paths.couldNotLook(localPath, peerUnreadable.truncated, peerManifestMap)) continue;
       // Push only over a copy the peer has not changed since we last agreed; see decideFilePush.
       // A path the peer has told us it holds a tombstone for is not sent again while our hash for it is unchanged.
       // Two answers a peer has already given to exactly these bytes, and does not need asking again for: that it holds a tombstone

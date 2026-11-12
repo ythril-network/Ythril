@@ -97,12 +97,14 @@ export async function heldRowsFor(spaceId: string, peer?: HeldRowsPeer): Promise
 /**
  * The paths of each class, sorted, for the bytes `disk` lists against the rows `held`. Pure. Both sides are matched by `toDocId`, so a
  * name stored NFD is one file, and a path is reported in that spelling. `unreadable` is what the walk could not look at (keys, a directory with
- * a trailing `/`, as the manifest names them): a row at such a path is in no class.
+ * a trailing `/`, as the manifest names them): a row at such a path is in no class. When that list was cut (`unreadableTruncated`) so is a row at
+ * any path the walk did not carry ({@link UnreadablePaths.couldNotLook}): it may be one of the cut ones.
  */
 export function classifyDiskAgainstRows(
   disk: readonly Pick<ManifestEntry, 'path' | 'sha256'>[],
   held: ReadonlyMap<string, HeldRow>,
   unreadable: readonly string[] = [],
+  unreadableTruncated = false,
 ): Record<FileMismatchClass, string[]> {
   const unlooked = new UnreadablePaths(unreadable);
   const found: Record<FileMismatchClass, string[]> = {
@@ -120,7 +122,7 @@ export function classifyDiskAgainstRows(
   }
   for (const [id, row] of held) {
     if (row.deletedAt !== undefined || row.sha256 === undefined) continue;
-    if (!onDisk.has(id) && !isInstanceLocalFile(id) && !unlooked.covers(id)) found.row_without_bytes.push(id);
+    if (!onDisk.has(id) && !isInstanceLocalFile(id) && !unlooked.couldNotLook(id, unreadableTruncated, onDisk)) found.row_without_bytes.push(id);
   }
   for (const cls of FILE_MISMATCH_CLASSES) found[cls].sort();
   return found;
@@ -135,5 +137,5 @@ export async function readDiskAgainstRows(
   walk: <T>(fn: () => Promise<T>) => Promise<T>,
 ): Promise<Record<FileMismatchClass, string[]>> {
   const disk = await walk(() => buildFileManifest(spaceId, undefined, { readOnly: true }));
-  return classifyDiskAgainstRows(disk.entries, await heldRowsFor(spaceId), disk.unreadable);
+  return classifyDiskAgainstRows(disk.entries, await heldRowsFor(spaceId), disk.unreadable, disk.unreadableTruncated);
 }

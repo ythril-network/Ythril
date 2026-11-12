@@ -356,6 +356,11 @@ export async function isStoredDirectory(abs: string): Promise<boolean> {
  * What is at `abs` on the disk (`lstat`: nothing is followed, read or decrypted), or `null` when the path does not exist — the one failure
  * read as an answer ({@link isMissingPath}); any other is thrown, on the terms of {@link bytesPresent}. For a caller that needs more than
  * whether something is there: its kind (`isStoredDirectory`) or its size and mtime (a move's marker).
+ *
+ * **It does not read a name too long (`ENAMETOOLONG`) or a link loop (`ELOOP`) as "does not exist"**, where `pathPresentSync` in
+ * `util/path-present.ts` does ({@link cannotExist}), and on purpose: the two ask different questions. A move's destination check
+ * (`assertNothingStandsAt`, `files/destination.ts`) lets the throw reach `fsRefusalOf`, which refuses the caller's path in words ("the name is too long");
+ * answered `null` it would call the destination free and fail later, at the temp step, as the server's fault. Both sides say so.
  */
 export async function lstatIfPresent(abs: string): Promise<fs.Stats | null>;
 /** The same read with exact inode and device numbers (`bigint`): what a move needs to tell one directory entry under two spellings from two entries. */

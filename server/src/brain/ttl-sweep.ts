@@ -54,7 +54,8 @@ import { drainStrayFileMeta } from '../sync/stray-filemeta-drain.js';
 import { spaceTtlDays } from './chrono-retention.js';
 import { findSpace } from '../spaces/space-lookup.js';
 import { stripFlaggedRowsOnce } from '../files/derived-fields.js';
-import { leakedRowsDeadline, publishLeakedRowScansOwed, repairLeakedRows } from '../files/leaked-rows-repair.js';
+import { publishLeakedRowScansOwed, repairLeakedRows } from '../files/leaked-rows-repair.js';
+import { sweepStepDeadline } from '../files/sweep-pass.js';
 import { absentBytesSpaceOrder, absentBytesTick, endAbsentBytesTick, sweepAbsentBytes } from '../files/absent-bytes-sweep.js';
 import { retirePeerSidecars } from '../sync/peer-sidecar-retirement.js';
 import { logInternalAudit } from '../audit/audit.js';
@@ -439,7 +440,7 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
   // Rows that hang off a file this instance deleted (Q-465, `files/leaked-rows-repair.ts`): a cursor scan, a bounded number of pages per
   // space per tick inside one time budget for the step, resuming where the last tick stopped, and not starting over within a day of its
   // end. After the strip, so what is repaired here is what the strip left; the spaces share the budget, and a space that fails is passed over.
-  const repairUntil = leakedRowsDeadline();
+  const repairUntil = sweepStepDeadline();
   await eachSpace(REPAIR_STEP, configuredSpaces(), space => repairLeakedRows(space.id, now, { deadlineAt: repairUntil }));
 
   // Records of files whose bytes this instance lost (Q-337, `files/absent-bytes-sweep.ts`): stamped, then removed here only once the due rule

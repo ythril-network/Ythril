@@ -65,27 +65,32 @@ export async function removeFileHere(
   // one thing that says whether the file is still the orphan it was, and the steps below would take a re-upload's job and derivatives with it. Only a
   // row this write took has the rest removed; one rewritten meanwhile (a re-upload, an arrival) keeps everything. What a failure after the retire
   // leaves (a derived row, a job) belongs to a file with no row, which the leaked-rows repair and the media worker already clear.
-  if (retireOnlyIf !== undefined) {
-    let taken = 0;
-    await step('retireFileMeta', async () => { taken = await retireFileMetaMany(spaceId, [rel], { onlyIf: retireOnlyIf, ...(retiredBy ? { retiredBy } : {}) }); });
-    if (taken === 0) return false;
-    invalidateUsageCache();
+  let taken = 0;
+  // The row's own retirement: narrowed to what the caller decided on, or the whole row (soft-flagged, retained for audit, or hard-deleted, per
+  // softDeleteFileMeta — as every sidecar row an arrival made went with the leavings).
+  const retire = (): Promise<void> => step('retireFileMeta', async () => {
+    if (retireOnlyIf === undefined) await retireFileMeta(spaceId, rel);
+    else taken = await retireFileMetaMany(spaceId, [rel], { onlyIf: retireOnlyIf, ...(retiredBy ? { retiredBy } : {}) });
+  });
+  // What the file leaves besides its row, in the one order both removals take it.
+  const clearLeavings = async (): Promise<void> => {
+    invalidateUsageCache(); // freed disk — reflect it in the next quota check
+    // Cancel any queued media/text job so it cannot outlive the file and retry forever.
     await step('cancelMediaJob', () => cancelMediaJob(spaceId, rel));
     await step('deleteConversionArtifacts', () => deleteConversionArtifacts(spaceId, rel));
     await step('forgetPathKeyedCache', () => forgetPathKeyedCache(spaceId, { ids: [rel] }));
+    // The file's own embed job; its derived rows' jobs went with their rows (`deleteConversionArtifacts`), resolved from the rows.
     await step('retireEmbedWorkOfRemovedRows', () => retireEmbedWorkOfRemovedRows(spaceId, { ids: [toDocId(rel)] }));
+  };
+  if (retireOnlyIf !== undefined) {
+    await retire();
+    if (taken === 0) return false;
+    await clearLeavings();
     return true;
   }
-  invalidateUsageCache(); // freed disk — reflect it in the next quota check
-  // Cancel any queued media/text job so it cannot outlive the file and retry forever.
-  await step('cancelMediaJob', () => cancelMediaJob(spaceId, rel));
-  await step('deleteConversionArtifacts', () => deleteConversionArtifacts(spaceId, rel));
-  await step('forgetPathKeyedCache', () => forgetPathKeyedCache(spaceId, { ids: [rel] }));
-  // The file's own embed job; its derived rows' jobs went with their rows (`deleteConversionArtifacts`), resolved from the rows.
-  await step('retireEmbedWorkOfRemovedRows', () => retireEmbedWorkOfRemovedRows(spaceId, { ids: [toDocId(rel)] }));
+  await clearLeavings();
   // LAST: while the record remains, a retry (or the TTL sweep) completes this delete as an orphan.
-  // Soft-flag it (retained for audit) or hard-delete it, per softDeleteFileMeta — as every sidecar row an arrival made went above.
-  await step('retireFileMeta', () => retireFileMeta(spaceId, rel));
+  await retire();
   return true;
 }
 
