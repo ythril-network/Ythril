@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Startup:** an unreadable `secrets.json`, `schema-library.json` or `schema-catalogs.json` stops the start by name instead of loading empty; the at-rest migration refuses an unreadable state file.
 - **Backups:** backups, offsite copy, restore and `backup.json` no longer read an unreadable path as absent: the offsite copy no longer skips users' files, and a restore no longer rejects a backup as holding no file.
 - **Files:** the Files listing (`GET /api/files/:spaceId`) adds `metadataIncomplete` (`store-unavailable`, `store-fault` or `unknown`) when a space's file records could not be read, and the Files tab says so, instead of listing the files bare.
+- **Files:** the restore check no longer reports a file record as having no bytes when its list of unreadable paths was cut at its limit; such a record is left out of the report.
 - **Files:** a folder delete or move over an unreadable subtree answers `500 file_system_fault` and changes nothing.
 - **Files:** a resumed import whose spool cannot be read is retried, not failed and deleted; the at-rest file pass names an unreadable folder and goes on.
 - **Sync:** an unreadable file or folder is named in the sync manifest (`unreadable`) instead of looking absent to peers, the hash cache and the restore check; a push over it answers `409 path_unreadable`.
