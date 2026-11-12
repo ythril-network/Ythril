@@ -35,12 +35,12 @@ import { spaceCollection } from '../db/space-collection.js';
 import { detachedWrite } from '../db/write-bound.js';
 import { isDuplicateKey } from '../db/write-errors.js';
 import { getConfig } from '../config/loader.js';
-import { JSON_BODY_MAX_BYTES } from '../config/body-limits.js';
+import { isOverSnapshotCap } from './schema-snapshot.js';
 import { admitSpaceWrite, isActRefusal } from './space-write-gate.js';
 import { configuredSpaces } from './space-lookup.js';
 import { libraryUsages } from './library-usages.js';
 import {
-  variationOf, layerStampOf, knownHeld, noteHeld, forgetHeld, onStampWithoutSnapshot,
+  variationOf, layerStampOf, knownHeld, noteHeld, forgetHeld,
   type SnapshotLinks, type Stamp,
 } from './schema-stamp.js';
 import type { SpaceMeta } from '../config/types.js';
@@ -51,14 +51,6 @@ import { warnOnce } from '../util/warn-once.js';
 import { schemaSnapshotTotal } from '../metrics/schema-snapshot-count.js';
 import { log, peerText } from '../util/log.js';
 
-/**
- * The largest snapshot text a peer takes: a schema that came in through a JSON body is at most that body's limit. A larger text (library
- * inlining can grow one) is still kept here, and said once; peers refuse to fetch it.
- */
-export const SCHEMA_SNAPSHOT_MAX_BYTES = JSON_BODY_MAX_BYTES;
-
-/** Is `text` larger than a peer takes? In UTF-8 bytes, never `length` (a letter can be two): the one test of the cap, for the writer's note and the receiver's refusal. */
-export const isOverSnapshotCap = (text: string): boolean => Buffer.byteLength(text, 'utf8') > SCHEMA_SNAPSHOT_MAX_BYTES;
 
 /** The name the cycle's step, and every failure of a snapshot write, is reported under. */
 export const SCHEMA_SNAPSHOT_STEP = declareStep('Schema snapshots');
@@ -115,9 +107,17 @@ export async function ensureSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs
 
 /** {@link ensureSnapshot}, detached: never awaited by the write that asked, a failure reported once per window through the shared reporter. */
 export function keepSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs): void {
-  if (knownHeld(spaceId, stamp.fp)) return;
-  detachedWrite(() => ensureSnapshot(spaceId, stamp, kept)).catch(err => { schemaSnapshotTotal.note('failed'); reportSpaceFailure(SCHEMA_SNAPSHOT_STEP, spaceId, err); });
+  const key = `${spaceId}:${stamp.fp}`;
+  // One detached upsert per fingerprint at a time: a burst of writes right after a schema save would otherwise schedule one each until the first lands.
+  if (knownHeld(spaceId, stamp.fp) || keeping.has(key)) return;
+  keeping.add(key);
+  detachedWrite(() => ensureSnapshot(spaceId, stamp, kept))
+    .catch(err => { schemaSnapshotTotal.note('failed'); reportSpaceFailure(SCHEMA_SNAPSHOT_STEP, spaceId, err); })
+    .finally(() => keeping.delete(key));
 }
+
+/** The detached upserts in flight, `space:fp`: each entry leaves when its upsert settles, so the set holds no more than the writes running now. */
+const keeping = new Set<string>();
 
 /** What `spaceId` keeps for its variation now: every layer's row, and its own unless it is one of them ("don't copy, just use"). */
 function owedOf(spaceId: string): Array<readonly [Stamp, KeptAs]> {
@@ -168,10 +168,10 @@ export async function ensureSchemaSnapshots(): Promise<void> {
  * with. The space's current variation or one of its layers when it is one of them; otherwise (the schema moved on since the write read it) an
  * own row whose links are not known any more.
  */
-onStampWithoutSnapshot((spaceId, stamp) => {
+export function keepStampedSnapshot(spaceId: string, stamp: Stamp): void {
   const v = variationOf(spaceId);
   const layer = v?.layers.find(l => l.stamp.fp === stamp.fp);
   const kept: KeptAs = layer ? { origin: 'layer', networkId: layer.networkId, links: null }
     : { origin: 'own', links: v?.stamp.fp === stamp.fp ? v.links : null };
   keepSnapshot(spaceId, stamp, kept);
-});
+}

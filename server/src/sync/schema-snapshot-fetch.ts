@@ -48,9 +48,9 @@ import { storeIsNotAnswering } from '../db/store-condition.js';
 import { withinWriteBound } from '../db/write-bound.js';
 import { isShuttingDown } from '../lifecycle.js';
 import { isDirectionalNetwork, isUpstreamPeer, networksSharedWith } from '../networks/network-spaces.js';
-import { ensureSnapshot, SCHEMA_SNAPSHOT_MAX_BYTES, snapshots, type SnapshotRow } from '../spaces/schema-snapshot-store.js';
-import { behindVerdict, verifySnapshot, type SharedNetwork, type SnapshotRefusal } from '../spaces/schema-snapshot.js';
-import { isSchemaFingerprint, SCHEMA_FINGERPRINT_FIELD, variationOf, type SnapshotLinks } from '../spaces/schema-stamp.js';
+import { ensureSnapshot, snapshots, type SnapshotRow } from '../spaces/schema-snapshot-store.js';
+import { behindVerdict, SCHEMA_SNAPSHOT_MAX_BYTES, verifySnapshot, type SharedNetwork, type SnapshotRefusal } from '../spaces/schema-snapshot.js';
+import { isSchemaFingerprint, knownHeld, SCHEMA_FINGERPRINT_FIELD, variationOf, type SnapshotLinks } from '../spaces/schema-stamp.js';
 import { unknownSpaceSentence } from '../spaces/unknown-space.js';
 import { networksHolding } from '../spaces/wipe-vote.js';
 import { schemaSnapshotTotal } from '../metrics/schema-snapshot-count.js';
@@ -59,7 +59,7 @@ import { declareStep } from '../util/housekeeping-signals.js';
 import { LruMap } from '../util/lru-map.js';
 import { log, peerText } from '../util/log.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
-import { warnOnce } from '../util/warn-once.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 import { refusalOf, transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import { peerSafeFetch, transferInit } from './peer-fetch.js';
 import { peerRunsAtLeast, reportedVersion } from './peer-floor.js';
@@ -95,15 +95,23 @@ const noRoute = new LruMap<string, true>(REMEMBERED);
 const noSpace = new LruMap<string, true>(REMEMBERED);
 /** Not before this time: `member:space:fp` after a failure, `member:space` after a refused rung. */
 const pausedUntil = new LruMap<string, number>(REMEMBERED);
-/** In flight, `space:fp`: one request for a fingerprint at a time, however many members' turns want it. */
+/** In flight, `space:fp`: one request for a fingerprint at a time, however many members' turns want it (checked again before each ask, not only per batch). */
 const inFlight = new Set<string>();
 
 const rungSaid = warnOnce<string>();
 const behindSaid = warnOnce<string>();
+/** A member's failed asks, `member:space`: said once per window, not once per minute for as long as it fails; the metric counts each one. */
+const failureSaid = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
 
 /** Forget every outcome this module remembers, for tests. */
 export function forgetSchemaSnapshotOutcomes(): void {
-  terminal.clear(); noRoute.clear(); noSpace.clear(); pausedUntil.clear(); inFlight.clear();
+  terminal.clear(); noRoute.clear(); noSpace.clear(); pausedUntil.clear(); inFlight.clear(); failureSaid.forgetAll();
+}
+
+/** Say a failed ask of `member` for `fp`, once per window per member and space. */
+function sayFailed(member: NetworkMember, spaceId: string, fp: string, why: string): void {
+  failureSaid(`${member.instanceId}:${spaceId}`, () => log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} `
+    + `for space '${peerText(spaceId)}': ${why} (said once per ${SAY_ONCE_WINDOW_MS / 60_000} minutes while it fails)`));
 }
 
 /** The members of `spaceId` that may be asked at all: they share it with this server and run a release that serves snapshots. */
@@ -186,6 +194,8 @@ export async function fetchOwedSchemaSnapshots(a: SnapshotFetch): Promise<void> 
   for (const fp of toAsk) {
     if (!a.turn.mayContinue() || isShuttingDown()) return;
     const flight = flightKey(spaceId, fp);
+    // Asked again here, not only when the batch was chosen: another member's turn may have asked for it, or kept it, while this one awaited the one before.
+    if (inFlight.has(flight) || knownHeld(spaceId, fp)) continue;
     inFlight.add(flight);
     try {
       const next = await askMemberFor(a, fp, memberKey, a.turn);
@@ -215,7 +225,7 @@ async function askMemberFor(a: SnapshotFetch, fp: string, memberKey: string, tur
   } catch (err) {
     // The turn was cut (an act on the space, shutdown): the member did not fail. Otherwise it is unreachable, and the next fingerprint would wait too.
     if (!turn.mayContinue() || isShuttingDown()) return 'stop';
-    log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} for space '${peerText(spaceId)}': ${peerText(err)}`);
+    sayFailed(member, spaceId, fp, peerText(err));
     return failed('stop');
   }
   if (resp.status === 200) return await keepFetched(a, fp, memberKey, resp, failed, turn);
@@ -255,7 +265,7 @@ async function askMemberFor(a: SnapshotFetch, fp: string, memberKey: string, tur
       break;
     default:
   }
-  log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} for space '${peerText(spaceId)}': HTTP ${resp.status}`);
+  sayFailed(member, spaceId, fp, `HTTP ${resp.status}`);
   return failed('next');
 }
 
@@ -268,7 +278,7 @@ async function keepFetched(a: SnapshotFetch, fp: string, memberKey: string, resp
   } catch (err) {
     if (err instanceof ResponseTooLargeError) return refuse(spaceId, member, fp, memberKey, 'over_cap');
     if (!turn.mayContinue() || isShuttingDown()) return 'stop';
-    log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} for space '${peerText(spaceId)}': ${peerText(err)}`);
+    sayFailed(member, spaceId, fp, peerText(err));
     return failed('next');
   }
   if (typeof body?.text !== 'string') return refuse(spaceId, member, fp, memberKey, 'refused_shape');

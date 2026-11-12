@@ -161,18 +161,37 @@ export async function scanOwedSchemaSnapshots(): Promise<void> {
   await eachSpace(SCHEMA_SNAPSHOT_STEP, configuredSpaces(), async (space) => {
     const carriedIn = new Map<string, (typeof STAMPED_COLLECTIONS)[number]>();
     await eachUnit(STAMPED_COLLECTIONS, async (collection) => {
-      const found = await distinctStringsOf(col<Record<string, unknown>>(spaceCollection(space.id, collection)), SCHEMA_FINGERPRINT_FIELD, {});
+      // The partial index's own filter, verbatim, so the planner can prove the query implies it and reads `schemaFingerprint_present`, not the collection.
+      const found = await distinctStringsOf(col<Record<string, unknown>>(spaceCollection(space.id, collection)), SCHEMA_FINGERPRINT_FIELD, STAMPED_ONLY);
       for (const fp of found) if (isSchemaFingerprint(fp) && !carriedIn.has(fp)) carriedIn.set(fp, collection);
     });
     const carried = [...carriedIn.keys()].filter(fp => !knownHeld(space.id, fp));
     if (carried.length === 0) return;
     const held = new Set((await readStoredById<SnapshotRow>(spaceCollection(space.id, 'schemaSnapshots'), carried, { _id: 1 })).keys());
     for (const fp of held) noteHeld(space.id, fp);
-    for (const fp of owedFingerprints(carried, held).slice(0, SCAN_PER_SPACE)) {
-      const from = await col<Record<string, unknown>>(spaceCollection(space.id, carriedIn.get(fp)!))
-        .findOne(asFilter<Record<string, unknown>>({ [SCHEMA_FINGERPRINT_FIELD]: fp }), { projection: { deliveredBy: 1 } });
-      const deliveredBy = from?.['deliveredBy'];
-      noteOwedSchemaSnapshot(space.id, fp, typeof deliveredBy === 'string' ? deliveredBy : undefined);
-    }
+    const owedNow = owedFingerprints(carried, held).slice(0, SCAN_PER_SPACE);
+    const deliverers = await deliverersOf(space.id, owedNow, fp => carriedIn.get(fp)!);
+    for (const fp of owedNow) noteOwedSchemaSnapshot(space.id, fp, deliverers.get(fp));
   });
+}
+
+/** The filter of the gap scan's `distinct`: the stamp index's partial filter, so the scan reads the index, never the collection. */
+const STAMPED_ONLY = asFilter<Record<string, unknown>>({ [SCHEMA_FINGERPRINT_FIELD]: { $exists: true } });
+
+/**
+ * The peer that delivered a record carrying each fingerprint, where one did: one aggregation per record collection the fingerprints were found in (at
+ * most four), not one read per fingerprint. A fingerprint whose first record has no deliverer is absent: any member may hold it.
+ */
+async function deliverersOf(spaceId: string, fps: readonly string[], collectionOf: (fp: string) => (typeof STAMPED_COLLECTIONS)[number]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const collection of STAMPED_COLLECTIONS) {
+    const here = fps.filter(fp => collectionOf(fp) === collection);
+    if (here.length === 0) continue;
+    const groups = col<Record<string, unknown>>(spaceCollection(spaceId, collection)).aggregate<{ _id: string; deliveredBy?: unknown }>([
+      { $match: { [SCHEMA_FINGERPRINT_FIELD]: { $in: here } } },
+      { $group: { _id: `$${SCHEMA_FINGERPRINT_FIELD}`, deliveredBy: { $first: '$deliveredBy' } } },
+    ]);
+    for await (const g of groups) if (typeof g.deliveredBy === 'string') out.set(g._id, g.deliveredBy);
+  }
+  return out;
 }
