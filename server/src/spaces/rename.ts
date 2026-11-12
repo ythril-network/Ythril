@@ -16,6 +16,7 @@ import type { Config, SpaceConfig } from '../config/types.js';
 import { moveEveryMark } from '../sync/receive-marks.js';
 import { retargetSpaceAliases, spaceNameInUseRefusal, SpaceNameInUseError } from '../sync/space-map.js';
 import { repairStaleSpaceIds } from './_shared.js';
+import { forgetHeld } from './schema-stamp.js';
 import {
   runSpaceAct, registerSpaceAct, releaseSpaceActWaiter, defineSpaceActBody, spaceActStands, SpaceActsClosedError,
   type SpaceActBodyContext, type SpaceActBodyOutcome,
@@ -110,6 +111,10 @@ export async function moveSpaceData(
   } catch (err) {
     stepFailed(`Could not rewrite spaceId field for renamed space ${newId}`, err, errors);
   }
+
+  // The schema snapshots moved with the collections: what is known held under either id is asked of the store again.
+  forgetHeld(oldId);
+  forgetHeld(newId);
 
   // 1b''. A reindex run names its space in `members`, which a resumed run walks: left at the old id it would walk
   // a space that no longer exists and never end. The collection moved with the rest; this is its contents.

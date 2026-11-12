@@ -9,41 +9,12 @@
 import type { Collection } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/mongo.js';
-import { writeFile as writeSpaceFile } from '../files/files.js';
 import { log, peerText } from '../util/log.js';
 import { classifyReadFailure } from '../brain/store-failure.js';
-import type { SpaceMeta, KnowledgeType, PendingSpaceOp } from '../config/types.js';
-import { KNOWLEDGE_TYPES } from '../config/types.js';
+import type { PendingSpaceOp } from '../config/types.js';
 
-export const SCHEMA_KTS: readonly KnowledgeType[] = KNOWLEDGE_TYPES;
-
-/**
- * Write per-type schema JSON files into the space's `schemas/` folder as a
- * convenience snapshot after a meta update.
- * File name: `schemas/<spaceId>_<kt>_<typeName>.json`
- *
- * These files are **read-only snapshots** — the source of truth is
- * `config.json` under `spaces[*].meta.typeSchemas`.  Do not edit the files to
- * change the live schema; use the API (PATCH /api/spaces/:id or
- * PUT /api/spaces/:id/meta/typeSchemas/:kt/:name) instead.
- */
-export async function syncSchemaFiles(spaceId: string, meta: SpaceMeta | undefined): Promise<void> {
-  if (!meta?.typeSchemas) return;
-  try {
-    for (const kt of SCHEMA_KTS) {
-      const ktMap = meta.typeSchemas[kt];
-      if (!ktMap) continue;
-      for (const [typeName, typeSchema] of Object.entries(ktMap)) {
-        const safeName = typeName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
-        const filePath = `schemas/${spaceId}_${kt}_${safeName}.json`;
-        const content = JSON.stringify(typeSchema, null, 2);
-        await writeSpaceFile(spaceId, filePath, content);
-      }
-    }
-  } catch (err) {
-    log.warn(`syncSchemaFiles(${peerText(spaceId)}): ${peerText(err)}`);
-  }
-}
+// The per-type schema files (`schemas/<space>_<kind>_<type>.json`) this module once wrote after every meta write are retired (Q-735): each
+// schema version is kept privately, `schema-snapshot-store.ts`, and the files 6.5 left are removed by `files/retired-schema-file-sweep.ts`.
 
 /**
  * Per-space collections `initSpace` creates and indexes.

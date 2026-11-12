@@ -18,6 +18,7 @@ export { LruMap, type LruWeight } from './lru-map.js';
 export { isPlainObject, ownValue } from './plain-object.js';
 export { isObjectInternalKey, isObjectPrototypeName } from './object-internal-keys.js';
 export { canonicalJson } from './canonical-json.js';
+export { schemaFingerprintTextOf, SCHEMA_FINGERPRINT_FORMAT, type FingerprintedMeta } from './schema-fingerprint.js';
 export { errorHeader, textOf, render, escapeLineBreaks, redact, redactSecrets, logSafe } from './text.js';
 export {
   ruleEngine, ENGINE_INPUT_CAPS, compileRule, rulesIn, namesKinds, spaceRuleKinds,

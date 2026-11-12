@@ -601,6 +601,12 @@ export const CONFIG_RELOAD_OPERATIONS = {
 export const LEGACY_SPILL_SWEEP_OPERATION = 'file.legacy_spill.sweep';
 
 /**
+ * The recurring sweep (every TTL sweep cycle) of the per-type schema files 6.5 wrote into spaces (Q-735, `files/retired-schema-file-sweep.ts`):
+ * one entry per space it cleaned. Written directly, like the spill sweep's.
+ */
+export const RETIRED_SCHEMA_FILE_SWEEP_OPERATION = 'file.retired_schema_file.sweep';
+
+/**
  * A member's missing alias for a network space, restored from its upstream's announcement (Q-133,
  * `networks/network-spaces.ts` `healAnnouncedAliases`): one entry per alias it recorded. It re-points which local
  * space a network id's traffic lands in, so it is audited though no request asked for it. Written directly, like the

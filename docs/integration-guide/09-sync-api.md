@@ -615,7 +615,7 @@ answer is lost is read back while the hold is still held. On the serving instanc
   shares the text (`dd/`) is not covered. Only failures to **look** are named (a `stat` or a read refused or failed with
   anything but "it cannot exist"): a path that is gone is not, and neither is a file whose bytes were read but cannot be
   decoded (a foreign key, altered bytes), whose peer copy still arrives as a conflict copy. A path the responder keeps to
-  itself (a conflict copy, a conversion's sidecar, a schema snapshot, a legacy spill) is not named, as it is never
+  itself (a conflict copy, a conversion's sidecar, a retired per-type schema file, a legacy spill) is not named, as it is never
   offered. The list holds at most 1000 paths, sorted; past that it is cut and `unreadableTruncated` is `true`, which
   says a path that is not named may still be one the responder could not look at. `since` narrows `manifest` and never
   `unreadable`. A space whose files root itself cannot be looked at is not an empty manifest: the answer is `500` with
@@ -741,7 +741,7 @@ Also out, and local to this instance: the landing position `pos` and `posAtSeq`,
 `spaceId` is out too: it crosses the wire and the receiver rewrites it to its own id for the space, which under a
 `spaceMap` alias is not the sender's. Everything else is hashed, and everything else crosses the wire — a field
 in neither category means two peers can never agree about identical content. File leaves hash the file's
-SHA-256, and a file that never leaves an instance — a conflict copy, a schema snapshot, a legacy read spill, a
+SHA-256, and a file that never leaves an instance — a conflict copy, a retired per-type schema file, a legacy read spill, a
 conversion's sidecar — is not hashed at all, record or bytes; nor is a soft-deleted file's row (`deletedAt`, local
 audit state). A file's processing status never touches its hashed `updatedAt`. The check is advisory: a root
 mismatch is reported as `MERKLE_DIVERGENCE`, it does not block sync. For a file row an old receiver stamped with

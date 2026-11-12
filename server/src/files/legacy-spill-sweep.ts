@@ -17,35 +17,20 @@
  *   nothing: one directory listing and one indexed query per space.
  * - **One space's trouble is that space's** (`Q-274`, `Q-358`): every space is swept through `eachSpace`
  *   (`util/housekeeping-walk.ts`), so a space whose read fails is reported once and the next is still swept, and a
- *   database operation of a space that hangs ends at the housekeeping bound instead of holding the cycle. A spill
- *   whose blob cannot be removed is a unit of its space (`eachUnit`): reported by name, retried next cycle, and the
- *   others still go.
- * - **The `files` record is the finder, so it goes LAST.** A spill's removal is three steps — the blob, the `fileHashes`
- *   row, the `files` record — and only the record is looked up again next cycle (a blob already gone is not an error
- *   and a hash row is found by nothing). Deleting the record first would let a failure of the second delete leave a
- *   hash row no later run could ever find; deleting it last leaves a failed run with a record that points at
- *   everything still to do.
- * - **A directory is empty only when it is not there.** The listing's failure is the space's unless it says the path
- *   does not exist (`isMissingPath`): a permission or I/O failure answered as "no spills" would be reported as a clean
- *   sweep for ever.
+ *   database operation of a space that hangs ends at the housekeeping bound instead of holding the cycle.
+ * - **The walk is shared** with the retired per-type schema files (`files/retired-local-path-sweep.ts`, bundle-265): each spill is
+ *   a unit (its blob, then everything it left through the one remover: its media job, its derived rows, its cached hash, its embed
+ *   jobs), and the `files` records go LAST, because a record is the finder a failed run is redone by. A directory is empty only when
+ *   it is not there: any other failure to list it is the space's, never "no spills".
  *
  * Removed at the next major, with the deprecated `path` and `isSpillPath`'s hiding of `_tmp`.
  */
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { spaceRoot } from './sandbox.js';
-import { invalidateUsageCache } from '../quota/quota.js';
-import { col, asFilter } from '../db/mongo.js';
-import { spaceCollection } from '../db/space-collection.js';
-import { deleteStoredIfPresent, isMissingPath } from './stored-bytes.js';
-import { forgetPathKeyedCache } from './path-keyed-cache.js';
 import { SPILL_DIR, spillIdFromPath } from '../brain/spill-path.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
-import { logInternalAudit } from '../audit/audit.js';
 import { LEGACY_SPILL_SWEEP_OPERATION } from '../audit/middleware.js';
-import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
+import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
-import { log } from '../util/log.js';
+import { sweepRetiredLocalPaths } from './retired-local-path-sweep.js';
 
 /** The name a failure of this sweep is reported, counted and quarantined under. */
 const STEP = declareStep('Legacy spill sweep');
@@ -60,52 +45,14 @@ export interface LegacySpillSweep {
   failed: { spaceId: string; path: string; error: string }[];
 }
 
-/** One space: returns how many spills it removed. Throws what ends the space's sweep; the walk reports it. */
-async function sweepSpace(spaceId: string): Promise<number> {
-  const started = Date.now();
-  const found = new Set<string>();
-
-  const dir = path.join(spaceRoot(spaceId), SPILL_DIR);
-  const names = await fs.readdir(dir).catch((err: unknown) => {
-    if (!isMissingPath(err)) throw err;   // not being there is an answer; a failure to look is the space's
-    return [] as string[];
-  });
-  for (const name of names) {
-    const rel = `${SPILL_DIR}/${name}`;
-    if (spillIdFromPath(rel)) found.add(rel);
-  }
-  const metas = await col<{ _id: string }>(spaceCollection(spaceId, 'files'))
-    // An anchored, case-sensitive prefix, so the query walks only the `_tmp/` range of the `_id` index on every
-    // cycle; the exact spill shape is then decided by `spillIdFromPath` below, the one test for it.
-    .find(asFilter({ _id: { $regex: `^${SPILL_DIR}/` } }), { projection: { _id: 1 } }).toArray();
-  for (const m of metas) if (spillIdFromPath(m._id)) found.add(m._id);
-  if (found.size === 0) return 0;
-
-  const removed: string[] = [];
-  await eachUnit([...found], async (rel) => {
-    // The blob may never have arrived, or be already gone: both are fine.
-    await deleteStoredIfPresent(path.join(dir, rel.slice(SPILL_DIR.length + 1)));
-    removed.push(rel);
-  });
-  if (removed.length === 0) return 0;
-  // The disk this freed is the files quota's, and a cached figure would keep charging for it until expiry — whether or not
-  // the records below go this run.
-  invalidateUsageCache();
-
-  // The `files` record is the finder (see the header): it goes last, so a failure of either delete is redone by the next run.
-  await forgetPathKeyedCache(spaceId, { ids: removed });
-  await col(spaceCollection(spaceId, 'files')).deleteMany(asFilter({ _id: { $in: removed } }));
-
-  log.info(`Legacy spill sweep: removed ${removed.length} read spill(s) older versions wrote into '${spaceId}'`);
-  logInternalAudit({
-    method: 'SWEEP', path: 'internal:legacy-spill-sweep', spaceId, operation: LEGACY_SPILL_SWEEP_OPERATION, startedAt: started,
-  });
-  return removed.length;
-}
-
 export async function sweepLegacySpills(): Promise<LegacySpillSweep> {
   const out: LegacySpillSweep = { removed: 0, failed: [] };
-  const walk = await eachSpace(STEP, configuredSpaces(), async (space) => { out.removed += await sweepSpace(space.id); });
+  const walk = await eachSpace(STEP, configuredSpaces(), async (space) => {
+    out.removed += await sweepRetiredLocalPaths(space.id, {
+      dir: SPILL_DIR, matches: rel => spillIdFromPath(rel) !== null, rowed: 'remove',
+      step: STEP, what: 'read spill(s) older versions wrote', operation: LEGACY_SPILL_SWEEP_OPERATION, audit: 'legacy-spill-sweep',
+    });
+  });
   for (const f of walk.failed) out.failed.push({ spaceId: f.spaceId, path: f.unit ?? SPILL_DIR, error: f.reason });
   return out;
 }

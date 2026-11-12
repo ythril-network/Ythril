@@ -106,6 +106,8 @@ Content-Type: application/json
 
 Trigger an immediate point-in-time dump of the entire MongoDB database. The backup is written to `<data-root>/backups/<ISO-timestamp>/` and contains a `manifest.json` plus one NDJSON file per collection.
 
+Every schema version a space has used is kept in the space's private `<space>_schema_snapshots` collection, so a database backup carries them and a restore brings them back. A space export (the admin space transfer) does not carry them yet.
+
 > **Unless `encrypt` is on, a backup is an unencrypted copy of everything, and `requireEncryptedAtRest` does not cover it.**
 >
 > The dump is written by reading *through* `mongod`, so it comes out **decrypted**: every fact, entity, edge,
@@ -376,7 +378,7 @@ change feed counts the same way). `count` is every file of the class. `paths` ho
 when the whole restore's cap on named paths (200, shared equally between its spaces) is reached; each is quoted bounded (256
 characters, escapes written out), and a path is in the record's normalised (NFC) spelling, so a name stored decomposed counts
 once. A client that meets a class it does not know shows the raw name. Never compared: a conversion's sidecars, conflict copies,
-schema snapshots, legacy read spills, chunk rows, and a record that holds no `sha256` (an import's). `checked: false` carries a
+retired per-type schema files, legacy read spills, chunk rows, and a record that holds no `sha256` (an import's). `checked: false` carries a
 `reasonCode` for a client to word in its own language - `timeout` (the check ran past the file-system bound, 120 s per space,
 given in `limitMs`) or `failed` (the server log names the cause) - and a `reason` of ours in English, never the driver's text,
 which says that restoring the backup again repeats the check; the space is

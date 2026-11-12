@@ -106,13 +106,13 @@ describe('what an instance derives for itself never travels', () => {
     assert.equal(await read(INSTANCES.b, tokenB, open.conflictPath), null, 'the conflict copy reached B');
   });
 
-  it('a schema snapshot (schemas/*.json) stays on the instance that wrote it', async () => {
-    // A schema change on a closed network opens a vote rather than writing, so the snapshot is written the way
-    // `syncSchemaFiles` names it; the rule is about that name (`schemas/<space>_<kind>_<type>.json`), not its author.
+  it('a retired per-type schema file (schemas/<space>_<kind>_<type>.json) stays on the instance that holds it', async () => {
+    // 6.6.0 writes no such file (each schema version is kept privately, `<space>_schema_snapshots`); one 6.5 left, or one written at that
+    // name as here, never travels: the rule is about the name (`RETIRED_SCHEMA_FILE`), not its author.
     const snap = `schemas/${SPACE}_entity_Note.json`;
     await write(INSTANCES.a, tokenA, snap, '{ "propertySchemas": {} }\n');
     await syncBoth(); await syncBoth();
-    assert.ok(!(await manifestPaths(INSTANCES.a, tokenA)).includes(snap), 'A offers its schema snapshot to peers');
-    assert.equal(await read(INSTANCES.b, tokenB, snap), null, 'A\'s schema snapshot reached B as a file');
+    assert.ok(!(await manifestPaths(INSTANCES.a, tokenA)).includes(snap), 'A offers its retired schema file to peers');
+    assert.equal(await read(INSTANCES.b, tokenB, snap), null, 'A\'s retired schema file reached B');
   });
 });

@@ -304,7 +304,7 @@ export async function syncFiles(
     for (const { remote, key } of arriving) {
       // Between files: an act registered on the space stops the turn here, and the file in flight was cut by its signal.
       if (turn && !turn.mayContinue()) { leg.refused('turn_stopped'); break; }
-      if (isInstanceLocalFile(key)) continue; // a peer's conflict copy or schema snapshot is the peer's own
+      if (isInstanceLocalFile(key)) continue; // a peer's conflict copy or retired per-type schema file is the peer's own
       // A path this instance could not look at is neither fetched, written nor saved as a conflict copy: to this side it is not absent.
       if (unreadableHere(key)) { leg.refused('unreadable_here'); if (leftAlone++ === 0) firstLeftAlone = key; continue; }
       const local = oursMap.get(key);

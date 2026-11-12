@@ -535,8 +535,11 @@ for (const key of Object.keys(SpaceMetaBody.shape)) {
  * reports this instance's answer to an unknown write field so a reader can learn the mode, and the answer is spread flat, so a caller that
  * GETs the meta and PATCHes it back would otherwise be refused for a key it never wrote. It is stripped here on THIS door only — the
  * meta is the shared definition and the setting is local — and is set at the top level of `PATCH /api/spaces/:id` or by `update_space`.
+ *
+ * `schemaFingerprint` joined in Q-734 (bundle-265): the fingerprint of the schema the space's records are checked and stamped against,
+ * derived from the schema itself, so a caller-set value would name a schema that is not the one in force.
  */
-export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema', 'invalidRules', 'unknownWriteFields'] as const;
+export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema', 'invalidRules', 'unknownWriteFields', 'schemaFingerprint'] as const;
 
 /** Drop the server-owned housekeeping fields from an incoming `meta`, leaving everything else to Zod. */
 export function stripServerOwnedMeta(meta: unknown): unknown {

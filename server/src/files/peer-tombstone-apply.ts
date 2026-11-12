@@ -22,7 +22,7 @@
  *     looks a peer's path up shares, Q-404): a path that leaves the space, or goes through a link that does, is refused and
  *     touches nothing — never normalised into the tree. The row it names is keyed by the RESOLVED path, never by the
  *     sender's text. **A path this instance keeps for itself** (`isInstanceLocalFile`: a sidecar under a derived tree, a
- *     conflict copy, a schema snapshot) is IGNORED — counted in `ignored` and on `ythril_sync_file_arrivals_total{door="tombstone",outcome="ignored_instance_local"}`, never applied, stored or relayed: each instance
+ *     conflict copy, a retired per-type schema file) is IGNORED — counted in `ignored` and on `ythril_sync_file_arrivals_total{door="tombstone",outcome="ignored_instance_local"}`, never applied, stored or relayed: each instance
  *     derives its own, so a peer's deletion of its copy says nothing about this one's.
  *  3. **An id already held is a no-op.** The pull reads every tombstone every cycle; one this instance holds has been
  *     applied, and applied again it deletes the file a peer has since re-created (which the next manifest pull downloads,

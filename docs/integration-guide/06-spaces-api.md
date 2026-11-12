@@ -792,9 +792,18 @@ type schemas are readable only by tokens that may reach the space.
   "stats": { "facts": 142, "entities": 53, "edges": 87, "chrono": 12, "files": 31 },
   "needsReindex": false,
   "reindexRun": { "running": false, "remaining": 0, "failed": 0 },
-  "invalidRules": []
+  "invalidRules": [],
+  "schemaFingerprint": "49bea0b1b287256c8bf200fb74fabfa5505e43634da1aba9ec7e44717c868186"
 }
 ```
+
+`schemaFingerprint` names the schema the space runs on as it stands: the SHA-256 (lowercase hex) of the schema's canonical
+text, its `typeSchemas` and `rules` with the keys sorted, every library `$ref` this instance resolves written inline, and
+nothing else of the meta (`purpose`, `usageNotes`, `validationMode` and the rest do not move it). The same schema is the
+same fingerprint on every instance; a space with no schema has the empty schema's. Each version a space has used is kept
+privately by the instance under its fingerprint; it is never a file of the space (the per-type files
+`schemas/<space>_<kind>_<type>.json` that 6.5 wrote are no longer written). It is derived, so a meta sent back with it is
+not refused: the field is stripped on the way in, like `version`. `space_meta` answers it too.
 
 `invalidRules` names the stored [rules](06a-schema-api.md#rules) that no longer compile, or read a property their type
 no longer declares — `typeSchemas.<kind>.<type>.rules.<name>` or `meta.rules.<name>`, **names only, never a rule's text

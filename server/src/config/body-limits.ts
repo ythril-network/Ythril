@@ -12,6 +12,13 @@
  * A leaf module: the loader imports it.
  */
 
+/**
+ * The most bytes the global JSON (and form) body parsers take (`app.ts`), as one number both they and what is bounded by them read: a schema
+ * snapshot a peer fetches is at most this (`SCHEMA_SNAPSHOT_MAX_BYTES`), because a schema that came in through a JSON body is at most this.
+ * Not configurable; body-parser takes a number of bytes, so the number and its old spelling `'10mb'` are one limit.
+ */
+export const JSON_BODY_MAX_BYTES = 10 * 1024 * 1024;
+
 /** The inflated bytes one import body may hold when `importBodyMaxBytes` is not set: 1 GiB. */
 export const DEFAULT_IMPORT_BODY_MAX_BYTES = 1024 * 1024 * 1024;
 /** The documents one import body may hold when `importMaxDocuments` is not set. */

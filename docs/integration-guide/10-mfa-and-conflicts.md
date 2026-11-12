@@ -199,7 +199,7 @@ the destination is `409` with `code: "destination_exists"` and the destination's
 stays open, so you can choose another name or space and resolve it again. A `rename` that goes through a file
 (`a.txt/inside.txt`) is `409` with `code: "path_blocked"`. A `rename` that leaves the space, or goes through a link that does, is
 `400`, and so is a `rename` into a path this instance keeps for itself (the conversion trees `_converted/` and `_extracted/`, a
-schema snapshot, a conflict copy's own name). Every path of the conflict, the copy's and the original's, is resolved the same
+retired per-type schema file `schemas/<space>_<kind>_<type>.json`, a conflict copy's own name). Every path of the conflict, the copy's and the original's, is resolved the same
 checked way, so a conflict path that goes through a link out of the space is `400` for every action. `rename` and
 `targetSpaceId` that are not strings are `400`, before any `403`.
 
