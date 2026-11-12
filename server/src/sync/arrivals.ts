@@ -102,6 +102,7 @@ import {
 import { retentionStampOf } from '../brain/retention-stamp.js';
 import { retagToLocalSpace, seqGuard, divergesFrom, forkRowVerdict, isForkingFamily, CONVERGE_BLANKED } from './upsert-plan.js';
 import { isNewerCopy } from './held-tombstone-rules.js';
+import { withoutMalformedStamp } from './incoming-schemas.js';
 import { authoredContentHash, bodyProjectionOf } from './authored-content.js';
 import { readBackDuplicates } from './duplicate-readback.js';
 import { fileContentHash, FILE_HASH_PROJECTION } from '../brain/merkle.js';
@@ -331,6 +332,10 @@ function prepared(raw: Doc, family: BrainCollection, restore: boolean, origin: R
   // Stamped afresh by this landing, whatever door brought it: the written-here bit joins the record tier for a database's raw restore, but
   // an import or a peer never takes it from the document (the landing's patch is the only source, `withLandingStamp`).
   delete doc[WRITTEN_HERE];
+  // The writer's schema stamp is kept as the writer sent it, on every door, and a malformed one is absent on every door (`withoutMalformedStamp`): the sync
+  // doors parse the `Incoming*` schemas, which read it so, and an import parses none, so it is read here, where all of them meet (bundle-265, Q-737). An
+  // arrival never gets a stamp of this instance's: those are the brain writers', and an arrival keeps its sender's.
+  doc = withoutMalformedStamp(doc);
   for (const f of RESTORED_LOCAL_FIELDS) {
     if (!restore) { delete doc[f]; continue; }
     // JSON turned a stamp into text, and a backup may carry any shape; stored as anything but a Date it never matches the sweep's range

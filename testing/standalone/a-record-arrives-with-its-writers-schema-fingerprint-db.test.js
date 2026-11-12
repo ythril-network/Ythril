@@ -8,8 +8,10 @@
  *
  *  1. **The admin import** (`importDocuments`, the restore of an export): a record lands with the stamp it carries; it replaces the stored copy's stamp
  *     with its own, and a record that carries none leaves none (the replaced copy's stamp described the replaced copy). The import does not parse a record
- *     with the `Incoming*` schemas (it records what it is handed and refuses only what the writer's preconditions refuse, `sync/space-import.ts`), so a
- *     malformed stamp is not read as none here the way it is on the sync doors; that is not asserted, because the design does not say it.
+ *     with the `Incoming*` schemas (it records what it is handed and refuses only what the writer's preconditions refuse, `sync/space-import.ts`), so on its
+ *     own it stored a malformed stamp verbatim, where the sync doors read it as absent. One rule on every door (parent decision, 2026-11-12, on the finding
+ *     of the tests-first return): `writeArrivals` drops a malformed stamp for an import as it does for a push and a pull, and the record still lands. The
+ *     per-family malformed cases hold it; they are red on the code that stored it verbatim (bundle-265 I3).
  *  2. **The backup restore** (`restoreDatabase`, the raw `backupLoader`): a dump holds the stamp and a restore stores it back, unchanged, for every
  *     record family, and the space's Merkle root is the same before the dump and after the restore.
  *  3. **The page a peer is served** carries the stamp: the sender's read must not project it away (it is replicated, not local-only), or a pulling member
@@ -22,7 +24,8 @@
  * import, the backup restore and the served page store and read the stamp as a plain stored field, which the base already does (the import writer does not
  * parse with the `Incoming*` schemas, the loader is a raw insert, the sender's read projects only the local-only fields), so they PASS there and are pins:
  * the change that declares the stamp, classes it and leaves it out of the hash must not make the import drop it, the restore re-validate it or the sender's
- * read project it away. The stored stamps they use are seeded directly: nothing stamps a record until a writer lands in this bundle.
+ * read project it away. The stored stamps they use are seeded directly: nothing stamps a record until a writer lands in this bundle. The one exception
+ * among the import cases is the malformed-stamp case, which is red until `writeArrivals` reads a malformed stamp as absent (seen red, then green).
  *
  * Run: node --test testing/standalone/a-record-arrives-with-its-writers-schema-fingerprint-db.test.js
  * (requires a prior `npm run build:server` and the test MongoDB)
@@ -47,6 +50,20 @@ const SUITE = 'tsfpwire';
 const fp = (word) => createHash('sha256').update(`schema ${word}`, 'utf8').digest('hex');
 const X = fp('X');
 const Y = fp('Y');
+
+/** Values a writer may send in the stamp's place that are not a fingerprint: the list `a-schema-fingerprint-travels-on-the-wire` holds the Incoming schemas to. */
+const MALFORMED_STAMPS = Object.freeze([
+  ['an empty string', ''],
+  ['a short string', 'abc'],
+  ['63 hex characters', X.slice(0, 63)],
+  ['65 hex characters', `${X}a`],
+  ['64 characters that are not all hex', `${X.slice(0, 63)}g`],
+  ['a number', 12345],
+  ['null', null],
+  ['an object', { fp: X }],
+  ['an array', [X]],
+  ['true', true],
+]);
 
 /** The record families, by the key a payload and a collection name them by, and the builder of each. */
 const FAMILIES = Object.freeze({ facts: 'fact', entities: 'entity', edges: 'edge', chrono: 'chrono' });
@@ -99,6 +116,27 @@ describe('a record keeps its writer\'s schema fingerprint on every door it arriv
         assert.equal(hasStamp(none), false, `${family}: an unstamped record was stored with the replaced copy's stamp ${JSON.stringify(none.schemaFingerprint)}`);
       });
 
+      it(`${family}: a malformed stamp is read as absent on an import, as on push and pull, and the record still lands`, async () => {
+        // The one rule on every door (parent decision, 2026-11-12): a peer's, or a backup's, malformed claim costs the record its stamp, never the record.
+        const bad = MALFORMED_STAMPS.map(([what, value], i) => ({ what, id: `bad${i}`, record: make(family, S, `bad${i}`, 40, { schemaFingerprint: value }) }));
+        await importMod.importDocuments(S, { [family]: bad.map(b => b.record) });
+        for (const { what, id } of bad) {
+          const got = await stored(family, S, id);
+          assert.ok(got, `${family}: an import with ${what} as its stamp refused or lost the whole record: a malformed claim must cost the stamp only`);
+          assert.equal(hasStamp(got), false, `${family}: an import stored ${what} as the stamp (${JSON.stringify(got.schemaFingerprint)}); the sync doors read it as absent`);
+        }
+
+        // Over a stored copy that carries a stamp: the replacing record's own stamp is its claim, and a malformed one is none, so none is stored.
+        await door.coll(S, family).insertOne({ ...make(family, S, 'over', 39), schemaFingerprint: Y, deliveredBy: '' });
+        await importMod.importDocuments(S, { [family]: [make(family, S, 'over', 40, { schemaFingerprint: 'not a fingerprint' })] });
+        const over = await stored(family, S, 'over');
+        assert.equal(over?.seq, 40, `${family}: fixture check, the import did not replace the stored copy`);
+        assert.equal(hasStamp(over), false, `${family}: a malformed stamp replaced the stored copy's, or the stored copy's stayed: ${JSON.stringify(over.schemaFingerprint)}`);
+
+        // The control: a good stamp beside the bad ones lands unchanged, so the check above is not "every stamp is dropped".
+        await importMod.importDocuments(S, { [family]: [make(family, S, 'good', 40, { schemaFingerprint: X })] });
+        assert.equal((await stored(family, S, 'good'))?.schemaFingerprint, X, `${family}: a good stamp was dropped by the import`);
+      });
     }
   });
 

@@ -515,6 +515,18 @@ The marks a lapsed content window leaves behind, `contentRedacted` and `contentR
 case and DO replicate and DO get hashed: they say what the record is, not when the instance will act. Excluded,
 a redacted entry would hash identically to one that still has its detail — real divergence going unreported.
 
+**`schemaFingerprint` is a third class: it replicates, and it is not hashed.** A record carries the fingerprint of the
+schema its writer held it to (6.6.0 and later: facts, entities, edges and chrono entries; a link and a file carry none).
+Send it as it is and it is kept, on `batch-upsert`, on a pull and on an admin import alike; the receiver stores the
+sender's value and never replaces it with its own, because it is the writer's claim and the receiver does not check it
+(checking needs the writer's schema, which the receiver may not hold yet). **A value that is not a fingerprint (64
+lowercase hexadecimal characters) is read as absent on every door: the record is stored without a stamp and is never
+refused for it.** The stamp is version metadata, not body: two copies of one version that differ only in it are the same
+copy, so nothing forks and nothing is replaced over it. A member below 6.6.0 drops the stamp on arrival and forwards the
+record without it, so a stamp reaches only members from 6.6.0 on. It is left out of the hash for exactly that reason: an
+older member holds the record without it, and an equal-seq copy is never stored over the held one, so a hashed stamp
+would keep two roots apart for ever, where nothing is wrong with the record.
+
 ### Schema mismatches are reported, never refused
 
 Two instances in one network may declare **different schemas for the same space**. A record the sender
@@ -739,7 +751,10 @@ derived by the local model, so peers running different models legitimately diffe
 in either direction, because the sweep that acts on it would then be following another operator's policy.
 Also out, and local to this instance: the landing position `pos` and `posAtSeq`, and `writtenHere` (this instance wrote the record's current version; a restore keeps it, an arrival never does). A tombstone's own local fields are `storedVia`, `issuedHere`, `pos` and `posAtSeq`; `pos` is also the one order-only field — a read may order by it and no answer returns it. And `_resolvedElsewhere`, on a fork row only: the decision this instance still owes after another instance resolved its own copy of the fork behind a tombstone this instance declined. It is carried across an ordinary arrival, kept by a restore, dropped from a peer's copy, and never hashed.
 `spaceId` is out too: it crosses the wire and the receiver rewrites it to its own id for the space, which under a
-`spaceMap` alias is not the sender's. Everything else is hashed, and everything else crosses the wire — a field
+`spaceMap` alias is not the sender's. And `schemaFingerprint`, the one field that replicates and is not hashed: a record's
+stamp is the writer's claim about the schema it held the record to, an older member drops it, and an equal-seq copy never
+replaces the held one, so a hashed stamp would never let two members agree (a record stamped differently, or not at all, gives
+the same leaf; a changed record still gives another). Everything else is hashed, and everything else crosses the wire — a field
 in neither category means two peers can never agree about identical content. File leaves hash the file's
 SHA-256, and a file that never leaves an instance — a conflict copy, a retired per-type schema file, a legacy read spill, a
 conversion's sidecar — is not hashed at all, record or bytes; nor is a soft-deleted file's row (`deletedAt`, local

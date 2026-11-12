@@ -89,7 +89,20 @@ function sha256hex(input: string): string {
  * where nothing is wrong. It is its OWN list, never `LOCAL_ONLY_FIELDS`: the arrival writer strips those, and
  * would strip the space id from every arrival.
  */
-const DERIVED_FIELDS: ReadonlySet<string> = new Set([...LOCAL_ONLY_FIELDS, ...RETAGGED_FIELDS]);
+/*
+ * ## And the fields that REPLICATE and are NOT hashed (bundle-265, Q-737)
+ *
+ * `schemaFingerprint` is the schema its writer held the record to. It travels with the record (the `Incoming*` schemas declare it), and the hash leaves it
+ * out, because a member below 6.6.0 drops it on arrival (its `Incoming*` schemas strip a key they do not declare) and an equal-seq copy is never stored over
+ * the held one (`plan.verdicts[i] = 'skipped'`, `sync/upsert-plan.ts`), so a hashed stamp would keep the two members' leaves apart for ever, over metadata about
+ * the WRITE and not about the record: `MERKLE_DIVERGENCE` every cycle where nothing is wrong. Two members that stamped one version with different schemas
+ * (each its own variation) also agree. NOT `LOCAL_ONLY_FIELDS` (the arrival writer strips those, and a stamp stripped on arrival is no stamp) and not
+ * `RETAGGED_FIELDS` (nothing rewrites it on arrival). The gate `a-replicated-field-reaches-its-incoming-schema` reads this set: a field that replicates and is
+ * not hashed must be named here with its reason.
+ */
+const REPLICATED_UNHASHED_FIELDS: ReadonlySet<string> = new Set(['schemaFingerprint']);
+
+const DERIVED_FIELDS: ReadonlySet<string> = new Set([...LOCAL_ONLY_FIELDS, ...RETAGGED_FIELDS, ...REPLICATED_UNHASHED_FIELDS]);
 
 /**
  * A copy of `doc` without `fields` at its TOP LEVEL. The one spelling of "the record less its local fields": a derived field is a field of the
