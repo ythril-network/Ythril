@@ -101,7 +101,7 @@ export async function ensureSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs
     const done = await admitSpaceWrite(spaceId, undefined, () =>
       snapshots(spaceId).updateOne(asFilter<SnapshotRow>({ _id: stamp.fp }), { $setOnInsert: row }, { upsert: true }));
     // A row that was there already is not a snapshot written; a fetched one is counted `fetched`, whoever it came from.
-    if (done.upsertedCount > 0) schemaSnapshotTotal.count(kept.origin === 'fetched' ? 'fetched' : 'written');
+    if (done.upsertedCount > 0) schemaSnapshotTotal.note(kept.origin === 'fetched' ? 'fetched' : 'written');
   } catch (err) {
     if (isActRefusal(err)) return 'refused';
     if (!isDuplicateKey(err)) throw err;
@@ -113,7 +113,7 @@ export async function ensureSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs
 /** {@link ensureSnapshot}, detached: never awaited by the write that asked, a failure reported once per window through the shared reporter. */
 export function keepSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs): void {
   if (knownHeld(spaceId, stamp.fp)) return;
-  detachedWrite(() => ensureSnapshot(spaceId, stamp, kept)).catch(err => { schemaSnapshotTotal.count('failed'); reportSpaceFailure(SCHEMA_SNAPSHOT_STEP, spaceId, err); });
+  detachedWrite(() => ensureSnapshot(spaceId, stamp, kept)).catch(err => { schemaSnapshotTotal.note('failed'); reportSpaceFailure(SCHEMA_SNAPSHOT_STEP, spaceId, err); });
 }
 
 /** What `spaceId` keeps for its variation now: every layer's row, and its own unless it is one of them ("don't copy, just use"). */

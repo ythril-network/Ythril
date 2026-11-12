@@ -24,7 +24,11 @@
  * The empty schema's fingerprint is always known held and has no row: it is never owed.
  */
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
+import { LruMap } from '../util/lru-map.js';
+import { backoffDelayMs } from '../util/backoff.js';
 import { col, asFilter } from '../db/mongo.js';
+import { distinctStringsOf } from '../db/distinct-strings.js';
+import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { COLLECTION_SUFFIX, KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
@@ -54,26 +58,28 @@ interface Owed {
   /** The members that answered "not held" since the last back-off. */
   readonly notHeld: Set<string>;
   retryAt: number;
-  backoffMs: number;
+  /** How many times every candidate answered "not held" since a deliverer last arrived: the attempt of the next back-off. */
+  backoffs: number;
 }
 
 /**
- * Insertion-ordered maps, bounded by dropping the first key past the bound: a key noted again is deleted and inserted, so the first is the least
- * recently noted. (`LruMap` hides its order, and the order is what "owed to this member first, in the order noted" reads.)
+ * One space's owed fingerprints: the entries (bounded, the least recently used dropped by the `LruMap`) and, beside them, the order they were first
+ * noted in, which "owed to this member first, in the order noted" reads and `LruMap` does not expose. The entries' eviction keeps the order in step.
  */
-const owed = new Map<string, Map<string, Owed>>();
+interface OwedSpace { readonly byFp: LruMap<string, Owed>; readonly order: Set<string> }
 
-function boundedSet<V>(m: Map<string, V>, key: string, value: V, max: number): void {
-  m.delete(key);
-  m.set(key, value);
-  if (m.size > max) m.delete(m.keys().next().value as string);
-}
+const owed = new LruMap<string, OwedSpace>(MAX_SPACES);
 
-const ofSpace = (spaceId: string): Map<string, Owed> => {
-  const m = owed.get(spaceId) ?? new Map<string, Owed>();
-  boundedSet(owed, spaceId, m, MAX_SPACES);
-  return m;
+const ofSpace = (spaceId: string): OwedSpace => {
+  const held = owed.get(spaceId);
+  if (held) return held;
+  const order = new Set<string>();
+  const made: OwedSpace = { byFp: new LruMap<string, Owed>(MAX_FINGERPRINTS_PER_SPACE, fp => { order.delete(fp); }), order };
+  owed.set(spaceId, made);
+  return made;
 };
+
+const forgetIn = (space: OwedSpace | undefined, fp: string): void => { space?.byFp.delete(fp); space?.order.delete(fp); };
 
 /**
  * Note that `fp` is owed in `spaceId`, delivered by `peerId` (`''`, absent or a restore: any member). A fingerprint that is no stamp, or is known held,
@@ -81,13 +87,14 @@ const ofSpace = (spaceId: string): Map<string, Owed> => {
  */
 export function noteOwedSchemaSnapshot(spaceId: string, fp: unknown, peerId?: string): void {
   if (typeof fp !== 'string' || !FINGERPRINT.test(fp) || knownHeld(spaceId, fp)) return;
-  const spaceOwed = ofSpace(spaceId);
-  const entry = spaceOwed.get(fp) ?? { peers: new Set<string>(), any: false, notHeld: new Set<string>(), retryAt: 0, backoffMs: 0 };
+  const space = ofSpace(spaceId);
+  const entry = space.byFp.get(fp) ?? { peers: new Set<string>(), any: false, notHeld: new Set<string>(), retryAt: 0, backoffs: 0 };
   if (peerId) {
-    if (!entry.peers.has(peerId)) { entry.peers.add(peerId); entry.notHeld.delete(peerId); entry.retryAt = 0; entry.backoffMs = 0; }
+    if (!entry.peers.has(peerId)) { entry.peers.add(peerId); entry.notHeld.delete(peerId); entry.retryAt = 0; entry.backoffs = 0; }
   } else entry.any = true;
   // A fingerprint noted again keeps its place in the line: the gap scan notes everything every cycle.
-  if (!spaceOwed.has(fp)) boundedSet(spaceOwed, fp, entry, MAX_FINGERPRINTS_PER_SPACE);
+  space.byFp.set(fp, entry);
+  space.order.add(fp);
 }
 
 /**
@@ -95,7 +102,7 @@ export function noteOwedSchemaSnapshot(spaceId: string, fp: unknown, peerId?: st
  * (four of them would starve every later one of its turn); the gap scan owes it again for as long as a stored record carries it and no row holds it.
  */
 export function forgetOwedSchemaSnapshot(spaceId: string, fp: string): void {
-  owed.get(spaceId)?.delete(fp);
+  forgetIn(owed.peek(spaceId), fp);
 }
 
 /** {@link noteOwedSchemaSnapshot} for the stamps of a page of landed records: each distinct stamp once, with the peer that delivered the page. */
@@ -111,8 +118,10 @@ export function noteOwedSchemaSnapshots(spaceId: string, docs: Iterable<Record<s
 export function owedTo(spaceId: string, memberId: string, candidates: readonly string[], now: number): string[] {
   const mine: string[] = [];
   const anyone: string[] = [];
-  for (const [fp, e] of owed.get(spaceId) ?? []) {
-    if (e.notHeld.has(memberId) || now < e.retryAt) continue;
+  const space = owed.peek(spaceId);
+  for (const fp of space?.order ?? []) {
+    const e = space?.byFp.peek(fp);
+    if (!e || e.notHeld.has(memberId) || now < e.retryAt) continue;
     if (e.peers.has(memberId)) mine.push(fp);
     else if (e.any || !candidates.some(c => e.peers.has(c))) anyone.push(fp);
   }
@@ -121,7 +130,7 @@ export function owedTo(spaceId: string, memberId: string, candidates: readonly s
 
 /** A snapshot of `fp` is held for `spaceId`: nothing is owed for it any more. */
 export function dropOwedSchemaSnapshot(spaceId: string, fp: string): void {
-  owed.get(spaceId)?.delete(fp);
+  forgetIn(owed.peek(spaceId), fp);
   noteHeld(spaceId, fp);
 }
 
@@ -130,13 +139,13 @@ export function dropOwedSchemaSnapshot(spaceId: string, fp: string): void {
  * `candidates` (the members that may be asked) when some record has no deliverer - the fingerprint backs off for longer each time.
  */
 export function noteNotHeld(spaceId: string, fp: string, memberId: string, candidates: readonly string[], now: number): void {
-  const e = owed.get(spaceId)?.get(fp);
+  const e = owed.peek(spaceId)?.byFp.peek(fp);
   if (!e) return;
   e.notHeld.add(memberId);
   const everyone = e.any || !candidates.some(c => e.peers.has(c)) ? candidates : [...e.peers];
   if (!everyone.every(c => e.notHeld.has(c))) return;
-  e.backoffMs = Math.min(Math.max(e.backoffMs * 2, BACKOFF_FIRST_MS), BACKOFF_MAX_MS);
-  e.retryAt = now + e.backoffMs;
+  e.retryAt = now + backoffDelayMs(e.backoffs, BACKOFF_FIRST_MS, BACKOFF_MAX_MS);
+  e.backoffs++;
   e.notHeld.clear();
 }
 
@@ -155,17 +164,12 @@ export async function scanOwedSchemaSnapshots(): Promise<void> {
   await eachSpace(SCHEMA_SNAPSHOT_STEP, configuredSpaces(), async (space) => {
     const carriedIn = new Map<string, (typeof STAMPED_COLLECTIONS)[number]>();
     await eachUnit(STAMPED_COLLECTIONS, async (collection) => {
-      const found = await col<Record<string, unknown>>(spaceCollection(space.id, collection))
-        .distinct(SCHEMA_FINGERPRINT_FIELD, asFilter<Record<string, unknown>>({ [SCHEMA_FINGERPRINT_FIELD]: { $exists: true } }));
-      for (const fp of found) if (typeof fp === 'string' && FINGERPRINT.test(fp) && !carriedIn.has(fp)) carriedIn.set(fp, collection);
+      const found = await distinctStringsOf(col<Record<string, unknown>>(spaceCollection(space.id, collection)), SCHEMA_FINGERPRINT_FIELD, {});
+      for (const fp of found) if (FINGERPRINT.test(fp) && !carriedIn.has(fp)) carriedIn.set(fp, collection);
     });
     const carried = [...carriedIn.keys()].filter(fp => !knownHeld(space.id, fp));
     if (carried.length === 0) return;
-    const rows = col<SnapshotRow>(spaceCollection(space.id, 'schemaSnapshots'));
-    const held = new Set<string>();
-    for (let i = 0; i < carried.length; i += 500) {
-      for (const r of await rows.find(asFilter<SnapshotRow>({ _id: { $in: carried.slice(i, i + 500) } }), { projection: { _id: 1 } }).toArray()) held.add(String(r._id));
-    }
+    const held = new Set((await readStoredById<SnapshotRow>(spaceCollection(space.id, 'schemaSnapshots'), carried, { _id: 1 })).keys());
     for (const fp of held) noteHeld(space.id, fp);
     for (const fp of owedFingerprints(carried, held).slice(0, SCAN_PER_SPACE)) {
       const from = await col<Record<string, unknown>>(spaceCollection(space.id, carriedIn.get(fp)!))

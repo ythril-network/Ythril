@@ -47,9 +47,13 @@ function sharedNetworksOf(spaceId: string, authToken: unknown): Set<string> | un
   return new Set(networksHolding(spaceId, { networks: peerMemberNetworks(peerId) }).map(n => n.id));
 }
 
-/** Register `GET /schema-snapshot` on `router` (the sync meta router). */
-export function registerSchemaSnapshotRoute(router: Router): void {
-  router.get('/schema-snapshot', syncRateLimit, requireAuth, async (req, res) => {
+/**
+ * Register `GET /schema-snapshot` on the sync meta router. The parameter is spelled as the caller spells the router (`syncMetaRouter`), as
+ * `spaces-reembed.ts` does: the surface matrix's static extraction resolves a route's prefix by the name it is registered on, and a bare `router`
+ * takes the prefix of whichever other register function names its parameter `router` (here it read `/api/files`).
+ */
+export function registerSchemaSnapshotRoute(syncMetaRouter: Router): void {
+  syncMetaRouter.get('/schema-snapshot', syncRateLimit, requireAuth, async (req, res) => {
     try {
       const { spaceId, networkId, fp } = req.query as Record<string, string>;
       if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
