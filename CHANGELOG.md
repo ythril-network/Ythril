@@ -13,8 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A file deleted before this release has an old position: it is listed as deleted only to a feed read with no cursor | None |
 | A `config.json` that is there but empty, not JSON or unreadable stops the start, naming the file, instead of opening first-run setup | Repair or restore the file; delete it only to set the instance up anew |
 | Irreversible: records of files whose bytes this instance lost are removed here only, with no tombstone, once their window has passed and every peer we pull from completed a sync | Put lost bytes back before upgrading to keep their records |
+| `GET /api/sync/meta` now asks `schema: read` on the space (`knowledge: write` implies it); a peer token without it is answered `403 schema_rung` | Give peer tokens `schema: read` where a member reads the schema |
+| The per-type files `schemas/<space>_<kind>_<type>.json` are no longer written, and the housekeeping cycle removes the ones this instance wrote (a file you uploaded at such a path is kept) | Read the schema from `GET /api/spaces/:id/meta` or MCP `space_meta` instead |
+| Members below 6.6.0 drop `schemaFingerprint` on arrival and forward records without it | None; a record is stamped again on its next write on a newer member |
+| Records written before this release carry no `schemaFingerprint`; nothing backfills it | None; a record is stamped on its next write that conforms |
 
 ### Added
+
+- **Schema:** `schemaFingerprint` on `GET /api/spaces/:id/meta` and MCP `space_meta`: the SHA-256 of the space schema's canonical text, the same on every instance holding the same schema; derived, and stripped when the meta is sent back.
+- **Schema:** every schema version a space has used is kept privately in `<space>_schema_snapshots`, named by its fingerprint, with what it was built from (own types, network layers). A database backup carries it, an export does not yet.
+- **Records:** records carry `schemaFingerprint` exactly while they conform as stored to the space's schema. A create or update whose record fully conforms is stamped with that schema's fingerprint, and its answer carries it. An update that leaves the record non-conforming or lands on a moved version, a chrono redaction and an edge relink remove it. Recall hits withhold it.
+- **Sync:** a record's `schemaFingerprint` travels with it on push, pull and import as its writer sent it; a value that is not a 64-character lowercase hex fingerprint is read as absent (stored without a stamp, never refused).
+- **Sync:** `GET /api/sync/schema-snapshot?spaceId=&networkId=&fp=`: a member that receives a record stamped with a schema version it does not hold fetches that version from the member that sent it. A version built from a network the asker is not in is never served (`409 not_shared`). Metric `ythril_schema_snapshot_total`.
+- **Audit:** `file.retired_schema_file.sweep`.
 
 - **Files:** the file change feed, `GET /api/files/:spaceId/changes` and the MCP tool `file_changes`: the changes to a space's files after a cursor, in order; with no cursor it lists every file. An expired cursor answers `410 cursor_expired`.
 - **Files:** `filesAwaitingBytes` on REST stats and MCP `space_stats`: records whose bytes are missing here, which file counts leave out. The change feed gains reason `bytes_lost` and the audit log `file.absent_bytes.sweep`.
@@ -23,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Schema:** the per-type files `schemas/<space>_<kind>_<type>.json` are no longer written; the housekeeping cycle removes the ones this instance wrote, locally and without a tombstone.
+- **Records:** a `schemaFingerprint` sent in a write body is ignored (not named as an unknown field, never stored); `deleteFields` refuses it by name.
+- **Sync:** the space hash (Merkle root) does not include `schemaFingerprint`: it replicates and is left out of the leaf, so copies that differ only in it do not diverge (ADR 22).
+- **Sync:** `GET /api/sync/meta` asks `schema: read` on the space.
 - **Files:** bytes that arrive from a peer move the file row's position, never its version: a reader paging by position hears of them, and the publisher's next edit still wins. Identical bytes again write nothing.
 - **Files:** a file deletion (own, folder, TTL, a peer's, a sidecar's) takes a position in the same write that flags or marks the row.
 - **Files:** a record whose bytes this instance lost is removed here only, with no tombstone: checked once a day per space, after 1 day (30 without a recorded hash or after a restore or import), once every peer completed a sync; mass losses are held.
