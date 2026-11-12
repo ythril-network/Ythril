@@ -57,6 +57,13 @@ const READER = 'server/src/db/read-by-id.ts';
  * function that defines them.
  */
 const ALLOWED = new Map([
+  // bundle-265 (Q-735): two by-id reads that are not of records at all.
+  ['server/src/files/retired-local-path-sweep.ts:sweepRetiredLocalPaths',
+    'which of the paths a retired writer left has a `files` row (projected to `_id`): a file WITH a row is someone\'s upload and is kept. An'
+    + ' existence question about file rows, never the stored copy of a record.'],
+  ['server/src/spaces/schema-snapshot-store.ts:ensureSchemaSnapshots',
+    'which of a space\'s owed schema fingerprints already has a row in its private `<space>_schema_snapshots` (projected to `_id`): a snapshot'
+    + ' row is no record, and the read is an existence question.'],
   // bundle-255: the retirement of file rows asks which of a page of ids is in a STATE, never for the stored copies.
   ['server/src/files/file-meta.ts:retireLivePage',
     'which of one page of ids (at most READ_CHUNK) is still a LIVE file row, projected to `_id` and `seq`: the rows the page retires and the version'
