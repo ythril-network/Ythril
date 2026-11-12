@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Files:** the file change feed, `GET /api/files/:spaceId/changes` and the MCP tool `file_changes`: the changes to a space's files after a cursor, in order; with no cursor it lists every file. An expired cursor answers `410 cursor_expired`.
 - **Files:** `filesAwaitingBytes` on REST stats and MCP `space_stats`: records whose bytes are missing here, which file counts leave out. The change feed gains reason `bytes_lost` and the audit log `file.absent_bytes.sweep`.
+- **Files:** the Brain page's Files tab, a view's Overview and the Danger zone show "+N awaiting bytes" beside the file count when some records wait for their bytes.
 - **Files:** metrics `ythril_files_absent_bytes_removed_total`, `ythril_files_awaiting_bytes` and `ythril_files_absent_bytes_held`.
 
 ### Changed
@@ -44,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** the restore check no longer reports a file record as having no bytes when its list of unreadable paths was cut at its limit; such a record is left out of the report.
 - **Files:** a folder delete or move over an unreadable subtree answers `500 file_system_fault` and changes nothing.
 - **Files:** a resumed import whose spool cannot be read is retried, not failed and deleted; the at-rest file pass names an unreadable folder and goes on.
-- **Sync:** an unreadable file or folder is named in the sync manifest (`unreadable`) instead of looking absent to peers, the hash cache and the restore check; a push over it answers `409 path_unreadable`.
+- **Sync:** an unreadable file or folder is named in the sync manifest (`unreadable`) instead of looking absent to peers, the hash cache and the restore check; a push over it answers `409 path_unreadable`, and the sender offers it again an hour later.
 
 ## [6.5.5] — 2026-11-08
 
