@@ -288,7 +288,7 @@ interface SpaceView {
         <button class="tab" type="button" role="tab" [class.active]="activeTab() === 'files'" [attr.aria-selected]="activeTab() === 'files'" (click)="setTab('files')">
           <ph-icon name="folder" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.tab.files' | transloco }}
           @if (activeStats(); as s) {
-            <span class="tab-count">{{ s.files }}</span>
+            <span class="tab-count">{{ s.files }}</span>@if (s.filesAwaitingBytes; as n) {<span class="tab-count" data-testid="files-awaiting-bytes" [attr.title]="n | plural:'brain.filesAwaitingBytesHint'">{{ n | plural:'brain.filesAwaitingBytes' }}</span>}
           }
         </button>
         <!-- Space settings, as a cog at the far RIGHT of the strip and deliberately not a tab.

@@ -107,7 +107,7 @@ body of the API call, the `confirm` parameter of the tool), which finds what the
 refused and nothing is deleted. An MCP token with write access to files can delete a folder this way, as the API can.
 
 **A file whose bytes were removed outside Ythril while its metadata stayed has no row here** — the list is read
-from disk — and the **Files** count leaves it out too: it is counted apart, as *awaiting bytes* (`filesAwaitingBytes` in the space's stats). You can still delete it through the API
+from disk — and the **Files** count leaves it out too: it is counted apart, as *awaiting bytes* (`filesAwaitingBytes` in the space's stats), which the Brain page's **Files** tab and a view's Overview show beside the count (*+2 awaiting bytes*, with what it means on hover) and the space's Danger zone lists as **Files awaiting bytes**, each only while there are some. You can still delete it through the API
 (`DELETE /api/files/:spaceId?path=…`) or the MCP `delete_file` tool: the delete is completed, and synced peers are
 told to remove their copy too (which ones apply it is explained next).
 

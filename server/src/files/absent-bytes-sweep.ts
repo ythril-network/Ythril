@@ -25,8 +25,12 @@
  * cursor every tick; a pass that completed is not started again within `SWEEP_RESCAN_AFTER_MS` (`files/sweep-pass.ts`; a day: the walk lists every
  * directory of the space, so it is not repeated every tick). Per space and tick of a pass:
  *
- * 1. **The walk**: the read-only manifest walk (`buildFileManifest(..., { listOnly: true })`: one listing per directory, nothing hashed, and the
- *    paths it could not look at named in `unreadable`), under {@link withinFsBound}: a walk the bound ends counts the space's pass as incomplete.
+ * 1. **The walk**, ONCE per pass: the read-only manifest walk (`buildFileManifest(..., { listOnly: true })`: one listing per directory, nothing
+ *    hashed, and the paths it could not look at named in `unreadable`), under {@link withinFsBound}. What it found is kept in memory for the
+ *    ticks that follow, so a walk longer than a tick's budget costs that one tick and the pages go on from the next: the paths kept, across
+ *    every space, are at most {@link ABSENT_BYTES_WALK_KEPT_PATHS}; a walk that would pass that keeps none, and each of its rows is then
+ *    confirmed alone (step 2). A walk the bound ends is not repeated within the pass: the space waits, and once `SWEEP_RESCAN_AFTER_MS` has
+ *    passed since the pass began, that pass is given up and a new one walks again. A restart of the process walks again once.
  * 2. **The rows**, a page at a time by `_id` (live top-level rows, not instance-local files): a row the walk found is present; one under an
  *    unreadable path is UNLOOKED; any other is confirmed by `bytesHeldAt` (every spelling the disk may keep), bounded the same way: present,
  *    absent, or unlooked when the look fails or hits its bound. An unlooked row is never stamped and never removed.
@@ -36,7 +40,8 @@
  *    directory) and {@link absentRowIsDue} asked. A due row is re-checked under its path lock (bytes still absent, row still the one decided on),
  *    the lock released, and retired by `removeFileHere(..., { retireOnlyIf })`, whose filter carries the stamp, hash and update time: a row
  *    rewritten meanwhile is not taken, and only rows really taken are counted, audited and metered. A row the filter refused, still stamped, is
- *    stamped again at `now`.
+ *    stamped again at `now`. A page whose due rows the tick's removal cap cut short is NOT passed by the cursor: the tick ends for the space
+ *    there, its counts are not taken, and the next tick reads the page again (what was stamped or removed stays so).
  *
  * The mass-loss hold is judged on the LAST COMPLETE pass: a pass stamps and counts; removals happen in a later one.
  *
@@ -49,9 +54,11 @@
  *
  * ## What it says
  *
- * One audit entry per space per pass that retired anything ({@link FILES_ABSENT_BYTES_SWEEP_OPERATION}, no token, the paths capped at
- * {@link ABSENT_BYTES_AUDIT_PATHS}); `ythril_files_absent_bytes_removed_total`, `ythril_files_awaiting_bytes{space}` and
- * `ythril_files_absent_bytes_held{reason}`; one log line per space per pass that stamped or removed anything. It fires no webhook and no live
+ * One audit entry per space per pass that retired anything, written when the pass completes ({@link FILES_ABSENT_BYTES_SWEEP_OPERATION}, no
+ * token, the paths capped at {@link ABSENT_BYTES_AUDIT_PATHS}): what the pass did is added up on its `running` state tick by tick (`said`,
+ * bounded by the same cap). `ythril_files_absent_bytes_removed_total`, `ythril_files_awaiting_bytes{space}` (after every tick of a pass and every
+ * restart, the count {@link filesAwaitingBytes} answers) and `ythril_files_absent_bytes_held{reason}`; one log line per space per pass that
+ * stamped or removed anything, when it completes (a tick's own line is debug). It fires no webhook and no live
  * event: the change feed says `{ deleted: true, reason: 'bytes_lost' }`. An explicit delete of such a record (REST, MCP `delete_file`) is the
  * person's own act and keeps its tombstone.
  */
@@ -83,7 +90,8 @@ import { pathsWithAnyFileTombstone } from './tombstones.js';
 import { underPrefix } from '../util/under-prefix.js';
 import { chunkSessionOpenAt } from './chunks.js';
 import { removeFileHere } from './remove-file-here.js';
-import { PassGenerations, passIsOwed, rememberPass, sweepStepDeadline } from './sweep-pass.js';
+import { PassGenerations, passIsOwed, rememberPass, sweepStepDeadline, SWEEP_RESCAN_AFTER_MS } from './sweep-pass.js';
+import { randomUUID } from 'node:crypto';
 import { WAIT_DAYS_FOR_BYTES, WAIT_FOR_BYTES_MS } from './bytes-wait.js';
 
 declare module '../config/types.js' {
@@ -105,10 +113,18 @@ export const ABSENT_BYTES_WINDOW_MS = 86_400_000;
 export const ABSENT_BYTES_PAGE_SIZE = 500;
 /** Pages one space reads in one tick; the cursor carries the rest to the next. */
 export const ABSENT_BYTES_PAGES_PER_TICK = 20;
-/** The most records the sweep removes in one tick, across every space; the rest wait for the next tick. */
+/**
+ * The most records the sweep removes in one tick, across every space. The rest wait for the next tick: the page that holds them is not passed by
+ * the cursor, so the next tick reads it again.
+ */
 export const ABSENT_BYTES_REMOVALS_PER_TICK = 200;
 /** The most paths one audit entry names; past it the entry says how many it left out. */
 export const ABSENT_BYTES_AUDIT_PATHS = 50;
+/**
+ * The most file paths the walks kept between the ticks of their passes hold, across every space: about a hundred bytes each, so tens of MB at
+ * most. A walk that would pass it keeps no paths, and each row of its pass is confirmed alone.
+ */
+export const ABSENT_BYTES_WALK_KEPT_PATHS = 200_000;
 /** The bound on the walk of one space, ms. */
 const WALK_BOUND_MS = 120_000;
 /** The bound on one look at one path, ms. */
@@ -116,9 +132,11 @@ const LOOK_BOUND_MS = 10_000;
 
 /** The counts of one pass of one space: rows read, and how many of them were present, absent and could not be looked at. */
 export interface PassCounts { recorded: number; present: number; absent: number; unlooked: number }
-/** The sweep's state on a space's config entry. */
+/** What a pass did, added up over its ticks, for the one audit entry and the one log line it writes when it completes. */
+export interface PassSaid { stamped: number; cleared: number; removed: number; held: number; paths: string[] }
+/** The sweep's state on a space's config entry. `id` names the pass, so a walk kept in memory is used by the pass that made it and no other. */
 export interface AbsentBytesScan {
-  running?: { startedAt: string; after?: string; counts: PassCounts };
+  running?: { id?: string; startedAt: string; after?: string; counts: PassCounts; said?: PassSaid };
   last?: { completedAt: string; counts: PassCounts };
 }
 
@@ -193,7 +211,13 @@ interface SweepSteps {
   lookBoundMs: number;
   /** How long a finished pass waits before the next starts, ms. */
   rescanAfterMs: number;
+  /** Replaces the walk of a space (a test's slow or failing disk). */
+  walk: (spaceId: string) => Promise<WalkFound>;
+  /** How long a tick goes on starting pages, ms (a test's short tick). */
+  tickBudgetMs: number;
 }
+/** What the walk of a space found: the paths on disk, those it could not look at, and whether that list was cut. */
+interface WalkFound { entries: ReadonlyArray<{ path: string }>; unreadable: readonly string[]; unreadableTruncated: boolean }
 let steps: Partial<SweepSteps> | null = null;
 /** A test seam only: `null` puts the real behaviour back. */
 export function setAbsentBytesSweepStepsForTest(next: Partial<SweepSteps> | null): void { steps = next; }
@@ -209,7 +233,7 @@ const scanIsOwed = (state: AbsentBytesScan | undefined, now: Date): boolean =>
 
 /** A new tick's budget. */
 export function absentBytesTick(from: number = Date.now()): AbsentBytesTick {
-  return { deadlineAt: sweepStepDeadline(from), removalsLeft: ABSENT_BYTES_REMOVALS_PER_TICK };
+  return { deadlineAt: steps?.tickBudgetMs !== undefined ? from + steps.tickBudgetMs : sweepStepDeadline(from), removalsLeft: ABSENT_BYTES_REMOVALS_PER_TICK };
 }
 
 /** `spaces` rotated to start after the space the last tick reached, so one large space cannot starve the rest. */
@@ -248,12 +272,14 @@ export async function restartAbsentBytesSweeps(spaceIds: readonly string[], at: 
   });
   for (const id of spaceIds) {
     heldBySpace.delete(id);
+    keptWalks.delete(id);
     // A write to the space's files collection: it asks the write gate and is counted like every other (`admitSpaceWrite`). A space an act still
     // holds refuses it; its stamps keep their age, and `filesRestoredAt` still holds every row to the longest window.
     await admitSpaceWrite(id, 'files', async () => {
       await col<FileMetaDoc>(spaceCollection(id, 'files')).updateMany(asFilter<FileMetaDoc>({ [BYTES_ABSENT_SINCE]: { $exists: true } }), { $unset: { [BYTES_ABSENT_SINCE]: '' } } as never);
     })
       .catch(err => log.warn(`Absent-bytes sweep: the stamps of space '${peerText(id)}' could not be cleared after its records were brought back: ${peerText(err)}`));
+    await publishAwaiting(id);
   }
   publishHeld();
 }
@@ -261,6 +287,36 @@ export async function restartAbsentBytesSweeps(spaceIds: readonly string[], at: 
 /** How many live file records of `spaceId` are waiting for their bytes (stamped): what `filesAwaitingBytes` answers. */
 export async function filesAwaitingBytes(spaceId: string): Promise<number> {
   return col(spaceCollection(spaceId, 'files')).countDocuments({ ...AWAITING_BYTES_ROW });
+}
+
+/** Set `ythril_files_awaiting_bytes{space}` to what {@link filesAwaitingBytes} answers now, so the gauge and the stats never say two numbers. */
+async function publishAwaiting(spaceId: string): Promise<void> {
+  await filesAwaitingBytes(spaceId).then(n => { filesAwaitingBytesGauge.labels({ space: spaceId }).set(n); })
+    .catch(err => log.debug(`Absent-bytes sweep: the awaiting-bytes count of space '${peerText(spaceId)}' could not be read: ${peerText(err)}`));
+}
+
+/**
+ * The walks kept between the ticks of their passes, by space ({@link ABSENT_BYTES_WALK_KEPT_PATHS} paths at most across them): `here` is null
+ * when the walk did not fit, `failed` when its bound ended it. Forgotten when the pass completes or is restarted.
+ */
+interface KeptWalk { passId: string; here: ReadonlySet<string> | null; unreadable: UnreadablePaths; cut: boolean; failed?: true }
+const keptWalks = new Map<string, KeptWalk>();
+const keptPaths = (): number => [...keptWalks.values()].reduce((n, w) => n + (w.here?.size ?? 0), 0);
+
+/** Walk `spaceId` for the pass `passId` and keep what it found; a walk its bound ends is kept as failed, and thrown. */
+async function walkFor(spaceId: string, passId: string): Promise<KeptWalk> {
+  keptWalks.delete(spaceId);
+  let found: WalkFound;
+  try {
+    found = await withinFsBound(() => (steps?.walk ?? ((id: string) => buildFileManifest(id, undefined, { listOnly: true })))(spaceId), WALK_BOUND_MS, `the absent-bytes walk of ${spaceId}`);
+  } catch (err) {
+    keptWalks.set(spaceId, { passId, here: null, unreadable: new UnreadablePaths(), cut: true, failed: true });
+    throw err;
+  }
+  const fits = keptPaths() + found.entries.length <= ABSENT_BYTES_WALK_KEPT_PATHS;
+  const kept: KeptWalk = { passId, here: fits ? new Set(found.entries.map(e => e.path)) : null, unreadable: new UnreadablePaths(found.unreadable), cut: found.unreadableTruncated };
+  keptWalks.set(spaceId, kept);
+  return kept;
 }
 
 type SweptRow = { _id: string; sha256?: string; updatedAt?: string; [BYTES_ABSENT_SINCE]?: string };
@@ -296,9 +352,9 @@ function pullingMembers(spaceId: string): Array<{ id: string; evidence: FileLegE
 /** The top-level directory of a key, or null for a file at the root. */
 const topOf = (key: string): string | null => (key.includes('/') ? key.slice(0, key.indexOf('/')) : null);
 
-/** Decide the stamped rows of a page and remove those due. */
-async function removeDue(spaceId: string, stamped: readonly SweptRow[], now: Date, last: PassCounts | null, tick: AbsentBytesTick, outcome: AbsentBytesOutcome): Promise<void> {
-  if (stamped.length === 0) return;
+/** Decide the stamped rows of a page and remove those due. Answers whether the tick's removal cap left due rows of the page untried. */
+async function removeDue(spaceId: string, stamped: readonly SweptRow[], now: Date, last: PassCounts | null, tick: AbsentBytesTick, outcome: AbsentBytesOutcome): Promise<boolean> {
+  if (stamped.length === 0) return false;
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   const keys = stamped.map(r => r._id);
   const owed = await pathsCarriedByOwedMoves(spaceId, keys);
@@ -350,15 +406,16 @@ async function removeDue(spaceId: string, stamped: readonly SweptRow[], now: Dat
   // Re-checked under the path lock: the bytes still absent, the row still the one decided on. The lock is released before the retire
   // (`removeFileHere` takes none, and the lock is not re-entrant); the retire's own filter closes the interval after it.
   const confirmed: SweptRow[] = [];
+  let capped = false;
   for (const row of due) {
-    if (confirmed.length >= tick.removalsLeft) break;
+    if (confirmed.length >= tick.removalsLeft) { capped = true; break; }
     const still = await storedAbsOf(spaceId, row._id).then(abs => withPathLock(abs, async () => {
       if (await look(spaceId, row._id)) return false;
       return (await files.countDocuments(asFilter<FileMetaDoc>({ _id: row._id, ...LIVE_FILE_ROW, ...asDecided(row) }))) === 1;
     })).catch(() => false);
     if (still) confirmed.push(row);
   }
-  if (confirmed.length === 0) return;
+  if (confirmed.length === 0) return capped;
   await steps?.beforeRemove?.({ spaceId, paths: confirmed.map(r => r._id) });
   for (const row of confirmed) {
     if (tick.removalsLeft <= 0) break;
@@ -368,6 +425,7 @@ async function removeDue(spaceId: string, stamped: readonly SweptRow[], now: Dat
     await admitSpaceWrite(spaceId, 'files', () => files.updateOne(asFilter<FileMetaDoc>({ _id: row._id, ...LIVE_FILE_ROW, [BYTES_ABSENT_SINCE]: { $exists: true } }), { $set: { [BYTES_ABSENT_SINCE]: now.toISOString() } } as never))
       .catch(err => log.warn(`Absent-bytes sweep: '${peerText(row._id)}' of space '${peerText(spaceId)}' could not be stamped again: ${peerText(err)}`));
   }
+  return capped;
 }
 
 /**
@@ -384,16 +442,46 @@ export async function sweepAbsentBytes(spaceId: string, now: Date, tick: AbsentB
   heldBySpace.set(spaceId, new Map());   // the held gauge says this space's latest decisions, never a sum over ticks
   const generation = generations.of(spaceId);
   const state: AbsentBytesScan = { ...(entry.absentBytesScan ?? {}) };
-  const running = state.running ?? { startedAt: now.toISOString(), counts: { recorded: 0, present: 0, absent: 0, unlooked: 0 } };
+  const newPass = (): NonNullable<AbsentBytesScan['running']> =>
+    ({ id: randomUUID(), startedAt: now.toISOString(), counts: { recorded: 0, present: 0, absent: 0, unlooked: 0 } });
+  let running = state.running ?? newPass();
+  running.id ??= randomUUID();
   const last = state.last?.counts ?? null;
   const startedAt = Date.now();
   const files = col<FileMetaDoc>(spaceCollection(spaceId, 'files'));
   const stampNow = now.toISOString();
+  // What of `outcome` is already added to the pass's `said`: each page adds what it did since, and so does a tick that throws.
+  const noted = { stamped: 0, cleared: 0, removed: 0, held: 0 };
+  const noteSaid = (): void => {
+    const said = running.said ?? { stamped: 0, cleared: 0, removed: 0, held: 0, paths: [] };
+    said.stamped += outcome.stamped - noted.stamped;
+    said.cleared += outcome.cleared - noted.cleared;
+    said.held += outcome.held - noted.held;
+    const fresh = outcome.removed.slice(noted.removed);
+    said.removed += fresh.length;
+    said.paths = [...said.paths, ...fresh].slice(0, ABSENT_BYTES_AUDIT_PATHS);
+    Object.assign(noted, { stamped: outcome.stamped, cleared: outcome.cleared, removed: outcome.removed.length, held: outcome.held });
+    running.said = said;
+  };
+  let saidOfPass: PassSaid | null = null;
   try {
-    const walk = await withinFsBound(() => buildFileManifest(spaceId, undefined, { listOnly: true }), WALK_BOUND_MS, `the absent-bytes walk of ${spaceId}`);
-    const here = new Set(walk.entries.map(e => e.path));
-    const unreadable = new UnreadablePaths(walk.unreadable);
-    const lookedAway = (key: string): boolean => unreadable.couldNotLook(key, walk.unreadableTruncated, here);
+    let walk = keptWalks.get(spaceId);
+    if (walk !== undefined && walk.passId !== running.id) walk = undefined;
+    if (walk?.failed === true) {
+      // The walk of this pass hit its bound: not walked again within the pass. A day after the pass began it is given up, and a new one walks.
+      if (now.getTime() - Date.parse(running.startedAt) < (steps?.rescanAfterMs ?? SWEEP_RESCAN_AFTER_MS)) return outcome;
+      running = newPass();
+      walk = undefined;
+    }
+    if (walk === undefined) {
+      // The pass is written down before its walk, so a walk that fails is known by the pass's id on the next tick.
+      state.running = running;
+      rememberPass(spaceId, 'absentBytesScan', state);
+      walk = await walkFor(spaceId, running.id!);
+      if (generations.of(spaceId) !== generation) return outcome;   // a restore or an import restarted the pass during the walk
+    }
+    const { here, unreadable, cut } = walk;
+    const lookedAway = (key: string): boolean => (here === null ? unreadable.covers(key) || cut : unreadable.couldNotLook(key, cut, here));
 
     for (let pages = 0; pages < (steps?.pagesPerTick ?? ABSENT_BYTES_PAGES_PER_TICK) && Date.now() < tick.deadlineAt; pages++) {
       const page = await idKeysetPage<SweptRow>({
@@ -406,20 +494,22 @@ export async function sweepAbsentBytes(spaceId: string, now: Date, tick: AbsentB
       const toStamp: string[] = [];
       const toClear: string[] = [];
       const stampedBefore: SweptRow[] = [];
+      // The page's counts, taken into the pass only when the cursor passes the page.
+      const counts: PassCounts = { recorded: 0, present: 0, absent: 0, unlooked: 0 };
       for (const row of page.rows) {
         if (isInstanceLocalFile(row._id)) continue;
-        running.counts.recorded++;
+        counts.recorded++;
         let present: boolean | null;
-        if (here.has(row._id)) present = true;
+        if (here?.has(row._id) === true) present = true;
         else if (lookedAway(row._id)) present = null;
         else present = await look(spaceId, row._id).catch(() => null);
-        if (present === null) { running.counts.unlooked++; outcome.unlooked++; continue; }
+        if (present === null) { counts.unlooked++; outcome.unlooked++; continue; }
         if (present) {
-          running.counts.present++;
+          counts.present++;
           if (row[BYTES_ABSENT_SINCE] !== undefined) toClear.push(row._id);
           continue;
         }
-        running.counts.absent++;
+        counts.absent++;
         if (row[BYTES_ABSENT_SINCE] === undefined) toStamp.push(row._id);
         else stampedBefore.push(row);
       }
@@ -433,13 +523,26 @@ export async function sweepAbsentBytes(spaceId: string, now: Date, tick: AbsentB
           outcome.cleared += (await files.updateMany(asFilter<FileMetaDoc>({ _id: { $in: part }, [BYTES_ABSENT_SINCE]: { $exists: true } }), { $unset: { [BYTES_ABSENT_SINCE]: '' } } as never)).modifiedCount;
         }
       }).catch((err: unknown) => { if (!isSpaceNotWritable(err)) throw err; });
-      await removeDue(spaceId, stampedBefore, now, last, tick, outcome);
+      const heldBefore = outcome.held;
+      const capped = await removeDue(spaceId, stampedBefore, now, last, tick, outcome);
       if (generations.of(spaceId) !== generation) return outcome;
+      if (capped) {
+        // Due rows the cap left are on this page: the cursor stays before it and its counts are not taken, so the next tick reads it again.
+        // What was stamped, cleared and removed is done and is said; what was held is decided again then.
+        outcome.held = heldBefore;
+        noteSaid();
+        state.running = running;
+        rememberPass(spaceId, 'absentBytesScan', state);
+        break;
+      }
+      for (const k of ['recorded', 'present', 'absent', 'unlooked'] as const) running.counts[k] += counts[k];
+      noteSaid();
       if (page.end) {
         state.last = { completedAt: stampNow, counts: running.counts };
         delete state.running;
         outcome.completed = true;
-        filesAwaitingBytesGauge.labels({ space: spaceId }).set(running.counts.absent);
+        saidOfPass = running.said ?? null;
+        keptWalks.delete(spaceId);
       } else {
         running.after = page.last;
         state.running = running;
@@ -448,23 +551,36 @@ export async function sweepAbsentBytes(spaceId: string, now: Date, tick: AbsentB
       if (outcome.completed) break;
     }
   } finally {
+    // A tick that threw still says what it did: added to the pass, when the pass is still this one.
+    if (!outcome.completed && generations.of(spaceId) === generation && (outcome.stamped + outcome.cleared + outcome.removed.length > noted.stamped + noted.cleared + noted.removed)) {
+      noteSaid();
+      state.running = running;
+      rememberPass(spaceId, 'absentBytesScan', state);
+    }
     publishHeld();
     filesAbsentBytesRemovedTotal.inc(outcome.removed.length);
-    // One entry per space per pass that retired anything, naming only the rows the retire really took.
-    if (outcome.removed.length > 0) {
-      const listed = outcome.removed.slice(0, ABSENT_BYTES_AUDIT_PATHS);
-      logInternalAudit({
-        method: 'SWEEP', path: 'internal:absent-bytes-sweep', spaceId, operation: FILES_ABSENT_BYTES_SWEEP_OPERATION, startedAt,
-        changes: [
-          { field: 'retiredPaths', added: listed },
-          { field: 'removed', to: outcome.removed.length },
-          ...(outcome.removed.length > listed.length ? [{ field: 'pathsNotListed', to: outcome.removed.length - listed.length }] : []),
-        ],
-      });
-    }
+    await publishAwaiting(spaceId);
   }
-  const said = `Absent-bytes sweep of space '${peerText(spaceId)}': stamped ${outcome.stamped} record(s) whose bytes are gone, cleared ${outcome.cleared} whose bytes are back, `
-    + `removed ${outcome.removed.length}, kept ${outcome.held} still waiting, ${outcome.unlooked} could not be looked at; ${outcome.completed ? 'the pass is complete' : 'the pass goes on next cycle'}`;
-  if (outcome.stamped + outcome.removed.length > 0) log.info(said); else log.debug(said);
+  if (saidOfPass !== null) sayPass(spaceId, saidOfPass, running.counts.unlooked, startedAt);
+  const tickLine = `Absent-bytes sweep of space '${peerText(spaceId)}', one tick: stamped ${outcome.stamped}, cleared ${outcome.cleared}, removed ${outcome.removed.length}, `
+    + `kept ${outcome.held}, ${outcome.unlooked} could not be looked at; ${outcome.completed ? 'the pass is complete' : 'the pass goes on next cycle'}`;
+  log.debug(tickLine);
   return outcome;
+}
+
+/** What a completed pass did: one audit entry when it retired anything, naming only the rows the retire really took, and one log line. */
+function sayPass(spaceId: string, said: PassSaid, unlooked: number, startedAt: number): void {
+  if (said.removed > 0) {
+    logInternalAudit({
+      method: 'SWEEP', path: 'internal:absent-bytes-sweep', spaceId, operation: FILES_ABSENT_BYTES_SWEEP_OPERATION, startedAt,
+      changes: [
+        { field: 'retiredPaths', added: said.paths },
+        { field: 'removed', to: said.removed },
+        ...(said.removed > said.paths.length ? [{ field: 'pathsNotListed', to: said.removed - said.paths.length }] : []),
+      ],
+    });
+  }
+  const line = `Absent-bytes sweep of space '${peerText(spaceId)}': stamped ${said.stamped} record(s) whose bytes are gone, cleared ${said.cleared} whose bytes are back, `
+    + `removed ${said.removed}, kept ${said.held} still waiting, ${unlooked} could not be looked at; the pass is complete`;
+  if (said.stamped + said.removed > 0) log.info(line); else log.debug(line);
 }

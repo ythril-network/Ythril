@@ -31,7 +31,7 @@ import { expiryForCreate } from '../brain/ttl.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from '../brain/embed-queue.js';
 import { embedArrivedFiles } from '../sync/embed-arrived-files.js';
 import { mergePropertiesOrKeep, mergePropertiesStage } from '../brain/merge-fields.js';
-import { stampOfArrival, BYTES_ABSENT_SINCE } from '../sync/local-only-fields.js';
+import { stampOfArrival, BYTES_ABSENT_SINCE, RETIRED_BY } from '../sync/local-only-fields.js';
 import { NEVER_RETURNED_PROJECTION } from '../brain/read-projection.js';
 import { peerFileKey } from './sandbox.js';
 import { getConfig } from '../config/loader.js';
@@ -154,7 +154,8 @@ export async function upsertFileMeta(
     if (opts.sha256 !== undefined) $set['sha256'] = opts.sha256;
     // A write to a soft-deleted path means the file is live again — clear the flag.
     // And the bytes are here: a stamp of the absent-bytes sweep goes in this write (Q-337), or the next pass reads a live file as an orphan.
-    const $unset: Record<string, unknown> = { deletedAt: '', [BYTES_ABSENT_SINCE]: '' };
+    // A live row carries no retirement reason either (`RETIRED_BY`): a path the sweep retired and a person writes again is a new life.
+    const $unset: Record<string, unknown> = { deletedAt: '', [BYTES_ABSENT_SINCE]: '', [RETIRED_BY]: '' };
     // Only an EXPLICIT ttlDays on a re-upload touches expiry: >0 (re)stamps, 0/null clears it. A plain
     // overwrite (ttlDays omitted) leaves any existing TTL untouched — it must not silently reset.
     if (opts.ttlDays !== undefined) {
@@ -272,7 +273,7 @@ export async function recordArrivedFile(
         [
           ...replacedBytesStages(sha256, 'arrival'),
           { $set: { sizeBytes: { $literal: sizeBytes }, sha256: { $literal: sha256 }, pos: { $literal: landing!.pos }, posAtSeq: { $ifNull: ['$seq', 0] } } },
-          { $unset: ['deletedAt', BYTES_ABSENT_SINCE] },
+          { $unset: ['deletedAt', BYTES_ABSENT_SINCE, RETIRED_BY] },
         ] as never,
       ), 'file.arrival');
       if (held.matchedCount > 0) return true;
@@ -298,7 +299,7 @@ export async function recordArrivedFile(
           $set: { sizeBytes, sha256 },
           // Bytes on disk mean the file is live: a path soft-deleted here and re-created upstream comes back, as the
           // upload writer has always made it (`Q-239`).
-          $unset: { deletedAt: '', [BYTES_ABSENT_SINCE]: '' },
+          $unset: { deletedAt: '', [BYTES_ABSENT_SINCE]: '', [RETIRED_BY]: '' },
           $setOnInsert: created,
         } as never),
         { upsert: true },
@@ -850,8 +851,9 @@ export async function markFileMetaDeleted(
 function flagAndStrip(pos: number, deletedAt: string = new Date().toISOString(), retiredBy?: RetiredBy): object[] {
   // The flag takes a POSITION (bundle-255: the change feed reads the deletion by it) and never a version: `posAtSeq` is the row's own `seq`, read in
   // the write, so the position repair (which re-stamps a row whose `posAtSeq` is not its `seq`) leaves it alone.
+  // The reason is SET or REMOVED, never left: a row once retired by the sweep, revived, then deleted by a person is that person's delete.
   return [{
-    $set: { deletedAt: { $literal: deletedAt }, pos: { $literal: pos }, posAtSeq: { $ifNull: ['$seq', 0] }, ...(retiredBy !== undefined ? { retiredBy: { $literal: retiredBy } } : {}) },
+    $set: { deletedAt: { $literal: deletedAt }, pos: { $literal: pos }, posAtSeq: { $ifNull: ['$seq', 0] }, [RETIRED_BY]: retiredBy !== undefined ? { $literal: retiredBy } : '$$REMOVE' },
   }, ...stripDerivedStages()];
 }
 

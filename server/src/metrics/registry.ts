@@ -933,7 +933,7 @@ filesAbsentBytesRemovedTotal.inc(0);
 /** File records waiting for their bytes (stamped by the absent-bytes sweep), per space, as of each space's last pass. */
 export const filesAwaitingBytesGauge = new Gauge({
   name: 'ythril_files_awaiting_bytes',
-  help: 'Live file records whose bytes this disk lacks, stamped by the absent-bytes sweep and waiting out their window, by space (as of the space\'s last pass)',
+  help: 'Live file records whose bytes this disk lacks, stamped by the absent-bytes sweep and waiting out their window, by space (counted after each tick of a pass and each restore or import)',
   labelNames: ['space'] as const,
   registers: [register],
 });
