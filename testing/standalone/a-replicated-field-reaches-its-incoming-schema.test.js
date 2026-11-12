@@ -111,6 +111,13 @@ const RETAGGED = 'server/src/sync/retagged-fields.ts';
  */
 const REPLICATED_UNHASHED = 'REPLICATED_UNHASHED_FIELDS';
 
+/**
+ * The field-name constants of the schema package, read out of where they are declared (`SCHEMA_FINGERPRINT_FIELD = 'schemaFingerprint'`): a source that
+ * names a field through its constant (the stamp's key on the `Incoming*` schemas, its entry in `REPLICATED_UNHASHED_FIELDS`) is read as the name it holds, so
+ * the gate keeps seeing the field after the literal is spelled in one module only.
+ */
+const FIELD_CONSTANTS = new Map([...readFileSync('schema/src/schema-fingerprint.ts', 'utf8').matchAll(/export const ([A-Z_]+_FIELD) = '([a-zA-Z_]\w*)'(?: as const)?;/g)].map(x => [x[1], x[2]]));
+
 /** Fields of a `*Doc` interface, in declaration order. */
 function docFields(src, name) {
   const at = src.indexOf(`export interface ${name}`);
@@ -146,7 +153,11 @@ function incomingBody(src, name) {
 function incomingKeys(src, name) {
   const body = incomingBody(src, name);
   if (body === null) return null;
-  return [...body.matchAll(/^ {2}([a-zA-Z_]\w*):/gm)].map(m => m[1]);
+  return [
+    ...[...body.matchAll(/^ {2}([a-zA-Z_]\w*):/gm)].map(m => m[1]),
+    // A key spelled through a field constant: `[SCHEMA_FINGERPRINT_FIELD]: SchemaStampSchema,`.
+    ...[...body.matchAll(/^ {2}\[([A-Z_]+_FIELD)\]:/gm)].map(m => FIELD_CONSTANTS.get(m[1])).filter(Boolean),
+  ];
 }
 
 /** The keys of an `Incoming*` object declared `z.never()`: present only so a document that carries them is REFUSED. */
@@ -160,7 +171,7 @@ function setNamed(src, name) {
   const body = stripComments(m?.[1] ?? '');
   // An entry may be a field-name CONSTANT (`export const FUNCTIONAL_GUARD = '_functionalGuard' as const;`): the name is spelled once,
   // and the set names the constant, so the literal is read from where it is declared.
-  const constants = new Map([...src.matchAll(/export const ([A-Z_]+) = '([a-zA-Z_]\w*)' as const;/g)].map(x => [x[1], x[2]]));
+  const constants = new Map([...FIELD_CONSTANTS, ...[...src.matchAll(/export const ([A-Z_]+) = '([a-zA-Z_]\w*)' as const;/g)].map(x => [x[1], x[2]])]);
   const viaConstant = [...body.matchAll(/\b([A-Z][A-Z_]*)\b/g)].map(x => constants.get(x[1])).filter(Boolean);
   return [...body.matchAll(/'([a-zA-Z_]\w*)'/g)].map(x => x[1]).concat(viaConstant);
 }
@@ -567,9 +578,11 @@ describe('the gate sees a field taken away from the schema or the hash', () => {
       + `const ${REPLICATED_UNHASHED}: ReadonlySet<string> = new Set([${setBody}]);\n`;
     const withStamp = (setBody) => {
       const merkle = merkleOf(setBody);
-      const types = real.types.replace('export interface FactDoc extends StampSkewable {', 'export interface FactDoc extends StampSkewable {\n  schemaFingerprint?: string;');
+      // `FactDoc` names the stamp through `extends ..., SchemaStamped` (an inherited field is no line of its body, which is what `docFields` reads), so the mutation
+      // writes it into the body: a document whose own interface declares the stamp.
+      const types = real.types.replace('export interface FactDoc extends StampSkewable, SchemaStamped {', 'export interface FactDoc extends StampSkewable, SchemaStamped {\n  schemaFingerprint?: string;');
       const shared = real.shared.replace('export const IncomingFactDoc = z.object({\n', 'export const IncomingFactDoc = z.object({\n  schemaFingerprint: z.string().optional(),\n');
-      assert.notEqual(types, real.types, 'the types mutation changed nothing: FactDoc is no longer declared as `extends StampSkewable` - re-anchor it');
+      assert.notEqual(types, real.types, 'the types mutation changed nothing: FactDoc is no longer declared as `extends StampSkewable, SchemaStamped` - re-anchor it');
       assert.notEqual(shared, real.shared, 'the schema mutation changed nothing - re-anchor it');
       // The local-only lists as they are, plus the set this `merkle` declares: the sources `analyse` is handed.
       const lists = read(LOCAL_ONLY) + '\n' + read(RETAGGED) + '\n' + merkle;
