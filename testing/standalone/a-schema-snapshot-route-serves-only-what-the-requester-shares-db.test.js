@@ -11,7 +11,9 @@
  * 2. reach: a peer that does not reach the space is refused `403` (`refusePeerReach`) - before the rung, before the row is looked at;
  * 3. the schema rung: `satisfies(effectiveRung(rights, space, 'schema'), 'read')`, else `403 { code: 'schema_rung' }`. A files-only token holds none, a
  *    token holding `knowledge: write` holds it by implication, a token with no matrix is refused;
- * 4. an unknown space: `410 { code: 'lost_space' }` (`sendLostSpace`, as `/meta` answers it);
+ * 4. an unknown space: what `sendLostSpace` answers, as `/meta` answers it (404 with the sentence and no code; 410 `space_retired` for a retired id), after reach and
+ *    the rung, so a caller that may not reach a space cannot tell a space that does not exist from one that does. Reach itself refuses a name this instance does
+ *    not configure (`403 Forbidden`, for an admin token too), so the lost-space answer is what a space that vanishes between the reach check and the lookup gets;
  * 5. no row: `404 { code: 'unknown_fingerprint' }` - the only 404 that carries a code, because the receiver reads a 404 WITHOUT one as "this peer has no such
  *    route" and stops asking it;
  * 6. a row built from a layer of a network the peer does not share with this space (a layer row of it, an own row linking it, a fetched row whose sender's
@@ -131,10 +133,26 @@ describe('GET /api/sync/schema-snapshot', { skip }, () => {
       assert.equal(r.body.code, 'unknown_fingerprint');
     });
 
-    it('410 lost_space for a space this instance does not have (an admin token that names no network reaches any space name)', async () => {
-      const r = await route(ADMIN_TOKEN, { spaceId: 'a-space-this-instance-never-had', networkId: undefined, fp: 'd'.repeat(64) });
-      assert.equal(r.code, 410, JSON.stringify(r.body));
-      assert.equal(r.body.code, 'lost_space');
+    it('a space this instance does not have is answered as GET /meta answers it, token for token: the reach check refuses it first, and sendLostSpace answers only what reach let through', async () => {
+      const GONE = 'a-space-this-instance-never-had';
+      for (const token of [ADMIN_TOKEN, peerToken(PEER)]) {
+        const r = await route(token, { spaceId: GONE, networkId: undefined, fp: 'd'.repeat(64) });
+        const viaMeta = await callRoute(routers.meta, 'get', '/meta', { query: { spaceId: GONE }, authToken: token });
+        assert.equal(r.code, viaMeta.code, `${JSON.stringify(r.body)} against ${JSON.stringify(viaMeta.body)}`);
+        assert.deepEqual(r.body, viaMeta.body, 'the two schema doors answer a lost space in different words');
+        assert.equal(r.body.code, undefined, 'a code on it would be read as an unknown fingerprint or another refusal');
+      }
+    });
+
+    it('a caller that does not reach the space is answered alike whether the space exists or not: reach comes before the lookup, so the door does not say which spaces exist', async () => {
+      const { text, fp } = await snapshotNamed('exists-outside');
+      await snapshotsOf(door.mongo, OUTSIDE).insertOne(snapshotRow({ fp, text, origin: 'own', links: linksOf(fp) }));
+      const exists = await route(peerToken(PEER), { spaceId: OUTSIDE, fp });
+      const gone = await route(peerToken(PEER), { spaceId: 'a-space-this-instance-never-had', fp });
+      assert.equal(exists.code, 403, JSON.stringify(exists.body));
+      assert.equal(gone.code, exists.code, `a space that does not exist was answered ${gone.code} ${JSON.stringify(gone.body)}, one that exists ${exists.code}: the door tells a caller without reach which spaces exist`);
+      assert.deepEqual(gone.body, exists.body);
+      await snapshotsOf(door.mongo, OUTSIDE).deleteMany({});
     });
 
     it('403 for a peer that does not reach the space - before its rung and before the row is looked at', async () => {

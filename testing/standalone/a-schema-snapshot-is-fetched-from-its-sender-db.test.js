@@ -14,7 +14,7 @@
  *   stream) are refused, nothing is stored, and the refusal is TERMINAL for that member, that version and that fingerprint: a later cycle does not ask
  *   again, a version change clears it.
  * - **Every coded answer is decided apart.** `404 unknown_fingerprint` (the member does not hold it: the next fingerprint is still asked), a `404` WITHOUT a
- *   code (the member has no such route: remembered per version, the member is not asked again), `410 lost_space`, `409 not_shared` (terminal), `403 schema_rung`.
+ *   code (the member has no such route: remembered per version, the member is not asked again), the member lost the space (`404` with the lost-space sentence, or `410 space_retired`), `409 not_shared` (terminal), `403 schema_rung`.
  * - **The transfer init.** The request is made with `transferInit(requestInit)`: the control plane's ten-second signal would win over the transfer budget
  *   and a 10 MiB snapshot from a slow peer would be aborted and retried for ever (`peer-fetch.ts` says so). A peer that answers after eleven seconds is
  *   read.
@@ -282,9 +282,15 @@ describe('a record stamped with a snapshot this server lacks fetches it from the
       assert.ok(askedFor().length > 1, 'the member was not asked again after its version changed');
     });
 
-    it('410 lost_space: the member no longer has the space, so it is not asked for this space again until its version changes', async () => {
-      const [x, y] = await Promise.all([snapshotNamed('lx'), snapshotNamed('ly')]);
-      peer.snapshot = ({ fp }) => (fp === x.fp ? { status: 410, body: { code: 'lost_space' } } : ok(y));
+    // What the member's one existence rule answers for a space it does not have (`sendLostSpace`, as GET /meta answers it): 404 with the sentence and no
+    // code, or 410 `space_retired` for a retired id. The first is told from a missing route by its words.
+    const lostSpaceAnswers = {
+      '404 with the sentence unknownSpaceSentence spells and no code': ({ spaceId }) => ({ status: 404, body: { error: `Space '${spaceId}' not found` } }),
+      '410 space_retired': ({ spaceId }) => ({ status: 410, body: { error: `Space '${spaceId}' is retired`, code: 'space_retired' } }),
+    };
+    for (const [name, lost] of Object.entries(lostSpaceAnswers)) it(`${name}: the member no longer has the space, so it is not asked for this space again until its version changes`, async () => {
+      const [x, y] = await Promise.all([snapshotNamed(`lx${name.length}`), snapshotNamed(`ly${name.length}`)]);
+      peer.snapshot = (ask) => (ask.fp === x.fp ? lost(ask) : ok(y));
       arrives(x.fp);
       const before = await snapshotCount('lost_space');
       await sync();
