@@ -60,6 +60,16 @@ export class UnreadablePaths {
     }
     return false;
   }
+
+  /**
+   * Whether no look answered for `key`: it is named or under a named directory ({@link covers}), or the list was cut (`listCut`) and `carried`
+   * (the entries the same look did read) does not hold it, so it may be one of the paths the cut dropped. A path the look did read is never
+   * one it could not look at. The one spelling of "could not look at this path" for a manifest's `unreadable`/`unreadableTruncated` pair:
+   * the absent-bytes sweep, the pull and push of a file sync, and the restore check all ask it, none spells the cut rule itself.
+   */
+  couldNotLook(key: string, listCut: boolean, carried: { has(key: string): boolean }): boolean {
+    return this.covers(key) || (listCut && !carried.has(key));
+  }
 }
 
 /** What a peer said of the paths it could not look at, as it is used: the ones it named (resolved to our keys) and whether its list was cut. */

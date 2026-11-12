@@ -53,6 +53,10 @@ export const cannotExist = (err: unknown): boolean =>
 /**
  * Whether something is at `abs` (a symbolic link is followed, as `existsSync` did). `false` when the path cannot exist
  * ({@link cannotExist}); every other failure to look (EACCES, EPERM, EIO, a stuck mount) is thrown as it came, never read as "no".
+ *
+ * It is the answer for a caller that only asks whether a file is there. The async twin that also hands back what is there
+ * (`lstatIfPresent`, `files/stored-bytes.ts`) answers `false`/`null` for {@link isMissingPath} alone and throws a name too long or a link loop,
+ * because a move's destination check turns that throw into a refusal of the caller's path; the difference is on purpose.
  */
 export function pathPresentSync(abs: string): boolean {
   try {

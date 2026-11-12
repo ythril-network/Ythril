@@ -22,7 +22,7 @@
  *
  * A step of the TTL sweep (`brain/ttl-sweep.ts`), with its own pages per tick, its own deadline and at most {@link ABSENT_BYTES_REMOVALS_PER_TICK}
  * removals per tick across the spaces, whose order rotates each tick so one large space cannot starve the rest. A pass under way resumes from its
- * cursor every tick; a pass that completed is not started again within {@link ABSENT_BYTES_RESCAN_AFTER_MS} (a day: the walk lists every
+ * cursor every tick; a pass that completed is not started again within `SWEEP_RESCAN_AFTER_MS` (`files/sweep-pass.ts`; a day: the walk lists every
  * directory of the space, so it is not repeated every tick). Per space and tick of a pass:
  *
  * 1. **The walk**: the read-only manifest walk (`buildFileManifest(..., { listOnly: true })`: one listing per directory, nothing hashed, and the
@@ -83,6 +83,7 @@ import { pathsWithAnyFileTombstone } from './tombstones.js';
 import { underPrefix } from '../util/under-prefix.js';
 import { chunkSessionOpenAt } from './chunks.js';
 import { removeFileHere } from './remove-file-here.js';
+import { PassGenerations, passIsOwed, rememberPass, sweepStepDeadline } from './sweep-pass.js';
 import { WAIT_DAYS_FOR_BYTES, WAIT_FOR_BYTES_MS } from './bytes-wait.js';
 
 declare module '../config/types.js' {
@@ -108,10 +109,6 @@ export const ABSENT_BYTES_PAGES_PER_TICK = 20;
 export const ABSENT_BYTES_REMOVALS_PER_TICK = 200;
 /** The most paths one audit entry names; past it the entry says how many it left out. */
 export const ABSENT_BYTES_AUDIT_PATHS = 50;
-/** How long the step may go on STARTING pages, ms. */
-const STEP_BUDGET_MS = 30_000;
-/** A pass that completed is not started again before this much time has passed, ms: the walk lists every directory of the space. */
-export const ABSENT_BYTES_RESCAN_AFTER_MS = 24 * 3_600_000;
 /** The bound on the walk of one space, ms. */
 const WALK_BOUND_MS = 120_000;
 /** The bound on one look at one path, ms. */
@@ -207,14 +204,12 @@ export interface AbsentBytesTick { deadlineAt: number; removalsLeft: number; rea
 let lastReached: string | undefined;
 
 /** Whether a pass of a space is owed at `now`: one under way, none completed yet, or the last completed a day ago or more. */
-function passIsOwed(state: AbsentBytesScan | undefined, now: Date): boolean {
-  if (state?.running !== undefined || state?.last === undefined) return true;
-  return now.getTime() - Date.parse(state.last.completedAt) >= (steps?.rescanAfterMs ?? ABSENT_BYTES_RESCAN_AFTER_MS);
-}
+const scanIsOwed = (state: AbsentBytesScan | undefined, now: Date): boolean =>
+  passIsOwed({ running: state?.running !== undefined, completedAt: state?.last?.completedAt }, now, steps?.rescanAfterMs);
 
 /** A new tick's budget. */
 export function absentBytesTick(from: number = Date.now()): AbsentBytesTick {
-  return { deadlineAt: from + STEP_BUDGET_MS, removalsLeft: ABSENT_BYTES_REMOVALS_PER_TICK };
+  return { deadlineAt: sweepStepDeadline(from), removalsLeft: ABSENT_BYTES_REMOVALS_PER_TICK };
 }
 
 /** `spaces` rotated to start after the space the last tick reached, so one large space cannot starve the rest. */
@@ -226,8 +221,7 @@ export function absentBytesSpaceOrder<T extends { id: string }>(spaces: readonly
 export function endAbsentBytesTick(tick: AbsentBytesTick): void { if (tick.reached !== undefined) lastReached = tick.reached; }
 
 /** Bumped by a restart, so a page already running does not write state over the one a restore or an import cleared. */
-const generations = new Map<string, number>();
-const generationOf = (spaceId: string): number => generations.get(spaceId) ?? 0;
+const generations = new PassGenerations();
 
 /** Held rows by reason, per space, as of each space's last decision: the gauge is their sum. */
 const heldBySpace = new Map<string, Map<HoldReason, number>>();
@@ -239,10 +233,6 @@ function publishHeld(): void {
   }
 }
 
-function remember(spaceId: string, state: AbsentBytesScan): void {
-  changeSpaceEntries([spaceId], entry => { entry.absentBytesScan = state; return true; }, { save: 'soon' });
-}
-
 /**
  * Start the sweep of these spaces over and put every record they hold back on the longest wait, before the caller answers: what a restore and
  * an import do. Every stamp is cleared (what was stamped before says nothing of the rows now there), `filesRestoredAt` is set, and the next
@@ -250,7 +240,7 @@ function remember(spaceId: string, state: AbsentBytesScan): void {
  * still holds every row of it to the longest window.
  */
 export async function restartAbsentBytesSweeps(spaceIds: readonly string[], at: Date = new Date()): Promise<void> {
-  for (const id of spaceIds) generations.set(id, generationOf(id) + 1);
+  generations.bump(spaceIds);
   changeSpaceEntries(spaceIds, entry => {
     delete entry.absentBytesScan;
     entry.filesRestoredAt = at.toISOString();
@@ -389,10 +379,10 @@ export async function sweepAbsentBytes(spaceId: string, now: Date, tick: AbsentB
   const entry = getConfig().spaces.find(s => s.id === spaceId);
   if (entry === undefined || Date.now() >= tick.deadlineAt) return outcome;
   // A complete pass per space at most once a day (the leaked-rows repair's cadence): a pass under way resumes every tick; a finished one waits.
-  if (!passIsOwed(entry.absentBytesScan, now)) return outcome;
+  if (!scanIsOwed(entry.absentBytesScan, now)) return outcome;
   tick.reached = spaceId;
   heldBySpace.set(spaceId, new Map());   // the held gauge says this space's latest decisions, never a sum over ticks
-  const generation = generationOf(spaceId);
+  const generation = generations.of(spaceId);
   const state: AbsentBytesScan = { ...(entry.absentBytesScan ?? {}) };
   const running = state.running ?? { startedAt: now.toISOString(), counts: { recorded: 0, present: 0, absent: 0, unlooked: 0 } };
   const last = state.last?.counts ?? null;
@@ -403,7 +393,7 @@ export async function sweepAbsentBytes(spaceId: string, now: Date, tick: AbsentB
     const walk = await withinFsBound(() => buildFileManifest(spaceId, undefined, { listOnly: true }), WALK_BOUND_MS, `the absent-bytes walk of ${spaceId}`);
     const here = new Set(walk.entries.map(e => e.path));
     const unreadable = new UnreadablePaths(walk.unreadable);
-    const lookedAway = (key: string): boolean => unreadable.covers(key) || (walk.unreadableTruncated && !here.has(key));
+    const lookedAway = (key: string): boolean => unreadable.couldNotLook(key, walk.unreadableTruncated, here);
 
     for (let pages = 0; pages < (steps?.pagesPerTick ?? ABSENT_BYTES_PAGES_PER_TICK) && Date.now() < tick.deadlineAt; pages++) {
       const page = await idKeysetPage<SweptRow>({
@@ -444,7 +434,7 @@ export async function sweepAbsentBytes(spaceId: string, now: Date, tick: AbsentB
         }
       }).catch((err: unknown) => { if (!isSpaceNotWritable(err)) throw err; });
       await removeDue(spaceId, stampedBefore, now, last, tick, outcome);
-      if (generationOf(spaceId) !== generation) return outcome;
+      if (generations.of(spaceId) !== generation) return outcome;
       if (page.end) {
         state.last = { completedAt: stampNow, counts: running.counts };
         delete state.running;
@@ -454,7 +444,7 @@ export async function sweepAbsentBytes(spaceId: string, now: Date, tick: AbsentB
         running.after = page.last;
         state.running = running;
       }
-      remember(spaceId, state);
+      rememberPass(spaceId, 'absentBytesScan', state);
       if (outcome.completed) break;
     }
   } finally {
