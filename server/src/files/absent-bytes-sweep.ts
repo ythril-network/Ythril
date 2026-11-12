@@ -260,8 +260,12 @@ function publishHeld(): void {
 /**
  * Start the sweep of these spaces over and put every record they hold back on the longest wait, before the caller answers: what a restore and
  * an import do. Every stamp is cleared (what was stamped before says nothing of the rows now there), `filesRestoredAt` is set, and the next
- * tick's pass looks again. A space whose stamps cannot be cleared is said and still restarted: its stamps keep their age, and `filesRestoredAt`
- * still holds every row of it to the longest window.
+ * tick's pass looks again. A space an act still holds refuses the stamp clear; that is said and the space is still restarted: its stamps keep
+ * their age, and `filesRestoredAt` still holds every row of it to the longest window.
+ *
+ * **A store failure is never swallowed here**: it rejects, so an import answers it as every other door answers a failing store
+ * (`a-store-failure-answers-alike-on-every-door-db`) instead of 200 with nothing done. Every space is restarted in memory and in config before the
+ * first store write, so a failure leaves no space half restarted there. A caller with no door to answer (the restore's end) catches it.
  */
 export async function restartAbsentBytesSweeps(spaceIds: readonly string[], at: Date = new Date()): Promise<void> {
   generations.bump(spaceIds);
@@ -270,18 +274,19 @@ export async function restartAbsentBytesSweeps(spaceIds: readonly string[], at: 
     entry.filesRestoredAt = at.toISOString();
     return true;
   });
+  for (const id of spaceIds) { heldBySpace.delete(id); keptWalks.delete(id); }
+  publishHeld();
   for (const id of spaceIds) {
-    heldBySpace.delete(id);
-    keptWalks.delete(id);
     // A write to the space's files collection: it asks the write gate and is counted like every other (`admitSpaceWrite`). A space an act still
-    // holds refuses it; its stamps keep their age, and `filesRestoredAt` still holds every row to the longest window.
+    // holds refuses it, and only that refusal is passed over; a store failure rejects.
     await admitSpaceWrite(id, 'files', async () => {
       await col<FileMetaDoc>(spaceCollection(id, 'files')).updateMany(asFilter<FileMetaDoc>({ [BYTES_ABSENT_SINCE]: { $exists: true } }), { $unset: { [BYTES_ABSENT_SINCE]: '' } } as never);
-    })
-      .catch(err => log.warn(`Absent-bytes sweep: the stamps of space '${peerText(id)}' could not be cleared after its records were brought back: ${peerText(err)}`));
-    await publishAwaiting(id);
+    }).catch((err: unknown) => {
+      if (!isSpaceNotWritable(err)) throw err;
+      log.warn(`Absent-bytes sweep: the stamps of space '${peerText(id)}' were not cleared after its records were brought back, an act holds it: ${peerText(err)}`);
+    });
+    filesAwaitingBytesGauge.labels({ space: id }).set(await filesAwaitingBytes(id));
   }
-  publishHeld();
 }
 
 /** How many live file records of `spaceId` are waiting for their bytes (stamped): what `filesAwaitingBytes` answers. */
