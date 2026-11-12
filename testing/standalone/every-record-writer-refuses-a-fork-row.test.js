@@ -100,9 +100,6 @@ const EXEMPT = {
   ...reasoned('its collection name is computed and is never one of the four (candidate rows, a file move)', [
     'brain/candidate-prune.ts:pruneCandidateCollection', 'files/rekey-rows.ts:rekeyRows',
   ]),
-  ...reasoned('the keep-writer writes the PARENT (never a fork row) through `writeAtReadVersion`, which refuses a fork row; the call is a callback the graph does not follow', [
-    'brain/fork-keep.ts:writeKeptBody',
-  ]),
   // The fork module is the writer of fork rows: the keep-writer writes the PARENT, and the re-mint inserts a new row and removes the old one.
   'server/src/brain/forks.ts:*': 'the fork module itself: `writeKeptBody` and the re-mint, which change a fork only by resolve or re-mint',
 };
