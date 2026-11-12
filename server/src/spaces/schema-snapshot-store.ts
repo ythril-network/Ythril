@@ -87,7 +87,7 @@ const overCapSaid = warnOnce<string>();
 export async function ensureSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs): Promise<'written' | 'held' | 'refused'> {
   if (knownHeld(spaceId, stamp.fp)) return 'held';
   if (Buffer.byteLength(stamp.text, 'utf8') > SCHEMA_SNAPSHOT_MAX_BYTES) {
-    overCapSaid(`${spaceId}:${stamp.fp}`, () => log.warn(`Schema snapshot ${stamp.fp} of space '${peerText(spaceId)}' is larger than a peer `
+    overCapSaid(`${spaceId}:${stamp.fp}`, () => log.warn(`Schema snapshot ${peerText(stamp.fp)} of space '${peerText(spaceId)}' is larger than a peer `
       + 'takes: it is kept here, and no member can fetch it'));
   }
   const row: Omit<SnapshotRow, '_id'> = {

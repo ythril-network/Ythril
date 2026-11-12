@@ -664,11 +664,13 @@ describe('every bulk call site in the server is accounted for', () => {
     });
   });
 
-  it('the premise `request-capped` rests on: a request body is at most 10 MiB, a bulk save at most BULK_MAX_PER_TYPE per array', () => {
+  it('the premise `request-capped` rests on: a request body is at most 10 MiB, a bulk save at most BULK_MAX_PER_TYPE per array', async () => {
+    // The limit is one number since bundle-265 (`JSON_BODY_MAX_BYTES`, `config/body-limits.ts`), which app.ts passes to the JSON parser.
     const app = sourceOf('server/src/app.ts');
-    const limits = [...app.matchAll(/express\.json\(\s*\{\s*limit:\s*'(\d+)mb'/g)].map(m => Number(m[1]));
-    assert.ok(limits.length >= 1, 'app.ts no longer sets a JSON body limit the analysis rests on');
-    for (const l of limits) assert.ok(l <= 10, `the JSON body limit is ${l} MiB; the analysis in db/write-bound.ts rests on 10 MiB at most`);
+    assert.match(app, /express\.json\(\s*\{\s*limit:\s*JSON_BODY_MAX_BYTES\b/, 'app.ts no longer sets the JSON body limit the analysis rests on');
+    const { JSON_BODY_MAX_BYTES } = await import('../../server/dist/config/body-limits.js');
+    assert.ok(Number.isSafeInteger(JSON_BODY_MAX_BYTES) && JSON_BODY_MAX_BYTES <= 10 * 1024 * 1024,
+      `the JSON body limit is ${JSON_BODY_MAX_BYTES} bytes; the analysis in db/write-bound.ts rests on 10 MiB at most`);
     assert.ok(BULK_MAX_PER_TYPE <= 500, `a bulk save takes ${BULK_MAX_PER_TYPE} items per array`);
     assert.ok(ROWS_PER_BULK_COMMAND <= 1000 && READ_CHUNK <= 500, 'a chunk of rows grew past what the analysis assumes');
   });
