@@ -1,6 +1,7 @@
 /**
  * Every sync door a peer reaches a space through answers `423 space_held` while the space is held for that peer, stores and serves nothing, and answers as ever
- * once the hold is lifted - an admin token is not an exchange, and the schema door is reach-only (bundle-106, §3.3 doors, R6-f, R-X2g, R-X17b).
+ * once the hold is lifted - an admin token is not an exchange, and the schema doors ask reach and the schema rung, never the hold (bundle-106, §3.3 doors, R6-f, R-X2g, R-X17b;
+ * bundle-265 S-N2 added the rung: `GET /meta` and `GET /schema-snapshot` refuse a token with no `schema: read` and are otherwise answered for a held space).
  *
  * ## What was true before
  *
@@ -151,12 +152,16 @@ describe('a held space meets a peer on every sync door with 423', { skip }, () =
     assert.deepEqual(refused, [], 'an operator\'s own token was held as if it were the exchange');
   });
 
-  it('R-X17b: the schema door is reach only - 200 for a held space - beside its twin, a document door, 423', async () => {
+  it('R-X17b: the schema door asks reach and the schema rung, never the hold - 200 for a held space - beside its twin, a document door, 423', async () => {
     const peer = peerToken(PEER);
     const docs = await ask({ router: routers.docs, method: 'get', path: '/facts' }, HELD, peer);
     assert.ok(isHeld(docs), `the twin failed: the document door did not hold the space (${docs.code}), so the schema door's 200 proves nothing`);
     const meta = await ask({ router: routers.meta, method: 'get', path: '/meta' }, HELD, peer);
     assert.equal(meta.code, 200, `the schema door answered ${meta.code} ${JSON.stringify(meta.body)} for a held space: a subscriber's type schemas would wait out the whole hold`);
+    // The snapshot door is the schema door's sibling (Q-738): the version a record is stamped with is fetched through it, and a wipe changes no schema.
+    const { code, body } = await callRoute(routers.meta, 'get', '/schema-snapshot', { query: { spaceId: HELD, networkId: door.NET, fp: 'e'.repeat(64) }, authToken: peer })
+      .catch(err => ({ code: -1, body: { error: String(err) } }));
+    assert.deepEqual({ code, answer: body?.code }, { code: 404, answer: 'unknown_fingerprint' }, `the snapshot door answered ${code} ${JSON.stringify(body)} for a held space: it must answer as for any space (never space_held)`);
   });
 
   it('R-X2g: a peer\'s write that meets the writer\'s refusal is answered 423 space_held, never 409; an admin token is not', async () => {

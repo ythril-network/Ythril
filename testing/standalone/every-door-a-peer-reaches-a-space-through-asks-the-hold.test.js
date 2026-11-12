@@ -62,9 +62,13 @@ const SYNC_DOOR_FLOOR = 24;
 // `enforceSpaceScope` is the resolver the guards call, not a guard: its own declaration matched `enforceSpaceScope(` (the derivation counted it as calling itself).
 const RIGHTS_DOOR_FLOOR = 5;
 
-/** The schema door asks reach only: a wipe changes no schema, and a subscriber takes its type schemas through it (section 3.3 v5, X17, INT S14). */
+/**
+ * The schema doors ask reach and the schema rung, never the hold: a wipe changes no schema, and a subscriber takes its type schemas through them (section
+ * 3.3 v5, X17, INT S14). Both ask the rung through the one helper `refuseSchemaRung` (bundle-265, Q-738, S-N2), so the two cannot differ.
+ */
 const REACH_ONLY = [
   { file: 'meta.ts', route: 'GET /meta', why: 'schema propagation is not data: a wipe changes no schema and a subscriber pulls its type schemas from its upstream through it' },
+  { file: 'schema-snapshot.ts', route: 'GET /schema-snapshot', why: 'a schema snapshot is not data: a wipe changes no schema and a receiver fetches the version a record is stamped with through it' },
 ];
 /** Guards that resolve a space for a caller but are space MANAGEMENT behind an admin flag or a second factor, not one of the three rights doors the design names. */
 const NOT_THE_EXCHANGE = [
@@ -214,6 +218,14 @@ describe('every sync route that names a space asks the hold (or says why it asks
       assert.ok(hit, `${entry.file} ${entry.route} is in the reach-only table and no such route names a space: the table went stale`);
       assert.equal(hit.asks, 'reach', `${entry.file} ${entry.route} must ask refusePeerReach( only (${entry.why}); it asks '${hit.asks}'`);
     }
+  });
+
+  it('each reach-only door also asks the schema rung, through the one helper refuseSchemaRung(', () => {
+    const doors = syncDoors();
+    const lacking = REACH_ONLY.map(entry => doors.find(d => d.name === entry.file && d.route === entry.route))
+      .filter(hit => hit && !/\brefuseSchemaRung\s*\(/.test(hit.text)).map(hit => `${hit.file}:${hit.line} ${hit.route}`);
+    assert.deepEqual(lacking, [], `these schema doors hand a token the schema on reach alone (GET /meta did before bundle-265; a token with files only holds no schema right):\n  ${lacking.join('\n  ')}`);
+    assert.ok(REACH_ONLY.every(entry => doors.some(d => d.name === entry.file && d.route === entry.route)), 'a reach-only door is missing, so the rung check above compared nothing for it');
   });
 
   it('no spaceAllowed( call in api/sync/ but the function that answers the reach question', () => {
