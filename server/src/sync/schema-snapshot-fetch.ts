@@ -41,6 +41,8 @@ import { getConfig } from '../config/loader.js';
 import type { NetworkMember } from '../config/types.js';
 import { col, asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { distinctStringsOf } from '../db/distinct-strings.js';
+import { readStoredById } from '../db/read-by-id.js';
 import { storeIsNotAnswering } from '../db/store-condition.js';
 import { withinWriteBound } from '../db/write-bound.js';
 import { isShuttingDown } from '../lifecycle.js';
@@ -56,7 +58,7 @@ import { LruMap } from '../util/lru-map.js';
 import { log, peerText } from '../util/log.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { warnOnce } from '../util/warn-once.js';
-import { turnSignal, type ExchangeTurn } from './held-answer.js';
+import { transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import { peerSafeFetch, transferInit } from './peer-fetch.js';
 import { peerRunsAtLeast } from './peer-floor.js';
 import { BACKOFF_FIRST_MS, dropOwedSchemaSnapshot, forgetOwedSchemaSnapshot, noteNotHeld, owedTo, STAMPED_COLLECTIONS } from './schema-snapshot-owed.js';
@@ -149,9 +151,9 @@ async function codeOf(resp: Response): Promise<string | undefined> {
 async function carriedNow(spaceId: string, fps: readonly string[]): Promise<Set<string>> {
   const carried = new Set<string>();
   for (const collection of STAMPED_COLLECTIONS) {
-    const found = await col<Record<string, unknown>>(spaceCollection(spaceId, collection))
-      .distinct(SCHEMA_FINGERPRINT_FIELD, asFilter<Record<string, unknown>>({ [SCHEMA_FINGERPRINT_FIELD]: { $in: [...fps] } }));
-    for (const fp of found) if (typeof fp === 'string') carried.add(fp);
+    const found = await distinctStringsOf(col<Record<string, unknown>>(spaceCollection(spaceId, collection)), SCHEMA_FINGERPRINT_FIELD,
+      asFilter<Record<string, unknown>>({ [SCHEMA_FINGERPRINT_FIELD]: { $in: [...fps] } }));
+    for (const fp of found) carried.add(fp);
   }
   return carried;
 }
@@ -190,17 +192,17 @@ export async function fetchOwedSchemaSnapshots(a: SnapshotFetch): Promise<void> 
     for (const fp of wanted) if (!carried.has(fp)) forgetOwedSchemaSnapshot(spaceId, fp);
     const stillOwed = wanted.filter(fp => carried.has(fp));
     // The held check, before any request: a row another member's answer or this server's own write put there is not asked for.
-    const rows = stillOwed.length === 0 ? [] : await col<SnapshotRow>(spaceCollection(spaceId, 'schemaSnapshots'))
-      .find(asFilter<SnapshotRow>({ _id: { $in: stillOwed } }), { projection: { _id: 1 } }).toArray();
-    return { owed: stillOwed, held: new Set(rows.map(r => String(r._id))) };
+    const rows = await readStoredById<SnapshotRow>(spaceCollection(spaceId, 'schemaSnapshots'), stillOwed, { _id: 1 });
+    return { owed: stillOwed, held: new Set(rows.keys()) };
   });
   for (const fp of held) dropOwedSchemaSnapshot(spaceId, fp);
-  for (const fp of owed.filter(f => !held.has(f) && !inFlight.has(`${spaceId}:${f}`)).slice(0, SNAPSHOT_FETCHES_PER_TURN)) {
+  const toAsk = owed.filter(f => !held.has(f) && !inFlight.has(flightKey(spaceId, f))).slice(0, SNAPSHOT_FETCHES_PER_TURN);
+  for (const fp of toAsk) {
     if (!a.turn.mayContinue() || isShuttingDown()) return;
-    const flight = `${spaceId}:${fp}`;
+    const flight = flightKey(spaceId, fp);
     inFlight.add(flight);
     try {
-      const next = await ask(a, fp, memberKey, a.turn);
+      const next = await askMemberFor(a, fp, memberKey, a.turn);
       // Asked for, and the answer is in: the owed set is a queue from arrivals to the turn, not a memory of what failed. Whatever the answer was (kept, refused,
       // no route, no space, a failure) the entry leaves it, and the gap scan owes the fingerprint again while a stored record carries it and no row holds it;
       // what was refused or is backing off is remembered below, per member and version, so the scan does not make the member answer it again. Only "not
@@ -211,11 +213,14 @@ export async function fetchOwedSchemaSnapshots(a: SnapshotFetch): Promise<void> 
   }
 }
 
+/** The key of one fingerprint's request in flight. */
+const flightKey = (space: string, fp: string): string => `${space}:${fp}`;
+
 /** Ask the member for `fp`, decide the answer, and keep the snapshot when it verifies. */
-async function ask(a: SnapshotFetch, fp: string, memberKey: string, turn: ExchangeTurn): Promise<Next> {
+async function askMemberFor(a: SnapshotFetch, fp: string, memberKey: string, turn: ExchangeTurn): Promise<Next> {
   const { member, spaceId } = a;
   const failedKey = `${memberKey}:${spaceId}:${fp}`;
-  const failed = (next: Next): Next => { schemaSnapshotTotal.count('failed'); pausedUntil.set(failedKey, Date.now() + BACKOFF_FIRST_MS); return next; };
+  const failed = (next: Next): Next => { schemaSnapshotTotal.note('failed'); pausedUntil.set(failedKey, Date.now() + BACKOFF_FIRST_MS); return next; };
   const q = new URLSearchParams({ spaceId: a.remoteSpaceId, networkId: a.networkId, fp });
   let resp: Response;
   try {
@@ -227,26 +232,29 @@ async function ask(a: SnapshotFetch, fp: string, memberKey: string, turn: Exchan
     log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} for space '${peerText(spaceId)}': ${peerText(err)}`);
     return failed('stop');
   }
-  if (resp.status === 200) return await keep(a, fp, memberKey, resp, failed, turn);
+  if (resp.status === 200) return await keepFetched(a, fp, memberKey, resp, failed, turn);
+  // A hold or a decline the member answers is its own word for "not now" (a 423 `space_held`): the turn is held, not failed.
+  const refusal = await transferRefusal(resp);
+  if (refusal !== 'failed') { turn.refusedBy(refusal); return 'stop'; }
   const code = await codeOf(resp);
   switch (resp.status) {
     case 404:
       if (code === 'unknown_fingerprint') {
-        schemaSnapshotTotal.count('not_held');
+        schemaSnapshotTotal.note('not_held');
         noteNotHeld(spaceId, fp, member.instanceId, candidatesOf(spaceId), Date.now());
         return 'not_held';
       }
-      if (code === undefined) { schemaSnapshotTotal.count('route_missing'); noRoute.set(memberKey, true); return 'stop'; }
+      if (code === undefined) { schemaSnapshotTotal.note('route_missing'); noRoute.set(memberKey, true); return 'stop'; }
       break;
     case 410:
-      if (code === 'lost_space') { schemaSnapshotTotal.count('lost_space'); noSpace.set(`${memberKey}:${spaceId}`, true); return 'stop'; }
+      if (code === 'lost_space') { schemaSnapshotTotal.note('lost_space'); noSpace.set(`${memberKey}:${spaceId}`, true); return 'stop'; }
       break;
     case 409:
-      if (code === 'not_shared') { schemaSnapshotTotal.count('not_shared'); terminal.set(`${memberKey}:${spaceId}:${fp}`, 'not_shared'); return 'next'; }
+      if (code === 'not_shared') { schemaSnapshotTotal.note('not_shared'); terminal.set(`${memberKey}:${spaceId}:${fp}`, 'not_shared'); return 'next'; }
       break;
     case 403:
       if (code === 'schema_rung') {
-        schemaSnapshotTotal.count('refused_rung');
+        schemaSnapshotTotal.note('refused_rung');
         pausedUntil.set(`${memberKey}:${spaceId}`, Date.now() + BACKOFF_FIRST_MS);
         rungSaid(`${member.instanceId}:${spaceId}`, () => log.warn(`${peerText(member.label ?? member.instanceId)} refused this instance the schema of space '${peerText(spaceId)}': `
           + 'the token it holds for that member has no `schema: read` there, so the schema versions its records are stamped with cannot be fetched. Grant it on that member.'));
@@ -260,7 +268,7 @@ async function ask(a: SnapshotFetch, fp: string, memberKey: string, turn: Exchan
 }
 
 /** A 200: verify the text against the fingerprint asked for, then keep it. */
-async function keep(a: SnapshotFetch, fp: string, memberKey: string, resp: Response, failed: (next: Next) => Next, turn: ExchangeTurn): Promise<Next> {
+async function keepFetched(a: SnapshotFetch, fp: string, memberKey: string, resp: Response, failed: (next: Next) => Next, turn: ExchangeTurn): Promise<Next> {
   const { member, spaceId } = a;
   let body: { text?: unknown; links?: unknown; layerOf?: unknown };
   try {
@@ -281,7 +289,7 @@ async function keep(a: SnapshotFetch, fp: string, memberKey: string, resp: Respo
     // An act stands on the space: nothing is written now, and what it still owes is asked for in a later turn.
     if (kept === 'refused') return 'stop';
   } catch (err) {
-    schemaSnapshotTotal.count('failed');
+    schemaSnapshotTotal.note('failed');
     reportSpaceFailure(SCHEMA_SNAPSHOT_FETCH_STEP, spaceId, err, { unit: fp, when: 'a later turn' });
     if (storeIsNotAnswering(err)) throw err;
     return 'next';
@@ -293,7 +301,7 @@ async function keep(a: SnapshotFetch, fp: string, memberKey: string, resp: Respo
 
 /** A text that was refused: counted, said, and terminal for this member, version and fingerprint. */
 function refuse(spaceId: string, member: NetworkMember, fp: string, memberKey: string, outcome: SnapshotRefusal): Next {
-  schemaSnapshotTotal.count(outcome);
+  schemaSnapshotTotal.note(outcome);
   terminal.set(`${memberKey}:${spaceId}:${fp}`, outcome);
   log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} for space '${peerText(spaceId)}' REFUSED (${outcome}): `
     + 'it is not the canonical schema text that fingerprint names (or it is over the size a snapshot may have). It is not asked for again from this member at this version.');
@@ -319,7 +327,7 @@ async function sayBehind(spaceId: string, member: NetworkMember, sender: { fp: s
     }));
     for (const networkId of behindVerdict({ networks: mine }, sender)) {
       behindSaid(`${spaceId}:${networkId}:${sender.fp}`, () => {
-        schemaSnapshotTotal.count('behind');
+        schemaSnapshotTotal.note('behind');
         log.info(`Schema snapshot ${peerText(sender.fp.slice(0, 12))} kept for space '${peerText(spaceId)}': the links ${peerText(member.label ?? member.instanceId)} sent, `
           + `a hint only, say this variation's layer from network '${peerText(networkId)}' is not the one it uses. Nothing is changed: the layer arrives by the meta pull or a round.`);
       });

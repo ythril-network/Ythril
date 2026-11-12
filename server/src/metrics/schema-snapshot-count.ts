@@ -11,7 +11,7 @@
  * ## What it prevents
  *
  * One family, one label, one list. The outcomes are a hand-written list in the registry and again at each call: an outcome added to one and not the other
- * is a series nobody declared at zero. {@link SCHEMA_SNAPSHOT_OUTCOMES} is the one list: the registry pre-declares one series per entry and `count` takes
+ * is a series nobody declared at zero. {@link SCHEMA_SNAPSHOT_OUTCOMES} is the one list: the registry pre-declares one series per entry and `note` takes
  * only a member of it.
  */
 import { countSink } from './count-sink.js';
@@ -35,4 +35,4 @@ const outcomes = countSink<[outcome: SchemaSnapshotOutcome]>();
 export const setSchemaSnapshotSink = outcomes.set;
 
 /** `ythril_schema_snapshot_total`, as the writer and the receiver count it: one snapshot, under what became of it. */
-export const schemaSnapshotTotal = { count: outcomes.add };
+export const schemaSnapshotTotal = { note: outcomes.add };

@@ -98,6 +98,9 @@ const EXEMPT = {
     'brain/queue-embed-sweep.ts:queueOwedSweep',
     'brain/candidate-prune.ts:pruneCandidateCollection', 'brain/chrono-redaction.ts:backfillTypedExpiry',
   ]),
+  ...reasoned('a fork row carries the schema fingerprint of the copy it holds and is owed that snapshot like any record: this reader asks which fingerprints stored records carry, forks included, and lists no relationship', [
+    'sync/schema-snapshot-fetch.ts:carriedNow', 'sync/schema-snapshot-owed.ts:scanOwedSchemaSnapshots',
+  ]),
   // Q-624 slice I3: the readers whose subject IS the fork rows, or a row's fork status.
   ...reasoned('the fork module itself: it reads fork rows on purpose (Review\'s list and resolve, the re-mint, the cascade, the cap) and names `forkOf` in every read', [
     'brain/forks.ts:refuseForkRowsNamed', 'brain/forks.ts:forkRowsUnder', 'brain/forks.ts:remintForks', 'brain/forks.ts:assertForksFitTogether',
