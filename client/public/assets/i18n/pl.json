@@ -1213,7 +1213,7 @@
   "spaces.schema.exportToLibrary.confirm": "Eksportuj do biblioteki",
   "spaces.schema.exportToLibrary.done": "Wyeksportowano do grupy biblioteki \"{{group}}\" — utworzono {{created}}, zaktualizowano {{updated}}.",
   "spaces.schema.exportToLibrary.failed": "Nie można wyeksportować schematu do biblioteki.",
-  "spaces.schema.autoSyncHint": "Każda wersja schematu użyta przez ten serwer jest przechowywana prywatnie i nazwana swoim odciskiem. Bieżący odcisk przestrzeni jest podany w jej metadanych.",
+  "spaces.schema.versionsKeptHint": "Każda wersja schematu użyta przez ten serwer jest przechowywana prywatnie i nazwana swoim odciskiem. Bieżący odcisk przestrzeni podają GET /api/spaces/:id/meta oraz narzędzie MCP space_meta (schemaFingerprint).",
   "spaces.schema.tab.entities": "Podmioty",
   "spaces.schema.tab.edges": "Krawędzie",
   "spaces.schema.tab.facts": "Fakty",

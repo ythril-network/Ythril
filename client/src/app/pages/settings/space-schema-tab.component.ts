@@ -180,7 +180,7 @@ const suggestedAddAsName = (name: string): string => name + '-2';
   <button class="btn btn-secondary btn-sm" type="button" (click)="triggerImportFromLibraryAny()" [attr.title]="'spaces.schema.importFromLibraryTitle' | transloco"><ph-icon name="bookmarks" [size]="13" style="margin-right:5px;"/>{{ 'spaces.schema.importLibraryButton' | transloco }}</button>
   <input #schImportInput type="file" accept=".json,application/json" style="display:none" (change)="onImportSchemaFile($event)" />
   <input #schTypeImportInput type="file" accept=".json,application/json" style="display:none" (change)="onImportTypeSchemaFile($event)" />
-  <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">{{ 'spaces.schema.autoSyncHint' | transloco }}</span>
+  <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">{{ 'spaces.schema.versionsKeptHint' | transloco }}</span>
 </div>
 <!-- collection tabs -->
 <!-- One tab stop for the strip (roving tabindex): the selected tab is in the Tab order, the others are reached with the arrow keys, Home and End. -->

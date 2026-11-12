@@ -1213,7 +1213,7 @@
   "spaces.schema.exportToLibrary.confirm": "In Bibliothek exportieren",
   "spaces.schema.exportToLibrary.done": "In Bibliotheksgruppe \"{{group}}\" exportiert — {{created}} erstellt, {{updated}} aktualisiert.",
   "spaces.schema.exportToLibrary.failed": "Schema konnte nicht in die Bibliothek exportiert werden.",
-  "spaces.schema.autoSyncHint": "Jede Schema-Version, die dieser Server verwendet hat, wird privat aufbewahrt und nach ihrem Fingerabdruck benannt. Der aktuelle Fingerabdruck des Space steht in seinen Metadaten.",
+  "spaces.schema.versionsKeptHint": "Jede Schema-Version, die dieser Server verwendet hat, wird privat aufbewahrt und nach ihrem Fingerabdruck benannt. Den aktuellen Fingerabdruck des Space nennen GET /api/spaces/:id/meta und das MCP-Werkzeug space_meta (schemaFingerprint).",
   "spaces.schema.tab.entities": "Entitäten",
   "spaces.schema.tab.edges": "Kanten",
   "spaces.schema.tab.facts": "Fakten",
