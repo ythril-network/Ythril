@@ -6,13 +6,22 @@
  * ## The two mechanisms, and why they have to be checked together
  *
  * **Stripping.** `docs.ts` runs every pushed document through `safeParse` before writing it, and zod strips
- * keys the schema does not declare. The pull path validates nothing. So a field missing from its `Incoming*`
- * twin is kept when the record arrives by pull and deleted when the same record arrives by push: same version,
- * push-only, direction-dependent, no error and a 200 on the way back.
+ * keys the schema does not declare. The pull path used to validate nothing, and since Q-204 plans and validates a
+ * pulled page as a pushed one (`sync/accept-page.ts`), so the two doors agree today; what a missing declaration still
+ * costs is the field itself, deleted on every arrival, and a hashed one then differs for ever between the member that
+ * wrote it and the member that stripped it.
  *
- * **Hashing.** `computeMerkleRoot` hashes every field of every brain document except the three it excludes at
- * the projection (`embedding`, `embeddingModel`, `matchedText`). That hash is what tells an operator whether
- * two instances hold the same data.
+ * **Hashing.** `computeMerkleRoot` hashes every field of every brain document except the fields `DERIVED_FIELDS`
+ * names in `brain/merkle.ts` (the local-only ones, the retagged ones and, since bundle-265, the replicated-but-unhashed
+ * ones). That hash is what tells an operator whether two instances hold the same data.
+ *
+ * **A third class, bundle-265 (Q-737): replicated and NOT hashed.** `schemaFingerprint` (the fingerprint of the schema
+ * the record's writer validated it against) travels with the record, so every record family's `Incoming*` schema declares
+ * it; and it is left out of the hash, because an older member drops it on arrival and an equal-seq copy is never stored over
+ * the held one, so a hashed stamp would keep two members' leaves apart for ever over metadata about the write. Such a field
+ * is named in `REPLICATED_UNHASHED_FIELDS` (`brain/merkle.ts`, with its reason beside it), which `DERIVED_FIELDS` is made of
+ * and this gate reads out of that source: a declared field the hash does not see is a defect (the false negative below)
+ * UNLESS it is named there, and the set is read, never listed here.
  *
  * Put them together and the rule falls out with no judgement left in it: **a field that is hashed must
  * replicate.** If it does not, the sender's copy has the key and the receiver's does not, and the roots differ
@@ -96,6 +105,11 @@ const LOCAL_ONLY = 'server/src/sync/local-only-fields.ts';
  * them out through their own list — never through `LOCAL_ONLY_FIELDS`, which the arrival writer strips.
  */
 const RETAGGED = 'server/src/sync/retagged-fields.ts';
+/**
+ * The set of fields that replicate and are left out of the hash (bundle-265, Q-737), declared in `merkle.ts` beside the reason: `schemaFingerprint` is the
+ * first. `DERIVED_FIELDS` is made of it, so `merkleExcluded` reads it from the sources handed to it, which for this list include `merkle.ts` itself.
+ */
+const REPLICATED_UNHASHED = 'REPLICATED_UNHASHED_FIELDS';
 
 /** Fields of a `*Doc` interface, in declaration order. */
 function docFields(src, name) {
@@ -251,6 +265,17 @@ function replicatedPairs(sharedSrc) {
 }
 
 /**
+ * The replicated documents that carry a record's schema stamp: the `INCOMING_SCHEMA_OF` families with a type schema to be checked against, which are every
+ * family but a link (it has no schema) and a file (it has no type schema). Read out of the table in `sync/incoming-schemas.ts`, never listed here.
+ */
+function recordPairs(sharedSrc) {
+  const table = stripComments(sharedSrc).match(/export const INCOMING_SCHEMA_OF[^=]*= \{([\s\S]*?)\n\};/);
+  const named = [...(table?.[1] ?? '').matchAll(/^ {2}(\w+): \{ schema: (Incoming\w+),/gm)].map(m => [m[1], m[2]]);
+  const records = new Set(named.filter(([family]) => family !== 'links' && family !== 'filemeta').map(([, inc]) => inc));
+  return replicatedPairs(sharedSrc).filter(([, inc]) => records.has(inc));
+}
+
+/**
  * The rule, both directions, for one replicated document — over the sources it is handed, so a case can hand it a
  * source with one line changed (the mutation cases below) and ask whether the gate would have SEEN the change.
  *
@@ -272,10 +297,12 @@ function analyse({ types, shared, merkle, localOnly }, docName, incName) {
   const hashes = f => (view.inclusive ? view.fromProjection.includes(f) : !view.fromProjection.includes(f));
   const never = neverKeys(incomingBody(shared, incName));
   const retagged = setNamed(localOnly, 'RETAGGED_FIELDS');
+  // The fourth READ exemption (bundle-265): a declared field the hash leaves out is not a defect when `merkle.ts` NAMES it as replicated-but-unhashed.
+  const replicatedUnhashed = setNamed(localOnly, REPLICATED_UNHASHED);
   return {
-    fields, keys, never, retagged,
+    fields, keys, never, retagged, replicatedUnhashed,
     undeclared: fields.filter(f => hashes(f) && !keys.includes(f) && !fromSet.includes(f) && !(f in HASHED_BUT_NOT_REPLICATED)),
-    declaredNotHashed: keys.filter(k => fields.includes(k) && !never.includes(k) && !retagged.includes(k) && !hashes(k)),
+    declaredNotHashed: keys.filter(k => fields.includes(k) && !never.includes(k) && !retagged.includes(k) && !replicatedUnhashed.includes(k) && !hashes(k)),
   };
 }
 
@@ -283,7 +310,8 @@ describe('a hashed field replicates, and a non-replicated field is not hashed', 
   const types = readFileSync(TYPES, 'utf8');
   const shared = readFileSync(SHARED, 'utf8');
   const merkle = readFileSync(MERKLE, 'utf8');
-  const localOnly = readFileSync(LOCAL_ONLY, 'utf8') + '\n' + readFileSync(RETAGGED, 'utf8');
+  // `merkle.ts` too: `REPLICATED_UNHASHED_FIELDS` lives beside the reason for it, and `DERIVED_FIELDS` is made of it (bundle-265).
+  const localOnly = readFileSync(LOCAL_ONLY, 'utf8') + '\n' + readFileSync(RETAGGED, 'utf8') + '\n' + merkle;
   const real = { types, shared, merkle, localOnly };
   // Per document, because the two projection shapes are read differently — see `merkleExcluded`.
   const { fromSet, fromProjection } = merkleExcluded(merkle, null, localOnly);
@@ -331,6 +359,33 @@ describe('a hashed field replicates, and a non-replicated field is not hashed', 
         + 'from the hash in merkle.ts (both places).');
     });
   }
+
+  it('REPLICATED_UNHASHED_FIELDS is found in merkle.ts and names the stamp (the check itself works, bundle-265)', () => {
+    // A floor like the ones above: a set that was renamed or moved reads as EMPTY, the declared-but-unhashed stamp below is then reported as a defect, and the
+    // message would blame the schema. The set is read out of merkle.ts's own source, where its reason sits.
+    assert.ok(new RegExp(`const ${REPLICATED_UNHASHED}: ReadonlySet<string> = new Set\\(\\[`).test(stripComments(merkle)),
+      'merkle.ts declares no REPLICATED_UNHASHED_FIELDS: a replicated field the hash leaves out has nowhere to say so, and the stamp is hashed');
+    const named = setNamed(localOnly, REPLICATED_UNHASHED);
+    assert.ok(named.includes('schemaFingerprint'), `REPLICATED_UNHASHED_FIELDS names ${JSON.stringify(named)}: the stamp is hashed, so a member that drops it on arrival never agrees with the one that wrote it`);
+    assert.ok(fromSet.includes('schemaFingerprint'), 'DERIVED_FIELDS is not made of REPLICATED_UNHASHED_FIELDS: the stamp is in the set and the hash still sees it');
+    assert.equal(setNamed(localOnly, 'LOCAL_ONLY_FIELDS').includes('schemaFingerprint'), false,
+      'the stamp is in LOCAL_ONLY_FIELDS: the arrival writer strips those, and a stamp stripped on arrival is no stamp');
+  });
+
+  for (const [docName, incName] of recordPairs(shared)) {
+    it(`${docName}: ${incName} declares schemaFingerprint, and the hash leaves it out because merkle.ts names it replicated-but-unhashed`, () => {
+      const seen = analyse(real, docName, incName);
+      assert.ok(seen.keys.includes('schemaFingerprint'), `${incName} does not declare schemaFingerprint: zod strips the writer's stamp on every push`);
+      assert.ok(seen.replicatedUnhashed.includes('schemaFingerprint'), `schemaFingerprint travels on ${docName} and REPLICATED_UNHASHED_FIELDS does not name it`);
+      assert.deepEqual(seen.declaredNotHashed, [], `${incName} declares ${seen.declaredNotHashed.join(', ')}, which travels and is not hashed, and no set names it as replicated-but-unhashed`);
+      assert.deepEqual(seen.undeclared, [], `${docName}: ${seen.undeclared.join(', ')} is hashed and not declared`);
+    });
+  }
+
+  it('the record documents are derived from the schema table, with a floor', () => {
+    const pairs = recordPairs(shared);
+    assert.ok(pairs.length >= 4, `only ${pairs.length} record document(s) found (${pairs.map(p => p[0])}): INCOMING_SCHEMA_OF was not read, and the per-document stamp cases would run over none`);
+  });
 
   it('the exemption list has no stale rows', () => {
     /*
@@ -385,7 +440,7 @@ describe('the gate sees a field taken away from the schema or the hash', () => {
     types: read(TYPES),
     shared: read(SHARED),
     merkle: read(MERKLE),
-    localOnly: read(LOCAL_ONLY) + '\n' + read(RETAGGED),
+    localOnly: read(LOCAL_ONLY) + '\n' + read(RETAGGED) + '\n' + read(MERKLE),
   };
   const FILE = ['FileMetaDoc', 'IncomingFileMetaDoc'];
 
@@ -499,6 +554,55 @@ describe('the gate sees a field taken away from the schema or the hash', () => {
     assert.notEqual(mutated.types, real.types, 'the types mutation changed nothing — re-anchor it');
     assert.deepEqual(analyse(mutated, ...FILE).declaredNotHashed, ['aFieldNobodyHashed'],
       'a field added to the document and the wire schema and not to FILE_HASH_PROJECTION went unreported');
+  });
+
+  /*
+   * The third class (bundle-265): a field the schema declares, the hash leaves out, and `merkle.ts` NAMES as replicated-but-unhashed. The sources below are
+   * built in memory and whole: a document with the stamp on its interface and its schema, a `merkle.ts` whose `DERIVED_FIELDS` is made of the set, and the set
+   * with and without the stamp. They hold on the gate's own logic, so they do not depend on what the implementation has written yet.
+   */
+  describe('a declared field the hash leaves out is a defect unless merkle.ts names it replicated-but-unhashed', () => {
+    const merkleOf = (setBody) => 'const DERIVED_FIELDS: ReadonlySet<string> = new Set([...LOCAL_ONLY_FIELDS, ...RETAGGED_FIELDS, ...REPLICATED_UNHASHED_FIELDS]);\n'
+      + 'const DERIVED_PROJECTION: Readonly<Record<string, 0>> = Object.fromEntries([...DERIVED_FIELDS].map(f => [f, 0]));\n'
+      + `const ${REPLICATED_UNHASHED}: ReadonlySet<string> = new Set([${setBody}]);\n`;
+    const withStamp = (setBody) => {
+      const merkle = merkleOf(setBody);
+      const types = real.types.replace('export interface FactDoc extends StampSkewable {', 'export interface FactDoc extends StampSkewable {\n  schemaFingerprint?: string;');
+      const shared = real.shared.replace('export const IncomingFactDoc = z.object({\n', 'export const IncomingFactDoc = z.object({\n  schemaFingerprint: z.string().optional(),\n');
+      assert.notEqual(types, real.types, 'the types mutation changed nothing: FactDoc is no longer declared as `extends StampSkewable` - re-anchor it');
+      assert.notEqual(shared, real.shared, 'the schema mutation changed nothing - re-anchor it');
+      // The local-only lists as they are, plus the set this `merkle` declares: the sources `analyse` is handed.
+      const lists = read(LOCAL_ONLY) + '\n' + read(RETAGGED) + '\n' + merkle;
+      return { types, shared, merkle, localOnly: lists };
+    };
+
+    it('named in the set: not reported as declared-and-unhashed, and nothing is reported hashed-and-undeclared either', () => {
+      const seen = analyse(withStamp("'schemaFingerprint'"), 'FactDoc', 'IncomingFactDoc');
+      assert.ok(seen.keys.includes('schemaFingerprint') && seen.fields.includes('schemaFingerprint'), 'the mutation did not reach the schema or the document');
+      assert.deepEqual(seen.replicatedUnhashed, ['schemaFingerprint'], 'the set was not read out of the source it is declared in');
+      assert.deepEqual(seen.declaredNotHashed, [], 'a declared field that merkle.ts names replicated-but-unhashed was reported as a defect');
+      assert.deepEqual(seen.undeclared, []);
+    });
+
+    it('left out of the hash by another list and named by no set: reported declared and not hashed (the false negative the exemption must not hide)', () => {
+      // The stamp is excluded from the hash through the LOCAL-ONLY list instead (which would also strip it on arrival), and REPLICATED_UNHASHED_FIELDS is empty:
+      // the exemption is for a field the set NAMES, and this one is only left out, so two members holding different stamps would agree they match for ever.
+      const sources = withStamp('');
+      const anchor = 'export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([';
+      assert.ok(sources.localOnly.includes(anchor), 'LOCAL_ONLY_FIELDS is no longer declared as `export const LOCAL_ONLY_FIELDS: ReadonlySet<string> = new Set([` - re-anchor the mutation');
+      const asLocal = { ...sources, localOnly: sources.localOnly.replace(anchor, `${anchor}'schemaFingerprint', `) };
+      const seen = analyse(asLocal, 'FactDoc', 'IncomingFactDoc');
+      assert.deepEqual(seen.replicatedUnhashed, [], 'the set was read as holding the stamp');
+      assert.ok(seen.declaredNotHashed.includes('schemaFingerprint'),
+        'a field the schema declares and the hash leaves out, named by no REPLICATED_UNHASHED_FIELDS, went unreported');
+    });
+
+    it('a field named in the set that no schema declares is not a defect of this gate (the set is a statement about the hash, not about the schema)', () => {
+      const sources = withStamp("'schemaFingerprint', 'aFieldOnlyTheSetNames'");
+      const seen = analyse(sources, 'FactDoc', 'IncomingFactDoc');
+      assert.deepEqual(seen.replicatedUnhashed, ['schemaFingerprint', 'aFieldOnlyTheSetNames']);
+      assert.deepEqual(seen.declaredNotHashed, []);
+    });
   });
 
   for (const [docName, incName] of replicatedPairs(real.shared)) {
