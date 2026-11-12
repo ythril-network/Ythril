@@ -27,6 +27,7 @@ import { listReadMaxMs, textContains } from './tag-filter.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 import { edgeEndsAt } from './edge-ends-of-record.js';
+import { unstampEdgesOfRetypedEntity } from './retyped-entity-edges.js';
 import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
 import { planAndCommitOne } from './write-plan/plan-and-commit.js';
 import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
@@ -310,6 +311,8 @@ export async function updateEntityById(
   // would describe a write that did not happen — a fabricated 200 that predates the precondition and was
   // reachable whenever a record was deleted inside the read-then-write window.
   if (!beforeWrite) return null;
+  // The edges that name this entity were judged against its old type (the endpoint rule): a re-type takes their stamp (bundle-265 DI1).
+  if (newType !== beforeWrite.type) await unstampEdgesOfRetypedEntity(spaceId, id);
 
   const result = {
     ...existing,

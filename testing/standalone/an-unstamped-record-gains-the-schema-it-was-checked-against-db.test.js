@@ -246,6 +246,27 @@ describe('a stamp means the record conforms as stored (D-77)', { skip }, () => {
     assert.equal('schemaFingerprint' in inPlace, false, 'an edge relinked in place keeps its stamp');
   });
 
+  it('(12) an entity re-type removes the stamp of every edge that names it, from or to; a change of its properties alone keeps them (bundle-265 DI1)', async () => {
+    // In the warn space, so the re-type to a type the schema does not name lands (a strict space would refuse it).
+    const W = `/api/brain/spaces/${WARN}`;
+    const ann = (await ok('POST', `${W}/entities`, { name: uniq('Ann'), type: 'person' }, 'entity'))._id;
+    const bo = (await ok('POST', `${W}/entities`, { name: uniq('Bo'), type: 'person' }, 'entity'))._id;
+    const cy = (await ok('POST', `${W}/entities`, { name: uniq('Cy'), type: 'person' }, 'entity'))._id;
+    const out = (await ok('POST', `${W}/edges`, { from: ann, to: bo, label: 'knows' }, 'edge'))._id;
+    const into = (await ok('POST', `${W}/edges`, { from: cy, to: ann, label: 'likes' }, 'edge'))._id;
+    const apart = (await ok('POST', `${W}/edges`, { from: bo, to: cy, label: 'likes' }, 'edge'))._id;
+    for (const e of [out, into, apart]) await setStamp('edges', e, OLDER, WARN);
+
+    await ok('PATCH', `${W}/entities/${ann}`, { properties: { age: 5 } }, 'a properties-only update');
+    for (const e of [out, into, apart]) assert.equal(await stampOf('edges', e, WARN), OLDER, `edge ${e} lost its stamp on an update that did not change its end's type`);
+
+    // Seen red at c244852b: both edges of the re-typed entity keep OLDER.
+    await ok('PATCH', `${W}/entities/${ann}`, { type: 'robot' }, 'the re-type');
+    assert.equal(await stampOf('edges', out, WARN), undefined, 'an edge FROM the re-typed entity keeps a stamp judged against its old type');
+    assert.equal(await stampOf('edges', into, WARN), undefined, 'an edge TO the re-typed entity keeps a stamp judged against its old type');
+    assert.equal(await stampOf('edges', apart, WARN), OLDER, 'an edge that does not name the re-typed entity lost its stamp');
+  });
+
   it('(11) a KEEP writer (the retention-stamp heal) leaves a stamp as it was', async () => {
     const r = await preReleaseRows();
     const { healStoredStamps } = await import('../../server/dist/brain/retention-stamp-heal.js');
