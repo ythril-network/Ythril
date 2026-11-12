@@ -496,6 +496,44 @@ describe('an equal-seq copy that says something different forks, for every forki
     }
   });
 
+  /*
+   * bundle-265 (Q-737): a record carries `schemaFingerprint`, the fingerprint of the schema its writer validated it against. It REPLICATES, so every
+   * forking family's `Incoming*` schema declares it, and the body fields are DERIVED from those schemas less `VERSION_META`: a stamp that is declared and
+   * not named in `VERSION_META` becomes BODY, and two copies of one version that differ only in which schema their writers held would fork (ADR 15: a
+   * fork is a difference in what a record SAYS). Two members that edited the same version under different schemas are the ordinary case in any network
+   * whose members hold their own types, so the fork would be everyday, and every one of them a Review item about nothing.
+   *
+   * The skipped-verdict half of this case holds on the base too (the stamp is stripped there, so the copies are equal by construction). What is red on
+   * the base is the precondition: the schemas do not declare the stamp, so the case would otherwise pass for a reason that is about to stop being true.
+   */
+  it('the same body with another, a malformed or no schemaFingerprint is skipped, for every forking kind: the stamp says which schema a writer held, never what the record says', async () => {
+    leaf();
+    const { INCOMING_SCHEMA_OF } = await import('../../server/dist/sync/incoming-schemas.js');
+    const { createHash } = await import('node:crypto');
+    const fp = (word) => createHash('sha256').update(`schema ${word}`, 'utf8').digest('hex');
+    assert.equal(P.FORKING_FAMILIES.length >= 4, true, 'FORKING_FAMILIES shrank: the case would range over fewer kinds than the stamp travels on');
+    for (const kind of P.FORKING_FAMILIES) {
+      assert.ok('schemaFingerprint' in INCOMING_SCHEMA_OF[kind].schema.shape,
+        `${kind}: the Incoming schema does not declare schemaFingerprint, so a peer's stamp is stripped on push and the case below says nothing`);
+      assert.ok(!H.BODY_FIELDS_OF[kind].includes('schemaFingerprint'), `${kind}: schemaFingerprint is read as BODY, so a stamp-only difference forks`);
+      assert.ok(H.VERSION_META.includes('schemaFingerprint'), 'VERSION_META does not name schemaFingerprint: the stamp is body');
+      const stamped = base(kind, { schemaFingerprint: fp('X') });
+      for (const [what, stored, arriving] of [
+        ['stored X, arriving Y', stamped, base(kind, { schemaFingerprint: fp('Y') })],
+        ['stored X, arriving none (a peer below 6.6.0 relayed it)', stamped, base(kind)],
+        ['stored none, arriving X', base(kind), stamped],
+        ['stored X, arriving a malformed stamp (read as none)', stamped, base(kind, { schemaFingerprint: 'not a fingerprint' })],
+      ]) {
+        const p = against(kind, stored, arriving);
+        assert.deepEqual(p.verdicts, ['skipped'], `${kind}: ${what} is not skipped (${p.verdicts})`);
+        assert.deepEqual([p.forks.length, p.swaps.length, p.accepts.size], [0, 0, 0], `${kind}: ${what} wrote something`);
+      }
+      // The control: the same pair with a difference in what the record SAYS still forks, so the stamp being ignored is not the case ignoring everything.
+      const real = against(kind, stamped, base(kind, { schemaFingerprint: fp('Y'), [MAIN_FIELD[kind]]: ALTERNATE[kind][MAIN_FIELD[kind]] ?? 'another body' }));
+      assert.deepEqual(real.verdicts, ['forked'], `${kind}: a body difference under another stamp does not fork`);
+    }
+  });
+
   it('a property spelled author, seq or pos is body: a difference in one forks', () => {
     leaf();
     for (const kind of P.FORKING_FAMILIES) {

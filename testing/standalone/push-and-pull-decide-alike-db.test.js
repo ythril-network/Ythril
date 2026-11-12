@@ -49,6 +49,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
+import { createHash } from 'node:crypto';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
@@ -66,6 +67,9 @@ const TOKEN = Object.freeze({ rights: { perSpace: {}, spaceAdmin: { floor: true,
 const OTHER_AUTHOR = Object.freeze({ instanceId: 'someone-else', instanceLabel: 'Someone else' });
 const THIRD = 'third-instance';
 const UNDECLARED = 'notDeclaredByTheSchema';
+/** Two schema fingerprints, as two writers' variations of a space would carry them (bundle-265, Q-737): 64 lowercase hex, never a literal word. */
+const FP_X = createHash('sha256').update('schema X', 'utf8').digest('hex');
+const FP_Y = createHash('sha256').update('schema Y', 'utf8').digest('hex');
 
 /** The planner's verdict union, read from the source: every `export type <X>Verdict = '…' | …;` under sync/. */
 function plannerVerdicts() {
@@ -186,6 +190,30 @@ function rows() {
               && snap.conflicts.length === 1 && snap.conflicts[0].kind === 'metadata' && snap.conflicts[0].losing.description === highText },
         ];
       })() : []),
+      // bundle-265 (Q-737): a record's `schemaFingerprint` is the WRITER's claim of the schema it validated against. It replicates, so an arrival keeps what
+      // the sender sent, on every door alike: the version is replaced whole, the stamp with it (a newer copy with none leaves none; the stored stamp described the
+      // older version), a malformed one is read as none and the record still lands, and a copy at an equal seq that differs only in the stamp is skipped (it is
+      // version metadata, not body), leaving the stored stamp as it was. Records only: a link has no schema and a file no type schema, so neither carries one.
+      ...(forking.includes(key) ? [
+        { name: `${key}: a new record lands keeping its writer's schema fingerprint`, family: key, verdict: isFacts ? 'inserted' : 'upserted',
+          seed: () => ({}), page: (s) => [make(key, s, id, 5, { schemaFingerprint: FP_X })],
+          check: (snap) => has(snap, id, 'schemaFingerprint', FP_X) },
+        { name: `${key}: a newer copy replaces the stored one's fingerprint with the sender's`, family: key, verdict: isFacts ? 'updated' : 'upserted',
+          seed: (s) => ({ stored: [make(key, s, id, 3, { schemaFingerprint: FP_X })] }),
+          page: (s) => [make(key, s, id, 5, { schemaFingerprint: FP_Y })],
+          check: (snap) => has(snap, id, 'seq', 5) && has(snap, id, 'schemaFingerprint', FP_Y) },
+        { name: `${key}: a newer copy with no fingerprint replaces a stamped one, and the stamp goes with the version it described`, family: key, verdict: isFacts ? 'updated' : 'upserted',
+          seed: (s) => ({ stored: [make(key, s, id, 3, { schemaFingerprint: FP_X })] }),
+          page: (s) => [make(key, s, id, 5)],
+          check: (snap) => has(snap, id, 'seq', 5) && snap.docs.every(d => d._id !== id || !('schemaFingerprint' in d)) },
+        { name: `${key}: a malformed fingerprint is read as none, and the record lands`, family: key, verdict: isFacts ? 'inserted' : 'upserted',
+          seed: () => ({}), page: (s) => [make(key, s, id, 5, { schemaFingerprint: 'not a fingerprint' })],
+          check: (snap) => has(snap, id, 'seq', 5) && snap.docs.every(d => d._id !== id || !('schemaFingerprint' in d)) },
+        { name: `${key}: an equal-seq copy that differs only in its fingerprint is skipped, not forked, and the stored stamp stands`, family: key, verdict: 'skipped',
+          seed: (s) => ({ stored: [make(key, s, id, 5, { schemaFingerprint: FP_X })] }),
+          page: (s) => [make(key, s, id, 5, { schemaFingerprint: FP_Y })],
+          check: (snap) => has(snap, id, 'schemaFingerprint', FP_X) && snap.docs.every(d => d.forkOf === undefined) },
+      ] : []),
       { name: `${key}: a wrong-typed field is refused (Q-225)`, family: key, verdict: 'rejected',
         seed: () => ({}), page: (s) => [make(key, s, id, 5, { [wrongTypedField(key)]: 12345 })],
         check: (snap) => !has(snap, id) },
