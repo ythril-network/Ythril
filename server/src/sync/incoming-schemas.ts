@@ -33,6 +33,35 @@ import { MAX_FACT_LENGTH, MAX_PEER_PATH_LENGTH, MAX_TAGS } from '../util/request
  */
 const ForkAtSchema = z.number().int().nonnegative().max(MAX_SYNC_SEQ).optional();
 
+/** The schema stamp (`schemaFingerprint`): the sha256 of a schema's canonical text, lowercase hex. Anything else is not one. */
+const SCHEMA_STAMP = /^[0-9a-f]{64}$/;
+
+/** What a stamp the writer sent is read as: its fingerprint, or `undefined` for anything that is not one. */
+const stampOrAbsent = (value: unknown): string | undefined => (typeof value === 'string' && SCHEMA_STAMP.test(value) ? value : undefined);
+
+/**
+ * The ONE reading of "a malformed stamp is absent" (bundle-265, Q-737): a copy of `doc` with its `schemaFingerprint` left as it is when it is a fingerprint and
+ * left out when it is anything else, so a peer's malformed claim costs it its stamp, never its record, on every door a record arrives by: the `Incoming*`
+ * schemas below close with it (push and pull), and `writeArrivals` asks it of an import, which parses no schema. The stamp is the WRITER's claim, kept as
+ * sent and not checked against any schema here (checking needs the writer's schema, which may be exactly the one this server lacks). A document with no
+ * stamp is returned as it is.
+ */
+export function withoutMalformedStamp<T extends object>(doc: T): T {
+  if (!('schemaFingerprint' in doc) || stampOrAbsent(doc.schemaFingerprint) !== undefined) return doc;
+  const kept: Record<string, unknown> = { ...doc };
+  delete kept['schemaFingerprint'];
+  return kept as T;
+}
+
+/**
+ * The declaration of the stamp on every record family's `Incoming*` schema, read so a malformed one is `undefined` (the value must not fail the record) and
+ * then removed by `withoutMalformedStamp` in the schema's `.overwrite` (zod keeps the KEY of an input that named one, as `undefined`; the schema keeps its
+ * `shape` through `.overwrite`). Declared, because zod strips what a schema does not name and a stripped stamp is lost on push while pull keeps it; it
+ * replicates and is left out of the hash (`REPLICATED_UNHASHED_FIELDS`, `brain/merkle.ts`), and it is version metadata, not body (`VERSION_META`,
+ * `sync/authored-content.ts`).
+ */
+const SchemaStampSchema = z.preprocess(stampOrAbsent, z.string().optional());
+
 export const AuthorRefSchema = z.object({
   instanceId: z.string().min(1),
   instanceLabel: z.string().min(1),
@@ -72,7 +101,9 @@ export const IncomingFactDoc = z.object({
   forkOf: z.string().min(1).optional(),
   /** See `IncomingFactDoc`: the shared version at which the two copies diverged, the seq the fork id is derived from (`forkRowVerdict`). */
   forkAt: ForkAtSchema,
-});
+  /** See `SchemaStampSchema`: the schema its writer held this record to; a malformed one is read as absent. */
+  schemaFingerprint: SchemaStampSchema,
+}).overwrite(withoutMalformedStamp);
 
 /** How many authored keys, and how long a key name, a peer's `authoredKeys` may carry (a file has a handful today). */
 const MAX_AUTHORED_KEYS = 64;
@@ -163,7 +194,9 @@ export const IncomingEntityDoc = z.object({
   forkOf: z.string().min(1).optional(),
   /** See `IncomingFactDoc`: the shared version at which the two copies diverged, the seq the fork id is derived from (`forkRowVerdict`). */
   forkAt: ForkAtSchema,
-});
+  /** See `SchemaStampSchema`: the schema its writer held this record to; a malformed one is read as absent. */
+  schemaFingerprint: SchemaStampSchema,
+}).overwrite(withoutMalformedStamp);
 
 /**
  * The kinds an edge endpoint may declare, built from `REF_KINDS` so a new kind is not refused on the push
@@ -199,7 +232,9 @@ export const IncomingEdgeDoc = z.object({
   forkOf: z.string().min(1).optional(),
   /** See `IncomingFactDoc`: the shared version at which the two copies diverged, the seq the fork id is derived from (`forkRowVerdict`). */
   forkAt: ForkAtSchema,
-});
+  /** See `SchemaStampSchema`: the schema its writer held this record to; a malformed one is read as absent. */
+  schemaFingerprint: SchemaStampSchema,
+}).overwrite(withoutMalformedStamp);
 
 /**
  * A link record on the wire: two endpoints, their kinds, and replication bookkeeping — no suppression
@@ -262,7 +297,9 @@ export const IncomingChronoDoc = z.object({
   forkOf: z.string().min(1).optional(),
   /** See `IncomingFactDoc`: the shared version at which the two copies diverged, the seq the fork id is derived from (`forkRowVerdict`). */
   forkAt: ForkAtSchema,
-});
+  /** See `SchemaStampSchema`: the schema its writer held this record to; a malformed one is read as absent. */
+  schemaFingerprint: SchemaStampSchema,
+}).overwrite(withoutMalformedStamp);
 
 /** A family's wire key: the name its documents travel under in a page and in the push and pull routes. */
 export type IncomingFamilyKey = BrainCollection | 'filemeta';
