@@ -36,7 +36,8 @@ import type { Config, NetworkConfig, NetworkMember, VoteRound } from '../config/
 import { spaceActStands } from '../spaces/space-act-runner.js';
 import { openSpaceTransfer, type SpaceTransfer } from './space-transfer-fence.js';
 import { roundSpaceLocalId, localToRemote } from './space-map.js';
-import { spaceActApplied } from '../networks/round-state.js';import { warnOnce } from '../util/warn-once.js';
+import { spaceActApplied } from '../networks/round-state.js';
+import { warnOnce } from '../util/warn-once.js';
 import { log, peerText } from '../util/log.js';
 
 export type HoldReason = 'act owed here' | 'peer has not concluded' | 'peer concluded first' | 'evidence unknown';
