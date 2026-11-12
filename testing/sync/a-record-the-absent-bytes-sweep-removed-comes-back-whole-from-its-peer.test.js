@@ -55,8 +55,13 @@ const hasBytes = async (base, token, p) => (await fetch(`${base}/api/files/${spa
 const rowOn = (x, p) => mongoEval(x, `print(JSON.stringify(d.getCollection(${JSON.stringify(`${space.id}_files`)}).findOne({ _id: ${JSON.stringify(p)} })))`);
 const tombstonesOn = (x, p) => mongoEval(x, `print(JSON.stringify(d.getCollection(${JSON.stringify(`${space.id}_file_tombstones`)}).find({ path: ${JSON.stringify(p)} }).toArray()))`);
 
-/** What the sweep leaves on `x` for `p`: the bytes gone, the row a `bytes-lost` feed marker, no tombstone. */
-function sweptOn(x, container, p) {
+/**
+ * What the sweep leaves on `x` for `p`: the bytes gone, the row a `bytes-lost` feed marker, no tombstone. The marker is written
+ * into the database directly, which does not move the server's Merkle cache stamp ("a write this process makes, or a database
+ * replaced under it, moves the stamp": brain/merkle.ts, db/space-generation.ts); the real sweep writes through its own process.
+ * So one write through `x`'s server follows, as the sweep's own write would, or `x` answers the check from its cached rows.
+ */
+async function sweptOn(x, base, token, container, p) {
   dockerExec(`docker exec ${container} rm -f ${JSON.stringify(`/data/files/${space.id}/${p}`)}`);
   mongoEval(x, `
     const c = d.getCollection(${JSON.stringify(`${space.id}_files`)});
@@ -64,6 +69,7 @@ function sweptOn(x, container, p) {
     c.replaceOne({ _id: r._id }, { _id: r._id, spaceId: r.spaceId, path: r._id, deletedAt: new Date().toISOString(), feedMarker: true, pos: r.pos, posAtSeq: r.seq ?? 0, retiredBy: 'bytes-lost' });
     print('null');
   `);
+  await upload(base, token, `stamp-${p}`, 'moves the files stamp the way the sweep\'s own write does');
 }
 async function round() {
   for (const [base, token] of [[INSTANCES.a, tA], [INSTANCES.b, tB]]) await post(base, token, `/api/networks/${net.networkId}/sync?wait=true`, {});
@@ -84,7 +90,7 @@ describe('a record the absent-bytes sweep removed, between two instances', () =>
     await waitFor(async () => { await round(); return (await hasBytes(INSTANCES.b, tB, p)) && (rowOn('b', p)?.tags ?? []).includes('person-wrote-this'); },
       120_000, 1_000, 'B never received the file with its tags');
 
-    sweptOn('b', 'ythril-b', p);
+    await sweptOn('b', INSTANCES.b, tB, 'ythril-b', p);
     assert.equal(rowOn('b', p)?.feedMarker, true, 'fixture: the sweep\'s removal was not produced on B');
 
     await waitFor(async () => { await round(); const r = rowOn('b', p); return (await hasBytes(INSTANCES.b, tB, p)) && r && r.feedMarker !== true && (r.tags ?? []).includes('person-wrote-this'); },
@@ -99,7 +105,7 @@ describe('a record the absent-bytes sweep removed, between two instances', () =>
     await waitFor(async () => { await round(); return hasBytes(INSTANCES.b, tB, p); }, 120_000, 1_000, 'B never received the file');
     // The bytes go on A too, behind the sync's back (a lost volume): A keeps a record nobody has bytes for.
     dockerExec(`docker exec ythril-a rm -f ${JSON.stringify(`/data/files/${space.id}/${p}`)}`);
-    sweptOn('b', 'ythril-b', p);
+    await sweptOn('b', INSTANCES.b, tB, 'ythril-b', p);
 
     await waitFor(async () => { await round(); const r = rowOn('b', p); return r && r.feedMarker !== true; },
       180_000, 1_000, () => `A's record was not offered back to B by the re-read: ${JSON.stringify(rowOn('b', p))}`);

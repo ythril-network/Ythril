@@ -23,7 +23,7 @@ The owner's ruling of 2026-11-11 was "remove meta with the file".
 
 ## Consequences
 
-- **A removal is irreversible**, and a record no peer holds bytes for may be offered back by the Merkle re-read, wait again and be removed again, audited each time (`file.absent_bytes.sweep`).
+- **A removal is irreversible**, and a record no peer holds bytes for may be offered back by the Merkle re-read, wait again and be removed again, audited each time (`file.absent_bytes.sweep`). With soft-delete on, the removal is a flag that keeps the row's `seq`, and a flagged row is never swapped for a peer's copy, so there the offer does not land and the record stays removed here.
 - **A network with a silent member never reaches the evidence** and waits the 30 days: the ceiling bounds the wait, it does not skip the other holds.
 - **A rollback is harmless**: an older build ignores `bytesAbsentSince`, `absentBytesScan` and `filesRestoredAt`; what was removed stays removed.
 - **This is the reversal to prevent:** writing a tombstone for bytes lost on one disk; deciding by age or by "no bytes here" without the evidence of peers and the holds; letting the media worker (or any queue) remove a record; or counting such a record in `files`, which tells a reader a file exists that nothing can serve.
