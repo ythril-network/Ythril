@@ -101,6 +101,7 @@ const NOT_A_SETTING = new Map([
   // The local-only field classes, each named in sync-protocol.md by the constant of sync/local-only-fields.ts (or brain/recall-shape.ts) that lists it.
   ...['LOCAL_ONLY_FIELDS', 'RESTORED_LOCAL_FIELDS', 'WRITE_GUARD_FIELDS', 'POSITION_FIELDS', 'TOMBSTONE_LOCAL_FIELDS', 'DECISION_OWED_FIELDS', 'ORDER_ONLY_FIELDS']
     .map((name) => [name, 'a TypeScript constant: a class of local-only field, named in sync-protocol.md as the list that defines it']),
+  ['REPLICATED_UNHASHED_FIELDS', 'a TypeScript constant of brain/merkle.ts: the fields that replicate and are left out of the space hash, named in ADR 22 as the list that defines them'],
   // Placeholders in copy-paste examples.
   ['YOUR_TENANT_ID', 'placeholder in an OIDC example'],
   ['YOUR_CLIENT_ID', 'placeholder in an OIDC example'],

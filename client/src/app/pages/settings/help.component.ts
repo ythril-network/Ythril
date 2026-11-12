@@ -141,6 +141,7 @@ export const HELP_DOCS = [
       'decisions/19-the-schema-vocabulary-and-its-validator-are-one-package-the-server-imports.md',
       'decisions/20-a-scan-hold-warns-by-its-age-not-by-a-count-of-runs.md',
       'decisions/21-a-file-whose-bytes-are-gone-is-removed-here-only-after-evidence-and-an-explicit-delete-keeps-its-tombstone.md',
+      'decisions/22-a-field-that-describes-the-write-may-replicate-and-be-left-out-of-the-space-hash.md',
     ],
   },
   { id: 'workstation-mode-guide', file: 'workstation-mode-guide.md' },
