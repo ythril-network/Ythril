@@ -39,6 +39,13 @@ import { logInternalAudit } from '../audit/audit.js';
 import { eachUnit } from '../util/housekeeping-walk.js';
 import { log } from '../util/log.js';
 
+/**
+ * How old a file with no row must be before a `rowed: 'keep'` sweep takes it for the retired writer's: an upload writes its bytes before its row, and a
+ * sweep that listed the directory between the two would delete a user's file. The retired writer's files are from before the upgrade, far older than this.
+ * Written as one number (`N * 60_000`) for `doc-cited-constants`.
+ */
+export const ROWLESS_FILE_GRACE_MS = 10 * 60_000;
+
 export interface RetiredLocalPaths {
   /** The directory under the space root the retired writer wrote into, as a relative path with `/`. */
   dir: string;
@@ -77,6 +84,12 @@ export async function sweepRetiredLocalPaths(spaceId: string, { dir, matches, ro
     // A row at the path, live or flagged, is what the retired writer never wrote: the file is someone's.
     const withRow = await files.find(asFilter({ _id: { $in: [...found] } }), { projection: { _id: 1 } }).toArray();
     for (const r of withRow) found.delete(r._id);
+    // No row YET is not "the retired writer wrote it": an upload's bytes land before its row, so a file younger than the grace is left for a later cycle.
+    // A file whose age cannot be read is kept too: the next cycle asks again, and nothing of a user's is removed on a guess.
+    for (const rel of [...found]) {
+      const st = await fs.stat(path.join(abs, rel.slice(dir.length + 1))).catch((err: unknown) => (isMissingPath(err) ? null : 'unread' as const));
+      if (st === 'unread' || (st !== null && st.mtimeMs > started - ROWLESS_FILE_GRACE_MS)) found.delete(rel);
+    }
   }
   if (found.size === 0) return 0;
 

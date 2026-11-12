@@ -56,7 +56,13 @@ const SECOND_RETIRED = 'schemas/second_entity_task.json';
 let mongo, ttl;
 
 const abs = (rel, space = SPACE) => path.join(tmpDir, 'files', space, ...rel.split('/'));
-const put = (rel, body, space = SPACE) => { fs.mkdirSync(path.dirname(abs(rel, space)), { recursive: true }); fs.writeFileSync(abs(rel, space), body); };
+/** A day ago: what the 6.5 writer left is from before the upgrade, older than the sweep's grace for a file with no row (`ROWLESS_FILE_GRACE_MS`). */
+const LONG_AGO = new Date(Date.now() - 24 * 60 * 60_000);
+const put = (rel, body, space = SPACE, { fresh = false } = {}) => {
+  fs.mkdirSync(path.dirname(abs(rel, space)), { recursive: true });
+  fs.writeFileSync(abs(rel, space), body);
+  if (!fresh) fs.utimesSync(abs(rel, space), LONG_AGO, LONG_AGO);
+};
 const row = (rel, space = SPACE) => ({
   _id: rel, spaceId: space, path: rel, description: '', tags: [], author: { instanceId: 'self', instanceLabel: 'Self' },
   createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z', seq: 1,
@@ -101,6 +107,15 @@ describe('retired per-type schema files are swept from the space', { skip }, () 
     assert.equal(present(SECOND_RETIRED, SECOND), false, 'the second space\'s retired file was not swept: the walk stopped at the first space');
     for (const rel of [OPERATORS_UPLOAD, MY_NOTES, HEX_NAME, NESTED, NOTE]) assert.ok(present(rel), `${rel} is the user's own and must stay`);
     assert.deepEqual(await rowIds(), [HEX_NAME, MY_NOTES, NESTED, NOTE, OPERATORS_UPLOAD].sort(), 'a row was removed with a file that is not a retired one, or a retired file\'s row appeared');
+  });
+
+  it('a FRESH file at the retired shape with no row yet is an upload whose row is not written: it stays (bundle-265 DI2)', async () => {
+    // Seen red at c244852b: the sweep read "no row" as "the 6.5 writer wrote it" and removed bytes written a moment ago.
+    const uploading = 'schemas/general_entity_arriving.json';
+    put(uploading, '{"uploading":"now"}', SPACE, { fresh: true });
+    await ttl.sweepExpired();
+    assert.ok(present(uploading), 'a file written a moment ago, whose row was not written yet, was swept');
+    for (const rel of RETIRED) assert.equal(present(rel), false, `${rel} is old and rowless and still in the space`);
   });
 
   it('a file at the retired shape that has a row is an upload: its bytes and its row stay', async () => {
