@@ -108,7 +108,7 @@ export interface TokenRecord {
 // Moved to `types-knowledge.ts` — a LEAF that imports nothing, so it cannot become half of a cycle. See that
 // file for why that matters. Imported as well as re-exported, because `export ... from` does not bring a name
 // into local scope and `TtlBucket` below is built from `KnowledgeType`.
-import type { MergeFn, NumericMergeFn, BooleanMergeFn, PropertySchema, TypeSchema, ValidationMode, KnowledgeType, RecordType, TombstoneType, RefKind, SpaceMeta, StampSkewable } from './types-knowledge.js';
+import type { MergeFn, NumericMergeFn, BooleanMergeFn, PropertySchema, TypeSchema, ValidationMode, KnowledgeType, RecordType, TombstoneType, RefKind, SpaceMeta, StampSkewable, SchemaStamped } from './types-knowledge.js';
 export type { MergeFn, NumericMergeFn, BooleanMergeFn, PropertySchema, TypeSchema, ValidationMode, KnowledgeType, SpaceMeta };
 // A VALUE, so it needs its own import and re-export: everything else above is a type. Re-exported from here
 // rather than importing the leaf directly, because `config/types.js` is the one path this codebase's modules
@@ -1285,16 +1285,6 @@ export interface SecretsFile {
 }
 
 // ── MongoDB document shapes ────────────────────────────────────────────────
-
-/**
- * The schema stamp a record carries (Q-736): the fingerprint of the schema it conforms to AS STORED. Set only by the stamp op
- * (`spaces/schema-stamp.ts`) of a write that validated it, removed by a write that leaves it unchecked or non-conforming, kept as sent
- * by an arrival (the writer's claim). A caller's own value in a write body is ignored. Absent on a record written before 6.6.0 and not
- * updated since. A file row and a link row carry none: neither has a schema of its own.
- */
-export interface SchemaStamped {
-  schemaFingerprint?: string;
-}
 
 export interface AuthorRef {
   instanceId: string;

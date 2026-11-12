@@ -13,7 +13,7 @@ import { readMetaForWrite, stampOp, stampOpIfUnmoved, stampSetOf, stampUnsetOf, 
 import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
-import { storedEdgeKind } from './entity-refs.js';
+import { foldEdgeKinds } from './entity-refs.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import type { EdgeDoc } from '../config/types.js';
 import type { RefKind } from '../config/types-knowledge.js';
@@ -165,12 +165,7 @@ export async function updateEdgeById(
    * edge's embedding on the next pass without this function computing anything: the endpoint resolves in the
    * collection the new kind names.
    */
-  for (const side of ['fromKind', 'toKind'] as const) {
-    const given = updates[side];
-    if (given === undefined) continue;
-    const stored = storedEdgeKind(given);
-    if (stored) $set[side] = stored; else $unset[side] = '';
-  }
+  foldEdgeKinds(updates, $set, $unset);
   const newLabel = updates.label ?? existing.label;
   let newDesc = updates.description !== undefined ? updates.description : existing.description;
   let newTags = mergeTagsOrKeep(existing.tags, updates.tags);
@@ -353,9 +348,8 @@ export async function updateEdgeById(
   // previously succeeded is now rejected.
   // A relabel that stayed in place (a peer-authored edge): the guard follows the label in the same write — set for the new subject,
   // or dropped when the label no longer carries one (`_functionalGuard` is `WRITE_GUARD_FIELDS`' field).
-  if (relabelled) {
-    if (functionalGuard !== undefined) $set[FUNCTIONAL_GUARD] = functionalGuard; else Object.assign($unset, UNSET_GUARD);
-  }
+  if (relabelled && functionalGuard !== undefined) $set[FUNCTIONAL_GUARD] = functionalGuard;
+  else if (relabelled) Object.assign($unset, UNSET_GUARD);
   let seq = 0;
   // Admitted and counted from its own check (`admitSpaceWrite`), each time it is attempted; a relabel that moved the edge was counted by `rekeyEdges`.
   const writeInPlace = () => admitSpaceWrite(spaceId, 'edges', () => writeAtReadVersion<EdgeDoc>(spaceId, 'edges', id, ifMatchSeq, (at) => {
@@ -380,7 +374,8 @@ export async function updateEdgeById(
   if (!beforeWrite) return null;
   if (kindChanged) await refuseEdgeToGoneEntity(spaceId, recordAfterPatch(existing, $set, $unset) as unknown as EdgeDoc);   // Q-305
 
-  const result = {
+  // The answer carries the schema stamp as the write left it (`carryStamp`).
+  const result = carryStamp({
     ...existing,
     label: newLabel,
     tags: newTags,
@@ -393,10 +388,9 @@ export async function updateEdgeById(
     ...(!('properties' in $unset) && (updates.properties !== undefined || deleteFieldsPaths) ? { properties: newProps } : {}),
     ...(updates.type !== undefined ? { type: newType } : {}),
     ...(updates.weight !== undefined ? { weight: newWeight } : {}),
-  } as EdgeDoc;
+  } as EdgeDoc, $set, $unset);
   if ('_expireAt' in $set) result._expireAt = $set['_expireAt'] as Date;
   else if ('_expireAt' in $unset) delete (result as { _expireAt?: unknown })._expireAt;
-  carryStamp(result, $set, $unset);
 
   // Apply deleteFields to the returned doc for consistency
   if (deleteFieldsPaths && deleteFieldsPaths.length > 0) {

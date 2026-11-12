@@ -32,7 +32,7 @@ import {
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../merge-fields.js';
 import { type RecordFlags } from '../record-flag.js';
 import { edgeIdFor } from '../edge-id.js';
-import { storedEdgeKind, edgeEndpointKind, missingRefsRefusal } from '../entity-refs.js';
+import { storedEdgeKind, foldEdgeKinds, edgeEndpointKind, missingRefsRefusal } from '../entity-refs.js';
 import { resolveEdgeEndpointNames } from '../edge-endpoint-names.js';
 import type { EdgeDoc, SpaceMeta } from '../../config/types.js';
 import { readMetaForWrite, stampOp, stampSetOf, stampUnsetOf, type MetaForWrite } from '../../spaces/schema-stamp.js';
@@ -408,14 +408,8 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet)
     if (tags !== undefined) $set['tags'] = effectiveTags;
     if (properties !== undefined) $set['properties'] = effectiveProps;
     const $unset: Record<string, unknown> = { ...derived.unset, ...stampUnsetOf(stamp) };
-    // Correcting a kind back to `entity` must UNSET it: absent is the canonical form, and a stored `'entity'`
-    // would make this edge unfindable by its own triplet lookup.
-    for (const side of ['fromKind', 'toKind'] as const) {
-      const given = side === 'fromKind' ? opts?.fromKind : opts?.toKind;
-      if (given === undefined) continue;
-      const stored = storedEdgeKind(given);
-      if (stored) $set[side] = stored; else $unset[side] = '';
-    }
+    // Correcting a kind back to `entity` must UNSET it (`foldEdgeKinds`).
+    foldEdgeKinds({ fromKind: opts?.fromKind, toKind: opts?.toKind }, $set, $unset);
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'edge', existing: existing as unknown as Record<string, unknown> }); // F10
     const result = convergeResult(existing, $set, $unset);
