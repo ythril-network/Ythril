@@ -248,6 +248,11 @@ property only to a caller who also holds `knowledge` `read` on the space (or an 
 row comes without its `value`. `GET /api/spaces/:id/schema-layers` and MCP `space_schema_layers` need `schema` `read`,
 and reordering the networks needs `schema` `admin`.
 
+**Two sync doors read the schema too.** `GET /api/sync/meta` and `GET /api/sync/schema-snapshot` ask `schema` `read` on
+the space, and a peer token without it is answered `403` `schema_rung` (see [Sync API](09-sync-api.md)). They are not in
+the rights catalog, which lists no sync route. A peer token minted by an invite or a join holds `knowledge` `write`, which
+implies it.
+
 ---
 
 ### List Tokens

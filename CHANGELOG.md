@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | `GET /api/sync/meta` now asks `schema: read` on the space (`knowledge: write` implies it); a peer token without it is answered `403 schema_rung` | Give peer tokens `schema: read` where a member reads the schema |
 | The per-type files `schemas/<space>_<kind>_<type>.json` are no longer written, and the housekeeping cycle removes the ones this instance wrote (a file you uploaded at such a path is kept) | Read the schema from `GET /api/spaces/:id/meta` or MCP `space_meta` instead |
 | Members below 6.6.0 drop `schemaFingerprint` on arrival and forward records without it | None; a record is stamped again on its next write on a newer member |
+| 6.5 hashes a stored `schemaFingerprint`, so a `merkle: true` network with a member below 6.6.0, or rolled back to 6.5, reports divergence | Upgrade or roll back every member together |
 | Records written before this release carry no `schemaFingerprint`; nothing backfills it | None; a record is stamped on its next write that conforms |
 
 ### Added
