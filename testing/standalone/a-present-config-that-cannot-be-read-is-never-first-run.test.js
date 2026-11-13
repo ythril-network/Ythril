@@ -148,6 +148,8 @@ describe('a present config.json that cannot be read is never first run', () => {
 
   describe('the real entry point', () => {
     const ENTRY = fileURLToPath(new URL('../../server/dist/index.js', import.meta.url));
+    const HUNG_AFTER_MS = 60_000;
+    const HUNG = `still running after ${HUNG_AFTER_MS / 1000} s`;
     for (const [label, stage] of BAD_STATES) {
       it(`${label}: boot refuses naming config.json and never starts first-run setup`, async () => {
         clear();
@@ -159,12 +161,14 @@ describe('a present config.json that cannot be read is never first run', () => {
         let out = '';
         child.stdout.on('data', c => { out += c; });
         child.stderr.on('data', c => { out += c; });
+        // The bound only tells a boot that hangs from one that refuses. Alone a refusing boot takes 9-11 s in the runner (module load
+        // dominates), so 15 s timed out three cases while a preflight loaded the machine (bundle-267); 60 s keeps the hang check.
         const exit = await new Promise((resolve) => {
-          const timer = setTimeout(() => { child.kill('SIGKILL'); resolve('still running after 15 s'); }, 15000);
+          const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(HUNG); }, HUNG_AFTER_MS);
           child.on('exit', (code) => { clearTimeout(timer); resolve(code); });
         });
         clear();
-        assert.notEqual(exit, 0, `boot over a present config.json (${label}) did not refuse: ${exit === 'still running after 15 s' ? exit : 'it exited 0'}\n${out.slice(0, 600)}`);
+        assert.notEqual(exit, 0, `boot over a present config.json (${label}) did not refuse: ${exit === HUNG ? exit : 'it exited 0'}\n${out.slice(0, 600)}`);
         assert.equal(typeof exit, 'number', `boot over a present config.json (${label}) did not refuse: ${exit}\n${out.slice(0, 600)}`);
         assert.match(out, /config\.json/, `the refusal does not name the file:\n${out.slice(0, 600)}`);
         assert.doesNotMatch(out, /first-run setup required/, 'boot started first-run setup over a present config.json');
