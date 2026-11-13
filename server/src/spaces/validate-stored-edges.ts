@@ -88,25 +88,58 @@ function staleGuardOf(e: StoredEdge): StaleGuard | null {
  * `strictLinkage: false` makes a deliberate documented state and `ErModel.danglingEdges` already reports on its
  * own row. Folding that into a type violation would make one setting's escape hatch look like another setting's
  * breach, so an unresolvable endpoint is passed as "not resolved" and the type rule stays silent about it.
+ *
+ * ## One page, several versions
+ *
+ * `metaOf` names the schema each edge is judged by: the same meta for every edge (the check against the current schema), or the version
+ * each edge carries (`against: 'stamp'`), `null` for an edge that is judged by none (it is counted by the caller, never listed). The ends
+ * are read ONCE for the page, whatever number of versions it holds, and the edges are then judged per version: a functional count spans
+ * the edges of one version only, as the version that declared it would have counted. Stale guards are not about a schema and are
+ * reported for every edge of the page.
  */
 export async function validateStoredEdges(
   spaceId: string,
-  meta: SpaceMeta,
   docs: readonly StoredEdge[],
+  metaOf: (doc: StoredEdge) => SpaceMeta | null,
 ): Promise<StoredEdgeFindings> {
   const out: StoredViolation[] = [];
   const staleGuards: StaleGuard[] = [];
-  if (docs.length === 0) return { violations: out, staleGuards };
+  for (const doc of docs) {
+    const stale = staleGuardOf(doc);
+    if (stale) staleGuards.push(stale);
+  }
+  const groups = new Map<SpaceMeta, StoredEdge[]>();
+  for (const doc of docs) {
+    const meta = metaOf(doc);
+    if (meta) (groups.get(meta) ?? groups.set(meta, []).get(meta)!).push(doc);
+  }
+  if (groups.size === 0) return { violations: out, staleGuards };
+  const judged = [...groups.values()].flat();
+  const typeOf = await endTypesOf(spaceId, judged);
+  // In page order, whatever group an edge fell in: the caller hands each record its findings as it reads them.
+  const found = new Map<string, StoredViolation>();
+  for (const [meta, group] of groups) for (const v of judgeEdgeGroup(meta, group, typeOf)) found.set(v._id, v);
+  for (const doc of docs) { const v = found.get(String(doc._id)); if (v) out.push(v); }
+  return { violations: out, staleGuards };
+}
 
-  const endpointIds = [...new Set(docs.flatMap(e => [e.from, e.to]).filter((x): x is string => !!x))];
+/** The entity type at each end the edges name, in ONE batched read: `null` for an untyped entity, absent for an entity that is not there. */
+async function endTypesOf(spaceId: string, docs: readonly StoredEdge[]): Promise<ReadonlyMap<string, string | null>> {
   const typeOf = new Map<string, string | null>();
+  const endpointIds = [...new Set(docs.flatMap(e => [e.from, e.to]).filter((x): x is string => !!x))];
   if (endpointIds.length > 0) {
     const ents = await readStoredById<{ type?: string }>(spaceCollection(spaceId, 'entities'), endpointIds, { type: 1 });
     for (const [id, e] of ents) typeOf.set(id, e.type ?? null);
   }
+  return typeOf;
+}
+
+/** The violations of edges judged by one `meta`, their ends' types read ({@link endTypesOf}). */
+function judgeEdgeGroup(meta: SpaceMeta, docs: readonly StoredEdge[], typeOf: ReadonlyMap<string, string | null>): StoredViolation[] {
+  const out: StoredViolation[] = [];
 
   /*
-   * How many edges carry each `(from, label)`, counted over the SCANNED page.
+   * How many edges carry each `(from, label)`, counted over the SCANNED page — its edges judged by this `meta`.
    *
    * The page rather than the collection, because every other row this endpoint returns is about what it scanned:
    * a count reaching past the limit would make one answer depend on rows the caller was never shown, and two
@@ -118,8 +151,6 @@ export async function validateStoredEdges(
     !!e.from && !!e.label && typeof e.to === 'string'));
 
   for (const doc of docs) {
-    const stale = staleGuardOf(doc);
-    if (stale) staleGuards.push(stale);
     const v = validateEdge(meta, recordViewOf('edge', doc), {
       ...(doc.from && typeOf.has(doc.from) ? { fromType: typeOf.get(doc.from) } : {}),
       ...(doc.to && typeOf.has(doc.to) ? { toType: typeOf.get(doc.to) } : {}),
@@ -130,5 +161,5 @@ export async function validateStoredEdges(
     });
     if (v.length) out.push({ collection: 'edges', _id: String(doc._id), violations: v });
   }
-  return { violations: out, staleGuards };
+  return out;
 }
