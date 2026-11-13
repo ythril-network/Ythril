@@ -81,14 +81,36 @@ let compileEvictions = 0;
 const onEvict = (): void => { compileEvictions++; };
 let programs = new LruMap<string, Program>(PROGRAM_CACHE_FLOOR, onEvict);
 
+/**
+ * A program map one call owns: the rules of a meta bound to it ({@link compileRulesInto}) compile into it, never into the shared cache.
+ *
+ * It prevents **a walk over old versions churning the shared cache.** The shared cache is sized for the rules the instance's spaces hold
+ * now; a check that judges each stored record by the version it carries (`against: 'stamp'`) runs the rules of texts no space holds now, up
+ * to one text per stamp on a page, and in the shared cache each of those would evict a program every write of a live space needs. A map
+ * the call owns is dropped with the call.
+ */
+export type RulePrograms = Map<string, Program>;
+/** A new, empty {@link RulePrograms} for one call. */
+export const ownRulePrograms = (): RulePrograms => new Map();
+/** Which metas compile into which call's map: keyed by the meta object, so a meta the call dropped takes its binding with it. */
+const boundPrograms = new WeakMap<object, RulePrograms>();
+/**
+ * Bind `meta` to `programs`: {@link evaluateRules} over this very object reads a program the shared cache already holds, and compiles a
+ * missing one into `programs` (once per rule text per call), never into the shared cache. Returns `meta`.
+ */
+export function compileRulesInto<M extends SpaceMeta>(meta: M, programs: RulePrograms): M {
+  boundPrograms.set(meta, programs);
+  return meta;
+}
+
 /** The program for `text` in `kind` against `declared` (`null`: a space rule's open map). Dead when it no longer compiles or reads what is not declared. */
-function programFor(kind: ViewKind, level: 'type' | 'space', declared: ReadonlySet<string> | null, text: string): Program {
+function programFor(kind: ViewKind, level: 'type' | 'space', declared: ReadonlySet<string> | null, text: string, own?: RulePrograms): Program {
   const key = `${kind}\u0000${level}\u0000${declared === null ? '*' : [...declared].sort().join('\u0001')}\u0000${text}`;
-  const cached = programs.get(key);
+  const cached = programs.get(key) ?? own?.get(key);
   if (cached) { compileHits++; return cached; }
   compileMisses++;
   const program = compileRule(kind, level, declared, text);
-  programs.set(key, program);
+  (own ?? programs).set(key, program);
   return program;
 }
 
@@ -206,6 +228,7 @@ export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView,
 
   const rows: SchemaViolation[] = [];
   const self = engineSelf(kind, view);
+  const own = boundPrograms.get(meta);
   for (const { field, rule, level, declared } of sources) {
     const hash = ruleHash(rule.rule);
     const addRow = (reason: string, reads?: Refs, outcome?: SchemaViolation['outcome']): void => {
@@ -219,7 +242,7 @@ export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView,
     };
     const couldNot = (why: string, reads?: Refs): void => { say('could_not_evaluate', `could not be evaluated on this record (${why})`, reads); };
     if (!ruleEngineAvailable()) { couldNot('the rule engine is not available'); continue; }
-    const program = programFor(kind, level, declared, rule.rule);
+    const program = programFor(kind, level, declared, rule.rule, own);
     if (!program.ok) continue; // dead: skipped here, reported by invalidRulesOf and the boot check
     if ([...program.refs.props].some(p => !Object.hasOwn(view.properties, p))) continue; // absent: the rule does not apply
     const large = tooLarge(program.refs, self);
