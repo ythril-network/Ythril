@@ -24,7 +24,6 @@ import { col, asFilter } from '../db/mongo.js';
 import { readStoredById, READ_CHUNK } from '../db/read-by-id.js';
 import type { FileTombstoneDoc } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
-import { dropIndexesIfPresent } from '../db/index-names.js';
 import { inChunks } from '../util/chunks.js';
 import { KeyGenerations } from '../util/key-generations.js';
 import { idKeysetPage, type IdPage } from '../db/id-keyset-page.js';
@@ -112,15 +111,6 @@ export function tombstonesOf(spaceId: string) {
  * so the declaration builds the indexes without naming the collection itself.
  */
 export const FILE_TOMBSTONE_PART = 'fileTombstones' satisfies SpacePart;
-
-/**
- * Drop the indexes of the space's file tombstones that a later release replaced, by name — only those listed
- * (`dropIndexesIfPresent`, the one way a replaced index goes). Here because this module is the one that names the collection;
- * which indexes it should carry, and which it replaced, is the lifecycle's (`FILE_TOMBSTONE_INDEXES` and
- * `dropReplacedFileTombstoneIndexes`, in `tombstones.ts`).
- */
-export const dropFileTombstoneIndexesIfPresent = (spaceId: string, names: readonly string[]) =>
-  dropIndexesIfPresent(spaceCollection(spaceId, 'fileTombstones'), names);
 
 /** The cap as an `extra` for the iso keyset: the rows strictly below it. */
 const belowCap = (cap: string) => ({ positionAt: { $lt: cap } });

@@ -33,6 +33,8 @@
  *   and tries again: `spaces/edge-guard-index.ts`) and the edge identity (the partial unique index that replaces the full one: built beside
  *   it, confirmed, and only then the full one dropped, on a collection with no edge in it; one with edges is the owed job's:
  *   `spaces/edge-identity-index.ts`, `spaces/edge-identity-owed.ts`).
+ * - `replaces`: the names of indexes a later declaration replaced on the same collection, dropped by the build once this one is listed (the
+ *   schema stamp's compound replaces the single-key stamp index; the file tombstones' settle index replaces `{ pending, deletedAt }`).
  *
  * ## What it does not cover
  *
@@ -42,7 +44,7 @@
 import type { Document } from 'mongodb';
 import { SCHEMA_FINGERPRINT_FIELD } from '@ythril-network/schema/internal';
 import { col } from '../db/mongo.js';
-import { indexNamesOf } from '../db/index-names.js';
+import { indexNamesOf, dropIndexesIfPresent } from '../db/index-names.js';
 import { boundOperationMs, housekeepingOpMs } from '../db/write-bound.js';
 import { StoreTimeout } from '../db/write-timeout.js';
 import { storeIsNotAnswering } from '../db/store-condition.js';
@@ -63,7 +65,7 @@ import {
   edgeIdentityState, edgesHoldNoRow, someEdgeIdentityStands,
 } from './edge-identity-index.js';
 import { VECTOR_INDEXED_COLLECTIONS } from './vector-index.js';
-import { STAMP_INDEX, STAMP_PRESENT } from './schema-snapshot-carried.js';
+import { STAMP_INDEX, REPLACED_STAMP_INDEX, STAMP_PRESENT, STAMPED_COLLECTIONS, stampTypeFieldOf } from './schema-snapshot-carried.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { FORK_INDEXES, FORKING_FAMILIES } from '../sync/upsert-plan.js';
 import { TTL_COLLECTIONS } from '../brain/ttl.js';
@@ -95,6 +97,12 @@ export interface SpaceIndex {
   readonly withoutIt?: string;
   /** The index keeps the TTL sweep's queries cheap: built again by the sweep until it stands ({@link ensureTtlIndexes}). */
   readonly sweep?: true;
+  /**
+   * The names of the indexes this one replaces on its collection: each is dropped by the build ({@link buildSpaceIndex}) only once this index is
+   * confirmed listed there, so no read loses its index in between. THE retire path of a declared index (the keyset compounds' bare `{ seq: 1 }`
+   * and the edge identity keep their own builders, which are more than a drop).
+   */
+  readonly replaces?: readonly string[];
 }
 
 /**
@@ -128,14 +136,16 @@ const TTL_INDEXES: readonly SpaceIndex[] = [
   // both ask `deletedAt: { $exists: true }` of every space every cycle. Sparse, so it holds the deleted files' records alone.
   { part: 'files', keys: { deletedAt: 1 }, options: { name: 'ttl_deletedAt', sparse: true }, policy: 'report', bootSafe: false, sweep: true },
   /*
-   * The schema stamp (Q-736) on the four record collections: the owed-snapshot gap scan asks the distinct stamps of every space each housekeeping
-   * cycle, and later readers filter by it. PARTIAL on the stamp's presence, so every row written before 6.6.0 (unstamped) costs nothing; built by the
-   * sweep like the retention indexes, `report`: a space without it is scanned, slowly and correctly, and never blocked at boot.
+   * The schema stamp (Q-736) on the four record collections, keyed (stamp, type field) since bundle-267: the owed-snapshot gap scan asks the distinct
+   * stamps of every space each housekeeping cycle, the version list counts (stamp, type) pairs, and the filter's `older` reads by stamp first. Every one
+   * is answered from the keys alone (`spaces/schema-snapshot-carried.ts`). PARTIAL on the stamp's presence, so every row written before 6.6.0
+   * (unstamped) costs nothing; built by the sweep like the retention indexes, `report`: a space without it fails its schema-version reads closed
+   * (`schema_index_building`) and is never blocked at boot. It replaces the single-key stamp index, whose prefix it serves.
    */
-  ...Object.values(COLLECTION_SUFFIX).map((part): SpaceIndex => ({
-    part, keys: { [SCHEMA_FINGERPRINT_FIELD]: 1 },
+  ...STAMPED_COLLECTIONS.map((part): SpaceIndex => ({
+    part, keys: { [SCHEMA_FINGERPRINT_FIELD]: 1, [stampTypeFieldOf(part)]: 1 },
     options: { name: STAMP_INDEX, partialFilterExpression: { [SCHEMA_FINGERPRINT_FIELD]: { ...STAMP_PRESENT } } },
-    policy: 'report', bootSafe: false, sweep: true,
+    policy: 'report', bootSafe: false, sweep: true, replaces: [REPLACED_STAMP_INDEX],
   })),
 ];
 
@@ -229,7 +239,9 @@ export const SPACE_INDEXES: readonly SpaceIndex[] = Object.freeze([
   ...MEDIA_JOB_INDEXES.map(keys => plain('mediaJobs', keys)),
   ...EMBED_JOB_INDEXES.map(keys => plain('embedJobs', keys)),
   // The file tombstones' settle, move-marker, per-path and paged questions (bundle-30 I16, bundle-51), declared in `files/tombstones.ts`.
-  ...FILE_TOMBSTONE_INDEXES.map(ix => plain(FILE_TOMBSTONE_PART, ix.keys, ix.options)),
+  ...FILE_TOMBSTONE_INDEXES.map((ix): SpaceIndex => ({
+    ...plain(FILE_TOMBSTONE_PART, ix.keys, ix.options), ...('replaces' in ix ? { replaces: ix.replaces } : {}),
+  })),
   /*
    * The lexical half of hybrid search (`brain/lexical-search.ts`), on `matchedText` ONLY: the exact pre-embedding string, so the
    * lexical channel reads precisely the text the vector channel embedded. MongoDB allows ONE text index per collection, so this
@@ -272,8 +284,21 @@ export async function buildSpaceIndex(
   if (ix.builder === 'keyset') return buildKeysetIndex(spaceId, { part: ix.part, keys: ix.keys as Readonly<Record<string, 1>> }, { onBuild: hooks.onKeysetBuild });
   if (ix.builder === 'guard') { await ensureEdgeGuardIndex(spaceId); return undefined; }
   if (ix.builder === 'edge-identity') { await buildEdgeIdentityIndex(spaceId); return undefined; }
-  await col(spaceCollection(spaceId, ix.part)).createIndex({ ...ix.keys }, { ...ix.options });
+  const collName = spaceCollection(spaceId, ix.part);
+  await col(collName).createIndex({ ...ix.keys }, { ...ix.options });
+  if (ix.replaces?.length) await retireReplacedIndexes(collName, ix);
   return undefined;
+}
+
+/**
+ * Drop the indexes `ix` replaces ({@link SpaceIndex.replaces}) from `collName`, only once `ix` is confirmed listed there: a build the store
+ * accepted and did not list leaves every replaced index standing, so no read loses its index. Each through `dropIndexesIfPresent`, the one
+ * way a replaced index goes.
+ */
+async function retireReplacedIndexes(collName: string, ix: SpaceIndex): Promise<void> {
+  const listed = await indexNamesOf(collName);
+  if (!listed.includes(spaceIndexName(ix))) return;
+  await dropIndexesIfPresent(collName, ix.replaces ?? [], listed);
 }
 
 /**
@@ -409,7 +434,11 @@ export function buildSpaceIndexUnits(
 export async function ensureTtlIndexes(spaceId: string): Promise<{ failed: { unit: string; reason: string }[] }> {
   const present = new Map<SpacePart, readonly string[]>();
   for (const part of new Set(SWEEP_INDEXES.map(ix => ix.part))) present.set(part, await indexNamesWithinBound(spaceCollection(spaceId, part)));
-  const missing = SWEEP_INDEXES.filter(ix => !(present.get(ix.part) ?? []).includes(spaceIndexName(ix)));
+  // Missing, or standing beside an index it replaces that is still listed: the build is then a no-op and the drop finishes the retire.
+  const missing = SWEEP_INDEXES.filter(ix => {
+    const listed = present.get(ix.part) ?? [];
+    return !listed.includes(spaceIndexName(ix)) || (ix.replaces ?? []).some(name => listed.includes(name));
+  });
   if (missing.length === 0) return { failed: [] };
   return buildSpaceIndexUnits(spaceId, missing);
 }

@@ -128,7 +128,7 @@ import { ActNotRecorded } from './act-answers.js';
 import { parentOfSidecar } from './moved-paths.js';
 import { decideSlice, fileTombstonePosition, movesToAskAbout, type SliceDecision } from './tombstone-publish-rules.js';
 import {
-  ask, bumpWipeGeneration, dropFileTombstoneIndexesIfPresent, legacyTombstonePage, FILE_TOMBSTONE_PART, FILE_TOMBSTONE_QUERIES, FILE_TOMBSTONE_SETTLE_BATCH, PUBLISHED, readTombstonesById, tombstonesAtPaths, tombstonesOf, wipeGenerationOf,
+  ask, bumpWipeGeneration, legacyTombstonePage, FILE_TOMBSTONE_PART, FILE_TOMBSTONE_QUERIES, FILE_TOMBSTONE_SETTLE_BATCH, PUBLISHED, readTombstonesById, tombstonesAtPaths, tombstonesOf, wipeGenerationOf,
   type MoveMarker, type PrunableRow, type StoredFileTombstone,
 } from './tombstone-store.js';
 import { issuedHereStamp } from '../sync/issued-here.js';
@@ -168,9 +168,10 @@ export const fileTombstoneStaleBefore = (now: Date): string => new Date(now.getT
 export { FILE_TOMBSTONE_PART };
 export const FILE_TOMBSTONE_INDEXES = [
   // The settle: `{ pending: true, settleAt <= t }` sorted by `settleAt` (bundle-71, Q-352: the clock the settle moves, which
-  // is not the clock the one-per-path rule reads). Partial, so it holds only the pending few. It replaces `{ pending, deletedAt }`,
-  // which `dropReplacedFileTombstoneIndexes` drops ({@link REPLACED_FILE_TOMBSTONE_INDEXES}).
-  { keys: { pending: 1, settleAt: 1 }, options: { partialFilterExpression: { pending: { $exists: true } } } },
+  // is not the clock the one-per-path rule reads). Partial, so it holds only the pending few. It replaces `{ pending, deletedAt }`
+  // (bundle-71, Q-352), which the build drops once this one is listed (`replaces`, the declaration's retire path): the index a question no
+  // longer asks is maintained on every pending write for nothing.
+  { keys: { pending: 1, settleAt: 1 }, options: { partialFilterExpression: { pending: { $exists: true } } }, replaces: ['pending_1_deletedAt_1'] },
   // A move's marker: `moveMarkerOf`, `settleBegunMove` and `forgetFinishedMove`, once or more per move. Sparse: only a
   // move's tombstones carry it, and only until the move is finished.
   { keys: { 'move.from': 1, 'move.to': 1 }, options: { sparse: true } },
@@ -186,20 +187,6 @@ export const FILE_TOMBSTONE_INDEXES = [
   // what lets the planner use a partial index.
   { keys: { positionAt: 1, _id: 1 }, options: { partialFilterExpression: { positionAt: { $exists: true } } } },
 ] as const;
-
-/**
- * Drop the file tombstone indexes a later release replaced ({@link REPLACED_FILE_TOMBSTONE_INDEXES}). {@link FILE_TOMBSTONE_INDEXES}
- * themselves are built from the per-space declaration (`spaces/space-indexes.ts`), by `initSpace` and the background pass; this is
- * the step beside them that is not a build, run by the same two. Local state, so there is nothing to migrate but the index: the
- * one a question no longer asks is maintained on every pending write for nothing. Dropped only when listed
- * (`dropIndexesIfPresent`, the one way a replaced index goes).
- */
-export async function dropReplacedFileTombstoneIndexes(spaceId: string): Promise<void> {
-  await dropFileTombstoneIndexesIfPresent(spaceId, REPLACED_FILE_TOMBSTONE_INDEXES);
-}
-
-/** The indexes a later release replaced, by name: dropped by {@link dropReplacedFileTombstoneIndexes}. */
-const REPLACED_FILE_TOMBSTONE_INDEXES = ['pending_1_deletedAt_1'] as const;
 
 /**
  * Give every published tombstone stored before positions existed one (migration of LOCAL state: a file tombstone is never
