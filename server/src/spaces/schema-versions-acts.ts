@@ -36,7 +36,7 @@ import { variationOf, EMPTY_SCHEMA_FINGERPRINT } from './schema-stamp.js';
 import { servableTo } from './schema-snapshot.js';
 import { snapshots } from './schema-snapshot-store.js';
 import { fingerprintTypesIn, STAMPED_COLLECTIONS, FINGERPRINT_TYPES_DEFAULT_MS, type StampedCollection } from './schema-snapshot-carried.js';
-import { heldVersions, versionMetaOf, type HeldVersion } from './schema-version-text.js';
+import { heldVersions, heldVersionsKept, versionMetaOf, type HeldVersion, type HeldProvenance } from './schema-version-text.js';
 import { schemaVersionDiff } from './schema-diff.js';
 import { unknownSpaceSentence } from './unknown-space.js';
 import { SCHEMA_INDEX_BUILDING, BAD_FINGERPRINT, UNKNOWN_FINGERPRINT, badFingerprintSentence } from '../util/errors.js';
@@ -77,7 +77,7 @@ const unknownFingerprint: SchemaVersionsActResult = {
 const unknownSpace = (spaceId: string): SchemaVersionsActResult => ({ status: 404, error: unknownSpaceSentence(spaceId) });
 
 /** May the caller have this held version? Every version for a local token; for a peer-bound one, what the sync door would serve it. */
-const mayHave = (v: HeldVersion, caller: SchemaVersionsCaller): boolean => !caller.shared || !v.kept || servableTo(v.kept, caller.shared).ok;
+const mayHave = (v: HeldProvenance, caller: SchemaVersionsCaller): boolean => !caller.shared || !v.kept || servableTo(v.kept, caller.shared).ok;
 
 /**
  * The parameters both doors take, with their bounds: the route's query (numbers through `queryInt`) and the tool's arguments are parsed by this
@@ -138,7 +138,8 @@ export async function listSchemaVersionsAct(
   const current = variation.stamp.fp;
   // The order of the list: current, the rows newest first, the configured layers no row holds, then what records carry and nothing holds.
   const order = [...new Set([current, ...rowFps, ...variation.layers.map(l => l.stamp.fp), ...counts.keys()])];
-  const held = await heldVersions(spaceId, order);
+  // Held, how and since when, read without the texts: the list names versions, never their schemas.
+  const held = await heldVersionsKept(spaceId, order);
   const versions: VersionEntry[] = [];
   for (const fp of order) {
     const v = held.get(fp);

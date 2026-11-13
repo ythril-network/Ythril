@@ -8,6 +8,7 @@
  *   every place that tolerance dropped named in `unread`. A text this server holds was verified when it arrived (`verifySnapshot`, the strict
  *   path for arriving texts); reading it again must never refuse it, so the two are separate functions.
  * - {@link versionText} / {@link versionTexts}: which text does a fingerprint name in a space, and does this server hold it at all?
+ * - {@link heldVersionsKept}: does this server hold these fingerprints, how and since when, for a reader that needs no schema? It reads no text.
  *
  * ## What it prevents
  *
@@ -108,8 +109,12 @@ export function versionMetaOf(text: string): VersionMeta | null {
  * One version this server holds: its text, and how it came to hold it - what `servableTo` decides on (`kept`, absent for the empty schema,
  * which every instance holds and serves to anyone) and, for a row, when it was kept (`since`).
  */
-export interface HeldVersion {
+export interface HeldVersion extends HeldProvenance {
   readonly text: string;
+}
+
+/** How this server holds a version, without its text: what {@link heldVersionsKept} answers for a reader that needs no schema. */
+export interface HeldProvenance {
   readonly kept?: ServableRow;
   readonly since?: string;
 }
@@ -125,30 +130,53 @@ export function configuredVersions(spaceId: string): Map<string, HeldVersion> {
   return out;
 }
 
-/** A snapshot row as {@link heldVersions} reads it. */
+/** A snapshot row as {@link heldVersions} and {@link heldVersionsKept} read it (`text` by the first only). */
 type HeldRow = { _id: string; text?: unknown } & Partial<Pick<SnapshotRow, 'origin' | 'networkId' | 'links' | 'at'>>;
 
+/** What a row says of how it is held; its text is the caller's. */
+const PROVENANCE_FIELDS = { origin: 1, networkId: 1, links: 1, at: 1 } as const;
+
 /**
- * Each of `fps` this server holds in `spaceId`: the config's first (current, a layer, the empty schema), then one batched read of the rows for
- * the rest. The config's text wins over a row's (a row can lag), and a held row lends the config's version its `since`. A fingerprint with no
- * row is absent; a failed read throws.
+ * Each of `fps` this server holds in `spaceId`, as `rows` (one batched read of the rows that hold a string text, by the caller) and the config
+ * say: the config's first (current, a layer, the empty schema), whose text wins over a row's (a row can lag), and a held row lends the
+ * config's version its `since`. A fingerprint with no row is absent.
  */
-export async function heldVersions(spaceId: string, fps: readonly string[]): Promise<Map<string, HeldVersion>> {
+async function holdingsOf(spaceId: string, fps: readonly string[], textFields: Readonly<Record<string, 1>>): Promise<Map<string, HeldProvenance & { text?: string }>> {
   const configured = configuredVersions(spaceId);
   const wanted = [...new Set(fps)];
   const toRead = wanted.filter(fp => fp !== EMPTY_SCHEMA_FINGERPRINT);
+  // Only a row whose text is a string holds a version: asked of the store, so a reader that leaves the text out answers the same set.
   const rows = toRead.length === 0 ? new Map<string, HeldRow>()
-    : await readStoredById<HeldRow>(spaceCollection(spaceId, 'schemaSnapshots'), toRead, { text: 1, origin: 1, networkId: 1, links: 1, at: 1 });
-  const out = new Map<string, HeldVersion>();
+    : await readStoredById<HeldRow>(spaceCollection(spaceId, 'schemaSnapshots'), toRead, { ...textFields, ...PROVENANCE_FIELDS },
+      { filter: { text: { $type: 'string' } } });
+  const out = new Map<string, HeldProvenance & { text?: string }>();
   for (const fp of wanted) {
     const row = rows.get(fp);
     const since = typeof row?.at === 'string' ? row.at : undefined;
     const fromConfig = configured.get(fp);
     if (fromConfig) { out.set(fp, { ...fromConfig, ...(since !== undefined ? { since } : {}) }); continue; }
-    if (!row || typeof row.text !== 'string' || row.origin === undefined) continue;
+    if (!row || row.origin === undefined) continue;
     const kept: ServableRow = { origin: row.origin, links: row.links ?? null, ...(row.networkId !== undefined ? { networkId: row.networkId } : {}) };
-    out.set(fp, { text: row.text, kept, ...(since !== undefined ? { since } : {}) });
+    out.set(fp, { ...(typeof row.text === 'string' ? { text: row.text } : {}), kept, ...(since !== undefined ? { since } : {}) });
   }
+  return out;
+}
+
+/** Each of `fps` this server holds in `spaceId`, with its text ({@link holdingsOf}). A failed read throws. */
+export async function heldVersions(spaceId: string, fps: readonly string[]): Promise<Map<string, HeldVersion>> {
+  const out = new Map<string, HeldVersion>();
+  for (const [fp, v] of await holdingsOf(spaceId, fps, { text: 1 })) if (typeof v.text === 'string') out.set(fp, { ...v, text: v.text });
+  return out;
+}
+
+/**
+ * Each of `fps` this server holds in `spaceId`, WITHOUT its text: the rows are read with a projection that leaves `text` out (a text can
+ * reach the snapshot cap), for a reader that asks only whether a version is held, how, and since when (the version list, the filter's
+ * held checks). A failed read throws.
+ */
+export async function heldVersionsKept(spaceId: string, fps: readonly string[]): Promise<Map<string, HeldProvenance>> {
+  const out = new Map<string, HeldProvenance>();
+  for (const [fp, v] of await holdingsOf(spaceId, fps, {})) out.set(fp, { ...(v.kept ? { kept: v.kept } : {}), ...(v.since !== undefined ? { since: v.since } : {}) });
   return out;
 }
 
