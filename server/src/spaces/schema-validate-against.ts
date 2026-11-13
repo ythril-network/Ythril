@@ -22,7 +22,7 @@
  * rules a save or an arrival accepted: the door's "only rules its caller could save" promise, held in spirit.
  */
 import type { SpaceMeta } from '../config/types.js';
-import { SCHEMA_FINGERPRINT_FIELD, isSchemaFingerprint } from './schema-stamp.js';
+import { carriedStampOf } from './schema-stamp.js';
 import { versionMetaOf, versionTexts } from './schema-version-text.js';
 import { resolveMetaRefs } from './schema-validation.js';
 import { compileRulesInto, ownRulePrograms } from './schema-rules.js';
@@ -58,12 +58,6 @@ export function currentJudge(meta: SpaceMeta): RecordJudge {
   };
 }
 
-/** The stamp a record carries, when it names a version: a fingerprint-shaped string. Anything else is no version. */
-function stampOf(doc: Readonly<Record<string, unknown>>): string | undefined {
-  const fp = doc[SCHEMA_FINGERPRINT_FIELD];
-  return typeof fp === 'string' && isSchemaFingerprint(fp) ? fp : undefined;
-}
-
 /**
  * Every record judged by the version it carries, run with `settings`' settings (the checked space's current meta). One per call: it holds
  * the call's texts, its program map and its counts.
@@ -75,7 +69,7 @@ export function stampJudge(settings: SpaceMeta): RecordJudge {
   const counts: ValidateSkipped = { unversioned: 0, notHeld: {} };
 
   const metaOf = (memberId: string, doc: Readonly<Record<string, unknown>>): SpaceMeta | null => {
-    const fp = stampOf(doc);
+    const fp = carriedStampOf(doc);
     return fp === undefined ? null : versions.get(memberId)?.get(fp) ?? null;
   };
 
@@ -83,7 +77,7 @@ export function stampJudge(settings: SpaceMeta): RecordJudge {
     against: 'stamp',
     async readPage(memberId, docs) {
       const known = versions.get(memberId) ?? versions.set(memberId, new Map()).get(memberId)!;
-      const wanted = [...new Set(docs.map(stampOf).filter((fp): fp is string => fp !== undefined && !known.has(fp)))];
+      const wanted = [...new Set(docs.map(carriedStampOf).filter((fp): fp is string => fp !== undefined && !known.has(fp)))];
       if (wanted.length === 0) return;
       // One batched read; a failed one throws (never "not held").
       const texts = await versionTexts(memberId, wanted);
@@ -98,7 +92,7 @@ export function stampJudge(settings: SpaceMeta): RecordJudge {
     take(memberId, doc) {
       const meta = metaOf(memberId, doc);
       if (meta) return meta;
-      const fp = stampOf(doc);
+      const fp = carriedStampOf(doc);
       if (fp === undefined) counts.unversioned++;
       else counts.notHeld[fp] = (counts.notHeld[fp] ?? 0) + 1;
       return null;

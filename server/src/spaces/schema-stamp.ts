@@ -65,6 +65,15 @@ export interface SchemaCheckOutcome {
 /** The field a record carries its stamp in: spelled once, in `@ythril-network/schema` (`schema-fingerprint.ts`), and re-exported here for the writers. */
 export { SCHEMA_FINGERPRINT_FIELD, isSchemaFingerprint };
 
+/**
+ * The fingerprint a stored document carries, or `undefined` when it carries none or its stamp is not fingerprint-shaped (no version). The one
+ * reading of a stored record's stamp: the export's carried set and the stamp judge ask it, so neither reads a malformed stamp as a version.
+ */
+export function carriedStampOf(doc: unknown): string | undefined {
+  const fp = typeof doc === 'object' && doc !== null ? (doc as Readonly<Record<string, unknown>>)[SCHEMA_FINGERPRINT_FIELD] : undefined;
+  return isSchemaFingerprint(fp) ? fp : undefined;
+}
+
 /** How a log line names a schema fingerprint: its first 12 hex characters, the one length every line uses, so a grep for one finds them all. */
 export const fpPrefix = (fp: string): string => fp.slice(0, 12);
 
