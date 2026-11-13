@@ -16,7 +16,7 @@
  * ## What is held
  *
  * 1. The group is covered: PROJECTION_COVERED or an IXSCAN on the new index, no FETCH, no COLLSCAN, 0 documents examined; its counts
- *    are the records' own, and junk stamps and non-string types are left out.
+ *    are the records' own, and junk stamps are left out; a non-string type is answered `unnamed` (type null), never dropped (lens sweep F3).
  * 2. `fingerprintsCarriedIn` (gap scan, sweep, fetch) is covered too: today it holds `$exists` and FETCHes every stamped record.
  * 3. `older` as the filter tool runs it (the caller's `$and`, the default landing order) is index-served: no COLLSCAN.
  * 4. The retire: an existing collection with only the old index reads through it; the index step builds the new one and drops the
@@ -66,9 +66,11 @@ describe('the schema-version reads are served by the (stamp, type) index (real M
       for (let k = 0; k < n; k++) ents.push(recordOf('entities', SPACE, ++i, { type, fp, tags: k % 10 === 0 ? ['x'] : ['y'] }));
       if (fp) want.set(`${fp}|${type}`, (want.get(`${fp}|${type}`) ?? 0) + n);
     }
-    // What the group must leave out: a stamp that is no fingerprint, and a type that is no string.
+    // What the group must leave out: a stamp that is no fingerprint. A type that is no string is kept, marked `unnamed`, so its stamp is
+    // still counted and the filter answers it unclassified.
     ents.push(recordOf('entities', SPACE, ++i, { type: 'A', fp: 'not-a-fingerprint' }));
     ents.push(recordOf('entities', SPACE, ++i, { type: 42, fp: V1.fp }));
+    want.set(`${V1.fp}|unnamed`, 1);
     for (const [fp, label, n] of [[V1.fp, 'knows', 20], [V2.fp, 'likes', 20]]) {
       for (let k = 0; k < n; k++) edges.push(recordOf('edges', SPACE, ++i, { type: label, fp }));
     }
@@ -82,7 +84,7 @@ describe('the schema-version reads are served by the (stamp, type) index (real M
   it('fingerprintTypesIn answers every (stamp, type) pair with its count from the index alone', async () => {
     assert.equal(typeof carried.fingerprintTypesIn, 'function', 'spaces/schema-snapshot-carried.js exports no fingerprintTypesIn');
     const { result, sent } = await readsDuring(client, `${SPACE}_entities`, () => carried.fingerprintTypesIn(SPACE, 'entities', { maxTimeMS: 10_000 }));
-    const got = new Map(result.map(r => [`${r.fp}|${r.type}`, r.count]));
+    const got = new Map(result.map(r => [`${r.fp}|${r.unnamed ? 'unnamed' : r.type}`, r.count]));
     assert.deepEqual(new Map([...got].sort()), new Map([...want].sort()), 'the pairs or their counts are not the records\'');
     assert.equal(sent.length, 1, `one command per call: ${sent.map(s => s.name).join(', ')}`);
     assert.ok(sent[0].command.maxTimeMS > 0, 'the group runs with no maxTimeMS');

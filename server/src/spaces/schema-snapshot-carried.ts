@@ -86,11 +86,16 @@ export async function fingerprintsCarriedIn(spaceId: string, collection: Stamped
   return found.filter(fp => isSchemaFingerprint(fp));
 }
 
-/** One (stamp, type) pair the stored records of a collection carry: `type` is `null` for an untyped record. */
+/**
+ * One (stamp, type) pair the stored records of a collection carry: `type` is `null` for an untyped record. `unnamed` marks records whose type
+ * field holds something that is not a string (a peer's arrival keeps its writer's stamp unchecked): no type name can be read for them, so a
+ * reader that classifies by type must answer them unclassified, never leave them out.
+ */
 export interface FingerprintType {
   readonly fp: string;
   readonly type: string | null;
   readonly count: number;
+  readonly unnamed?: true;
 }
 
 /** The figure a list's group runs under when its caller states none. */
@@ -99,7 +104,8 @@ export const FINGERPRINT_TYPES_DEFAULT_MS = 10_000;
 /**
  * Every (stamp, type) pair the stored records of `collection` in `spaceId` carry, with how many records carry each: one `$group` answered
  * from the stamp index's keys ("reads every stamped key of the collection once, no records"), under `maxTimeMS` always. Only fingerprint-shaped
- * stamps and string-or-absent types are answered. Throws on any failure of the read, a missing stamp index among them.
+ * stamps are answered; a type that is neither a string nor absent is answered `unnamed`, never dropped, so its stamp still reaches the
+ * counts and the filter's unclassified records. Throws on any failure of the read, a missing stamp index among them.
  */
 export async function fingerprintTypesIn(
   spaceId: string, collection: StampedCollection, opts: { maxTimeMS?: number } = {},
@@ -114,8 +120,8 @@ export async function fingerprintTypesIn(
   for (const g of groups) {
     const { fp, t } = g._id ?? {};
     if (!isSchemaFingerprint(fp)) continue;
-    if (t !== undefined && t !== null && typeof t !== 'string') continue;
-    out.push({ fp, type: typeof t === 'string' ? t : null, count: g.n });
+    const unnamed = t !== undefined && t !== null && typeof t !== 'string';
+    out.push({ fp, type: typeof t === 'string' ? t : null, count: g.n, ...(unnamed ? { unnamed: true as const } : {}) });
   }
   return out;
 }
