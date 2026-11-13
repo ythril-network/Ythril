@@ -82,6 +82,9 @@ and the two are identical by construction. The REST routes with no tool are in
 | | `space_meta` | `POST /api/space_meta` · legacy: `GET /api/spaces/:id/meta` | read `schema` |
 | | `schema_update` | `POST /api/schema_update` · legacy: `PUT /api/spaces/:id/schema` | admin `schema` |
 | | `space_schema_layers` | `POST /api/space_schema_layers` · legacy: `GET /api/spaces/:id/schema-layers` | read `schema` |
+| | `space_schema_versions` | `POST /api/space_schema_versions` · legacy: `GET /api/spaces/:id/schema-versions` | read `schema` |
+| | `space_schema_versions` | `POST /api/space_schema_versions` · legacy: `GET /api/spaces/:id/schema-versions/:fp` | read `schema` |
+| | `space_schema_versions` | `POST /api/space_schema_versions` · legacy: `GET /api/spaces/:id/schema-versions/:fp/diff` | read `schema` |
 | | `space_set_network_precedence` | `POST /api/space_set_network_precedence` · legacy: `PUT /api/spaces/:id/network-precedence` | admin `schema` |
 | | `space_reembed` | `POST /api/space_reembed` · legacy: `POST /api/spaces/:id/reembed` | admin `knowledge` |
 | | `file_stamp_report` | `POST /api/file_stamp_report` · legacy: `POST /api/spaces/:id/file-stamp-report` | instance-admin (MCP) · REST exempt |
