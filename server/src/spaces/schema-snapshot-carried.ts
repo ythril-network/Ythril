@@ -29,8 +29,11 @@ export const STAMPED_COLLECTIONS = KNOWLEDGE_TYPES.map(t => COLLECTION_SUFFIX[t]
 /** One of {@link STAMPED_COLLECTIONS}. */
 export type StampedCollection = (typeof STAMPED_COLLECTIONS)[number];
 
-/** The stamp's partial index (`spaces/space-indexes.ts`), which every read here is hinted to. */
+/** The stamp's partial index, which every read here is hinted to: `spaces/space-indexes.ts` builds it under this name, read here, never copied. */
 export const STAMP_INDEX = `${SCHEMA_FINGERPRINT_FIELD}_present`;
+
+/** The stamp index's partial filter: the index holds only stamped records, and every read here holds this condition verbatim so the hint can serve it. */
+export const STAMP_PRESENT = { $exists: true } as const;
 
 /**
  * The fingerprints a stored record of `collection` in `spaceId` carries, each once; with `among`, only those of `among` (none asked: none read).
@@ -38,7 +41,7 @@ export const STAMP_INDEX = `${SCHEMA_FINGERPRINT_FIELD}_present`;
  */
 export async function fingerprintsCarriedIn(spaceId: string, collection: StampedCollection, among?: readonly string[]): Promise<string[]> {
   if (among !== undefined && among.length === 0) return [];
-  const filter = { [SCHEMA_FINGERPRINT_FIELD]: { $exists: true, ...(among !== undefined ? { $in: [...among] } : {}) } };
+  const filter = { [SCHEMA_FINGERPRINT_FIELD]: { ...STAMP_PRESENT, ...(among !== undefined ? { $in: [...among] } : {}) } };
   const found = await distinctStringsOf(col<Record<string, unknown>>(spaceCollection(spaceId, collection)), SCHEMA_FINGERPRINT_FIELD,
     asFilter<Record<string, unknown>>(filter), { hint: STAMP_INDEX });
   return found.filter(fp => isSchemaFingerprint(fp));
