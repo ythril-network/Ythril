@@ -46,14 +46,16 @@ export type KeepVerifiedOutcome =
 
 /**
  * Verify `text` as the snapshot `fp` names and keep it in `spaceId` as `fetched` (from `from` when given), with `rawLinks` shape-checked. Throws what
- * the write throws.
+ * the write throws. A row it inserts is counted `fetched`, or `imported` when the admin import passes that as `counted`.
  */
-export async function keepVerifiedSnapshot(spaceId: string, fp: string, text: unknown, rawLinks: unknown, from?: string): Promise<KeepVerifiedOutcome> {
+export async function keepVerifiedSnapshot(
+  spaceId: string, fp: string, text: unknown, rawLinks: unknown, from?: string, counted?: 'imported',
+): Promise<KeepVerifiedOutcome> {
   if (typeof text !== 'string') return { outcome: 'refused_shape' };
   const verdict = verifySnapshot(text, fp);
   if (!verdict.ok) return { outcome: verdict.outcome };
   const links = linksFrom(rawLinks);
   // Bounded: neither the turn nor an import act is a request, so nothing else ends a write that waits on a locked document.
-  const kept = await withinWriteBound(() => ensureSnapshot(spaceId, { fp, text }, { origin: 'fetched', ...(from !== undefined ? { from } : {}), links }));
+  const kept = await withinWriteBound(() => ensureSnapshot(spaceId, { fp, text }, { origin: 'fetched', ...(from !== undefined ? { from } : {}), links }, counted));
   return { outcome: kept === 'refused' ? 'act_stands' : kept, links };
 }

@@ -8,7 +8,8 @@
  * per REPLICATED family, by collection name, streamed document by document with backpressure. What this instance derives with its own model,
  * its write guard and its positions are left out (`NOT_CARRIED_BY_BACKUP`); the record tier (retention stamps, `deliveredBy`, `syncBase`,
  * `_resolvedElsewhere`) stays, because a restore of an own backup keeps it. Of the files collection only the rows a backup holds are written
- * (`backupRow`, the rule the import drops by): no chunk, no face row, no legacy spill.
+ * (`backupRow`, the rule the import drops by): no chunk, no face row, no legacy spill. After the families, `schemaSnapshots`: the schema
+ * snapshots the written records carry and those they link, `{ fp, text, links }` each (`sync/schema-snapshot-export.ts`).
  *
  * ## The import
  *
@@ -46,6 +47,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { NOT_CARRIED_BY_BACKUP, backupRow } from '../sync/local-only-fields.js';
 import { REPLICATED_FAMILIES } from '../sync/replicated-families.js';
 import { ExportBodyMalformed, ExportBodyTooLarge } from '../sync/export-stream.js';
+import { SNAPSHOTS_EXPORT_KEY, exportedSnapshotIds, noteCarried, writeSnapshotElements, type SnapshotsWritten } from '../sync/schema-snapshot-export.js';
 import { SERVER_VERSION } from '../util/server-version.js';
 import { log, peerText } from '../util/log.js';
 import { settledWithin } from '../util/time-bound.js';
@@ -90,7 +92,14 @@ spaceTransferRouter.get('/:spaceId/export', globalRateLimit, requireAdminMfaScop
   const projection = Object.fromEntries([...NOT_CARRIED_BY_BACKUP].map(f => [f, 0]));
   // What the export wrote so far, per family, for its audit row: written when the response finishes or is cut off (the counts so far).
   const written = REPLICATED_FAMILIES.map(f => ({ field: f.collection, to: 0 }));
-  req.auditChangesExplicit = written;
+  const snapshotCounts: SnapshotsWritten = { written: { to: 0 }, omitted: { to: 0 } };
+  req.auditChangesExplicit = [
+    ...written,
+    Object.assign(snapshotCounts.written, { field: SNAPSHOTS_EXPORT_KEY }),
+    Object.assign(snapshotCounts.omitted, { field: 'schemaSnapshotsOmitted' }),
+  ];
+  // The fingerprints the written records carry: the snapshots the export then holds are exactly theirs (and what those link).
+  const carried = new Set<string>();
 
   const write = (chunk: string): Promise<void> =>
     res.write(chunk) ? Promise.resolve() : new Promise<void>(resolve => res.once('drain', resolve));
@@ -106,6 +115,7 @@ spaceTransferRouter.get('/:spaceId/export', globalRateLimit, requireAdminMfaScop
     for await (const doc of cursor) {
       if (files && !backupRow.predicate(doc as Record<string, unknown>)) continue;
       await write((first ? '' : ',') + JSON.stringify(doc));
+      noteCarried(carried, doc);
       first = false;
       count.to++;
     }
@@ -133,6 +143,9 @@ spaceTransferRouter.get('/:spaceId/export', globalRateLimit, requireAdminMfaScop
       await write(`,${JSON.stringify(f.collection)}:`);
       await streamArray(cursors[i]!, f.collection === 'files', written[i]!);
     }
+    // After the families: the schema snapshots the written records use, and those they link (`sync/schema-snapshot-export.ts`).
+    await write(`,${JSON.stringify(SNAPSHOTS_EXPORT_KEY)}:`);
+    await writeSnapshotElements(spaceId, await exportedSnapshotIds(spaceId, carried), write, snapshotCounts);
     await write('}');
     res.end();
   } catch (err) {
