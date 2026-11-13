@@ -208,6 +208,10 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/spaces/:id/schema', method: 'PUT', area: 'schema', needs: 'admin', scope: 'path' },
   { route: '/api/spaces/:id/meta', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
   { route: '/api/spaces/:id/schema-layers', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
+  // Q-742: the space's schema versions, read like its meta.
+  { route: '/api/spaces/:id/schema-versions', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
+  { route: '/api/spaces/:id/schema-versions/:fp', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
+  { route: '/api/spaces/:id/schema-versions/:fp/diff', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
   { route: '/api/spaces/:id/network-precedence', method: 'PUT', area: 'schema', needs: 'admin', scope: 'path' },
   // `PATCH /api/spaces/:id` and `DELETE /api/spaces/:id` used to sit here as `schema` rows. They are not
   // views of one area's data, so they moved to `NOT_AREA_SCOPED` below with their reasons.
@@ -371,6 +375,7 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   // `knowledge: read` besides, and is withheld otherwise (`spaces/schema-validate-door.ts`), on both doors.
   { tool: 'schema_validate', area: 'schema', needs: 'read' },
   { tool: 'space_schema_layers', area: 'schema', needs: 'read' },
+  { tool: 'space_schema_versions', area: 'schema', needs: 'read' },
   { tool: 'space_set_network_precedence', area: 'schema', needs: 'admin' },
   // Governed by a rung from the moment it stopped being an instance-admin tool. `admin: true` exempts a tool
   // from this inventory because an instance-level capability has no space to scope to; `spaceAdmin: true` is
