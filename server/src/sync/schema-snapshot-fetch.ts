@@ -65,8 +65,13 @@ import { peerSafeFetch, transferInit } from './peer-fetch.js';
 import { peerRunsAtLeast, reportedVersion } from './peer-floor.js';
 import { BACKOFF_FIRST_MS, dropOwedSchemaSnapshot, forgetOwedSchemaSnapshot, noteNotHeld, owedTo, STAMPED_COLLECTIONS } from './schema-snapshot-owed.js';
 
-/** The first release that serves snapshots; a member not known to run it is never asked. */
-export const SCHEMA_SNAPSHOT_SINCE = '6.6.0';
+/**
+ * The version a member must report to be asked; a member not known to run it is never asked. It is the version main reported when the route landed,
+ * not the release that ships it: a build reports its package's version, which only the release bumps, so a floor at the coming release would match no
+ * member of any network built from main and leave the fetch dormant everywhere until the release (gate a-peer-version-floor-is-not-above-this-build).
+ * The released build of this number has no route: it answers 404 without a code, which is remembered per member and version, so it costs one request.
+ */
+export const SCHEMA_SNAPSHOT_SINCE = '6.5.5';
 
 /** The most snapshots asked of one member for one space in one turn; the rest wait for the next. */
 export const SNAPSHOT_FETCHES_PER_TURN = 4;
