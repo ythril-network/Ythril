@@ -44,7 +44,7 @@
 import type { Document } from 'mongodb';
 import { SCHEMA_FINGERPRINT_FIELD } from '@ythril-network/schema/internal';
 import { col } from '../db/mongo.js';
-import { indexNamesOf, dropIndexesIfPresent } from '../db/index-names.js';
+import { indexNamesOf, dropReplacedOnceListed } from '../db/index-names.js';
 import { boundOperationMs, housekeepingOpMs } from '../db/write-bound.js';
 import { StoreTimeout } from '../db/write-timeout.js';
 import { storeIsNotAnswering } from '../db/store-condition.js';
@@ -286,19 +286,9 @@ export async function buildSpaceIndex(
   if (ix.builder === 'edge-identity') { await buildEdgeIdentityIndex(spaceId); return undefined; }
   const collName = spaceCollection(spaceId, ix.part);
   await col(collName).createIndex({ ...ix.keys }, { ...ix.options });
-  if (ix.replaces?.length) await retireReplacedIndexes(collName, ix);
+  // The indexes `ix` replaces ({@link SpaceIndex.replaces}) go only once `ix` is confirmed listed (`dropReplacedOnceListed`).
+  if (ix.replaces?.length) await dropReplacedOnceListed(collName, [spaceIndexName(ix)], ix.replaces);
   return undefined;
-}
-
-/**
- * Drop the indexes `ix` replaces ({@link SpaceIndex.replaces}) from `collName`, only once `ix` is confirmed listed there: a build the store
- * accepted and did not list leaves every replaced index standing, so no read loses its index. Each through `dropIndexesIfPresent`, the one
- * way a replaced index goes.
- */
-async function retireReplacedIndexes(collName: string, ix: SpaceIndex): Promise<void> {
-  const listed = await indexNamesOf(collName);
-  if (!listed.includes(spaceIndexName(ix))) return;
-  await dropIndexesIfPresent(collName, ix.replaces ?? [], listed);
 }
 
 /**

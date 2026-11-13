@@ -35,7 +35,7 @@ import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 import { settledWithin } from '../util/time-bound.js';
 import { detachedWrite } from '../db/write-bound.js';
 import { readRowsById } from '../db/read-by-id.js';
-import { dropIndexesIfPresent, indexNamesOf } from '../db/index-names.js';
+import { dropReplacedOnceListed } from '../db/index-names.js';
 import { retryRowsStored, type RetryRowVerdict } from './retry-rows-stored.js';
 
 /** Retry schedule in milliseconds: 10s, 30s, 1m, 5m, 30m, 1h */
@@ -56,13 +56,12 @@ const REPLACED_INDEX = 'scheduledAt_1';
  * listen. The poll works without them, only slower.
  *
  * The two compounds the poll's choice reads are built first, and the `{ scheduledAt: 1 }` they replace is dropped only once both are
- * listed (`dropIndexesIfPresent`), so the queue is never left with neither.
+ * listed (`dropReplacedOnceListed`), so the queue is never left with neither.
  */
 export async function initRetryQueueIndexes(): Promise<void> {
   const queue = col<RetryJob>(RETRY_COLLECTION);
   const names = [await queue.createIndex(DUE_KEYS_INDEX), await queue.createIndex(LANE_INDEX)];
-  const present = await indexNamesOf(RETRY_COLLECTION);
-  if (names.every(n => present.includes(n))) await dropIndexesIfPresent(RETRY_COLLECTION, [REPLACED_INDEX], present);
+  await dropReplacedOnceListed(RETRY_COLLECTION, names, [REPLACED_INDEX]);
 }
 /** How often the retry poll runs a tick. The drain sentence of integration guide 14 states it (a gate compares). */
 export const RETRY_POLL_INTERVAL_MS = 10_000;
