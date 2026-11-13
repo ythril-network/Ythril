@@ -1203,7 +1203,7 @@
   "spaces.schema.exportToLibraryButton": "Eksportuj do biblioteki",
   "spaces.schema.libPicker.skipped": "Juz w tej przestrzeni, wiec nie zaimportowano: {{names}}",
   "spaces.schema.libPicker.importGroup": "Importuj grupe",
-  "spaces.schema.importLibraryButton": "Importuj biblioteke",
+  "spaces.schema.importLibraryButton": "Importuj bibliotekę",
   "spaces.schema.exportToLibraryTitle": "Wyeksportuj cały schemat tej przestrzeni do biblioteki schematów instancji jako grupę wielokrotnego użytku",
   "spaces.schema.exportToLibrary.title": "Eksportuj schemat do biblioteki",
   "spaces.schema.exportToLibrary.hint": "Dodaje jeden wpis biblioteki na typ (zgrupowane), aby można było zastosować cały ten schemat do innej przestrzeni. Typy już powiązane z biblioteką są pomijane.",

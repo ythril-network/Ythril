@@ -21,7 +21,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
@@ -40,6 +40,20 @@ describe('no package script calls the compiler by its bin link', () => {
       }
     }
     assert.deepEqual(found, [], `these steps run whatever node_modules/.bin/tsc points at; write node ../scripts/tsc.mjs instead:\n${found.join('\n')}`);
+  });
+
+  it('no package script deletes a build output before the runner has checked the install (it cleans with --clean)', () => {
+    // A step that deleted dist and then ran a runner that refused a stale install left the checkout with no dist at all (bundle-266).
+    const manifests = trackedSources('.', { ext: ['package.json'], floor: 4 }).filter(f => f === 'package.json' || f.endsWith('/package.json'));
+    const found = [];
+    for (const file of manifests) {
+      const scripts = JSON.parse(readFileSync(join(REPO_ROOT, file), 'utf8')).scripts ?? {};
+      for (const [name, body] of Object.entries(scripts)) {
+        const at = body.search(/\bnode\s+(?:\.\.\/)?scripts\/tsc\.mjs\b/);
+        if (at > 0 && /rmSync|rimraf|\brm\s+-[a-z]*r/.test(body.slice(0, at))) found.push(`${file} "${name}"`);
+      }
+    }
+    assert.deepEqual(found, [], `these scripts delete before the install check; pass --clean <dir> to scripts/tsc.mjs instead:\n${found.join('\n')}`);
   });
 
   it('the reader finds every bin-link spelling and passes the runner', () => {
@@ -73,6 +87,15 @@ describe('scripts/tsc.mjs runs the workspace\'s own typescript', () => {
     assert.equal(r.status, 3, `the runner's exit status is not the compiler's: ${r.stderr}`);
     assert.deepEqual(JSON.parse(r.stdout.trim()), { own: true, args: ['--noEmit', '-p', 'a b.json'] });
     assert.doesNotMatch(r.stdout, /claimed-by-another-package/);
+  });
+
+  it('--clean <dir> empties that folder and is not passed to the compiler', () => {
+    mkdirSync(join(dir, 'out', 'sub'), { recursive: true });
+    writeFileSync(join(dir, 'out', 'sub', 'old.js'), 'stale');
+    const r = spawnSync(process.execPath, [RUNNER, '--clean', 'out', '-p', 'x.json'], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 3, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout.trim()).args, ['-p', 'x.json']);
+    assert.equal(existsSync(join(dir, 'out')), false, 'the --clean folder is still there');
   });
 
   it('fails when the workspace has no typescript, never falling back to a bin link', () => {

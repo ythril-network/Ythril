@@ -39,7 +39,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && node ../scripts/tsc.mjs -p tsconfig.json",
+    "build": "node ../scripts/tsc.mjs --clean dist -p tsconfig.json",
     "prepack": "npm run build"
   },
   "dependencies": {
