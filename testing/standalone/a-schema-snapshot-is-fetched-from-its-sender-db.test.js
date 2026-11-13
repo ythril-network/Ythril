@@ -190,17 +190,17 @@ describe('a record stamped with a snapshot this server lacks fetches it from the
     });
   });
 
-  describe('a member that does not run 6.6.0 is never asked', () => {
-    it('a 6.5 member and a member of unknown version are not asked; the records they sent still land', async () => {
+  describe('a member below the snapshot floor is never asked', () => {
+    it('a member below SCHEMA_SNAPSHOT_SINCE and a member of unknown version are not asked; the records they sent still land', async () => {
       const snap = await snapshotNamed('old');
       peer.snapshot = () => ok(snap);
-      door.configure({ memberExtra: { version: '6.5.5' } });
+      door.configure({ memberExtra: { version: '6.5.4' } });
       const id1 = arrives(snap.fp);
       await sync();
       door.configure({ memberExtra: { version: undefined } });
       const id2 = arrives(snap.fp);
       await sync();
-      assert.deepEqual(askedFor(), [], 'a member that does not run 6.6.0 was asked for a snapshot');
+      assert.deepEqual(askedFor(), [], 'a member below the snapshot floor was asked for a snapshot');
       assert.ok(await door.coll(S, 'facts').findOne({ _id: id1 }) && await door.coll(S, 'facts').findOne({ _id: id2 }), 'the records of the old member did not land');
     });
   });

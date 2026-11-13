@@ -96,7 +96,11 @@ describe('a closed network of two members that hold different schemas', () => {
     // The own types are set BEFORE the network exists, so each space is a plain one and no round carries a layer: X and Y are the two members' own variations.
     const a = await patch(INSTANCES.a, tokenA, `/api/spaces/${SPACE}`, { meta: { typeSchemas: typeSchemas('lead', 'stage') } });
     assert.ok(a.status < 300, `own type on A: ${a.status} ${JSON.stringify(a.body)}`);
-    const b = await patch(INSTANCES.b, tokenB, `/api/spaces/${SPACE}`, { meta: { typeSchemas: typeSchemas('task', 'owner') } });
+    // B's variation also allows A's `lead`, so B's edit of A's lead (the last case) conforms on B and is stamped with B's fingerprint: a type outside B's
+    // allowlist would be a violation there, and a write that does not conform is unstamped by design (a stamp means full conformance).
+    const bTypes = typeSchemas('task', 'owner');
+    bTypes.entity.lead = { propertySchemas: { stage: { type: 'string' }, priority: { type: 'string' } } };
+    const b = await patch(INSTANCES.b, tokenB, `/api/spaces/${SPACE}`, { meta: { typeSchemas: bTypes } });
     assert.ok(b.status < 300, `own type on B: ${b.status} ${JSON.stringify(b.body)}`);
     closed = await mirroredNetwork({ label: `fpwire-${RUN}`, spaces: [SPACE], a: [INSTANCES.a, tokenA], b: [INSTANCES.b, tokenB], merkle: true });
     networkId = closed.networkId;
