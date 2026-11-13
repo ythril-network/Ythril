@@ -119,6 +119,23 @@ export class EdgeIdentityBuilding extends Error {
   }
 }
 
+/** The code a door answers a read of schema versions with while the collection it reads has no schema version index. A constant, never a literal at a site. */
+export const SCHEMA_INDEX_BUILDING = 'schema_index_building';
+
+/**
+ * A read of the schema stamps of a collection that lists neither stamp index (bundle-267, design r3 final change 6): it fails closed rather than
+ * scanning every record. The index step builds it on the next housekeeping cycle; every door answers `503` with `code: 'schema_index_building'`
+ * and `retryable: true`.
+ */
+export class SchemaIndexBuilding extends Error {
+  override readonly name = 'SchemaIndexBuilding';
+  readonly code = SCHEMA_INDEX_BUILDING;
+  readonly status = 503;
+  constructor(readonly spaceId: string) {
+    super(`The schema version index of space '${spaceId}' is being built; retry after the housekeeping cycle.`);
+  }
+}
+
 /** The codes the two fork refusals below answer with, in this order: the one list a door, a tool text and its gate read them from. */
 export const FORK_REFUSAL_CODES = Object.freeze(['fork_row_read_only', 'fork_cap'] as const);
 

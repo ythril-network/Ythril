@@ -36,7 +36,7 @@ import { forgetSpaceShape } from '../brain/space-shape.js';
 import { forgetHeld } from './schema-stamp.js';
 import { keepVariationSnapshots } from './schema-snapshot-store.js';
 import { cancelEveryJobOfSpace } from '../files/media/job-queue.js';
-import { dropReplacedFileTombstoneIndexes, forgetFileTombstonesOf } from '../files/tombstones.js';
+import { forgetFileTombstonesOf } from '../files/tombstones.js';
 import { forgetPathKeyedCache } from '../files/path-keyed-cache.js';
 import { retireEmbedWorkOfRemovedRows } from '../files/file-embed-work.js';
 import { buildSpaceIndexesAtInit, forgetSpaceIndexWarnings } from './space-indexes.js';
@@ -66,7 +66,7 @@ import { raiseFileFeedFloorToHead, dropFileFeedFloor } from '../files/file-feed-
  * (`ensureQueryIndexes`), because its build reads the whole collection. A failed build follows the index's policy: the identity
  * index, the link pair and the plain indexes stop the space initialising, the write guard and the TTL indexes are said and
  * skipped, the text index is a warning. The steps that are not builds stay here, in their order: the legacy prefixed indexes and
- * the superseded edge identity are dropped before the declaration runs, the replaced file tombstone index after it.
+ * the superseded edge identity are dropped before the declaration runs; an index a declared one replaces goes with that one's build.
  */
 export async function initSpace(
   spaceId: string,
@@ -133,9 +133,8 @@ export async function initSpace(
   // An edges collection that holds no row is as free to build as a new one: the partial edge identity index replaces the full one there at once (Q-624);
   // one WITH edges stays on the full index until the owed job's swap (`spaces/edge-identity-owed.ts`).
   const edgesEmpty = createdNow.has(spaceCollection(spaceId, 'edges')) || await edgesHoldNoRow(spaceId);
+  // An index a declared one replaces (the file tombstones' `{ pending, deletedAt }`) is dropped by that one's build once it is listed (`replaces`).
   await buildSpaceIndexesAtInit(spaceId, part => createdNow.has(spaceCollection(spaceId, part)) || (part === 'edges' && edgesEmpty));
-  // After it: the file tombstone index a later release replaced, maintained on every pending write for nothing.
-  await dropReplacedFileTombstoneIndexes(spaceId);
 
   // Vector search indexes (Atlas Local / Atlas) — only on the collections that hold a record (Q-165): a
   // populated collection's are created or validated here, an empty one's are dropped, which is also how an

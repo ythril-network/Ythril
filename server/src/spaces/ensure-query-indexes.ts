@@ -30,7 +30,7 @@ import { log, peerText } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
 import { type KeysetBuild } from './keyset-indexes.js';
 import { SPACE_INDEXES, buildSpaceIndexUnits } from './space-indexes.js';
-import { dropReplacedFileTombstoneIndexes, positionLegacyFileTombstones } from '../files/tombstones.js';
+import { positionLegacyFileTombstones } from '../files/tombstones.js';
 import { positionUnpositionedFileRows } from '../files/unpositioned-file-rows.js';
 import { configuredSpaces } from './space-lookup.js';
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
@@ -43,9 +43,9 @@ const QUERY_INDEXES_STEP = declareStep('query indexes');
  *
  * Every declared index, each its own unit through the walk (`eachSpace`, `eachUnit`), whatever its policy: a failure on one index
  * is said with the space and the index named and the others are still built; a failure that is the whole space's (a store that
- * stopped answering, a space that stalls) ends that space's pass; one space's failure never stops the next or the boot. Beside the
- * builds, two steps that are not builds: the local position a file tombstone stored before positions existed lacks, and the drop of
- * the file tombstone index a later release replaced.
+ * stopped answering, a space that stalls) ends that space's pass; one space's failure never stops the next or the boot. An index a
+ * declared one replaces is dropped by that one's build, once it is listed (`replaces`). Beside the builds, two steps that are not builds:
+ * the local position a file tombstone stored before positions existed lacks, and the one a live file row lacks.
  *
  * Returns how many units were issued, so a caller can log it and a test can assert the loop ran rather than trusting that it did.
  * The builds themselves stay unbounded: an index build scales with the collection, so no one figure is right (`db/write-bound.ts`
@@ -65,8 +65,6 @@ export async function ensureQueryIndexes(): Promise<number> {
       { name: 'file tombstone positions', run: () => positionLegacyFileTombstones(space.id) },
       // The live file rows with no position (bytes that arrived before Q-725, pre-4.0 rows): the change feed's cursor-less listing reads by position (bundle-255).
       { name: 'file row positions', run: () => positionUnpositionedFileRows(space.id) },
-      // The file tombstone index a later release replaced (bundle-71, Q-352), after the one that replaced it was built.
-      { name: 'replaced file tombstone indexes', run: () => dropReplacedFileTombstoneIndexes(space.id) },
     ];
     await eachUnit(others, async (unit) => {
       await unit.run();
