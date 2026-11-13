@@ -178,7 +178,7 @@ network supplies is stored and may not take effect. space_schema_layers says whi
 of your edits a network outranks (fields, hidden) and which network wins.
 
 A record written while it conformed carries the fingerprint of the schema it
-conformed to (schemaFingerprint): its schema version. space_schema_versions lists
+conformed to: its schema version. space_schema_versions lists
 a space's versions, reads one (fp) and says what changed between two (fp and
 against). filter's schemaVersion finds records by version (current, a
 fingerprint, older, unversioned), and schema_validate with against: stamp judges
