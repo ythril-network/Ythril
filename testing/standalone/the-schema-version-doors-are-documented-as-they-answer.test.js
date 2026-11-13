@@ -63,7 +63,8 @@ describe('the validate request table is SchemaValidateBody', () => {
     const planted = page.split('\n').filter(l => !/^\|\s*`limit`\s*\|/.test(l)).join('\n');
     assert.notDeepEqual(validateTableKeys(planted), Object.keys(SchemaValidateBody.shape).sort(), 'the comparison passes a table with a row taken out');
     // And it passes the page it should become: a table with one row per body key (the budget keys share a row, as on the page).
-    const want = [...Object.keys(SchemaValidateBody.shape), 'against'];
+    // One row per key: `against` is added for the code before it, and is a body key once built, so a Set keeps it to one row.
+    const want = [...new Set([...Object.keys(SchemaValidateBody.shape), 'against'])];
     const rows = want.map(k => `| \`${k}\` | meaning |`).join('\n');
     const built = `### Validate Schema (Dry Run)\n\n| Parameter | Meaning |\n|---|---|\n${rows}\n`;
     assert.deepEqual(validateTableKeys(built), [...new Set(want)].sort());
