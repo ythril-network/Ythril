@@ -31,6 +31,7 @@ import { getConfig, saveConfig } from '../config/loader.js';
 import type { Config, NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
 import { migrateToken } from '../auth/rights-migration.js';
 import { reachesSpace } from '../auth/space-reach.js';
+import { peerBoundTo } from '../auth/peer-bound.js';
 import { networkJoinRefusal } from '../auth/network-rights.js';
 import { withInstanceAdminGrants } from '../auth/instance-admin-grants.js';
 import type { TokenRights } from '../config/rights-shape.js';
@@ -94,6 +95,17 @@ export function isUpstreamPeer(net: NetworkConfig, id: string | undefined): bool
  */
 export function networksSharedWith(spaceId: string, peerId: string, cfg: Pick<Config, 'networks'> = getConfig()): NetworkConfig[] {
   return cfg.networks.filter(n => n.spaces.includes(spaceId) && n.members.some(m => m.instanceId === peerId));
+}
+
+/**
+ * The ids of the networks a calling token's peer and this server both hold `spaceId` in, or `undefined` for a token bound to no peer (a local
+ * or admin caller shares by reach). What `servableTo` is asked with by every door that hands out a schema version: the sync door's snapshot and
+ * the user doors' version list, read and diff, so a peer-bound token is shown on one door exactly what the other would serve it.
+ */
+export function networkIdsSharedWithCaller(spaceId: string, token: object | null | undefined): Set<string> | undefined {
+  const peerId = peerBoundTo(token);
+  if (!peerId) return undefined;
+  return new Set(networksSharedWith(spaceId, peerId).map(n => n.id));
 }
 
 /** The spaces this instance announces for `net`, in the network's ids — a local alias is never what a peer calls it. */

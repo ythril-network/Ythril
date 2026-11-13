@@ -172,6 +172,8 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   read_spill: 'brain.spill.read',
   // Returns the space's schema and counts. `space.list` is the REST read that exposes the same shape.
   space_meta: 'space.list',
+  // Q-742: a space's schema versions, read like its meta - `GET /api/spaces/:id/schema-versions[/:fp[/diff]]` record `space.list`.
+  space_schema_versions: 'space.list',
 
   // ── Not audited operations, with the reason each. ──────────────────────────────────────────────
   // Returns this instance's own documentation. Reads no space and no record.

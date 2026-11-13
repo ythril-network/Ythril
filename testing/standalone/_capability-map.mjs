@@ -102,6 +102,10 @@ export const CAPABILITIES = [
   ['Spaces', 'space_meta', 'GET /api/spaces/:id/meta'],
   ['Spaces', 'schema_update', 'PUT /api/spaces/:id/schema'],
   ['Spaces', 'space_schema_layers', 'GET /api/spaces/:id/schema-layers'],
+  // Q-742: one tool, three routes - no `fp` the list, `fp` the version, `fp` and `against` the comparison.
+  ['Spaces', 'space_schema_versions', 'GET /api/spaces/:id/schema-versions'],
+  ['Spaces', 'space_schema_versions', 'GET /api/spaces/:id/schema-versions/:fp'],
+  ['Spaces', 'space_schema_versions', 'GET /api/spaces/:id/schema-versions/:fp/diff'],
   ['Spaces', 'space_set_network_precedence', 'PUT /api/spaces/:id/network-precedence'],
   // The PER-TYPE write is NOT `schema_update` and mapping it here overstated the coverage.
   // `schema_update` replaces the whole map at `schema: admin`; this route edits ONE type at

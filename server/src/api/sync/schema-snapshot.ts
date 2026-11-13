@@ -28,9 +28,8 @@ import type { Router } from 'express';
 import { schemaFingerprintTextOf } from '@ythril-network/schema/internal';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth } from '../../auth/middleware.js';
-import { peerBoundTo } from '../../auth/peer-bound.js';
 import { asFilter } from '../../db/mongo.js';
-import { networksSharedWith } from '../../networks/network-spaces.js';
+import { networkIdsSharedWithCaller } from '../../networks/network-spaces.js';
 import { servableTo } from '../../spaces/schema-snapshot.js';
 import { EMPTY_SCHEMA_FINGERPRINT, isSchemaFingerprint } from '../../spaces/schema-stamp.js';
 import { snapshots, type SnapshotRow } from '../../spaces/schema-snapshot-store.js';
@@ -38,13 +37,6 @@ import { isConfiguredSpace } from '../../spaces/space-lookup.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { sendLostSpace } from '../write-target-answer.js';
 import { refusePeerReach, refuseSchemaRung } from './_shared.js';
-
-/** The networks the asking peer and this server both hold `spaceId` in; `undefined` for a caller that is no peer (it shares by reach). */
-function sharedNetworksOf(spaceId: string, authToken: unknown): Set<string> | undefined {
-  const peerId = peerBoundTo(authToken as Record<string, unknown> | undefined);
-  if (!peerId) return undefined;
-  return new Set(networksSharedWith(spaceId, peerId).map(n => n.id));
-}
 
 /**
  * Register `GET /schema-snapshot` on the sync meta router. The parameter is spelled as the caller spells the router (`syncMetaRouter`), as
@@ -69,7 +61,7 @@ export function registerSchemaSnapshotRoute(syncMetaRouter: Router): void {
       }
       const row = await snapshots(spaceId).findOne(asFilter<SnapshotRow>({ _id: fp }));
       if (!row) { res.status(404).json({ error: 'This instance holds no schema snapshot with that fingerprint', code: 'unknown_fingerprint' }); return; }
-      const shared = sharedNetworksOf(spaceId, req.authToken);
+      const shared = networkIdsSharedWithCaller(spaceId, req.authToken as object | undefined);
       const served = shared ? servableTo(row, shared) : { ok: true as const, links: row.links };
       if (!served.ok) {
         res.status(409).json({ error: 'That schema was built from a network the asking member is not in', code: served.code });
