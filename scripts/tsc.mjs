@@ -41,7 +41,7 @@
  * It stops on the first difference, so one refusal is one line.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -113,8 +113,19 @@ if (refusal) {
   process.exit(1);
 }
 
+// `--clean <dir>`: empty the build's output folder, but only once the install is known good. A script that deleted it before this
+// check left a stale checkout with no schema/dist at all when the check then refused (bundle-266's drive, 2026-11-13).
+const args = process.argv.slice(2);
+const cleanAt = args.indexOf('--clean');
+if (cleanAt >= 0) {
+  const dir = args[cleanAt + 1];
+  if (!dir || dir.startsWith('-')) { console.error('tsc.mjs: --clean needs a folder'); process.exit(1); }
+  rmSync(resolve(process.cwd(), dir), { recursive: true, force: true });
+  args.splice(cleanAt, 2);
+}
+
 const from = createRequire(join(process.cwd(), 'package.json'));
 const compiler = from.resolve('typescript/bin/tsc');
-const run = spawnSync(process.execPath, [compiler, ...process.argv.slice(2)], { stdio: 'inherit' });
+const run = spawnSync(process.execPath, [compiler, ...args], { stdio: 'inherit' });
 if (run.error) throw run.error;
 process.exit(run.status ?? 1);
