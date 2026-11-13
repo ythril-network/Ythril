@@ -11,8 +11,7 @@
 import { getConfig } from '../config/loader.js';
 import { recordExpiry, recordContentExpiry, type RetentionSpace } from './chrono-retention.js';
 import type { KnowledgeType, TtlBucket } from '../config/types.js';
-import { COLLECTION_SUFFIX, BRAIN_COLLECTIONS, RECORD_COLLECTION } from '../config/types.js';
-export { COLLECTION_SUFFIX, BRAIN_COLLECTIONS, RECORD_COLLECTION };
+import { COLLECTION_SUFFIX, BRAIN_COLLECTIONS, RECORD_COLLECTION } from '../config/types.js';export { COLLECTION_SUFFIX, BRAIN_COLLECTIONS, RECORD_COLLECTION };
 export type { BrainCollection } from '../config/types.js';
 
 const DAY_MS = 86_400_000;
@@ -47,9 +46,10 @@ export const TTL_COLLECTIONS = BRAIN_COLLECTIONS.filter(c => c !== 'links');
  * The document field that names a record's type, per collection.
  *
  * **Edges key on `label`, not `type`** — `EdgeDoc` has both, and `validateEdgeWrite` looks the schema up by
- * `label`. Reading `type` for an edge finds a schema that is never there and looks like it worked.
+ * `label`. Reading `type` for an edge finds a schema that is never there and looks like it worked. The stamp
+ * index and its readers (`spaces/schema-snapshot-carried.ts`, `stampTypeFieldOf`) read this table too.
  */
-export const TYPE_FIELD: Record<KnowledgeType, 'type' | 'label'> = {
+export const TYPE_FIELD: Readonly<Record<KnowledgeType, 'type' | 'label'>> = {
   entity: 'type', fact: 'type', edge: 'label', chrono: 'type',
 };
 

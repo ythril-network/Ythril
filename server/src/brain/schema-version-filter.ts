@@ -19,16 +19,16 @@
  *   version to be older than, and `unversioned` is the ask for it.
  * - **A version resolved once for a view.** {@link schemaVersionResolver} resolves per member and memoises per member for one call, so
  *   the read, the total and the echo use one resolution and two members never share one current version.
- * - **A predicate merged by assignment.** The resolution is a clause ANDed with the caller's ({@link narrowedBy}), never keys spread over
+ * - **A predicate merged by assignment.** The resolution is a clause ANDed with the caller's (`andPredicates`, `db/and-predicates.ts`), never keys spread over
  *   the caller's filter, which would replace a caller's own stamp clause or `$or`.
  * - **"Older" silently meaning "older or unknown".** {@link schemaVersionEcho} counts, per member and over the whole match (not the page),
  *   the matches whose version is not held or not classifiable.
  * - **A store failure answered as "no match".** Every read here throws on failure (`fingerprintTypesIn`, `heldVersions`, the count), a
  *   missing stamp index as 503 `schema_index_building`; nothing is caught.
  */
-import { COLLECTION_SUFFIX, KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import type { BrainCollection } from '../config/types.js';
-import { stampTypeFieldOf, fingerprintTypesIn, type StampedCollection } from '../spaces/schema-snapshot-carried.js';
+import { andPredicates } from '../db/and-predicates.js';
+import { stampedKindOf, stampTypeFieldOf, fingerprintTypesIn, type StampedCollection } from '../spaces/schema-snapshot-carried.js';
 import { heldVersions } from '../spaces/schema-version-text.js';
 import { typesDifferingUnder, type SchemaChangedMode } from '../spaces/schema-diff.js';
 import { variationOf, EMPTY_SCHEMA_FINGERPRINT, SCHEMA_FINGERPRINT_FIELD } from '../spaces/schema-stamp.js';
@@ -41,9 +41,6 @@ export interface SchemaVersionResolution {
   readonly current: string;
   readonly unclassified: readonly string[];
 }
-
-/** The kind whose records `collection` holds (`entities` → `entity`). */
-const kindOf = (collection: StampedCollection): string => KNOWLEDGE_TYPES.find(k => COLLECTION_SUFFIX[k] === collection)!;
 
 /** A clause no record matches, answered from the stamp index like the rest. */
 const NOTHING = { [SCHEMA_FINGERPRINT_FIELD]: { $in: [] } };
@@ -60,7 +57,7 @@ async function olderIn(spaceId: string, collection: StampedCollection, mode: Sch
   }
   const held = await heldVersions(spaceId, [current, ...typesOf.keys()]);
   const currentText = held.get(current)?.text;
-  const kind = kindOf(collection);
+  const kind = stampedKindOf(collection);
   const typeField = stampTypeFieldOf(collection);
   const whole: string[] = [];
   const unclassified: string[] = [];
@@ -108,11 +105,6 @@ export function schemaVersionResolver(collection: string, ask: SchemaVersionAsk,
   };
 }
 
-/** `base` narrowed by every clause, under `$and`: never a key assigned over the caller's predicate. No clause: `base` itself, unchanged. */
-export function narrowedBy(base: Record<string, unknown>, clauses: readonly Record<string, unknown>[]): Record<string, unknown> {
-  return clauses.length === 0 ? base : { $and: [base, ...clauses] };
-}
-
 /** The answer's `schemaVersion`: per member, its current version and how many of its matches carry a version it cannot classify. */
 export interface SchemaVersionEcho {
   readonly members: { spaceId: string; current: string; unclassified: number }[];
@@ -129,7 +121,7 @@ export async function schemaVersionEcho(
   return { members: await Promise.all(members.map(async (spaceId) => {
     const { current, unclassified: fps } = await resolve(spaceId);
     const unknown = { [SCHEMA_FINGERPRINT_FIELD]: { $in: [...fps] } };
-    const unclassified = fps.length === 0 ? 0 : await countBrain(spaceId, collection, narrowedBy(await predicateFor(spaceId), [unknown]), maxTimeMS);
+    const unclassified = fps.length === 0 ? 0 : await countBrain(spaceId, collection, andPredicates(await predicateFor(spaceId), unknown) ?? {}, maxTimeMS);
     return { spaceId, current, unclassified };
   })) };
 }

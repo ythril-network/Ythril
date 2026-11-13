@@ -29,7 +29,9 @@ import { col, asFilter } from '../db/mongo.js';
 import { distinctStringsOf } from '../db/distinct-strings.js';
 import { indexNamesOf } from '../db/index-names.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { COLLECTION_SUFFIX, KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
+import { COLLECTION_SUFFIX, KNOWLEDGE_TYPES, type KnowledgeType } from '../config/types-knowledge.js';
+import { TYPE_FIELD } from '../brain/ttl.js';
+import { RECORD_TYPE_OF } from '../sync/replicated-families.js';
 import { SchemaIndexBuilding } from '../util/errors.js';
 import { isSchemaFingerprint, SCHEMA_FINGERPRINT_FIELD } from './schema-stamp.js';
 
@@ -39,8 +41,14 @@ export const STAMPED_COLLECTIONS = KNOWLEDGE_TYPES.map(t => COLLECTION_SUFFIX[t]
 /** One of {@link STAMPED_COLLECTIONS}. */
 export type StampedCollection = (typeof STAMPED_COLLECTIONS)[number];
 
-/** The field a stamped collection's records name their type in: an edge's type is its `label`, every other record's is `type`. */
-export const stampTypeFieldOf = (collection: StampedCollection): 'type' | 'label' => (collection === COLLECTION_SUFFIX.edge ? 'label' : 'type');
+/**
+ * The kind whose records a stamped collection holds (`entities` → `entity`): `RECORD_TYPE_OF`, the one total table from a collection to its
+ * record type, read here, never inverted again. Every stamped collection is a knowledge type's ({@link STAMPED_COLLECTIONS} is built from them).
+ */
+export const stampedKindOf = (collection: StampedCollection): KnowledgeType => RECORD_TYPE_OF[collection] as KnowledgeType;
+
+/** The field a stamped collection's records name their type in: `TYPE_FIELD`'s (an edge's type is its `label`, every other record's is `type`). */
+export const stampTypeFieldOf = (collection: StampedCollection): 'type' | 'label' => TYPE_FIELD[stampedKindOf(collection)];
 
 /** The stamp index, `{ schemaFingerprint: 1, <type field>: 1 }`: `spaces/space-indexes.ts` builds it under this name, read here, never copied. */
 export const STAMP_INDEX = `${SCHEMA_FINGERPRINT_FIELD}_type_present`;
