@@ -17,7 +17,7 @@
  *   metric (`imported`, `import_refused`, `failed`), and one warn line per import that refused any, naming at most {@link REFUSALS_NAMED} prefixes.
  */
 import { storeIsNotAnswering } from '../db/store-condition.js';
-import { isSchemaFingerprint } from '../spaces/schema-stamp.js';
+import { fpPrefix, isSchemaFingerprint } from '../spaces/schema-stamp.js';
 import { schemaSnapshotTotal } from '../metrics/schema-snapshot-count.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { keepVerifiedSnapshot } from './schema-snapshot-keep.js';
@@ -53,7 +53,7 @@ export async function importSnapshots(spaceId: string, pages: AsyncIterable<read
   const refusals: string[] = [];
   const refuse = (fp: unknown, why: string): void => {
     out.refused++;
-    if (refusals.length < REFUSALS_NAMED) refusals.push(`${peerText(typeof fp === 'string' ? fp.slice(0, 12) : '(none)')} ${why}`);
+    if (refusals.length < REFUSALS_NAMED) refusals.push(`${peerText(typeof fp === 'string' ? fpPrefix(fp) : '(none)')} ${why}`);
   };
   for await (const page of pages) {
     for (const element of page) {

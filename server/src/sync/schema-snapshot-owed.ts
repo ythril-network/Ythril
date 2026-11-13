@@ -35,12 +35,10 @@ import { spaceCollection } from '../db/space-collection.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import { SCHEMA_SNAPSHOT_STEP, type SnapshotRow } from '../spaces/schema-snapshot-store.js';
 import { fingerprintsCarriedIn, STAMPED_COLLECTIONS, type StampedCollection } from '../spaces/schema-snapshot-carried.js';
-import { isSchemaFingerprint, knownHeld, noteHeld, SCHEMA_FINGERPRINT_FIELD } from '../spaces/schema-stamp.js';
+import { fpPrefix, isSchemaFingerprint, knownHeld, noteHeld, SCHEMA_FINGERPRINT_FIELD } from '../spaces/schema-stamp.js';
 import { owedFingerprints } from '../spaces/schema-snapshot.js';
 import { warnOnce } from '../util/warn-once.js';
 import { log, peerText } from '../util/log.js';
-
-export { STAMPED_COLLECTIONS };
 
 /** The most spaces and, per space, fingerprints the in-memory owed set holds; the least recently noted is dropped past either. */
 const MAX_SPACES = 64;
@@ -160,7 +158,7 @@ export function noteNotHeld(spaceId: string, fp: string, memberId: string, candi
   e.backoffs++;
   e.notHeld.clear();
   if (e.backoffs === OWED_GIVE_UP_ROUNDS) {
-    givenUpSaid(`${spaceId}:${fp}`, () => log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} of space '${peerText(spaceId)}' is no longer asked for: every member `
+    givenUpSaid(`${spaceId}:${fp}`, () => log.warn(`Schema snapshot ${peerText(fpPrefix(fp))} of space '${peerText(spaceId)}' is no longer asked for: every member `
       + `that may hold it answered that it holds no such version, ${OWED_GIVE_UP_ROUNDS} rounds in a row. A record carrying it that arrives from another member `
       + 'asks again; the records keep their stamp meanwhile.'));
   }

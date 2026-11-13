@@ -18,8 +18,9 @@
  */
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { snapshotLinksNamed } from '../spaces/schema-snapshot.js';
 import { snapshots } from '../spaces/schema-snapshot-store.js';
-import { isSchemaFingerprint, SCHEMA_FINGERPRINT_FIELD, type SnapshotLinks } from '../spaces/schema-stamp.js';
+import { fpPrefix, isSchemaFingerprint, SCHEMA_FINGERPRINT_FIELD, type SnapshotLinks } from '../spaces/schema-stamp.js';
 import { log, peerText } from '../util/log.js';
 import { MAX_DOCUMENT_BYTES } from './export-stream.js';
 
@@ -38,12 +39,6 @@ export function noteCarried(carried: Set<string>, doc: unknown): void {
   if (isSchemaFingerprint(fp)) carried.add(fp);
 }
 
-/** Every fingerprint a row's links name. */
-function linkedBy(links: SnapshotLinks | null | undefined): string[] {
-  if (!links || typeof links !== 'object') return [];
-  return [links.own, ...(links.layers ?? []).map(l => l.fp), ...(links.served ?? []).map(l => l.fp)].filter(isSchemaFingerprint);
-}
-
 /** The rows of `spaceId` the export holds: every held row `carried` names, and every held row those link, transitively, in fingerprint order. */
 export async function exportedSnapshotIds(spaceId: string, carried: ReadonlySet<string>): Promise<string[]> {
   const linksOf = new Map<string, SnapshotLinks | null>();
@@ -54,7 +49,7 @@ export async function exportedSnapshotIds(spaceId: string, carried: ReadonlySet<
     const fp = todo.pop()!;
     if (out.has(fp)) continue;
     out.add(fp);
-    for (const next of linkedBy(linksOf.get(fp))) if (linksOf.has(next) && !out.has(next)) todo.push(next);
+    for (const next of snapshotLinksNamed(linksOf.get(fp))) if (linksOf.has(next) && !out.has(next)) todo.push(next);
   }
   return [...out].sort();
 }
@@ -72,8 +67,26 @@ export interface SnapshotsWritten {
 export async function writeSnapshotElements(
   spaceId: string, ids: readonly string[], write: (chunk: string) => Promise<void>, counts: SnapshotsWritten,
 ): Promise<void> {
+  await writeJsonArray(snapshotElements(spaceId, ids, counts), write);
+}
+
+/**
+ * Write one JSON array value of an export through `write` (backpressured): `[`, each element `elements` yields (its JSON text) after the one before
+ * it was written, comma-separated, then `]`. THE framing of every array the export writes, its families and its snapshots; what an element is, and
+ * which are left out, is the caller's. An element is asked for only once the one before was written, so a caller's count after its `yield` counts it.
+ */
+export async function writeJsonArray(elements: AsyncIterable<string>, write: (chunk: string) => Promise<void>): Promise<void> {
   await write('[');
   let first = true;
+  for await (const element of elements) {
+    await write((first ? '' : ',') + element);
+    first = false;
+  }
+  await write(']');
+}
+
+/** The elements of {@link writeSnapshotElements}, each read alone; one over the cap counted in `counts.omitted`, warned and left out. */
+async function* snapshotElements(spaceId: string, ids: readonly string[], counts: SnapshotsWritten): AsyncGenerator<string> {
   for (const fp of ids) {
     const row = (await readStoredById<{ text?: unknown; links?: unknown }>(spaceCollection(spaceId, 'schemaSnapshots'), [fp], { text: 1, links: 1 })).get(fp);
     if (!row || typeof row.text !== 'string') continue;
@@ -81,13 +94,11 @@ export async function writeSnapshotElements(
     const bytes = Buffer.byteLength(element, 'utf8');
     if (bytes > SNAPSHOT_ELEMENT_MAX_BYTES) {
       counts.omitted.to++;
-      log.warn(`Space export for '${peerText(spaceId)}' left out schema snapshot ${peerText(fp.slice(0, 12))}: its element is ${bytes} bytes, over the `
+      log.warn(`Space export for '${peerText(spaceId)}' left out schema snapshot ${peerText(fpPrefix(fp))}: its element is ${bytes} bytes, over the `
         + `${SNAPSHOT_ELEMENT_MAX_BYTES} an importer reads. Its records are exported; an import fetches the version from a member or holds none.`);
       continue;
     }
-    await write((first ? '' : ',') + element);
-    first = false;
+    yield element;
     counts.written.to++;
   }
-  await write(']');
 }

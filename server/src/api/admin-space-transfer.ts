@@ -47,7 +47,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { NOT_CARRIED_BY_BACKUP, backupRow } from '../sync/local-only-fields.js';
 import { REPLICATED_FAMILIES } from '../sync/replicated-families.js';
 import { ExportBodyMalformed, ExportBodyTooLarge } from '../sync/export-stream.js';
-import { SNAPSHOTS_EXPORT_KEY, exportedSnapshotIds, noteCarried, writeSnapshotElements, type SnapshotsWritten } from '../sync/schema-snapshot-export.js';
+import { SNAPSHOTS_EXPORT_KEY, exportedSnapshotIds, noteCarried, writeJsonArray, writeSnapshotElements, type SnapshotsWritten } from '../sync/schema-snapshot-export.js';
 import { SERVER_VERSION } from '../util/server-version.js';
 import { log, peerText } from '../util/log.js';
 import { settledWithin } from '../util/time-bound.js';
@@ -109,18 +109,14 @@ spaceTransferRouter.get('/:spaceId/export', globalRateLimit, requireAdminMfaScop
     col(spaceCollection(spaceId, collection)).find(collection === 'files' ? { ...backupRow.filter } : {}, { projection });
 
   /** Stream one family's cursor as a JSON array value. */
-  const streamArray = async (cursor: ReturnType<typeof cursorOf>, files: boolean, count: { to: number }): Promise<void> => {
-    await write('[');
-    let first = true;
+  const streamArray = (cursor: ReturnType<typeof cursorOf>, files: boolean, count: { to: number }): Promise<void> => writeJsonArray((async function* () {
     for await (const doc of cursor) {
       if (files && !backupRow.predicate(doc as Record<string, unknown>)) continue;
-      await write((first ? '' : ',') + JSON.stringify(doc));
+      yield JSON.stringify(doc);
       noteCarried(carried, doc);
-      first = false;
       count.to++;
     }
-    await write(']');
-  };
+  })(), write);
 
   try {
     // The store is asked BEFORE the 200 is committed: the first family's first batch is read while the status can still change, so a store

@@ -15,7 +15,7 @@
  *   nothing because of it.
  * - {@link snapshotSweepPlan}: a version a stored record carries, or one a kept version links, being removed by the sweep (bundle-266, Q-739).
  */
-import { schemaFingerprintTextOf } from '@ythril-network/schema/internal';
+import { isSchemaFingerprint, schemaFingerprintTextOf } from '@ythril-network/schema/internal';
 import { readPeerMeta } from './body-schemas.js';
 import type { SnapshotLinks } from './schema-stamp.js';
 import { JSON_BODY_MAX_BYTES } from '../config/body-limits.js';
@@ -156,9 +156,18 @@ export interface SnapshotSweepPlan {
   readonly remove: string[];
 }
 
-/** The other rows `row` links. Not itself: an own variation with no layer links its own fingerprint (`links.own`), which keeps nothing. */
-const linkedBy = (row: SweptRow): string[] =>
-  (row.links ? [row.links.own, ...row.links.layers.map(l => l.fp), ...row.links.served.map(l => l.fp)] : []).filter(fp => fp !== row._id);
+/**
+ * Every fingerprint a row's links name (`links.own`, `links.layers[].fp`, `links.served[].fp`): THE reading of a row's links, for the sweep's keep
+ * closure and the export's. Guarded as a stored row is read: absent or non-object links name none, a missing list is empty, and a value that is no
+ * fingerprint is dropped. An own variation with no layer names its own fingerprint (`links.own`); a caller that must not count that drops it.
+ */
+export function snapshotLinksNamed(links: SnapshotLinks | null | undefined): string[] {
+  if (!links || typeof links !== 'object') return [];
+  return [links.own, ...(links.layers ?? []).map(l => l.fp), ...(links.served ?? []).map(l => l.fp)].filter(isSchemaFingerprint);
+}
+
+/** The other rows `row` links. Not itself: a self-link keeps nothing. */
+const linkedBy = (row: SweptRow): string[] => snapshotLinksNamed(row.links).filter(fp => fp !== row._id);
 
 /**
  * Which snapshot rows one sweep pass marks, clears and removes (design r2 D2 as r3 S-2 amends it). Pure: it changes nothing it is given.

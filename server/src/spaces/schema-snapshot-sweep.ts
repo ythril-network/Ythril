@@ -31,7 +31,7 @@ import { log, peerList, peerText } from '../util/log.js';
 import { schemaSnapshotTotal } from '../metrics/schema-snapshot-count.js';
 import { configuredSpaces } from './space-lookup.js';
 import { admitSpaceWrite, isActRefusal } from './space-write-gate.js';
-import { forgetHeld } from './schema-stamp.js';
+import { forgetHeld, fpPrefix } from './schema-stamp.js';
 import { owedOf, snapshots, type SnapshotRow } from './schema-snapshot-store.js';
 import { fingerprintsCarriedIn, STAMPED_COLLECTIONS } from './schema-snapshot-carried.js';
 import { SNAPSHOT_REMOVAL_GRACE_MS, snapshotSweepPlan, type SweptRow } from './schema-snapshot.js';
@@ -69,9 +69,8 @@ export async function sweepSchemaSnapshots(opts: { now?: number } = {}): Promise
     }
     if (removed.count === 0) return;
     for (let i = 0; i < removed.count; i++) schemaSnapshotTotal.note('removed');
-    const named = removed.fps.slice(0, NAMED).map(fp => fp.slice(0, 12));
     log.info(`Schema snapshot sweep removed ${removed.count} version(s) of space '${peerText(space.id)}' that nothing here used for `
-      + `${SNAPSHOT_REMOVAL_GRACE_MS / 3_600_000} h: ${peerList(named)}${removed.fps.length > NAMED ? ', ...' : ''}`);
+      + `${SNAPSHOT_REMOVAL_GRACE_MS / 3_600_000} h: ${peerList(removed.fps.map(fpPrefix), ', ', { count: NAMED })}`);
   });
 }
 
