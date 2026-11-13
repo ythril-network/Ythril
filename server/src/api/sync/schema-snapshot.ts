@@ -25,13 +25,12 @@
  * The empty schema's fingerprint has no row on any instance (every instance knows it held) and is answered from its constant.
  */
 import type { Router } from 'express';
-import { schemaFingerprintTextOf } from '@ythril-network/schema/internal';
 import { syncRateLimit } from '../../rate-limit/middleware.js';
 import { requireAuth } from '../../auth/middleware.js';
 import { asFilter } from '../../db/mongo.js';
 import { networkIdsSharedWithCaller } from '../../networks/network-spaces.js';
 import { servableTo } from '../../spaces/schema-snapshot.js';
-import { EMPTY_SCHEMA_FINGERPRINT, isSchemaFingerprint } from '../../spaces/schema-stamp.js';
+import { EMPTY_SCHEMA_FINGERPRINT, EMPTY_SCHEMA_STAMP, isSchemaFingerprint } from '../../spaces/schema-stamp.js';
 import { snapshots, type SnapshotRow } from '../../spaces/schema-snapshot-store.js';
 import { isConfiguredSpace } from '../../spaces/space-lookup.js';
 import { sendCaughtFailure } from '../send-failure.js';
@@ -56,7 +55,7 @@ export function registerSchemaSnapshotRoute(syncMetaRouter: Router): void {
       if (refuseSchemaRung(res, spaceId, req.authToken)) return;
       if (!isConfiguredSpace(spaceId)) { sendLostSpace(req, res, spaceId); return; }
       if (fp === EMPTY_SCHEMA_FINGERPRINT) {
-        res.json({ fp, text: schemaFingerprintTextOf(undefined), links: { own: fp, layers: [], served: [] } });
+        res.json({ fp, text: EMPTY_SCHEMA_STAMP.text, links: { own: fp, layers: [], served: [] } });
         return;
       }
       const row = await snapshots(spaceId).findOne(asFilter<SnapshotRow>({ _id: fp }));
