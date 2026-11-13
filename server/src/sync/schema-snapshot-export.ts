@@ -21,7 +21,7 @@ import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { snapshotLinksNamed } from '../spaces/schema-snapshot.js';
 import { snapshots } from '../spaces/schema-snapshot-store.js';
-import { fpPrefix, isSchemaFingerprint, SCHEMA_FINGERPRINT_FIELD, type SnapshotLinks } from '../spaces/schema-stamp.js';
+import { fpPrefix, carriedStampOf, type SnapshotLinks } from '../spaces/schema-stamp.js';
 import { log, peerText } from '../util/log.js';
 import { MAX_DOCUMENT_BYTES } from './export-stream.js';
 
@@ -36,8 +36,8 @@ export const SNAPSHOT_ELEMENT_MAX_BYTES = MAX_DOCUMENT_BYTES - SNAPSHOT_ELEMENT_
 
 /** Note the schema fingerprint `doc` carries, if it carries one, in `carried`. */
 export function noteCarried(carried: Set<string>, doc: unknown): void {
-  const fp = (doc as Record<string, unknown> | null)?.[SCHEMA_FINGERPRINT_FIELD];
-  if (isSchemaFingerprint(fp)) carried.add(fp);
+  const fp = carriedStampOf(doc);
+  if (fp !== undefined) carried.add(fp);
 }
 
 /** The rows of `spaceId` the export holds: every held row `carried` names, and every held row those link, transitively, in fingerprint order. */
