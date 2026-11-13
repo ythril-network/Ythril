@@ -12,6 +12,7 @@ import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types.js';
 import { normaliseProjection, toMongoProjection } from './projection.js';
 import { sanitizeFilter, type CallerCheckedFilter } from './filter-sanitizer.js';
 import { CONVENIENCE_KEYS } from './list-conveniences.js';
+import { SCHEMA_VERSION_FILTER_KEYS } from './schema-version-args.js';
 import { UNSUPPORTED_PAGE_PARAMS } from '../util/pagination.js';
 import { skipRefusal } from '../util/strict-limit.js';
 import { LANDING_ORDER } from './list-sort.js';
@@ -61,6 +62,11 @@ export const QUERY_BODY_FIELDS: ReadonlySet<string> = new Set([
    * defect this repo pays most for.
    */
   'entityName', 'fromName', 'toName',
+  /*
+   * The schema-version arguments (Q-741), spread from the module that resolves them per member, for the same reason as the
+   * conveniences below: one list, so the tool and this body cannot take different names.
+   */
+  ...SCHEMA_VERSION_FILTER_KEYS,
   /*
    * The five list CONVENIENCES, spread from the module rather than spelled here — one list, so a
    * sixth name cannot reach the tool and miss this set. The nine per-collection list routes have
