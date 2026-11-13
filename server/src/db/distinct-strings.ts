@@ -21,15 +21,19 @@
  * - The filter is the caller's, combined with that rule by `$and`, so a filter that names the field itself (a prefix `$regex` on it) is
  *   not overwritten.
  * - The grouping may spill to disk, so a large distinct set is not refused for the aggregation's memory limit.
+ * - `hint` names the index the read must use: a collection without it FAILS the read instead of scanning the collection, for a caller
+ *   that would rather fail than pay a collection scan (or act on an answer read some other way).
  */
 import type { Collection, Document, Filter } from 'mongodb';
 
-export async function distinctStringsOf<T extends Document>(collection: Collection<T>, field: string, filter: Filter<T>): Promise<string[]> {
+export async function distinctStringsOf<T extends Document>(
+  collection: Collection<T>, field: string, filter: Filter<T>, opts: { hint?: string } = {},
+): Promise<string[]> {
   if (!field || field.startsWith('$')) throw new RangeError('distinctStringsOf: the field is a document path, not an expression');
   const cursor = collection.aggregate<{ _id: string }>([
     { $match: { $and: [filter as Document, { [field]: { $type: 'string' } }] } },
     { $group: { _id: `$${field}` } },
-  ], { allowDiskUse: true });
+  ], { allowDiskUse: true, ...(opts.hint !== undefined ? { hint: opts.hint } : {}) });
   const values: string[] = [];
   for await (const group of cursor) values.push(group._id);
   return values;
