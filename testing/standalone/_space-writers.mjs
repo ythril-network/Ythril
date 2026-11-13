@@ -275,6 +275,23 @@ function classifyName(index, raw, scope, depth) {
   return { kind: 'unknown', why: `the collection name \`${expr.slice(0, 60)}\` is not a literal, a template or spaceCollection` };
 }
 
+/**
+ * The file `name` is imported from in `scope`'s file, `{ file, src }`, by a relative named import under its own name
+ * (`import { snapshots } from './x.js'`); null when it is not imported that way or the file is not in the index.
+ */
+function importedFrom(index, scope, name) {
+  for (const m of (scope.src ?? '').matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*['"](\.[^'"]+)['"]/g)) {
+    const named = m[1].split(',').map(s => s.trim()).filter(Boolean).map(s => s.split(/\s+as\s+/).map(x => x.trim()));
+    if (!named.some(([orig, local]) => (local ?? orig) === name)) continue;
+    const parts = scope.file.split('/').slice(0, -1);
+    for (const seg of m[2].split('/')) { if (seg === '..') parts.pop(); else if (seg !== '.') parts.push(seg); }
+    const file = parts.join('/').replace(/\.js$/, '.ts');
+    const src = index.sources.get(file);
+    return src ? { file, src } : null;
+  }
+  return null;
+}
+
 /** The verdict for a helper that returns a collection, read from its `return`s, or null if it is not one. */
 function classifyHelper(index, name, scope, depth) {
   const key = index.resolve(scope.file, name);
@@ -285,11 +302,15 @@ function classifyHelper(index, name, scope, depth) {
     helperScope = { file: entry.file, body: entry.body, src: index.sources.get(entry.file) };
     returns = [...entry.body.matchAll(/\breturn\s+/g)].map(m => expressionFrom(entry.body, m.index + m[0].length));
   } else {
-    // A concise arrow is not a top-level function the index holds: `const jobs = (s) => col(…)`.
-    const m = new RegExp(`(?:^|\\n)(?:export\\s+)?(?:const|let)\\s+${name}\\s*(?::[^=]*)?=\\s*(?:async\\s*)?\\([^)]*\\)\\s*(?::[^=]*?)?=>\\s*(?!\\{)`).exec(scope.src);
-    if (!m) return null;
-    helperScope = { file: scope.file, body: '', src: scope.src };
-    returns = [expressionFrom(scope.src, m.index + m[0].length)];
+    // A concise arrow is not a top-level function the index holds: `const jobs = (s) => col(…)`. It is looked for in the calling file, then in the
+    // file the name is imported from: a writer in its own module that opens the store's `snapshots(spaceId)` was `unknown`, and so unchecked by the
+    // write-gate gate (bundle-266 G1: the snapshot sweep is such a writer).
+    const arrow = new RegExp(`(?:^|\\n)(?:export\\s+)?(?:const|let)\\s+${name}\\s*(?::[^=]*)?=\\s*(?:async\\s*)?\\([^)]*\\)\\s*(?::[^=]*?)?=>\\s*(?!\\{)`);
+    const home = [{ file: scope.file, src: scope.src }, importedFrom(index, scope, name)].filter(h => h && h.src).find(h => arrow.test(h.src));
+    if (!home) return null;
+    const m = arrow.exec(home.src);
+    helperScope = { file: home.file, body: '', src: home.src };
+    returns = [expressionFrom(home.src, m.index + m[0].length)];
   }
   const verdicts = returns.filter(r => r.length > 0).map(r => classifyReceiver(index, r, helperScope, depth));
   if (verdicts.length === 0) return null;

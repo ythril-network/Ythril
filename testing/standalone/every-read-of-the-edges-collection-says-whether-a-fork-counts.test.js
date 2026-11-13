@@ -99,7 +99,8 @@ const EXEMPT = {
     'brain/candidate-prune.ts:pruneCandidateCollection', 'brain/chrono-redaction.ts:backfillTypedExpiry',
   ]),
   ...reasoned('a fork row carries the schema fingerprint of the copy it holds and is owed that snapshot like any record: this reader asks which fingerprints stored records carry, forks included, and lists no relationship', [
-    'sync/schema-snapshot-fetch.ts:carriedNow', 'sync/schema-snapshot-owed.ts:scanOwedSchemaSnapshots', 'sync/schema-snapshot-owed.ts:deliverersOf',
+    // bundle-266: the fetch's `carriedNow` and the gap scan's own `distinct` moved onto the one reader every caller of the question shares.
+    'spaces/schema-snapshot-carried.ts:fingerprintsCarriedIn', 'sync/schema-snapshot-owed.ts:deliverersOf',
   ]),
   // Q-624 slice I3: the readers whose subject IS the fork rows, or a row's fork status.
   ...reasoned('the fork module itself: it reads fork rows on purpose (Review\'s list and resolve, the re-mint, the cascade, the cap) and names `forkOf` in every read', [
