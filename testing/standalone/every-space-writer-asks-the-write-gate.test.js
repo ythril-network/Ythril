@@ -12,10 +12,25 @@
  * ## How the set is derived, and why it carries a floor
  *
  * The writers come from `_space-writers.mjs`, which resolves every mutator's receiver to the collection it names through aliases and
- * helpers; a covered writer is one whose receiver is a space collection of a family a wipe covers (a computed part counts: the commit's
- * stage names its collection from the plan kind), or a file-system write on the file tree. The derivation's own floors are asserted by
- * `spaceWriters`; this gate adds a floor on the writers it holds to the rule. A writer the index cannot attribute to a function (a
- * mutator at module scope or in a class method) FAILS the gate — it is not skipped (TS-13).
+ * helpers; a covered writer is one whose receiver is a space collection in `COVERED` (a computed part counts: the commit's stage names its
+ * collection from the plan kind), or a file-system write on the file tree. The derivation's own floors are asserted by `spaceWriters`; this
+ * gate adds a floor on the writers it holds to the rule. A writer the index cannot attribute to a function (a mutator at module scope or in
+ * a class method) FAILS the gate — it is not skipped (TS-13).
+ *
+ * ## Every per-space collection is covered or exempted by name (bundle-266, G1)
+ *
+ * `COVERED` was a name list, and a name list cannot see a collection nobody added to it: `schema_snapshots` (Q-735) was written by the
+ * snapshot store, removed by the sweep (Q-739) and landed by the import (Q-740) without this gate ever looking at a writer of it. So the
+ * per-space collections are DERIVED from the registry `SPACE_COLLECTIONS` (`db/space-collection.ts`), and each one is either `COVERED` or
+ * a row of `EXEMPT_COLLECTIONS` with its reason; one in neither fails, and so does a row naming no collection the registry has. The
+ * exemption table carries a floor, so emptying it into `COVERED` by hand is a visible change.
+ *
+ * Seen red (bundle-266, on 82208a6b, log b266-tests-g1-derivation.log): a scratch `server/src/spaces/zz-scratch-snapshot-writer.ts` whose one
+ * function deletes from `snapshots(spaceId)` without asking is named by the case "every covered writer asks the gate". The first plant run
+ * passed it: the derivation (`_space-writers.mjs`) resolved a concise-arrow helper only in the calling file, so a writer in its own module
+ * opening the store's `snapshots(spaceId)` was `unknown` and checked by nothing - the snapshot sweep is such a writer. The derivation now
+ * follows the helper's relative import. With `schema_snapshots` out of `COVERED` the same plant passes the writer case, and with it and
+ * `file_hashes` out of the lists the derivation case names both.
  *
  * ## The exemptions, each with its reason, each failing when its file stops matching
  *
@@ -44,8 +59,28 @@ const INDEX = moduleIndex('server/src');
 // `files` was 40 until the space rename's two bare `fs.rename` calls became the one inside `moveTree` (`files/remove-tree.ts`, Q-171): two sites merged into one.
 const WRITERS = spaceWriters(INDEX, { floors: { space: 150, alias: 65, files: 39 } });
 
-/** The families a wipe covers, and their tombstones — the collection suffixes a covered write names. */
-const COVERED = new Set(['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones', 'file_tombstones']);
+/**
+ * The per-space collections whose every writer asks the gate: the record families and their tombstones (an act lands, restores or empties
+ * them), and the schema snapshots (an import lands them and the sweep removes them, Q-739/Q-740, so neither may run beside an act).
+ */
+const COVERED = new Set(['facts', 'entities', 'edges', 'chrono', 'links', 'files', 'tombstones', 'file_tombstones', 'schema_snapshots']);
+
+/** The per-space collections a writer of which need not ask, each with its reason. Every other one of `SPACE_COLLECTIONS` is `COVERED`. */
+const EXEMPT_COLLECTIONS = new Map([
+  ['conflicts', 'a note that two copies of a record disagreed: written beside the arrival that raised it, it holds no record an act lands or restores'],
+  ['dupe_candidates', 'a review finding derived from the records by the duplicate scanner: never landed or restored by an act, re-derived after one'],
+  ['contradiction_candidates', 'a review finding derived from the records by the contradiction scanner: never landed or restored by an act, re-derived after one'],
+  ['embed_jobs', 'the embedding work queue: what it names is re-derived from the records, and a job for a record an act removed finds nothing'],
+  ['reindex_run', 'the reindex run\'s own progress row: bookkeeping of a derivation, no record'],
+  ['media_jobs', 'the media derivation\'s work queue: re-derived from the file rows, and a job for a file an act removed finds nothing'],
+  ['link_violations', 'the link checker\'s findings, derived from the records and re-derived after an act'],
+  ['file_hashes', 'the content-hash index of the file rows, derived from the bytes; the files family it describes is COVERED'],
+]);
+/** The fewest exemption rows: the eight derived or bookkeeping collections of bundle-266. Fewer means a row was dropped, not that a collection became covered. */
+const EXEMPT_COLLECTIONS_FLOOR = 8;
+
+/** The per-space collection suffixes, read from the registry the server builds every space collection name from. */
+const { SPACE_COLLECTIONS } = await import('../../server/dist/db/space-collection.js');
 
 /** Files whose writers need no ask, and why. Each must still hold a writer (else the table is stale). */
 const EXEMPT = new Map([
@@ -175,6 +210,28 @@ describe('every function that writes a space asks the write gate before its firs
       assert.ok(ask >= 0, `${name} never asks the gate, directly or through another wrapper: every writer that goes through it is unguarded`);
       assert.ok(body.slice(0, ask).search(/\bbody\s*\(/) < 0, `${name} runs the caller's body before it asks the gate`);
     }
+  });
+
+  it('every per-space collection of the registry is COVERED or exempted with a reason, and no row names a collection the registry lacks', () => {
+    const suffixes = Object.values(SPACE_COLLECTIONS);
+    assert.ok(suffixes.length >= 17, `only ${suffixes.length} per-space collections in SPACE_COLLECTIONS: the registry moved`);
+    const neither = suffixes.filter(s => !COVERED.has(s) && !EXEMPT_COLLECTIONS.has(s));
+    assert.deepEqual(neither, [], 'a per-space collection is neither COVERED nor exempted: its writers are checked by nothing. Add it to COVERED, or a reasoned row to EXEMPT_COLLECTIONS');
+    const both = suffixes.filter(s => COVERED.has(s) && EXEMPT_COLLECTIONS.has(s));
+    assert.deepEqual(both, [], 'a collection is both COVERED and exempted');
+    const known = new Set(suffixes);
+    const stale = [...COVERED, ...EXEMPT_COLLECTIONS.keys()].filter(s => !known.has(s));
+    assert.deepEqual(stale, [], 'a row names a collection SPACE_COLLECTIONS does not have');
+    assert.ok(EXEMPT_COLLECTIONS.size >= EXEMPT_COLLECTIONS_FLOOR, `only ${EXEMPT_COLLECTIONS.size} exemption rows: one was dropped`);
+    for (const [s, why] of EXEMPT_COLLECTIONS) assert.ok(why.length > 20, `the exemption of '${s}' gives no reason`);
+  });
+
+  it('the writers of schema snapshots are found, so the rule is asked of them', () => {
+    // The store's writer (`ensureSnapshot`) names its collection through the `snapshots(spaceId)` helper: a derivation that resolved none of them
+    // would hold the sweep and the import to nothing.
+    const snapshotWriters = WRITERS.sites.filter(s => s.kind === 'space' && s.collection === 'schema_snapshots').map(s => s.key);
+    assert.ok(snapshotWriters.includes('server/src/spaces/schema-snapshot-store.ts:ensureSnapshot'),
+      `the derivation does not see ensureSnapshot write schema_snapshots: ${JSON.stringify([...new Set(snapshotWriters)])}`);
   });
 
   it('every exemption still names a file that holds a covered writer', () => {
