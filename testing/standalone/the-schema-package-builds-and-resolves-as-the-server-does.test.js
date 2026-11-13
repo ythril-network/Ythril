@@ -53,13 +53,13 @@ describe('the package depends as the server does (I2, L1)', () => {
 });
 
 describe('the package builds from a clean dist (I4)', () => {
-  it('its build script removes dist with node\'s rmSync before tsc runs', () => {
+  // The runner empties dist itself (`--clean dist`, node's rmSync), after its install check and before tsc: a clean step ahead of the
+  // runner left a stale checkout with no dist when the check refused (bundle-266).
+  it('its build script has the compiler runner clean dist (--clean dist) before tsc runs, with no clean step of its own', () => {
     const steps = shellCommands(schema.scripts?.build);
-    const clean = steps.findIndex(s => /^node -e\b/.test(s) && /rmSync\(\s*\\?['"]dist\\?['"]/.test(s) && /recursive\s*:\s*true/.test(s));
-    const compile = steps.findIndex(s => COMPILER_RUN.test(s));
-    assert.ok(clean >= 0, `the build (${schema.scripts?.build}) has no portable dist clean (node -e ... rmSync('dist', { recursive: true, ... }))`);
-    assert.ok(compile > clean, 'the dist clean must run before tsc');
-    assert.ok(!steps.some(s => /\brm\s+-r|\brimraf\b|\brmdir\b|\bdel\b/.test(s)), 'the clean is a shell command that does not run on every platform');
+    const compile = steps.findIndex(s => COMPILER_RUN.test(s) && /\s--clean\s+dist(?:\s|$)/.test(s));
+    assert.ok(compile >= 0, `the build (${schema.scripts?.build}) does not run scripts/tsc.mjs with --clean dist`);
+    assert.ok(!steps.some(s => /\brm\s+-r|\brimraf\b|\brmdir\b|\bdel\b|rmSync/.test(s)), 'the build cleans dist in a step of its own, ahead of the install check');
   });
 
   it('.dockerignore matches dist/ and node_modules/ at any depth', () => {

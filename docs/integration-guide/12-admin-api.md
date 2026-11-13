@@ -136,7 +136,9 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   instance keeps whose fingerprint an exported record carries (`schemaFingerprint`), plus every version those link,
   transitively, whatever network built it: the records already carry those fingerprints, and an export is an
   administrator's explicit act. Each element is `{ fp, text, links }` and nothing else: how this instance came to hold
-  the version (its origin, network and sender) is not exported. A version this instance does not hold is not in it.
+  the version (its origin, network and sender) is not exported. `links` does name the networks of the layer and
+  served versions it points at, on purpose: the importer keeps those versions with it. A version this instance does not
+  hold is not in it.
   `schemaSnapshots` is no replicated family and no sync door serves it.
 - **A version too large for an importer to read is left out.** Every importer, released ones included, refuses a body
   holding an element over 10 MB, and a JSON-escaped text grows; an element that would come near that is left out,
