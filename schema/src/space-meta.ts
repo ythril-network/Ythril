@@ -792,20 +792,23 @@ export function readPeerMeta(incoming: unknown): MetaParse {
  * parse each stored layer WHOLE and drop the layer when it failed — silently, so a member held a layer it did not run, and one type
  * saved before a rule existed (a pattern a stricter body refuses today) took every good type of its layer with it. A part that no
  * longer parses is left out of what is read and named in `skipped`; everything else is read. The whole parse goes first, so the case that
- * matters (nothing is wrong) costs one parse and not one per type.
+ * matters (nothing is wrong) costs one parse and not one per type. `unknown` names each key this release has never heard of, which the read
+ * leaves out as the tolerant peer reader does: a reader that compares what it read (a schema version's diff) must know what it could not read.
  */
-export function readStoredMeta(stored: unknown): { meta: Obj; skipped: string[] } {
+export function readStoredMeta(stored: unknown): { meta: Obj; skipped: string[]; unknown: string[] } {
   // A stored rule that no longer compiles is the rule engine's to skip and report (`invalidRulesOf`), never a reason to leave out the
   // type that carries it: the save-time rule checks are off while what a store holds is read.
   return readingStoredRules(() => readStoredMetaParts(stored));
 }
 
-function readStoredMetaParts(stored: unknown): { meta: Obj; skipped: string[] } {
+function readStoredMetaParts(stored: unknown): { meta: Obj; skipped: string[]; unknown: string[] } {
   const stripped = stripServerOwnedMeta(stored);
-  if (!isPlainObject(stripped)) return { meta: {}, skipped: [] };
-  const known = readKnownMeta(stripped, new UnknownNames());
+  if (!isPlainObject(stripped)) return { meta: {}, skipped: [], unknown: [] };
+  const names = new UnknownNames();
+  const known = readKnownMeta(stripped, names);
+  const unknown = names.list();
   const whole = SpaceMetaBody.safeParse(known);
-  if (whole.success) return { meta: whole.data as Obj, skipped: [] };
+  if (whole.success) return { meta: whole.data as Obj, skipped: [], unknown };
 
   const skipped = new UnknownNames();
   const out: Obj = {};
@@ -832,7 +835,7 @@ function readStoredMetaParts(stored: unknown): { meta: Obj; skipped: string[] } 
     }
     setOwn(out, key, kinds);
   }
-  return { meta: out, skipped: skipped.list() };
+  return { meta: out, skipped: skipped.list(), unknown };
 }
 
 /**
