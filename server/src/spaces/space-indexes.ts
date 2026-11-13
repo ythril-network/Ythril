@@ -63,6 +63,7 @@ import {
   edgeIdentityState, edgesHoldNoRow, someEdgeIdentityStands,
 } from './edge-identity-index.js';
 import { VECTOR_INDEXED_COLLECTIONS } from './vector-index.js';
+import { STAMP_INDEX, STAMP_PRESENT } from './schema-snapshot-carried.js';
 import { LINK_INDEXES } from '../brain/link-adjacency.js';
 import { FORK_INDEXES, FORKING_FAMILIES } from '../sync/upsert-plan.js';
 import { TTL_COLLECTIONS } from '../brain/ttl.js';
@@ -133,7 +134,7 @@ const TTL_INDEXES: readonly SpaceIndex[] = [
    */
   ...Object.values(COLLECTION_SUFFIX).map((part): SpaceIndex => ({
     part, keys: { [SCHEMA_FINGERPRINT_FIELD]: 1 },
-    options: { name: `${SCHEMA_FINGERPRINT_FIELD}_present`, partialFilterExpression: { [SCHEMA_FINGERPRINT_FIELD]: { $exists: true } } },
+    options: { name: STAMP_INDEX, partialFilterExpression: { [SCHEMA_FINGERPRINT_FIELD]: { ...STAMP_PRESENT } } },
     policy: 'report', bootSafe: false, sweep: true,
   })),
 ];
