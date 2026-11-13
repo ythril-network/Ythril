@@ -30,8 +30,10 @@ export function rungsOf(SPACE_AREAS, over = {}, rest = 'none') {
  * Open the doors over `spaces` (ids; each a real space with embeddings suppressed).
  * @returns the door: `rest(key, method, url, body?)`, `mcp(key, tool, args)`, `mint(name, perSpace | opts)`, and the server modules.
  */
-export async function openViewDoors({ suite, spaces }) {
-  const door = await openPushDoor({ suite, spaces: spaces.map(id => ({ id, label: id, folders: [], meta: META })) });
+export async function openViewDoors({ suite, spaces, openDoor }) {
+  // `openDoor`: a door of the caller's own under the app (a pull door, for a case that needs a network and its peer); it opens
+  // `spaces` itself. Absent: a push door over `spaces`, each with embeddings suppressed.
+  const door = openDoor ? await openDoor() : await openPushDoor({ suite, spaces: spaces.map(id => ({ id, label: id, folders: [], meta: META })) });
   const loader = await import('../../server/dist/config/loader.js');
   const tokens = await import('../../server/dist/auth/tokens.js');
   const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
