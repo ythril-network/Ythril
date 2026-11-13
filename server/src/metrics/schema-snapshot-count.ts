@@ -20,10 +20,13 @@ import { countSink } from './count-sink.js';
  * What became of a snapshot: `written` (this server kept a version of its own or a layer's), `fetched` (kept from a member), `not_held` (the member
  * holds no such version), `route_missing` (the member has no such route), `lost_space` (the member no longer has the space), `not_shared` (the member serves no such version to this member: it was built from a network this member is not in), `refused_rung` (the member
  * refused this token the schema), `refused_hash`, `refused_shape` and `over_cap` (the text a member sent was refused), `failed` (anything else that went
- * wrong), `behind` (a fetched snapshot's links say this variation lags the sender's).
+ * wrong), `behind` (a fetched snapshot's links say this variation lags the sender's), `removed` (the sweep removed a row nothing here used),
+ * `imported` (an admin import kept a version from its body), `import_refused` (an admin import's version was refused: not the text its
+ * fingerprint names).
  */
 export const SCHEMA_SNAPSHOT_OUTCOMES = [
   'written', 'fetched', 'not_held', 'route_missing', 'lost_space', 'not_shared', 'refused_rung', 'refused_hash', 'refused_shape', 'over_cap', 'failed', 'behind',
+  'removed', 'imported', 'import_refused',
 ] as const;
 
 /** An outcome, as `ythril_schema_snapshot_total` labels it. */

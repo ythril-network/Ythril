@@ -12,11 +12,17 @@
  *
  * ## What a row is
  *
- * `{ _id: fp, text, origin, networkId?, from?, links, at }`: `text` is the canonical schema text the fingerprint is the hash of. `origin` says
- * how this server came to hold it: `own` (a variation of the space this server ran), `layer` (a network's layer as received; `links: null`,
- * because this server cannot know what the upstream built it from) or `fetched` (from a peer, with `from`). An own row's `links` say what the
- * variation was built from: the own definitions' fingerprint, each layer received and what this server serves each network. Content-addressed,
- * so a row once written never changes: a second origin of the same text keeps the first row.
+ * `{ _id: fp, text, origin, networkId?, from?, links, at, orphanSince? }`: `text` is the canonical schema text the fingerprint is the hash of.
+ * `origin` says how this server came to hold it: `own` (a variation of the space this server ran), `layer` (a network's layer as received;
+ * `links: null`, because this server cannot know what the upstream built it from) or `fetched` (from a peer, with `from`). An own row's `links`
+ * say what the variation was built from: the own definitions' fingerprint, each layer received and what this server serves each network.
+ * Content-addressed, so a row's text never changes: a second write of the same text keeps the first row. Two things do change, by rule:
+ *
+ * - `orphanSince`, the mark the snapshot sweep (`schema-snapshot-sweep.ts`) sets when it first finds the row unused, and removes the row a
+ *   grace after; every writer that makes the version current or a held layer clears it, whatever the held cache says.
+ * - The origin, when a version kept as `fetched` (or `own`) becomes current or a held layer: that writer rewrites `origin`, `networkId` and
+ *   `links` to its own (`from` goes), so a version an import or a fetch landed first is served and kept as what it now is. A `layer` row is
+ *   never rewritten: it is the network history the behind hint reads.
  *
  * **"Don't copy, just use"**: a variation that adds nothing to a layer has the layer's text and so the layer's fingerprint, and writes no own row.
  *
@@ -40,7 +46,7 @@ import { admitSpaceWrite, isActRefusal } from './space-write-gate.js';
 import { configuredSpaces } from './space-lookup.js';
 import { libraryUsages } from './library-usages.js';
 import {
-  variationOf, layerStampOf, knownHeld, noteHeld, forgetHeld,
+  variationOf, layerStampOf, knownHeld, noteHeld, forgetHeld, heldGeneration,
   type SnapshotLinks, type Stamp,
 } from './schema-stamp.js';
 import type { SpaceMeta } from '../config/types.js';
@@ -70,6 +76,8 @@ export interface SnapshotRow extends KeptAs {
   _id: string;
   text: string;
   at: string;
+  /** The ISO time of the sweep pass that first found the row unused; absent while it is used. */
+  orphanSince?: string;
 }
 
 export const snapshots = (spaceId: string): Collection<SnapshotRow> => col<SnapshotRow>(spaceCollection(spaceId, 'schemaSnapshots'));
@@ -92,6 +100,8 @@ export async function ensureSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs
     ...(kept.from !== undefined ? { from: kept.from } : {}),
     links: kept.links, at: new Date().toISOString(),
   };
+  // Read before the upsert: a forgetHeld (the sweep removing the row) while it is in flight moves it, and the row is then not noted held.
+  const generation = heldGeneration(spaceId);
   try {
     const done = await admitSpaceWrite(spaceId, undefined, () =>
       snapshots(spaceId).updateOne(asFilter<SnapshotRow>({ _id: stamp.fp }), { $setOnInsert: row }, { upsert: true }));
@@ -101,8 +111,46 @@ export async function ensureSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs
     if (isActRefusal(err)) return 'refused';
     if (!isDuplicateKey(err)) throw err;
   }
-  noteHeld(spaceId, stamp.fp);
+  if (heldGeneration(spaceId) === generation) noteHeld(spaceId, stamp.fp);
   return 'written';
+}
+
+/** The rows a writer of a version that is current or a held layer claims: one whose origin is not `kept`'s (a `layer` row never), or one that is marked. */
+const claimFilters = (fp: string, kept: KeptAs): [Record<string, unknown>, Record<string, unknown>] => [
+  { _id: fp, origin: { $nin: [kept.origin, 'layer'] } },
+  { _id: fp, orphanSince: { $exists: true } },
+];
+
+/**
+ * Claim the row of `stamp` for a version that is current or a held layer now (design r3 D-upgrade and S-6): a row whose origin is not `kept`'s takes
+ * `kept`'s origin, network and links (the text is equal by its hash; `from` goes), and a mark the sweep set is cleared. Both whatever the held cache
+ * says, both conditional, in one round trip through the write gate. An act standing on the space: nothing now, and the cycle claims it later.
+ */
+async function claimKept(spaceId: string, stamp: Stamp, kept: KeptAs): Promise<void> {
+  const [wrongOrigin, marked] = claimFilters(stamp.fp, kept);
+  const $set = { origin: kept.origin, links: kept.links, ...(kept.networkId !== undefined ? { networkId: kept.networkId } : {}) };
+  const $unset = { from: '' as const, ...(kept.networkId === undefined ? { networkId: '' as const } : {}) };
+  try {
+    await admitSpaceWrite(spaceId, undefined, () => snapshots(spaceId).bulkWrite([
+      { updateOne: { filter: asFilter<SnapshotRow>(wrongOrigin), update: { $set, $unset } } },
+      { updateOne: { filter: asFilter<SnapshotRow>(marked), update: { $unset: { orphanSince: '' } } } },
+    ], { ordered: false }));
+  } catch (err) {
+    if (!isActRefusal(err)) throw err;
+  }
+}
+
+/** Does a present row (`origin` and `orphanSince` read) need {@link claimKept} for `kept`? The same rule as its filters, so the cycle writes only what it must. */
+const needsClaim = (row: Pick<SnapshotRow, 'origin' | 'orphanSince'>, kept: KeptAs): boolean =>
+  row.orphanSince !== undefined || (row.origin !== kept.origin && row.origin !== 'layer');
+
+/**
+ * Claim and keep the row of a version that is current or a held layer now (detached): {@link claimKept}, then {@link ensureSnapshot}. The claim
+ * first, so once the row is seen the claim has landed: a claim landing later would clear a mark a sweep set after the version stopped being current.
+ */
+function keepCurrentSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs): void {
+  detachedWrite(async () => { await claimKept(spaceId, stamp, kept); await ensureSnapshot(spaceId, stamp, kept); })
+    .catch(err => { schemaSnapshotTotal.note('failed'); reportSpaceFailure(SCHEMA_SNAPSHOT_STEP, spaceId, err); });
 }
 
 /** {@link ensureSnapshot}, detached: never awaited by the write that asked, a failure reported once per window through the shared reporter. */
@@ -119,8 +167,11 @@ export function keepSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs): void 
 /** The detached upserts in flight, `space:fp`: each entry leaves when its upsert settles, so the set holds no more than the writes running now. */
 const keeping = new Set<string>();
 
-/** What `spaceId` keeps for its variation now: every layer's row, and its own unless it is one of them ("don't copy, just use"). */
-function owedOf(spaceId: string): Array<readonly [Stamp, KeptAs]> {
+/**
+ * What `spaceId` keeps for its variation now: every layer's row, and its own unless it is one of them ("don't copy, just use"). The sweep's keep set:
+ * read here, never copied.
+ */
+export function owedOf(spaceId: string): Array<readonly [Stamp, KeptAs]> {
   const v = variationOf(spaceId);
   if (!v) return [];
   const out: Array<readonly [Stamp, KeptAs]> = v.layers.map(l => [l.stamp, { origin: 'layer', networkId: l.networkId, links: null }] as const);
@@ -130,12 +181,12 @@ function owedOf(spaceId: string): Array<readonly [Stamp, KeptAs]> {
 
 /** Keep the rows of `spaceId`'s variation as the config holds it now (detached). `updateSpace` and `createSpace` call it. */
 export function keepVariationSnapshots(spaceId: string): void {
-  for (const [stamp, kept] of owedOf(spaceId)) keepSnapshot(spaceId, stamp, kept);
+  for (const [stamp, kept] of owedOf(spaceId)) keepCurrentSnapshot(spaceId, stamp, kept);
 }
 
-/** Keep the row of a network layer `storeNetworkLayer` just stored for `spaceId` (detached). */
+/** Keep the row of a network layer `storeNetworkLayer` just stored for `spaceId` (detached), claimed as that layer's. */
 export function keepLayerSnapshot(networkId: string, spaceId: string, layer: SpaceMeta): void {
-  keepSnapshot(spaceId, layerStampOf(layer), { origin: 'layer', networkId, links: null });
+  keepCurrentSnapshot(spaceId, layerStampOf(layer), { origin: 'layer', networkId, links: null });
 }
 
 /** After a library save: keep the variation of every space that links one of `names` (its fingerprint moved with the entry). */
@@ -146,19 +197,26 @@ export function keepSnapshotsOfSpacesLinking(names: readonly string[]): void {
 
 /**
  * The housekeeping step: for every space, the rows its variation and its layers owe, read from the store (not from what is known held, so a
- * row a restore or a failed write lost is written again), and the missing ones written. A space an act stands on is passed over quietly.
+ * row a restore or a failed write lost is written again), and the missing ones written; a present one with the wrong origin or a sweep's mark is
+ * claimed. A space an act stands on is passed over quietly.
  */
 export async function ensureSchemaSnapshots(): Promise<void> {
   await eachSpace(SCHEMA_SNAPSHOT_STEP, configuredSpaces(), async (space) => {
     const owed = owedOf(space.id);
     if (owed.length === 0) return;
-    const present = new Set((await snapshots(space.id)
-      .find(asFilter<SnapshotRow>({ _id: { $in: [...new Set(owed.map(([s]) => s.fp))] } }), { projection: { _id: 1 } }).toArray()).map(r => String(r._id)));
+    const present = new Map<string, Pick<SnapshotRow, 'origin' | 'orphanSince'>>((await snapshots(space.id)
+      .find(asFilter<SnapshotRow>({ _id: { $in: [...new Set(owed.map(([s]) => s.fp))] } }), { projection: { _id: 1, origin: 1, orphanSince: 1 } }).toArray())
+      .map(r => [String(r._id), r] as const));
     for (const [stamp, kept] of owed) {
-      if (present.has(stamp.fp)) { noteHeld(space.id, stamp.fp); continue; }
+      const row = present.get(stamp.fp);
+      if (row) {
+        if (needsClaim(row, kept)) await claimKept(space.id, stamp, kept);
+        noteHeld(space.id, stamp.fp);
+        continue;
+      }
       forgetHeld(space.id, stamp.fp);
       if (await ensureSnapshot(space.id, stamp, kept) === 'refused') return;
-      present.add(stamp.fp);
+      present.set(stamp.fp, { origin: kept.origin });
     }
   });
 }
