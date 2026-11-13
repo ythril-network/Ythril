@@ -20,6 +20,7 @@ import { col } from '../db/mongo.js';
 import type { BrainCollection } from '../config/types.js';
 import type { SpaceMeta, KnowledgeType } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { kindHasAllowlist } from './schema-validation.js';
 import { COUNTED_FILE_ROW } from '../files/live-file-row.js';
 import { HOLDS_NO_VECTOR } from '../brain/holds-vector.js';
 
@@ -329,7 +330,7 @@ export function scoreCompleteness(spaceId: string, meta: SpaceMeta, facts: Compl
   const purposeMissing = !meta.purpose || meta.purpose.trim() === '';
   push('meta-purpose-missing', 'info', 'space', purposeMissing ? 1 : 0, 1, [], null);
 
-  const hasSchemas = SCHEMA_KINDS.some(({ kind }) => Object.keys(typeSchemas[kind] ?? {}).length > 0);
+  const hasSchemas = SCHEMA_KINDS.some(({ kind }) => kindHasAllowlist(typeSchemas, kind));
   push('schemas-declared-but-unenforced', 'warn', 'space',
     hasSchemas && (meta.validationMode ?? 'off') === 'off' ? 1 : 0, hasSchemas ? 1 : 0, [], null);
 

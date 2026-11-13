@@ -10,7 +10,7 @@
 export * from './index.js';
 export {
   findBrokenLibraryRefs, findWrongKindLibraryRefs, brokenRefsError, wrongKindRefsError, withoutBrokenLibraryRefs,
-  readPeerMeta, readStoredMeta, withTypeSchemas, derivedFromStored,
+  readPeerMeta, readStoredMeta, withTypeSchemas, derivedFromStored, placeUnder,
 } from './space-meta.js';
 export { mergeMetaFields, mergeTypeDefinition, eachTypeDefinition, boundedNames } from './meta-fields.js';
 export { useSchemaLibrary } from './library.js';

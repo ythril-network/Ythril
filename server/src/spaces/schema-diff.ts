@@ -28,12 +28,13 @@
  * Not the question `typesAnEditChanges` (the price of an edit) or the field rights' `rulesOf` answer: those price a write and a notice, this
  * compares two stored versions.
  */
-import { isPlainObject, spaceRuleKinds, type StoredRule } from '@ythril-network/schema/internal';
+import { isPlainObject, placeUnder, spaceRuleKinds, type StoredRule } from '@ythril-network/schema/internal';
 import { isDeepStrictEqual } from 'node:util';
 import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import { LruMap } from '../util/lru-map.js';
 import { sha256Hex } from '../util/sha256-hex.js';
 import { versionMetaOf, type VersionSchema } from './schema-version-text.js';
+import { kindHasAllowlist } from './schema-validation.js';
 
 /** The four classes of a change; `nested` marks a key whose own table classes its parts. */
 export type SchemaDiffClass = 'structural' | 'wording' | 'write' | 'lifecycle';
@@ -88,7 +89,6 @@ export interface SchemaVersionDiff {
 type Obj = Record<string, unknown>;
 const objOf = (v: unknown): Obj => (isPlainObject(v) ? v : {});
 const sides = (from: unknown, to: unknown): { from?: unknown; to?: unknown } => ({ ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}) });
-const under = (path: string, key: string): string => (path === '' ? key : `${path}.${key}`);
 
 /** The changes between two objects of `table`, each key by its class, a `nested` key walked by its own table (`entries` for a map of them). */
 function changesOf(table: string, from: unknown, to: unknown, path: string, out: SchemaChange[]): void {
@@ -98,7 +98,7 @@ function changesOf(table: string, from: unknown, to: unknown, path: string, out:
     const x = a[key], y = b[key];
     if (isDeepStrictEqual(x, y)) continue;
     const declared = SCHEMA_DIFF_CLASSES[table]?.[key];
-    const place = under(path, key);
+    const place = placeUnder(path, key);
     if (declared !== 'nested') { out.push({ place, ...sides(x, y), class: keyClass(table, key) }); continue; }
     const mapOf = `${table}.${key}.*`;
     if (Object.hasOwn(SCHEMA_DIFF_CLASSES, mapOf)) entriesOf(mapOf, x, y, place, out);
@@ -112,7 +112,7 @@ function entriesOf(table: string, from: unknown, to: unknown, path: string, out:
   for (const name of new Set([...Object.keys(a), ...Object.keys(b)])) {
     const x = a[name], y = b[name];
     if (isDeepStrictEqual(x, y)) continue;
-    const place = under(path, name);
+    const place = placeUnder(path, name);
     if (x === undefined || y === undefined || !isPlainObject(x) || !isPlainObject(y)) { out.push({ place, ...sides(x, y), class: 'structural' }); continue; }
     changesOf(table, x, y, place, out);
   }
@@ -128,7 +128,6 @@ function typeChanges(from: unknown, to: unknown): SchemaChange[] {
   return out;
 }
 
-const declaresAny = (schema: VersionSchema, kind: string): boolean => Object.keys(objOf(schema.typeSchemas[kind])).length > 0;
 const ruleKinds = (r: unknown): string[] => (isPlainObject(r) ? spaceRuleKinds(r as unknown as StoredRule) : []);
 
 /** The diff of two read schemas, with the places either read dropped. */
@@ -152,7 +151,7 @@ function diffOf(a: VersionSchema, b: VersionSchema, unread: string[]): SchemaVer
   }
   const allowlists: SchemaVersionDiff['allowlists'] = [];
   for (const kind of KNOWLEDGE_TYPES) {
-    const from = declaresAny(a, kind), to = declaresAny(b, kind);
+    const from = kindHasAllowlist(a.typeSchemas, kind), to = kindHasAllowlist(b.typeSchemas, kind);
     if (from !== to) allowlists.push({ kind, from, to });
   }
   return { types, spaceRules, allowlists, unread };

@@ -164,6 +164,16 @@ export function inlineResolvableRefs<M extends Partial<SpaceMeta>>(meta: M): M {
 const viewOf = (kind: ViewKind, record: RecordView): RecordView => (isRecordView(record) ? record : recordViewOf(kind, record));
 
 /**
+ * Does `kind` close its type set in `typeSchemas`: a kind with any declared type admits only those types (its allowlist); a kind with none
+ * admits any. The one statement of the rule: each validator below refuses by it, the completeness check asks it, and the version diff
+ * (`spaces/schema-diff.ts`) reports a kind whose answer changed between two versions.
+ */
+export function kindHasAllowlist(typeSchemas: Readonly<Record<string, unknown>> | undefined, kind: string): boolean {
+  const declared = typeSchemas?.[kind];
+  return typeof declared === 'object' && declared !== null && Object.keys(declared).length > 0;
+}
+
+/**
  * Validate an entity write against the space meta schema.
  */
 export function validateEntity(meta: SpaceMeta, record: RecordView, instanceWrittenKeys: readonly string[] = []): SchemaViolation[] {
@@ -174,7 +184,7 @@ export function validateEntity(meta: SpaceMeta, record: RecordView, instanceWrit
   const entitySchemas = meta.typeSchemas?.entity;
 
   // Entity type allowlist (if any types are defined, entity.type must be one of them)
-  if (entity.type && entitySchemas && Object.keys(entitySchemas).length > 0) {
+  if (entity.type && entitySchemas && kindHasAllowlist(meta.typeSchemas, 'entity')) {
     if (!Object.prototype.hasOwnProperty.call(entitySchemas, entity.type)) {
       violations.push({
         field: 'type',
@@ -316,7 +326,7 @@ export function validateEdge(
   const edgeSchemas = meta.typeSchemas?.edge;
 
   // Edge label allowlist
-  if (edge.label && edgeSchemas && Object.keys(edgeSchemas).length > 0) {
+  if (edge.label && edgeSchemas && kindHasAllowlist(meta.typeSchemas, 'edge')) {
     if (!SERVER_WRITTEN_EDGE_LABELS.has(edge.label)
       && !Object.prototype.hasOwnProperty.call(edgeSchemas, edge.label)) {
       violations.push({
@@ -403,7 +413,7 @@ export function validateFact(meta: SpaceMeta, record: RecordView, instanceWritte
   const factSchemas = meta.typeSchemas?.fact;
 
   // Fact type allowlist (if any types are defined, fact.type must be one of them)
-  if (fact.type && factSchemas && Object.keys(factSchemas).length > 0) {
+  if (fact.type && factSchemas && kindHasAllowlist(meta.typeSchemas, 'fact')) {
     if (!Object.prototype.hasOwnProperty.call(factSchemas, fact.type)) {
       violations.push({
         field: 'type',
@@ -444,7 +454,7 @@ export function validateChrono(meta: SpaceMeta, record: RecordView, instanceWrit
   const chronoSchemas = meta.typeSchemas?.chrono;
 
   // Chrono type allowlist (if custom types are defined, chrono.type must be one of them)
-  if (chrono.type && chronoSchemas && Object.keys(chronoSchemas).length > 0) {
+  if (chrono.type && chronoSchemas && kindHasAllowlist(meta.typeSchemas, 'chrono')) {
     if (!Object.prototype.hasOwnProperty.call(chronoSchemas, chrono.type)) {
       violations.push({
         field: 'type',

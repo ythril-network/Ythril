@@ -15,7 +15,7 @@
  *   nothing because of it.
  * - {@link snapshotSweepPlan}: a version a stored record carries, or one a kept version links, being removed by the sweep (bundle-266, Q-739).
  */
-import { isSchemaFingerprint, schemaFingerprintTextOf } from '@ythril-network/schema/internal';
+import { isSchemaFingerprint, schemaFingerprintTextOf, isPlainObject } from '@ythril-network/schema/internal';
 import { readPeerMeta } from './body-schemas.js';
 import type { SnapshotLinks } from './schema-stamp.js';
 import { JSON_BODY_MAX_BYTES } from '../config/body-limits.js';
@@ -63,6 +63,20 @@ function cutLinks(links: SnapshotLinks, shared: ReadonlySet<string>): SnapshotLi
   return { own: links.own, layers: cutTo(links.layers, shared), served: cutTo(links.served, shared) };
 }
 
+/** The keys a snapshot text of format 1 holds: an arriving text with any other is refused, a stored one names it unread. */
+export const SNAPSHOT_TEXT_KEYS: ReadonlySet<string> = new Set(['format', 'typeSchemas', 'rules']);
+
+/**
+ * The envelope of a snapshot text: the parsed body when `text` is JSON, a plain object and `format: 1`, else `null`. Both readers of a text
+ * open it here (`verifySnapshot`, strict, for an arriving text; `versionMetaOf`, tolerant, for a stored one), so the two never disagree on
+ * what a version text is; each judges the body by its own rule.
+ */
+export function snapshotBodyOf(text: string): Record<string, unknown> | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return null; }
+  return isPlainObject(parsed) && parsed['format'] === 1 ? parsed : null;
+}
+
 /** Why a fetched text was refused: over the byte cap, not the text its fingerprint names, or not a canonical snapshot. */
 export type SnapshotRefusal = 'over_cap' | 'refused_hash' | 'refused_shape';
 
@@ -76,12 +90,9 @@ export function verifySnapshot(text: string, fp: string): { ok: true } | { ok: f
   if (isOverSnapshotCap(text)) return { ok: false, outcome: 'over_cap' };
   if (sha256Hex(text) !== fp) return { ok: false, outcome: 'refused_hash' };
   const refused = { ok: false, outcome: 'refused_shape' } as const;
-  let parsed: unknown;
-  try { parsed = JSON.parse(text); } catch { return refused; }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return refused;
-  const body = parsed as Record<string, unknown>;
-  if (body['format'] !== 1) return refused;
-  if (Object.keys(body).some(k => k !== 'format' && k !== 'typeSchemas' && k !== 'rules')) return refused;
+  const body = snapshotBodyOf(text);
+  if (!body) return refused;
+  if (Object.keys(body).some(k => !SNAPSHOT_TEXT_KEYS.has(k))) return refused;
   const read = readPeerMeta({ typeSchemas: body['typeSchemas'] ?? {}, rules: body['rules'] ?? {} });
   if (!read.ok) return refused;
   return schemaFingerprintTextOf(read.meta) === text ? { ok: true } : refused;

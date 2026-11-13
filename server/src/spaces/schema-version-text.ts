@@ -23,11 +23,8 @@ import { readStoredMeta, isPlainObject } from '@ythril-network/schema/internal';
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { EMPTY_SCHEMA_FINGERPRINT, EMPTY_SCHEMA_STAMP } from './schema-stamp.js';
-import type { ServableRow } from './schema-snapshot.js';
+import { snapshotBodyOf, SNAPSHOT_TEXT_KEYS, type ServableRow } from './schema-snapshot.js';
 import { owedOf, type SnapshotRow } from './schema-snapshot-store.js';
-
-/** The keys a version text holds: anything else is a later format's and is named unread. */
-const TEXT_KEYS: ReadonlySet<string> = new Set(['format', 'typeSchemas', 'rules']);
 
 /** The schema a version text holds, as this release reads it. */
 export interface VersionSchema {
@@ -46,10 +43,9 @@ export interface VersionMeta {
  * not format 1: never for a text this server stored, which the stored reader always reads.
  */
 export function versionMetaOf(text: string): VersionMeta | null {
-  let parsed: unknown;
-  try { parsed = JSON.parse(text); } catch { return null; }
-  if (!isPlainObject(parsed) || parsed['format'] !== 1) return null;
-  const unread = Object.keys(parsed).filter(k => !TEXT_KEYS.has(k));
+  const parsed = snapshotBodyOf(text);
+  if (!parsed) return null;
+  const unread = Object.keys(parsed).filter(k => !SNAPSHOT_TEXT_KEYS.has(k));
   const read = readStoredMeta({ typeSchemas: parsed['typeSchemas'] ?? {}, rules: parsed['rules'] ?? {} });
   unread.push(...read.unknown, ...read.skipped);
   const typeSchemas = isPlainObject(read.meta['typeSchemas']) ? read.meta['typeSchemas'] as VersionSchema['typeSchemas'] : {};
