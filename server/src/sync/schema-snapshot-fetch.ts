@@ -50,7 +50,7 @@ import { isDirectionalNetwork, isUpstreamPeer, networksSharedWith } from '../net
 import { snapshots, type SnapshotRow } from '../spaces/schema-snapshot-store.js';
 import { fingerprintsCarriedIn, STAMPED_COLLECTIONS } from '../spaces/schema-snapshot-carried.js';
 import { behindVerdict, SCHEMA_SNAPSHOT_MAX_BYTES, type SharedNetwork, type SnapshotRefusal } from '../spaces/schema-snapshot.js';
-import { knownHeld, variationOf, type SnapshotLinks } from '../spaces/schema-stamp.js';
+import { fpPrefix, knownHeld, variationOf, type SnapshotLinks } from '../spaces/schema-stamp.js';
 import { keepVerifiedSnapshot } from './schema-snapshot-keep.js';
 import { unknownSpaceSentence } from '../spaces/unknown-space.js';
 import { networksHolding } from '../spaces/wipe-vote.js';
@@ -116,7 +116,7 @@ export function forgetSchemaSnapshotOutcomes(): void {
 
 /** Say a failed ask of `member` for `fp`, once per window per member and space. */
 function sayFailed(member: NetworkMember, spaceId: string, fp: string, why: unknown): void {
-  failureSaid(`${member.instanceId}:${spaceId}`, () => log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} `
+  failureSaid(`${member.instanceId}:${spaceId}`, () => log.warn(`Schema snapshot ${peerText(fpPrefix(fp))} from ${peerText(member.label ?? member.instanceId)} `
     + `for space '${peerText(spaceId)}': ${peerText(why)} (said once per ${SAY_ONCE_WINDOW_MS / 60_000} minutes while it fails)`));
 }
 
@@ -283,7 +283,7 @@ async function keepFetched(a: SnapshotFetch, fp: string, memberKey: string, resp
 function refuse(spaceId: string, member: NetworkMember, fp: string, memberKey: string, outcome: SnapshotRefusal): Next {
   schemaSnapshotTotal.note(outcome);
   terminal.set(`${memberKey}:${spaceId}:${fp}`, outcome);
-  log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} from ${peerText(member.label ?? member.instanceId)} for space '${peerText(spaceId)}' REFUSED (${outcome}): `
+  log.warn(`Schema snapshot ${peerText(fpPrefix(fp))} from ${peerText(member.label ?? member.instanceId)} for space '${peerText(spaceId)}' REFUSED (${outcome}): `
     + 'it is not the canonical schema text that fingerprint names (or it is over the size a snapshot may have). It is not asked for again from this member at this version.');
   return 'next';
 }
@@ -308,7 +308,7 @@ async function sayBehind(spaceId: string, member: NetworkMember, sender: { fp: s
     for (const networkId of behindVerdict({ networks: mine }, sender)) {
       behindSaid(`${spaceId}:${networkId}:${sender.fp}`, () => {
         schemaSnapshotTotal.note('behind');
-        log.info(`Schema snapshot ${peerText(sender.fp.slice(0, 12))} kept for space '${peerText(spaceId)}': the links ${peerText(member.label ?? member.instanceId)} sent, `
+        log.info(`Schema snapshot ${peerText(fpPrefix(sender.fp))} kept for space '${peerText(spaceId)}': the links ${peerText(member.label ?? member.instanceId)} sent, `
           + `a hint only, say this variation's layer from network '${peerText(networkId)}' is not the one it uses. Nothing is changed: the layer arrives by the meta pull or a round.`);
       });
     }

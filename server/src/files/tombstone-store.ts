@@ -26,6 +26,7 @@ import type { FileTombstoneDoc } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
 import { dropIndexesIfPresent } from '../db/index-names.js';
 import { inChunks } from '../util/chunks.js';
+import { KeyGenerations } from '../util/key-generations.js';
 import { idKeysetPage, type IdPage } from '../db/id-keyset-page.js';
 import { isoKeysetFilters, isoKeysetSort, tieThenRange, type IsoPosition } from '../util/seq-keyset.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
@@ -217,15 +218,15 @@ export async function highestFileTombstoneVersionAt(spaceId: string, paths: read
  * write again a row a stale settle dropped, and after a wipe it would re-create a tombstone in a space that was just emptied —
  * published, served, and applied by every peer to a path of the NEW space.
  */
-const wipeGenerations = new Map<string, number>();
-export const wipeGenerationOf = (spaceId: string): number => wipeGenerations.get(spaceId) ?? 0;
+const wipeGenerations = new KeyGenerations();
+export const wipeGenerationOf = (spaceId: string): number => wipeGenerations.of(spaceId);
 
 /**
  * Mark a wipe of the space's file tombstones: the next generation. Called by the one wipe (`forgetFileTombstonesOf`, in
  * `tombstones.ts`, under the space's publish lock) in the same step as its delete — the delete alone is what a publish in flight
  * undoes, and the generation alone says nothing about the rows.
  */
-export const bumpWipeGeneration = (spaceId: string): void => { wipeGenerations.set(spaceId, wipeGenerationOf(spaceId) + 1); };
+export const bumpWipeGeneration = (spaceId: string): void => { wipeGenerations.bump(spaceId); };
 
 /**
  * The stored tombstones of `ids`, by id, as a Map keyed by the stored `_id` — one projected `$in` read per chunk

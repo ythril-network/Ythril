@@ -36,17 +36,8 @@ export function passIsOwed(pass: { running: boolean; completedAt: string | undef
   return now.getTime() - Date.parse(pass.completedAt) >= rescanAfterMs;
 }
 
-/** The generation of each space's pass, bumped by a restart so a page already running does not write state over the one a restart cleared. */
-export class PassGenerations {
-  private readonly byId = new Map<string, number>();
-
-  of(spaceId: string): number { return this.byId.get(spaceId) ?? 0; }
-
-  /** A restart of these spaces' passes: every page that began under an earlier generation is stale. */
-  bump(spaceIds: readonly string[]): void {
-    for (const id of spaceIds) this.byId.set(id, this.of(id) + 1);
-  }
-}
+/** The generation of each space's pass, bumped by a restart (`bump(spaceIds)`) so a page already running does not write state over the one a restart cleared. */
+export { KeyGenerations as PassGenerations } from '../util/key-generations.js';
 
 /**
  * Where a pass of a space is, set on its LIVE config entry (read at once by the next page) and written down SOON: coalesced with the next

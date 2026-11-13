@@ -41,6 +41,7 @@ import { servedMetaFor } from '../sync/replicated-meta.js';
 import { layersFor } from './network-layers.js';
 import { findSpace } from './space-lookup.js';
 import { LruMap } from '../util/lru-map.js';
+import { KeyGenerations } from '../util/key-generations.js';
 import { log, peerText } from '../util/log.js';
 import { sha256Hex } from '../util/sha256-hex.js';
 
@@ -63,6 +64,9 @@ export interface SchemaCheckOutcome {
 
 /** The field a record carries its stamp in: spelled once, in `@ythril-network/schema` (`schema-fingerprint.ts`), and re-exported here for the writers. */
 export { SCHEMA_FINGERPRINT_FIELD, isSchemaFingerprint };
+
+/** How a log line names a schema fingerprint: its first 12 hex characters, the one length every line uses, so a grep for one finds them all. */
+export const fpPrefix = (fp: string): string => fp.slice(0, 12);
 
 /** The op that removes the stamp: what every write spreads that changes schema-relevant content without a conforming validation. */
 export const UNSTAMP: { readonly $unset: { readonly [SCHEMA_FINGERPRINT_FIELD]: '' } } = Object.freeze({ $unset: Object.freeze({ [SCHEMA_FINGERPRINT_FIELD]: '' as const }) });
@@ -138,7 +142,7 @@ const spaceOfWrite = new WeakMap<MetaForWrite, string>();
  */
 function keepStampedSnapshotLater(spaceId: string, stamp: Stamp): void {
   void import('./schema-snapshot-store.js').then(store => store.keepStampedSnapshot(spaceId, stamp),
-    (err: unknown) => log.error(`Schema snapshot writer could not be loaded, so the snapshot of fingerprint ${peerText(stamp.fp.slice(0, 12))} of space '${peerText(spaceId)}' `
+    (err: unknown) => log.error(`Schema snapshot writer could not be loaded, so the snapshot of fingerprint ${peerText(fpPrefix(stamp.fp))} of space '${peerText(spaceId)}' `
       + `was not kept: ${peerText(err)}`));
 }
 
@@ -274,13 +278,13 @@ export function noteHeld(spaceId: string, fp: string): void {
  * the space's {@link heldGeneration}, so a write that started before it cannot note the row held after it.
  */
 export function forgetHeld(spaceId: string, fp?: string): void {
-  generations.set(spaceId, heldGeneration(spaceId) + 1);
+  generations.bump(spaceId);
   if (fp === undefined) held.delete(spaceId);
   else held.get(spaceId)?.delete(fp);
 }
 
 /** How many times {@link forgetHeld} ran for each space: one number per configured space ever seen, never reset. */
-const generations = new Map<string, number>();
+const generations = new KeyGenerations();
 
 /**
  * The space's held generation: a writer reads it before its upsert and notes the row held after it only when it has not moved. Otherwise a keep in
@@ -288,5 +292,5 @@ const generations = new Map<string, number>();
  * of the process (bundle-266, design r3 S-5).
  */
 export function heldGeneration(spaceId: string): number {
-  return generations.get(spaceId) ?? 0;
+  return generations.of(spaceId);
 }
