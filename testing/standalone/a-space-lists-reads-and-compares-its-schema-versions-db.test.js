@@ -35,7 +35,7 @@ import { openViewDoors } from './_view-doors.mjs';
 import { openPullDoor, PEER } from './_pull-door.mjs';
 import { seedActEntry, clearActEntries } from './_space-act-harness.mjs';
 import { snapshotNamed, snapshotRow, snapshotsOf, linksOf } from './_schema-snapshot-peer.mjs';
-import { recordOf, saveVersion, heldRows, undocumentedKeys } from './_schema-version-fixtures.mjs';
+import { recordOf, saveVersion, heldRows, undocumentedKeys, readsDuring } from './_schema-version-fixtures.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -57,7 +57,7 @@ const versionsOf = (r) => r.body?.versions ?? r.structured?.versions ?? [];
 describe('a space lists, reads and compares its schema versions (real MongoDB)', { skip }, () => {
   before(async () => {
     d = await openViewDoors({ suite: SUITE, openDoor: () => openPullDoor({
-      suite: SUITE, spaces: [S, LAG, LAYERED], type: 'club', direction: 'both', meta: { [S]: META, [LAG]: META, [LAYERED]: META },
+      suite: SUITE, spaces: [S, LAG, LAYERED], type: 'club', direction: 'both', monitorCommands: true, meta: { [S]: META, [LAG]: META, [LAYERED]: META },
     }) });
     local = await d.mint('svv-local', {
       [S]: d.row({ schema: 'read', knowledge: 'read' }), [LAG]: d.row({ schema: 'read' }), [LAYERED]: d.row({ schema: 'read' }),
@@ -107,6 +107,19 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
       assert.equal(gone.held, false);
       assert.equal(gone.counts.entities, 2);
       assert.ok(at(NOT_HELD) > at(X.fp), 'a version not held is listed before a held one');
+    });
+
+    it('the list reads no version text: its rows are read without `text`, while a read still reads it (lens sweep F4)', async () => {
+      // Seen red at b4b51aed: the list read every kept row through `heldVersions`, whose projection names `text`.
+      const client = d.door.mongo.getMongo();
+      const readsText = (c) => c.name !== 'find' || !c.command.projection || c.command.projection.text === 1;
+      const list = await readsDuring(client, `${S}_schema_snapshots`, () => listRest(local.key));
+      assert.equal(list.result.status, 200, list.result.text.slice(0, 300));
+      assert.ok(list.sent.length > 0, 'the list read no snapshot row at all: the probe watched the wrong collection');
+      assert.deepEqual(list.sent.filter(readsText).map(c => c.command.projection ?? c.name), [], 'the list read a version text');
+      const read = await readsDuring(client, `${S}_schema_snapshots`, () => listRest(local.key, S, `?fp=${v1.fp}`));
+      assert.equal(read.result.status, 200, read.result.text.slice(0, 300));
+      assert.ok(read.sent.some(readsText), 'a version read no longer reads its text: the probe cannot tell the two apart');
     });
 
     it('the tool answers the same list', async () => {
