@@ -383,13 +383,13 @@ async function walkStored(
         // An edge is judged against the others of its page (a subject's count, the ends it names), so the page is judged whole and
         // each record then takes its own findings in order — what it does not take, it was never read.
         const edgeFindings = kind === 'edge'
-          ? await validateStoredEdges(mid, docs.rows as unknown as StoredEdge[], e => judge.metaOf(mid, e as unknown as Record<string, unknown>))
+          ? await validateStoredEdges(mid, docs.rows as unknown as StoredEdge[], e => judge.metaOf(mid, kind, e as unknown as Record<string, unknown>))
           : null;
         const edgeRows = new Map((edgeFindings?.violations ?? []).map(v => [v._id ?? '', v]));
         const edgeGuards = new Map((edgeFindings?.staleGuards ?? []).map(g => [g._id, g]));
         for (const doc of docs.rows) {
           const id = String(doc._id);
-          const meta = judge.metaOf(mid, doc);
+          const meta = judge.metaOf(mid, kind, doc);
           const found: RecordViolations | undefined = meta === null ? undefined : kind === 'edge'
             ? edgeRows.get(id)
             : (() => {
@@ -410,7 +410,7 @@ async function walkStored(
           tally.checked++;
           previousId = id;
           // Read now, so counted now when no version judged it: a record past the one that fills the page is not counted.
-          judge.take(mid, doc);
+          judge.take(mid, kind, doc);
           if (shown) page.push(shown);
           if (guard) staleGuards.push(guard);
           // The record that fills the page ends the read: it is the last one this call has read, and the next one starts after it.

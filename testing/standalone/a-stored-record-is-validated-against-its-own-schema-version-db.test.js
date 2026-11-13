@@ -8,7 +8,10 @@
  *   always echo it, so a caller can tell an older server that dropped the key.
  * - `stamp` only in stored mode: with `meta` or `sample` it is `400 against_needs_stored`.
  * - In stamp mode a record is judged against the text of its own version; a record whose version is not held is COUNTED, not listed,
- *   per fingerprint, and an unversioned one is counted: `skipped: { unversioned, notHeld: { <fp>: n } }`, counting this call.
+ *   per fingerprint, and an unversioned one is counted: `skipped: { unversioned, notHeld: { <fp>: n }, unread: { <fp>: n } }`, counting
+ *   this call. A record whose kind and type sit under a place its version's text this release could not read (a type the stored reader
+ *   skips, an unknown key) is not judged by what was read: it is counted in `unread`, as the filter and the diff call that pair unclassified
+ *   (lens sweep F2).
  * - Edges of several versions on one page are grouped by version, and their endpoints are read once per page, not per group.
  *
  * ## Fixture
@@ -21,6 +24,9 @@
  *
  * `against` is dropped silently (the body is not strict), so the answer has no `against` echo and no `skipped`, stamp mode answers what
  * current mode answers, and `against` with `meta` is not refused (new code).
+ *
+ * Space U (F2): its held text X declares person (requires `q`) and a type `robot` this release cannot parse. R1 robot@X, R2 person@X
+ * without q. Seen red at b4b51aed: R1 listed as "type not declared" and no `unread` count; R2 listed (judged), as it must stay.
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,6 +34,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openViewDoors } from './_view-doors.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { recordOf, saveVersion, readsDuring, undocumentedKeys } from './_schema-version-fixtures.mjs';
+import { snapshotOf, snapshotRow, snapshotsOf } from './_schema-snapshot-peer.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -35,13 +42,14 @@ const SUITE = 'svvalidate';
 const V = 'svval';
 const META = { suppressEmbeddings: true, validationMode: 'strict' };
 const NOT_HELD = 'e'.repeat(64);
+const U = 'svvalu';
 
 const version = (prop, fromType) => ({ ...META, typeSchemas: {
   entity: { person: { propertySchemas: { [prop]: { type: 'string', required: true } } }, org: {} },
   edge: { knows: { endpoints: { from: [fromType] } } },
 } });
 
-let d, v1, v2;
+let d, v1, v2, X;
 const ID = { P1: 'en-000001', P2: 'en-000002', O1: 'en-000003' };
 
 /**
@@ -53,12 +61,12 @@ const freshKey = async () => (await d.mint(`svval-admin-${++serial}`, {}, { admi
 
 /** Both doors: `{ status, refused, body, text }`. */
 const DOORS = {
-  'REST POST /api/spaces/:id/validate-schema': async (body) => {
-    const r = await d.rest(await freshKey(), 'POST', `/api/spaces/${V}/validate-schema`, body);
+  'REST POST /api/spaces/:id/validate-schema': async (body, space = V) => {
+    const r = await d.rest(await freshKey(), 'POST', `/api/spaces/${space}/validate-schema`, body);
     return { status: r.status, refused: r.status >= 400, body: r.body, text: r.text };
   },
-  'MCP schema_validate': async (body) => {
-    const r = await d.mcp(await freshKey(), 'schema_validate', { space: V, ...body });
+  'MCP schema_validate': async (body, space = V) => {
+    const r = await d.mcp(await freshKey(), 'schema_validate', { space, ...body });
     let parsed = r.structured;
     if (!parsed) { try { parsed = JSON.parse(r.text); } catch { parsed = undefined; } }
     return { status: r.status, refused: r.isError, body: parsed, text: r.text };
@@ -81,7 +89,7 @@ function violatingIds(body) {
 
 describe('a stored record is validated against its own schema version (real MongoDB, both doors)', { skip }, () => {
   before(async () => {
-    d = await openViewDoors({ suite: SUITE, openDoor: () => openPushDoor({ suite: SUITE, monitorCommands: true, spaces: [{ id: V, label: V, folders: [], meta: META }] }) });
+    d = await openViewDoors({ suite: SUITE, openDoor: () => openPushDoor({ suite: SUITE, monitorCommands: true, spaces: [V, U].map(id => ({ id, label: id, folders: [], meta: META })) }) });
     v1 = await saveVersion(V, version('p', 'person'));
     v2 = await saveVersion(V, version('q', 'org'));
     const ents = d.door.coll(V, 'entities');
@@ -97,6 +105,16 @@ describe('a stored record is validated against its own schema version (real Mong
       recordOf('edges', V, 11, { type: 'knows', fp: v1.fp, from: ID.P1, to: ID.P2 }),
       recordOf('edges', V, 12, { type: 'knows', fp: v2.fp, from: ID.P1, to: ID.O1 }),
       recordOf('edges', V, 13, { type: 'knows', fp: v2.fp, from: ID.O1, to: ID.O1 }),
+    ]);
+    // A held text with a place this release cannot read: `robot`'s property type is not one the stored reader parses, so it skips the type.
+    X = await snapshotOf({ typeSchemas: { entity: {
+      person: { propertySchemas: { q: { type: 'string', required: true } } },
+      robot: { propertySchemas: { x: { type: 'a-type-of-a-later-release' } } },
+    } } });
+    await snapshotsOf(d.door.mongo, U).insertOne(snapshotRow({ fp: X.fp, text: X.text, origin: 'fetched', from: 'a-peer' }));
+    await d.door.coll(U, 'entities').insertMany([
+      recordOf('entities', U, 21, { type: 'robot', fp: X.fp, properties: { x: 'a' } }),
+      recordOf('entities', U, 22, { type: 'person', fp: X.fp }),
     ]);
   });
   after(async () => { await d?.close(); });
@@ -120,10 +138,18 @@ describe('a stored record is validated against its own schema version (real Mong
       it('counts records whose version is not held per fingerprint, and unversioned records, without listing them', async () => {
         const stamp = await run({ against: 'stamp' });
         assert.ok(!stamp.refused, stamp.text.slice(0, 300));
-        assert.deepEqual(stamp.body?.skipped, { unversioned: 3, notHeld: { [NOT_HELD]: 2 } });
+        assert.deepEqual(stamp.body?.skipped, { unversioned: 3, notHeld: { [NOT_HELD]: 2 }, unread: {} });
         for (const id of ['en-000004', 'en-000005', 'en-000006', 'en-000007', 'en-000008']) {
           assert.ok(!violatingIds(stamp.body).includes(id), `${id} is listed: a record with no version to judge it by became a row`);
         }
+      });
+
+      it('a record whose type its version\'s text holds where this release cannot read it is counted unread, never judged by the rest (F2)', async () => {
+        const stamp = await run({ against: 'stamp' }, U);
+        assert.ok(!stamp.refused, stamp.text.slice(0, 300));
+        assert.deepEqual(violatingIds(stamp.body), ['en-000022'],
+          'the robot was judged by the part of its version that was read (a false "type not declared"), or the person, read whole, was not judged');
+        assert.deepEqual(stamp.body?.skipped, { unversioned: 0, notHeld: {}, unread: { [X.fp]: 1 } });
       });
 
       it('against stamp with a proposed meta or a sample is 400 against_needs_stored', async () => {

@@ -21,6 +21,7 @@
  */
 import { readStoredMeta, isPlainObject } from '@ythril-network/schema/internal';
 import { readStoredById } from '../db/read-by-id.js';
+import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { EMPTY_SCHEMA_FINGERPRINT, EMPTY_SCHEMA_STAMP } from './schema-stamp.js';
 import { snapshotBodyOf, SNAPSHOT_TEXT_KEYS, type ServableRow } from './schema-snapshot.js';
@@ -32,10 +33,60 @@ export interface VersionSchema {
   readonly rules: Record<string, unknown>;
 }
 
-/** What {@link versionMetaOf} answers: the schema read, and every place the stored reader's tolerance left out. */
+/** What {@link versionMetaOf} answers: the schema read, every place the stored reader's tolerance left out, and which records those stand over. */
 export interface VersionMeta {
   readonly meta: VersionSchema;
   readonly unread: readonly string[];
+  readonly reach: UnreadReach;
+}
+
+/**
+ * The records a version's unread places stand over: every record of the version (`all`: an envelope key, an unknown meta key, a rules map
+ * that did not read, a bounded-names tail), or per kind every record of it (`'all'`: the kind's map did not read, or a place under it names
+ * no type the text declares) or the records of the named types (a type the reader skipped, an unknown field inside a type).
+ */
+export interface UnreadReach {
+  readonly all: boolean;
+  readonly kinds: ReadonlyMap<string, ReadonlySet<string> | 'all'>;
+}
+
+const TYPES_KEY = 'typeSchemas';
+
+/** Where each of `unread` stands, read against the type names `declared` (the text's own `typeSchemas`, as written). */
+function unreadReachOf(unread: readonly string[], declared: unknown): UnreadReach {
+  const kinds = new Map<string, Set<string> | 'all'>();
+  let all = false;
+  const add = (kind: string, type: string | 'all'): void => {
+    const held = kinds.get(kind);
+    if (held === 'all') return;
+    if (type === 'all') kinds.set(kind, 'all');
+    else if (held) held.add(type);
+    else kinds.set(kind, new Set([type]));
+  };
+  const namesOf = (kind: string): string[] => {
+    const defs = isPlainObject(declared) ? declared[kind] : undefined;
+    return isPlainObject(defs) ? Object.keys(defs) : [];
+  };
+  for (const place of unread) {
+    // The stored reader names a skipped type `kind:name` and a skipped kind map `typeSchemas.kind`; an unknown field inside a type
+    // `typeSchemas.kind.name.field`. A kind is one of the four, which hold no `.` or `:`.
+    const colon = place.indexOf(':');
+    const skippedKind = colon > 0 ? place.slice(0, colon) : '';
+    if ((KNOWLEDGE_TYPES as readonly string[]).includes(skippedKind)) { add(skippedKind, place.slice(colon + 1)); continue; }
+    const [head, kind, ...rest] = place.split('.');
+    if (head !== TYPES_KEY || kind === undefined || !(KNOWLEDGE_TYPES as readonly string[]).includes(kind)) { all = true; continue; }
+    const inside = rest.join('.');
+    const type = inside === '' ? undefined : namesOf(kind).find(n => inside === n || inside.startsWith(`${n}.`));
+    add(kind, type ?? 'all');
+  }
+  return { all, kinds };
+}
+
+/** Does `reach` stand over a record of `kind` whose type field holds `type`? An untyped record is under its kind's `'all'` only. */
+export function unreadCovers(reach: UnreadReach, kind: string, type: unknown): boolean {
+  if (reach.all) return true;
+  const types = reach.kinds.get(kind);
+  return types === 'all' || (types !== undefined && typeof type === 'string' && types.has(type));
 }
 
 /**
@@ -46,11 +97,11 @@ export function versionMetaOf(text: string): VersionMeta | null {
   const parsed = snapshotBodyOf(text);
   if (!parsed) return null;
   const unread = Object.keys(parsed).filter(k => !SNAPSHOT_TEXT_KEYS.has(k));
-  const read = readStoredMeta({ typeSchemas: parsed['typeSchemas'] ?? {}, rules: parsed['rules'] ?? {} });
+  const read = readStoredMeta({ typeSchemas: parsed[TYPES_KEY] ?? {}, rules: parsed['rules'] ?? {} });
   unread.push(...read.unknown, ...read.skipped);
-  const typeSchemas = isPlainObject(read.meta['typeSchemas']) ? read.meta['typeSchemas'] as VersionSchema['typeSchemas'] : {};
+  const typeSchemas = isPlainObject(read.meta[TYPES_KEY]) ? read.meta[TYPES_KEY] as VersionSchema['typeSchemas'] : {};
   const rules = isPlainObject(read.meta['rules']) ? read.meta['rules'] as VersionSchema['rules'] : {};
-  return { meta: { typeSchemas, rules }, unread };
+  return { meta: { typeSchemas, rules }, unread, reach: unreadReachOf(unread, parsed[TYPES_KEY]) };
 }
 
 /**
