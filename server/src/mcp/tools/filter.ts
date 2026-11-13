@@ -37,6 +37,8 @@ import { projectionForOrderedMerge } from '../../brain/projection.js';
 import { resolveEntityIdsByName } from '../../brain/entities.js';
 import { attachedToEntityNamed } from '../../brain/entity-name-scope.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
+import { SCHEMA_VERSION_FILTER_SCHEMA, readSchemaVersionAsk } from '../../brain/schema-version-args.js';
+import { schemaVersionResolver, narrowedBy, schemaVersionEcho } from '../../brain/schema-version-filter.js';
 
 export const queryTool: ToolHandler = {
   name: 'filter',
@@ -131,6 +133,9 @@ export const queryTool: ToolHandler = {
             // `FILE_PATH_SCHEMA` in `brain/file-path-arg.ts`. Same reason as the two above: the
             // transform and its description belong in one place or they stop agreeing.
             ...FILE_PATH_SCHEMA,
+            // The schema-version arguments (Q-741), declared beside the module that resolves them per member: see
+            // `brain/schema-version-filter.ts`.
+            ...SCHEMA_VERSION_FILTER_SCHEMA,
           },
           /*
            * `filter` is NOT required, since 5.0 and on both doors in the same change. A caller narrowing
@@ -173,7 +178,6 @@ export const queryTool: ToolHandler = {
     const sortParse = parseSortParam(a['sort'], a['dir'], SORTABLE_FIELDS[collName as keyof typeof SORTABLE_FIELDS]);
     if ('error' in sortParse) throw new Error(sortParse.error);
     const order = sortParse.sort ? toMongoSort(sortParse.sort) : DEFAULT_QUERY_SORT;
-    const maxTimeMS = typeof a['maxTimeMS'] === 'number' ? a['maxTimeMS'] : 5000;
     const projection =
       a['projection'] != null && typeof a['projection'] === 'object'
         ? (a['projection'] as Record<string, unknown>)
@@ -231,19 +235,32 @@ export const queryTool: ToolHandler = {
         + `For facts and chrono use entityName.`);
     }
 
-    /** The predicate for ONE member: the caller's filter, plus whatever the names resolve to there. */
+    // The schema version asked for (Q-741), refused by name on a collection with no stamp, a malformed fingerprint, or `schemaChanged`
+    // without `older`; resolved per member, once per call, by the module (`brain/schema-version-filter.ts`).
+    const versionAsk = readSchemaVersionAsk(coll, a);
+    if ('error' in versionAsk) throw new Error(versionAsk.error);
+    const maxTimeMS = typeof a['maxTimeMS'] === 'number' ? a['maxTimeMS'] : 5000;
+    const versionOf = versionAsk.ask ? schemaVersionResolver(coll, versionAsk.ask, maxTimeMS) : undefined;
+
+    /**
+     * The predicate for ONE member: the caller's filter NARROWED by whatever the names and the schema version resolve to there.
+     *
+     * Every resolution joins under `$and`, never by assignment. It was assigned: `entityName` wrote over a caller's `_id`, `fromName`
+     * over a caller's `from`, `toName` over a caller's `to`, so the answer widened to exactly what the caller had excluded
+     * (`a-join-argument-narrows-the-callers-filter-db`).
+     */
     const filterFor = async (mid: string): Promise<Record<string, unknown>> => {
-      if (!entityName && !fromName && !toName) return filter;
-      const per: Record<string, unknown> = { ...filter };
+      const clauses: Record<string, unknown>[] = [];
       // `$in: []` when a name matches nothing, and that is the answer rather than a reason to widen: a
       // typo must not become a full-collection read that looks like a successful search.
       // Through the shared predicate, which covers BOTH the legacy array and link records — reading
       // only the array misses every record written with `linkEntities`, which is the form the guide
       // leads with. See `entity-name-scope.ts` for the measurement.
-      if (entityName) Object.assign(per, await attachedToEntityNamed(mid, coll === 'chrono' ? 'chrono' : 'fact', entityName));
-      if (fromName) per['from'] = { $in: await resolveEntityIdsByName(mid, fromName) };
-      if (toName) per['to'] = { $in: await resolveEntityIdsByName(mid, toName) };
-      return per;
+      if (entityName) clauses.push(await attachedToEntityNamed(mid, coll === 'chrono' ? 'chrono' : 'fact', entityName));
+      if (fromName) clauses.push({ from: { $in: await resolveEntityIdsByName(mid, fromName) } });
+      if (toName) clauses.push({ to: { $in: await resolveEntityIdsByName(mid, toName) } });
+      if (versionOf) clauses.push((await versionOf(mid)).clause);
+      return narrowedBy(filter, clauses);
     };
 
     // Resolved before the read, so a bad `maxBytes` is an error rather than a query that ran first — and because the
@@ -292,6 +309,8 @@ export const queryTool: ToolHandler = {
     // name join answered `count: 2, total: 86` on a space of 86 edges, and a pager comparing the two read on for ever.
     let total = 0;
     for (const mid of members) total += await countBrain(mid, coll, await filterFor(mid), maxTimeMS);
+    // Per member: its current version, and how many of its matches (the whole match, not the page) carry a version it cannot classify.
+    const versionEcho = versionOf ? await schemaVersionEcho(members, coll, versionOf, filterFor, maxTimeMS) : undefined;
 
     // `content` stays the bare array it has always been, so a client parsing the text is unaffected. Without `total`
     // a caller sweeping with `skip` cannot tell a short last page from a truncated one, which is the number the fleet integrator
@@ -364,6 +383,8 @@ export const queryTool: ToolHandler = {
         count: rows.length, total, limit, skip,
         ...queryAccounting,
         ...(sortParse.sort ? { sort: sortParse.sort.field, dir: sortParse.sort.dir === 1 ? 'asc' : 'desc' } : {}),
+        // Only when `schemaVersion` was sent: each member's current version and its unclassified count.
+        ...(versionEcho ? { schemaVersion: versionEcho } : {}),
       },
     };
   },
