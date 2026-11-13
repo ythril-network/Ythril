@@ -124,17 +124,17 @@ const claimFilters = (fp: string, kept: KeptAs): [Record<string, unknown>, Recor
 /**
  * Claim the row of `stamp` for a version that is current or a held layer now (design r3 D-upgrade and S-6): a row whose origin is not `kept`'s takes
  * `kept`'s origin, network and links (the text is equal by its hash; `from` goes), and a mark the sweep set is cleared. Both whatever the held cache
- * says, both conditional, in one round trip through the write gate. An act standing on the space: nothing now, and the cycle claims it later.
+ * says, both conditional, in one write unit through the write gate. An act standing on the space: nothing now, and the cycle claims it later.
  */
 async function claimKept(spaceId: string, stamp: Stamp, kept: KeptAs): Promise<void> {
   const [wrongOrigin, marked] = claimFilters(stamp.fp, kept);
   const $set = { origin: kept.origin, links: kept.links, ...(kept.networkId !== undefined ? { networkId: kept.networkId } : {}) };
   const $unset = { from: '' as const, ...(kept.networkId === undefined ? { networkId: '' as const } : {}) };
   try {
-    await admitSpaceWrite(spaceId, undefined, () => snapshots(spaceId).bulkWrite([
-      { updateOne: { filter: asFilter<SnapshotRow>(wrongOrigin), update: { $set, $unset } } },
-      { updateOne: { filter: asFilter<SnapshotRow>(marked), update: { $unset: { orphanSince: '' } } } },
-    ], { ordered: false }));
+    await admitSpaceWrite(spaceId, undefined, async () => {
+      await snapshots(spaceId).updateOne(asFilter<SnapshotRow>(wrongOrigin), { $set, $unset });
+      await snapshots(spaceId).updateOne(asFilter<SnapshotRow>(marked), { $unset: { orphanSince: '' } });
+    });
   } catch (err) {
     if (!isActRefusal(err)) throw err;
   }
