@@ -18,7 +18,7 @@
  * 5. `404 { code: 'unknown_fingerprint' }` for a fingerprint no row holds. The only 404 that carries a code: a receiver reads a 404 WITHOUT one as
  *    "this member has no such route" and stops asking it;
  * 6. `409 { code: 'not_shared' }` for a row built from a layer of a network the asking peer does not share with this space (`servableTo`): a variation
- *    over a layer of N2 holds N2's definitions, which `GET /meta` never sends to N1;
+ *    over a layer of N2 holds N2's definitions, which the sync door's `GET /api/sync/meta` never sends to N1;
  * 7. `200 { fp, text, links, layerOf? }`, the links cut to the shared networks. A caller that is no peer (an admin or a local token) shares by reach and is
  *    served the row whole.
  *

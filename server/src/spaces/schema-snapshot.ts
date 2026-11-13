@@ -7,7 +7,7 @@
  * ## What each one prevents
  *
  * - {@link servableTo}: a snapshot that names another network's definitions reaching a member of this network only (F-39.2, "nothing mixed is sent
- *   on"). A variation built over a layer of N2 holds N2's definitions, which `GET /meta` never sends to N1; its snapshot must not either.
+ *   on"). A variation built over a layer of N2 holds N2's definitions, which the sync door's `GET /api/sync/meta` never sends to N1; its snapshot must not either.
  * - {@link verifySnapshot}: a peer's text kept as a snapshot because it says so. It is kept only when it is the canonical text its fingerprint is the
  *   hash of, so what a fingerprint names is the same text on every instance.
  * - {@link owedFingerprints}: a fingerprint asked for twice, or asked for after a row holds it.
