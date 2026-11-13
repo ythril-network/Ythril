@@ -18,6 +18,14 @@
  *  6. **A queued (202) import's counts reach its completion row.**
  *  7. **G3: the keys the export route writes equal the keys of the export example in docs/integration-guide/12-admin-api.md.** The documentation is what
  *     an integrator reads to restore; a key it does not show is one nobody knows to keep.
+ *  8. **E-6: the snapshots land after every record, inside the act.** Every write to the snapshot collection comes after the last write to a record
+ *     collection, and while the import act still stands in the config: a version is kept only beside the records that carry it, and under the
+ *     space's hold, so nothing else writes the space between them.
+ *  9. **A store that is not answering the snapshot write aborts the import, as it would a record write** (reliability S4): the act fails and is owed
+ *     a retry, and the door does not answer 200. Skipping it and counting it refused would answer success for an import the store never finished.
+ *
+ * Cases 8 and 9 were written after 08af077b, and seen red on ce5cf4b6: no snapshot is written at all, so case 8 finds no snapshot write and case 9's
+ * import answers 200 (the bundle's Work-Log).
  *
  * ## The masking channels are held off
  *
@@ -37,6 +45,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { Collection, MongoNetworkError } from 'mongodb';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openImportDoor } from './_import-door.mjs';
@@ -96,6 +105,19 @@ async function importBody(body) {
   const r = await door.post(SPACE, typeof body === 'string' ? body : JSON.stringify(body));
   assert.equal(r.status, 200, `import answered ${r.status}: ${r.text?.slice(0, 300)}`);
   return r.json;
+}
+/** The space's record collections an import writes. */
+const RECORD_COLLECTIONS = new Set(['facts', 'entities', 'edges', 'chrono', 'links', 'files'].map(c => `${SPACE}_${c}`));
+/** Does an import act stand for the space now, in the live config? */
+const importStands = () => (door.loader.getConfig().pendingSpaceActs ?? []).some(e => e.kind === 'import' && e.localId === SPACE);
+const WRITES = ['bulkWrite', 'updateOne', 'updateMany', 'insertOne', 'insertMany', 'replaceOne'];
+/** Call `seen(collectionName)` before every driver write; the answer puts the driver back. */
+function watchWrites(seen) {
+  const originals = WRITES.map(m => [m, Collection.prototype[m]]);
+  for (const [m, original] of originals) {
+    Collection.prototype[m] = function watched(...args) { seen(this.collectionName); return original.apply(this, args); };
+  }
+  return () => { for (const [m, original] of originals) Collection.prototype[m] = original; };
 }
 const lastAuditRow = async (operation) => (await auditRowsOf(door.mongo, operation)).sort((x, y) => String(x.timestamp ?? x._id).localeCompare(String(y.timestamp ?? y._id))).at(-1);
 const changeOf = (row, field) => (row?.changes ?? []).find(c => c.field === field)?.to;
@@ -231,6 +253,40 @@ describe('a schema snapshot travels in the export and lands on import (real Mong
       const rows = (await auditRowsOf(door.mongo, 'space.act_completed')).filter(x => String(x.path).startsWith('internal:space-act:import:'));
       const own = rows.at(-1);
       assert.equal(changeOf(own, 'snapshotsLanded'), 3, `the completion row of a queued import does not count its snapshots: ${JSON.stringify(own?.changes)}`);
+    });
+
+    it('E-6: lands the snapshots after every record, while the import act still stands', T, async () => {
+      const body = await exported();
+      await emptySpace();
+      const writes = [];
+      const restore = watchWrites((coll) => writes.push({ coll, actStands: importStands() }));
+      let r;
+      try { r = await door.post(SPACE, JSON.stringify(body)); } finally { restore(); }
+      assert.equal(r.status, 200, `import answered ${r.status}: ${r.text?.slice(0, 300)}`);
+      const snapshotAt = writes.flatMap((w, i) => (w.coll === `${SPACE}_schema_snapshots` ? [i] : []));
+      const recordAt = writes.flatMap((w, i) => (RECORD_COLLECTIONS.has(w.coll) ? [i] : []));
+      assert.ok(snapshotAt.length > 0, `the import made no snapshot write: ${JSON.stringify(writes.map(w => w.coll))}`);
+      assert.ok(recordAt.length > 0, 'fixture: the import made no record write');
+      assert.ok(recordAt.at(-1) < snapshotAt[0], `a snapshot was written before the last record: ${JSON.stringify(writes.map(w => w.coll))}`);
+      assert.deepEqual(snapshotAt.filter(i => !writes[i].actStands), [], 'a snapshot was written after the import act had completed: outside the space\'s hold');
+    });
+
+    it('a store that does not answer the snapshot write aborts the import, as a record write would, and leaves the act owed a retry', T, async () => {
+      const body = await exported();
+      await emptySpace();
+      const failures = [];
+      runner.setSpaceActHooksForTest({ afterBodyFailed: (e, err) => { if (e.kind === 'import') failures.push(err); } });
+      const original = Collection.prototype.updateOne;
+      Collection.prototype.updateOne = function scripted(...args) {
+        if (this.collectionName === `${SPACE}_schema_snapshots`) return Promise.reject(new MongoNetworkError('scripted: the store is not answering'));
+        return original.apply(this, args);
+      };
+      let r;
+      try { r = await door.post(SPACE, JSON.stringify(body)); } finally { Collection.prototype.updateOne = original; }
+      assert.notEqual(r.status, 200, `the import answered 200 though the store did not answer its snapshot write: ${r.text?.slice(0, 300)}`);
+      assert.equal(failures.length, 1, 'the import act did not fail on a store that was not answering');
+      const owed = (door.loader.getConfig().pendingSpaceActs ?? []).find(e => e.kind === 'import' && e.localId === SPACE);
+      assert.ok(owed?.retryAt, `the failed import is not owed a retry: ${JSON.stringify(owed)}`);
     });
   });
 });
