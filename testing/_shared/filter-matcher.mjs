@@ -16,7 +16,8 @@
  * plain value (MongoDB would match an element of it; this matcher does not model that, and says so rather than
  * comparing by reference).
  *
- * Supported: equality (strict) on a dotted path, `$eq $ne $gt $gte $lt $lte $in $nin $exists` per field, and `$and`
+ * Supported: equality (strict) on a dotted path, `$eq $ne $gt $gte $lt $lte $in $nin $exists` per field, `$type` by the
+ * aliases `string bool null object array` (any other alias throws), and `$and`
  * `$or` at any level. A comparison (`$gt $gte $lt $lte`) against a missing or null value never matches, as in MongoDB:
  * JavaScript would read `null >= 0` as true.
  *
@@ -50,6 +51,18 @@ const list = (op, operand) => {
   return operand;
 };
 
+/**
+ * The `$type` aliases this matcher models, by the alias name MongoDB takes. A missing value has no type (MongoDB's `$type` never
+ * matches it); an array is matched by its elements in MongoDB, which this matcher does not model, so an array matches `array` alone.
+ */
+const BSON_TYPE_ALIASES = {
+  string: (v) => typeof v === 'string',
+  bool: (v) => typeof v === 'boolean',
+  null: (v) => v === null,
+  object: (v) => v !== null && typeof v === 'object' && !Array.isArray(v),
+  array: (v) => Array.isArray(v),
+};
+
 /** Per-field operators: `(value, operand) => boolean`. */
 const FIELD_OPERATORS = {
   $eq: (v, x) => v === x,
@@ -61,6 +74,11 @@ const FIELD_OPERATORS = {
   $in: (v, x) => list('$in', x).includes(v),
   $nin: (v, x) => !list('$nin', x).includes(v),
   $exists: (v, x) => (v !== undefined) === Boolean(x),
+  $type: (v, x) => {
+    const test = Object.hasOwn(BSON_TYPE_ALIASES, x) ? BSON_TYPE_ALIASES[x] : null;
+    if (!test) throw new UnsupportedFilterError(`$type ${JSON.stringify(x)} is not modelled by the test matcher (only ${Object.keys(BSON_TYPE_ALIASES).join(', ')})`);
+    return test(v);
+  },
 };
 
 /** The branches of a `$and` / `$or`: a non-empty list. */
