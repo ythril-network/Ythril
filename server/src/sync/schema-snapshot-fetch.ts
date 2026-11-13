@@ -21,7 +21,7 @@
  *
  * ## What each answer becomes
  *
- * - `200`: {@link verifySnapshot}. A refusal (`over_cap`, `refused_hash`, `refused_shape`) is TERMINAL for this member, this version and this fingerprint:
+ * - `200`: `keepVerifiedSnapshot` (`sync/schema-snapshot-keep.ts`: `verifySnapshot`, then the row). A refusal (`over_cap`, `refused_hash`, `refused_shape`) is TERMINAL for this member, this version and this fingerprint:
  *   asking again would get the same text. Otherwise the row is kept (`origin: 'fetched'`, `from` the member, `links` as sent and shape-checked), and the
  *   links are read as a HINT of whether this variation is behind the sender's (`behindVerdict`; logged once, counted `behind`, nothing kept because of it).
  * - `404` with code `unknown_fingerprint`: the member holds no such version (`not_held`); when every candidate has said so the fingerprint backs off.
@@ -40,17 +40,18 @@
  */
 import { getConfig } from '../config/loader.js';
 import type { NetworkMember } from '../config/types.js';
-import { col, asFilter } from '../db/mongo.js';
+import { asFilter } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { distinctStringsOf } from '../db/distinct-strings.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { storeIsNotAnswering } from '../db/store-condition.js';
 import { withinWriteBound } from '../db/write-bound.js';
 import { isShuttingDown } from '../lifecycle.js';
 import { isDirectionalNetwork, isUpstreamPeer, networksSharedWith } from '../networks/network-spaces.js';
-import { ensureSnapshot, snapshots, type SnapshotRow } from '../spaces/schema-snapshot-store.js';
-import { behindVerdict, SCHEMA_SNAPSHOT_MAX_BYTES, verifySnapshot, type SharedNetwork, type SnapshotRefusal } from '../spaces/schema-snapshot.js';
-import { isSchemaFingerprint, knownHeld, SCHEMA_FINGERPRINT_FIELD, variationOf, type SnapshotLinks } from '../spaces/schema-stamp.js';
+import { snapshots, type SnapshotRow } from '../spaces/schema-snapshot-store.js';
+import { fingerprintsCarriedIn, STAMPED_COLLECTIONS } from '../spaces/schema-snapshot-carried.js';
+import { behindVerdict, SCHEMA_SNAPSHOT_MAX_BYTES, type SharedNetwork, type SnapshotRefusal } from '../spaces/schema-snapshot.js';
+import { knownHeld, variationOf, type SnapshotLinks } from '../spaces/schema-stamp.js';
+import { keepVerifiedSnapshot } from './schema-snapshot-keep.js';
 import { unknownSpaceSentence } from '../spaces/unknown-space.js';
 import { networksHolding } from '../spaces/wipe-vote.js';
 import { schemaSnapshotTotal } from '../metrics/schema-snapshot-count.js';
@@ -63,7 +64,7 @@ import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 import { refusalOf, transferRefusal, turnSignal, type ExchangeTurn } from './held-answer.js';
 import { peerSafeFetch, transferInit } from './peer-fetch.js';
 import { peerRunsAtLeast, reportedVersion } from './peer-floor.js';
-import { BACKOFF_FIRST_MS, dropOwedSchemaSnapshot, forgetOwedSchemaSnapshot, noteNotHeld, owedTo, STAMPED_COLLECTIONS } from './schema-snapshot-owed.js';
+import { BACKOFF_FIRST_MS, dropOwedSchemaSnapshot, forgetOwedSchemaSnapshot, noteNotHeld, owedTo } from './schema-snapshot-owed.js';
 
 /**
  * The version a member must report to be asked; a member not known to run it is never asked. It is the version main reported when the route landed,
@@ -129,34 +130,6 @@ function candidatesOf(spaceId: string): string[] {
   return [...ids];
 }
 
-/** The links a member sent, if they are the shape of links: three fields, fingerprints, at most 64 entries per list. Anything else is no links. */
-function linksFrom(raw: unknown): SnapshotLinks | null {
-  if (typeof raw !== 'object' || raw === null) return null;
-  const l = raw as Record<string, unknown>;
-  const list = (v: unknown): SnapshotLinks['layers'] | undefined => {
-    if (!Array.isArray(v) || v.length > 64) return undefined;
-    const out: SnapshotLinks['layers'] = [];
-    for (const e of v as Array<Record<string, unknown> | null>) {
-      if (typeof e?.['networkId'] !== 'string' || e['networkId'].length === 0 || e['networkId'].length > 128 || !isSchemaFingerprint(e['fp'])) return undefined;
-      out.push({ networkId: e['networkId'], fp: e['fp'] });
-    }
-    return out;
-  };
-  const layers = list(l['layers']);
-  const served = list(l['served']);
-  return isSchemaFingerprint(l['own']) && layers && served ? { own: l['own'], layers, served } : null;
-}
-
-/** Which of `fps` a stored record of `spaceId` still carries: one `distinct` per record collection, over the stamp's index. */
-async function carriedNow(spaceId: string, fps: readonly string[]): Promise<Set<string>> {
-  const carried = new Set<string>();
-  for (const collection of STAMPED_COLLECTIONS) {
-    const found = await distinctStringsOf(col<Record<string, unknown>>(spaceCollection(spaceId, collection)), SCHEMA_FINGERPRINT_FIELD,
-      asFilter<Record<string, unknown>>({ [SCHEMA_FINGERPRINT_FIELD]: { $in: [...fps] } }));
-    for (const fp of found) carried.add(fp);
-  }
-  return carried;
-}
 
 /** The arguments of one turn's fetch. `requestInit` is the engine's, which carries the control plane's signal: it is passed through `transferInit`. */
 export interface SnapshotFetch {
@@ -187,7 +160,9 @@ export async function fetchOwedSchemaSnapshots(a: SnapshotFetch): Promise<void> 
   if (wanted.length === 0) return;
   // Still carried: a record that was deleted or rewritten since the fingerprint was noted no longer needs its snapshot, and nothing is asked for it.
   const { owed, held } = await withinWriteBound(async () => {
-    const carried = await carriedNow(spaceId, wanted);
+    // Additive, as the gap scan: a collection whose read fails throws to the turn, and the fingerprint is asked about again next turn.
+    const carried = new Set<string>();
+    for (const collection of STAMPED_COLLECTIONS) for (const fp of await fingerprintsCarriedIn(spaceId, collection, wanted)) carried.add(fp);
     for (const fp of wanted) if (!carried.has(fp)) forgetOwedSchemaSnapshot(spaceId, fp);
     const stillOwed = wanted.filter(fp => carried.has(fp));
     // The held check, before any request: a row another member's answer or this server's own write put there is not asked for.
@@ -286,15 +261,13 @@ async function keepFetched(a: SnapshotFetch, fp: string, memberKey: string, resp
     sayFailed(member, spaceId, fp, err);
     return failed('next');
   }
-  if (typeof body?.text !== 'string') return refuse(spaceId, member, fp, memberKey, 'refused_shape');
-  const verdict = verifySnapshot(body.text, fp);
-  if (!verdict.ok) return refuse(spaceId, member, fp, memberKey, verdict.outcome);
-  const links = linksFrom(body.links);
+  let links: SnapshotLinks | null;
   try {
-    // Bounded: the turn is no request, so nothing ends a write that waits on a locked document for ever but this scope.
-    const kept = await withinWriteBound(() => ensureSnapshot(spaceId, { fp, text: body.text as string }, { origin: 'fetched', from: member.instanceId, links }));
+    const kept = await keepVerifiedSnapshot(spaceId, fp, body?.text, body?.links, member.instanceId);
+    if (kept.outcome !== 'written' && kept.outcome !== 'held' && kept.outcome !== 'act_stands') return refuse(spaceId, member, fp, memberKey, kept.outcome);
     // An act stands on the space: nothing is written now, and what it still owes is asked for in a later turn.
-    if (kept === 'refused') return 'stop';
+    if (kept.outcome === 'act_stands') return 'stop';
+    links = kept.links;
   } catch (err) {
     schemaSnapshotTotal.note('failed');
     reportSpaceFailure(SCHEMA_SNAPSHOT_FETCH_STEP, spaceId, err, { unit: fp, when: 'a later turn' });

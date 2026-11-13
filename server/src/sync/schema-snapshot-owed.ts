@@ -18,26 +18,29 @@
  * ## "Nobody holds it"
  *
  * A member that answers `unknown_fingerprint` is dropped from that fingerprint's candidates. When every candidate has said so the fingerprint backs off,
- * doubling from {@link BACKOFF_FIRST_MS} to {@link BACKOFF_MAX_MS}, and the candidates are asked again after it. A record carrying the fingerprint that
- * arrives from a member not yet a candidate resets it: that member may hold it.
+ * doubling from {@link BACKOFF_FIRST_MS} to {@link BACKOFF_MAX_MS}, and the candidates are asked again after it; after {@link OWED_GIVE_UP_ROUNDS} such
+ * rounds it is given up and no longer asked. A record carrying the fingerprint that arrives from a member not yet a candidate resets both: that member
+ * may hold it.
+ *
+ * The stored records' stamps are read through `fingerprintsCarriedIn` (`spaces/schema-snapshot-carried.ts`), the one reader of that question.
  *
  * The empty schema's fingerprint is always known held and has no row: it is never owed.
  */
 import { eachSpace, eachUnit } from '../util/housekeeping-walk.js';
 import { LruMap } from '../util/lru-map.js';
 import { backoffDelayMs } from '../util/backoff.js';
-import { col, asFilter } from '../db/mongo.js';
-import { distinctStringsOf } from '../db/distinct-strings.js';
+import { col } from '../db/mongo.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { COLLECTION_SUFFIX, KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import { SCHEMA_SNAPSHOT_STEP, type SnapshotRow } from '../spaces/schema-snapshot-store.js';
+import { fingerprintsCarriedIn, STAMPED_COLLECTIONS, type StampedCollection } from '../spaces/schema-snapshot-carried.js';
 import { isSchemaFingerprint, knownHeld, noteHeld, SCHEMA_FINGERPRINT_FIELD } from '../spaces/schema-stamp.js';
 import { owedFingerprints } from '../spaces/schema-snapshot.js';
+import { warnOnce } from '../util/warn-once.js';
+import { log, peerText } from '../util/log.js';
 
-/** The record collections that carry a stamp: every brain collection but `files` (no type, so no schema) and `links` (a link row has no schema). */
-export const STAMPED_COLLECTIONS = KNOWLEDGE_TYPES.map(t => COLLECTION_SUFFIX[t]);
+export { STAMPED_COLLECTIONS };
 
 /** The most spaces and, per space, fingerprints the in-memory owed set holds; the least recently noted is dropped past either. */
 const MAX_SPACES = 64;
@@ -46,6 +49,15 @@ const MAX_FINGERPRINTS_PER_SPACE = 256;
 /** The first back-off when every candidate said "not held", doubled each time, and its ceiling. */
 export const BACKOFF_FIRST_MS = 60_000;
 export const BACKOFF_MAX_MS = 60 * 60_000;
+
+/**
+ * After this many back-offs in a row (rounds in which every candidate answered "not held"), a fingerprint is given up: no longer asked for, said once,
+ * until a record carrying it arrives from a member not yet a candidate. Once the sweep removes rows nobody uses, "nobody holds it" is reachable on a whole
+ * network, and asking every hour for the life of the process would be load with no answer (bundle-266, design r3 S-8).
+ */
+export const OWED_GIVE_UP_ROUNDS = 6;
+
+const givenUpSaid = warnOnce<string>();
 
 interface Owed {
   /** The members that delivered a record carrying it. */
@@ -87,7 +99,10 @@ export function noteOwedSchemaSnapshot(spaceId: string, fp: unknown, peerId?: st
   const space = ofSpace(spaceId);
   const entry = space.byFp.get(fp) ?? { peers: new Set<string>(), any: false, notHeld: new Set<string>(), retryAt: 0, backoffs: 0 };
   if (peerId) {
-    if (!entry.peers.has(peerId)) { entry.peers.add(peerId); entry.notHeld.delete(peerId); entry.retryAt = 0; entry.backoffs = 0; }
+    if (!entry.peers.has(peerId)) {
+      entry.peers.add(peerId); entry.notHeld.delete(peerId); entry.retryAt = 0; entry.backoffs = 0;
+      givenUpSaid.forget(`${spaceId}:${fp}`);
+    }
   } else entry.any = true;
   // A fingerprint noted again keeps its place in the line: the gap scan notes everything every cycle.
   space.byFp.set(fp, entry);
@@ -118,7 +133,7 @@ export function owedTo(spaceId: string, memberId: string, candidates: readonly s
   const space = owed.peek(spaceId);
   for (const fp of space?.order ?? []) {
     const e = space?.byFp.peek(fp);
-    if (!e || e.notHeld.has(memberId) || now < e.retryAt) continue;
+    if (!e || e.backoffs >= OWED_GIVE_UP_ROUNDS || e.notHeld.has(memberId) || now < e.retryAt) continue;
     if (e.peers.has(memberId)) mine.push(fp);
     else if (e.any || !candidates.some(c => e.peers.has(c))) anyone.push(fp);
   }
@@ -144,6 +159,11 @@ export function noteNotHeld(spaceId: string, fp: string, memberId: string, candi
   e.retryAt = now + backoffDelayMs(e.backoffs, BACKOFF_FIRST_MS, BACKOFF_MAX_MS);
   e.backoffs++;
   e.notHeld.clear();
+  if (e.backoffs === OWED_GIVE_UP_ROUNDS) {
+    givenUpSaid(`${spaceId}:${fp}`, () => log.warn(`Schema snapshot ${peerText(fp.slice(0, 12))} of space '${peerText(spaceId)}' is no longer asked for: every member `
+      + `that may hold it answered that it holds no such version, ${OWED_GIVE_UP_ROUNDS} rounds in a row. A record carrying it that arrives from another member `
+      + 'asks again; the records keep their stamp meanwhile.'));
+  }
 }
 
 /** Forget everything owed, for tests. */
@@ -159,11 +179,10 @@ const SCAN_PER_SPACE = MAX_FINGERPRINTS_PER_SPACE;
  */
 export async function scanOwedSchemaSnapshots(): Promise<void> {
   await eachSpace(SCHEMA_SNAPSHOT_STEP, configuredSpaces(), async (space) => {
-    const carriedIn = new Map<string, (typeof STAMPED_COLLECTIONS)[number]>();
+    const carriedIn = new Map<string, StampedCollection>();
+    // Additive: a collection whose read fails is reported and the rest are owed; the next cycle reads it again.
     await eachUnit(STAMPED_COLLECTIONS, async (collection) => {
-      // The partial index's own filter, verbatim, so the planner can prove the query implies it and reads `schemaFingerprint_present`, not the collection.
-      const found = await distinctStringsOf(col<Record<string, unknown>>(spaceCollection(space.id, collection)), SCHEMA_FINGERPRINT_FIELD, STAMPED_ONLY);
-      for (const fp of found) if (isSchemaFingerprint(fp) && !carriedIn.has(fp)) carriedIn.set(fp, collection);
+      for (const fp of await fingerprintsCarriedIn(space.id, collection)) if (!carriedIn.has(fp)) carriedIn.set(fp, collection);
     });
     const carried = [...carriedIn.keys()].filter(fp => !knownHeld(space.id, fp));
     if (carried.length === 0) return;
@@ -175,14 +194,11 @@ export async function scanOwedSchemaSnapshots(): Promise<void> {
   });
 }
 
-/** The filter of the gap scan's `distinct`: the stamp index's partial filter, so the scan reads the index, never the collection. */
-const STAMPED_ONLY = asFilter<Record<string, unknown>>({ [SCHEMA_FINGERPRINT_FIELD]: { $exists: true } });
-
 /**
  * The peer that delivered a record carrying each fingerprint, where one did: one aggregation per record collection the fingerprints were found in (at
  * most four), not one read per fingerprint. A fingerprint whose first record has no deliverer is absent: any member may hold it.
  */
-async function deliverersOf(spaceId: string, fps: readonly string[], collectionOf: (fp: string) => (typeof STAMPED_COLLECTIONS)[number]): Promise<Map<string, string>> {
+async function deliverersOf(spaceId: string, fps: readonly string[], collectionOf: (fp: string) => StampedCollection): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   for (const collection of STAMPED_COLLECTIONS) {
     const here = fps.filter(fp => collectionOf(fp) === collection);
