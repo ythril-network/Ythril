@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { readsDuring } from './_schema-version-fixtures.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'readcount';
@@ -31,10 +32,10 @@ describe('a read count sees only the call it measures (real MongoDB)', { skip },
   it('a reader still running from an earlier step is waited out, and the call\'s own one command is all that is counted', async () => {
     const coll = door.coll(SPACE, 'entities');
     // An earlier step's background reader: a read every 20 ms for 300 ms, not awaited, as the detached sweep is not.
+    // A fixed count of reads 20 ms apart, so it is still reading when the measured call is asked for.
     let stop = false;
     const background = (async () => {
-      const until = Date.now() + 300;
-      while (!stop && Date.now() < until) { await coll.find({ name: 'one' }).toArray(); await new Promise(r => setTimeout(r, 20)); }
+      for (let k = 0; k < 15 && !stop; k++) { await coll.find({ name: 'one' }).toArray(); await elapse(20, 'pacing: a background reader issues one read every 20 ms'); }
     })();
     try {
       const { result, sent } = await readsDuring(client, `${SPACE}_entities`, () => coll.find({ _id: 'one' }).toArray());

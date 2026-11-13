@@ -15,6 +15,8 @@
  *   `docsExamined` 0 where the design says covered, never an IXSCAN alone.
  */
 
+import { waitFor } from '../_shared/wait-for.mjs';
+
 const DIST = '../../server/dist/';
 
 /** The field a stamped collection's records name their type in. */
@@ -128,11 +130,8 @@ async function quietOn(client, collection) {
   client.on('commandSucceeded', ended);
   client.on('commandFailed', ended);
   try {
-    const until = Date.now() + QUIET_LIMIT_MS;
-    while (inFlight.size > 0 || Date.now() - last < QUIET_MS) {
-      if (Date.now() > until) throw new Error(`${collection} was never quiet for ${QUIET_MS} ms within ${QUIET_LIMIT_MS} ms: a background reader kept running`);
-      await new Promise(r => setTimeout(r, 25));
-    }
+    await waitFor(() => inFlight.size === 0 && Date.now() - last >= QUIET_MS, QUIET_LIMIT_MS, 25, undefined,
+      { what: `${collection} to be quiet for ${QUIET_MS} ms before the count (a background reader kept running)` });
   } finally {
     client.off('commandStarted', started);
     client.off('commandSucceeded', ended);
