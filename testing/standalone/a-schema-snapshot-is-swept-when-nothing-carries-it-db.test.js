@@ -158,6 +158,8 @@ describe('a schema snapshot is swept when nothing here carries it, after a grace
       const row = await rowOf('grace', O);
       assert.ok(row, 'a row was removed inside its grace');
       assert.equal(row.orphanSince, iso(T0), 'a later pass moved the mark: the grace would never run out');
+      // A pass sweeps every space: left here, this row would be removed by the next case's pass and counted in its global metric.
+      await snaps('grace').deleteMany({});
     });
 
     it('a pass past the grace removes the rows, forgets them as held, counts each removed and names the first five', T, async () => {
