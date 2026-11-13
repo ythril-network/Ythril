@@ -6,7 +6,7 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { schemaVersionsToolAct } from '../../spaces/schema-versions-acts.js';
 import { networkIdsSharedWithCaller } from '../../networks/network-spaces.js';
-import { ToolRefusal } from '../../util/errors.js';
+import { toolRefusalOfAct } from '../../util/errors.js';
 import { SCHEMA_FINGERPRINT_FIELD } from '../../spaces/schema-stamp.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 import { ROW_PAGER } from '../../brain/result-budget.js';
@@ -47,7 +47,7 @@ export const space_schema_versionsTool: ToolHandler = {
       shared: networkIdsSharedWithCaller(ctx.callSpace, ctx.callerRecord), transport: ctx.transport,
     });
     if ('error' in r) {
-      throw new ToolRefusal(r.status, r.code ? `${r.error} (${r.code})` : r.error, { error: r.error, ...(r.code ? { code: r.code } : {}) });
+      throw toolRefusalOfAct(r.status, r.error, { error: r.error, ...(r.code ? { code: r.code } : {}) });
     }
     // The answer in `content` as well as `structuredContent`: a client may read either one alone.
     return { content: [{ type: 'text' as const, text: JSON.stringify(r.body) }], structuredContent: { ...r.body } };

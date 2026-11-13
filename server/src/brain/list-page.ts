@@ -36,6 +36,11 @@ export interface ListPageOptions {
    * because only the door knows which it is — a module falling back to one would hand an agent a script's page.
    */
   budgetChars: number;
+  /**
+   * How many times the door carries the body, `carriagesFor(transport)` (`resolveBudget`'s third argument): a door that sends the rows twice
+   * (the tool door: `content` and `structuredContent`) holds each copy to its share. Absent: once, as every list that states none answered before.
+   */
+  carriages?: number;
 }
 
 export type ListPage<T> =
@@ -98,7 +103,7 @@ export async function pageMemberList<T>(opts: {
     ...(opts.req.maxChars !== undefined ? { maxChars: queryInt(opts.req.maxChars) } : {}),
     ...(opts.req.maxBytes !== undefined ? { maxBytes: queryInt(opts.req.maxBytes) } : {}),
     ...(opts.req.maxTokens !== undefined ? { maxTokens: queryInt(opts.req.maxTokens) } : {}),
-  } as BudgetRequest, opts.page.budgetChars);
+  } as BudgetRequest, opts.page.budgetChars, opts.page.carriages);
   if (!budget.ok) return budget;
   const read = await pageAcrossMembers({
     members: opts.members, readMember: opts.readMember, compare: opts.compare,
@@ -126,7 +131,7 @@ export function pageList<T>(all: readonly T[], req: ListPageRequest, opts: ListP
     ...(req.maxChars !== undefined ? { maxChars: queryInt(req.maxChars) } : {}),
     ...(req.maxBytes !== undefined ? { maxBytes: queryInt(req.maxBytes) } : {}),
     ...(req.maxTokens !== undefined ? { maxTokens: queryInt(req.maxTokens) } : {}),
-  } as BudgetRequest, opts.budgetChars);
+  } as BudgetRequest, opts.budgetChars, opts.carriages);
   if (!budget.ok) return budget;
   const page = all.slice(paging.skip, paging.skip + paging.limit);
   const outcome = applyBudget(page, budget);
