@@ -28,6 +28,7 @@
 
 import { AUDIT_SCHEMA_SUMMARY } from './audit-schema-summary.js';
 import { BRAIN_COLLECTIONS } from '../config/types-knowledge.js';
+import type { ImportTotals } from '../sync/space-import.js';
 
 /**
  * A single recorded field change.
@@ -46,8 +47,12 @@ export interface AuditChange {
   removed?: (string | number | boolean)[];
 }
 
-/** The fields of an import's totals (`importTotals`), which its own row and a queued import's completion row both carry. */
-const IMPORT_TOTAL_FIELDS = ['inserted', 'updated', 'refused', 'deletedOnRestore', 'due', 'snapshotsLanded', 'snapshotsRefused', 'unreadArraysTotal'] as const;
+/** The fields of an import's totals (`importTotals`), which its own row and a queued import's completion row both carry: each a key of {@link ImportTotals}. */
+const IMPORT_TOTAL_LIST = ['inserted', 'updated', 'refused', 'deletedOnRestore', 'due', 'snapshotsLanded', 'snapshotsRefused', 'unreadArraysTotal'] as const satisfies readonly (keyof ImportTotals)[];
+
+/** The keys of {@link ImportTotals} the list leaves out: none, or the assignment below fails the type check, so a new total cannot miss the allowlist. */
+type UnlistedImportTotal = Exclude<keyof ImportTotals, (typeof IMPORT_TOTAL_LIST)[number]>;
+const IMPORT_TOTAL_FIELDS: [UnlistedImportTotal] extends [never] ? typeof IMPORT_TOTAL_LIST : { unlisted: UnlistedImportTotal } = IMPORT_TOTAL_LIST;
 
 /**
  * Fields each operation may record, by `operation` name from `audit/middleware.ts`.
