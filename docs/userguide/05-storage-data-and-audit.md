@@ -165,6 +165,15 @@ file bytes) — and the import puts them back. What to expect from a restore:
   tightened must still restore. In a space whose validation is **warn** or **strict**, the answer lists the first 50
   such records by id with the field and reason (never the value) and says how many there were in all; **off** reports
   none.
+- **The schema versions the records were written under travel too.** Ythril keeps each schema version a space uses
+  privately: while a record here carries it, while it is current or a network's layer, and while a kept version links
+  it; once none holds, the housekeeping cycle removes it no sooner than a day after it first found it unused. The export
+  carries the versions its records use, and the import keeps them, so a restored record can still be checked against
+  the exact schema it was written under. A version whose text does not match its name is skipped and counted, and its
+  records are restored anyway; one too large to carry is left out of the export. Either way, the version is asked of
+  the other instances in the space's networks. An instance older than 6.6 skips them on import.
+- **A part of the export this version does not know is named.** The answer names each list in the export
+  that it does not read and so did not restore, so an export from a newer version loses nothing silently.
 - File previews and passages are rebuilt from the file itself, so they are not part of the export.
 - **The file bytes are not part of it, and an import gives no report on them.** A file's record comes back without its
   size and hash, so the import does not say which files on disk no longer match their records. A whole [restore](#restore)

@@ -106,7 +106,7 @@ Content-Type: application/json
 
 Trigger an immediate point-in-time dump of the entire MongoDB database. The backup is written to `<data-root>/backups/<ISO-timestamp>/` and contains a `manifest.json` plus one NDJSON file per collection.
 
-Every schema version a space has used is kept in the space's private `<space>_schema_snapshots` collection, so a database backup carries them and a restore brings them back. A space export (the admin space transfer) does not carry them yet.
+The schema versions a space uses are kept in the space's private `<space>_schema_snapshots` collection, so a database backup carries them and a restore brings them back. A version is kept while a record here carries it, while it is current or a network's layer, and while a kept version links it; once none holds, the housekeeping cycle removes it no sooner than a day after it first found it unused. A space export (the admin space transfer) carries the versions its records use as `schemaSnapshots`, and an import lands them ([Admin API → Export Space](12-admin-api.md#export-space)).
 
 > **Unless `encrypt` is on, a backup is an unencrypted copy of everything, and `requireEncryptedAtRest` does not cover it.**
 >

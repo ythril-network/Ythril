@@ -104,7 +104,9 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   "edges":    [ { "_id": "...", "from": "...", "to": "...", "label": "...", "...": "..." } ],
   "chrono":   [ { "_id": "...", "title": "...", "type": "...", "...": "..." } ],
   "links":    [ { "_id": "...", "from": "...", "fromKind": "fact", "to": "...", "toKind": "entity", "...": "..." } ],
-  "files":    [ { "_id": "...", "path": "...", "...": "..." } ]
+  "files":    [ { "_id": "...", "path": "...", "...": "..." } ],
+  "schemaSnapshots": [ { "fp": "49bea0b1...", "text": "{\"format\":1,...}",
+                         "links": { "own": "...", "layers": [ { "networkId": "...", "fp": "..." } ], "served": [] } } ]
 }
 ```
 
@@ -130,6 +132,17 @@ Dumps the entire knowledge base of a space as a single JSON document. Requires a
   (`storedVia`, `issuedHere`, `pos`, `posAtSeq`) are this instance's alone. JSON writes the stamps as ISO strings; the
   import turns them back into dates.
 - Binary file content is **not** included — only file metadata. Use the Files API to download actual files.
+- **After the families, `schemaSnapshots`**: the schema versions the exported records use. It holds every version this
+  instance keeps whose fingerprint an exported record carries (`schemaFingerprint`), plus every version those link,
+  transitively, whatever network built it: the records already carry those fingerprints, and an export is an
+  administrator's explicit act. Each element is `{ fp, text, links }` and nothing else: how this instance came to hold
+  the version (its origin, network and sender) is not exported. A version this instance does not hold is not in it.
+  `schemaSnapshots` is no replicated family and no sync door serves it.
+- **A version too large for an importer to read is left out.** Every importer, released ones included, refuses a body
+  holding an element over 10 MB, and a JSON-escaped text grows; an element that would come near that is left out,
+  counted in the audit row (`schemaSnapshotsOmitted`) and named in one warn line (the space, the fingerprint's prefix, the
+  bytes). Its records are still exported; after an import the version is fetched from a member, or none
+  is held.
 
 ---
 
@@ -153,7 +166,7 @@ first. Its bounds are two config keys, read live:
 | key | default | answered when exceeded |
 |---|---|---|
 | `importBodyMaxBytes` | 1 GiB (1 073 741 824) | `413`: counted on the INFLATED body, so a small compressed body cannot expand past it |
-| `importMaxDocuments` | 5 000 000 | `413`: documents in every family together |
+| `importMaxDocuments` | 5 000 000 | `413`: documents in every family together, the elements of `schemaSnapshots` counted with them |
 
 Both must be positive whole numbers; any other value refuses the config at load or reload. A reverse proxy's own
 body limit (nginx `client_max_body_size`, [Hosting](02-hosting.md)) is the outer cap, and the body must arrive within the
@@ -161,9 +174,11 @@ server's request timeout (5 minutes), so the largest body a client can send is a
 
 **Refused before anything is written, and nothing is kept:** a body that is not JSON (`415`: the content type must be
 `application/json`, and the encoding one of the three above); a malformed body, anywhere in it — not one object, a
-family that is not an array or appears twice, a document over 10 MB or nested deeper than 64 levels, a body cut off or
-never closed (`400`); either ceiling (`413`); a disk without room for the body (`507`); another import standing on this
-instance, or another import still being received (`409`, `code: "space_being_imported"`: one import runs at a time).
+family (or `schemaSnapshots`) that is not an array or appears twice, a document or element over 10 MB or nested deeper
+than 64 levels, a body cut off or never closed (`400`); either ceiling (`413`); a disk without room for the body
+(`507`); another import standing on this instance, or another import still being received (`409`,
+`code: "space_being_imported"`: one import runs at a time). A well-formed schema snapshot element whose text is not
+the version its fingerprint names refuses nothing: that element alone is skipped and counted (below).
 
 **The import is a space act.** Once the body is valid it is registered as an act of kind `import` on the space, and
 while it stands the space takes no local write and no peer's push (`409`, `code: "space_being_imported"`), as during a
@@ -179,8 +194,9 @@ since changed or removed) completes as failed with `422` and is not retried; wha
 names it. When the import completes it forgets what the space RECEIVED from each peer (as a restore of the whole
 instance does), so the next sync reads every member from the start.
 
-**Request body** — the export's shape. Each array is optional; the envelope keys are read wherever they sit, and a key
-the import does not know is skipped:
+**Request body** — the export's shape. Each array is optional; the envelope keys are read wherever they sit. A key the
+import does not know is skipped and never landed; one whose value is an array is also named in the answer
+(`unknownKeys`, below) and in one warn line:
 
 ```json
 {
@@ -197,7 +213,8 @@ are **replaced, whatever their seq** — an import is a restore, so a backup res
 `_id`s are inserted. A body holding the same `_id` twice stores the copy with the highest seq, and of equal seqs the
 earlier one, wherever in the body the copies are. <!-- replicated-family-order -->
 The families land in a fixed order (facts, entities, chrono, files,
-edges, links) whatever their order in the body.
+edges, links) whatever their order in the body. The schema snapshots land last, after every record, inside the
+same act.
 
 What the import stores of each document:
 
@@ -227,6 +244,15 @@ What the import stores of each document:
   left out and named in `deletedOnRestore`. Nothing is written for it, so no tombstone is made or moved.
 - The space's version counter is not moved: an arrival never moves it, a restore's included. A restored record keeps
   the version it was exported at and takes a fresh position in this instance's stream, so it is offered to peers again.
+- **Schema snapshots land as fetched.** Each element of `schemaSnapshots` is kept only when its text is at most the
+  snapshot cap, hashes to its `fp` and is the canonical text of a schema snapshot: the checks a version fetched from a
+  member passes. Its `links` are kept when they have the shape of links, and otherwise it keeps none. It lands as a version this instance fetched, own backup or foreign
+  alike (the envelope decides nothing about it), naming the envelope's `instanceId` as its sender only when that has an
+  instance id's shape. A version that is current here or a network's layer this instance holds is taken back as its
+  own by the housekeeping cycle, or by the next schema save or layer stored. A version already held is left as it is
+  (`held`). An element that fails a check, or whose write the store refuses, is skipped and counted (`refused`): its
+  records have landed, and the gap scan asks members for the version. A store that is not answering fails the act,
+  which is retried, as a record write would.
 
 **Instance restore and space import differ here on purpose.** A [restore of the whole instance](12a-data-management-api.md)
 puts the database back as it was, records deleted after the backup included. A space import restores the state of the
@@ -249,9 +275,19 @@ backup ([decision 13](../decisions/13-a-restore-is-a-set-of-space-acts-and-forge
     "links":    { "inserted": 0, "updated": 0, "errors": 0 },
     "files":    { "inserted": 0, "updated": 0, "errors": 1, "derived": 2,
                   "refused": [ { "_id": "notes/a.md", "reason": "seq \"7\" is not a non-negative integer" } ] }
-  }
+  },
+  "schemaSnapshots": { "landed": 2, "held": 1, "refused": 0 },
+  "unknownKeys": [ "notes" ],
+  "unknownKeysTotal": 1
 }
 ```
+
+Beside `results`, for the whole body:
+
+| field | what it holds |
+|---|---|
+| `schemaSnapshots` | what became of the body's schema snapshots (above): `landed`, the versions this import kept; `held`, those already kept here; `refused`, the elements skipped. One warn line names the first few refused fingerprints with why |
+| `unknownKeys` | the keys of the body whose value is an array and that the import does not read: skipped, never landed. **The first 10**; `unknownKeysTotal` is how many there were. A key whose value is no array is not named |
 
 Per family, alongside the counts, and each present only when it has something to say:
 

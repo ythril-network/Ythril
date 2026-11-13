@@ -1,6 +1,8 @@
 /**
- * Every schema version a space's server has used is kept as a row of a PRIVATE per-space collection, `<space>_schema_snapshots`, named by its
- * fingerprint (Q-735, bundle-265). This module writes the rows; `schema-stamp.ts` says what a fingerprint is.
+ * The schema versions a space uses are kept as rows of a PRIVATE per-space collection, `<space>_schema_snapshots`, named by their fingerprint
+ * (Q-735, bundle-265): kept while a record here carries one, while it is current or a network's layer, and while a kept version links it; once
+ * none holds, the housekeeping sweep (`schema-snapshot-sweep.ts`, bundle-266) removes it no sooner than a day after it first found it unused.
+ * This module writes the rows; `schema-stamp.ts` says what a fingerprint is.
  *
  * ## Why a collection and not a file
  *
