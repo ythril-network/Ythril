@@ -92,14 +92,55 @@ describe('the owed-snapshot gap scan reads the stamp index, in two commands per 
 
     assert.ok(sent.length > 0, 'the scan sent nothing to the facts collection: the client was not monitored, or the scan skipped the space');
     assert.ok(sent.length <= 2, `the scan sent ${sent.length} commands to one collection for ${OWED} owed fingerprints (${sent.map(s => s.name).join(', ')}): one read per fingerprint`);
-    for (const { name, command } of sent) {
-      const explainOf = name === 'aggregate'
-        ? { aggregate: command.aggregate, pipeline: command.pipeline, cursor: {} }
-        : { find: command.find, filter: command.filter, projection: command.projection, limit: command.limit };
-      const ex = await mongo.getDb().command({ explain: explainOf, verbosity: 'queryPlanner' });
-      const { indexes, stages } = walk(ex);
-      assert.ok(!stages.includes('COLLSCAN'), `${name} ${JSON.stringify(command.pipeline ?? command.filter)} is planned as a collection scan (${stages.join(' ')})`);
-      assert.ok(indexes.includes('schemaFingerprint_present'), `${name} ${JSON.stringify(command.pipeline ?? command.filter)} does not read schemaFingerprint_present (${JSON.stringify(indexes)})`);
-    }
+    await assertIndexServed(sent);
+  });
+
+  /*
+   * The one reader of "which fingerprints do the stored records carry" (bundle-266, design r2 D4): `fingerprintsCarriedIn(spaceId, collection, among?)`
+   * in `spaces/schema-snapshot-carried.ts`. Without `among` it is the gap scan's question (every stamp); with it, the fetch's and the sweep's (which of
+   * THESE is still carried). The `among` form filters `{ schemaFingerprint: { $in: among } }`: an `$in` of strings implies the partial filter
+   * `$exists: true`, so the planner may use the index for it, and the reader hints the index besides, so a collection whose index is gone FAILS the
+   * read instead of scanning the collection (the sweep's fail-closed case relies on that failure). Both forms must plan on the index.
+   *
+   * Seen red at 82208a6b: `spaces/schema-snapshot-carried.js` does not exist.
+   */
+  it('fingerprintsCarriedIn, in both forms, answers from the stamp index alone, and the among form answers only among', async () => {
+    const carried = await import('../../server/dist/spaces/schema-snapshot-carried.js').catch(err => ({ __missing: err }));
+    assert.ok(!carried.__missing, `server/dist/spaces/schema-snapshot-carried.js does not load (${carried.__missing?.code ?? carried.__missing})`);
+    assert.equal(typeof carried.fingerprintsCarriedIn, 'function', 'spaces/schema-snapshot-carried.js exports no fingerprintsCarriedIn');
+    const among = [fpOf(0), fpOf(3), 'd'.repeat(64)];
+    const sent = [];
+    const listen = (ev) => {
+      const coll = ev.command?.[ev.commandName];
+      if (coll === `${SPACE}_facts` && ['aggregate', 'find', 'distinct', 'count'].includes(ev.commandName)) sent.push({ name: ev.commandName, command: ev.command });
+    };
+    const client = mongo.getMongo();
+    client.on('commandStarted', listen);
+    let all, some;
+    try {
+      all = await carried.fingerprintsCarriedIn(SPACE, 'facts');
+      some = await carried.fingerprintsCarriedIn(SPACE, 'facts', among);
+    } finally { client.off('commandStarted', listen); }
+    assert.deepEqual([...all].sort(), Array.from({ length: OWED }, (_, i) => fpOf(i)).sort(), 'the full form does not answer every stamp the collection carries');
+    assert.deepEqual([...some].sort(), [fpOf(0), fpOf(3)].sort(), 'the among form answers a fingerprint outside among, or misses one inside it');
+    assert.equal(sent.length, 2, `want one command per call: ${sent.map(s => s.name).join(', ')}`);
+    await assertIndexServed(sent);
   });
 });
+
+/** Every captured read, explained: planned on `schemaFingerprint_present`, never a collection scan. */
+async function assertIndexServed(sent) {
+  for (const { name, command } of sent) {
+    const hint = command.hint !== undefined ? { hint: command.hint } : {};
+    const explainOf = name === 'aggregate'
+      ? { aggregate: command.aggregate, pipeline: command.pipeline, cursor: {}, ...hint }
+      : name === 'distinct'
+        ? { distinct: command.distinct, key: command.key, query: command.query, ...hint }
+        : { find: command.find, filter: command.filter, projection: command.projection, limit: command.limit, ...hint };
+    const shown = JSON.stringify(command.pipeline ?? command.filter ?? command.query);
+    const ex = await mongo.getDb().command({ explain: explainOf, verbosity: 'queryPlanner' });
+    const { indexes, stages } = walk(ex);
+    assert.ok(!stages.includes('COLLSCAN'), `${name} ${shown} is planned as a collection scan (${stages.join(' ')})`);
+    assert.ok(indexes.includes('schemaFingerprint_present'), `${name} ${shown} does not read schemaFingerprint_present (${JSON.stringify(indexes)})`);
+  }
+}

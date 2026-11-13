@@ -203,3 +203,102 @@ describe('behindVerdict: is this variation behind the sender\'s on a network the
     assert.deepEqual(verdict(mine, sender), ['n1']);
   });
 });
+
+/*
+ * snapshotSweepPlan (bundle-266, Q-739, design r2 D2 as r3 S-2 amends it): `snapshotSweepPlan(rows, carried, keep, now, grace)`.
+ *
+ * - `rows`: the space's snapshot rows as the sweep reads them, `{ _id, origin, links, orphanSince? }` (never `text`); `orphanSince` an ISO time.
+ * - `carried`: a `Set` of the fingerprints a stored record of the space carries; `keep`: a `Set` of the current variation's own and layer
+ *   fingerprints (`owedOf`); `now` and `grace` in ms.
+ * - Answers `{ mark, clear, remove }`, each the ids (fingerprints) of rows: `mark` a candidate with no mark, `clear` a marked row that is no
+ *   candidate, `remove` a candidate marked at most `now - grace` ago. A candidate: origin own or fetched, not carried, not kept, and linked
+ *   (links.own, links.layers[].fp, links.served[].fp) by no row that stays this pass, recomputed until nothing changes. At most 256 removals,
+ *   and a group a staying row links is never cut.
+ *
+ * Seen red at 82208a6b: `spaces/schema-snapshot.js` exports no snapshotSweepPlan, so every case fails at `need`.
+ */
+describe('snapshotSweepPlan: which snapshot rows the sweep marks, clears and removes', () => {
+  const GRACE = 24 * 3_600_000;
+  const NOW = Date.parse('2026-11-13T12:00:00.000Z');
+  const ago = (ms) => new Date(NOW - ms).toISOString();
+  const row = (id, over = {}) => ({ _id: id, origin: 'own', links: null, ...over });
+  const linksTo = (...fps) => ({ own: fps[0], layers: fps.slice(1).map(f => ({ networkId: 'n1', fp: f })), served: [] });
+  /** The ids of an answer list, whether it holds ids or rows. */
+  const idsOf = (xs) => (xs ?? []).map(x => (typeof x === 'string' ? x : x._id)).sort();
+  const plan = (rows, { carried = [], keep = [], now = NOW, grace = GRACE } = {}) => {
+    const out = need('snapshotSweepPlan')(rows, new Set(carried), new Set(keep), now, grace);
+    return { mark: idsOf(out.mark), clear: idsOf(out.clear), remove: idsOf(out.remove) };
+  };
+  const A = fp('a'); const B = fp('b'); const C = fp('c'); const D = fp('d');
+
+  it('an own or fetched row nothing carries, keeps or links is marked on its first pass, and nothing is removed', () => {
+    assert.deepEqual(plan([row(A), row(B, { origin: 'fetched' })]), { mark: [A, B], clear: [], remove: [] });
+  });
+
+  it('a layer row is never a candidate, whatever carries it: it is not marked, and an old mark on it is cleared', () => {
+    assert.deepEqual(plan([row(A, { origin: 'layer' }), row(B, { origin: 'layer', orphanSince: ago(GRACE * 3) })]), { mark: [], clear: [B], remove: [] });
+  });
+
+  it('a carried row and a kept row are no candidates; a mark on either is cleared, never acted on', () => {
+    const rows = [row(A), row(B), row(C, { orphanSince: ago(GRACE * 2) }), row(D, { orphanSince: ago(GRACE * 2) })];
+    assert.deepEqual(plan(rows, { carried: [A, C], keep: [B, D] }), { mark: [], clear: [C, D], remove: [] });
+  });
+
+  it('the grace boundary: a mark grace-1 ms old stays, one exactly grace old and one grace+1 ms old are removed', () => {
+    const rows = [row(A, { orphanSince: ago(GRACE - 1) }), row(B, { orphanSince: ago(GRACE) }), row(C, { orphanSince: ago(GRACE + 1) })];
+    assert.deepEqual(plan(rows), { mark: [], clear: [], remove: [B, C] });
+  });
+
+  it('a row a kept row links is kept, through every link field and transitively', () => {
+    const old = { orphanSince: ago(GRACE * 2) };
+    // A is carried; it links B by links.own and C by a layer link; C links D by links.served.
+    const rows = [row(A, { links: linksTo(B, C) }), row(B, old), row(C, { ...old, links: { own: fp('9'), layers: [], served: [{ networkId: 'n2', fp: D }] } }), row(D, old)];
+    const got = plan(rows, { carried: [A] });
+    assert.deepEqual(got.remove, [], 'a row a kept row links (directly or through another) was removed');
+    assert.deepEqual(got.clear, [B, C, D], 'a linked row keeps an old mark');
+  });
+
+  it('"kept" means not removed THIS pass: a row a candidate inside its grace links is not removed, and rows removed together may link each other', () => {
+    // A is a candidate seen for the first time (marked now, so it stays this pass) and links B, whose mark is past the grace.
+    const staying = plan([row(A, { links: linksTo(B) }), row(B, { orphanSince: ago(GRACE * 2) })]);
+    assert.ok(staying.mark.includes(A), 'the fixture is wrong: A should be marked');
+    assert.equal(staying.remove.includes(B), false, 'B was removed while A, which stays this pass, links it');
+    // Both past the grace, linking each other in a cycle: both go, and the cycle ends.
+    const both = plan([row(A, { links: linksTo(B), orphanSince: ago(GRACE * 2) }), row(B, { links: linksTo(A), orphanSince: ago(GRACE * 2) })]);
+    assert.deepEqual(both.remove, [A, B]);
+  });
+
+  it('a marked row that is carried again is cleared and not removed, however old its mark', () => {
+    assert.deepEqual(plan([row(A, { orphanSince: ago(GRACE * 10) })], { carried: [A] }), { mark: [], clear: [A], remove: [] });
+  });
+
+  it('at most 256 removals a pass, never part of a linked group, and the bound limits removals only, never marks', () => {
+    const old = ago(GRACE * 2);
+    const rows = [];
+    // 150 pairs, P links Q, all past the grace: 300 removable rows. Plus 20 unmarked candidates.
+    for (let i = 0; i < 150; i++) {
+      const p = `p${String(i).padStart(63, '0')}`; const q = `q${String(i).padStart(63, '0')}`;
+      rows.push(row(p, { links: linksTo(q), orphanSince: old }), row(q, { orphanSince: old }));
+    }
+    for (let i = 0; i < 20; i++) rows.push(row(`m${String(i).padStart(63, '0')}`));
+    const got = plan(rows);
+    assert.ok(got.remove.length > 0 && got.remove.length <= 256, `${got.remove.length} removals in one pass`);
+    const removed = new Set(got.remove);
+    const cut = [];
+    for (let i = 0; i < 150; i++) {
+      const p = `p${String(i).padStart(63, '0')}`; const q = `q${String(i).padStart(63, '0')}`;
+      if (!removed.has(p) && removed.has(q)) cut.push(i);
+    }
+    assert.deepEqual(cut, [], 'the bound removed a row whose linking row stays');
+    assert.equal(got.mark.length, 20, 'the bound held back marks: it counts removals only');
+  });
+
+  it('it changes nothing it is given', () => {
+    const rows = [row(A, { links: linksTo(B), orphanSince: ago(GRACE * 2) }), row(B, { orphanSince: ago(GRACE * 2) })];
+    const frozen = structuredClone(rows);
+    const carried = new Set([C]); const keep = new Set([D]);
+    need('snapshotSweepPlan')(rows, carried, keep, NOW, GRACE);
+    assert.deepEqual(rows, frozen);
+    assert.deepEqual([[...carried], [...keep]], [[C], [D]]);
+  });
+});
