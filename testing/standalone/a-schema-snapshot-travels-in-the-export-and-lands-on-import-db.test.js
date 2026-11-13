@@ -14,7 +14,7 @@
  *  4. **A refused element is skipped and counted; the records land anyway.** The answer says `schemaSnapshots: { landed, held, refused }`, the metric
  *     counts `imported` and `import_refused`.
  *  5. **Unknown keys are named in the answer**, the first ten, through `peerText`, with `unknownKeysTotal`; the audit row carries counts only
- *     (`snapshotsLanded`, `snapshotsRefused`, `unknownKeysTotal`), never a name.
+ *     (`snapshotsLanded`, `snapshotsRefused`, `unreadArraysTotal`), never a name.
  *  6. **A queued (202) import's counts reach its completion row.**
  *  7. **G3: the keys the export route writes equal the keys of the export example in docs/integration-guide/12-admin-api.md.** The documentation is what
  *     an integrator reads to restore; a key it does not show is one nobody knows to keep.
@@ -193,7 +193,7 @@ describe('a schema snapshot travels in the export and lands on import (real Mong
       assert.ok(await door.coll(SPACE, 'facts').findOne({ _id: 'f-a' }), 'the records did not land');
       assert.equal(await metricSample('ythril_schema_snapshot_total', { outcome: 'imported' }) - before, 3, 'imported rows are not counted as imported');
       const row = await lastAuditRow('space.import');
-      assert.deepEqual([changeOf(row, 'snapshotsLanded'), changeOf(row, 'snapshotsRefused'), changeOf(row, 'unknownKeysTotal')], [3, 0, 0],
+      assert.deepEqual([changeOf(row, 'snapshotsLanded'), changeOf(row, 'snapshotsRefused'), changeOf(row, 'unreadArraysTotal')], [3, 0, 0],
         `the import's audit row does not carry the snapshot counts: ${JSON.stringify(row?.changes)}`);
     });
 
@@ -232,7 +232,7 @@ describe('a schema snapshot travels in the export and lands on import (real Mong
       assert.ok(Array.isArray(answer.unknownKeys) && answer.unknownKeys.length === 10, `the answer does not name the first ten: ${JSON.stringify(answer.unknownKeys)}`);
       assert.deepEqual(answer.unknownKeys, keys.slice(0, 10));
       const row = await lastAuditRow('space.import');
-      assert.equal(changeOf(row, 'unknownKeysTotal'), 11);
+      assert.equal(changeOf(row, 'unreadArraysTotal'), 11);
       assert.equal(JSON.stringify(row).includes('future0'), false, 'the audit row names a key: it is counts only');
       const late = await importBody(JSON.stringify(body).replace(/}$/, ',"line\\nbreak":[]}'));
       assert.equal(late.unknownKeys.some(k => /[\r\n]/.test(k)), false, `a key name reached the answer with its line break: ${JSON.stringify(late.unknownKeys)}`);
