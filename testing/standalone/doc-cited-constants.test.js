@@ -26,7 +26,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
@@ -47,7 +47,9 @@ const read = (rel) => {
   // paths through here (`server/src/config/types.ts`), and an existence check alone matches the file
   // itself and hands it to `readdirSync`.
   const dir = join(ROOT, rel.replace(/\.md$/, ''));
-  if (rel.endsWith('.md') && existsSync(dir) && statSync(dir).isDirectory()) {
+  // The directory's own spelling, compared exactly: on a case-insensitive disk `CHANGELOG.md` would otherwise be read as the frozen
+  // `changelog/` parts beside it, and a row naming the changelog fails on that disk only (bundle-266).
+  if (rel.endsWith('.md') && existsSync(dir) && statSync(dir).isDirectory() && readdirSync(dirname(dir)).includes(basename(dir))) {
     return readdirSync(dir).filter(f => f.endsWith('.md')).sort()
       .map(f => readFileSync(join(dir, f), 'utf8')).join('\n');
   }
@@ -617,6 +619,26 @@ const CITED = [
     doc: 'docs/integration-guide/09-sync-api.md',
     text: (v) => new RegExp(`at most ${v} paths, sorted`),
   },
+  // The schema snapshot retention (bundle-266): how long a version nothing uses waits before the sweep removes it, and how many rounds of
+  // `unknown_fingerprint` from every member give an owed version up. The protocol page and the changelog each state both in prose.
+  ...['docs/sync-protocol.md', 'CHANGELOG.md'].map(doc => ({
+    what: `how long an unused schema version waits before the sweep removes it (${doc})`,
+    source: 'server/src/spaces/schema-snapshot.ts',
+    code: /export const SNAPSHOT_REMOVAL_GRACE_MS = ([0-9_]+) \* 60 \* 60_000;/,
+    scale: 24,   // hours in code, days in prose
+    doc,
+    text: (v) => new RegExp(`removes it no sooner than ${v === 1 ? 'a day' : counted(v, 'day')} after it first found it unused`),
+  })),
+  ...[
+    ['docs/sync-protocol.md', (v) => new RegExp(`After (?:${v}|${NUMBER_WORDS[v]}) such rounds in a row it is given up`)],
+    ['CHANGELOG.md', (v) => new RegExp(`answered \`unknown_fingerprint\` for ${counted(v, 'round')} in a row is no longer asked for`)],
+  ].map(([doc, text]) => ({
+    what: `how many rounds of unknown_fingerprint from every member give an owed schema version up (${doc})`,
+    source: 'server/src/sync/schema-snapshot-owed.ts',
+    code: /export const OWED_GIVE_UP_ROUNDS = ([0-9_]+);/,
+    doc,
+    text,
+  })),
 ];
 
 /**
