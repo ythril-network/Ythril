@@ -1213,7 +1213,7 @@
   "spaces.schema.exportToLibrary.confirm": "Export to library",
   "spaces.schema.exportToLibrary.done": "Exported to library group \"{{group}}\" — {{created}} created, {{updated}} updated.",
   "spaces.schema.exportToLibrary.failed": "Could not export the schema to the library.",
-  "spaces.schema.versionsKeptHint": "Every schema version this server has used is kept privately, named by its fingerprint. The space's current fingerprint is in GET /api/spaces/:id/meta and the MCP tool space_meta (schemaFingerprint).",
+  "spaces.schema.versionsKeptHint": "Each schema version is kept privately, named by its fingerprint: kept while a record here carries it, while it is current or a network's layer, and while a kept version links it; once none holds, the housekeeping cycle removes it no sooner than a day after it first found it unused. The space's current fingerprint is in GET /api/spaces/:id/meta and the MCP tool space_meta (schemaFingerprint).",
   "spaces.schema.tab.entities": "Entities",
   "spaces.schema.tab.edges": "Edges",
   "spaces.schema.tab.facts": "Facts",

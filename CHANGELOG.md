@@ -18,15 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Members below 6.6.0 drop `schemaFingerprint` on arrival and forward records without it | None; a record is stamped again on its next write on a newer member |
 | A `merkle: true` network reports divergence while a member runs below 6.6.0 or was rolled back to 6.5: 6.5 hashes a stored `schemaFingerprint` | Upgrade or roll back every member together |
 | Records written before this release carry no `schemaFingerprint`; nothing backfills it | None; a record is stamped on its next write that conforms |
+| An importer below 6.6.0 skips the `schemaSnapshots` of a 6.6 export: the records land without their schema versions, which are then fetched from members or stay unheld | Import a 6.6 export into 6.6.0 or later to keep the versions |
 
 ### Added
 
 - **Schema:** `schemaFingerprint` on `GET /api/spaces/:id/meta` and MCP `space_meta`: the SHA-256 of the space schema's canonical text, the same on every instance holding the same schema; derived, and stripped when the meta is sent back.
-- **Schema:** every schema version a space has used is kept privately in `<space>_schema_snapshots`, named by its fingerprint, with what it was built from (own types, network layers). A database backup carries it, an export does not yet.
+- **Schema:** the schema versions a space uses are kept privately in `<space>_schema_snapshots`, named by their fingerprint, with what each was built from (own types, network layers). A database backup carries them.
+- **Schema:** a schema version is kept while a record here carries it, while it is current or a network's layer, and while a kept version links it; once none holds, the housekeeping cycle removes it no sooner than a day after it first found it unused.
+- **Import/export:** an admin space export carries `schemaSnapshots`, `{ fp, text, links }` for each schema version its records use and each one those link; one too large for an importer is left out, counted `schemaSnapshotsOmitted`.
+- **Import/export:** an import keeps each verified schema version as fetched, after its records, and skips one that is not; it answers `schemaSnapshots: { landed, held, refused }`, and its audit row counts `snapshotsLanded`, `snapshotsRefused` and `unreadArraysTotal`.
 - **Records:** a record carries `schemaFingerprint` exactly while it conforms to the space's schema: a conforming write stamps it, and its answer shows it; a non-conforming update, a redaction or a relink removes it. Recall hits omit it.
 - **Sync:** a record's `schemaFingerprint` travels with it on push, pull and import as its writer sent it; a value that is not a 64-character lowercase hex fingerprint is read as absent (stored without a stamp, never refused).
 - **Sync:** `GET /api/sync/schema-snapshot`: a member fetches a schema version it lacks from the member that sent the stamped record; one built from a network the asker is not in answers `409 not_shared`.
-- **Sync:** metric `ythril_schema_snapshot_total`; audit event `file.retired_schema_file.sweep`.
+- **Sync:** metric `ythril_schema_snapshot_total`, with outcomes `removed` (the sweep), `imported` and `import_refused` (an admin import) beside the fetch's; audit event `file.retired_schema_file.sweep`.
+- **Sync:** a schema version every member that may hold it answered `unknown_fingerprint` for six rounds in a row is no longer asked for, said once in a warn line, until a record carrying it arrives from another member.
 - **Files:** the file change feed, `GET /api/files/:spaceId/changes` and the MCP tool `file_changes`: the changes to a space's files after a cursor, in order; with no cursor it lists every file. An expired cursor answers `410 cursor_expired`.
 - **Files:** `filesAwaitingBytes` on REST stats and MCP `space_stats`: records whose bytes are missing here, which file counts leave out. The change feed gains reason `bytes_lost` and the audit log `file.absent_bytes.sweep`.
 - **Files:** the Brain page's Files tab, a view's Overview and the Danger zone show "+N awaiting bytes" beside the file count when some records wait for their bytes.
@@ -38,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Records:** a `schemaFingerprint` sent in a write body is ignored (not named as an unknown field, never stored); `deleteFields` refuses it by name.
 - **Sync:** the space hash (Merkle root) leaves out `schemaFingerprint`; copies that differ only in it count as equal (ADR 22).
 - **Sync:** `GET /api/sync/meta` asks `schema: read` on the space.
+- **Import/export:** an admin space import names the array keys of its body it does not read, in the answer (`unknownKeys`, the first 10, and `unknownKeysTotal`) and one warn line, instead of skipping them unnamed; they are still never landed.
 - **Files:** bytes that arrive from a peer move the file row's position, never its version: a reader paging by position hears of them, and the publisher's next edit still wins. Identical bytes again write nothing.
 - **Files:** a file deletion (own, folder, TTL, a peer's, a sidecar's) takes a position in the same write that flags or marks the row.
 - **Files:** a record whose bytes this instance lost is removed here only, with no tombstone: checked once a day per space, after 1 day (30 without a recorded hash or after a restore or import), once every peer completed a sync; mass losses are held.
