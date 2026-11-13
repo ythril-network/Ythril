@@ -106,11 +106,47 @@ export async function explainOf(db, { name, command }) {
   return planOf(await db.command({ explain, verbosity: 'executionStats' }));
 }
 
+/** How long `collection` must see no command, with none in flight, before a count starts. */
+const QUIET_MS = 250;
+/** How long a count waits for that quiet before it refuses to measure at all. */
+const QUIET_LIMIT_MS = 15_000;
+
 /**
- * The read commands the server's client sends to `collection` while `fn` runs. Needs a client opened with command monitoring
+ * Resolves once `collection` has had no command from `client` for QUIET_MS, with none still in flight; rejects after QUIET_LIMIT_MS.
+ *
+ * Why a count waits first: an earlier step may have left a reader of the same collection running, and its commands land inside the
+ * measured window. Saving a schema version starts the snapshot sweep detached (`sweepAfterMetaWrite`), and the sweep reads the stamps
+ * through `fingerprintsCarriedIn`. Main's CI run 43499981804 counted that read as the measured call's second command.
+ */
+async function quietOn(client, collection) {
+  const inFlight = new Set();
+  let last = Date.now();
+  const mine = (ev) => ev.command?.[ev.commandName] === collection || (ev.commandName === 'getMore' && ev.command?.collection === collection);
+  const started = (ev) => { if (mine(ev)) { inFlight.add(ev.requestId); last = Date.now(); } };
+  const ended = (ev) => { if (inFlight.delete(ev.requestId)) last = Date.now(); };
+  client.on('commandStarted', started);
+  client.on('commandSucceeded', ended);
+  client.on('commandFailed', ended);
+  try {
+    const until = Date.now() + QUIET_LIMIT_MS;
+    while (inFlight.size > 0 || Date.now() - last < QUIET_MS) {
+      if (Date.now() > until) throw new Error(`${collection} was never quiet for ${QUIET_MS} ms within ${QUIET_LIMIT_MS} ms: a background reader kept running`);
+      await new Promise(r => setTimeout(r, 25));
+    }
+  } finally {
+    client.off('commandStarted', started);
+    client.off('commandSucceeded', ended);
+    client.off('commandFailed', ended);
+  }
+}
+
+/**
+ * The read commands the server's client sends to `collection` while `fn` runs, counted only after the collection went quiet (`quietOn`),
+ * so a reader an earlier step left running is waited out rather than counted. Needs a client opened with command monitoring
  * (`openPushDoor({ monitorCommands: true })`).
  */
 export async function readsDuring(client, collection, fn) {
+  await quietOn(client, collection);
   const sent = [];
   const listen = (ev) => {
     if (ev.command?.[ev.commandName] === collection && ['aggregate', 'find', 'distinct', 'count'].includes(ev.commandName)) {
