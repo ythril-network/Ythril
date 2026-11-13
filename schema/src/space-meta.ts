@@ -583,15 +583,18 @@ class UnknownNames {
 /** The keys a zod object accepts. Read from the schema, so a field added to it is known to the reader on the same commit. */
 const keysOf = (schema: { shape: Record<string, unknown> }): Set<string> => new Set(Object.keys(schema.shape));
 
-/** `key` under `path`, dotted; `path` '' is the root, so a name read relative to one definition carries no leading dot. */
-const under = (path: string, key: string): string => (path === '' ? key : `${path}.${key}`);
+/**
+ * `key` under `path`, dotted; `path` '' is the root, so a name read relative to one definition carries no leading dot. The one spelling of a
+ * schema place: the stored reader names what it left out with it, and the server's version diff (`spaces/schema-diff.ts`) names what changed.
+ */
+export const placeUnder = (path: string, key: string): string => (path === '' ? key : `${path}.${key}`);
 
 /** `value` without the keys `known` lacks, each one named under `path`. A value that is not an object is left for the body to refuse. */
 function withoutUnknownKeys(value: unknown, known: Set<string>, path: string, names: UnknownNames): unknown {
   if (!isPlainObject(value)) return value;
   const out: Obj = {};
   for (const [k, v] of Object.entries(value)) {
-    if (known.has(k)) setOwn(out, k, v); else names.add(under(path, k));
+    if (known.has(k)) setOwn(out, k, v); else names.add(placeUnder(path, k));
   }
   return out;
 }
@@ -604,11 +607,11 @@ function readKnownType(def: unknown, path: string, names: UnknownNames): unknown
   if (isPlainObject(props)) {
     const known = keysOf(PropertySchemaZ);
     const next: Obj = {};
-    for (const [name, ps] of Object.entries(props)) setOwn(next, name, withoutUnknownKeys(ps, known, under(path, `propertySchemas.${name}`), names));
+    for (const [name, ps] of Object.entries(props)) setOwn(next, name, withoutUnknownKeys(ps, known, placeUnder(path, `propertySchemas.${name}`), names));
     out['propertySchemas'] = next;
   }
-  if (isPlainObject(out['retention'])) out['retention'] = withoutUnknownKeys(out['retention'], keysOf(InlineTypeSchemaZ.shape.retention.unwrap()), under(path, 'retention'), names);
-  if (isPlainObject(out['endpoints'])) out['endpoints'] = withoutUnknownKeys(out['endpoints'], keysOf(InlineTypeSchemaZ.shape.endpoints.unwrap()), under(path, 'endpoints'), names);
+  if (isPlainObject(out['retention'])) out['retention'] = withoutUnknownKeys(out['retention'], keysOf(InlineTypeSchemaZ.shape.retention.unwrap()), placeUnder(path, 'retention'), names);
+  if (isPlainObject(out['endpoints'])) out['endpoints'] = withoutUnknownKeys(out['endpoints'], keysOf(InlineTypeSchemaZ.shape.endpoints.unwrap()), placeUnder(path, 'endpoints'), names);
   return out;
 }
 
