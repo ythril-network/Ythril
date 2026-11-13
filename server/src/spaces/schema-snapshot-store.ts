@@ -123,8 +123,11 @@ export async function ensureSnapshot(
   return inserted ? 'written' : 'held';
 }
 
-/** The rows a writer of a version that is current or a held layer claims: one whose origin is not `kept`'s (a `layer` row never), or one that is marked. */
-const claimFilters = (fp: string, kept: KeptAs): [Record<string, unknown>, Record<string, unknown>] => [
+/**
+ * The rows a writer of a version that is current or a held layer claims: one whose origin is not `kept`'s (a `layer` row never), or one that is marked.
+ * Exported with {@link needsClaim}, the same rule as a predicate, for the test that pins the two equal (`the-snapshot-claim-filter-and-predicate-agree`).
+ */
+export const claimFilters = (fp: string, kept: KeptAs): [Record<string, unknown>, Record<string, unknown>] => [
   { _id: fp, origin: { $nin: [kept.origin, 'layer'] } },
   { _id: fp, orphanSince: { $exists: true } },
 ];
@@ -149,7 +152,7 @@ async function claimKept(spaceId: string, stamp: Stamp, kept: KeptAs): Promise<v
 }
 
 /** Does a present row (`origin` and `orphanSince` read) need {@link claimKept} for `kept`? The same rule as its filters, so the cycle writes only what it must. */
-const needsClaim = (row: Pick<SnapshotRow, 'origin' | 'orphanSince'>, kept: KeptAs): boolean =>
+export const needsClaim = (row: Pick<SnapshotRow, 'origin' | 'orphanSince'>, kept: KeptAs): boolean =>
   row.orphanSince !== undefined || (row.origin !== kept.origin && row.origin !== 'layer');
 
 /**
@@ -157,7 +160,12 @@ const needsClaim = (row: Pick<SnapshotRow, 'origin' | 'orphanSince'>, kept: Kept
  * first, so once the row is seen the claim has landed: a claim landing later would clear a mark a sweep set after the version stopped being current.
  */
 function keepCurrentSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs): void {
-  detachedWrite(async () => { await claimKept(spaceId, stamp, kept); await ensureSnapshot(spaceId, stamp, kept); })
+  detachedKeep(spaceId, async () => { await claimKept(spaceId, stamp, kept); await ensureSnapshot(spaceId, stamp, kept); });
+}
+
+/** Run `work` for `spaceId` detached: never awaited by the write that asked; a failure counted `failed` and reported through the shared reporter, never thrown. */
+function detachedKeep(spaceId: string, work: () => Promise<unknown>): Promise<unknown> {
+  return detachedWrite(work)
     .catch(err => { schemaSnapshotTotal.note('failed'); reportSpaceFailure(SCHEMA_SNAPSHOT_STEP, spaceId, err); });
 }
 
@@ -167,9 +175,7 @@ export function keepSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs): void 
   // One detached upsert per fingerprint at a time: a burst of writes right after a schema save would otherwise schedule one each until the first lands.
   if (knownHeld(spaceId, stamp.fp) || keeping.has(key)) return;
   keeping.add(key);
-  detachedWrite(() => ensureSnapshot(spaceId, stamp, kept))
-    .catch(err => { schemaSnapshotTotal.note('failed'); reportSpaceFailure(SCHEMA_SNAPSHOT_STEP, spaceId, err); })
-    .finally(() => keeping.delete(key));
+  detachedKeep(spaceId, () => ensureSnapshot(spaceId, stamp, kept)).finally(() => keeping.delete(key));
 }
 
 /** The detached upserts in flight, `space:fp`: each entry leaves when its upsert settles, so the set holds no more than the writes running now. */
