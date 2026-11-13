@@ -169,7 +169,8 @@ file bytes) — and the import puts them back. What to expect from a restore:
   privately: while a record here carries it, while it is current or a network's layer, and while a kept version links
   it; once none holds, the housekeeping cycle removes it no sooner than a day after it first found it unused. The export
   carries the versions its records use, and the import keeps them, so a restored record can still be checked against
-  the exact schema it was written under. A version that does not match its name, or is too large to carry, is skipped
+  the exact schema it was written under: there is no button for that yet, so run the check through the API or an assistant (`POST /api/spaces/:id/validate-schema` or `schema_validate` with `against: stamp`; `GET /api/spaces/:id/schema-versions` or `space_schema_versions` lists the versions).
+  A record can still carry a version this instance does not hold, when fetching it from the member that sent the record gave up, that member would not share it, or an import skipped it; such records are counted, not checked. A version that does not match its name, or is too large to carry, is skipped
   and counted, its records restored anyway. An instance older than 6.6 skips them on import.
 - **A part of the export this version does not know is named** in the answer, so nothing is lost silently.
 - File previews and passages are rebuilt from the file itself, so they are not part of the export.

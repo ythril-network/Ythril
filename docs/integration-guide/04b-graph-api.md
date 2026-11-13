@@ -436,6 +436,82 @@ already its name. An endpoint that resolves to nothing falls back to the raw id.
 **Both kinds cross the wire.** They are declared on the sync ingest schema, so a peer receives the edge
 meaning what its author meant.
 
+#### An edge label can declare its ends, and whether a subject may have more than one (3.7)
+
+Two fields on an **edge** type schema ([Space Schemas](06a-schema-api.md)), refused on the other three collections
+rather than silently ignored — they name things an entity, a fact or a chrono entry does not have.
+
+```json
+{ "typeSchemas": { "edge": {
+  "reports_to": { "endpoints": { "from": ["person"], "to": ["person"] }, "functional": true },
+  "belongs_to": { "endpoints": { "from": ["document", "person"], "to": ["project", "team"] } },
+  "mentions":   { "endpoints": { "from": ["document"] } }
+} } }
+```
+
+**Each side is independently optional, and absent means any.** `mentions` above pins the subject and leaves the
+object open, which is the ordinary case: in a fourteen-label model `likes` legitimately permits seven of nine
+types on `to`, and a rule that has to enumerate seven of nine is a list somebody will forget to extend.
+
+**Two arrays mean the CROSS PRODUCT.** `belongs_to` above permits `document → team` as well as the two pairs you
+probably had in mind. That is the semantics, not an omission: if you need exactly one pair, declare a label per
+pair — which you can already do. There is deliberately no pairs form.
+
+**Members are entity type names**, in the same vocabulary [`space_meta`'s `actualSchema`](#data-model-inferred-er)
+reports, plus the literal
+`UNTYPED` for entities that have no type. Untyped entities are ordinary, so they are admissible by SAYING so
+rather than by being refused in silence — and an untyped entity at an end that names a type IS a violation. A
+member may also be written `entity:<type>`; a bare name means the same thing. Any other knowledge-type prefix
+(`fact:`, `chrono:`, `edge:`) is refused with a message saying why: the grammar is reserved for if those
+records can ever be edge endpoints, so it cannot later be read as a type name that happens to contain a colon.
+
+**`functional: true` means one edge per `(from, label)`.** "Another edge" is a different edge, not only a different
+`to`: the same `to` reached as another kind (`toKind`, or `fromKind` at the other end) is a second edge too. Not per
+`(from, to)` — that is already guaranteed by edge identity — and not per `to`, which is the inverse relation and has
+its own name.
+
+**Where the rules are enforced.** A write that would break either one is **refused**, on every door that creates or
+edits an edge — the two edge routes, `save_edge`, `update_edge`, per item through `/bulk`, and the inline `edges` of
+an entity, fact or chrono write (refused before the record is written, so nothing is stored). The violation names
+`fromType`, `toType` or `functional` as its field, and the reason says which types the label admits. In a `warn`
+space it is reported in the response instead of refused, like every other schema rule. An edge that arrives from a
+sync peer or an import is stored as it was written and recorded in the arrival's `schemaViolations` (see
+[What arrivals record](06a-schema-api.md#what-arrivals-record)), and a merge reports instead of refusing.
+
+**Writers that run at the same time cannot both win.** In a `strict` space an instance's own writers — the two edge
+routes, `save_edge`, `update_edge`, a bulk item and an inline edge — leave a subject at most one edge under a
+functional label, even when two of them check at the same moment: the one that loses is decided again against the
+winner and refused with the same `functional` violation a write made afterwards gets, on either door. A writer that
+keeps losing, because the subject keeps changing under it, answers `409` and writes nothing, and a relabel onto an
+identity another edge already holds answers `409 edge_identity_taken`. What this does not cover: a `warn` or `off`
+space stores the second edge (`warn` reports it), and an edge that arrives from a sync peer, a merge or an import is
+stored and reported (in the arrival's own record as well as in `validate-schema`), never refused — so a subject can
+still hold two. The
+guarantee is in place from a new space's set-up, and for a space that existed before the upgrade once the background
+index pass has reached it; a space where it could not be built says so (`index _functionalGuard_1 on edges` under the `Space indexes` or `query indexes` step in
+[Background jobs](11-setup-api.md#background-jobs-and-the-spaces-they-walk)) and is tried again by the next index pass,
+and until then a race there behaves as it did before.
+
+**A rule you declare later does not freeze the edges you already have.** Refusal is on what a write INTRODUCES:
+if a stored edge already breaks the rule, an edit that leaves the ends alone still goes through, so declaring a
+schema can never make a record unmaintainable. Re-writing the same edge — the same `from`, `to`, `label` and end
+kinds — is likewise not a `functional` breach: an edge is not its own duplicate.
+
+**An endpoint that resolves to nothing is not a type violation.** With `strictLinkage: false` a dangling
+reference is a deliberate documented state, and `ErModel.danglingEdges` has a row for it; a `to` that cannot be
+resolved is left unchecked rather than refused, so one setting's escape hatch is not read as another setting's
+breach. Endpoint types are also only resolved for **entity** ends: a fact, chrono or file end has no type in
+this vocabulary.
+
+**And the stored edges are still auditable.** [`POST /api/spaces/:id/validate-schema`](06a-schema-api.md#validate-schema-dry-run) lists
+every stored edge that breaks either rule — what the enforcement cannot reach, because it was written before the
+rule existed, arrived from a peer, was merged or imported, or came in while the space was in `warn`. The same answer
+carries `staleGuards`, which is a different list.
+
+Both fields are also accepted on a **schema-library** entry, unlike `retention`. The difference is shape versus
+policy: what may sit at the end of a `reports_to` is a fact about the relationship, and travels with an entry any
+number of spaces reference; a delete window belongs to a type in one space.
+
 #### An edge's `_id` is DERIVED from the relationship, and moves when the relationship does
 
 An edge's `_id` is `uuidv5` over `(from, to, label)`, each part length-prefixed so no part can forge the
