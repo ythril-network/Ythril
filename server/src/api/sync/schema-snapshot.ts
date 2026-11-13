@@ -34,6 +34,7 @@ import { EMPTY_SCHEMA_FINGERPRINT, EMPTY_SCHEMA_STAMP, isSchemaFingerprint } fro
 import { snapshots, type SnapshotRow } from '../../spaces/schema-snapshot-store.js';
 import { isConfiguredSpace } from '../../spaces/space-lookup.js';
 import { sendCaughtFailure } from '../send-failure.js';
+import { BAD_FINGERPRINT, UNKNOWN_FINGERPRINT, badFingerprintSentence } from '../../util/errors.js';
 import { sendLostSpace } from '../write-target-answer.js';
 import { refusePeerReach, refuseSchemaRung } from './_shared.js';
 
@@ -48,7 +49,7 @@ export function registerSchemaSnapshotRoute(syncMetaRouter: Router): void {
       const { spaceId, networkId, fp } = req.query as Record<string, string>;
       if (!spaceId) { res.status(400).json({ error: 'spaceId required' }); return; }
       if (!isSchemaFingerprint(fp)) {
-        res.status(400).json({ error: 'fp must be a schema fingerprint: 64 lowercase hex characters', code: 'bad_fingerprint' });
+        res.status(400).json({ error: badFingerprintSentence('fp'), code: BAD_FINGERPRINT });
         return;
       }
       if (refusePeerReach(res, spaceId, networkId, req.authToken)) return;
@@ -59,7 +60,7 @@ export function registerSchemaSnapshotRoute(syncMetaRouter: Router): void {
         return;
       }
       const row = await snapshots(spaceId).findOne(asFilter<SnapshotRow>({ _id: fp }));
-      if (!row) { res.status(404).json({ error: 'This instance holds no schema snapshot with that fingerprint', code: 'unknown_fingerprint' }); return; }
+      if (!row) { res.status(404).json({ error: 'This instance holds no schema snapshot with that fingerprint', code: UNKNOWN_FINGERPRINT }); return; }
       const shared = networkIdsSharedWithCaller(spaceId, req.authToken as object | undefined);
       const served = shared ? servableTo(row, shared) : { ok: true as const, links: row.links };
       if (!served.ok) {

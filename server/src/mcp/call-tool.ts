@@ -51,7 +51,7 @@ import { edgeIdentityTakenAnswer } from '../brain/edge-rekey.js';
 import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { answerForCaught } from '../util/answer-for-caught.js';
 import { spaceActAnswer } from '../spaces/space-act-answer.js';
-import { NotFoundError, ToolRefusal, SchemaIndexBuilding } from '../util/errors.js';
+import { NotFoundError, ToolRefusal, schemaIndexBuildingAnswer } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
 import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
 import { PositionClockUnusable, PositionsSeedUnavailable, ForkRowReadOnly, ForkCapRefusal, EndpointRemoved, LinkTargetRemoved } from '../util/errors.js';
@@ -456,9 +456,9 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
       return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 404, callSpace };
     }
     // A read of schema versions over a collection that lists no stamp index yet: the REST door's 503 and body (`sendCaughtFailure`), the code in the text too.
-    if (err instanceof SchemaIndexBuilding) {
-      const body = { error: err.message, code: err.code, retryable: true };
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${message} (${err.code})` }], isError: true, structuredContent: body }, status: err.status, callSpace };
+    const building = schemaIndexBuildingAnswer(err);
+    if (building) {
+      return { result: { content: [{ type: 'text' as const, text: `Error: ${message} (${building.body.code})` }], isError: true, structuredContent: building.body }, status: building.status, callSpace };
     }
     // A relabel onto an identity another edge holds: the REST route's 409 and body (`edgeIdentityTakenAnswer`).
     const identityTaken = edgeIdentityTakenAnswer(err);

@@ -18,7 +18,7 @@ import { beginSchemaValidate, SCHEMA_VALIDATE_MAX_LIMIT, SCHEMA_VALIDATE_CURSOR_
 import { readSpacesOfCall } from '../../spaces/read-scope.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
 import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
-import { ToolRefusal } from '../../util/errors.js';
+import { toolRefusalOfAct } from '../../util/errors.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 import { KEYSET_PAGER } from '../../brain/result-budget.js';
 import { VALIDATE_AGAINST } from '../../spaces/schema-validate-against.js';
@@ -119,8 +119,7 @@ export const schema_validateTool: ToolHandler = {
       transport: ctx.transport,
     });
     if (r.status !== 200) {
-      const code = typeof r.body?.['code'] === 'string' ? r.body['code'] : undefined;
-      throw new ToolRefusal(r.status, code ? `${r.error} (${code})` : r.error, r.body);
+      throw toolRefusalOfAct(r.status, r.error, r.body);
     }
     // The answer in `content` as well as `structuredContent`: a client may read either one alone.
     return { content: [{ type: 'text' as const, text: JSON.stringify(r.answer) }], structuredContent: { ...r.answer } };

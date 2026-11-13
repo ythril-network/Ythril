@@ -5,7 +5,8 @@
  *
  * ## What each answers
  *
- * - {@link listSchemaVersionsAct}: `{ versions: [{ fp, current, held, origin?, since?, counts }], nextSkip? }`. The current version first (from the
+ * - {@link listSchemaVersionsAct}: `{ versions: [{ fp, current, held, origin?, since?, counts }], ...the page fields }`, paged by `pageList`
+ *   (`brain/list-page.ts`: `truncated`, `total`, `count`, `limit`, `skip`, `nextSkip` when cut, and the budget figures). The current version first (from the
  *   config, row or no row), then the held rows newest first, then each network layer of the current variation the config holds and no row does,
  *   then every fingerprint the records carry that no row holds (`held: false`; the empty schema is held everywhere). `counts` are the records of
  *   each stamped collection carrying the version, from the stamp index alone (`fingerprintTypesIn`: it reads the version index of four
@@ -28,9 +29,8 @@
  */
 import { z } from 'zod';
 import { isSchemaFingerprint } from '@ythril-network/schema/internal';
-import {
-  resolveBudget, resolvePaging, applyBudget, defaultBudgetChars, carriagesFor, budgetCeilingZ, type BudgetRequest,
-} from '../brain/result-budget.js';
+import { resolveBudget, defaultBudgetChars, carriagesFor, budgetCeilingZ, type BudgetRequest } from '../brain/result-budget.js';
+import { pageList } from '../brain/list-page.js';
 import { refusalOfParse } from '../util/log.js';
 import { variationOf, EMPTY_SCHEMA_FINGERPRINT } from './schema-stamp.js';
 import { servableTo } from './schema-snapshot.js';
@@ -39,7 +39,7 @@ import { fingerprintTypesIn, STAMPED_COLLECTIONS, FINGERPRINT_TYPES_DEFAULT_MS, 
 import { heldVersions, versionMetaOf, type HeldVersion } from './schema-version-text.js';
 import { schemaVersionDiff } from './schema-diff.js';
 import { unknownSpaceSentence } from './unknown-space.js';
-import { SCHEMA_INDEX_BUILDING } from '../util/errors.js';
+import { SCHEMA_INDEX_BUILDING, BAD_FINGERPRINT, UNKNOWN_FINGERPRINT, badFingerprintSentence } from '../util/errors.js';
 
 /** What an act answers: a body, or a refusal with its status and code. */
 export type SchemaVersionsActResult =
@@ -64,16 +64,14 @@ interface VersionEntry {
 
 /**
  * The codes the schema-version doors refuse with, one list: the acts answer from it, and a text that names them (the tool's description) is
- * checked against it. `bad_fingerprint` and `unknown_fingerprint` are the sync door's spellings (`api/sync/schema-snapshot.ts`).
+ * checked against it. `bad_fingerprint` and `unknown_fingerprint` are the sync door's, read from their one declaration (`util/errors.ts`).
  */
-export const SCHEMA_VERSION_REFUSAL_CODES = ['bad_fingerprint', 'unknown_fingerprint', 'against_needs_fp', SCHEMA_INDEX_BUILDING] as const;
-const [BAD_FINGERPRINT_CODE, UNKNOWN_FINGERPRINT_CODE, AGAINST_NEEDS_FP] = SCHEMA_VERSION_REFUSAL_CODES;
+export const SCHEMA_VERSION_REFUSAL_CODES = [BAD_FINGERPRINT, UNKNOWN_FINGERPRINT, 'against_needs_fp', SCHEMA_INDEX_BUILDING] as const;
+const AGAINST_NEEDS_FP = SCHEMA_VERSION_REFUSAL_CODES[2];
 
-const BAD_FINGERPRINT = (where: string): SchemaVersionsActResult => ({
-  status: 400, error: `${where} must be a schema fingerprint: 64 lowercase hex characters`, code: BAD_FINGERPRINT_CODE,
-});
-const UNKNOWN_FINGERPRINT: SchemaVersionsActResult = {
-  status: 404, error: 'This space holds no schema version with that fingerprint that this caller may read', code: UNKNOWN_FINGERPRINT_CODE,
+const badFingerprint = (where: string): SchemaVersionsActResult => ({ status: 400, error: badFingerprintSentence(where), code: BAD_FINGERPRINT });
+const unknownFingerprint: SchemaVersionsActResult = {
+  status: 404, error: 'This space holds no schema version with that fingerprint that this caller may read', code: UNKNOWN_FINGERPRINT,
 };
 /** A space gone between the door's check and the read: the one unknown-space sentence (`spaces/unknown-space.ts`). */
 const unknownSpace = (spaceId: string): SchemaVersionsActResult => ({ status: 404, error: unknownSpaceSentence(spaceId) });
@@ -129,10 +127,9 @@ async function rowFingerprints(spaceId: string): Promise<string[]> {
 export async function listSchemaVersionsAct(
   spaceId: string, req: BudgetRequest & { skip?: unknown }, caller: SchemaVersionsCaller,
 ): Promise<SchemaVersionsActResult> {
+  // Refused before anything is read: the bounds of both doors (`SchemaVersionsParams`) and the budget, in the words every budgeted door uses.
   const budget = budgetOf(req, caller);
   if (!budget.ok) return { status: 400, error: budget.error };
-  const paging = resolvePaging({ skip: req.skip });
-  if (!paging.ok) return { status: 400, error: paging.error };
   const variation = variationOf(spaceId);
   if (!variation) return unknownSpace(spaceId);
 
@@ -155,15 +152,19 @@ export async function listSchemaVersionsAct(
       counts: counts.get(fp) ?? zeroCounts(),
     });
   }
-  const page = versions.slice(paging.skip);
-  const outcome = applyBudget(page, budget.budget);
-  return { status: 200, body: { versions: outcome.returned, ...(outcome.truncated ? { nextSkip: paging.skip + outcome.returned.length } : {}) } };
+  // One page through the one pager of a held list (`pageList`): whole versions, under the budget, the cut reported. The list takes no row
+  // limit, so the limit is the whole list and only the budget cuts it.
+  const page = pageList(versions, { skip: req.skip, maxChars: req.maxChars, maxBytes: req.maxBytes, maxTokens: req.maxTokens }, {
+    defaultLimit: Math.max(1, versions.length), budgetChars: defaultBudgetChars(caller.transport), carriages: carriagesFor(caller.transport),
+  });
+  if (!page.ok) return { status: 400, error: page.error };
+  return { status: 200, body: { versions: page.rows, ...page.fields } };
 }
 
 /** One version this caller may have, or the refusal. */
 async function versionFor(spaceId: string, fp: string, caller: SchemaVersionsCaller): Promise<HeldVersion | SchemaVersionsActResult> {
   const v = (await heldVersions(spaceId, [fp])).get(fp);
-  return v && mayHave(v, caller) ? v : UNKNOWN_FINGERPRINT;
+  return v && mayHave(v, caller) ? v : unknownFingerprint;
 }
 
 const isRefusal = (v: HeldVersion | SchemaVersionsActResult): v is SchemaVersionsActResult => 'status' in v;
@@ -172,7 +173,7 @@ const isRefusal = (v: HeldVersion | SchemaVersionsActResult): v is SchemaVersion
 export async function readSchemaVersionAct(
   spaceId: string, fp: string, req: BudgetRequest, caller: SchemaVersionsCaller,
 ): Promise<SchemaVersionsActResult> {
-  if (!isSchemaFingerprint(fp)) return BAD_FINGERPRINT('fp');
+  if (!isSchemaFingerprint(fp)) return badFingerprint('fp');
   const budget = budgetOf(req, caller);
   if (!budget.ok) return { status: 400, error: budget.error };
   const variation = variationOf(spaceId);
@@ -195,9 +196,9 @@ export async function readSchemaVersionAct(
 export async function diffSchemaVersionAct(
   spaceId: string, fp: string, against: unknown, req: BudgetRequest, caller: SchemaVersionsCaller,
 ): Promise<SchemaVersionsActResult> {
-  if (!isSchemaFingerprint(fp)) return BAD_FINGERPRINT('fp');
+  if (!isSchemaFingerprint(fp)) return badFingerprint('fp');
   const to = against === undefined || against === 'current' ? 'current' : against;
-  if (to !== 'current' && !isSchemaFingerprint(to)) return BAD_FINGERPRINT('against');
+  if (to !== 'current' && !isSchemaFingerprint(to)) return badFingerprint('against');
   const budget = budgetOf(req, caller);
   if (!budget.ok) return { status: 400, error: budget.error };
   const variation = variationOf(spaceId);
@@ -222,7 +223,7 @@ export async function schemaVersionsToolAct(
     if (args.against !== undefined) return { status: 400, error: '`against` names what to compare `fp` with: send `fp` too', code: AGAINST_NEEDS_FP };
     return listSchemaVersionsAct(spaceId, { ...budget, skip: args.skip }, caller);
   }
-  if (typeof args.fp !== 'string') return BAD_FINGERPRINT('fp');
+  if (typeof args.fp !== 'string') return badFingerprint('fp');
   return args.against === undefined
     ? readSchemaVersionAct(spaceId, args.fp, budget, caller)
     : diffSchemaVersionAct(spaceId, args.fp, args.against, budget, caller);

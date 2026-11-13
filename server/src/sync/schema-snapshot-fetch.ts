@@ -56,6 +56,7 @@ import { unknownSpaceSentence } from '../spaces/unknown-space.js';
 import { networksHolding } from '../spaces/wipe-vote.js';
 import { schemaSnapshotTotal } from '../metrics/schema-snapshot-count.js';
 import { boundedJson, ResponseTooLargeError } from '../util/bounded-read.js';
+import { UNKNOWN_FINGERPRINT } from '../util/errors.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { LruMap } from '../util/lru-map.js';
 import { log, peerText } from '../util/log.js';
@@ -216,7 +217,7 @@ async function askMemberFor(a: SnapshotFetch, fp: string, memberKey: string, tur
   const lostSpace = (): Next => { schemaSnapshotTotal.note('lost_space'); noSpace.set(`${memberKey}:${spaceId}`, true); return 'stop'; };
   switch (resp.status) {
     case 404:
-      if (code === 'unknown_fingerprint') {
+      if (code === UNKNOWN_FINGERPRINT) {
         schemaSnapshotTotal.note('not_held');
         noteNotHeld(spaceId, fp, member.instanceId, candidatesOf(spaceId), Date.now());
         return 'not_held';

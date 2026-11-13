@@ -30,6 +30,15 @@ export class ToolRefusal extends Error {
   }
 }
 
+/**
+ * An act's refusal as a {@link ToolRefusal}: the `code` the body carries is named in the text too (`<error> (<code>)`), so a client that reads
+ * only the text sees the code the REST door answers in its body. One function, so no tool states it in its own words or drops the code.
+ */
+export function toolRefusalOfAct(status: ToolRefusal['status'], error: string, body?: Readonly<Record<string, unknown>>): ToolRefusal {
+  const code = typeof body?.['code'] === 'string' ? body['code'] : undefined;
+  return new ToolRefusal(status, code ? `${error} (${code})` : error, body);
+}
+
 /** Thrown when a request is invalid (bad params, missing fields, etc.). */
 export class ValidationError extends Error {
   override readonly name = 'ValidationError';
@@ -135,6 +144,26 @@ export class SchemaIndexBuilding extends Error {
     super(`The schema version index of space '${spaceId}' is being built; retry after the housekeeping cycle.`);
   }
 }
+
+/**
+ * The answer every door gives {@link SchemaIndexBuilding}: its status and `{ error, code, retryable: true }`, or `undefined` for any other
+ * error. The REST door (`sendCaughtFailure`) and the tool door (`callTool`) both read it, so the two bodies cannot drift.
+ */
+export function schemaIndexBuildingAnswer(err: unknown):
+  { status: 503; body: { error: string; code: typeof SCHEMA_INDEX_BUILDING; retryable: true } } | undefined {
+  if (!(err instanceof SchemaIndexBuilding)) return undefined;
+  return { status: err.status, body: { error: err.message, code: err.code, retryable: true } };
+}
+
+/**
+ * The codes and sentence a schema fingerprint is refused with, on the sync door (`GET /api/sync/schema-snapshot`), by its receiver
+ * (`sync/schema-snapshot-fetch.ts`) and on the version doors (`spaces/schema-versions-acts.ts`). Constants, never literals at a site.
+ */
+export const BAD_FINGERPRINT = 'bad_fingerprint';
+/** A fingerprint the answering server holds no version of, or none this caller may have: see {@link BAD_FINGERPRINT}. */
+export const UNKNOWN_FINGERPRINT = 'unknown_fingerprint';
+/** Why `where` (a parameter's name) is refused as {@link BAD_FINGERPRINT}. */
+export const badFingerprintSentence = (where: string): string => `${where} must be a schema fingerprint: 64 lowercase hex characters`;
 
 /** The codes the two fork refusals below answer with, in this order: the one list a door, a tool text and its gate read them from. */
 export const FORK_REFUSAL_CODES = Object.freeze(['fork_row_read_only', 'fork_cap'] as const);

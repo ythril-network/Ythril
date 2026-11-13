@@ -5,7 +5,7 @@
  * ## The contract (written before the code)
  *
  * - `GET /api/spaces/:id/schema-versions` answers `{ versions: [{ fp, current, held, origin?, since?, counts: { entities, facts,
- *   edges, chrono } }], nextSkip? }`: current first (read from the config, row or no row), then the held rows by `at` descending, then
+ *   edges, chrono } }], truncated, total, count, limit, skip, nextSkip?, ...the budget figures }` (`pageList`'s fields): current first (read from the config, row or no row), then the held rows by `at` descending, then
  *   the fingerprints records carry with no row (`held: false`). It takes `skip` and the shared budget (`maxChars`, `maxBytes`,
  *   `maxTokens`); a cut page answers `nextSkip`.
  * - `GET .../schema-versions?fp=<fp>` answers `{ fp, current, held, schema: { typeSchemas, rules } }`.
@@ -133,6 +133,8 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
       assert.equal(cut.status, 200, cut.text.slice(0, 300));
       assert.ok(versionsOf(cut).length < whole.length, 'a 300-byte page holds every version');
       assert.equal(typeof cut.body?.nextSkip, 'number', 'a cut page answers no nextSkip');
+      assert.deepEqual({ truncated: cut.body.truncated, total: cut.body.total, skip: cut.body.skip }, { truncated: true, total: whole.length, skip: 0 },
+        'a cut page does not say it was cut, of how many, from where (pageList\'s fields)');
       const next = await listRest(local.key, S, `?skip=${cut.body.nextSkip}`);
       assert.equal(versionsOf(next)[0]?.fp, whole[cut.body.nextSkip]?.fp);
       const mcp = await d.mcp(local.key, 'space_schema_versions', { space: S, maxBytes: 300 });
@@ -140,8 +142,10 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
     });
 
     it('every key of an entry is named in the integration guide (06a, Schema versions)', async () => {
-      const list = versionsOf(await listRest(local.key));
-      const keys = ['versions', 'nextSkip', ...new Set(list.flatMap(e => Object.keys(e))), ...Object.keys(list[0]?.counts ?? {})];
+      const whole = await listRest(local.key);
+      const list = versionsOf(whole);
+      // The page's own keys as the list answers them (`pageList`'s), plus `nextSkip`, which only a cut page carries.
+      const keys = [...new Set([...Object.keys(whole.body), 'nextSkip', ...list.flatMap(e => Object.keys(e)), ...Object.keys(list[0]?.counts ?? {})])];
       assert.ok(keys.length >= 8, `too few keys to compare: ${keys}`);
       assert.deepEqual(await undocumentedKeys('integration-guide/06a-schema-api.md', 'Schema versions', keys), []);
     });
