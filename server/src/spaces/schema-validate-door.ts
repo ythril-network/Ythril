@@ -9,7 +9,10 @@
  * - **sample** (`sample: { kind, record }`): the meta (the caller's proposed one, or the stored one) run over ONE record the caller
  *   typed, in the stored shape `recordViewOf` takes. Nothing stored is read, so it costs one evaluation and the record needs no right
  *   beyond the route's: it is the caller's own. The RULES it runs, in either mode, are another matter (see below).
- * - **stored data** (no `sample`): the meta run over the space's stored records, a page at a time.
+ * - **stored data** (no `sample`): the meta run over the space's stored records, a page at a time. With `against: 'stamp'` each record
+ *   is judged by the version it carries instead (`spaces/schema-validate-against.ts`): records with no version to judge them by are
+ *   counted in `skipped`, and the edges of one page are judged per version with their ends read once for the page. `against` is echoed
+ *   in every answer.
  *
  * ## What it prevents
  *
@@ -61,6 +64,10 @@ import {
 import { parseSpaceMeta, readStoredMeta, libraryRefRefusal, type TypeSchemasZ } from './body-schemas.js';
 import { violationsOfRecord, resolveMetaRefs, endsNotResolved, type SchemaViolation } from './schema-validation.js';
 import { validateStoredEdges, STORED_EDGE_PROJECTION, type StoredEdge, type StaleGuard } from './validate-stored-edges.js';
+import {
+  VALIDATE_AGAINST, currentJudge, stampJudge, type RecordJudge, type ValidateAgainst, type ValidateSkipped,
+} from './schema-validate-against.js';
+import { SCHEMA_FINGERPRINT_FIELD } from './schema-stamp.js';
 
 /** The most violating records one page holds, and the default. */
 export const SCHEMA_VALIDATE_MAX_LIMIT = 500;
@@ -85,6 +92,11 @@ export const SchemaValidateBody = z.object({
     kind: z.enum(KNOWLEDGE_TYPES),
     record: z.record(z.string(), z.unknown()),
   }).strict().optional(),
+  /**
+   * What each stored record is judged by: the space's current schema (the default), or the version the record carries (`stamp`, stored
+   * mode only: with `meta` or `sample` it is `400 against_needs_stored`). Always echoed in the answer.
+   */
+  against: z.enum(VALIDATE_AGAINST).optional(),
   limit: z.number().int().min(1).max(SCHEMA_VALIDATE_MAX_LIMIT).optional(),
   after: z.string().min(1).max(SCHEMA_VALIDATE_CURSOR_MAX).optional(),
   // The size ceilings, bounded as the tools declare them (`budgetCeilingZ`, one floor for both doors); `resolveBudget` reads what passes.
@@ -99,6 +111,10 @@ export interface RecordViolations { collection: string; _id?: string; violations
 /** What both doors answer (REST adds `meta` in stored mode, as it always has). */
 export interface SchemaValidateAnswer {
   spaceId: string;
+  /** What the records were judged by, echoed in every answer: a caller tells an older server that dropped the key by its absence. */
+  against: ValidateAgainst;
+  /** Against the stamp only: the records THIS call read that no version judged ({@link ValidateSkipped}), counted, never listed. */
+  skipped?: ValidateSkipped;
   /** Per collection: the records this call read, and how many the collection holds. */
   checked: Record<string, { checked: number; total: number }>;
   /** True when the walk reached its end: nothing is left after this answer, so no `nextAfter`. */
@@ -127,6 +143,9 @@ export type SchemaValidateOutcome =
   | { status: 200; answer: SchemaValidateAnswer; mode: 'sample' | 'stored'; meta: SpaceMeta }
   /** A refusal. `body` is the whole answer where it has structure — a failed parse's `{ error, issues }` — which both doors send as it is. */
   | { status: 400 | 403 | 404 | 409 | 410 | 422 | 429; error: string; body?: Readonly<Record<string, unknown>> };
+
+/** The code of the refusal of `against: 'stamp'` beside a proposed `meta` or a `sample`, the same on both doors. */
+export const AGAINST_NEEDS_STORED = 'against_needs_stored';
 
 /** The refusal a caller over the rail gets, the same words on both doors. */
 export const SCHEMA_VALIDATE_RATE_LIMITED = `the stored-data schema check is rate limited — at most ${HEAVY_CALLS_PER_WINDOW} runs a minute per token, `
@@ -195,16 +214,19 @@ export function mayReadStoredValues(rights: TokenRights | null | undefined, spac
 /** The stored-data checks running, by space. Module state, so a second door finds the first one's run. */
 const checks = heavyRunner();
 
+/** The stamp, read with every record: against the stamp, it names the version the record is judged by. */
+const STAMP = { [SCHEMA_FINGERPRINT_FIELD]: 1 } as const;
+
 /**
  * The collections in the order they are walked, with the fixed projection each is read with: the stored fields a view is built from
  * (`viewSourceProjection`, so a field added to the view is read here too) — and for an edge the stored-edge check's, which also needs the
- * ends and the write guard.
+ * ends and the write guard — and the stamp.
  */
 const WALK: ReadonlyArray<{ collection: Exclude<BrainCollection, 'links'>; kind: ViewKind; projection: Readonly<Record<string, 1>> }> = [
-  { collection: 'entities', kind: 'entity', projection: { _id: 1, ...viewSourceProjection('entity') } },
-  { collection: 'edges', kind: 'edge', projection: STORED_EDGE_PROJECTION },
-  { collection: 'facts', kind: 'fact', projection: { _id: 1, ...viewSourceProjection('fact') } },
-  { collection: 'chrono', kind: 'chrono', projection: { _id: 1, ...viewSourceProjection('chrono') } },
+  { collection: 'entities', kind: 'entity', projection: { _id: 1, ...viewSourceProjection('entity'), ...STAMP } },
+  { collection: 'edges', kind: 'edge', projection: { ...STORED_EDGE_PROJECTION, ...STAMP } },
+  { collection: 'facts', kind: 'fact', projection: { _id: 1, ...viewSourceProjection('fact'), ...STAMP } },
+  { collection: 'chrono', kind: 'chrono', projection: { _id: 1, ...viewSourceProjection('chrono'), ...STAMP } },
 ];
 
 /** A position in the walk: a member space, a collection, the last `_id` read. Opaque to the caller. */
@@ -250,6 +272,13 @@ export async function beginSchemaValidate(input: {
     return { status: 400, error: refusal.error, body: { ...refusal } };
   }
   const { sample, after } = parsed.data;
+  const against = parsed.data.against ?? 'current';
+  // A record's own version is a stored record's: a proposed meta or a typed sample has none to judge by.
+  if (against === 'stamp' && (parsed.data.meta !== undefined || sample !== undefined)) {
+    const error = '`against: stamp` judges each stored record by the version it carries, so it takes neither `meta` nor `sample`: '
+      + 'leave them out, or check against the current schema';
+    return { status: 400, error, body: { error, code: AGAINST_NEEDS_STORED } };
+  }
   const limit = parsed.data.limit ?? SCHEMA_VALIDATE_MAX_LIMIT;
   // Resolved in both modes, so a size parameter that is wrong is refused whichever mode it rides on; only a stored-data answer is cut by it.
   const budget = resolveBudget(parsed.data, defaultBudgetChars(transport), carriagesFor(transport));
@@ -284,7 +313,7 @@ export async function beginSchemaValidate(input: {
     return {
       status: 200, mode: 'sample', meta,
       answer: {
-        spaceId, checked: {}, complete: true,
+        spaceId, against, checked: {}, complete: true,
         violations: rows.length > 0 ? [{ collection: WALK.find(w => w.kind === sample.kind)!.collection, violations: rows }] : [],
       },
     };
@@ -296,7 +325,7 @@ export async function beginSchemaValidate(input: {
   const ran = await checks.run(spaceId, callerKey, {
     busy: `A stored-data schema check of '${spaceId}' is already running — try again when it ends`,
     limited: SCHEMA_VALIDATE_RATE_LIMITED,
-  }, () => walkStored(spaceId, memberIds, resolved, { limit, cursor, canReadValues, budget }));
+  }, () => walkStored(spaceId, memberIds, against === 'stamp' ? stampJudge(meta) : currentJudge(resolved), { limit, cursor, canReadValues, budget }));
   return ran.ok ? { status: 200, mode: 'stored', meta, answer: ran.value } : { status: ran.status, error: ran.error };
 }
 
@@ -305,7 +334,7 @@ export async function beginSchemaValidate(input: {
  * record that fills the page (see the header), so what it read is what it answers for.
  */
 async function walkStored(
-  spaceId: string, memberIds: readonly string[], meta: SpaceMeta,
+  spaceId: string, memberIds: readonly string[], judge: RecordJudge,
   opts: { limit: number; cursor: Cursor | null; canReadValues: boolean; budget: ResolvedBudget },
 ): Promise<SchemaValidateAnswer> {
   const { limit, cursor, canReadValues, budget } = opts;
@@ -349,16 +378,19 @@ async function walkStored(
         }
         const docs = await idKeysetPage<{ _id: string } & Record<string, unknown>>(
           { collection: name, filter: {}, projection, size: Math.min(READ_PAGE, SCHEMA_VALIDATE_SCAN_BOUND - read) }, afterId);
+        // What the page's records are judged by, read once for the page (against the stamp: the versions they carry).
+        await judge.readPage(mid, docs.rows);
         // An edge is judged against the others of its page (a subject's count, the ends it names), so the page is judged whole and
         // each record then takes its own findings in order — what it does not take, it was never read.
         const edgeFindings = kind === 'edge'
-          ? await validateStoredEdges(mid, meta, docs.rows as unknown as StoredEdge[])
+          ? await validateStoredEdges(mid, docs.rows as unknown as StoredEdge[], e => judge.metaOf(mid, e as unknown as Record<string, unknown>))
           : null;
         const edgeRows = new Map((edgeFindings?.violations ?? []).map(v => [v._id ?? '', v]));
         const edgeGuards = new Map((edgeFindings?.staleGuards ?? []).map(g => [g._id, g]));
         for (const doc of docs.rows) {
           const id = String(doc._id);
-          const found: RecordViolations | undefined = kind === 'edge'
+          const meta = judge.metaOf(mid, doc);
+          const found: RecordViolations | undefined = meta === null ? undefined : kind === 'edge'
             ? edgeRows.get(id)
             : (() => {
               const rows = violationsOfRecord(meta, kind, doc);
@@ -377,6 +409,8 @@ async function walkStored(
           read++;
           tally.checked++;
           previousId = id;
+          // Read now, so counted now when no version judged it: a record past the one that fills the page is not counted.
+          judge.take(mid, doc);
           if (shown) page.push(shown);
           if (guard) staleGuards.push(guard);
           // The record that fills the page ends the read: it is the last one this call has read, and the next one starts after it.
@@ -397,8 +431,9 @@ async function walkStored(
     returned: page, remainder: [], charsReturned: meter.chars(), bytesReturned: meter.bytes(), truncated: cut,
     ...(refusedBy ? { refusedBy } : {}),
   }, page.length, budget);
+  const skipped = judge.skipped();
   return {
-    spaceId, checked, complete: next === undefined, violations: page, staleGuards,
+    spaceId, against: judge.against, ...(skipped ? { skipped } : {}), checked, complete: next === undefined, violations: page, staleGuards,
     ...(next !== undefined ? { nextAfter: encodeCursor(next) } : {}),
     progress: { checked: read, total: [...sizes.values()].reduce((a, b) => a + b, 0) },
     truncated: cut,

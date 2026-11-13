@@ -681,7 +681,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
    * F-46 (R6-12): the one sequence both doors run (`spaces/schema-validate-door.ts`) — `sample` mode, the stored-data walk paged by
    * `after` / `nextAfter` with a fixed projection, values only for a caller who may read the space's knowledge, the heavy-call rail
    * and the single flight. This door adds what it has always answered in stored mode: the meta it checked (the MCP tool never echoes
-   * it). The dynamic import keeps the validators out of this module's load, as the inline scan's import did.
+   * it), except against the stamp, where no one meta was checked. The dynamic import keeps the validators out of this module's load.
    */
   const { beginSchemaValidate } = await import('../spaces/schema-validate-door.js');
   const rights = (req.authToken as { rights?: TokenRights } | undefined)?.rights;
@@ -695,7 +695,7 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
   });
   if (outcome.status !== 200) { res.status(outcome.status).json(outcome.body ?? { error: outcome.error }); return; }
   const { spaceId, ...answer } = outcome.answer;
-  res.json(outcome.mode === 'stored' ? { spaceId, meta: outcome.meta, ...answer } : outcome.answer);
+  res.json(outcome.mode === 'stored' && answer.against === 'current' ? { spaceId, meta: outcome.meta, ...answer } : outcome.answer);
 });
 
 // DELETE /api/spaces/:id — requires { "confirm": true } on every space, networked or not (R4).

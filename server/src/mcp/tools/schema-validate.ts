@@ -21,6 +21,7 @@ import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
 import { ToolRefusal } from '../../util/errors.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 import { KEYSET_PAGER } from '../../brain/result-budget.js';
+import { VALIDATE_AGAINST } from '../../spaces/schema-validate-against.js';
 
 export const schema_validateTool: ToolHandler = {
   name: 'schema_validate',
@@ -33,6 +34,11 @@ export const schema_validateTool: ToolHandler = {
     + 'chrono, `record` in the stored shape (`name` for an entity, `fact` for a fact, `title` for a chrono entry, `label` for an edge, '
     + 'with `type`, `description`, `tags`, `properties`) — and nothing stored is read: the quick way to try a rule. Without `sample` '
     + 'the schema is run over the space\'s stored records.\n\n'
+    + 'AGAINST (stored records): `against: current` (the default) judges every record by the space\'s schema now; `against: stamp` judges '
+    + 'each record by the schema version it carries, run with the space\'s current settings (`validationMode`, `strictLinkage`). A record '
+    + 'with no version, or whose version this server does not hold, is not judged and not listed: `skipped` counts them for THIS call, '
+    + '`{ unversioned, notHeld: { <fingerprint>: n } }`. An edge\'s functional count spans the edges of its own version on the page; '
+    + 'check against current for a count across versions. `against` is echoed in every answer.\n\n'
     + 'THE ANSWER: `violations` lists each record that breaks the schema with its rows (`field`, `reason`); a rule\'s row is '
     + '`rules.<name>` (a type\'s rule) or `meta.rules.<name>` (a space rule) and its reason is the rule\'s message. `checked` says per '
     + 'collection how many records THIS call read of how many there are, and `progress` (stored records) is `{ checked, total }`: '
@@ -81,6 +87,12 @@ export const schema_validateTool: ToolHandler = {
         required: ['kind', 'record'],
         additionalProperties: false,
       },
+      against: {
+        // The REST body's own list (`SchemaValidateBody`).
+        type: 'string', enum: [...VALIDATE_AGAINST], default: 'current',
+        description: 'What each stored record is judged by: `current` (the default) the space\'s schema now, `stamp` the version the record '
+          + 'carries. Stored records only: with `meta` or `sample` it is refused (`against_needs_stored`).',
+      },
       limit: {
         type: 'integer', minimum: 1, maximum: SCHEMA_VALIDATE_MAX_LIMIT, default: SCHEMA_VALIDATE_MAX_LIMIT,
         description: `Violating records per page: 1 to ${SCHEMA_VALIDATE_MAX_LIMIT}, default ${SCHEMA_VALIDATE_MAX_LIMIT}.`,
@@ -106,7 +118,10 @@ export const schema_validateTool: ToolHandler = {
       // The door that received the call, as every budgeted tool reads it: a tool is also served as `POST /api/schema_validate`.
       transport: ctx.transport,
     });
-    if (r.status !== 200) throw new ToolRefusal(r.status, r.error, r.body);
+    if (r.status !== 200) {
+      const code = typeof r.body?.['code'] === 'string' ? r.body['code'] : undefined;
+      throw new ToolRefusal(r.status, code ? `${r.error} (${code})` : r.error, r.body);
+    }
     // The answer in `content` as well as `structuredContent`: a client may read either one alone.
     return { content: [{ type: 'text' as const, text: JSON.stringify(r.answer) }], structuredContent: { ...r.answer } };
   },
