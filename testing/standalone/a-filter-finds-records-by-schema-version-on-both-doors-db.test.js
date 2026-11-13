@@ -37,7 +37,7 @@ import { openViewDoors } from './_view-doors.mjs';
 import { openPullDoor } from './_pull-door.mjs';
 import { seedActEntry, clearActEntries } from './_space-act-harness.mjs';
 import { snapshotRow, snapshotsOf, linksOf, sha256 } from './_schema-snapshot-peer.mjs';
-import { recordOf, saveVersion, heldRows, undocumentedKeys } from './_schema-version-fixtures.mjs';
+import { recordOf, saveVersion, heldRows, undocumentedKeys, readsDuring } from './_schema-version-fixtures.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
@@ -89,7 +89,7 @@ const idsOf = (...keys) => keys.flatMap(k => seeded.get(k) ?? assert.fail(`no se
 describe('the filter by schema version (real MongoDB, both doors)', { skip }, () => {
   before(async () => {
     d = await openViewDoors({ suite: SUITE, openDoor: () => openPullDoor({
-      suite: SUITE, spaces: [A, B, C, D], type: 'club', direction: 'both', meta: Object.fromEntries([A, B, C, D].map(s => [s, META])),
+      suite: SUITE, spaces: [A, B, C, D], type: 'club', direction: 'both', monitorCommands: true, meta: Object.fromEntries([A, B, C, D].map(s => [s, META])),
     }) });
     admin = await d.mint('svf-admin', {}, { admin: true });
     owner = await d.mint('svf-owner', Object.fromEntries([A, B].map(s => [s, d.row({ knowledge: 'read', schema: 'read' })])));
@@ -128,6 +128,8 @@ describe('the filter by schema version (real MongoDB, both doors)', { skip }, ()
     await seed(C, 'entities', 'untyped@v1', 1, { type: null, fp: vC1.fp });
     await seed(C, 'facts', 'X@v1', 2, { type: 'X', fp: vC1.fp });
     await seed(C, 'chrono', 'Y@v1', 1, { type: 'Y', fp: vC1.fp });
+    // F3: an edge whose label is not a string, the only edge carrying vC1 (an arrival keeps its writer's stamp unchecked).
+    await seed(C, 'edges', 'odd@v1', 1, { type: 42, fp: vC1.fp });
 
     await saveVersion(D, { ...META, typeSchemas: { entity: { O: { propertySchemas: { o: { type: 'string' } } } } } });
     await seedActEntry(d.loader, { kind: 'wipe', localId: D, state: 'registered' });
@@ -215,6 +217,14 @@ describe('the filter by schema version (real MongoDB, both doors)', { skip }, ()
         assert.deepEqual(ids(c), [], 'a chrono record is older though nothing governing chrono changed');
       });
 
+      it('a version carried only by records whose type is not a string is older and unclassified, never dropped (lens sweep F3)', async () => {
+        // Seen red at b4b51aed: the (stamp, type) group of the non-string label was dropped, so vC1 never reached `older` for edges.
+        const e = await call(admin.key, { space: C, collection: 'edges', schemaVersion: 'older' });
+        ok(e, 'C edges older');
+        assert.deepEqual(ids(e), idsOf(`${C}/edges/odd@v1`), 'the record of a type no reader can name is not older');
+        assert.equal(memberOf(e, C)?.unclassified, 1, 'the record of a type no reader can name is not counted unclassified');
+      });
+
       it('a layer whose row lags behind an act is read from the config: its records are classified, never unclassified', async () => {
         assert.ok(!(await heldRows(d.door.mongo, D)).includes(layerFp), 'precondition: the layer row landed although an act stands');
         const o = await call(admin.key, { space: D, collection: 'entities', schemaVersion: 'older' });
@@ -253,6 +263,24 @@ describe('the filter by schema version (real MongoDB, both doors)', { skip }, ()
       });
     });
   }
+
+  it('a second identical older call and a fingerprint ask read no version text (lens sweep F5)', async () => {
+    // Seen red at b4b51aed: `older` read every carried version's text on each call, and hashed both texts for the memo key; the
+    // fingerprint ask read a text only to learn whether it is held.
+    const client = d.door.mongo.getMongo();
+    const readsText = (c) => c.name !== 'find' || !c.command.projection || c.command.projection.text === 1;
+    const watch = (args) => readsDuring(client, `${A}_schema_snapshots`, () => DOORS['MCP filter'](admin.key, { space: A, collection: 'entities', limit: 100, ...args }));
+    await watch({ schemaVersion: 'older' });
+    const again = await watch({ schemaVersion: 'older' });
+    ok(again.result, 'older again');
+    assert.ok(again.sent.length > 0, 'older read no snapshot row: the probe watched the wrong collection');
+    assert.deepEqual(again.sent.filter(readsText).map(c => c.command.projection ?? c.name), [], 'the second older call read a version text');
+    const byFp = await watch({ schemaVersion: P.fp });
+    ok(byFp.result, 'a fingerprint');
+    assert.deepEqual(byFp.sent.filter(readsText).map(c => c.command.projection ?? c.name), [], 'the fingerprint ask read a version text');
+    assert.deepEqual(ids(byFp.result), idsOf(`${A}/entities/A@P`, `${A}/entities/D@P`));
+    assert.equal(memberOf(byFp.result, A)?.unclassified, 0, 'a held fingerprint is counted unclassified');
+  });
 
   it('the two doors answer the same rows and the same echo', async () => {
     const args = { space: A, collection: 'entities', schemaVersion: 'older', schemaChanged: 'any', limit: 100 };

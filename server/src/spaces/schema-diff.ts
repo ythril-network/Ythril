@@ -22,8 +22,9 @@
  * - **A key with no class hidden as "same".** {@link SCHEMA_DIFF_CLASSES} names a class for every key of every zod object a version text holds,
  *   and a pure test holds it total over the zod shapes; {@link keyClass} answers `structural` for a key it does not know (fail toward showing).
  * - **"Same" for what was not read.** A place either side's read dropped (`unread`) makes the pair `unclassified`, never equal.
- * - **Classifying one pair twice.** Both texts are fixed by their hash, so a pair's classification never goes stale: it is kept in a bounded
- *   per-process memo ({@link typesDifferingUnder}), keyed by the two texts' hashes and the mode.
+ * - **Classifying one pair twice, or reading its texts to find it was classified.** A fingerprint is its text's hash, so a pair's
+ *   classification never goes stale: it is kept in a bounded per-process memo ({@link typesDifferingBetween}) keyed by the two fingerprints
+ *   and the mode, and a caller asks it ({@link knownTypesDiffering}) before it reads a text.
  *
  * Not the question `typesAnEditChanges` (the price of an edit) or the field rights' `rulesOf` answer: those price a write and a notice, this
  * compares two stored versions.
@@ -32,7 +33,6 @@ import { isPlainObject, placeUnder, spaceRuleKinds, type StoredRule } from '@yth
 import { isDeepStrictEqual } from 'node:util';
 import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import { LruMap } from '../util/lru-map.js';
-import { sha256Hex } from '../util/sha256-hex.js';
 import { versionMetaOf, type VersionSchema } from './schema-version-text.js';
 import { kindHasAllowlist } from './schema-validation.js';
 
@@ -182,19 +182,39 @@ export interface TypesDiffering {
   readonly unclassified: boolean;
 }
 
-/** The pairs classified, by both texts' hashes and the mode: both texts are fixed by their hash, so an entry never goes stale. */
+/**
+ * The pairs classified, by both FINGERPRINTS and the mode (`fromFp>toFp|mode`, design r3 §2). A fingerprint is the sha256 of its text
+ * (`schema-stamp.ts`; a row's `_id` is verified against its text when it arrives), so an entry never goes stale, and a hit reads no text.
+ */
 const PAIR_MEMO_MAX = 256;
 const pairMemo = new LruMap<string, TypesDiffering>(PAIR_MEMO_MAX);
+const pairKey = (fromFp: string, toFp: string, mode: SchemaChangedMode): string => `${fromFp}>${toFp}|${mode}`;
+
+/** A version as the memo knows it: its fingerprint and the text it names. */
+export interface FingerprintedText { readonly fp: string; readonly text: string }
 
 /**
  * The types of each kind that differ from `fromText` to `toText` under `mode`, from {@link schemaVersionDiff} with A1 (a space rule's kinds)
- * and A2 (allowlists). Memoised per process (at most {@link PAIR_MEMO_MAX} pairs): the same pair and mode answer the same object.
+ * and A2 (allowlists). Not memoised: a caller that holds the fingerprints asks {@link knownTypesDiffering} first and reads the texts only on a miss.
  */
 export function typesDifferingUnder(fromText: string, toText: string, mode: SchemaChangedMode): TypesDiffering {
-  const key = `${sha256Hex(fromText)}>${sha256Hex(toText)}|${mode}`;
+  return classify(schemaVersionDiff(fromText, toText), mode);
+}
+
+/** The memo's answer for the pair of fingerprints and `mode`, or `undefined`: then read both texts and ask {@link typesDifferingBetween}. */
+export function knownTypesDiffering(fromFp: string, toFp: string, mode: SchemaChangedMode): TypesDiffering | undefined {
+  return pairMemo.get(pairKey(fromFp, toFp, mode));
+}
+
+/**
+ * {@link typesDifferingUnder} of two versions, memoised per process by their fingerprints and the mode (at most {@link PAIR_MEMO_MAX} pairs):
+ * the same pair and mode answer the same object.
+ */
+export function typesDifferingBetween(from: FingerprintedText, to: FingerprintedText, mode: SchemaChangedMode): TypesDiffering {
+  const key = pairKey(from.fp, to.fp, mode);
   const held = pairMemo.get(key);
   if (held) return held;
-  const answer = classify(schemaVersionDiff(fromText, toText), mode);
+  const answer = typesDifferingUnder(from.text, to.text, mode);
   pairMemo.set(key, answer);
   return answer;
 }
