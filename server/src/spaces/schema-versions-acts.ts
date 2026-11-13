@@ -39,6 +39,7 @@ import { fingerprintTypesIn, STAMPED_COLLECTIONS, FINGERPRINT_TYPES_DEFAULT_MS, 
 import { heldVersions, versionMetaOf, type HeldVersion } from './schema-version-text.js';
 import { schemaVersionDiff } from './schema-diff.js';
 import { unknownSpaceSentence } from './unknown-space.js';
+import { SCHEMA_INDEX_BUILDING } from '../util/errors.js';
 
 /** What an act answers: a body, or a refusal with its status and code. */
 export type SchemaVersionsActResult =
@@ -61,11 +62,18 @@ interface VersionEntry {
   counts: Record<StampedCollection, number>;
 }
 
+/**
+ * The codes the schema-version doors refuse with, one list: the acts answer from it, and a text that names them (the tool's description) is
+ * checked against it. `bad_fingerprint` and `unknown_fingerprint` are the sync door's spellings (`api/sync/schema-snapshot.ts`).
+ */
+export const SCHEMA_VERSION_REFUSAL_CODES = ['bad_fingerprint', 'unknown_fingerprint', 'against_needs_fp', SCHEMA_INDEX_BUILDING] as const;
+const [BAD_FINGERPRINT_CODE, UNKNOWN_FINGERPRINT_CODE, AGAINST_NEEDS_FP] = SCHEMA_VERSION_REFUSAL_CODES;
+
 const BAD_FINGERPRINT = (where: string): SchemaVersionsActResult => ({
-  status: 400, error: `${where} must be a schema fingerprint: 64 lowercase hex characters`, code: 'bad_fingerprint',
+  status: 400, error: `${where} must be a schema fingerprint: 64 lowercase hex characters`, code: BAD_FINGERPRINT_CODE,
 });
 const UNKNOWN_FINGERPRINT: SchemaVersionsActResult = {
-  status: 404, error: 'This space holds no schema version with that fingerprint that this caller may read', code: 'unknown_fingerprint',
+  status: 404, error: 'This space holds no schema version with that fingerprint that this caller may read', code: UNKNOWN_FINGERPRINT_CODE,
 };
 /** A space gone between the door's check and the read: the one unknown-space sentence (`spaces/unknown-space.ts`). */
 const unknownSpace = (spaceId: string): SchemaVersionsActResult => ({ status: 404, error: unknownSpaceSentence(spaceId) });
@@ -211,7 +219,7 @@ export async function schemaVersionsToolAct(
 ): Promise<SchemaVersionsActResult> {
   const budget: BudgetRequest = { maxChars: args.maxChars, maxBytes: args.maxBytes, maxTokens: args.maxTokens };
   if (args.fp === undefined) {
-    if (args.against !== undefined) return { status: 400, error: '`against` names what to compare `fp` with: send `fp` too', code: 'against_needs_fp' };
+    if (args.against !== undefined) return { status: 400, error: '`against` names what to compare `fp` with: send `fp` too', code: AGAINST_NEEDS_FP };
     return listSchemaVersionsAct(spaceId, { ...budget, skip: args.skip }, caller);
   }
   if (typeof args.fp !== 'string') return BAD_FINGERPRINT('fp');
