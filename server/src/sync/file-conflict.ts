@@ -92,7 +92,8 @@ export function decideFilePush(
  *   an open conflict, and replicated it landed on the peer as a copy of the peer's own conflict;
  * - a RETIRED PER-TYPE SCHEMA FILE, `schemas/<space>_<entity|fact|edge|chrono>_<type>.json` ({@link RETIRED_SCHEMA_FILE}): 6.5 wrote one
  *   from each instance's OWN effective meta after every schema save, so every schema change conflicted on every member. 6.6.0 writes none
- *   (each schema version is kept privately, `<space>_schema_snapshots`) and the housekeeping cycle removes what 6.5 left
+ *   (a schema version is kept privately, `<space>_schema_snapshots`, while a record here carries it, or while it is current, a layer, or
+ *   linked by a kept version) and the housekeeping cycle removes what 6.5 left
  *   (`files/retired-schema-file-sweep.ts`); the pattern stays here so a leftover never STARTS travelling.
  * - a LEGACY READ SPILL, `_tmp/graph-<uuid>.json` / `_tmp/results-<uuid>.json` at the root (`Q-92`): one caller's
  *   search result, written into the space by versions before 5.6.0. Spills now live outside every space; the copies

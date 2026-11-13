@@ -1,5 +1,6 @@
 /**
- * Every schema version a server has used is kept as a row of a PRIVATE per-space collection, named by its fingerprint (Q-735, bundle-265).
+ * A schema version a server uses is kept as a row of a PRIVATE per-space collection, named by its fingerprint (Q-735, bundle-265), while a record
+ * here carries it, or while it is current, a layer, or linked by a kept version (the sweep, bundle-266).
  *
  * ## What is kept, where, and why a collection
  *
