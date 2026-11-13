@@ -19,12 +19,12 @@
  * - **A failed read answered as "not held".** A fingerprint with no row is `null`; a read the store fails throws, so a caller never tells a
  *   peer a version is unknown because the store did not answer.
  */
-import { readStoredMeta, isPlainObject, schemaFingerprintTextOf } from '@ythril-network/schema/internal';
+import { readStoredMeta, isPlainObject } from '@ythril-network/schema/internal';
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { variationOf, EMPTY_SCHEMA_FINGERPRINT } from './schema-stamp.js';
+import { EMPTY_SCHEMA_FINGERPRINT, EMPTY_SCHEMA_STAMP } from './schema-stamp.js';
 import type { ServableRow } from './schema-snapshot.js';
-import type { SnapshotRow } from './schema-snapshot-store.js';
+import { owedOf, type SnapshotRow } from './schema-snapshot-store.js';
 
 /** The keys a version text holds: anything else is a later format's and is named unread. */
 const TEXT_KEYS: ReadonlySet<string> = new Set(['format', 'typeSchemas', 'rules']);
@@ -57,9 +57,6 @@ export function versionMetaOf(text: string): VersionMeta | null {
   return { meta: { typeSchemas, rules }, unread };
 }
 
-/** The empty schema's text: held on every instance, with no row anywhere. */
-const EMPTY_TEXT = schemaFingerprintTextOf(undefined);
-
 /**
  * One version this server holds: its text, and how it came to hold it - what `servableTo` decides on (`kept`, absent for the empty schema,
  * which every instance holds and serves to anyone) and, for a row, when it was kept (`since`).
@@ -70,13 +67,14 @@ export interface HeldVersion {
   readonly since?: string;
 }
 
-/** The versions the config holds for `spaceId` now: the empty schema's, each network layer's and the current variation's, by fingerprint. */
+/**
+ * The versions the config holds for `spaceId` now: the empty schema's, and what the variation keeps (`owedOf`: each network layer's, and the
+ * current variation's unless it is one of them), by fingerprint. Read from `owedOf`, never built again: a current version equal to a layer's is
+ * that layer here exactly as the sync door keeps and serves its row, so the list, read and diff doors decide what a peer may have as it does.
+ */
 export function configuredVersions(spaceId: string): Map<string, HeldVersion> {
-  const out = new Map<string, HeldVersion>([[EMPTY_SCHEMA_FINGERPRINT, { text: EMPTY_TEXT }]]);
-  const variation = variationOf(spaceId);
-  if (!variation) return out;
-  for (const layer of variation.layers) out.set(layer.stamp.fp, { text: layer.stamp.text, kept: { origin: 'layer', networkId: layer.networkId, links: null } });
-  out.set(variation.stamp.fp, { text: variation.stamp.text, kept: { origin: 'own', links: variation.links } });
+  const out = new Map<string, HeldVersion>([[EMPTY_SCHEMA_FINGERPRINT, { text: EMPTY_SCHEMA_STAMP.text }]]);
+  for (const [stamp, kept] of owedOf(spaceId)) out.set(stamp.fp, { text: stamp.text, kept });
   return out;
 }
 

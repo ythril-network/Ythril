@@ -21,6 +21,11 @@
  * ## Seen red at b299cde3
  *
  * The routes answer 404 with no code (no such route), the tool does not exist, `schema-version-text.js` does not exist (new code).
+ *
+ * ## Seen red at 31c71f2d (a current version that is a network layer)
+ *
+ * `configuredVersions` answered the current layer `{ origin: 'own', links }` while `owedOf` (what the sync door keeps) answers it
+ * `{ origin: 'layer', networkId, links: null }`.
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,6 +42,8 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const SUITE = 'svversions';
 const S = 'svver';
 const LAG = 'svverlag';
+/** A space whose own definitions add nothing to its one network layer: its current fingerprint is the layer's. */
+const LAYERED = 'svverlayered';
 const META = { suppressEmbeddings: true };
 const NOT_HELD = 'e'.repeat(64);
 const OUTSIDE_NET = 'a-network-the-peer-is-not-in';
@@ -50,9 +57,11 @@ const versionsOf = (r) => r.body?.versions ?? r.structured?.versions ?? [];
 describe('a space lists, reads and compares its schema versions (real MongoDB)', { skip }, () => {
   before(async () => {
     d = await openViewDoors({ suite: SUITE, openDoor: () => openPullDoor({
-      suite: SUITE, spaces: [S, LAG], type: 'club', direction: 'both', meta: { [S]: META, [LAG]: META },
+      suite: SUITE, spaces: [S, LAG, LAYERED], type: 'club', direction: 'both', meta: { [S]: META, [LAG]: META, [LAYERED]: META },
     }) });
-    local = await d.mint('svv-local', { [S]: d.row({ schema: 'read', knowledge: 'read' }), [LAG]: d.row({ schema: 'read' }) });
+    local = await d.mint('svv-local', {
+      [S]: d.row({ schema: 'read', knowledge: 'read' }), [LAG]: d.row({ schema: 'read' }), [LAYERED]: d.row({ schema: 'read' }),
+    });
     peer = await d.mint('svv-peer', { [S]: d.row({ schema: 'read' }) }, { peerInstanceId: PEER });
     v1 = await saveVersion(S, typed('p'));
     v2 = await saveVersion(S, typed('q'));
@@ -215,6 +224,27 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
       const mcpMeta = await d.mcp(local.key, 'space_meta', { space: '@svvview' });
       assert.ok(mcp.isError && mcpMeta.isError);
       assert.equal(mcp.text, mcpMeta.text, 'the tool answers a view in other words than space_meta');
+    });
+  });
+
+  describe('a current version that is a network layer', () => {
+    it('is answered as that layer, as the sync door keeps it (owedOf), never as an own version', async () => {
+      const { readPeerMeta } = await import('../../schema/dist/internal.js');
+      const layer = readPeerMeta({ typeSchemas: { entity: { L1: { propertySchemas: { l: { type: 'string' } } } } } });
+      assert.ok(layer.ok, layer.message);
+      (await import('../../server/dist/spaces/effective-meta.js')).storeNetworkLayer(d.door.NET, LAYERED, layer.meta);
+      const variation = (await import('../../server/dist/spaces/schema-stamp.js')).variationOf(LAYERED);
+      const fp = variation.stamp.fp;
+      assert.equal(variation.layers[0]?.stamp.fp, fp, 'precondition: the current fingerprint is not the layer\'s');
+      const { owedOf } = await import('../../server/dist/spaces/schema-snapshot-store.js');
+      const owed = owedOf(LAYERED).find(([s]) => s.fp === fp)?.[1];
+      assert.deepEqual(owed, { origin: 'layer', networkId: d.door.NET, links: null }, 'precondition: the sync door does not keep it as the layer');
+      const { configuredVersions } = await import('../../server/dist/spaces/schema-version-text.js');
+      assert.deepEqual(configuredVersions(LAYERED).get(fp)?.kept, owed, 'the versions doors read the current layer as another row than the sync door keeps');
+      const r = await listRest(local.key, LAYERED);
+      assert.equal(r.status, 200, r.text.slice(0, 300));
+      const entry = versionsOf(r).find(e => e.fp === fp);
+      assert.deepEqual({ current: entry?.current, origin: entry?.origin }, { current: true, origin: 'layer' });
     });
   });
 

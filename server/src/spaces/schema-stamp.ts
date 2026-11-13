@@ -84,8 +84,12 @@ const memo = new WeakMap<object, Memo>();
 
 const stampOfText = (text: string): Stamp => Object.freeze({ fp: sha256Hex(text), text });
 
-/** The empty schema: no meta at all, and one with no type and no rule. */
+/**
+ * The empty schema: no meta at all, and one with no type and no rule. Its text is held on every instance with no row anywhere; every reader
+ * of that text (the version reads, the sync door) reads it here, never spells `schemaFingerprintTextOf(undefined)` again.
+ */
 const EMPTY: Stamp = stampOfText(schemaFingerprintTextOf(undefined));
+export { EMPTY as EMPTY_SCHEMA_STAMP };
 
 /** The stored `$ref` types of a meta, each with what it resolves to now. */
 function refsOf(stored: SpaceMeta): Array<readonly [TypeSchema, TypeSchema | undefined]> {
