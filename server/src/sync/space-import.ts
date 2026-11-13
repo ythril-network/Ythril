@@ -201,8 +201,8 @@ export interface ImportTotals {
   /** Snapshot rows the import inserted, and elements it skipped; present when the result says what it did with snapshots. */
   snapshotsLanded?: number;
   snapshotsRefused?: number;
-  /** Array keys of the body not read; present when the result counts them. */
-  unknownKeysTotal?: number;
+  /** Array keys of the body not read (the answer's `unknownKeysTotal`); present when the result counts them. Named apart from it because an audit field name must not read as a credential. */
+  unreadArraysTotal?: number;
 }
 
 /** The totals of an import's result over every family: the door's audit row and the act's completion row say the same numbers. */
@@ -216,7 +216,7 @@ export function importTotals(result: ImportResult): ImportTotals {
     t.due += r.dueTotal ?? 0;
   }
   if (result.schemaSnapshots) { t.snapshotsLanded = result.schemaSnapshots.landed; t.snapshotsRefused = result.schemaSnapshots.refused; }
-  if (result.unknownKeysTotal !== undefined) t.unknownKeysTotal = result.unknownKeysTotal;
+  if (result.unknownKeysTotal !== undefined) t.unreadArraysTotal = result.unknownKeysTotal;
   return t;
 }
 

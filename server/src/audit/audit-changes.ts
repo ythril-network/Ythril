@@ -47,7 +47,7 @@ export interface AuditChange {
 }
 
 /** The fields of an import's totals (`importTotals`), which its own row and a queued import's completion row both carry. */
-const IMPORT_TOTAL_FIELDS = ['inserted', 'updated', 'refused', 'deletedOnRestore', 'due', 'snapshotsLanded', 'snapshotsRefused', 'unknownKeysTotal'] as const;
+const IMPORT_TOTAL_FIELDS = ['inserted', 'updated', 'refused', 'deletedOnRestore', 'due', 'snapshotsLanded', 'snapshotsRefused', 'unreadArraysTotal'] as const;
 
 /**
  * Fields each operation may record, by `operation` name from `audit/middleware.ts`.
