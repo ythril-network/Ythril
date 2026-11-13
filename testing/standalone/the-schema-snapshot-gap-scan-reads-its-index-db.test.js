@@ -1,6 +1,6 @@
 /**
  * The owed-snapshot gap scan (`scanOwedSchemaSnapshots`, `sync/schema-snapshot-owed.ts`) runs over the four record collections of every space every
- * housekeeping cycle. It must read the stamp's partial index `schemaFingerprint_present`, never the collection, and it must not read once per fingerprint
+ * housekeeping cycle. It must read the stamp's partial index (`STAMP_INDEX`; `schemaFingerprint_present` until bundle-267), never the collection, and it must not read once per fingerprint
  * it owes (bundle-265 lens sweep P1, P2).
  *
  * ## Why the filter matters
@@ -14,7 +14,7 @@
  * ## How it is checked
  *
  * The server's own client is opened with command monitoring; the aggregation the scan really sends to the facts collection is captured and explained, and
- * the winning plan must name `schemaFingerprint_present` and hold no `COLLSCAN`. The commands the scan sends to that collection are counted: the distinct
+ * the winning plan must name the stamp index and hold no `COLLSCAN`. The commands the scan sends to that collection are counted: the distinct
  * stamps, then the deliverers of the owed ones, two commands however many fingerprints are owed.
  *
  * ## Seen red
@@ -76,7 +76,7 @@ describe('the owed-snapshot gap scan reads the stamp index, in two commands per 
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 
-  it('every read of the facts collection the scan sends is planned on schemaFingerprint_present, never a collection scan, and there are two of them', async () => {
+  it('every read of the facts collection the scan sends is planned on the stamp index, never a collection scan, and there are two of them', async () => {
     const sent = [];
     const listen = (ev) => {
       const coll = ev.command?.[ev.commandName];
@@ -128,8 +128,9 @@ describe('the owed-snapshot gap scan reads the stamp index, in two commands per 
   });
 });
 
-/** Every captured read, explained: planned on `schemaFingerprint_present`, never a collection scan. */
+/** Every captured read, explained: planned on the stamp index (`STAMP_INDEX`, (stamp, type) since bundle-267), never a collection scan. */
 async function assertIndexServed(sent) {
+  const { STAMP_INDEX } = await import('../../server/dist/spaces/schema-snapshot-carried.js');
   for (const { name, command } of sent) {
     const hint = command.hint !== undefined ? { hint: command.hint } : {};
     const explainOf = name === 'aggregate'
@@ -141,6 +142,6 @@ async function assertIndexServed(sent) {
     const ex = await mongo.getDb().command({ explain: explainOf, verbosity: 'queryPlanner' });
     const { indexes, stages } = walk(ex);
     assert.ok(!stages.includes('COLLSCAN'), `${name} ${shown} is planned as a collection scan (${stages.join(' ')})`);
-    assert.ok(indexes.includes('schemaFingerprint_present'), `${name} ${shown} does not read schemaFingerprint_present (${JSON.stringify(indexes)})`);
+    assert.ok(indexes.includes(STAMP_INDEX), `${name} ${shown} does not read ${STAMP_INDEX} (${JSON.stringify(indexes)})`);
   }
 }

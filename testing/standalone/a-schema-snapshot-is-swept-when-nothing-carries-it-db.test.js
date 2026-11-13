@@ -212,8 +212,9 @@ describe('a schema snapshot is swept when nothing here carries it, after a grace
       const mark = iso(T0 - 2 * grace());
       await seedRow('closed', marked, { orphanSince: mark });
       await seedRow('closed', fresh);
-      // A real failure: the read hints the stamp's partial index, and on one collection it is gone.
-      await door.coll('closed', 'edges').dropIndex(`${stampMod.SCHEMA_FINGERPRINT_FIELD}_present`);
+      // A real failure: the read hints the stamp index, and on one collection it is gone (the reader answers 503 schema_index_building).
+      const { STAMP_INDEX } = await import('../../server/dist/spaces/schema-snapshot-carried.js');
+      await door.coll('closed', 'edges').dropIndex(STAMP_INDEX);
       try {
         await sweep(T0);
         const after = await rowOf('closed', marked);

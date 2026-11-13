@@ -90,7 +90,10 @@ before(async () => {
   // And the `code` a refused read of the file change feed carries (`cursor_expired`, `invalid_cursor`: `file_changes` names them, bundle-255).
   const { FILE_CHANGES_REFUSAL_CODES } = await import('../../server/dist/mcp/tools/file-changes.js');
   assert.ok(FILE_CHANGES_REFUSAL_CODES?.length >= 2, 'the file change feed refusal codes were not read');
-  ANSWER_VALUES = [...DEGRADED_REASONS, ...FILE_CHANGES_REFUSAL_CODES,...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
+  // And the codes a refused schema-version read carries (`bad_fingerprint`, `unknown_fingerprint`, ...: `space_schema_versions` names them, bundle-267).
+  const { SCHEMA_VERSION_REFUSAL_CODES } = await import('../../server/dist/spaces/schema-versions-acts.js');
+  assert.ok(SCHEMA_VERSION_REFUSAL_CODES?.length >= 3, 'the schema-version refusal codes were not read');
+  ANSWER_VALUES = [...DEGRADED_REASONS, ...FILE_CHANGES_REFUSAL_CODES, ...SCHEMA_VERSION_REFUSAL_CODES,...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
     ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, SPACE_STILL_BEING_REMOVED, ...SYNC_ANSWER_CODES];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });
