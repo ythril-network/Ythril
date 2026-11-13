@@ -17,6 +17,12 @@ description: >-
 #
 # `--profile office` so the opt-in sidecar's log is listed when the job started it; compose lists no service of a
 # profile that is not enabled.
+#
+# Why a process died, not only that it did: main's CI run 43499981804 (2026-11-13) showed the harness Mongo's runner
+# log saying `signal: killed` for mongod and `compose ps` saying `Exited (0)`, which cannot tell the kernel's
+# out-of-memory killer from a stop from outside. `docker inspect` gives each container's OOMKilled flag and exit code;
+# the kernel log names an OOM kill and the cgroup it hit, including a child process (mongod) inside a container whose
+# own flag stays false. dmesg may be refused on a runner, so it never fails the dump.
 runs:
   using: composite
   steps:
@@ -25,6 +31,12 @@ runs:
       run: |
         compose="docker compose -p ythril-test -f testing/docker-compose.test.yml --profile office"
         $compose ps --all
+        echo "::group::container state (OOMKilled, exit code)"
+        docker inspect -f '{{.Name}} OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}} Error={{.State.Error}}' $($compose ps -aq) 2>/dev/null || true
+        echo "::endgroup::"
+        echo "::group::kernel out-of-memory lines"
+        sudo dmesg -T 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | tail -n 50 || true
+        echo "::endgroup::"
         for svc in $($compose ps --services --all); do
           echo "::group::$svc"
           $compose logs --tail 500 "$svc" || true
