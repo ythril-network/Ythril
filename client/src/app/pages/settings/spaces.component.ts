@@ -234,7 +234,7 @@ export class SpacesComponent implements OnInit {
         // ordering that finds a content gap: a space fielding questions and returning nothing. A space nobody
         // queries has no rate at all and sorts last rather than looking like the worst offender.
         case 'answers-asc': return [...list].sort((a, b) => {
-          const ra = this.answerRate(this.activityFor(a.id)); const rb = this.answerRate(this.activityFor(b.id));
+          const ra = this.answerRate(this.activityFor(a.id)), rb =this.answerRate(this.activityFor(b.id));
           if (ra === null && rb === null) return 0;
           if (ra === null) return 1;
           if (rb === null) return -1;

@@ -63,7 +63,7 @@ export function roundSummary(net: NetworkConfig, round: VoteRound): string | und
 /** Newest first; an entry with no readable `concludedAt` after every dated one. */
 function newestFirst(a: RoundOutcomeEntry, b: RoundOutcomeEntry): number {
   const at = (e: RoundOutcomeEntry): number => { const ms = Date.parse(e.concludedAt ?? ''); return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms; };
-  const x = at(a); const y = at(b);
+  const x = at(a), y = at(b);
   return x === y ? 0 : x < y ? 1 : -1;
 }
 

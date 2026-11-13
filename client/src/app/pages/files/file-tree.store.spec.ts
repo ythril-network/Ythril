@@ -32,7 +32,7 @@ function mount() {
   const store = TestBed.inject(FileTreeStore);
   store.loadRoot('work');
   const node = (path: string): any => {
-    const walk = (nodes: any[]): any => { for (const n of nodes) { if (n.path === path) return n; const hit = n.children && walk(n.children); if (hit) return hit; } };
+    const walk = (nodes: any[]): any => { for (const n of nodes) { const hit = n.path === path ? n : n.children && walk(n.children); if (hit) return hit; } };
     return walk(store.treeRoot());
   };
   for (const path of ['/docs', '/docs/sub', '/other']) store.toggle(node(path), 'work');

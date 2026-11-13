@@ -666,7 +666,7 @@ async function relinkTally(spaceId: string, absorbedId: string): Promise<RelinkT
   // What names the absorbed record's unresolved versions follows them to the survivor (`remintForks`), so this merge relinks it and it counts toward the bound.
   // At most `MAX_FORKS_PER_RECORD` versions, each count stopped at what is left of the bound.
   const forkIds = (await col<{ _id: string }>(spaceCollection(spaceId, 'entities')).find(asFilter<{ _id: string }>({ forkOf: absorbedId }), { projection: { _id: 1 } }).toArray()).map(f => f._id);
-  let forkEdges = 0; let forkLinks = 0;
+  let forkEdges = 0, forkLinks = 0;
   for (const id of forkIds) {
     const f = relinkFilters(spaceId, id);
     forkEdges += await col<EdgeDoc>(spaceCollection(spaceId, 'edges')).countDocuments(f.edges, { limit: Math.max(1, limit - edges - forkEdges) });

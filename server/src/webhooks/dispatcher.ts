@@ -656,7 +656,7 @@ async function countRetryRowsAfterFailure(
 ): Promise<{ stored: number; lost: number }> {
   const deadline = shutdownReadBackDeadline;
   const verdicts = await retryRowsStored(RETRY_COLLECTION, rows.map(r => r.job), err, deadline === null ? {} : { timeLeft: () => deadline - Date.now() });
-  let stored = 0; let lost = 0;
+  let stored = 0, lost = 0;
   for (const { job, overflow } of rows) {
     const v = verdicts.get(job._id) ?? 'not_known_stored';
     if (v === 'stored') { stored++; if (overflow) firstDeliveryTally.overflowed++; continue; }

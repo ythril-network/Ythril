@@ -392,14 +392,14 @@ export async function indexExportBody(file: string, opts: IndexOptions = {}): Pr
 /** Mark, in `fam.keep`, the copies of a repeated id that do not land. Reads the family again only when a hash was seen twice. */
 async function decideRepeats(file: string, key: string, fam: FamilyIndex, t: FamilyTable): Promise<void> {
   const n = fam.count;
-  const hi = t.hi.view; const lo = t.lo.view; const comp = t.competes.view; const seq = t.seq.view;
+  const hi = t.hi.view, lo = t.lo.view, comp = t.competes.view, seq = t.seq.view;
   const order: number[] = [];
   for (let i = 0; i < n; i++) if (comp[i] === 1) order.push(i);
   const sorted = Int32Array.from(order).sort((a, b) => (hi[a]! - hi[b]!) || (lo[a]! - lo[b]!) || (a - b));
   const twice = new Uint8Array(n);
   let any = false;
   for (let k = 1; k < sorted.length; k++) {
-    const a = sorted[k - 1]!; const b = sorted[k]!;
+    const a = sorted[k - 1]!, b = sorted[k]!;
     if (hi[a] === hi[b] && lo[a] === lo[b]) { twice[a] = 1; twice[b] = 1; any = true; }
   }
   if (!any) return;

@@ -11,7 +11,8 @@
 import { getConfig } from '../config/loader.js';
 import { recordExpiry, recordContentExpiry, type RetentionSpace } from './chrono-retention.js';
 import type { KnowledgeType, TtlBucket } from '../config/types.js';
-import { COLLECTION_SUFFIX, BRAIN_COLLECTIONS, RECORD_COLLECTION } from '../config/types.js';export { COLLECTION_SUFFIX, BRAIN_COLLECTIONS, RECORD_COLLECTION };
+import { COLLECTION_SUFFIX, BRAIN_COLLECTIONS, RECORD_COLLECTION } from '../config/types.js';
+export { COLLECTION_SUFFIX, BRAIN_COLLECTIONS, RECORD_COLLECTION };
 export type { BrainCollection } from '../config/types.js';
 
 const DAY_MS = 86_400_000;

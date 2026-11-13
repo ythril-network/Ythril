@@ -207,7 +207,7 @@ export function exchangeVerdicts(net: NetworkConfig, member: NetworkMember): {
   exchange: string[]; held: { spaceId: string; reason: HoldReason }[]; declined: string[];
 } {
   const cfg = getConfig();
-  const exchange: string[] = []; const held: { spaceId: string; reason: HoldReason }[] = []; const declined: string[] = [];
+  const exchange: string[] = [], held: { spaceId: string; reason: HoldReason }[] = [], declined: string[] = [];
   for (const spaceId of net.spaces) {
     if (declinedBy(net, member, spaceId)) { declined.push(spaceId); continue; }
     const reason = spaceHold(cfg, spaceId, member.instanceId, net.id);

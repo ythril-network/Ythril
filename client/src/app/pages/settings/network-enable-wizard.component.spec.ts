@@ -89,7 +89,7 @@ describe('NetworkEnableWizardComponent (characterization)', () => {
 
   it('completeEnableWizard() confirms, then emits "enabled" with the URL and "close"', async () => {
     const c = make();
-    const enabled = vi.fn(); const closed = vi.fn();
+    const enabled = vi.fn(), closed = vi.fn();
     c.enabled.subscribe(enabled); c.close.subscribe(closed);
     c.enableHostname = 'brain.example.com';
     confirmResult = true;
