@@ -41,3 +41,15 @@ export async function dropIndexesIfPresent(
   for (const name of gone) await col(collName).dropIndex(name);
   return listed.filter(n => !gone.includes(n));
 }
+
+/**
+ * Drop the indexes `replaced` names from `collName`, but only once every one of `replacements` is confirmed listed there: a build the store
+ * accepted and did not list leaves every replaced index standing, so no read loses its index. The confirmation is the forgettable part, so it
+ * lives here (the space index step and the webhook retry queue retire through it). Answers whether the replaced indexes were retired.
+ */
+export async function dropReplacedOnceListed(collName: string, replacements: readonly string[], replaced: readonly string[]): Promise<boolean> {
+  const listed = await indexNamesOf(collName);
+  if (!replacements.every(n => listed.includes(n))) return false;
+  await dropIndexesIfPresent(collName, replaced, listed);
+  return true;
+}
