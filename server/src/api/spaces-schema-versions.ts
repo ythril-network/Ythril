@@ -7,26 +7,22 @@
  * one request shape on both doors. Rights come from `ROUTE_RIGHTS`: `schema: read`. A personal view is answered as an unknown space, as
  * `GET /meta` answers it (a schema-area door takes no view).
  */
-import { Router, type Response } from 'express';
+import { Router } from 'express';
 import { requireSpaceAuthScoped } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { queryInt } from '../brain/result-budget.js';
 import { networkIdsSharedWithCaller } from '../networks/network-spaces.js';
-import { schemaVersionsToolAct, type SchemaVersionsActResult } from '../spaces/schema-versions-acts.js';
+import { schemaVersionsToolAct } from '../spaces/schema-versions-acts.js';
 import { sendCaughtFailure } from './send-failure.js';
+import { sendSpaceActAnswer } from './send-act-answer.js';
 
 export const spaceSchemaVersionsRouter = Router();
-
-function send(res: Response, r: SchemaVersionsActResult): void {
-  if ('error' in r) { res.status(r.status).json({ error: r.error, ...(r.code ? { code: r.code } : {}) }); return; }
-  res.status(r.status).json(r.body);
-}
 
 // GET /api/spaces/:id/schema-versions[?fp=<fp>[&against=current|<fp>]] - the list (one page), one version, or a comparison.
 spaceSchemaVersionsRouter.get('/:id/schema-versions', globalRateLimit, requireSpaceAuthScoped('id'), async (req, res) => {
   const spaceId = req.params['id'] as string;
   try {
-    send(res, await schemaVersionsToolAct(spaceId, {
+    sendSpaceActAnswer(res, await schemaVersionsToolAct(spaceId, {
       fp: req.query['fp'], against: req.query['against'], skip: queryInt(req.query['skip']),
       maxChars: queryInt(req.query['maxChars']), maxBytes: queryInt(req.query['maxBytes']), maxTokens: queryInt(req.query['maxTokens']),
     }, { shared: networkIdsSharedWithCaller(spaceId, req.authToken as object | undefined), transport: 'rest' }));

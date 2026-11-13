@@ -9,14 +9,10 @@ import { Router } from 'express';
 import { refusalOfParse } from '../util/log.js';
 import { denyReadOnly, requireSpaceAuthMfaScoped, requireSpaceAuthScoped } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { NetworkPrecedenceBody, schemaLayersAct, setNetworkPrecedenceAct, type SchemaLayersActResult } from '../spaces/schema-layers-acts.js';
+import { NetworkPrecedenceBody, schemaLayersAct, setNetworkPrecedenceAct } from '../spaces/schema-layers-acts.js';
+import { sendSpaceActAnswer as send } from './send-act-answer.js';
 
 export const spaceSchemaLayersRouter = Router();
-
-function send(res: import('express').Response, r: SchemaLayersActResult): void {
-  if ('error' in r) { res.status(r.status).json({ error: r.error }); return; }
-  res.status(r.status).json(r.body);
-}
 
 // GET /api/spaces/:id/schema-layers — own definitions, each network's layer in precedence, and the clashes.
 spaceSchemaLayersRouter.get('/:id/schema-layers', globalRateLimit, requireSpaceAuthScoped('id'), (req, res) => {
