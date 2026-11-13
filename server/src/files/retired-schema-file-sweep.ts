@@ -1,7 +1,8 @@
 /**
  * Remove the per-type schema files 6.5 wrote into a space (`schemas/<space>_<kind>_<type>.json`), locally, in every TTL cycle (Q-735).
  *
- * 6.6.0 keeps every schema version privately (`<space>_schema_snapshots`, `spaces/schema-snapshot-store.ts`) and writes no such file. What
+ * 6.6.0 keeps a schema version privately (`<space>_schema_snapshots`, `spaces/schema-snapshot-store.ts`) while a record here carries it, or while
+ * it is current, a layer, or linked by a kept version, and writes no such file. What
  * 6.5 left is stale from the first schema change and of no use to anyone (a reader reads `GET /api/spaces/:id/meta` or `space_meta`), and it
  * never travels (`RETIRED_SCHEMA_FILE` stays in `isInstanceLocalFile`). Every cycle and not once at boot, because a 6.5 backup restored later
  * brings the files back.

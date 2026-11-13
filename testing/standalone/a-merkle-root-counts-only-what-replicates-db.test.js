@@ -13,7 +13,7 @@
  *   aliased space differed in every leaf, for ever, on identical content.
  * - **Instance-local files.** A conflict copy and a retired per-type schema file never travel (`isInstanceLocalFile`, `Q-66`), and
  *   the peer manifest leaves them out. The root hashed the unfiltered manifest, so any conflict copy, or any schema file
- *   that differs between members, made the roots differ for ever. (6.6.0 keeps every schema version in a private collection,
+ *   that differs between members, made the roots differ for ever. (6.6.0 keeps the schema versions in use in a private collection,
  *   `<space>_schema_snapshots`, which is no brain family and no file: the last case holds that it moves no root.)
  *
  * A permanent false alarm teaches an operator to ignore the one signal that means data really is missing.

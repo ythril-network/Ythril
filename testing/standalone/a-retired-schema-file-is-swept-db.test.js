@@ -4,7 +4,7 @@
  *
  * ## Why they go, and why by a sweep
  *
- * 6.6.0 keeps every schema version privately (`<space>_schema_snapshots`) and no longer writes the per-type files (`syncSchemaFiles` is gone). A space that
+ * 6.6.0 keeps the schema versions in use privately (`<space>_schema_snapshots`) and no longer writes the per-type files (`syncSchemaFiles` is gone). A space that
  * held them keeps them for ever unless something removes them: they are no use to anyone (a reader reads `GET /api/spaces/:id/meta` or `space_meta`), they
  * are stale from the first schema change, and they never sync (`isInstanceLocalFile` keeps its old pattern, as `RETIRED_SCHEMA_FILE`, so a leftover never
  * STARTS travelling). They are removed by the same walk as the legacy read spills (`files/retired-local-path-sweep.ts`, extracted from

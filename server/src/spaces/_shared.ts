@@ -14,7 +14,8 @@ import { classifyReadFailure } from '../brain/store-failure.js';
 import type { PendingSpaceOp } from '../config/types.js';
 
 // The per-type schema files (`schemas/<space>_<kind>_<type>.json`) this module once wrote after every meta write are retired (Q-735): each
-// schema version is kept privately, `schema-snapshot-store.ts`, and the files 6.5 left are removed by `files/retired-schema-file-sweep.ts`.
+// schema version is kept privately, `schema-snapshot-store.ts`, while a record here carries it, or while it is current, a layer, or linked by a
+// kept version, and the files 6.5 left are removed by `files/retired-schema-file-sweep.ts`.
 
 /**
  * Per-space collections `initSpace` creates and indexes.

@@ -80,7 +80,8 @@ export const SPACE_COLLECTIONS = {
   mediaJobs: 'media_jobs',
   linkViolations: 'link_violations',
   fileHashes: 'file_hashes',
-  // Every schema version the space's server has used, named by fingerprint: private, never a brain family (`spaces/schema-snapshot-store.ts`).
+  // The schema versions the space's server keeps, named by fingerprint: each while a record here carries it, or while it is current, a layer, or
+  // linked by a kept version. Private, never a brain family (`spaces/schema-snapshot-store.ts`).
   schemaSnapshots: 'schema_snapshots',
 } as const;
 
