@@ -54,7 +54,7 @@ import { eachSpace } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { warnOnce } from '../util/warn-once.js';
-import { schemaSnapshotTotal } from '../metrics/schema-snapshot-count.js';
+import { schemaSnapshotTotal, type SchemaSnapshotOutcome } from '../metrics/schema-snapshot-count.js';
 import { log, peerText } from '../util/log.js';
 
 
@@ -86,9 +86,13 @@ const overCapSaid = warnOnce<string>();
 
 /**
  * Write the row of `stamp` in `spaceId` unless it is there: one upsert that inserts and never rewrites. A concurrent writer's duplicate key is
- * the row being there. `refused` when an act stands on the space (the cycle writes it later); anything else the store answers is thrown.
+ * the row being there. `written` when this call inserted the row, `held` when it was there; `refused` when an act stands on the space (the cycle
+ * writes it later); anything else the store answers is thrown. An inserted row is counted under `counted`, by default `fetched` for a fetched
+ * row and `written` for any other; the admin import counts its own as `imported`.
  */
-export async function ensureSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs): Promise<'written' | 'held' | 'refused'> {
+export async function ensureSnapshot(
+  spaceId: string, stamp: Stamp, kept: KeptAs, counted?: Extract<SchemaSnapshotOutcome, 'imported'>,
+): Promise<'written' | 'held' | 'refused'> {
   if (knownHeld(spaceId, stamp.fp)) return 'held';
   if (isOverSnapshotCap(stamp.text)) {
     overCapSaid(`${spaceId}:${stamp.fp}`, () => log.warn(`Schema snapshot ${peerText(stamp.fp)} of space '${peerText(spaceId)}' is larger than a peer `
@@ -102,17 +106,19 @@ export async function ensureSnapshot(spaceId: string, stamp: Stamp, kept: KeptAs
   };
   // Read before the upsert: a forgetHeld (the sweep removing the row) while it is in flight moves it, and the row is then not noted held.
   const generation = heldGeneration(spaceId);
+  let inserted = false;
   try {
     const done = await admitSpaceWrite(spaceId, undefined, () =>
       snapshots(spaceId).updateOne(asFilter<SnapshotRow>({ _id: stamp.fp }), { $setOnInsert: row }, { upsert: true }));
     // A row that was there already is not a snapshot written; a fetched one is counted `fetched`, whoever it came from.
-    if (done.upsertedCount > 0) schemaSnapshotTotal.note(kept.origin === 'fetched' ? 'fetched' : 'written');
+    inserted = done.upsertedCount > 0;
+    if (inserted) schemaSnapshotTotal.note(counted ?? (kept.origin === 'fetched' ? 'fetched' : 'written'));
   } catch (err) {
     if (isActRefusal(err)) return 'refused';
     if (!isDuplicateKey(err)) throw err;
   }
   if (heldGeneration(spaceId) === generation) noteHeld(spaceId, stamp.fp);
-  return 'written';
+  return inserted ? 'written' : 'held';
 }
 
 /** The rows a writer of a version that is current or a held layer claims: one whose origin is not `kept`'s (a `layer` row never), or one that is marked. */

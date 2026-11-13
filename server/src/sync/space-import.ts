@@ -89,6 +89,8 @@ import { EdgeIdentityBuilding } from '../util/errors.js';
 import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readFamilyPages, type ExportBodyIndex } from './export-stream.js';
+import { SNAPSHOTS_EXPORT_KEY } from './schema-snapshot-export.js';
+import { importSnapshots, senderOf, type ImportedSnapshots } from './schema-snapshot-import.js';
 import type { RestoreOrigin } from './local-only-fields.js';
 
 /**
@@ -178,15 +180,29 @@ export interface ImportTypeResult {
 export interface ImportResult {
   spaceId: string;
   results: Record<ImportType, ImportTypeResult>;
+  /**
+   * What the import did with the schema snapshots its body carried (`sync/schema-snapshot-import.ts`). BESIDE `results`, never in it:
+   * {@link importTotals} sums the families of `results`. Present on a body the door spooled.
+   */
+  schemaSnapshots?: ImportedSnapshots;
+  /** The array keys of the body the import did not read, the first `UNKNOWN_KEYS_NAMED`, each through `peerText`. Present with `unknownKeysTotal`. */
+  unknownKeys?: string[];
+  /** How many array keys of the body the import did not read. */
+  unknownKeysTotal?: number;
 }
 
-/** What a whole import came to, every family together: the counts its audit row carries, never an id. */
+/** What a whole import came to, every family together: the counts its audit row carries, never an id or a name. */
 export interface ImportTotals {
   inserted: number;
   updated: number;
   refused: number;
   deletedOnRestore: number;
   due: number;
+  /** Snapshot rows the import inserted, and elements it skipped; present when the result says what it did with snapshots. */
+  snapshotsLanded?: number;
+  snapshotsRefused?: number;
+  /** Array keys of the body not read; present when the result counts them. */
+  unknownKeysTotal?: number;
 }
 
 /** The totals of an import's result over every family: the door's audit row and the act's completion row say the same numbers. */
@@ -199,6 +215,8 @@ export function importTotals(result: ImportResult): ImportTotals {
     t.deletedOnRestore += r.deletedOnRestoreTotal ?? 0;
     t.due += r.dueTotal ?? 0;
   }
+  if (result.schemaSnapshots) { t.snapshotsLanded = result.schemaSnapshots.landed; t.snapshotsRefused = result.schemaSnapshots.refused; }
+  if (result.unknownKeysTotal !== undefined) t.unknownKeysTotal = result.unknownKeysTotal;
   return t;
 }
 
@@ -456,9 +474,26 @@ export async function importDocuments(spaceId: string, payload: Record<string, u
   finally { afterImport(spaceId); await restartAbsentBytesSweeps([spaceId]); }
 }
 
-/** Import the body spooled at `file`, read and validated whole before (`indexExportBody`), a page at a time: the door's import act. */
+/** How many snapshot elements one page holds: an element may be near `MAX_DOCUMENT_BYTES`, and the page's byte bound closes it earlier. */
+const SNAPSHOT_PAGE_SIZE = 16;
+
+/**
+ * Import the body spooled at `file`, read and validated whole before (`indexExportBody`), a page at a time: the door's import act. The body's
+ * schema snapshots land after every record and after the records' restarts (design r3 E-6), so a version is kept only once the records that
+ * carry it are there; a store that is not answering them fails the import as a record write would. The keys the body held and nothing read
+ * are named in the answer and in one warn line, never landed.
+ */
 export async function importSpool(spaceId: string, file: string, index: ExportBodyIndex, opts: ImportOptions = {}): Promise<ImportResult> {
-  try { return await importInto(spaceId, pagesOfSpool(file, index), opts); }
+  let result: ImportResult;
+  try { result = await importInto(spaceId, pagesOfSpool(file, index), opts); }
   finally { afterImport(spaceId); await restartAbsentBytesSweeps([spaceId]); }
+  const schemaSnapshots = await importSnapshots(spaceId, readFamilyPages(file, index, SNAPSHOTS_EXPORT_KEY, { pageSize: SNAPSHOT_PAGE_SIZE }),
+    senderOf(index.envelope));
+  const unknownKeys = index.unknownKeys.map(k => peerText(k));
+  if (index.unknownKeysTotal > 0) {
+    log.warn(`Import into space '${peerText(spaceId)}': ${index.unknownKeysTotal} key(s) of the body are not ones this server reads and were not `
+      + `landed: ${peerList(unknownKeys)}`);
+  }
+  return { ...result, schemaSnapshots, unknownKeys, unknownKeysTotal: index.unknownKeysTotal };
 }
 

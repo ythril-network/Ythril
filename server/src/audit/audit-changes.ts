@@ -46,6 +46,9 @@ export interface AuditChange {
   removed?: (string | number | boolean)[];
 }
 
+/** The fields of an import's totals (`importTotals`), which its own row and a queued import's completion row both carry. */
+const IMPORT_TOTAL_FIELDS = ['inserted', 'updated', 'refused', 'deletedOnRestore', 'due', 'snapshotsLanded', 'snapshotsRefused', 'unknownKeysTotal'] as const;
+
 /**
  * Fields each operation may record, by `operation` name from `audit/middleware.ts`.
  *
@@ -129,15 +132,17 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // through (`explicitChanges`) keeps it.
   'fork.resolve': ['kind', 'keep', 'parentId', 'forkId', 'resolvedElsewhere', 'kept', 'discarded'],
   // How many records of each kind an export handed out, and `complete: false` when the client went away before the body ended (the counts are
-  // then what had been written). Counts only: nothing of what the export held.
-  'space.export': [...BRAIN_COLLECTIONS, 'complete'],
+  // then what had been written). Counts only: nothing of what the export held. `schemaSnapshots` counts the schema versions it carried and
+  // `schemaSnapshotsOmitted` the ones too large for an importer, which it left out.
+  'space.export': [...BRAIN_COLLECTIONS, 'complete', 'schemaSnapshots', 'schemaSnapshotsOmitted'],
   // The same for the export of the audit log, which has no counts to give: it records only whether the client took all of it.
   'audit.export': ['complete'],
   // What a space import landed, in totals: records stored new, records replaced, records refused, records the restore left out because this
   // instance deleted them after the backup, and records that were already past their expiry when they landed (the next sweep takes them).
-  'space.import': ['inserted', 'updated', 'refused', 'deletedOnRestore', 'due'],
+  // Beside them the schema versions it kept and skipped, and how many keys of the body it did not read: counts only, never a key's name.
+  'space.import': [...IMPORT_TOTAL_FIELDS],
   // A queued space act's completion row: the totals its body reports (an import's, the same as above), the only place nobody waiting is told.
-  'space.act_completed': ['inserted', 'updated', 'refused', 'deletedOnRestore', 'due'],
+  'space.act_completed': [...IMPORT_TOTAL_FIELDS],
   // The new signing key's fingerprint and never the key itself: a peer that pinned the old one compares fingerprints.
   'signing.rotate': ['fingerprint'],
   // What a TTL sweep took from a space: one change per record collection, `to` the number deleted this cycle (`field` is the collection's name).

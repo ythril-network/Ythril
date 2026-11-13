@@ -38,6 +38,8 @@ import { log, peerText } from '../util/log.js';
 import { ChunkedEnvelopeError } from '../config/secretbox.js';
 import { ExportBodyMalformed, indexExportBody, type ExportBodyIndex } from '../sync/export-stream.js';
 import { arrivalRefusal } from '../sync/arrivals.js';
+import { REPLICATED_FAMILIES } from '../sync/replicated-families.js';
+import { SNAPSHOTS_EXPORT_KEY } from '../sync/schema-snapshot-export.js';
 import { importSpool, importTotals, restoreOriginOf, type ImportResult } from '../sync/space-import.js';
 import { defineSpaceActBody, defineSpaceActBootSweep, registerOwnSpaceAct, spaceActsOfKind, type SpaceActBodyOutcome } from './space-act-runner.js';
 
@@ -102,9 +104,15 @@ export async function holdImportDoor<T>(work: () => Promise<T>): Promise<{ held:
 /** Does a document take part in the repeated-id rule of a body: only one the writer would not refuse (it refuses before it collapses). */
 const competes = (family: string, doc: Record<string, unknown>): boolean => arrivalRefusal(doc, { seqOptional: family === 'files' }) === null;
 
+/**
+ * The array keys an import reads: every replicated family and the schema snapshots. `schemaSnapshots` is indexed and paged like a family, so it is
+ * never named unknown, but it is never one of `REPLICATED_FAMILIES`, which drives sync.
+ */
+const IMPORT_KEYS: readonly string[] = [...REPLICATED_FAMILIES.map(f => f.collection), SNAPSHOTS_EXPORT_KEY];
+
 /** Index a spooled body for an import: the door's validation and the body's resume read it the same way. */
 export function indexSpool(file: string, maxDocuments: number): Promise<ExportBodyIndex> {
-  return indexExportBody(file, { maxDocuments, competes });
+  return indexExportBody(file, { maxDocuments, competes, families: IMPORT_KEYS });
 }
 
 /** The index the door read, kept for the body's first run so the body is not read whole a third time. A resume reads it again. */
