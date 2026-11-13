@@ -88,7 +88,8 @@ async function sweepSpace(spaceId: string, now: number): Promise<{ fps: string[]
   });
   // Fail closed: a collection that could not be read might carry any candidate. Each failure was reported by the walk.
   if (failed.length > 0) return none;
-  const plan = snapshotSweepPlan(rows, carried, keep, now, SNAPSHOT_REMOVAL_GRACE_MS);  const rowsOf = snapshots(spaceId);
+  const plan = snapshotSweepPlan(rows, carried, keep, now, SNAPSHOT_REMOVAL_GRACE_MS);
+  const rowsOf = snapshots(spaceId);
   if (plan.mark.length > 0) {
     await rowsOf.updateMany(asFilter<SnapshotRow>({ _id: { $in: plan.mark } }), { $set: { orphanSince: new Date(now).toISOString() } });
   }

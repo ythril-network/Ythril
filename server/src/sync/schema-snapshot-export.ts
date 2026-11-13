@@ -5,8 +5,9 @@
  *
  * Every row whose fingerprint a record the export WROTE carries (the export route notes each streamed document's stamp with {@link noteCarried},
  * so there is no second read of the records and no window between them), plus every row those rows link (`links.own`, `links.layers[].fp`,
- * `links.served[].fp`), transitively. Each element is `{ fp, text, links }` and nothing else: `origin`, `networkId` and `from` name peers and
- * networks, in a file that leaves the instance, and the import lands every element as `fetched` whatever they said.
+ * `links.served[].fp`), transitively. Each element is `{ fp, text, links }` and nothing else. `origin`, `networkId` and `from` say how THIS instance
+ * came by the row, which the importer does not take on (it lands every element as `fetched`). `links` does name networks (each layer's and
+ * served version's networkId) and travels on purpose: the importer needs it to keep the versions a kept one links.
  *
  * ## What it prevents
  *
