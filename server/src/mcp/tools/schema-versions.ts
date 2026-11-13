@@ -7,13 +7,14 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { schemaVersionsToolAct } from '../../spaces/schema-versions-acts.js';
 import { networkIdsSharedWithCaller } from '../../networks/network-spaces.js';
 import { ToolRefusal } from '../../util/errors.js';
+import { SCHEMA_FINGERPRINT_FIELD } from '../../spaces/schema-stamp.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 import { ROW_PAGER } from '../../brain/result-budget.js';
 
 export const space_schema_versionsTool: ToolHandler = {
   name: 'space_schema_versions',
   description: 'List, read and compare the schema versions of a space. Every record written while it conformed carries the fingerprint of '
-    + 'the schema it conformed to (`schemaFingerprint`); a version is that fingerprint and the schema it names.\n\n'
+    + `the schema it conformed to (\`${SCHEMA_FINGERPRINT_FIELD}\`); a version is that fingerprint and the schema it names.\n\n`
     + 'WITHOUT `fp`: the list, `{ versions: [{ fp, current, held, origin?, since?, counts }], nextSkip? }` - the current version first, then '
     + 'the versions this instance keeps, newest first, then the fingerprints records carry that it keeps no schema for (`held: false`). '
     + '`counts` are the records of each collection that carry the version, read from the schema version index of four collections, no '
