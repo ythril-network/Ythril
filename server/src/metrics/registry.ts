@@ -2013,11 +2013,12 @@ for (const reason of EMBED_JOB_FAILED_REASONS) embedJobsFailedCounter.labels({ r
 /**
  * What became of a schema snapshot (`spaces/schema-snapshot-store.ts`, `sync/schema-snapshot-fetch.ts`, counted through
  * `metrics/schema-snapshot-count.ts`, which both can import where they cannot import this): `written`, `fetched`, `not_held`, `route_missing`,
- * `lost_space`, `not_shared`, `refused_rung`, `refused_hash`, `refused_shape`, `over_cap`, `failed` and `behind`.
+ * `lost_space`, `not_shared`, `refused_rung`, `refused_hash`, `refused_shape`, `over_cap`, `failed`, `behind`, `removed` (the sweep), `imported` and
+ * `import_refused` (an admin import).
  */
 export const schemaSnapshotCounter = new Counter({
   name: 'ythril_schema_snapshot_total',
-  help: 'Schema snapshots by outcome (written, fetched, not_held, route_missing, lost_space, not_shared, refused_rung, refused_hash, refused_shape, over_cap, failed, behind)',
+  help: 'Schema snapshots by outcome (written, fetched, not_held, route_missing, lost_space, not_shared, refused_rung, refused_hash, refused_shape, over_cap, failed, behind, removed, imported, import_refused)',
   labelNames: ['outcome'] as const,
   registers: [register],
 });

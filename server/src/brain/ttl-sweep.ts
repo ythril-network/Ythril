@@ -52,6 +52,7 @@ import { sweepChronoRetention } from './chrono-redaction.js';
 import { sweepLegacySpills } from '../files/legacy-spill-sweep.js';
 import { sweepRetiredSchemaFiles } from '../files/retired-schema-file-sweep.js';
 import { ensureSchemaSnapshots } from '../spaces/schema-snapshot-store.js';
+import { sweepSchemaSnapshots } from '../spaces/schema-snapshot-sweep.js';
 import { scanOwedSchemaSnapshots } from '../sync/schema-snapshot-owed.js';
 import { drainStrayFileMeta } from '../sync/stray-filemeta-drain.js';
 import { spaceTtlDays } from './chrono-retention.js';
@@ -412,6 +413,8 @@ async function sweepExpiredSteps(now: Date): Promise<number> {
   await sweepRetiredSchemaFiles().catch(err => log.warn(`Retired schema file sweep: ${peerText(err)}`));
   // Every space's current schema version and its layers, kept privately (Q-735): writes what a refused gate or a failed write left owed.
   await ensureSchemaSnapshots().catch(err => log.warn(`Schema snapshots: ${peerText(err)}`));
+  // The versions nothing here uses any more, marked and removed a grace later (Q-739): after the keep writes, so a version just made current is claimed first.
+  await sweepSchemaSnapshots({ now: now.getTime() }).catch(err => log.warn(`Schema snapshot sweep: ${peerText(err)}`));
   // The versions the stored records are stamped with and no snapshot holds: owed to the member that delivered them, fetched in its next turn (Q-738).
   await scanOwedSchemaSnapshots().catch(err => log.warn(`Schema snapshots owed: ${peerText(err)}`));
   await retirePeerSidecars().catch(err => log.warn(`Peer sidecar retirement: ${peerText(err)}`));

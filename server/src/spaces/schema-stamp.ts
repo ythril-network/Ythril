@@ -25,8 +25,9 @@
  *
  * ## What else lives here
  *
- * The bounded set of fingerprints known to have a snapshot row (`knownHeld`), because a content-addressed row never changes: a positive answer
- * cannot go stale, and the per-write backstop costs no I/O after the first write of a fingerprint. And `variationOf`, what the snapshot writer
+ * The bounded set of fingerprints known to have a snapshot row (`knownHeld`), so the per-write backstop costs no I/O after the first write of a
+ * fingerprint. A content-addressed row's text never changes; the row goes only when the snapshot sweep removes it, and the sweep forgets it here
+ * first (`forgetHeld`, which moves the space's `heldGeneration` so a write in flight cannot note it held again). And `variationOf`, what the snapshot writer
  * keeps for a space (`schema-snapshot-store.ts`): the variation's stamp, each layer's, and the links between them.
  *
  * Imports `getConfig` and the two ref resolvers in one direction: `schema-validation.ts` imports nothing from here, so `getSpaceMeta` is untouched
@@ -268,8 +269,24 @@ export function noteHeld(spaceId: string, fp: string): void {
   known.set(fp, true);
 }
 
-/** Forget what is known of `spaceId`'s rows (its collection was dropped or renamed away), or of one row of it. */
+/**
+ * Forget what is known of `spaceId`'s rows (its collection was dropped or renamed away), or of one row of it (the sweep removed it). Each call moves
+ * the space's {@link heldGeneration}, so a write that started before it cannot note the row held after it.
+ */
 export function forgetHeld(spaceId: string, fp?: string): void {
+  generations.set(spaceId, heldGeneration(spaceId) + 1);
   if (fp === undefined) held.delete(spaceId);
   else held.get(spaceId)?.delete(fp);
+}
+
+/** How many times {@link forgetHeld} ran for each space: one number per configured space ever seen, never reset. */
+const generations = new Map<string, number>();
+
+/**
+ * The space's held generation: a writer reads it before its upsert and notes the row held after it only when it has not moved. Otherwise a keep in
+ * flight while the sweep removed the row (and forgot it) would mark the removed row held, and the backstop and the gap scan would skip it for the life
+ * of the process (bundle-266, design r3 S-5).
+ */
+export function heldGeneration(spaceId: string): number {
+  return generations.get(spaceId) ?? 0;
 }

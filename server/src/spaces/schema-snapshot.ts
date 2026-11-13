@@ -13,6 +13,7 @@
  * - {@link owedFingerprints}: a fingerprint asked for twice, or asked for after a row holds it.
  * - {@link behindVerdict}: "my variation is behind" read from a sender's links as a HINT (S-N3): a peer's claim, so the caller logs and counts it and keeps
  *   nothing because of it.
+ * - {@link snapshotSweepPlan}: a version a stored record carries, or one a kept version links, being removed by the sweep (bundle-266, Q-739).
  */
 import { schemaFingerprintTextOf } from '@ythril-network/schema/internal';
 import { readPeerMeta } from './body-schemas.js';
@@ -128,4 +129,86 @@ export function behindVerdict(mine: { readonly networks: readonly SharedNetwork[
     behind.push(net.networkId);
   }
   return behind;
+}
+
+/**
+ * How long a snapshot row stays after the sweep first found it unused (bundle-266, Q-739). Far longer than any write's read-to-land window
+ * (`withinWriteBound` caps one at minutes): a write that read a version before a schema edit lands, stamped with it, long before its row may go, and
+ * the removing pass reads the stored records again.
+ */
+export const SNAPSHOT_REMOVAL_GRACE_MS = 24 * 60 * 60_000;
+
+/** The most rows one sweep pass removes from one space; the next pass takes the rest. */
+export const SNAPSHOT_REMOVALS_PER_PASS = 256;
+
+/** A snapshot row as the sweep reads it: never its text. `orphanSince` is the ISO time of the pass that first found it unused. */
+export interface SweptRow {
+  readonly _id: string;
+  readonly origin: ServableRow['origin'];
+  readonly links: SnapshotLinks | null;
+  readonly orphanSince?: string;
+}
+
+/** What one sweep pass does to a space's rows, as fingerprints: rows to mark unused now, rows whose mark goes, rows to remove. */
+export interface SnapshotSweepPlan {
+  readonly mark: string[];
+  readonly clear: string[];
+  readonly remove: string[];
+}
+
+/** The other rows `row` links. Not itself: an own variation with no layer links its own fingerprint (`links.own`), which keeps nothing. */
+const linkedBy = (row: SweptRow): string[] =>
+  (row.links ? [row.links.own, ...row.links.layers.map(l => l.fp), ...row.links.served.map(l => l.fp)] : []).filter(fp => fp !== row._id);
+
+/**
+ * Which snapshot rows one sweep pass marks, clears and removes (design r2 D2 as r3 S-2 amends it). Pure: it changes nothing it is given.
+ *
+ * A row is a CANDIDATE when its origin is `own` or `fetched` (a `layer` row is the network history the behind hint reads, never removed), no stored
+ * record carries it (`carried`), it is not the current variation's nor a held layer's (`keep`), and no row that stays this pass links it (by
+ * `links.own`, `links.layers[].fp` or `links.served[].fp`), recomputed until nothing changes: a row is removed only when every row linking it goes too.
+ * Then a candidate with no mark (or one that does not read as a time) is marked; a marked row that is no candidate loses its mark; and a candidate
+ * marked at least `grace` before `now` is removed.
+ *
+ * What it prevents: a version a stored record names losing its text, and a version linked from one kept being removed under it. At most
+ * {@link SNAPSHOT_REMOVALS_PER_PASS} rows are removed, whole linked groups only (a group cut in half would leave a staying row linking a removed one);
+ * the bound counts removals, never marks.
+ */
+export function snapshotSweepPlan(rows: readonly SweptRow[], carried: ReadonlySet<string>, keep: ReadonlySet<string>, now: number, grace: number): SnapshotSweepPlan {
+  const markedAt = (r: SweptRow): number => (r.orphanSince === undefined ? NaN : Date.parse(r.orphanSince));
+  const unused = (r: SweptRow): boolean => r.origin !== 'layer' && !carried.has(r._id) && !keep.has(r._id);
+  const removed = new Set(rows.filter(r => unused(r) && now - markedAt(r) >= grace).map(r => r._id));
+  let linked = new Set<string>();
+  for (let changed = true; changed;) {
+    linked = new Set(rows.filter(r => !removed.has(r._id)).flatMap(linkedBy));
+    changed = false;
+    for (const id of removed) if (linked.has(id)) { removed.delete(id); changed = true; }
+  }
+  const candidate = (r: SweptRow): boolean => unused(r) && !linked.has(r._id);
+  return {
+    mark: rows.filter(r => candidate(r) && Number.isNaN(markedAt(r))).map(r => r._id),
+    clear: rows.filter(r => r.orphanSince !== undefined && !candidate(r)).map(r => r._id),
+    remove: boundedRemovals(rows.filter(r => removed.has(r._id))),
+  };
+}
+
+/** The removals of one pass cut to the bound by whole linked groups (rows linking each other, either way), in the order the rows came. */
+function boundedRemovals(removable: readonly SweptRow[]): string[] {
+  if (removable.length <= SNAPSHOT_REMOVALS_PER_PASS) return removable.map(r => r._id);
+  const ids = new Set(removable.map(r => r._id));
+  const next = new Map<string, Set<string>>(removable.map(r => [r._id, new Set<string>()]));
+  for (const r of removable) for (const to of linkedBy(r)) if (ids.has(to) && to !== r._id) { next.get(r._id)!.add(to); next.get(to)!.add(r._id); }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const r of removable) {
+    if (seen.has(r._id)) continue;
+    const group: string[] = [];
+    for (const stack = [r._id]; stack.length > 0;) {
+      const id = stack.pop()!;
+      if (seen.has(id)) continue;
+      seen.add(id); group.push(id);
+      stack.push(...next.get(id)!);
+    }
+    if (out.length + group.length <= SNAPSHOT_REMOVALS_PER_PASS) out.push(...group);
+  }
+  return out;
 }
