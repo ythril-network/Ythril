@@ -281,20 +281,17 @@ describe('snapshotSweepPlan: which snapshot rows the sweep marks, clears and rem
   it('at most 256 removals a pass, never part of a linked group, and the bound limits removals only, never marks', () => {
     const old = ago(GRACE * 2);
     const rows = [];
-    // 150 pairs, P links Q, all past the grace: 300 removable rows. Plus 20 unmarked candidates.
-    for (let i = 0; i < 150; i++) {
-      const p = `p${String(i).padStart(63, '0')}`; const q = `q${String(i).padStart(63, '0')}`;
-      rows.push(row(p, { links: linksTo(q), orphanSince: old }), row(q, { orphanSince: old }));
-    }
-    for (let i = 0; i < 20; i++) rows.push(row(`m${String(i).padStart(63, '0')}`));
+    // 150 pairs, P links Q, all past the grace: 300 removable rows. Plus 20 unmarked candidates. Ids are fingerprints (64 hex),
+    // or a link is not one; every Q row comes before every P row, so a bound that takes the first 256 rows cuts 106 pairs.
+    const p = (i) => `a${String(i).padStart(63, '0')}`; const q = (i) => `b${String(i).padStart(63, '0')}`;
+    for (let i = 0; i < 150; i++) rows.push(row(q(i), { orphanSince: old }));
+    for (let i = 0; i < 150; i++) rows.push(row(p(i), { links: linksTo(q(i)), orphanSince: old }));
+    for (let i = 0; i < 20; i++) rows.push(row(`c${String(i).padStart(63, '0')}`));
     const got = plan(rows);
     assert.ok(got.remove.length > 0 && got.remove.length <= 256, `${got.remove.length} removals in one pass`);
     const removed = new Set(got.remove);
     const cut = [];
-    for (let i = 0; i < 150; i++) {
-      const p = `p${String(i).padStart(63, '0')}`; const q = `q${String(i).padStart(63, '0')}`;
-      if (!removed.has(p) && removed.has(q)) cut.push(i);
-    }
+    for (let i = 0; i < 150; i++) if (!removed.has(p(i)) && removed.has(q(i))) cut.push(i);
     assert.deepEqual(cut, [], 'the bound removed a row whose linking row stays');
     assert.equal(got.mark.length, 20, 'the bound held back marks: it counts removals only');
   });
