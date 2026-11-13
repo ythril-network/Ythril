@@ -259,6 +259,31 @@ not told by the sync. So the write itself says it:
 `networks: read` on the networks that carry the space; any other caller gets `keys`, `memberCount` and no names. The
 write is applied regardless. Upgrade every instance of the network ([Upgrading](02b-upgrading.md)).
 
+### Schema versions
+
+```http
+GET /api/spaces/:id/schema-versions[?fp=<fingerprint>[&against=current|<fingerprint>]]
+Authorization: Bearer <token with schema:read on the space>
+```
+
+A record written while it conformed carries the fingerprint of the schema it conformed to (`schemaFingerprint`, [Get Space Meta](06-spaces-api.md#get-space-meta)); a **schema version** is that fingerprint and the schema it names. This one route lists a space's versions, reads one, or compares two, by its query; MCP `space_schema_versions` takes the same parameters (`space`, `fp`, `against`, `skip`, `maxChars`, `maxBytes`, `maxTokens`) and answers the same bodies and refusals.
+
+| Query | Answer |
+|---|---|
+| no `fp` | the list, one page: `{ "versions": [{ "fp", "current", "held", "origin"?, "since"?, "counts" }], "nextSkip"? }` |
+| `fp` | that version: `{ "fp", "current", "held": true, "schema": { "typeSchemas", "rules" }, "unread"? }` |
+| `fp` and `against` | what changed from `fp` to `against` (`current`, or another fingerprint): `{ "from", "to", "types", "spaceRules", "allowlists", "unread" }` |
+
+**The list** names the current version first, then the versions this instance keeps, newest first, then each network layer the space runs on that no kept row holds, then every fingerprint the records carry that this instance holds no schema for (`held: false`). `origin` says how a kept version came here (`own`, a network's `layer`, or `fetched` from a member) and `since` when it was kept. `counts` are the records of each stamped collection carrying the version (`entities`, `edges`, `facts`, `chrono`), read from the schema version index of each collection, no record. The order is the listing order, not a version history. `skip` and the size ceilings page it: a page the budget cut answers `nextSkip`, the `skip` of the next page. A version and a comparison are one unit each, answered whole.
+
+**A carried version can be not held.** The versions are kept while a record here carries them, but a record can arrive stamped with a version this instance never received: the fetch from the member that sent it gave up, the member would not share it (`not_shared`), or an import skipped it ([Sync Protocol](../sync-protocol.md#a-snapshot-is-fetched-from-the-member-that-sent-the-record)). Such a version is listed with `held: false`, and reading or comparing it answers `404 unknown_fingerprint`.
+
+**A comparison** lists every type with a change (`types: [{ "kind", "type", "changes": [{ "place", "from"?, "to"?, "class" }] }]`), every space rule with one (`spaceRules`, with the kinds it governs on either side, since a space rule's change reaches every type of those kinds) and every kind whose "declares any type" state differs (`allowlists`). Each change has one `class`: `structural` (it can change whether a record conforms), `wording`, `write` (what a write does with a value) or `lifecycle`. The class of each schema key is set in the server's code, and **a key the server does not know is `structural`**, so an unfamiliar change is shown, never hidden. A place either version's text holds that this release cannot read is listed in `unread`, and the pair is never answered as the same.
+
+**Who sees what.** A token bound to a peer sees only the versions the sync door would serve it: one built from a network it is not in is left out of the list, and reading or comparing it answers `404 unknown_fingerprint`. A local token sees every version. A personal view is answered as an unknown space, as on `GET /meta`.
+
+**Refusals**, the same on both doors, each with its `code`: `400` `bad_fingerprint` (`fp` or `against` is not 64 lowercase hex), `404` `unknown_fingerprint` (not held, or not this caller's to read: the sync door's spelling), `400` `against_needs_fp` (`against` without `fp`), a `400` naming a malformed `skip` or ceiling, and `503` `schema_index_building` while a collection's schema version index is still being built (retry after the housekeeping cycle).
+
 ### Validate Schema (Dry Run)
 
 ```http
@@ -281,6 +306,7 @@ guarded at the rung it advertises rather than at "administers the whole space".
 |---|---|
 | `meta` | The schema to check, in the shape `GET /:id/meta` returns it. Parsed exactly as a schema save parses it, so a rule or type the save would refuse is refused here in the same words (`400`; a `$ref` to a missing or wrong-kind library entry `422`, as on the save). Omit it to check the space's stored schema |
 | `sample` | `{ "kind": "entity" \| "edge" \| "fact" \| "chrono", "record": { … } }` — check **one record you supply** instead of the stored ones, in the STORED shape (`name` for an entity, `fact` for a fact, `title` for a chrono entry, `label` for an edge, with `type`, `description`, `tags`, `properties`; a field left out is empty). Nothing stored is read, it costs one evaluation, and it is not rate limited — **and, in either mode, a check runs only rules you could save**: a call with a `meta` whose rules (`rules`, or any type's `rules`) differ from the stored ones needs `admin` on `schema`, the right to save them, and is otherwise refused `403` (see *What it costs*) |
+| `against` | What each stored record is judged by: `current` (default), the space's schema as it stands, or `stamp`, the [schema version](#schema-versions) the record carries in its `schemaFingerprint`, so a record is held to the schema it was written under. `stamp` checks stored records only: with `meta` or `sample` it is `400` `against_needs_stored`. The answer always echoes `against`, so a caller can tell a server that does not know the key (it echoes none) |
 | `limit` | Violating records per page, 1 to 500 (default 500) |
 | `after` | The `nextAfter` of the previous page. Opaque; one this check did not give is a `400` |
 | `maxChars`, `maxBytes`, `maxTokens` | The size ceilings every budgeted read takes, on a stored-data check: the page is cut to **whole violating records** that fit, and `nextAfter` continues it; the first violating record is returned whole even when it alone is over the ceiling, with `truncated: true`, or it could never be read. **Default `maxChars`: 50 000 on REST, 25 000 on MCP** — the one default the two doors deliberately differ on — and the answer discloses the number it used (`budgetChars`, `budgetBytes`). A value that is not a positive integer is a `400` |
@@ -321,6 +347,7 @@ answers one record with `{ "field": "rules.adult", "reason": "A person must be a
 {
   "spaceId": "eng-kb",
   "meta": { "validationMode": "strict", "typeSchemas": { "entity": { "service": {}, "person": {} } }, "..." : "..." },
+  "against": "current",
   "checked": { "entities": { "checked": 200, "total": 14200 }, "edges": { "checked": 0, "total": 830 }, "...": "..." },
   "complete": false,
   "truncated": false,
@@ -342,6 +369,8 @@ answers one record with `{ "field": "rules.adult", "reason": "A person must be a
   "progress": { "checked": 200, "total": 15030 }
 }
 ```
+
+`meta` is the schema the check ran with, on REST in a stored-data check against `current` only: against the stamp no one schema judged the page, and MCP `schema_validate` never echoes it. **Against the stamp, a record no version can judge is counted, never listed or judged by the current schema in its place**: `skipped: { "unversioned": n, "notHeld": { "<fingerprint>": n } }`, present only in that mode, counts the records of THIS call with no stamp (`unversioned`) and those whose version this instance does not hold (`notHeld`, per fingerprint; see [Schema versions](#schema-versions) for why a carried version can be not held). A version's text holds its types and rules only: `validationMode`, `strictLinkage` and the other settings are the space's current ones in both modes, and an edge's `functional` count spans the edges of its own version on the page: check against `current` for a count across versions.
 
 **It says how much it checked, and pages by cursor** (`Q-129`). One call reads at most 10,000 records, walking each
 member space's four collections in turn by `_id`, **and stops reading at the record that fills the page**: `limit`
@@ -800,81 +829,10 @@ nothing the copy it replaced did not. A **fork** (an unchosen version of an edge
 edge for a later one. An end that names an entity **fork row** is treated as unresolved too (not checked), and never stops the
 rest of the page from being recorded. The edge is stored in every mode, `strict` included.
 
-### An edge label can declare its ends, and whether a subject may have more than one (3.7)
+### Where schema validation runs
 
-Two fields on an **edge** type schema, refused on the other three collections rather than silently ignored —
-they name things an entity, a fact or a chrono entry does not have.
-
-```json
-{ "typeSchemas": { "edge": {
-  "reports_to": { "endpoints": { "from": ["person"], "to": ["person"] }, "functional": true },
-  "belongs_to": { "endpoints": { "from": ["document", "person"], "to": ["project", "team"] } },
-  "mentions":   { "endpoints": { "from": ["document"] } }
-} } }
-```
-
-**Each side is independently optional, and absent means any.** `mentions` above pins the subject and leaves the
-object open, which is the ordinary case: in a fourteen-label model `likes` legitimately permits seven of nine
-types on `to`, and a rule that has to enumerate seven of nine is a list somebody will forget to extend.
-
-**Two arrays mean the CROSS PRODUCT.** `belongs_to` above permits `document → team` as well as the two pairs you
-probably had in mind. That is the semantics, not an omission: if you need exactly one pair, declare a label per
-pair — which you can already do. There is deliberately no pairs form.
-
-**Members are entity type names**, in the same vocabulary [`space_meta`'s `actualSchema`](04b-graph-api.md)
-reports, plus the literal
-`UNTYPED` for entities that have no type. Untyped entities are ordinary, so they are admissible by SAYING so
-rather than by being refused in silence — and an untyped entity at an end that names a type IS a violation. A
-member may also be written `entity:<type>`; a bare name means the same thing. Any other knowledge-type prefix
-(`fact:`, `chrono:`, `edge:`) is refused with a message saying why: the grammar is reserved for if those
-records can ever be edge endpoints, so it cannot later be read as a type name that happens to contain a colon.
-
-**`functional: true` means one edge per `(from, label)`.** "Another edge" is a different edge, not only a different
-`to`: the same `to` reached as another kind (`toKind`, or `fromKind` at the other end) is a second edge too. Not per
-`(from, to)` — that is already guaranteed by edge identity — and not per `to`, which is the inverse relation and has
-its own name.
-
-**Where the rules are enforced.** A write that would break either one is **refused**, on every door that creates or
-edits an edge — the two edge routes, `save_edge`, `update_edge`, per item through `/bulk`, and the inline `edges` of
-an entity, fact or chrono write (refused before the record is written, so nothing is stored). The violation names
-`fromType`, `toType` or `functional` as its field, and the reason says which types the label admits. In a `warn`
-space it is reported in the response instead of refused, like every other schema rule. An edge that arrives from a
-sync peer or an import is stored as it was written and recorded in the arrival's `schemaViolations` (see
-[What arrivals record](#what-arrivals-record)), and a merge reports instead of refusing.
-
-**Writers that run at the same time cannot both win.** In a `strict` space an instance's own writers — the two edge
-routes, `save_edge`, `update_edge`, a bulk item and an inline edge — leave a subject at most one edge under a
-functional label, even when two of them check at the same moment: the one that loses is decided again against the
-winner and refused with the same `functional` violation a write made afterwards gets, on either door. A writer that
-keeps losing, because the subject keeps changing under it, answers `409` and writes nothing, and a relabel onto an
-identity another edge already holds answers `409 edge_identity_taken`. What this does not cover: a `warn` or `off`
-space stores the second edge (`warn` reports it), and an edge that arrives from a sync peer, a merge or an import is
-stored and reported (in the arrival's own record as well as in `validate-schema`), never refused — so a subject can
-still hold two. The
-guarantee is in place from a new space's set-up, and for a space that existed before the upgrade once the background
-index pass has reached it; a space where it could not be built says so (`index _functionalGuard_1 on edges` under the `Space indexes` or `query indexes` step in
-[Background jobs](11-setup-api.md#background-jobs-and-the-spaces-they-walk)) and is tried again by the next index pass,
-and until then a race there behaves as it did before.
-
-**A rule you declare later does not freeze the edges you already have.** Refusal is on what a write INTRODUCES:
-if a stored edge already breaks the rule, an edit that leaves the ends alone still goes through, so declaring a
-schema can never make a record unmaintainable. Re-writing the same edge — the same `from`, `to`, `label` and end
-kinds — is likewise not a `functional` breach: an edge is not its own duplicate.
-
-**An endpoint that resolves to nothing is not a type violation.** With `strictLinkage: false` a dangling
-reference is a deliberate documented state, and `ErModel.danglingEdges` has a row for it; a `to` that cannot be
-resolved is left unchecked rather than refused, so one setting's escape hatch is not read as another setting's
-breach. Endpoint types are also only resolved for **entity** ends: a fact, chrono or file end has no type in
-this vocabulary.
-
-**And the stored edges are still auditable.** [`POST /api/spaces/:id/validate-schema`](06-spaces-api.md) lists
-every stored edge that breaks either rule — what the enforcement cannot reach, because it was written before the
-rule existed, arrived from a peer, was merged or imported, or came in while the space was in `warn`. The same answer
-carries `staleGuards`, which is a different list: [see below](#validate-schema-dry-run).
-
-Both fields are also accepted on a **schema-library** entry, unlike `retention`. The difference is shape versus
-policy: what may sit at the end of a `reports_to` is a fact about the relationship, and travels with an entry any
-number of spaces reference; a delete window belongs to a type in one space.
+An edge label's `endpoints` and `functional` fields, what they admit and where they are enforced, are on the edge page:
+[An edge label can declare its ends](04b-graph-api.md#an-edge-label-can-declare-its-ends-and-whether-a-subject-may-have-more-than-one-37).
 
 Schema validation runs on:
 

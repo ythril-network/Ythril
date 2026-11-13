@@ -510,13 +510,14 @@ reasoning, and the `$in` form for a set of ids, are in
 > | `seq` | The sync counter, and the value to send as `If-Match` on a conditional write. Useful, not internal |
 > | `matchedText` | The exact text this record's vector was built from. Derived from the fields above it, and for a file chunk it is the heading plus the passage — so the passage a SECOND time |
 > | `embeddingModel` | Which model produced the vector. Identical for every record in a space |
-> | `schemaFingerprint` | The fingerprint of the space's schema this record **conforms to as stored** (the one GET meta and `space_meta` answer). A fact, entity, edge or chrono entry only; absent on a record written before 6.6.0 and not updated since |
+> | `schemaFingerprint` | The fingerprint of the schema this record **conformed to when it was written here or when it arrived** (the current one is what GET meta and `space_meta` answer; an older one is a [schema version](06a-schema-api.md#schema-versions)). A fact, entity, edge or chrono entry only; absent when no checked write here left the record conforming since 6.6 and it did not arrive with a valid stamp |
 >
 > **`schemaFingerprint` is the server's claim, and it is kept true.** A create or update whose record fully conforms to the
 > schema it was checked against is stamped with that schema's fingerprint, and the write's answer carries it. Every write
 > that leaves the record unchecked or not conforming removes it: an update that leaves a violation (a `warn` or `off` space
 > lets one through), an update whose record moved under it before it landed, the redaction of a chrono entry's content
-> (it removes `description`, which a rule may read), and the relink of an edge onto new ends (a merge). A sync arrival
+> (it removes `description`, which a rule may read), the relink of an edge onto new ends (a merge), and, on every edge
+> that names it as an end, a change of an entity's type (the edge was judged against the old type). A sync arrival
 > keeps the stamp its writer gave it: that is the writer's claim, not checked here. A `schemaFingerprint` sent in a write
 > body is ignored (not named as an unknown field, not stored), and `deleteFields` refuses it by name. Recall hits withhold it.
 >
