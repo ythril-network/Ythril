@@ -14,8 +14,9 @@
  *   - `keyClass(table, key)`: the table's class, and `structural` for a key the table does not know (fail toward showing).
  *   - `schemaVersionDiff(fromText, toText)`: `{ types: [{ kind, type, changes: [{ place, from, to, class }] }], spaceRules, allowlists:
  *     [{ kind, from, to }], unread }`.
- *   - `typesDifferingUnder(fromText, toText, mode)` (mode `structural | any`): `{ kinds: Map<kind, Set<type> | 'all'>, unclassified }`,
- *     memoised per process by the pair and the mode (bounded at 256 pairs).
+ *   - `typesDifferingUnder(fromText, toText, mode)` (mode `structural | any`): `{ kinds: Map<kind, Set<type> | 'all'>, unclassified }`;
+ *     `typesDifferingBetween({ fp, text }, { fp, text }, mode)` answers it memoised per process by the two fingerprints and the mode
+ *     (bounded at 256 pairs), and `knownTypesDiffering(fromFp, toFp, mode)` reads that memo alone.
  *
  * ## Why each case can fail for a real defect
  *
@@ -32,6 +33,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
 const schemaPkg = await import('../../schema/dist/index.js');
 const { schemaFingerprintTextOf } = await import('../../schema/dist/internal.js');
@@ -252,14 +254,20 @@ describe('versionMetaOf', () => {
 });
 
 describe('the diff memo', () => {
-  it('answers the same classification for the same pair and mode, and is bounded', () => {
-    const typesDifferingUnder = need(diff, 'typesDifferingUnder');
-    const v = (n) => textOf(ent({ [`T${n}`]: { propertySchemas: { p: { type: 'string' } } } }));
-    const first = typesDifferingUnder(v(0), v(1), 'structural');
-    assert.equal(typesDifferingUnder(v(0), v(1), 'structural'), first, 'the same pair was classified twice');
-    assert.notEqual(typesDifferingUnder(v(0), v(1), 'any'), first, 'the mode is not part of the key');
-    for (let i = 2; i < 2 + 300; i++) typesDifferingUnder(v(0), v(i), 'structural');
-    const again = typesDifferingUnder(v(0), v(1), 'structural');
+  it('answers the same classification for the same pair of fingerprints and mode, knows it without the texts, and is bounded', () => {
+    const typesDifferingBetween = need(diff, 'typesDifferingBetween');
+    const knownTypesDiffering = need(diff, 'knownTypesDiffering');
+    const v = (n) => {
+      const text = textOf(ent({ [`T${n}`]: { propertySchemas: { p: { type: 'string' } } } }));
+      return { fp: createHash('sha256').update(text, 'utf8').digest('hex'), text };
+    };
+    assert.equal(knownTypesDiffering(v(0).fp, v(1).fp, 'structural'), undefined, 'a pair never classified is known');
+    const first = typesDifferingBetween(v(0), v(1), 'structural');
+    assert.equal(knownTypesDiffering(v(0).fp, v(1).fp, 'structural'), first, 'the memo is not keyed by the fingerprints alone');
+    assert.equal(typesDifferingBetween(v(0), v(1), 'structural'), first, 'the same pair was classified twice');
+    assert.notEqual(typesDifferingBetween(v(0), v(1), 'any'), first, 'the mode is not part of the key');
+    for (let i = 2; i < 2 + 300; i++) typesDifferingBetween(v(0), v(i), 'structural');
+    const again = typesDifferingBetween(v(0), v(1), 'structural');
     assert.notEqual(again, first, 'the memo held 300 newer pairs and the first: it is not bounded');
     assert.deepEqual([...again.kinds.entries()].map(([k, s]) => [k, s === 'all' ? s : [...s].sort()]),
       [...first.kinds.entries()].map(([k, s]) => [k, s === 'all' ? s : [...s].sort()]));

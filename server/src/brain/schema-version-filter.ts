@@ -23,14 +23,18 @@
  *   the caller's filter, which would replace a caller's own stamp clause or `$or`.
  * - **"Older" silently meaning "older or unknown".** {@link schemaVersionEcho} counts, per member and over the whole match (not the page),
  *   the matches whose version is not held or not classifiable.
- * - **A store failure answered as "no match".** Every read here throws on failure (`fingerprintTypesIn`, `heldVersions`, the count), a
+ * - **A version's text read on every call.** Whether a version is held is read without its text (`heldVersionsKept`); a pair's classification
+ *   is memoised by the two fingerprints (`knownTypesDiffering`), so a text is read only for a pair not classified yet (design r3 §2).
+ * - **A record whose type no reader can name left out.** A (stamp, type) group whose type is not a string (`unnamed`) makes its whole
+ *   fingerprint older and unclassified, counted in the echo, never dropped.
+ * - **A store failure answered as "no match".** Every read here throws on failure (`fingerprintTypesIn`, `heldVersionsKept`, the count), a
  *   missing stamp index as 503 `schema_index_building`; nothing is caught.
  */
 import type { BrainCollection } from '../config/types.js';
 import { andPredicates } from '../db/and-predicates.js';
 import { stampedKindOf, stampTypeFieldOf, fingerprintTypesIn, type StampedCollection } from '../spaces/schema-snapshot-carried.js';
-import { heldVersions } from '../spaces/schema-version-text.js';
-import { typesDifferingUnder, type SchemaChangedMode } from '../spaces/schema-diff.js';
+import { heldVersionsKept, versionTexts } from '../spaces/schema-version-text.js';
+import { knownTypesDiffering, typesDifferingBetween, type SchemaChangedMode, type TypesDiffering } from '../spaces/schema-diff.js';
 import { variationOf, EMPTY_SCHEMA_FINGERPRINT, SCHEMA_FINGERPRINT_FIELD } from '../spaces/schema-stamp.js';
 import { isStampedCollection, type SchemaVersionAsk } from './schema-version-args.js';
 import { countBrain } from './query.js';
@@ -45,27 +49,52 @@ export interface SchemaVersionResolution {
 /** A clause no record matches, answered from the stamp index like the rest. */
 const NOTHING = { [SCHEMA_FINGERPRINT_FIELD]: { $in: [] } };
 
+/**
+ * How each of `fps` differs from `current` under `mode`, for those this server holds with `current` (absent: not held). Held is asked without
+ * the texts; the memo (`knownTypesDiffering`, keyed by fingerprints) answers a pair seen before, and only the misses' texts are read, once.
+ */
+async function classified(spaceId: string, current: string, fps: readonly string[], mode: SchemaChangedMode): Promise<Map<string, TypesDiffering>> {
+  const out = new Map<string, TypesDiffering>();
+  const held = await heldVersionsKept(spaceId, [current, ...fps]);
+  if (!held.has(current)) return out;
+  const misses: string[] = [];
+  for (const fp of fps) {
+    if (!held.has(fp)) continue;
+    const known = knownTypesDiffering(fp, current, mode);
+    if (known) out.set(fp, known); else misses.push(fp);
+  }
+  if (misses.length === 0) return out;
+  const texts = await versionTexts(spaceId, [current, ...misses]);
+  const to = texts.get(current);
+  for (const fp of misses) {
+    const from = texts.get(fp);
+    if (from !== undefined && to !== undefined) out.set(fp, typesDifferingBetween({ fp, text: from }, { fp: current, text: to }, mode));
+  }
+  return out;
+}
+
 /** The `older` clause of one member: fingerprint-first branches, every one naming a stamp, so no unversioned record is matched. */
 async function olderIn(spaceId: string, collection: StampedCollection, mode: SchemaChangedMode, current: string, maxTimeMS: number): Promise<SchemaVersionResolution> {
   const pairs = await fingerprintTypesIn(spaceId, collection, { maxTimeMS });
   const typesOf = new Map<string, Set<string>>();
+  /** Fingerprints some of whose records hold a type that is not a string: no type of theirs can be named, so they are unclassified. */
+  const unnamed = new Set<string>();
   for (const p of pairs) {
     if (p.fp === current) continue;
     const types = typesOf.get(p.fp) ?? new Set<string>();
     if (p.type !== null) types.add(p.type);
+    if (p.unnamed) unnamed.add(p.fp);
     typesOf.set(p.fp, types);
   }
-  const held = await heldVersions(spaceId, [current, ...typesOf.keys()]);
-  const currentText = held.get(current)?.text;
+  const differs = await classified(spaceId, current, [...typesOf.keys()], mode);
   const kind = stampedKindOf(collection);
   const typeField = stampTypeFieldOf(collection);
   const whole: string[] = [];
   const unclassified: string[] = [];
   const branches: Record<string, unknown>[] = [];
   for (const [fp, present] of typesOf) {
-    const text = held.get(fp)?.text;
-    const differ = text !== undefined && currentText !== undefined ? typesDifferingUnder(text, currentText, mode) : undefined;
-    if (!differ || differ.unclassified) { whole.push(fp); unclassified.push(fp); continue; }
+    const differ = differs.get(fp);
+    if (!differ || differ.unclassified || unnamed.has(fp)) { whole.push(fp); unclassified.push(fp); continue; }
     const types = differ.kinds.get(kind);
     if (types === undefined) continue;
     if (types === 'all') { whole.push(fp); continue; }
@@ -84,7 +113,8 @@ async function resolveIn(spaceId: string, collection: StampedCollection, ask: Sc
     case 'current': return { clause: { [SCHEMA_FINGERPRINT_FIELD]: current }, current, unclassified: [] };
     case 'unversioned': return { clause: { [SCHEMA_FINGERPRINT_FIELD]: { $exists: false } }, current, unclassified: [] };
     case 'fingerprint': {
-      const held = (await heldVersions(spaceId, [ask.fp])).has(ask.fp);
+      // Held is all this asks: the text is left out of the read.
+      const held = (await heldVersionsKept(spaceId, [ask.fp])).has(ask.fp);
       return { clause: { [SCHEMA_FINGERPRINT_FIELD]: ask.fp }, current, unclassified: held ? [] : [ask.fp] };
     }
     case 'older': return olderIn(spaceId, collection, ask.mode, current, maxTimeMS);
