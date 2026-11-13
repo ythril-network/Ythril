@@ -268,6 +268,12 @@ describe('snapshotSweepPlan: which snapshot rows the sweep marks, clears and rem
     assert.deepEqual(both.remove, [A, B]);
   });
 
+  it('a row whose own link names itself is not kept by that link: an own variation with no layer is marked, then removed', () => {
+    const self = (id, over = {}) => row(id, { links: { own: id, layers: [], served: [] }, ...over });
+    assert.deepEqual(plan([self(A)]), { mark: [A], clear: [], remove: [] });
+    assert.deepEqual(plan([self(A, { orphanSince: ago(GRACE * 2) })]), { mark: [], clear: [], remove: [A] });
+  });
+
   it('a marked row that is carried again is cleared and not removed, however old its mark', () => {
     assert.deepEqual(plan([row(A, { orphanSince: ago(GRACE * 10) })], { carried: [A] }), { mark: [], clear: [A], remove: [] });
   });
