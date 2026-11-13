@@ -15,7 +15,7 @@ export const space_schema_versionsTool: ToolHandler = {
   name: 'space_schema_versions',
   description: 'List, read and compare the schema versions of a space. Every record written while it conformed carries the fingerprint of '
     + `the schema it conformed to (\`${SCHEMA_FINGERPRINT_FIELD}\`); a version is that fingerprint and the schema it names.\n\n`
-    + 'WITHOUT `fp`: the list, `{ versions: [{ fp, current, held, origin?, since?, counts }], nextSkip? }` - the current version first, then '
+    + 'WITHOUT `fp`: the list, `{ versions: [{ fp, current, held, origin?, since?, counts }], count, total, limit, skip, truncated, nextSkip? }` (a page like every held list) - the current version first, then '
     + 'the versions this instance keeps, newest first, then the fingerprints records carry that it keeps no schema for (`held: false`). '
     + '`counts` are the records of each collection that carry the version, read from the schema version index of four collections, no '
     + 'record. The order is the listing order only, not a version history. Same as `GET /api/spaces/:id/schema-versions`.\n\n'

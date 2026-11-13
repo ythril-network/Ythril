@@ -115,6 +115,19 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
       assert.deepEqual(versionsOf(mcp), versionsOf(await listRest(local.key)));
     });
 
+    it('the tool description names every page key the list answers, beyond the shared budget disclosure', async () => {
+      // bundle-267: the list moved onto pageList and the description kept naming `{ versions, nextSkip? }` alone.
+      const { space_schema_versionsTool } = await import('../../server/dist/mcp/tools/schema-versions.js');
+      const { budgetFields } = await import('../../server/dist/brain/result-budget.js');
+      const disclosed = new Set(Object.keys(budgetFields({ returned: [], truncated: false, charsReturned: 0, bytesReturned: 0 }, 0, { chars: 1, bytes: null })));
+      const whole = await listRest(local.key);
+      const cut = await listRest(local.key, S, '?maxBytes=300');
+      const keys = [...new Set([...Object.keys(whole.body), ...Object.keys(cut.body)])].filter(k => !disclosed.has(k) && !k.startsWith('budget'));  // budgetBoundBy joins the disclosure on a cut page
+      assert.ok(keys.includes('versions') && keys.includes('nextSkip'), `the page keys were not read: ${keys}`);
+      const unnamed = keys.filter(k => !new RegExp(`\\b${k}\\b`).test(space_schema_versionsTool.description));
+      assert.deepEqual(unnamed, [], 'the tool description does not name keys the list answers');
+    });
+
     it('the current version comes from the config while its row lags behind an act', async () => {
       assert.ok(!(await heldRows(d.door.mongo, LAG)).includes(lagV2.fp), 'precondition: the current row landed although an act stands');
       const r = await listRest(local.key, LAG);
