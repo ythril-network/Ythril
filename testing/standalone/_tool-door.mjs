@@ -25,9 +25,10 @@ import { openPushDoor } from './_push-door.mjs';
  * @param {object} o
  * @param {string} o.suite   harness database slug (unique per test file: `a-db-harness-name-is-unique`)
  * @param {object[]} o.spaces  config `spaces` entries
+ * @param {boolean} [o.monitorCommands]  open the server's client with command monitoring (`openPushDoor`'s), for a test that explains what a tool sent
  */
-export async function openToolDoor({ suite, spaces }) {
-  const door = await openPushDoor({ suite, spaces });
+export async function openToolDoor({ suite, spaces, monitorCommands = false }) {
+  const door = await openPushDoor({ suite, spaces, monitorCommands });
   const { callTool } = await import('../../server/dist/mcp/call-tool.js');
   const { SPACE_AREAS } = await import('../../server/dist/config/rights-shape.js');
   const ADMIN = { instanceAdmin: true, createSpaces: true, perSpace: {}, floor: Object.fromEntries(SPACE_AREAS.map(a => [a, 'admin'])) };
