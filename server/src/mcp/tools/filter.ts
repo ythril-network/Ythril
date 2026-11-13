@@ -38,7 +38,8 @@ import { resolveEntityIdsByName } from '../../brain/entities.js';
 import { attachedToEntityNamed } from '../../brain/entity-name-scope.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 import { SCHEMA_VERSION_FILTER_SCHEMA, readSchemaVersionAsk } from '../../brain/schema-version-args.js';
-import { schemaVersionResolver, narrowedBy, schemaVersionEcho } from '../../brain/schema-version-filter.js';
+import { schemaVersionResolver, schemaVersionEcho } from '../../brain/schema-version-filter.js';
+import { andPredicates } from '../../db/and-predicates.js';
 
 export const queryTool: ToolHandler = {
   name: 'filter',
@@ -260,7 +261,7 @@ export const queryTool: ToolHandler = {
       if (fromName) clauses.push({ from: { $in: await resolveEntityIdsByName(mid, fromName) } });
       if (toName) clauses.push({ to: { $in: await resolveEntityIdsByName(mid, toName) } });
       if (versionOf) clauses.push((await versionOf(mid)).clause);
-      return narrowedBy(filter, clauses);
+      return andPredicates(filter, ...clauses) ?? {};
     };
 
     // Resolved before the read, so a bad `maxBytes` is an error rather than a query that ran first — and because the
