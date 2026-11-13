@@ -226,7 +226,7 @@ describe('what the tolerant parse cannot read is unclassified, never "same"', ()
 
   it('a type the stored parse skips is named in unread', () => {
     const versionMetaOf = need(text, 'versionMetaOf');
-    const bad = textOf(ent({ A: { propertySchemas: { p: { type: 'string' } } }, Bad: { namingPattern: '(' } }));
+    const bad = textOf(ent({ A: { propertySchemas: { p: { type: 'string' } } }, Bad: { namingPattern: '(a+)+' } }));
     const read = versionMetaOf(bad);
     assert.ok(read.meta.typeSchemas.entity.A, 'the readable type was dropped with the unreadable one');
     assert.ok(read.unread.some(p => String(p).includes('Bad')), `unread does not name the skipped type: ${JSON.stringify(read.unread)}`);

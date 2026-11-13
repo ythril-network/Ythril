@@ -8,11 +8,12 @@
  *   edges, chrono } }], nextSkip? }`: current first (read from the config, row or no row), then the held rows by `at` descending, then
  *   the fingerprints records carry with no row (`held: false`). It takes `skip` and the shared budget (`maxChars`, `maxBytes`,
  *   `maxTokens`); a cut page answers `nextSkip`.
- * - `GET .../schema-versions/:fp` answers `{ fp, current, held, schema: { typeSchemas, rules } }`.
- * - `GET .../schema-versions/:fp/diff?against=current|<fp>` (default `current`) answers the per-type diff (from = :fp, to = against).
- * - MCP `space_schema_versions { space, fp?, against?, skip?, maxChars... }`: no fp the list, fp the version, fp + against the diff.
- * - Refusals: `404 unknown_fingerprint` (not held, or not one this caller may have), `400 bad_fingerprint`, and on the tool `400
- *   against_needs_fp`.
+ * - `GET .../schema-versions?fp=<fp>` answers `{ fp, current, held, schema: { typeSchemas, rules } }`.
+ * - `GET .../schema-versions?fp=<fp>&against=current|<fp>` answers the per-type diff (from = fp, to = against).
+ * - MCP `space_schema_versions { space, fp?, against?, skip?, maxChars... }` takes the same parameters: no fp the list, fp the
+ *   version, fp + against the diff. One route and one tool, one shape (one-capability-is-one-shape).
+ * - Refusals: `404 unknown_fingerprint` (not held, or not one this caller may have), `400 bad_fingerprint`, and on both doors
+ *   `400 against_needs_fp`.
  * - A peer-bound token sees only the versions `servableTo` lets the sync door serve it; a local token sees all.
  * - A personal view on these routes is an unknown space, answered as `GET /meta` answers it.
  * - `versionText(spaceId, fp)` (`spaces/schema-version-text.js`): a row that is gone is not held (`null`); a store failure throws.
@@ -111,19 +112,21 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
       assert.equal(r.status, 200, r.text.slice(0, 300));
       assert.equal(versionsOf(r)[0]?.fp, lagV2.fp);
       assert.equal(versionsOf(r)[0]?.held, true, 'the current version, in the config, is answered not held');
-      const read = await d.rest(local.key, 'GET', `/api/spaces/${LAG}/schema-versions/${lagV2.fp}`);
+      const read = await listRest(local.key, LAG, `?fp=${lagV2.fp}`);
       assert.equal(read.status, 200, read.text.slice(0, 300));
     });
 
     it('a page cut by the budget answers nextSkip, and the next page continues it', async () => {
       const whole = versionsOf(await listRest(local.key));
-      const cut = await listRest(local.key, S, '?maxChars=200');
+      // maxBytes, not maxChars: a character budget is raised to the shared floor (MIN_MAX_BYTES), which this short list fits under;
+      // a byte ceiling has no floor, so 300 bytes cuts it on both doors.
+      const cut = await listRest(local.key, S, '?maxBytes=300');
       assert.equal(cut.status, 200, cut.text.slice(0, 300));
-      assert.ok(versionsOf(cut).length < whole.length, 'a 200-character page holds every version');
+      assert.ok(versionsOf(cut).length < whole.length, 'a 300-byte page holds every version');
       assert.equal(typeof cut.body?.nextSkip, 'number', 'a cut page answers no nextSkip');
       const next = await listRest(local.key, S, `?skip=${cut.body.nextSkip}`);
       assert.equal(versionsOf(next)[0]?.fp, whole[cut.body.nextSkip]?.fp);
-      const mcp = await d.mcp(local.key, 'space_schema_versions', { space: S, maxChars: 200 });
+      const mcp = await d.mcp(local.key, 'space_schema_versions', { space: S, maxBytes: 300 });
       assert.equal(typeof mcp.structured?.nextSkip, 'number', 'the tool ignores the budget');
     });
 
@@ -137,7 +140,7 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
 
   describe('a version and a comparison', () => {
     it('reads one version\'s schema, on both doors', async () => {
-      const r = await d.rest(local.key, 'GET', `/api/spaces/${S}/schema-versions/${v1.fp}`);
+      const r = await listRest(local.key, S, `?fp=${v1.fp}`);
       assert.equal(r.status, 200, r.text.slice(0, 300));
       assert.equal(r.body.fp, v1.fp);
       assert.equal(r.body.current, false);
@@ -149,12 +152,12 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
       assert.deepEqual(await undocumentedKeys('integration-guide/06a-schema-api.md', 'Schema versions', Object.keys(r.body)), []);
     });
 
-    it('compares a version against current by default, and against a named version', async () => {
-      const r = await d.rest(local.key, 'GET', `/api/spaces/${S}/schema-versions/${v1.fp}/diff`);
+    it('compares a version against current, and against a named version', async () => {
+      const r = await listRest(local.key, S, `?fp=${v1.fp}&against=current`);
       assert.equal(r.status, 200, r.text.slice(0, 300));
       const rowA = r.body.types?.find(t => t.kind === 'entity' && t.type === 'A');
       assert.ok(rowA?.changes?.some(c => c.class === 'structural'), `the rename p -> q is not a structural change of A: ${r.text.slice(0, 400)}`);
-      const same = await d.rest(local.key, 'GET', `/api/spaces/${S}/schema-versions/${v1.fp}/diff?against=${v1.fp}`);
+      const same = await listRest(local.key, S, `?fp=${v1.fp}&against=${v1.fp}`);
       assert.equal(same.status, 200);
       assert.deepEqual(same.body.types, [], 'a version compared with itself differs');
       const mcp = await d.mcp(local.key, 'space_schema_versions', { space: S, fp: v1.fp, against: 'current' });
@@ -162,16 +165,19 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
       assert.deepEqual(mcp.structured?.types, r.body.types);
     });
 
-    it('refuses with the sync door\'s spellings: 404 unknown_fingerprint, 400 bad_fingerprint; the tool 400 against_needs_fp', async () => {
-      const gone = await d.rest(local.key, 'GET', `/api/spaces/${S}/schema-versions/${'d'.repeat(64)}`);
+    it('refuses with the sync door\'s spellings: 404 unknown_fingerprint, 400 bad_fingerprint, 400 against_needs_fp', async () => {
+      const gone = await listRest(local.key, S, `?fp=${'d'.repeat(64)}`);
       assert.equal(gone.status, 404);
       assert.equal(gone.body?.code, 'unknown_fingerprint');
-      const bad = await d.rest(local.key, 'GET', `/api/spaces/${S}/schema-versions/abc`);
+      const bad = await listRest(local.key, S, '?fp=abc');
       assert.equal(bad.status, 400);
       assert.equal(bad.body?.code, 'bad_fingerprint');
-      const badDiff = await d.rest(local.key, 'GET', `/api/spaces/${S}/schema-versions/${v1.fp}/diff?against=abc`);
+      const badDiff = await listRest(local.key, S, `?fp=${v1.fp}&against=abc`);
       assert.equal(badDiff.status, 400);
       assert.equal(badDiff.body?.code, 'bad_fingerprint');
+      const noFp = await listRest(local.key, S, '?against=current');
+      assert.equal(noFp.status, 400);
+      assert.equal(noFp.body?.code, 'against_needs_fp');
       const mcp = await d.mcp(local.key, 'space_schema_versions', { space: S, against: 'current' });
       assert.ok(mcp.isError, mcp.text);
       assert.match(mcp.text, /against_needs_fp/);
@@ -190,8 +196,8 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
       const theirs = versionsOf(r).map(e => e.fp);
       assert.ok(theirs.includes(v1.fp), 'the peer does not see a version it shares');
       assert.ok(!theirs.includes(X.fp), 'the peer sees a version built from a network it is not in');
-      for (const path of [`${X.fp}`, `${X.fp}/diff`]) {
-        const read = await d.rest(peer.key, 'GET', `/api/spaces/${S}/schema-versions/${path}`);
+      for (const path of [`?fp=${X.fp}`, `?fp=${X.fp}&against=current`]) {
+        const read = await listRest(peer.key, S, path);
         assert.equal(read.status, 404, `${path}: ${read.text.slice(0, 200)}`);
         assert.equal(read.body?.code, 'unknown_fingerprint', `${path}: a version the peer may not have is not answered as one it does not know`);
       }
@@ -200,7 +206,7 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
     it('a personal view is an unknown space here, answered as GET meta answers it', async () => {
       const meta = await d.rest(local.key, 'GET', '/api/spaces/%40svvview/meta');
       assert.ok(meta.status >= 400, `precondition: GET meta took a view (${meta.status})`);
-      for (const path of ['schema-versions', `schema-versions/${v1.fp}`, `schema-versions/${v1.fp}/diff`]) {
+      for (const path of ['schema-versions', `schema-versions?fp=${v1.fp}`, `schema-versions?fp=${v1.fp}&against=current`]) {
         const r = await d.rest(local.key, 'GET', `/api/spaces/%40svvview/${path}`);
         assert.equal(r.status, meta.status, `${path}: ${r.text.slice(0, 200)}`);
         assert.deepEqual(r.body, meta.body, `${path} answers a view in other words than GET meta`);

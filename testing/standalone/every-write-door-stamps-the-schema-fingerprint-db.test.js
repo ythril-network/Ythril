@@ -174,9 +174,11 @@ describe('every door that writes a conforming record stamps the current fingerpr
 
   it('the partial index on schemaFingerprint is declared on the four collections and built by the sweep (P2)', async () => {
     const { SPACE_INDEXES, ensureTtlIndexes, spaceIndexName } = await import('../../server/dist/spaces/space-indexes.js');
-    const declared = SPACE_INDEXES.filter(ix => Object.keys(ix.keys).length === 1 && ix.keys.schemaFingerprint === 1);
+    // The stamp index leads with the stamp and pairs it with the collection's type field (bundle-267: `type`, or `label` on edges).
+    const declared = SPACE_INDEXES.filter(ix => Object.keys(ix.keys)[0] === 'schemaFingerprint');
     assert.deepEqual(declared.map(ix => ix.part).sort(), [...STAMPED_PARTS].sort(), 'the stamp index is not declared on exactly the four record collections');
     for (const ix of declared) {
+      assert.deepEqual(Object.keys(ix.keys), ['schemaFingerprint', ix.part === 'edges' ? 'label' : 'type'], `${ix.part}: the stamp index is not (stamp, type field)`);
       assert.deepEqual(ix.options.partialFilterExpression, { schemaFingerprint: { $exists: true } }, `${ix.part}: not partial on the stamp's presence`);
       assert.equal(ix.policy, 'report', `${ix.part}: a failed build must be reported, never block`);
       assert.notEqual(ix.bootSafe, true, `${ix.part}: built at boot, where a big collection would hold the boot`);

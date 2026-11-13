@@ -66,6 +66,8 @@ const EXEMPT = {
   // The one reader of "which fingerprints do the stored records carry" (bundle-266): the gap scan, the fetch's still-carried check, the snapshot sweep
   // and nothing else call it, and none of them reads a record collection for it themselves.
   'server/src/spaces/schema-snapshot-carried.ts:fingerprintsCarriedIn': 'asks which schema fingerprints the stored records of one of the four knowledge collections carry (`STAMPED_COLLECTIONS`: entities, facts, edges, chrono; a file row has no type and no stamp), so the collection it is handed is never the files one',
+  // bundle-267: the (stamp, type) counts the filter and the versions list read, from the index keys alone, over the same four collections.
+  'server/src/spaces/schema-snapshot-carried.ts:fingerprintTypesIn': 'counts the stored records of one of the four knowledge collections per (schema fingerprint, type) (`StampedCollection`: entities, facts, edges, chrono; a file row has no type and no stamp), so the collection it is handed is never the files one',
   'server/src/sync/schema-snapshot-owed.ts:deliverersOf': 'the gap scan\'s deliverer read walks `STAMPED_COLLECTIONS` (the four knowledge collections), so the computed collection is never the files one',
   'server/src/brain/edge-endpoint-names.ts:resolveEndpointName':'returns the id before its one read when the kind is `file` (a file endpoint\'s display name IS its path), so the collection it computes is never the files one',
   'server/src/brain/edge-endpoint-names.ts:withEndpointNames': 'skips every `file` endpoint before it groups the ids (a file endpoint\'s display name IS its path) and reads only the entity, fact and chrono kinds its map is typed to, so the collection it computes is never the files one',
