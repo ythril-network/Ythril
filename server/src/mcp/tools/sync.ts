@@ -312,7 +312,7 @@ export const network_syncTool: ToolHandler = {
       // read over all of them, by the same function the doors of one network use. A network that ran out of time or failed is recorded
       // WITH the members it had finished (the answers before it are kept, and the networks after it still run); the networks are waited
       // for in turn, so a full cycle can take up to `timeoutMs` per network.
-      let totalSynced = 0; let totalErrors = 0; let stillRunning = 0; let failedNetworks = 0;
+      let totalSynced = 0, totalErrors = 0, stillRunning = 0, failedNetworks = 0;
       const lines: string[] = [];
       const members: MemberResult[] = [];
       for (const net of syncCfg.networks) {

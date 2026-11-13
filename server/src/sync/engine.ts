@@ -104,7 +104,7 @@ async function _runSyncForNetworkImpl(networkId: string, progress: NetworkCycleP
   // What the cycle's pulls stored against the local schemas' rules, per space across every member (`sync/arrival-recording.ts`, R6-9).
   const recordedBySpace = new Map<string, RecordedSummary>();
   // Spaces not exchanged and why, per space across every member: a hold or a decline is not a failure (W9, X10).
-  const heldBySpace = new Map<string, SyncHeldSpace>(); const declinedBySpace = new Map<string, SyncDeclinedSpace>();
+  const heldBySpace = new Map<string, SyncHeldSpace>(), declinedBySpace = new Map<string, SyncDeclinedSpace>();
 
   log.info(`Starting sync cycle for network '${peerText(net.label)}' (${net.members.length} members)`);
   // Every member's turn is read by the one classifier both doors use (`sync/cycle-outcome.ts`): its outcome, its counters, the cycle's tally.

@@ -45,7 +45,7 @@ export async function pageTraversal(
   const position = new Map(ordered.map((n, i) => [String((n as { _id?: unknown; id?: unknown })._id ?? (n as { id?: unknown }).id), i]));
   const unitsEdges: Edge[][] = ordered.map(() => []);
   for (const e of walk.edges) {
-    const a = position.get(String(e.from)); const b = position.get(String(e.to));
+    const a = position.get(String(e.from)), b = position.get(String(e.to));
     if (a === undefined || b === undefined) continue;
     unitsEdges[Math.max(a, b)]!.push(e);
   }

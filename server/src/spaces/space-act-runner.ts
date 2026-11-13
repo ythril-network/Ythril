@@ -618,7 +618,7 @@ async function runJob(id: string, via: string): Promise<SpaceRoundSettled> {
       }
       if (drained === 'drained') break;
       setState(id, 'draining');
-      const localId = entry.localId; const kind = entry.kind;
+      const { localId, kind } = entry;
       waitingSaid(id, () => log.info(`${kind} of '${peerText(localId)}' is waiting for transfer(s) of it to end`));
       entry = readEntry(id) ?? entry;
     }

@@ -1584,7 +1584,7 @@ export const unresolvedForks = new Gauge({
       for (const id of [...forkCountsSeen.keys()]) if (!live.has(id)) forkCountsSeen.delete(id);
       this.reset();
       for (const { kind } of COUNTED_FORK_KINDS) {
-        let unresolved = 0; let marked = 0;
+        let unresolved = 0, marked = 0;
         for (const counts of forkCountsSeen.values()) { unresolved += counts[kind]?.unresolved ?? 0; marked += counts[kind]?.resolvedElsewhere ?? 0; }
         this.set({ kind, resolvedElsewhere: 'true' }, marked);
         this.set({ kind, resolvedElsewhere: 'false' }, unresolved - marked);
