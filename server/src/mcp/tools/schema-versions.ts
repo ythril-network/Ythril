@@ -1,6 +1,6 @@
 /**
  * MCP `space_schema_versions` (bundle-267, Q-742): a space's schema versions listed, one read, two compared - the tool half of
- * `GET /api/spaces/:id/schema-versions`, `.../:fp` and `.../:fp/diff`. All four run `spaces/schema-versions-acts.ts`, so the doors take the same
+ * `GET /api/spaces/:id/schema-versions` (`fp`, `against` and the rest as query parameters). Both run `spaces/schema-versions-acts.ts`, so the doors take the same
  * parameters and answer the same bodies and refusals. Rights come from `TOOL_RIGHTS`: `schema: read`.
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
@@ -19,9 +19,9 @@ export const space_schema_versionsTool: ToolHandler = {
     + 'the versions this instance keeps, newest first, then the fingerprints records carry that it keeps no schema for (`held: false`). '
     + '`counts` are the records of each collection that carry the version, read from the schema version index of four collections, no '
     + 'record. The order is the listing order only, not a version history. Same as `GET /api/spaces/:id/schema-versions`.\n\n'
-    + 'WITH `fp`: that version, `{ fp, current, held, schema: { typeSchemas, rules } }` (`GET .../schema-versions/:fp`).\n\n'
+    + 'WITH `fp`: that version, `{ fp, current, held, schema: { typeSchemas, rules } }` (`GET .../schema-versions?fp=`).\n\n'
     + 'WITH `fp` AND `against` (`current` or a fingerprint): what changed from `fp` to `against`, per type, in four classes - `structural` '
-    + '(whether a record conforms can change), `wording`, `write` and `lifecycle` (`GET .../schema-versions/:fp/diff`). A place this release '
+    + '(whether a record conforms can change), `wording`, `write` and `lifecycle` (`GET .../schema-versions?fp=&against=`). A place this release '
     + 'cannot read is listed in `unread`, never answered as unchanged.\n\n'
     + 'REFUSALS: `bad_fingerprint` (not 64 lowercase hex), `unknown_fingerprint` (not kept here, or not one this caller may read: a token '
     + 'bound to a peer sees only what the sync door would serve it), `against_needs_fp` (`against` alone), and `schema_index_building` '

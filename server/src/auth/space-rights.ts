@@ -210,8 +210,6 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/spaces/:id/schema-layers', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
   // Q-742: the space's schema versions, read like its meta.
   { route: '/api/spaces/:id/schema-versions', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
-  { route: '/api/spaces/:id/schema-versions/:fp', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
-  { route: '/api/spaces/:id/schema-versions/:fp/diff', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
   { route: '/api/spaces/:id/network-precedence', method: 'PUT', area: 'schema', needs: 'admin', scope: 'path' },
   // `PATCH /api/spaces/:id` and `DELETE /api/spaces/:id` used to sit here as `schema` rows. They are not
   // views of one area's data, so they moved to `NOT_AREA_SCOPED` below with their reasons.

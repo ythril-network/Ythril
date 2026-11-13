@@ -1,6 +1,6 @@
 /**
  * A space's schema versions, listed, read and compared (bundle-267, Q-742 without names; design r2 "Q-742 without names", r3 §4): the acts
- * behind `GET /api/spaces/:id/schema-versions[/:fp[/diff]]` and MCP `space_schema_versions`, so both doors take the same parameters and give the
+ * behind `GET /api/spaces/:id/schema-versions` (query `fp`, `against`) and MCP `space_schema_versions`, so both doors take the same parameters and give the
  * same answers and refusals.
  *
  * ## What each answers
@@ -23,7 +23,7 @@
  * ## Refusals
  *
  * `400 bad_fingerprint` for a fingerprint that is not 64 lowercase hex (on the path, or in `against`), `404 unknown_fingerprint` for one not
- * held or not this caller's to have, `400 against_needs_fp` for `against` without `fp` (the tool, whose list and diff share one door), a 400 for
+ * held or not this caller's to have, `400 against_needs_fp` for `against` without `fp` (both doors: the list, the read and the diff share one), a 400 for
  * a malformed budget or `skip`, and `503 schema_index_building` (thrown, `SchemaIndexBuilding`) while a collection lists no stamp index.
  */
 import { z } from 'zod';
@@ -211,7 +211,7 @@ export async function diffSchemaVersionAct(
 }
 
 /**
- * The tool's one door onto the three acts: no `fp` the list, `fp` the version, `fp` and `against` the comparison. `against` alone is refused
+ * The one door of both the tool and the route onto the three acts: no `fp` the list, `fp` the version, `fp` and `against` the comparison. `against` alone is refused
  * (`against_needs_fp`): it names what to compare WITH, and a list compares nothing.
  */
 export async function schemaVersionsToolAct(
