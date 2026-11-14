@@ -1,0 +1,99 @@
+{
+  "$comment": "Q-744 (bundle-268, design r4 §5, §10 T6/T9/C5): the answer shapes of GET /api/spaces/:id/schema-versions and MCP space_schema_versions in the type forms, one example each. The server suite the-schema-version-doors-are-documented-as-they-answer / a-space-lists-reads-and-compares-its-schema-versions-db holds the live answers to these shapes (check mode); the client's schema-api.service.spec reads this file and never keeps a second copy. typeClause lists the type names the client's typeClauseOf is held equal to the server's on (T9).",
+  "typeClause": {
+    "kinds": ["entity", "fact", "edge", "chrono"],
+    "names": ["Person", "knows", "a b", "__proto__", "constructor", "Ünïcødé", "x.y"]
+  },
+  "kind": {
+    "request": { "kind": "entity" },
+    "answer": {
+      "kind": "entity",
+      "current": "1111111111111111111111111111111111111111111111111111111111111111",
+      "types": [
+        { "type": "Person", "declared": "own", "older": true },
+        { "type": "Place", "declared": "own", "older": false },
+        { "type": "Shared", "declared": "layer", "networks": ["net-1"] },
+        { "type": "Gone", "declared": "none" }
+      ],
+      "count": 4, "total": 4, "limit": 100, "skip": 0, "truncated": false
+    }
+  },
+  "kindWithheld": {
+    "request": { "kind": "entity" },
+    "answer": {
+      "kind": "entity",
+      "current": "1111111111111111111111111111111111111111111111111111111111111111",
+      "recordFacts": "withheld",
+      "types": [
+        { "type": "Person", "declared": "own" },
+        { "type": "Shared", "declared": "layer", "networks": ["net-1"] }
+      ],
+      "count": 2, "total": 2, "limit": 100, "skip": 0, "truncated": false
+    }
+  },
+  "history": {
+    "request": { "kind": "entity", "type": "Person" },
+    "answer": {
+      "kind": "entity", "type": "Person",
+      "current": "1111111111111111111111111111111111111111111111111111111111111111",
+      "declared": "own",
+      "definitions": [
+        { "rep": "1111111111111111111111111111111111111111111111111111111111111111", "current": true, "since": "2026-11-03T10:00:00.000Z", "origin": { "edited": true, "networks": [], "fetched": false } },
+        { "rep": "2222222222222222222222222222222222222222222222222222222222222222", "current": false, "since": "2026-10-21T09:00:00.000Z", "until": "2026-11-03T10:00:00.000Z", "origin": { "edited": true, "networks": [], "fetched": false } },
+        { "rep": "3333333333333333333333333333333333333333333333333333333333333333", "current": false, "origin": { "edited": false, "networks": [], "fetched": true } }
+      ],
+      "count": 3, "total": 3, "limit": 100, "skip": 0, "truncated": false
+    }
+  },
+  "historyCut": {
+    "request": { "kind": "entity", "type": "Person" },
+    "answer": {
+      "kind": "entity", "type": "Person",
+      "current": "1111111111111111111111111111111111111111111111111111111111111111",
+      "declared": "own", "cut": true,
+      "definitions": [
+        { "rep": "1111111111111111111111111111111111111111111111111111111111111111", "current": true, "since": "2026-11-03T10:00:00.000Z", "origin": { "edited": true, "networks": [], "fetched": false } }
+      ],
+      "count": 1, "total": 1, "limit": 100, "skip": 0, "truncated": false
+    }
+  },
+  "historyUndeclared": {
+    "request": { "kind": "entity", "type": "Gone" },
+    "answer": {
+      "kind": "entity", "type": "Gone",
+      "current": "1111111111111111111111111111111111111111111111111111111111111111",
+      "declared": "none",
+      "definitions": [
+        { "rep": "2222222222222222222222222222222222222222222222222222222222222222", "current": false, "since": "2026-10-21T09:00:00.000Z", "until": "2026-11-03T10:00:00.000Z", "origin": { "edited": true, "networks": [], "fetched": false } }
+      ],
+      "count": 1, "total": 1, "limit": 100, "skip": 0, "truncated": false
+    }
+  },
+  "fps": {
+    "request": { "fps": ["1111111111111111111111111111111111111111111111111111111111111111", "2222222222222222222222222222222222222222222222222222222222222222", "4444444444444444444444444444444444444444444444444444444444444444", "5555555555555555555555555555555555555555555555555555555555555555"], "kind": "entity", "type": "Person" },
+    "answer": {
+      "kind": "entity", "type": "Person",
+      "current": "1111111111111111111111111111111111111111111111111111111111111111",
+      "standings": [
+        { "fp": "1111111111111111111111111111111111111111111111111111111111111111", "standing": "current", "definition": { "rep": "1111111111111111111111111111111111111111111111111111111111111111", "since": "2026-11-03T10:00:00.000Z" } },
+        { "fp": "2222222222222222222222222222222222222222222222222222222222222222", "standing": "older", "definition": { "rep": "2222222222222222222222222222222222222222222222222222222222222222", "since": "2026-10-21T09:00:00.000Z", "until": "2026-11-03T10:00:00.000Z" } },
+        { "fp": "4444444444444444444444444444444444444444444444444444444444444444", "standing": "notHeld" },
+        { "fp": "5555555555555555555555555555555555555555555555555555555555555555", "standing": "unclassified" }
+      ]
+    }
+  },
+  "refusals": {
+    "codes": ["bad_kind", "type_needs_kind", "kind_needs_type", "fps_needs_type", "too_many_fps", "bad_fingerprint", "unknown_fingerprint", "schema_versions_busy", "schema_index_building"],
+    "statusOf": { "bad_kind": 400, "type_needs_kind": 400, "kind_needs_type": 400, "fps_needs_type": 400, "too_many_fps": 400, "bad_fingerprint": 400, "unknown_fingerprint": 404, "schema_versions_busy": 503, "schema_index_building": 503 },
+    "example": { "status": 503, "body": { "error": "Placing this space's records against its schema versions took longer than this request may; what was done is kept, so trying again continues it.", "code": "schema_versions_busy" } }
+  },
+  "olderServer": {
+    "request": { "kind": "entity" },
+    "answer": {
+      "versions": [
+        { "fp": "1111111111111111111111111111111111111111111111111111111111111111", "current": true, "held": true, "origin": "own", "since": "2026-11-03T10:00:00.000Z", "counts": { "entities": 3, "facts": 0, "edges": 0, "chrono": 0 } }
+      ],
+      "count": 1, "total": 1, "limit": 100, "skip": 0, "truncated": false
+    }
+  }
+}
