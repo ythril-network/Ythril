@@ -9,6 +9,8 @@
  * and the first test would fail rather than the bug shipping silently.
  */
 import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { of } from 'rxjs';
 import { getTranslocoModule } from '../../testing/transloco-testing';
@@ -18,7 +20,7 @@ import { EntityRefPicker } from './entity-ref-picker.service';
 import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordDrawerComponent } from './record-drawer.component';
 import { isOnPush } from '../../testing/onpush';
-import { aMemory } from '../../testing/records';
+import { aMemory, anEntity } from '../../testing/records';
 
 /** getEntitiesByIds is the only API the open() → resolveEntityNames path can touch here. */
 function makeApi() {
@@ -30,6 +32,8 @@ describe('RecordDrawerComponent', () => {
     TestBed.configureTestingModule({
       imports: [RecordDrawerComponent, getTranslocoModule()],
       providers: [
+        // The Type definition row (b268, C3) reads the versions door through the real SchemaApi.
+        provideHttpClient(), provideHttpClientTesting(),
         RecordDrawerState,
         BrainStore,
         EntityRefPicker,
@@ -93,5 +97,46 @@ describe('RecordDrawerComponent', () => {
     expect(descField, 'description should be a <textarea>').toBeTruthy();
     expect(descField!.tagName).toBe('TEXTAREA');
     expect(descField!.value).toBe(multiline);
+  });
+
+  describe('the Type definition row (b268, C3, design r4 §7.7)', () => {
+    const asksOf = (http: HttpTestingController) => http.match(r => r.url.split('?')[0] === '/api/spaces/work/schema-versions').map(req => {
+      const q = new URLSearchParams(req.request.urlWithParams.split('?')[1] ?? '');
+      for (const k of req.request.params.keys()) q.set(k, req.request.params.get(k)!);
+      return Object.fromEntries(q);
+    });
+
+    it('sits right after Seq, and asks the standing of the record\'s own stamp for its kind and type', async () => {
+      const fixture = create();
+      const state = TestBed.inject(RecordDrawerState);
+      const http = TestBed.inject(HttpTestingController);
+      state.spaceId.set('work');
+      state.open('entity', anEntity({ type: 'person', schemaFingerprint: 'cc33dd44cc33dd44' } as never));
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const drawer = fixture.nativeElement.querySelector('.drawer') as HTMLElement;
+      const row = drawer.querySelector('app-record-type-definition');
+      expect(row, 'the drawer has no Type definition row').not.toBeNull();
+      const field = row!.closest('.drawer-field') ?? row!;
+      const before = field.previousElementSibling as HTMLElement | null;
+      expect(before?.textContent, 'the row does not follow Seq').toContain('common.seq');
+      expect(asksOf(http)).toEqual([{ fps: 'cc33dd44cc33dd44', kind: 'entity', type: 'person' }]);
+    });
+
+    it('a record with no stamp shows the row as No version and asks nothing', async () => {
+      const fixture = create();
+      const state = TestBed.inject(RecordDrawerState);
+      const http = TestBed.inject(HttpTestingController);
+      state.spaceId.set('work');
+      state.open('entity', anEntity({ type: 'person' }));
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const row = (fixture.nativeElement as HTMLElement).querySelector('app-record-type-definition');
+      expect(row, 'the drawer has no Type definition row').not.toBeNull();
+      expect(row!.textContent).toContain('brain.drawer.typeDefinition.none');
+      expect(asksOf(http)).toEqual([]);
+    });
   });
 });
