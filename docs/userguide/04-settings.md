@@ -162,7 +162,7 @@ you opened it* and a **Reload the schema** button; reloading drops your unsaved 
     the Schema right at **admin** sees every rule read-only with the reason (*Changing rules needs schema admin rights on
     this space, which this token does not hold*). The space's own rules that apply to the type are listed under *Space rules
     that apply here*, read-only.
-- **From Lib** — import a schema from the Schema Library. The type row shows a badge and stays in sync with the library automatically. While linked, the type's properties are shown **read-only** so you can see what it enforces; click **Unlink** to copy the library schema inline (breaking the link) and then customise it for this space.
+- **From Lib** — import a schema from the Schema Library. The type's pane shows it as linked, and it stays in sync with the library automatically. While linked, the type's properties are shown **read-only** so you can see what it enforces; click **Unlink** to copy the library schema inline (breaking the link) and then customise it for this space.
 - **From File** — import a schema from a previously exported JSON file.
 - **Save to Lib** — save the current type schema to the Schema Library for reuse in other spaces.
 
