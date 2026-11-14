@@ -2,12 +2,13 @@ import { ChangeDetectionStrategy, Component, inject, output, signal } from '@ang
 import { SupersededBadgeComponent } from '../../shared/superseded-badge.component';
 import { ForkMarkerComponent } from '../../shared/fork-marker.component';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { Entity } from '../../core/api.types';
 import { CascadePreview } from '../../core/cascade-preview.types';
-import { BrainApi } from '../../core/brain-api.service';
+import { BrainApi, type VersionArgs } from '../../core/brain-api.service';
+import { DefinitionLanding } from './definition-landing';
+import { DefinitionChipsComponent } from './definition-chips.component';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { PropertiesViewComponent } from '../../shared/properties-view.component';
 import { PropertiesEditorComponent } from '../../shared/properties-editor.component';
@@ -52,7 +53,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
   selector: 'app-entities-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, ForkMarkerComponent, RefusalAlertComponent, WriteWarningsComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, ForkMarkerComponent, RefusalAlertComponent, WriteWarningsComponent, DefinitionChipsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -142,6 +143,8 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
               {{ 'brain.deleteFailed' | transloco: { reason: recordList.deleteError() } }}
             </div>
           }
+          <app-definition-chips [landing]="landing" [spaceId]="spaceId()" kind="entity" [type]="recordFilter().type"
+            (removeType)="removeLandingType()" (removeDefinition)="removeDefinitionFilter()" />
           <app-record-order-line [sortField]="sortField()" />
           <div class="table-wrapper" hscrollTop>
             <table>
@@ -151,6 +154,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                     <input class="col-filter-input" type="text" [ngModel]="search()" (ngModelChange)="setSearchFilter($event)"
                       [placeholder]="'brain.filter.searchPlaceholder' | transloco" [attr.aria-label]="'brain.filter.searchPlaceholder' | transloco" />
                   </th>
+                  @if (landing.active()) { <th>{{ 'brain.list.typeDefinitionColumn' | transloco }}</th> }
                   <th app-sort-th field="type" label="brain.entities.table.type" [activeField]="sortField()" [dir]="sortDir()" (sort)="setSort($event)">
                     <select class="col-filter-select" [ngModel]="recordFilter().type" (ngModelChange)="setTypeFilter($event)" [attr.aria-label]="'brain.filter.label' | transloco">
                       <option value="">{{ 'brain.filter.allTypes' | transloco }}</option>
@@ -177,7 +181,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                 @for (ent of store.entities(); track ent._id) {
                   @if (recordList.editingId() === ent._id) {
                     <tr>
-                      <td colspan="7">
+                      <td [attr.colspan]="landing.active() ? 8 : 7">
                         <div class="create-form" style="border:none; padding:8px 0;">
                           <div class="field" style="flex:1; min-width:120px; margin-bottom:0;">
                             <label>{{ 'brain.entities.table.name' | transloco }}</label>
@@ -225,6 +229,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                   } @else {
                     <tr>
                       <td>{{ ent.name }} <app-superseded-badge [superseded]="ent.superseded" /> <app-fork-marker [forkOf]="ent.forkOf" kind="entity" /></td>
+                      @if (landing.active()) { <td style="white-space:nowrap;">@if (landing.cell(ent); as c) { {{ c.key | transloco: c.params }} }</td> }
                       <td>
                         @if (ent.type) { <span class="badge badge-purple">{{ ent.type }}</span> }
                       </td>
@@ -255,7 +260,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                     </tr>
                   }
                 } @empty {
-                  <tr><td colspan="7">
+                  <tr><td [attr.colspan]="landing.active() ? 8 : 7">
                     @if (recordList.loadError() !== null) {
                       <app-error-state [message]="'brain.error.loadEntities' | transloco" [reason]="recordList.loadError() ?? ''" (retry)="retryCurrentTab()" />
                     } @else {
@@ -279,7 +284,6 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
 export class EntitiesTabComponent extends RecordTabBase {
   readonly drawerState = inject(RecordDrawerState);
   private brainApi = inject(BrainApi);
-  private route = inject(ActivatedRoute);
   private confirmDialog = inject(ConfirmDialogService);
   private transloco = inject(TranslocoService);
   private readonly language = inject(ActiveLanguage).language;
@@ -287,16 +291,12 @@ export class EntitiesTabComponent extends RecordTabBase {
   private retype = inject(RetypeConfirmService);
 
   /**
-   * `?type=` seeds the type filter, so the Overview's data-model panel can link straight to "the entities
-   * of this type" as a real URL.
-   *
-   * Read from the snapshot ONCE, not subscribed. A later navigation carrying a different `?type=` is not a
-   * case worth serving: this tab unmounts when the user leaves it, so arriving here is always a fresh read.
-   * Subscribing would additionally fight `resetOnSpaceChange`, which clears the filter deliberately — a
-   * type filter must not survive a space change, because the same name can mean different things in two
-   * spaces.
+   * `?type=` seeds the type filter, so the Overview's data-model panel can link straight to "the entities of this type" as a real URL,
+   * and with `&definition=` a type's history lands here on its records not on the current definition (Q-744). The landing is the four
+   * record tabs' one reader of that link; a type filter must not survive a space change, because the same name can mean different
+   * things in two spaces, and the landing drops it there.
    */
-  private deepLinkedType = this.route.snapshot.queryParamMap.get('type') ?? undefined;
+  protected readonly landing = new DefinitionLanding('entity', () => this.relandOnLink());
 
   /** Emitted after a create/delete so the shell can refresh the space's tab-count stats. */
   readonly mutated = output<void>();
@@ -341,22 +341,24 @@ export class EntitiesTabComponent extends RecordTabBase {
     // two spaces, so carrying the filter across would silently show a filtered-empty list and look like the
     // space is empty. The tab unmounts when the user leaves it, so arriving here is always a fresh read of
     // the URL anyway.
-    const type = this.deepLinkedType ?? '';
-    this.deepLinkedType = undefined;
+    const type = this.landing.takeType();
     this.recordFilter.set({ type, tag: '', description: '', properties: '', fromName: '', toName: '', entityName: '' });
   }
 
   protected override load(): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;
-    const ef: { type?: string; tag?: string; description?: string; properties?: string } = {};
+    const ef: { type?: string; tag?: string; description?: string; properties?: string } & VersionArgs = { ...this.landing.listArgs() };
     if (this.recordFilter().type) ef.type = this.recordFilter().type;
     if (this.recordFilter().tag) ef.tag = this.recordFilter().tag;
     if (this.recordFilter().description) ef.description = this.recordFilter().description;
     if (this.recordFilter().properties) ef.properties = this.recordFilter().properties;
     // Through the tab's rows slot (Q-112): a newer filter's request cancels this one.
     this.loadRows(this.brainApi.listEntities(spaceId, this.pageSize, this.skip(), ef, this.sortParam(), this.searchParam()),
-      ({ entities }) => this.store.entities.set(entities));
+      ({ entities }) => {
+        this.store.entities.set(entities);
+        this.landing.readColumn(spaceId, this.recordFilter().type, entities);
+      });
   }
 
   // The top bar is a SEMANTIC finder now (2b-iii-d): its A–Z half was removed since the docked Name

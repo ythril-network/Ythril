@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { InstantComponent } from '../../shared/instant.component';
 import { FormsModule } from '@angular/forms';
@@ -15,7 +15,10 @@ import { propertyErrorsOf, refusalViewOf } from '../../core/refusal-signals';
 import { injectIsView } from '../../core/views.store';
 import { BrainStore } from './brain-store.service';
 import { EntityRefPicker } from './entity-ref-picker.service';
-import { RecordDrawerState } from './record-drawer-state.service';
+import { RecordDrawerState, type DrawerRecord } from './record-drawer-state.service';
+import { RecordTypeDefinitionComponent } from './record-type-definition.component';
+import { SchemaTypeHistoryComponent } from '../settings/schema-type-history.component';
+import { typeNameOf } from '../../core/type-field';
 import { holdUnsavedEdits } from '../../core/unsaved-edits';
 import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
 
@@ -33,7 +36,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
   selector: 'app-record-drawer',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, TagInputComponent, PropertiesEditorComponent, EntityRefFieldComponent, FactRefFieldComponent, PhIconComponent, ModalDirective, RefusalAlertComponent, WriteWarningsComponent],
+  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, TagInputComponent, PropertiesEditorComponent, EntityRefFieldComponent, FactRefFieldComponent, PhIconComponent, ModalDirective, RefusalAlertComponent, WriteWarningsComponent, RecordTypeDefinitionComponent, SchemaTypeHistoryComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES],
   template: `
       @if (state.drawerRecord(); as dr) {
@@ -117,6 +120,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                   <div class="drawer-label">{{ 'common.seq' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.seq }}</div>
                 </div>
+                <app-record-type-definition [spaceId]="state.spaceId()" kind="fact" [type]="recordType(dr)" [fp]="dr.record.schemaFingerprint" (compare)="openCompare($event)" />
                 @if (dr.record.author) {
                   <div class="drawer-field">
                     <div class="drawer-label">{{ 'common.authorInstanceId' | transloco }}</div>
@@ -164,6 +168,11 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                   <div class="drawer-label">_id</div>
                   <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record._id }}</div>
                 </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">{{ 'common.seq' | transloco }}</div>
+                  <div class="drawer-readonly-value">{{ dr.record.seq }}</div>
+                </div>
+                <app-record-type-definition [spaceId]="state.spaceId()" kind="entity" [type]="recordType(dr)" [fp]="dr.record.schemaFingerprint" (compare)="openCompare($event)" />
                 <div class="drawer-field" style="margin-bottom:0;">
                   <div class="drawer-label">{{ 'common.createdAt' | transloco }}</div>
                   <div class="drawer-readonly-value"><app-instant [value]="dr.record.createdAt" variant="datetimeSeconds"/></div>
@@ -217,6 +226,11 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                   <div class="drawer-label">_id</div>
                   <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record._id }}</div>
                 </div>
+                <div class="drawer-field">
+                  <div class="drawer-label">{{ 'common.seq' | transloco }}</div>
+                  <div class="drawer-readonly-value">{{ dr.record.seq }}</div>
+                </div>
+                <app-record-type-definition [spaceId]="state.spaceId()" kind="edge" [type]="recordType(dr)" [fp]="dr.record.schemaFingerprint" (compare)="openCompare($event)" />
                 <div class="drawer-field" style="margin-bottom:0;">
                   <div class="drawer-label">{{ 'common.createdAt' | transloco }}</div>
                   <div class="drawer-readonly-value"><app-instant [value]="dr.record.createdAt" variant="datetimeSeconds"/></div>
@@ -294,6 +308,7 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
                   <div class="drawer-label">{{ 'common.seq' | transloco }}</div>
                   <div class="drawer-readonly-value">{{ dr.record.seq }}</div>
                 </div>
+                <app-record-type-definition [spaceId]="state.spaceId()" kind="chrono" [type]="recordType(dr)" [fp]="dr.record.schemaFingerprint" (compare)="openCompare($event)" />
                 <div class="drawer-field">
                   <div class="drawer-label">_id</div>
                   <div class="drawer-readonly-value" style="font-family:var(--font-mono,monospace); font-size:11px;">{{ dr.record._id }}</div>
@@ -311,6 +326,13 @@ import { BRAIN_CHIP_STYLES, BRAIN_DRAWER_STYLES } from './brain-form.styles';
 
           </div>
         </div>
+        <!-- Compare: the record's type's history, opened on the record's definition (r4 §7.7). -->
+        @if (compareRep(); as rep) {
+          @if (recordType(dr); as type) {
+            <app-schema-type-history [spaceId]="state.spaceId()" [kind]="dr.kind" [type]="type" [chosen]="rep"
+              (closed)="compareRep.set(null)" (left)="compareRep.set(null); requestClose()" />
+          }
+        }
       }
   `,
 })
@@ -333,6 +355,14 @@ export class RecordDrawerComponent {
   protected requestClose(): void {
     void this.draft.closeIfConfirmed(() => this.state.close());
   }
+
+  /** The definition Compare opened the type's history on; null while the history is closed. */
+  protected readonly compareRep = signal<string | null>(null);
+
+  protected openCompare(rep: string): void { this.compareRep.set(rep); }
+
+  /** The record's type name, read from the field its kind keeps it in (an edge's is its label). */
+  protected recordType(dr: DrawerRecord): string | undefined { return typeNameOf(dr.kind, dr.record); }
 
   /** The instance an author wrote from, by the label it carries (an author that predates labels has the id only). */
   authorLabel(author: { instanceId: string; instanceLabel?: string }): string {

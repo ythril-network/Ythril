@@ -9,6 +9,7 @@ import { injectIsView } from '../../core/views.store';
 import { httpErrorReason } from '../../core/http-error';
 import type { WireRow } from '../../core/refusal-text';
 import { splitWriteWarnings } from '../../core/write-warnings';
+import type { DefinitionLanding } from './definition-landing';
 
 /** How long a typed column filter waits for typing to pause before the list reloads. */
 const FILTER_DEBOUNCE_MS = 250;
@@ -147,7 +148,12 @@ export abstract class RecordTabBase {
     this.recordList.loadError.set(null);
     this.rows.run(source, {
       next: apply,
-      error: (e) => this.recordList.loadError.set(httpErrorReason(e)),
+      error: (e) => {
+        // A server that refuses the definition filter (older: no `sameAs:`) is not a failed list: the landing drops the filter and
+        // says so, and the list is read again by its type alone, after this request has finished.
+        if (this.landing.refuse(e)) { queueMicrotask(() => this.load()); return; }
+        this.recordList.loadError.set(httpErrorReason(e));
+      },
       // Superseded: the newer request owns the indicator now, so it stays on.
       finally: (superseded) => { if (!superseded) this.recordList.loading.set(false); },
     });
@@ -192,6 +198,32 @@ export abstract class RecordTabBase {
 
   /** Load the tab's list for the active space. Sets `recordList.loading`/`loadError` + `store.<coll>`. */
   protected abstract load(): void;
+
+  /**
+   * The Brain landing of a type's history (`type=&definition=`, Q-744): each tab makes one for its kind, wired to `relandOnLink`.
+   * Its list body carries `landing.listArgs()`, its rows feed `landing.readColumn`, and its filter starts from `landing.takeType()`.
+   */
+  protected abstract readonly landing: DefinitionLanding;
+
+  /** A later link brought a new type and definition: the filter takes the type and the list reloads from its first page. */
+  protected relandOnLink(): void {
+    this.recordFilter.update(f => ({ ...f, type: this.landing.takeType() }));
+    this.skip.set(0);
+    this.load();
+  }
+
+  /** The definition chip's ✕: the list goes back to the type alone. */
+  removeDefinitionFilter(): void {
+    this.landing.clear();
+    this.skip.set(0);
+    this.load();
+  }
+
+  /** The type chip's ✕: the type filter goes, and the definition filter with it (its column and chip name the type). The edges tab, whose linked type is a label, overrides it. */
+  removeLandingType(): void {
+    this.landing.clear();
+    this.setTypeFilter('');
+  }
 
   /** Override to clear per-tab filter/search state on a space switch (default: nothing beyond skip). */
   protected resetOnSpaceChange(): void {}
