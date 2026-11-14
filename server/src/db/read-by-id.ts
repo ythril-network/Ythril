@@ -53,6 +53,20 @@ const READ_PARALLEL = 4;
 export type TimeLeft = () => number | undefined;
 
 /**
+ * A {@link TimeLeft} over one deadline: what `remaining()` says is left, as a read's own `maxTimeMS` (whole milliseconds, at least 1), and
+ * `spent()` thrown once nothing is. The one spelling of a request's deadline handed to every read of a pass (recall's seed walk, the
+ * schema-version standing pass). What a hand copy drops: the throw, so a spent deadline is sent as `maxTimeMS: 0`, which the store reads
+ * as no bound at all.
+ */
+export function timeLeftUntil(remaining: () => number, spent: () => Error): () => number {
+  return () => {
+    const ms = remaining();
+    if (ms <= 0) throw spent();
+    return Math.max(1, Math.floor(ms));
+  };
+}
+
+/**
  * The fields a reader returns: an inclusion of the ones the caller reads, `'all'` but the never-returned ones, or
  * `'carried'` — every stored field, the vector included, for a writer re-inserting the document it read (a re-key
  * carries the edge's vector across; `'all'` would drop it, and the edge would leave recall until it re-embedded).

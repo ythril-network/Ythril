@@ -51,7 +51,7 @@ import { edgeIdentityTakenAnswer } from '../brain/edge-rekey.js';
 import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { answerForCaught } from '../util/answer-for-caught.js';
 import { spaceActAnswer } from '../spaces/space-act-answer.js';
-import { NotFoundError, ToolRefusal, schemaIndexBuildingAnswer } from '../util/errors.js';
+import { NotFoundError, ToolRefusal, schemaReadUnavailableAnswer } from '../util/errors.js';
 import { WriteConflict } from '../brain/write-plan/types.js';
 import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
 import { PositionClockUnusable, PositionsSeedUnavailable, ForkRowReadOnly, ForkCapRefusal, EndpointRemoved, LinkTargetRemoved } from '../util/errors.js';
@@ -455,8 +455,9 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     if (err instanceof NotFoundError) {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 404, callSpace };
     }
-    // A read of schema versions over a collection that lists no stamp index yet: the REST door's 503 and body (`sendCaughtFailure`), the code in the text too.
-    const building = schemaIndexBuildingAnswer(err);
+    // A read of schema versions over a collection that lists no stamp index yet, or a pass past its deadline: the REST door's 503 and body
+    // (`sendCaughtFailure`), the code in the text too.
+    const building = schemaReadUnavailableAnswer(err);
     if (building) {
       return { result: { content: [{ type: 'text' as const, text: `Error: ${message} (${building.body.code})` }], isError: true, structuredContent: building.body }, status: building.status, callSpace };
     }

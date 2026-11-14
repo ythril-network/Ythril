@@ -37,6 +37,11 @@ export interface CoalescingRunnerHooks {
   onQueued?(key: string): void;
   /** A queued rerun is starting. */
   onRerun?(key: string): void;
+  /**
+   * `false`: a trigger mid-flight joins and queues NOTHING (bundle-268, Q-744 design r3 §5.2). For a read pass, whose joiners want the answer
+   * of the flight they joined and have nothing for a rerun to pick up. The release in `finally` holds either way. Default `true`.
+   */
+  rerun?: boolean;
 }
 
 /**
@@ -76,9 +81,11 @@ export function createCoalescingRunner<T, P extends object = object>(hooks: Coal
     const inflight = running.get(key);
     if (inflight) {
       // Join the running job and ask for one more pass after it. `add` on a Set is what makes this
-      // "one more", not "one more per trigger".
-      rerunRequested.add(key);
-      hooks.onQueued?.(key);
+      // "one more", not "one more per trigger". A runner made with `rerun: false` only joins.
+      if (hooks.rerun !== false) {
+        rerunRequested.add(key);
+        hooks.onQueued?.(key);
+      }
       return inflight;
     }
 
