@@ -37,6 +37,7 @@ import type { RefKind } from '../config/types-knowledge.js';
 import { syntheticEdgeId } from './edge-id.js';
 import type { EdgeDoc, EntityDoc } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
+import { timeLeftUntil } from '../db/read-by-id.js';
 
 /** Hard cap on the `traverse` depth accepted by graph-augmented recall. */
 export const MAX_RECALL_TRAVERSE = 5;
@@ -247,12 +248,7 @@ export async function traverseFromSeeds(
 ): Promise<SeedTraverse> {
   if (seedIds.length === 0 || maxDepth < 1 || limit < 1) return { neighbours: [], scanCapped: false };
   /** The deadline as a query's own `maxTimeMS`, or none. Throws once nothing is left. */
-  const timeLeft = (): number | undefined => {
-    if (!deadline) return undefined;
-    const ms = deadline();
-    if (ms <= 0) throw new WalkDeadlineExceeded();
-    return Math.max(1, Math.floor(ms));
-  };
+  const timeLeft: () => number | undefined = deadline ? timeLeftUntil(deadline, () => new WalkDeadlineExceeded()) : () => undefined;
   const entities = spaceCollection(spaceId, 'entities');
 
   // Set by either link scan when it stopped reading rather than running out of matches. Carried out rather

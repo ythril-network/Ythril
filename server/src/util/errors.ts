@@ -145,13 +145,32 @@ export class SchemaIndexBuilding extends Error {
   }
 }
 
+/** The code a door answers a schema-version pass with when it ran out of its request's time. A constant, never a literal at a site. */
+export const SCHEMA_VERSIONS_BUSY = 'schema_versions_busy';
+
 /**
- * The answer every door gives {@link SchemaIndexBuilding}: its status and `{ error, code, retryable: true }`, or `undefined` for any other
- * error. The REST door (`sendCaughtFailure`) and the tool door (`callTool`) both read it, so the two bodies cannot drift.
+ * A pass that places a space's records against its schema versions (the type history, its older mark, the filter's `older` and `sameAs`) spent
+ * its request's deadline (bundle-268, Q-744 design r3 §5.1). What was classified stays in the memo, so trying again continues it. The sentence
+ * is fixed: the store's own `MaxTimeMSExpired` text never reaches a caller. Every door answers `503` with `code: 'schema_versions_busy'` and
+ * `retryable: true`.
  */
-export function schemaIndexBuildingAnswer(err: unknown):
-  { status: 503; body: { error: string; code: typeof SCHEMA_INDEX_BUILDING; retryable: true } } | undefined {
-  if (!(err instanceof SchemaIndexBuilding)) return undefined;
+export class SchemaVersionsBusy extends Error {
+  override readonly name = 'SchemaVersionsBusy';
+  readonly code = SCHEMA_VERSIONS_BUSY;
+  readonly status = 503;
+  constructor(readonly spaceId: string) {
+    super('Placing this space\'s records against its schema versions took longer than this request may; what was done is kept, so trying again continues it.');
+  }
+}
+
+/**
+ * The answer every door gives a schema-version read that cannot be answered now, {@link SchemaIndexBuilding} or {@link SchemaVersionsBusy}: its
+ * status and `{ error, code, retryable: true }`, or `undefined` for any other error. The REST door (`sendCaughtFailure`) and the tool door
+ * (`callTool`) both read it, so the two bodies cannot drift.
+ */
+export function schemaReadUnavailableAnswer(err: unknown):
+  { status: 503; body: { error: string; code: typeof SCHEMA_INDEX_BUILDING | typeof SCHEMA_VERSIONS_BUSY; retryable: true } } | undefined {
+  if (!(err instanceof SchemaIndexBuilding) && !(err instanceof SchemaVersionsBusy)) return undefined;
   return { status: err.status, body: { error: err.message, code: err.code, retryable: true } };
 }
 

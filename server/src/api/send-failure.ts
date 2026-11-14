@@ -32,7 +32,7 @@ import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { spaceActAnswer } from '../spaces/space-act-answer.js';
 import { writeRefusalAnswer } from '../brain/write-validation.js';
 import { RecordVersionAtCeiling } from '../brain/write-precondition.js';
-import { PositionClockUnusable, PositionsSeedUnavailable, PositionsBuilding, EdgeIdentityBuilding, schemaIndexBuildingAnswer } from '../util/errors.js';
+import { PositionClockUnusable, PositionsSeedUnavailable, PositionsBuilding, EdgeIdentityBuilding, schemaReadUnavailableAnswer } from '../util/errors.js';
 
 /**
  * Put a store failure's answer on the wire: status, `Retry-After` when the answer is retryable, and the body —
@@ -118,8 +118,9 @@ export function sendCaughtFailure(res: express.Response, where: string, err: unk
   if (err instanceof PositionsBuilding) { res.status(503).json({ error: err.message, code: err.code, retryable: true }); return; }
   // A page of fork edges for a space still rebuilding its edge identity index: the 503 a sender reads as the EDGES FAMILY held (`edge_identity_building`).
   if (err instanceof EdgeIdentityBuilding) { sendEdgeIdentityBuilding(res, err); return; }
-  // A read of schema versions over a collection that lists no stamp index yet: the 503 the tool door answers too (`schema_index_building`).
-  const building = schemaIndexBuildingAnswer(err);
+  // A read of schema versions over a collection that lists no stamp index yet, or a pass past its deadline: the 503 the tool door answers
+  // too (`schema_index_building`, `schema_versions_busy`).
+  const building = schemaReadUnavailableAnswer(err);
   if (building) { res.status(building.status).json(building.body); return; }
   const stamp = writeRefusalAnswer(err, 'update');
   if (stamp && (err instanceof RecordVersionAtCeiling || err instanceof PositionClockUnusable || err instanceof PositionsSeedUnavailable)) {
