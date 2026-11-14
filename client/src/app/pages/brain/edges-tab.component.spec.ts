@@ -15,6 +15,14 @@ import { EntityRefPicker } from './entity-ref-picker.service';
 import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordListState } from './record-list-state.service';
 import { EdgesTabComponent } from './edges-tab.component';
+import { definitionFilterCases } from '../../testing/definition-filter-cases';
+import { anEdge } from '../../testing/records';
+
+// The Brain landing of a type's history (b268, C4): the shared cases, over this tab. An edge's type is its label (P67).
+definitionFilterCases({
+  component: EdgesTabComponent, kind: 'edge', collection: 'edges',
+  record: (i, type, fp) => anEdge({ _id: `g${i}`, label: type, ...(fp ? { schemaFingerprint: fp } : {}) } as never),
+});
 import { isOnPush } from '../../testing/onpush';
 
 const api = {
