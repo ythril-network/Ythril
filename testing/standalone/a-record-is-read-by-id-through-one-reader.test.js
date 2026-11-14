@@ -57,6 +57,10 @@ const READER = 'server/src/db/read-by-id.ts';
  * function that defines them.
  */
 const ALLOWED = new Map([
+  // bundle-268 (Q-744): the size of schema version texts, read without the texts.
+  ['server/src/spaces/type-standing.ts:textSizesOf',
+    'the byte size of each of some schema version texts in a space\'s private `<space>_schema_snapshots` (`$strLenBytes`, no text shipped), so'
+    + ' the standing pass can read the texts in byte-bounded chunks: a snapshot row is no record, and no stored copy is returned.'],
   // bundle-265 (Q-735): two by-id reads that are not of records at all.
   ['server/src/files/retired-local-path-sweep.ts:sweepRetiredLocalPaths',
     'which of the paths a retired writer left has a `files` row (projected to `_id`): a file WITH a row is someone\'s upload and is kept. An'
