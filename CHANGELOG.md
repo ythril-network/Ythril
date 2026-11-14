@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Schema:** a schema version is kept while a record here carries it, while it is current or a network's layer, and while a kept version links it; once none holds, the housekeeping cycle removes it no sooner than a day after it first found it unused.
 - **Schema:** `GET /api/spaces/:id/schema-versions` and MCP `space_schema_versions` list a space's schema versions with record counts, read one (`fp`), or say what changed per type from one to another (`fp` and `against`); a peer-bound token sees only what the sync door would serve it.
 - **Schema:** `against: stamp` on `POST /api/spaces/:id/validate-schema` and MCP `schema_validate` judges each stored record by the version it carries, counting those it cannot in `skipped` (`unversioned`, `notHeld`, `unread`); `against` is echoed in every answer.
+- **Schema:** a type's history on the schema versions door and tool (`kind`, `type`, `fps`), `sameAs:<fp>` on the filter, the History dialog, a clock mark on types with records on an older definition, the drawer's Type definition row and the Brain chips and column.
 - **Import/export:** an admin space export carries `schemaSnapshots`, `{ fp, text, links }` for each schema version its records use and each one those link; one too large for an importer is left out, counted `schemaSnapshotsOmitted`.
 - **Import/export:** an import keeps each verified schema version as fetched, after its records, and skips one that is not; it answers `schemaSnapshots: { landed, held, refused }`, and its audit row counts `snapshotsLanded`, `snapshotsRefused` and `unreadArraysTotal`.
 - **Records:** a record carries `schemaFingerprint`, the schema it conformed to when it was written here or when it arrived: a conforming write stamps it, and its answer shows it; a non-conforming update, a redaction, a relink or a change of an edge end's type removes it. Recall hits omit it.
@@ -39,7 +40,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** `filesAwaitingBytes` on REST stats and MCP `space_stats`: records whose bytes are missing here, which file counts leave out. The change feed gains reason `bytes_lost` and the audit log `file.absent_bytes.sweep`.
 - **Files:** the Brain page's Files tab, a view's Overview and the Danger zone show "+N awaiting bytes" beside the file count when some records wait for their bytes.
 - **Files:** metrics `ythril_files_absent_bytes_removed_total`, `ythril_files_awaiting_bytes` and `ythril_files_absent_bytes_held`.
-- **Schema:** a type's history on the schema versions door and tool (`kind`, `type`, `fps`), `sameAs:<fp>` on the filter, the History dialog, a clock mark on types with records on an older definition, the drawer's Type definition row and the Brain chips and column.
 
 ### Changed
 

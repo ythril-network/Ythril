@@ -86,6 +86,9 @@ const OPEN_BY_RULING = [
   { name: 'the sync wait bound', test: q => q.door === 'MCP network_sync' && q.seg === 'timeoutMs',
     why: 'clamped to 1000-120000 by `syncTimeoutMs`, the function `POST /api/networks/:id/sync` clamps with, and the applied value is '
       + 'disclosed in the answer. A schema `maximum` would REFUSE a value REST clamps (Q-468)' },
+  { name: 'the schema versions fps list', test: q => (q.seg === 'fps' || /\.fps(\|\d+)?$/.test(q.path)) && (q.door === 'MCP space_schema_versions' || /SchemaVersionsParams$/.test(q.door)),
+    why: 'bounded by the act both doors run (`FPS_MAX`, 100, in spaces/schema-type-acts.ts), which refuses a longer list `400 too_many_fps`; '
+      + 'a schema `maxItems` would refuse it first as an argument error on MCP only, without the code the route answers (bundle-268, Q-744)' },
   { name: 'merge resolutions', test: q => q.door === 'MCP graph_merge' && q.seg === 'resolutions',
     why: 'read once into a map keyed by property name; an entry naming a property the plan did not report changes nothing' },
 ];
