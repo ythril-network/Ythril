@@ -4,6 +4,7 @@ import { RungPickerComponent } from './rung-picker.component';
 import { SpaceAdminToggleComponent } from './space-admin-toggle.component';
 import { RIGHT_AREAS, type Rung, type TokenRights, type WireRungs } from './rights-glyph.component';
 import { RightsCatalogService } from './rights-catalog.service';
+import { HELP_TOGGLE_STYLES } from '../../shared/help-toggle.styles';
 
 const EMPTY = (): WireRungs => Object.fromEntries(RIGHT_AREAS.map(a => [a, 'none'])) as WireRungs;
 
@@ -30,7 +31,8 @@ const EMPTY = (): WireRungs => Object.fromEntries(RIGHT_AREAS.map(a => [a, 'none
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [RungPickerComponent, SpaceAdminToggleComponent, TranslocoPipe],
-  styles: [`
+  // The "?" and its box are the app's one help look (shared/help-toggle.styles.ts); this matrix keeps its own "one area open" state.
+  styles: [HELP_TOGGLE_STYLES, `
     :host { display: block; overflow-x: auto; }
     table { border-collapse: collapse; width: 100%; font-size: 13px; }
     th, td { border-bottom: 1px solid var(--border-muted); padding: 8px 10px; text-align: center; }
@@ -40,22 +42,6 @@ const EMPTY = (): WireRungs => Object.fromEntries(RIGHT_AREAS.map(a => [a, 'none
     tr.floor { border-bottom: 2px solid var(--accent); }
     tr.floor td.l { color: var(--accent); }
     td.l small { display: block; font-weight: 400; font-size: 11px; color: var(--text-muted); }
-    .area-info {
-      /* Flex-centred, not left to text metrics. A bare ? has left side bearing, so in a 15px circle at
-         10px it sits visibly left of centre - reported as the help question-marks being off. A button's
-         default text centring works on the ADVANCE width, which is not where the ink is. */
-      display: inline-flex; align-items: center; justify-content: center;
-      margin-left: 5px; width: 15px; height: 15px; padding: 0; line-height: 1;
-      border: 1px solid var(--border); border-radius: 50%;
-      background: var(--bg-surface); color: var(--text-muted);
-      font-size: 10px; font-weight: 700; cursor: pointer; vertical-align: middle;
-    }
-    .area-info:hover { border-color: var(--accent); color: var(--accent); }
-    .area-info[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
-    .explain {
-      margin: 10px 0 2px; padding: 10px 12px; text-align: left;
-      border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated);
-    }
     .explain h4 { margin: 0 0 4px; font-size: 12.5px; }
     .explain p { margin: 0 0 8px; font-size: 12px; color: var(--text-secondary); }
     .explain .rungs { margin: 0 0 8px; padding: 0; list-style: none; font-size: 12px; }
