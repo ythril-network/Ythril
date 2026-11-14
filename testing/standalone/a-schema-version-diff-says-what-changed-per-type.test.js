@@ -16,7 +16,7 @@
  *     [{ kind, from, to }], unread }`.
  *   - `typesDifferingUnder(fromText, toText, mode)` (mode `structural | any`): `{ kinds: Map<kind, Set<type> | 'all'>, unclassified }`;
  *     `typesDifferingBetween({ fp, text }, { fp, text }, mode)` answers it memoised per process by the two fingerprints and the mode
- *     (bounded at 256 pairs), and `knownTypesDiffering(fromFp, toFp, mode)` reads that memo alone.
+ *     (bounded at `PAIR_MEMO_MAX` pairs, 4,096 since bundle-268), and `knownTypesDiffering(fromFp, toFp, mode)` reads that memo alone.
  *
  * ## Why each case can fail for a real defect
  *
@@ -266,9 +266,14 @@ describe('the diff memo', () => {
     assert.equal(knownTypesDiffering(v(0).fp, v(1).fp, 'structural'), first, 'the memo is not keyed by the fingerprints alone');
     assert.equal(typesDifferingBetween(v(0), v(1), 'structural'), first, 'the same pair was classified twice');
     assert.notEqual(typesDifferingBetween(v(0), v(1), 'any'), first, 'the mode is not part of the key');
-    for (let i = 2; i < 2 + 300; i++) typesDifferingBetween(v(0), v(i), 'structural');
+    // The bound is read from the module, so the case outgrows it whatever size it is given (bundle-268 raised it from 256 to 4,096).
+    const max = diff.PAIR_MEMO_MAX;
+    assert.ok(Number.isInteger(max) && max >= 4_096, `the pair memo holds ${max} pairs (PAIR_MEMO_MAX), fewer than one history's COMPARE_MAX`);
+    const newer = max + 44;
+    const zero = v(0);
+    for (let i = 2; i < 2 + newer; i++) typesDifferingBetween(zero, v(i), 'structural');
     const again = typesDifferingBetween(v(0), v(1), 'structural');
-    assert.notEqual(again, first, 'the memo held 300 newer pairs and the first: it is not bounded');
+    assert.notEqual(again, first, `the memo held ${newer} newer pairs and the first: it is not bounded`);
     assert.deepEqual([...again.kinds.entries()].map(([k, s]) => [k, s === 'all' ? s : [...s].sort()]),
       [...first.kinds.entries()].map(([k, s]) => [k, s === 'all' ? s : [...s].sort()]));
   });

@@ -33,7 +33,7 @@ import { isPlainObject, placeUnder, spaceRuleKinds, type StoredRule } from '@yth
 import { isDeepStrictEqual } from 'node:util';
 import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import { LruMap } from '../util/lru-map.js';
-import { versionMetaOf, type VersionSchema } from './schema-version-text.js';
+import { versionMetaOf, type VersionSchema, type VersionMeta } from './schema-version-text.js';
 import { kindHasAllowlist } from './schema-validation.js';
 
 /** The four classes of a change; `nested` marks a key whose own table classes its parts. */
@@ -157,19 +157,61 @@ function diffOf(a: VersionSchema, b: VersionSchema, unread: string[]): SchemaVer
   return { types, spaceRules, allowlists, unread };
 }
 
+/**
+ * A version text read once, for a pass that diffs one text (its anchor) against many: {@link schemaVersionDiff} takes it in place of the text
+ * and does not read it again (design r3 §5.4, amend 4).
+ */
+export interface ParsedVersion {
+  readonly text: string;
+  readonly read: VersionMeta | null;
+}
+
+/** `text` read as a stored version is read, once. */
+export const parsedVersion = (text: string): ParsedVersion => ({ text, read: versionMetaOf(text) });
+
+/** A version as a diff takes it: its text, or the text already read. */
+export type VersionInput = string | ParsedVersion;
+
+const readOf = (v: VersionInput): VersionMeta | null => (typeof v === 'string' ? versionMetaOf(v) : v.read);
+const textOf = (v: VersionInput): string => (typeof v === 'string' ? v : v.text);
+
 /** Both texts read, or the unread answer for a text that is not a version text at all. */
-function readPair(fromText: string, toText: string): { a: VersionSchema; b: VersionSchema; unread: string[] } {
-  const a = versionMetaOf(fromText), b = versionMetaOf(toText);
+function readPair(from: VersionInput, to: VersionInput): { a: VersionSchema; b: VersionSchema; unread: string[] } {
+  const a = readOf(from), b = readOf(to);
   const empty: VersionSchema = { typeSchemas: {}, rules: {} };
   const unread = [...(a ? a.unread.map(p => `from:${p}`) : ['from:text']), ...(b ? b.unread.map(p => `to:${p}`) : ['to:text'])];
   return { a: a?.meta ?? empty, b: b?.meta ?? empty, unread };
 }
 
-/** What changed from `fromText` to `toText`, per type, per space rule and per kind's allowlist, in the four classes. */
-export function schemaVersionDiff(fromText: string, toText: string): SchemaVersionDiff {
-  if (fromText === toText) return { types: [], spaceRules: [], allowlists: [], unread: [] };
-  const { a, b, unread } = readPair(fromText, toText);
+/** What changed from `from` to `to` (texts, or texts read once), per type, per space rule and per kind's allowlist, in the four classes. */
+export function schemaVersionDiff(from: VersionInput, to: VersionInput): SchemaVersionDiff {
+  if (textOf(from) === textOf(to)) return { types: [], spaceRules: [], allowlists: [], unread: [] };
+  const { a, b, unread } = readPair(from, to);
   return diffOf(a, b, unread);
+}
+
+/**
+ * Does a changed space rule reach the records of `kind`? It governs every type of the kinds it names on either side (A1). THE reach of a
+ * space rule: the classification ({@link typesDifferingUnder}) and the narrowed comparison ({@link narrowedDiff}) both ask it, so a type's
+ * history never shows a change the classification did not count, or hides one it did.
+ */
+export const ruleReaches = (rule: SchemaVersionDiff['spaceRules'][number], kind: string): boolean => rule.kinds.includes(kind);
+
+/** Does a kind's allowlist change reach the records of `kind`? Only its own (A2). Asked by the classification and the narrowed comparison. */
+export const allowlistReaches = (allowlist: SchemaVersionDiff['allowlists'][number], kind: string): boolean => allowlist.kind === kind;
+
+/**
+ * The comparison a type's history shows: `diff` cut to what reaches one (kind, type), in the same shape. `types` holds only that type's
+ * entry, `spaceRules` only the rules that reach the kind ({@link ruleReaches}), `allowlists` only the kind's ({@link allowlistReaches}),
+ * `unread` as it was. It counts a change exactly when the classification names the type or marks its kind `all` (the reach law, T7).
+ */
+export function narrowedDiff(diff: SchemaVersionDiff, kind: string, type: string): SchemaVersionDiff {
+  return {
+    types: diff.types.filter(t => t.kind === kind && t.type === type),
+    spaceRules: diff.spaceRules.filter(r => ruleReaches(r, kind)),
+    allowlists: diff.allowlists.filter(a => allowlistReaches(a, kind)),
+    unread: diff.unread,
+  };
 }
 
 /** Which changes count: `structural` alone, or `any` of the four classes. */
@@ -185,20 +227,23 @@ export interface TypesDiffering {
 /**
  * The pairs classified, by both FINGERPRINTS and the mode (`fromFp>toFp|mode`, design r3 §2). A fingerprint is the sha256 of its text
  * (`schema-stamp.ts`; a row's `_id` is verified against its text when it arrives), so an entry never goes stale, and a hit reads no text.
+ * 4,096 (bundle-268, design r3 §5.3): one type history makes at most n − 1 neighbour pairs plus `COMPARE_MAX` (4,096) representative pairs, so
+ * a history paged twice finds its pairs here; the walk over every carried version (the older mark, `older`) keeps its own standing memo and
+ * does not cycle through this one.
  */
-const PAIR_MEMO_MAX = 256;
+export const PAIR_MEMO_MAX = 4_096;
 const pairMemo = new LruMap<string, TypesDiffering>(PAIR_MEMO_MAX);
 const pairKey = (fromFp: string, toFp: string, mode: SchemaChangedMode): string => `${fromFp}>${toFp}|${mode}`;
 
-/** A version as the memo knows it: its fingerprint and the text it names. */
-export interface FingerprintedText { readonly fp: string; readonly text: string }
+/** A version as the memo knows it: its fingerprint and the text it names (or that text, read once). */
+export interface FingerprintedText { readonly fp: string; readonly text: VersionInput }
 
 /**
  * The types of each kind that differ from `fromText` to `toText` under `mode`, from {@link schemaVersionDiff} with A1 (a space rule's kinds)
  * and A2 (allowlists). Not memoised: a caller that holds the fingerprints asks {@link knownTypesDiffering} first and reads the texts only on a miss.
  */
-export function typesDifferingUnder(fromText: string, toText: string, mode: SchemaChangedMode): TypesDiffering {
-  return classify(schemaVersionDiff(fromText, toText), mode);
+export function typesDifferingUnder(from: VersionInput, to: VersionInput, mode: SchemaChangedMode): TypesDiffering {
+  return classify(schemaVersionDiff(from, to), mode);
 }
 
 /** The memo's answer for the pair of fingerprints and `mode`, or `undefined`: then read both texts and ask {@link typesDifferingBetween}. */
@@ -223,8 +268,9 @@ function classify(diff: SchemaVersionDiff, mode: SchemaChangedMode): TypesDiffer
   const counts = (changes: readonly SchemaChange[]): boolean => changes.some(c => mode === 'any' || c.class === 'structural');
   const kinds = new Map<string, Set<string> | 'all'>();
   const all = (kind: string): void => { kinds.set(kind, 'all'); };
-  for (const r of diff.spaceRules) if (counts(r.changes)) for (const kind of r.kinds) all(kind);
-  for (const a of diff.allowlists) all(a.kind);
+  const reachable = new Set([...KNOWLEDGE_TYPES, ...diff.spaceRules.flatMap(r => r.kinds), ...diff.allowlists.map(a => a.kind)]);
+  for (const r of diff.spaceRules) if (counts(r.changes)) for (const kind of reachable) if (ruleReaches(r, kind)) all(kind);
+  for (const a of diff.allowlists) for (const kind of reachable) if (allowlistReaches(a, kind)) all(kind);
   for (const t of diff.types) {
     if (!counts(t.changes)) continue;
     const held = kinds.get(t.kind);
