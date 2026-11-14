@@ -290,6 +290,65 @@ describe('the filter by schema version (real MongoDB, both doors)', { skip }, ()
     assert.deepEqual(rest.echo, mcp.echo);
   });
 
+  /**
+   * `older` off the pairs (Q-744, bundle-268 design r4 §2, §3.1, amend "one rule", §10 T8). R2 `unnamedFingerprintsIn(space, collection,
+   * among, timeLeft)` answers exactly the stamps the shipped `unnamed` rule makes unclassified, for every probe shape of an array type;
+   * the misses' texts are read in chunks of at most `TEXT_CHUNK` texts and `TEXT_CHUNK_BYTES` bytes (spaces/type-standing.js), one text
+   * over the bytes being a chunk of its own; an array-typed record makes its stamp unclassified, so it leaves the type branch for the
+   * echo's `unclassified`. These run last: they plant records the cases above do not expect. Seen red at 327b105e: R2 and the chunk
+   * bounds do not exist, and the misses' texts are read in one batch.
+   */
+  describe('older off the pairs (Q-744)', () => {
+    it('R2 answers the stamps the shipped unnamed rule makes unclassified, for every array shape', async () => {
+      const shapes = [['T', 'X'], ['T', 1], ['T', null], [1, 2], [], 42, 'T', null];
+      const fps = shapes.map((_, k) => String(k + 1).repeat(64).slice(0, 64));
+      for (const [k, shape] of shapes.entries()) await seed(C, 'chrono', `shape${k}`, 1, { type: shape, fp: fps[k] });
+      const brute = fps.filter((_, k) => shapes[k] !== null && typeof shapes[k] !== 'string').sort();
+      const { fingerprintTypesIn } = await import('../../server/dist/spaces/schema-snapshot-carried.js');
+      const shipped = [...new Set((await fingerprintTypesIn(C, 'chrono', { maxTimeMS: 10_000 })).filter(p => p.unnamed).map(p => p.fp))].filter(fp => fps.includes(fp)).sort();
+      assert.deepEqual(shipped, brute, 'precondition: the shipped unnamed rule is not the brute force over the shapes');
+      const { need } = await import('./_type-history.mjs');
+      const { unnamedFingerprintsIn } = await need('spaces/schema-snapshot-carried.js', ['unnamedFingerprintsIn']);
+      assert.deepEqual([...await unnamedFingerprintsIn(C, 'chrono', fps, () => 10_000)].sort(), brute, 'R2 is not the shipped unnamed rule');
+      assert.deepEqual([...await unnamedFingerprintsIn(C, 'chrono', [fps[6], fps[7]], () => 10_000)], [], 'R2 names a stamp outside the shapes it was asked about');
+    });
+
+    it('the misses\' texts are read in chunks of at most TEXT_CHUNK texts and TEXT_CHUNK_BYTES bytes', async () => {
+      const { need } = await import('./_type-history.mjs');
+      const { TEXT_CHUNK, TEXT_CHUNK_BYTES } = await need('spaces/type-standing.js', ['TEXT_CHUNK', 'TEXT_CHUNK_BYTES']);
+      const { canonicalJson } = await import('../../server/dist/util/canonical-json.js');
+      const bytesOf = new Map();
+      for (let k = 0; k < TEXT_CHUNK + 9; k++) {
+        const text = canonicalJson({ format: 1, typeSchemas: { fact: { F: { propertySchemas: { [`f${k}`]: { type: 'string' } } } } }, rules: {} });
+        const fp = sha256(text);
+        bytesOf.set(fp, Buffer.byteLength(text, 'utf8'));
+        await snapshotsOf(d.door.mongo, A).insertOne(snapshotRow({ fp, text, origin: 'fetched', from: 'a-peer', links: linksOf(fp) }));
+        await seed(A, 'facts', `chunk${k}`, 1, { type: 'F', fp });
+      }
+      const client = d.door.mongo.getMongo();
+      const { result, sent } = await readsDuring(client, `${A}_schema_snapshots`, () => DOORS['MCP filter'](admin.key, { space: A, collection: 'facts', schemaVersion: 'older', limit: 100 }));
+      ok(result, 'older over the new misses');
+      const textReads = sent.filter(c => c.name === 'find' && (!c.command.projection || c.command.projection.text === 1));
+      assert.ok(textReads.length >= 2, `${TEXT_CHUNK + 9} misses were read in ${textReads.length} text read(s)`);
+      for (const c of textReads) {
+        const asked = c.command.filter?._id?.$in ?? [];
+        assert.ok(asked.length <= TEXT_CHUNK, `one text read asked for ${asked.length} texts`);
+        const bytes = asked.reduce((n, fp) => n + (bytesOf.get(fp) ?? 0), 0);
+        assert.ok(bytes <= TEXT_CHUNK_BYTES || asked.length === 1, `one text read asked for ${bytes} bytes`);
+      }
+      assert.deepEqual(ids(result), idsOf(...Array.from({ length: TEXT_CHUNK + 9 }, (_, k) => `${A}/facts/chunk${k}`)),
+        'the older facts are not exactly those whose version gives F another property (the chunked classification lost or added one)');
+    });
+
+    it('an array-typed record at a version that changed its type makes that version unclassified: its records are counted there', async () => {
+      await seed(A, 'entities', 'arrayA@v1', 1, { type: ['A', 'X'], fp: vA1.fp });
+      const o = await DOORS['MCP filter'](admin.key, { space: A, collection: 'entities', schemaVersion: 'older', limit: 100 });
+      ok(o, 'older with an array-typed record');
+      assert.ok(ids(o).includes(idsOf(`${A}/entities/arrayA@v1`)[0]), 'the array-typed record is not reached by older');
+      assert.equal(memberOf(o, A)?.unclassified, 3 + 3 + 2 + 1, 'v1\'s records (A 3, B 2, the array 1) and the 3 not held are not all counted unclassified');
+    });
+  });
+
   it('every key of the echo is named where the filter is documented (04d, Structured query)', async () => {
     const o = await DOORS['MCP filter'](admin.key, { space: A, collection: 'entities', schemaVersion: 'older' });
     ok(o, 'older');
