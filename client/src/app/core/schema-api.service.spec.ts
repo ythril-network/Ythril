@@ -183,7 +183,7 @@ describe('an answer this client does not fully know is read cautiously (C5, r3 Â
     ], count: 3, total: 3, limit: 100, skip: 0, truncated: false });
     const read = await got;
     expect(read.supported).toBe(true);
-    if (!read.supported) return;
+    if (!read.supported) throw new Error('the list answer was read as not supported');
     expect(read.answer['types'].map((t: any) => [t.type, t.declared])).toEqual([['person', 'own'], ['odd', 'none'], ['__proto__', 'none']]);
     expect(({} as Record<string, unknown>)['declared']).toBeUndefined();
   });
