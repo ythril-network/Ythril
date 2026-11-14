@@ -8,7 +8,9 @@ import { catchError, of, switchMap } from 'rxjs';
 import { ChronoEntry, ChronoType, ChronoStatus } from '../../core/api.types';
 import { recordOf, interactiveRecallBody } from './recall-hits';
 import { INTERACTIVE_DEBOUNCE_MS } from '../../core/latest-wins';
-import { BrainApi } from '../../core/brain-api.service';
+import { BrainApi, type VersionArgs } from '../../core/brain-api.service';
+import { DefinitionLanding } from './definition-landing';
+import { DefinitionChipsComponent } from './definition-chips.component';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { EntityRefFieldComponent } from './entity-ref-field.component';
 import { FactRefFieldComponent } from './fact-ref-field.component';
@@ -49,7 +51,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
   selector: 'app-chrono-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent, FactRefFieldComponent, PropertiesEditorComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, ForkMarkerComponent, RefusalAlertComponent, WriteWarningsComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, EntityRefFieldComponent, FactRefFieldComponent, PropertiesEditorComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, ForkMarkerComponent, RefusalAlertComponent, WriteWarningsComponent, DefinitionChipsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -136,6 +138,8 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
               {{ 'brain.deleteFailed' | transloco: { reason: recordList.deleteError() } }}
             </div>
           }
+          <app-definition-chips [landing]="landing" [spaceId]="spaceId()" kind="chrono" [type]="recordFilter().type"
+            (removeType)="removeLandingType()" (removeDefinition)="removeDefinitionFilter()" />
           <app-record-order-line [sortField]="sortField()" [ranked]="!!store.chronoSearch().trim()" />
           <div class="table-wrapper" hscrollTop>
             <table>
@@ -144,7 +148,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                   <th app-sort-th field="title" label="brain.chrono.table.title" [activeField]="sortField()" [dir]="sortDir()" (sort)="setSort($event)">
                     <input class="col-filter-input" type="text" [ngModel]="search()" (ngModelChange)="setSearchFilter($event)"
                       [placeholder]="'brain.filter.searchPlaceholder' | transloco" [attr.aria-label]="'brain.filter.searchPlaceholder' | transloco" />
-                  </th><th app-sort-th label="brain.chrono.table.description">
+                  </th>@if (landing.active()) { <th>{{ 'brain.list.typeDefinitionColumn' | transloco }}</th> }<th app-sort-th label="brain.chrono.table.description">
                     <input class="col-filter-input" type="text" [ngModel]="recordFilter().description" (ngModelChange)="setDescriptionFilter($event)"
                       [placeholder]="'brain.filter.descriptionPlaceholder' | transloco" [attr.aria-label]="'brain.filter.descriptionPlaceholder' | transloco" />
                   </th><th app-sort-th field="type" label="brain.chrono.table.type" [activeField]="sortField()" [dir]="sortDir()" (sort)="setSort($event)">
@@ -172,7 +176,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                 @for (entry of store.chrono(); track entry._id) {
                   @if (recordList.editingId() === entry._id) {
                     <tr>
-                      <td colspan="9">
+                      <td [attr.colspan]="landing.active() ? 10 : 9">
                         <div class="create-form" style="border:none; padding:8px 0;">
                           <div class="field" style="flex:2; min-width:180px; margin-bottom:0;">
                             <label>{{ 'common.form.title' | transloco }}</label>
@@ -232,6 +236,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                   } @else {
                     <tr>
                       <td>{{ entry.title }} <app-superseded-badge [superseded]="entry.superseded" /> <app-fork-marker [forkOf]="entry.forkOf" kind="chrono" /></td>
+                      @if (landing.active()) { <td style="white-space:nowrap;">@if (landing.cell(entry); as c) { {{ c.key | transloco: c.params }} }</td> }
                       <td class="desc-cell" style="max-width:160px;" [title]="entry.description ?? ''">
                         <div class="desc-clamp">{{ entry.description || '—' }}</div>
                       </td>
@@ -269,7 +274,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                     </tr>
                   }
                 } @empty {
-                  <tr><td colspan="9">
+                  <tr><td [attr.colspan]="landing.active() ? 10 : 9">
                     @if (recordList.loadError() !== null) {
                       <app-error-state [message]="'brain.error.loadChrono' | transloco" [reason]="recordList.loadError() ?? ''" (retry)="retryCurrentTab()" />
                     } @else {
@@ -335,15 +340,18 @@ export class ChronoTabComponent extends RecordTabBase {
     this.load();
   }
 
+  /** `?type=` (with `&definition=`, a type's history landing here) seeds the type filter on the tab's first load (Q-744). */
+  protected readonly landing = new DefinitionLanding('chrono', () => this.relandOnLink());
+
   protected override resetOnSpaceChange(): void {
-    this.recordFilter.set({ type: '', tag: '', description: '', properties: '', fromName: '', toName: '', entityName: '' });
+    this.recordFilter.set({ type: this.landing.takeType(), tag: '', description: '', properties: '', fromName: '', toName: '', entityName: '' });
     this.statusFilter.set('');
   }
 
   protected override load(): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;
-    const cf:{ search?: string; type?: string; tag?: string; description?: string; status?: string; entityName?: string } = {};
+    const cf:{ search?: string; type?: string; tag?: string; description?: string; status?: string; entityName?: string } & VersionArgs = { ...this.landing.listArgs() };
     // Docked Title column freetext filter → server-side substring (2b-iii-c), matching memories/edges.
     // The top bar is semantic-only now and never feeds this.
     if (this.searchParam()) cf.search = this.searchParam();
@@ -356,6 +364,7 @@ export class ChronoTabComponent extends RecordTabBase {
     this.loadRows(this.brainApi.listChrono(spaceId, this.pageSize, this.skip(), cf, this.sortParam()),
       ({ chrono }) => {
         this.store.chrono.set(chrono);
+        this.landing.readColumn(spaceId, this.recordFilter().type, chrono);
         const ids = [...new Set(chrono.flatMap(e => e.linkEntities ?? []))];
         if (ids.length) this.picker.resolveEntityNames(ids);
       });

@@ -8,7 +8,9 @@ import { catchError, of } from 'rxjs';
 import { Edge, Entity } from '../../core/api.types';
 import { recordOf, interactiveRecallBody } from './recall-hits';
 import { INTERACTIVE_DEBOUNCE_MS } from '../../core/latest-wins';
-import { BrainApi } from '../../core/brain-api.service';
+import { BrainApi, type VersionArgs } from '../../core/brain-api.service';
+import { DefinitionLanding } from './definition-landing';
+import { DefinitionChipsComponent } from './definition-chips.component';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { PropertiesViewComponent } from '../../shared/properties-view.component';
 import { PropertiesEditorComponent } from '../../shared/properties-editor.component';
@@ -45,7 +47,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
   selector: 'app-edges-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, ForkMarkerComponent, RefusalAlertComponent, WriteWarningsComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntitySearchComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, ForkMarkerComponent, RefusalAlertComponent, WriteWarningsComponent, DefinitionChipsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -135,6 +137,8 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
               {{ 'brain.deleteFailed' | transloco: { reason: recordList.deleteError() } }}
             </div>
           }
+          <app-definition-chips [landing]="landing" [spaceId]="spaceId()" kind="edge" [type]="landing.linked()" [pinned]="true"
+            (removeType)="removeLandingType()" (removeDefinition)="removeDefinitionFilter()" />
           <app-record-order-line [sortField]="sortField()" [ranked]="!!store.edgeSearch().trim()" />
           <div class="table-wrapper" hscrollTop>
             <table>
@@ -146,7 +150,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                   </th><th app-sort-th field="label" label="brain.edges.table.relation" [activeField]="sortField()" [dir]="sortDir()" (sort)="setSort($event)">
                     <input class="col-filter-input" type="text" [ngModel]="search()" (ngModelChange)="setSearchFilter($event)"
                       [placeholder]="'brain.filter.searchPlaceholder' | transloco" [attr.aria-label]="'brain.filter.searchPlaceholder' | transloco" />
-                  </th><th app-sort-th field="to" label="brain.edges.table.to" [activeField]="sortField()" [dir]="sortDir()" (sort)="setSort($event)">
+                  </th>@if (landing.active()) { <th>{{ 'brain.list.typeDefinitionColumn' | transloco }}</th> }<th app-sort-th field="to" label="brain.edges.table.to" [activeField]="sortField()" [dir]="sortDir()" (sort)="setSort($event)">
                     <input class="col-filter-input" type="text" [ngModel]="recordFilter().toName" (ngModelChange)="setNameFilter('toName', $event)"
                       [placeholder]="'brain.filter.entityNamePlaceholder' | transloco" [attr.aria-label]="'brain.filter.entityNamePlaceholder' | transloco" />
                   </th><th app-sort-th field="weight" label="brain.edges.table.weight" [activeField]="sortField()" [dir]="sortDir()" (sort)="setSort($event)"></th>
@@ -174,7 +178,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                 @for (edge of store.edges(); track edge._id) {
                   @if (recordList.editingId() === edge._id) {
                     <tr>
-                      <td colspan="10">
+                      <td [attr.colspan]="landing.active() ? 11 : 10">
                         <div class="create-form" style="border:none; padding:8px 0;">
                           <div class="field" style="min-width:200px; margin-bottom:0;">
                             <label style="font-size:11px; color:var(--text-muted);">{{ 'brain.edges.form.editingLabel' | transloco }}</label>
@@ -229,6 +233,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                     <tr style="vertical-align:top;">
                       <td style="font-size:12px; white-space:nowrap;">{{ edge.fromName || edge.from }}</td>
                       <td><span class="badge badge-blue">{{ edge.label }}</span> <app-superseded-badge [superseded]="edge.superseded" /> <app-fork-marker [forkOf]="edge.forkOf" kind="edge" /></td>
+                      @if (landing.active()) { <td style="white-space:nowrap;">@if (landing.cell(edge); as c) { {{ c.key | transloco: c.params }} }</td> }
                       <td style="font-size:12px; white-space:nowrap;">{{ edge.toName || edge.to }}</td>
                       <td style="color:var(--text-muted);">{{ edge.weight ?? '—' }}</td>
                       <td style="font-size:11px; white-space:nowrap;">{{ edge.type || '—' }}</td>
@@ -259,7 +264,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                     </tr>
                   }
                 } @empty {
-                  <tr><td colspan="10">
+                  <tr><td [attr.colspan]="landing.active() ? 11 : 10">
                     @if (recordList.loadError() !== null) {
                       <app-error-state [message]="'brain.error.loadEdges' | transloco" [reason]="recordList.loadError() ?? ''" (retry)="retryCurrentTab()" />
                     } @else {
@@ -327,14 +332,36 @@ export class EdgesTabComponent extends RecordTabBase {
       || (this.recordList.editingId() !== '' && JSON.stringify(this.editEdge) !== this.editedFrom));
   }
 
+  /**
+   * `?type=&definition=`, a type's history landing here (Q-744). An edge's type is its LABEL (TYPE_FIELD), and this tab's type filter is
+   * the edge's own `type` field, so the linked label stays in the landing and narrows the list by `label`, never by `type`.
+   */
+  protected readonly landing = new DefinitionLanding('edge', () => this.relandOnLink());
+
   protected override resetOnSpaceChange(): void {
+    this.landing.takeType();
     this.recordFilter.set({ type: '', tag: '', description: '', properties: '', fromName: '', toName: '', entityName: '' });
+  }
+
+  protected override relandOnLink(): void {
+    this.landing.takeType();
+    this.skip.set(0);
+    this.load();
+  }
+
+  override removeLandingType(): void {
+    this.landing.clear();
+    this.landing.linked.set('');
+    this.skip.set(0);
+    this.load();
   }
 
   protected override load(): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;
-    const gf:{ type?: string; tag?: string; description?: string; properties?: string; fromName?: string; toName?: string } = {};
+    const label = this.landing.linked();
+    const gf:{ type?: string; label?: string; tag?: string; description?: string; properties?: string; fromName?: string; toName?: string } & VersionArgs =
+      { ...this.landing.listArgs(), ...(label ? { label } : {}) };
     if (this.recordFilter().type) gf.type = this.recordFilter().type;
     if (this.recordFilter().tag) gf.tag = this.recordFilter().tag;
     if (this.recordFilter().description) gf.description = this.recordFilter().description;
@@ -343,7 +370,10 @@ export class EdgesTabComponent extends RecordTabBase {
     if (this.recordFilter().toName) gf.toName = this.recordFilter().toName;
     // Through the tab's rows slot (Q-112): a newer filter's request, or a semantic search, cancels this one.
     this.loadRows(this.brainApi.listEdges(spaceId, this.pageSize, this.skip(), gf, this.sortParam(), this.searchParam()),
-      ({ edges }) => this.store.edges.set(edges));
+      ({ edges }) => {
+        this.store.edges.set(edges);
+        this.landing.readColumn(spaceId, label, edges);
+      });
   }
 
   /**

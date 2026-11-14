@@ -171,6 +171,17 @@ export interface RecallRequestBody {
 /** Ids per request when resolving a set of entities: every `$in` stays bounded, and every id is still asked for (Q-131). */
 const ENTITY_ID_BATCH = 100;
 
+/** The filter's schema version arguments a record list may carry (a type's history landing, Q-744): `older` or `sameAs:<fp>`. */
+export interface VersionArgs { schemaVersion?: string; schemaChanged?: 'any' }
+
+/** The version arguments of a list's filters, only those set, so a list without them asks exactly as before. */
+function versionArgs(filters?: VersionArgs): VersionArgs {
+  return {
+    ...(filters?.schemaVersion ? { schemaVersion: filters.schemaVersion } : {}),
+    ...(filters?.schemaChanged ? { schemaChanged: filters.schemaChanged } : {}),
+  };
+}
+
 @Injectable({ providedIn: 'root' })
 export class BrainApi {
   private http = inject(HttpClient);
@@ -371,7 +382,7 @@ export class BrainApi {
    * `_id`. The intersection with the other filters stays the SERVER's — they travel in the same
    * predicate — which is what keeps paging and `total` honest.
    */
-  listFacts(spaceId: string, limit = 20, skip = 0, filters?: { tag?: string; entity?: string; type?: string; description?: string; properties?: string; entityName?: string }, sort?: ListSort, search?: string): Observable<{ facts: Fact[]; limit: number; skip: number }> {
+  listFacts(spaceId: string, limit = 20, skip = 0, filters?: { tag?: string; entity?: string; type?: string; description?: string; properties?: string; entityName?: string } & VersionArgs, sort?: ListSort, search?: string): Observable<{ facts: Fact[]; limit: number; skip: number }> {
     const linked$: Observable<string[] | null> = filters?.entity
       ? recordsLinkingTo(this.http, spaceId, 'fact', [filters.entity])
       : of(null);
@@ -380,6 +391,7 @@ export class BrainApi {
       ...(linkedIds ? { filter: { _id: { $in: linkedIds } } } : {}),
       ...(filters?.tag ? { tag: filters.tag } : {}),
       ...(filters?.type ? { type: filters.type } : {}),
+      ...versionArgs(filters),
       ...(filters?.description ? { description: filters.description } : {}),
       ...(filters?.properties ? { properties: filters.properties } : {}),
       ...(filters?.entityName ? { entityName: filters.entityName } : {}),
@@ -403,7 +415,7 @@ export class BrainApi {
 
   // ── Brain — entities ──────────────────────────────────────────────────────
 
-  listEntities(spaceId: string, limit = 50, skip = 0, filters?: { search?: string; type?: string; tag?: string; description?: string; properties?: string }, sort?: ListSort, search?: string): Observable<{ entities: Entity[] }> {
+  listEntities(spaceId: string, limit = 50, skip = 0, filters?: { search?: string; type?: string; tag?: string; description?: string; properties?: string } & VersionArgs, sort?: ListSort, search?: string): Observable<{ entities: Entity[] }> {
     // `filters.search` is the entity-search bar's EXACT `name` lookup, so it is a predicate; `search`
     // is the docked column freetext, which is the substring convenience. Two different questions that
     // have always shared a spelling here — the distinction is why this one cannot be folded.
@@ -411,6 +423,7 @@ export class BrainApi {
       limit, skip, ...this.sortBody(sort),
       ...(filters?.search ? { filter: { name: filters.search } } : {}),
       ...(filters?.type ? { type: filters.type } : {}),
+      ...versionArgs(filters),
       ...(filters?.tag ? { tag: filters.tag } : {}),
       ...(filters?.description ? { description: filters.description } : {}),
       ...(filters?.properties ? { properties: filters.properties } : {}),
@@ -462,12 +475,15 @@ export class BrainApi {
 
   // ── Brain — edges ─────────────────────────────────────────────────────────
 
-  listEdges(spaceId: string, limit = 50, skip = 0, filters?: { type?: string; tag?: string; description?: string; properties?: string; fromName?: string; toName?: string }, sort?: ListSort, search?: string): Observable<{ edges: Edge[] }> {
+  listEdges(spaceId: string, limit = 50, skip = 0, filters?: { type?: string; label?: string; tag?: string; description?: string; properties?: string; fromName?: string; toName?: string } & VersionArgs, sort?: ListSort, search?: string): Observable<{ edges: Edge[] }> {
     // `fromName`/`toName` are per-member JOINs `filter` resolves server-side — a client holding ids
     // could not, which is why they are arguments rather than something built here.
+    // `label` is the edge's TYPE (its relation, TYPE_FIELD), an exact predicate; `type` is the edge's own free-text type field.
     return this.filterPage<Edge>(spaceId, 'edges', 'edges', {
       limit, skip, ...this.sortBody(sort),
+      ...(filters?.label ? { filter: { label: filters.label } } : {}),
       ...(filters?.type ? { type: filters.type } : {}),
+      ...versionArgs(filters),
       ...(filters?.tag ? { tag: filters.tag } : {}),
       ...(filters?.description ? { description: filters.description } : {}),
       ...(filters?.properties ? { properties: filters.properties } : {}),
@@ -606,7 +622,7 @@ export class BrainApi {
 
   // ── Brain — chrono ──────────────────────────────────────────────────────
 
-  listChrono(spaceId: string, limit = 50, skip = 0, filters?: { tags?: string; tagsAny?: string; tag?: string; type?: string; status?: string; after?: string; before?: string; search?: string; description?: string; entityName?: string }, sort?: ListSort): Observable<{ chrono: ChronoEntry[] }> {
+  listChrono(spaceId: string, limit = 50, skip = 0, filters?: { tags?: string; tagsAny?: string; tag?: string; type?: string; status?: string; after?: string; before?: string; search?: string; description?: string; entityName?: string } & VersionArgs, sort?: ListSort): Observable<{ chrono: ChronoEntry[] }> {
     /*
      * `deriveStatus: true` IS THE WHOLE REASON THIS TAB COULD NOT MOVE UNTIL NOW.
      *
@@ -638,6 +654,7 @@ export class BrainApi {
       ...(Object.keys(predicate).length ? { filter: predicate } : {}),
       ...(filters?.tag ? { tag: filters.tag } : {}),
       ...(filters?.type ? { type: filters.type } : {}),
+      ...versionArgs(filters),
       ...(filters?.description ? { description: filters.description } : {}),
       ...(filters?.entityName ? { entityName: filters.entityName } : {}),
       ...(filters?.search ? { search: filters.search } : {}),

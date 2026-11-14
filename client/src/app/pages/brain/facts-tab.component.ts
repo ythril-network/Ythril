@@ -8,7 +8,9 @@ import { catchError, of, switchMap } from 'rxjs';
 import { Fact } from '../../core/api.types';
 import { recordOf, interactiveRecallBody } from './recall-hits';
 import { INTERACTIVE_DEBOUNCE_MS } from '../../core/latest-wins';
-import { BrainApi } from '../../core/brain-api.service';
+import { BrainApi, type VersionArgs } from '../../core/brain-api.service';
+import { DefinitionLanding } from './definition-landing';
+import { DefinitionChipsComponent } from './definition-chips.component';
 import { TagInputComponent } from '../../shared/tag-input.component';
 import { PropertiesViewComponent } from '../../shared/properties-view.component';
 import { PropertiesEditorComponent } from '../../shared/properties-editor.component';
@@ -52,7 +54,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
   selector: 'app-facts-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntityRefFieldComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, ForkMarkerComponent, RefusalAlertComponent, WriteWarningsComponent],
+  imports: [CommonModule, FormsModule, TranslocoPipe, TagInputComponent, PropertiesViewComponent, PropertiesEditorComponent, EntityRefFieldComponent, PhIconComponent, ErrorStateComponent, RecordSearchBarComponent, SortableHeaderComponent, RecordOrderLineComponent, HscrollTopDirective, TimestampComponent, SupersededBadgeComponent, ForkMarkerComponent, RefusalAlertComponent, WriteWarningsComponent, DefinitionChipsComponent],
   styles: [BRAIN_CHIP_STYLES, BRAIN_RECORD_TABLE_STYLES],
   template: `
 
@@ -144,6 +146,8 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
               {{ 'brain.deleteFailed' | transloco: { reason: recordList.deleteError() } }}
             </div>
           }
+          <app-definition-chips [landing]="landing" [spaceId]="spaceId()" kind="fact" [type]="recordFilter().type"
+            (removeType)="removeLandingType()" (removeDefinition)="removeDefinitionFilter()" />
           <app-record-order-line [sortField]="sortField()" [ranked]="!!store.memorySearch().trim()" />
           <div class="table-wrapper" hscrollTop>
             <table>
@@ -152,7 +156,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                   <th app-sort-th label="brain.facts.table.fact">
                     <input class="col-filter-input" type="text" [ngModel]="search()" (ngModelChange)="setSearchFilter($event)"
                       [placeholder]="'brain.filter.searchPlaceholder' | transloco" [attr.aria-label]="'brain.filter.searchPlaceholder' | transloco" />
-                  </th><th app-sort-th label="brain.facts.table.description">
+                  </th>@if (landing.active()) { <th>{{ 'brain.list.typeDefinitionColumn' | transloco }}</th> }<th app-sort-th label="brain.facts.table.description">
                     <input class="col-filter-input" type="text" [ngModel]="recordFilter().description" (ngModelChange)="setDescriptionFilter($event)"
                       [placeholder]="'brain.filter.descriptionPlaceholder' | transloco" [attr.aria-label]="'brain.filter.descriptionPlaceholder' | transloco" />
                   </th><th app-sort-th field="type" label="brain.facts.table.type" [activeField]="sortField()" [dir]="sortDir()" (sort)="setSort($event)">
@@ -178,7 +182,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                 @for (mem of store.facts(); track mem._id) {
                   @if (recordList.editingId() === mem._id) {
                     <tr>
-                      <td colspan="8">
+                      <td [attr.colspan]="landing.active() ? 9 : 8">
                         <div class="create-form" style="border:none; padding:8px 0;">
                           <div class="field" style="flex:2; min-width:200px; margin-bottom:0;">
                             <label>{{ 'common.form.fact' | transloco }}</label>
@@ -233,6 +237,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                   } @else {
                     <tr>
                       <td style="max-width:300px; white-space:pre-wrap; word-break:break-word;">{{ mem.fact }} <app-superseded-badge [superseded]="mem.superseded" /> <app-fork-marker [forkOf]="mem.forkOf" kind="fact" /></td>
+                      @if (landing.active()) { <td style="white-space:nowrap;">@if (landing.cell(mem); as c) { {{ c.key | transloco: c.params }} }</td> }
                       <td class="desc-cell" style="max-width:180px;" [title]="mem.description ?? ''">
                         <div class="desc-clamp">{{ mem.description || '—' }}</div>
                       </td>
@@ -269,7 +274,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
                     </tr>
                   }
                 } @empty {
-                  <tr><td colspan="8">
+                  <tr><td [attr.colspan]="landing.active() ? 9 : 8">
                     @if (recordList.loadError() !== null) {
                       <app-error-state [message]="'brain.error.loadFacts' | transloco" [reason]="recordList.loadError() ?? ''" (retry)="retryCurrentTab()" />
                     } @else {
@@ -335,15 +340,18 @@ export class FactsTabComponent extends RecordTabBase {
       || (this.recordList.editingId() !== '' && JSON.stringify(this.editMemory) !== this.editedFrom));
   }
 
+  /** `?type=` (with `&definition=`, a type's history landing here) seeds the type filter on the tab's first load (Q-744). */
+  protected readonly landing = new DefinitionLanding('fact', () => this.relandOnLink());
+
   protected override resetOnSpaceChange(): void {
-    this.recordFilter.set({ type: '', tag: '', description: '', properties: '', fromName: '', toName: '', entityName: '' });
+    this.recordFilter.set({ type: this.landing.takeType(), tag: '', description: '', properties: '', fromName: '', toName: '', entityName: '' });
     this.filterEntity.set('');
   }
 
   protected override load(): void {
     const spaceId = this.spaceId();
     if (!spaceId) return;
-    const filters:{ tag?: string; entity?: string; type?: string; description?: string; properties?: string; entityName?: string } = {};
+    const filters:{ tag?: string; entity?: string; type?: string; description?: string; properties?: string; entityName?: string } & VersionArgs = { ...this.landing.listArgs() };
     if (this.recordFilter().tag) filters.tag = this.recordFilter().tag;
     if (this.filterEntity()) filters.entity = this.filterEntity();
     if (this.recordFilter().type) filters.type = this.recordFilter().type;
@@ -354,6 +362,7 @@ export class FactsTabComponent extends RecordTabBase {
     this.loadRows(this.brainApi.listFacts(spaceId, this.pageSize, this.skip(), filters, this.sortParam(), this.searchParam()),
       ({ facts }) => {
         this.store.facts.set(facts);
+        this.landing.readColumn(spaceId, this.recordFilter().type, facts);
         const ids = [...new Set(facts.flatMap(m => m.linkEntities ?? []))];
         if (ids.length) this.picker.resolveEntityNames(ids);
       });
