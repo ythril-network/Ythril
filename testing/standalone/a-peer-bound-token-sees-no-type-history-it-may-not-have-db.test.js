@@ -37,7 +37,12 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const SUITE = 'thpeer';
 const [PB, PU] = ['thpeerb', 'thpeeru'];
 const META = { suppressEmbeddings: true };
-const OUTSIDE_NET = 'a-network-the-peer-is-not-in';
+/**
+ * A network the peer is not in: the pull door's lateral club network, carrying PU only, with a member that is not the peer. It must be a
+ * CONFIGURED network: `storeNetworkLayer` stores no layer for a network the config does not hold (it answers false and leaves the space's
+ * meta as it was), so a made-up id left PU's current version the space's own and the 404 and the cut were never exercised (bundle-268 build).
+ */
+let OUTSIDE_NET;
 const typed = (prop) => ({ ...META, typeSchemas: { entity: { A: { propertySchemas: { [prop]: { type: 'string' } } } } } });
 
 let d, doors, local, peer, v1, v2, X;
@@ -46,8 +51,10 @@ const seeded = new Map();
 describe('a peer-bound token sees no type history it may not have (real MongoDB, both doors)', { skip }, () => {
   before(async () => {
     d = await openViewDoors({ suite: SUITE, openDoor: () => openPullDoor({
-      suite: SUITE, spaces: [PB, PU], type: 'club', direction: 'both', meta: { [PB]: META, [PU]: META },
+      suite: SUITE, spaces: [PB, PU], type: 'club', direction: 'both', meta: { [PB]: META, [PU]: META }, lateral: [PU],
     }) });
+    OUTSIDE_NET = d.door.LATERAL_NET;
+    assert.ok(typeof OUTSIDE_NET === 'string' && OUTSIDE_NET.length > 0, 'the pull door names no lateral network');
     doors = typeDoors(d);
     const rungs = d.row({ schema: 'read', knowledge: 'read' });
     local = await d.mint('thp-local', { [PB]: rungs, [PU]: rungs });
@@ -67,7 +74,8 @@ describe('a peer-bound token sees no type history it may not have (real MongoDB,
     const { readPeerMeta } = await import('../../schema/dist/internal.js');
     const layer = readPeerMeta({ typeSchemas: { entity: { L: { propertySchemas: { l: { type: 'string' } } } } } });
     assert.ok(layer.ok, layer.message);
-    (await import('../../server/dist/spaces/effective-meta.js')).storeNetworkLayer(OUTSIDE_NET, PU, layer.meta);
+    assert.ok((await import('../../server/dist/spaces/effective-meta.js')).storeNetworkLayer(OUTSIDE_NET, PU, layer.meta),
+      'precondition: the layer of a network the peer is not in did not change PU\'s current version');
     await d.door.coll(PU, 'entities').insertOne(recordOf('entities', PU, ++i, { type: 'L', fp: (await import('../../server/dist/spaces/schema-stamp.js')).variationOf(PU).stamp.fp }));
   });
   after(async () => { await d?.close(); });

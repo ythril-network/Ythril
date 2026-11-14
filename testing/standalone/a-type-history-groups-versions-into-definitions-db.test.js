@@ -137,7 +137,9 @@ describe('a type history groups versions into definitions (real MongoDB, both do
         assert.equal(r.body.declared, 'none');
         assert.equal(r.body.definitions?.length, 1, '__proto__ at h1 and h3 (neither declares it) is not one definition');
         assert.equal(({}).polluted, undefined);
-        const { TYPE_NAME_MAX } = await need('spaces/space-meta.js', ['TYPE_NAME_MAX']);
+        // The bound lives in the schema package (schema/src/space-meta.ts, design r3 §2), exported beside the per-type maps it bounds.
+        const { TYPE_NAME_MAX } = await import('../../schema/dist/internal.js');
+        assert.equal(typeof TYPE_NAME_MAX, 'number', 'the schema package exports no TYPE_NAME_MAX');
         const long = await doors[door](owner.key, H, { kind: 'entity', type: 'T'.repeat(TYPE_NAME_MAX + 1) });
         assert.ok(long.refused, `a type name over the bound was answered: ${long.text.slice(0, 200)}`);
         if (door === 'REST') assert.equal(long.status, 400);

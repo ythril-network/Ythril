@@ -213,7 +213,9 @@ describe('the schema-version reads are served by the (stamp, type) index (real M
       const { result, sent } = await readsDuring(client, `${SPACE}_entities`, () => mod.fingerprintsOfType(SPACE, 'entities', 'A', tl));
       assert.deepEqual([...result].sort(), [V1.fp, V2.fp].sort(), 'R4 is not the stamps of A\'s stamped records');
       assert.equal(sent.length, 1, `R4 sent ${sent.length} commands on a non-multikey index`);
-      assert.equal(sent[0].name, 'distinct');
+      // One covered grouping read (`distinctStringsOf`), not the driver's `distinct`: a one-reply distinct is refused under server/src by
+      // `no-source-reads-distinct-values-in-one-reply`, which keeps no exemption list (bundle-268 build).
+      assert.equal(sent[0].name, 'aggregate');
       await assertCovered(sent[0], NEW);
     });
 
@@ -301,7 +303,11 @@ describe('the schema-version reads are served by the (stamp, type) index (real M
         const answers = await Promise.all(Array.from({ length: 4 }, () => door.call('space_schema_versions', { space: SEED, kind: 'entity' })));
         assert.ok(answers.every(a => !a.result.isError), answers.map(a => a.text.slice(0, 120)).join(' | '));
         const w = standingWork();
-        assert.equal(w.diffs - b.diffs, seedCount + 1, `four concurrent reads made ${w.diffs - b.diffs} diffs, not one pass's ${seedCount + 1}`);
+        // One pass against the new current diffs each carried version once: the seedCount seeds. The version current before this save is
+        // carried by no record, so it is no miss (a pass parses the misses plus the anchor: seedCount + 1 parses, seedCount diffs, as the
+        // cold case above holds). Four passes would make 4 x seedCount.
+        assert.equal(w.diffs - b.diffs, seedCount, `four concurrent reads made ${w.diffs - b.diffs} diffs, not one pass's ${seedCount}`);
+        assert.equal(w.textsParsed - b.textsParsed, seedCount + 1, `four concurrent reads parsed ${w.textsParsed - b.textsParsed} texts, not one pass's ${seedCount + 1}`);
       });
     });
   });

@@ -95,16 +95,21 @@ export async function undocumentedKeys(docRel, heading, keys) {
   return [...new Set(keys)].filter(k => !section.includes(`\`${k}\``) && !new RegExp(`[\\\`{,\\s"]${k}[\\\`:,}\\s"]`).test(section));
 }
 
-/** A read command a door sent (captured by command monitoring), explained with execution stats, as `planOf` reads it. */
+/**
+ * A read command a door sent (captured by command monitoring), explained with execution stats, as `planOf` reads it. Only the fields the
+ * command carried are explained: a find sent without a `sort` (a `findOne`, a seek) explained with `sort: undefined` reaches the store as
+ * `sort: null`, which it refuses ("Expected field sort to be of type object") before planning anything (bundle-268).
+ */
 export async function explainOf(db, { name, command }) {
+  const defined = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
   const hint = command.hint !== undefined ? { hint: command.hint } : {};
   const explain = name === 'aggregate'
     ? { aggregate: command.aggregate, pipeline: command.pipeline, cursor: {}, ...hint }
     : name === 'distinct'
-      ? { distinct: command.distinct, key: command.key, query: command.query, ...hint }
+      ? defined({ distinct: command.distinct, key: command.key, query: command.query, ...hint })
       : name === 'count'
-        ? { count: command.count, query: command.query, ...hint }
-        : { find: command.find, filter: command.filter, projection: command.projection, sort: command.sort, limit: command.limit, skip: command.skip, ...hint };
+        ? defined({ count: command.count, query: command.query, ...hint })
+        : defined({ find: command.find, filter: command.filter, projection: command.projection, sort: command.sort, limit: command.limit, skip: command.skip, ...hint });
   return planOf(await db.command({ explain, verbosity: 'executionStats' }));
 }
 
