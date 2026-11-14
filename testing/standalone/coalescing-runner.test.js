@@ -326,3 +326,50 @@ describe('coalescing runner — join hands each trigger the progress of the cycl
     assert.equal(await p, 'plain');
   });
 });
+
+/**
+ * `{ rerun: false }` (Q-744, bundle-268 design r3 §5.2, r4 §K and §10 T12): a read pass has nothing for a rerun to pick up, so a joiner
+ * joins the flight and queues nothing; the release in `finally` still holds, so a job that throws frees its key and the next call starts a
+ * fresh job. Seen red at 327b105e: the option does not exist, so the joiner queues a rerun and a second job starts.
+ */
+describe('coalescing runner — { rerun: false }', () => {
+  it('a joiner shares the flight and queues nothing: one job, no rerun, no onQueued', async () => {
+    const queued = [], reruns = [];
+    const runner = createCoalescingRunner({ rerun: false, onQueued: k => queued.push(k), onRerun: k => reruns.push(k) });
+    const { job, state } = controllableJob();
+    const first = runner.run('pass', job);
+    const joiners = [runner.run('pass', job), runner.run('pass', job), runner.run('pass', job)];
+    assert.equal(state.starts, 1, 'a joiner started its own job');
+    await state.finishOne({ synced: 7, errors: 0 });
+    const answers = await Promise.all([first, ...joiners]);
+    assert.ok(answers.every(a => a === answers[0]), 'the joiners did not get the flight\'s own answer');
+    await new Promise(r => setImmediate(r));
+    assert.equal(state.starts, 1, 'a rerun started after the flight');
+    assert.deepEqual({ queued, reruns }, { queued: [], reruns: [] }, 'a joiner queued a rerun');
+    assert.equal(runner.isRunning('pass'), false, 'the key is still held');
+  });
+
+  it('a job that throws frees its key, its joiners see the throw, and the next call starts afresh', async () => {
+    const runner = createCoalescingRunner({ rerun: false });
+    let starts = 0;
+    let fail;
+    const job = () => { starts++; return new Promise((_, reject) => { fail = reject; }); };
+    const first = runner.run('pass', job);
+    const joiner = runner.run('pass', job);
+    fail(new Error('the store is not answering'));
+    await assert.rejects(first, /not answering/);
+    await assert.rejects(joiner, /not answering/);
+    await new Promise(r => setImmediate(r));
+    assert.equal(starts, 1, 'the throw was rerun');
+    assert.equal(runner.isRunning('pass'), false, 'a job that threw kept its key');
+    const fresh = runner.run('pass', async () => { starts++; return 'fresh'; });
+    assert.equal(await fresh, 'fresh');
+    assert.equal(starts, 2);
+  });
+
+  it('a synchronous throw from the job frees its key as well', async () => {
+    const runner = createCoalescingRunner({ rerun: false });
+    await assert.rejects(runner.run('pass', () => { throw new Error('thrown before any await'); }), /before any await/);
+    assert.equal(runner.isRunning('pass'), false);
+  });
+});
