@@ -17,6 +17,14 @@ import { EntityRefPicker } from './entity-ref-picker.service';
 import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordListState } from './record-list-state.service';
 import { EntitiesTabComponent } from './entities-tab.component';
+import { definitionFilterCases } from '../../testing/definition-filter-cases';
+import { anEntity } from '../../testing/records';
+
+// The Brain landing of a type's history (b268, C4): the shared cases, over this tab.
+definitionFilterCases({
+  component: EntitiesTabComponent, kind: 'entity', collection: 'entities',
+  record: (i, type, fp) => anEntity({ _id: `e${i}`, name: `person ${String.fromCharCode(96 + i)}`, type, ...(fp ? { schemaFingerprint: fp } : {}) } as never),
+});
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { isOnPush } from '../../testing/onpush';
 

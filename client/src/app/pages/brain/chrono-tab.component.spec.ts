@@ -15,6 +15,14 @@ import { EntityRefPicker } from './entity-ref-picker.service';
 import { RecordDrawerState } from './record-drawer-state.service';
 import { RecordListState } from './record-list-state.service';
 import { ChronoTabComponent } from './chrono-tab.component';
+import { definitionFilterCases } from '../../testing/definition-filter-cases';
+import { aChrono } from '../../testing/records';
+
+// The Brain landing of a type's history (b268, C4): the shared cases, over this tab.
+definitionFilterCases({
+  component: ChronoTabComponent, kind: 'chrono', collection: 'chrono',
+  record: (i, type, fp) => aChrono({ _id: `c${i}`, title: `event ${String.fromCharCode(96 + i)}`, type, ...(fp ? { schemaFingerprint: fp } : {}) } as never),
+});
 import { isOnPush } from '../../testing/onpush';
 
 /** The chrono write body, as `BrainApi.createChrono` declares it. */
