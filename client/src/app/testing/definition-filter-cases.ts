@@ -47,6 +47,14 @@ export interface DefinitionFilterTab {
 const FP_A = 'a'.repeat(64);
 const FP_B = 'b'.repeat(64);
 
+/**
+ * How a list read narrows to type T. An edge's type is its label (TYPE_FIELD), and the list's `type`
+ * shorthand means an edge's own `type` field, so the edges tab narrows by `filter: {label: T}`; asking
+ * `type` there would land a label's history on the wrong edges.
+ */
+const typeNarrowing = (kind: DefinitionFilterTab['kind'], type: string): object =>
+  kind === 'edge' ? { filter: { label: type } } : { type };
+
 export function definitionFilterCases(tab: DefinitionFilterTab): void {
   const mount = (params: Record<string, string>) => {
     TestBed.resetTestingModule();
@@ -113,13 +121,15 @@ export function definitionFilterCases(tab: DefinitionFilterTab): void {
     it('type=T&definition=older asks the list for T\'s records not on the current definition', async () => {
       const m = mount({ type: 'person', definition: 'older' });
       const body = await answerList(m, []);
-      expect(body).toMatchObject({ type: 'person', schemaVersion: 'older', schemaChanged: 'any' });
+      expect(body).toMatchObject({ ...typeNarrowing(tab.kind, 'person'), schemaVersion: 'older', schemaChanged: 'any' });
+      expect(body['type'], 'an edge read never narrows by its own type field').toBe(tab.kind === 'edge' ? undefined : 'person');
     });
 
     it('definition=sameAs:<fp> asks the list for the records saved under that definition', async () => {
       const m = mount({ type: 'person', definition: `sameAs:${FP_A}` });
       const body = await answerList(m, []);
-      expect(body).toMatchObject({ type: 'person', schemaVersion: `sameAs:${FP_A}` });
+      expect(body).toMatchObject({ ...typeNarrowing(tab.kind, 'person'), schemaVersion: `sameAs:${FP_A}` });
+      expect(body['type'], 'an edge read never narrows by its own type field').toBe(tab.kind === 'edge' ? undefined : 'person');
     });
 
     it('the chips name the type and "not current", and offer the way back to the history', async () => {
