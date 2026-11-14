@@ -138,7 +138,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
             </div>
           }
           <app-definition-chips [landing]="landing" [spaceId]="spaceId()" kind="edge" [type]="landing.linked()" [pinned]="true"
-            (removeType)="removeLandingType()" (removeDefinition)="removeDefinitionFilter()" />
+            (clearType)="removeLandingType()" (clearDefinition)="removeDefinitionFilter()" />
           <app-record-order-line [sortField]="sortField()" [ranked]="!!store.edgeSearch().trim()" />
           <div class="table-wrapper" hscrollTop>
             <table>

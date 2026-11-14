@@ -34,7 +34,12 @@ export interface TypeStandingRow { fp: string; standing: TypeStanding; definitio
 /** `?fps=&kind=&type=`: each asked version's standing. */
 export interface TypeStandingsAnswer { kind: TypedKind; type: string; current: string; standings: TypeStandingRow[] }
 /** One change at one place of a type, between the two versions. */
-export interface TypeChange { place: string; from?: unknown; to?: unknown; class: string }
+export interface TypeChange {
+  place: string;
+  from?: unknown;
+  to?: unknown;
+  class: string;
+}
 /** `?fp=&against=&kind=&type=`: the comparison narrowed to the type. */
 export interface TypeComparisonAnswer {
   kind: TypedKind; type: string; from: string; to: string;
