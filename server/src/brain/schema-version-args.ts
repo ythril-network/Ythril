@@ -42,7 +42,11 @@ export const SCHEMA_VERSION_FILTER_SCHEMA = {
       + 'member: through a personal view each member answers against its own current version. The answer then carries '
       + '`schemaVersion: {members: [{spaceId, current, unclassified}]}`: `unclassified` counts the matching records, over the whole match, '
       + 'whose version is not held or not classifiable. A record that arrives mid-call with a new version can be missed by that call. '
-      + 'Entities, facts, edges and chrono only: `files` and `links` carry no stamp and refuse it.',
+      + '`sameAs:<fingerprint>`: records saved under that definition of their type - those stamped with it, and those whose version '
+      + 'defines their type as it does (any change counts); a version this server does not hold, or this caller may not have, matches only '
+      + 'its own records. A token bound to a peer places `older` and `sameAs` only against versions the sync door would serve it. A pass '
+      + 'past its time answers 503 `schema_versions_busy`. A record whose type field holds an array is matched by no type: its version '
+      + 'counts as unclassified. Entities, facts, edges and chrono only: `files` and `links` carry no stamp and refuse it.',
   },
   schemaChanged: {
     type: 'string',
@@ -57,7 +61,15 @@ export const SCHEMA_VERSION_FILTER_SCHEMA = {
 export type SchemaVersionAsk =
   | { readonly kind: 'current' | 'unversioned' }
   | { readonly kind: 'older'; readonly mode: SchemaChangedMode }
-  | { readonly kind: 'fingerprint'; readonly fp: string };
+  | { readonly kind: 'fingerprint'; readonly fp: string }
+  | { readonly kind: 'sameAs'; readonly fp: string };
+
+/** The prefix of the by-definition ask, `sameAs:<fingerprint>` (bundle-268, Q-744): the records each type of which that version defines alike. */
+const SAME_AS = 'sameAs:';
+
+/** The fingerprint of a well-formed `sameAs:<fp>`, or `undefined`. Case matters: `sameas:` is no ask. */
+const sameAsFingerprintOf = (v: unknown): string | undefined =>
+  (typeof v === 'string' && v.startsWith(SAME_AS) && isSchemaFingerprint(v.slice(SAME_AS.length)) ? v.slice(SAME_AS.length) : undefined);
 
 /** Whether `collection`'s records carry a stamp. */
 export const isStampedCollection = (collection: string): collection is StampedCollection => (STAMPED_COLLECTIONS as readonly string[]).includes(collection);
@@ -73,8 +85,10 @@ export function readSchemaVersionAsk(collection: string, args: Record<string, un
   if (version !== undefined && !isStampedCollection(collection)) {
     return { error: `schemaVersion applies to ${STAMPED_COLLECTIONS.join(', ')} only, not '${collection}': its records carry no schema version.` };
   }
-  if (version !== undefined && (typeof version !== 'string' || !((VERSION_WORDS as readonly string[]).includes(version) || isSchemaFingerprint(version)))) {
-    return { error: `schemaVersion must be ${VERSION_WORDS.join(', ')} or a schema fingerprint (64 lowercase hex characters).` };
+  const sameAs = sameAsFingerprintOf(version);
+  if (version !== undefined && sameAs === undefined
+    && (typeof version !== 'string' || !((VERSION_WORDS as readonly string[]).includes(version) || isSchemaFingerprint(version)))) {
+    return { error: `schemaVersion must be ${VERSION_WORDS.join(', ')}, a schema fingerprint (64 lowercase hex characters) or ${SAME_AS}<fingerprint>.` };
   }
   if (changed !== undefined && version !== 'older') {
     return { error: 'schemaChanged applies with schemaVersion: "older" only: it says which changes make a record older.' };
@@ -83,6 +97,7 @@ export function readSchemaVersionAsk(collection: string, args: Record<string, un
     return { error: `schemaChanged must be one of: ${CHANGE_MODES.join(', ')}.` };
   }
   if (version === 'older') return { ask: { kind: 'older', mode: (changed as SchemaChangedMode | undefined) ?? 'structural' } };
+  if (sameAs !== undefined) return { ask: { kind: 'sameAs', fp: sameAs } };
   if (version === 'current' || version === 'unversioned') return { ask: { kind: version } };
   return { ask: { kind: 'fingerprint', fp: version as string } };
 }

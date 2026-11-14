@@ -39,6 +39,7 @@ import { attachedToEntityNamed } from '../../brain/entity-name-scope.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 import { SCHEMA_VERSION_FILTER_SCHEMA, readSchemaVersionAsk } from '../../brain/schema-version-args.js';
 import { schemaVersionResolver, schemaVersionEcho } from '../../brain/schema-version-filter.js';
+import { networkIdsSharedWithCaller } from '../../networks/network-spaces.js';
 import { andPredicates } from '../../db/and-predicates.js';
 
 export const queryTool: ToolHandler = {
@@ -241,7 +242,10 @@ export const queryTool: ToolHandler = {
     const versionAsk = readSchemaVersionAsk(coll, a);
     if ('error' in versionAsk) throw new Error(versionAsk.error);
     const maxTimeMS = typeof a['maxTimeMS'] === 'number' ? a['maxTimeMS'] : 5000;
-    const versionOf = versionAsk.ask ? schemaVersionResolver(coll, versionAsk.ask, maxTimeMS) : undefined;
+    // Per member, in the caller's scope: a token bound to a peer places `older` and `sameAs` only against versions it may have (Q-744).
+    const versionOf = versionAsk.ask
+      ? schemaVersionResolver(coll, versionAsk.ask, maxTimeMS, (mid) => networkIdsSharedWithCaller(mid, ctx.callerRecord))
+      : undefined;
 
     /**
      * The predicate for ONE member: the caller's filter NARROWED by whatever the names and the schema version resolve to there.
