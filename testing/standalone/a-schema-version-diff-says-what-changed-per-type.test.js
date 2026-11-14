@@ -273,3 +273,54 @@ describe('the diff memo', () => {
       [...first.kinds.entries()].map(([k, s]) => [k, s === 'all' ? s : [...s].sort()]));
   });
 });
+
+/**
+ * The reach law (Q-744, bundle-268 design r2 §1 "Reach of a diff, one statement", r4 §10 T7). `narrowedDiff(diff, kind, type)` is the
+ * comparison a type's history shows: `diff` (a `schemaVersionDiff` answer) cut to what reaches one (kind, type), in the same shape -
+ * `types` holds only that type's entry, `spaceRules` only the rules whose kinds reach the kind (`ruleReaches`), `allowlists` only the
+ * kind's (`allowlistReaches`), `unread` as it was. The law, over every classified pair of the shared corpus, both modes and every (kind,
+ * type) either side declares plus an undeclared one per kind: the narrowed diff holds at least one change the mode counts (`structural`:
+ * a change of class `structural`; `any`: any change; an allowlist entry always) exactly when `typesDifferingUnder` names the type or marks
+ * the kind `all`. Seen red at 327b105e: `narrowedDiff` does not exist.
+ */
+describe('the narrowed comparison and the classification reach the same (kind, type)', () => {
+  it('narrowedDiff counts a change exactly when the classification names the type or marks its kind all', async () => {
+    const narrowedDiff = need(diff, 'narrowedDiff');
+    const schemaVersionDiff = need(diff, 'schemaVersionDiff');
+    const typesDifferingUnder = need(diff, 'typesDifferingUnder');
+    const { samenessCorpus } = await import('./_schema-sameness-corpus.mjs');
+    const corpus = await samenessCorpus();
+    const KINDS = ['entity', 'edge', 'fact', 'chrono'];
+    const failures = [];
+    let checked = 0;
+    for (const a of corpus) for (const b of corpus) {
+      if (a === b) continue;
+      const full = schemaVersionDiff(a.text, b.text);
+      if (full.unread.length > 0) continue;
+      const kt = new Set(KINDS.map(k => `${k}\0__undeclared`));
+      for (const t of full.types) kt.add(`${t.kind}\0${t.type}`);
+      for (const k of KINDS) {
+        for (const ty of Object.keys(JSON.parse(a.text).typeSchemas?.[k] ?? {})) kt.add(`${k}\0${ty}`);
+        for (const ty of Object.keys(JSON.parse(b.text).typeSchemas?.[k] ?? {})) kt.add(`${k}\0${ty}`);
+      }
+      for (const mode of ['structural', 'any']) {
+        const td = typesDifferingUnder(a.text, b.text, mode);
+        for (const key of kt) {
+          const [kind, type] = key.split('\0');
+          checked++;
+          const n = narrowedDiff(full, kind, type);
+          const counts = (c) => mode === 'any' || c.class === 'structural';
+          const counted = (n.types ?? []).filter(t => t.kind === kind && t.type === type).flatMap(t => t.changes).filter(counts).length
+            + (n.spaceRules ?? []).flatMap(r => r.changes).filter(counts).length + (n.allowlists ?? []).length;
+          if ((n.types ?? []).some(t => t.kind !== kind || t.type !== type)) failures.push(`${a.label} -> ${b.label} ${kind}/${type}: another type is kept`);
+          const x = td.kinds.get(kind);
+          const named = x === 'all' || (x instanceof Set && x.has(type));
+          if ((counted > 0) !== named) failures.push(`${a.label} -> ${b.label} ${mode} ${kind}/${type}: narrowed counts ${counted}, classify ${named ? 'names it' : 'does not'}`);
+        }
+      }
+      if (failures.length > 20) break;
+    }
+    assert.ok(checked > 10_000, `only ${checked} (pair, mode, kind/type) cases ran`);
+    assert.deepEqual(failures.slice(0, 20), []);
+  });
+});
