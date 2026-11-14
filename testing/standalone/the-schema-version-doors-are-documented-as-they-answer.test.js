@@ -78,8 +78,34 @@ describe('the validate request table is SchemaValidateBody', () => {
   });
 });
 
+/**
+ * The type forms are documented where a caller reads them (Q-744, bundle-268 design r4 §9 and §10 T6): the `space_schema_versions` row of
+ * 16-mcp names every new parameter, answer field and code; 06a's Schema versions section names every field of the three answers, the
+ * glyph rule (the `older` filter with `schemaChanged`), and the record-facts rule. Seen red at 327b105e: neither page names a type form.
+ */
+describe('the type forms of the schema-version doors are documented', () => {
+  const FIELDS = ['kind', 'type', 'fps', 'declared', 'older', 'definitions', 'rep', 'origin', 'since', 'until', 'cut', 'standings', 'standing', 'recordFacts'];
+  const CODES = ['bad_kind', 'type_needs_kind', 'kind_needs_type', 'fps_needs_type', 'too_many_fps', 'schema_versions_busy', 'schema_index_building'];
+
+  it('the space_schema_versions row of 16-mcp names every type-form parameter, field and code', () => {
+    const row = readDoc('integration-guide/16-mcp.md').split('\n').find(l => l.startsWith('| `space_schema_versions` |'));
+    assert.ok(row, '16-mcp has no space_schema_versions row');
+    const missing = [...FIELDS, ...CODES, 'knowledge: read'].filter(k => !row.includes(k.includes(':') ? k : `\`${k}\``));
+    assert.deepEqual(missing, [], `the 16-mcp row does not name ${missing.join(', ')}`);
+  });
+
+  it('the Schema versions section of 06a names every field, the glyph rule and the record-facts rule', async () => {
+    const { undocumentedKeys } = await import('./_schema-version-fixtures.mjs');
+    assert.deepEqual(await undocumentedKeys('integration-guide/06a-schema-api.md', 'Schema versions', [...FIELDS, ...CODES, 'schemaChanged', 'withheld']), []);
+    const page = readDoc(SCHEMA_PAGE);
+    assert.match(page, /`older` is true exactly when/, '06a does not state the glyph rule a caller can reproduce');
+  });
+});
+
 describe('every refusal code of the schema-version doors is answered and documented', () => {
-  const CODES = ['bad_fingerprint', 'unknown_fingerprint', 'against_needs_fp', 'against_needs_stored', 'schema_index_building'];
+  // Q-744 (bundle-268 design r4 §5, §10 T6) adds the type forms' refusals and the pass's 503; seen red at 327b105e, where none exists.
+  const CODES = ['bad_fingerprint', 'unknown_fingerprint', 'against_needs_fp', 'against_needs_stored', 'schema_index_building',
+    'bad_kind', 'type_needs_kind', 'kind_needs_type', 'fps_needs_type', 'too_many_fps', 'schema_versions_busy'];
   const sources = trackedSources(['server/src']).filter(p => p.endsWith('.ts')).map(p => readFileSync(join(REPO_ROOT, p), 'utf8'));
 
   it('a code named only in a comment does not count (plant)', () => {

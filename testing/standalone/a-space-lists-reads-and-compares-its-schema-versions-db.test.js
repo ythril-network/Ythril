@@ -302,4 +302,118 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
       } finally { Object.assign(proto, saved); }
     });
   });
+
+  /**
+   * The type forms (Q-744, bundle-268 design r4 §5 and §10 T6): the dispatch table on both doors, the echo, every new refusal, the 503s,
+   * and the shared answer fixture in check mode. Seen red at 327b105e: REST ignores `kind`, `type` and `fps` and answers the version list;
+   * MCP refuses them as unknown arguments.
+   */
+  describe('the type forms', () => {
+    const FIXTURE = new URL('../../client/src/app/testing/fixtures/schema-type-answers.json', import.meta.url);
+    const both = async (key, space, params) => {
+      const { typeDoors } = await import('./_type-history.mjs');
+      const doors = typeDoors(d);
+      return [await doors.REST(key, space, params), await doors.MCP(key, space, params)];
+    };
+
+    it('the dispatch table: kind, kind+type, fps+kind+type and fp+against+kind+type each answer their form, echoing kind and type', async () => {
+      for (const r of await both(local.key, S, { kind: 'entity' })) {
+        assert.ok(!r.refused && Array.isArray(r.body.types), `${r.door} kind: ${r.text.slice(0, 300)}`);
+        assert.equal(r.body.kind, 'entity');
+        assert.ok(r.body.types.some(t => t.type === 'A' && t.declared === 'own'), `${r.door}: A is not an own row`);
+      }
+      for (const r of await both(local.key, S, { kind: 'entity', type: 'A' })) {
+        assert.ok(!r.refused && Array.isArray(r.body.definitions), `${r.door} kind+type: ${r.text.slice(0, 300)}`);
+        assert.deepEqual({ kind: r.body.kind, type: r.body.type }, { kind: 'entity', type: 'A' });
+      }
+      for (const r of await both(local.key, S, { fps: [v1.fp, v2.fp, NOT_HELD], kind: 'entity', type: 'A' })) {
+        assert.ok(!r.refused && Array.isArray(r.body.standings), `${r.door} fps: ${r.text.slice(0, 300)}`);
+        assert.deepEqual(new Map(r.body.standings.map(s => [s.fp, s.standing])), new Map([[v1.fp, 'older'], [v2.fp, 'current'], [NOT_HELD, 'notHeld']]));
+      }
+      for (const r of await both(local.key, S, { fp: v1.fp, against: 'current', kind: 'entity', type: 'A' })) {
+        assert.ok(!r.refused, `${r.door} narrowed: ${r.text.slice(0, 300)}`);
+        assert.deepEqual({ kind: r.body.kind, type: r.body.type }, { kind: 'entity', type: 'A' }, `${r.door}: the narrowed comparison does not echo`);
+        assert.ok((r.body.types ?? []).length > 0 && r.body.types.every(t => t.kind === 'entity' && t.type === 'A'), `${r.door}: the comparison is not narrowed to A`);
+      }
+    });
+
+    it('every new refusal, on both doors, named by its code', async () => {
+      const fps = (n) => Array.from({ length: n }, (_, i) => i.toString(16).padStart(64, '0'));
+      for (const [params, code] of [
+        [{ kind: 'nonsense' }, 'bad_kind'],
+        [{ type: 'A' }, 'type_needs_kind'],
+        [{ fps: [v1.fp], kind: 'entity' }, 'kind_needs_type'],
+        [{ fp: v1.fp, kind: 'entity', type: 'A' }, 'kind_needs_type'],
+        [{ fps: [v1.fp] }, 'fps_needs_type'],
+        [{ fps: fps(101), kind: 'entity', type: 'A' }, 'too_many_fps'],
+        [{ fps: [v1.fp, 'abc'], kind: 'entity', type: 'A' }, 'bad_fingerprint'],
+      ]) {
+        for (const r of await both(local.key, S, params)) {
+          assert.ok(r.refused, `${r.door} ${JSON.stringify(params).slice(0, 120)} was answered`);
+          if (r.door === 'REST') assert.equal(r.status, 400, `${JSON.stringify(params).slice(0, 120)}: ${r.text.slice(0, 200)}`);
+          assert.match(r.text, new RegExp(code), `${r.door} ${JSON.stringify(params).slice(0, 120)}: not refused as ${code}: ${r.text.slice(0, 200)}`);
+        }
+      }
+      for (const r of await both(local.key, S, { fps: fps(100), kind: 'entity', type: 'A' })) assert.ok(!r.refused, `${r.door}: 100 fps, the bound, was refused: ${r.text.slice(0, 200)}`);
+    });
+
+    it('a pass past its deadline answers 503 schema_versions_busy with no store text, on both doors and on the filter', async () => {
+      const proto = Object.getPrototypeOf(d.door.mongo.col(`${S}_entities`));
+      const saved = { find: proto.find, aggregate: proto.aggregate, distinct: proto.distinct, findOne: proto.findOne };
+      const expired = () => Object.assign(new Error('operation exceeded time limit'), { code: 50, codeName: 'MaxTimeMSExpired' });
+      const slow = (name) => function slowRead(...args) {
+        if (String(this.collectionName) !== `${S}_entities`) return saved[name].apply(this, args);
+        if (name === 'distinct' || name === 'findOne') return Promise.reject(expired());
+        const err = expired();
+        return { toArray: () => Promise.reject(err), next: () => Promise.reject(err), project() { return this; }, limit() { return this; }, sort() { return this; }, hint() { return this; }, maxTimeMS() { return this; }, [Symbol.asyncIterator]: async function* () { throw err; } };
+      };
+      Object.assign(proto, { find: slow('find'), aggregate: slow('aggregate'), distinct: slow('distinct'), findOne: slow('findOne') });
+      try {
+        for (const r of await both(local.key, S, { kind: 'entity' })) {
+          assert.ok(r.refused, `${r.door}: a pass past its deadline was answered`);
+          if (r.door === 'REST') assert.equal(r.status, 503, r.text.slice(0, 200));
+          assert.match(r.text, /schema_versions_busy/, `${r.door}: ${r.text.slice(0, 200)}`);
+          assert.doesNotMatch(r.text, /MaxTimeMS|exceeded time limit/, `${r.door}: the store's own words reached the caller`);
+        }
+        const f = await d.rest(local.key, 'POST', '/api/filter', { space: S, collection: 'entities', schemaVersion: 'older' });
+        assert.equal(f.status, 503, `the filter answered ${f.status}: ${f.text.slice(0, 200)}`);
+        assert.match(f.text, /schema_versions_busy/);
+        assert.doesNotMatch(f.text, /MaxTimeMS|exceeded time limit/);
+      } finally { Object.assign(proto, saved); }
+    });
+
+    it('the answers have the shapes of the shared fixture (check mode): every key and every enumerated value is one the fixture holds', async () => {
+      const { readFileSync } = await import('node:fs');
+      const fx = JSON.parse(readFileSync(FIXTURE, 'utf8'));
+      const keysOf = (rows) => new Set(rows.flatMap(r => Object.keys(r)));
+      const top = (ex) => new Set([...Object.keys(ex.answer), 'nextSkip', 'cut', 'recordFacts']);
+      const [kind] = await both(local.key, S, { kind: 'entity' });
+      const [hist] = await both(local.key, S, { kind: 'entity', type: 'A' });
+      const [st] = await both(local.key, S, { fps: [v1.fp, v2.fp, NOT_HELD], kind: 'entity', type: 'A' });
+      const checks = [
+        ['kind', kind, fx.kind, 'types'], ['history', hist, fx.history, 'definitions'], ['fps', st, fx.fps, 'standings'],
+      ];
+      for (const [name, live, ex, list] of checks) {
+        assert.ok(!live.refused && Array.isArray(live.body[list]), `${name}: ${live.text.slice(0, 200)}`);
+        const extra = Object.keys(live.body).filter(k => !top(ex).has(k) && !k.startsWith('budget') && !['charsReturned', 'bytesReturned', 'tokensReturned'].includes(k));
+        assert.deepEqual(extra, [], `${name}: the answer has keys the fixture does not: the fixture and the client spec are out of date`);
+        const rowExtra = [...keysOf(live.body[list])].filter(k => !keysOf(ex.answer[list]).has(k));
+        assert.deepEqual(rowExtra, [], `${name}: a row has keys the fixture does not`);
+      }
+      const declared = new Set(fx.kind.answer.types.map(t => t.declared));
+      assert.ok(kind.body.types.every(t => declared.has(t.declared)), 'a declared value the fixture does not hold');
+      const standing = new Set(fx.fps.answer.standings.map(s => s.standing));
+      assert.ok(st.body.standings.every(s => standing.has(s.standing)), 'a standing the fixture does not hold');
+      assert.deepEqual([...fx.refusals.codes].sort(), ['bad_fingerprint', 'bad_kind', 'fps_needs_type', 'kind_needs_type', 'schema_index_building', 'schema_versions_busy', 'too_many_fps', 'type_needs_kind', 'unknown_fingerprint']);
+    });
+
+    it('a collection with no stamp index answers the kind read 503 schema_index_building (last: it drops S\'s index)', async () => {
+      await d.door.coll(S, 'entities').dropIndexes();
+      for (const r of await both(local.key, S, { kind: 'entity' })) {
+        assert.ok(r.refused, `${r.door}: a kind read without the stamp index was answered`);
+        if (r.door === 'REST') assert.equal(r.status, 503, r.text.slice(0, 200));
+        assert.match(r.text, /schema_index_building/, `${r.door}: ${r.text.slice(0, 200)}`);
+      }
+    });
+  });
 });
