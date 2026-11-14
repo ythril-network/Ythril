@@ -41,6 +41,7 @@ import {
   InlineTypeSchemaZ, LIBRARY_SCHEMA_KEYS, libraryDeletePathProblem, parseInlineDefinition, withTypeSchemas,
   type ParsedLibraryEntry,
 } from '../spaces/body-schemas.js';
+import { TYPE_NAME_MAX } from '@ythril-network/schema/internal';
 import rateLimit from 'express-rate-limit';
 import type { SchemaCatalog, KnowledgeType } from '../config/types.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
@@ -140,7 +141,8 @@ function kindChangeRefusal(name: string, newKind: KnowledgeType): string | undef
 export const LibraryEntryBodyZ = z.object({
   name: z.string().min(1).max(200).regex(LIBRARY_NAME_RE, 'name must start with an alphanumeric character and contain only letters, digits, dots, dashes, or underscores'),
   knowledgeType: z.enum(KNOWLEDGE_TYPES),
-  typeName: z.string().min(1).max(200),
+  // A library entry names a type a space will declare: the per-type maps' own bound, read from where it is declared.
+  typeName: z.string().min(1).max(TYPE_NAME_MAX),
   schema: LibraryTypeSchemaZ,
   description: z.string().max(1000).optional(),
   schemaGroup: z.string().min(1).max(200).optional(),
@@ -152,7 +154,7 @@ export const LibraryEntryBodyZ = z.object({
 /** Body for PUT (name comes from the URL param). */
 export const LibraryEntryPutBodyZ = z.object({
   knowledgeType: z.enum(KNOWLEDGE_TYPES),
-  typeName: z.string().min(1).max(200),
+  typeName: z.string().min(1).max(TYPE_NAME_MAX),
   schema: LibraryTypeSchemaZ,
   /** Pass null to explicitly clear a previously set description. */
   description: z.string().max(1000).nullable().optional(),

@@ -317,7 +317,19 @@ function atPath(obj: unknown, path: string): unknown {
  * type to `string`. The SHAPE is still built from the tuple, so a fifth type joins this door on the commit
  * that declares it.
  */
-const perTypeMap = () => z.preprocess(refuseInternalKeys, z.record(z.string().min(1).max(200), TypeSchemaZ)).optional();
+const perTypeMap = () => z.preprocess(refuseInternalKeys, z.record(z.string().min(1).max(TYPE_NAME_MAX), TypeSchemaZ)).optional();
+
+/** The longest type name a schema may declare: the per-type maps' key bound, read by every door that takes a type name (Q-744). */
+export const TYPE_NAME_MAX = 200;
+
+/**
+ * Could a schema declare a type of this name? A non-empty string of at most {@link TYPE_NAME_MAX} characters that names no object's
+ * internals: the rule the per-type maps above refuse by. What it prevents: a door listing a type name no schema could ever hold (a
+ * record-only name in a type's history), which a caller could then never ask for, or a map key that reaches a prototype.
+ */
+export function isDeclarableTypeName(name: unknown): name is string {
+  return typeof name === 'string' && name.length >= 1 && name.length <= TYPE_NAME_MAX && !isObjectInternalKey(name);
+}
 
 /**
  * The collection-scoped fields `schema` carries that do not belong under `collection`, as `{ path, message }` — the one answer for
