@@ -26,6 +26,13 @@
  * `400 bad_fingerprint` for a fingerprint that is not 64 lowercase hex (on the path, or in `against`), `404 unknown_fingerprint` for one not
  * held or not this caller's to have, `400 against_needs_fp` for `against` without `fp` (both doors: the list, the read and the diff share one), a 400 for
  * a malformed budget or `skip`, and `503 schema_index_building` (thrown, `SchemaIndexBuilding`) while a collection lists no stamp index.
+ *
+ * ## The type forms (bundle-268, Q-744)
+ *
+ * `kind`, `kind` + `type`, `fps` + `kind` + `type` and `fp` + `against` + `kind` + `type` reach `schema-type-acts.ts` (the type list, a type's
+ * history, where versions stand for a type) and the narrowed comparison, refused first, in one order, by `bad_kind`, `type_needs_kind`,
+ * `fps_needs_type`, `kind_needs_type`, the type name's bound, `too_many_fps` and `bad_fingerprint`; a pass past its deadline is `503
+ * schema_versions_busy` (thrown, `SchemaVersionsBusy`).
  */
 import { z } from 'zod';
 import { isSchemaFingerprint } from '@ythril-network/schema/internal';
@@ -33,23 +40,31 @@ import { resolveBudget, defaultBudgetChars, carriagesFor, budgetCeilingZ, type B
 import { pageList } from '../brain/list-page.js';
 import { refusalOfParse } from '../util/log.js';
 import { variationOf, EMPTY_SCHEMA_FINGERPRINT } from './schema-stamp.js';
-import { servableTo } from './schema-snapshot.js';
 import { snapshots } from './schema-snapshot-store.js';
 import { fingerprintTypesIn, STAMPED_COLLECTIONS, FINGERPRINT_TYPES_DEFAULT_MS, type StampedCollection } from './schema-snapshot-carried.js';
 import { heldVersions, heldVersionsKept, versionMetaOf, type HeldVersion, type HeldProvenance } from './schema-version-text.js';
-import { schemaVersionDiff } from './schema-diff.js';
+import { schemaVersionDiff, narrowedDiff } from './schema-diff.js';
 import { unknownSpaceSentence } from './unknown-space.js';
-import { SCHEMA_INDEX_BUILDING, BAD_FINGERPRINT, UNKNOWN_FINGERPRINT, badFingerprintSentence } from '../util/errors.js';
+import { mayHave as mayHaveIn } from './type-standing.js';
+import { typeListAct, typeHistoryAct, typeStandingsAct, FPS_MAX } from './schema-type-acts.js';
+import { KNOWLEDGE_TYPES, type KnowledgeType } from '../config/types-knowledge.js';
+import { TYPE_NAME_MAX } from '@ythril-network/schema/internal';
+import type { TokenRights } from '../config/rights-shape.js';
+import { SCHEMA_INDEX_BUILDING, SCHEMA_VERSIONS_BUSY, BAD_FINGERPRINT, UNKNOWN_FINGERPRINT, badFingerprintSentence } from '../util/errors.js';
 
 /** What an act answers: a body, or a refusal with its status and code. */
 export type SchemaVersionsActResult =
   | { status: 200; body: Record<string, unknown> }
   | { status: 400 | 404; error: string; code?: string };
 
-/** Who is asking, as the acts need it: the networks a peer-bound token shares the space in (`undefined`: a local token), and the door. */
+/**
+ * Who is asking, as the acts need it: the networks a peer-bound token shares the space in (`undefined`: a local token), the door, and the
+ * caller's rights (the type forms answer the facts read from records only to `knowledge: read` or an administrator: `mayReadRecordFacts`).
+ */
 export interface SchemaVersionsCaller {
   readonly shared: ReadonlySet<string> | undefined;
   readonly transport: 'mcp' | 'rest';
+  readonly rights: TokenRights | null | undefined;
 }
 
 /** One entry of the list. */
@@ -66,8 +81,14 @@ interface VersionEntry {
  * The codes the schema-version doors refuse with, one list: the acts answer from it, and a text that names them (the tool's description) is
  * checked against it. `bad_fingerprint` and `unknown_fingerprint` are the sync door's, read from their one declaration (`util/errors.ts`).
  */
-export const SCHEMA_VERSION_REFUSAL_CODES = [BAD_FINGERPRINT, UNKNOWN_FINGERPRINT, 'against_needs_fp', SCHEMA_INDEX_BUILDING] as const;
+export const SCHEMA_VERSION_REFUSAL_CODES = [
+  BAD_FINGERPRINT, UNKNOWN_FINGERPRINT, 'against_needs_fp', SCHEMA_INDEX_BUILDING,
+  // The type forms (bundle-268, Q-744 design r4 §5).
+  'bad_kind', 'type_needs_kind', 'kind_needs_type', 'fps_needs_type', 'too_many_fps', SCHEMA_VERSIONS_BUSY,
+] as const;
 const AGAINST_NEEDS_FP = SCHEMA_VERSION_REFUSAL_CODES[2];
+const [BAD_KIND, TYPE_NEEDS_KIND, KIND_NEEDS_TYPE, FPS_NEEDS_TYPE, TOO_MANY_FPS] =
+  [SCHEMA_VERSION_REFUSAL_CODES[4], SCHEMA_VERSION_REFUSAL_CODES[5], SCHEMA_VERSION_REFUSAL_CODES[6], SCHEMA_VERSION_REFUSAL_CODES[7], SCHEMA_VERSION_REFUSAL_CODES[8]];
 
 const badFingerprint = (where: string): SchemaVersionsActResult => ({ status: 400, error: badFingerprintSentence(where), code: BAD_FINGERPRINT });
 const unknownFingerprint: SchemaVersionsActResult = {
@@ -76,17 +97,21 @@ const unknownFingerprint: SchemaVersionsActResult = {
 /** A space gone between the door's check and the read: the one unknown-space sentence (`spaces/unknown-space.ts`). */
 const unknownSpace = (spaceId: string): SchemaVersionsActResult => ({ status: 404, error: unknownSpaceSentence(spaceId) });
 
-/** May the caller have this held version? Every version for a local token; for a peer-bound one, what the sync door would serve it. */
-const mayHave = (v: HeldProvenance, caller: SchemaVersionsCaller): boolean => !caller.shared || !v.kept || servableTo(v.kept, caller.shared).ok;
+/** May the caller have this held version? THE answer of the standing pass (`type-standing.ts`), asked with this caller's networks. */
+const mayHave = (v: HeldProvenance, caller: SchemaVersionsCaller): boolean => mayHaveIn(v, caller.shared);
 
 /**
  * The parameters both doors take, with their bounds: the route's query (numbers through `queryInt`) and the tool's arguments are parsed by this
- * one schema, so the two cannot state different bounds (`a-tool-and-its-route-agree-on-bounds`). `fp` and `against` are strings here and judged
- * by the acts, which answer a malformed one as `bad_fingerprint` on both doors.
+ * one schema, so the two cannot state different bounds (`a-tool-and-its-route-agree-on-bounds`). `fp`, `against`, `kind`, `type` and `fps`
+ * are taken as sent here and judged by the acts, which answer each malformed one by its own code on both doors (`bad_fingerprint`,
+ * `bad_kind`, `too_many_fps`, a `type` over `TYPE_NAME_MAX`). `fps` is a comma-separated list on the route and an array on the tool.
  */
 export const SchemaVersionsParams = z.object({
   fp: z.string().optional(),
   against: z.string().optional(),
+  kind: z.string().optional(),
+  type: z.string().optional(),
+  fps: z.union([z.string(), z.array(z.string())]).optional(),
   skip: z.number().min(0).multipleOf(1).optional(),
   maxChars: budgetCeilingZ().optional(),
   maxBytes: budgetCeilingZ().optional(),
@@ -196,6 +221,7 @@ export async function readSchemaVersionAct(
 /** What changed from version `fp` to `against` (`current` by default). The budget is taken and checked; a comparison is answered whole. */
 export async function diffSchemaVersionAct(
   spaceId: string, fp: string, against: unknown, req: BudgetRequest, caller: SchemaVersionsCaller,
+  narrowTo?: { kind: KnowledgeType; type: string },
 ): Promise<SchemaVersionsActResult> {
   if (!isSchemaFingerprint(fp)) return badFingerprint('fp');
   const to = against === undefined || against === 'current' ? 'current' : against;
@@ -209,21 +235,72 @@ export async function diffSchemaVersionAct(
   if (isRefusal(from)) return from;
   const target = toFp === fp ? from : await versionFor(spaceId, toFp, caller);
   if (isRefusal(target)) return target;
-  return { status: 200, body: { from: fp, to: toFp, ...schemaVersionDiff(from.text, target.text) } };
+  const diff = schemaVersionDiff(from.text, target.text);
+  if (narrowTo) return { status: 200, body: { from: fp, to: toFp, kind: narrowTo.kind, type: narrowTo.type, ...narrowedDiff(diff, narrowTo.kind, narrowTo.type) } };
+  return { status: 200, body: { from: fp, to: toFp, ...diff } };
+}
+
+/** The arguments of the one door, as both doors hand them over. */
+export type SchemaVersionsArgs = { fp?: unknown; against?: unknown; skip?: unknown; kind?: unknown; type?: unknown; fps?: unknown } & BudgetRequest;
+
+/** `fps` as sent: an array on the tool, one comma-separated value on the route (or a repeated one). */
+function fpsOf(fps: unknown): unknown[] {
+  if (Array.isArray(fps)) return fps.flatMap(v => (typeof v === 'string' ? v.split(',') : [v])).filter(v => v !== '');
+  if (typeof fps === 'string') return fps.split(',').filter(v => v !== '');
+  return [fps];
 }
 
 /**
- * The one door of both the tool and the route onto the three acts: no `fp` the list, `fp` the version, `fp` and `against` the comparison. `against` alone is refused
- * (`against_needs_fp`): it names what to compare WITH, and a list compares nothing.
+ * The type forms (bundle-268, Q-744 design r4 §5), refused in a fixed order so every malformed request has one code: `bad_kind`, then
+ * `type_needs_kind`, then `fps_needs_type` / `kind_needs_type`, then the type name's bound, then `too_many_fps` and `bad_fingerprint`.
  */
-export async function schemaVersionsToolAct(
-  spaceId: string, args: { fp?: unknown; against?: unknown; skip?: unknown } & BudgetRequest, caller: SchemaVersionsCaller,
-): Promise<SchemaVersionsActResult> {
-  const budget: BudgetRequest = { maxChars: args.maxChars, maxBytes: args.maxBytes, maxTokens: args.maxTokens };
-  if (args.fp === undefined) {
-    if (args.against !== undefined) return { status: 400, error: '`against` names what to compare `fp` with: send `fp` too', code: AGAINST_NEEDS_FP };
-    return listSchemaVersionsAct(spaceId, { ...budget, skip: args.skip }, caller);
+async function typeFormAct(spaceId: string, args: SchemaVersionsArgs, budget: BudgetRequest, caller: SchemaVersionsCaller): Promise<SchemaVersionsActResult> {
+  const { kind, type, fps, fp, against } = args;
+  if (kind !== undefined && !(KNOWLEDGE_TYPES as readonly unknown[]).includes(kind)) {
+    return { status: 400, error: `\`kind\` must be one of: ${KNOWLEDGE_TYPES.join(', ')}`, code: BAD_KIND };
   }
+  if (type !== undefined && kind === undefined) return { status: 400, error: '`type` names a type of a kind: send `kind` too', code: TYPE_NEEDS_KIND };
+  if (fps !== undefined && type === undefined) {
+    return kind === undefined
+      ? { status: 400, error: '`fps` asks where versions stand for one type: send `kind` and `type` too', code: FPS_NEEDS_TYPE }
+      : { status: 400, error: '`fps` with `kind` asks for one type: send `type` too', code: KIND_NEEDS_TYPE };
+  }
+  if (fp !== undefined && (against === undefined || type === undefined)) {
+    return { status: 400, error: '`kind` with `fp` narrows a comparison to one type: send `against` and `type` too', code: KIND_NEEDS_TYPE };
+  }
+  if (type !== undefined && (typeof type !== 'string' || type.length < 1 || type.length > TYPE_NAME_MAX)) {
+    return { status: 400, error: `\`type\` must be a type name of 1 to ${TYPE_NAME_MAX} characters` };
+  }
+  const k = kind as KnowledgeType;
+  const budgetCheck = budgetOf({ ...budget, skip: args.skip }, caller);
+  if (!budgetCheck.ok) return { status: 400, error: budgetCheck.error };
+  if (fps !== undefined) {
+    if (fp !== undefined) return { status: 400, error: '`fps` and `fp` are two forms: send one' };
+    const list = fpsOf(fps);
+    if (list.length > FPS_MAX) return { status: 400, error: `\`fps\` names at most ${FPS_MAX} fingerprints`, code: TOO_MANY_FPS };
+    if (list.length === 0 || list.some(v => !isSchemaFingerprint(v))) return badFingerprint('every member of fps');
+    return typeStandingsAct(spaceId, k, type as string, list as string[], caller);
+  }
+  if (fp !== undefined) {
+    if (typeof fp !== 'string') return badFingerprint('fp');
+    return diffSchemaVersionAct(spaceId, fp, against, budget, caller, { kind: k, type: type as string });
+  }
+  if (type !== undefined) return typeHistoryAct(spaceId, k, type as string, { ...budget, skip: args.skip }, caller);
+  return typeListAct(spaceId, k, { ...budget, skip: args.skip }, caller);
+}
+
+/**
+ * The one door of both the tool and the route onto the acts: no `fp` the list, `fp` the version, `fp` and `against` the comparison; with `kind`
+ * (and `type`, `fps`) the type forms ({@link typeFormAct}). `against` alone is refused (`against_needs_fp`): it names what to compare WITH, and a
+ * list compares nothing.
+ */
+export async function schemaVersionsToolAct(spaceId: string, args: SchemaVersionsArgs, caller: SchemaVersionsCaller): Promise<SchemaVersionsActResult> {
+  const budget: BudgetRequest = { maxChars: args.maxChars, maxBytes: args.maxBytes, maxTokens: args.maxTokens };
+  if (args.fp === undefined && args.against !== undefined) {
+    return { status: 400, error: '`against` names what to compare `fp` with: send `fp` too', code: AGAINST_NEEDS_FP };
+  }
+  if (args.kind !== undefined || args.type !== undefined || args.fps !== undefined) return typeFormAct(spaceId, args, budget, caller);
+  if (args.fp === undefined) return listSchemaVersionsAct(spaceId, { ...budget, skip: args.skip }, caller);
   if (typeof args.fp !== 'string') return badFingerprint('fp');
   return args.against === undefined
     ? readSchemaVersionAct(spaceId, args.fp, budget, caller)
