@@ -13,19 +13,25 @@ import { globalRateLimit } from '../rate-limit/middleware.js';
 import { queryInt } from '../brain/result-budget.js';
 import { networkIdsSharedWithCaller } from '../networks/network-spaces.js';
 import { schemaVersionsToolAct } from '../spaces/schema-versions-acts.js';
+import type { TokenRights } from '../config/rights-shape.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { sendSpaceActAnswer } from './send-act-answer.js';
 
 export const spaceSchemaVersionsRouter = Router();
 
-// GET /api/spaces/:id/schema-versions[?fp=<fp>[&against=current|<fp>]] - the list (one page), one version, or a comparison.
+// GET /api/spaces/:id/schema-versions[?fp=<fp>[&against=current|<fp>]] - the list (one page), one version, or a comparison;
+// [?kind=<kind>[&type=<T>[&fps=<fp>,<fp>...]]] - a kind's types, a type's history, or where versions stand for a type (Q-744).
 spaceSchemaVersionsRouter.get('/:id/schema-versions', globalRateLimit, requireSpaceAuthScoped('id'), async (req, res) => {
   const spaceId = req.params['id'] as string;
   try {
     sendSpaceActAnswer(res, await schemaVersionsToolAct(spaceId, {
       fp: req.query['fp'], against: req.query['against'], skip: queryInt(req.query['skip']),
+      kind: req.query['kind'], type: req.query['type'], fps: req.query['fps'],
       maxChars: queryInt(req.query['maxChars']), maxBytes: queryInt(req.query['maxBytes']), maxTokens: queryInt(req.query['maxTokens']),
-    }, { shared: networkIdsSharedWithCaller(spaceId, req.authToken as object | undefined), transport: 'rest' }));
+    }, {
+      shared: networkIdsSharedWithCaller(spaceId, req.authToken as object | undefined), transport: 'rest',
+      rights: (req.authToken as { rights?: TokenRights } | undefined)?.rights,
+    }));
   } catch (err) {
     sendCaughtFailure(res, 'GET /api/spaces/:id/schema-versions', err);
   }

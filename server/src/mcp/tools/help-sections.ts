@@ -180,9 +180,14 @@ of your edits a network outranks (fields, hidden) and which network wins.
 A record written while it conformed carries the fingerprint of the schema it
 conformed to: its schema version. space_schema_versions lists
 a space's versions, reads one (fp) and says what changed between two (fp and
-against). filter's schemaVersion finds records by version (current, a
-fingerprint, older, unversioned), and schema_validate with against: stamp judges
-each stored record by the version it carries.`;
+against). With kind it lists a kind's types and marks each own type with records
+not on its current definition (older); with kind and type it gives that type's
+history: the definitions its records were saved under, with when each held; with
+fps, kind and type where each version stands for the type. filter's
+schemaVersion finds records by version (current, a fingerprint, older,
+sameAs:<fingerprint> for one definition of their type, unversioned), and
+schema_validate with against: stamp judges each stored record by the version it
+carries.`;
 
 const REST_SUMMARY = `EVERY TOOL ON THIS LIST IS ALSO "POST /api/<tool-name>", with the token you are
 using now as a Bearer header. The body is the tool's arguments exactly — the same
