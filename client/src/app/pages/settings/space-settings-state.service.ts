@@ -737,11 +737,18 @@ export class SpaceSettingsState {
     });
   }
 
-  /** Re-baseline both dirty snapshots — called after opening a space. */
+  /**
+   * Bumped each time the schema as stored is re-baselined (opened, or saved): what was read about the stored schema, such as which
+   * types have records on an older definition (Q-744), is read again.
+   */
+  readonly schemaEpoch = signal(0);
+
+  /** Re-baseline both dirty snapshots — called after opening a space and after a save. */
   markPristine(): void {
     this.pristinePayload = this.settingsPayload();
     this.initialSnapshot = this.snapshot();
     this.dupeInitialSnapshot = this.dupeSnapshot();
+    this.schemaEpoch.update(n => n + 1);
   }
 
   /** Re-baseline ONLY the duplicates snapshot — called after the duplicates tab's own successful save. */

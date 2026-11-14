@@ -14,7 +14,7 @@
  * unrendered. That hazard is exactly why OnPush was not retrofitted onto the 1600-line parent and
  * is applied per component instead.
  */
-import { Component, ChangeDetectionStrategy, Injector, inject, signal, ElementRef, ViewChild, OnInit, computed } from '@angular/core';
+import { Component, ChangeDetectionStrategy, DestroyRef, Injector, inject, signal, ElementRef, ViewChild, OnInit, computed, effect, untracked } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SchemaTypeNameComponent } from './schema-type-name.component';
@@ -23,7 +23,11 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
 import { SpaceSettingsState, emptyTypeSchemaState, ruleRowsFromWire, typeSchemaFromState, typeStateFromSchema, type RuleRow, type TypeSchemaState } from './space-settings-state.service';
-import { SchemaApi, type SchemaLayersView } from '../../core/schema-api.service';
+import { SchemaApi, type SchemaLayersView, type TypeListAnswer, type TypeRead, type TypeRow } from '../../core/schema-api.service';
+import { EMPTY, Observable, Subscription, catchError, concatMap, expand, from, map, of, reduce } from 'rxjs';
+import { SchemaTypeHistoryComponent } from './schema-type-history.component';
+import { HelpToggleComponent } from '../../shared/help-toggle.component';
+import { rovingIndex } from '../../shared/roving-focus';
 import { ToastService } from '../../core/toast.service';
 import { KnowledgeType, KNOWLEDGE_TYPES, PropertySchema, SchemaLibraryEntry, SpaceMeta, TypeSchema, recordTtlWindows } from '../../core/api.types';
 import { ErrorStateComponent } from '../../shared/error-state.component';
@@ -44,13 +48,16 @@ import { PluralText } from '../../core/plural-text.service';
 import { escapeHtml } from '../../shared/escape-html';
 import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
+/** A kind's rows as the tab holds them: answered, answered by a server that cannot (no echo), or failed. */
+type KindRows = { s: 'ready'; answer: TypeListAnswer } | { s: 'unsupported' } | { s: 'failed' };
+
 /** The name an import conflict's "add as" field starts with: the clashing name, made distinct. */
 const suggestedAddAsName = (name: string): string => name + '-2';
 
 @Component({
   selector: 'app-space-schema-tab',
   standalone: true,
-  imports: [SchemaTypeEditorComponent, RuleRowsComponent, SchemaTypeNameComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent, StatusPillComponent],
+  imports: [SchemaTypeEditorComponent, RuleRowsComponent, SchemaTypeNameComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent, StatusPillComponent, SchemaTypeHistoryComponent, HelpToggleComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SPACE_DIALOG_STYLES, SCHEMA_MD_STYLES],
   template: `
@@ -180,7 +187,6 @@ const suggestedAddAsName = (name: string): string => name + '-2';
   <button class="btn btn-secondary btn-sm" type="button" (click)="triggerImportFromLibraryAny()" [attr.title]="'spaces.schema.importFromLibraryTitle' | transloco"><ph-icon name="bookmarks" [size]="13" style="margin-right:5px;"/>{{ 'spaces.schema.importLibraryButton' | transloco }}</button>
   <input #schImportInput type="file" accept=".json,application/json" style="display:none" (change)="onImportSchemaFile($event)" />
   <input #schTypeImportInput type="file" accept=".json,application/json" style="display:none" (change)="onImportTypeSchemaFile($event)" />
-  <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">{{ 'spaces.schema.versionsKeptHint' | transloco }}</span>
 </div>
 <!-- collection tabs -->
 <!-- One tab stop for the strip (roving tabindex): the selected tab is in the Tab order, the others are reached with the arrow keys, Home and End. -->
@@ -220,6 +226,20 @@ const suggestedAddAsName = (name: string): string => name + '-2';
 
 </div><!-- sch-coll-body -->
 
+<!-- ── the History icon button (Q-744): no text, "History" its tooltip and name, first in the pane's actions. Not drawn when the
+     server cannot answer a type's history (an older one: no echo). ── -->
+<ng-template #historyButton let-kt="kt" let-name="name">
+  @if (historySupported(kt)) {
+    <button class="btn btn-ghost btn-sm" type="button" style="padding:2px 6px;" (click)="openHistory(kt, name)"
+      aria-haspopup="dialog" [attr.aria-expanded]="historyOpen()"
+      [attr.title]="'spaces.schema.history.button' | transloco" [attr.aria-label]="'spaces.schema.history.button' | transloco"><ph-icon name="clock-counter-clockwise" [size]="13"/></button>
+  }
+</ng-template>
+
+@if (historyFor(); as h) {
+  <app-schema-type-history [spaceId]="h.spaceId" [kind]="h.kt" [type]="h.name" (closed)="historyFor.set(null)" (left)="leaveForBrain()" />
+}
+
 <!-- ── master/detail template ── -->
 <ng-template #masterDetail let-kt="kt">
   <div class="sch-md">
@@ -244,34 +264,28 @@ const suggestedAddAsName = (name: string): string => name + '-2';
       <!-- The type list scrolls inside its own box: a long allowlist must not stretch the whole dialog
            (and push the imports / Save out of reach) — it stays put and the list scrolls. -->
       <div class="sch-type-list">
+      <!-- A type row is its name (Q-744, owner 2026-11-14: no pills). Retention and a library link show in the type's pane. The
+           muted clock marks a type with records on an older definition; it is part of the row's name, never a control. -->
       @for (name of state.typeNames(kt); track name) {
-        <button type="button" class="sch-type-item" [class.sel]="state.isTypeSelected(kt,name)" [attr.aria-current]="state.isTypeSelected(kt,name) ? 'true' : null" (click)="state.selectType(kt,name)">
-          <span class="nm">{{ name }}</span>
-          <span class="sch-type-badges">
-            @if (state.typeLibRef(kt,name)) {
-              <span class="badge badge-blue">{{ 'spaces.schema.badge.library' | transloco }}</span>
-            } @else {
-              @if (state.typeState(kt,name).propertySchemas.length) {
-                <span class="badge badge-gray">{{ state.typeState(kt,name).propertySchemas.length }}p</span>
-              }
-              @if (state.typeState(kt,name).rules.length) {
-                <span class="badge badge-gray rules-count" data-testid="rules-count" [attr.title]="'rules.countTitle' | transloco: { count: state.typeState(kt,name).rules.length }">{{ state.typeState(kt,name).rules.length }}</span>
-              }
-              @if (kt === 'entity' && state.typeState(kt,name).namingPattern) {
-                <span class="badge badge-gray">{{ 'spaces.schema.badge.pattern' | transloco }}</span>
-              }
-              <!-- A window deletes records, so it is visible from the list rather than only after selecting
-                   the type. Amber, not grey: this is the one badge here that describes data loss. -->
-              @if (state.typeState(kt,name).retentionDays || state.typeState(kt,name).retentionContentDays) {
-                <span class="badge badge-yellow">{{ 'spaces.schema.badge.ttl' | transloco }}</span>
-              }
-            }
-          </span>
+        <button type="button" class="sch-type-item" [class.sel]="isOwnSelected(kt,name)" [attr.aria-current]="isOwnSelected(kt,name) ? 'true' : null" (click)="selectOwn(kt,name)">
+          <span class="nm" [attr.title]="name">{{ name }}</span>
+          @if (olderMark(kt, name)) {
+            <span class="sch-older" [attr.title]="'spaces.schema.list.olderMark' | transloco"><ph-icon name="clock-counter-clockwise" [size]="12" aria-hidden="true"/><span class="vh sr-only">{{ 'spaces.schema.list.olderMarkSr' | transloco }}</span></span>
+          }
         </button>
       } @empty {
         <div class="sch-empty-list">{{ kt === 'edge' ? ('spaces.schema.noEdgeLabels' | transloco) : ('spaces.schema.noTypes' | transloco) }}</div>
       }
       </div>
+      @if (otherRows(kt).length) {
+        <div class="sch-others" role="group" [attr.aria-labelledby]="'sch-others-head-' + kt">
+          <div class="sch-others-head" [id]="'sch-others-head-' + kt">{{ 'spaces.schema.list.notDefinedHere' | transloco }}</div>
+          @for (o of otherRows(kt); track o.type) {
+            <button type="button" class="sch-other-item" [class.sel]="isOtherSelected(kt, o.type)" [attr.aria-current]="isOtherSelected(kt, o.type) ? 'true' : null"
+                    (click)="selectOther(kt, o.type)"><span class="nm" [attr.title]="o.type">{{ o.type }}</span></button>
+          }
+        </div>
+      }
 
       <!-- Imports stay at the bottom: they are the occasional path, and putting them beside the
            everyday control is what made the top of this column busy. -->
@@ -290,19 +304,41 @@ const suggestedAddAsName = (name: string): string => name + '-2';
 
     <!-- DETAIL: editor for the selected type -->
     <div class="sch-detail">
-      @if (selectedTypeName(kt); as name) {
+      @if (otherSelected(kt); as other) {
+        <!-- A name not defined in this space: one line and History, no editor (r4 §7.4). -->
+        <div class="sch-detail-head">
+          <span class="nm">{{ other.type }}</span>
+          <span class="acts">
+            <ng-container *ngTemplateOutlet="historyButton; context: { kt: kt, name: other.type }"></ng-container>
+          </span>
+        </div>
+        <div class="sch-oneline">
+          @if (other.declared === 'layer') {
+            {{ 'spaces.schema.other.layer' | transloco: { name: (other.networks ?? []).join(', ') } }}
+          } @else {
+            {{ 'spaces.schema.other.none' | transloco }}
+          }
+          <app-help-toggle label="spaces.schema.other.helpAria">
+            @if (other.declared === 'layer') { <p>{{ 'spaces.schema.other.help.layer' | transloco }}</p> } @else { <p>{{ 'spaces.schema.other.help.none' | transloco }}</p> }
+            <p>{{ 'spaces.schema.other.help.history' | transloco }}</p>
+          </app-help-toggle>
+        </div>
+      } @else if (selectedTypeName(kt); as name) {
         <div class="sch-detail-head">
           <!-- The name and its rename are one question, in their own component (B-18). -->
           <app-schema-type-name [name]="name" [rename]="renamerFor(kt, name)" />
           <span class="acts">
+            <ng-container *ngTemplateOutlet="historyButton; context: { kt: kt, name: name }"></ng-container>
             <button class="btn btn-ghost btn-sm" type="button" (click)="exportTypeSchema(kt,name)"
-              style="padding:2px 6px;" [attr.title]="'spaces.schema.exportTypeTitle' | transloco"><ph-icon name="upload" [size]="13"/></button>
+              style="padding:2px 6px;" [attr.title]="'spaces.schema.exportTypeTitle' | transloco"
+              [attr.aria-label]="'spaces.schema.exportTypeTitle' | transloco"><ph-icon name="upload" [size]="13"/></button>
             @if (!state.typeLibRef(kt,name)) {
               <button class="btn btn-ghost btn-sm" type="button" (click)="saveTypeToLibrary(kt,name)"
                 style="padding:2px 6px;" [attr.title]="'spaces.schema.saveToLibraryTitle' | transloco"
                 [attr.aria-label]="'spaces.schema.saveToLibraryButton' | transloco"><ph-icon name="bookmarks" [size]="13"/></button>
             }
-            <button class="icon-btn danger" type="button" (click)="state.removeType(kt,name)" [attr.title]="'common.remove' | transloco"><ph-icon name="x" [size]="14"/></button>
+            <button class="icon-btn danger" type="button" (click)="state.removeType(kt,name)" [attr.title]="'common.remove' | transloco"
+              [attr.aria-label]="'common.remove' | transloco"><ph-icon name="x" [size]="14"/></button>
           </span>
         </div>
 
@@ -444,6 +480,122 @@ export class SpaceSchemaTabComponent implements OnInit {
     { kt: 'chrono', label: 'spaces.schema.tab.chrono' },
   ];
 
+  // ── a type's history (Q-744, design r4 §7): the kind's rows, the older mark, "Not defined in this space" and the History dialog
+  /** Each kind's rows from the versions door, as last read; a kind not yet read, or whose read failed, draws no mark. */
+  private readonly kindRows = signal<ReadonlyMap<KnowledgeType, KindRows>>(new Map());
+  private kindReads?: Subscription;
+  /** The selected name of the "Not defined in this space" group, which shows its own pane instead of the editor. */
+  private readonly otherSel = signal<{ kt: KnowledgeType; name: string } | null>(null);
+  /** The type whose history dialog is open. */
+  protected readonly historyFor = signal<{ spaceId: string; kt: KnowledgeType; name: string } | null>(null);
+  protected readonly historyOpen = computed(() => this.historyFor() !== null);
+
+  constructor() {
+    // The rows are read when the tab opens and again after each save; the read goes with the tab.
+    effect(() => {
+      this.state.schemaEpoch();
+      this.state.settingsSpace();
+      untracked(() => this.loadKindRows());
+    });
+    inject(DestroyRef).onDestroy(() => this.kindReads?.unsubscribe());
+  }
+
+  /**
+   * Read every kind's rows: the shown kind first, then one kind after another (r4 §7.2), again whenever the stored schema is re-read
+   * (opened or saved). Nothing is drawn while they load, and a failure draws nothing at all: "if the check fails, no marker shows and
+   * History still works" (layout M).
+   */
+  private loadKindRows(): void {
+    this.kindReads?.unsubscribe();
+    const spaceId = this.state.settingsSpace()?.id;
+    this.kindRows.set(new Map());
+    if (!spaceId) return;
+    const shown = this.state.schemaCollTab();
+    const order = [shown, ...KNOWLEDGE_TYPES.filter(k => k !== shown)];
+    this.kindReads = from(order).pipe(
+      concatMap(kt => this.readKindRows(spaceId, kt).pipe(map(rows => [kt, rows] as const))),
+    ).subscribe(([kt, rows]) => {
+      const next = new Map(this.kindRows());
+      next.set(kt, rows);
+      this.kindRows.set(next);
+    });
+  }
+
+  /** One kind's rows, every page of them; pages that disagree on the current version are not drawn (r3 §9.2). */
+  private readKindRows(spaceId: string, kt: KnowledgeType): Observable<KindRows> {
+    let first: Observable<TypeRead<TypeListAnswer>>;
+    // A host whose SchemaApi has no type reads (a spec of the tab alone, with a stub) draws no history, as an older server does.
+    try { first = this.schemaApi.typeList(spaceId, kt); } catch { return of<KindRows>({ s: 'unsupported' }); }
+    return first.pipe(
+      expand(r => r.supported && r.answer.nextSkip ? this.schemaApi.typeList(spaceId, kt, r.answer.nextSkip) : EMPTY),
+      reduce<TypeRead<TypeListAnswer>, KindRows | null>((acc, r) => {
+        if (!r.supported) return { s: 'unsupported' };
+        if (acc === null) return { s: 'ready', answer: r.answer };
+        if (acc.s !== 'ready' || acc.answer.current !== r.answer.current) return { s: 'failed' };
+        return { s: 'ready', answer: { ...acc.answer, types: [...acc.answer.types, ...r.answer.types] } };
+      }, null),
+      map(rows => rows ?? { s: 'failed' as const }),
+      catchError(() => of<KindRows>({ s: 'failed' })),
+    );
+  }
+
+  private rowsOf(kt: KnowledgeType): TypeListAnswer | null {
+    const r = this.kindRows().get(kt);
+    return r?.s === 'ready' ? r.answer : null;
+  }
+
+  /** The muted clock on an own type: shown exactly when the server answered `older: true` for it, and the record facts are not withheld. */
+  protected olderMark(kt: KnowledgeType, name: string): boolean {
+    const rows = this.rowsOf(kt);
+    if (!rows || rows.recordFacts === 'withheld') return false;
+    return rows.types.some(t => t.type === name && t.declared === 'own' && t.older === true);
+  }
+
+  /** Whether the server can answer a type's history for this kind (it echoed the kind); History is not drawn otherwise. */
+  protected historySupported(kt: KnowledgeType): boolean { return this.rowsOf(kt) !== null; }
+
+  /** "Not defined in this space": the layer names, and the record-only names unless the record facts are withheld. */
+  protected otherRows(kt: KnowledgeType): TypeRow[] {
+    const rows = this.rowsOf(kt);
+    if (!rows) return [];
+    const own = new Set(this.state.typeNames(kt));
+    return rows.types.filter(t => !own.has(t.type) && (t.declared === 'layer' || (t.declared === 'none' && rows.recordFacts !== 'withheld')));
+  }
+
+  protected otherSelected(kt: KnowledgeType): TypeRow | null {
+    const sel = this.otherSel();
+    return sel && sel.kt === kt ? this.otherRows(kt).find(t => t.type === sel.name) ?? null : null;
+  }
+
+  protected isOtherSelected(kt: KnowledgeType, name: string): boolean {
+    const sel = this.otherSel();
+    return !!sel && sel.kt === kt && sel.name === name;
+  }
+
+  protected isOwnSelected(kt: KnowledgeType, name: string): boolean {
+    return !this.otherSelected(kt) && this.state.isTypeSelected(kt, name);
+  }
+
+  protected selectOwn(kt: KnowledgeType, name: string): void {
+    this.otherSel.set(null);
+    this.state.selectType(kt, name);
+  }
+
+  protected selectOther(kt: KnowledgeType, name: string): void {
+    this.otherSel.set({ kt, name });
+  }
+
+  protected openHistory(kt: KnowledgeType, name: string): void {
+    const spaceId = this.state.settingsSpace()?.id;
+    if (spaceId) this.historyFor.set({ spaceId, kt, name });
+  }
+
+  /** An Open link of the history went to the Brain: the dialog closes, and the settings with it unless they hold unsaved edits. */
+  protected leaveForBrain(): void {
+    this.historyFor.set(null);
+    if (!this.state.isDirty()) this.state.closeSettings();
+  }
+
   protected selectCollTab(kt: KnowledgeType): void {
     this.state.schemaCollTab.set(kt);
     this.schImportError.set('');
@@ -456,13 +608,7 @@ export class SpaceSchemaTabComponent implements OnInit {
    */
   protected onCollTabKey(event: KeyboardEvent): void {
     const at = this.collTabs.findIndex(t => t.kt === this.state.schemaCollTab());
-    if (at < 0) return;
-    const last = this.collTabs.length - 1;
-    const to = event.key === 'ArrowRight' ? (at === last ? 0 : at + 1)
-      : event.key === 'ArrowLeft' ? (at === 0 ? last : at - 1)
-      : event.key === 'Home' ? 0
-      : event.key === 'End' ? last
-      : -1;
+    const to = rovingIndex(event.key, at, this.collTabs.length, { axis: 'horizontal', wrap: true });
     if (to < 0) return;
     event.preventDefault();
     this.selectCollTab(this.collTabs[to]!.kt);

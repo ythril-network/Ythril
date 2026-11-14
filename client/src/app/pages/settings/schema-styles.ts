@@ -53,13 +53,19 @@ export const SCHEMA_MD_STYLES = `
 .sch-master { display:flex; flex-direction:column; gap:3px; min-width:0; }
 /* The list of types scrolls inside itself; the add-row above and imports below stay pinned. */
 .sch-type-list { display:flex; flex-direction:column; gap:3px; min-height:0; overflow-y:auto; max-height:340px; }
-.sch-type-item { display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:none;
+.sch-type-item, .sch-other-item { display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:none;
   border:1px solid transparent; border-radius:8px; padding:7px 9px; cursor:pointer; font:inherit; color:var(--text-primary); }
-.sch-type-item:hover { background:var(--bg-elevated); }
-.sch-type-item.sel { background:color-mix(in srgb,var(--accent) 12%,transparent); border-color:color-mix(in srgb,var(--accent) 34%,transparent); }
-.sch-type-item .nm { font-family:var(--font-mono); font-size:13px; color:var(--accent); flex:1; min-width:0;
+.sch-type-item:hover, .sch-other-item:hover { background:var(--bg-elevated); }
+.sch-type-item.sel, .sch-other-item.sel { background:color-mix(in srgb,var(--accent) 12%,transparent); border-color:color-mix(in srgb,var(--accent) 34%,transparent); }
+.sch-type-item .nm, .sch-other-item .nm { font-family:var(--font-mono); font-size:13px; color:var(--accent); flex:1; min-width:0;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.sch-type-badges { display:inline-flex; gap:3px; flex-wrap:wrap; justify-content:flex-end; }
+/* A type row is its name and, on a type with records on an older definition, a muted clock: no number, no badge (Q-744). */
+.sch-older { display:inline-flex; color:var(--text-muted); flex-shrink:0; }
+/* "Not defined in this space": the layer and record-only names, quieter than the own list. */
+.sch-others { display:flex; flex-direction:column; gap:3px; margin-top:10px; padding-top:8px; border-top:1px solid var(--border-muted); }
+.sch-others-head { font-size:11.5px; color:var(--text-muted); padding:0 9px 2px; }
+.sch-other-item .nm { color:var(--text-secondary); }
+.sch-oneline { margin:6px 0 0; font-size:13px; color:var(--text-secondary); display:flex; flex-wrap:wrap; align-items:center; }
 .sch-empty-list { color:var(--text-muted); font-size:12.5px; font-style:italic; padding:14px 6px; text-align:center; }
 .sch-detail { min-width:0; }
 .sch-detail-empty { color:var(--text-muted); font-size:13px; font-style:italic; padding:26px 20px; text-align:center;
@@ -149,7 +155,6 @@ export const SCHEMA_MD_STYLES = `
 .ends-opt .any { color:var(--text-muted); font-style:italic; }
 .ends-opt input { margin:0; }
 .ends-pairs { display:flex; flex-wrap:wrap; gap:3px; margin-top:4px; }
-.sch-type-badges .badge { font-size:9px; }
 /* A property a network layer supplies: the network's name beside the key, and the proposal buttons after it. */
 .layer-mark { display:inline-flex; align-items:center; gap:3px; margin-inline-start:6px; font-size:10.5px; color:var(--info); border:1px solid var(--info); border-radius:3px; padding:0 4px; }
 .layer-propose { font-size:10.5px; padding:0 6px; margin-inline-start:4px; }
@@ -161,5 +166,4 @@ export const SCHEMA_MD_STYLES = `
 /* A gap, not the space between the spans: Angular drops a whitespace-only node between elements, so the name ran into its message. */
 .applicable-rules li { padding-block:2px; display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; }
 .applicable-rules .rule-name { font-family:var(--font-mono, ui-monospace, monospace); }
-.rules-count { font-size:9px; }
 `;
