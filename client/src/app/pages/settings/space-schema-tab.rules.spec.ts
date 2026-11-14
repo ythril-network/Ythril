@@ -13,7 +13,7 @@
  *
  * Contract: `validate-schema`, `propose-to-network`, `reload-schema`.
  * Chosen: `rules-section` / `rule-row` / `rule-toggle` / `rule-text` / `rule-message` / `rule-text-counter` /
- * `rule-message-counter` / `rules-count` / `applicable-rules` / `space-rules-section` / `space-rule-row` /
+ * `rule-message-counter` / `applicable-rules` / `space-rules-section` / `space-rule-row` /
  * `space-rule-kind` / `rules-readonly-reason` / `layer-marker` / `validate-mode-sample` / `validate-mode-stored` /
  * `validate-sample` / `validate-progress` / `validate-continue` / `validate-all-good`, plus the role `alert` inside the
  * row a refusal names. A counter carries its numbers as `data-used` / `data-limit`: the words around them are
@@ -22,20 +22,12 @@
  */
 import { isSignal } from '@angular/core';
 import { By } from '@angular/platform-browser';
-import { TestBed } from '@angular/core/testing';
-import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { ToastService } from '../../core/toast.service';
-import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { KNOWLEDGE_TYPES, type Space } from '../../core/api.types';
-import { getTranslocoModule } from '../../testing/transloco-testing';
 import { declaredNearest, declaredValue } from '../../testing/declared-style';
+import { $, $$, mountSchemaTab, selectSchemaType, type SchemaTabHarness } from '../../testing/schema-tab-harness';
 import { SpaceSchemaTabComponent } from './space-schema-tab.component';
-import { SpaceSettingsPopupComponent } from './space-settings-popup.component';
-import { SpaceSettingsState } from './space-settings-state.service';
-import { SpacesStore } from './spaces-store.service';
 
 // ── fixtures ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -100,85 +92,28 @@ const NO_LAYERS = { spaceId: 'work', own: {}, layers: [], precedence: [], clashe
 
 interface MountOptions { schemaRights?: 'admin' | 'write'; layers?: unknown; library?: unknown[] }
 
+/** The pop-up over the fake backend, from the shared harness (`testing/schema-tab-harness.ts`; this spec was its first site). */
 async function mount(opts: MountOptions = {}) {
-  TestBed.resetTestingModule();
-  TestBed.configureTestingModule({
+  return mountSchemaTab({
+    space: ruledSpace(),
+    rights: rights(opts.schemaRights ?? 'admin'),
+    layers: opts.layers ?? NO_LAYERS,
+    library: opts.library ?? [],
     // The two readout sentences are plural bases said through `pluralText`, which says nothing for a key the harness only echoes;
     // each form is its own name, so a case can still see WHICH sentence was said.
-    imports: [SpaceSettingsPopupComponent, getTranslocoModule({ translation: { en: {
+    translation: {
       'validate.progress.one': 'validate.progress', 'validate.progress.other': 'validate.progress',
       'validate.progressOpen.one': 'validate.progressOpen', 'validate.progressOpen.other': 'validate.progressOpen',
-    } } })],
-    providers: [
-      provideHttpClient(), provideHttpClientTesting(),
-      SpaceSettingsState, SpacesStore,
-      { provide: ToastService, useValue: { show: vi.fn(), error: vi.fn(), success: vi.fn(), info: vi.fn() } },
-      { provide: ConfirmDialogService, useValue: { confirm: () => Promise.resolve(true) } },
-    ],
+    },
   });
-  const http = TestBed.inject(HttpTestingController);
-  const fixture = TestBed.createComponent(SpaceSettingsPopupComponent);
-  // Attached to the document: `document.activeElement` is meaningless for a detached tree.
-  document.body.appendChild(fixture.nativeElement);
-  const state = fixture.componentInstance.state;
-
-  /** Answers the reads the tab and its neighbours make; leaves every write (and any read it does not know) for the test. */
-  const answers: Record<string, unknown> = {
-    '/api/tokens/me': { id: 't1', name: 'token', rights: rights(opts.schemaRights ?? 'admin') },
-    '/api/spaces/work/schema-layers': opts.layers ?? NO_LAYERS,
-    '/api/schema-library': { entries: opts.library ?? [] },
-    '/api/brain/spaces/work/stats': { spaceId: 'work', facts: 0, entities: 0, edges: 0, chrono: 0, files: 0 },
-  };
-  const flushReads = () => {
-    for (const req of http.match(r => r.method === 'GET' && r.url.split('?')[0]! in answers)) req.flush(answers[req.request.url.split('?')[0]!] as never);
-  };
-  /** Let change detection, deferred blocks and the reads they issued run to rest. */
-  const settle = async (until?: () => boolean): Promise<void> => {
-    const pass = async (): Promise<void> => {
-      fixture.detectChanges();
-      flushReads();
-      await fixture.whenStable();
-      fixture.detectChanges();
-    };
-    if (!until) { await pass(); return; }
-    // Real timers here, so the condition is polled by vitest's own wait; it throws naming the wait when it never holds,
-    // where the old count-bounded loop returned quietly and left the failure to whatever was asserted next.
-    await vi.waitFor(async () => {
-      await pass();
-      if (!until()) throw new Error('settle: the awaited state never rendered');
-    }, { timeout: 5_000, interval: 50 });
-  };
-
-  state.openSettings(ruledSpace());
-  state.settingsTab.set('schema');
-  const el = fixture.nativeElement as HTMLElement;
-  // The tab sits in a deferred block with a minimum loading time, so wait for IT rather than for a fixed moment.
-  await settle(() => !!el.querySelector('.sch-validation-bar'));
-  // Once more, so what the reads issued by the first pass answered (the token's rights, the layers) has rendered.
-  await settle();
-  return { fixture, state, http, el, settle };
 }
 
-type Harness = Awaited<ReturnType<typeof mount>>;
+type Harness = SchemaTabHarness;
 
-const $ = (root: ParentNode, sel: string): HTMLElement | null => root.querySelector<HTMLElement>(sel);
-const $$ = (root: ParentNode, sel: string): HTMLElement[] => Array.from(root.querySelectorAll<HTMLElement>(sel));
 const INTERACTIVE = 'button, input, select, textarea, a[href]';
 
 /** The type pane (`.sch-detail`) with one type selected. */
-async function selectType(h: Harness, kt: (typeof KNOWLEDGE_TYPES)[number], name: string): Promise<HTMLElement> {
-  h.state.schemaCollTab.set(kt);
-  await h.settle();
-  // Clicked, as an operator does: the selection is a plain field of the state, and the tab is OnPush, so only an event
-  // handler tells it to look again.
-  const item = $$(h.el, '.sch-type-item').find(i => $(i, '.nm')?.textContent?.trim() === name);
-  expect(item, `the type list has no "${name}"`).toBeDefined();
-  item!.click();
-  await h.settle();
-  const pane = $(h.el, '.sch-detail');
-  expect(pane, 'the type pane did not render').not.toBeNull();
-  return pane!;
-}
+const selectType = (h: Harness, kt: (typeof KNOWLEDGE_TYPES)[number], name: string): Promise<HTMLElement> => selectSchemaType(h, kt, name);
 
 /** The rule row whose disclosure names `name`, in `root`. */
 function ruleRow(root: ParentNode, name: string, testid = 'rule-row'): HTMLElement | null {
@@ -216,16 +151,18 @@ describe('the type pane shows a type\'s rules after its property table', () => {
       .toEqual([expect.stringContaining('age-positive'), expect.stringContaining('title-long')]);
   });
 
-  it('the type list carries a count badge for a type with rules, and none for a type without', async () => {
+  // Replaces "the type list carries a count badge for a type with rules" (b268, design r4 §7.1): a type row is its name.
+  it('a type row holds its name and at most the older glyph: a type with rules carries no count', async () => {
     const h = await mount();
     h.state.schemaCollTab.set('entity');
     await h.settle();
     const item = (name: string) => $$(h.el, '.sch-type-item').find(i => $(i, '.nm')?.textContent?.trim() === name)!;
     expect(item('person'), 'the type list did not render').toBeDefined();
-    const badge = $(item('person'), '[data-testid="rules-count"]');
-    expect(badge, 'no rules count badge on a type with two rules').not.toBeNull();
-    expect(badge!.textContent).toContain('2');
-    expect($(item('plain'), '[data-testid="rules-count"]')).toBeNull();
+    for (const name of ['person', 'plain', 'linked']) {
+      const extra = Array.from(item(name).children).filter(c => !c.classList.contains('nm') && !c.classList.contains('sch-older'));
+      expect(extra.map(c => c.outerHTML), `the row of ${name} holds more than its name`).toEqual([]);
+      expect($(item(name), '[data-testid="rules-count"], .badge'), `the row of ${name} carries a pill`).toBeNull();
+    }
   });
 });
 
