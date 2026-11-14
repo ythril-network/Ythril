@@ -381,6 +381,8 @@ export interface Fact {
   updatedAt: string;
   seq: number;
   author?: { instanceId: string };
+  /** The schema version the record was last saved under (04-brain-api.md); absent on a record with no stamp. */
+  schemaFingerprint?: string;
 }
 
 export interface Entity {
@@ -409,6 +411,10 @@ export interface Entity {
    * one rule, two declarations, and the weaker one on the side that reads the response.
    */
   updatedAt: string;
+  /** The record's sync sequence number, set by the server on every write. */
+  seq?: number;
+  /** The schema version the record was last saved under (04-brain-api.md); absent on a record with no stamp. */
+  schemaFingerprint?: string;
 }
 
 export interface Edge {
@@ -442,6 +448,10 @@ export interface Edge {
    * one rule, two declarations, and the weaker one on the side that reads the response.
    */
   updatedAt: string;
+  /** The record's sync sequence number, set by the server on every write. */
+  seq?: number;
+  /** The schema version the record was last saved under (04-brain-api.md); absent on a record with no stamp. */
+  schemaFingerprint?: string;
 }
 
 export type ChronoType = 'event' | 'deadline' | 'plan' | 'prediction' | 'milestone';
@@ -476,6 +486,8 @@ export interface ChronoEntry {
   createdAt: string;
   updatedAt: string;
   seq: number;
+  /** The schema version the record was last saved under (04-brain-api.md); absent on a record with no stamp. */
+  schemaFingerprint?: string;
 }
 
 /** Embedding-job backlog for a space (F9 Overview embedding-queue panel). */
