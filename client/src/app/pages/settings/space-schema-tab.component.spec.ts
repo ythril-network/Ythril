@@ -11,7 +11,7 @@
  *      UNCHANGED (only the conflict dialog's hardcoded English strings get translated).
  */
 import { TestBed } from '@angular/core/testing';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { of } from 'rxjs';
@@ -23,6 +23,7 @@ import { SchemaApi } from '../../core/schema-api.service';
 import { ToastService } from '../../core/toast.service';
 import { AuthApi } from '../../core/auth-api.service';
 import type { Space } from '../../core/api.types';
+import { $, $$, mountSchemaTab, selectSchemaType, type SchemaTabHarness } from '../../testing/schema-tab-harness';
 
 const mkType = (over: Partial<TypeSchemaState> = {}): TypeSchemaState => emptyTypeSchemaState(over);
 
@@ -731,4 +732,232 @@ describe('SpaceSchemaTabComponent - the "This instance" row: Unknown top-level f
     expect(consequence.length, `${lang}: no consequence text`).toBeGreaterThan(10);
     expect(consequence).not.toMatch(RAW_KEY);
   });
+});
+
+// ── bundle-268 (Q-744): the type list is names, a quiet older glyph, the History icon button and "Not defined in this space" ──
+//
+// Design r4 §7.1 to §7.4, test C2, over the whole pop-up on a fake backend (`testing/schema-tab-harness.ts`). The tab's `kind`
+// read is answered by the test; a spec about something else leaves it pending, which draws no glyph.
+//
+// Seen red on 327b105e: the pills are drawn, there is no `kind` read, no glyph, no History button and no "Not defined" group, and
+// `versionsKeptHint` is shown.
+
+describe('the type list and pane of bundle-268 (C2)', () => {
+  const HISTORY_SPACE = (): Space => ({
+    id: 'work', label: 'Work', maxGiB: 10, networks: [],
+    meta: {
+      version: 7, validationMode: 'strict',
+      typeSchemas: {
+        entity: {
+          person: {
+            propertySchemas: { age: { type: 'number' }, name: { type: 'string' } },
+            rules: { 'age-positive': { rule: 'self.properties.age >= 0', message: 'An age cannot be negative' } },
+            namingPattern: '^[A-Z]', retention: { days: 30 },
+          },
+          plain: {},
+          linked: { $ref: 'library:shared-person' },
+        },
+        fact: {}, edge: { follows: {} }, chrono: { event: {} },
+      },
+    },
+  } as unknown as Space);
+  const RIGHTS = {
+    floor: { knowledge: 'none', files: 'none', schema: 'none', dataQuality: 'none' },
+    perSpace: { work: { knowledge: 'admin', files: 'admin', schema: 'admin', dataQuality: 'admin' } },
+  };
+  const LIBRARY = [{
+    name: 'shared-person', knowledgeType: 'entity', typeName: 'person', schema: { propertySchemas: { age: { type: 'number' } } },
+    createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
+  }];
+
+  const mountIt = () => mountSchemaTab({ space: HISTORY_SPACE(), rights: RIGHTS, library: LIBRARY });
+
+  const kindList = (kind: string, types: unknown[], extra: Record<string, unknown> = {}) => ({
+    kind, current: 'ff99aa00ff99aa00', types, count: types.length, total: types.length, limit: 100, skip: 0, truncated: false, ...extra,
+  });
+
+  /** The pending `kind` reads (kind, no type), by kind. */
+  const kindReads = (h: SchemaTabHarness) => h.http.match(r => {
+    if (r.method !== 'GET' || r.url.split('?')[0] !== '/api/spaces/work/schema-versions') return false;
+    const q = new URLSearchParams(r.urlWithParams.split('?')[1] ?? '');
+    const kind = r.params.get('kind') ?? q.get('kind');
+    const type = r.params.get('type') ?? q.get('type');
+    return !!kind && !type;
+  });
+  const kindOf = (req: ReturnType<typeof kindReads>[number]) =>
+    req.request.params.get('kind') ?? new URLSearchParams(req.request.urlWithParams.split('?')[1] ?? '').get('kind');
+
+  /** Answers every `kind` read the tab makes, the asked kind from `bodies` or an empty list, until none is pending. */
+  async function answerKinds(h: SchemaTabHarness, bodies: Record<string, { status?: number; body: unknown }>): Promise<string[]> {
+    const asked: string[] = [];
+    for (let round = 0; round < 6; round++) {
+      const pending = kindReads(h);
+      if (!pending.length) break;
+      for (const req of pending) {
+        const kind = kindOf(req)!;
+        asked.push(kind);
+        const a = bodies[kind] ?? { body: kindList(kind, []) };
+        if (a.status && a.status !== 200) req.flush(a.body as never, { status: a.status, statusText: 'x' });
+        else req.flush(a.body as never);
+      }
+      await h.settle();
+    }
+    return asked;
+  }
+
+  const row = (h: SchemaTabHarness, name: string) => $$(h.el, '.sch-type-item').find(i => $(i, '.nm')?.textContent?.trim() === name);
+  const OWN = [
+    { type: 'person', declared: 'own', older: true },
+    { type: 'plain', declared: 'own', older: false },
+    { type: 'linked', declared: 'own', older: false },
+  ];
+
+  it('the tab reads the shown kind\'s rows from the versions door when it opens', async () => {
+    const h = await mountIt();
+    h.state.schemaCollTab.set('entity');
+    await h.settle();
+    const asked = await answerKinds(h, { entity: { body: kindList('entity', OWN) } });
+    expect(asked, 'the tab never asked kind=entity').toContain('entity');
+  });
+
+  it('a type row is its name: no pill for properties, rules, a pattern, retention or a library link', async () => {
+    const h = await mountIt();
+    h.state.schemaCollTab.set('entity');
+    await h.settle();
+    await answerKinds(h, { entity: { body: kindList('entity', OWN) } });
+    for (const name of ['person', 'plain', 'linked']) {
+      const r = row(h, name);
+      expect(r, `no row for ${name}`).toBeDefined();
+      expect($(r!, '.badge, .sch-type-badges, [data-testid="rules-count"]'), `${name} carries a pill`).toBeNull();
+      const extra = Array.from(r!.children).filter(c => !c.classList.contains('nm') && !c.classList.contains('sch-older'));
+      expect(extra.map(c => c.outerHTML), `${name}'s row holds more than its name and the glyph`).toEqual([]);
+      expect(r!.textContent).not.toMatch(/\d/);
+    }
+  });
+
+  it('the glyph shows exactly on a type answered older: true; it is not focusable and says so to a screen reader', async () => {
+    const h = await mountIt();
+    h.state.schemaCollTab.set('entity');
+    await h.settle();
+    await answerKinds(h, { entity: { body: kindList('entity', OWN) } });
+    const glyph = $(row(h, 'person')!, '.sch-older');
+    expect(glyph, 'no glyph on a type with records on an older definition').not.toBeNull();
+    expect(glyph!.getAttribute('title')).toBe('spaces.schema.list.olderMark');
+    expect($(glyph!, '.vh')?.textContent).toContain('spaces.schema.list.olderMarkSr');
+    expect($(glyph!, 'button, a[href], input, [tabindex]'), 'the glyph holds something focusable').toBeNull();
+    expect(glyph!.hasAttribute('tabindex')).toBe(false);
+    expect(glyph!.textContent).not.toMatch(/\d/);
+    expect($(row(h, 'plain')!, '.sch-older')).toBeNull();
+    expect($(row(h, 'linked')!, '.sch-older')).toBeNull();
+  });
+
+  it('a failed kind read draws no glyph and says nothing', async () => {
+    const h = await mountIt();
+    h.state.schemaCollTab.set('entity');
+    await h.settle();
+    const asked = await answerKinds(h, { entity: { status: 500, body: { error: 'boom' } } });
+    expect(asked).toContain('entity');
+    expect($$(h.el, '.sch-older')).toEqual([]);
+    expect(h.el.textContent).not.toContain('common.reason');
+    expect(row(h, 'person'), 'the list itself went away').toBeDefined();
+  });
+
+  it('withheld record facts draw no glyph and no record-only rows; layer rows stay', async () => {
+    const h = await mountIt();
+    h.state.schemaCollTab.set('entity');
+    await h.settle();
+    await answerKinds(h, { entity: { body: kindList('entity', [
+      { type: 'person', declared: 'own' }, { type: 'plain', declared: 'own' }, { type: 'linked', declared: 'own' },
+      { type: 'shared', declared: 'layer', networks: ['net-a'] },
+    ], { recordFacts: 'withheld' }) } });
+    expect($$(h.el, '.sch-older')).toEqual([]);
+    const group = $(h.el, '[role="group"][aria-labelledby]');
+    expect(group, 'no "Not defined in this space" group for a layer type').not.toBeNull();
+    expect($$(group!, 'button').map(b => b.textContent?.trim())).toEqual(['shared']);
+  });
+
+  it('"Not defined in this space" holds the layer and record-only names as name-only buttons, and its pane has one line and History', async () => {
+    const h = await mountIt();
+    h.state.schemaCollTab.set('entity');
+    await h.settle();
+    await answerKinds(h, { entity: { body: kindList('entity', [...OWN,
+      { type: 'shared', declared: 'layer', networks: ['net-a'] }, { type: 'ghost', declared: 'none' },
+    ]) } });
+    const group = $(h.el, '[role="group"][aria-labelledby]');
+    expect(group, 'no group').not.toBeNull();
+    expect(document.getElementById(group!.getAttribute('aria-labelledby')!)?.textContent).toContain('spaces.schema.list.notDefinedHere');
+    const names = $$(group!, 'button');
+    expect(names.map(b => b.textContent?.trim())).toEqual(['shared', 'ghost']);
+    for (const b of names) expect($(b, '.badge, .sch-older')).toBeNull();
+    expect(row(h, 'ghost'), 'a record-only name is listed among the own types').toBeUndefined();
+
+    names[1]!.click();
+    await h.settle();
+    const pane = $(h.el, '.sch-detail');
+    expect(pane, 'selecting a not-defined name shows no pane').not.toBeNull();
+    expect(pane!.textContent).toContain('ghost');
+    expect(pane!.textContent).toContain('spaces.schema.other.none');
+    expect($(pane!, 'button[aria-label="spaces.schema.history.button"]'), 'the pane has no History button').not.toBeNull();
+    expect($(pane!, '.prop-table'), 'a not-defined name got an editor').toBeNull();
+  });
+
+  it('the History button comes first in the pane\'s actions, with no text, "History" as title and name; every action is named', async () => {
+    const h = await mountIt();
+    const pane = await selectSchemaType(h, 'entity', 'plain');
+    await answerKinds(h, { entity: { body: kindList('entity', OWN) } });
+    const acts = $$(pane, '.acts button');
+    expect(acts.length, 'history, export, save to library, remove').toBe(4);
+    const history = acts[0]!;
+    expect(history.textContent?.trim()).toBe('');
+    expect(history.getAttribute('title')).toBe('spaces.schema.history.button');
+    expect(history.getAttribute('aria-label')).toBe('spaces.schema.history.button');
+    expect(history.getAttribute('aria-haspopup')).toBe('dialog');
+    expect($(history, 'ph-icon')?.getAttribute('name') ?? $(history, 'ph-icon')?.getAttribute('ng-reflect-name')).toBe('clock-counter-clockwise');
+    expect(acts[1]!.getAttribute('aria-label'), 'export has no name').toBe('spaces.schema.exportTypeTitle');
+    expect(acts[2]!.getAttribute('aria-label'), 'save to library has no name').toBe('spaces.schema.saveToLibraryButton');
+    expect(acts[3]!.getAttribute('aria-label'), 'remove has no name').toBe('common.remove');
+  });
+
+  it('History opens the dialog for the type, and closing it gives the focus back to the History button', async () => {
+    const h = await mountIt();
+    const pane = await selectSchemaType(h, 'entity', 'plain');
+    await answerKinds(h, { entity: { body: kindList('entity', OWN) } });
+    const history = $(pane, 'button[aria-label="spaces.schema.history.button"]');
+    expect(history).not.toBeNull();
+    history!.focus();
+    history!.click();
+    await h.settle();
+    expect(history!.getAttribute('aria-expanded')).toBe('true');
+    const dialog = $(h.el, 'app-schema-type-history');
+    expect(dialog, 'History opened no dialog').not.toBeNull();
+    const reads = h.http.match(r => r.url.split('?')[0] === '/api/spaces/work/schema-versions' && (r.params.get('type') ?? new URLSearchParams(r.urlWithParams.split('?')[1] ?? '').get('type')) === 'plain');
+    expect(reads.length, 'the dialog did not read the history of plain').toBe(1);
+    reads[0]!.flush({ kind: 'entity', type: 'plain', current: 'ff99', declared: 'own', definitions: [], count: 0, total: 0, limit: 20, skip: 0, truncated: false });
+    await h.settle();
+    $(dialog!, '[data-testid="history-close"]')!.click();
+    await h.settle();
+    expect($(h.el, 'app-schema-type-history')).toBeNull();
+    expect(document.activeElement).toBe($(h.el, '.sch-detail button[aria-label="spaces.schema.history.button"]'));
+  });
+
+  it('a server that does not echo kind has no history: the History button is not drawn', async () => {
+    const h = await mountIt();
+    const pane = await selectSchemaType(h, 'entity', 'plain');
+    const asked = await answerKinds(h, { entity: { body: { current: 'ff99', versions: [] } } });
+    await h.settle();
+    // The ask was made, so what follows is the echo rule and not a tab that never asked.
+    expect(asked, 'the tab never asked kind=entity').toContain('entity');
+    expect($(pane, 'button[aria-label="spaces.schema.history.button"]')).toBeNull();
+    expect($(h.el, '.acts button[title="spaces.schema.history.button"]')).toBeNull();
+    expect($$(h.el, '.sch-older')).toEqual([]);
+  });
+
+  it('the versions-kept hint is gone from the tab', async () => {
+    const h = await mountIt();
+    h.state.schemaCollTab.set('entity');
+    await h.settle();
+    expect(h.el.textContent).not.toContain('spaces.schema.versionsKeptHint');
+  });
+
+  afterEach(() => { document.body.innerHTML = ''; });
 });
