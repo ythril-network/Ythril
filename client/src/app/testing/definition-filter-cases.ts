@@ -31,6 +31,7 @@ import { EntityRefPicker } from '../pages/brain/entity-ref-picker.service';
 import { RecordDrawerState } from '../pages/brain/record-drawer-state.service';
 import { RecordListState } from '../pages/brain/record-list-state.service';
 import { ConfirmDialogService } from '../core/confirm-dialog.service';
+import type { RecordTab } from '../pages/brain/brain-tabs';
 
 export interface DefinitionFilterTab {
   /** The tab component. */
@@ -38,7 +39,7 @@ export interface DefinitionFilterTab {
   /** Its knowledge kind as the versions door names it. */
   kind: 'entity' | 'fact' | 'edge' | 'chrono';
   /** Its `filter` collection. */
-  collection: 'entities' | 'facts' | 'edges' | 'chrono';
+  collection: RecordTab;
   /** One record of the tab, with its type and, when given, its stamp. */
   record: (i: number, type: string, fp?: string) => object;
 }
