@@ -32,17 +32,17 @@ import type { DefinitionLanding } from './definition-landing';
       <span class="chip">
         @if (kind() === 'edge') { {{ 'brain.edges.table.relation' | transloco }}: {{ type() }}
           <button class="x" type="button" [attr.title]="'brain.filter.removeRelationAria' | transloco" [attr.aria-label]="'brain.filter.removeRelationAria' | transloco"
-                  (click)="removeType.emit()"><ph-icon name="x" [size]="11"/></button>
+                  (click)="clearType.emit()"><ph-icon name="x" [size]="11"/></button>
         } @else { {{ 'common.form.type' | transloco }}: {{ type() }}
           <button class="x" type="button" [attr.title]="'brain.filter.removeTypeAria' | transloco" [attr.aria-label]="'brain.filter.removeTypeAria' | transloco"
-                  (click)="removeType.emit()"><ph-icon name="x" [size]="11"/></button>
+                  (click)="clearType.emit()"><ph-icon name="x" [size]="11"/></button>
         }
       </span>
     }
     @if (landing().active()) {
       <span class="chip">{{ landing().chip().key | transloco: landing().chip().params }}
         <button class="x" type="button" [attr.title]="'brain.filter.removeDefinitionAria' | transloco" [attr.aria-label]="'brain.filter.removeDefinitionAria' | transloco"
-                (click)="removeDefinition.emit()"><ph-icon name="x" [size]="11"/></button>
+                (click)="clearDefinition.emit()"><ph-icon name="x" [size]="11"/></button>
       </span>
     }
     @if (type()) {
@@ -64,7 +64,8 @@ export class DefinitionChipsComponent {
   readonly type = input<string>('');
   /** The type chip is the only place this filter shows (the edges tab's linked label), so it stays while the type is set. */
   readonly pinned = input<boolean>(false);
-  readonly removeType = output<void>();
-  readonly removeDefinition = output<void>();
+  // "clear", not "remove": a chip narrows what the list shows and writes nothing, so it is no write control a view must hide.
+  readonly clearType = output<void>();
+  readonly clearDefinition = output<void>();
   protected readonly historyOpen = signal(false);
 }

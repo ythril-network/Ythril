@@ -147,7 +147,7 @@ import { isRetypeCancelled, saveWithRetype } from './retype-flow';
             </div>
           }
           <app-definition-chips [landing]="landing" [spaceId]="spaceId()" kind="fact" [type]="recordFilter().type"
-            (removeType)="removeLandingType()" (removeDefinition)="removeDefinitionFilter()" />
+            (clearType)="removeLandingType()" (clearDefinition)="removeDefinitionFilter()" />
           <app-record-order-line [sortField]="sortField()" [ranked]="!!store.memorySearch().trim()" />
           <div class="table-wrapper" hscrollTop>
             <table>
