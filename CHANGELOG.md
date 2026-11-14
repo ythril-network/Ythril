@@ -39,8 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** `filesAwaitingBytes` on REST stats and MCP `space_stats`: records whose bytes are missing here, which file counts leave out. The change feed gains reason `bytes_lost` and the audit log `file.absent_bytes.sweep`.
 - **Files:** the Brain page's Files tab, a view's Overview and the Danger zone show "+N awaiting bytes" beside the file count when some records wait for their bytes.
 - **Files:** metrics `ythril_files_absent_bytes_removed_total`, `ythril_files_awaiting_bytes` and `ythril_files_absent_bytes_held`.
+- **Schema:** a type's history on the schema versions door and tool (`kind`, `type`, `fps`), `sameAs:<fp>` on the filter, the History dialog, a clock mark on types with records on an older definition, the drawer's Type definition row and the Brain chips and column.
 
 ### Changed
+
+- **Schema:** type rows in the schema tab show only the name: the property, rules, pattern, library and retention pills are gone; retention and the library link stay in the type's pane.
+- **Schema:** `older` no longer walks every stamped record; version texts are read in byte-bounded chunks; a pass past its deadline answers 503 `schema_versions_busy`; edges get a `{label: 1}` index, built in the background.
+- **Schema:** a record whose type field holds an array is matched by no type in `schemaVersion` filters and the History dialog; it is counted as unclassified.
+- **Schema:** peer-bound tokens' `older` and `sameAs` see only versions they may have.
 
 - **Schema:** the per-type files `schemas/<space>_<kind>_<type>.json` are no longer written; the housekeeping cycle removes the ones this instance wrote, locally and without a tombstone.
 - **Schema:** the schema version index keys the stamp and the type; the index pass builds it, then drops the old one. Until a collection has either, a schema-version read answers `503 schema_index_building`.
