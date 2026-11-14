@@ -103,6 +103,9 @@ const EXEMPT = {
     'spaces/schema-snapshot-carried.ts:fingerprintsCarriedIn', 'sync/schema-snapshot-owed.ts:deliverersOf',
     // bundle-267: the (stamp, type) counts are answered from the index keys alone; a `forkOf` clause would make the plan fetch every row.
     'spaces/schema-snapshot-carried.ts:fingerprintTypesIn',
+    // bundle-268 (Q-744): the type history's seeks over the stamp and type indexes (R2 to R5), answered from the keys for the same reason.
+    'spaces/schema-snapshot-carried.ts:unnamedFingerprintsIn', 'spaces/schema-snapshot-carried.ts:typeOnAnyOf',
+    'spaces/schema-snapshot-carried.ts:fingerprintsOfType', 'spaces/schema-snapshot-carried.ts:recordTypeNamesIn',
   ]),
   // Q-624 slice I3: the readers whose subject IS the fork rows, or a row's fork status.
   ...reasoned('the fork module itself: it reads fork rows on purpose (Review\'s list and resolve, the re-mint, the cascade, the cap) and names `forkOf` in every read', [

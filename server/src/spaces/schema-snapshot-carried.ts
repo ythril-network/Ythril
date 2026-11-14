@@ -9,7 +9,11 @@
  *   its candidates are. Each caller keeps only its own failure policy (the gap scan and the fetch are additive, so a partial answer is safe there;
  *   the sweep removes, so it reads all four collections or none).
  * - {@link fingerprintTypesIn}: "Which (stamp, type) pairs do the stored records of this collection carry, and how many of each?" The version
- *   list's counts and the filter's `older` predicate ask it.
+ *   list's counts ask it.
+ * - The type history's seeks (bundle-268, Q-744 design r4 §1), none a walk of the records: {@link unnamedFingerprintsIn} (R2, which stamps carry
+ *   a record whose type is no string), {@link typeOnAnyOf} (R3, does a record of T carry one of these stamps), {@link fingerprintsOfType} (R4,
+ *   which stamps T carries) and {@link recordTypeNamesIn} (R5, which names the records carry), each planned by
+ *   {@link stampIndexMayHoldArrays}, the one answer to whether the stamp index may hold an array type.
  *
  * ## What it prevents
  *
@@ -25,8 +29,10 @@
  *
  * A fork row is a stored record like any other and is read: it carries the stamp of the copy it holds.
  */
-import { col, asFilter } from '../db/mongo.js';
+import { col, asFilter, getDb } from '../db/mongo.js';
 import { distinctStringsOf } from '../db/distinct-strings.js';
+import type { TimeLeft } from '../db/read-by-id.js';
+import { stampedTypeValue } from './type-field-clause.js';
 import { indexNamesOf } from '../db/index-names.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { COLLECTION_SUFFIX, KNOWLEDGE_TYPES, type KnowledgeType } from '../config/types-knowledge.js';
@@ -77,13 +83,165 @@ export async function stampIndexHint(spaceId: string, collection: StampedCollect
  * The fingerprints a stored record of `collection` in `spaceId` carries, each once; with `among`, only those of `among` (none asked: none read).
  * Throws on any failure of the read, a missing stamp index among them; never answers partially.
  */
-export async function fingerprintsCarriedIn(spaceId: string, collection: StampedCollection, among?: readonly string[]): Promise<string[]> {
+export async function fingerprintsCarriedIn(
+  spaceId: string, collection: StampedCollection, among?: readonly string[], opts: { timeLeft?: TimeLeft } = {},
+): Promise<string[]> {
   if (among !== undefined && among.length === 0) return [];
   const hint = await stampIndexHint(spaceId, collection);
   const filter = { [SCHEMA_FINGERPRINT_FIELD]: { ...STAMP_READ, ...(among !== undefined ? { $in: [...among] } : {}) } };
+  const maxTimeMS = opts.timeLeft?.();
   const found = await distinctStringsOf(col<Record<string, unknown>>(spaceCollection(spaceId, collection)), SCHEMA_FINGERPRINT_FIELD,
-    asFilter<Record<string, unknown>>(filter), { hint });
+    asFilter<Record<string, unknown>>(filter), { hint, ...(maxTimeMS !== undefined ? { maxTimeMS } : {}) });
   return found.filter(fp => isSchemaFingerprint(fp));
+}
+
+// ── The type history's reads (bundle-268, Q-744 design r4 §1 and its amendment): index seeks, never a walk of the records ──────────────
+
+/**
+ * Every BSON type a type field can hold that is neither a string nor null nor an array, as `$type` aliases: as ONE `$type` list they bound the
+ * stamp index tightly and the read stays covered (probe t8: 23 keys, 0 records, where an `$or` of the same clauses planned a FETCH once
+ * `symbol` was in it). `symbol` is left out: a deprecated BSON type no door writes (a write and an arrival are JSON), whose index bounds are
+ * the strings', so asking for it walks every key; `undefined` likewise (it cannot be bounded).
+ */
+const NON_STRING_SCALAR_TYPES = [
+  'number', 'object', 'binData', 'objectId', 'bool', 'date', 'regex', 'dbPointer', 'javascript', 'javascriptWithScope',
+  'timestamp', 'minKey', 'maxKey',
+] as const;
+
+/** The IXSCAN of `index` anywhere in an explain answer, whatever shape the server version gives it. */
+function ixscanOf(node: unknown, index: string): Record<string, unknown> | undefined {
+  if (Array.isArray(node)) {
+    for (const n of node) { const hit = ixscanOf(n, index); if (hit) return hit; }
+    return undefined;
+  }
+  if (!node || typeof node !== 'object') return undefined;
+  const o = node as Record<string, unknown>;
+  if (o['stage'] === 'IXSCAN' && o['indexName'] === index) return o;
+  for (const [k, v] of Object.entries(o)) {
+    if (k === 'rejectedPlans' || k === 'command') continue;
+    const hit = ixscanOf(v, index);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/**
+ * May this collection's stamp index hold an array-valued type field? THE one answer R2, R4, R3 and the filter's `older` pick their plan by
+ * (design r4 amend "one rule"): read from the index's own multikey flag, which the store sets the first time a stamped record with an array
+ * type is written (and never clears), through one planner explain (no record read, no command on the collection). A collection read through
+ * the single-key stamp index it replaces answers `true`: that index does not hold the type, so it cannot say. What it prevents: the plain,
+ * covered type match used where a stamped `['T', 'X']` would match T by an element, and the guarded FETCH paid where no array can exist.
+ */
+export async function stampIndexMayHoldArrays(spaceId: string, collection: StampedCollection, hint?: string): Promise<boolean> {
+  const index = hint ?? await stampIndexHint(spaceId, collection);
+  if (index !== STAMP_INDEX) return true;
+  const explained = await getDb().command({
+    explain: { find: spaceCollection(spaceId, collection), filter: { [SCHEMA_FINGERPRINT_FIELD]: STAMP_READ }, hint: index, limit: 1 },
+    verbosity: 'queryPlanner',
+  });
+  const scan = ixscanOf(explained, index);
+  if (!scan) return true;
+  const paths = scan['multiKeyPaths'] as Record<string, unknown[]> | undefined;
+  const typeField = stampTypeFieldOf(collection);
+  if (paths && typeof paths === 'object' && Array.isArray(paths[typeField])) return paths[typeField]!.length > 0;
+  return scan['isMultiKey'] !== false;
+}
+
+/** The type match and the hint one stamp read uses: the index the collection lists, and whether that index may hold an array type. */
+async function stampPlanOf(spaceId: string, collection: StampedCollection, mayHoldArrays?: boolean): Promise<{ hint: string; arrays: boolean }> {
+  const hint = await stampIndexHint(spaceId, collection);
+  return { hint, arrays: mayHoldArrays ?? await stampIndexMayHoldArrays(spaceId, collection, hint) };
+}
+
+/** What every R2 to R4 read takes besides its question: the multikey answer when the caller's pass already read it. */
+export interface StampReadOptions { readonly mayHoldArrays?: boolean }
+
+/**
+ * R2: which of `among` does a record carry whose type is neither a string nor absent (`unnamed`: an array, a number, an object)? The same set
+ * the shipped `unnamed` rule of {@link fingerprintTypesIn} answers, asked of `among` alone. On a stamp index that holds no array, one covered
+ * read (the `$type` list, tight bounds: no record read); on one that may, the same list with `array` in it, which fetches (an array of
+ * strings has no key of its own type). Throws on any failure; never answers partially.
+ */
+export async function unnamedFingerprintsIn(
+  spaceId: string, collection: StampedCollection, among: readonly string[], timeLeft: TimeLeft, opts: StampReadOptions = {},
+): Promise<string[]> {
+  if (among.length === 0) return [];
+  const { hint, arrays } = await stampPlanOf(spaceId, collection, opts.mayHoldArrays);
+  const typeField = stampTypeFieldOf(collection);
+  const stamp = { [SCHEMA_FINGERPRINT_FIELD]: { ...STAMP_READ, $in: [...new Set(among)] } };
+  const filter = { ...stamp, [typeField]: { $type: arrays ? [...NON_STRING_SCALAR_TYPES, 'array'] : [...NON_STRING_SCALAR_TYPES] } };
+  const maxTimeMS = timeLeft();
+  const rows = await col<Record<string, unknown>>(spaceCollection(spaceId, collection)).find(asFilter<Record<string, unknown>>(filter), {
+    projection: { _id: 0, [SCHEMA_FINGERPRINT_FIELD]: 1 }, hint, ...(maxTimeMS !== undefined ? { maxTimeMS } : {}),
+  }).toArray();
+  return [...new Set(rows.map(r => r[SCHEMA_FINGERPRINT_FIELD]).filter((fp): fp is string => isSchemaFingerprint(fp)))];
+}
+
+/**
+ * R3: does a record of `type` (the string, never an array holding it) carry any of `fps`? One point seek per stamp at most, stopping at the
+ * first hit. Throws on any failure.
+ */
+export async function typeOnAnyOf(
+  spaceId: string, collection: StampedCollection, type: string, fps: readonly string[], timeLeft: TimeLeft, opts: StampReadOptions = {},
+): Promise<boolean> {
+  if (fps.length === 0) return false;
+  const { hint, arrays } = await stampPlanOf(spaceId, collection, opts.mayHoldArrays);
+  const filter = { [SCHEMA_FINGERPRINT_FIELD]: { ...STAMP_READ, $in: [...new Set(fps)] }, [stampTypeFieldOf(collection)]: stampedTypeValue(type, arrays) };
+  const maxTimeMS = timeLeft();
+  const hit = await col<Record<string, unknown>>(spaceCollection(spaceId, collection)).findOne(asFilter<Record<string, unknown>>(filter), {
+    projection: { _id: 0, [SCHEMA_FINGERPRINT_FIELD]: 1 }, hint, ...(maxTimeMS !== undefined ? { maxTimeMS } : {}),
+  });
+  return hit !== null;
+}
+
+/**
+ * R4: which stamps do the records of `type` carry, each once? On a stamp index that holds no array, one covered read (the type's keys of the
+ * stamp index, grouped by stamp: `distinctStringsOf`, never the driver's one-reply distinct); on one that may, a loose scan of the guarded
+ * match, one seek per stamp the type carries plus one, the deadline asked before each. Never a walk of the type's records. Throws on any failure.
+ */
+export async function fingerprintsOfType(
+  spaceId: string, collection: StampedCollection, type: string, timeLeft: TimeLeft, opts: StampReadOptions = {},
+): Promise<string[]> {
+  const { hint, arrays } = await stampPlanOf(spaceId, collection, opts.mayHoldArrays);
+  const records = col<Record<string, unknown>>(spaceCollection(spaceId, collection));
+  const typeField = stampTypeFieldOf(collection);
+  if (!arrays) {
+    const maxTimeMS = timeLeft();
+    const found = await distinctStringsOf(records, SCHEMA_FINGERPRINT_FIELD,
+      asFilter<Record<string, unknown>>({ [SCHEMA_FINGERPRINT_FIELD]: STAMP_READ, [typeField]: type }), { hint, ...(maxTimeMS !== undefined ? { maxTimeMS } : {}) });
+    return found.filter(fp => isSchemaFingerprint(fp));
+  }
+  const out: string[] = [];
+  let last = '';
+  for (;;) {
+    const maxTimeMS = timeLeft();
+    // No `sort`: the hinted stamp index is read forward from `last`, so its first match IS the next stamp (a sort on the stamp would name the
+    // field through a computed key the position-order gate cannot read).
+    const next = await records.findOne(asFilter<Record<string, unknown>>({
+      [SCHEMA_FINGERPRINT_FIELD]: { ...STAMP_READ, $gt: last }, [typeField]: stampedTypeValue(type, true),
+    }), { projection: { _id: 0, [SCHEMA_FINGERPRINT_FIELD]: 1 }, hint, ...(maxTimeMS !== undefined ? { maxTimeMS } : {}) });
+    const fp = next?.[SCHEMA_FINGERPRINT_FIELD];
+    if (typeof fp !== 'string') return out;
+    if (isSchemaFingerprint(fp)) out.push(fp);
+    last = fp;
+  }
+}
+
+/** The single-field type index a collection's record-only names are read through: `{ label: 1 }` on the edges, `{ type: 1 }` elsewhere. */
+const typeIndexOf = (collection: StampedCollection): string => `${stampTypeFieldOf(collection)}_1`;
+
+/**
+ * R5: the string type names the records of `collection` carry, stamped or not, each once: one key per name (DISTINCT_SCAN) on the type index,
+ * through `distinctStringsOf` with no filter. A caller lists a name only once a string-typed record carrying a version confirms it (R3). While
+ * the edges' `{ label: 1 }` is still being built (it is the background pass's) the read runs unhinted under the deadline. Throws on any failure.
+ */
+export async function recordTypeNamesIn(spaceId: string, collection: StampedCollection, timeLeft: TimeLeft): Promise<string[]> {
+  const name = spaceCollection(spaceId, collection);
+  const index = typeIndexOf(collection);
+  const listed = (await indexNamesOf(name)).includes(index);
+  const maxTimeMS = timeLeft();
+  return distinctStringsOf(col<Record<string, unknown>>(name), stampTypeFieldOf(collection), {},
+    { ...(listed ? { hint: index } : {}), ...(maxTimeMS !== undefined ? { maxTimeMS } : {}) });
 }
 
 /**

@@ -112,6 +112,14 @@ export interface SpaceIndex {
  */
 const EDGE_FROM_ENTRY: SpaceIndex = { part: 'edges', keys: EDGE_FROM_INDEX.keys, options: { ...EDGE_FROM_INDEX.options }, policy: 'report', bootSafe: false };
 
+/**
+ * `{ label: 1 }` on the edges (bundle-268, Q-744 design r4 §8): an edge's type is its `label`, and `{ type: 1 }` does not hold it, so the names
+ * edges carry (`recordTypeNamesIn`, the schema tab's "Not defined in this space" edge labels) and the Brain's guarded label clause read one key
+ * per name here instead of every edge. Not boot-safe: the build reads every edge, so on an existing collection it is the background pass's (a new
+ * collection gets it at init). `report`: until it stands those reads run unhinted under their deadline, slowly and correctly.
+ */
+const EDGE_LABEL_ENTRY: SpaceIndex = { part: 'edges', keys: { label: 1 }, options: {}, policy: 'report', bootSafe: false };
+
 /** An index every builder runs the same way: `throw` and built at every boot. */
 const plain = (part: SpacePart, keys: SpaceIndex['keys'], options: SpaceIndexOptions = {}): SpaceIndex =>
   ({ part, keys, options, policy: 'throw', bootSafe: true });
@@ -198,6 +206,7 @@ export const SPACE_INDEXES: readonly SpaceIndex[] = Object.freeze([
    * the three-field index it replaced first (`dropSupersededEdgeIdentityIndex`), or that one would keep refusing the rows this allows.
    */
   EDGE_FROM_ENTRY,
+  EDGE_LABEL_ENTRY,
   { part: 'edges', keys: EDGE_IDENTITY_INDEX.keys, options: { ...EDGE_IDENTITY_INDEX.options }, policy: 'throw', bootSafe: false, builder: 'edge-identity' },
   /*
    * The write guard of a strict functional label (`Q-439`), declared with its options in `EDGE_GUARD_INDEXES` and built through
