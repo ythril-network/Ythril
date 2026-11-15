@@ -521,19 +521,12 @@ export class SpaceSchemaTabComponent implements OnInit {
     });
   }
 
-  /** One kind's rows, every page of them; pages that disagree on the current version are not drawn (r3 §9.2). */
+  /** One kind's rows, every page of them; pages that disagree on the current version fail the read in `everyTypePage` and are not drawn (r3 §9.2). */
   private readKindRows(spaceId: string, kt: KnowledgeType): Observable<KindRows> {
     return everyTypePage((skip: number) => this.schemaApi.typeList(spaceId, kt, skip)).pipe(
-      map(pages => {
-        const answers: TypeListAnswer[] = [];
-        for (const p of pages) {
-          if (!p.supported) return { s: 'unsupported' } as KindRows;
-          answers.push(p.answer);
-        }
-        const [first, ...later] = answers;
-        if (!first || later.some(a => a.current !== first.current)) return { s: 'failed' } as KindRows;
-        return { s: 'ready', answer: { ...first, types: answers.flatMap(a => a.types) } } as KindRows;
-      }),
+      map((read): KindRows => (read.supported
+        ? { s: 'ready', answer: { ...read.answer[0], types: read.answer.flatMap(a => a.types) } }
+        : { s: 'unsupported' })),
       catchError(() => of<KindRows>({ s: 'failed' })),
     );
   }

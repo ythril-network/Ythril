@@ -33,7 +33,7 @@ import { HttpTestingController, provideHttpClientTesting, type TestRequest } fro
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { firstValueFrom, type Observable } from 'rxjs';
+import { firstValueFrom, of, throwError, type Observable } from 'rxjs';
 import * as schemaApiModule from './schema-api.service';
 import { SchemaApi } from './schema-api.service';
 
@@ -243,5 +243,36 @@ describe('why a read failed is named, and only busy is retried (C5, r4 §7.2, §
     versionsReq().flush({ kind: 'entity', type: 'person', current: 'ff99', declared: 'own', definitions: [{ rep: 'ff99', current: true, origin: { edited: true, networks: [], fetched: false } }], count: 1, total: 1, limit: 20, skip: 0, truncated: false });
     const read = await got;
     expect(read.supported).toBe(true);
+  });
+});
+
+/**
+ * `everyTypePage` holds the two rules every paged type read needs, so no caller writes them again: a page the server does not support
+ * makes the whole read not supported, and pages that disagree on the current version fail the read. Before this they stood in the
+ * type list and in the history, each in its own words, and the history had dropped the second.
+ */
+describe('every page of a type read is one read, or none (everyTypePage)', () => {
+  type Page = { current: string; n: number; nextSkip?: number };
+  const walk = (pages: Record<number, Read | Error>) => firstValueFrom(schemaApiModule.everyTypePage<Page>((skip: number) => {
+    const p = pages[skip];
+    return p instanceof Error ? throwError(() => p) : of(p as { supported: false } | { supported: true; answer: Page });
+  }));
+  const page = (current: string, n: number, nextSkip?: number): Read => ({ supported: true, answer: { current, n, ...(nextSkip === undefined ? {} : { nextSkip }) } });
+
+  it('hands on every page in order when all are supported and name one current version', async () => {
+    const read = await walk({ 0: page('aa', 1, 20), 20: page('aa', 2, 40), 40: page('aa', 3) });
+    expect(read.supported && read.answer.map(a => a.n)).toEqual([1, 2, 3]);
+  });
+
+  it('a later page the server does not support makes the whole read not supported, never the first page alone', async () => {
+    expect(await walk({ 0: page('aa', 1, 20), 20: { supported: false } })).toEqual({ supported: false });
+  });
+
+  it('pages that disagree on the current version fail the read', async () => {
+    await expect(walk({ 0: page('aa', 1, 20), 20: page('bb', 2) })).rejects.toThrow(/disagree on the current schema version/);
+  });
+
+  it('a page that fails fails the read', async () => {
+    await expect(walk({ 0: page('aa', 1, 20), 20: new Error('gone') })).rejects.toThrow('gone');
   });
 });
