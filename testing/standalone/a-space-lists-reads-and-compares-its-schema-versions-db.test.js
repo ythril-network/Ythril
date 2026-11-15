@@ -347,6 +347,9 @@ describe('a space lists, reads and compares its schema versions (real MongoDB)',
         [{ fps: [v1.fp] }, 'fps_needs_type'],
         [{ fps: fps(101), kind: 'entity', type: 'A' }, 'too_many_fps'],
         [{ fps: [v1.fp, 'abc'], kind: 'entity', type: 'A' }, 'bad_fingerprint'],
+        // Q-744 fix round 2, S7: the two refusals no code of the list names are refused by their message alone, on both doors.
+        [{ kind: 'entity', type: 'T'.repeat(201) }, 'type name of 1 to'],
+        [{ fps: [v1.fp], fp: v1.fp, against: 'current', kind: 'entity', type: 'A' }, 'two forms'],
       ]) {
         for (const r of await both(local.key, S, params)) {
           assert.ok(r.refused, `${r.door} ${JSON.stringify(params).slice(0, 120)} was answered`);

@@ -39,7 +39,7 @@ import { servableTo } from './schema-snapshot.js';
 import { configuredVersions, heldVersionsKept, versionTexts, type HeldProvenance } from './schema-version-text.js';
 import { parsedVersion, typesDifferingUnder, type ParsedVersion, type SchemaChangedMode, type TypesDiffering } from './schema-diff.js';
 import {
-  fingerprintsCarriedIn, unnamedFingerprintsIn, stampIndexMayHoldArrays, stampedKindOf, FINGERPRINT_TYPES_DEFAULT_MS, type StampedCollection,
+  fingerprintsCarriedIn, unnamedFingerprintsIn, stampPlanOf, stampedKindOf, FINGERPRINT_TYPES_DEFAULT_MS, type StampedCollection, type StampPlan,
 } from './schema-snapshot-carried.js';
 
 /** Where one stamp stands against the anchor for the records of one kind: see the module docblock. */
@@ -154,6 +154,17 @@ function textChunksOf(fps: readonly string[], sizes: ReadonlyMap<string, number>
   return out;
 }
 
+/**
+ * THE chunker of every pass that reads many version texts (the standing pass and a type's history): `fps` in chunks of at most {@link TEXT_CHUNK}
+ * texts and {@link TEXT_CHUNK_BYTES} bytes, sized from the config and one aggregate of the rows, never from the texts. What it prevents: a
+ * reader that bounds a read by count alone, which with 19 KB texts is 300 KB and with the snapshot cap's 10 MB texts is 160 MB in one reply.
+ * One text (or none) needs no sizing: it is a chunk of its own.
+ */
+export async function textChunksFor(spaceId: string, fps: readonly string[], timeLeft: () => number): Promise<string[][]> {
+  if (fps.length <= 1) return fps.length === 0 ? [] : [[...fps]];
+  return textChunksOf(fps, await textSizesOf(spaceId, fps, timeLeft));
+}
+
 /** The anchor's text, read once for a pass: from the config when it holds it, else from its row. `null` when neither holds it. */
 async function anchorTextOf(spaceId: string, anchor: string, timeLeft: () => number): Promise<ParsedVersion | null> {
   const configured = configuredVersions(spaceId).get(anchor);
@@ -202,9 +213,8 @@ export async function standingsOf(
         for (const fp of misses) out.set(fp, 'notHeld');
         return { anchorHeld: false, fps: out };
       }
-      const sizes = await textSizesOf(spaceId, misses, scope.timeLeft);
       let slice = Date.now();
-      for (const chunk of textChunksOf(misses, sizes)) {
+      for (const chunk of await textChunksFor(spaceId, misses, scope.timeLeft)) {
         const texts = await versionTexts(spaceId, chunk, { timeLeft: scope.timeLeft });
         work.textsRead += texts.size;
         for (const fp of chunk) {
@@ -229,11 +239,11 @@ export async function standingsOf(
   });
 }
 
-/** What {@link kindStandingsIn} answers: the anchor held for the caller, each carried stamp's standing, and the stamp index's multikey answer. */
+/** What {@link kindStandingsIn} answers: the anchor held for the caller, each carried stamp's standing, and the pass's stamp plan (hint, multikey answer). */
 export interface KindStandings {
   readonly anchorHeld: boolean;
   readonly fps: ReadonlyMap<string, KindStanding>;
-  readonly mayHoldArrays: boolean;
+  readonly plan: StampPlan;
 }
 
 /**
@@ -244,12 +254,12 @@ export async function kindStandingsIn(
   spaceId: string, collection: StampedCollection, anchor: string, mode: SchemaChangedMode, scope: PassScope,
 ): Promise<KindStandings> {
   return busyOnTimeout(spaceId, async () => {
-    const carried = await fingerprintsCarriedIn(spaceId, collection, undefined, { timeLeft: scope.timeLeft });
+    const plan = await stampPlanOf(spaceId, collection);
+    const carried = await fingerprintsCarriedIn(spaceId, collection, undefined, { timeLeft: scope.timeLeft, plan });
     const { anchorHeld, fps } = await standingsOf(spaceId, collection, anchor, mode, scope, carried);
-    const mayHoldArrays = await stampIndexMayHoldArrays(spaceId, collection);
     const ask = [...fps].filter(([, s]) => s !== 'notHeld' && s !== 'unclassified').map(([fp]) => fp);
-    for (const fp of await unnamedFingerprintsIn(spaceId, collection, ask, scope.timeLeft, { mayHoldArrays })) fps.set(fp, 'unclassified');
-    return { anchorHeld, fps, mayHoldArrays };
+    for (const fp of await unnamedFingerprintsIn(spaceId, collection, ask, scope.timeLeft, { plan })) fps.set(fp, 'unclassified');
+    return { anchorHeld, fps, plan };
   });
 }
 

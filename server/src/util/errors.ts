@@ -150,7 +150,7 @@ export const SCHEMA_VERSIONS_BUSY = 'schema_versions_busy';
 
 /**
  * A pass that places a space's records against its schema versions (the type history, its older mark, the filter's `older` and `sameAs`) spent
- * its request's deadline (bundle-268, Q-744 design r3 §5.1). What was classified stays in the memo, so trying again continues it. The sentence
+ * its request's deadline (bundle-268, Q-744 design r3 §5.1). The versions already compared stay in the memo, so trying again has less left to do; a read of the records that ran out starts again. The sentence
  * is fixed: the store's own `MaxTimeMSExpired` text never reaches a caller. Every door answers `503` with `code: 'schema_versions_busy'` and
  * `retryable: true`.
  */
@@ -159,7 +159,7 @@ export class SchemaVersionsBusy extends Error {
   readonly code = SCHEMA_VERSIONS_BUSY;
   readonly status = 503;
   constructor(readonly spaceId: string) {
-    super('Placing this space\'s records against its schema versions took longer than this request may; what was done is kept, so trying again continues it.');
+    super('Placing this space\'s records against its schema versions took longer than this request may; the versions already compared are kept, so trying again has less left to do.');
   }
 }
 

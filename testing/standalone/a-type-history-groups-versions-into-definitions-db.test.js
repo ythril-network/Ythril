@@ -40,7 +40,8 @@ import { typeDoors, allPages, need } from './_type-history.mjs';
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const SUITE = 'thhist';
-const [H, CAP, CMP] = ['thhist', 'thhistcap', 'thhistcmp'];
+const [H, CAP, CMP, CHK, MEMO] = ['thhist', 'thhistcap', 'thhistcmp', 'thhistchk', 'thhistmemo'];
+const ALL = [H, CAP, CMP, CHK, MEMO];
 const META = { suppressEmbeddings: true };
 const FIGURES = ['counts', 'records', 'notCurrent', 'stamped', 'totals', 'unversioned', 'changes', 'versions'];
 
@@ -49,6 +50,32 @@ const at = (month, day = 1) => `2026-${String(month).padStart(2, '0')}-${String(
 
 let d, doors, owner, V = {}, cur, capCur, cmpCur;
 let rid = 0;
+/** The byte size of each of CHK's versions' texts, by fingerprint. */
+const bytesOf = new Map();
+
+/** Every `$in` list of ids a snapshot read's filter holds: the filter is read as data here, never evaluated against a record. */
+const idsIn = (filter) => {
+  if (Array.isArray(filter)) return filter.flatMap(idsIn);
+  if (!filter || typeof filter !== 'object') return [];
+  const own = Array.isArray(filter.$in) ? filter.$in : [];
+  return [...own, ...Object.values(filter).flatMap(v => (v === own ? [] : idsIn(v)))];
+};
+
+/**
+ * The reads of version TEXTS `fn` makes of `space`'s snapshot rows, each as the fingerprints it asked for: the finds that project `text`
+ * (the held-without-text reads do not). The server runs in this process, so the collection's `find` is the one place to count them.
+ */
+async function textReadsDuring(space, fn) {
+  const name = `${space}_schema_snapshots`;
+  const proto = Object.getPrototypeOf(d.door.mongo.col(name));
+  const saved = proto.find;
+  const reads = [];
+  proto.find = function readsText(...args) {
+    if (String(this.collectionName) === name && args[1]?.projection?.text === 1) reads.push(idsIn(args[0]));
+    return saved.apply(this, args);
+  };
+  try { return { result: await fn(), reads }; } finally { proto.find = saved; }
+}
 
 /** A kept own row (or a fetched one) for `typeSchemas` at `when`, and `n` records of `type` stamped with it. */
 async function keep(space, typeSchemas, when, { origin = 'own', type = 'A', n = 1 } = {}) {
@@ -71,10 +98,10 @@ const keysIn = (value, out = new Set()) => {
 describe('a type history groups versions into definitions (real MongoDB, both doors)', { skip }, () => {
   before(async () => {
     d = await openViewDoors({ suite: SUITE, openDoor: () => openPullDoor({
-      suite: SUITE, spaces: [H, CAP, CMP], type: 'club', direction: 'both', meta: { [H]: META, [CAP]: META, [CMP]: META },
+      suite: SUITE, spaces: ALL, type: 'club', direction: 'both', meta: Object.fromEntries(ALL.map(s => [s, META])),
     }) });
     doors = typeDoors(d);
-    owner = await d.mint('thh-owner', Object.fromEntries([H, CAP, CMP].map(s => [s, d.row({ schema: 'read', knowledge: 'read' })])));
+    owner = await d.mint('thh-owner', Object.fromEntries(ALL.map(s => [s, d.row({ schema: 'read', knowledge: 'read' })])));
     V.h1 = await keep(H, A(['p']), at(1));
     V.h2 = await keep(H, A(['p'], { B: {} }), at(2));
     V.h3 = await keep(H, A(['q']), at(3));
@@ -91,8 +118,23 @@ describe('a type history groups versions into definitions (real MongoDB, both do
 
     for (let j = 0; j < 200; j++) await keep(CMP, A([`k${j % 40}`], { B: { description: `step ${j}` } }), new Date(Date.UTC(2026, 0, 1) + j * 3_600_000).toISOString());
     cmpCur = await saveVersion(CMP, { ...META, typeSchemas: A(['current']) });
+
+    // CHK: five versions of 1.8 MB each, 9 MB together: past the 8 MiB one read of texts may ask for. Each is carried by a record of A.
+    for (let k = 0; k < 5; k++) {
+      const v = await snapshotOf({ typeSchemas: { entity: { A: { description: String(k).repeat(1_800_000) } } } });
+      await snapshotsOf(d.door.mongo, CHK).insertOne(snapshotRow({ fp: v.fp, text: v.text, origin: 'own', links: linksOf(v.fp), at: at(1 + k) }));
+      await d.door.coll(CHK, 'entities').insertOne(recordOf('entities', CHK, ++rid, { type: 'A', fp: v.fp }));
+      bytesOf.set(v.fp, Buffer.byteLength(v.text, 'utf8'));
+    }
+    // MEMO: three versions that differ in one other type, and two types, X and Y, that none of them declares and each carries a record of.
+    // Fetched, so no definition's origin needs a text (an own definition's origin reads its text, whatever the diff memo holds).
+    for (let k = 0; k < 3; k++) {
+      const v = await snapshotOf({ typeSchemas: { entity: { Z: { propertySchemas: { [`p${k}`]: { type: 'string' } } } } } });
+      await snapshotsOf(d.door.mongo, MEMO).insertOne(snapshotRow({ fp: v.fp, text: v.text, origin: 'fetched', from: 'a-peer', links: linksOf(v.fp), at: at(1 + k) }));
+      for (const type of ['X', 'Y']) await d.door.coll(MEMO, 'entities').insertOne(recordOf('entities', MEMO, ++rid, { type, fp: v.fp }));
+    }
     const { ensureTtlIndexes } = await import('../../server/dist/spaces/space-indexes.js');
-    for (const s of [H, CAP, CMP]) assert.deepEqual((await ensureTtlIndexes(s)).failed, [], `${s}: the stamp index did not build`);
+    for (const s of ALL) assert.deepEqual((await ensureTtlIndexes(s)).failed, [], `${s}: the stamp index did not build`);
   });
   after(async () => { await d?.close(); });
 
@@ -185,5 +227,33 @@ describe('a type history groups versions into definitions (real MongoDB, both do
     assert.deepEqual([...await fingerprintsOfType(H, 'entities', 'A', timeLeft)].sort(), want);
     assert.deepEqual([...await fingerprintsOfType(H, 'entities', '__proto__', timeLeft)].sort(), [V.h1.fp, V.h3.fp].sort());
     assert.deepEqual([...await fingerprintsOfType(H, 'entities', 'B', timeLeft)], [], 'a type no record carries has stamps');
+  });
+
+  /**
+   * The history reads version texts by the standing pass's chunker (Q-744 fix round 2, S2, S6). Seen red on the unchanged code: the history took
+   * 16 texts per read whatever their size (five 1.8 MB texts in one read), and read every text of a history before it asked the pair memo.
+   */
+  it('the texts of a history are read in chunks bounded by bytes as well as by count', async () => {
+    const { TEXT_CHUNK, TEXT_CHUNK_BYTES } = await need('spaces/type-standing.js', ['TEXT_CHUNK', 'TEXT_CHUNK_BYTES']);
+    assert.ok([...bytesOf.values()].reduce((n, b) => n + b, 0) > TEXT_CHUNK_BYTES && bytesOf.size < TEXT_CHUNK, 'the fixture does not pass the byte bound by itself');
+    const { result, reads } = await textReadsDuring(CHK, () => doors.REST(owner.key, CHK, { kind: 'entity', type: 'A' }));
+    assert.ok(!result.refused, result.text.slice(0, 300));
+    assert.ok(reads.length >= 2, `the five texts, 9 MB together, were read in ${reads.length} read(s)`);
+    for (const asked of reads) {
+      const bytes = asked.reduce((n, fp) => n + (bytesOf.get(fp) ?? 0), 0);
+      assert.ok(asked.length <= TEXT_CHUNK && (bytes <= TEXT_CHUNK_BYTES || asked.length === 1), `one read asked for ${asked.length} texts, ${bytes} bytes`);
+    }
+    assert.deepEqual([...new Set(reads.flat())].sort(), [...bytesOf.keys()].sort(), 'a text of the history was never read');
+  });
+
+  it('a pair the diff memo holds is answered without reading its texts: the second type of the same versions reads none', async () => {
+    const first = await textReadsDuring(MEMO, () => doors.REST(owner.key, MEMO, { kind: 'entity', type: 'X' }));
+    assert.ok(!first.result.refused, first.result.text.slice(0, 300));
+    assert.equal(first.result.body.definitions?.length, 1, 'X, which no version declares, is not one definition over the three versions');
+    assert.ok(first.reads.length >= 1, 'the first history read no text: the control does not measure what it says');
+    const second = await textReadsDuring(MEMO, () => doors.REST(owner.key, MEMO, { kind: 'entity', type: 'Y' }));
+    assert.ok(!second.result.refused, second.result.text.slice(0, 300));
+    assert.equal(second.result.body.definitions?.length, 1);
+    assert.deepEqual(second.reads, [], 'a pair classified before was classified again from its texts');
   });
 });

@@ -17,6 +17,7 @@ import { vi } from 'vitest';
 import { of } from 'rxjs';
 import { dialogDismissSpecs } from '../../testing/dialog-dismiss-harness';
 import { getTranslocoModule } from '../../testing/transloco-testing';
+import { NO_TYPE_READS } from '../../testing/schema-type-reads';
 import { AdminApi } from '../../core/admin-api.service';
 import { AuthApi } from '../../core/auth-api.service';
 import { NetworksApi } from '../../core/networks-api.service';
@@ -132,7 +133,7 @@ function schemaTab() {
       { provide: SpacesApi, useValue: {} },
       { provide: ToastService, useValue: toast },
       { provide: SpacesStore, useValue: { spaces: signal([]), networks: signal([]), networksLoaded: signal(true), refreshNetworks: () => {}, networksForSpace: () => [], load: () => {} } },
-      { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [] }), upsertSchemaLibraryEntry: () => of({ entry: {} }), exportSpaceSchemaToLibrary: () => of({ created: 1, updated: 0 }) } },
+      { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [] }), upsertSchemaLibraryEntry: () => of({ entry: {} }), exportSpaceSchemaToLibrary: () => of({ created: 1, updated: 0 }), ...NO_TYPE_READS } },
     ],
   });
   const fixture = TestBed.createComponent(SpaceSchemaTabComponent);

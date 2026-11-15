@@ -34,12 +34,12 @@ export const space_schema_versionsTool: ToolHandler = {
     + '`standing` one of `current`, `older`, `notHeld`, `unclassified`.\n\n'
     + 'WITH `fp`, `against`, `kind` AND `type`: the comparison narrowed to that type.\n\n'
     + 'The record facts (`older` and the `none` rows) need `knowledge: read` on the space; without it the answer says '
-    + '`recordFacts: "withheld"`. No form answers a count.\n\n'
+    + '`recordFacts: "withheld"`, and a type\'s definitions are read from the version texts alone. No form answers a count.\n\n'
     + 'REFUSALS: `bad_fingerprint` (not 64 lowercase hex), `unknown_fingerprint` (not kept here, or not one this caller may read: a token '
     + 'bound to a peer sees only what the sync door would serve it; the type forms refuse it for a current version the caller may not read), '
-    + '`against_needs_fp` (`against` alone), `bad_kind`, `type_needs_kind`, `kind_needs_type`, `fps_needs_type`, `too_many_fps`, and two '
+    + '`against_needs_fp` (`against` alone), `bad_kind`, `type_needs_kind`, `kind_needs_type`, `fps_needs_type`, `too_many_fps`, a `type` over 200 characters or `fps` with `fp` (message only), and two '
     + '503s: `schema_index_building` while a collection\'s schema version index is still being built, `schema_versions_busy` when placing the '
-    + 'records took longer than a request may (what was done is kept: try again).',
+    + 'records took longer than a request may (the versions already compared are kept: try again).',
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
     type: 'object',

@@ -40,6 +40,7 @@ import { stampTypeFieldOf, type StampedCollection } from '../spaces/schema-snaps
 import { heldVersionsKept } from '../spaces/schema-version-text.js';
 import type { SchemaChangedMode } from '../spaces/schema-diff.js';
 import { kindStandingsIn, passTimeLeft, type PassScope } from '../spaces/type-standing.js';
+import { stampedTypeList } from '../spaces/type-field-clause.js';
 import { variationOf, EMPTY_SCHEMA_FINGERPRINT, SCHEMA_FINGERPRINT_FIELD } from '../spaces/schema-stamp.js';
 import { isStampedCollection, type SchemaVersionAsk } from './schema-version-args.js';
 import { countBrain } from './query.js';
@@ -66,7 +67,7 @@ const anyOf = (branches: Record<string, unknown>[]): Record<string, unknown> =>
  * it); a stamp with such a record is unclassified anyway, by R2.
  */
 async function olderIn(spaceId: string, collection: StampedCollection, mode: SchemaChangedMode, current: string, scope: PassScope): Promise<SchemaVersionResolution> {
-  const { fps, mayHoldArrays } = await kindStandingsIn(spaceId, collection, current, mode, scope);
+  const { fps, plan } = await kindStandingsIn(spaceId, collection, current, mode, scope);
   const typeField = stampTypeFieldOf(collection);
   const whole: string[] = [];
   const unclassified: string[] = [];
@@ -75,7 +76,7 @@ async function olderIn(spaceId: string, collection: StampedCollection, mode: Sch
     if (s === 'notHeld' || s === 'unclassified') { whole.push(fp); unclassified.push(fp); continue; }
     if (s === 'all') { whole.push(fp); continue; }
     if (s === 'same') continue;
-    branches.push({ [SCHEMA_FINGERPRINT_FIELD]: fp, [typeField]: { $in: [...s].sort(), ...(mayHoldArrays ? { $not: { $type: 'array' } } : {}) } });
+    branches.push({ [SCHEMA_FINGERPRINT_FIELD]: fp, [typeField]: stampedTypeList([...s].sort(), plan.mayHoldArrays) });
   }
   if (whole.length > 0) branches.push({ [SCHEMA_FINGERPRINT_FIELD]: { $in: whole.sort() } });
   return { clause: anyOf(branches), current, unclassified: unclassified.sort() };

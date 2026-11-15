@@ -18,7 +18,8 @@ import { CommonModule, Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { Subscription, TimeoutError, of, catchError, timeout } from 'rxjs';
-import { GraphLoadWatch, WAIT_GIVE_UP_MS } from './graph-load-watch';
+import { WAIT_GIVE_UP_MS } from '../../core/wait-give-up';
+import { GraphLoadWatch } from './graph-load-watch';
 import { LatestWins } from '../../core/latest-wins';
 
 /** How long the depth slider must rest before the graph asks for its depth (Q-112). */

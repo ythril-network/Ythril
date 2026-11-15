@@ -12,6 +12,17 @@
  * ## Fixture
  *
  * Space RF: v1 declares A and Gone; v2 (current) changes A and drops Gone. Records A@v1, A@v2, Gone@v1: Gone is a record-only name.
+ * Ghost is a name no version ever declared, carried by a record at v1; Nobody is a name no record carries.
+ *
+ * ## What a type's history is told without knowledge: read (Q-744 fix round 2, S1)
+ *
+ * The definitions of a type are answered to a `schema: read` caller from the version texts alone: a name no version declared answers the same
+ * whether or not a record carries it (`Ghost` and `Nobody`, on `kind` + `type` and on `fps`), so no record's existence is learned from it. A
+ * type declared and later removed (`Gone`) still has its definitions, read from the texts; a caller with `knowledge: read` is answered from the
+ * stamps the records carry, as before. Seen red on the unchanged code: `Ghost` answered one definition (v1, the stamp its record carries) to
+ * the schema reader, `Nobody` none. The same holds for the standing `unclassified` (space RU: v1 carried only by a record whose type is an
+ * array): it is read from the records, so a schema reader's standing for v1 comes from its text (`older`). Seen red on the code before the
+ * gate: the schema reader was answered `unclassified`.
  *
  * ## Seen red at 327b105e
  *
@@ -30,17 +41,19 @@ import { typeDoors, rowsByType } from './_type-history.mjs';
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 
 const RF = 'thfacts';
+/** A second space whose older version is carried only by a record whose type is no string: what `unclassified` would tell. */
+const RU = 'thfactsu';
 const META = { suppressEmbeddings: true };
 const str = (p) => ({ propertySchemas: { [p]: { type: 'string' } } });
 
-let d, doors, schemaOnly, both, admin, v1, v2;
+let d, doors, schemaOnly, both, admin, v1, v2, u1;
 
 describe('record facts on the type history need knowledge: read (real MongoDB, both doors)', { skip }, () => {
   before(async () => {
-    d = await openViewDoors({ suite: 'thfacts', spaces: [RF] });
+    d = await openViewDoors({ suite: 'thfacts', spaces: [RF, RU] });
     doors = typeDoors(d);
-    schemaOnly = await d.mint('thf-schema', { [RF]: d.row({ schema: 'read' }) });
-    both = await d.mint('thf-both', { [RF]: d.row({ schema: 'read', knowledge: 'read' }) });
+    schemaOnly = await d.mint('thf-schema', { [RF]: d.row({ schema: 'read' }), [RU]: d.row({ schema: 'read' }) });
+    both = await d.mint('thf-both', { [RF]: d.row({ schema: 'read', knowledge: 'read' }), [RU]: d.row({ schema: 'read', knowledge: 'read' }) });
     admin = await d.mint('thf-admin', {}, { admin: true });
     v1 = await saveVersion(RF, { ...META, typeSchemas: { entity: { A: str('p'), Gone: str('g') } } });
     v2 = await saveVersion(RF, { ...META, typeSchemas: { entity: { A: str('q') } } });
@@ -48,9 +61,14 @@ describe('record facts on the type history need knowledge: read (real MongoDB, b
     await d.door.coll(RF, 'entities').insertMany([
       recordOf('entities', RF, ++i, { type: 'A', fp: v1.fp }), recordOf('entities', RF, ++i, { type: 'A', fp: v2.fp }),
       recordOf('entities', RF, ++i, { type: 'Gone', fp: v1.fp }),
+      recordOf('entities', RF, ++i, { type: 'Ghost', fp: v1.fp }),
     ]);
+    u1 = await saveVersion(RU, { ...META, typeSchemas: { entity: { A: str('p') } } });
+    await saveVersion(RU, { ...META, typeSchemas: { entity: { A: str('q') } } });
+    await d.door.coll(RU, 'entities').insertMany([recordOf('entities', RU, ++i, { type: ['A', 'B'], fp: u1.fp })]);
     const { ensureTtlIndexes } = await import('../../server/dist/spaces/space-indexes.js');
     assert.deepEqual((await ensureTtlIndexes(RF)).failed, []);
+    assert.deepEqual((await ensureTtlIndexes(RU)).failed, []);
   });
   after(async () => { await d?.close(); });
 
@@ -73,6 +91,42 @@ describe('record facts on the type history need knowledge: read (real MongoDB, b
         assert.equal(r.body.recordFacts, 'withheld');
         assert.deepEqual((r.body.definitions ?? []).map(x => x.rep).sort(), [v1.fp, v2.fp].sort(), 'the definitions are withheld too');
         assert.ok(r.body.definitions.every(x => x.origin && typeof x.origin.fetched === 'boolean'), 'origins are withheld');
+      });
+
+      it('schema: read alone: a name no version declared answers the same whether or not a record carries it', async () => {
+        const withRecord = await doors[door](schemaOnly.key, RF, { kind: 'entity', type: 'Ghost' });
+        const without = await doors[door](schemaOnly.key, RF, { kind: 'entity', type: 'Nobody' });
+        assert.ok(!withRecord.refused && !without.refused, `${withRecord.text.slice(0, 200)} | ${without.text.slice(0, 200)}`);
+        assert.deepEqual({ ...withRecord.body, type: null }, { ...without.body, type: null }, 'the history tells a schema reader that a record of Ghost exists');
+        assert.deepEqual(withRecord.body.definitions, [], 'a name no version declares has a definition');
+        const stands = (type) => doors[door](schemaOnly.key, RF, { kind: 'entity', type, fps: [v1.fp, v2.fp] });
+        const [s1, s2] = [await stands('Ghost'), await stands('Nobody')];
+        assert.ok(!s1.refused && !s2.refused, `${s1.text.slice(0, 200)} | ${s2.text.slice(0, 200)}`);
+        assert.deepEqual({ ...s1.body, type: null }, { ...s2.body, type: null }, 'the standings tell a schema reader that a record of Ghost exists');
+      });
+
+      it('schema: read alone: a type declared and later removed has its definitions from the texts, with no record asked', async () => {
+        const r = await doors[door](schemaOnly.key, RF, { kind: 'entity', type: 'Gone' });
+        assert.ok(!r.refused, r.text.slice(0, 300));
+        assert.equal(r.body.declared, 'none');
+        assert.deepEqual((r.body.definitions ?? []).map(x => x.rep), [v1.fp], 'the version that declared Gone is not its definition');
+      });
+
+      it('a version carried only by a record whose type is no string stands by its text for schema: read, unclassified only with knowledge: read', async () => {
+        const stand = async (key) => {
+          const r = await doors[door](key, RU, { kind: 'entity', type: 'A', fps: [u1.fp] });
+          assert.ok(!r.refused, r.text.slice(0, 300));
+          return r.body.standings?.[0]?.standing;
+        };
+        assert.equal(await stand(schemaOnly.key), 'older', 'the standing tells a schema reader that a record of an unnamed type exists');
+        assert.equal(await stand(both.key), 'unclassified', 'a caller who may read the records is not told the version is unclassified');
+      });
+
+      it('knowledge: read: the history of a name only a record carries is read from the stamps the record carries', async () => {
+        const r = await doors[door](both.key, RF, { kind: 'entity', type: 'Ghost' });
+        assert.ok(!r.refused, r.text.slice(0, 300));
+        assert.equal(r.body.recordFacts, undefined);
+        assert.deepEqual((r.body.definitions ?? []).map(x => x.rep), [v1.fp]);
       });
 
       for (const [who, key] of [['knowledge: read', () => both.key], ['an administrator', () => admin.key]]) {

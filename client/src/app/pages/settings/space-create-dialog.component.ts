@@ -18,6 +18,7 @@ import { SpacesApi } from '../../core/spaces-api.service';
 import { SpaceMeta, ValidationMode } from '../../core/api.types';
 import { refusalText } from '../../core/refusal-text';
 import { retiredAmong } from '../../core/retired-space-ids';
+import { WAIT_GIVE_UP_MS } from '../../core/wait-give-up';
 import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
 @Component({
@@ -131,7 +132,7 @@ export class SpaceCreateDialogComponent {
     if (this.form.purpose.trim()) meta.purpose = this.form.purpose.trim();
     body.meta = meta;
     this.spacesApi.createSpace(body).pipe(
-      timeout(30_000),
+      timeout(WAIT_GIVE_UP_MS),
       finalize(() => this.creating.set(false)),
     ).subscribe({
       next: ({ space }) => {

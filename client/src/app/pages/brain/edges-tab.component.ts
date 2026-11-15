@@ -349,6 +349,9 @@ export class EdgesTabComponent extends RecordTabBase {
     this.load();
   }
 
+  /** The type filter here is the edge's own `type` field; the landed definition is the label's, and stays. */
+  protected override dropDefinitionWithType(): void {}
+
   override removeLandingType(): void {
     this.landing.clear();
     this.landing.linked.set('');

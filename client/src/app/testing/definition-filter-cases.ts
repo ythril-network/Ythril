@@ -136,7 +136,9 @@ export function definitionFilterCases(tab: DefinitionFilterTab): void {
       const m = mount({ type: 'person', definition: 'older' });
       await answerList(m, []);
       expect(m.el.textContent).toContain('brain.filter.typeDefinitionOlder');
-      const back = Array.from(m.el.querySelectorAll<HTMLElement>('a, button')).find(b => b.textContent?.includes('brain.filter.historyOf'));
+      // "Type: X" / "Relation: X" is one sentence with the name in it (C6), never a word, a colon and the name joined in the template.
+      expect(m.el.textContent).toContain(tab.kind === 'edge' ? 'brain.filter.relationChip' : 'brain.filter.typeChip');
+      const back =Array.from(m.el.querySelectorAll<HTMLElement>('a, button')).find(b => b.textContent?.includes('brain.filter.historyOf'));
       expect(back, 'no "History of {type}" link').toBeDefined();
       const remove = m.el.querySelector<HTMLElement>('[aria-label="brain.filter.removeDefinitionAria"]');
       expect(remove?.tagName, 'the definition chip cannot be removed').toBe('BUTTON');
@@ -172,6 +174,35 @@ export function definitionFilterCases(tab: DefinitionFilterTab): void {
       expect(body['schemaVersion']).toBeUndefined();
       expect(column(m.el)).toBeNull();
       expect(versionReads(m)).toEqual([]);
+    });
+
+    // Pre-ship review C4. Seen red on 4f9f11f0: the definition of person still filtered company's records.
+    it('moving the type filter to another type drops the definition filter, and the list asks for the new type alone', async () => {
+      const m = mount({ type: 'person', definition: 'older' });
+      await answerList(m, []);
+      expect(m.el.textContent).toContain('brain.filter.typeDefinitionOlder');
+      (m.fixture.componentInstance as { setTypeFilter(v: string): void }).setTypeFilter('company');
+      const body = await answerList(m, []);
+      if (tab.kind === 'edge') {
+        // The edge's type filter is its own `type` field; the landed definition is the label's, so it stays.
+        expect(body).toMatchObject({ schemaVersion: 'older', schemaChanged: 'any' });
+        expect(m.el.textContent).toContain('brain.filter.typeDefinitionOlder');
+        return;
+      }
+      expect(body['type']).toBe('company');
+      expect(body['schemaVersion'], 'the definition of one type still filters another\'s records').toBeUndefined();
+      expect(body['schemaChanged']).toBeUndefined();
+      expect(m.el.textContent).not.toContain('brain.filter.typeDefinitionOlder');
+      expect(column(m.el), 'the column outlived its definition').toBeNull();
+    });
+
+    it('setting the type filter to the type it already has keeps the definition filter', async () => {
+      const m = mount({ type: 'person', definition: 'older' });
+      await answerList(m, []);
+      (m.fixture.componentInstance as { setTypeFilter(v: string): void }).setTypeFilter('person');
+      const body = await answerList(m, []);
+      expect(body).toMatchObject({ schemaVersion: 'older', schemaChanged: 'any' });
+      expect(m.el.textContent).toContain('brain.filter.typeDefinitionOlder');
     });
 
     it('a server that refuses sameAs: says this instance cannot filter by definition yet', async () => {

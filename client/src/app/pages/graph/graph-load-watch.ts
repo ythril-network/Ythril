@@ -18,12 +18,11 @@ import { signal } from '@angular/core';
 import { Observable, forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import type { SpacesResponse, SpaceStats } from '../../core/api.types';
+import { WAIT_GIVE_UP_MS } from '../../core/wait-give-up';
 import { readinessReasons, type ReadinessReason } from './graph-readiness';
 
 /** How long a load may run before the tab says it is still waiting, and why. */
 export const WAIT_EXPLAIN_MS = 3_000;
-/** How long a load may run before it ends in the error state rather than spinning for ever. */
-export const WAIT_GIVE_UP_MS = 30_000;
 
 /** What the watch reads a space's readiness from — the two `SpacesApi` calls, and nothing else. */
 export interface ReadinessSource {
