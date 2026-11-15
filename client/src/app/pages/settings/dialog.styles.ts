@@ -1,3 +1,5 @@
+import { STACK } from '../../shared/stacking';
+
 /**
  * The modal shell: backdrop, panel, header.
  *
@@ -27,7 +29,7 @@ export const DIALOG_STYLES = `
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 100;
+    z-index: ${STACK.dialog};
     padding: 16px;
   }
   .dialog {

@@ -222,8 +222,8 @@ function textReader(spaceId: string, timeLeft: () => number): { prefetch: (fps: 
 }
 
 /** The own row kept just before `at` on this space's own line, or none. */
-function ownBefore(own: readonly { fp: string; at: string; links: SnapshotLinks | null }[], at: string | undefined, fp: string): { fp: string; links: SnapshotLinks | null } | undefined {
-  let found: { fp: string; links: SnapshotLinks | null } | undefined;
+function ownBefore(own: readonly { fp: string; at: string; links: SnapshotLinks | null }[], at: string | undefined, fp: string): { fp: string; at: string; links: SnapshotLinks | null } | undefined {
+  let found: { fp: string; at: string; links: SnapshotLinks | null } | undefined;
   for (const row of own) {
     if (row.fp === fp) continue;
     if (at !== undefined && row.at >= at) break;
@@ -344,10 +344,43 @@ async function ownLineOf(spaceId: string, timeLeft: () => number): Promise<{ fp:
 }
 
 /**
- * Where a definition's oldest version `x` came from, as it is held now (amend 2): fetched from a member; a network layer's row; or own, then
- * `edited` when the type differs between x's own definitions and those of the own version kept just before it (none before: the own
- * definitions declare the type), `null` when either own definitions text is no longer held, and `networks` each layer whose version
- * changed the type between the two. Network ids are cut to the caller's shared set.
+ * The network layers whose version changed (kind, type) between the own version holding `before` and the one holding `now`: a layer new
+ * since declares the type, a layer kept differs where the type differs between its two texts; a text no longer held counts as no change.
+ */
+async function layersChangingType(
+  kind: KnowledgeType, type: string, now: SnapshotLinks | null, before: SnapshotLinks | null, textOf: (fp: string) => Promise<string | undefined>,
+): Promise<string[]> {
+  const networks: string[] = [];
+  for (const layer of now?.layers ?? []) {
+    const wasFp = before?.layers.find(l => l.networkId === layer.networkId)?.fp;
+    if (wasFp === layer.fp) continue;
+    const text = await textOf(layer.fp);
+    if (text === undefined) continue;
+    if (wasFp === undefined) {
+      if (declaredTypeNamesOf(versionMetaOf(text)?.meta, kind).includes(type)) networks.push(layer.networkId);
+      continue;
+    }
+    const was = await textOf(wasFp);
+    if (was === undefined) continue;
+    const td = typesDifferingBetween({ fp: wasFp, text: was }, { fp: layer.fp, text }, 'any');
+    if (!td.unclassified && namesType(td, kind, type)) networks.push(layer.networkId);
+  }
+  return networks;
+}
+
+/**
+ * Where a definition began, as it is held now (amend 2): fetched from a member; a network layer's row; or own, then `edited` when the type
+ * differs between the own definitions of the version where the definition began and those of the own version kept just before it (none
+ * before: the own definitions declare the type), `null` when either own definitions text is no longer held, and `networks` each layer whose
+ * version changed the type between the two. Network ids are cut to the caller's shared set.
+ *
+ * A definition's members are only the versions records carry, so its oldest member `x` is not necessarily where it began: records written
+ * after another type changed carry a later stamp than the one that changed this type. The origin is therefore read at the own version where
+ * the definition began. From `x`, while an own version `y` is kept before it, both own texts are held, the type does not differ between `y`
+ * and the version reached, and no layer changed the type between them, the walk steps back to `y`; a text not held stops it with `null`
+ * ("Edited here" is never claimed blind). The walk is bounded: every step moves strictly earlier on the own line (so by its length, read
+ * once), every text goes through the pass's memoised reader, and each step asks `scope.timeLeft()`, which throws when the pass's time
+ * budget is spent. It prevents an older definition answering "not edited" (no origin line) because only another type changed after it began.
  */
 async function originOf(
   kind: KnowledgeType, type: string, x: Kept, own: readonly { fp: string; at: string; links: SnapshotLinks | null }[],
@@ -357,38 +390,37 @@ async function originOf(
   const kept = x.held.kept;
   if (x.fetched) return { edited: false, networks: [], fetched: true };
   if (kept?.origin === 'layer') return { edited: false, networks: cut(kept.networkId !== undefined ? [kept.networkId] : []), fetched: false };
-  const links = kept?.links ?? null;
   const ownFpOf = (fp: string, l: SnapshotLinks | null): string => l?.own ?? fp;
-  const xOwn = ownFpOf(x.fp, links);
-  const xText = await textOf(xOwn);
-  const y = ownBefore(own, x.at, x.fp);
+  let at = x.at;
+  let fp = x.fp;
+  let links = kept?.links ?? null;
+  let xOwn = ownFpOf(fp, links);
+  let xText = await textOf(xOwn);
+  let y = ownBefore(own, at, fp);
+  let yOwn: string | undefined;
+  let yText: string | undefined;
+  while (xText !== undefined && y) {
+    yOwn = ownFpOf(y.fp, y.links);
+    yText = await textOf(yOwn);
+    if (yText === undefined) break;
+    const td = typesDifferingBetween({ fp: yOwn, text: yText }, { fp: xOwn, text: xText }, 'any');
+    if (td.unclassified || namesType(td, kind, type)) break;
+    if ((await layersChangingType(kind, type, links, y.links, textOf)).length > 0) break;
+    scope.timeLeft();
+    ({ fp, at, links } = y);
+    xOwn = yOwn;
+    xText = yText;
+    y = ownBefore(own, at, fp);
+    yOwn = yText = undefined;
+  }
   let edited: boolean | null;
   if (xText === undefined) edited = null;
   else if (!y) {
     edited = declaredTypeNamesOf(versionMetaOf(xText)?.meta, kind).includes(type);
-  } else {
-    const yOwn = ownFpOf(y.fp, y.links);
-    const yText = await textOf(yOwn);
-    if (yText === undefined) edited = null;
-    else {
-      const td = typesDifferingBetween({ fp: yOwn, text: yText }, { fp: xOwn, text: xText }, 'any');
-      edited = td.unclassified ? null : namesType(td, kind, type);
-    }
+  } else if (yText === undefined) edited = null;
+  else {
+    const td = typesDifferingBetween({ fp: yOwn!, text: yText }, { fp: xOwn, text: xText }, 'any');
+    edited = td.unclassified ? null : namesType(td, kind, type);
   }
-  const networks: string[] = [];
-  for (const layer of links?.layers ?? []) {
-    const before = y?.links?.layers.find(l => l.networkId === layer.networkId)?.fp;
-    if (before === layer.fp) continue;
-    const now = await textOf(layer.fp);
-    if (now === undefined) continue;
-    if (before === undefined) {
-      if (declaredTypeNamesOf(versionMetaOf(now)?.meta, kind).includes(type)) networks.push(layer.networkId);
-      continue;
-    }
-    const was = await textOf(before);
-    if (was === undefined) continue;
-    const td = typesDifferingBetween({ fp: before, text: was }, { fp: layer.fp, text: now }, 'any');
-    if (!td.unclassified && namesType(td, kind, type)) networks.push(layer.networkId);
-  }
-  return { edited, networks: cut(networks), fetched: false };
+  return { edited, networks: cut(await layersChangingType(kind, type, links, y?.links ?? null, textOf)), fetched: false };
 }

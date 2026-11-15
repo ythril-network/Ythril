@@ -10,6 +10,7 @@
  */
 import { CHIP_STYLES } from '../../shared/chip.styles';
 import { PROP_TABLE_STYLES } from '../../shared/prop-table.styles';
+import { STACK } from '../../shared/stacking';
 
 export const SPACE_DIALOG_STYLES = `
 ${CHIP_STYLES}
@@ -39,11 +40,11 @@ ${PROP_TABLE_STYLES}
    surface token from every other. */
 .space-search-input { min-width:160px; }
 /* create dialog */
-.dialog-backdrop { position:fixed; inset:0; background:var(--bg-scrim); display:flex; align-items:center; justify-content:center; z-index:100; }
+.dialog-backdrop { position:fixed; inset:0; background:var(--bg-scrim); display:flex; align-items:center; justify-content:center; z-index:${STACK.dialog}; }
 .dialog { background:var(--bg-primary); border:1px solid var(--border); border-radius:var(--radius-lg); padding:24px; width:90%; max-width:960px; max-height:90vh; overflow-y:auto; }
 .dialog-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
 /* settings popup */
-.sp-backdrop { position:fixed; inset:0; background:var(--bg-scrim); z-index:200; display:flex; align-items:center; justify-content:center; }
+.sp-backdrop { position:fixed; inset:0; background:var(--bg-scrim); z-index:${STACK.popup}; display:flex; align-items:center; justify-content:center; }
 .sp-panel { width:92vw; height:92vh; max-width:1200px; background:var(--bg-primary); border:1px solid var(--border); border-radius:var(--radius-lg); display:flex; flex-direction:column; overflow:hidden; }
 .sp-header { display:flex; align-items:center; gap:12px; padding:14px 20px; border-bottom:1px solid var(--border); flex-shrink:0; }
 /* Wraps rather than clips: Danger Zone is the last tab and was the first to vanish in a narrow dialog,
