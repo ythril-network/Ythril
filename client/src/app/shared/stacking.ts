@@ -1,5 +1,6 @@
 /**
- * The z-index of every full-screen layer a dialog or a drawer paints, in one place.
+ * The z-index of the full-screen layers that can host one another (a page dialog, the drawer, the popup, a dialog they host), in one
+ * place. A layer that hosts nothing and is hosted by nothing may still write its own number; `stacking.spec.ts` reads both spellings.
  *
  * What it prevents: a dialog opened from inside a drawer or a popup painting UNDER it. The history dialog (Q-744) is a page-level
  * `.dialog-backdrop` (level `dialog`, 100); the record drawer's overlay and the space settings popup are level 200. Opened from the
