@@ -16,7 +16,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, closeStringJoins } from './_sources.mjs';
 
 const CODE = 'schema_versions_busy';
 /** What the refusal says is kept. */
@@ -25,7 +25,7 @@ const KEPT = 'versions already compared are kept';
 const REACH = 320;
 
 /** A source as prose: string pieces joined (`' + '`), line breaks and runs of blanks as one blank. */
-export const asProse = (text) => text.replace(/['"`]\s*\+\s*['"`]/g, '').replace(/\s+/g, ' ');
+export const asProse = (text) => closeStringJoins(text).replace(/\s+/g, ' ');
 
 /** For each mention of the code in `text` of `file`: what follows it says nothing is kept, the refusal's words, or other words (a problem). */
 export function busyClaims(file, text) {

@@ -32,7 +32,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { blockAfter, enclosingBlocksMatching, statementAround } from './_structural-window.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, closeStringJoins } from './_sources.mjs';
 import { moveCascadeAsksDestinationFirst, guardPrecedesIrreversibleSteps, MOVE_CASCADE_STEPS } from './_cascade-order.mjs';
 
 const FILE_TOOLS = readFileSync('server/src/mcp/tools/file.ts', 'utf8');
@@ -63,7 +63,7 @@ const MOVE = description('move_file');
 const MKDIR = description('create_dir');
 
 /** A description's sentences: its source-string joins closed, split after a full stop or at a `\n`. Read by SENTENCE so two halves of a guarantee cannot be met by two unrelated sentences. */
-const sentencesOf = (text) => text.replace(/'\s*\r?\n\s*\+\s*'/g, '').split(/(?<=[.!?])\s+|\\n/);
+const sentencesOf = (text) => closeStringJoins(text).split(/(?<=[.!?])\s+|\\n/);
 /** The source text of one tool: from its `name:` to the next tool's, comments stripped. */
 const toolSource = (name) => {
   const s = stripComments(FILE_TOOLS);
@@ -310,7 +310,7 @@ describe('move_file explains the tombstone and the directory case', () => {
   // The two guarantees a caller picks a destination by. Stated as GUARANTEES, never as a mechanism ("nothing checks", "a bare
   // rename"): the sentence that named the mechanism went stale the day a destination check was added, and nobody reports a
   // refusal they were told did not exist. Read by SENTENCE, so the two halves cannot be satisfied by two unrelated sentences.
-  const SENTENCES = MOVE.replace(/'\s*\r?\n\s*\+\s*'/g, '').split(/(?<=[.!?])\s+|\\n/);
+  const SENTENCES = sentencesOf(MOVE);
   const sentenceAbout = (...parts) => SENTENCES.find(s => parts.every(p => p.test(s)));
 
   it('states, as a guarantee, that a name blocked by a file is refused', () => {
