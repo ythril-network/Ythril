@@ -2884,7 +2884,7 @@
   "spaces.schema.history.place.retention": "Aufbewahrung",
   "spaces.schema.history.place.retention.days": "Aufbewahrung: Löschen nach (Tagen)",
   "spaces.schema.history.place.retention.contentDays": "Aufbewahrung: Details entfernen nach (Tagen)",
-  "spaces.schema.history.place.suppressEmbeddings": "Embeddings",
+  "spaces.schema.history.place.suppressEmbeddings": "Embeddings unterdrückt",
   "spaces.schema.history.place.whenDuePasses": "Wenn das Datum verstreicht",
   "spaces.schema.history.place.endpoints": "Erlaubte Enden",
   "spaces.schema.history.place.endpoints.from": "Erlaubte Enden: von",
