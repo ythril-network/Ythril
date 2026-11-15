@@ -127,6 +127,21 @@ describe('the words of bundle-268 exist in en, de and pl (C6)', () => {
   });
 });
 
+describe('a place whose value is shown as yes or no says what yes means', () => {
+  it('the history names the suppression, not the editor\'s control: "Embeddings: yes" would read as embedded', () => {
+    const same: string[] = [];
+    for (const locale of LOCALES) {
+      const words = dictionary(locale);
+      const place = String(words['spaces.schema.history.place.suppressEmbeddings'] ?? '');
+      const control = String(words['spaces.schema.suppressEmbeddings.label'] ?? '');
+      // A floor: a control label that is gone would make every place differ from it.
+      expect(control.trim(), `${locale}: the editor's label is missing`).not.toBe('');
+      if (place.trim() === '' || place === control) same.push(`${locale}: "${place}"`);
+    }
+    expect(same).toEqual([]);
+  });
+});
+
 describe('the type-row pills leave no words behind (C6, r4 §7.1)', () => {
   it('the library, pattern and retention badge keys and the rules count title are gone from every locale', () => {
     const left: string[] = [];

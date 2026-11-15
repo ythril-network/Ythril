@@ -2884,7 +2884,7 @@
   "spaces.schema.history.place.retention": "Retencja",
   "spaces.schema.history.place.retention.days": "Retencja: usuwaj po (dniach)",
   "spaces.schema.history.place.retention.contentDays": "Retencja: usuń szczegóły po (dniach)",
-  "spaces.schema.history.place.suppressEmbeddings": "Embeddingi",
+  "spaces.schema.history.place.suppressEmbeddings": "Embeddingi wstrzymane",
   "spaces.schema.history.place.whenDuePasses": "Gdy data minie",
   "spaces.schema.history.place.endpoints": "Dozwolone końce",
   "spaces.schema.history.place.endpoints.from": "Dozwolone końce: od",
