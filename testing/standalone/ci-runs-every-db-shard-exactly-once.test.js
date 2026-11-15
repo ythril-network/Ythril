@@ -33,28 +33,21 @@ import { splitStandalone } from '../_shared/standalone-split.mjs';
 import * as shardPlan from '../_shared/db-shard-plan.mjs';
 import {
   loadCi, parseWorkflow, jobEntries, stepsOf, shellOf, usesOf, expressionOf, mergeGateEntries, isTrue, skipsWhenRunIsReused, REUSE_EMPTY,
+  DB_SHARD_SCRIPT as DB_SCRIPT, jobRunning, stepEnv,
 } from '../_shared/ci-workflow.mjs';
 import { REPO_ROOT } from './_sources.mjs';
 
 const { planDbShards, DB_SHARDS_MAX } = shardPlan;
 const COUNT_ENV = 'YTHRIL_TEST_DB_SHARDS';
 const INDEX_ENV = 'YTHRIL_TEST_DB_SHARD_INDEX';
-const DB_SCRIPT = 'test:standalone:db';
 
 const { offlineDb } = splitStandalone({ root: REPO_ROOT });
 
 /** The job that runs the `-db` third: the one whose steps run `npm run test:standalone:db`. Exactly one, or the rule has no subject. */
-function dbJobOf(doc) {
-  const found = jobEntries(doc).filter(({ job }) => stepsOf(job).some(s => shellOf(s).includes(DB_SCRIPT)));
-  if (found.length !== 1) throw new Error(`${found.length} job(s) run ${DB_SCRIPT} (${found.map(j => j.id).join(', ')}) — exactly one is the subject of this rule`);
-  return found[0];
-}
+const dbJobOf = (doc) => jobRunning(doc, DB_SCRIPT);
 
-/** The value an env var has where the test step runs: the step's own, else the job's. */
-function envOf(job, name) {
-  const step = stepsOf(job).find(s => shellOf(s).includes(DB_SCRIPT));
-  return step?.env?.[name] ?? job.env?.[name];
-}
+/** The value an env var has where the test step runs. */
+const envOf = (job, name) => stepEnv(job, stepsOf(job).find(s => shellOf(s).includes(DB_SCRIPT)), name);
 
 /** What a job's matrix says: the axis the index env reads, and that axis's values. `null` when there is no matrix. */
 function matrixAxisOf(job, indexExpr) {
