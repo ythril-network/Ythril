@@ -17,7 +17,9 @@
  *
  * The current version must be one the caller may have (`404 unknown_fingerprint` otherwise: no type is placed against a version a peer may
  * not read). The record facts (the older mark and the record-only names) need `knowledge: read` on the space or an administrator
- * (`mayReadRecordFacts`); without it they are left out and the answer says `recordFacts: 'withheld'`. Nothing here answers a count.
+ * (`mayReadRecordFacts`); without it they are left out and the answer says `recordFacts: 'withheld'`, and a type's definitions are read from the version texts alone
+ * (the versions that declare it), never from the stamps its records carry: a name no version declared answers the same whether or not a
+ * record carries it. Nothing here answers a count.
  */
 import { isDeclarableTypeName } from '@ythril-network/schema/internal';
 import { COLLECTION_SUFFIX, type KnowledgeType } from '../config/types-knowledge.js';
@@ -29,7 +31,7 @@ import { UNKNOWN_FINGERPRINT } from '../util/errors.js';
 import { variationOf } from './schema-stamp.js';
 import { layersFor } from './network-layers.js';
 import { heldVersionsKept } from './schema-version-text.js';
-import { typeOnAnyOf, recordTypeNamesIn, stampIndexMayHoldArrays, unnamedFingerprintsIn, type StampedCollection } from './schema-snapshot-carried.js';
+import { typeOnAnyOf, recordTypeNamesIn, stampPlanOf, unnamedFingerprintsIn, type StampedCollection } from './schema-snapshot-carried.js';
 import {
   busyOnTimeout, kindStandingsIn, mayHave, notSameFor, notSameStanding, passTimeLeft, scopeKeyOf, standingsOf, type PassScope,
 } from './type-standing.js';
@@ -57,8 +59,6 @@ async function currentFor(spaceId: string, caller: SchemaVersionsCaller): Promis
 const collectionOf = (kind: KnowledgeType): StampedCollection => COLLECTION_SUFFIX[kind] as StampedCollection;
 const scopeOf = (spaceId: string, caller: SchemaVersionsCaller): PassScope => ({ shared: caller.shared, timeLeft: passTimeLeft(spaceId) });
 
-const typeNamesOf = declaredTypeNamesOf;
-
 /** The record facts of one kind's list: per own type, whether a record of it is not on its current definition, and the record-only names. */
 interface KindFacts {
   readonly older: ReadonlyMap<string, boolean>;
@@ -75,17 +75,18 @@ const kindFlights = createCoalescingRunner<KindFacts>({ rerun: false });
 function kindFactsOf(spaceId: string, kind: KnowledgeType, current: string, own: readonly string[], declared: ReadonlySet<string>, scope: PassScope): Promise<KindFacts> {
   const collection = collectionOf(kind);
   return kindFlights.run(`${spaceId}|${collection}|${current}|any|${scopeKeyOf(scope.shared)}`, () => busyOnTimeout(spaceId, async () => {
-    const { fps, mayHoldArrays } = await kindStandingsIn(spaceId, collection, current, 'any', scope);
+    // The pass's one plan: every seek below reads the listing the standing pass made, however many types there are.
+    const { fps, plan } = await kindStandingsIn(spaceId, collection, current, 'any', scope);
     const older = new Map<string, boolean>();
     for (const type of own) {
       const notSame = notSameFor(fps, type);
-      older.set(type, notSame.length > 0 && await typeOnAnyOf(spaceId, collection, type, notSame, scope.timeLeft, { mayHoldArrays }));
+      older.set(type, notSame.length > 0 && await typeOnAnyOf(spaceId, collection, type, notSame, scope.timeLeft, { plan }));
     }
     const stamps = [...fps.keys(), current];
     const none: string[] = [];
-    for (const name of await recordTypeNamesIn(spaceId, collection, scope.timeLeft)) {
+    for (const name of await recordTypeNamesIn(spaceId, collection, scope.timeLeft, { plan })) {
       if (declared.has(name) || !isDeclarableTypeName(name)) continue;
-      if (await typeOnAnyOf(spaceId, collection, name, stamps, scope.timeLeft, { mayHoldArrays })) none.push(name);
+      if (await typeOnAnyOf(spaceId, collection, name, stamps, scope.timeLeft, { plan })) none.push(name);
     }
     return { older, none };
   }));
@@ -101,7 +102,7 @@ function pageOf<T>(rows: readonly T[], req: BudgetRequest & { skip?: unknown }, 
     defaultLimit: Math.max(1, rows.length), budgetChars: defaultBudgetChars(caller.transport), carriages: carriagesFor(caller.transport),
   });
   if (!page.ok) return { ok: false, error: page.error };
-  const { returned: _sameAsCount, ...fields } = page.fields;
+  const { returned: _repeatsCount, ...fields } = page.fields;
   return { ok: true, rows: page.rows, fields };
 }
 
@@ -121,16 +122,16 @@ export async function typeListAct(
   if (typeof current !== 'string') return current;
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
-  const own = typeNamesOf(space?.ownMeta ?? space?.meta, kind).sort();
+  const own = declaredTypeNamesOf(space?.ownMeta ?? space?.meta, kind).sort();
   const ownSet = new Set(own);
   const layers = layersFor(cfg, spaceId);
-  const effective = new Set(typeNamesOf(space?.meta, kind));
+  const effective = new Set(declaredTypeNamesOf(space?.meta, kind));
   const cut = (ids: string[]): string[] => (caller.shared ? ids.filter(id => caller.shared!.has(id)) : ids);
   // Keyed by `Map`, so a type named `__proto__` reaches no prototype.
   const rows = new Map<string, TypeRow>();
   for (const type of own) rows.set(type, { type, declared: 'own' });
   for (const type of [...effective].filter(t => !ownSet.has(t)).sort()) {
-    rows.set(type, { type, declared: 'layer', networks: cut(layers.filter(l => typeNamesOf(l.meta, kind).includes(type)).map(l => l.networkId)) });
+    rows.set(type, { type, declared: 'layer', networks: cut(layers.filter(l => declaredTypeNamesOf(l.meta, kind).includes(type)).map(l => l.networkId)) });
   }
   const facts = mayReadRecordFacts(caller.rights, spaceId);
   if (facts) {
@@ -150,14 +151,14 @@ export async function typeHistoryAct(
 ): Promise<SchemaVersionsActResult> {
   const current = await currentFor(spaceId, caller);
   if (typeof current !== 'string') return current;
-  const history = await typeHistoryOf(spaceId, kind, type, scopeOf(spaceId, caller));
+  const facts = mayReadRecordFacts(caller.rights, spaceId);
+  const history = await typeHistoryOf(spaceId, kind, type, scopeOf(spaceId, caller), facts ? 'records' : 'texts');
   const rows = history.definitions.map(d => ({
     rep: d.rep, current: d.current, ...(d.since !== undefined ? { since: d.since } : {}), ...(d.until !== undefined ? { until: d.until } : {}),
     origin: { ...d.origin },
   }));
   const page = pageOf(rows, req, caller);
   if (!page.ok) return { status: 400, error: page.error };
-  const facts = mayReadRecordFacts(caller.rights, spaceId);
   return {
     status: 200,
     body: {
@@ -176,12 +177,14 @@ export async function typeStandingsAct(
   const collection = collectionOf(kind);
   const scope = scopeOf(spaceId, caller);
   const asked = [...new Set(fps)];
+  // A version only records of an unnamed type carry is `unclassified`: a fact read from the records, so told only to a caller who may read them.
+  const facts = mayReadRecordFacts(caller.rights, spaceId);
   const standings = await busyOnTimeout(spaceId, async () => {
     const placed = (await standingsOf(spaceId, collection, current, 'any', scope, asked)).fps;
-    const ask = [...placed].filter(([, s]) => s !== 'notHeld' && s !== 'unclassified').map(([fp]) => fp);
+    const ask = facts ? [...placed].filter(([, s]) => s !== 'notHeld' && s !== 'unclassified').map(([fp]) => fp) : [];
     if (ask.length > 0) {
-      const mayHoldArrays = await stampIndexMayHoldArrays(spaceId, collection);
-      for (const fp of await unnamedFingerprintsIn(spaceId, collection, ask, scope.timeLeft, { mayHoldArrays })) placed.set(fp, 'unclassified');
+      const plan = await stampPlanOf(spaceId, collection);
+      for (const fp of await unnamedFingerprintsIn(spaceId, collection, ask, scope.timeLeft, { plan })) placed.set(fp, 'unclassified');
     }
     return placed;
   });
@@ -193,7 +196,7 @@ export async function typeStandingsAct(
     return notSameStanding(s, type) ? 'older' : 'current';
   };
   const rows = asked.map(fp => ({ fp, standing: standingOf(fp) }));
-  const history = rows.some(r => r.standing === 'current' || r.standing === 'older') ? await typeHistoryOf(spaceId, kind, type, scope) : undefined;
+  const history = rows.some(r => r.standing === 'current' || r.standing === 'older') ? await typeHistoryOf(spaceId, kind, type, scope, facts ? 'records' : 'texts') : undefined;
   const out = rows.map(r => {
     const d = r.standing === 'current' || r.standing === 'older' ? history?.definitions.find(x => x.members.includes(r.fp)) : undefined;
     return d

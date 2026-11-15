@@ -23,8 +23,8 @@ import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { SPACE_DIALOG_STYLES } from './space-dialog.styles';
 import { SpaceSettingsState, emptyTypeSchemaState, ruleRowsFromWire, typeSchemaFromState, typeStateFromSchema, type RuleRow, type TypeSchemaState } from './space-settings-state.service';
-import { SchemaApi, type SchemaLayersView, type TypeListAnswer, type TypeRead, type TypeRow } from '../../core/schema-api.service';
-import { EMPTY, Observable, Subscription, catchError, concatMap, expand, from, map, of, reduce } from 'rxjs';
+import { SchemaApi, everyTypePage, type SchemaLayersView, type TypeListAnswer, type TypeRow } from '../../core/schema-api.service';
+import { Observable, Subscription, catchError, concatMap, from, map, of } from 'rxjs';
 import { SchemaTypeHistoryComponent } from './schema-type-history.component';
 import { HelpToggleComponent } from '../../shared/help-toggle.component';
 import { rovingIndex } from '../../shared/roving-focus';
@@ -270,7 +270,7 @@ const suggestedAddAsName = (name: string): string => name + '-2';
         <button type="button" class="sch-type-item" [class.sel]="isOwnSelected(kt,name)" [attr.aria-current]="isOwnSelected(kt,name) ? 'true' : null" (click)="selectOwn(kt,name)">
           <span class="nm" [attr.title]="name">{{ name }}</span>
           @if (olderMark(kt, name)) {
-            <span class="sch-older" [attr.title]="'spaces.schema.list.olderMark' | transloco"><ph-icon name="clock-counter-clockwise" [size]="12" aria-hidden="true"/><span class="vh sr-only">{{ 'spaces.schema.list.olderMarkSr' | transloco }}</span></span>
+            <span class="sch-older" [attr.title]="'spaces.schema.list.olderMark' | transloco"><ph-icon name="clock-counter-clockwise" [size]="12" aria-hidden="true"/><span class="sr-only">{{ 'spaces.schema.list.olderMarkSr' | transloco }}</span></span>
           }
         </button>
       } @empty {
@@ -502,8 +502,8 @@ export class SpaceSchemaTabComponent implements OnInit {
 
   /**
    * Read every kind's rows: the shown kind first, then one kind after another (r4 §7.2), again whenever the stored schema is re-read
-   * (opened or saved). Nothing is drawn while they load, and a failure draws nothing at all: "if the check fails, no marker shows and
-   * History still works" (layout M).
+   * (opened or saved). No marker is drawn while they load or after a failure, and History is shown for a kind whose read is ready or
+   * failed ("if the check fails, no marker shows and History still works", layout M), not while it loads and not when it is not supported.
    */
   private loadKindRows(): void {
     this.kindReads?.unsubscribe();
@@ -523,18 +523,17 @@ export class SpaceSchemaTabComponent implements OnInit {
 
   /** One kind's rows, every page of them; pages that disagree on the current version are not drawn (r3 §9.2). */
   private readKindRows(spaceId: string, kt: KnowledgeType): Observable<KindRows> {
-    let first: Observable<TypeRead<TypeListAnswer>>;
-    // A host whose SchemaApi has no type reads (a spec of the tab alone, with a stub) draws no history, as an older server does.
-    try { first = this.schemaApi.typeList(spaceId, kt); } catch { return of<KindRows>({ s: 'unsupported' }); }
-    return first.pipe(
-      expand(r => r.supported && r.answer.nextSkip ? this.schemaApi.typeList(spaceId, kt, r.answer.nextSkip) : EMPTY),
-      reduce<TypeRead<TypeListAnswer>, KindRows | null>((acc, r) => {
-        if (!r.supported) return { s: 'unsupported' };
-        if (acc === null) return { s: 'ready', answer: r.answer };
-        if (acc.s !== 'ready' || acc.answer.current !== r.answer.current) return { s: 'failed' };
-        return { s: 'ready', answer: { ...acc.answer, types: [...acc.answer.types, ...r.answer.types] } };
-      }, null),
-      map(rows => rows ?? { s: 'failed' as const }),
+    return everyTypePage((skip: number) => this.schemaApi.typeList(spaceId, kt, skip)).pipe(
+      map(pages => {
+        const answers: TypeListAnswer[] = [];
+        for (const p of pages) {
+          if (!p.supported) return { s: 'unsupported' } as KindRows;
+          answers.push(p.answer);
+        }
+        const [first, ...later] = answers;
+        if (!first || later.some(a => a.current !== first.current)) return { s: 'failed' } as KindRows;
+        return { s: 'ready', answer: { ...first, types: answers.flatMap(a => a.types) } } as KindRows;
+      }),
       catchError(() => of<KindRows>({ s: 'failed' })),
     );
   }
@@ -551,8 +550,15 @@ export class SpaceSchemaTabComponent implements OnInit {
     return rows.types.some(t => t.type === name && t.declared === 'own' && t.older === true);
   }
 
-  /** Whether the server can answer a type's history for this kind (it echoed the kind); History is not drawn otherwise. */
-  protected historySupported(kt: KnowledgeType): boolean { return this.rowsOf(kt) !== null; }
+  /**
+   * Whether History is drawn for this kind: when the kind's read is ready or failed. Not while it loads, and not when the server does not
+   * support it (it did not echo the kind: an older one). A failed read draws no marker but History still works (layout M), and the
+   * dialog reads again by itself and says what it finds.
+   */
+  protected historySupported(kt: KnowledgeType): boolean {
+    const rows = this.kindRows().get(kt);
+    return rows?.s === 'ready' || rows?.s === 'failed';
+  }
 
   /** "Not defined in this space": the layer names, and the record-only names unless the record facts are withheld. */
   protected otherRows(kt: KnowledgeType): TypeRow[] {

@@ -55,6 +55,9 @@ const EN = {
   'spaces.schema.history.facet.required': 'required',
   'spaces.schema.history.facet.pattern': 'pattern {{value}}',
   'spaces.schema.history.facet.not': 'not {{facet}}',
+  'spaces.schema.history.place.property.required': 'required',
+  'spaces.schema.history.place.property.description': 'description',
+  'spaces.schema.history.place.retention.days': 'Retention: delete after (days)',
   'propertiesEditor.notDeclared': 'not declared',
   'common.yes': 'Yes',
   'common.no': 'No',
@@ -307,7 +310,8 @@ describe('the history dialog: loading and failing quietly (C1, r4 §7.6)', () =>
     expect(busy, 'nothing is aria-busy while the history loads').not.toBeNull();
     expect(busy!.textContent).toContain('spaces.schema.history.loading');
     await answerHistory(h, SEVERAL);
-    expect($(h.el, '[aria-busy="true"]')).toBeNull();
+    // The comparison of the chosen definition is out and has its own loading line (C5); the history's is gone.
+    expect($(h.el, '[aria-busy="true"]:not([data-testid="history-comparison-loading"])')).toBeNull();
   });
 
   it('a server that did not answer shows one block naming that cause, and Read again asks again', async () => {
@@ -416,7 +420,7 @@ describe('the history dialog: What changed in words (F3)', () => {
       { place: 'retention.days', from: 30, to: ['a', 'b'], class: 'lifecycle' },
       { place: '', from: { a: 1 }, to: { b: 2 }, class: 'structural' },
     ]);
-    expect(cells(h, '.pl')).toEqual(['size', 'email: required', 'orcid', 'email: description', 'retention.days', 'The whole definition']);
+    expect(cells(h, '.pl')).toEqual(['size', 'email: required', 'orcid', 'email: description', 'Retention: delete after (days)', 'The whole definition']);
     expect(valuesOf(h, '.was')).toEqual(['not declared', 'no', 'not declared', 'Work address', '30', '{"a":1}']);
     expect(valuesOf(h, '.now')).toEqual(['number', 'yes', 'string, pattern 0000-0000-0000-000X', 'Work address, used for sign-in', 'a, b', '{"b":2}']);
     expect(h.el.textContent).not.toContain('propertySchemas');
@@ -497,5 +501,93 @@ describe('the history dialog: the look the mockup draws (F5)', () => {
   it('the current column is bold and the place is monospace', () => {
     expect(decls('.cmp .now')).toMatch(/font-weight: (600|700)/);
     expect(decls('.cmp .pl')).toContain('font-family: var(--font-mono');
+  });
+});
+
+// ── pre-ship review, round 2 (C1, C2, C5, C8) ────────────────────────────────────────────────────────────────────────
+//
+// Seen red on 4f9f11f0: C2 (the dialog stayed empty on an older server) and C5 (nothing while a comparison loaded) fail as
+// written; C8 (a read that never answers) waits for ever; C1's non-advancing `nextSkip` is the hand-written `expand` asking for
+// ever (its loop is bounded here by the test, which stops at five asks).
+
+describe('the history dialog: an older server, a long history, a read that never answers (round 2)', () => {
+  const FIRST = page([SEVERAL.definitions[0], SEVERAL.definitions[1]], { nextSkip: 2, truncated: true, count: 2, total: 3, limit: 2 });
+  const SECOND = page([SEVERAL.definitions[2]], { skip: 2, count: 1, total: 3, limit: 2 });
+
+  it('a server that does not echo the type shows one muted line saying it cannot, and no list and no failure', async () => {
+    const h = await open();
+    await answerHistory(h, { types: [] });
+    const line = $(h.el, '[data-testid="history-unsupported"]');
+    expect(line, 'the unsupported phase draws nothing').not.toBeNull();
+    expect(line!.textContent).toContain('spaces.schema.history.unsupported');
+    expect(line!.classList.contains('muted')).toBe(true);
+    expect($(h.el, '[role="listbox"]')).toBeNull();
+    expect($(h.el, '[data-testid="history-failed"]')).toBeNull();
+    expect($(h.el, '[aria-busy="true"]')).toBeNull();
+  });
+
+  it('a history of two pages is asked page by page and listed as one', async () => {
+    const h = await open();
+    await answerHistory(h, FIRST);
+    const next = versionReads(h);
+    expect(next.length, 'the second page was not asked').toBe(1);
+    expect(next[0]!.p['skip']).toBe('2');
+    next[0]!.req.flush(SECOND as never);
+    await settle(h);
+    expect($$(h.el, '[role="option"]').length).toBe(3);
+    // Only the chosen definition's comparison (it has an `fp`) is still out; no third page of the history.
+    expect(versionReads(h).filter(r => !r.p['fp']).length).toBe(0);
+  });
+
+  it('a nextSkip that does not move forward ends the read with the pages so far', async () => {
+    const h = await open();
+    await answerHistory(h, FIRST);
+    const next = versionReads(h);
+    expect(next.length).toBe(1);
+    next[0]!.req.flush({ ...SECOND, nextSkip: 2 } as never);
+    await settle(h);
+    expect(versionReads(h).filter(r => !r.p['fp']).length, 'the read asked again at the same place').toBe(0);
+    expect($$(h.el, '[role="option"]').length).toBe(3);
+  });
+
+  it('a read that never answers ends in "no answer" with Read again, after 30 s', async () => {
+    vi.useFakeTimers();
+    const h = await open();
+    await vi.advanceTimersByTimeAsync(29_000);
+    await settle(h);
+    expect($(h.el, '[data-testid="history-failed"]'), 'gave up early').toBeNull();
+    expect($(h.el, '[aria-busy="true"]')).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1_500);
+    await settle(h);
+    const block = $(h.el, '[data-testid="history-failed"]');
+    expect(block, 'a read with no answer never ended').not.toBeNull();
+    expect(block!.textContent).toContain('common.reason.noAnswer');
+    expect($(block!, '[data-testid="history-read-again"]')).not.toBeNull();
+  });
+
+  it('each ask has its own 30 s: a busy answer does not use up the next ask\'s time', async () => {
+    vi.useFakeTimers();
+    const h = await open();
+    await answerHistory(h, { error: 'x', code: 'schema_versions_busy' }, 503);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(29_500);
+    await settle(h);
+    expect($(h.el, '[data-testid="history-failed"]'), 'the second ask was given only what was left of the first 30 s').toBeNull();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle(h);
+    expect($(h.el, '[data-testid="history-failed"]')!.textContent).toContain('common.reason.noAnswer');
+  });
+
+  it('while a comparison is being read it says so in the muted loading line, and the line goes when the answer comes', async () => {
+    const h = await open({ chosen: OLDER });
+    await answerHistory(h, SEVERAL);
+    const line = $(h.el, '[data-testid="history-comparison-loading"]');
+    expect(line, 'nothing is drawn while the comparison loads').not.toBeNull();
+    expect(line!.getAttribute('aria-busy')).toBe('true');
+    expect(line!.classList.contains('muted')).toBe(true);
+    expect(line!.textContent).toContain('spaces.schema.history.loading');
+    versionReads(h).find(r => r.p['fp'] === OLDER)!.req.flush(COMPARE([]) as never);
+    await settle(h);
+    expect($(h.el, '[data-testid="history-comparison-loading"]')).toBeNull();
   });
 });

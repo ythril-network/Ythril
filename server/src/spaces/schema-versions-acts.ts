@@ -252,7 +252,9 @@ function fpsOf(fps: unknown): unknown[] {
 
 /**
  * The type forms (bundle-268, Q-744 design r4 §5), refused in a fixed order so every malformed request has one code: `bad_kind`, then
- * `type_needs_kind`, then `fps_needs_type` / `kind_needs_type`, then the type name's bound, then `too_many_fps` and `bad_fingerprint`.
+ * `type_needs_kind`, then `fps_needs_type` / `kind_needs_type`, then `too_many_fps` and `bad_fingerprint`. Two refusals carry their message and
+ * no code, because no code of the list names them and a borrowed one would send an integrator to the wrong parameter: a `type` over its
+ * bound, and `fps` sent together with `fp`.
  */
 async function typeFormAct(spaceId: string, args: SchemaVersionsArgs, budget: BudgetRequest, caller: SchemaVersionsCaller): Promise<SchemaVersionsActResult> {
   const { kind, type, fps, fp, against } = args;

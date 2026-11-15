@@ -2,8 +2,8 @@ import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, OnInit, com
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { EMPTY, expand, reduce } from 'rxjs';
-import { SchemaApi, typeHistoryFailure, type TypeChange, type TypeDefinition, type TypeHistoryAnswer, type TypeRead } from '../../core/schema-api.service';
+import { map } from 'rxjs';
+import { SchemaApi, everyTypePage, typeHistoryFailure, type TypeChange, type TypeDefinition, type TypeHistoryAnswer, type TypeRead } from '../../core/schema-api.service';
 import { DateFormatService } from '../../core/date-format.service';
 import { definitionSpan, typeReadReason, type Words } from '../../core/type-definition-words';
 import { changePlaceWords, changeValueWords, type Say } from '../../core/type-change-words';
@@ -31,6 +31,27 @@ type Phase =
 type Comparison = { phase: 'loading' } | { phase: 'none' } | { phase: 'ready'; changes: TypeChange[]; unread: string[] };
 
 let headSeq = 0;
+
+/**
+ * The pages of a type's history as one answer: the definitions of every page in order, `cut` when any page says so. One page the server
+ * does not support makes the whole read not supported, so a part is never shown as the history.
+ */
+function mergedHistory(pages: readonly TypeRead<TypeHistoryAnswer>[]): TypeRead<TypeHistoryAnswer> {
+  const answers: TypeHistoryAnswer[] = [];
+  for (const p of pages) {
+    if (!p.supported) return { supported: false };
+    answers.push(p.answer);
+  }
+  const [first, ...later] = answers;
+  if (!first) return { supported: false };
+  return {
+    supported: true,
+    answer: later.reduce<TypeHistoryAnswer>(
+      (acc, a) => ({ ...acc, definitions: [...acc.definitions, ...a.definitions], cut: acc.cut ?? a.cut }),
+      first,
+    ),
+  };
+}
 
 /** Stands for the type in the title's sentence while it is cut in two; no word of any language holds it. */
 const TYPE_MARK = '';
@@ -128,6 +149,9 @@ const TYPE_MARK = '';
           <button class="btn btn-secondary btn-sm" type="button" data-testid="history-read-again" (click)="load()">{{ 'spaces.schema.history.readAgain' | transloco }}</button>
         </div>
       }
+      @case ('unsupported') {
+        <p class="muted" data-testid="history-unsupported">{{ 'spaces.schema.history.unsupported' | transloco }}</p>
+      }
       @case ('ready') {
         @if (undeclared()) { <p class="one">{{ 'spaces.schema.history.notInSchema' | transloco }}</p> }
         @if (definitions().length === 1) {
@@ -154,6 +178,9 @@ const TYPE_MARK = '';
                   }
                 </div>
                 @if (comparison(); as c) {
+                  @if (c.phase === 'loading') {
+                    <p class="muted" aria-busy="true" data-testid="history-comparison-loading">{{ 'spaces.schema.history.loading' | transloco }}</p>
+                  }
                   @if (c.phase === 'ready') {
                     @for (place of c.unread; track place) { <p class="warn">{{ 'spaces.schema.history.unread' | transloco: { place: place } }}</p> }
                     @if (c.changes.length) {
@@ -203,8 +230,6 @@ export class SchemaTypeHistoryComponent implements OnInit {
   private readonly router = inject(Router, { optional: true });
   private readonly destroyRef = inject(DestroyRef);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
-  /** What had the focus when the dialog opened; Close gives it back. Read before the dialog's focus trap moves it. */
-  private readonly opener = (typeof document !== 'undefined' ? document.activeElement : null) as HTMLElement | null;
 
   protected readonly headId = `hist-head-${++headSeq}`;
   protected readonly view = signal<Phase>({ phase: 'loading' });
@@ -226,17 +251,12 @@ export class SchemaTypeHistoryComponent implements OnInit {
   /** Read the history, every page of it (a page past the first reads the server's class memo and diffs nothing, r4 §5.2). */
   protected load(): void {
     this.view.set({ phase: 'loading' });
-    const page = (skip?: number) => this.api.typeHistory(this.spaceId(), this.kind(), this.type(), skip);
-    page().pipe(
-      expand((r: TypeRead<TypeHistoryAnswer>) => r.supported && r.answer.nextSkip ? page(r.answer.nextSkip) : EMPTY),
-      reduce((acc: TypeRead<TypeHistoryAnswer> | null, r: TypeRead<TypeHistoryAnswer>) => {
-        if (!acc || !acc.supported || !r.supported) return acc ?? r;
-        return { supported: true as const, answer: { ...acc.answer, definitions: [...acc.answer.definitions, ...r.answer.definitions], cut: acc.answer.cut ?? r.answer.cut } };
-      }, null),
+    everyTypePage((skip: number) => this.api.typeHistory(this.spaceId(), this.kind(), this.type(), skip)).pipe(
+      map(pages => mergedHistory(pages)),
       takeUntilDestroyed(this.destroyRef),
     ).subscribe({
       next: r => {
-        if (!r || !r.supported) { this.view.set({ phase: 'unsupported' }); return; }
+        if (!r.supported) { this.view.set({ phase: 'unsupported' }); return; }
         this.view.set({ phase: 'ready', answer: r.answer });
         const want = this.chosen0();
         const at = want ? r.answer.definitions.findIndex(d => d.rep === want) : -1;
@@ -285,7 +305,6 @@ export class SchemaTypeHistoryComponent implements OnInit {
 
   protected close(): void {
     this.closed.emit();
-    this.opener?.focus?.();
   }
 
   protected linkTo(definition: string): string {

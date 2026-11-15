@@ -30,10 +30,10 @@ import type { DefinitionLanding } from './definition-landing';
   <div class="chip-row">
     @if (type()) {
       <span class="chip">
-        @if (kind() === 'edge') { {{ 'brain.edges.table.relation' | transloco }}: {{ type() }}
+        @if (kind() === 'edge') { {{ 'brain.filter.relationChip' | transloco: { name: type() } }}
           <button class="x" type="button" [attr.title]="'brain.filter.removeRelationAria' | transloco" [attr.aria-label]="'brain.filter.removeRelationAria' | transloco"
                   (click)="clearType.emit()"><ph-icon name="x" [size]="11"/></button>
-        } @else { {{ 'common.form.type' | transloco }}: {{ type() }}
+        } @else { {{ 'brain.filter.typeChip' | transloco: { name: type() } }}
           <button class="x" type="button" [attr.title]="'brain.filter.removeTypeAria' | transloco" [attr.aria-label]="'brain.filter.removeTypeAria' | transloco"
                   (click)="clearType.emit()"><ph-icon name="x" [size]="11"/></button>
         }

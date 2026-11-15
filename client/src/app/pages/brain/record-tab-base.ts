@@ -225,6 +225,13 @@ export abstract class RecordTabBase {
     this.setTypeFilter('');
   }
 
+  /**
+   * The type filter moved to another type: a landed definition filter goes with it. A definition is one type's, so it would filter the
+   * other type's records by a version they cannot have. The edges tab overrides: its definition belongs to the linked label, which its
+   * type filter (the edge's own `type` field) does not change.
+   */
+  protected dropDefinitionWithType(): void { this.landing.clear(); }
+
   /** Override to clear per-tab filter/search state on a space switch (default: nothing beyond skip). */
   protected resetOnSpaceChange(): void {}
 
@@ -260,6 +267,7 @@ export abstract class RecordTabBase {
 
   /** Docked Type/Kind header filter changed → narrow the list from page 1. */
   setTypeFilter(value: string): void {
+    if (this.recordFilter().type !== value) this.dropDefinitionWithType();
     this.recordFilter.update(f => ({ ...f, type: value }));
     this.skip.set(0);
     this.load();

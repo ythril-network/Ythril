@@ -13,6 +13,14 @@ const WORDS: Record<string, string> = {
   'spaces.schema.history.facet.required': 'required',
   'spaces.schema.history.facet.pattern': 'pattern {{value}}',
   'spaces.schema.history.facet.not': 'not {{facet}}',
+  'spaces.schema.history.facet.enum': 'one of ({{value}})',
+  'spaces.schema.history.facet.minimum': 'at least {{value}}',
+  'spaces.schema.history.facet.mergeFn': 'merged by {{value}}',
+  'spaces.schema.history.place.property.minimum': 'smallest value',
+  'spaces.schema.history.place.property.required': 'required',
+  'spaces.schema.history.place.property.description': 'description',
+  'spaces.schema.history.place.retention.days': 'Retention: delete after (days)',
+  'spaces.schema.history.place.namingPattern': 'Naming pattern',
   'propertiesEditor.notDeclared': 'not declared',
   'common.yes': 'Yes',
   'common.no': 'No',
@@ -28,7 +36,7 @@ describe('changePlaceWords', () => {
   });
 
   it('any other place shows as it is, the empty place as "The whole definition"', () => {
-    expect(changePlaceWords('retention.days', say)).toBe('retention.days');
+    expect(changePlaceWords('futureField', say)).toBe('futureField');
     expect(changePlaceWords('propertySchemas.', say)).toBe('propertySchemas.');
     expect(changePlaceWords('', say)).toBe('The whole definition');
   });
@@ -55,7 +63,15 @@ describe('changeValueWords', () => {
     expect(changeValueWords({ type: 'string', pattern: '0000-0000-0000-000X' }, place, say)).toBe('string, pattern 0000-0000-0000-000X');
     expect(changeValueWords({ type: 'string', required: true }, place, say)).toBe('string, required');
     expect(changeValueWords({ type: 'string', unique: true, minLength: 3, required: false }, place, say)).toBe('string, unique, minLength 3, not required');
-    expect(changeValueWords({ type: 'string', enum: ['a', 'b'] }, place, say)).toBe('string, enum (a, b)');
+    expect(changeValueWords({ type: 'string', enum: ['a', 'b'] }, place, say)).toBe('string, one of (a, b)');
+    expect(changeValueWords({ type: 'number', minimum: 3, mergeFn: 'avg' }, place, say)).toBe('number, at least 3, merged by avg');
+  });
+
+  it('a type-level place and a property facet in a place are worded (C7); an unknown one prints as written', () => {
+    expect(changePlaceWords('namingPattern', say)).toBe('Naming pattern');
+    expect(changePlaceWords('retention.days', say)).toBe('Retention: delete after (days)');
+    expect(changePlaceWords('propertySchemas.size.minimum', say)).toBe('size: smallest value');
+    expect(changePlaceWords('propertySchemas.size.format', say)).toBe('size: format');
   });
 
   it('anything else is compact JSON: an object at another place, a definition with a facet that is no plain value, an empty array', () => {

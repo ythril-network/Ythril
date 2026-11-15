@@ -18,6 +18,9 @@ import type { KnowledgeType } from '../config/types-knowledge.js';
 /** The guarded equality a type name is matched by, on any type field. */
 export const guardedTypeValue = (type: string): { $eq: string; $not: { $type: 'array' } } => ({ $eq: type, $not: { $type: 'array' } });
 
+/** The guarded membership a list of type names is matched by, on any type field: the list form of {@link guardedTypeValue}. */
+export const guardedTypeList = (types: readonly string[]): { $in: string[]; $not: { $type: 'array' } } => ({ $in: [...types], $not: { $type: 'array' } });
+
 /**
  * The type match of a read over the STAMP INDEX: the plain `type` while that index holds no array-valued type field (`mayHoldArrays: false`,
  * read from its multikey flag: no stamped record then holds an array, so the plain match is exact and stays answered from the keys), and the
@@ -25,6 +28,10 @@ export const guardedTypeValue = (type: string): { $eq: string; $not: { $type: 'a
  */
 export const stampedTypeValue = (type: string, mayHoldArrays: boolean): string | ReturnType<typeof guardedTypeValue> =>
   (mayHoldArrays ? guardedTypeValue(type) : type);
+
+/** {@link stampedTypeValue} for a list of names: `{ $in }` while no array can be there, the guarded {@link guardedTypeList} otherwise. */
+export const stampedTypeList = (types: readonly string[], mayHoldArrays: boolean): { $in: string[] } | ReturnType<typeof guardedTypeList> =>
+  (mayHoldArrays ? guardedTypeList(types) : { $in: [...types] });
 
 /** The records of `kind` whose type is exactly the string `type`: an array that holds it is not one of them. */
 export function typeClauseOf(kind: KnowledgeType, type: string): Record<string, { $eq: string; $not: { $type: 'array' } }> {

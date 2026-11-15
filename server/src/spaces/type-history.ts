@@ -8,8 +8,9 @@
  *   (`F ~T G`: the diff names neither T nor T's kind `all`, and the pair is classified), an equivalence (E1), found by chaining neighbours in
  *   keeping order, then comparing each run's representative with the classes found so far, the most recently matched first (E2: the result is
  *   union-find's partition).
- * - {@link typeHistoryOf}: *"what is T's history in this space, for this caller?"* The stamps T's records carry (R4) that the caller may have,
- *   plus the current version when T is declared, grouped, with spans and origins.
+ * - {@link typeHistoryOf}: *"what is T's history in this space, for this caller?"* The stamps T's records carry (R4) that the caller may have
+ *   (for a caller denied the record facts: the versions whose texts declare T, so nothing is learned of the records), plus the current version
+ *   when T is declared, grouped, with spans and origins.
  * - {@link mayReadRecordFacts}: *"may this caller be told facts read from the records?"* (the older mark, the record-only names, the Open links).
  *
  * ## What it prevents
@@ -31,12 +32,13 @@ import { col } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { LruMap } from '../util/lru-map.js';
 import { isPlainObject } from '@ythril-network/schema/internal';
-import { variationOf, type SnapshotLinks } from './schema-stamp.js';
+import { variationOf, isSchemaFingerprint, type SnapshotLinks } from './schema-stamp.js';
 import { layersFor } from './network-layers.js';
-import { heldVersionsKept, versionTexts, versionMetaOf, type HeldProvenance } from './schema-version-text.js';
-import { typesDifferingBetween, type TypesDiffering } from './schema-diff.js';
-import { fingerprintsOfType, unnamedFingerprintsIn, stampIndexMayHoldArrays, type StampedCollection } from './schema-snapshot-carried.js';
-import { busyOnTimeout, mayHave, notSameStanding, scopeKeyOf, standingsOf, TEXT_CHUNK, type PassScope } from './type-standing.js';
+import { configuredVersions, heldVersionsKept, versionTexts, versionMetaOf, type HeldProvenance } from './schema-version-text.js';
+import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
+import { knownTypesDiffering, typesDifferingBetween, type TypesDiffering } from './schema-diff.js';
+import { fingerprintsOfType, unnamedFingerprintsIn, stampPlanOf, type StampedCollection } from './schema-snapshot-carried.js';
+import { busyOnTimeout, mayHave, notSameStanding, scopeKeyOf, standingsOf, textChunksFor, type PassScope } from './type-standing.js';
 
 /** The most classes one history lists; the 64th is drawn, a run that matches none of them is not. */
 export const CLASS_MAX = 64;
@@ -157,15 +159,13 @@ export function declaredTypeNamesOf(meta: unknown, kind: KnowledgeType): string[
   return isPlainObject(types) ? Object.keys(types) : [];
 }
 
-/** What the current schema says of `type`: declared by the space's own definitions, by a layer only (with which networks), or not at all. */
-export function declaredOf(spaceId: string, kind: KnowledgeType, type: string): { declared: Declared; networks: string[] } {
+/** What the current schema says of `type`: declared by the space's own definitions, by a layer only, or not at all. */
+export function declaredOf(spaceId: string, kind: KnowledgeType, type: string): Declared {
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
   const has = (meta: unknown): boolean => declaredTypeNamesOf(meta, kind).includes(type);
-  if (has(space?.ownMeta ?? space?.meta)) return { declared: 'own', networks: [] };
-  const networks = layersFor(cfg, spaceId).filter(l => has(l.meta)).map(l => l.networkId);
-  if (networks.length > 0 && has(space?.meta)) return { declared: 'layer', networks };
-  return { declared: 'none', networks: [] };
+  if (has(space?.ownMeta ?? space?.meta)) return 'own';
+  return layersFor(cfg, spaceId).some(l => has(l.meta)) && has(space?.meta) ? 'layer' : 'none';
 }
 
 /** The class memo: a type's history per everything it depends on. 256 entries, weighted at 72 bytes per member, 8 MiB. */
@@ -198,14 +198,13 @@ const namesType = (td: TypesDiffering, kind: string, type: string): boolean => {
   return k === 'all' || (k instanceof Set && k.has(type));
 };
 
-/** A pass-local reader of version texts: chunked, each text read once while it fits in 16 MiB. */
+/** A pass-local reader of version texts: chunked by the one chunker of text reads ({@link textChunksFor}), each text read once while it fits in 16 MiB. */
 function textReader(spaceId: string, timeLeft: () => number): { prefetch: (fps: readonly string[]) => Promise<void>; text: (fp: string) => Promise<string | undefined> } {
   const cache = new LruMap<string, string>(100_000, undefined, { weigh: t => Math.max(1, t.length), maxWeight: 16 * 1024 * 1024 });
   const missing = new Set<string>();
   const read = async (fps: readonly string[]): Promise<void> => {
     const want = fps.filter(fp => cache.peek(fp) === undefined && !missing.has(fp));
-    for (let i = 0; i < want.length; i += TEXT_CHUNK) {
-      const chunk = want.slice(i, i + TEXT_CHUNK);
+    for (const chunk of await textChunksFor(spaceId, want, timeLeft)) {
       const texts = await versionTexts(spaceId, chunk, { timeLeft });
       for (const fp of chunk) { const t = texts.get(fp); if (t === undefined) missing.add(fp); else cache.set(fp, t); }
     }
@@ -232,23 +231,59 @@ function ownBefore(own: readonly { fp: string; at: string; links: SnapshotLinks 
   return found;
 }
 
+/** Where a history's versions are found: the stamps the type's records carry, or the version texts alone (for a caller denied the record facts). */
+export type HistorySource = 'records' | 'texts';
+
+/** The declaring-versions memo: per (space, kind, type, every version held), the versions whose text declares the type. A fingerprint names its text. */
+const declaringMemo = new LruMap<string, string[]>(256);
+
 /**
- * The history of (`kind`, `type`) in `spaceId` for the caller `scope` names: the stamps T's records carry (R4), the ones the caller may have and
- * that are classifiable against current (R2's unnamed stamps are not), plus the current version when T is declared, grouped into definitions,
- * each with its span and origin. Memoised. Throws on any failure: `SchemaIndexBuilding`, `SchemaVersionsBusy`.
+ * Every version this server holds whose text declares (`kind`, `type`): what the schema texts alone say of a type, so a type declared and
+ * later removed still has its versions, and a name no version declared has none, whether or not a record carries it. Reads no record. The texts
+ * are read by the one chunker ({@link textChunksFor}), under the pass's deadline, and the answer is kept per set of versions held.
  */
-export async function typeHistoryOf(spaceId: string, kind: KnowledgeType, type: string, scope: PassScope): Promise<TypeHistory> {
+async function versionsDeclaring(spaceId: string, kind: KnowledgeType, type: string, scope: PassScope): Promise<string[]> {
+  const rows = await col<{ _id: string }>(spaceCollection(spaceId, 'schemaSnapshots'))
+    .find({ text: { $type: 'string' } }, { projection: { _id: 1 }, maxTimeMS: scope.timeLeft() }).toArray();
+  const fps = [...new Set([...configuredVersions(spaceId).keys(), ...rows.map(r => String(r._id))])].filter(fp => isSchemaFingerprint(fp)).sort();
+  const key = `${spaceId}|${kind}|${type}|${createHash('sha256').update(fps.join(',')).digest('hex')}`;
+  const known = declaringMemo.get(key);
+  if (known) return known;
+  const declaring: string[] = [];
+  for (const chunk of await textChunksFor(spaceId, fps, scope.timeLeft)) {
+    const texts = await versionTexts(spaceId, chunk, { timeLeft: scope.timeLeft });
+    for (const fp of chunk) {
+      const text = texts.get(fp);
+      if (text !== undefined && declaredTypeNamesOf(versionMetaOf(text)?.meta, kind).includes(type)) declaring.push(fp);
+    }
+    await yieldToEventLoop();
+  }
+  declaringMemo.set(key, declaring);
+  return declaring;
+}
+
+/**
+ * The history of (`kind`, `type`) in `spaceId` for the caller `scope` names: the versions in question (`from`: the stamps T's records carry
+ * (R4), or the version texts that declare T), the ones the caller may have and, from records, that are classifiable against current (R2's
+ * unnamed stamps are not), plus the current version when T is declared, grouped into definitions, each with its span and origin. Memoised.
+ * Throws on any failure: `SchemaIndexBuilding`, `SchemaVersionsBusy`.
+ */
+export async function typeHistoryOf(
+  spaceId: string, kind: KnowledgeType, type: string, scope: PassScope, from: HistorySource = 'records',
+): Promise<TypeHistory> {
   return busyOnTimeout(spaceId, async () => {
     const collection = COLLECTION_SUFFIX[kind] as StampedCollection;
     const variation = variationOf(spaceId);
     if (!variation) throw new Error(`space '${spaceId}' is not configured`);
     const current = variation.stamp.fp;
-    const { declared } = declaredOf(spaceId, kind, type);
-    const mayHoldArrays = await stampIndexMayHoldArrays(spaceId, collection);
-    const carried = await fingerprintsOfType(spaceId, collection, type, scope.timeLeft, { mayHoldArrays });
+    const declared = declaredOf(spaceId, kind, type);
+    // The versions in question: the stamps the type's records carry (and the stamps R2 marks unnamed among them), or, for a caller who may
+    // not be told what records carry, the versions whose texts declare the type; nothing below this reads a record.
+    const plan = from === 'records' ? await stampPlanOf(spaceId, collection) : undefined;
+    const carried = plan ? await fingerprintsOfType(spaceId, collection, type, scope.timeLeft, { plan }) : await versionsDeclaring(spaceId, kind, type, scope);
     const candidates = [...new Set([...carried, ...(declared !== 'none' ? [current] : [])])];
     const held = await heldVersionsKept(spaceId, candidates, { timeLeft: scope.timeLeft });
-    const unnamed = new Set(await unnamedFingerprintsIn(spaceId, collection, carried.filter(fp => held.has(fp)), scope.timeLeft, { mayHoldArrays }));
+    const unnamed = new Set(plan ? await unnamedFingerprintsIn(spaceId, collection, carried.filter(fp => held.has(fp)), scope.timeLeft, { plan }) : []);
     const kept: Kept[] = [];
     for (const fp of candidates) {
       const v = held.get(fp);
@@ -272,20 +307,30 @@ export async function typeHistoryOf(spaceId: string, kind: KnowledgeType, type: 
         return notSameStanding(s, type) ? 'differs' : 'same';
       }
       scope.timeLeft();
-      const [ta, tb] = [await texts.text(a), await texts.text(b)];
-      if (ta === undefined || tb === undefined) return 'unclassified';
-      const td = typesDifferingBetween({ fp: a, text: ta }, { fp: b, text: tb }, 'any');
+      // The pair memo first: a pair classified before reads no text.
+      let td = knownTypesDiffering(a, b, 'any');
+      if (!td) {
+        const [ta, tb] = [await texts.text(a), await texts.text(b)];
+        if (ta === undefined || tb === undefined) return 'unclassified';
+        td = typesDifferingBetween({ fp: a, text: ta }, { fp: b, text: tb }, 'any');
+      }
       if (td.unclassified) return 'unclassified';
       return namesType(td, kind, type) ? 'differs' : 'same';
     };
-    await texts.prefetch(order.filter(fp => fp !== anchor));
+    // Read ahead, in chunks, the texts of the neighbour pairs the memo does not hold; a text another pair needs is read when it is asked.
+    const seq = order.filter(fp => fp !== anchor);
+    const ahead = new Set<string>();
+    for (let i = 1; i < seq.length; i++) if (!knownTypesDiffering(seq[i - 1]!, seq[i]!, 'any')) { ahead.add(seq[i - 1]!); ahead.add(seq[i]!); }
+    await texts.prefetch([...ahead]);
     const grouping = await groupDefinitions(order, anchor, compare);
 
     const byFp = new Map(kept.map(k => [k.fp, k]));
     const classOf = new Map<string, number>();
     grouping.classes.forEach((c, i) => { for (const m of c.members) classOf.set(m, i); });
     // The dated line: every kept, classified, non-fetched version in keeping order (a cut run is a class of its own here).
-    const dated = kept.filter(k => !k.fetched && k.at !== undefined && !grouping.unclassified.includes(k.fp));
+    const unclassifiedSet = new Set(grouping.unclassified);
+    const dated = kept.filter(k => !k.fetched && k.at !== undefined && !unclassifiedSet.has(k.fp));
+    const datedAt = new Map(dated.map((k, i) => [k.fp, i]));
     const classIdOf = (fp: string): string => (classOf.has(fp) ? `c${classOf.get(fp)}` : `x${fp}`);
     const own = await ownLineOf(spaceId, scope.timeLeft);
     const definitions: Definition[] = [];
@@ -304,7 +349,7 @@ export async function typeHistoryOf(spaceId: string, kind: KnowledgeType, type: 
           }
         } else {
           since = mine[0]!.at;
-          const newest = dated.indexOf(mine[mine.length - 1]!);
+          const newest = datedAt.get(mine[mine.length - 1]!.fp)!;
           const next = dated.slice(newest + 1).find(k => classIdOf(k.fp) !== `c${i}`);
           until = next?.at;
         }

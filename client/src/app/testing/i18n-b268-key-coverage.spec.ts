@@ -51,7 +51,8 @@ export const B268_KEYS = [
   'brain.drawer.typeDefinition.helpAria', 'brain.drawer.typeDefinition.help.current', 'brain.drawer.typeDefinition.help.older',
   'brain.drawer.typeDefinition.help.none', 'brain.drawer.typeDefinition.help.cannotTell',
   'brain.filter.typeDefinitionOlder', 'brain.filter.typeDefinitionSpan', 'brain.filter.historyOf',
-  'brain.filter.cannotFilterByDefinition',
+  'brain.filter.cannotFilterByDefinition', 'brain.filter.typeChip', 'brain.filter.relationChip',
+  'spaces.schema.history.unsupported',
   'brain.filter.removeTypeAria', 'brain.filter.removeRelationAria', 'brain.filter.removeDefinitionAria',
   'brain.list.typeDefinitionColumn',
 ] as const;
@@ -75,6 +76,8 @@ const PARAMS: Record<string, string[]> = {
   'brain.drawer.typeDefinition.failed': ['reason'],
   'brain.filter.typeDefinitionSpan': ['span'],
   'brain.filter.historyOf': ['type'],
+  'brain.filter.typeChip': ['name'],
+  'brain.filter.relationChip': ['name'],
 };
 
 /** The pills' words (r4 §7.1, P54). Each had one user, the removed `sch-type-badges` block. */

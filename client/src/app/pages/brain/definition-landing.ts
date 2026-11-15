@@ -25,8 +25,8 @@ export function definitionListArgs(definition: string): { schemaVersion?: string
  * The link is read once when the tab opens and again when a later navigation brings a different one (an Open link followed from a
  * history dialog opened inside the Brain), and a space change drops it: the same type name can mean different things in two spaces.
  *
- * Collaborators the tab specs of other rules do not provide (the route, the schema reads) are reached lazily and only when a link is
- * set, so a tab mounted without them behaves as it always did.
+ * The route is optional (a tab mounted without one has no link), and `SchemaApi` is reached lazily, only when a definition filter is set
+ * and rows arrive: a tab with no link never asks for it, and one with a link must be given it.
  */
 export class DefinitionLanding {
   private readonly injector = inject(Injector);
@@ -116,8 +116,7 @@ export class DefinitionLanding {
     const rep = this.sameAsRep();
     if (rep) fps.add(rep);
     if (!fps.size) { this.reads.cancel(); return; }
-    let api: SchemaApi;
-    try { api = this.injector.get(SchemaApi); } catch { return; }
+    const api = this.injector.get(SchemaApi);
     this.reads.run(api.typeStandings(spaceId, this.kind, type, [...fps]), {
       next: r => { if (r.supported) this.standings.set(new Map(r.answer.standings.map(s => [s.fp, s]))); },
       // The column is an aid to the list; failing, its cells stay empty and the list stands.

@@ -85,7 +85,7 @@
   "refusals": {
     "codes": ["bad_kind", "type_needs_kind", "kind_needs_type", "fps_needs_type", "too_many_fps", "bad_fingerprint", "unknown_fingerprint", "schema_versions_busy", "schema_index_building"],
     "statusOf": { "bad_kind": 400, "type_needs_kind": 400, "kind_needs_type": 400, "fps_needs_type": 400, "too_many_fps": 400, "bad_fingerprint": 400, "unknown_fingerprint": 404, "schema_versions_busy": 503, "schema_index_building": 503 },
-    "example": { "status": 503, "body": { "error": "Placing this space's records against its schema versions took longer than this request may; what was done is kept, so trying again continues it.", "code": "schema_versions_busy" } }
+    "example": { "status": 503, "body": { "error": "Placing this space's records against its schema versions took longer than this request may; the versions already compared are kept, so trying again has less left to do.", "code": "schema_versions_busy" } }
   },
   "olderServer": {
     "request": { "kind": "entity" },

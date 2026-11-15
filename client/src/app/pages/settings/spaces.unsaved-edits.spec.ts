@@ -11,6 +11,7 @@ import { signal } from '@angular/core';
 import { describe, it, expect, vi } from 'vitest';
 import { of } from 'rxjs';
 import { getTranslocoModule } from '../../testing/transloco-testing';
+import { NO_TYPE_READS } from '../../testing/schema-type-reads';
 import { UnsavedEdits } from '../../core/unsaved-edits';
 import { SpaceDangerTabComponent } from './space-danger-tab.component';
 import { SpaceSchemaLayersComponent } from './space-schema-layers.component';
@@ -195,6 +196,7 @@ describe('the Schema tab holds its export dialog and import-conflict name (Q-701
           listSchemaLibrary: () => of({ entries: [] }),
           upsertSchemaLibraryEntry: () => of({ entry: {} }),
           exportSpaceSchemaToLibrary: () => of({ created: 1, updated: 0 }),
+          ...NO_TYPE_READS,
         } },
       ],
     });

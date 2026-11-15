@@ -229,6 +229,27 @@ describe('the schema-version reads are served by the (stamp, type) index (real M
       }
     });
 
+    it('a pass over several types lists the collection\'s indexes once, whatever the number of types and seeks (Q-744 fix round 2, S4)', async () => {
+      const coll = `${SPACE}_entities`;
+      const listings = async (fn) => {
+        const seen = [];
+        const { result } = await readsDuring(client, coll, async () => {
+          const listen = (ev) => { if (ev.commandName === 'listIndexes' && ev.command?.listIndexes === coll) seen.push(ev.requestId); };
+          client.on('commandStarted', listen);
+          try { return await fn(); } finally { client.off('commandStarted', listen); }
+        });
+        return { result, count: seen.length };
+      };
+      const kind = await listings(() => door.call('space_schema_versions', { space: SPACE, kind: 'entity' }));
+      assert.ok(!kind.result.result.isError, kind.result.text.slice(0, 300));
+      const types = (kind.result.structured?.types ?? []).filter(t => t.declared === 'own').length;
+      assert.ok(types >= 2, `the control lists ${types} own type(s): a pass over one type cannot show a listing per type`);
+      assert.ok(kind.count <= 1, `a kind list over ${types} types listed the indexes ${kind.count} times`);
+      const history = await listings(() => door.call('space_schema_versions', { space: SPACE, kind: 'entity', type: 'A' }));
+      assert.ok(!history.result.result.isError, history.result.text.slice(0, 300));
+      assert.ok(history.count <= 1, `a type history listed the indexes ${history.count} times`);
+    });
+
     describe('a multikey stamp index', () => {
       before(async () => {
         multiV = [];

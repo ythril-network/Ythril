@@ -73,7 +73,11 @@ export const STAMP_READ = { $type: 'string' } as const;
  * replaces, else {@link SchemaIndexBuilding}. One listing per read: metadata, whatever the size of the collection.
  */
 export async function stampIndexHint(spaceId: string, collection: StampedCollection): Promise<string> {
-  const names = await indexNamesOf(spaceCollection(spaceId, collection));
+  return stampIndexIn(spaceId, await indexNamesOf(spaceCollection(spaceId, collection)));
+}
+
+/** {@link stampIndexHint} over a listing the caller already holds. */
+function stampIndexIn(spaceId: string, names: readonly string[]): string {
   if (names.includes(STAMP_INDEX)) return STAMP_INDEX;
   if (names.includes(REPLACED_STAMP_INDEX)) return REPLACED_STAMP_INDEX;
   throw new SchemaIndexBuilding(spaceId);
@@ -84,10 +88,10 @@ export async function stampIndexHint(spaceId: string, collection: StampedCollect
  * Throws on any failure of the read, a missing stamp index among them; never answers partially.
  */
 export async function fingerprintsCarriedIn(
-  spaceId: string, collection: StampedCollection, among?: readonly string[], opts: { timeLeft?: TimeLeft } = {},
+  spaceId: string, collection: StampedCollection, among?: readonly string[], opts: { timeLeft?: TimeLeft } & StampReadOptions = {},
 ): Promise<string[]> {
   if (among !== undefined && among.length === 0) return [];
-  const hint = await stampIndexHint(spaceId, collection);
+  const hint = opts.plan?.hint ?? await stampIndexHint(spaceId, collection);
   const filter = { [SCHEMA_FINGERPRINT_FIELD]: { ...STAMP_READ, ...(among !== undefined ? { $in: [...among] } : {}) } };
   const maxTimeMS = opts.timeLeft?.();
   const found = await distinctStringsOf(col<Record<string, unknown>>(spaceCollection(spaceId, collection)), SCHEMA_FINGERPRINT_FIELD,
@@ -147,14 +151,27 @@ export async function stampIndexMayHoldArrays(spaceId: string, collection: Stamp
   return scan['isMultiKey'] !== false;
 }
 
-/** The type match and the hint one stamp read uses: the index the collection lists, and whether that index may hold an array type. */
-async function stampPlanOf(spaceId: string, collection: StampedCollection, mayHoldArrays?: boolean): Promise<{ hint: string; arrays: boolean }> {
-  const hint = await stampIndexHint(spaceId, collection);
-  return { hint, arrays: mayHoldArrays ?? await stampIndexMayHoldArrays(spaceId, collection, hint) };
+/** What a pass's stamp reads share: the index to hint, whether it may hold an array type, and the listing both came from. */
+export interface StampPlan {
+  readonly hint: string;
+  readonly mayHoldArrays: boolean;
+  /** The collection's index names, as listed once for the plan: the type index of R5 is read from here, never listed again. */
+  readonly indexNames: readonly string[];
 }
 
-/** What every R2 to R4 read takes besides its question: the multikey answer when the caller's pass already read it. */
-export interface StampReadOptions { readonly mayHoldArrays?: boolean }
+/**
+ * The plan of one pass over `collection`: ONE listing of its indexes and one planner explain. A pass makes it once and hands it to every read
+ * ({@link StampReadOptions}), so the number of types it seeks never multiplies the listing. Throws {@link SchemaIndexBuilding} when the
+ * collection lists no stamp index.
+ */
+export async function stampPlanOf(spaceId: string, collection: StampedCollection): Promise<StampPlan> {
+  const indexNames = await indexNamesOf(spaceCollection(spaceId, collection));
+  const hint = stampIndexIn(spaceId, indexNames);
+  return { hint, indexNames, mayHoldArrays: await stampIndexMayHoldArrays(spaceId, collection, hint) };
+}
+
+/** What every R2 to R5 read takes besides its question: the pass's plan. A read handed none makes its own, so a lone read is never blind. */
+export interface StampReadOptions { readonly plan?: StampPlan }
 
 /**
  * R2: which of `among` does a record carry whose type is neither a string nor absent (`unnamed`: an array, a number, an object)? The same set
@@ -166,7 +183,7 @@ export async function unnamedFingerprintsIn(
   spaceId: string, collection: StampedCollection, among: readonly string[], timeLeft: TimeLeft, opts: StampReadOptions = {},
 ): Promise<string[]> {
   if (among.length === 0) return [];
-  const { hint, arrays } = await stampPlanOf(spaceId, collection, opts.mayHoldArrays);
+  const { hint, mayHoldArrays: arrays } = opts.plan ?? await stampPlanOf(spaceId, collection);
   const typeField = stampTypeFieldOf(collection);
   const stamp = { [SCHEMA_FINGERPRINT_FIELD]: { ...STAMP_READ, $in: [...new Set(among)] } };
   const filter = { ...stamp, [typeField]: { $type: arrays ? [...NON_STRING_SCALAR_TYPES, 'array'] : [...NON_STRING_SCALAR_TYPES] } };
@@ -185,7 +202,7 @@ export async function typeOnAnyOf(
   spaceId: string, collection: StampedCollection, type: string, fps: readonly string[], timeLeft: TimeLeft, opts: StampReadOptions = {},
 ): Promise<boolean> {
   if (fps.length === 0) return false;
-  const { hint, arrays } = await stampPlanOf(spaceId, collection, opts.mayHoldArrays);
+  const { hint, mayHoldArrays: arrays } = opts.plan ?? await stampPlanOf(spaceId, collection);
   const filter = { [SCHEMA_FINGERPRINT_FIELD]: { ...STAMP_READ, $in: [...new Set(fps)] }, [stampTypeFieldOf(collection)]: stampedTypeValue(type, arrays) };
   const maxTimeMS = timeLeft();
   const hit = await col<Record<string, unknown>>(spaceCollection(spaceId, collection)).findOne(asFilter<Record<string, unknown>>(filter), {
@@ -202,7 +219,7 @@ export async function typeOnAnyOf(
 export async function fingerprintsOfType(
   spaceId: string, collection: StampedCollection, type: string, timeLeft: TimeLeft, opts: StampReadOptions = {},
 ): Promise<string[]> {
-  const { hint, arrays } = await stampPlanOf(spaceId, collection, opts.mayHoldArrays);
+  const { hint, mayHoldArrays: arrays } = opts.plan ?? await stampPlanOf(spaceId, collection);
   const records = col<Record<string, unknown>>(spaceCollection(spaceId, collection));
   const typeField = stampTypeFieldOf(collection);
   if (!arrays) {
@@ -233,12 +250,13 @@ const typeIndexOf = (collection: StampedCollection): string => `${stampTypeField
 /**
  * R5: the string type names the records of `collection` carry, stamped or not, each once: one key per name (DISTINCT_SCAN) on the type index,
  * through `distinctStringsOf` with no filter. A caller lists a name only once a string-typed record carrying a version confirms it (R3). While
- * the edges' `{ label: 1 }` is still being built (it is the background pass's) the read runs unhinted under the deadline. Throws on any failure.
+ * the edges' `{ label: 1 }` is still being built (it is the background pass's) the read runs unhinted under the deadline. Whether the type index
+ * is listed is read from the pass's plan when it has one ({@link StampPlan}), so it lists nothing again. Throws on any failure.
  */
-export async function recordTypeNamesIn(spaceId: string, collection: StampedCollection, timeLeft: TimeLeft): Promise<string[]> {
+export async function recordTypeNamesIn(spaceId: string, collection: StampedCollection, timeLeft: TimeLeft, opts: StampReadOptions = {}): Promise<string[]> {
   const name = spaceCollection(spaceId, collection);
   const index = typeIndexOf(collection);
-  const listed = (await indexNamesOf(name)).includes(index);
+  const listed = (opts.plan?.indexNames ?? await indexNamesOf(name)).includes(index);
   const maxTimeMS = timeLeft();
   return distinctStringsOf(col<Record<string, unknown>>(name), stampTypeFieldOf(collection), {},
     { ...(listed ? { hint: index } : {}), ...(maxTimeMS !== undefined ? { maxTimeMS } : {}) });

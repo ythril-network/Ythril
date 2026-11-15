@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { of } from 'rxjs';
 import { getTranslocoModule } from '../../testing/transloco-testing';
+import { NO_TYPE_READS } from '../../testing/schema-type-reads';
 import { SpaceSchemaTabComponent } from './space-schema-tab.component';
 import { SpaceSettingsState, emptyTypeSchemaState, type TypeSchemaState } from './space-settings-state.service';
 import { SpacesApi } from '../../core/spaces-api.service';
@@ -44,7 +45,7 @@ function setup(schemaApi: Partial<SchemaApi> = {}) {
         success: (msg: string) => toasts.push({ kind: 'success', msg }),
         info:    (msg: string) => toasts.push({ kind: 'info', msg }),
       } },
-      { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [] }), upsertSchemaLibraryEntry: () => of({ entry: {} }), ...schemaApi } },
+      { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [] }), upsertSchemaLibraryEntry: () => of({ entry: {} }), ...NO_TYPE_READS, ...schemaApi } },
     ],
   });
   const fixture = TestBed.createComponent(SpaceSchemaTabComponent);
@@ -337,7 +338,7 @@ describe('SpaceSchemaTabComponent — validation controls (moved here in U9 pt3)
         SpaceSettingsState,
         { provide: SpacesApi, useValue: {} },
         { provide: ToastService, useValue: { show: () => {}, error: () => {}, success: () => {}, info: () => {} } },
-        { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [] }), upsertSchemaLibraryEntry: () => of({ entry: {} }) } },
+        { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [] }), upsertSchemaLibraryEntry: () => of({ entry: {} }), ...NO_TYPE_READS } },
       ],
     });
     const fixture = TestBed.createComponent(SpaceSchemaTabComponent);
@@ -584,7 +585,7 @@ describe('SpaceSchemaTabComponent - the "This instance" row: Unknown top-level f
         SpaceSettingsState,
         { provide: SpacesApi, useValue: { getSpaceStats: () => of({ spaceId: 'work', facts: 0, entities: 0, edges: 0, chrono: 0, files: 0 }) } },
         { provide: ToastService, useValue: { show: () => {}, error: () => {}, success: () => {}, info: () => {} } },
-        { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [] }), upsertSchemaLibraryEntry: () => of({ entry: {} }) } },
+        { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [] }), upsertSchemaLibraryEntry: () => of({ entry: {} }), ...NO_TYPE_READS } },
         ...(opts.rights ? [{ provide: AuthApi, useValue: { verifyToken: () => of({ id: 't', name: 't', rights: opts.rights }) } }] : []),
       ],
     });
@@ -843,7 +844,7 @@ describe('the type list and pane of bundle-268 (C2)', () => {
     const glyph = $(row(h, 'person')!, '.sch-older');
     expect(glyph, 'no glyph on a type with records on an older definition').not.toBeNull();
     expect(glyph!.getAttribute('title')).toBe('spaces.schema.list.olderMark');
-    expect($(glyph!, '.vh')?.textContent).toContain('spaces.schema.list.olderMarkSr');
+    expect($(glyph!, '.sr-only')?.textContent).toContain('spaces.schema.list.olderMarkSr');
     expect($(glyph!, 'button, a[href], input, [tabindex]'), 'the glyph holds something focusable').toBeNull();
     expect(glyph!.hasAttribute('tabindex')).toBe(false);
     expect(glyph!.textContent).not.toMatch(/\d/);
@@ -951,6 +952,74 @@ describe('the type list and pane of bundle-268 (C2)', () => {
     expect($(pane, 'button[aria-label="spaces.schema.history.button"]')).toBeNull();
     expect($(h.el, '.acts button[title="spaces.schema.history.button"]')).toBeNull();
     expect($$(h.el, '.sch-older')).toEqual([]);
+  });
+
+  // ── pre-ship review, round 2 (C1, C3). Seen red on 4f9f11f0: C3 (a failed read hid History) and the non-advancing case of C1.
+
+  const HISTORY = 'button[aria-label="spaces.schema.history.button"]';
+  const historyButton = (h: SchemaTabHarness) => $(h.el, `.sch-detail ${HISTORY}`);
+
+  /** Answers the kind reads: `entity` from `pages` by the `skip` it asks with (the asked skips are returned), every other kind empty. */
+  async function answerEntityPages(h: SchemaTabHarness, pages: Record<number, unknown>): Promise<number[]> {
+    const skips: number[] = [];
+    for (let round = 0; round < 6; round++) {
+      const pending = kindReads(h);
+      if (!pending.length) break;
+      for (const req of pending) {
+        const kind = kindOf(req)!;
+        if (kind !== 'entity') { req.flush(kindList(kind, []) as never); continue; }
+        const asked = req.request.params.get('skip') ?? new URLSearchParams(req.request.urlWithParams.split('?')[1] ?? '').get('skip');
+        const skip = Number(asked ?? 0);
+        skips.push(skip);
+        req.flush((pages[skip] ?? kindList('entity', [])) as never);
+      }
+      await h.settle();
+    }
+    return skips;
+  }
+
+  const PAGE_1 = kindList('entity', [{ type: 'plain', declared: 'own', older: false }, { type: 'linked', declared: 'own', older: false }], { nextSkip: 2, truncated: true, total: 3 });
+  const PAGE_2 = (extra: Record<string, unknown> = {}) => kindList('entity', [{ type: 'person', declared: 'own', older: true }], { skip: 2, total: 3, ...extra });
+
+  it('a kind\'s list of two pages is read page by page and is one list: the older mark of a type on the second page shows', async () => {
+    const h = await mountIt();
+    h.state.schemaCollTab.set('entity');
+    await h.settle();
+    const skips = await answerEntityPages(h, { 0: PAGE_1, 2: PAGE_2() });
+    expect(skips, 'the second page was not asked at nextSkip').toEqual([0, 2]);
+    expect($(row(h, 'person')!, '.sch-older'), 'the mark of a type on page two').not.toBeNull();
+  });
+
+  it('a nextSkip that does not move forward ends the list\'s read with the pages so far', async () => {
+    const h = await mountIt();
+    h.state.schemaCollTab.set('entity');
+    await h.settle();
+    const skips = await answerEntityPages(h, { 0: PAGE_1, 2: PAGE_2({ nextSkip: 2 }) });
+    expect(skips, 'the read asked again at the same place').toEqual([0, 2]);
+    expect($(row(h, 'person')!, '.sch-older')).not.toBeNull();
+  });
+
+  it('pages that disagree on the current version are not drawn: no mark, and History still works', async () => {
+    const h = await mountIt();
+    await selectSchemaType(h, 'entity', 'person');
+    await answerEntityPages(h, { 0: PAGE_1, 2: PAGE_2({ current: 'aa11bb22cc33dd44' }) });
+    expect($$(h.el, '.sch-older')).toEqual([]);
+    expect(historyButton(h)).not.toBeNull();
+  });
+
+  it('History is drawn after a failed read of the list (no mark), not while it loads, and not when the server does not support it', async () => {
+    const h = await mountIt();
+    await selectSchemaType(h, 'entity', 'plain');
+    expect(historyButton(h), 'drawn while the kind\'s read was still out').toBeNull();
+    await answerKinds(h, { entity: { status: 500, body: { error: 'boom' } } });
+    expect(historyButton(h), 'a failed read hid History').not.toBeNull();
+    expect($$(h.el, '.sch-older')).toEqual([]);
+
+    const old = await mountIt();
+    await selectSchemaType(old, 'entity', 'plain');
+    await answerKinds(old, { entity: { body: { current: 'ff99', versions: [] } } });
+    expect(historyButton(old), 'drawn for a server that cannot answer').toBeNull();
+    expect($(old.el, '.sch-detail'), 'the pane itself went away: the check proves nothing').not.toBeNull();
   });
 
   it('the versions-kept hint is gone from the tab', async () => {

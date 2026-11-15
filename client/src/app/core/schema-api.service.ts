@@ -1,7 +1,9 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, map, retry, throwError, timer } from 'rxjs';
+import { Observable, map, retry, throwError, timeout, timer } from 'rxjs';
 import type { SchemaLibraryEntry, ForeignCatalogEntry, SchemaCatalog } from './api.types';
+import { WAIT_GIVE_UP_MS } from './wait-give-up';
+import { readEveryPage } from './read-every-page';
 import type { TypedKind } from './type-field';
 import { answerErrorField } from './refusal-text';
 
@@ -48,6 +50,18 @@ export interface TypeComparisonAnswer {
 }
 /** A type read: `supported: false` when the server answered without the `kind`/`type` echo, i.e. it is older and ignored the asks. */
 export type TypeRead<T> = { supported: false } | { supported: true; answer: T };
+
+/**
+ * Every page of a paged type read, in order, through `readEveryPage` (the one walk, with its guard: a `nextSkip` that does not move
+ * forward ends it). A page that is "not supported" has no `nextSkip` and so ends the walk; the caller reads the pages and decides.
+ */
+export function everyTypePage<T extends { nextSkip?: number }>(
+  page: (skip: number) => Observable<TypeRead<T>>,
+): Observable<TypeRead<T>[]> {
+  return readEveryPage((skip: number) => page(skip).pipe(
+    map(read => ({ read, nextSkip: read.supported ? read.answer.nextSkip : undefined })),
+  )).pipe(map(pages => pages.map(p => p.read)));
+}
 
 /** Why a type read failed, in the words the screens use (`common.reason.<reason>`); `refused` carries the server's own sentence. */
 export type TypeReadFailure =
@@ -165,12 +179,14 @@ export class SchemaApi {
   }
 
   /**
-   * One type read: the GET, a busy answer asked again three times (1 s, 2 s, 4 s) and nothing else retried, and the answer read by
-   * `read`, which returns null for one without the echo (an older server) so the caller is told "not supported", never handed a
-   * version list as if it were a type answer.
+   * One type read: the GET, given up on after `WAIT_GIVE_UP_MS` (a `TimeoutError` carries no status, so it reads as "no answer"), a
+   * busy answer asked again three times (1 s, 2 s, 4 s) and nothing else retried, and the answer read by `read`, which returns null
+   * for one without the echo (an older server) so the caller is told "not supported", never handed a version list as if it were a
+   * type answer. The limit sits before the retry, so each ask has its own and a busy server cannot spend one limit across the asks.
    */
   private typeRead<T>(spaceId: string, params: Record<string, string>, read: (body: unknown) => T | null): Observable<TypeRead<T>> {
     return this.http.get<unknown>(`/api/spaces/${encodeURIComponent(spaceId)}/schema-versions`, { params: new HttpParams({ fromObject: params }) }).pipe(
+      timeout(WAIT_GIVE_UP_MS),
       retry({
         count: BUSY_RETRY_MS.length,
         delay: (err: unknown, n: number) => codeOf(err) === 'schema_versions_busy' ? timer(BUSY_RETRY_MS[n - 1]!) : throwError(() => err),
