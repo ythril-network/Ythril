@@ -914,7 +914,8 @@ describe('the type list and pane of bundle-268 (C2)', () => {
     expect(history.getAttribute('aria-haspopup')).toBe('dialog');
     expect($(history, 'ph-icon')?.getAttribute('name') ?? $(history, 'ph-icon')?.getAttribute('ng-reflect-name')).toBe('clock-counter-clockwise');
     expect(acts[1]!.getAttribute('aria-label'), 'export has no name').toBe('spaces.schema.exportTypeTitle');
-    expect(acts[2]!.getAttribute('aria-label'), 'save to library has no name').toBe('spaces.schema.saveToLibraryButton');
+    expect(acts[2]!.getAttribute('aria-label'), 'save to library has no name').toBe('spaces.schema.saveToLibraryTitle');
+    expect(acts[2]!.getAttribute('aria-label'), 'save to library: the accessible name is the tooltip').toBe(acts[2]!.getAttribute('title'));
     expect(acts[3]!.getAttribute('aria-label'), 'remove has no name').toBe('common.remove');
   });
 

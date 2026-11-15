@@ -164,7 +164,7 @@ you opened it* and a **Reload the schema** button; reloading drops your unsaved 
     that apply here*, read-only.
 - **From Lib** — import a schema from the Schema Library. The type's pane shows it as linked, and it stays in sync with the library automatically. While linked, the type's properties are shown **read-only** so you can see what it enforces; click **Unlink** to copy the library schema inline (breaking the link) and then customise it for this space.
 - **From File** — import a schema from a previously exported JSON file.
-- **Save to Lib** — save the current type schema to the Schema Library for reuse in other spaces.
+- **Save to library** (the bookmark icon) — save the current type schema to the Schema Library for reuse in other spaces.
 
 The toolbar at the top of the tab has **four** whole-space actions. **Export JSON** / **Import JSON** download or load the entire space's type schemas as one file. **Import library** pulls type definitions in from the instance's Schema Library — the reverse of the button beside it. **Export to library** copies the *whole* space schema into the Schema Library in one step — one reusable entry per type, grouped under a name you choose (defaulting to the space's), so you can later apply the whole set to another space. Types already linked to the library (`From Lib`) are skipped. Save any pending edits first — it exports the last saved version.
 

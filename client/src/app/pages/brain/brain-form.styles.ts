@@ -5,6 +5,7 @@
  * const keeps them from drifting. `BRAIN_DRAWER_STYLES` is drawer-only (the shell no longer renders
  * the drawer, so it does not import it).
  */
+import { STACK } from '../../shared/stacking';
 
 /** Entity-chip + inline reference-picker styling, used by every form, the ref-field components, and
  *  the drawer. (The old click-to-open flyout was retired once file-meta moved to the inline pickers.) */
@@ -47,7 +48,7 @@ export const BRAIN_CHIP_STYLES = `
 export const BRAIN_DRAWER_STYLES = `
     .drawer-overlay {
       position: fixed; inset: 0; background: var(--bg-scrim);
-      z-index: 200; display: flex; justify-content: flex-end;
+      z-index: ${STACK.drawer}; display: flex; justify-content: flex-end;
     }
     .drawer {
       width: min(480px, 100vw); background: var(--bg-primary); height: 100%;

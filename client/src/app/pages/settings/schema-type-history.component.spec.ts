@@ -25,6 +25,7 @@ import { provideRouter } from '@angular/router';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { DateFormatService } from '../../core/date-format.service';
+import { stripComments } from '../../testing/strip-comments';
 import { SchemaTypeHistoryComponent } from './schema-type-history.component';
 
 // ── fixtures ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -50,6 +51,13 @@ const EN = {
   'spaces.schema.history.oneDefinition': 'One definition so far, {{since}}. Nothing has changed yet.',
   'spaces.schema.history.failed': 'Could not read the history: {{reason}}',
   'spaces.schema.history.origin.layer': 'Network layer: {{name}}',
+  'spaces.schema.history.wholeDefinition': 'The whole definition',
+  'spaces.schema.history.facet.required': 'required',
+  'spaces.schema.history.facet.pattern': 'pattern {{value}}',
+  'spaces.schema.history.facet.not': 'not {{facet}}',
+  'propertiesEditor.notDeclared': 'not declared',
+  'common.yes': 'Yes',
+  'common.no': 'No',
 };
 
 const ORIGIN_EDITED = { edited: true, networks: [], fetched: false };
@@ -72,10 +80,10 @@ const SEVERAL = page([
 
 interface Open { fixture: ComponentFixture<SchemaTypeHistoryComponent>; http: HttpTestingController; el: HTMLElement; closed: number[] }
 
-async function open(inputs: { kind?: string; type?: string; chosen?: string } = {}): Promise<Open> {
+async function open(inputs: { kind?: string; type?: string; chosen?: string; title?: string } = {}): Promise<Open> {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
-    imports: [SchemaTypeHistoryComponent, getTranslocoModule({ translation: { en: EN } })],
+    imports: [SchemaTypeHistoryComponent, getTranslocoModule({ translation: { en: inputs.title ? { ...EN, 'spaces.schema.history.title': inputs.title } : EN } })],
     providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([]), { provide: DateFormatService, useValue: dates }],
   });
   const http = TestBed.inject(HttpTestingController);
@@ -336,5 +344,158 @@ describe('the history dialog: loading and failing quietly (C1, r4 §7.6)', () =>
     await vi.advanceTimersByTimeAsync(10);
     await settle(h);
     expect($(h.el, '[data-testid="history-failed"]')!.textContent).toContain('common.reason.busy');
+  });
+});
+
+// ── what changed, and how the dialog looks (Q-744 verify fixes F2, F3, F5) ───────────────────────────────────────────
+
+/** The stylesheet text the component carries (its own rules and the shared dialog shell), comments removed. */
+function componentCss(): string {
+  const styles = (SchemaTypeHistoryComponent as unknown as { ɵcmp: { styles: string[] } }).ɵcmp.styles;
+  expect(styles.length, 'the component carries no styles').toBeGreaterThan(0);
+  // The compiler may already have scoped the selectors (`.cmp[_ngcontent-%COMP%]`); the rules are read as written.
+  return stripComments(styles.join('\n')).replace(/\[_ng(?:content|host)-[^\]]*\]/g, '');
+}
+
+interface CssRule { media: string; selectors: string[]; body: string }
+
+/** The rules of a stylesheet, each with the `@media` it sits in ('' for none); one level of nesting, which is all the dialog uses. */
+function cssRules(css: string): CssRule[] {
+  const out: CssRule[] = [];
+  const walk = (text: string, media: string): void => {
+    let i = 0;
+    while (i < text.length) {
+      const open = text.indexOf('{', i);
+      if (open < 0) break;
+      const head = text.slice(i, open).trim();
+      let depth = 1, j = open + 1;
+      while (j < text.length && depth > 0) { if (text[j] === '{') depth++; else if (text[j] === '}') depth--; j++; }
+      const inner = text.slice(open + 1, j - 1);
+      if (head.startsWith('@media')) walk(inner, head.replace(/\s+/g, ' '));
+      else out.push({ media, selectors: head.split(',').map(s => s.trim().replace(/\s+/g, ' ')), body: inner });
+      i = j;
+    }
+  };
+  walk(css, '');
+  return out;
+}
+
+/** The declarations of every rule naming exactly `selector`, inside `media` ('' for outside any). */
+function decls(selector: string, media = ''): string {
+  const css = componentCss();
+  const hit = cssRules(css).filter(r => r.media === media && r.selectors.includes(selector));
+  if (!hit.length) throw new Error(`no rule for "${selector}" in "${media}"; the stylesheet reads: ${css.replace(/\s+/g, ' ').slice(css.indexOf('.hist-head'), css.indexOf('.hist-head') + 700)}`);
+  return hit.map(r => r.body).join(' ').replace(/\s+/g, ' ');
+}
+
+const PHONE = '@media (max-width: 760px)';
+
+const COMPARE = (changes: unknown[], unread: string[] = []) => ({ kind: 'entity', type: 'person', types: [{ kind: 'entity', type: 'person', changes }], unread });
+
+/** Opens the dialog on the older definition and answers its comparison with `changes`. */
+async function openCompared(changes: unknown[], inputs: Parameters<typeof open>[0] = {}): Promise<Open> {
+  const h = await open({ chosen: OLDER, ...inputs });
+  await answerHistory(h, SEVERAL);
+  const ask = versionReads(h).find(r => r.p['fp'] === OLDER);
+  expect(ask, 'no comparison was asked').toBeTruthy();
+  ask!.req.flush(COMPARE(changes) as never);
+  await settle(h);
+  return h;
+}
+
+const cells = (h: Open, cls: string) => $$(h.el, `.cmp ${cls}`).map(c => c.textContent!.trim());
+const valuesOf = (h: Open, cls: string) => $$(h.el, `.cmp ${cls} .val`).map(c => c.textContent!.trim());
+
+describe('the history dialog: What changed in words (F3)', () => {
+  it('a place shows as the property, a value as words, an absent side as "not declared"', async () => {
+    const h = await openCompared([
+      { place: 'propertySchemas.size', to: { type: 'number' }, class: 'structural' },
+      { place: 'propertySchemas.email.required', from: false, to: true, class: 'structural' },
+      { place: 'propertySchemas.orcid', to: { type: 'string', pattern: '0000-0000-0000-000X' }, class: 'structural' },
+      { place: 'propertySchemas.email.description', from: 'Work address', to: 'Work address, used for sign-in', class: 'wording' },
+      { place: 'retention.days', from: 30, to: ['a', 'b'], class: 'lifecycle' },
+      { place: '', from: { a: 1 }, to: { b: 2 }, class: 'structural' },
+    ]);
+    expect(cells(h, '.pl')).toEqual(['size', 'email: required', 'orcid', 'email: description', 'retention.days', 'The whole definition']);
+    expect(valuesOf(h, '.was')).toEqual(['not declared', 'no', 'not declared', 'Work address', '30', '{"a":1}']);
+    expect(valuesOf(h, '.now')).toEqual(['number', 'yes', 'string, pattern 0000-0000-0000-000X', 'Work address, used for sign-in', 'a, b', '{"b":2}']);
+    expect(h.el.textContent).not.toContain('propertySchemas');
+    expect(h.el.textContent).not.toContain('{"type"');
+  });
+
+  it('a value is bound as text: markup in a member\'s schema stays text', async () => {
+    const h = await openCompared([{ place: 'propertySchemas.note', from: '<img src=x onerror=alert(1)>', to: { type: 'string', pattern: '<b>x</b>' }, class: 'structural' }]);
+    expect($$(h.el, '.cmp img, .cmp b').length).toBe(0);
+    expect(valuesOf(h, '.was')).toEqual(['<img src=x onerror=alert(1)>']);
+    expect(valuesOf(h, '.now')).toEqual(['string, pattern <b>x</b>']);
+  });
+});
+
+describe('the history dialog: the compare layout (F2)', () => {
+  it('names each side with the column words in the cell, shown only where the head row is hidden', async () => {
+    const h = await openCompared([{ place: 'propertySchemas.size', to: { type: 'number' }, class: 'structural' }]);
+    expect($$(h.el, '.cmp .was .lbl').map(e => e.textContent!.trim())).toEqual(['spaces.schema.history.thisDefinition:']);
+    expect($$(h.el, '.cmp .now .lbl').map(e => e.textContent!.trim())).toEqual(['spaces.schema.history.currentColumn:']);
+    expect(decls('.cmp .lbl')).toContain('display: none');
+    expect(decls('.cmp .lbl', PHONE)).toContain('display: inline');
+    expect(decls('.cmp .h', PHONE)).toContain('display: none');
+  });
+
+  it('at phone width each change is one block: one column, the place, then the two values', () => {
+    // jsdom lays nothing out, so the rule that stacks the grid is read from the stylesheet.
+    expect(decls('.cmp', PHONE)).toContain('grid-template-columns: minmax(0, 1fr)');
+    expect(decls('.hcols', PHONE)).toContain('grid-template-columns: minmax(0, 1fr)');
+    for (const cls of ['.cmp .pl', '.cmp .was', '.cmp .now']) expect(decls(cls, PHONE), cls).toContain('grid-column: 1');
+  });
+
+  it('no grid track can outgrow the dialog: every column is minmax(0, …), and the long strings wrap', () => {
+    const tracks = [...componentCss().matchAll(/grid-template-columns:\s*([^;}]+)/g)].map(m => m[1]!);
+    expect(tracks.length).toBeGreaterThan(2);
+    // minmax(0, …) tracks, or a fixed one (the chevron's 12px): a bare 1fr or auto track grows to its widest word.
+    for (const t of tracks) expect(t.replace(/minmax\(0,\s*[^)]+\)|\b\d+px\b/g, '').trim(), `a track of "${t}" is not minmax(0, …)`).toBe('');
+    for (const sel of ['.hist-title', '.cmp .pl', '.cmp .val', '.di .l2']) expect(decls(sel), sel).toContain('overflow-wrap: anywhere');
+    expect(decls('.hist-title')).toContain('min-width: 0');
+  });
+});
+
+describe('the history dialog: the look the mockup draws (F5)', () => {
+  it('the type in the title is monospace in the accent colour, the title still reads whole', async () => {
+    const h = await open({ type: 'person' });
+    await answerHistory(h, SEVERAL);
+    const title = $(h.el, '.hist-title')!;
+    expect($(title, '.tn')!.textContent).toBe('person');
+    expect(title.textContent!.trim()).toBe('History of person');
+    expect($(h.el, '[role="dialog"]')!.getAttribute('aria-label')).toBe('History of person');
+    expect(decls('.hist-title .tn')).toContain('font-family: var(--font-mono');
+    expect(decls('.hist-title .tn')).toContain('color: var(--accent)');
+  });
+
+  it('the type goes where the language puts it: before, between and after the words', async () => {
+    for (const [sentence, text] of [['Verlauf von {{type}}', 'Verlauf von person'], ['{{type}}: Verlauf', 'person: Verlauf'], ['Historia typu {{type}} w tej przestrzeni', 'Historia typu person w tej przestrzeni']] as const) {
+      const h = await open({ type: 'person', title: sentence });
+      await answerHistory(h, SEVERAL);
+      const title = $(h.el, '.hist-title')!;
+      expect(title.textContent!.trim(), sentence).toBe(text);
+      expect($(title, '.tn')!.textContent, sentence).toBe('person');
+      expect($(h.el, '[role="dialog"]')!.getAttribute('aria-label'), sentence).toBe(text);
+    }
+  });
+
+  it('Open records is a muted underlined link at the right end of its row, not accent-coloured', () => {
+    const quiet = decls('.quiet');
+    expect(quiet).toContain('color: var(--text-secondary)');
+    expect(quiet).toContain('text-decoration: underline');
+    expect(quiet).not.toContain('--accent');
+    expect(decls('.sel-head')).toContain('justify-content: space-between');
+  });
+
+  it('the selected definition has a 2px accent bar at its left and an accent chevron', () => {
+    expect(decls('.di[aria-selected="true"]')).toContain('box-shadow: inset 2px 0 0 var(--accent)');
+    expect(decls('.di[aria-selected="true"] .chev')).toContain('color: var(--accent)');
+  });
+
+  it('the current column is bold and the place is monospace', () => {
+    expect(decls('.cmp .now')).toMatch(/font-weight: (600|700)/);
+    expect(decls('.cmp .pl')).toContain('font-family: var(--font-mono');
   });
 });

@@ -6,6 +6,8 @@ import { EMPTY, expand, reduce } from 'rxjs';
 import { SchemaApi, typeHistoryFailure, type TypeChange, type TypeDefinition, type TypeHistoryAnswer, type TypeRead } from '../../core/schema-api.service';
 import { DateFormatService } from '../../core/date-format.service';
 import { definitionSpan, typeReadReason, type Words } from '../../core/type-definition-words';
+import { changePlaceWords, changeValueWords, type Say } from '../../core/type-change-words';
+import { STACK } from '../../shared/stacking';
 import { FORK_KIND_TAB } from '../../core/forks.types';
 import type { TypedKind } from '../../core/type-field';
 import { ModalDirective } from '../../shared/modal.directive';
@@ -30,6 +32,9 @@ type Comparison = { phase: 'loading' } | { phase: 'none' } | { phase: 'ready'; c
 
 let headSeq = 0;
 
+/** Stands for the type in the title's sentence while it is cut in two; no word of any language holds it. */
+const TYPE_MARK = '';
+
 /**
  * The history of one type (Q-744, design r4 §7.6, round 5 layout M): its definitions with their spans and where each is now, what
  * changed in the chosen one against the current one, and the Open links into the Brain. Counts nothing (r5 rule 1).
@@ -46,35 +51,60 @@ let headSeq = 0;
   imports: [TranslocoPipe, ModalDirective, PhIconComponent, HelpToggleComponent],
   styles: [DIALOG_STYLES, `
     :host { display: block; }
-    .dialog { --dialog-max-width: 760px; }
+    /* Above the drawer and the popup that host it (stacking.ts), or their layer covers Close and the Open links. */
+    .dialog-backdrop { z-index: ${STACK.hostedDialog}; }
+    .dialog { --dialog-max-width: 860px; padding: 20px 24px 24px; }
     .hist-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 12px; }
-    .hist-title { margin: 0; font-size: 15px; font-weight: 700; }
+    .hist-title { margin: 0; min-width: 0; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+    .hist-title .tn { font-family: var(--font-mono, monospace); color: var(--accent); }
     .hist-head .close { margin-left: auto; }
     .one { margin: 0; font-size: 13px; color: var(--text-secondary); }
-    .hcols { display: grid; grid-template-columns: minmax(180px, 2fr) 3fr; gap: 14px; }
-    .dl { display: flex; flex-direction: column; max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-    .di { display: grid; grid-template-columns: 1fr auto; text-align: left; gap: 2px 6px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--border-muted);
-      background: transparent; color: var(--text-primary); cursor: pointer; font: inherit; font-size: 12.5px; }
-    .di[aria-selected="true"] { background: var(--accent-dim); }
-    .di .l2 { grid-column: 1; font-size: 11.5px; color: var(--text-muted); }
+    .hcols { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 20px; align-items: start; }
+    .selbox { min-width: 0; }
+    .dl { display: flex; flex-direction: column; min-width: 0; max-height: 372px; overflow-y: auto; border: 1px solid var(--border-muted); border-radius: var(--radius-md); }
+    .di { display: grid; grid-template-columns: minmax(0, 1fr) 12px; text-align: left; gap: 2px 8px; padding: 8px 10px 8px 12px; border: 0; border-bottom: 1px solid var(--border-muted);
+      background: transparent; color: inherit; cursor: pointer; font: inherit; flex: none; white-space: normal; }
+    .di:last-child { border-bottom: 0; }
+    .di:hover { background: var(--bg-elevated); }
+    .di[aria-selected="true"] { background: var(--bg-elevated); box-shadow: inset 2px 0 0 var(--accent); }
+    .di .l1 { grid-column: 1; font-size: 12.5px; color: var(--text-primary); overflow-wrap: anywhere; }
+    .di .l2 { grid-column: 1; font-size: 11.5px; color: var(--text-muted); overflow-wrap: anywhere; }
     .di .chev { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--text-muted); }
-    .sel-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; font-size: 13px; }
-    .quiet { font-size: 12px; color: var(--accent); }
-    .cmp { display: grid; grid-template-columns: auto 1fr 1fr; gap: 4px 10px; font-size: 12px; }
-    .cmp .h { font-weight: 650; color: var(--text-secondary); }
-    .cmp .v { font-family: var(--font-mono, monospace); overflow-wrap: anywhere; }
+    .di[aria-selected="true"] .chev { color: var(--accent); }
+    .sel-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; margin: 2px 0 12px; font-size: 13px; }
+    .sel-head b { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+    .quiet { font-size: 12.5px; color: var(--text-secondary); text-decoration: underline; text-decoration-color: var(--border); }
+    .quiet:hover { color: var(--text-primary); }
+    .cmp { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 4px 16px; align-items: baseline; font-size: 12.5px; }
+    .cmp .h { font-size: 11px; color: var(--text-muted); }
+    .cmp .pl { font-family: var(--font-mono, monospace); font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+    .cmp .was { color: var(--text-muted); overflow-wrap: anywhere; }
+    .cmp .now { color: var(--text-primary); font-weight: 600; overflow-wrap: anywhere; }
+    .cmp .val { overflow-wrap: anywhere; }
+    .cmp .lbl { display: none; }
     .muted { font-size: 12px; color: var(--text-muted); margin: 8px 0 0; }
     .warn { font-size: 12px; color: var(--warning, var(--text-secondary)); margin: 0 0 8px; }
-    .foot { display: flex; justify-content: flex-end; margin-top: 14px; }
+    .foot { display: flex; justify-content: flex-end; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-muted); }
     .failed .err { margin: 0 0 10px; font-size: 13px; color: var(--error); }
-    @media (max-width: 640px) { .hcols { grid-template-columns: 1fr; } }
+    /* Phone: nothing scrolls or clips sideways. The list and the comparison stack, and each change is one block: the place, then
+       "This definition: {value}", then "Current: {value}" (the head row is hidden, so each value names its side). */
+    @media (max-width: 760px) {
+      .dialog { padding: 16px; }
+      .hcols { grid-template-columns: minmax(0, 1fr); }
+      .dl { max-height: 220px; }
+      .cmp { grid-template-columns: minmax(0, 1fr); }
+      .cmp .h { display: none; }
+      .cmp .lbl { display: inline; }
+      .cmp .pl { grid-column: 1; margin-top: 6px; }
+      .cmp .was, .cmp .now { grid-column: 1; }
+    }
   `],
   template: `
 <div class="dialog-backdrop">
   <div class="dialog" [appModal]="'spaces.schema.history.title' | transloco: { type: type() }" [attr.aria-labelledby]="headId"
        appModalCloseOnBackdrop (dismiss)="close()" (click)="$event.stopPropagation()">
     <div class="hist-head">
-      <h3 class="hist-title" [id]="headId">{{ 'spaces.schema.history.title' | transloco: { type: type() } }}</h3>
+      <h3 class="hist-title" [id]="headId">@let words = titleParts('spaces.schema.history.title' | transloco: { type: TYPE_MARK });{{ words.pre }}<span class="tn">{{ type() }}</span>{{ words.post }}</h3>
       <app-help-toggle label="spaces.schema.history.helpAria" testId="history-help-toggle">
         <p>{{ 'spaces.schema.history.help.keeps' | transloco }}</p>
         @if (undeclared()) { <p>{{ 'spaces.schema.history.help.undeclared' | transloco }}</p> }
@@ -132,7 +162,9 @@ let headSeq = 0;
                         <span class="h">{{ 'spaces.schema.history.thisDefinition' | transloco }}</span>
                         <span class="h">{{ 'spaces.schema.history.currentColumn' | transloco }}</span>
                         @for (ch of c.changes; track ch.place) {
-                          <span>{{ ch.place }}</span><span class="v">{{ valueText(ch.from) }}</span><span class="v">{{ valueText(ch.to) }}</span>
+                          <span class="pl">{{ placeText(ch.place) }}</span>
+                          <span class="was"><span class="lbl">{{ 'spaces.schema.history.thisDefinition' | transloco }}: </span><span class="val">{{ valueText(ch.from, ch.place) }}</span></span>
+                          <span class="now"><span class="lbl">{{ 'spaces.schema.history.currentColumn' | transloco }}: </span><span class="val">{{ valueText(ch.to, ch.place) }}</span></span>
                         }
                       </div>
                     }
@@ -290,8 +322,23 @@ export class SchemaTypeHistoryComponent implements OnInit {
     return out;
   }
 
-  /** A schema value as text: a string as it is, anything else as JSON, an absent side as a dash. Text binding only, never markup. */
-  protected valueText(v: unknown): string {
-    return v === undefined ? '—' : typeof v === 'string' ? v : JSON.stringify(v);
+  /** The title's sentence cut at the type's place, so the type can be set in its own face wherever the language puts it. */
+  protected titleParts(sentence: string): { pre: string; post: string } {
+    const [pre = '', ...rest] = sentence.split(TYPE_MARK);
+    return { pre, post: rest.join(TYPE_MARK) };
+  }
+
+  protected readonly TYPE_MARK = TYPE_MARK;
+
+  private readonly say: Say = (key, params) => this.transloco.translate(key, params);
+
+  /** A change's place as the property it is about (`type-change-words.ts`). Text binding only, never markup. */
+  protected placeText(place: string): string {
+    return changePlaceWords(place, this.say);
+  }
+
+  /** One side of a change in words (`type-change-words.ts`). Text binding only, never markup. */
+  protected valueText(v: unknown, place: string): string {
+    return changeValueWords(v, place, this.say);
   }
 }
