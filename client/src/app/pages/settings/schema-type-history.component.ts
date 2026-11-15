@@ -33,17 +33,12 @@ type Comparison = { phase: 'loading' } | { phase: 'none' } | { phase: 'ready'; c
 let headSeq = 0;
 
 /**
- * The pages of a type's history as one answer: the definitions of every page in order, `cut` when any page says so. One page the server
- * does not support makes the whole read not supported, so a part is never shown as the history.
+ * The pages of a type's history as one answer: the definitions of every page in order, `cut` when any page says so. Whether the pages
+ * make one read at all (all supported, one current version) is `everyTypePage`'s to say.
  */
-function mergedHistory(pages: readonly TypeRead<TypeHistoryAnswer>[]): TypeRead<TypeHistoryAnswer> {
-  const answers: TypeHistoryAnswer[] = [];
-  for (const p of pages) {
-    if (!p.supported) return { supported: false };
-    answers.push(p.answer);
-  }
-  const [first, ...later] = answers;
-  if (!first) return { supported: false };
+function mergedHistory(read: TypeRead<[TypeHistoryAnswer, ...TypeHistoryAnswer[]]>): TypeRead<TypeHistoryAnswer> {
+  if (!read.supported) return read;
+  const [first, ...later] = read.answer;
   return {
     supported: true,
     answer: later.reduce<TypeHistoryAnswer>(
@@ -252,7 +247,7 @@ export class SchemaTypeHistoryComponent implements OnInit {
   protected load(): void {
     this.view.set({ phase: 'loading' });
     everyTypePage((skip: number) => this.api.typeHistory(this.spaceId(), this.kind(), this.type(), skip)).pipe(
-      map(pages => mergedHistory(pages)),
+      map(read => mergedHistory(read)),
       takeUntilDestroyed(this.destroyRef),
     ).subscribe({
       next: r => {

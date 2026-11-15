@@ -53,14 +53,27 @@ export type TypeRead<T> = { supported: false } | { supported: true; answer: T };
 
 /**
  * Every page of a paged type read, in order, through `readEveryPage` (the one walk, with its guard: a `nextSkip` that does not move
- * forward ends it). A page that is "not supported" has no `nextSkip` and so ends the walk; the caller reads the pages and decides.
+ * forward ends it), as one read of all their answers. The two rules a caller would otherwise write again, and one of them forget, are
+ * in here: one page the server does not support makes the whole read not supported (it has no `nextSkip`, so it also ends the walk), and
+ * pages that disagree on the current version fail the read, because the schema changed between them and their parts do not belong to
+ * one answer. So a part is never handed on as the whole. A read that answers always has a first page.
  */
-export function everyTypePage<T extends { nextSkip?: number }>(
+export function everyTypePage<T extends { nextSkip?: number; current: string }>(
   page: (skip: number) => Observable<TypeRead<T>>,
-): Observable<TypeRead<T>[]> {
+): Observable<TypeRead<[T, ...T[]]>> {
   return readEveryPage((skip: number) => page(skip).pipe(
     map(read => ({ read, nextSkip: read.supported ? read.answer.nextSkip : undefined })),
-  )).pipe(map(pages => pages.map(p => p.read)));
+  )).pipe(map((pages): TypeRead<[T, ...T[]]> => {
+    const answers: T[] = [];
+    for (const { read } of pages) {
+      if (!read.supported) return { supported: false };
+      answers.push(read.answer);
+    }
+    const [first, ...later] = answers;
+    if (!first) throw new Error('a paged type read answered no page');
+    if (later.some(a => a.current !== first.current)) throw new Error('the pages of a type read disagree on the current schema version');
+    return { supported: true, answer: [first, ...later] };
+  }));
 }
 
 /** Why a type read failed, in the words the screens use (`common.reason.<reason>`); `refused` carries the server's own sentence. */
