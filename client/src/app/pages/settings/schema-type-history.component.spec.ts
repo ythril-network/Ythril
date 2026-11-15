@@ -384,7 +384,7 @@ function cssRules(css: string): CssRule[] {
 function decls(selector: string, media = ''): string {
   const css = componentCss();
   const hit = cssRules(css).filter(r => r.media === media && r.selectors.includes(selector));
-  if (!hit.length) throw new Error(`no rule for "${selector}" in "${media}"; the stylesheet reads: ${css.replace(/\s+/g, ' ').slice(css.indexOf('.hist-head'), css.indexOf('.hist-head') + 700)}`);
+  if (!hit.length) throw new Error(`no rule for "${selector}" in "${media}"; the stylesheet reads: ${css.replace(/\s+/g, ' ')}`);
   return hit.map(r => r.body).join(' ').replace(/\s+/g, ' ');
 }
 
