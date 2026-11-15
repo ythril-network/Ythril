@@ -98,6 +98,22 @@ export function jobEntries(doc) {
 
 export const stepsOf = (job) => (Array.isArray(job.steps) ? job.steps : []);
 
+/** The npm script that runs the standalone suite's database third: the mark of CI's database shard job. */
+export const DB_SHARD_SCRIPT = 'test:standalone:db';
+
+/**
+ * `{ id, name, job }` of the ONE job whose steps run `script`. Throws when none or several do, so a rule about "the job
+ * that runs it" never passes over no subject and never picks one of two silently.
+ */
+export function jobRunning(doc, script) {
+  const found = jobEntries(doc).filter(({ job }) => stepsOf(job).some((s) => shellOf(s).includes(script)));
+  if (found.length !== 1) throw new Error(`${found.length} job(s) run ${script} (${found.map((j) => j.id).join(', ')}) — exactly one is the subject of this rule`);
+  return found[0];
+}
+
+/** The value an env var has where a step runs: the step's own, else its job's. One reading, so no rule looks at the step and forgets the job. */
+export const stepEnv = (job, step, name) => step?.env?.[name] ?? job.env?.[name];
+
 /**
  * `[{ id, name, job }]` of the jobs whose display name is the one the ruleset requires (`MERGE_GATE_NAME`). The one reading
  * of "which job is the merge gate": every caller answers its own question about the result (none, exactly one, more than

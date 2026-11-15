@@ -15,6 +15,9 @@
  *   grep up` is not a start, `docker-compose up` is.
  * - **A compose value has one resolver and one size parser**: a `${VAR:-default}` anywhere in a value means its default,
  *   a size in MiB means one number whatever the gate that asks, and a size nobody can read is a throw.
+ * - **"The job that runs this script" is one job or a throw, and an env value is the step's own, else its job's.** The
+ *   rules over the database shard job each wrote both (the shard matrix, and the database's memory ceiling after Full run
+ *   43772201689); a copy that returned the first of two jobs, or read the step and forgot the job, would pass over nothing.
  *
  * Run: node --test testing/standalone/workflow-and-compose-readers-follow-what-they-hide.test.js
  */
@@ -23,7 +26,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { shellOf, parseWorkflow, CI_WORKFLOW } from '../_shared/ci-workflow.mjs';
+import { shellOf, parseWorkflow, CI_WORKFLOW, loadCi, jobRunning, stepEnv, DB_SHARD_SCRIPT } from '../_shared/ci-workflow.mjs';
 import { CI_WORKFLOW as CI_WORKFLOW_PATH } from '../_shared/ci-workflow-path.mjs';
 import { startSets, stackJobs, startsComposeStack, upCommands } from '../_shared/compose-start-sets.mjs';
 import { loadCompose, resolveDefaults, resolvedValue, isOverridable, memoryMiB, environmentOf } from '../_shared/compose-file.mjs';
@@ -127,6 +130,34 @@ describe('"does this run docker compose up" has one answer', () => {
 
   it('what a start names is read from the same match', () => {
     assert.deepEqual(upCommands('docker compose --profile=extra up -d --wait-timeout 300 app'), [{ profiles: ['extra'], services: ['app'] }]);
+  });
+});
+
+describe('"the job that runs this script" and "the value where this step runs" have one answer', () => {
+  const doc = (jobs) => parseWorkflow(JSON.stringify({ on: { push: {} }, jobs: Object.fromEntries(Object.entries(jobs).map(([id, j]) => [id, { 'runs-on': 'x', ...j }])) }), 'fixture');
+
+  it('the one job whose steps run the script is returned with its id', () => {
+    const found = jobRunning(doc({ a: { steps: [{ run: 'npm run lint' }] }, b: { steps: [{ run: 'npm ci' }, { run: 'npm run test:x' }] } }), 'test:x');
+    assert.equal(found.id, 'b');
+    assert.equal(found.job.steps.length, 2);
+  });
+
+  it('no job, or two, is a throw that counts and names them', () => {
+    assert.throws(() => jobRunning(doc({ a: { steps: [{ run: 'npm run lint' }] } }), 'test:x'), /^Error: 0 job\(s\) run test:x \(\) — exactly one/);
+    assert.throws(() => jobRunning(doc({ a: { steps: [{ run: 'npm run test:x' }] }, b: { steps: [{ run: 'npm run test:x' }] } }), 'test:x'), /^Error: 2 job\(s\) run test:x \(a, b\) — exactly one/);
+  });
+
+  it('the real ci.yml has exactly one database shard job', () => {
+    assert.ok(jobRunning(loadCi(), DB_SHARD_SCRIPT).id);
+  });
+
+  it('a step\'s own value wins, the job\'s is the fallback, neither is undefined', () => {
+    const job = { env: { A: 'job', B: 'job' } };
+    assert.equal(stepEnv(job, { env: { A: 'step' } }, 'A'), 'step');
+    assert.equal(stepEnv(job, { env: { A: 'step' } }, 'B'), 'job');
+    assert.equal(stepEnv(job, {}, 'B'), 'job');
+    assert.equal(stepEnv(job, undefined, 'B'), 'job', 'a step that was not found still reads the job');
+    assert.equal(stepEnv({}, { env: {} }, 'A'), undefined);
   });
 });
 

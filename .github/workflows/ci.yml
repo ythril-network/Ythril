@@ -316,9 +316,17 @@ jobs:
       - name: Start the database
         # Only ythril-mongo-a: it is the one the harness connects to (127.0.0.1:27117). The harness tunes it itself
         # on every open, so no setup script runs here.
+        #
+        # Twice the compose file's ceiling: that default is sized so four databases and four instances fit one machine,
+        # and this job runs ONE database on a runner of its own. At the default the kernel killed mongod in the
+        # container's memory group in shard 2 of Full run 43772201689 (2026-11-15; mongod held 1.96 GB beside the search
+        # process's heap), and every later file of the shard was refused. Held by
+        # `ci-gives-the-db-shard-database-the-runner-s-room`.
         run: |
           docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait --wait-timeout 300 \
             --no-build --pull never ythril-mongo-a
+        env:
+          YTHRIL_TEST_MONGO_A_MEM: 6144m
 
       - name: Standalone tests that open the database
         # This job's shard of the plan, against the Mongo started above: the runner starts no container of its own, and
@@ -327,6 +335,22 @@ jobs:
         env:
           YTHRIL_TEST_DB_SHARDS: 4
           YTHRIL_TEST_DB_SHARD_INDEX: ${{ matrix.shard }}
+
+      - name: Report the database's peak memory
+        # On every run, green ones too: a shard that nears its ceiling is otherwise green and silent until the kernel
+        # kills the database. A container that is gone has no figure left to read; the failure dump below says why it died.
+        if: always()
+        run: |
+          peak=$(docker exec ythril-mongo-a cat /sys/fs/cgroup/memory.peak 2>/dev/null || true)
+          max=$(docker exec ythril-mongo-a cat /sys/fs/cgroup/memory.max 2>/dev/null || true)
+          case "$peak:$max" in
+            *[!0-9:]*|:*|*:) echo "ythril-mongo-a is not running or reports no peak memory (peak='$peak', ceiling='$max')"; exit 0 ;;
+          esac
+          pct=$(( peak * 100 / max ))
+          echo "ythril-mongo-a peak memory: $(( peak / 1048576 )) MiB of $(( max / 1048576 )) MiB (${pct}%)"
+          if [ "$pct" -ge 80 ]; then
+            echo "::warning::The shard's database reached ${pct}% of its memory ceiling: raise YTHRIL_TEST_MONGO_A_MEM in this job, or split the shard, before the kernel kills it."
+          fi
 
       - name: Upload test results
         if: always()
