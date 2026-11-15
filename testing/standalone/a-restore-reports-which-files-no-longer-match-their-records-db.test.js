@@ -49,6 +49,7 @@ import { dirname, join } from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { build } from './_push-door.mjs';
+import { bare } from './_bare.mjs';
 import { clearActEntries, deferred, resetRunnerForTest } from './_space-act-harness.mjs';
 import {
   restoreModules, takeBackup, restoreThenReport, spaceRowsOfReport, classOf, reportedPaths, FILE_CLASSES, REPORT_PATHS_PER_CLASS,
@@ -79,8 +80,7 @@ function bytes(space, rel, content) {
 async function row(space, id, content, extra = {}) {
   const sizes = content === undefined ? {} : { sizeBytes: Buffer.byteLength(content), sha256: sha(content) };
   // An undefined key is a key the row does not have (the driver would store it as null, which is a value).
-  const doc = build.filemeta(space, id, ++seq, { embeddingStatus: 'done', ...sizes, ...extra });
-  for (const k of Object.keys(doc)) if (doc[k] === undefined) delete doc[k];
+  const doc = bare(build.filemeta(space, id, ++seq, { embeddingStatus: 'done', ...sizes, ...extra }));
   await door.coll(space, 'files').insertOne(doc);
 }
 

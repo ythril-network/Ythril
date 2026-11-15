@@ -51,7 +51,8 @@ const MAX_OPENING_CHARS = 300;
 /**
  * THE CEILINGS ARE A RATCHET: lower them, never raise them. Both are the densified file's own figure plus a margin
  * of about 10 per cent, so a section that grows past its neighbours fails here before it becomes the next thousand
- * lines. A change that genuinely needs more room tightens older entries to make it — which is the point.
+ * lines. A change that genuinely needs more room tightens the entries under `[Unreleased]` to make it — which is the
+ * point; a released section stays as published (the hints are SECTION_OVER_HINT and FILE_OVER_HINT below).
  *
  * SECTION_MAX_LINES: the longest section of the densified file (`[Unreleased]`, whose upgrade table is most of it)
  * plus the margin. Every released section is far under it, so for a patch release it is a loose bound; the entry cap
@@ -173,6 +174,32 @@ function assertNone(offenders, what, how) {
   assert.equal(offenders.length, 0,
     `${offenders.length} ${what}\n${how}\nper section — ${summary}\n${sample}`
     + (offenders.length > 12 ? `\n  ... and ${offenders.length - 12} more` : ''));
+}
+
+/** What an author is told when a section is over SECTION_MAX_LINES. */
+const SECTION_OVER_HINT = 'Tighten the entries under [Unreleased]; a released section stays as published.';
+/**
+ * What an author is told when the file is over FILE_MAX_BYTES. Not "tighten older entries": a released section is
+ * published text and other checks refuse an edit to it; the file shrinks when a major's cut archives the previous major.
+ */
+const FILE_OVER_HINT = 'Tighten the entries under [Unreleased]; the next major\'s cut moves the previous major\'s sections into changelog/.';
+
+/**
+ * The ceiling check over a changelog text: the sections and the file over their limits, and the hint for the limits crossed.
+ * Taking the text and its sections as arguments is what lets a test run it on a fixture over each limit.
+ */
+function ceilingCheck(secs, text) {
+  const over = secs
+    .map(s => ({ section: s.name, n: s.start, size: s.lines.length + 1 }))
+    .filter(x => x.size > SECTION_MAX_LINES)
+    .map(x => ({ ...x, why: `${x.size} lines, ceiling ${SECTION_MAX_LINES}` }));
+  const hints = over.length ? [SECTION_OVER_HINT] : [];
+  const bytes = Buffer.byteLength(text.replace(/\r\n/g, '\n'), 'utf8');
+  if (bytes > FILE_MAX_BYTES) {
+    over.push({ section: 'the file', n: 1, why: `${bytes} bytes, ceiling ${FILE_MAX_BYTES}` });
+    hints.push(FILE_OVER_HINT);
+  }
+  return { over, how: hints.join(' ') };
 }
 
 describe('the changelog is written for its reader', () => {
@@ -322,13 +349,41 @@ describe('the changelog is written for its reader', () => {
   });
 
   it('no section, and not the file, grows past its ceiling', () => {
-    const over = sections
-      .map(s => ({ section: s.name, n: s.start, size: s.lines.length + 1 }))
-      .filter(x => x.size > SECTION_MAX_LINES)
-      .map(x => ({ ...x, why: `${x.size} lines, ceiling ${SECTION_MAX_LINES}` }));
-    const bytes = Buffer.byteLength(src.replace(/\r\n/g, '\n'), 'utf8');
-    if (bytes > FILE_MAX_BYTES) over.push({ section: 'the file', n: 1, why: `${bytes} bytes, ceiling ${FILE_MAX_BYTES}` });
-    assertNone(over, 'sections or the file are over their ceiling.',
-      'Tighten older entries to make room; the ceilings only ever go down.');
+    const { over, how } = ceilingCheck(sections, src);
+    assertNone(over, 'sections or the file are over their ceiling.', how);
+  });
+
+  describe('the ceiling check names a remedy the branch has', () => {
+    /** A changelog text whose `[Unreleased]` holds `lines` body lines, so its section size is `lines + 1`. */
+    const withUnreleasedOf = (lines) => `## [Unreleased]\n${Array.from({ length: lines }, (_, i) => `- **Sync:** entry ${i}`).join('\n')}`;
+    const ceilingOf = (text) => ceilingCheck(sectionsOf(text), text);
+
+    it('a section over its line ceiling answers the section hint, and no file hint', () => {
+      const text = withUnreleasedOf(SECTION_MAX_LINES);
+      const { over, how } = ceilingOf(text);
+      assert.deepEqual(over.map(o => o.section), ['[Unreleased]']);
+      assert.equal(how, SECTION_OVER_HINT);
+    });
+
+    it('the file over its byte ceiling answers the file hint, and no section hint', () => {
+      const text = `${withUnreleasedOf(3)}${'x'.repeat(FILE_MAX_BYTES)}\n`;
+      const { over, how } = ceilingOf(text);
+      assert.deepEqual(over.map(o => o.section), ['the file']);
+      assert.equal(how, FILE_OVER_HINT);
+    });
+
+    it('a text within both ceilings answers no offender', () => {
+      assert.deepEqual(ceilingOf(withUnreleasedOf(SECTION_MAX_LINES - 1)).over, []);
+    });
+
+    it('both hints open by pointing at [Unreleased], and none asks to edit a released section', () => {
+      for (const [name, hint] of [['section', SECTION_OVER_HINT], ['file', FILE_OVER_HINT]]) {
+        assert.match(hint, /^Tighten the entries under \[Unreleased\]/, `the ${name} hint does not start by pointing at [Unreleased]`);
+        // The gate holds every released section as published; a hint that sends an author to rewrite one is a request the
+        // other changelog checks refuse (the-changelog-holds-one-major, and a release's text is its publication).
+        assert.doesNotMatch(hint, /\bolder\b|\breleased (?:entries|sections)\b(?! stay)/i, `the ${name} hint points at older or released text`);
+      }
+      assert.match(FILE_OVER_HINT, /next major's cut moves the previous major's sections into changelog\//);
+    });
   });
 });

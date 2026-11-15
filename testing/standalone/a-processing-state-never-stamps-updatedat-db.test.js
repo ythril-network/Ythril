@@ -54,6 +54,7 @@ import { moduleIndex, walkFrom, callsIn } from './_call-graph.mjs';
 import { recordWrites } from './_record-writes.mjs';
 import { fileRowWrites, processingTouched, NOT_A_PROCESSING_MARK } from './_processing-state-writes.mjs';
 import { seedClaim } from './_media-claim.mjs';
+import { bare } from './_bare.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -88,13 +89,12 @@ const jobs = (space = SPACE) => mongo.col(`${space}_media_jobs`);
 /** A top-level file row as an arrival or an upload leaves it, with the poison on the fields that must not move. */
 async function seed(id, over = {}, space = SPACE) {
   await files(space).deleteOne({ _id: id });
-  const doc = {
+  // `undefined` means "absent": the driver would store it as null, and a status of null is not a row nothing has touched.
+  const doc = bare({
     _id: id, spaceId: space, path: id, tags: [], description: 'written by a person', sizeBytes: 100, sha256: HASH,
     author: { instanceId: 'peer-1', instanceLabel: 'Peer' }, createdAt: POISON, updatedAt: POISON, seq: POISON_SEQ,
     embeddingStatus: 'processing', ...over,
-  };
-  // `undefined` means "absent": the driver would store it as null, and a status of null is not a row nothing has touched.
-  for (const k of Object.keys(doc)) if (doc[k] === undefined) delete doc[k];
+  });
   await files(space).insertOne(doc);
 }
 

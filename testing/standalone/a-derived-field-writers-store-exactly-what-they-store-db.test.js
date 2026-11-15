@@ -39,6 +39,7 @@ import http from 'node:http';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { seedClaim } from './_media-claim.mjs';
+import { bare } from './_bare.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -69,11 +70,11 @@ const jobs = (space = OPEN) => mongo.col(`${space}_embed_jobs`);
 
 const T0 = '2026-08-01T00:00:00.000Z';
 /** A file row as an upload leaves it, plus whatever a case adds. */
-const row = (id, over = {}) => Object.fromEntries(Object.entries({
+const row = (id, over = {}) => bare({
   _id: id, spaceId: OPEN, path: id, tags: ['t'], description: 'about the report', createdAt: T0, updatedAt: T0, sizeBytes: 100,
   author: LOCAL, seq: 5, ...over,
   // An `undefined` here means "no such key": the driver would store it as null, which is a different row.
-}).filter(([, v]) => v !== undefined));
+});
 const seed = async (doc, space = OPEN) => { await files(space).insertOne(doc); return doc; };
 const stored = (id, space = OPEN) => files(space).findOne({ _id: id });
 

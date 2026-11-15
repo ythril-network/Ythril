@@ -601,7 +601,7 @@ Only fields we ourselves emit are dropped. Anything else is a typo, and a typo i
 A single space has no endpoint of its own: read it from the listing above, or read its metadata from
 `GET /api/spaces/:id/meta`.
 
-**Removing a type schema.** `PATCH` deep-merges by default, so omitting a type does not delete it — a merge that could delete would make every PATCH potentially destructive, and a client that round-trips a space would silently drop schemas whenever its serialiser emitted `null` for an unset field. There are three ways to delete:
+**Removing a type schema.** `PATCH` deep-merges by default, so omitting a type does not delete it; naming a type replaces its whole definition in the layer written, so send the complete type as `GET /api/spaces/:id/meta` returned it plus your change (send `If-Match` to refuse a write over a version you have not read) — a merge that could delete would make every PATCH potentially destructive, and a client that round-trips a space would silently drop schemas whenever its serialiser emitted `null` for an unset field. There are three ways to delete:
 
 - `DELETE /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` for one type (404 if it does not exist).
 - `PUT /api/spaces/:id/schema` to replace the whole map. On a space in no network it writes a timestamped backup of the previous schema first and then applies the replacement at once. On a networked space it is a vote, like every schema write there: it opens a round (`202 vote_pending`, or `200` where this instance's own yes carries it), nothing is written until the round passes, and a passed round applies as a **merge**, so a type the replacement leaves out is kept (see [Replace Full Schema](06a-schema-api.md#replace-full-schema-bulk-overwrite)).
@@ -648,7 +648,7 @@ stored, never applied, and every write of that type was rejected with `does not 
 caller's value for a check that never ran. A pattern stored before this now reports `pattern not evaluated,
 so nothing was checked`, which points at the schema instead.
 
-`typeSchemasMode` defaults to `merge`, which is the behaviour this endpoint has always had. Under `replace`, a knowledge type sent as `{}` clears it, and omitting a knowledge type entirely also clears it — so send all four keys unless you mean to empty the ones you leave out. Omitting `meta.typeSchemas` altogether still changes nothing, in either mode; `replace` says how to apply schemas that are present, not that absent ones should be erased.
+`typeSchemasMode` defaults to `merge`, which is the behaviour this endpoint has always had: a type you do not name is kept, and naming a type replaces its whole definition in the layer written (a network's composed type still unions layers), so a property you leave out of a named type is dropped. Under `replace`, a knowledge type sent as `{}` clears it, and omitting a knowledge type entirely also clears it — so send all four keys unless you mean to empty the ones you leave out. Omitting `meta.typeSchemas` altogether still changes nothing, in either mode; `replace` says how to apply schemas that are present, not that absent ones should be erased.
 
 ```json
 {

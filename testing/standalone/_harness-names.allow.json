@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "file": "testing/_shared/reindex-run-seed.mjs",
+      "expression": "_dbName",
+      "reason": "the stack instance's own database, read at run time from the ythril-a container's MONGO_URI; it is no harness database a test file claims",
+      "reviewBy": "2027-05-15"
+    },
+    {
+      "file": "testing/standalone/a-fork-resolved-elsewhere-is-decided-here-mesh-db.test.js",
+      "expression": "`q624t3_mesh_${this.name}`",
+      "reason": "one database per mesh instance, named from each Instance's own name field (this.name) and handed to the child as MESH_SUITE; the q624t3_mesh_ prefix is unique to this file",
+      "reviewBy": "2027-05-15"
+    }
+  ]
+}

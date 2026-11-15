@@ -681,7 +681,7 @@ export class SpaceSettingsState {
    * ## Two fields that are not a plain diff, and both have cost something before
    *
    * - `typeSchemasMode: 'replace'` rides along whenever `meta.typeSchemas` does. Without it the server
-   *   MERGES, so a type deleted in the editor is simply not mentioned and is faithfully preserved — the
+   *   MERGES by type name (a type that is named is replaced whole), so a type deleted in the editor is simply not mentioned and is faithfully preserved — the
    *   deletion appears to work, survives the save, and is still there on reload. It must never be sent on
    *   its own: with no `typeSchemas` beside it, `replace` is a mode for a map that is not in the body.
    * - `recordTtlDays` is not in this payload at all and must not be added. It is edited in the Danger

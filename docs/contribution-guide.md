@@ -73,6 +73,7 @@ ythril/
 │   └── sync/        Multi-instance sync tests
 ├── kubernetes/      K8s manifests (Ythril + ollama/whisper/unstructured sidecars, NetworkPolicies)
 ├── scripts/         Build, setup, test-time and maintenance scripts
+├── tools/flow-checks/  Probes the maintainers' flow checks run against a running instance (axe-core accessibility scans; each answers holds, violated or cannot answer)
 ├── config/          Runtime config (bind-mounted into container)
 ├── docs/            Project documentation
 ├── docker-compose.yml          Production compose

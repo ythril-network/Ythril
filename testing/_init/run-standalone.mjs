@@ -55,7 +55,8 @@ import { timingReporterFlags, clearTimingResults } from '../_shared/timing-repor
 import { testChildEnv } from '../_shared/test-child-env.mjs';
 import { boundedTestArgs, batchTimeoutMs } from '../_shared/test-file-bound.mjs';
 import { planDbShards, unitsOf, dbShardPort, dbFilesThisProcessRuns, dbBatchLabel } from '../_shared/db-shard-plan.mjs';
-import { resolveDbShardConfig, startDbShards, stopDbShards, attachDbShards } from './db-shard-stack.mjs';
+import { resolveDbShardConfig, startDbShards, stopDbShards, attachDbShards, dbShardProject } from './db-shard-stack.mjs';
+import { reportContainerState, reportThenStop, TEST_STACK_PROJECT } from './container-state.mjs';
 
 /**
  * REFUSE a stale `server/dist`, rather than testing the wrong build and reporting either answer.
@@ -223,14 +224,18 @@ async function runDbSharded(shardCount, width, started) {
   process.once('SIGTERM', onSignal);
   let doneBatches = 0;
   const heartbeat = setInterval(() => console.log(`standalone: -db shards still running (${doneBatches} batch(es) done, ${((Date.now() - t0) / 1000).toFixed(0)}s)`), 60_000);
+  // Q-792: a failing run says why its shard Mongos stopped (OOMKilled, exit code) before `stop` removes them with their volumes.
+  const failedBefore = failed;
+  let threw = true;
   try {
     console.log(`standalone: -db shards up after ${((Date.now() - t0) / 1000).toFixed(1)}s`);
     await Promise.all(plan.map((files, i) => runShardUnits(files, i, width, dbShardPort(i), () => { doneBatches++; })));
+    threw = false;
   } finally {
     clearInterval(heartbeat);
     process.removeListener('SIGINT', onSignal);
     process.removeListener('SIGTERM', onSignal);
-    await stop();
+    await reportThenStop({ failed: threw || failed > failedBefore, projects: shards.map(s => dbShardProject(s.index)), stop });
   }
 }
 
@@ -261,5 +266,7 @@ if (ran === 0) {
 console.log(`standalone finished in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 if (failed > 0) {
   console.error(`standalone: ${failed} batch(es) failed`);
+  // Q-792: the stack the single-Mongo -db path, a CI shard job and the instance third ran against. Shards were reported before their removal.
+  await reportContainerState({ projects: [TEST_STACK_PROJECT] });
   process.exit(1);
 }

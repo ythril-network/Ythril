@@ -362,7 +362,8 @@ export function planSpaceMetaUpdate(input: {
   const base: Partial<SpaceMeta> = writeBase ?? {};
 
   // Merge the incoming meta with the existing meta so that PATCH has true RFC-7396 semantics: scalar fields
-  // overwrite, typeSchemas entries are added/updated, and types *not* mentioned in the body are preserved.
+  // overwrite, typeSchemas entries are added/updated (a type the body names is replaced whole, its other properties dropped),
+  // and types *not* mentioned in the body are preserved.
   // `typeSchemasMode: 'replace'` opts out of that last clause so a deletion can be expressed at all.
   // What is stored is PARSED (`Q-216`): the merged result is read against `base`, so the parts the request changed go through the one
   // body and every other part is, by construction, what the store already holds. The planner's own body parse above is for the

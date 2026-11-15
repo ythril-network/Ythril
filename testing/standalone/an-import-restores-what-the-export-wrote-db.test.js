@@ -29,7 +29,11 @@
  *  9. **D-9**: an imported record with no stamp, in a space with a window, is stamped from its own `createdAt` by
  *     `schema > space`; one that carries a stamp keeps it.
  * 10. **The export carries every replicated family — links included — and export -> wipe -> import restores each.**
- *     Links were never exported, so a restore lost every link while reporting success.
+ *     Links were never exported, so a restore lost every link while reporting success. **Field for field** (Q-792 part 8):
+ *     every field the family's interface declares (extends and module augmentation followed, `_record-doc-fields.mjs`) is
+ *     seeded and comes back deep-equal, or is NOT_CARRIED_BY_BACKUP and does not come back, or is listed with its reason in
+ *     `an-import-restores-what-the-export-wrote-db.allow.json`; the comparison was `seq` and one content key, so a dropped
+ *     or leaked field stayed green, and face descriptors once reached exports past a hand-edited field list.
  *
  * Rules 4, 5 and the counting half of 7 hold on the base and are PINS: the rewrite onto the shared arrivals writer
  * must not lose them (the writer guards by seq, and a restore must not be guarded).
@@ -45,8 +49,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
+import { recordDocFields } from './_record-doc-fields.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -67,7 +73,7 @@ const CREATED = Date.parse('2026-06-01T00:00:00.000Z');
 const iso = (ms) => new Date(ms).toISOString();
 const author = { instanceId: 'origin', instanceLabel: 'Origin' };
 
-let mongo, importMod, families, recordTypeOf, wireKeys, localOnly, seqMod, server, base, adminKey;
+let mongo, importMod, families, recordTypeOf, wireKeys, localOnly, notCarried, seqMod, server, base, adminKey;
 const coll = (space, c) => mongo.col(`${space}_${c}`);
 const DERIVED_EMBED = ['embedding', 'embeddingModel', 'matchedText'];
 
@@ -86,7 +92,70 @@ function fixture(collection, id, seq, over = {}) {
   assert.ok(shapes[collection], `no exported-document fixture for collection '${collection}' — add one`);
   return { ...common, ...shapes[collection], ...over };
 }
-const CONTENT_KEY = { facts: 'fact', entities: 'name', edges: 'label', chrono: 'title', links: 'from', files: 'path' };
+
+/** The stored document interface of each replicated family (`server/src/config/types.ts`); a family with none here fails the round trip. */
+const FAMILY_DOC = { facts: 'FactDoc', entities: 'EntityDoc', edges: 'EdgeDoc', chrono: 'ChronoEntry', links: 'LinkDoc', files: 'FileMetaDoc' };
+/** The field count each interface derived to when the round trip was made field-by-field (Q-792): a reader that finds fewer has broken. */
+const FIELD_FLOOR = { facts: 20, entities: 19, edges: 25, chrono: 27, links: 11, files: 39 };
+/** Declared fields a restore deliberately does not bring back that NOT_CARRIED_BY_BACKUP does not name, each with its reason. */
+const NOT_RESTORED = JSON.parse(fs.readFileSync(new URL('./an-import-restores-what-the-export-wrote-db.allow.json', import.meta.url), 'utf8')).entries;
+const notRestored = (family, field) => NOT_RESTORED.find(e => e.family === family && e.field === field);
+
+/**
+ * A seed value for a declared field, chosen by its declared TYPE, so a field added to an interface is seeded without editing this file;
+ * a field whose type is neither here nor in SEED_BY_FIELD throws, naming it, rather than going unseeded and so uncompared.
+ */
+const SEED_BY_TYPE = {
+  string: (c, f) => `${c}.${f} seeded`,
+  number: () => 0.5,
+  boolean: () => true,
+  true: () => true,
+  'number[]': () => [0.25, 0.5],
+  'string[]': () => ['seeded-tag'],
+  'string | null': (c, f) => `${c}.${f} seeded`,
+  Date: () => new Date('2028-02-02T00:00:00.000Z'),
+  AuthorRef: () => ({ ...author }),
+  'Record<string, string | number | boolean>': () => ({ seededText: 'v', seededNumber: 2, seededFlag: true }),
+  '[number, number, number, number]': () => [0.1, 0.2, 0.3, 0.4],
+};
+/** Fields whose value has a meaning or a validator a type-derived value would miss (the record's identity, ISO stamps, enums). */
+const SEED_BY_FIELD = {
+  _id: (c, id) => id,
+  path: (c, id) => id,
+  spaceId: () => SPACE,
+  seq: (c, id, seq) => seq,
+  createdAt: () => iso(CREATED),
+  updatedAt: () => iso(CREATED + 1000),
+  startsAt: () => iso(CREATED + DAY_MS),
+  endsAt: () => iso(CREATED + 2 * DAY_MS),
+  contentRedactedAt: () => iso(CREATED + 3 * DAY_MS),
+  deletedAt: () => iso(CREATED + 4 * DAY_MS),
+  bytesAbsentSince: () => iso(CREATED + 5 * DAY_MS),
+  type: (c) => (c === 'chrono' ? 'event' : c === 'entities' ? 'concept' : `seeded_${c}`),
+  status: () => 'upcoming',
+  fromKind: () => 'fact',
+  toKind: () => 'entity',
+  descriptionSource: () => 'generated',
+  retiredBy: () => 'bytes-lost',
+  schemaFingerprint: () => 'ab'.repeat(32), // a sha256 in lowercase hex: a malformed stamp is read as absent (withoutMalformedStamp)
+  stampSkew: () => ({ property: 'when', stamp: '2026-05-01T00:00:00.000Z', skewMs: -86_400_000, thresholdMs: 3_600_000 }),
+  recurrence: () => ({ freq: 'weekly', interval: 2, until: iso(CREATED + 90 * DAY_MS) }),
+};
+
+/** The row the round trip seeds for one family: one value for every declared field, bar a field whose presence makes it a row no backup holds. */
+function tripRow(c, id, seq, fields) {
+  const doc = {};
+  for (const f of fields) {
+    if (notRestored(c, f.name)?.seeded === false) continue;
+    const literal = f.type.match(/^'([^']+)'(?:\s*\|\s*'[^']+')*$/);
+    const make = Object.hasOwn(SEED_BY_FIELD, f.name) ? () => SEED_BY_FIELD[f.name](c, id, seq)
+      : Object.hasOwn(SEED_BY_TYPE, f.type) ? () => SEED_BY_TYPE[f.type](c, f.name)
+        : literal ? () => literal[1] : null;
+    assert.ok(make, `${FAMILY_DOC[c]}.${f.name}: no seed value for type '${f.type}' — add one to SEED_BY_TYPE or SEED_BY_FIELD`);
+    doc[f.name] = make();
+  }
+  return doc;
+}
 
 const importKeys = () => families.map(f => f.collection);
 async function wipe(space) {
@@ -125,7 +194,7 @@ describe('the admin import restores what the export wrote', { skip }, () => {
       Object.entries(kinds.RECORD_COLLECTION).find(([, c]) => c === f.collection)?.[0] ?? null]));
     const shared = await import('../../server/dist/api/sync/_shared.js');
     wireKeys = new Set(Object.keys(shared.IncomingFileMetaDoc.shape));
-    ({ LOCAL_ONLY_FIELDS: localOnly } = await import('../../server/dist/sync/local-only-fields.js'));
+    ({ LOCAL_ONLY_FIELDS: localOnly, NOT_CARRIED_BY_BACKUP: notCarried } = await import('../../server/dist/sync/local-only-fields.js'));
     const tokens = await import('../../server/dist/auth/tokens.js');
     adminKey = (await tokens.createToken({ name: 'admin', admin: true })).plaintext;
     server = await listenApp();
@@ -466,17 +535,55 @@ describe('the admin import restores what the export wrote', { skip }, () => {
       assert.deepEqual(missing, [], `the export omits ${missing.join(', ')} — a restore from it loses every one`);
     });
 
-    it('export -> wipe -> import restores every record of every family', async () => {
+    it('every entry of the not-restored list is explained, current, and names a declared field no backup class already covers', () => {
+      const bad = [];
+      const today = new Date().toISOString().slice(0, 10);
+      for (const e of NOT_RESTORED) {
+        const at = `${e.family}.${e.field}`;
+        if (!importKeys().includes(e.family)) bad.push(`${at}: '${e.family}' is not a replicated family`);
+        else if (!recordDocFields(FAMILY_DOC[e.family]).some(f => f.name === e.field)) bad.push(`${at}: ${FAMILY_DOC[e.family]} declares no such field — remove the entry`);
+        if (notCarried.has(e.field)) bad.push(`${at}: already NOT_CARRIED_BY_BACKUP — the entry is redundant`);
+        if (typeof e.reason !== 'string' || e.reason.trim().split(/\s+/).length < 3) bad.push(`${at}: needs a reason of three words or more`);
+        if (typeof e.reviewBy !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(e.reviewBy) || Number.isNaN(Date.parse(e.reviewBy))) bad.push(`${at}: needs a reviewBy date (YYYY-MM-DD)`);
+        else if (e.reviewBy < today) bad.push(`${at}: past its reviewBy ${e.reviewBy} — review it`);
+        if (typeof e.seeded !== 'boolean') bad.push(`${at}: needs seeded: true|false (false only where the field makes the row one no backup holds)`);
+      }
+      assert.deepEqual(bad, []);
+    });
+
+    it('export -> wipe -> import restores every declared field of every family, or the field is one no backup carries', async () => {
+      // Q-792 part 8. The comparison was `seq` plus one content key, so a field the export projected out or the import dropped stayed
+      // green — and so did one that leaked through: face descriptors once reached exports past a design that edited a field list.
+      // Each family's field set is read from its interface (extends and module augmentation followed, `_record-doc-fields.mjs`), never
+      // listed here; the seeded row covers it; every field comes back deep-equal (a Date a Date), or is NOT_CARRIED_BY_BACKUP and does
+      // not come back, or is in this file's not-restored list with a reason. Seen red by mutation (a carried field projected out of
+      // the export at admin-space-transfer.ts), restored by hand.
+      const { forkIdFor } = await import('../../server/dist/sync/upsert-plan.js');
       const seeded = [];
+      const wrong = [];
       let seq = 200;
       for (const c of importKeys()) {
-        const id = c === 'files' ? 'trip/a.md' : `trip-${c}`;
-        const doc = { ...fixture(c, id, ++seq), spaceId: SPACE,
-          ...(recordTypeOf[c] !== null ? { _expireAt: new Date('2028-02-02T00:00:00.000Z') } : {}) };
+        assert.ok(FAMILY_DOC[c], `replicated family '${c}' has no document interface named here — add it to FAMILY_DOC`);
+        const fields = recordDocFields(FAMILY_DOC[c]);
+        assert.ok(fields.length >= FIELD_FLOOR[c], `${FAMILY_DOC[c]}: only ${fields.length} field(s) derived, floor ${FIELD_FLOOR[c]} — the reader or the type moved`);
+        const doc = tripRow(c, c === 'files' ? 'trip/a.md' : `trip-${c}`, ++seq, fields);
+        // A seeded `forkOf` makes the row a FORK, which every door refuses unless its id derives from its subject (`forkRowVerdict`): a fact
+        // fork with no `forkAt` derives from its parent, its seq and its text, as 5.6.2 wrote them.
+        if (typeof doc.forkOf === 'string') {
+          assert.equal(c, 'facts', `${FAMILY_DOC[c]} now declares forkOf: derive its fork id here (forkRowVerdict) before seeding it`);
+          doc._id = forkIdFor(doc.forkOf, doc.seq, doc.fact);
+        }
+        const id = doc._id;
+        const declared = new Set(fields.map(f => f.name));
+        const uncovered = fields.filter(f => !(f.name in doc) && notRestored(c, f.name)?.seeded !== false).map(f => f.name);
+        if (uncovered.length) wrong.push(`${c}/${id}: the seeded row does not cover ${uncovered.join(', ')} — a field never seeded is a field never compared`);
+        const undeclared = Object.keys(doc).filter(k => !declared.has(k));
+        if (undeclared.length) wrong.push(`${c}/${id}: seeded ${undeclared.join(', ')}, which ${FAMILY_DOC[c]} does not declare`);
         await coll(SPACE, c).insertOne(doc);
-        seeded.push({ c, id, seq, content: doc[CONTENT_KEY[c]], stamped: recordTypeOf[c] !== null });
+        seeded.push({ c, id, doc, fields });
       }
       assert.ok(seeded.length >= 6, 'fixture check: fewer than six families seeded');
+      assert.deepEqual(wrong, [], 'the round trip cannot judge a field it does not seed');
       const body = await exportSpace();
       await wipe(SPACE);
       const r = await fetch(`${base}/api/admin/spaces/${SPACE}/import`, {
@@ -484,16 +591,36 @@ describe('the admin import restores what the export wrote', { skip }, () => {
         body: JSON.stringify(body),
       });
       assert.equal(r.status, 200, `import answered ${r.status}: ${await r.clone().text()}`);
-      const wrong = [];
-      for (const s of seeded) {
-        const stored = await coll(SPACE, s.c).findOne({ _id: s.id });
-        if (!stored) { wrong.push(`${s.c}/${s.id}: not restored`); continue; }
-        if (stored.seq !== s.seq || stored[CONTENT_KEY[s.c]] !== s.content) {
-          wrong.push(`${s.c}/${s.id}: restored ${JSON.stringify({ seq: stored.seq, [CONTENT_KEY[s.c]]: stored[CONTENT_KEY[s.c]] })}`);
+      const answer = await r.json();
+      const show = (v) => (v instanceof Date ? `Date ${v.toISOString()}` : JSON.stringify(v));
+      for (const { c, id, doc, fields } of seeded) {
+        const exported = (body[c] ?? []).find(x => x?._id === id);
+        const stored = await coll(SPACE, c).findOne({ _id: id });
+        if (!exported) { wrong.push(`${c}/${id}: not exported`); continue; }
+        if (!stored) { wrong.push(`${c}/${id}: not restored (the import answered ${JSON.stringify(answer?.results?.[c] ?? answer)})`); continue; }
+        for (const { name } of fields) {
+          if (!(name in doc)) continue;
+          const back = isDeepStrictEqual(stored[name], doc[name]);
+          if (notCarried.has(name)) {
+            if (name in exported) wrong.push(`${c}.${name}: the export carried it, and it is NOT_CARRIED_BY_BACKUP`);
+            if (back) wrong.push(`${c}.${name}: came back through the import, and it is NOT_CARRIED_BY_BACKUP`);
+          } else if (notRestored(c, name)) {
+            if (back) wrong.push(`${c}.${name}: listed as not restored, and it came back — remove the entry`);
+          } else if (!(name in exported)) {
+            wrong.push(`${c}.${name}: DROPPED by the export (seeded ${show(doc[name])})`);
+          } else if (!back) {
+            wrong.push(`${c}.${name}: changed or dropped by the import: stored ${name in stored ? show(stored[name]) : 'nothing'}, seeded ${show(doc[name])}`);
+          }
         }
-        if (s.stamped && !(stored._expireAt instanceof Date)) wrong.push(`${s.c}/${s.id}: the stamp came back as ${typeof stored._expireAt}`);
+        const declared = new Set(fields.map(f => f.name));
+        for (const k of Object.keys(stored)) {
+          // Undeclared and not seeded: only this instance's own classified local state may appear (a landing's position and
+          // written-here bit, the deliverer of what landed); anything else came from nowhere a backup accounts for.
+          if (declared.has(k) || localOnly.has(k)) continue;
+          wrong.push(`${c}.${k}: LEAKED — the restored row holds ${show(stored[k])}, which ${FAMILY_DOC[c]} does not declare and no local-only class names`);
+        }
       }
-      assert.deepEqual(wrong, [], 'a backup taken by the export and restored by the import does not reproduce the space');
+      assert.deepEqual(wrong, [], 'a backup taken by the export and restored by the import does not reproduce the space field for field');
     });
   });
 });

@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Schema:** the per-type files `schemas/<space>_<kind>_<type>.json` are no longer written; the housekeeping cycle removes the ones this instance wrote, locally and without a tombstone.
 - **Schema:** the schema version index keys the stamp and the type; the index pass builds it, then drops the old one. Until a collection has either, a schema-version read answers `503 schema_index_building`.
+- **Schema:** `schema_update` and `PATCH` say a named type is replaced whole: send the complete type as `space_meta` returned it. The MCP door has no `If-Match`; read `space_meta` after the write.
 - **Records:** a `schemaFingerprint` sent in a write body is ignored (not named as an unknown field, never stored); `deleteFields` refuses it by name.
 - **Sync:** the space hash (Merkle root) leaves out `schemaFingerprint`; copies that differ only in it count as equal (ADR 22).
 - **Sync:** `GET /api/sync/meta` asks `schema: read` on the space.
@@ -61,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Web:** a screen reader reads the token hint on the login page, and the password hint and mismatch message on the setup page, with their fields.
 - **Records:** `entityName`, `fromName` and `toName` on `POST /api/filter` and MCP `filter` narrow the caller's `filter` instead of replacing its `_id`, `$or`, `from` or `to`; the web client's fact list by ids and an entity name now answers their intersection.
 - **Spaces:** a search-index readiness check stops within a second when its database connection closes, instead of asking the closed connection for up to a minute.
 - **Housekeeping:** a space set aside after a slow answer is checked again once its pause ends, even when its last check found it still building its positions. Before, no background task, the media queue included, checked that space again until a restart.

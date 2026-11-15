@@ -80,8 +80,12 @@ describe('the MCP door: `schema_update` and `save_space` carry rules, and say wh
 
   it('it states the guarantee and not the mechanism: no engine name, no cost model', () => {
     assert.match(desc(), /\brules?\b/i, 'there is no description of rules to hold: a description that says nothing names no mechanism either');
-    assert.doesNotMatch(desc(), /@bufbuild|RE2|cel-js|AST|synthetic|comprehension nesting/i,
+    // Each name is matched as a whole word: a bare /AST/i matched "last-writer-wins" in the merge sentence (Q-792).
+    const MECHANISM = /@bufbuild|\bRE2\b|\bcel-js\b|\bAST\b|\bsynthetic\b|\bcomprehension nesting\b/i;
+    assert.doesNotMatch(desc(), MECHANISM,
       'the description names a mechanism: it has to be revisited every time the mechanism gains a case');
+    assert.doesNotMatch('the write is last-writer-wins', MECHANISM, 'the mechanism match fires inside an ordinary word');
+    assert.match('parsed into an AST first', MECHANISM, 'the mechanism match no longer finds the engine name it exists for');
   });
 
   it('`typeSchemas` lists `rules` among the fields a type carries, so the complete list the description points at is complete', () => {

@@ -63,11 +63,12 @@ import { refusalText } from '../../core/refusal-text';
                 name="pw"
                 [(ngModel)]="form.settingsPassword"
                 autocomplete="new-password"
+                aria-describedby="pw-hint"
                 minlength="8"
                 required
                 [disabled]="loading()"
               />
-              <span class="field-hint">{{ 'setup.form.settingsPasswordHint' | transloco }}</span>
+              <span id="pw-hint" class="field-hint">{{ 'setup.form.settingsPasswordHint' | transloco }}</span>
             </div>
 
             <div class="field">
@@ -78,12 +79,13 @@ import { refusalText } from '../../core/refusal-text';
                 name="pw2"
                 [(ngModel)]="form.confirm"
                 autocomplete="new-password"
+                [attr.aria-describedby]="form.confirm && form.confirm !== form.settingsPassword ? 'pw2-error' : null"
                 minlength="8"
                 required
                 [disabled]="loading()"
               />
               @if (form.confirm && form.confirm !== form.settingsPassword) {
-                <span class="field-hint error">{{ 'setup.form.passwordMismatch' | transloco }}</span>
+                <span id="pw2-error" class="field-hint error" role="alert">{{ 'setup.form.passwordMismatch' | transloco }}</span>
               }
             </div>
 

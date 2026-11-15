@@ -188,7 +188,8 @@ export const UpdateSpaceBody = z.object({
   /**
    * How `meta.typeSchemas` combines with what is already stored. Default `merge`, which is the behaviour
    * this endpoint has always had and which an integrator specifically asked for — a caller that edits one
-   * type must not have to resend the other forty.
+   * type must not have to resend the other forty. The merge is by type name: a type the body names is
+   * replaced whole, so the caller sends that type complete.
    *
    * `replace` makes the payload authoritative: types absent from it are REMOVED. It exists because there
    * was otherwise no way to delete a type at all. The settings UI deleted one, sent a payload that simply
