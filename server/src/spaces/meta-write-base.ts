@@ -62,7 +62,8 @@ export function mergeSpaceMeta(
   // list of six: a scalar replaces when STATED (`!== undefined`, never truthiness — `suppressEmbeddings: false` is how an
   // operator turns suppression back off), an object replaces whole, and the types are merged below.
   //
-  // typeSchemas — merge per-KT, per-type: incoming types add/update, existing untouched types preserved.
+  // typeSchemas — merge per-KT, per-type: incoming types add/update (a named type is replaced whole: `{ ...had[kt], ...ktMap }` is
+  // two levels deep, so the type's own properties are not merged), existing untouched types preserved.
   // Under `replace` the payload is authoritative instead, so a type absent from it is deleted. Note the
   // guard is on `!== undefined`, so `replace` with `typeSchemas: {}` clears every type — which is the only
   // way to express "this space declares nothing" and has to be reachable.

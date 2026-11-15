@@ -83,7 +83,7 @@ const succeeded = (a) => a.status >= 200 && a.status < 300;
 
 describe('a delete of a file record already gone answers 404 on every door', { skip }, () => {
   before(async () => {
-    door = await openPushDoor({ suite: 'gonedel', spaces: [{ id: S, label: S, folders: [], meta: { suppressEmbeddings: true } }] });
+    door = await openPushDoor({ suite: 'retrydelflag', spaces: [{ id: S, label: S, folders: [], meta: { suppressEmbeddings: true } }] });
     files = await import('../../server/dist/files/files.js');
     config = (await import('../../server/dist/config/loader.js')).getConfig();
     ({ callTool } = await import('../../server/dist/mcp/call-tool.js'));

@@ -42,8 +42,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { argumentsOf, balancedFrom } from './_structural-window.mjs';
 import { MUTATORS, receiverBefore } from './_space-writers.mjs';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { recordDocFields } from './_record-doc-fields.mjs';
 
 const MERKLE = 'server/src/brain/merkle.ts';
 const TYPES = 'server/src/config/types.ts';
@@ -60,22 +61,14 @@ const DOCUMENTED = Object.freeze(['embeddingStatus', 'mediaJobError', 'mediaType
 
 const read = (rel) => readFileSync(join(REPO_ROOT, rel), 'utf8');
 
-/** The fields of `FileMetaDoc`, in declaration order, read from the interface. */
+/**
+ * The fields of `FileMetaDoc`, in declaration order: the interface's own, then any declared beside its only writer by module augmentation
+ * (`retiredBy` in `files/feed-marker.ts`, bundle-70), as the frozen `types.ts` asks. Read by `_record-doc-fields.mjs`, which every record
+ * family's field set goes through (Q-792).
+ */
 export function fileMetaDocFields() {
-  const src = read(TYPES);
-  const at = src.indexOf('export interface FileMetaDoc');
-  assert.ok(at > -1, `${TYPES}: no FileMetaDoc — re-anchor`);
-  const body = src.slice(at, src.indexOf('\n}', at));
-  const fields = [...body.matchAll(/^ {2}([a-zA-Z_]\w*)\??:/gm)].map(m => m[1]);
-  assert.ok(fields.length >= 25, `only ${fields.length} FileMetaDoc field(s) read — the interface moved; re-anchor`);
-  // A field declared beside its only writer by module augmentation (`declare module '../config/types.js' { interface FileMetaDoc { … } }`), as
-  // the frozen `types.ts` asks: `retiredBy` in `files/feed-marker.ts` (bundle-70).
-  for (const rel of trackedSources(['server/src']).filter(f => f.endsWith('.ts'))) {
-    const text = stripComments(read(rel));
-    for (const m of text.matchAll(/declare module '[^']*config\/types\.js'\s*\{\s*interface FileMetaDoc\s*\{([^}]*)\}/g)) {
-      fields.push(...[...m[1].matchAll(/^\s*([a-zA-Z_]\w*)\??:/gm)].map(x => x[1]));
-    }
-  }
+  const fields = recordDocFields('FileMetaDoc').map(f => f.name);
+  assert.ok(fields.length >= 25, `only ${fields.length} FileMetaDoc field(s) read from ${TYPES} — the interface moved; re-anchor`);
   return fields;
 }
 

@@ -1,0 +1,26 @@
+{
+  "entries": [
+    { "family": "files", "field": "sizeBytes", "seeded": true, "reviewBy": "2027-05-15", "reason": "not a wire key: describes bytes the restoring instance has not got; re-measured when the bytes arrive (space-import.ts rule 3)" },
+    { "family": "files", "field": "sha256", "seeded": true, "reviewBy": "2027-05-15", "reason": "not a wire key: a hash of bytes the restoring instance has not got; recomputed from the blob (space-import.ts rule 3)" },
+    { "family": "files", "field": "excerpt", "seeded": true, "reviewBy": "2027-05-15", "reason": "not a wire key: derived from the document's bytes by conversion, re-derived where the bytes are held" },
+    { "family": "files", "field": "convertedFileId", "seeded": true, "reviewBy": "2027-05-15", "reason": "local processing state of this instance's conversion run, re-derived from the blob" },
+    { "family": "files", "field": "chunkCount", "seeded": true, "reviewBy": "2027-05-15", "reason": "local processing state of this instance's conversion run, re-derived from the blob" },
+    { "family": "files", "field": "conversionError", "seeded": true, "reviewBy": "2027-05-15", "reason": "local processing state of this instance's conversion run, re-derived from the blob" },
+    { "family": "files", "field": "mediaType", "seeded": true, "reviewBy": "2027-05-15", "reason": "local processing state set by this instance's media dispatch, re-derived from the blob" },
+    { "family": "files", "field": "embeddingStatus", "seeded": true, "reviewBy": "2027-05-15", "reason": "local processing state of this instance's embedding run, re-derived from the blob" },
+    { "family": "files", "field": "mediaJobError", "seeded": true, "reviewBy": "2027-05-15", "reason": "local processing state of this instance's media run, re-derived from the blob" },
+    { "family": "files", "field": "wholeDocument", "seeded": true, "reviewBy": "2027-05-15", "reason": "marks a derived chunk row this instance made; derived rows are never in a backup" },
+    { "family": "files", "field": "sourceSha256", "seeded": true, "reviewBy": "2027-05-15", "reason": "stamped on rows a media or conversion run derived; local, re-derived from the blob" },
+    { "family": "files", "field": "chunkIndex", "seeded": true, "reviewBy": "2027-05-15", "reason": "chunk-row field: chunk rows are re-derived from the blob and never in a backup (backupRow)" },
+    { "family": "files", "field": "headingText", "seeded": true, "reviewBy": "2027-05-15", "reason": "chunk-row field: chunk rows are re-derived from the blob and never in a backup (backupRow)" },
+    { "family": "files", "field": "content", "seeded": true, "reviewBy": "2027-05-15", "reason": "chunk-row field: chunk rows are re-derived from the blob and never in a backup (backupRow)" },
+    { "family": "files", "field": "chunkOffsetMs", "seeded": true, "reviewBy": "2027-05-15", "reason": "chunk-row field: chunk rows are re-derived from the blob and never in a backup (backupRow)" },
+    { "family": "files", "field": "chunkDurationMs", "seeded": true, "reviewBy": "2027-05-15", "reason": "chunk-row field: chunk rows are re-derived from the blob and never in a backup (backupRow)" },
+    { "family": "files", "field": "faceEmbedding", "seeded": true, "reviewBy": "2027-05-15", "reason": "face-row field: face descriptors are re-derived from the image and never in a backup (Q-226)" },
+    { "family": "files", "field": "faceEntityId", "seeded": true, "reviewBy": "2027-05-15", "reason": "face-row field: face rows are re-derived from the image and never in a backup (Q-226)" },
+    { "family": "files", "field": "faceBbox", "seeded": true, "reviewBy": "2027-05-15", "reason": "face-row field: face rows are re-derived from the image and never in a backup (Q-226)" },
+    { "family": "files", "field": "faceScore", "seeded": true, "reviewBy": "2027-05-15", "reason": "face-row field: face rows are re-derived from the image and never in a backup (Q-226)" },
+    { "family": "files", "field": "parentFileId", "seeded": false, "reviewBy": "2027-05-15", "reason": "its presence makes the row a derived chunk, which backupRow leaves out of every export" },
+    { "family": "files", "field": "feedMarker", "seeded": false, "reviewBy": "2027-05-15", "reason": "its presence makes the row a feed marker, which backupRow leaves out of every export" }
+  ]
+}

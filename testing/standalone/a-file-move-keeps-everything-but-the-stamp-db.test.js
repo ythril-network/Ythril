@@ -27,6 +27,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { bare } from './_bare.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { NOT_A_FEED_MARKER, goneOrMarker } from './_feed-marker-row.mjs';
@@ -65,7 +66,8 @@ const loaded = (id, over = {}) => ({
 });
 /** A file with its bytes and the loaded row. */
 async function put(id, over = {}) {
-  const row = loaded(id, over);
+  // `over` spells "no such key" as `undefined`; the driver would store that as null, and a row with `syncBase: null` is not a row without one.
+  const row = bare(loaded(id, over));
   await acts.files.writeFile(SPACE, id, `bytes of ${id}`);
   await files().insertOne(row);
   return row;

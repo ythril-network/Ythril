@@ -50,10 +50,11 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
                 [(ngModel)]="tokenInput"
                 [placeholder]="'login.tokenPlaceholder' | transloco"
                 autocomplete="current-password"
+                aria-describedby="token-hint"
                 required
                 [disabled]="loading()"
               />
-              <span class="field-hint">
+              <span id="token-hint" class="field-hint">
                 {{ 'login.tokenHint' | transloco }}
               </span>
             </div>

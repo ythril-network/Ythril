@@ -453,7 +453,8 @@ async function runSpaceMetaUpdate(
  * server-owned strip, the schema-library `$ref` check, and the network vote. A tool calling `updateSpace()` directly
  * would skip all of them — so the chain was extracted first (`spaces/meta-update.ts`, pinned by
  * `space-meta-update-contract.test.js`) and this tool calls it. **Merge semantics are the REST default**: types not
- * mentioned are preserved, and `typeSchemasMode: 'replace'` is how a deletion is expressed.
+ * mentioned are preserved, a type that is named is replaced whole, and `typeSchemasMode: 'replace'` is how a deletion
+ * is expressed.
  */
 /**
  * The keys `schema_update` forwards into `meta` — read from the tool's OWN schema, once.
@@ -477,7 +478,10 @@ export const schema_updateTool: ToolHandler = {
     + 'the `admin` rung on the `schema` area of the space named in `space` — holding it on a different space does '
     + 'not grant this one. '
     + 'MERGES by default: types you do not mention are preserved, so editing one type does not require resending '
-    + 'the others. Pass `typeSchemasMode: "replace"` to make the payload authoritative — that is the only way to '
+    + 'the others. Naming a type replaces its whole definition in the layer written (a network\'s composed type still '
+    + 'unions layers), so send the complete type as `space_meta` returned it plus your addition: a property you leave '
+    + 'out of a named type is dropped. There is no If-Match on this door, so the write is last-writer-wins: read '
+    + '`space_meta` again after it. Pass `typeSchemasMode: "replace"` to make the payload authoritative — that is the only way to '
     + 'DELETE a type. Knowledge-type keys are singular: entity, fact, edge, chrono. A `$ref` to a schema-library '
     + 'entry that does not exist is refused (422) rather than silently stored as an empty schema. A linked type '
     + 'may be sent back exactly as `space_meta` returned it — `$ref` beside the entry’s definition — and the '
@@ -522,7 +526,7 @@ export const schema_updateTool: ToolHandler = {
       typeSchemasMode: {
         type: 'string', enum: ['merge', 'replace'],
         description: 'How `typeSchemas` combines with what is stored. `merge` (default) adds and updates named '
-          + 'types and preserves the rest; `replace` makes the payload authoritative, so types absent from it are '
+          + 'types and preserves the rest; naming a type replaces its whole definition, so send it complete; `replace` makes the payload authoritative, so types absent from it are '
           + 'REMOVED. Use `replace` to delete a type.',
       },
       targetNetwork: {
