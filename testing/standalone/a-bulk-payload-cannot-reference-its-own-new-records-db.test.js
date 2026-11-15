@@ -39,6 +39,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { closeStringJoins } from './_sources.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -50,9 +51,8 @@ const skip = await mongoSkipReason();
  * missed one of the five copies for exactly that reason — *"reference records created earlier"* and *"in the
  * same batch"* sat on different lines — and a gate that reads less than the file is a gate that passes on it.
  */
-const flatten = (s) => s
-  .replace(/\\n/g, ' ')                 // escaped newlines INSIDE a string literal
-  .replace(/'\s*\+\s*'/g, '')           // the joins of a concatenated description
+const flatten = (s) => closeStringJoins(s   // the joins of a concatenated description
+  .replace(/\\n/g, ' '))                // escaped newlines INSIDE a string literal
   .replace(/\n\s*\*\s?/g, ' ')          // docblock line leaders
   .replace(/\s+/g, ' ');
 

@@ -166,3 +166,19 @@ export const TRACKED_TEST_FLOOR = 100;
 export function trackedTestFiles({ root = REPO_ROOT, dirs = ['.'], floor = TRACKED_TEST_FLOOR } = {}) {
   return trackedSources(dirs, { ext: [...TEST_FILE_SUFFIXES], floor, root }).sort();
 }
+
+/**
+ * A source text with the joins of its concatenated string literals closed: `'one ' + 'two'`, on one line or across
+ * lines, in any quote, reads `one two`.
+ *
+ * ## What it prevents
+ *
+ * A tool description or an error message is a chain of string pieces, so a sentence a check looks for sits on two
+ * lines with `' + '` between its halves. Three checks each closed the joins with a pattern of their own: one for single
+ * quotes on any line, two only across a line break. A description written with another quote, or joined on one line,
+ * was a sentence one of them read and another missed. The question "what does this source say as one text" is asked here.
+ *
+ * @param {string} text source text
+ * @returns {string} the text with every quote, plus sign, quote run removed
+ */
+export const closeStringJoins = (text) => String(text).replace(/['"`]\s*\+\s*['"`]/g, '');
