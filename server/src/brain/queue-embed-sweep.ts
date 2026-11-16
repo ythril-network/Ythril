@@ -35,8 +35,9 @@ import { col, asFilter } from '../db/mongo.js';
 import { COLLECTION, derivedHasText, buildEmbedTexts, embedOwed, type EmbedOwed } from './embed-record.js';
 import { enqueueEmbedJobs, type EmbedPriority } from './embed-queue.js';
 import {
-  recordSuppressedMany, recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD,
+  recordSuppressedMany, RECORD_SUPPRESS_FIELD,
 } from './suppress-embeddings.js';
+import { suppressionTiers, type SuppressMeta } from './suppression-tiers.js';
 import { HOLDS_VECTOR, holdsVectorExpr } from './holds-vector.js';
 import { isSpillPath } from './spill-path.js';
 import { HOLDS_DERIVED, holdsDerivedExpr } from './holds-derived.js';
@@ -54,60 +55,21 @@ export const EMBED_SWEEP_KINDS = Object.keys(COLLECTION) as BrainEmbedRecordType
 /** Records read per round trip of the walk. */
 const WALK_BATCH = 500;
 
-/** Just the fields the exclusion decision reads, so a test can build the tiers by hand. */
-export interface SuppressMeta {
-  suppressEmbeddings?: boolean | undefined;
-  typeSchemas?: Partial<Record<KnowledgeType, Record<string, { suppressEmbeddings?: boolean } | undefined>>> | undefined;
-}
+export type { SuppressMeta };
 
 /**
- * The three suppression tiers as a Mongo filter fragment — or `'all'` when nothing can be embedded.
+ * The records of `kind` the three suppression tiers leave embeddable, as a Mongo filter fragment — or `'all'` when nothing can
+ * be embedded (the sweep then says "no work" instead of a backlog it can never clear).
  *
- * Exported for testing because this is the part with the reasoning in it. Each tier separately:
- *
- *  - **record**: `suppressEmbeddings: true` is a plain field, so `$ne: true` excludes it. It must be
- *    `$ne` rather than `{ $exists: false }` — the flag can legitimately be present and `false`, and a record
- *    that explicitly opts IN must not be excluded.
- *  - **schema**: the suppressed type NAMES are enumerable from `meta.typeSchemas`, so they become a `$nin` on
- *    the type field. Edges key on `label` while everything else keys on `type`, which `TYPE_FIELD` already
- *    encodes — reading `type` for an edge would find no schema, look like it worked, and silently exclude
- *    nothing for the one record kind this was widened to cover.
- *  - **space**: knowable before any query. On its own it suppresses everything, so the sweep can say "no work"
- *    instead of reporting a backlog it can never clear. But a type schema saying `false` OVERRIDES it, and so
- *    does a record — `record > schema > space`, where "not stated" falls through. So `'all'` is only correct
- *    when no lower tier can lift a record back out, which is what `releasedTypes` checks.
- *
- * Takes the meta rather than a space id, so it is **pure** and a test can build the three tiers by hand.
+ * The not-suppressed half of `suppressionTiers` (`suppression-tiers.ts`, which states the tier rule and why one classification
+ * serves this sweep and the one that strips vectors). Exported for testing; **pure**, so a test builds the tiers by hand.
  */
 export function suppressionExclusion(
   meta: SuppressMeta | undefined,
   kind: BrainEmbedRecordType,
 ): 'all' | { query: Record<string, unknown> } {
-  const spaceWide = meta?.suppressEmbeddings === true;
-  const knowledgeType: KnowledgeType | undefined = kind === 'file' ? undefined : kind;
-  const schemas = knowledgeType === undefined ? undefined : meta?.typeSchemas?.[knowledgeType];
-
-  const suppressedTypes: string[] = [];
-  const releasedTypes: string[] = [];
-  for (const [name, schema] of Object.entries(schemas ?? {})) {
-    const v = (schema as { suppressEmbeddings?: boolean } | undefined)?.suppressEmbeddings;
-    if (v === true) suppressedTypes.push(name);
-    else if (v === false) releasedTypes.push(name);
-  }
-
-  const field = knowledgeType === undefined ? undefined : TYPE_FIELD[knowledgeType];
-
-  if (spaceWide) {
-    // A record-level opt-in can also lift a record out, and unlike a type name that is not enumerable from
-    // meta — so `'all'` is claimed only when neither escape hatch exists for this kind.
-    if (releasedTypes.length === 0) return 'all';
-    // Some types are explicitly released: only those, minus any record opting out.
-    return { query: { ...(field ? { [field]: { $in: releasedTypes } } : {}), ...recordNotSuppressedFilter() } };
-  }
-
-  const query: Record<string, unknown> = { ...recordNotSuppressedFilter() };
-  if (field && suppressedTypes.length > 0) query[field] = { $nin: suppressedTypes };
-  return { query };
+  const { notSuppressed } = suppressionTiers(meta, kind);
+  return notSuppressed === null ? 'all' : { query: notSuppressed };
 }
 
 /** Where a walk has got to: the kind it is in and the last record id it queued there. */

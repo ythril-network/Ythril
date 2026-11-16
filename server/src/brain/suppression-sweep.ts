@@ -42,15 +42,13 @@
  *
  * ## The tier rule, and the half that is easy to invert
  *
- * `record > schema > space`. **At the RECORD tier a `false` means "not stated"** and falls through — which is
- * why `recordSuppression()` returns `true | undefined` and never `false`. **At the SCHEMA tier a `false` DOES
- * override** the space. Conflating the two would either spare every record anybody had ever explicitly
- * un-suppressed, or sweep a type whose schema deliberately opted out.
+ * Stated once, in `suppression-tiers.ts`, which classifies the tiers into the suppressed filter this sweep strips by and its
+ * complement the queue sweep embeds by (Q-184): one classification, so the two cannot disagree.
  */
 import { col, asFilter } from '../db/mongo.js';
 import { log, peerText } from '../util/log.js';
-import { TYPE_FIELD } from './ttl.js';
-import { recordNotSuppressedFilter, RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
+import { RECORD_SUPPRESS_FIELD } from './suppress-embeddings.js';
+import { suppressionTiers } from './suppression-tiers.js';
 import type { KnowledgeType, SpaceMeta } from '../config/types.js';
 import { COLLECTION_SUFFIX } from '../config/types.js';
 import { spaceCollection, type SpacePart } from '../db/space-collection.js';
@@ -80,38 +78,12 @@ const COLLECTION: Readonly<Record<KnowledgeType, SpacePart>> = COLLECTION_SUFFIX
 /**
  * Records of `kind` that resolve to suppressed **and** still hold a vector.
  *
- * Pure, and separated from the write so the tier logic can be exercised without a database — the three tiers
- * interacting is the whole difficulty, and it is not something to discover against a live collection.
- *
- * `TYPE_FIELD` rather than a literal `'type'`: **edges key their schema on `label`** while every other kind
- * keys on `type`, and `EdgeDoc` carries both. Reading `type` for an edge finds a schema that is never there
- * and sweeps nothing, silently, for the one kind suppression was specifically widened to cover.
+ * The suppressed half of `suppressionTiers` (`suppression-tiers.ts`, which states the tier rule and why one classification
+ * serves this sweep and the queue sweep), with `HOLDS_VECTOR`. Pure, and separated from the write so the tiers can be
+ * exercised without a database.
  */
 export function suppressedWithVectorFilter(meta: SpaceMeta, kind: KnowledgeType): Record<string, unknown> {
-  const field = TYPE_FIELD[kind];
-  const schemas = meta.typeSchemas?.[kind] ?? {};
-  const statedTrue: string[] = [];
-  const stated: string[] = [];
-  for (const [name, schema] of Object.entries(schemas)) {
-    const v = (schema as { suppressEmbeddings?: boolean } | undefined)?.suppressEmbeddings;
-    if (v === undefined) continue;
-    stated.push(name);
-    if (v === true) statedTrue.push(name);
-  }
-
-  const or: Record<string, unknown>[] = [
-    // Record tier. One spelling since `D-6`: the pre-3.1.0 name is gone, and the peer floor excludes the
-    // builds that could still have written it.
-    { [RECORD_SUPPRESS_FIELD]: true },
-    // Schema tier, where a type states `true` outright.
-    { [field]: { $in: statedTrue }, ...recordNotSuppressedFilter() },
-  ];
-  // Space tier, reaching only the types whose schema states NOTHING — a schema `false` overrides it.
-  if (meta.suppressEmbeddings === true) {
-    or.push({ [field]: { $nin: stated }, ...recordNotSuppressedFilter() });
-  }
-
-  return { ...HOLDS_VECTOR, $or: or };
+  return { ...HOLDS_VECTOR, ...suppressionTiers(meta, kind).suppressed };
 }
 
 /**
