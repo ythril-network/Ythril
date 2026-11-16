@@ -296,7 +296,11 @@ export const FROZEN = {
   // slow enough to explain (`graph-load-watch.ts`), which linked records the panel's filter leaves showing
   // (`graph-detail-filter.ts`), and what a node or an edge lists (`graph-linked-fetch.ts`, one fetch where the
   // node and edge panels each carried a copy). Lowered to the real number, as the ratchet asks.
-  'client/src/app/pages/graph/graph.component.ts': 619,
+  // 619 -> 617 (Q-190). The page had grown to 635 and two more questions left it: what a tap on the canvas
+  // selects, the root included (`nodeForTap` and `rootAsNode` in `graph-panel.ts`, which replace two copies of the
+  // root-to-node literal), and the two canvas operations the page spelled out inline (`setEdgeLabelsHidden`, which
+  // the render already carried a second copy of, and `fitToCanvas`, in `graph-cytoscape.ts`).
+  'client/src/app/pages/graph/graph.component.ts': 617,
   // 753 -> 764: `backfillTokenRights`. This file is where config migrations already live — the media
   // master-switch and space-description ones are both here — so a fourth belongs beside them rather than in
   // a module only the loader would ever call.

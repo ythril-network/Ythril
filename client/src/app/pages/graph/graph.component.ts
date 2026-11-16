@@ -64,9 +64,9 @@ import {
 } from './graph-traversal-cache';
 import {
   GraphTheme, DEFAULT_GRAPH_THEME, readGraphTheme,
-  buildElements, createGraphCytoscape, renderElements, type GraphInstance,
+  buildElements, createGraphCytoscape, renderElements, setEdgeLabelsHidden, fitToCanvas, type GraphInstance,
 } from './graph-cytoscape';
-import { panelColorOf, panelTitleOf } from './graph-panel';
+import { panelColorOf, panelTitleOf, rootAsNode, nodeForTap } from './graph-panel';
 import { openSpaceFromLink } from '../../core/space-param';
 import { ViewsStore } from '../../core/views.store';
 import { UnknownSpaceNoticeComponent } from '../../shared/unknown-space-notice.component';
@@ -529,13 +529,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
   private onNodeTap(id: string): void {
     // graphNodes does NOT include the root (it is added to the canvas separately), so a tap on the
     // root — the most-clicked node in any graph — has to be reconstructed from rootEntity.
-    let tn = this.graphNodes.find(n => n._id === id);
-    if (!tn) {
-      const root = this.rootEntity();
-      if (root && root._id === id) {
-        tn = { _id: root._id, name: root.name, type: root.type || 'default', depth: 0, description: root.description, tags: root.tags };
-      }
-    }
+    const tn = nodeForTap(this.graphNodes, this.rootEntity(), id);
     if (!tn) return;
     this.selectedEdge.set(null);
     this.selectedEdgeRecord.set(null);
@@ -601,13 +595,7 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
 
   onHideLabelsChange(hide: boolean): void {
     this.hideLabels.set(hide);
-    if (this.cy) {
-      if (hide) {
-        this.cy.edges().addClass('hide-labels');
-      } else {
-        this.cy.edges().removeClass('hide-labels');
-      }
-    }
+    if (this.cy) setEdgeLabelsHidden(this.cy, hide);
   }
 
   selectRoot(entity: Entity, pushHistory = false): void {
@@ -723,21 +711,15 @@ export class GraphComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!this.cy) return;
     // Resize first: Angular may have opened or closed the side panel since renderGraph() ran, which
     // changes the canvas width without cytoscape knowing.
-    this.cy.resize();
-    this.cy.fit(undefined, 40);
+    fitToCanvas(this.cy);
 
     const root = this.rootEntity();
     if (!root || this.selectedNode() || this.selectedEdge()) return;
 
-    this.selectedNode.set({ _id: root._id, name: root.name, type: root.type || 'default', depth: 0, description: root.description, tags: root.tags });
+    this.selectedNode.set(rootAsNode(root));
     this.loadNodeDetails(root._id);
     // Opening the panel narrows the canvas — refit once the DOM has caught up.
-    setTimeout(() => {
-      if (this.cy) {
-        this.cy.resize();
-        this.cy.fit(undefined, 40);
-      }
-    }, 50);
+    setTimeout(() => { if (this.cy) fitToCanvas(this.cy); }, 50);
   }
 
   // ── Detail panel helpers ────────────────────────────────────────────────────

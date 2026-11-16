@@ -358,6 +358,26 @@ export function createGraphCytoscape(
 }
 
 /**
+ * The operator's global switch for edge labels: the `hide-labels` class on every edge, which wins in the stylesheet.
+ *
+ * One function for the toggle and for every render, because a render replaces every element — a class set only by
+ * the toggle would be lost on the next draw, and two copies of this branch is how one of them stops agreeing.
+ */
+export function setEdgeLabelsHidden(cy: cytoscape.Core, hide: boolean): void {
+  if (hide) cy.edges().addClass('hide-labels');
+  else cy.edges().removeClass('hide-labels');
+}
+
+/**
+ * Fit the graph to the canvas as it is NOW: resize first, because Angular may have opened or closed the side panel
+ * since cytoscape last measured, which changes the canvas width without cytoscape knowing.
+ */
+export function fitToCanvas(cy: cytoscape.Core): void {
+  cy.resize();
+  cy.fit(undefined, 40);
+}
+
+/**
  * Draw an element model, then fit.
  *
  * `resize()` runs twice deliberately: once before drawing, and again on `layoutstop`, because Angular
@@ -375,8 +395,7 @@ export function renderElements(
   cy.elements().remove();
   cy.add(elements);
 
-  if (hideLabels) cy.edges().addClass('hide-labels');
-  else cy.edges().removeClass('hide-labels');
+  setEdgeLabelsHidden(cy, hideLabels);
 
   // A re-render replaces every element, so the label set has to be recomputed rather than assumed to have
   // survived. Runs after `hide-labels` is set, and that class still wins — the operator's global "off" is

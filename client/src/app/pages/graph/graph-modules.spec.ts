@@ -17,7 +17,8 @@ import {
 import {
   emptyCache, decideFetch, applyResult, filterToDepth, type TraversalCache,
 } from './graph-traversal-cache';
-import { buildElements, typeColor, DEFAULT_GRAPH_THEME } from './graph-cytoscape';
+import { buildElements, typeColor, DEFAULT_GRAPH_THEME, setEdgeLabelsHidden, fitToCanvas } from './graph-cytoscape';
+import { nodeForTap, rootAsNode } from './graph-panel';
 import type { TraverseNode, TraverseEdge, Entity } from '../../core/api.types';
 
 const node = (id: string, depth: number): TraverseNode => ({ _id: id, name: id.toUpperCase(), type: 'thing', depth });
@@ -217,5 +218,55 @@ describe('graph-details — derivation boundaries', () => {
     expect(nextSort({ field: 'createdAt', asc: false }, 'description')).toEqual({ field: 'description', asc: true });
     expect(nextSort({ field: 'createdAt', asc: true }, 'description')).toEqual({ field: 'description', asc: true });
     expect(nextSort({ field: 'createdAt', asc: true }, 'createdAt')).toEqual({ field: 'createdAt', asc: false });
+  });
+});
+
+describe('graph-panel — what a tap selects', () => {
+  const root = { _id: 'root', name: 'Ada', type: 'person', description: 'd', tags: ['t'] } as Entity;
+
+  it('stands the root in as a depth-0 node carrying its own fields', () => {
+    expect(rootAsNode(root)).toEqual({ _id: 'root', name: 'Ada', type: 'person', depth: 0, description: 'd', tags: ['t'] });
+  });
+
+  it('gives a root with no type the default type, as the canvas colours it', () => {
+    expect(rootAsNode({ ...root, type: '' } as Entity).type).toBe('default');
+  });
+
+  it('selects a drawn node by id, ahead of the root', () => {
+    const drawn = node('a', 1);
+    expect(nodeForTap([drawn], root, 'a')).toBe(drawn);
+    // The root is not in the drawn set, so a tap on it is rebuilt from the entity.
+    expect(nodeForTap([drawn], root, 'root')).toEqual(rootAsNode(root));
+  });
+
+  it('selects nothing for an id that is neither drawn nor the root, or when there is no root', () => {
+    expect(nodeForTap([node('a', 1)], root, 'zzz')).toBeUndefined();
+    expect(nodeForTap([], null, 'root')).toBeUndefined();
+  });
+});
+
+describe('graph-cytoscape — the canvas operations the page calls', () => {
+  function fakeCy() {
+    const calls: string[] = [];
+    const edges = { addClass: (c: string) => calls.push(`add:${c}`), removeClass: (c: string) => calls.push(`remove:${c}`) };
+    const cy = {
+      edges: () => edges,
+      resize: () => calls.push('resize'),
+      fit: (eles: unknown, padding: number) => calls.push(`fit:${eles}:${padding}`),
+    };
+    return { cy: cy as any, calls };
+  }
+
+  it('hides edge labels by adding the class, and shows them by removing it', () => {
+    const { cy, calls } = fakeCy();
+    setEdgeLabelsHidden(cy, true);
+    setEdgeLabelsHidden(cy, false);
+    expect(calls).toEqual(['add:hide-labels', 'remove:hide-labels']);
+  });
+
+  it('measures the canvas before it fits, with the padding the page always used', () => {
+    const { cy, calls } = fakeCy();
+    fitToCanvas(cy);
+    expect(calls).toEqual(['resize', 'fit:undefined:40']);
   });
 });
