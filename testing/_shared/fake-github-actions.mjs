@@ -40,9 +40,12 @@ export const FAKE_GH_TOKEN = 'ghp_fakeTestToken0123456789abcdefghijklmn';
  * `pages` (optional) is a listing of more than one page: page n answers `pages[n - 1]` (an empty list past the last), on every
  * read, where `runs` answers page 1 alone. It is what a run older than the first page's runs looks like.
  *
- * @param {{ runs: object[], listings?: object[][], pages?: object[][], jobsByRun?: Record<string, object[]>, artifactsByRun?: Record<string, Array<{id: number, name: string, zip: Buffer, expired?: boolean}>>, token?: string }} opts
+ * `lagsUnderStatusFilter` (optional) holds run ids a listing that sends `status=` leaves out while the unfiltered listing holds
+ * them: GitHub's status-filtered listing lagged more than 20 minutes behind a finished run on 2026-11-16 (run 43933586850).
+ *
+ * @param {{ runs: object[], listings?: object[][], pages?: object[][], lagsUnderStatusFilter?: number[], jobsByRun?: Record<string, object[]>, artifactsByRun?: Record<string, Array<{id: number, name: string, zip: Buffer, expired?: boolean}>>, token?: string }} opts
  */
-export async function startFakeGithub({ runs, listings, pages, jobsByRun = {}, artifactsByRun = {}, token = FAKE_GH_TOKEN }) {
+export async function startFakeGithub({ runs, listings, pages, lagsUnderStatusFilter = [], jobsByRun = {}, artifactsByRun = {}, token = FAKE_GH_TOKEN }) {
   const requests = [];
   let listingReads = 0;
   const artifactById = new Map();
@@ -68,7 +71,8 @@ export async function startFakeGithub({ runs, listings, pages, jobsByRun = {}, a
         return json(200, { total_count: here.length, workflow_runs: here });
       }
       if (page > 1) return json(200, { total_count: 0, workflow_runs: [] });
-      const held = listings ? listings[Math.min(listingReads, listings.length - 1)] : runs;
+      const listed = listings ? listings[Math.min(listingReads, listings.length - 1)] : runs;
+      const held = u.searchParams.has('status') ? listed.filter(r => !lagsUnderStatusFilter.includes(r.id)) : listed;
       listingReads++;
       return json(200, { total_count: held.length, workflow_runs: held });
     }
