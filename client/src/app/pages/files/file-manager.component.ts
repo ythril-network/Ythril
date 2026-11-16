@@ -10,8 +10,7 @@ import { FileListingComponent, type FileRow } from './file-listing.component';
 import { sortFileEntries, type FileSortField } from './file-sort';
 import { ViewsStore, injectIsView } from '../../core/views.store';
 import { openSpaceFromLink } from '../../core/space-param';
-import { of } from 'rxjs';
-import { pollUntil, type PollHandle } from '../../core/poll-until';
+import { FileProgressPoll } from './file-progress-poll';
 import { UnknownSpaceNoticeComponent } from '../../shared/unknown-space-notice.component';
 import { baseName, formatSize, joinPath, parentPath } from './file-format';
 import { FileTreeComponent, type TreeNode } from './file-tree.component';
@@ -341,7 +340,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
      */
     this.listing.listed.pipe(takeUntilDestroyed()).subscribe(({ path, entries }) => {
       this.tree.fillFrom(path, entries);
-      this.syncProgressPolling();
+      this.progress.sync();
       this.settleFocusAfterDelete();
     });
     this.listing.listingFailed.pipe(takeUntilDestroyed()).subscribe(({ path, reason }) => {
@@ -716,54 +715,13 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   // there: "page 12 of 40" for the whole conversion. Nothing errored, which is why it read as a wedged
   // pipeline rather than a stale view — the reporter took it for the former.
   //
-  // A poll is the honest mechanism for a value with no event behind it, and this one is bounded on both
-  // sides: it exists only while a row on screen is actually in flight, and it skips a tick when the tab is
-  // hidden. An idle folder polls nothing.
-
-  /** 4 s: progress moves a page at a time, so faster only costs requests. `progressAt` shows staleness. */
-  private static readonly PROGRESS_POLL_MS = 4_000;
-  private progressPoll: PollHandle | null = null;
-
-  /** True while any row on screen is still being processed — the only condition that justifies polling. */
-  anyInFlight(): boolean {
-    return this.listing.entries().some(e =>
-      !!e.progress || e.embeddingStatus === 'pending' || e.embeddingStatus === 'processing');
-  }
-
-  /** Start or stop the poll to match what is on screen. Called after every listing load. */
-  private syncProgressPolling(): void {
-    if (this.anyInFlight()) {
-      if (this.progressPoll?.active) return;                     // already running — never stack timers
-      /*
-       * `pollUntil` asks "again until told to stop": it skips a hidden tab and keeps its schedule, so the poll
-       * resumes the moment the tab is looked at, with no visibility listener to leak, and `stop()` ends it.
-       * The request is not an Observable of its own: the listing store owns the request and publishes the
-       * answer through `listed`, which is what retires this poll (syncProgressPolling, above). So the tick
-       * starts the store's reload and answers at once, and the poll goes on while something is in flight.
-       * A failed reload never ends the chain: it is the store's, and the next tick asks again.
-       */
-      this.progressPoll = pollUntil<void>({
-        delayMs: () => FileManagerComponent.PROGRESS_POLL_MS,
-        request: () => {
-          this.reloadDir();
-          // The open file's own record goes stale in exactly the same way: the description a document gets
-          // is written when its job finishes, so a detail pane opened during processing showed none until
-          // the file was closed and reopened.
-          const open = this.preview.file();
-          if (open) this.loadSelectedMeta(open);
-          return of(undefined);
-        },
-        onAnswer: () => this.anyInFlight(),
-      });
-    } else {
-      this.stopProgressPolling();
-    }
-  }
-
-  private stopProgressPolling(): void {
-    this.progressPoll?.stop();
-    this.progressPoll = null;
-  }
+  // The poll is `file-progress-poll.ts`: it exists only while a row on screen is in flight, skips a hidden
+  // tab, and is synced after every listing load and stopped on destroy. This page supplies its tick.
+  private readonly progress = new FileProgressPoll(() => this.listing.entries(), () => {
+    this.reloadDir();
+    const open = this.preview.file();
+    if (open) this.loadSelectedMeta(open);
+  });
 
   @HostListener('dragover', ['$event'])
   onDragOver(event: DragEvent): void {
@@ -1091,6 +1049,6 @@ export class FileManagerComponent implements OnInit, OnDestroy {
     this.uploads.abortAll();
     // A poll left running would keep requesting a directory listing for a view nobody is looking at —
     // and, because it reloads through the component's own signals, on a destroyed component.
-    this.stopProgressPolling();
+    this.progress.stop();
   }
 }
