@@ -1,11 +1,10 @@
 {
   "entries": [
-    { "file": "server/src/metrics/registry.ts", "code": 1261, "ticket": "Q-398", "reason": "Already over the 650 ceiling when the gate began to fail; Q-398 decomposes it.", "reviewBy": "2027-05-16" },
+    { "file": "server/src/metrics/registry.ts", "code": 1235, "ticket": "Q-860", "reason": "Already over the 650 ceiling when the gate began to fail; Q-845 to Q-860 decompose it slice by slice, Q-860 the last.", "reviewBy": "2027-05-16" },
     { "file": "client/src/app/pages/settings/space-schema-tab.component.ts", "code": 1101, "ticket": "Q-490", "reason": "Already over its frozen 690 when the gate began to fail; Q-490 decomposes it.", "reviewBy": "2027-05-16" },
     { "file": "server/src/config/loader.ts", "code": 954, "ticket": "Q-141", "reason": "Already over its frozen 764 when the gate began to fail; Q-141 decomposes it.", "reviewBy": "2027-05-16" },
     { "file": "client/src/app/pages/settings/data.component.ts", "code": 886, "ticket": "Q-492", "reason": "Already over its limit of 644 when the gate began to fail; Q-492 decomposes it.", "reviewBy": "2027-05-16" },
     { "file": "client/src/app/core/api.types.ts", "code": 707, "ticket": "Q-475", "reason": "Already over its frozen 666 when the gate began to fail; Q-475 decomposes it.", "reviewBy": "2027-05-16" },
-    { "file": "server/src/brain/recall.ts", "code": 705, "ticket": "Q-189", "reason": "Already over its frozen 691 when the gate began to fail; Q-189 decomposes it.", "reviewBy": "2027-05-16" },
     { "file": "server/src/mcp/tools/spaces.ts", "code": 682, "ticket": "Q-491", "reason": "Already over the 650 ceiling when the gate began to fail; Q-491 decomposes it.", "reviewBy": "2027-05-16" },
     { "file": "client/src/app/pages/brain/brain.component.ts", "code": 578, "ticket": "Q-714", "reason": "Already over its frozen 572 when the gate began to fail; Q-714 decomposes it.", "reviewBy": "2027-05-16" },
     { "file": "server/src/config/types.ts", "code": 507, "ticket": "Q-730", "reason": "Already over its frozen 506 when the gate began to fail; Q-730 decomposes it.", "reviewBy": "2027-05-16" }
