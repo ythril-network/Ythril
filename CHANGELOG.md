@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** the media worker no longer removes a record whose source file is gone; it drops the job.
 - **Embeddings:** the embed sweep and the suppression sweep read the three suppression tiers through one classification; no answer changes.
 - **Recall:** the collection, projection and parent-file steps of a recall result live in their own module; no answer changes.
+- **Metrics:** the sync tombstone metrics are declared in a module of their own; their names, labels and help texts are unchanged.
 - **Web:** the conflict badge in the top bar no longer asks for its count while the browser tab is hidden; it asks again at its next minute once the tab is shown.
 - **Web:** the graph page reads what a tap selects and hides edge labels through its helper modules; nothing on the page changes.
 - **Testing:** every `node --test` the standalone runner starts is time-bounded: a test or hook pending past 15 minutes fails, and a batch that never exits is ended and named.
