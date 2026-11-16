@@ -59,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** a file deletion (own, folder, TTL, a peer's, a sidecar's) takes a position in the same write that flags or marks the row.
 - **Files:** a record whose bytes this instance lost is removed here only, with no tombstone: checked once a day per space, after 1 day (30 without a recorded hash or after a restore or import), once every peer completed a sync; mass losses are held.
 - **Files:** the media worker no longer removes a record whose source file is gone; it drops the job.
-- **Embeddings:** the embed sweep and the suppression sweep read the three suppression tiers through one classification, so what one embeds the other never strips; no answer changes.
+- **Embeddings:** the embed sweep and the suppression sweep read the three suppression tiers through one classification; no answer changes.
 - **Testing:** every `node --test` the standalone runner starts is time-bounded: a test or hook pending past 15 minutes fails, and a batch that never exits is ended and named.
 - **Testing:** the standalone harness no longer changes `setTimeout` after a close; it worked around the search-index check fixed below.
 - **Testing:** a test that waits on the media worker and times out says what the worker logged during the wait, and whether the queue was still checking the job's space or had set it aside.
