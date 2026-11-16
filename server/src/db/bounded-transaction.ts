@@ -32,7 +32,8 @@
  *     ends the driver call and answers `StoreTimeout`), as every other operation is.
  *  4. **A transient failure** (`TransientTransactionError`: a write conflict, a transaction the server aborted) aborts and runs
  *     `fn` again from the top while the deadline allows, after a short backoff; past the deadline the loop ends with
- *     `StoreTimeout`. `fn` must therefore be safe to run twice, as it always had to be.
+ *     `StoreTimeout`. `fn` must therefore be safe to run twice, as it always had to be. A timeout after a retry carries the failure
+ *     that made it retry as its `cause`, whichever way the bound ended it (`Q-839`).
  *  5. **The commit** carries `maxCommitTimeMS` (the server's deadline for it) and a client race at that figure plus the
  *     backstop margin, since the driver's commit takes no `signal`. An unknown commit result while time is left is committed
  *     again (the server answers a repeated commit of the same transaction with its outcome).
@@ -289,11 +290,19 @@ export async function inBoundedTransaction<T>(
   const session = getMongo().startSession();
   const done: { ran: boolean; result?: T } = { ran: false };
   try {
+    let lastFailure: unknown;
     for (let tries = 1; ; tries++) {
       try {
         return await attempt(session, fn, deadline, commitCap, done);
       } catch (err) {
-        if (!(err instanceof Retry)) throw err;
+        if (!(err instanceof Retry)) {
+          // The bound ending a later attempt (its early-deadline throw, the commit's race, the write-bound scope) says no cause of its own.
+          if (err instanceof StoreTimeout && err.cause === undefined && lastFailure !== undefined) {
+            throw new StoreTimeout('the transaction', { cause: lastFailure });
+          }
+          throw err;
+        }
+        lastFailure = err.failure;
         const pause = backoffDelayMs(tries - 1, FIRST_BACKOFF_MS, MAX_BACKOFF_MS);
         // A transient failure past the deadline is the bound ending the retrying: answered as the bound's, the failure as its cause.
         if (deadline - Date.now() <= pause) throw new StoreTimeout('the transaction', { cause: err.failure });
