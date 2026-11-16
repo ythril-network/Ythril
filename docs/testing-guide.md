@@ -14,7 +14,7 @@ Two rules run through everything below, because both were learned the expensive 
 Run `npm run preflight` first, always. It runs every structural check that needs no Docker and no test database, in one command, and
 `scripts/preflight.mjs` is the list: it runs the pure standalone test files and no database test file, in either mode, and says how many
 database test files it did not run (those are CI's Full run). `npm run preflight:static` also leaves out the client unit tests, the
-production build and its budgets, takes about five minutes against the full run's hour on a maintainer's machine, and is never a push
+production build and its budgets, and is never a push
 pass. Its first step, `scripts/unregistered-local-files.mjs`, fails when the checkout holds a file git does not track that no rule naming a
 place registers: a file `git status` lists as untracked, or one that only a catch-all ignore rule (`*.log`, `*.txt`, any `*.<ext>` or other
 pattern with a `*` and no `/` in `.gitignore`, and a stray `.DS_Store` or `Thumbs.db`) hides. It prints each path with the rule that hid it,
