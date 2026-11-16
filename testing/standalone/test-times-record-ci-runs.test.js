@@ -392,6 +392,19 @@ describe('--record-ci <runId> against a listing that lags', () => {
     });
   });
 
+  it('a finished run the status-filtered listing still lacks is found: the listing is read unfiltered and kept to completed runs', async () => {
+    const w = laggingWorld(0);
+    w.lagsUnderStatusFilter = [LATE_RUN];
+    w.listings[0].push(run(LATE_RUN + 1, { status: 'in_progress', conclusion: null }));
+    await withRecordingWorld(w, async ({ github, ythril, dir, env }) => {
+      const r = await runTimes(['--record-ci', String(LATE_RUN)], { cwd: dir, env: { ...env, ...SHORT_WAIT } });
+      assert.equal(r.code, 0, everything(r));
+      assert.equal(github.listingReads(), 1, 'the run was in the first read');
+      assert.ok(Object.keys(records(ythril)).includes(`ci:${LATE_RUN}:1:standalone-pure:standalone`), `the run was recorded:\n${everything(r)}`);
+      assert.ok(!github.askedAbout().has(String(LATE_RUN + 1)), 'a run still in progress, now listed, was not read');
+    });
+  });
+
   it('a pass that names nothing reads the listing once, whatever the bound says', async () => {
     await withRecordingWorld(laggingWorld(Infinity), async ({ github, dir, env }) => {
       const r = await runTimes(['--record-ci'], { cwd: dir, env: { ...env, ...SHORT_WAIT } });

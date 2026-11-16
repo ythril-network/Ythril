@@ -69,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** the metric-source tests read declarations through `testing/standalone/_metric-sources.mjs`, which finds every metrics module that declares a metric; a test fails a scanner that reads `registry.ts` on its own.
 - **Testing:** the local preflight runs its source gates first, then the builds, then the client tests, then the standalone batches, and stops at the first failing stage, naming the stages it did not run.
 - **Testing:** every local preflight run records one `Preflight-Run` entry with each stage's name, kind, time and outcome, the commit, branch, host and mode; it is kept in `test-results/unrecorded` when no Ythril instance is configured, and `node scripts/test-times.mjs --preflight-trend` prints the stage times and medians of the last runs.
+- **Testing:** the CI-run recorder lists main's runs without GitHub's `status=completed` filter and keeps the completed ones itself; a run that filter still lacked is now found.
 - **Testing:** every `node --test` the standalone runner starts is time-bounded: a test or hook pending past 15 minutes fails, and a batch that never exits is ended and named.
 - **Testing:** the standalone harness no longer changes `setTimeout` after a close; it worked around the search-index check fixed below.
 - **Testing:** a test that waits on the media worker and times out says what the worker logged during the wait, and whether the queue was still checking the job's space or had set it aside.

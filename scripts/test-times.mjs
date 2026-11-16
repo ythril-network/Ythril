@@ -670,9 +670,11 @@ const LISTING_PAGES = 5;
 /**
  * The listing every reader of the CI runs asks for: completed pushes to main of `ci.yml`, newest first, a hundred to a
  * page. One spelling, because the recorder, `--rewrite` and the summary's baseline each read it and a filter changed in
- * one (the branch, the event, the status) would silently widen or narrow the others.
+ * one (the branch, the event) would silently widen or narrow the others. It sends no `status=completed`: GitHub's
+ * status-filtered listing lagged more than 20 minutes behind a run the unfiltered one already listed as completed, so every
+ * reader keeps the completed runs itself (`r.status === 'completed'`).
  */
-const completedPushesPath = (page = 1) => `/repos/${REPO}/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100&page=${page}`;
+const completedPushesPath = (page = 1) => `/repos/${REPO}/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=100&page=${page}`;
 const GITHUB_TIMEOUT_MS = 30_000;
 const GITHUB_JSON_CAP = 20_000_000;
 const GITHUB_ZIP_CAP = 100_000_000;
