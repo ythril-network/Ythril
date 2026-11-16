@@ -113,7 +113,7 @@ const TEMPLATE_ALLOWED: Readonly<Record<string, string>> = {
 };
 
 const TRANSLATED = String.raw`'([a-zA-Z][\w-]*(?:\.[\w-]+)+)'\s*\|\s*transloco`;
-const GAP = String.raw`(?:[\s ]|&nbsp;)*`;
+const GAP = String.raw`(?:[\s\xA0]|&nbsp;)*`;
 const TERNARY = String.raw`[^{}?]*\?\s*\(\s*${TRANSLATED}\s*\)\s*:\s*\(\s*${TRANSLATED}`;
 
 /** A number-like expression: a length or size, a COUNT_PARAMS-named identifier, or a call ending in Count, Total or size. */

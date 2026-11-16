@@ -33,7 +33,7 @@ describe('every request-body limit is in the example config', () => {
   it('each key of BodyLimitsConfig is in config/config.example.json as a positive whole number', () => {
     const keys = limitKeysOf(fs.readFileSync(path.join(REPO_ROOT, 'server/src/config/body-limits.ts'), 'utf8'));
     assert.ok(keys && keys.length >= 4 && keys.includes('importBodyMaxBytes'), `the limits did not derive: ${JSON.stringify(keys)}`);
-    const example = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'config/config.example.json'), 'utf8').replace(/^﻿/, ''));
+    const example = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'config/config.example.json'), 'utf8').replace(/^\u{FEFF}/u, ''));
     const wrong = keys.filter(k => !(Number.isSafeInteger(example[k]) && example[k] > 0));
     assert.deepEqual(wrong, [], `config/config.example.json lacks, or holds no positive whole number for: ${wrong.join(', ')}`);
   });

@@ -136,7 +136,7 @@ describe('a restored space\'s mismatching files on the restore card (Q-557)', ()
 describe('the count is a plural in each language the page ships, and no key or placeholder shows', () => {
   /** The row's words for `count` files of one class, with the digits and the path taken out, so only the plural form is compared. */
   const words = (lang: 'en' | 'de' | 'pl', count: number): string =>
-    rowText(card('restore', restoreOf(STALE(count, ['p.json'])), lang), 'notes').replace(/p\.json/g, '').replace(/\d[\d\s.,  ]*/g, '#').replace(/\s+/g, ' ').trim();
+    rowText(card('restore', restoreOf(STALE(count, ['p.json'])), lang), 'notes').replace(/p\.json/g, '').replace(/\d[\d\s.,\xA0\u{202F}]*/gu, '#').replace(/\s+/g, ' ').trim();
 
   it('en and de tell one file from several; pl tells one, few (2) and many (5) apart', () => {
     expect(words('en', 1), 'en: one and several read alike').not.toBe(words('en', 2));

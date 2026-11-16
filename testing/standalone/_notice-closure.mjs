@@ -104,7 +104,7 @@ export const APACHE_TEXT = 'TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DIST
  * the leading indentation the published text carries are not a difference.
  */
 export function isApacheLicenceText(text) {
-  const lines = String(text).replace(/^﻿/, '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const lines = String(text).replace(/^\u{FEFF}/u, '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   return lines[0] === 'Apache License' && /^Version 2\.0\b/.test(lines[1] ?? '') && lines.includes(APACHE_TEXT);
 }
 
