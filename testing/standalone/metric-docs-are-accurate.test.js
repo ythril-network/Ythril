@@ -29,7 +29,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = process.cwd();
-const src = readFileSync(join(ROOT, 'server/src/metrics/registry.ts'), 'utf8');
+// The registry's text plus the module it hands its `Registry` to for the sync tombstone metrics (Q-398).
+const src = ['server/src/metrics/registry.ts', 'server/src/metrics/sync-tombstone-metrics.ts']
+  .map(f => readFileSync(join(ROOT, f), 'utf8')).join('\n');
 const doc = readFileSync(join(ROOT, 'docs/integration-guide/11-setup-api.md'), 'utf8');
 
 /**
