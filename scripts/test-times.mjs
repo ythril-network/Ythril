@@ -128,7 +128,8 @@ export const BACKFILL_RUNS = 30;
 
 /** The recorder reads the checkout it is run in: `test-results/` in the working directory, or the folder `YTHRIL_TEST_RESULTS_DIR` names (an absolute path; `timingResultsDir` decides). */
 const resultsDir = () => timingResultsDir(process.cwd());
-const unrecordedDir = () => join(resultsDir(), 'unrecorded');/** A path inside the working directory as the working directory's own relative path, forward slashes; one outside it (a moved results folder) as it is. */
+const unrecordedDir = () => join(resultsDir(), 'unrecorded');
+/** A path inside the working directory as the working directory's own relative path, forward slashes; one outside it (a moved results folder) as it is. */
 const shown = (p) => { const r = relative(process.cwd(), p).split(sep).join('/'); return r.startsWith('..') || isAbsolute(r) ? p : r; };
 
 /**
