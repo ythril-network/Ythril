@@ -131,7 +131,7 @@ describe('the shipped ythril-mongo sizes mongot and keeps its logs on a volume',
     before(() => {
       tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-compose-plant-'));
       // LF and no byte-order mark, whatever the checkout's line-ending setting: the edits below match on lines.
-      text = fs.readFileSync(path.join(REPO_ROOT, 'docker-compose.yml'), 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n');
+      text = fs.readFileSync(path.join(REPO_ROOT, 'docker-compose.yml'), 'utf8').replace(/^\u{FEFF}/u, '').replace(/\r\n/g, '\n');
     });
     after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best effort */ } });
 

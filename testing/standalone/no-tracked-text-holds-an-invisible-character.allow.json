@@ -1,0 +1,8 @@
+[
+  {
+    "file": "client/public/assets/i18n/de.json",
+    "codePoint": "U+202F",
+    "reason": "German typography: the narrow no-break space inside the abbreviation z. B. is how the translation is set; it is product text, not a slip in code.",
+    "reviewBy": "2027-05-16"
+  }
+]

@@ -736,7 +736,7 @@ const docRow = (doc, name) => doc.split(/\r?\n/).find(l => l.startsWith('|') && 
 
 /** Does the row state `value`: as digits (grouping marks allowed) or in one of its units? */
 export function rowStates(row, value, units) {
-  const plain = row.replace(/[,_\s ]/g, '');
+  const plain = row.replace(/[,_\s\u{202F}]/gu, '');
   if (new RegExp(`(?<![0-9])${value}(?![0-9])`).test(plain)) return true;
   return units.some(([unit, size]) => {
     const n = value / size;
