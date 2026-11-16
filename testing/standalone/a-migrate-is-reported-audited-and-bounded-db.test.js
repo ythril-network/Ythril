@@ -224,7 +224,9 @@ describe('a migrate is reported, audited and bounded like a restore', { skip }, 
     assert.equal(out.status, 202, `the migrate was refused: ${out.status} ${JSON.stringify(out.body)}`);
     const owed = () => { const es = migrateEntries(); return es.length > 0 && es.every(e => e.state === 'owed' && e.retryAt && !e.needsAbandon); };
     try {
-      await until(owed, 'the act owed with a retry time', 4_000);
+      // Ten times the 1 s operation bound: the lock is held for good, so an unbounded copy never turns owed however long this
+      // waits, while a bounded one on a slow CI runner needed more than 4 s (bundle-297's Full run, 4193 ms, still running).
+      await until(owed, 'the act owed with a retry time', 10_000);
     } catch {
       assert.ok(lock, 'the lock was never taken: the row stalled nothing');
       assert.fail(`the copy's operation was not bounded: ${Date.now() - started} ms after the request the migrate entries are `
