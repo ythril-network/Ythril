@@ -22,6 +22,19 @@
  * database, run it before every push. The database test files are CI's Full run (owner decision,
  * 2026-10-22, Q-588), and `scripts/trade.mjs` measures what that saves and costs.
  *
+ * ── The order ───────────────────────────────────────────────────────────────────────────────────
+ *
+ * Cheapest first, and the first failing stage ends the run (Q-862). The stages and their kinds are data,
+ * `scripts/_shared/preflight-stages.mjs`: the `source` stages (no build: the cheap text gates, docs lint, the CHANGELOG
+ * entry), then the `build` stages (the server build, the gates that import it, the client type-check and production
+ * build), then the `test` stages (the client unit tests, then the standalone batches, the slowest). A full run took
+ * about 35 minutes, 26 of them in test batches that ran BEFORE the sub-minute gates, and it went on to the end after a
+ * failure; every failure on 2026-11-16 was one of those gates. A stage that fails finishes (a second failing batch of the
+ * same stage is still shown), the next stage is not started, and the summary names every stage that did not run. Each
+ * stage opens with `stages.begin(<name>)`, which throws when the script enters a stage out of the list's order, so the
+ * code and the list cannot drift apart. No caller asks for the old run-everything behaviour (package.json, the
+ * in-container runner and `~/.claude/hooks/preflight-mark.js` all run it bare), so there is no flag for it.
+ *
  * Usage:  npm run preflight
  *         npm run preflight:static   (`--static`: every gate that runs no suite of its own - the source and built
  *         gates, the pure half of the offline tests, parse, unrun-tests, surface, docs, todo, changelog and the client
@@ -38,6 +51,7 @@ import { testChildEnv } from '../testing/_shared/test-child-env.mjs';
 import { timingResultsDir } from '../testing/_shared/timing-reporter.mjs';
 import { stampRunnerOutcome } from './mask-client-report.mjs';
 import { CLIENT_RESULTS, clientCommandWritingTo } from './_shared/client-results.mjs';
+import { SOURCE_GATES, BUILT_GATES, createStageRunner } from './_shared/preflight-stages.mjs';
 
 /**
  * `--static`, and nothing else: an unknown argument is refused rather than ignored, because `--statc` falling through
@@ -53,33 +67,37 @@ if (unknownArgs.length) {
 /** Where the client's Vitest JSON report is written; the path ci.yml's client step and the recorder read (the results folder is `timingResultsDir`'s). */
 const CLIENT_REPORT = join(timingResultsDir(process.cwd()), CLIENT_RESULTS);
 
-/** Gates that read SOURCE only — no build required, so they run first and fail fastest. */
-const SOURCE_GATES = [
-  ['icon-registry-coverage', 'an unregistered icon renders as a blank space, silently'],
-  ['scheduler-wiring', 'a background scheduler nobody starts looks exactly like one with nothing to do'],
-  ['route-guard-coverage', 'an unguarded route is only visible by reading every router'],
-  ['env-var-docs-coverage', 'a setting no doc mentions is one nobody can find'],
-  ['config-key-docs-coverage', 'a wrong key in a config example is IGNORED at runtime — no error to search for'],
-  ['route-path-docs-coverage', 'a documented endpoint that does not exist 404s with nothing to explain it'],
-  ['mcp-tool-docs-coverage', 'a tool documented as blocked for read-only tokens that is not actually blocked'],
-  ['doc-cited-constants', 'a number the docs quote that no longer matches the constant it quotes'],
-  ['help-docs-coverage', 'a guide that ships but the in-product Help page never offers, or offers and cannot load'],
-  ['help-anchor-coverage', 'a help link whose anchor matches no heading — it opens the guide and scrolls nowhere'],
-  ['console-redaction-coverage', 'an error written straight to the console, bypassing the redaction log.* applies'],
-];
-
-/** Gates that import from server/dist and therefore need a build. */
-const BUILT_GATES = [
-  ['audit-route-coverage', 'a mutating route with no audit rule leaves no trace of who changed what'],
-];
-
 // Every child gets `testChildEnv`'s environment, not this process's: the recorder's token and the runner's wire stay out of
 // anything a test (or a dependency a test imports) can read. A caller that needs more passes `env` itself.
 const run = (cmd, opts = {}) => execSync(cmd, { stdio: 'inherit', env: testChildEnv(), ...opts });
 
 const failures = [];
 
+/**
+ * The verdict, and the end of the run: called after the last stage, and by the runner at the first stage boundary that finds
+ * a failure, with the stages it did not start.
+ */
+function conclude(notRun) {
+  console.log('\n' + '='.repeat(76));
+  // A static run is never a push pass: its verdict never says PASSED, and it says "not a push pass", which
+  // ~/.claude/hooks/preflight-mark.js refuses to record even though the run exits 0.
+  if (failures.length === 0) {
+    console.log(STATIC
+      ? 'Preflight STATIC passed - not a push pass. The client unit tests, the production build and the bundle budgets did not run.'
+      : 'Preflight PASSED. The database test files and the Docker-dependent suites (integration, sync, red-team) run in CI.');
+    process.exit(0);
+  }
+  console.log(`Preflight ${STATIC ? 'STATIC FAILED' : 'FAILED'} — ${failures.length} gate(s):\n`);
+  for (const f of failures) console.log(`  ${f.name}\n      ${f.why}`);
+  if (notRun.length > 0) console.log(`\nNot run (the first failing stage ended the run): ${notRun.join(', ')}`);
+  console.log('\nEach of these catches something that produces no error on its own. Fix before pushing.');
+  process.exit(1);
+}
+
+const stages = createStageRunner({ failures, isStatic: STATIC, onStop: ({ notRun }) => conclude(notRun) });
+
 function gate(name, why, file) {
+  stages.begin(name);
   process.stdout.write(`\n── ${name} ──\n`);
   try {
     run(`node --test testing/standalone/${file}.test.js`);
@@ -90,92 +108,65 @@ function gate(name, why, file) {
 
 console.log('Preflight — the checks that catch failures with no error message.\n');
 
+// ── the `source` stages: nothing here needs a build, so they run first and fail fastest ──────────────────────────
+
 // A file git does not track that only a catch-all rule (*.log, *.txt) hides is clutter nobody is told about: agent runs left logs,
 // a stack dump, test output and stray worktree copies in the checkout this way (Q-626). Scratch goes outside every checkout (scratchRoot), not to a folder in it. The check names a
 // place for what stays local. It asks git alone, so it is the cheapest step here and runs first, in both modes.
+stages.begin('unregistered-local-files');
 console.log('\n── no untracked file hidden only by a catch-all ignore rule ──');
 try { run('node scripts/unregistered-local-files.mjs'); } catch {
   failures.push({ name: 'unregistered-local-files', why: 'a file git does not track that no rule naming a place registers: clutter the catch-all ignore rules hide' });
 }
 
+// CI has run this since it was written; preflight never did. So eleven PRs in a row passed locally with an entry, and
+// the twelfth — the only one in that run to change access rules — got as far as a red CI job before anyone noticed the
+// CHANGELOG had no line for it. A gate that only exists after the push is a gate that teaches you to push and see.
+//
+// It works locally for the same reason CI can run it: the comparison is against `origin/main`, which is already
+// fetched. Nothing about it needed the runner. It is a git diff, so it runs right after the first stage: a missing entry
+// was the failure found half an hour late most often (2026-11-16).
+stages.begin('check-changelog');
+console.log('\n── CHANGELOG entry for shipped changes ──');
+try { run('node ./scripts/check-changelog.mjs'); } catch {
+  failures.push({ name: 'check-changelog', why: 'a file that changes what ships, with no [Unreleased] line' });
+}
+
+// The owner reads todo/ directly, and the release cadence is "cut the tag when _TODO-ORDERED.md is empty" — so a
+// domain tracker holding an item the ordered list never mentions makes "empty" a claim about one file rather than
+// about the work. todo/ is gitignored, so this can only ever run here; the script exits 0 when the folder is
+// absent, which is what makes it safe in a clean checkout.
+stages.begin('todo:check');
+console.log('\n── todo/ is open items only, all indexed ──');
+try { run('npm run todo:check'); } catch {
+  failures.push({ name: 'todo:check', why: 'a tracker holds closed work, or an open item the ordered list never references' });
+}
+
+// Each gate() begins its own stage.
 for (const [file, why] of SOURCE_GATES) gate(file, why, file);
 
-// Build UNCONDITIONALLY before anything that imports from server/dist.
-//
-// This used to build only when `server/dist` was missing, which made every gate below it a check on
-// whatever was compiled last — a different branch, a different commit, code that no longer exists. It
-// cost a red CI run: a PR changed `toRecallRecord`'s output, preflight reported PASSED, and the
-// standalone test that contradicts the change had been run against the PREVIOUS build. A stale pass is
-// worse than no check, because it is indistinguishable from a real one. A `tsc` run is cheap; being
-// told the wrong answer is not.
-console.log('\n── building server (the gates below import from server/dist) ──');
-try { run('npm run build:server'); } catch { failures.push({ name: 'build:server', why: 'the server does not compile' }); }
-
-for (const [file, why] of BUILT_GATES) gate(file, why, file);
-
-// Every standalone test that needs neither a running instance nor the test database, rather than the curated handful above.
-//
-// `npm run test:standalone` assumes the Docker stack — a handful of those files drive a live server on
-// :3200, and the database-backed ones need the test database. The rest are pure: they import from
-// `server/dist` and assert on logic. Those had no reason to wait for CI, and waiting for CI is exactly how
-// a PR that changed `toRecallRecord`'s output shipped with the test contradicting it still asserting the old shape.
-//
-// THE SPLIT AND THE BATCHING MOVED TO `testing/_shared/standalone-split.mjs`, whole, with the
-// measurements that produced them. `test:standalone` asks the same question, and two copies of it is two
-// places for preflight and the suite to disagree about which gates exist — which is the one divergence
-// that makes a green preflight worthless.
-const standaloneSplit = splitStandalone();
-const { all: allStandalone, offline, offlinePure: pure, offlineDb, ciOnly } = standaloneSplit;
-console.log(`
-── standalone tests that need no running instance and no database (${pure.length} of ${allStandalone.length}; `
-  + `${allStandalone.length - offline.length} declare @needs-instance and run in CI) ──`);
-console.log(`  ${offlineDb.length} database test files are not run here; CI's Full run runs them.`);
-console.log(`  ${ciOnly.length} file(s) declare @ci-only (too slow for every push); CI's standalone-pure job runs them.`);
-
 /*
- * DEFAULT CONCURRENCY — one worker per core — and the flag that was here is gone.
+ * ── every test file is REACHED by a CI job's selection ──
  *
- * `--test-concurrency=1` is right for a suite sharing ONE live instance: `testing/integration` run
- * concurrently latches maintenance mode and reports 314 false failures. These files have no instance to
- * share; that is what `@needs-instance` declares, and the ones that do are not in this list.
- *
- * Measured over the 591 offline files on this machine: 191.0s serialised, 46.6s parallel, both green.
- * Preflight ran them serially too, so the offline set cost about three and a half minutes twice per
- * cycle — once here and once in `test:all:core`.
- *
- * The database-backed files are NOT in this run, in either mode (Q-588, owner decision 2026-10-22): they share one MongoDB
- * (`DB_TEST_CONCURRENCY` in the shared split caps them there), a machine without the test stack skipped them silently, and
- * CI's Full run runs them. `offlineRuns` is the plan `test:standalone` runs too; this keeps its pure batches only, and the
- * gate `a-preflight-runs-no-database-batch-and-static-is-never-a-push-pass` holds that for both modes.
+ * A tracked test file that no job selects is a test nobody runs, and it is green in review because it never ran: a file
+ * under `testing/bench/`, a spec outside `client/src`, a test one directory deeper than a glob reaches. CI's aggregator
+ * asks the run half of this (which file produced no test event); this is the static half, derived from the workflow, the
+ * package scripts and the vitest config, and it needs nothing a developer's machine lacks.
  */
-const runs = offlineRuns(standaloneSplit, { ciOnly: false }).filter(r => r.kind === 'pure');
-let standaloneFailed = false;
-// Timing, through the shared helper: one destination per batch, the flags AFTER the plan's own args so the batch
-// budget and the cap stay about the files, and the recorder's credentials out of the children's environment.
-// The suite is `preflight`, not `standalone`: this is a subset, and it must not clear or overwrite a full run's files.
-clearTimingResults('preflight');
-const batchesOfKind = {};
-for (const [i, r] of runs.entries()) {
-  if (runs.length > 1) console.log(`  batch ${i + 1}/${runs.length} — ${r.files.length} ${r.kind} file(s)`);
-  batchesOfKind[r.kind] = (batchesOfKind[r.kind] ?? 0) + 1;
-  const flags = timingReporterFlags({ suite: 'preflight', batch: `${r.kind}-${batchesOfKind[r.kind]}`, scope: STATIC ? 'static' : 'subset' });
-  // An argument array and no shell: through cmd.exe the line is capped at 8 191 characters, and the reporter's flags
-  // on top of a budget-sized batch went over it ("The command line is too long", no test output). CreateProcess
-  // allows 32 767, which is the limit the batch budget is sized under.
-  try { execFileSync('node', ['--test', ...r.args, ...flags.args, ...r.files], { stdio: 'inherit', env: testChildEnv(flags.env) }); } catch {
-    // Keep going: one batch failing must not hide a second failure in a later batch, which is exactly the
-    // information a single all-or-nothing invocation used to give.
-    standaloneFailed = true;
-  }
+stages.begin('unrun-tests');
+console.log('\n── every tracked test file is reached by a CI job ──');
+try { run('node scripts/unrun-tests.mjs'); } catch {
+  failures.push({ name: 'unrun-tests', why: 'a tracked test file that no CI job selects: it is never run, and "all tests pass" says nothing about it' });
 }
-if (standaloneFailed) {
-  failures.push({ name: 'test:standalone (offline subset)', why: 'server contracts and pure logic — no Docker needed, so no reason to learn this from CI' });
-}
+
+stages.begin('lint:docs');
+console.log('\n── docs lint ──');
+try { run('npm run lint:docs'); } catch { failures.push({ name: 'lint:docs', why: 'markdown that will fail CI' }); }
 
 // ── every test file PARSES, including the ones only CI runs ────────────────────────────────────────────────
 //
-// The pure subset above executes its standalone files, so a syntax error in one of those fails loudly
-// here. The database-backed files and the Docker-dependent suites — integration, sync, red-team — are not
+// The pure subset executes its standalone files, so a syntax error in one of those fails loudly in that stage. The
+// database-backed files and the Docker-dependent suites — integration, sync, red-team — are not
 // RUN locally, so without this step a broken one would be invisible until CI, and it would not fail as an
 // assertion: node reports a module-load error at `line 1:1` with an import stack, which reads nothing like
 // the test that is actually broken. This step parses every test file, those included.
@@ -183,6 +174,7 @@ if (standaloneFailed) {
 // Paid for on 2026-08-06: an apostrophe lost its backslash on the way through a shell heredoc, the file
 // stopped parsing, local preflight was green, and CI spent a full Docker run to say so. `node --check` over
 // every test file costs about a second and would have said it immediately.
+stages.begin('test files parse');
 console.log('\n── every test file parses (incl. the Docker-only suites CI runs) ──');
 {
   const testFiles = execSync('git ls-files "testing/**/*.js" "testing/**/*.mjs"', { encoding: 'utf8' })
@@ -235,57 +227,40 @@ console.log('\n── every test file parses (incl. the Docker-only suites CI ru
   }
 }
 
-/*
- * ── every test file is REACHED by a CI job's selection ──
- *
- * A tracked test file that no job selects is a test nobody runs, and it is green in review because it never ran: a file
- * under `testing/bench/`, a spec outside `client/src`, a test one directory deeper than a glob reaches. CI's aggregator
- * asks the run half of this (which file produced no test event); this is the static half, derived from the workflow, the
- * package scripts and the vitest config, and it needs nothing a developer's machine lacks.
- */
-console.log('\n── every tracked test file is reached by a CI job ──');
-try { run('node scripts/unrun-tests.mjs'); } catch {
-  failures.push({ name: 'unrun-tests', why: 'a tracked test file that no CI job selects: it is never run, and "all tests pass" says nothing about it' });
-}
+// ── the `build` stages: the server build, what imports it, the client type-check and the production build ────────
+
+// Build UNCONDITIONALLY before anything that imports from server/dist.
+//
+// This used to build only when `server/dist` was missing, which made every gate below it a check on
+// whatever was compiled last — a different branch, a different commit, code that no longer exists. It
+// cost a red CI run: a PR changed `toRecallRecord`'s output, preflight reported PASSED, and the
+// standalone test that contradicts the change had been run against the PREVIOUS build. A stale pass is
+// worse than no check, because it is indistinguishable from a real one. A `tsc` run is cheap; being
+// told the wrong answer is not.
+stages.begin('build:server');
+console.log('\n── building server (the gates below import from server/dist) ──');
+try { run('npm run build:server'); } catch { failures.push({ name: 'build:server', why: 'the server does not compile' }); }
+
+// Each gate() begins its own stage.
+for (const [file, why] of BUILT_GATES) gate(file, why, file);
 
 /*
  * ── the route list, checked against what express actually serves ──
  *
  * Every gate that says "every route" reads one module, and that module reads SOURCE. This is the only check
  * in the repository that compares it against the live express router objects — the one thing that cannot be
- * wrong about what is served — so it is the check that catches the module being wrong.
+ * wrong about what is served — so it is the check that catches the module being wrong. It imports the router
+ * modules from server/dist, so it runs after the build.
  *
  * It is here because nothing ran it. Left as a manual script it rotted into reporting all 46 tools as
  * unmapped (it grepped a file the map had moved out of) and one route as unserved (its own scan could not
  * resolve a router passed as a parameter). Forty-seven false findings is worse than no audit: the next
  * person to run it stops trusting the tooling. A check nobody runs is a claim.
  */
+stages.begin('surface-matrix-audit');
 console.log('\n── the route list agrees with what express serves ──');
 try { run('node scripts/surface-matrix-audit.mjs'); } catch {
   failures.push({ name: 'surface-matrix-audit', why: 'the static route list and the live express routers disagree' });
-}
-
-console.log('\n── docs lint ──');
-try { run('npm run lint:docs'); } catch { failures.push({ name: 'lint:docs', why: 'markdown that will fail CI' }); }
-
-// The owner reads todo/ directly, and the release cadence is "cut the tag when _TODO-ORDERED.md is empty" — so a
-// domain tracker holding an item the ordered list never mentions makes "empty" a claim about one file rather than
-// about the work. todo/ is gitignored, so this can only ever run here; the script exits 0 when the folder is
-// absent, which is what makes it safe in a clean checkout.
-console.log('\n── todo/ is open items only, all indexed ──');
-try { run('npm run todo:check'); } catch {
-  failures.push({ name: 'todo:check', why: 'a tracker holds closed work, or an open item the ordered list never references' });
-}
-
-// CI has run this since it was written; preflight never did. So eleven PRs in a row passed locally with an entry, and
-// the twelfth — the only one in that run to change access rules — got as far as a red CI job before anyone noticed the
-// CHANGELOG had no line for it. A gate that only exists after the push is a gate that teaches you to push and see.
-//
-// It works locally for the same reason CI can run it: the comparison is against `origin/main`, which is already
-// fetched. Nothing about it needed the runner.
-console.log('\n── CHANGELOG entry for shipped changes ──');
-try { run('node ./scripts/check-changelog.mjs'); } catch {
-  failures.push({ name: 'check-changelog', why: 'a file that changes what ships, with no [Unreleased] line' });
 }
 
 /*
@@ -301,25 +276,10 @@ try { run('node ./scripts/check-changelog.mjs'); } catch {
  * so it reported 297 errors of which 175 were `Cannot find name 'expect'` — noise a real error hides inside.
  * The two real projects are the question worth asking.
  */
+stages.begin('typecheck:client');
 console.log('\n── client type-check (app + spec projects) ──');
 try { run('npm run typecheck:client'); } catch {
   failures.push({ name: 'typecheck:client', why: 'types the test run transpiles past and the AOT build never sees' });
-}
-
-console.log(STATIC ? '\n── client unit tests: not in a static run ──' : '\n── client unit tests (includes i18n key coverage) ──');
-// The command is ci.yml's client step, character for character (`ci-workflow-is-sound` holds the two equal): this step is
-// the local producer of `test-results/client.json`, which `npm run test:client` does not write. The old report goes first,
-// so a run that dies before writing one cannot leave an earlier run's report standing as this run's; the runner's own
-// verdict is stamped into whatever it wrote, so the recorder can call a run incomplete that counts no failure.
-// A static run clears it too and writes none, so no earlier run's report is read as this one's.
-rmSync(CLIENT_REPORT, { force: true });
-if (!STATIC) {
-  let clientOutcome = 'success';
-  try { run(clientCommandWritingTo('npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json', CLIENT_REPORT, join(timingResultsDir(process.cwd(), {}), CLIENT_RESULTS))); } catch {
-    clientOutcome = 'failure';
-    failures.push({ name: 'test:client', why: 'component behaviour, and translation keys missing from de/pl' });
-  }
-  stampRunnerOutcome(CLIENT_REPORT, clientOutcome);
 }
 
 // The production build type-checks TEMPLATES (AOT) and compiles under the app's own tsconfig, neither of
@@ -327,6 +287,7 @@ if (!STATIC) {
 // and it is where an unknown element, a bad binding or a broken inline template surfaces. ~7 seconds.
 // The build and the budget check read one output, so a static run skips them together.
 if (!STATIC) {
+stages.begin('build:prod');
 console.log('\n── client production build (AOT template type-check) ──');
 let buildOut = '';
 try {
@@ -347,6 +308,7 @@ try {
 // budget is simply never evaluated, the build stays green, and the chunk it was meant to guard grows
 // without limit. That is the same silent no-op the budgets exist to prevent, one level up, and the only
 // place it can be checked is against the real chunk table the build just printed.
+stages.begin('bundle-budgets');
 console.log('\n── bundle budgets bind to real chunks ──');
 try {
   const cfg = JSON.parse(readFileSync('client/angular.json', 'utf8'));
@@ -369,16 +331,86 @@ try {
 }
 }
 
-console.log('\n' + '='.repeat(76));
-// A static run is never a push pass: its verdict never says PASSED, and it says "not a push pass", which
-// ~/.claude/hooks/preflight-mark.js refuses to record even though the run exits 0.
-if (failures.length === 0) {
-  console.log(STATIC
-    ? 'Preflight STATIC passed - not a push pass. The client unit tests, the production build and the bundle budgets did not run.'
-    : 'Preflight PASSED. The database test files and the Docker-dependent suites (integration, sync, red-team) run in CI.');
-  process.exit(0);
+// ── the `test` stages: the suites, slowest last (the client unit tests, about four minutes, before the standalone batches, about twenty-six) ──
+
+// The command is ci.yml's client step, character for character (`ci-workflow-is-sound` holds the two equal): this step is
+// the local producer of `test-results/client.json`, which `npm run test:client` does not write. The old report goes first,
+// so a run that dies before writing one cannot leave an earlier run's report standing as this run's; the runner's own
+// verdict is stamped into whatever it wrote, so the recorder can call a run incomplete that counts no failure.
+// A static run clears it too and writes none, so no earlier run's report is read as this one's.
+rmSync(CLIENT_REPORT, { force: true });
+if (!STATIC) {
+  stages.begin('client unit tests');
+  console.log('\n── client unit tests (includes i18n key coverage) ──');
+  let clientOutcome = 'success';
+  try { run(clientCommandWritingTo('npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json', CLIENT_REPORT, join(timingResultsDir(process.cwd(), {}), CLIENT_RESULTS))); } catch {
+    clientOutcome = 'failure';
+    failures.push({ name: 'test:client', why: 'component behaviour, and translation keys missing from de/pl' });
+  }
+  stampRunnerOutcome(CLIENT_REPORT, clientOutcome);
+} else {
+  console.log('\n── client unit tests: not in a static run ──');
 }
-console.log(`Preflight ${STATIC ? 'STATIC FAILED' : 'FAILED'} — ${failures.length} gate(s):\n`);
-for (const f of failures) console.log(`  ${f.name}\n      ${f.why}`);
-console.log('\nEach of these catches something that produces no error on its own. Fix before pushing.');
-process.exit(1);
+
+// Every standalone test that needs neither a running instance nor the test database, rather than the curated handful above.
+//
+// `npm run test:standalone` assumes the Docker stack — a handful of those files drive a live server on
+// :3200, and the database-backed ones need the test database. The rest are pure: they import from
+// `server/dist` and assert on logic. Those had no reason to wait for CI, and waiting for CI is exactly how
+// a PR that changed `toRecallRecord`'s output shipped with the test contradicting it still asserting the old shape.
+//
+// THE SPLIT AND THE BATCHING MOVED TO `testing/_shared/standalone-split.mjs`, whole, with the
+// measurements that produced them. `test:standalone` asks the same question, and two copies of it is two
+// places for preflight and the suite to disagree about which gates exist — which is the one divergence
+// that makes a green preflight worthless.
+stages.begin('test:standalone (offline subset)');
+const standaloneSplit = splitStandalone();
+const { all: allStandalone, offline, offlinePure: pure, offlineDb, ciOnly } = standaloneSplit;
+console.log(`
+── standalone tests that need no running instance and no database (${pure.length} of ${allStandalone.length}; `
+  + `${allStandalone.length - offline.length} declare @needs-instance and run in CI) ──`);
+console.log(`  ${offlineDb.length} database test files are not run here; CI's Full run runs them.`);
+console.log(`  ${ciOnly.length} file(s) declare @ci-only (too slow for every push); CI's standalone-pure job runs them.`);
+
+/*
+ * DEFAULT CONCURRENCY — one worker per core — and the flag that was here is gone.
+ *
+ * `--test-concurrency=1` is right for a suite sharing ONE live instance: `testing/integration` run
+ * concurrently latches maintenance mode and reports 314 false failures. These files have no instance to
+ * share; that is what `@needs-instance` declares, and the ones that do are not in this list.
+ *
+ * Measured over the 591 offline files on this machine: 191.0s serialised, 46.6s parallel, both green.
+ * Preflight ran them serially too, so the offline set cost about three and a half minutes twice per
+ * cycle — once here and once in `test:all:core`.
+ *
+ * The database-backed files are NOT in this run, in either mode (Q-588, owner decision 2026-10-22): they share one MongoDB
+ * (`DB_TEST_CONCURRENCY` in the shared split caps them there), a machine without the test stack skipped them silently, and
+ * CI's Full run runs them. `offlineRuns` is the plan `test:standalone` runs too; this keeps its pure batches only, and the
+ * gate `a-preflight-runs-no-database-batch-and-static-is-never-a-push-pass` holds that for both modes.
+ */
+const runs = offlineRuns(standaloneSplit, { ciOnly: false }).filter(r => r.kind === 'pure');
+let standaloneFailed = false;
+// Timing, through the shared helper: one destination per batch, the flags AFTER the plan's own args so the batch
+// budget and the cap stay about the files, and the recorder's credentials out of the children's environment.
+// The suite is `preflight`, not `standalone`: this is a subset, and it must not clear or overwrite a full run's files.
+clearTimingResults('preflight');
+const batchesOfKind = {};
+for (const [i, r] of runs.entries()) {
+  if (runs.length > 1) console.log(`  batch ${i + 1}/${runs.length} — ${r.files.length} ${r.kind} file(s)`);
+  batchesOfKind[r.kind] = (batchesOfKind[r.kind] ?? 0) + 1;
+  const flags = timingReporterFlags({ suite: 'preflight', batch: `${r.kind}-${batchesOfKind[r.kind]}`, scope: STATIC ? 'static' : 'subset' });
+  // An argument array and no shell: through cmd.exe the line is capped at 8 191 characters, and the reporter's flags
+  // on top of a budget-sized batch went over it ("The command line is too long", no test output). CreateProcess
+  // allows 32 767, which is the limit the batch budget is sized under.
+  try { execFileSync('node', ['--test', ...r.args, ...flags.args, ...r.files], { stdio: 'inherit', env: testChildEnv(flags.env) }); } catch {
+    // Keep going: one batch failing must not hide a second failure in a later batch, which is exactly the
+    // information a single all-or-nothing invocation used to give.
+    standaloneFailed = true;
+  }
+}
+if (standaloneFailed) {
+  failures.push({ name: 'test:standalone (offline subset)', why: 'server contracts and pure logic — no Docker needed, so no reason to learn this from CI' });
+}
+
+stages.end();
+conclude([]);

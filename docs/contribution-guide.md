@@ -176,7 +176,7 @@ This section is the short version. [`docs/testing-guide.md`](testing-guide.md) i
 npm run preflight
 ```
 
-Runs every structural gate that does **not** need Docker or the test database — `scripts/preflight.mjs` is the list: the registry, wiring and coverage gates, the documentation gates, docs lint, the standalone files that need neither an instance nor a database, and the client suite (which includes i18n key coverage). No containers. The database-backed standalone files are not run here, and it says how many; they run in CI's Full run.
+Runs every structural gate that does **not** need Docker or the test database — `scripts/preflight.mjs` is the list: the registry, wiring and coverage gates, the documentation gates, docs lint, the standalone files that need neither an instance nor a database, and the client suite (which includes i18n key coverage). No containers. The database-backed standalone files are not run here, and it says how many; they run in CI's Full run. It runs cheapest first (the stages that need no build, then the server build and what imports it, then the client type-check and production build, then the client unit tests, then the standalone batches) and stops at the first failing stage, naming the stages it did not run; the order and each stage's kind are in `scripts/_shared/preflight-stages.mjs`.
 
 `npm run preflight:static` runs the same list without the client suite, the production build and its budgets: about five minutes rather than an hour, for the moment between edits. It is never a push pass, and its verdict says so.
 
