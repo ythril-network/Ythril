@@ -22,14 +22,14 @@ import { EmbedService } from '../../core/embed.service';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { ShellComponent } from './shell.component';
 
-function make(embedded = false) {
+function make(embedded = false, listConflicts: () => unknown = () => of({ conflicts: [] })) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     imports: [ShellComponent, getTranslocoModule()],
     providers: [
       provideRouter([]),
       provideHttpClient(), provideHttpClientTesting(), // the shell loads the caller's personal views once
-      { provide: FilesApi, useValue: { listConflicts: () => of({ conflicts: [] }) } as any },
+      { provide: FilesApi, useValue: { listConflicts } as any },
       { provide: AuthService, useValue: { logout: () => {}, logoutOidc: async () => false } as unknown as AuthService },
       { provide: EmbedService, useValue: { embedded: () => embedded } as unknown as EmbedService },
     ],
@@ -153,6 +153,52 @@ describe('ShellComponent — drawer', () => {
     expect(cmp.drawerOpen()).toBe(true);
     events.next(new NavigationEnd(1, '/settings/spaces', '/settings/spaces'));
     expect(cmp.drawerOpen()).toBe(false);
+  });
+
+  /**
+   * The conflict badge refreshes on a fixed 60 s clock. A background tab does not show the badge, so the tick that
+   * fires while the tab is hidden asks nothing, and the first tick after it is looked at again asks (the clock is not
+   * stopped, so there is no visibility listener to leak). It is a fixed refresh that never stops, which is why it is
+   * not `pollUntil`; the hidden-tab skip is the one guard it shares with it.
+   */
+  describe('the conflict badge refresh', () => {
+    const hide = (hidden: boolean) => Object.defineProperty(document, 'hidden', { configurable: true, value: hidden });
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => { vi.useRealTimers(); hide(false); });
+
+    it('asks every 60 s while the tab is visible', () => {
+      const listConflicts = vi.fn(() => of({ conflicts: [{}, {}] }));
+      const { fixture, cmp } = make(false, listConflicts);
+      fixture.detectChanges();
+      expect(listConflicts).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(60_000);
+      expect(listConflicts).toHaveBeenCalledTimes(2);
+      expect(cmp.conflictCount()).toBe(2);
+      vi.advanceTimersByTime(120_000);
+      expect(listConflicts).toHaveBeenCalledTimes(4);
+    });
+
+    it('does not ask while the tab is hidden, and asks again on the first tick after it is shown', () => {
+      const listConflicts = vi.fn(() => of({ conflicts: [] }));
+      const { fixture } = make(false, listConflicts);
+      fixture.detectChanges();
+      expect(listConflicts).toHaveBeenCalledTimes(1);
+      hide(true);
+      vi.advanceTimersByTime(300_000);
+      expect(listConflicts, 'a hidden tab must not ask').toHaveBeenCalledTimes(1);
+      hide(false);
+      vi.advanceTimersByTime(60_000);
+      expect(listConflicts, 'the refresh resumes when the tab is looked at').toHaveBeenCalledTimes(2);
+    });
+
+    it('stops asking when the shell is destroyed', () => {
+      const listConflicts = vi.fn(() => of({ conflicts: [] }));
+      const { fixture } = make(false, listConflicts);
+      fixture.detectChanges();
+      fixture.destroy();
+      vi.advanceTimersByTime(300_000);
+      expect(listConflicts).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('loads the caller\'s personal views once, for every page under it (Q-531)', () => {

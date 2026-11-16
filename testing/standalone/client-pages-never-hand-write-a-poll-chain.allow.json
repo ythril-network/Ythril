@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "file": "client/src/app/pages/shell/shell.component.ts",
+      "site": "setInterval in ngOnInit",
+      "reason": "A fixed 60 s conflict badge refresh that never stops and asks no question of its answer, so it is not pollUntil's until-told-to-stop; it skips a hidden tab and its spec pins that.",
+      "reviewBy": "2027-05-16"
+    },
+    {
+      "file": "client/src/app/pages/brain/brain-live-stream.ts",
+      "site": "setTimeout in connect",
+      "reason": "The live stream's reconnect after the connection drops: it re-opens an EventSource, asks no condition's answer, and a mint failure deliberately never retries on a timer.",
+      "reviewBy": "2027-05-16"
+    }
+  ]
+}
