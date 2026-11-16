@@ -1,4 +1,4 @@
-import type { Edge, TraverseEdge, TraverseNode } from '../../core/api.types';
+import type { Edge, Entity, TraverseEdge, TraverseNode } from '../../core/api.types';
 import { typeColor, type GraphTheme } from './graph-cytoscape';
 
 /**
@@ -11,6 +11,19 @@ export function panelTitleOf(node: TraverseNode | null, edge: TraverseEdge | nul
   if (node) return node.name;
   if (edge) return edge.label || 'edge';
   return '';
+}
+
+/**
+ * The graph node a root entity stands for. The traversal never returns the root (`buildElements` adds it at depth 0),
+ * so a tap on it, and the panel opened for it when a layout settles, both have to build it from the entity.
+ */
+export function rootAsNode(root: Entity): TraverseNode {
+  return { _id: root._id, name: root.name, type: root.type || 'default', depth: 0, description: root.description, tags: root.tags };
+}
+
+/** The node a tap on `id` selects: one the traversal drew, else the root; undefined when the id is neither. */
+export function nodeForTap(drawn: TraverseNode[], root: Entity | null, id: string): TraverseNode | undefined {
+  return drawn.find(n => n._id === id) ?? (root && root._id === id ? rootAsNode(root) : undefined);
 }
 
 /** The colour of the same selection; the theme's fallback when nothing is selected. */
