@@ -9,6 +9,8 @@
  *                                                     fail (writing nothing) when that run was not listed or is not trusted
  *     node scripts/test-times.mjs --rewrite <key>     record one run again, from its own results
  *     node scripts/test-times.mjs --trend [--last N] [--flags]
+ *     node scripts/test-times.mjs --preflight-trend [--last N]   each preflight stage's time over the last N preflight runs
+ *     node scripts/test-times.mjs --drain-unrecorded  send what the spool holds (the preflight's own record, kept after its verdict)
  *     node scripts/test-times.mjs --summary --results <dir>   the run's page (CI's advisory job); records nothing
  *     node scripts/test-times.mjs --help
  *
@@ -85,12 +87,12 @@
  * Run the tests: `node --test testing/standalone/test-times-*.test.js`
  */
 import { inflateRawSync, crc32 } from 'node:zlib';
-import { readFileSync, readdirSync, writeFileSync, appendFileSync, existsSync, unlinkSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, appendFileSync, existsSync, unlinkSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, relative, resolve, sep, isAbsolute } from 'node:path';
 import { assertBearerSafeUrl, YthrilApiError } from './_shared/ythril-api.mjs';
 import {
-  TEST_RUN_SPEC, TEST_RUN_SCHEMA, TEST_RUN_RETENTION_DAYS, telemetryTypeDeclaration, checkTelemetryProperties, upsertTelemetryRecord,
+  TEST_RUN_SPEC, TEST_RUN_SCHEMA, TEST_RUN_RETENTION_DAYS, PREFLIGHT_RUN_SPEC, TELEMETRY_SPECS, telemetryTypeDeclaration, checkTelemetryProperties, upsertTelemetryRecord,
 } from './_shared/telemetry-record.mjs';
 import { withRecordLock, recordLockPath, lockWaitMs, LOCK_WAIT_ENV, LOCK_WAIT_MS } from './_shared/record-lock.mjs';
 import { newestBy } from './_shared/newest-by.mjs';
@@ -101,7 +103,8 @@ import { readCappedBody } from './_shared/capped-body.mjs';
 import { isEntryPoint } from './_shared/script-cli.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
 import { readTimingLog, timingResultsDir, TEST_RESULTS_DIR_ENV } from '../testing/_shared/timing-reporter.mjs';
-import { makeResultsFolder } from '../testing/_shared/results-folder.mjs';
+import { spoolPayload } from './_shared/unrecorded-spool.mjs';
+import { preflightTrendLines } from './_shared/preflight-run-record.mjs';
 import { maskText } from './_shared/mask-text.mjs';
 import { waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
@@ -497,14 +500,12 @@ const whyOf = (err, shownUrl) => (err instanceof YthrilApiError && err.status !=
 /** A failure that every later call would repeat: the instance is not there, or it refuses this token. */
 const stopsEverything = (err) => !(err instanceof YthrilApiError) || err.status === undefined || err.status === 401 || err.status === 403;
 
-const unrecordedName = (payload) => `${payload.properties.recordKey.replace(/[^A-Za-z0-9._-]/g, '_')}.json`;
-
 function keepPayload(payload, why) {
-  makeResultsFolder(unrecordedDir());
-  const name = unrecordedName(payload);
-  writeFileSync(join(unrecordedDir(), name), JSON.stringify(payload));
-  console.log(`test-times: not recorded: ${why}; kept ${shown(join(unrecordedDir(), name))}`);
+  console.log(`test-times: not recorded: ${why}; kept ${shown(spoolPayload(unrecordedDir(), payload))}`);
 }
+
+/** The record types the spool may hold: a `Test-Run` from this script, a `Preflight-Run` from `scripts/preflight.mjs`. */
+const SPOOLED_SPECS = new Map([TEST_RUN_SPEC, PREFLIGHT_RUN_SPEC].map(s => [s.type, s]));
 
 /** Write the kept payloads that can now be written; whatever cannot stays where it is. */
 async function drainUnrecorded(api, shownUrl) {
@@ -513,12 +514,14 @@ async function drainUnrecorded(api, shownUrl) {
   for (const name of readdirSync(unrecordedDir()).filter(n => n.endsWith('.json')).sort()) {
     const file = join(unrecordedDir(), name);
     let payload;
+    let spec;
     try {
       payload = JSON.parse(readFileSync(file, 'utf8'));
-      if (payload?.type !== CHRONO_TYPE || payload?.space !== SPACE) throw new Error('not a Test-Run payload');
-      assertConforms(payload.properties);
+      spec = SPOOLED_SPECS.get(payload?.type);
+      if (!spec || payload?.space !== spec.space) throw new Error(`not a ${[...SPOOLED_SPECS.keys()].join(' or ')} payload`);
+      checkTelemetryProperties(spec, payload.properties);
     } catch (err) { console.log(`test-times: left ${shown(join(unrecordedDir(), name))}: ${err.message}`); continue; }
-    try { await recordPayload(api, payload); unlinkSync(file); drained++; } catch (err) {
+    try { await upsertTelemetryRecord(api, spec, payload); unlinkSync(file); drained++; } catch (err) {
       console.log(`test-times: left ${shown(join(unrecordedDir(), name))}: ${whyOf(err, shownUrl)}`);
       if (stopsEverything(err)) break;
     }
@@ -636,6 +639,28 @@ function recordUnderLock(payloads, dest) {
       }
     }
   });
+}
+
+/**
+ * `--drain-unrecorded`: send what the spool holds (a `Preflight-Run` the preflight just kept, a `Test-Run` an earlier `--record`
+ * kept) and nothing else. Run by `scripts/preflight.mjs` after its verdict, as a child it kills at a time bound. A recording problem
+ * is a line and exit 0, like `--record`; with no instance the line says so and the files stay.
+ */
+async function drainOnly() {
+  const refused = refuseUnderCi('--drain-unrecorded');
+  if (refused) return refused;
+  if (!existsSync(unrecordedDir())) { console.log('test-times: nothing to record: no test-results/unrecorded'); return 0; }
+  const kept = readdirSync(unrecordedDir()).filter(n => n.endsWith('.json'));
+  const dest = destination();
+  if (!dest.api) { console.log(`test-times: not recorded: ${dest.why}; kept ${kept.length} payload(s) in ${shown(unrecordedDir())}`); return 0; }
+  try { recordLockPath(); lockWaitMs(); } catch (err) { console.log(`test-times: not recorded: ${firstLine(err)}; kept ${kept.length} payload(s) in ${shown(unrecordedDir())}`); return 0; }
+  let locked;
+  try { locked = await withRecordLock(() => drainUnrecorded(dest.api, dest.shownUrl)); } catch (err) {
+    console.log(`test-times: not recorded: ${firstLine(err)}; kept ${kept.length} payload(s) in ${shown(unrecordedDir())}`);
+    return 0;
+  }
+  if (locked === null) console.log(`test-times: not recorded: another recorder holds the record lock (in the git common dir); kept ${kept.length} payload(s) in ${shown(unrecordedDir())}`);
+  return 0;
 }
 
 // ---- --record-ci --------------------------------------------------------------------------------------------------
@@ -1074,6 +1099,7 @@ export function flagSuites(judged, history) {
 // ---- --trend ------------------------------------------------------------------------------------------------------
 
 const TREND_RUNS = 30;
+const PREFLIGHT_TREND_RUNS = 20;
 
 /** Entries of the trend population only: the predicate is asked of the server and checked again here. */
 const trendPredicate = { type: CHRONO_TYPE, 'properties.branch': 'main', 'properties.scope': 'full', 'properties.outcome': 'passed' };
@@ -1166,6 +1192,30 @@ async function trend({ last, flags }) {
     for (const s of flagSuites(judged, history)) { flagged++; console.log(`slow suite: ${group} took ${seconds(s.ms)}, over ${seconds(s.limit)}`); }
   }
   console.log(flagged ? `test-times: ${flagged} flag(s)` : 'test-times: no flags');
+  return 0;
+}
+
+// ---- --preflight-trend --------------------------------------------------------------------------------------------
+
+/** The newest `last` `Preflight-Run` records, read by type and date (embeddings are suppressed; a record is found by filter, never by meaning). */
+async function preflightRows(api, last) {
+  const answer = await api.call('filter', {
+    space: PREFLIGHT_RUN_SPEC.space, collection: 'chrono', filter: { type: PREFLIGHT_RUN_SPEC.type },
+    sort: 'startsAt', dir: 'desc', limit: last, maxChars: PAGE_MAX_CHARS,
+  });
+  const rows = answer?.data?.results;
+  if (!Array.isArray(rows)) throw new YthrilApiError('filter: the answer carried no results', { tool: 'filter' });
+  // The server's type and page size are asked for and checked again, like the other readers'.
+  return rows.filter(r => r?.type === PREFLIGHT_RUN_SPEC.type).sort(newestStartFirst).slice(0, last);
+}
+
+/** The stage times of the last `last` preflight runs, each stage's time per run and its median (`_shared/preflight-run-record.mjs` prints it). */
+async function preflightTrend({ last }) {
+  const dest = destination();
+  if (!dest.api) { console.error(`test-times: cannot read: ${dest.why}`); return 1; }
+  let rows;
+  try { rows = await preflightRows(dest.api, last); } catch (err) { console.error(`test-times: ${whyOf(err, dest.shownUrl)}`); return 1; }
+  for (const line of preflightTrendLines(rows)) console.log(line);
   return 0;
 }
 
@@ -1325,8 +1375,17 @@ export const HELP = `usage: node scripts/test-times.mjs <command>
                            not hold yet is waited for first (the listing is read again, see the two variables below);
                            the named run is walked wherever it sits, past the stop and past the ${BACKFILL_RUNS} runs too.
                            Run by hand.
-  --type-schema            print the schema_update arguments that declare the Test-Run chrono type on the instance
-                           (generated from the recorder's own field list, with its one-year retention)
+  --drain-unrecorded       send what test-results/unrecorded/ holds (a Preflight-Run that scripts/preflight.mjs kept, a Test-Run
+                           an earlier --record kept) and nothing else; exits 0 whenever it could not, the files stay. Run by
+                           scripts/preflight.mjs after its verdict, at a time bound
+  --preflight-trend [--last N]
+                           print the stage times of the newest N preflight runs (default ${PREFLIGHT_TREND_RUNS}): each stage's time in every run
+                           (oldest first; failed, or - for a stage the run never reached), its median over the runs where it
+                           passed, each run's wall time and the median wall time per mode
+  --type-schema [Preflight-Run]
+                           print the schema_update arguments that declare the Test-Run chrono type on the instance
+                           (generated from the recorder's own field list, with its one-year retention); with a type
+                           name, that type's (Test-Run, Trade or Preflight-Run)
   --rewrite <recordKey>    record one run again from its own results (ci:<runId>:<attempt>:<job>:<suite>
                            or the key of a local suite in test-results/)
   --trend [--last N] [--flags]
@@ -1360,6 +1419,21 @@ async function main(argv) {
   const [command, ...rest] = argv;
   if (command === '--help' || command === '-h') { console.log(HELP); return 0; }
   if (command === '--type-schema' && !rest.length) { console.log(JSON.stringify(testRunTypeDeclaration(), null, 2)); return 0; }
+  if (command === '--type-schema' && rest.length === 1) {
+    const spec = TELEMETRY_SPECS.find(s => s.type === rest[0]);
+    if (!spec) { console.error(`test-times: --type-schema names a type this repository declares (${TELEMETRY_SPECS.map(s => s.type).join(', ')}), not ${JSON.stringify(rest[0])}`); return 1; }
+    console.log(JSON.stringify(telemetryTypeDeclaration(spec), null, 2));
+    return 0;
+  }
+  if (command === '--drain-unrecorded' && !rest.length) return drainOnly();
+  if (command === '--preflight-trend') {
+    let last = PREFLIGHT_TREND_RUNS;
+    for (let i = 0; i < rest.length; i++) {
+      if (rest[i] === '--last' && positiveInteger(rest[i + 1] ?? '')) last = positiveInteger(rest[++i]);
+      else { console.error(HELP); return 1; }
+    }
+    return preflightTrend({ last });
+  }
   if (command === '--record' && !rest.length) return recordLocal();
   if (command === '--record-ci' && !rest.length) return recordCi();
   if (command === '--record-ci' && rest.length === 1) {

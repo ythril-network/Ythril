@@ -18,6 +18,9 @@
  * - **Kinds are ascending in cost, and a kind never returns.** `source` reads no build output, `build` compiles or imports
  *   what a build wrote, `test` runs a suite. A `build` stage listed after a `test` stage is a gate waiting behind the
  *   slowest work for nothing; {@link stageOrderViolations} names it.
+ * - **Every stage is timed by the runner (Q-864).** A stage's time is the clock between its `begin` and the next `begin` or `end`,
+ *   read once per boundary; {@link createStageRunner}'s `timings()` lists every planned stage with that time and its outcome
+ *   (`passed`, `failed`, or `not-run` with 0 ms). `scripts/_shared/preflight-run-record.mjs` records that list; nothing parses output.
  * - **A failure ends the run at the next stage boundary.** The stage that failed finishes (a batch failing must not hide a
  *   second failure in a later batch of the same stage), and the next `begin` reports it and stops, naming every stage that
  *   did not run. `onStop` is injected so a test can watch the stop without a process dying.
@@ -105,19 +108,33 @@ export function stageOrderViolations(stages) {
  * @param {boolean} o.isStatic a `--static` run: stages marked `static: false` are not expected
  * @param {(stop: {notRun: string[]}) => never} o.onStop called, once, at the first `begin` that finds a failure; it must not return
  * @param {ReadonlyArray<{name: string, kind: string, static?: boolean}>} [o.stages]
- * @returns {{ begin: (name: string) => void, end: () => void }}
+ * @param {() => number} [o.now] the clock, in milliseconds; injected so a test writes the gaps it expects
+ * @returns {{ begin: (name: string) => void, end: () => void, timings: () => StageTiming[] }}
  */
-export function createStageRunner({ failures, isStatic, onStop, stages = PREFLIGHT_STAGES }) {
+export function createStageRunner({ failures, isStatic, onStop, stages = PREFLIGHT_STAGES, now = Date.now }) {
   const bad = stageOrderViolations(stages);
   if (bad.length) throw new Error(`the preflight's stage list is out of order:\n  ${bad.join('\n  ')}`);
   const plan = stages.filter(s => !(isStatic && s.static === false));
   let next = 0;
   const notRun = () => plan.slice(next).map(s => s.name);
+
+  // The stage open now: when it began and how many failures there were before it, so the failure that ENDS it is the one it caused.
+  let open = null;
+  const finished = [];
+  const closeOpen = (at = now()) => {
+    if (!open) return;
+    finished.push({ name: open.stage.name, kind: open.stage.kind, ms: Math.max(0, Math.round(at - open.startedAt)), outcome: failures.length > open.failuresBefore ? 'failed' : 'passed' });
+    open = null;
+  };
+
   return {
     /** Entered at the top of a stage: stops the run if an earlier stage failed, else checks this is the stage the list says is next. */
     begin(name) {
+      // The previous stage ends where this one begins; a failure it caused is known only now, so it is closed before the stop is decided.
+      const at = now();
+      closeOpen(at);
       if (failures.length > 0) {
-        onStop({ notRun: notRun() });
+        onStop({ notRun: notRun(), stages: this.timings() });
         throw new Error('onStop returned: it must end the run');
       }
       const expected = plan[next];
@@ -125,10 +142,23 @@ export function createStageRunner({ failures, isStatic, onStop, stages = PREFLIG
         throw new Error(`preflight stage order drifted: entered ${JSON.stringify(name)} but the stage list says ${expected ? JSON.stringify(expected.name) : 'the run is over'} is next`);
       }
       next++;
+      open = { stage: expected, startedAt: at, failuresBefore: failures.length };
     },
     /** Entered after the last stage: a stage the script never entered is a gate that stopped running. */
     end() {
+      closeOpen();
       if (next < plan.length) throw new Error(`preflight ended without entering: ${notRun().join(', ')}`);
+    },
+    /**
+     * Every planned stage in order, each with the time the runner measured between its own begin and the next: `passed`, or `failed`
+     * when the run's failure list grew during it; a stage the run never reached is `not-run` with 0 ms. A stage still open is
+     * closed first, so the list is whole whenever it is asked for.
+     */
+    timings() {
+      closeOpen();
+      return [...finished, ...plan.slice(next).map(s => ({ name: s.name, kind: s.kind, ms: 0, outcome: 'not-run' }))];
     },
   };
 }
+
+/** @typedef {{ name: string, kind: string, ms: number, outcome: 'passed' | 'failed' | 'not-run' }} StageTiming */
