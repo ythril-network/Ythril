@@ -31,6 +31,16 @@ read stop the start in the same way, where an empty one was used before. A direc
 answers `500` `file_system_fault` and changes nothing, where it used to act on the part of the tree it could list
 ([Files API](05-files-api.md#every-code-a-file-act-answers)).
 
+**After upgrading to 6.6.0, the record of a file whose bytes this instance no longer has is removed, and that cannot be undone.** Before, such
+a record stayed for good: counted, never listed, so no one could delete it. Once a day per space the instance now looks for records whose bytes
+are missing from its disk and stamps them. A stamped record is removed one day after the stamp when it has a recorded hash, and 30 days after
+when it has none, or when a restore or import brought the space's records back in the last 30 days. It is removed only once every peer this
+instance pulls the space from has completed a sync since, and never while most of the space's files (or a whole top-level directory) are
+missing at once: that looks like an unmounted volume, not lost files. The removal is this instance's only: no tombstone is written, so a peer
+keeps its copy, and one that still holds the bytes sends the file back as an ordinary arrival. **Before upgrading, put back the bytes of every
+file whose record you want to keep** (restore the files volume from a backup); `filesAwaitingBytes` on the space's stats counts the records
+waiting for their bytes, and the audit log names what each pass removed (`file.absent_bytes.sweep`).
+
 **After upgrading to the release that repairs stale embeddings, run `POST /api/spaces/:id/reembed` once per space.** It now also queues
 every record whose stored text is not its current text (`stale` in its answer): a record whose text changed while its embedding job could
 not be queued, which kept the vector and the lexical text of its previous content, and a record a peer sent that this instance

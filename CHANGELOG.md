@@ -72,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** a test that waits on the media worker and times out says what the worker logged during the wait, and whether the queue was still checking the job's space or had set it aside.
 - **Testing:** the database-backed test files can run sharded from inside a container, on shard databases its host started. A run that cannot reach Docker and has no shard count stops and says so, instead of running every file on one database.
 - **Testing:** tests that could only restate a constant's value are removed or rewritten to drive the behaviour the value controls, and a gate refuses new ones.
+- **Docs:** changed: the upgrading guide names the removal of records whose file bytes are gone, its timings and holds, and putting lost bytes back before upgrading.
 - **Build:** the build stops with one line naming the package and `run npm ci` when the install differs from package-lock.json or lacks a package the build needs, instead of failing with misleading type errors.
 
 ### Fixed
