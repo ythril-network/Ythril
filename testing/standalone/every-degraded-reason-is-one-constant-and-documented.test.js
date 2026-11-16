@@ -34,6 +34,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { metricSourceText } from './_metric-sources.mjs';
 import { blockAfter } from './_structural-window.mjs';
 
 const sources = () => readTrackedSources('server/src', { ext: ['.ts'], floor: 100, specs: false });
@@ -94,7 +95,7 @@ describe('the degraded reasons are one constant', () => {
   });
 
   it('the metric pre-declares its series from the constant, not from a list of its own', () => {
-    const registry = stripComments(readFileSync('server/src/metrics/registry.ts', 'utf8'));
+    const registry = stripComments(metricSourceText());
     // The definition, then the pre-declare loop after it, bounded by that loop's own statement end.
     const at = registry.indexOf('export const recallDegradedTotal');
     assert.ok(at > -1, 'recallDegradedTotal is not defined in the registry — re-anchor this gate');

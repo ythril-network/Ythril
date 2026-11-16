@@ -51,9 +51,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { elapse } from '../_shared/sleep.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { metricSourceText } from './_metric-sources.mjs';
 
 const ROOT = process.cwd();
-const REGISTRY_SRC = join(ROOT, 'server/src/metrics/registry.ts');
 const QUOTA_SRC = join(ROOT, 'server/src/quota/quota.ts');
 
 let reg, quota;
@@ -78,7 +78,7 @@ async function scrape() {
 
 describe('the storage collector', () => {
   it('1. reads the cache and never calls the function that walks the disk', () => {
-    const src = readFileSync(REGISTRY_SRC, 'utf8');
+    const src = metricSourceText();
 
     // Strip comments line-first, so this cannot pass on the prose explaining it, and cannot be "fixed" by
     // deleting that prose.
@@ -99,7 +99,7 @@ describe('the storage collector', () => {
   });
 
   it('and the whole registry has no other disk-walking collector', () => {
-    const src = readFileSync(REGISTRY_SRC, 'utf8');
+    const src = metricSourceText();
     const code = src.split(/\r?\n/).filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
     assert.doesNotMatch(code, /\bmeasureUsage\s*\(/,
       'measureUsage() is reachable from the metrics registry again — it walks the files tree and no scrape may');

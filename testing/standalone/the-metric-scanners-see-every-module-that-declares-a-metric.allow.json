@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "file": "testing/standalone/one-definition-of-the-collections.test.js",
+      "reason": "Lists registry.ts among the files that may hold a collections enumeration; it reads no metric declaration, and a split module that held such an array would be flagged by that test itself.",
+      "reviewBy": "2027-05-16"
+    },
+    {
+      "file": "testing/standalone/storage-quota-env-pins.test.js",
+      "reason": "Pins one code site (the storage gauge's getStorageConfig() read) by pattern, not a metric declaration; when that gauge moves to its own module the pin fails loudly and is re-pointed with it.",
+      "reviewBy": "2027-05-16"
+    }
+  ]
+}

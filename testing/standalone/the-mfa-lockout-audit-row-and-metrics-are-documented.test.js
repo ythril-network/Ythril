@@ -31,6 +31,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
+import { metricSourceText } from './_metric-sources.mjs';
 import { enclosingBlockAround } from './_structural-window.mjs';
 
 const AUDIT_GUIDE = readFileSync('docs/integration-guide/13-audit-log-api.md', 'utf8');
@@ -57,7 +58,7 @@ describe('the lockout is auditable and observable', () => {
   });
 
   it('the registry declares both counters, the first by key', () => {
-    const registry = stripComments(readFileSync('server/src/metrics/registry.ts', 'utf8'));
+    const registry = stripComments(metricSourceText());
     const at = registry.indexOf("name: 'ythril_mfa_lockouts_total'");
     assert.ok(at >= 0, 'ythril_mfa_lockouts_total is not declared');
     // The counter's own object literal, bounded by its braces: a label written on the NEXT declaration cannot count.

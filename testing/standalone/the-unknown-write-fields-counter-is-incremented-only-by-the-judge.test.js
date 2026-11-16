@@ -24,13 +24,15 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { metricSources, metricSourceText } from './_metric-sources.mjs';
 import { balancedFrom } from './_structural-window.mjs';
 
 const METRIC = 'ythril_unknown_write_fields_total';
 const JUDGE = 'server/src/contract/write-accepts.ts';
 const LABELS = ['door', 'operation', 'mode', 'outcome'];
 
-const registry = stripComments(readFileSync('server/src/metrics/registry.ts', 'utf8'));
+const metricFiles = metricSources().map(s => s.file);
+const registry = stripComments(metricSourceText());
 
 /** The exported identifier the counter is declared as, and its declaration, or null when it is not registered. */
 function declaration() {
@@ -66,7 +68,7 @@ describe('only the judge increments it', () => {
   it('no module but the registry and the judge refers to the counter, and the judge does', () => {
     assert.ok(d, `${METRIC} is not registered, so there is no identifier to look for`);
     const users = sources
-      .filter(f => f !== 'server/src/metrics/registry.ts')
+      .filter(f => !metricFiles.includes(f))
       .filter(f => new RegExp(`\\b${d.ident}\\b`).test(stripComments(readFileSync(f, 'utf8'))));
     assert.deepEqual(users, [JUDGE], 'the counter is incremented outside the judge (or not at all), so the two doors can count differently');
   });

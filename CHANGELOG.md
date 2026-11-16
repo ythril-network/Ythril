@@ -66,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web:** the graph page reads what a tap selects and hides edge labels through its helper modules; nothing on the page changes.
 - **Web:** the Files page's processing poll lives in a module of its own; nothing on the page changes.
 - **Testing:** the size check fails a tracked file that grows past its limit unless an entry in its allow file names the file, its decomposing ticket and a review date.
+- **Testing:** the metric-source tests read declarations through `testing/standalone/_metric-sources.mjs`, which finds every metrics module that declares a metric; a test fails a scanner that reads `registry.ts` on its own.
 - **Testing:** the local preflight runs its source gates first, then the builds, then the client tests, then the standalone batches, and stops at the first failing stage, naming the stages it did not run.
 - **Testing:** every `node --test` the standalone runner starts is time-bounded: a test or hook pending past 15 minutes fails, and a batch that never exits is ended and named.
 - **Testing:** the standalone harness no longer changes `setTimeout` after a close; it worked around the search-index check fixed below.

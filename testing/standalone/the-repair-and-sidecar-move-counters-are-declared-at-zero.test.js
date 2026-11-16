@@ -22,12 +22,10 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { REPO_ROOT } from './_sources.mjs';
+import { metricSourceText } from './_metric-sources.mjs';
 
 const registry = await import('../../server/dist/metrics/registry.js');
-const REGISTRY_SOURCE = readFileSync(join(REPO_ROOT, 'server', 'src', 'metrics', 'registry.ts'), 'utf8');
+const REGISTRY_SOURCE = metricSourceText();
 
 /** What each series is: its name, its type, and the label values the scrape must carry at 0 (none: one unlabelled sample). */
 const SERIES = Object.freeze([

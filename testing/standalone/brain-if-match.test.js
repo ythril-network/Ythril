@@ -30,6 +30,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { balancedFrom, blockAfter } from './_structural-window.mjs';
+import { metricSourceText } from './_metric-sources.mjs';
 
 const ROOT = process.cwd();
 const src = (p) => readFileSync(join(ROOT, p), 'utf8');
@@ -180,7 +181,7 @@ describe('the metric keeps meaning what it meant', () => {
   it('all three outcomes are pre-declared for all four collections', () => {
     // Absent and zero look identical in a graph and mean opposite things. `refused` staying absent until
     // the first refusal would read as "this instance cannot refuse", which is the opposite of the truth.
-    const code = withoutComments(src('server/src/metrics/registry.ts'));
+    const code = withoutComments(metricSourceText());
     // 'ceiling' joined them in bundle-81: a write refused because the record's own version is at the highest number sync accepts.
     assert.match(code, /for \(const outcome of \['clean', 'collision', 'refused', 'ceiling'\]\)/,
       'the refused series is not pre-declared, so it reads as absent until the first refusal');
