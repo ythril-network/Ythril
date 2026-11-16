@@ -27,11 +27,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { metricSourceText } from './_metric-sources.mjs';
 
 const ROOT = process.cwd();
 const METRICS = ['ythril_scan_holds_total', 'ythril_recall_undecided_total'];
 const doc = readFileSync(join(ROOT, 'docs/integration-guide/11-setup-api.md'), 'utf8');
-const registrySource = readFileSync(join(ROOT, 'server/src/metrics/registry.ts'), 'utf8');
+const registrySource = metricSourceText();
 const { register } = await import('../../server/dist/metrics/registry.js');
 const scrape = await register.metrics();
 

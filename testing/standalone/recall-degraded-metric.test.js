@@ -20,6 +20,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { metricSourceText } from './_metric-sources.mjs';
 
 let register, recallDegradedTotal, REASONS;
 
@@ -92,7 +93,7 @@ describe('ythril_recall_degraded_total', () => {
     // `applyLexicalFusion` cannot tell "no text index" from "nothing matched" — both are an empty
     // result. Counting it would fire on ordinary queries and report degradation where there is none.
     // A metric an operator learns to ignore will not be read on the day it matters.
-    const registrySrc = readFileSync('server/src/metrics/registry.ts', 'utf8');
+    const registrySrc = metricSourceText();
     assert.ok(!registrySrc.includes("'lexical_unavailable'"),
       'the lexical reason must not be declared until it can be distinguished from a normal empty result');
     assert.match(registrySrc, /deliberately NOT counted/,

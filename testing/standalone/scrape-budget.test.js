@@ -43,12 +43,11 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { metricSourceText } from './_metric-sources.mjs';
 import { Gauge } from 'prom-client';
 import { elapse } from '../_shared/sleep.mjs';
 
 const REGISTRY = '../../server/dist/metrics/registry.js';
-const SOURCE = 'server/src/metrics/registry.js'.replace('/dist/', '/src/');
 
 let bust = 0;
 /** Load a fresh registry module with a chosen budget. */
@@ -233,7 +232,7 @@ describe('the scrape budget', () => {
 
 describe('the gate: no async collector may bypass the budget', () => {
   it('9. every async collect() in registry.ts goes through withCollectBudget', () => {
-    const src = readFileSync(SOURCE.replace('.js', '.ts'), 'utf8');
+    const src = metricSourceText();
 
     // Strip comments first, anchored to line starts so a `/*` inside a string literal cannot eat live code —
     // and so this gate cannot fire on the comment block that explains it.
@@ -262,7 +261,7 @@ describe('the gate: no async collector may bypass the budget', () => {
 
   it('every name passed to withCollectBudget is in TIMED_COLLECTORS', async () => {
     const mod = await loadRegistry(null);
-    const src = readFileSync(SOURCE.replace('.js', '.ts'), 'utf8');
+    const src = metricSourceText();
     const used = [...src.matchAll(/withCollectBudget\('([a-z_]+)'/g)].map(m => m[1]);
 
     assert.ok(used.length >= 9, `found only ${used.length} withCollectBudget call sites`);

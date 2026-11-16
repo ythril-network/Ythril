@@ -21,6 +21,7 @@ import { describe, it, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { POSTURE_LEVELS } from '../../server/dist/config/posture-levels.js';
 import { readFileSync } from 'node:fs';
+import { metricSourceText } from './_metric-sources.mjs';
 
 let register, securityPostureChecks, setPostureProvider;
 
@@ -93,7 +94,7 @@ describe('the metric and the endpoint cannot disagree', () => {
     // A posture metric that could disagree with `GET /api/about/security` would be worse than no metric.
     const boot = strip(readFileSync('server/src/index.ts', 'utf8'));
     assert.match(boot, /setPostureProvider\(\(\) => computeSecurityPosture\(\)\.checks\)/);
-    const reg = strip(readFileSync('server/src/metrics/registry.ts', 'utf8'));
+    const reg = strip(metricSourceText());
     assert.ok(!/requireEncryptedTransport|trustProxy|allowInsecurePeers/.test(reg),
       'the registry must not restate any posture rule — it counts what the one computer returns');
   });
@@ -101,7 +102,7 @@ describe('the metric and the endpoint cannot disagree', () => {
   it('the registry does not import the config loader to do it', () => {
     // `registry.ts` is imported by nearly every module; pulling the config loader in here inverts the
     // dependency direction. The provider is registered at boot instead.
-    const reg = strip(readFileSync('server/src/metrics/registry.ts', 'utf8'));
+    const reg = strip(metricSourceText());
     assert.ok(!/from '\.\.\/config\/security-posture/.test(reg));
   });
 });

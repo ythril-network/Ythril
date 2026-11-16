@@ -23,21 +23,11 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { allDocsText } from './_docs.mjs';
+import { declaredMetricNames } from './_metric-sources.mjs';
 
-const SERVER_SRC = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'server', 'src');
-const REGISTRY = join(SERVER_SRC, 'metrics', 'registry.ts');
-/** Modules that declare metrics on the registry's `Registry` when it hands it to them (`sync-tombstone-metrics.ts`, Q-398). */
-const DECLARING_MODULES = [REGISTRY, join(SERVER_SRC, 'metrics', 'sync-tombstone-metrics.ts')];
-
-/** Metric names as the registry declares them, in its own text and in the modules it hands its `Registry` to. */
-function registryMetrics() {
-  const src = DECLARING_MODULES.map(f => readFileSync(f, 'utf8')).join('\n');
-  return [...src.matchAll(/name:\s*'(ythril_[a-z0-9_]+)'/g)].map(m => m[1]);
-}
+/** Metric names as the registry declares them, in its own text and in every module under `server/src/metrics` that declares a metric (found by reading, not listed). */
+const registryMetrics = () => declaredMetricNames();
 
 /** Metric names the docs present as rows of the exposed-metrics table. */
 function documentedMetrics(text) {

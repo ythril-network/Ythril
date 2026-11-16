@@ -33,9 +33,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { join } from 'node:path';
+import { metricSourceText } from './_metric-sources.mjs';
 
 const signals = await import('../../server/dist/util/housekeeping-signals.js');
 
@@ -56,7 +54,6 @@ const QUARANTINED = 'ythril_housekeeping_quarantined_spaces';
 // `not_ready` (bundle-81): a space that owes its positions is skipped by a walk and counted, not failed.
 const KINDS = ['failure', 'timeout', 'store_down', 'stalled', 'not_ready'];
 
-const SOURCE = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'server', 'src', 'metrics', 'registry.ts');
 
 /** Every sample of one series name in a scrape, keyed by its labels in a stable spelling. */
 function samples(text, name) {
@@ -189,7 +186,7 @@ describe('the housekeeping counters are declared at zero', () => {
   });
 
   it('names each metric as a literal in registry.ts (the docs-coverage gate reads that file only)', () => {
-    const src = readFileSync(SOURCE, 'utf8');
+    const src = metricSourceText();
     for (const name of [FAILURE, RECORDS, SKIPPED, QUARANTINED]) {
       assert.ok(src.includes(`name: '${name}'`), `${name} is not declared with a literal name: '...' in metrics/registry.ts`);
     }

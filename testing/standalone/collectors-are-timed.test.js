@@ -35,11 +35,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { enclosingBlockAround } from './_structural-window.mjs';
+import { metricSources } from './_metric-sources.mjs';
 
 const ROOT = process.cwd();
-const SRC = 'server/src/metrics/registry.ts';
-const src = readFileSync(join(ROOT, SRC), 'utf8');
-const lines = src.split(/\r?\n/);
+const sources = metricSources();
+const SRC = 'the metric modules';
+const src = sources.map(s => s.text).join('\n');
 
 /**
  * Collectors that gather nothing and so are exempt from the budget wrapper, with the reason.
@@ -52,21 +53,24 @@ const REPORTING_COLLECTORS = ['ythril_metrics_collect_timeouts_total', 'ythril_m
 /** `{ line, metric, body }` for every async collector in the registry, reporting ones excluded. */
 function collectors() {
   const found = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (!/^\s*async collect\(\)\s*\{/.test(lines[i])) continue;
+  for (const { file, text } of sources) {
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (!/^\s*async collect\(\)\s*\{/.test(lines[i])) continue;
 
-    let metric = null;
-    for (let j = i; j >= 0 && j > i - 14; j--) {
-      const m = lines[j].match(/name: '(ythril_[a-z_]+)'/);
-      if (m) { metric = m[1]; break; }
+      let metric = null;
+      for (let j = i; j >= 0 && j > i - 14; j--) {
+        const m = lines[j].match(/name: '(ythril_[a-z_]+)'/);
+        if (m) { metric = m[1]; break; }
+      }
+      if (metric !== null && REPORTING_COLLECTORS.includes(metric)) continue;
+
+      // Body runs to the closing brace at the collector's own indent.
+      const indent = lines[i].match(/^\s*/)[0];
+      let end = i + 1;
+      while (end < lines.length && !new RegExp(`^${indent}\\},?$`).test(lines[end])) end++;
+      found.push({ file, line: i + 1, metric, body: lines.slice(i, end + 1).join('\n') });
     }
-    if (metric !== null && REPORTING_COLLECTORS.includes(metric)) continue;
-
-    // Body runs to the closing brace at the collector's own indent.
-    const indent = lines[i].match(/^\s*/)[0];
-    let end = i + 1;
-    while (end < lines.length && !new RegExp(`^${indent}\\},?$`).test(lines[end])) end++;
-    found.push({ line: i + 1, metric, body: lines.slice(i, end + 1).join('\n') });
   }
   return found;
 }
@@ -91,7 +95,7 @@ describe('every async metric collector is timed and bounded', () => {
   it('each one routes through withCollectBudget, which times it and bounds it', () => {
     const loose = collectors()
       .filter(c => !c.body.includes('withCollectBudget('))
-      .map(c => `${SRC}:${c.line} (${c.metric})`);
+      .map(c => `${c.file}:${c.line} (${c.metric})`);
     assert.deepEqual(loose, [], 'these gather at scrape time outside the budget wrapper, so they are neither '
       + `timed nor bounded — a slow scrape cannot name them and cannot survive them:\n  ${loose.join('\n  ')}\n\n`
       + "Wrap the body: `await withCollectBudget('<name>', async () => { ... }, () => this.reset());`");
