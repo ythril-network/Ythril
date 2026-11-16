@@ -32,6 +32,33 @@ import { join } from 'node:path';
 
 import { ROOT, CEILING, FROZEN, sourceFiles, codeLines, oversizeFiles } from './_oversize-files.mjs';
 
+const ALLOW = JSON.parse(readFileSync(new URL('./no-new-god-files.allow.json', import.meta.url), 'utf8'));
+
+/**
+ * What is wrong between the files over their limit and the allow entries. An entry is data the gate reads: the
+ * file, the size it is pinned at, the open ticket that decomposes it, why, and a date it is looked at again.
+ */
+function overgrowth(over, entries, sized, today) {
+  const problems = [];
+  const byFile = new Map(entries.map(e => [e.file, e]));
+  for (const o of over) {
+    const e = byFile.get(o.file);
+    if (!e) problems.push(`${o.file}: ${o.code} code lines, limit ${o.limit}, and no entry in no-new-god-files.allow.json`);
+    else if (o.code > e.code) problems.push(`${o.file}: ${o.code} code lines, grown past the ${e.code} its entry pins`);
+  }
+  for (const e of entries) {
+    const row = sized.find(s => s.f === e.file);
+    if (!row) problems.push(`${e.file}: entry names a file that is not a tracked source`);
+    else if (!over.some(o => o.file === e.file)) problems.push(`${e.file}: entry is stale, the file is back under its limit (remove it)`);
+    if (!/^Q-\d+$/.test(String(e.ticket ?? ''))) problems.push(`${e.file}: entry has no ticket (Q-<n>) that decomposes it`);
+    if (!String(e.reason ?? '').trim()) problems.push(`${e.file}: entry has no reason`);
+    const by = new Date(`${e.reviewBy}T00:00:00Z`);
+    if (Number.isNaN(by.getTime())) problems.push(`${e.file}: entry has no reviewBy date`);
+    else if (by < today) problems.push(`${e.file}: entry is past its reviewBy ${e.reviewBy}`);
+  }
+  return problems;
+}
+
 describe('no file grows past what we already carry', () => {
   const files = sourceFiles();
   const sized = files.map(f => ({ f: f.replaceAll('\\', '/'), code: codeLines(readFileSync(join(ROOT, f), 'utf8')) }));
@@ -42,17 +69,38 @@ describe('no file grows past what we already carry', () => {
     assert.ok(sized.some(s => s.code > 500), 'no large file found at all — the counter is probably broken');
   });
 
-  it('a file over its limit is REPORTED for decomposition, never failed', () => {
-    // Owner, 2026-09-28: "It should not block current work. It should flag the file for decomposition, which is a
-    // workitem." Until then this failed the build, and the way out was a raise with a paragraph excusing it. Now
-    // the list is printed here, and the project's ticket check (`{project.oversize-report}`) fails until each
-    // file has an open Work-Item with `decomposes: <path>` — the growth ships, and it becomes queued work.
+  it('a file over its limit fails unless the allow file names it, with its ticket, reason and a review date', () => {
+    // Owner, 2026-09-28: a size limit must not block current work and must flag the file for decomposition. The
+    // ticket check (`{project.oversize-report}`) does that after a merge, and it alone noticed when the Files page
+    // grew to 656 code lines in a green preflight and a green Full run (Q-861). This runs in the preflight and in
+    // CI, so overgrowth is refused before the merge. A file already over its limit stays in
+    // `no-new-god-files.allow.json`, pinned at the size it carries with the open ticket that decomposes it: it
+    // may shrink and it may not grow. Never raise a ceiling to get past this; move a concern out.
     const over = oversizeFiles(sized.map(s => ({ file: s.f, code: s.code })));
-    if (over.length > 0) {
-      console.log('  decompose — over their limit (file a Work-Item with decomposes: <path> for each):\n    '
-        + over.map(o => `${o.file}: ${o.code} code lines, limit ${o.limit}`).join('\n    '));
-    }
-    // The report is only worth having if it measures the limits it names: a file planted over CEILING is found.
+    const problems = overgrowth(over, ALLOW.entries, sized, new Date());
+    assert.deepEqual(problems, [], 'a file is over its size limit and nothing allows it:\n  ' + problems.join('\n  '));
+    console.log(`  ${ALLOW.entries.length} allow entries (files over their limit, each owed a decomposition)`);
+  });
+
+  it('the rule fails a planted overgrowth, a grown entry, a stale entry and an entry missing its reason, ticket or date', () => {
+    const today = new Date('2026-11-16T00:00:00Z');
+    const run = (rows, entries) =>
+      overgrowth(oversizeFiles(rows), entries, rows.map(r => ({ f: r.file, code: r.code })), today);
+    const planted = (code) => ({ file: 'x/planted.ts', code });
+    const allowed = { file: 'x/planted.ts', code: CEILING + 5, ticket: 'Q-1', reason: 'planted', reviewBy: '2027-05-16' };
+    const frozen = Object.entries(FROZEN)[0];
+    assert.equal(run([planted(CEILING + 1)], []).length, 1, 'a file over the ceiling with no entry passed');
+    assert.equal(run([{ file: frozen[0], code: frozen[1] + 1 }], []).length, 1, 'a frozen file that grew passed');
+    assert.deepEqual(run([planted(CEILING + 5)], [allowed]), [], 'an allowed file at its pinned size failed');
+    assert.equal(run([planted(CEILING + 6)], [allowed]).length, 1, 'an allowed file that grew past its pin passed');
+    assert.equal(run([planted(CEILING)], [allowed]).length, 1, 'a stale entry passed');
+    assert.equal(run([planted(CEILING + 5)], [{ ...allowed, reason: '' }]).length, 1, 'an entry without a reason passed');
+    assert.equal(run([planted(CEILING + 5)], [{ ...allowed, ticket: 'later' }]).length, 1, 'an entry without a ticket passed');
+    assert.equal(run([planted(CEILING + 5)], [{ ...allowed, reviewBy: '2026-11-15' }]).length, 1, 'an entry past its review date passed');
+  });
+
+  it('the measurement finds a file past a limit and reads a frozen limit', () => {
+    // The gate is only worth having if it measures the limits it names: a file planted over CEILING is found.
     assert.equal(oversizeFiles([{ file: 'x/planted.ts', code: CEILING + 1 }]).length, 1,
       'a file over the ceiling was not reported — the measurement is blind');
     const frozen = Object.entries(FROZEN)[0];
