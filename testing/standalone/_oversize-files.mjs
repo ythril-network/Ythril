@@ -366,7 +366,10 @@ export const FROZEN = {
   // 690 -> 691: one IMPORT line. `A-5` routes every collection name through `spaceCollection`, which
   // carries the space-id charset check a template string cannot. No behaviour moved into this file —
   // the change is that a name it used to build itself is now asked for.
-  'server/src/brain/recall.ts': 691,
+  // 691 -> 660: the collection suffix per knowledge type, the field projection per type and the parent-file attachment for chunk
+  // results are `recall-rows.ts` (49 code lines), a different subject from the search that stayed: they answer "which collection and
+  // which fields is a recall result read from", with no deadline, embedder or ranking in them. (The file measured 705 when moved.)
+  'server/src/brain/recall.ts': 660,
   // 678 -> 687: two conditional notices on the face card — the enable pin stating what it does NOT reach, and
   // "configured but not in use" for a stored endpoint awaiting acknowledgement. Nine lines of markup, and the
   // first attempt wanted THIRTY because the reasoning was written as HTML comments inside the template. That
