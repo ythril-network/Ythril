@@ -10,6 +10,8 @@ import { FileListingComponent, type FileRow } from './file-listing.component';
 import { sortFileEntries, type FileSortField } from './file-sort';
 import { ViewsStore, injectIsView } from '../../core/views.store';
 import { openSpaceFromLink } from '../../core/space-param';
+import { of } from 'rxjs';
+import { pollUntil, type PollHandle } from '../../core/poll-until';
 import { UnknownSpaceNoticeComponent } from '../../shared/unknown-space-notice.component';
 import { baseName, formatSize, joinPath, parentPath } from './file-format';
 import { FileTreeComponent, type TreeNode } from './file-tree.component';
@@ -720,7 +722,7 @@ export class FileManagerComponent implements OnInit, OnDestroy {
 
   /** 4 s: progress moves a page at a time, so faster only costs requests. `progressAt` shows staleness. */
   private static readonly PROGRESS_POLL_MS = 4_000;
-  private progressPoll: ReturnType<typeof setInterval> | null = null;
+  private progressPoll: PollHandle | null = null;
 
   /** True while any row on screen is still being processed — the only condition that justifies polling. */
   anyInFlight(): boolean {
@@ -731,25 +733,36 @@ export class FileManagerComponent implements OnInit, OnDestroy {
   /** Start or stop the poll to match what is on screen. Called after every listing load. */
   private syncProgressPolling(): void {
     if (this.anyInFlight()) {
-      if (this.progressPoll !== null) return;                    // already running — never stack timers
-      this.progressPoll = setInterval(() => {
-        // A background tab does not need a stage bar. Skipping the tick rather than stopping the timer
-        // means it resumes the moment the tab is looked at again, with no visibility listener to leak.
-        if (typeof document !== 'undefined' && document.hidden) return;
-        this.reloadDir();
-        // The open file's own record goes stale in exactly the same way: the description a document gets
-        // is written when its job finishes, so a detail pane opened during processing showed none until
-        // the file was closed and reopened.
-        const open = this.preview.file();
-        if (open) this.loadSelectedMeta(open);
-      }, FileManagerComponent.PROGRESS_POLL_MS);
+      if (this.progressPoll?.active) return;                     // already running — never stack timers
+      /*
+       * `pollUntil` asks "again until told to stop": it skips a hidden tab and keeps its schedule, so the poll
+       * resumes the moment the tab is looked at, with no visibility listener to leak, and `stop()` ends it.
+       * The request is not an Observable of its own: the listing store owns the request and publishes the
+       * answer through `listed`, which is what retires this poll (syncProgressPolling, above). So the tick
+       * starts the store's reload and answers at once, and the poll goes on while something is in flight.
+       * A failed reload never ends the chain: it is the store's, and the next tick asks again.
+       */
+      this.progressPoll = pollUntil<void>({
+        delayMs: () => FileManagerComponent.PROGRESS_POLL_MS,
+        request: () => {
+          this.reloadDir();
+          // The open file's own record goes stale in exactly the same way: the description a document gets
+          // is written when its job finishes, so a detail pane opened during processing showed none until
+          // the file was closed and reopened.
+          const open = this.preview.file();
+          if (open) this.loadSelectedMeta(open);
+          return of(undefined);
+        },
+        onAnswer: () => this.anyInFlight(),
+      });
     } else {
       this.stopProgressPolling();
     }
   }
 
   private stopProgressPolling(): void {
-    if (this.progressPoll !== null) { clearInterval(this.progressPoll); this.progressPoll = null; }
+    this.progressPoll?.stop();
+    this.progressPoll = null;
   }
 
   @HostListener('dragover', ['$event'])

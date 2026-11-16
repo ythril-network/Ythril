@@ -1292,6 +1292,37 @@ describe('FileManagerComponent — live refresh on the shell tick', () => {
       expect(fixture.componentInstance.listing.entries().length).toBe(1);
     });
 
+    it('skips the tick while the tab is hidden and resumes when it is shown, without a listener', () => {
+      const hide = (hidden: boolean) => Object.defineProperty(document, 'hidden', { configurable: true, value: hidden });
+      try {
+        const { listFiles } = create(PROCESSING);
+        const before = listFiles.mock.calls.length;
+        hide(true);
+        vi.advanceTimersByTime(20_000);
+        expect(listFiles.mock.calls.length, 'a hidden tab must not re-list').toBe(before);
+        hide(false);
+        vi.advanceTimersByTime(4_000);
+        expect(listFiles.mock.calls.length, 'the poll resumes when the tab is looked at').toBeGreaterThan(before);
+      } finally { hide(false); }
+    });
+
+    it('a poll that was stopped and is needed again starts afresh', () => {
+      // The processing file finishes (the poll retires), then another upload lands in the folder: the poll must start again.
+      const { fixture, listFiles } = create(PROCESSING);
+      listFiles.mockReturnValue(of({ entries: IDLE }));
+      vi.advanceTimersByTime(4_000);
+      fixture.detectChanges();
+      const idle = listFiles.mock.calls.length;
+      vi.advanceTimersByTime(20_000);
+      expect(listFiles.mock.calls.length, 'retired while idle').toBe(idle);
+      listFiles.mockReturnValue(of({ entries: PROCESSING }));
+      fixture.componentInstance.reloadDir();
+      fixture.detectChanges();
+      const restarted = listFiles.mock.calls.length;
+      vi.advanceTimersByTime(4_000);
+      expect(listFiles.mock.calls.length, 'a new in-flight row starts the poll again').toBeGreaterThan(restarted);
+    });
+
     it('is cleared on destroy, so it cannot outlive the view', () => {
       const { fixture, listFiles } = create(PROCESSING);
       fixture.destroy();

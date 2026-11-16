@@ -369,8 +369,13 @@ export class ShellComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.views.load();
     this.loadConflictCount();
-    // Refresh badge every 60 s so it tracks new conflicts without a page reload
-    this._pollTimer = setInterval(() => this.loadConflictCount(), 60_000);
+    // Refresh badge every 60 s so it tracks new conflicts without a page reload. A fixed refresh that never stops, so not
+    // pollUntil; it shares that module's one other guard: a hidden tab does not show the badge, so its tick asks nothing,
+    // and the clock is kept so the refresh resumes the moment the tab is looked at (no visibility listener to leak).
+    this._pollTimer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      this.loadConflictCount();
+    }, 60_000);
     // Close the drawer whenever navigation completes, so tapping a link on
     // mobile takes the user to the page and dismisses the overlay.
     this._navSub = this.router.events
