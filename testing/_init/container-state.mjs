@@ -63,10 +63,14 @@ function dockerAsk(argv, timeoutMs) {
   });
 }
 
-/** `promise`, or a rejection after `ms`: an injected or real ask that never answers cannot hold the run. */
+/**
+ * `promise`, or a rejection after `ms`: an injected or real ask that never answers cannot hold the run. The timer is
+ * NOT unref'd: it is what keeps the process alive until the bound answers; unref'd, a hung ask with nothing else alive
+ * let the event loop end with the race still pending (bundle-288's first Full run). It is cleared as soon as either settles.
+ */
 function within(promise, ms) {
   let timer;
-  const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`no answer in ${ms} ms`)), ms); timer.unref?.(); });
+  const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`no answer in ${ms} ms`)), ms); });
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
 

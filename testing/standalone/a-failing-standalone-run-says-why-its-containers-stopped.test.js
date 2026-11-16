@@ -25,7 +25,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { testChildEnv } from '../_shared/test-child-env.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { reportContainerState, reportThenStop } from '../_init/container-state.mjs';
 
@@ -122,6 +124,18 @@ describe('a failing run reads the state before it removes the containers, and th
     await reportThenStop({ failed: true, projects: ['p'], ask: hung, print, timeoutMs: 40, stop: async () => { stopped = true; } });
     assert.equal(stopped, true);
     assert.ok(lines.some(l => /docker not reachable/.test(l)));
+  });
+
+  // The case above passed locally and failed in CI ("Promise resolution is still pending but the event loop has already
+  // resolved"): the bound's timer was unref'd, and only other handles in a busy process kept the loop alive. A fresh
+  // process with nothing else alive is the honest test of a bound that must hold the run until it answers.
+  it('in a process with nothing else alive, a hung inspect is still given up on and stop runs', () => {
+    const mod = new URL('../_init/container-state.mjs', import.meta.url).href;
+    const script = `import { reportThenStop } from ${JSON.stringify(mod)};
+      await reportThenStop({ failed: true, projects: ['p'], ask: () => new Promise(() => {}), print: () => {}, timeoutMs: 40, stop: async () => { console.log('stopped'); } });`;
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 20000, env: testChildEnv() });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /stopped/);
   });
 
   it('an inspect that throws, and a print that throws, still let stop run', async () => {
