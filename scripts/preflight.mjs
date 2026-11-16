@@ -32,7 +32,10 @@
  * failure; every failure on 2026-11-16 was one of those gates. A stage that fails finishes (a second failing batch of the
  * same stage is still shown), the next stage is not started, and the summary names every stage that did not run. Each
  * stage opens with `stages.begin(<name>)`, which throws when the script enters a stage out of the list's order, so the
- * code and the list cannot drift apart. No caller asks for the old run-everything behaviour (package.json, the
+ * code and the list cannot drift apart. The runner times each stage, and after the verdict the run records one `Preflight-Run`
+ * (each stage's name, kind, time and outcome; Q-864): spooled to test-results/unrecorded, sent through `scripts/test-times.mjs`
+ * within a bound, and a recording that fails is one line and changes neither the verdict nor the exit status. `node
+ * scripts/test-times.mjs --preflight-trend` prints the stage times of the last runs. No caller asks for the old run-everything behaviour (package.json, the
  * in-container runner and `~/.claude/hooks/preflight-mark.js` all run it bare), so there is no flag for it.
  *
  * Usage:  npm run preflight
@@ -52,6 +55,7 @@ import { timingResultsDir } from '../testing/_shared/timing-reporter.mjs';
 import { stampRunnerOutcome } from './mask-client-report.mjs';
 import { CLIENT_RESULTS, clientCommandWritingTo } from './_shared/client-results.mjs';
 import { SOURCE_GATES, BUILT_GATES, createStageRunner } from './_shared/preflight-stages.mjs';
+import { buildPreflightRunPayload, preflightRunIdentity, recordPreflightRun } from './_shared/preflight-run-record.mjs';
 
 /**
  * `--static`, and nothing else: an unknown argument is refused rather than ignored, because `--statc` falling through
@@ -72,6 +76,27 @@ const CLIENT_REPORT = join(timingResultsDir(process.cwd()), CLIENT_RESULTS);
 const run = (cmd, opts = {}) => execSync(cmd, { stdio: 'inherit', env: testChildEnv(), ...opts });
 
 const failures = [];
+const STARTED_AT = new Date().toISOString();
+
+/**
+ * The record of this run (Q-864), made after the verdict is printed: the runner's own stage times, written to the spool and sent
+ * within a bound. It never throws and its one line is all the run says about it: a recording that fails changes neither the verdict
+ * nor the exit status, which are decided before this is called (`_shared/preflight-run-record.mjs`).
+ */
+function recordRun() {
+  try {
+    return recordPreflightRun(buildPreflightRunPayload({
+      stages: stages.timings(), mode: STATIC ? 'static' : 'full', startedAt: STARTED_AT, endedAt: new Date().toISOString(),
+      ...preflightRunIdentity(process.cwd()),
+    }));
+  } catch (err) { return `preflight: stage times not recorded: ${String(err?.message ?? err).split('\n')[0]}`; }
+}
+
+/** The one way out of a run: the record first, then the exit with the verdict's code. */
+function finish(code) {
+  console.log(`\n${recordRun()}`);
+  process.exit(code);
+}
 
 /**
  * The verdict, and the end of the run: called after the last stage, and by the runner at the first stage boundary that finds
@@ -85,13 +110,13 @@ function conclude(notRun) {
     console.log(STATIC
       ? 'Preflight STATIC passed - not a push pass. The client unit tests, the production build and the bundle budgets did not run.'
       : 'Preflight PASSED. The database test files and the Docker-dependent suites (integration, sync, red-team) run in CI.');
-    process.exit(0);
+    finish(0);
   }
   console.log(`Preflight ${STATIC ? 'STATIC FAILED' : 'FAILED'} — ${failures.length} gate(s):\n`);
   for (const f of failures) console.log(`  ${f.name}\n      ${f.why}`);
   if (notRun.length > 0) console.log(`\nNot run (the first failing stage ended the run): ${notRun.join(', ')}`);
   console.log('\nEach of these catches something that produces no error on its own. Fix before pushing.');
-  process.exit(1);
+  finish(1);
 }
 
 const stages = createStageRunner({ failures, isStatic: STATIC, onStop: ({ notRun }) => conclude(notRun) });

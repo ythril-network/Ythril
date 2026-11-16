@@ -153,8 +153,41 @@ export const TRADE_SPEC = checkedSpec({
   retention: { days: 365 },
 });
 
+/** Bumped when the list below changes; a reader skips a record of a version it does not know. */
+export const PREFLIGHT_RUN_FORMAT_VERSION = 1;
+
+/**
+ * The properties of one `Preflight-Run` entry: ONE run of `scripts/preflight.mjs` on one machine (Q-864), written by
+ * `scripts/_shared/preflight-run-record.mjs`. A chrono property cannot be an array, so the stages are one JSON string
+ * (`[{ name, kind, ms, outcome }]`, in the order the run planned them; `outcome` is `passed`, `failed` or `not-run`).
+ * `firstFailingStage` is absent on a pass: a property cannot be null.
+ */
+export const PREFLIGHT_RUN_SCHEMA = Object.freeze({
+  recordKey: text('`local:<host>:<startedAt>:preflight`. The identity: a second recording of the same run finds this one.'),
+  formatVersion: count('The version of this list; a reader skips a record of a version it does not know.'),
+  source: { type: 'string', required: true, values: ['local'], doc: 'Where the run happened: a preflight is a local run (CI runs its own jobs).' },
+  commit: text('The full commit sha the working tree was on, or `unknown` outside a git checkout.'),
+  branch: text('The branch git reported, or `unknown`.'),
+  dirty: { type: 'boolean', required: true, doc: 'The working tree had uncommitted changes.' },
+  host: text('`os.hostname()`: stage times are only comparable on one machine.'),
+  mode: { type: 'string', required: true, values: ['full', 'static'], doc: 'A full run, or `--static` (which leaves out the client unit tests, the production build and its budgets).' },
+  outcome: { type: 'string', required: true, values: ['passed', 'failed'], doc: '`failed` when any stage failed.' },
+  firstFailingStage: { type: 'string', required: false, doc: 'The first stage whose outcome is `failed`; absent on a pass.' },
+  wallMs: count('The clock time of the whole run, in milliseconds.'),
+  stageCount: count('How many stages the run planned (the length of `stages`).'),
+  stages: text('JSON: `[{ name, kind, ms, outcome }]` for every planned stage in run order; a stage the run never reached is `not-run` with 0 ms.'),
+});
+
+export const PREFLIGHT_RUN_SPEC = checkedSpec({
+  space: TELEMETRY_SPACE,
+  type: 'Preflight-Run',
+  description: 'One run of scripts/preflight.mjs: each stage\'s name, kind, time and outcome, with the commit, branch, host and mode, written by that script after its verdict (spooled in test-results/unrecorded when the instance is unreachable). Found by date and filter, never by meaning: embeddings are suppressed. A passed date means nothing here. Kept one year.',
+  schema: PREFLIGHT_RUN_SCHEMA,
+  retention: { days: 365 },
+});
+
 /** Every record type this repository declares. A gate derives its subjects from this list, so a type added here is held at once. */
-export const TELEMETRY_SPECS = Object.freeze([TEST_RUN_SPEC, TRADE_SPEC]);
+export const TELEMETRY_SPECS = Object.freeze([TEST_RUN_SPEC, TRADE_SPEC, PREFLIGHT_RUN_SPEC]);
 
 /**
  * The arguments of the `schema_update` call that declares the type on the spec's space, generated from the spec: the writer and
