@@ -77,6 +77,7 @@ import {
 } from './write-bound.js';
 import type { EndedOperation } from './write-bound.js';
 import { StoreTimeout } from './write-timeout.js';
+import { isMaxTimeExpired } from './max-time.js';
 import { carriesErrorLabel, storeIsNotAnswering } from './store-condition.js';
 import { log, peerText } from '../util/log.js';
 import { backoffDelayMs } from '../util/backoff.js';
@@ -299,6 +300,12 @@ export async function inBoundedTransaction<T>(
           // The bound ending a later attempt (its early-deadline throw, the commit's race, the write-bound scope) says no cause of its own.
           if (err instanceof StoreTimeout && err.cause === undefined && lastFailure !== undefined) {
             throw new StoreTimeout('the transaction', { cause: lastFailure });
+          }
+          // The server ending a statement because the transaction's deadline passed: an attempt begun with a few ms left sends
+          // that few ms as its `maxTimeMS`, and MaxTimeMSExpired is the bound's end, not a failure of the store's own. A statement's
+          // time limit that ends it BEFORE the deadline is not the bound's, and is thrown as it came.
+          if (!(err instanceof StoreTimeout) && isMaxTimeExpired(err) && Date.now() >= deadline) {
+            throw new StoreTimeout('the transaction', { cause: lastFailure ?? err });
           }
           throw err;
         }
