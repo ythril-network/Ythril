@@ -96,7 +96,7 @@ function fixture(collection, id, seq, over = {}) {
 /** The stored document interface of each replicated family (`server/src/config/types.ts`); a family with none here fails the round trip. */
 const FAMILY_DOC = { facts: 'FactDoc', entities: 'EntityDoc', edges: 'EdgeDoc', chrono: 'ChronoEntry', links: 'LinkDoc', files: 'FileMetaDoc' };
 /** The field count each interface derived to when the round trip was made field-by-field (Q-792): a reader that finds fewer has broken. */
-const FIELD_FLOOR = { facts: 20, entities: 19, edges: 25, chrono: 27, links: 11, files: 39 };
+const FIELD_FLOOR = { facts: 21, entities: 21, edges: 27, chrono: 29, links: 11, files: 42 };
 /** Declared fields a restore deliberately does not bring back that NOT_CARRIED_BY_BACKUP does not name, each with its reason. */
 const NOT_RESTORED = JSON.parse(fs.readFileSync(new URL('./an-import-restores-what-the-export-wrote-db.allow.json', import.meta.url), 'utf8')).entries;
 const notRestored = (family, field) => NOT_RESTORED.find(e => e.family === family && e.field === field);
@@ -116,6 +116,7 @@ const SEED_BY_TYPE = {
   Date: () => new Date('2028-02-02T00:00:00.000Z'),
   AuthorRef: () => ({ ...author }),
   'Record<string, string | number | boolean>': () => ({ seededText: 'v', seededNumber: 2, seededFlag: true }),
+  'Record<string, string>': () => ({ 'peer-x': 'sha-agreed' }),
   '[number, number, number, number]': () => [0.1, 0.2, 0.3, 0.4],
 };
 /** Fields whose value has a meaning or a validator a type-derived value would miss (the record's identity, ISO stamps, enums). */
@@ -139,6 +140,8 @@ const SEED_BY_FIELD = {
   retiredBy: () => 'bytes-lost',
   schemaFingerprint: () => 'ab'.repeat(32), // a sha256 in lowercase hex: a malformed stamp is read as absent (withoutMalformedStamp)
   stampSkew: () => ({ property: 'when', stamp: '2026-05-01T00:00:00.000Z', skewMs: -86_400_000, thresholdMs: 3_600_000 }),
+  forkOf: () => 'trip-parent',
+  forkAt: () => 7, // an integer seq: the shared version a fork's id is derived from (forkRowVerdict)
   recurrence: () => ({ freq: 'weekly', interval: 2, until: iso(CREATED + 90 * DAY_MS) }),
 };
 
@@ -558,7 +561,11 @@ describe('the admin import restores what the export wrote', { skip }, () => {
       // listed here; the seeded row covers it; every field comes back deep-equal (a Date a Date), or is NOT_CARRIED_BY_BACKUP and does
       // not come back, or is in this file's not-restored list with a reason. Seen red by mutation (a carried field projected out of
       // the export at admin-space-transfer.ts), restored by hand.
-      const { forkIdFor } = await import('../../server/dist/sync/upsert-plan.js');
+      const { forkIdFor, forkRowVerdict } = await import('../../server/dist/sync/upsert-plan.js');
+      const { authoredContentHash } = await import('../../server/dist/sync/authored-content.js');
+      // A fork EDGE shares its subject's five identity fields, so the import stores one only where the space's identity index is the partial one
+      // (`edge_identity_building`, 503, otherwise: the sender keeps it and offers it again). A space is converted at boot; this one is made by the test.
+      await (await import('../../server/dist/spaces/edge-identity-index.js')).ensurePartialEdgeIdentity(SPACE);
       const seeded = [];
       const wrong = [];
       let seq = 200;
@@ -567,11 +574,13 @@ describe('the admin import restores what the export wrote', { skip }, () => {
         const fields = recordDocFields(FAMILY_DOC[c]);
         assert.ok(fields.length >= FIELD_FLOOR[c], `${FAMILY_DOC[c]}: only ${fields.length} field(s) derived, floor ${FIELD_FLOOR[c]} — the reader or the type moved`);
         const doc = tripRow(c, c === 'files' ? 'trip/a.md' : `trip-${c}`, ++seq, fields);
-        // A seeded `forkOf` makes the row a FORK, which every door refuses unless its id derives from its subject (`forkRowVerdict`): a fact
-        // fork with no `forkAt` derives from its parent, its seq and its text, as 5.6.2 wrote them.
+        // A seeded `forkOf` makes the row a FORK, which every door refuses unless its id derives from its subject (`forkRowVerdict`): the id is
+        // `forkIdFor(forkOf, forkAt, authoredContentHash(family, row).text)`, the text being the row's body without its version fields. A row that
+        // declares one of the two marks and not the other is no fork any door accepts, so it fails here rather than seeding a row no backup holds.
         if (typeof doc.forkOf === 'string') {
-          assert.equal(c, 'facts', `${FAMILY_DOC[c]} now declares forkOf: derive its fork id here (forkRowVerdict) before seeding it`);
-          doc._id = forkIdFor(doc.forkOf, doc.seq, doc.fact);
+          assert.equal(typeof doc.forkAt, 'number', `${FAMILY_DOC[c]} declares forkOf and not forkAt: a fork row with no forkAt derives from nothing a peer can verify`);
+          doc._id = forkIdFor(doc.forkOf, doc.forkAt, authoredContentHash(c, doc).text);
+          assert.equal(forkRowVerdict(c, doc, authoredContentHash(c, doc).text), 'ok', `${c}: the seeded fork row's id does not derive (forkRowVerdict)`);
         }
         const id = doc._id;
         const declared = new Set(fields.map(f => f.name));

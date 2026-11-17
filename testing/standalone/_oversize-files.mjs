@@ -458,7 +458,11 @@ export const FROZEN = {
   //
   // 518 -> 506 (bundle-236): `FaceRecognitionConfig` moved WHOLE to `types-face-recognition.ts` (`FileMetaDoc.sourceSha256` would have taken the
   // file past 518). The ceiling follows the file down.
-  'server/src/config/types.ts': 506,
+  //
+  // 506 -> 490 (Q-730, bundle-322): the file measured 507 over 506 (`fileChangeFeedWindowDays`). The OIDC sign-in types (`OidcClaimRule`,
+  // `OidcClaimMapping`, `OidcConfig`) moved WHOLE to `types-oidc.ts`, whose one reader is the sign-in flow; the four fields `FileMetaDoc`
+  // gained (Q-797: `_expireAt`, `syncBase`, `suppressEmbeddings`, `authoredKeys`) are in the 490. The ceiling follows the file down.
+  'server/src/config/types.ts': 490,
   'client/src/app/pages/settings/data.component.ts': 644,
   // RAISED 646 -> 647 by ONE line: the Q-6 narrowing swapped `resolveMemberSpaces` for `memberSpacesForRequest`,
   // and this file no longer needed the old import, so it gained an import line and lost none. Not growth in any

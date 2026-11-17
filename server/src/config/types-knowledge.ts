@@ -193,6 +193,20 @@ export interface SchemaStamped {
   schemaFingerprint?: string;
 }
 
+/**
+ * The fork marks a forking family's row carries (facts, entities, edges and chrono entries), declared as their `Incoming*` schemas carry them
+ * (`sync/incoming-schemas.ts`): `forkOf` names the record this row is the other version of (its subject), and `forkAt` is the shared version the
+ * two copies diverged at, the seq the fork's `_id` is derived from (`forkRowVerdict`, `sync/upsert-plan.ts`). Both are absent on a record that is no
+ * fork, and `forkAt` on a 5.6 fact fork.
+ *
+ * Extend this rather than copying the fields: the export/import round trip covers the fields an interface declares, so a mark declared on one
+ * family only is a mark no backup test sees on the others (`a-stored-field-is-declared-by-its-record-interface`).
+ */
+export interface ForkMarked {
+  forkOf?: string;
+  forkAt?: number;
+}
+
 export interface StampSkewable {
   /**
    * Set only when this record's own timestamp property disagreed with the server's `createdAt` beyond the space's

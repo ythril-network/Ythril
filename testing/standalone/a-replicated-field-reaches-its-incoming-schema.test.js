@@ -580,9 +580,9 @@ describe('the gate sees a field taken away from the schema or the hash', () => {
       const merkle = merkleOf(setBody);
       // `FactDoc` names the stamp through `extends ..., SchemaStamped` (an inherited field is no line of its body, which is what `docFields` reads), so the mutation
       // writes it into the body: a document whose own interface declares the stamp.
-      const types = real.types.replace('export interface FactDoc extends StampSkewable, SchemaStamped {', 'export interface FactDoc extends StampSkewable, SchemaStamped {\n  schemaFingerprint?: string;');
+      const types = real.types.replace('export interface FactDoc extends StampSkewable, SchemaStamped, ForkMarked {', 'export interface FactDoc extends StampSkewable, SchemaStamped, ForkMarked {\n  schemaFingerprint?: string;');
       const shared = real.shared.replace('export const IncomingFactDoc = z.object({\n', 'export const IncomingFactDoc = z.object({\n  schemaFingerprint: z.string().optional(),\n');
-      assert.notEqual(types, real.types, 'the types mutation changed nothing: FactDoc is no longer declared as `extends StampSkewable, SchemaStamped` - re-anchor it');
+      assert.notEqual(types, real.types, 'the types mutation changed nothing: FactDoc is no longer declared as `extends StampSkewable, SchemaStamped, ForkMarked` - re-anchor it');
       assert.notEqual(shared, real.shared, 'the schema mutation changed nothing - re-anchor it');
       // The local-only lists as they are, plus the set this `merkle` declares: the sources `analyse` is handed.
       const lists = read(LOCAL_ONLY) + '\n' + read(RETAGGED) + '\n' + merkle;

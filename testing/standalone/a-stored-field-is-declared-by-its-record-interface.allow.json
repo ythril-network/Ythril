@@ -1,0 +1,7 @@
+{
+  "entries": [
+    { "field": "deliveredBy", "reviewBy": "2027-05-17", "reason": "this instance's own classified local state (LOCAL_ONLY_FIELDS), declared on no record interface; the round trip's leak check passes it through localOnly, and Q-797 names no such field" },
+    { "field": "writtenHere", "reviewBy": "2027-05-17", "reason": "this instance's own classified local state (LOCAL_ONLY_FIELDS), declared on no record interface; stamped afresh by every import's landing, so a round trip cannot compare it" },
+    { "field": "_resolvedElsewhere", "reviewBy": "2027-05-17", "reason": "this instance's own classified local state (LOCAL_ONLY_FIELDS), declared on no record interface; it lives only on a fork row, which the seeded row would have to make a decision-owed one" }
+  ]
+}
