@@ -143,7 +143,7 @@ export function recordPreflightRun(payload, { cwd = process.cwd(), env = process
 const seconds = (ms) => `${(ms / 1000).toFixed(1)} s`;
 
 /** The median of numbers: the middle one, the mean of the two middle ones for an even count; undefined for none. */
-function medianOf(values) {
+export function medianOf(values) {
   if (!values.length) return undefined;
   const s = [...values].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);

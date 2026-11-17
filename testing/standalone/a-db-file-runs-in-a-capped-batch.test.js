@@ -24,7 +24,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { splitStandalone, offlineRuns, DB_TEST_CONCURRENCY } from '../_shared/standalone-split.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
@@ -68,6 +68,22 @@ describe('a db file runs in a capped batch', () => {
       const src = stripComments(readFileSync(f, 'utf8'));
       assert.match(src, /\bofflineRuns\(/, `${f} imports the split and does not run its plan`);
       assert.doesNotMatch(src, /batched\(\s*(offline|pure)\b/, `${f} batches the offline half itself — a second copy of the plan`);
+    }
+  });
+
+  it('a runner that cuts the plan\'s pure runs into slow-first units (slowFirstUnits) still runs the plan, and hands the step runs, never files it picked itself', () => {
+    // `slowFirstUnits(runs, times, ...)` (scripts/_shared/slow-first-units.mjs) takes the plan's pure runs and answers units: a runner that
+    // calls it must have got `runs` from `offlineRuns` (the plan, db files capped), and must not cut the offline half by hand beside it.
+    // `git grep` exits 1 when nothing matches: that is "no caller yet", answered by the assertion below, not a crash of the listing.
+    const listed = spawnSync('git', ['grep', '-l', 'slowFirstUnits(', '--', 'scripts', 'testing/_init'], { encoding: 'utf8' });
+    assert.ok(listed.status === 0 || listed.status === 1, `git grep failed: ${listed.stderr}`);
+    const callers = listed.stdout.split('\n').filter(f => f.endsWith('.mjs') && f !== 'scripts/_shared/slow-first-units.mjs');
+    assert.ok(callers.includes('scripts/preflight.mjs'), `no runner calls slowFirstUnits (found: ${callers.join(', ') || 'none'}): preflight cuts its pure units through it`);
+    for (const f of callers) {
+      const src = stripComments(readFileSync(f, 'utf8'));
+      assert.match(src, /\bofflineRuns\(/, `${f} calls slowFirstUnits and does not run the shared plan to get its runs`);
+      assert.match(src, /import\s*\{[^}]*\bslowFirstUnits\b[^}]*\}\s*from\s*['"][^'"]*slow-first-units\.mjs['"]/, `${f} calls slowFirstUnits without importing it from the shared module`);
+      assert.doesNotMatch(src, /batched\(/, `${f} batches files itself beside the slow-first step — a second copy of the plan`);
     }
   });
 });

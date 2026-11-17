@@ -57,7 +57,8 @@ describe('preflight', () => {
     const settings = [...src.matchAll(/--test-concurrency=\$\{([^}]*)\}/g)].map(m => m[1].trim());
     assert.ok(settings.length > 0, 'scripts/preflight.mjs sets no --test-concurrency for its pure units');
     for (const s of settings) {
-      assert.match(s, /^workersPerUnit\(\s*UNIT_WIDTH\s*\)$/, `preflight sets --test-concurrency=\${${s}}, not \${workersPerUnit(UNIT_WIDTH)}`);
+      // A unit the recorded times put alone (Q-869, `.slow`) runs with one worker, the only other setting; every other unit takes workersPerUnit.
+      assert.match(s, /^(?:[\w.[\]]+\.slow\s*\?\s*1\s*:\s*)?workersPerUnit\(\s*UNIT_WIDTH\s*\)$/, `preflight sets --test-concurrency=\${${s}}, not \${workersPerUnit(UNIT_WIDTH)} (or one worker for a unit that runs alone)`);
     }
   });
 });

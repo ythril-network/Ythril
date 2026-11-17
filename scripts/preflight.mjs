@@ -60,7 +60,8 @@ import { timingResultsDir } from '../testing/_shared/timing-reporter.mjs';
 import { stampRunnerOutcome } from './mask-client-report.mjs';
 import { CLIENT_RESULTS, clientCommandWritingTo } from './_shared/client-results.mjs';
 import { PREFLIGHT_STAGES, SOURCE_GATES, BUILT_GATES, createStageRunner, planStages, runStages } from './_shared/preflight-stages.mjs';
-import { readStageCosts } from './_shared/stage-costs.mjs';
+import { readStageCosts, readFileTimes } from './_shared/stage-costs.mjs';
+import { slowFirstUnits } from './_shared/slow-first-units.mjs';
 import { buildPreflightRunPayload, preflightRunIdentity, recordPreflightRun } from './_shared/preflight-run-record.mjs';
 
 /**
@@ -461,18 +462,28 @@ stage('test:standalone (offline subset)', async () => {
    * gate `a-preflight-runs-no-database-batch-and-static-is-never-a-push-pass` holds that for both modes.
    */
   const runs = offlineRuns(standaloneSplit, { ciOnly: false }).filter(r => r.kind === 'pure');
+  // The slowest pure files start first and wait behind nothing (Q-869): the recorded per-file times (`test-results/file-times.json`, written by
+  // the host, never fetched here) put each file of 15 s or more in a unit of its own, slowest first, at the front; at most 2 x UNIT_WIDTH of
+  // them, so the units that run alone do not outnumber the workers. The other files stay in the batches `offlineRuns` cut. With no usable
+  // snapshot the units are those batches in list order, and the line says why.
+  const UNIT_WIDTH = 4;
+  const fileTimes = readFileTimes(timingResultsDir(process.cwd()));
+  const planned = slowFirstUnits(runs, fileTimes.times, { maxSlow: 2 * UNIT_WIDTH });
+  const slowAlone = planned.filter(u => u.slow).length;
+  console.log(fileTimes.times
+    ? `preflight: units: ${slowAlone} slow file(s) run alone first, from the times of ${fileTimes.times.runs} recorded run(s); ${planned.length - slowAlone} other unit(s) follow`
+    : `preflight: units are cut by path length, in list order (${fileTimes.why})`);
   // Timing, through the shared helper: one destination per unit, the flags AFTER the plan's own args so the batch budget stays about the
   // files, and the recorder's credentials out of the children's environment (`runTestUnits` builds it with `testChildEnv`). The label is the
   // unit's place in the list, fixed here before any unit launches, so two units never write one file whatever order they end in.
   // The suite is `preflight`, not `standalone`: this is a subset, and it must not clear or overwrite a full run's files (the stage-cost
   // snapshot is not a `preflight-*` file, so the clear leaves it).
   clearTimingResults('preflight');
-  const UNIT_WIDTH = 4;
-  const units = runs.map((r, i) => ({ files: r.files, args: r.args, flags: timingReporterFlags({ suite: 'preflight', batch: `pure-${i + 1}`, scope: STATIC ? 'static' : 'subset' }) }));
-  console.log(`  ${runs.length} batch(es) of pure files, ${UNIT_WIDTH} at a time`);
+  const units = planned.map((r, i) => ({ files: r.files, args: r.args, slow: r.slow, flags: timingReporterFlags({ suite: 'preflight', batch: `pure-${i + 1}`, scope: STATIC ? 'static' : 'subset' }) }));
+  console.log(`  ${units.length} unit(s) of pure files, ${UNIT_WIDTH} at a time`);
   const { failed } = await runTestUnits(units.map(u => u.files), {
     width: UNIT_WIDTH,
-    args: (files, i) => [`--test-concurrency=${workersPerUnit(UNIT_WIDTH)}`, ...units[i].args, ...units[i].flags.args],
+    args: (files, i) => [`--test-concurrency=${units[i].slow ? 1 : workersPerUnit(UNIT_WIDTH)}`, ...units[i].args, ...units[i].flags.args],
     envOf: (files, i) => units[i].flags.env,
     labelOf: (files, i) => `pure-${i + 1}`,
     header: ({ label, code, index, total, files, startedAt, endedAt }) =>

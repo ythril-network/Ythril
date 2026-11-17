@@ -42,7 +42,9 @@
  *   `testing/_shared/run-test-units.mjs`, which holds the pool, the time bound and the child environment); the unit runner's call sits
  *   in the standalone stage's body, runs in both modes and must be GIVEN only kind `pure` units: its first argument, followed back
  *   through the names it is built from, passes through a `.filter(r => r.kind === 'pure')` (or `!== 'db'`) whose predicate is that
- *   bare comparison, from a test the flag does not enter;
+ *   bare comparison, from a test the flag does not enter; since Q-869 that list is also built by `slowFirstUnits(runs, times, ...)`
+ *   (`scripts/_shared/slow-first-units.mjs`), and its FIRST argument is the one that passes through the kind filter, so the slow-first step
+ *   is never offered a db run (region 'slow-first'; its mutation takes the step out);
  * - every OTHER step call (`run`, `execSync`, `execFileSync`) is counted INSIDE a stage body, none is skipped by a guard on the flag,
  *   and none sits outside every stage (a step at the top level of the script runs before the plan and in no order the plan knows).
  *
@@ -385,6 +387,17 @@ function planHoldsOnlyPure(node, decls) {
   return pureFilters(node, decls).length > 0;
 }
 
+/**
+ * Every `slowFirstUnits(...)` call in the units the runner call is handed (Q-869): the step that takes the slowest pure files out into units of
+ * their own. The list the unit runner runs is built by it, so a plan that skips it runs the units `batched` cut, in list order, and a plan
+ * that feeds it anything but the pure runs hands the slow-first step a database run.
+ */
+function slowFirstCalls(node, decls) {
+  const calls = new Set();
+  for (const x of unitSources(node, decls)) visit(x, (n) => { if (ts.isCallExpression(n) && calleeName(n) === 'slowFirstUnits') calls.add(n); });
+  return [...calls];
+}
+
 // ─────────────────────────────────────────────────── the rule, as violations ─────────────────────────────────────────────────────
 
 const lineOf = (sf, n) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
@@ -470,6 +483,14 @@ function analyse(src, { floor = STEP_FLOOR } = {}) {
   for (const n of regions['database-batch']) {
     const at = `line ${lineOf(sf, n)}`;
     if (!planHoldsOnlyPure(n, decls)) say('database-batch', `the unit runner call (${at}) can be handed a database unit: the list it is given is not built from a \`.filter\` that selects only kind 'pure' by a bare comparison the flag does not enter, so a db run is in the plan in at least one mode`);
+    // The units pass through the slow-first step, and what that step is given is the filtered pure runs (the filter comes BEFORE it, so its input holds no db run).
+    const slowFirst = slowFirstCalls(n, decls);
+    if (slowFirst.length === 0) say('slow-first', `the unit runner call (${at}) is not handed units built by slowFirstUnits(...): the slowest pure files do not run alone and first, and the plan is the batches in list order`);
+    for (const c of slowFirst) {
+      if (!planHoldsOnlyPure({ arguments: [c.arguments[0]] }, decls)) {
+        say('slow-first', `slowFirstUnits (line ${lineOf(sf, c)}) is not given runs that a \`.filter\` selected as only kind 'pure' by a bare comparison: a db run could be handed to the slow-first step, and run uncapped in a unit of its own`);
+      }
+    }
   }
 
   // The runner called is the shared one: a local function of the same name would be a second pool with no time bound.
@@ -587,6 +608,17 @@ function planSelection(src, tag) {
   return { sf, node, filters: pureFilters(node, decls) };
 }
 
+/** The slow-first step taken out: each `slowFirstUnits(runs, ...)` call in the unit list becomes the runs it was given, so the units are the batches in list order. */
+function dropSlowFirstStep(src) {
+  const sf = parsed(src, 'no-slow-first');
+  const decls = bindingsOf(sf);
+  const node = regionNodes(sf)['database-batch'][0];
+  assert.ok(node, "the mutation found no 'database-batch' (unit runner) call");
+  const calls = slowFirstCalls(node, decls);
+  assert.ok(calls.length > 0, 'the mutation found no slowFirstUnits step in the unit list to take out');
+  return edit(src, calls.map(c => ({ start: c.getStart(sf), end: c.getEnd(), text: c.arguments[0].getText() })));
+}
+
 /**
  * A db run put back into the plan: the kind filter taken out of the list the unit runner is handed (the `.filter(...)` call becomes what it
  * filtered). The plan then runs every kind, in both modes.
@@ -694,6 +726,8 @@ describe('scripts/preflight.mjs: no database batch in either mode, and --static 
 
   it('the run plan holds no database unit in EITHER mode: the list handed to runTestUnits is built from offlineRuns by a filter that selects only kind pure, from a test the flag does not enter', () => regionHolds(REAL, 'database-batch'));
 
+  it('the units handed to runTestUnits are built by slowFirstUnits, from runs a filter selected as only kind pure (the filter first, the slow-first step after it)', () => regionHolds(REAL, 'slow-first'));
+
   it('no batch is started by hand: the pure units go through runTestUnits (the pool, the time bound, the held output, the child environment)', () => regionHolds(REAL, 'hand-batch'));
 
   it('the probe of the test database is gone: no socket is opened to ask whether a stack is up', () => regionHolds(REAL, 'database-probe'));
@@ -780,6 +814,12 @@ describe('scripts/preflight.mjs: no database batch in either mode, and --static 
       assert.ok(v.some(x => x.region === 'database-batch'), 'a unit list holding every kind left the rule green');
     });
 
+    it('the slow-first step taken out of the unit list (the units are the batches in list order again) is named', () => {
+      cleanBaseline();
+      const v = analyse(dropSlowFirstStep(REAL));
+      assert.ok(v.some(x => x.region === 'slow-first'), 'a unit list that skips slowFirstUnits left the rule green');
+    });
+
     it('a batch started by hand, beside the unit runner, is named', () => {
       cleanBaseline();
       const v = analyse(putHandBatchBack(REAL));
@@ -842,7 +882,8 @@ for (const g of ['a', 'b']) gate(g);
 stage('build:server', async () => { run('npm run build:server'); });
 stage('test:standalone (offline subset)', async () => {
   const runs = offlineRuns(split).filter(r => r.kind === 'pure');
-  const units = runs.map((r, i) => {
+  const planned = slowFirstUnits(runs, times, { maxSlow: 6 });
+  const units = planned.map((r, i) => {
     const flags = timingReporterFlags({ suite: 'preflight', batch: \`\${r.kind}-\${i + 1}\`, scope: STATIC ? 'static' : 'subset' });
     return { files: r.files, flags };
   });
@@ -883,7 +924,7 @@ const bodies = new Map();
 function gate(name) { stage(name, () => { run('node --test ' + name); }); }
 for (const g of ['a', 'b']) gate(g);
 stage('build:server', () => run('npm run build:server'));
-stage('test:standalone (offline subset)', () => runTestUnits(offlineRuns(split).filter(function (r) { return r.kind !== 'db'; }).map(r => r.files), {
+stage('test:standalone (offline subset)', () => runTestUnits(slowFirstUnits(offlineRuns(split).filter(function (r) { return r.kind !== 'db'; }), null, { maxSlow: 6 }).map(u => u.files), {
   width: 3, args: () => [], labelOf: (files, i) => 'pure-' + i,
   envOf: () => timingReporterFlags({ scope: process.argv.includes('--static') ? 'static' : 'subset' }).env,
 }));
@@ -959,6 +1000,10 @@ describe('the preflight rules, over literal samples', () => {
       it('goes red when the probe is put back', () => {
         assert.ok(analyse(putProbeBack(sample)).some(x => x.region === 'database-probe'));
       });
+
+      it('goes red when the slow-first step is taken out of the unit list', () => {
+        assert.ok(analyse(dropSlowFirstStep(sample)).some(x => x.region === 'slow-first'));
+      });
     });
   }
 
@@ -966,6 +1011,15 @@ describe('the preflight rules, over literal samples', () => {
     const noisy = `// run('npm run test --workspace=client'); console.log('Preflight PASSED'); new Socket(); const STATIC = argv.includes('--static');\n${SAMPLE_FILTER}`;
     assert.deepEqual(analyse(noisy), []);
     assert.equal(stripComments(noisy).includes('const STATIC = argv.includes'), false, 'the comment is gone once stripped');
+  });
+
+  it('a slow-first step fed the runs BEFORE the kind filter (the filter applied to its units after it) is named: a db run would be offered to it', () => {
+    const late = SAMPLE_CONTINUE.replace(
+      "slowFirstUnits(offlineRuns(split).filter(function (r) { return r.kind !== 'db'; }), null, { maxSlow: 6 }).map(u => u.files)",
+      "slowFirstUnits(offlineRuns(split), null, { maxSlow: 6 }).filter(function (u) { return u.kind !== 'db'; }).map(u => u.files)");
+    assert.notEqual(late, SAMPLE_CONTINUE, 'the sample no longer holds the call this case rewrites');
+    const v = analyse(late);
+    assert.ok(v.some(x => x.region === 'slow-first' && /not given runs/.test(x.message)), `the filter after the step was not named:\n${v.map(x => `[${x.region}] ${x.message}`).join('\n')}`);
   });
 
   it('a plan that selects by kind only when the flag is set is the old plan, and is named', () => {

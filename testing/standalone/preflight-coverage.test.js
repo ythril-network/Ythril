@@ -214,6 +214,52 @@ describe('preflight invokes the offline subset within the platform limit', () =>
     assert.match(code, /\bflags\.env\b/, 'the reporter\'s environment (flags.env) does not reach the units');
   });
 
+  it('the units preflight really runs, slow files alone first, are each a command line under the limit, and are the pure files exactly once', async () => {
+    /*
+     * The plan the preflight hands the pool is no longer `offlineRuns`' batches: `slowFirstUnits` takes the files the recorded times put at
+     * 15 s or more out into units of their own. The gates above read the real plan WITHOUT times, so a broken packed plan would pass them
+     * all; this one builds the units over a fixture that covers every pure file, names two as slow and carries a key for a `@ci-only`
+     * file (which the preflight leaves out, so the key must add nothing), and asserts the same rules over them: every pure file in
+     * exactly one unit, none empty, the `@ci-only` file nowhere, and every unit's whole command line, the single-worker flag a
+     * slow unit carries included, under CreateProcess's limit.
+     */
+    const { offlineRuns, splitStandalone } = await import('../_shared/standalone-split.mjs');
+    const { slowFirstUnits } = await import('../../scripts/_shared/slow-first-units.mjs');
+    const { timingReporterFlags } = await import('../_shared/timing-reporter-flags.mjs');
+    const { boundedTestArgs } = await import('../_shared/test-file-bound.mjs');
+    const { scratchRoot } = await import('../../scripts/_shared/scratch-root.mjs');
+    const { mkdtempSync, mkdirSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const split = splitStandalone();
+    const pure = offlineRuns(split, { ciOnly: false }).filter(r => r.kind === 'pure');
+    const planned = pure.flatMap(r => r.files);
+    assert.ok(planned.length > 500, `only ${planned.length} pure file(s) in the preflight plan: the fixture would cover nothing`);
+    const ciOnlyKey = `testing/standalone/${split.ciOnly[0]}`;
+    assert.ok(split.ciOnly.length > 0 && !planned.includes(ciOnlyKey), 'the preflight plan holds a @ci-only file, or the split names none to put in the fixture');
+    const slowTwo = [planned[7], planned[planned.length - 3]];
+    const fixture = { files: Object.fromEntries([...planned.map((f, i) => [f, 40 + (i % 90)]), [slowTwo[0], 70_000], [slowTwo[1], 31_000], [ciOnlyKey, 250_000]]) };
+    const units = slowFirstUnits(pure, fixture, { maxSlow: 8 });
+    assert.deepEqual(units.slice(0, 2).map(u => u.files), [[slowTwo[0]], [slowTwo[1]]], 'the two slow files are not the first two units, slowest first');
+    assert.equal(units.filter(u => u.slow).length, 2);
+    assert.deepEqual(units.flatMap(u => u.files).sort(), [...planned].sort(), 'the units are not the pure files exactly once each');
+    assert.ok(units.every(u => u.files.length > 0), 'a unit holds no file');
+    assert.ok(!units.some(u => u.files.includes(ciOnlyKey)), 'a @ci-only file entered the plan through a key in the times');
+    mkdirSync(scratchRoot(), { recursive: true });
+    const flags = timingReporterFlags({ suite: 'preflight', batch: 'pure-99', scope: 'subset', dir: mkdtempSync(join(scratchRoot(), 'flags-')) });
+    const longest = Math.max(...units.map(u => ['node', ...boundedTestArgs('--test-concurrency=1', ...u.args, ...flags.args, ...u.files)].join(' ').length));
+    assert.ok(longest < WINDOWS_LIMIT, `the longest unit is ${longest} characters, over the ${WINDOWS_LIMIT} CreateProcess allows`);
+  });
+
+  it('preflight reads the file times through readFileTimes, hands the pure runs and the times to slowFirstUnits with at most 2 x its unit width alone, and runs a slow unit with one worker', () => {
+    const code = stripComments(script);
+    assert.match(code, /import\s*\{[^}]*\bslowFirstUnits\b[^}]*\}\s*from\s*['"][^'"]*_shared\/slow-first-units\.mjs['"]/, 'preflight does not import slowFirstUnits from scripts/_shared/slow-first-units.mjs');
+    assert.match(code, /\breadFileTimes\(\s*timingResultsDir\(/, 'preflight does not read the file times through readFileTimes from the results folder');
+    assert.match(code, /\bslowFirstUnits\([^;]*\bmaxSlow\s*:\s*2\s*\*\s*UNIT_WIDTH\b/, 'preflight does not pass maxSlow: 2 * UNIT_WIDTH to slowFirstUnits');
+    assert.match(code, /\.slow\b/, 'preflight never looks at which unit is a slow one: it cannot run it with one worker');
+    assert.match(code, /--test-concurrency=\$\{[^}]*\b1\b[^}]*\}/, 'a slow unit is not given --test-concurrency=1');
+    assert.doesNotMatch(code, /\bbatched\(/, 'preflight cuts units by path length itself again');
+  });
+
   it('the unit runner starts each unit as `node` with an argument array, the time bound, and the environment testChildEnv builds', () => {
     // The rule the preflight's old `execFileSync('node', ['--test', ...], { env: testChildEnv(flags.env) })` kept, over the module that now holds it:
     // a caller cannot drop it because it is not the caller's.
