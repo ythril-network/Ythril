@@ -44,7 +44,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import ts from 'typescript';
 import { testFiles, testBodies, calleeName } from './_test-bodies.mjs';
-import { parseSource, lineOf } from '../_shared/syntax-tree.mjs';
+import { parseSource, lineOf, walkEveryNode } from '../_shared/syntax-tree.mjs';
 
 const STATS_TOOL = 'space_stats';
 /** Keys that only page or budget a listing. Any other key (`filter`, `path`, `tag`, `search`, ...) narrows it to the test's own records. */
@@ -57,15 +57,12 @@ const propName = (p) => (p.name && (ts.isIdentifier(p.name) || ts.isStringLitera
 /** Names bound by `const` to a plain string anywhere in the file: `const SPACE = 'general'`. */
 function constStrings(sf) {
   const out = new Map();
-  const visit = (n) => {
-    if (ts.isVariableDeclarationList(n) && (n.flags & ts.NodeFlags.Const)) {
-      for (const d of n.declarations) {
-        if (ts.isIdentifier(d.name) && d.initializer && ts.isStringLiteralLike(d.initializer)) out.set(d.name.text, d.initializer.text);
-      }
+  walkEveryNode(sf, (n) => {
+    if (!ts.isVariableDeclarationList(n) || !(n.flags & ts.NodeFlags.Const)) return;
+    for (const d of n.declarations) {
+      if (ts.isIdentifier(d.name) && d.initializer && ts.isStringLiteralLike(d.initializer)) out.set(d.name.text, d.initializer.text);
     }
-    ts.forEachChild(n, visit);
-  };
-  visit(sf);
+  });
   return out;
 }
 
@@ -104,7 +101,7 @@ function spaceProperty(args, ctx) {
   return null;
 }
 
-/** A listing's narrowing: an object literal with `path`/`tag`, a parameter of the helper, or (absent) the whole collection. */
+/** A listing's narrowing: an object literal with any key outside PAGING_KEYS, a parameter of the helper, or (absent) the whole collection. */
 function narrowingOf(expr, ctx) {
   if (!expr) return WHOLE;
   if (ts.isObjectLiteralExpression(expr)) {
@@ -213,8 +210,7 @@ export function aggregateReads(file, text) {
   const consts = constStrings(sf);
   const declared = new Set();
   const decls = [];
-  const collect = (n) => { if (isNamedHelper(n)) { const h = helperParts(n); declared.add(h.name); decls.push(h); } ts.forEachChild(n, collect); };
-  collect(sf);
+  walkEveryNode(sf, (n) => { if (isNamedHelper(n)) { const h = helperParts(n); declared.add(h.name); decls.push(h); } });
   const helpers = new Map();
   for (let pass = 0; pass < 3; pass++) {
     for (const { name, fn } of decls) {
