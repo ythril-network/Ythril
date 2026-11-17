@@ -24,7 +24,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 /** Files outside the api that import from it, each with why it may. */
@@ -72,7 +72,7 @@ describe('no module outside server/src/api imports from it, but the listed excep
   });
 
   it('every tracked module outside the api imports from it only when listed, and every listed one still does', () => {
-    const files = trackedSources('server/src', { floor: 500 }).filter(f => !f.startsWith('server/src/api/'));
+    const files = trackedSources(SERVER_CODE_ROOTS, { floor: 500 }).filter(f => !f.startsWith('server/src/api/'));
     assert.ok(files.length >= 400, `only ${files.length} modules outside the api: the listing is broken`);
     const offenders = [];
     const importing = new Set();

@@ -34,7 +34,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { callSitesOf } from './_call-sites.mjs';
 import { tempInstanceDir, removeInstanceDir, bootInstance, startFakePeer, allowEngineToDialPrivatePeers } from './_vote-round-instance.mjs';
@@ -77,7 +77,7 @@ describe('every conclusion of a round and every application of one is inside set
   });
 
   it('the written-out copies stay gone: no file but the settle module, the space-round module and the introductions module applies a step by hand', () => {
-    const files = trackedSources('server/src', { untracked: true, floor: 100 });
+    const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 });
     const offenders = [];
     for (const file of files) {
       if (['server/src/networks/round-conclusion.ts', 'server/src/spaces/apply-wipe-round.ts', 'server/src/networks/member-introductions.ts'].includes(file)) continue;

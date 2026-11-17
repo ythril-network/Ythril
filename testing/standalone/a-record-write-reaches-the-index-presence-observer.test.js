@@ -38,7 +38,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { between, bodyOf } from './_structural-window.mjs';
 
@@ -153,7 +153,7 @@ describe('3. a write inside a transaction reports when its session ends', () => 
 });
 
 describe('4. there is one door onto the database', () => {
-  const sources = readTrackedSources('server/src', SCAN).map(s => ({ ...s, code: blankComments(s.text) }));
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, SCAN).map(s => ({ ...s, code: blankComments(s.text) }));
 
   /**
    * The files allowed a door of their own, each with the reason it is not a write the lifecycle misses.
@@ -212,14 +212,14 @@ describe('4. there is one door onto the database', () => {
 
 describe('5. nothing writes through an aggregation stage', () => {
   it('no $merge or $out stage in the server', () => {
-    const hits = readTrackedSources('server/src', SCAN)
+    const hits = readTrackedSources(SERVER_CODE_ROOTS, SCAN)
       .filter(s => /['"`]?\$(merge|out)['"`]?\s*:/.test(blankComments(s.text))).map(s => s.file);
     assert.deepEqual(hits, [], `an aggregation that writes another collection, which the observer counts as a read: ${hits.join(', ')}`);
   });
 });
 
 describe('6. only the lifecycle builds or drops a collection\'s search indexes', () => {
-  const sources = readTrackedSources('server/src', SCAN).map(s => ({ ...s, code: blankComments(s.text) }));
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, SCAN).map(s => ({ ...s, code: blankComments(s.text) }));
   const BUILDERS = /\b(ensureCollectionSearchIndexes|dropCollectionSearchIndexes|ensureVectorSearchIndex)\s*\(/;
   const ALLOWED = new Set(['server/src/spaces/vector-index.ts', 'server/src/spaces/search-index-presence.ts']);
   // A FUNCTION that may DROP and never build, and why: the rule above is about a space that stays, where a drop loses its search. The

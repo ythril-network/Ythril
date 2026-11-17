@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 // This process writes only to the console. `redactSecrets` is the same rule `log.*` applies on the
-// server side; `util/log.ts` has no imports of its own, so borrowing it costs nothing.
+// server side. `util/log.ts` imports the schema package (`@ythril-network/schema/internal`), which resolves to its build, so running this from
+// source builds the package first (`prelocal-connector:dev`); beyond that, borrowing it costs nothing.
 import { redactSecrets, refusalOfParse } from '../util/log.js';
 import { spawn } from 'node:child_process';
 import { z } from 'zod';

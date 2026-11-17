@@ -42,7 +42,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf, argumentsOf, blockAfter } from './_structural-window.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const { edgeIdFor } = await import('../../server/dist/brain/edge-id.js');
 const { storedEdgeKind } = await import('../../server/dist/brain/entity-refs.js');
@@ -192,7 +192,7 @@ describe('every derivation site passes the kinds', () => {
    * passes three arguments — the nested call supplied the word the regex was looking for.
    */
   const callers = () => {
-    const found = trackedSources('server/src')
+    const found = trackedSources(SERVER_CODE_ROOTS)
       .filter(f => !f.endsWith('brain/edge-id.ts'))
       .map(f => {
         const s = src(f);

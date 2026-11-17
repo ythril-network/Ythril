@@ -13,7 +13,7 @@
  * fix, and the comments above the call sites below quote the very patterns asserted on.
  */
 import { describe, it } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -21,7 +21,7 @@ import { execFileSync } from 'node:child_process';
 const ROOT = new URL('../../', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
 const tracked = () =>
-  trackedSources('server/src');
+  trackedSources(SERVER_CODE_ROOTS);
 
 /**
  * Strip comments — carefully, because a naive stripper eats CODE.

@@ -33,7 +33,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 
 const MIME_SRC = 'server/src/files/mime.ts';
@@ -275,7 +275,7 @@ describe('the entry points all go through the shared resolver', () => {
     // Four partial copies existed; each disagreed with the others about some extension.
     // `git ls-files`, never a directory walk: gitignored and Docker-written files under the working
     // tree have broken this kind of check before (EACCES on a 0600 file that CI never tracked).
-    const files = trackedSources(['server/src', 'client/src']);
+    const files = trackedSources([...SERVER_CODE_ROOTS, 'client/src']);
     const offenders = [];
     for (const f of files) {
       if (f === MIME_SRC) continue;

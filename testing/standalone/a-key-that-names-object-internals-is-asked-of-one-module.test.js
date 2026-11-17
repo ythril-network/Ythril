@@ -28,10 +28,12 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/util/object-internal-keys.ts';
+/** Where the keys are DEFINED (the schema package, which the schema body needs them in): the one file that may spell them. `MODULE` re-exports it. */
+const HOME = 'schema/src/object-internal-keys.ts';
 /** `__proto__` as a quoted string in code: the one member no copy of the set can omit. */
 const PROTO_LITERAL = /(['"`])__proto__\1/;
 
@@ -44,12 +46,12 @@ describe('a key that names object internals is asked of one module', () => {
     }
   });
 
-  const sources = readTrackedSources('server/src', { untracked: true })
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, { untracked: true })
     .map(({ file, text }) => ({ file, code: stripComments(text) }));
 
   it('reads a tree worth reading, and the module has askers (the floors)', () => {
     assert.ok(sources.length >= 300, `only ${sources.length} server sources were read`);
-    const askers = sources.filter(s => s.file !== MODULE && /\bisObjectInternalKey\s*\(/.test(s.code)).map(s => s.file);
+    const askers = sources.filter(s => s.file !== MODULE && s.file !== HOME && /\bisObjectInternalKey\s*\(/.test(s.code)).map(s => s.file);
     assert.ok(askers.length >= 3, `only ${askers.length} file(s) ask isObjectInternalKey: ${askers.join(', ')}`);
     for (const f of ['server/src/brain/delete-fields.ts', 'server/src/brain/merge.ts', 'server/src/brain/filter-sanitizer.ts']) {
       assert.ok(askers.includes(f), `${f} no longer asks isObjectInternalKey — it has its own answer again`);
@@ -65,13 +67,13 @@ describe('a key that names object internals is asked of one module', () => {
   });
 
   it('no other server source asks `in Object.prototype` itself (G2: the rule-name check asks the module, as the editor mirrors it)', () => {
-    const copies = sources.filter(s => s.file !== MODULE && /\bin\s+Object\.prototype\b/.test(s.code)).map(s => s.file);
+    const copies = sources.filter(s => s.file !== MODULE && s.file !== HOME && /\bin\s+Object\.prototype\b/.test(s.code)).map(s => s.file);
     assert.deepEqual(copies, [],
       `a second spelling of "a name every object answers to" — ask isObjectPrototypeName (${MODULE}) instead:\n  ${copies.join('\n  ')}`);
   });
 
   it('no other server source spells the internal keys itself', () => {
-    const copies = sources.filter(s => s.file !== MODULE && PROTO_LITERAL.test(s.code)).map(s => s.file);
+    const copies = sources.filter(s => s.file !== MODULE && s.file !== HOME && PROTO_LITERAL.test(s.code)).map(s => s.file);
     assert.deepEqual(copies, [],
       `a second copy of the object-internal keys — ask isObjectInternalKey (${MODULE}) instead:\n  ${copies.join('\n  ')}`);
   });

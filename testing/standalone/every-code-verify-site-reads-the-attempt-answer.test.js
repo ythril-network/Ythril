@@ -30,7 +30,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { parseSource } from '../_shared/syntax-tree.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 // `api/mfa-code-door.ts` is the one sequence that `enforceMfa` (`auth/middleware.ts`) and the exemption grant (`api/tokens.ts`) both stand at.
@@ -124,7 +124,7 @@ describe('every tryMfaCode call reads the object it answers', () => {
   });
 
   it('no call anywhere reads its answer as a boolean', () => {
-    const files = trackedSources(['server/src'], { floor: 200, untracked: true }).filter(f => f !== COUNTER);
+    const files = trackedSources(SERVER_CODE_ROOTS, { floor: 200, untracked: true }).filter(f => f !== COUNTER);
     const found = {};
     let calls = 0;
     for (const f of files) {

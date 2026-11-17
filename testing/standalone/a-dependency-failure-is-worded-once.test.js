@@ -26,7 +26,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { withoutBodyOf } from './_structural-window.mjs';
 
@@ -37,7 +37,7 @@ const HOME_DIR = 'server/src/brain/write-plan/';
 function scan() {
   const declaredIn = [];
   const outside = [];
-  for (const file of trackedSources('server/src', { floor: 200 })) {
+  for (const file of trackedSources(SERVER_CODE_ROOTS, { floor: 200 })) {
     const src = stripComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
     const { declared, body: home, rest } = withoutBodyOf(src, 'dependencyFailed', `${file}: dependencyFailed`);
     if (declared) declaredIn.push(file);

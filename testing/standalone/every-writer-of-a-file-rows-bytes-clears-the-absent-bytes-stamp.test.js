@@ -28,8 +28,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleIndex } from './_call-graph.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 const WRITES = /\.(updateOne|updateMany|replaceOne|insertOne|insertMany|bulkWrite|findOneAndUpdate|findOneAndReplace)\s*\(/;
 const FILES = /spaceCollection\([^)]*'files'\)|col<FileMetaDoc>/;
 const BYTES = /\b(sizeBytes|sha256)\b/;

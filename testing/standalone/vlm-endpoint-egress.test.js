@@ -32,7 +32,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 import { bodyOf, enclosingBlockAround, statementUpTo } from './_structural-window.mjs';
 
@@ -222,7 +222,7 @@ describe('no operator-configurable URL is fetched without the guard', () => {
    * VLM paths survived it. This asks the opposite question: which files reach the network at all, and is
    * each one either guarded or a declared piece of infrastructure?
    */
-  const files = trackedSources('server/src');
+  const files = trackedSources(SERVER_CODE_ROOTS);
 
   /**
    * Files whose URLs are NOT operator-configurable model endpoints, and may fetch freely.

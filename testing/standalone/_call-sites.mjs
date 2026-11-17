@@ -19,7 +19,7 @@
  * It does not say what a call must satisfy: the caller asserts that, and states its exemptions with their reasons.
  */
 import fs from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { outermostFunctionAt } from './_source-helpers.mjs';
 
@@ -27,7 +27,7 @@ let loaded;
 /** The server's TypeScript sources, read once: `{ files, raw, blanked }`. Exported so a gate that also matches other shapes reads the same set. */
 export function serverSources() {
   if (!loaded) {
-    const files = trackedSources('server/src', { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'));
+    const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'));
     const raw = new Map(files.map(f => [f, fs.readFileSync(f, 'utf8')]));
     loaded = { files, raw, blanked: new Map([...raw].map(([f, t]) => [f, blankComments(t)])) };
   }

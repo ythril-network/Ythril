@@ -43,7 +43,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { indexSources } from './_call-graph.mjs';
 import { recordWrites } from './_record-writes.mjs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { moduleOrNull } from './_b81c-door.mjs';
 
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types.js');
@@ -144,7 +144,7 @@ const ARRIVAL = {
 
 /** The server's sources as `moduleIndex` reads them, in hand, so a mutation run can change one file in memory. */
 function serverSources() {
-  const files = trackedSources(['server/src', 'schema/src'], { untracked: true });
+  const files = trackedSources([...SERVER_CODE_ROOTS], { untracked: true });
   return new Map(files.map(f => [f, readFileSync(join(REPO_ROOT, f), 'utf8')]));
 }
 

@@ -45,7 +45,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { parseSource, ts, unwrapExpression } from '../_shared/syntax-tree.mjs';
 import { deliveryArgumentsOf, APPLIES, DELIVERY_PARAM, DELIVERY_BUILDERS } from './_delivery-arguments.mjs';
 import { calleeNameOf } from './_expression-names.mjs';
@@ -93,7 +93,7 @@ describe('the checker reads the syntax tree and sees the shapes this gate is abo
 });
 
 describe('every apply is handed a delivery from deliveryOf', () => {
-  const sources = trackedSources('server/src', { floor: 200, untracked: true });
+  const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 200, untracked: true });
   const calls = sources.flatMap(file => deliveryArgumentsOf(file, readFileSync(join(REPO_ROOT, file), 'utf8')).map(c => ({ ...c, file })));
 
   for (const name of APPLIES) {
@@ -119,7 +119,7 @@ describe('every apply is handed a delivery from deliveryOf', () => {
 });
 
 describe('the builders: a wrapper of deliveryOf returns deliveryOf\'s answer and nothing else', () => {
-  const sources = trackedSources('server/src', { floor: 200, untracked: true });
+  const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 200, untracked: true });
   const wrappers = DELIVERY_BUILDERS.filter(n => n !== 'deliveryOf');
 
   it('there is the base builder and at least one wrapper to hold', () => {

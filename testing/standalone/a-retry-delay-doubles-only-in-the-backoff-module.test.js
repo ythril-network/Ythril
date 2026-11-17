@@ -32,7 +32,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { statementAround } from './_structural-window.mjs';
 
@@ -94,7 +94,7 @@ describe('a retry delay doubles only in the backoff module', () => {
     assert.deepEqual(delayDoublings('// await sleep(1_000 * 2 ** attempt)\n/* delayMs *= 2 */\nconst x = 1;\n'), []);
   });
 
-  const sources = readTrackedSources(['server/src'], { floor: FILES_FLOOR, specs: false });
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, { floor: FILES_FLOOR, specs: false });
   const found = sources.flatMap(({ file, text }) => delayDoublings(text).map(h => ({ file, ...h })));
 
   it('reads the server source and sees the doubling inside the home module (positive control)', () => {

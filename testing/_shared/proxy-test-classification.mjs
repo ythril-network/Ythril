@@ -18,7 +18,7 @@
  * classified before it lands. `why` is one line a reviewer can check against the file.
  */
 import { execFileSync } from 'node:child_process';
-import { readTrackedSources, REPO_ROOT } from '../standalone/_sources.mjs';
+import { readTrackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from '../standalone/_sources.mjs';
 
 /**
  * The commit the list was classified against: every `rewrite` row's `base` hashes its file as it was here. It is on `main`, so the
@@ -49,9 +49,9 @@ let retired;
  */
 export function retiredProxyExports() {
   if (retired) return retired;
-  const modules = git('ls-tree', '-r', '--name-only', CLASSIFIED_AT, '--', 'server/src').split('\n').filter(f => PROXY_MODULE.test(f));
+  const modules = git('ls-tree', '-r', '--name-only', CLASSIFIED_AT, '--', ...SERVER_CODE_ROOTS).split('\n').filter(f => PROXY_MODULE.test(f));
   const then = new Set(modules.flatMap(f => exportsOf(git('show', `${CLASSIFIED_AT}:${f}`))));
-  const now = new Set(readTrackedSources('server/src', { floor: 300, specs: false }).flatMap(s => exportsOf(s.text)));
+  const now = new Set(readTrackedSources(SERVER_CODE_ROOTS, { floor: 300, specs: false }).flatMap(s => exportsOf(s.text)));
   const names = [...then].filter(n => !now.has(n)).sort();
   if (modules.length === 0 || names.length < PROXY_EXPORTS_FLOOR) {
     throw new Error(`derived ${names.length} retired proxy export(s) from ${modules.length} proxy module(s) at ${CLASSIFIED_AT}; the scan is broken`);

@@ -37,12 +37,13 @@ import { moduleIndex, routeHandlerRoots, walkFrom } from './_call-graph.mjs';
 import { mountedRoutes } from './_routes.mjs';
 import { spaceWriters } from './_space-writers.mjs';
 import { argumentsOf } from './_structural-window.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const ENGINE = 'server/src/sync/engine.ts';
 const PUSH_PATH = '/api/sync/tombstones';
 const SYNC_INDEX = 'server/src/api/sync/index.ts';
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 const ROUTES = mountedRoutes();
 const PUSH_ROUTE = ROUTES.find(r => r.method === 'POST' && r.path === PUSH_PATH);
 const PUSH_ROOTS = PUSH_ROUTE ? routeHandlerRoots(INDEX, PUSH_ROUTE) : [];

@@ -18,7 +18,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const moved = await import('../../server/dist/files/moved-paths.js');
@@ -45,7 +45,7 @@ describe('isDerivedRowOf and the id rules built on it', () => {
 });
 
 describe('the reading of a derived id\'s # is spelled once', () => {
-  const sources = readTrackedSources('server/src').map(s => ({ file: s.file, text: stripComments(s.text) }));
+  const sources = readTrackedSources(SERVER_CODE_ROOTS).map(s => ({ file: s.file, text: stripComments(s.text) }));
   /** The ways a source takes an id apart at its `#`. */
   const READINGS = [/lastIndexOf\('#'\)/, /startsWith\(`\$\{[^`]*\}#`\)/];
 

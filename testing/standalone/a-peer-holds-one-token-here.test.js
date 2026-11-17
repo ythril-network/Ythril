@@ -16,7 +16,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { supersededPeerTokenIds } from '../../server/dist/auth/tokens.js';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const tok = (id, peer, createdAt, lastUsed = null) => ({ id, name: `peer:${peer}`, peerInstanceId: peer, createdAt, lastUsed, expiresAt: null });
 
@@ -53,7 +53,7 @@ describe('a peer holds one token here', () => {
   it('nothing makes a peer token live except the function that revokes the ones it replaces', () => {
     // Lifting a pairing token's expiry IS making it live; a second site doing that by hand is where the leak returns.
     const owner = 'server/src/auth/tokens.ts';
-    const offenders = trackedSources(['server/src'], { untracked: true, exclude: [owner] })
+    const offenders = trackedSources(SERVER_CODE_ROOTS, { untracked: true, exclude: [owner] })
       .filter(f => /setTokenExpiry\([^)]*,\s*null\s*\)/.test(readFileSync(`${REPO_ROOT}/${f}`, 'utf8')));
     assert.deepEqual(offenders, [], `these make a peer token live without revoking the one it replaces: ${offenders.join(', ')}`);
     const join = readFileSync(`${REPO_ROOT}/server/src/networks/join-remote-act.ts`, 'utf8');

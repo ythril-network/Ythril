@@ -33,7 +33,7 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 const HASH = sha('the bytes the tombstone erased');
@@ -118,7 +118,7 @@ describe('every caller asks the one function', () => {
   });
 
   it('no source under server/src compares a stored row\'s seq with a tombstone\'s rowSeq by hand', () => {
-    const sources = trackedSources('server/src', { floor: 300 });
+    const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 300 });
     const hand = [
       /\b(?:row|target|stored|live|held|file)\.seq\s*[<>]=?\s*[\w.]*rowSeq\b/,
       /\browSeq\s*[<>]=?\s*(?:row|target|stored|live|held|file)\.seq\b/,
@@ -132,7 +132,7 @@ describe('every caller asks the one function', () => {
   });
 
   it('the scan sees the apply site (a floor under the sweep: it must be able to find what it forbids)', () => {
-    assert.ok(trackedSources('server/src', { floor: 300 }).includes(callers[2]), `${callers[2]} is not among the swept sources`);
+    assert.ok(trackedSources(SERVER_CODE_ROOTS, { floor: 300 }).includes(callers[2]), `${callers[2]} is not among the swept sources`);
     const baseLine = 'if (x === null || (a.rowSeq !== undefined && typeof target.seq === \'number\' && target.seq > a.rowSeq)) {';
     assert.ok(/\b(?:row|target|stored|live|held|file)\.seq\s*[<>]=?\s*[\w.]*rowSeq\b/.test(baseLine), 'the sweep would not have caught the base\'s own comparison');
   });

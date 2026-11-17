@@ -72,6 +72,7 @@ import { moduleIndex, routeHandlerRoots, walkFrom, spaceActBodies } from './_cal
 import { mountedRoutes } from './_routes.mjs';
 import { SCHEMA_PACKAGE_NAME } from './_relative-specifier.mjs';
 import { serverProgram } from '../_shared/server-program.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const LOG_MODULE = 'server/src/util/log.ts';
 /**
@@ -108,7 +109,7 @@ const LOCAL_SITES = new Map(LOCAL.flatMap(g => g.sites.map(s => [s, g.why])));
 const { program: PROGRAM, checker: CHECKER, sourceOf: SOURCE, repoPath } = serverProgram();
 const inTree = file => file.startsWith('server/src/');
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 const ROUTES = mountedRoutes();
 const ROUTE_ROOTS = new Map(ROUTES.map(r => [`${r.method} ${r.path}`, routeHandlerRoots(INDEX, r)]));
 

@@ -21,7 +21,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 /** The `space:` of an ANSWER (a `.json({` or a `body: {`, not an internal outcome type) that is the space an act returned, wrapped or not. */
@@ -31,7 +31,7 @@ describe('a space is answered through the one wire shape', () => {
   it('every answer that carries the entry an act returned is shaped by spaceForWire', () => {
     const wrapped = [];
     const bare = [];
-    for (const file of trackedSources(['server/src'], { floor: 100 })) {
+    for (const file of trackedSources(SERVER_CODE_ROOTS, { floor: 100 })) {
       const text = stripComments(readFileSync(file, 'utf8'));
       for (const m of text.matchAll(ANSWERED)) (m[1].startsWith('spaceForWire(') ? wrapped : bare).push(`${file}: space: ${m[1]}`);
     }

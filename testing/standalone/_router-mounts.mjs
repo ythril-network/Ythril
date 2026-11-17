@@ -41,7 +41,7 @@
  * so a caller cannot receive the failure quietly.
  */
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 /**
@@ -57,7 +57,7 @@ import { stripComments } from './_strip-comments.mjs';
  * @param {{roots?: string[], floor?: number}} [opts] `floor` is the fewest routers that may resolve before
  *   this throws. Raise it, never lower it.
  */
-export function routerMounts({ roots = ['server/src'], floor = 25 } = {}) {
+export function routerMounts({ roots = SERVER_CODE_ROOTS, floor = 25 } = {}) {
   const sources = trackedSources(roots, { floor: 50 });
   const texts = new Map(sources.map(f => [f, stripComments(readFileSync(f, 'utf8'))]));
 

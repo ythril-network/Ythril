@@ -36,6 +36,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleIndex, walkFrom } from './_call-graph.mjs';
 import { spaceWriters } from './_space-writers.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const { SPACE_COLLECTIONS } = await import('../../server/dist/db/space-collection.js');
 
@@ -55,7 +56,7 @@ const COMPUTED_BULK_WRITES = {
     + '(`PLAN_KINDS`), never the jobs collection — the commit queues its jobs through the runner, which the last case holds',
 };
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 // Lowered from 170 with the plan/commit split (`Q-99` part 3) — see `a-create-converge-write-lives-in-the-commit`.
 const WRITERS = spaceWriters(INDEX, { floors: { space: 150 } });
 const ALL = [...WRITERS.sites, ...WRITERS.orphans.map(o => ({ ...o, key: `${o.file}:(orphan)` }))];

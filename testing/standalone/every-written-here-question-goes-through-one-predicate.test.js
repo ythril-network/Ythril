@@ -42,7 +42,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/sync/written-here.ts';
@@ -69,7 +69,7 @@ const EXEMPT = [
   ['server/src/sync/fill-file-meta.ts', 'author: { $exists: false }', '`receiverMade`, its author-less half'],
 ];
 
-const sources = trackedSources('server/src', { floor: 200 });
+const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 200 });
 const codeOf = (file) => blankComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
 
 /** Every hit of every shape in `text`, as `{ shape, line, text }`. */

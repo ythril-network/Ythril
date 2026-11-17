@@ -30,7 +30,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/sync/wire-answer.ts';
@@ -115,7 +115,7 @@ describe('every sync door answers through sync/wire-answer.ts', () => {
 
   it('`positions: 1` is spelled in the module and nowhere else in server/src', () => {
     assert.ok(existsSync(join(REPO_ROOT, MODULE)), `${MODULE} does not exist`);
-    const spellers = trackedSources('server/src', { floor: 200 })
+    const spellers = trackedSources(SERVER_CODE_ROOTS, { floor: 200 })
       .filter(f => f !== MODULE && /\bpositions\s*:\s*1\b/.test(blankComments(readFileSync(join(REPO_ROOT, f), 'utf8'))));
     assert.deepEqual(spellers, [], 'the version stamp is written by hand outside the module that owns it');
     assert.match(blankComments(readFileSync(join(REPO_ROOT, MODULE), 'utf8')), /\bpositions\s*:\s*1\b/, 'the module does not stamp `positions: 1`');

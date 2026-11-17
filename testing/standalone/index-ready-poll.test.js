@@ -32,10 +32,11 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { enclosingBlockAround, bodyOfEndingWith, bodyOf, statementAround, statementFrom }
   from './_structural-window.mjs';
+import { SERVER_CODE_ROOTS, SERVER_SOURCE_ROOT } from './_sources.mjs';
 
-const ROOT = 'server/src';
+const ROOT = SERVER_SOURCE_ROOT;
 
-function sources(dir = ROOT, out = []) {
+function sources(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const p = `${dir}/${name}`;
     if (statSync(p).isDirectory()) { sources(p, out); continue; }
@@ -54,7 +55,7 @@ function codeOf(file) {
 
 describe('search-index listing is never name-filtered', () => {
   it('no caller passes a name to listSearchIndexes', () => {
-    const all = sources();
+    const all = SERVER_CODE_ROOTS.flatMap(root => sources(root));
     // Floor the enumeration. Without this a broken walk yields no files, no offenders, and a green gate that
     // examined nothing — the exact failure this lens pass went looking for.
     assert.ok(all.length > 100, `only walked ${all.length} source files`);

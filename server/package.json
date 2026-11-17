@@ -6,7 +6,8 @@
   "scripts": {
     "predev": "npm run build -w @ythril-network/schema",
     "dev": "tsx watch src/index.ts",
-    "local-connector:dev": "tsx watch src/local-agent-connector/index.ts",
+    "prelocal-connector:dev": "npm run build -w @ythril-network/schema",
+    "local-connector:dev":"tsx watch src/local-agent-connector/index.ts",
     "prebuild": "npm run build -w @ythril-network/schema",
     "build": "node ../scripts/tsc.mjs && node scripts/copy-src-assets.mjs",
     "start": "node dist/index.js",

@@ -27,8 +27,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { bodyOf } from './_structural-window.mjs';
+import { SERVER_CODE_ROOTS, SERVER_SOURCE_ROOT } from './_sources.mjs';
 
-const ROOT = 'server/src';
+const ROOT = SERVER_SOURCE_ROOT;
 /** The guard's own module defines the parameter — it is not a caller. */
 const SELF = 'server/src/util/ssrf.ts';
 /** The written opt-out. Deliberately a sentence fragment, so it reads as prose in the comment. */
@@ -36,7 +37,7 @@ const OPT_OUT = 'allowPrivate stays false';
 /** How far above a call an opt-out comment may sit. */
 const COMMENT_WINDOW = 8;
 
-function sources(dir = ROOT, out = []) {
+function sources(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const p = `${dir}/${name}`;
     if (statSync(p).isDirectory()) { sources(p, out); continue; }
@@ -75,7 +76,7 @@ export function findCalls(src) {
 }
 
 describe('ssrfSafeFetch callers decide allowPrivate deliberately', () => {
-  const files = sources().filter(f => f !== SELF);
+  const files = SERVER_CODE_ROOTS.flatMap(root => sources(root)).filter(f => f !== SELF);
 
   it('finds the call sites at all', () => {
     const total = files.reduce((n, f) => n + findCalls(readFileSync(f, 'utf8')).length, 0);

@@ -38,7 +38,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { balancedFrom, blockAfter } from './_structural-window.mjs';
 import {
   BRAIN_WRITE_PAIRS, RECORD_PAIRS, HELPER_KEYS, KIND_BOUNDED_HELPERS,
@@ -275,7 +275,7 @@ describe('a connection helper reads only the link classes its record kind holds'
   it('no connection helper is called without a record kind (V10: a link key a kind cannot hold is never read)', () => {
     // Every tracked source, not only the doors: the helpers are called from `readEditAudit` and the writers as well.
     const offenders = [];
-    for (const f of trackedSources(['server/src'], { floor: 100 })) {
+    for (const f of trackedSources(SERVER_CODE_ROOTS, { floor: 100 })) {
       if (f.endsWith('brain/write-connections.ts')) continue;
       const s = stripComments(readFileSync(f, 'utf8'));
       for (const name of KIND_BOUNDED_HELPERS) {

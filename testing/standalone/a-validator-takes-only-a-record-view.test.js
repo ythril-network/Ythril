@@ -35,7 +35,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { parseSource, ts, unwrapExpression, lineOf } from '../_shared/syntax-tree.mjs';
 import { recordViewOf, recordOf, REPO_DIST } from './_cel-rules.mjs';
@@ -170,7 +170,7 @@ export const e = validateEntity(meta, { title: 't', type: 't', description: '', 
 });
 
 describe('every caller of a validator passes a view', () => {
-  const SERVER = 'server/src';
+  const SERVER = SERVER_CODE_ROOTS.join(' and ');
   const VALIDATOR_FILE = 'server/src/spaces/schema-validation.ts';
 
   /** The validators, read from the module that defines them: `validate<Kind>`, exported. */
@@ -197,7 +197,7 @@ describe('every caller of a validator passes a view', () => {
   function callers() {
     const names = new Set(validatorNames());
     const out = [];
-    for (const file of trackedSources([SERVER], { exclude: [VALIDATOR_FILE] })) {
+    for (const file of trackedSources(SERVER_CODE_ROOTS, { exclude: [VALIDATOR_FILE] })) {
       const text = fs.readFileSync(path.join(REPO_ROOT, file), 'utf8');
       if (![...names].some(n => text.includes(`${n}(`))) continue;
       const sf = parseSource(file, text);
@@ -237,7 +237,7 @@ describe('every caller of a validator passes a view', () => {
    */
   function viewSources() {
     const out = [];
-    for (const file of trackedSources([SERVER], { exclude: ['server/src/brain/record-view.ts'] })) {
+    for (const file of trackedSources(SERVER_CODE_ROOTS, { exclude: ['server/src/brain/record-view.ts'] })) {
       const text = fs.readFileSync(path.join(REPO_ROOT, file), 'utf8');
       if (!text.includes('recordViewOf(')) continue;
       const sf = parseSource(file, text);
@@ -265,7 +265,7 @@ describe('every caller of a validator passes a view', () => {
   it('recordViewOf and RecordView are defined once, in brain/record-view.ts, and nothing casts its way to one', () => {
     const defs = [];
     const casts = [];
-    for (const file of trackedSources([SERVER])) {
+    for (const file of trackedSources(SERVER_CODE_ROOTS)) {
       const text = stripComments(fs.readFileSync(path.join(REPO_ROOT, file), 'utf8'));
       if (/\bexport (?:function|const) recordViewOf\b/.test(text)) defs.push(`${file}: recordViewOf`);
       if (/\bexport (?:type|interface) RecordView\b/.test(text)) defs.push(`${file}: RecordView`);

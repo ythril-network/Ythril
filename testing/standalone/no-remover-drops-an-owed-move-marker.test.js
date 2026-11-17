@@ -43,7 +43,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { parseSource, lineOf, ts } from '../_shared/syntax-tree.mjs';
 
 /** The one question every remover asks. */
@@ -163,7 +163,7 @@ export const unguarded = (sites, exempt = EXEMPT) => sites.filter(s => !s.asks &
 
 /** Every tracked source of the server, read. The floor is inside `trackedSources`: an empty listing throws. */
 function serverSources() {
-  return trackedSources('server/src', { ext: ['.ts'], floor: 100, specs: false })
+  return trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 100, specs: false })
     .map(file => ({ file, text: readFileSync(join(REPO_ROOT, file), 'utf8') }));
 }
 

@@ -26,7 +26,7 @@
  * (requires a prior `npm run build` in server/)
  */
 import { describe, it, before } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
@@ -148,7 +148,7 @@ describe('every decision site asks the one predicate', () => {
      * The pattern excludes `.admin(` — `db.admin()` is the Mongo driver and has nothing to do with tokens —
      * and `admin:` , which is an object KEY rather than a read.
      */
-    const files = trackedSources('server/src');
+    const files = trackedSources(SERVER_CODE_ROOTS);
 
     /*
      * `tool.admin` is EXCLUDED, and it is not a near-miss — it is a different fact with the same spelling.

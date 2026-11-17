@@ -36,7 +36,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openB81Mongo, closeB81Mongo, mongoSkipReason } from './_b81e-mongo.mjs';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const skip = await mongoSkipReason();
@@ -53,7 +53,7 @@ const ran = [];
 const MARKERS = Object.freeze({ positionsOwed: 'repair', positionsReadyAt: '2026-10-01T00:00:00.000Z', seqSeenBy6: 41 });
 const codeOf = (file) => blankComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
 /** Files that name the counters collection: its writers, and the one that reads a backup's counter and writes through `raiseVersionTo`. */
-const writers = () => trackedSources('server/src', { floor: 200 }).filter(f => NAMES_COUNTERS.test(codeOf(f)));
+const writers = () => trackedSources(SERVER_CODE_ROOTS, { floor: 200 }).filter(f => NAMES_COUNTERS.test(codeOf(f)));
 const writesDirectly = (f) => WRITES.test(codeOf(f));
 
 let mongo;

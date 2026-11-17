@@ -29,7 +29,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { withoutBodyOf } from './_structural-window.mjs';
 
@@ -58,7 +58,7 @@ export function keyBuilders(sources) {
   return out;
 }
 
-const server = () => readTrackedSources('server/src', { untracked: true, floor: SERVER_FLOOR });
+const server = () => readTrackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: SERVER_FLOOR });
 
 describe('the syncBase path is spelled once', () => {
   it('exactly one module exports syncBasePath', () => {

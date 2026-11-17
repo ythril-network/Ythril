@@ -33,7 +33,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 /** The most files this sweep may find fewer than: the server is far larger, so a short list means the listing broke. */
@@ -62,7 +62,7 @@ const definers = (sources) => sources
   .filter(({ text }) => /export\s+const\s+MACHINE_MADE_SOURCES\b/.test(blankComments(text)))
   .map(s => s.file);
 
-const server = () => readTrackedSources('server/src', { untracked: true, floor: SERVER_FLOOR });
+const server = () => readTrackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: SERVER_FLOOR });
 
 describe('the machine-made description sources are one list', () => {
   it('exactly one module exports MACHINE_MADE_SOURCES, and it is where the predicate and the tuple live together', () => {

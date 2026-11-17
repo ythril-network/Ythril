@@ -25,7 +25,7 @@
  * Run: node --test testing/standalone/rights-area-names-are-validated.test.js
  */
 import { describe, it, before } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -107,7 +107,7 @@ describe('rights area names are validated, not merely typed', () => {
     const asArray = new RegExp(`\\[\\s*${names.map(a => `'${a}'`).join(',\\s*')}\\s*\\]`);
     const asUnion = new RegExp(names.map(a => `'${a}'`).join(`\\s*\\|\\s*`));
 
-    const files = trackedSources('server/src', { exclude: ['server/src/config/rights-shape.ts'] })
+    const files = trackedSources(SERVER_CODE_ROOTS, { exclude: ['server/src/config/rights-shape.ts'] })
       .filter(f => f.endsWith('.ts'))
       // The one file ALLOWED to spell them: it is where the list is declared and the type derived from it.
       ;

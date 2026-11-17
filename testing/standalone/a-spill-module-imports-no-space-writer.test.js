@@ -32,7 +32,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, posix } from 'node:path';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const SUBJECTS = ['server/src/brain/graph-spill.ts', 'server/src/brain/read-spill-store.ts'];
@@ -48,7 +48,7 @@ const writesSomething = (src) =>
   || /\b(writeFile|writeFileSync|appendFile|rename|renameSync|rm|rmSync|unlink|unlinkSync|copyFile|createWriteStream|writeStored|mkdirPrivate\w*)\s*\(/.test(src);
 
 function writerModules() {
-  const all = trackedSources('server/src', { floor: 300 });
+  const all = trackedSources(SERVER_CODE_ROOTS, { floor: 300 });
   const writers = new Set(
     all.filter(f => f.startsWith('server/src/files/')).filter(f => writesSomething(code(f))),
   );

@@ -33,7 +33,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo } from '../standalone/_mongo-harness.mjs';
 import { seedHub, relinkProblems } from '../standalone/_merge-hub.mjs';
-import { readTrackedSources } from '../standalone/_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from '../standalone/_sources.mjs';
 import { stripComments } from '../standalone/_strip-comments.mjs';
 
 const SIZES = process.argv.slice(2).map(Number).filter(n => Number.isInteger(n) && n > 2);
@@ -55,7 +55,7 @@ fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({
 
 /** The bound as the code states it, when it exists — printed beside each size so a run says which side it is on. */
 function boundInCode() {
-  const defining = readTrackedSources('server/src', { untracked: true, floor: 300 })
+  const defining = readTrackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 300 })
     .filter(({ text }) => /export\s+const\s+MERGE_MAX_RELINKS\b/.test(stripComments(text)));
   return defining.length === 1 ? defining[0].file : null;
 }

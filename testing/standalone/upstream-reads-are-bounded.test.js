@@ -33,7 +33,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const ROOT = process.cwd();
 const HELPER = 'server/src/util/bounded-read.ts';
@@ -54,7 +54,7 @@ before(async () => { mod = await import('../../server/dist/util/bounded-read.js'
  * visible at the call site, which a copy never was.
  */
 function sourceFiles() {
-  return trackedSources('server/src', { untracked: true, floor: 50 });
+  return trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 50 });
 }
 
 /** Strip comments line-first so the gate cannot fire on the prose explaining it. */

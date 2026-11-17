@@ -46,7 +46,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleIndex, indexSources, callsIn, intervalJobRuns } from './_call-graph.mjs';
 import { walkEntryNames, walkCallsIn } from './_housekeeping-walks.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementUpTo } from './_structural-window.mjs';
 import { posix } from 'node:path';
@@ -111,11 +111,11 @@ function verdictCalls(sources) {
   return out;
 }
 
-const index = moduleIndex('server/src');
+const index = moduleIndex(SERVER_CODE_ROOTS);
 intervalJobRuns(index);   // registers the closures handed to intervalJob, so a walk written inside one is a caller too
 const ENTRY_NAMES = walkEntryNames(index);
 const ASKERS = askersOf(index);
-const sources = readTrackedSources('server/src', { floor: 300 });
+const sources = readTrackedSources(SERVER_CODE_ROOTS, { floor: 300 });
 
 describe('the question and its callers are read from the tree', () => {
   it('derives the askers from the two question files, with a floor', () => {

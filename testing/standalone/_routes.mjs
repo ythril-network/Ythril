@@ -25,7 +25,7 @@
  * returning a short list, because a gate handed `[]` concludes that everything is fine.
  */
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { routerMounts } from './_router-mounts.mjs';
 import { argumentsOf } from './_structural-window.mjs';
@@ -39,7 +39,7 @@ import { argumentsOf } from './_structural-window.mjs';
  * @param {{roots?: string[], floor?: number}} [opts] `floor` is the fewest routes that may resolve before
  *   this throws. Raise it when the surface grows; never lower it to make a run pass.
  */
-export function mountedRoutes({ roots = ['server/src'], floor = 150 } = {}) {
+export function mountedRoutes({ roots = SERVER_CODE_ROOTS, floor = 150 } = {}) {
   const mounts = routerMounts({ roots });
   const out = [];
 

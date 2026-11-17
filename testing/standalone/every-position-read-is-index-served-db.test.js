@@ -39,7 +39,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openB81Mongo, closeB81Mongo, mongoSkipReason } from './_b81e-mongo.mjs';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const skip = await mongoSkipReason();
@@ -61,7 +61,7 @@ let mongo, seqMod, indexes, spaceColl, query;
 function spelledPosSorts() {
   const out = new Map();
   let hits = 0;
-  for (const file of trackedSources('server/src', { floor: 200 })) {
+  for (const file of trackedSources(SERVER_CODE_ROOTS, { floor: 200 })) {
     const text = blankComments(fs.readFileSync(path.join(REPO_ROOT, file), 'utf8'));
     for (const m of text.matchAll(/\{\s*pos\s*:\s*(-?1)\s*(?:,\s*_id\s*:\s*(-?1)\s*)?\}/g)) {
       hits++;

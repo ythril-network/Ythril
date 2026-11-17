@@ -26,13 +26,14 @@ import { scheduledJobs } from './_scheduled-jobs.mjs';
 import { argumentsOf, balancedFrom } from './_structural-window.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { SHUTDOWN_FILE, shutdownSequenceOf } from './_shutdown-sequence.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const FILE = 'server/src/networks/round-expiry.ts';
 const LABEL = 'Vote round expiry';
 const code = (f) => stripComments(fs.readFileSync(f, 'utf8'));
 
 describe('the job is registered', () => {
-  const index = moduleIndex('server/src');
+  const index = moduleIndex(SERVER_CODE_ROOTS);
   const { jobs } = scheduledJobs(index);
   const job = jobs.find(j => j.kind === 'interval' && j.file === FILE);
 

@@ -36,7 +36,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { balancedFrom } from './_structural-window.mjs';
 import { CORPUS, FILE_DOC } from './_canonical-json-corpus.mjs';
@@ -195,7 +195,7 @@ describe('no other server source writes a canonical text by hand', () => {
   });
 
   // The server's sources and the schema package's, which the server imports: a hand-written canonical text in either is a second answer.
-  const sources = readTrackedSources(['server/src', 'schema/src'], { untracked: true })
+  const sources = readTrackedSources([...SERVER_CODE_ROOTS], { untracked: true })
     .map(({ file, text }) => ({ file, code: stripComments(text) }));
 
   it('reads a tree worth reading, and the askers still ask (the floors)', () => {

@@ -40,7 +40,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { lineOf, parseSource, ts } from '../_shared/syntax-tree.mjs';
 
 const OPTIONS_BUILDER = 'mongoClientOptions';
@@ -94,7 +94,7 @@ export function mongoClients(file, text, builders = new Set([OPTIONS_BUILDER])) 
   return clients;
 }
 
-const sources = () => trackedSources(['server/src'], { floor: 100 });
+const sources = () => trackedSources(SERVER_CODE_ROOTS, { floor: 100 });
 const read = (file) => readFileSync(join(REPO_ROOT, file), 'utf8');
 
 describe('mongoClients (the detector, held on samples)', () => {

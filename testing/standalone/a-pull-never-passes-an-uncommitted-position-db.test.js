@@ -43,7 +43,7 @@ import { parkPositionWrites } from './_b81c-park.mjs';
 import { peerToken, build } from './_push-door.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementFrom } from './_structural-window.mjs';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const skip = await mongoSkipReason();
 const HOLD_TIMEOUT = 30_000;
@@ -226,7 +226,7 @@ describe('a pull never passes an uncommitted position', { skip }, () => {
     it('the file-move transaction (files/move-cascade.ts) runs through inHeldTransaction, not a bare bounded transaction', () => {
       // (the root of the repository is `REPO_ROOT`, `_sources.mjs`)
       // Derived: the files that call `rebuiltFileRow` (the function that stamps the moved rows), other than its own module.
-      const callers = trackedSources(['server/src'], { ext: ['.ts'] })
+      const callers = trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'] })
         .filter(f => f.replaceAll('\\', '/') !== 'server/src/files/move-plan.ts' && /rebuiltFileRow\(/.test(fs.readFileSync(join(REPO_ROOT, f), 'utf8')));
       assert.ok(callers.length >= 1, 'no caller of rebuiltFileRow found: the derivation is broken');
       for (const f of callers) {

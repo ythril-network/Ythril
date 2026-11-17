@@ -29,7 +29,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { parseSource, ts, walkEveryNode } from '../_shared/syntax-tree.mjs';
 
 const VERBS = new Set(['get', 'post', 'put', 'patch', 'delete', 'all']);
@@ -118,7 +118,7 @@ describe('every sync route that names a network is gated, a data route, or exemp
   });
 
   it('the middleware is defined once, and every file that calls it imports it', () => {
-    const owners = trackedSources('server/src', { untracked: true, floor: 100 })
+    const owners = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 })
       .filter(f => new RegExp(`export (?:async )?function ${GATE}\\b`).test(readFileSync(f, 'utf8')));
     assert.equal(owners.length, 1, `${GATE} must be defined exactly once; found in: ${owners.join(', ') || 'no file'}`);
     const importers = files.filter(f => new RegExp(`\\b${GATE}\\(`).test(readFileSync(f, 'utf8')));

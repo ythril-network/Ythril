@@ -44,7 +44,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ts, parseSource, lineOf, walkEveryNode, unwrapExpression } from '../_shared/syntax-tree.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { splitStandalone } from '../_shared/standalone-split.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -126,7 +126,7 @@ function membersOfType(file, sf, local, name) {
 
 /** Every exported `...ForTest` setter in server/src that takes a figure, with the figures it takes. */
 function deriveSetters() {
-  const files = trackedSources('server/src', { ext: ['.ts'], specs: false, floor: 100, root: ROOT });
+  const files = trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], specs: false, floor: 100, root: ROOT });
   const setters = new Map();
   for (const file of files) {
     const text = readFileSync(join(ROOT, file), 'utf8');

@@ -42,6 +42,7 @@ import { argumentsOf } from './_structural-window.mjs';
 import { scheduledJobs } from './_scheduled-jobs.mjs';
 import { walkEntryNames, walkCallbackEdges, housekeepingRoots } from './_housekeeping-walks.mjs';
 import { mountedRoutes } from './_routes.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const observer = await import('../../server/dist/db/record-write-observer.js');
 const { RECORD_COLLECTION } = await import('../../server/dist/config/types-knowledge.js');
@@ -176,7 +177,7 @@ const rootId = (r) => r.form === 'boot' ? `boot|${r.label}` : `${r.form}|${fileO
 const CLASS = { interval: 'job', cron: 'job', boot: 'worker', 'after-listening': 'worker', 'slot-pool': 'worker' };
 
 describe('every deletion the server makes on its own is audited by the act that makes it', () => {
-  const index = moduleIndex('server/src');
+  const index = moduleIndex(SERVER_CODE_ROOTS);
   const names = walkEntryNames(index);
   const { jobs } = scheduledJobs(index);
   const roots = housekeepingRoots(index, jobs);

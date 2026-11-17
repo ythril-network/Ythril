@@ -17,7 +17,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const { LruMap } = await import('../../server/dist/util/lru-map.js');
@@ -60,7 +60,7 @@ describe('a bounded cache drops the least recently used', () => {
   });
 
   it('no source but the module drops a Map\'s first key by hand', () => {
-    const sources = readTrackedSources('server/src', { untracked: true, floor: 300 });
+    const sources = readTrackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 300 });
     const byHand = sources
       .filter(({ file }) => file !== MODULE)
       .filter(({ text }) => /\.keys\(\)\.next\(\)/.test(stripComments(text)))

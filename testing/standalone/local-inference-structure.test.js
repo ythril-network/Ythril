@@ -26,13 +26,13 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { balancedFrom, bodyOf, argumentsOf } from './_structural-window.mjs';
 import { importClosure, relativeImports, bareImports } from './_import-closure.mjs';
 import { SHUTDOWN_FILE, shutdownSequenceOf } from './_shutdown-sequence.mjs';
 
-const SRC = trackedSources('server/src', { floor: 100, untracked: true });
+const SRC = trackedSources(SERVER_CODE_ROOTS, { floor: 100, untracked: true });
 const read = (f) => readFileSync(join(REPO_ROOT, f), 'utf8');
 const code = (f) => stripComments(read(f));
 

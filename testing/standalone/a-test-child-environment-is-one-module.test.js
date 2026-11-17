@@ -16,7 +16,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { parseSource, lineOf, ts } from '../_shared/syntax-tree.mjs';
 import { testChildEnv, RECORDER_ENV_PREFIX } from '../_shared/test-child-env.mjs';
@@ -306,7 +306,7 @@ describe('the gate sees a copy of the rule and only a copy', () => {
 });
 
 describe('no file keeps its own copy of the child-environment rule', () => {
-  const files = trackedSources(['scripts', 'testing', 'server/src', 'benchmarks'], { ext: ['.mjs', '.js', '.cjs', '.ts'], floor: 500 })
+  const files = trackedSources(['scripts', 'testing', ...SERVER_CODE_ROOTS, 'benchmarks'], { ext: ['.mjs', '.js', '.cjs', '.ts'], floor: 500 })
     .filter((f) => f !== MODULE && f !== THIS);
 
   it('scans scripts and the test stacks', () => {

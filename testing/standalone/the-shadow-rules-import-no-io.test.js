@@ -27,7 +27,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { relativeImports, bareImports } from './_import-closure.mjs';
 
 const MARKER = '@pure-rules';
@@ -38,7 +38,7 @@ const IO_MODULES = ['server/src/config/loader.ts', 'server/src/db/mongo.ts', 'se
 /** Packages and built-ins that are I/O (or carry it): the file system, the database driver, the network, processes. */
 const IO_PACKAGES = /^(?:node:)?(?:fs|fs\/promises|child_process|net|http|https|http2|dns|dgram|tls|worker_threads|cluster)$|^mongodb$/;
 
-const entries = trackedSources('server/src', { floor: 100 }).filter(f => readFileSync(join(REPO_ROOT, f), 'utf8').includes(MARKER));
+const entries = trackedSources(SERVER_CODE_ROOTS, { floor: 100 }).filter(f => readFileSync(join(REPO_ROOT, f), 'utf8').includes(MARKER));
 
 /** The closure of `entry`, each member with the file that first reached it, so a finding can say how. */
 function closureWithParents(entry) {

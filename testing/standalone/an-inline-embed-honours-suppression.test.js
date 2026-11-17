@@ -43,7 +43,7 @@ import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
 import { argumentsOf, bodyOf, statementAround } from './_structural-window.mjs';
 import { suppressionResolvers, resolverCallPattern } from './_suppression-resolvers.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const { embeddingSuppressed } = await import('../../server/dist/brain/suppress-embeddings.js');
 
@@ -57,7 +57,7 @@ const { embeddingSuppressed } = await import('../../server/dist/brain/suppress-e
 let serverSourceCache;
 function serverSources() {
   if (!serverSourceCache) {
-    serverSourceCache = new Map(trackedSources('server/src', { untracked: true, floor: 300 })
+    serverSourceCache = new Map(trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 300 })
       .map(file => [file, stripComments(readFileSync(file, 'utf8'))]));
   }
   return serverSourceCache;

@@ -41,13 +41,14 @@ import assert from 'node:assert/strict';
 import { mountedRoutes } from './_routes.mjs';
 import { moduleIndex, callSitesIn, memberCallSitesIn } from './_call-graph.mjs';
 import { argumentsOf } from './_structural-window.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const { ROUTE_RIGHTS } = await import('../../server/dist/auth/space-rights.js');
 const { RUNGS } = await import('../../server/dist/config/rights-shape.js');
 
 const PRIMITIVES_FILE = 'server/src/auth/reachable-spaces.ts';
 
-const index = moduleIndex(['server/src']);
+const index = moduleIndex(SERVER_CODE_ROOTS);
 
 /**
  * The parameter list of a top-level function, as `[{ name, dflt }]` — `dflt` the string literal a parameter

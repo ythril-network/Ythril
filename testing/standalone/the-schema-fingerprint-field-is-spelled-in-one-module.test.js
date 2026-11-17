@@ -26,12 +26,13 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const WORD = /\bschemaFingerprint\b/g;
 
 const ALLOWED = Object.freeze({
+  'schema/src/schema-fingerprint.ts': 'the one definition of the field name, which every other module imports',
   'server/src/config/types-knowledge.ts': 'the property name of the SchemaStamped interface',
   'server/src/mcp/tools/spaces.ts': 'the sentence of the space_meta tool description',
   'server/src/spaces/space-meta-answer.ts': 'the meta answer\'s own field (a different object from the record stamp), which meta-response-round-trips reads by its text',
@@ -41,7 +42,7 @@ const ALLOWED = Object.freeze({
 const spellings = (source) => blankComments(source).split('\n').flatMap((line, i) => (line.match(WORD) ? [i + 1] : []));
 
 describe('the schema fingerprint field is spelled in one module', () => {
-  const files = trackedSources('server/src');
+  const files = trackedSources(SERVER_CODE_ROOTS);
 
   it('no server source outside the allowlist spells the field', () => {
     const found = [];

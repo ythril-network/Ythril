@@ -25,7 +25,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const ADMISSION = 'server/src/sync/peer-space-admission.ts';
@@ -36,7 +36,7 @@ const ENTERS_THE_FENCE_FOR_ITS_OWN_REASON = ['server/src/sync/space-exchange.ts'
 /** The doors that must ask the one module, whatever else they do. */
 const DOORS = ['server/src/api/sync/_shared.ts', 'server/src/auth/middleware.ts', 'server/src/mcp/call-tool.ts'];
 
-const sources = () => trackedSources('server/src', { untracked: true, floor: 300 });
+const sources = () => trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 300 });
 const code = (file) => stripComments(readFileSync(`${REPO_ROOT}/${file}`, 'utf8'));
 const naming = (re) => sources().filter(f => re.test(code(f))).sort();
 

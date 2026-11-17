@@ -29,7 +29,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/mcp/schema-warnings.ts';
@@ -67,7 +67,7 @@ describe('the module answers per mode', () => {
 });
 
 describe('every write tool says its schema warnings through the module', () => {
-  const sources = readTrackedSources('server/src', { untracked: true })
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, { untracked: true })
     .map(({ file, text }) => ({ file, code: stripComments(text) }));
   const CAPTURES = /\blet\s+\w+\s*:\s*UpdateValidation\s*\|\s*undefined\b/;
   const SENTENCE = /Schema:\s*\$\{/;

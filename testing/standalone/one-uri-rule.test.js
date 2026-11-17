@@ -36,7 +36,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-uri-rule-'));
@@ -60,7 +60,7 @@ const ROWS = [
 
 /** The server sources that export `name`, read with comments out. Floor: a hundred sources scanned. */
 function modulesExporting(name) {
-  const files = trackedSources('server/src', { floor: 100, specs: false });
+  const files = trackedSources(SERVER_CODE_ROOTS, { floor: 100, specs: false });
   const re = new RegExp(`export\\s+(?:async\\s+)?(?:function|const)\\s+${name}\\b`);
   return files.filter(f => re.test(stripComments(fs.readFileSync(path.join(REPO_ROOT, f), 'utf8'))));
 }
@@ -115,7 +115,7 @@ describe('one rule for where the database URI comes from', () => {
   }
 
   it('the redacted URI the route answers hides credentials and is the same function the dump uses: redactUri is declared once', () => {
-    const files = trackedSources('server/src', { floor: 100, specs: false });
+    const files = trackedSources(SERVER_CODE_ROOTS, { floor: 100, specs: false });
     const re = /(?:function\s+redactUri\b|(?:const|let)\s+redactUri\s*=)/;
     const declaredIn = files.filter(f => re.test(stripComments(fs.readFileSync(path.join(REPO_ROOT, f), 'utf8'))));
     assert.deepEqual(declaredIn.length, 1, `redactUri is declared in ${declaredIn.length} places: ${declaredIn.join(', ')}`);

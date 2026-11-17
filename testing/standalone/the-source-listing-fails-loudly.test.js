@@ -13,18 +13,18 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackedSources, readTrackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, readTrackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 describe('the listing answers with the repository', () => {
   it('finds the server sources', () => {
-    const files = trackedSources('server/src');
+    const files = trackedSources(SERVER_CODE_ROOTS);
     assert.ok(files.length > 100, `found ${files.length}`);
     assert.ok(files.every(f => f.endsWith('.ts')), 'the extension filter let something else through');
     assert.ok(files.includes('server/src/config/types.ts'), 'a file everyone knows is there is missing');
   });
 
   it('takes more than one directory, and more than one extension', () => {
-    const mixed = trackedSources(['server/src', 'docs'], { ext: ['.ts', '.md'] });
+    const mixed = trackedSources([...SERVER_CODE_ROOTS, 'docs'], { ext: ['.ts', '.md'] });
     assert.ok(mixed.some(f => f.endsWith('.md')), 'no markdown came back from docs/');
     assert.ok(mixed.some(f => f.endsWith('.ts')), 'no typescript came back from server/src');
   });
@@ -32,14 +32,14 @@ describe('the listing answers with the repository', () => {
   it('drops an excluded path, which is how a definer is left out', () => {
     // Every sweep of "who copies X" has to exclude the module that DECLARES X, or it reports the source of
     // truth as a copy of itself.
-    const without = trackedSources('server/src', { exclude: ['server/src/config/types.ts'] });
+    const without = trackedSources(SERVER_CODE_ROOTS, { exclude: ['server/src/config/types.ts'] });
     assert.ok(!without.includes('server/src/config/types.ts'));
   });
 
   it('never returns a declaration file, without being asked', () => {
     // Every caller that hand-rolled this excluded `.d.ts`, which is what makes it a default rather than an
     // option — and a default nobody has to remember is one nobody can forget.
-    assert.ok(!trackedSources('server/src').some(f => f.endsWith('.d.ts')));
+    assert.ok(!trackedSources(SERVER_CODE_ROOTS).some(f => f.endsWith('.d.ts')));
   });
 
   it('and leaves specs out on request, which is the one real second question', () => {
@@ -53,7 +53,7 @@ describe('the listing answers with the repository', () => {
   it('paths are repo-relative with forward slashes, on any platform', () => {
     // They are used as `join(REPO_ROOT, f)` and compared against literals in assertion messages. A backslash
     // here would make every `exclude` silently miss on Windows.
-    const files = trackedSources('server/src');
+    const files = trackedSources(SERVER_CODE_ROOTS);
     assert.ok(!files.some(f => f.includes('\\')), 'a backslash reached a path');
     assert.ok(REPO_ROOT.length > 0);
   });
@@ -65,7 +65,7 @@ describe('and it fails loudly rather than reporting nothing', () => {
      * The case the whole module is for. A caller that received `[]` would loop over nothing and pass — so
      * this must not be a returned empty array under any circumstance a caller can reach.
      */
-    assert.throws(() => trackedSources('server/src', { floor: 100_000 }), /listing is broken/);
+    assert.throws(() => trackedSources(SERVER_CODE_ROOTS, { floor: 100_000 }), /listing is broken/);
   });
 
   it('throws on a path that matches nothing at all', () => {
@@ -77,11 +77,11 @@ describe('and it fails loudly rather than reporting nothing', () => {
   it('the reader carries the floor too, not just the lister', () => {
     // `readTrackedSources` is the convenience wrapper, and a wrapper that skipped the check would be the
     // easier thing to reach for — which is how the guard gets lost.
-    assert.throws(() => readTrackedSources('server/src', { floor: 100_000 }), /listing is broken/);
+    assert.throws(() => readTrackedSources(SERVER_CODE_ROOTS, { floor: 100_000 }), /listing is broken/);
   });
 
   it('the reader returns text beside the path', () => {
-    const read = readTrackedSources('server/src', { floor: 100 });
+    const read = readTrackedSources(SERVER_CODE_ROOTS, { floor: 100 });
     const one = read.find(r => r.file === 'server/src/config/types.ts');
     assert.ok(one, 'a known file did not come back');
     assert.ok(one.text.includes('CHRONO_STATUSES'), 'the text is not the file');

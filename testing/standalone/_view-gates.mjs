@@ -14,12 +14,12 @@
  * matches. A site belongs to the INNERMOST function around it, widened outward only where a question says so (a member list
  * filtered in a callback belongs to the function that holds the list). Lines are 1-based in the original file.
  */
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { ts, parseSource, lineOf } from '../_shared/syntax-tree.mjs';
 
 /** The server's tracked TypeScript, read (floor inside `trackedSources`). */
-export const serverSources = () => readTrackedSources('server/src', { ext: ['.ts'], floor: 300, specs: false });
+export const serverSources = () => readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 300, specs: false });
 
 /** A fresh regex per use: a shared /g regex under-scans. */
 const re = (src, flags = '') => new RegExp(src, flags);

@@ -47,6 +47,7 @@ import {
   walkEntryNames, walkRunnerKeys, housekeepingRoots, reachOutsideWalks, insideWalks, spaceReachers, spaceLoopsIn, catchesIn,
 } from './_housekeeping-walks.mjs';
 import { balancedFrom } from './_structural-window.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 /** A direct line: `log.warn(`, `logger.error(`, `console.log(`. */
 const DIRECT_LOG = /(?<![\w$.])(?:log|logger|console)\s*\.\s*(?:warn|error|info|debug|log)\s*\(/g;
@@ -104,7 +105,7 @@ function findings(index, names, subjects, callbacks) {
   return out;
 }
 
-const index = moduleIndex('server/src');
+const index = moduleIndex(SERVER_CODE_ROOTS);
 const NAMES = walkEntryNames(index);
 const { jobs } = scheduledJobs(index);
 const roots = housekeepingRoots(index, jobs);

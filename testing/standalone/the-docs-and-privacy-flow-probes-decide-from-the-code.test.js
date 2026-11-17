@@ -24,7 +24,7 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
-import { readTrackedSources, REPO_ROOT } from './_sources.mjs';
+import { readTrackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { exportRoutes, exportSections, decide as decideExport } from '../../tools/flow-checks/check-i-privacy-export-possible.mjs';
 import { documentedStrings, fragmentsOf, decide as decideMessages, readAllow } from '../../tools/flow-checks/check-i-docs-refusals-and-messages-current.mjs';
 
@@ -35,7 +35,7 @@ const run = (name) => {
   return { code: r.status, last: lines[lines.length - 1] };
 };
 
-const serverSources = readTrackedSources(['server/src'], { ext: ['.ts'], specs: false });
+const serverSources = readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], specs: false });
 const guide = readTrackedSources(['docs/userguide'], { ext: ['.md'], floor: 3 });
 const docs = readTrackedSources(['docs'], { ext: ['.md'], floor: 10 });
 
@@ -76,7 +76,7 @@ describe('check-i-privacy-export-possible', () => {
 });
 
 describe('check-i-docs-refusals-and-messages-current', () => {
-  const sourcesText = readTrackedSources(['server/src', 'client/src', 'schema/src'], { ext: ['.ts'], specs: false });
+  const sourcesText = readTrackedSources([...SERVER_CODE_ROOTS, 'client/src'], { ext: ['.ts'], specs: false });
 
   it('answers on the repository without "cannot answer"', () => {
     const r = run('check-i-docs-refusals-and-messages-current');

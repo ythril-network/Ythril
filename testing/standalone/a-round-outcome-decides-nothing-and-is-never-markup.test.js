@@ -23,11 +23,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
-const serverFiles = () => trackedSources('server/src', { untracked: true, floor: 100 }).map(f => ({ file: f, code: stripComments(fs.readFileSync(f, 'utf8')) }));
+const serverFiles = () => trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).map(f => ({ file: f, code: stripComments(fs.readFileSync(f, 'utf8')) }));
 
 /** A read of `.outcome` on a thing a round or an outcome entry is usually bound to; an assignment is a write. */
 const READS_OUTCOME = /\b(?:round|rounds?\[[^\]]*\]|r|rd|pr|peerRound|local|stored|entry|e|o)\s*\??\.\s*outcome\b(?!\s*=[^=])/;

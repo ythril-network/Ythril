@@ -28,6 +28,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { tempInstanceDir, removeInstanceDir, bootInstance, callRoute } from './_vote-round-instance.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const SELF = 'aaaaaaaa-0000-4000-8000-000000005e1f';
 const P1 = 'aaaaaaaa-0000-4000-8000-0000000000a1';
@@ -247,7 +248,7 @@ describe('the two sentences are each written once', () => {
   it('the "Round not found or already concluded" text appears in one source file (the relay used its own)', () => {
     const files = [];
     const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = `${d}/${e.name}`; if (e.isDirectory()) walk(p); else if (p.endsWith('.ts')) files.push(p); } };
-    walk('server/src');
+    for (const root of SERVER_CODE_ROOTS) walk(root);
     assert.ok(files.length >= 100, 'the source listing is broken');
     const holders = files.filter(f => /Round not found or (?:already )?concluded/.test(stripComments(fs.readFileSync(f, 'utf8'))));
     assert.deepEqual(holders, ['server/src/networks/round-state.ts'], 'the refusal for a closed round is written out in more than the one module that owns it');

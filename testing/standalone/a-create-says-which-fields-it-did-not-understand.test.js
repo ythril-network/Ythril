@@ -39,10 +39,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 describe('no hand-kept list of the keys a write accepts, and no reporter over one, is left', () => {
-  const sources = trackedSources(['server/src'], { floor: 100 });
+  const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 100 });
 
   it('api/brain/unknown-fields.ts is gone', () => {
     assert.equal(sources.includes('server/src/api/brain/unknown-fields.ts'), false,

@@ -47,7 +47,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { ts, parseSource } from '../_shared/syntax-tree.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const BODY_OWNER = 'server/src/brain/write-validation.ts';
 const BULK = 'server/src/brain/bulk.ts';
@@ -125,7 +125,7 @@ export function breaches({ classes, tags, branches }) {
 }
 
 describe('a schema refusal has one body, built in one place', () => {
-  const found = analyse(readTrackedSources('server/src', { floor: 300, untracked: true }));
+  const found = analyse(readTrackedSources(SERVER_CODE_ROOTS, { floor: 300, untracked: true }));
   const broken = breaches(found);
 
   it('the derivation found the family, its tag sites and its branches (floors: a stopped match reports success about nothing)', () => {

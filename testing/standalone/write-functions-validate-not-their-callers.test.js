@@ -34,7 +34,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
 import { balancedFrom } from './_structural-window.mjs';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { writePlanFunction } from './_write-plan-sources.mjs';
 
 // The edge write DECIDES in its planner since `Q-99` part 3 — `upsertEdge` and the bulk door both plan through
@@ -45,7 +45,7 @@ const planner = () => writePlanFunction('planEdge');
 
 /** The one source file that declares `class EdgeSchemaViolation`, comment-stripped. */
 function violationClassSource() {
-  const homes = trackedSources('server/src', { floor: 100, untracked: true })
+  const homes = trackedSources(SERVER_CODE_ROOTS, { floor: 100, untracked: true })
     .map(file => ({ file, src: stripComments(readFileSync(join(REPO_ROOT, file), 'utf8')) }))
     .filter(f => /\bclass EdgeSchemaViolation\b/.test(f.src));
   assert.equal(homes.length, 1, `EdgeSchemaViolation is declared in ${homes.length} files — re-point this gate`);

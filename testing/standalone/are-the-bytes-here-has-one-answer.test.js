@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
@@ -112,7 +112,7 @@ function gateOver(sources, spellings, exempt) {
   const stale = Object.keys(exempt).filter(f => !hitFiles.has(f));
   return { hits, stale };
 }
-const tracked = () => trackedSources('server/src').map(f => ({ file: f, code: blankComments(readFileSync(path.join(REPO_ROOT, f), 'utf8')) }));
+const tracked = () => trackedSources(SERVER_CODE_ROOTS).map(f => ({ file: f, code: blankComments(readFileSync(path.join(REPO_ROOT, f), 'utf8')) }));
 
 /** The one place a failure may be read as "this path does not exist" by its code. */
 const MISSING_BY_CODE = () => /(['"])(?:ENOENT|ENOTDIR)\1/g;
@@ -169,7 +169,7 @@ describe('are the bytes here: one answer', () => {
     assert.deepEqual(swallowedStats(oneAnswer), [], 'the patterns match the one answer, which rethrows');
 
     const hits = [];
-    for (const f of trackedSources('server/src')) {
+    for (const f of trackedSources(SERVER_CODE_ROOTS)) {
       const code = blankComments(readFileSync(path.join(REPO_ROOT, f), 'utf8'));
       for (const at of swallowedStats(code)) hits.push(`${f}:${code.slice(0, at).split('\n').length}`);
     }
@@ -185,7 +185,7 @@ describe('are the bytes here: one answer', () => {
     const owner = 'server/src/util/path-present.ts';
     const hits = [];
     let ownerFound = 0;
-    for (const f of trackedSources('server/src')) {
+    for (const f of trackedSources(SERVER_CODE_ROOTS)) {
       // LF, so the window `bodyOf` returns is found in it on a CRLF checkout too.
       const code = blankComments(readFileSync(path.join(REPO_ROOT, f), 'utf8')).replace(/\r\n/g, '\n');
       // The owner's own definition is the one place allowed, by position — not "any line of the owner's file".
@@ -268,7 +268,7 @@ describe('are the bytes here: one answer', () => {
     });
 
     it('every exemption row names a reason and a tracked file', () => {
-      const trackedFiles = new Set(trackedSources('server/src'));
+      const trackedFiles = new Set(trackedSources(SERVER_CODE_ROOTS));
       for (const table of [EXISTENCE_CHECK_EXEMPT, SWALLOWED_READDIR_EXEMPT]) {
         for (const [file, reason] of Object.entries(table)) {
           assert.ok(trackedFiles.has(file), `${file} is exempted and is not a tracked source`);

@@ -24,13 +24,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/files/live-file-row.ts';
 
 describe('a kind chooses the flagged-row guard in one place', () => {
-  const users = trackedSources('server/src')
+  const users = trackedSources(SERVER_CODE_ROOTS)
     .filter(f => f !== MODULE)
     .map(f => ({ f, src: stripComments(readFileSync(f, 'utf8')) }))
     .filter(x => /\bNOT_A_FLAGGED_ROW\b|\bnotFlaggedIfFile\b/.test(x.src));

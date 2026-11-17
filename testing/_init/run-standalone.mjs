@@ -48,8 +48,7 @@
  * Run: node testing/_init/run-standalone.mjs
  */
 import { spawnSync } from 'node:child_process';
-import { statSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { staleBuilds } from '../_shared/stale-build.mjs';
 import { splitStandalone, batched, offlineRuns, DB_TEST_CONCURRENCY } from '../_shared/standalone-split.mjs';
 import { timingReporterFlags, clearTimingResults } from '../_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
@@ -60,9 +59,10 @@ import { resolveDbShardConfig, startDbShards, stopDbShards, attachDbShards, dbSh
 import { reportContainerState, reportThenStop, TEST_STACK_PROJECT } from './container-state.mjs';
 
 /**
- * REFUSE a stale `server/dist`, rather than testing the wrong build and reporting either answer.
+ * REFUSE a stale or missing build of the server's code (`server/dist` and `schema/dist`, `_shared/stale-build.mjs`), rather than testing the
+ * wrong build and reporting either answer.
  *
- * These files import from `server/dist`. `npm run preflight` builds it first; `test:all:core` never has,
+ * These files import from `server/dist`, which imports the schema package's `schema/dist`. `npm run preflight` builds them first; `test:all:core` never has,
  * so running the suite straight after a branch switch tests whatever was compiled last. It cost two
  * confused diagnoses in one evening: a fix that was already merged looked broken, and a build from two
  * branches ago looked like a regression in the change under test.
@@ -73,28 +73,10 @@ import { reportContainerState, reportThenStop, TEST_STACK_PROJECT } from './cont
  */
 function refuseStaleDist() {
   if (process.argv.includes('--allow-stale')) return;
-  const newest = (dir) => {
-    let t = 0;
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
-      const p = join(dir, e.name);
-      if (e.isDirectory()) t = Math.max(t, newest(p));
-      else if (e.name.endsWith('.ts')) t = Math.max(t, statSync(p).mtimeMs);
-    }
-    return t;
-  };
-  let built;
-  try { built = statSync('server/dist/index.js').mtimeMs; } catch {
-    console.error('server/dist is missing — run `npm run build --workspace=server` first.');
-    process.exit(1);
-  }
-  const src = newest('server/src');
-  if (src > built) {
-    console.error(`server/dist is OLDER than server/src (${new Date(built).toISOString()} < `
-      + `${new Date(src).toISOString()}). These tests import from dist, so this run would test a build `
-      + 'you did not make. Run `npm run build --workspace=server`, or pass --allow-stale if that is '
-      + 'really what you meant.');
-    process.exit(1);
-  }
+  const refusals = staleBuilds();
+  if (refusals.length === 0) return;
+  for (const refusal of refusals) console.error(refusal);
+  process.exit(1);
 }
 
 refuseStaleDist();

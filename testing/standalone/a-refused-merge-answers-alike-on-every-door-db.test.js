@@ -48,7 +48,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { snapshotParts, changedParts, wipeParts, RECORD_PARTS } from './_space-snapshot.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 import { seedHub, relinkProblems, vectorOf } from './_merge-hub.mjs';
@@ -179,7 +179,7 @@ const DRIVERS = {
  * `executeMerge` past it.
  */
 function mergeDoors() {
-  return readTrackedSources('server/src', { untracked: true, floor: 300 })
+  return readTrackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 300 })
     .filter(({ text }) => /\bmergeEntities\s*\(/.test(stripComments(text).replace(/(?:async\s+)?function\s+mergeEntities\s*\(/g, '')))
     .map(f => f.file)
     .filter(f => f !== 'server/src/brain/merge.ts');
@@ -187,14 +187,14 @@ function mergeDoors() {
 
 /** Files outside the merge module that call `executeMerge` directly — a door that skips the one sequence. */
 function mergeDoorsBypassing() {
-  return readTrackedSources('server/src', { untracked: true, floor: 300 })
+  return readTrackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 300 })
     .filter(({ file, text }) => file !== 'server/src/brain/merge.ts' && /\bexecuteMerge\s*\(/.test(stripComments(text)))
     .map(f => f.file);
 }
 
 /** The module that exports `MERGE_MAX_RELINKS`, found in the source; its compiled twin is imported. */
 async function mergeBound() {
-  const defining = readTrackedSources('server/src', { untracked: true, floor: 300 })
+  const defining = readTrackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 300 })
     .filter(({ text }) => /export\s+const\s+MERGE_MAX_RELINKS\b/.test(stripComments(text)));
   assert.equal(defining.length, 1,
     `MERGE_MAX_RELINKS is exported by ${defining.length} server module(s) (${defining.map(d => d.file).join(', ') || 'none'}) — `

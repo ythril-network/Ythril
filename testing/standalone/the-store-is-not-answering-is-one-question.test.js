@@ -27,7 +27,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 
@@ -116,7 +116,7 @@ describe('seedsInRequest', () => {
 
 describe('the pair is spelled in one module', () => {
   it('no server module but db/store-condition.ts spells isWriteTimeout(...) with isStoreUnreachable(...) by hand', () => {
-    const sources = readTrackedSources('server/src', { floor: 300 });
+    const sources = readTrackedSources(SERVER_CODE_ROOTS, { floor: 300 });
     const pair = /isWriteTimeout\([^)]*\)\s*\|\|\s*isStoreUnreachable\(|isStoreUnreachable\([^)]*\)\s*\|\|\s*isWriteTimeout\(/;
     const hits = sources
       .filter(({ file, text }) => file !== 'server/src/db/store-condition.ts' && pair.test(stripComments(text)))

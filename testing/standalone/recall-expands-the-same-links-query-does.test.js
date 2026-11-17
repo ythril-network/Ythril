@@ -31,7 +31,7 @@
  * Run: node --test testing/standalone/recall-expands-the-same-links-query-does.test.js
  */
 import { describe, it } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { guidePartOwning } from '../_shared/integration-guide-parts.mjs';
 import { readFileSync } from 'node:fs';
@@ -180,7 +180,7 @@ describe('the warning both doors carried is gone', () => {
      * A stale warning is the one kind of documentation defect nobody reports, so the sweep has to be the
      * whole surface rather than the two places somebody remembered.
      */
-    const listed = trackedSources(['server/src', 'client/src'])
+    const listed = trackedSources([...SERVER_CODE_ROOTS, 'client/src'])
       .filter(f => f.endsWith('.ts') || f.endsWith('.md'));
     assert.ok(listed.length > 100, `only ${listed.length} files found; the listing is broken`);
 

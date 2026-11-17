@@ -33,7 +33,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { FILTER_DOORS } from '../_shared/search-doors.mjs';
 
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
@@ -100,7 +100,7 @@ describe('the derivation itself is not a second implementation', () => {
      * copy a change is introducing is visible on the commit that introduces it.
      */
     const owners = ['server/src/brain/chrono-status.ts', 'server/src/brain/chrono.ts'];
-    const offenders = trackedSources(['server/src'], { untracked: true, exclude: owners })
+    const offenders = trackedSources(SERVER_CODE_ROOTS, { untracked: true, exclude: owners })
       .filter(f => src(f).includes('deriveChronoStatus('));
     // `recall-result.ts` (the row-to-result mapping `recall.ts` runs every hit through) presents chrono results and is the one other
     // legitimate caller — it derives for the same reason the list route does, through the same function. Anything else is a copy.

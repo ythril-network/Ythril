@@ -38,7 +38,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { runnerIsIdle } from './_space-act-harness.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const NOTIFY_MODULE = '../../server/dist/networks/notify-members.js';
@@ -120,7 +120,7 @@ export const QUEUE_NAMES = ['notify', 'cycles', 'runner'];
  */
 export function backgroundJobsInSource() {
   const keys = [];
-  for (const file of trackedSources('server/src', { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'))) {
+  for (const file of trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'))) {
     if (file === 'server/src/util/interval-job.ts') continue;
     const src = blankComments(fs.readFileSync(file, 'utf8'));
     for (const m of src.matchAll(/(?<![.\w$])intervalJob\s*\(\s*([^,]+),/g)) {

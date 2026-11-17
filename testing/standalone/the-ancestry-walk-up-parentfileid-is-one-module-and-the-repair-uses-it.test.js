@@ -35,7 +35,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { balancedFrom, blockAfter } from './_structural-window.mjs';
 import { relativeImports } from './_call-graph.mjs';
@@ -56,7 +56,7 @@ function ancestryLoops(src) {
 /** Whether `src` walks UP a `parentFileId` chain: one of its ancestry loops reads a row's `parentFileId` to continue. */
 const walksUp = (src) => ancestryLoops(src).some(l => READS_PARENT.test(l.body));
 
-const SOURCES = readTrackedSources('server/src', { ext: ['.ts'], floor: 300, untracked: true })
+const SOURCES = readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 300, untracked: true })
   .map(({ file, text }) => ({ file, src: stripComments(text) }));
 const HAS = new Set(SOURCES.map(s => s.file));
 const WALKERS = SOURCES.filter(s => walksUp(s.src)).map(s => s.file);

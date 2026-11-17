@@ -22,7 +22,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const DOOR = 'server/src/files/stored-bytes.ts';
@@ -47,7 +47,7 @@ function importedContentFns(src) {
 }
 
 describe('stored bytes are read and written only through the file door', () => {
-  const inScope = readTrackedSources('server/src', { floor: 100, exclude: [DOOR], specs: false })
+  const inScope = readTrackedSources(SERVER_CODE_ROOTS, { floor: 100, exclude: [DOOR], specs: false })
     .filter(s => NAMES_THE_TREE.test(s.text));
 
   it('found the modules that work with the files tree', () => {

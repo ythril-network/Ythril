@@ -17,7 +17,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 /** A server source, comment-stripped: every match is the call, never a sentence explaining it. */
@@ -30,7 +30,7 @@ const TAKES_EDGES = [
 
 /** Repo-relative paths, forward slashes. */
 export function inlineEdgeDoorFiles() {
-  return trackedSources('server/src', { floor: 100, untracked: true })
+  return trackedSources(SERVER_CODE_ROOTS, { floor: 100, untracked: true })
     .filter(f => !f.endsWith('brain/write-connections.ts'))
     .filter(f => { const s = serverSource(f); return TAKES_EDGES.some(re => re.test(s)); });
 }

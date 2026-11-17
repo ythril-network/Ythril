@@ -21,7 +21,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { SCHEMA_PACKAGE_NAME, RETIRED_SCHEMA_PACKAGE_NAME, schemaSpecifierSource } from './_relative-specifier.mjs';
 
@@ -60,9 +60,13 @@ describe('the scan this gate stands on (planted sources)', () => {
   });
 });
 
+/** The entry's own module, from the manifest's `exports` (`./dist/from-typescript.js` is built from `schema/src/from-typescript.ts`): the package is not a consumer of itself. */
+const ENTRY_SOURCE = JSON.parse(readFileSync('schema/package.json', 'utf8')).exports['./from-typescript'].import
+  .replace(/^\.\/dist\//, 'schema/src/').replace(/\.js$/, '.ts');
+
 describe('server/src and client/src never import the from-typescript entry of the schema package', () => {
   const files = [
-    ...trackedSources('server/src', { ext: ['.ts', '.js', '.mjs', '.cjs'], floor: 100 }),
+    ...trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts', '.js', '.mjs', '.cjs'], floor: 100 }).filter(f => f !== ENTRY_SOURCE),
     ...trackedSources('client/src', { ext: ['.ts', '.tsx', '.js', '.mjs'], floor: 20 }),
   ];
 

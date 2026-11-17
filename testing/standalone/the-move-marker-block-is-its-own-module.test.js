@@ -36,7 +36,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { CEILING, FROZEN, codeLines } from './_oversize-files.mjs';
 import { exportedNames, namesImportedFrom, relativeImports, topLevelDeclarations } from './_module-shape.mjs';
 
@@ -59,7 +59,7 @@ const STORE_PRIMITIVES = [
   'FILE_TOMBSTONE_SETTLE_BATCH',
 ];
 
-const serverSources = () => trackedSources('server/src', { ext: ['.ts'], floor: 100, specs: false });
+const serverSources = () => trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 100, specs: false });
 const read = (f) => readFileSync(join(REPO_ROOT, f), 'utf8');
 const sources = serverSources();
 const has = (f) => sources.includes(f);

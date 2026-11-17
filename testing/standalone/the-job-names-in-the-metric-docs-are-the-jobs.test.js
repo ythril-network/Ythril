@@ -23,6 +23,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { moduleIndex } from './_call-graph.mjs';
 import { scheduledJobs } from './_scheduled-jobs.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const METRIC = 'ythril_interval_tick_skipped_total';
 const FLOOR = 10;
@@ -35,7 +36,7 @@ const FLOOR = 10;
  * here is the one question it alone asks: what string is the label.
  */
 function declaredJobLabels() {
-  const index = moduleIndex('server/src');
+  const index = moduleIndex(SERVER_CODE_ROOTS);
   const labels = new Map();
   for (const job of scheduledJobs(index).jobs.filter(j => j.kind === 'interval')) {
     const text = index.sources.get(job.file);

@@ -54,6 +54,7 @@ import { moduleIndex, walkFrom } from './_call-graph.mjs';
 import { scheduledJobs } from './_scheduled-jobs.mjs';
 import { balancedFrom } from './_structural-window.mjs';
 import { SHUTDOWN_ANCHOR, shutdownSequenceOf } from './_shutdown-sequence.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 /**
  * Modules whose job has no stop, each with why it needs none. Held: the module must export no `stop…`, and its `check` must hold.
@@ -83,7 +84,7 @@ const STOPS_AFTER_THE_DRAIN = [
 
 const FLOORS = { filesWithJobs: 12, stoppedByModule: 10, stopCalls: 10 };
 
-const index = moduleIndex('server/src');
+const index = moduleIndex(SERVER_CODE_ROOTS);
 const { jobs } = scheduledJobs(index);
 
 /** The handler: the body of `runShutdown` (`shutdown.ts`, bundle-39 D5; it was `const shutdown = async` in `index.ts`), and where its drain starts. */

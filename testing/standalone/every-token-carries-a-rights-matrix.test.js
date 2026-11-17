@@ -31,6 +31,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const read = p => stripComments(readFileSync(p, 'utf8'));
 const TOKENS = 'server/src/auth/tokens.ts';
@@ -115,7 +116,7 @@ describe('nothing edits the legacy fields after mint', () => {
     // so both "no hits" and "only this file" are the healthy answers, and anything else is a real reference.
     let hits = '';
     try {
-      hits = execFileSync('git', ['grep', '-l', 'updateTokenSpaces', '--', 'server/src', 'client/src', 'testing'],
+      hits = execFileSync('git', ['grep', '-l', 'updateTokenSpaces', '--', ...SERVER_CODE_ROOTS, 'client/src', 'testing'],
         { encoding: 'utf8', cwd: process.cwd() }).trim();
     } catch { /* exit 1 = no matches */ }
     const others = hits.split('\n').map(l => l.trim().replace(/\\/g, '/')).filter(Boolean)

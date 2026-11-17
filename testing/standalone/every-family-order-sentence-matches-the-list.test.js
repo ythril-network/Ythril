@@ -43,7 +43,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { REPLICATED_FAMILIES } from '../../server/dist/sync/replicated-families.js';
 
 const OWN = 'testing/standalone/every-family-order-sentence-matches-the-list.test.js';
@@ -162,7 +162,7 @@ const ORDER_BLOCKS_FLOOR = ORDER_CLAIMS.length;
 // ── the repository, read once ───────────────────────────────────────────────────────────────────────────────────────────────────────
 const files = [
   ...readTrackedSources(['docs'], { ext: ['.md'], floor: 50 }),
-  ...readTrackedSources(['server/src', 'client/src'], { ext: ['.ts'], floor: 300 }),
+  ...readTrackedSources([...SERVER_CODE_ROOTS, 'client/src'], { ext: ['.ts'], floor: 300 }),
   ...readTrackedSources(['testing/standalone'], { ext: ['.js', '.mjs'], floor: 200, exclude: [OWN] }),
 ];
 const byFile = new Map(files.map(f => [f.file, f]));

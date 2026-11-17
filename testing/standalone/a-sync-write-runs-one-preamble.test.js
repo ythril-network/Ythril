@@ -16,11 +16,11 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementFrom } from './_structural-window.mjs';
 
-const SOURCES = readTrackedSources('server/src', { ext: ['.ts'], floor: 200, specs: false, untracked: true })
+const SOURCES = readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 200, specs: false, untracked: true })
   .map(({ file, text }) => ({ file: file.replace(/\\/g, '/'), code: stripComments(text) }));
 const SHARED = 'server/src/api/sync/_shared.ts';
 

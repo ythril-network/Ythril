@@ -39,6 +39,7 @@ import { listenApp } from '../_shared/in-process-app.mjs';
 import { auditRowsOf } from './_audit-rows.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const S = 'peerwrite';
@@ -127,10 +128,10 @@ describe('the dispatch and the listing both ask the one peer-token question (sou
   it('every toolIsVisible( call in server/src passes the peer binding, so no listing (tools/list, the instructions, help) offers a refused tool', () => {
     // The `help` tool built its list with `toolIsVisible(t, ctx.rights)`, so a peer-bound token's help offered write_file while the
     // dispatcher refused it (bundle-62 pre-ship sweep). A call with two arguments is that gap; the third must be the binding.
-    const root = 'server/src';
+    const roots = SERVER_CODE_ROOTS;
     const files = [];
     const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.ts')) files.push(p); } };
-    walk(root);
+    for (const root of roots) walk(root);
     const calls = [];
     for (const f of files) {
       const src = stripComments(readFileSync(f, 'utf8'));

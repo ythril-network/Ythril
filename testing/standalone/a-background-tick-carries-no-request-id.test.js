@@ -34,6 +34,7 @@ import { waitFor } from '../_shared/wait-for.mjs';
 import { elapse } from '../_shared/sleep.mjs';
 import { moduleIndex } from './_call-graph.mjs';
 import { scheduledJobs, JOB_FLOORS } from './_scheduled-jobs.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 let log, intervalJob, unsubscribe;
 const lines = [];
@@ -117,7 +118,7 @@ describe('outsideRequest', () => {
 });
 
 describe('every cron registration runs its tick outside the request that armed it', () => {
-  const index = moduleIndex('server/src');
+  const index = moduleIndex(SERVER_CODE_ROOTS);
   const { jobs } = scheduledJobs(index);
   const crons = jobs.filter(j => j.kind === 'cron');
 

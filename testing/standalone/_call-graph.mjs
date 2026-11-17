@@ -68,7 +68,7 @@ import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { resolveSpecifier } from './_relative-specifier.mjs';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { argumentsOf, balancedFrom, statementFrom } from './_structural-window.mjs';
 
@@ -477,7 +477,7 @@ export function moduleIndex(dirs, opts = {}) {
   const { functionFloor = 500, ...sourceOpts } = opts;
   // The server's code includes the package it imports by name (the schema package): a walk from a door follows a call into it.
   const list = [dirs].flat();
-  if (list.includes('server/src') && !list.includes('schema/src')) list.push('schema/src');
+  if (SERVER_CODE_ROOTS.some(r => list.includes(r))) list.push(...SERVER_CODE_ROOTS.filter(r => !list.includes(r)));
   const files = trackedSources(list, { untracked: true, ...sourceOpts });
   const sources = new Map(files.map(file => [file, readFileSync(join(REPO_ROOT, file), 'utf8')]));
   return indexSources(sources, { functionFloor, label: [dirs].flat().join(', ') });

@@ -17,7 +17,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 /** The two characters, built from their code points so this file never holds them raw itself. */
 const SEPARATORS = [String.fromCharCode(0x2028), String.fromCharCode(0x2029)];
@@ -36,7 +36,7 @@ function rawSeparators(sources) {
 
 describe('no source file holds a raw U+2028 or U+2029', () => {
   it('the tracked and new sources of server, schema, client and testing hold none', () => {
-    const sources = readTrackedSources(['server/src', 'schema/src', 'client/src', 'testing'], {
+    const sources = readTrackedSources([...SERVER_CODE_ROOTS, 'client/src', 'testing'], {
       ext: ['.ts', '.js', '.mjs', '.cjs'], untracked: true,
     });
     assert.ok(sources.length > 500, `read only ${sources.length} source files; the scan is not seeing the repository`);

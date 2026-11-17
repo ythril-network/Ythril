@@ -30,6 +30,7 @@ import assert from 'node:assert/strict';
 import {
   callsIn, callSitesIn, memberCallsIn, referencesIn, indexSources, moduleIndex, walkFrom, pathTo,
 } from './_call-graph.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const names = set => [...set].sort();
 const pairs = list => list.map(([o, p]) => `${o}.${p}`).sort();
@@ -148,7 +149,7 @@ describe('a closure built at module scope is followed', () => {
   });
 
   it('on the real tree: the sync engine reaches its coalescing runner\'s callbacks', () => {
-    const real = moduleIndex('server/src');
+    const real = moduleIndex(SERVER_CODE_ROOTS);
     const ENGINE = 'server/src/sync/engine.ts';
     const RUNNER = 'server/src/sync/network-cycle-runner.ts';
     assert.ok(real.bodies.has(`${RUNNER}:_syncRunner`), `${RUNNER}:_syncRunner is not a key — re-anchor this case`);

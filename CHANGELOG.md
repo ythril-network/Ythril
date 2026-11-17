@@ -107,6 +107,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** a delete, move or space wipe that waits for a media job's write waits half a second longer than that write may take; before, it could fail with a store timeout while the write was finishing.
 - **Database:** a transaction the write bound ends after it retried a write conflict always keeps that conflict as the timeout's cause; before, it was lost when the bound ended an attempt instead of the pause between two.
 - **Database:** a transaction the database ends at the write bound's deadline answers the bound's timeout, not the database's raw time-limit error.
+- **Workstation:** `npm run local-connector:dev` builds the schema package it imports first and starts the local connector from a fresh clone, as the guide says.
+- **Testing:** the source-hygiene gates read the schema package's source with the server's, and the standalone runner refuses a schema build older than its source or missing.
 - **Sync:** an unreadable file or folder is named in the sync manifest (`unreadable`) instead of looking absent to peers, the hash cache and the restore check; a push over it answers `409 path_unreadable`, and the sender offers it again an hour later.
 - **Sync:** a sync run queued behind a running one for a network that is deleted before it starts ends with one info line; it used to end as an unhandled rejection.
 

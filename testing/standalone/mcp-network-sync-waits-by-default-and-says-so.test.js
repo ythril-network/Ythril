@@ -31,7 +31,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { statementFrom } from './_structural-window.mjs';
 
 /** The module that OWNS the two constants and the one resolver. Everything else is a caller. */
@@ -72,7 +72,7 @@ describe('the sync wait default differs between the doors on purpose, and says s
 });
 
 describe('every call site resolves its default from the DOOR, and nothing outside the owner names the MCP one', () => {
-  const files = trackedSources(['server/src'], { exclude: [OWNER] });
+  const files = trackedSources(SERVER_CODE_ROOTS, { exclude: [OWNER] });
 
   it('found the sources to sweep', () => {
     assert.ok(files.length >= 100, `only ${files.length} server sources found — the sweep is broken, not clean`);

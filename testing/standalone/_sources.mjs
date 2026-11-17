@@ -32,6 +32,22 @@ import { fileURLToPath } from 'node:url';
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
+ * The server package's own tree: the prefix of a path that names ONE file in it (`${SERVER_SOURCE_ROOT}/spaces/lifecycle.ts`). It is never a scan
+ * root: a gate that lists the server's code reads {@link SERVER_CODE_ROOTS}.
+ */
+export const SERVER_SOURCE_ROOT = 'server/src';
+
+/**
+ * The source roots that make up the server's code, written once (Q-682). The server imports the schema package by name and runs it, so a gate
+ * that asks a question of "the server's code" reads both, and a package added to the server later is added HERE and reaches every such gate.
+ * A gate that names `server/src` alone is refused by `a-server-code-gate-reads-every-server-code-root`, unless it is about that tree only and
+ * says so in the allowlist beside it.
+ *
+ * Each root is `<package>/src`; the runner derives the package's `dist` and its build from it (`_shared/stale-build.mjs`).
+ */
+export const SERVER_CODE_ROOTS = Object.freeze([SERVER_SOURCE_ROOT, 'schema/src']);
+
+/**
  * Tracked files under `dirs`, filtered by extension, with a minimum asserted.
  *
  * @param {string|string[]} dirs      one or more paths, as `git ls-files` takes them

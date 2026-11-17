@@ -36,7 +36,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 /** The two homes of a counter write, and why each is one. */
@@ -69,7 +69,7 @@ function writesCounters(code) {
 }
 
 const codeOf = (file) => blankComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
-const sources = () => trackedSources('server/src', { floor: 200 });
+const sources = () => trackedSources(SERVER_CODE_ROOTS, { floor: 200 });
 
 describe('every writer of a counter doc sits behind the version mark', () => {
   it('the detector flags every way a handle is spelled, and a read of the same handle is not a write', () => {

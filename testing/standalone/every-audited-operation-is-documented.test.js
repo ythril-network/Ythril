@@ -55,7 +55,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const GUIDE = 'docs/integration-guide/13-audit-log-api.md';
@@ -142,7 +142,7 @@ describe('every audited operation is documented', () => {
     // name alone would stop reading every module that moved onto the other.
     const DISPATCHERS = new Set(['server/src/audit/middleware.ts', 'server/src/mcp/call-tool.ts']);
     const WRITER = /\b(?:logAuditEntry|logInternalAudit)\(/;
-    const callers = trackedSources(['server/src'], { floor: 50 })
+    const callers = trackedSources(SERVER_CODE_ROOTS, { floor: 50 })
       .filter(f => !DISPATCHERS.has(f))
       .filter(f => WRITER.test(stripComments(readFileSync(f, 'utf8'))));
     assert.ok(callers.some(f => /\blogInternalAudit\(\{/.test(stripComments(readFileSync(f, 'utf8')))),

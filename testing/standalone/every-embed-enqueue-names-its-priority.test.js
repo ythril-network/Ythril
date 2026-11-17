@@ -28,12 +28,12 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { argumentsOf, bodyOf } from './_structural-window.mjs';
 
 // Untracked-but-not-ignored too: a new arrival writer must not be outside this gate on its own commit.
-const SOURCES = readTrackedSources('server/src', { floor: 100, specs: false, untracked: true })
+const SOURCES = readTrackedSources(SERVER_CODE_ROOTS, { floor: 100, specs: false, untracked: true })
   .map(s => ({ file: s.file, code: blankComments(s.text) }));
 
 /** Every call of `name(` in the code, with its argument list, excluding the function's own declaration. */

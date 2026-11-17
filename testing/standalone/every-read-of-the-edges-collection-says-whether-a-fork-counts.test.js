@@ -56,7 +56,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { moduleIndex, routeHandlerRoots } from './_call-graph.mjs';
 import { mountedRoutes } from './_routes.mjs';
-import { REPO_ROOT } from './_sources.mjs';
+import { REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const CLAUSE_MODULE = 'server/src/brain/chosen-versions.ts';
@@ -154,7 +154,7 @@ const EXEMPT = {
   ]),
 };
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 for (const r of mountedRoutes()) routeHandlerRoots(INDEX, r);
 
 /** How a body NAMES an edges collection. */

@@ -37,6 +37,7 @@ import { dispatchSource } from './_tool-dispatch.mjs';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const README = readFileSync('README.md', 'utf8');
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
@@ -195,7 +196,7 @@ const CLAIMS = [
       // Reading it the other way round would make these assertions unfailable.
       const absent = (pattern) => {
         try {
-          return execFileSync('git', ['grep', '-ln', '-iE', pattern, '--', 'server/src', 'client/src'],
+          return execFileSync('git', ['grep', '-ln', '-iE', pattern, '--', ...SERVER_CODE_ROOTS, 'client/src'],
             { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
         } catch { return []; }
       };

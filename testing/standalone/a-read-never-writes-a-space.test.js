@@ -49,8 +49,9 @@ import { spaceWriters, SPACE_KINDS } from './_space-writers.mjs';
 import { DISPATCH_SOURCES } from './_tool-dispatch.mjs';
 import { TOOL_RIGHTS, ROUTE_RIGHTS, NOT_AREA_SCOPED_PATHS } from '../../server/dist/auth/space-rights.js';
 import { SPACE_COLLECTIONS } from '../../server/dist/db/space-collection.js';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 const ROUTES = mountedRoutes();
 // Registered BEFORE the writers are derived, so a write inside an inline handler belongs to its route.
 const ROUTE_ROOTS = new Map(ROUTES.map(r => [`${r.method} ${r.path}`, routeHandlerRoots(INDEX, r)]));

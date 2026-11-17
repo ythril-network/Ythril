@@ -26,7 +26,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const state = await import('../../server/dist/networks/round-state.js');
@@ -74,7 +74,7 @@ describe('the owed predicates, over the truth table', () => {
 });
 
 describe('no site spells the pair, or the publisher test, by hand', () => {
-  const sources = trackedSources('server/src', { untracked: true, floor: 300 });
+  const sources = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 300 });
   const text = (f) => stripComments(readFileSync(`${REPO_ROOT}/${f}`, 'utf8'));
 
   it('the act-type pair is a disjunction of two type tests only in round-state.ts', () => {

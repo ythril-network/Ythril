@@ -42,7 +42,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { moduleIndex } from './_call-graph.mjs';
-import { readTrackedSources, REPO_ROOT } from './_sources.mjs';
+import { readTrackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf, statementFrom } from './_structural-window.mjs';
 import { requireSpaceIndexDeclaration } from './_space-index-declaration.mjs';
@@ -188,7 +188,7 @@ describe('every forking family is handled where a family is handled', () => {
   });
 
   it('writeKeptBody has exactly one caller, and it is resolveFork', () => {
-    const sources = readTrackedSources('server/src', { ext: ['.ts'], floor: 300, specs: false, untracked: true });
+    const sources = readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 300, specs: false, untracked: true });
     const calls = sources.flatMap(s => [...stripComments(s.text).matchAll(/\bwriteKeptBody\s*\(/g)].map(() => s.file));
     const definition = sources.filter(s => /\bfunction\s+writeKeptBody\b/.test(stripComments(s.text)));
     assert.equal(definition.length, 1, 'writeKeptBody is not defined once');
@@ -229,6 +229,6 @@ describe('the fork path no longer spells the facts family', () => {
   });
 
   it('the files that carry the fork path exist and were read (floor)', () => {
-    assert.ok(moduleIndex('server/src').bodies.size >= 1000, 'the call graph read too few functions to hold the sweep above');
+    assert.ok(moduleIndex(SERVER_CODE_ROOTS).bodies.size >= 1000, 'the call graph read too few functions to hold the sweep above');
   });
 });

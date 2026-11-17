@@ -32,7 +32,7 @@ import { DISPATCH_SOURCES } from './_tool-dispatch.mjs';
 import { readFileSync } from 'node:fs';
 import { balancedFrom, blockAfter } from './_structural-window.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 let MCP_TOOL_OPERATIONS, MCP_OPERATION_SUBJECTS, MCP_READ_OPERATIONS, mcpAuditOperation,
   isMcpReadOperation, MCP_ACT_OPERATIONS;
@@ -262,7 +262,7 @@ describe('MCP audit coverage', () => {
    */
   const AUDIT_WRAPPER = 'server/src/mcp/tool-call-audit.ts';
   const auditSource = () => stripComments(readFileSync(AUDIT_WRAPPER, 'utf8'));
-  const serverSources = () => trackedSources('server/src', { floor: 300 }).map(f => ({ file: f, text: stripComments(readFileSync(f, 'utf8')) }));
+  const serverSources = () => trackedSources(SERVER_CODE_ROOTS, { floor: 300 }).map(f => ({ file: f, text: stripComments(readFileSync(f, 'utf8')) }));
 
   it('the dispatch writes its row through one wrapper, and the recorder has exactly one call site in the whole server', () => {
     const calls = serverSources().flatMap(({ file, text }) =>

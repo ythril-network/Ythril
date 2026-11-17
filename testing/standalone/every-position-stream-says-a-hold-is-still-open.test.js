@@ -27,7 +27,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS, SERVER_SOURCE_ROOT } from './_sources.mjs';
 import { elapse } from '../_shared/sleep.mjs';
 
 const REPO = REPO_ROOT;
@@ -50,7 +50,7 @@ function callText(src, from) {
 /** Every stream the server builds: its file and the noun its lines open with (`wording.noun`, else its `name`). */
 function derivedStreams() {
   const found = [];
-  for (const file of trackedSources('server/src')) {
+  for (const file of trackedSources(SERVER_CODE_ROOTS)) {
     if (file.endsWith('util/position-clock.ts')) continue; // the definition and its overloads, not a stream
     const src = readFileSync(join(REPO, file), 'utf8');
     for (const m of src.matchAll(/createPositionStream\(/g)) {
@@ -70,7 +70,7 @@ describe('every position stream says a hold is still open', () => {
   const held = [];
 
   before(async () => {
-    const dist = (file) => import(`../../server/dist/${relative('server/src', file).replace(/\\/g, '/').replace(/\.ts$/, '.js')}`);
+    const dist = (file) => import(`../../server/dist/${relative(SERVER_SOURCE_ROOT, file).replace(/\\/g, '/').replace(/\.ts$/, '.js')}`);
     for (const { file } of streams) await dist(file);
     const holdsModule = await import('../../server/dist/util/horizon-holds.js');
     assert.equal(typeof holdsModule.horizonHoldsForTest, 'function', 'util/horizon-holds.ts exports no horizonHoldsForTest: no test can reach the registries the watchdog scans');

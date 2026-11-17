@@ -28,7 +28,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { parseSource, ts } from '../_shared/syntax-tree.mjs';
 import { tempInstanceDir } from './_vote-round-instance.mjs';
@@ -97,7 +97,7 @@ describe('every SpaceMeta key is accepted by the body or owned by the server', (
 
   it('every meta key the server READS is one of those (the scan reads the source, not the interface)', () => {
     const reads = new Map();
-    for (const file of trackedSources('server/src', { floor: 300 })) {
+    for (const file of trackedSources(SERVER_CODE_ROOTS, { floor: 300 })) {
       const src = stripComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
       for (const m of src.matchAll(/\bmeta\??\.([A-Za-z_]\w*)/g)) {
         if (!interfaceMetaKeys.includes(m[1])) continue;

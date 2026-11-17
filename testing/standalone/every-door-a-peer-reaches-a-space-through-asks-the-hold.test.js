@@ -41,7 +41,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { parseSource, walkEveryNode, lineOf, routeBlocksOf, ts } from '../_shared/syntax-tree.mjs';
 
@@ -267,7 +267,7 @@ describe('the helpers ask the one hold question', () => {
   });
 
   it('refuseHeldPeer exists once and asks the one admission, which is the hold', () => {
-    const owners = trackedSources('server/src', { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'))
+    const owners = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'))
       .filter(f => functionNamed(parsed(f), 'refuseHeldPeer'));
     assert.equal(owners.length, 1, `refuseHeldPeer is defined in ${owners.length} place(s) (${owners.join(', ')}): the rights doors need exactly one`);
     assert.ok(calls(functionNamed(parsed(owners[0]), 'refuseHeldPeer').text, 'admitPeerOnResponse'), `${owners[0]}: refuseHeldPeer does not ask admitPeerOnResponse(`);

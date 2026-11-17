@@ -33,7 +33,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { relativeImports } from './_module-shape.mjs';
 
@@ -63,7 +63,7 @@ const NAMES_IT = () => /\bfileTombstones\b|file_tombstones/g;
 
 function namers() {
   const out = new Map();
-  for (const f of trackedSources('server/src')) {
+  for (const f of trackedSources(SERVER_CODE_ROOTS)) {
     const code = blankComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
     const lines = [];
     for (const m of code.matchAll(NAMES_IT())) lines.push(code.slice(0, m.index).split('\n').length);
@@ -87,7 +87,7 @@ const PUBLISHED_ONLY_READERS = {
 describe('the stray drain reads only published tombstones; every arrival site asks the wider predicate (Q-348)', () => {
   it('only the module and the declared published-only readers call heldFileTombstones', () => {
     const callers = new Set();
-    for (const f of trackedSources('server/src')) {
+    for (const f of trackedSources(SERVER_CODE_ROOTS)) {
       if (f === LIFECYCLE) continue;
       if (/\bheldFileTombstones\s*\(/.test(blankComments(readFileSync(join(REPO_ROOT, f), 'utf8')))) callers.add(f);
     }
@@ -132,7 +132,7 @@ describe('the file-tombstone collection is opened only by its module', () => {
 });
 
 describe('the store module is imported by the lifecycle, the marker block and the version stamper, and by nothing else (Q-462, Q-460)', () => {
-  const known = () => new Set(trackedSources('server/src'));
+  const known = () => new Set(trackedSources(SERVER_CODE_ROOTS));
 
   /** Every tracked source that imports (or re-exports from) the store module, by the relative specifier it resolves through. */
   function importersOf(owner) {

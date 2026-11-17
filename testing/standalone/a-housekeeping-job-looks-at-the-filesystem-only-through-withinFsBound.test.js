@@ -45,7 +45,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { ts, parseSource, lineOf, walkEveryNode } from '../_shared/syntax-tree.mjs';
 
 /** The filesystem verbs that can hang on a dead mount, as the design names them. */
@@ -294,7 +294,7 @@ export function jobSet(sources, read, exists) {
   return out.sort();
 }
 
-const SOURCES = trackedSources('server/src', { floor: 300, specs: false });
+const SOURCES = trackedSources(SERVER_CODE_ROOTS, { floor: 300, specs: false });
 const TRACKED = new Set(SOURCES);
 const textCache = new Map();
 const read = (f) => {

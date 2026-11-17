@@ -16,7 +16,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources, closeStringJoins } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, closeStringJoins, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const CODE = 'schema_versions_busy';
 /** What the refusal says is kept. */
@@ -40,7 +40,7 @@ export function busyClaims(file, text) {
 }
 
 const DOCS = trackedSources('docs', { ext: ['.md'], floor: 20 });
-const SOURCES = trackedSources(['server/src'], { ext: ['.ts'], floor: 100 });
+const SOURCES = trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 100 });
 const claims = [...DOCS, ...SOURCES].flatMap(f => busyClaims(f, readFileSync(join(REPO_ROOT, f), 'utf8')));
 
 describe('what a busy schema placement keeps is said in the refusal\'s words everywhere (Q-744)', () => {

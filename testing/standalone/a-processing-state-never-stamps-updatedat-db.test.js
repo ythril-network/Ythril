@@ -55,6 +55,7 @@ import { recordWrites } from './_record-writes.mjs';
 import { fileRowWrites, processingTouched, NOT_A_PROCESSING_MARK } from './_processing-state-writes.mjs';
 import { seedClaim } from './_media-claim.mjs';
 import { bare } from './_bare.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -281,7 +282,7 @@ describe('recording a file\'s processing state never stamps its authored half (r
 
 describe('every writer of a file\'s processing state is driven by a case above', () => {
   it('each function the tree writes processing state from is reached from an entry point a case drives', () => {
-    const INDEX = moduleIndex('server/src');
+    const INDEX = moduleIndex(SERVER_CODE_ROOTS);
     return import('../../server/dist/config/types.js').then(({ BRAIN_COLLECTIONS }) => {
       const records = recordWrites(INDEX, { collections: BRAIN_COLLECTIONS, floors: { space: 150 }, recordFloor: 50 });
       const writes = fileRowWrites(INDEX, records);

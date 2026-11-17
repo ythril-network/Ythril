@@ -19,7 +19,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackedSources, readTrackedSources } from './_sources.mjs';
+import { trackedSources, readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const { SpaceMetaBody } = await import('../../server/dist/spaces/body-schemas.js');
@@ -74,12 +74,12 @@ describe('the merge table covers every key the meta body accepts', () => {
 
 describe('derivedFromStored has one home', () => {
   // The server's sources and the schema package's, where the brand is minted (`body-schemas.ts` re-exports it).
-  const calls = () => readTrackedSources(['server/src', 'schema/src'], { untracked: true, floor: 300 })
+  const calls = () => readTrackedSources([...SERVER_CODE_ROOTS], { untracked: true, floor: 300 })
     .filter(({ text }) => /\bderivedFromStored\s*\(/.test(stripComments(text)))
     .map(f => f.file);
 
   it('reads a tree worth reading, and the trusted source is used at all (a floor)', () => {
-    assert.ok(trackedSources('server/src', { floor: 300 }).length >= 300);
+    assert.ok(trackedSources(SERVER_CODE_ROOTS, { floor: 300 }).length >= 300);
     assert.ok(calls().length >= 2, `only ${calls().length} file(s) mention derivedFromStored: the scan lost its subject`);
   });
 

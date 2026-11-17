@@ -55,7 +55,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { moduleIndex } from './_call-graph.mjs';
 import { recordWrites } from './_record-writes.mjs';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { fileRowWrites, processingFields, localOnlyFileFields, fileMetaDocFields, hashedFileFields } from './_processing-state-writes.mjs';
 
@@ -122,7 +122,7 @@ const EXEMPT = {
     + 'on rows already held, never creates a row',
 };
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 const RECORDS = recordWrites(INDEX, { collections: BRAIN_COLLECTIONS, floors: { space: 150 }, recordFloor: 50 });
 const WRITES = fileRowWrites(INDEX, RECORDS, { includeComputed: true });
 
@@ -142,7 +142,7 @@ const DERIVED = derivedFields();
 /** The source file that declares the typed processing state: its writes take their keys from an argument, not from text. */
 function typedStateFile() {
   const hits = [];
-  for (const f of trackedSources('server/src')) {
+  for (const f of trackedSources(SERVER_CODE_ROOTS)) {
     if (/export (?:interface|type) FileProcessingState\b/.test(blankComments(readFileSync(join(REPO_ROOT, f), 'utf8')))) hits.push(f);
   }
   assert.equal(hits.length, 1, `the typed processing state is declared in ${hits.length} file(s) (${hits}) — re-anchor`);
@@ -273,7 +273,7 @@ describe('a file row\'s derived fields are written by one module', () => {
   };
   it('a re-key of file rows through rekey-rows, whose collection is a parameter, is seen and named too', () => {
     const calls = [];
-    for (const f of trackedSources('server/src')) {
+    for (const f of trackedSources(SERVER_CODE_ROOTS)) {
       const src = blankComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
       for (const m of src.matchAll(/\brekeyRows\s*<\s*FileMetaDoc\s*>\s*\(/g)) calls.push(f);
     }

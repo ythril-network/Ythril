@@ -21,7 +21,7 @@
  * reader fails here on the day it is added, which is the only day it is cheap to fix.
  */
 import { test } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -55,7 +55,7 @@ const RESOLVED_BY = [
 ];
 
 test('every declared model slot is RESOLVED somewhere, not merely declared', () => {
-  const listed = trackedSources('server/src');
+  const listed = trackedSources(SERVER_CODE_ROOTS);
   const source = listed.map(f => readFileSync(join(repoRoot, f), 'utf8')).join('\n');
 
   const unread = MODEL_SLOTS.filter(slot => !RESOLVED_BY.some(shape => shape(slot).test(source)));

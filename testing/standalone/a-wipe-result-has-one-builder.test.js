@@ -17,7 +17,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const { wipeResultOf, WIPE_COLLECTION_TYPES } = await import('../../server/dist/spaces/lifecycle.js');
@@ -45,7 +45,7 @@ describe('wipeResultOf', () => {
 });
 
 describe('no site writes a WipeResult of its own', () => {
-  const sources = trackedSources('server/src', { untracked: true, floor: 300 });
+  const sources = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 300 });
   const text = (f) => stripComments(readFileSync(`${REPO_ROOT}/${f}`, 'utf8'));
 
   it('no object literal is typed as a WipeResult', () => {

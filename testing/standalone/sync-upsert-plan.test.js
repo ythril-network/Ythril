@@ -27,6 +27,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { base, ALTERNATE, MAIN_FIELD, REDACTION_MARKS, AUTHOR, OTHER_AUTHOR, T0, T1 } from './_fork-body-fixtures.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 let planArrivals, retagToLocalSpace, authored, linkIdFor;
 
@@ -240,7 +241,7 @@ describe('the fork caps\' index is declared once', () => {
         if (family === 'facts') assert.equal(e.bootSafe, true, `${JSON.stringify(ix.keys)} is not built at every boot on facts`);
       }
     }
-    const spelled = readTrackedSources('server/src', { ext: ['.ts'], floor: 200, specs: false, untracked: true })
+    const spelled = readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 200, specs: false, untracked: true })
       .filter(s => /createIndex\(\s*\{\s*forkOf\b/.test(stripComments(s.text))).map(s => s.file);
     assert.deepEqual(spelled, [], 'the forkOf index is spelled out again instead of read from FORK_INDEXES');
   });

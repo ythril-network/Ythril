@@ -13,7 +13,7 @@
  * (requires a prior `npm run build` in server/)
  */
 import { describe, it, before } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -22,7 +22,7 @@ import { FILTER_DOORS, doorSource } from '../_shared/search-doors.mjs';
 
 /** Every tracked server source, read out of git rather than named — see the derived cases below. */
 function serverSources() {
-  return trackedSources('server/src');
+  return trackedSources(SERVER_CODE_ROOTS);
 }
 const read = (f) => readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8');
 

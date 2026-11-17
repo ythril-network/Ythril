@@ -37,7 +37,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { parseSource, walkEveryNode, lineOf, ts } from '../_shared/syntax-tree.mjs';
 
@@ -177,7 +177,7 @@ describe('the data loop exchanges only what exchangeVerdicts produced', () => {
 });
 
 describe('every watermark the data loop writes asks the hold first', () => {
-  const writes = () => trackedSources('server/src', { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts')).flatMap(f => markWrites(f, source(f)));
+  const writes = () => trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts')).flatMap(f => markWrites(f, source(f)));
 
   it('the derivation found the two mark writers', () => {
     const found = writes();
@@ -191,7 +191,7 @@ describe('every watermark the data loop writes asks the hold first', () => {
 
   it('rule 4: setMemberSpaceMark( is called from the listed files only, each with its reason', () => {
     const callers = new Map();
-    for (const file of trackedSources('server/src', { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts') && f !== 'server/src/sync/member-space-mark.ts')) {
+    for (const file of trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts') && f !== 'server/src/sync/member-space-mark.ts')) {
       const sf = parseSource(file, source(file));
       let n = 0;
       walkEveryNode(sf, (node) => { if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'setMemberSpaceMark') n++; });

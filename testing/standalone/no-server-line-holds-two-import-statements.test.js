@@ -16,14 +16,14 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 /** A module specifier closing a statement, then a second import or re-export on the same line. */
 const FUSED = /['"]\s*;\s*(?:import|export)\b[^\n]*['"]/;
 const STARTS_A_STATEMENT = /^\s*(?:import|export)\b/;
 
 describe('no server line holds two import statements', () => {
-  const sources = readTrackedSources('server/src', { untracked: true });
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, { untracked: true });
 
   it('read the server tree', () => {
     assert.ok(sources.length >= 150, `only ${sources.length} server sources were read: the listing is broken`);

@@ -21,7 +21,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const OWN_MODULE = 'server/src/files/media/transcode.ts';
@@ -43,7 +43,7 @@ function callsIn(src) {
 }
 
 describe('every ffmpeg step ends when its job loses its claim', () => {
-  const calls = trackedSources('server/src')
+  const calls = trackedSources(SERVER_CODE_ROOTS)
     .filter(f => f !== OWN_MODULE)
     .flatMap(f => callsIn(stripComments(readFileSync(f, 'utf8'))).map(text => ({ f, text })));
 

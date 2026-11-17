@@ -20,11 +20,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { enclosingBlockAround, argumentsOf } from './_structural-window.mjs';
 
-const sources = trackedSources('server/src').filter(f => f.endsWith('.ts'));
+const sources = trackedSources(SERVER_CODE_ROOTS).filter(f => f.endsWith('.ts'));
 const read = (f) => stripComments(readFileSync(f, 'utf8'));
 
 describe('a network\'s local space list never reaches a peer without the network ids', () => {

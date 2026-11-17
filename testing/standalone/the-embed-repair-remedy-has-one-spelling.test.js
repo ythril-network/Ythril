@@ -18,10 +18,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
-const SOURCES = trackedSources('server/src', { floor: 200 });
+const SOURCES = trackedSources(SERVER_CODE_ROOTS, { floor: 200 });
 const code = new Map(SOURCES.map(f => [f, stripComments(readFileSync(f, 'utf8'))]));
 
 // To the `';` that ends the statement: the sentence itself holds semicolons.

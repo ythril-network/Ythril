@@ -55,7 +55,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { moduleIndex } from './_call-graph.mjs';
 import { recordWrites } from './_record-writes.mjs';
-import { REPO_ROOT } from './_sources.mjs';
+import { REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import {
   fileRowWrites, processingTouched, processingFields, hashedFileFields, localOnlyFileFields, fileMetaDocFields, updateKeys,
   NOT_A_PROCESSING_MARK,
@@ -72,7 +72,7 @@ const MODULE = 'server/src/files/derived-fields.ts';
  */
 const EXEMPT = NOT_A_PROCESSING_MARK;
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 const RECORDS = recordWrites(INDEX, { collections: BRAIN_COLLECTIONS, floors: { space: 150 }, recordFloor: 50 });
 const WRITES = fileRowWrites(INDEX, RECORDS);
 

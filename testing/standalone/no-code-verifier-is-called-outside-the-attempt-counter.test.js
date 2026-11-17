@@ -24,7 +24,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const ALLOWED = new Set(['server/src/auth/code-attempts.ts', 'server/src/auth/totp.ts']);
@@ -41,7 +41,7 @@ function offenders(sources) {
 }
 
 describe('only the attempt counter asks the code verifier', () => {
-  const files = trackedSources(['server/src'], { floor: 200, untracked: true });
+  const files = trackedSources(SERVER_CODE_ROOTS, { floor: 200, untracked: true });
   const sources = Object.fromEntries(files.map(f => [f, readFileSync(f, 'utf8')]));
 
   it('the scan reads the server and the one allowed path exists', () => {

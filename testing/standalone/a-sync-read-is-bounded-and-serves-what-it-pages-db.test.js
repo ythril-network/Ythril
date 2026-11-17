@@ -33,7 +33,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const skip = await mongoSkipReason();
@@ -197,7 +197,7 @@ describe('no limit falls through a falsy default', () => {
    */
   it('no source reads a limit as `parse(x) || default`', () => {
     const offenders = [];
-    for (const { file, text } of readTrackedSources('server/src', { ext: ['.ts'], floor: 100 })) {
+    for (const { file, text } of readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 100 })) {
       const src = stripComments(text);
       for (const m of src.matchAll(/(?:parseInt|Number)\([^)]*\blimit\b[^)]*\)\s*\|\|/gi)) offenders.push(`${file}: ${m[0]}`);
     }
@@ -212,7 +212,7 @@ describe('no limit falls through a falsy default', () => {
    */
   it('no source reads a sync start by hand', () => {
     const offenders = [];
-    for (const { file, text } of readTrackedSources('server/src', { ext: ['.ts'], floor: 100 })) {
+    for (const { file, text } of readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 100 })) {
       const src = stripComments(text);
       for (const m of src.matchAll(/(?:parseInt|Number|parseFloat)\([^)]*\bsinceSeq\b[^)]*\)/g)) offenders.push(`${file}: ${m[0]}`);
     }

@@ -21,7 +21,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 /** The one module that owns the guard. */
@@ -40,7 +40,7 @@ export function guardSpellings(sources) {
 
 describe('the array guard of a type match is one module\'s', () => {
   it('no file under server/src spells it but the one module', () => {
-    const sources = readTrackedSources('server/src', { untracked: true, floor: SERVER_FLOOR });
+    const sources = readTrackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: SERVER_FLOOR });
     assert.ok(sources.some(s => s.file === OWNER), `${OWNER} is not in the sweep`);
     assert.deepEqual(guardSpellings(sources), [],
       'a hand-written `$not: { $type: \'array\' }`: build the match through guardedTypeValue / guardedTypeList / stampedTypeValue / stampedTypeList '
@@ -48,7 +48,7 @@ describe('the array guard of a type match is one module\'s', () => {
   });
 
   it('the owner spells it, and exports the list form beside the single one', () => {
-    const owner = readTrackedSources('server/src', { untracked: true, floor: SERVER_FLOOR }).find(s => s.file === OWNER);
+    const owner = readTrackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: SERVER_FLOOR }).find(s => s.file === OWNER);
     assert.ok(owner && GUARD.test(blankComments(owner.text)), 'the owner no longer spells the guard: the sweep looks for the wrong thing');
     assert.match(blankComments(owner.text), /export\s+const\s+guardedTypeList\b|export\s+function\s+guardedTypeList\b/, 'no list form of the guard');
   });

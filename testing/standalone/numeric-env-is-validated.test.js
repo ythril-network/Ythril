@@ -30,11 +30,12 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
 import { enclosingBlockAround } from './_structural-window.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const read = (p) => readFileSync(p, 'utf8');
 
 /** Every .ts file under server/src. */
-function sources(dir = 'server/src') {
+function sources(dir) {
   const out = [];
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry);
@@ -44,7 +45,7 @@ function sources(dir = 'server/src') {
   return out;
 }
 
-const FILES = sources();
+const FILES = SERVER_CODE_ROOTS.flatMap(root => sources(root));
 const HELPER = read('server/src/config/env-num.ts');
 
 /** The RESOLVED registry — what the boot sweep actually iterates, not how its entries happen to be spelled. */

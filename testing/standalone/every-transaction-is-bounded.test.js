@@ -35,7 +35,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 /** The one module that may start a session. */
@@ -97,7 +97,7 @@ describe('every transaction is started inside db/bounded-transaction.ts', () => 
 
   // ── the tree ─────────────────────────────────────────────────────────────────────────────────────────────
 
-  const sources = trackedSources('server/src', { floor: 100 }).map(file => ({ file, text: read(file) }));
+  const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 100 }).map(file => ({ file, text: read(file) }));
   const starts = sessionStarts(sources);
 
   it('the derivation finds session starts, so an empty set cannot pass', () => {
