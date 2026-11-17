@@ -10,8 +10,8 @@
  *     node scripts/test-times.mjs --rewrite <key>     record one run again, from its own results
  *     node scripts/test-times.mjs --trend [--last N] [--flags]
  *     node scripts/test-times.mjs --preflight-trend [--last N]   each preflight stage's time over the last N preflight runs
- *     node scripts/test-times.mjs --preflight-costs [--runner container|host]   write test-results/stage-costs.json, the stage costs the preflight orders by
- *     node scripts/test-times.mjs --drain-unrecorded  send what the spool holds (the preflight's own record, kept after its verdict), then refresh that snapshot
+ *     node scripts/test-times.mjs --preflight-costs [--runner container|host]   write test-results/stage-costs.json, the stage costs the preflight orders by, and test-results/file-times.json, the per-file times it starts its slowest pure files by
+ *     node scripts/test-times.mjs --drain-unrecorded  send what the spool holds (the preflight's own record, kept after its verdict), then refresh those two snapshots (file-times when missing or over a day old)
  *     node scripts/test-times.mjs --summary --results <dir>   the run's page (CI's advisory job); records nothing
  *     node scripts/test-times.mjs --help
  *
@@ -105,8 +105,8 @@ import { isEntryPoint } from './_shared/script-cli.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
 import { readTimingLog, timingResultsDir, TEST_RESULTS_DIR_ENV } from '../testing/_shared/timing-reporter.mjs';
 import { spoolPayload } from './_shared/unrecorded-spool.mjs';
-import { preflightTrendLines, stageStats, STAGE_STATS_WINDOW } from './_shared/preflight-run-record.mjs';
-import { writeStageCosts, STAGE_COSTS_FILE } from './_shared/stage-costs.mjs';
+import { preflightTrendLines, stageStats, medianOf, STAGE_STATS_WINDOW } from './_shared/preflight-run-record.mjs';
+import { writeStageCosts, writeFileTimes, STAGE_COSTS_FILE, FILE_TIMES_FILE, MAX_AHEAD_MS } from './_shared/stage-costs.mjs';
 import { maskText } from './_shared/mask-text.mjs';
 import { waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
@@ -671,7 +671,7 @@ async function drainOnly() {
   if (!dest.api) { console.log(`test-times: not recorded: ${dest.why}; kept ${kept.length} payload(s) in ${shown(unrecordedDir())}`); return 0; }
   try { recordLockPath(); lockWaitMs(); } catch (err) { console.log(`test-times: not recorded: ${firstLine(err)}; kept ${kept.length} payload(s) in ${shown(unrecordedDir())}`); return 0; }
   let locked;
-  try { locked = await withRecordLock(async () => { await drainUnrecorded(dest.api, dest.shownUrl); await refreshStageCosts(dest); }); } catch (err) {
+  try { locked = await withRecordLock(async () => { await drainUnrecorded(dest.api, dest.shownUrl); await refreshStageCosts(dest); await refreshFileTimes(dest); }); } catch (err) {
     console.log(`test-times: not recorded: ${firstLine(err)}; kept ${kept.length} payload(s) in ${shown(unrecordedDir())}`);
     return 0;
   }
@@ -1250,12 +1250,83 @@ async function writeStageCostSnapshot(api, runner) {
   return `test-times: stage costs written to ${shown(join(resultsDir(), STAGE_COSTS_FILE))} (${runs} ${runner} run(s))`;
 }
 
-/** `--preflight-costs`: write the stage-cost snapshot from the instance. */
+/** The newest CI runs of the standalone-pure job the file times rest on. */
+const FILE_TIMES_RUNS = 5;
+/** What a `Test-Run` must be for its per-file times to rank the preflight's pure files: CI's own run of the pure job, over main, of the whole suite. */
+const FILE_TIMES_WHERE = { 'properties.source': 'ci', 'properties.job': 'standalone-pure', 'properties.branch': 'main', 'properties.scope': 'full' };
+const isFileTimesRow = (r) => r?.type === CHRONO_TYPE && typeof r.startsAt === 'string' && typeof r._id === 'string'
+  && Object.entries(FILE_TIMES_WHERE).every(([path, value]) => r.properties?.[path.slice('properties.'.length)] === value);
+
+/** The newest {@link FILE_TIMES_RUNS} `Test-Run` records of the pure job: the predicate is asked of the server and checked again here. */
+async function fileTimesRows(api) {
+  const answer = await api.call('filter', {
+    space: SPACE, collection: 'chrono', filter: { type: CHRONO_TYPE, ...FILE_TIMES_WHERE }, projection: { 'properties.measurements': 0 },
+    sort: 'startsAt', dir: 'desc', limit: FILE_TIMES_RUNS, maxChars: PAGE_MAX_CHARS,
+  });
+  const rows = answer?.data?.results;
+  if (!Array.isArray(rows)) throw new YthrilApiError('filter: the answer carried no results', { tool: 'filter' });
+  return rows.filter(isFileTimesRow).sort(newestStartFirst).slice(0, FILE_TIMES_RUNS);
+}
+
+/**
+ * Write the file-times snapshot the preflight starts its slowest pure files by (`_shared/stage-costs.mjs`, `_shared/slow-first-units.mjs`):
+ * per file, the median of its time over the newest CI runs of the pure job. Relative times are enough to rank the files, so CI's times rank
+ * the files the container runs. A record whose measurements do not parse (or hold no file time) is not counted; a record whose measurements
+ * were cut for size still holds every file's time and is. A write with no run to rest on is refused rather than made from nothing.
+ *
+ * @returns {Promise<string>} the line to say
+ */
+async function writeFileTimeSnapshot(api) {
+  const usable = [];
+  for (const row of await fileTimesRows(api)) {
+    const files = await filesOf(api, row);
+    if (!files) continue;
+    const times = Object.entries(files).filter(([file, ms]) => typeof file === 'string' && file !== '__proto__' && isCount(ms));
+    if (times.length) usable.push({ startsAt: row.startsAt, times });
+  }
+  if (!usable.length) throw new Error(`no recorded CI run of the standalone-pure job on main (scope full) holds per-file times to measure`);
+  const byFile = new Map();
+  for (const { times } of usable) for (const [file, ms] of times) byFile.set(file, [...(byFile.get(file) ?? []), ms]);
+  const files = Object.fromEntries([...byFile].map(([file, values]) => [file, medianOf(values)]));
+  const newestSourceAt = usable.map(u => u.startsAt).sort().at(-1);
+  writeFileTimes(resultsDir(), { generatedAt: new Date().toISOString(), newestSourceAt, runs: usable.length, files });
+  return `test-times: file times written to ${shown(join(resultsDir(), FILE_TIMES_FILE))} (${byFile.size} file(s), the median over ${usable.length} CI run(s))`;
+}
+
+/** One line for a failure of the file times: they are best effort and change neither the stage costs nor the exit status. */
+async function sayFileTimes(dest, verb) {
+  try { console.log(await writeFileTimeSnapshot(dest.api)); } catch (err) {
+    console.log(`test-times: file times not ${verb}: ${whyOf(err, dest.shownUrl)}`);
+  }
+}
+
+/** Older than a day (read from its own `generatedAt`), missing, unreadable or dated in the future: the drain writes the file times again. */
+function fileTimesDue() {
+  try {
+    const age = Date.now() - Date.parse(JSON.parse(readFileSync(join(resultsDir(), FILE_TIMES_FILE), 'utf8')).generatedAt);
+    return !Number.isFinite(age) || age > 86_400_000 || age < -MAX_AHEAD_MS;
+  } catch { return true; }
+}
+
+/**
+ * After the stage costs, in the drain's own try: the file-times snapshot is made again when it is missing, over a day old or dated in the
+ * future (a drain follows every preflight, and the records change a few times a day). Best effort.
+ */
+async function refreshFileTimes(dest) {
+  if (fileTimesDue()) await sayFileTimes(dest, 'refreshed');
+}
+
+/**
+ * `--preflight-costs`: write the stage-cost snapshot and the file-times snapshot from the instance. The exit status is the stage costs'; a
+ * failure of the file times is one line and changes neither.
+ */
 async function preflightCosts({ runner }) {
   const dest = destination();
   if (!dest.api) { console.error(`test-times: cannot read: ${dest.why}`); return 1; }
-  try { console.log(await writeStageCostSnapshot(dest.api, runner)); } catch (err) { console.error(`test-times: stage costs not written: ${whyOf(err, dest.shownUrl)}`); return 1; }
-  return 0;
+  let code = 0;
+  try { console.log(await writeStageCostSnapshot(dest.api, runner)); } catch (err) { console.error(`test-times: stage costs not written: ${whyOf(err, dest.shownUrl)}`); code = 1; }
+  await sayFileTimes(dest, 'written');
+  return code;
 }
 
 /** The stage times of the last `last` preflight runs, each stage's time per run and its median (`_shared/preflight-run-record.mjs` prints it). */
@@ -1425,13 +1496,17 @@ export const HELP = `usage: node scripts/test-times.mjs <command>
                            the named run is walked wherever it sits, past the stop and past the ${BACKFILL_RUNS} runs too.
                            Run by hand.
   --drain-unrecorded       send what test-results/unrecorded/ holds (a Preflight-Run that scripts/preflight.mjs kept, a Test-Run
-                           an earlier --record kept), then refresh ${STAGE_COSTS_FILE} (also when nothing was kept); exits 0 whenever
+                           an earlier --record kept), then refresh ${STAGE_COSTS_FILE} (also when nothing was kept) and, when missing
+                           or over a day old, ${FILE_TIMES_FILE}; exits 0 whenever
                            it could not, the files stay. Run by scripts/preflight.mjs after its verdict, at a time bound
   --preflight-costs [--runner container|host]
                            write test-results/${STAGE_COSTS_FILE}, the measured cost of each preflight stage the preflight orders
                            its stages by: per stage, over the newest ${STAGE_STATS_WINDOW} runs of one runner (default ${STAGE_COSTS_RUNNER}, where the preflight
                            runs; while fewer than 3 carry it, the records naming no runner too), how many runs ran it, how many
-                           failed and its median time
+                           failed and its median time; and test-results/${FILE_TIMES_FILE}, the per-file times the preflight starts its
+                           slowest pure files by: per file, the median over the newest ${FILE_TIMES_RUNS} CI runs of the standalone-pure job on
+                           main (scope full; a run whose measurements do not parse is not counted). A failure of the file
+                           times is one line and changes neither ${STAGE_COSTS_FILE} nor the exit status
   --preflight-trend [--last N]
                            print the stage times of the newest N preflight runs (default ${PREFLIGHT_TREND_RUNS}): each stage's time in every run
                            (oldest first; failed, or - for a stage the run never reached), its median over the runs where it

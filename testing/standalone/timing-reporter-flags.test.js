@@ -295,10 +295,18 @@ describe('every runner attaches the reporter through the helper', () => {
   /** The tracked files with these suffixes under these paths: the one listing, floor inside, so a broken scan throws. */
   const tracked = (paths, ext, floor) => trackedSources(paths, { ext, floor, root: ROOT });
 
-  it('a file that runs suite batches (`offlineRuns(` or `batched(`) builds its flags with timingReporterFlags', () => {
+  it('a file that runs suite batches (`offlineRuns(`, `batched(` or `slowFirstUnits(`) builds its flags with timingReporterFlags', () => {
+    // The module that DEFINES `slowFirstUnits` runs nothing: it is the function the runners call, not a runner.
+    const DEFINES_SLOW_FIRST = 'scripts/_shared/slow-first-units.mjs';
     const runners = tracked(['scripts', 'testing/_init'], ['.mjs'], 10)
-      .filter(f => /\b(offlineRuns|batched)\(/.test(stripComments(readFileSync(resolve(ROOT, f), 'utf8'))));
+      .filter(f => f !== DEFINES_SLOW_FIRST && /\b(offlineRuns|batched|slowFirstUnits)\(/.test(stripComments(readFileSync(resolve(ROOT, f), 'utf8'))));
     assert.ok(runners.length >= 2, `only ${runners.length} runner(s) found — preflight and run-standalone both run batches`);
+    // The units preflight runs are cut by `slowFirstUnits` (Q-869): the pattern must see that caller, or a runner that builds its units
+    // only through it would leave the helper out unnoticed.
+    const slowCallers = tracked(['scripts', 'testing/_init'], ['.mjs'], 10)
+      .filter(f => f !== DEFINES_SLOW_FIRST && /\bslowFirstUnits\(/.test(stripComments(readFileSync(resolve(ROOT, f), 'utf8'))));
+    assert.ok(slowCallers.includes('scripts/preflight.mjs'), `no caller of slowFirstUnits found in scripts or testing/_init (found: ${slowCallers.join(', ') || 'none'}): preflight cuts its pure units through it`);
+    assert.ok(slowCallers.every(f => runners.includes(f)), 'a caller of slowFirstUnits is not among the runners this case holds to the helper');
     for (const f of runners) {
       const src = stripComments(readFileSync(resolve(ROOT, f), 'utf8'));
       assert.ok(/from\s+['"][^'"]*timing-reporter-flags\.mjs['"]/.test(src), `${f} runs batches and does not import the helper`);
