@@ -30,7 +30,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, triggerSync, waitFor, filterRest } from './helpers.js';
+import { dockerExec, INSTANCES, post, reloadConfig, get, triggerSync, waitFor, filterRest } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -91,7 +91,7 @@ ${version === null
 fs.writeFileSync(p, JSON.stringify(c, null, 2));
 process.stdout.write('OK:' + (m.version || 'ABSENT'));
 `);
-  if (url && token) await post(url, token, '/api/admin/reload-config', {});
+  if (url && token) await reloadConfig(url, token);
   return out;
 }
 
@@ -166,8 +166,8 @@ process.stdout.write('OK');
 `);
     inject('ythril-a', idB, ptForA.body.plaintext);
     inject('ythril-b', idA, ptForB.body.plaintext);
-    await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
-    await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+    await reloadConfig(INSTANCES.a, tokenA);
+    await reloadConfig(INSTANCES.b, tokenB);
 
     // Mirror on B so its engine has somebody to call — the exchange has to be two-way for a version to
     // travel in both directions.

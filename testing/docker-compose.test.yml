@@ -239,9 +239,13 @@ services:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-b
     cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
-    # 1344m (was 1536m): the 512m mongo-a needs for mongot's heap comes from b, c and d, whose peaks in the full CI
-    # order were measured at 1092, 733 and 715 MiB (2026-10-05), so the stack's sum stays in budget.
-    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1344m}"
+    # 1664m (was 1344m, and 1536m before 2026-10-05; c and d are at 1152m): full run 44163324512 (2026-11-17) OOM-killed this container in the sync suite's
+    # key-rotation `before` hook, with mongod at 790 MB resident beside mongot, and it never came back: every later test of the job failed
+    # for a dead B. Its recorded peak in the full CI order is 1092 MiB (2026-10-05), and 1344m was only 23% above it. A ceiling stands
+    # half again above the recorded peak (`the-search-process-has-room-for-every-suite` holds that for b, c and d), and mongot's heap is
+    # capped below (as mongo-a's is) so a quarter of the container is not what it takes by default. The 320m b gains comes from c and d,
+    # which were measured at 733 and 715 MiB and keep 40% above them at 1152m, so the stack's sum stays in budget.
+    mem_limit: "${YTHRIL_TEST_MONGO_B_MEM:-1664m}"
     volumes:
       - ythril-mongo-b-data:/data/db
       - ythril-mongo-b-configdb:/data/configdb
@@ -250,6 +254,8 @@ services:
       # Ythril actually works against an authenticated MongoDB (see S7 / .env.example).
       MONGODB_INITDB_ROOT_USERNAME: ythril
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
+      # mongot's heap, explicit like mongo-a's: without it the JVM takes a quarter of the container, whatever the ceiling is.
+      JAVA_TOOL_OPTIONS: "-Xmx${YTHRIL_TEST_MONGOT_HEAP:-384m}"
       # mongot's and the runner's own logs to a file, so CI's failure dump can print a mongot death (see mongo-a).
       MONGOT_LOG_FILE: /tmp/mongot.log
       RUNNER_LOG_FILE: /tmp/runner.log
@@ -295,7 +301,7 @@ services:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-c
     cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
-    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1344m}"   # see mongo-b
+    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1152m}"   # see mongo-b: peak 733 MiB, 1152m is half again above it
     volumes:
       - ythril-mongo-c-data:/data/db
       - ythril-mongo-c-configdb:/data/configdb
@@ -304,6 +310,7 @@ services:
       # Ythril actually works against an authenticated MongoDB (see S7 / .env.example).
       MONGODB_INITDB_ROOT_USERNAME: ythril
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
+      JAVA_TOOL_OPTIONS: "-Xmx${YTHRIL_TEST_MONGOT_HEAP:-384m}"   # see mongo-b
       MONGOT_LOG_FILE: /tmp/mongot.log   # see mongo-a
       RUNNER_LOG_FILE: /tmp/runner.log
     healthcheck: *mongo-healthcheck
@@ -359,7 +366,7 @@ services:
     image: mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa
     container_name: ythril-mongo-d
     cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
-    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1344m}"   # see mongo-b
+    mem_limit: "${YTHRIL_TEST_MONGO_MEM:-1152m}"   # see mongo-b: peak 715 MiB, 1152m is half again above it
     volumes:
       - ythril-mongo-d-data:/data/db
       - ythril-mongo-d-configdb:/data/configdb
@@ -368,6 +375,7 @@ services:
       # Ythril actually works against an authenticated MongoDB (see S7 / .env.example).
       MONGODB_INITDB_ROOT_USERNAME: ythril
       MONGODB_INITDB_ROOT_PASSWORD: ythril-test-pw
+      JAVA_TOOL_OPTIONS: "-Xmx${YTHRIL_TEST_MONGOT_HEAP:-384m}"   # see mongo-b
       MONGOT_LOG_FILE: /tmp/mongot.log   # see mongo-a
       RUNNER_LOG_FILE: /tmp/runner.log
     healthcheck: *mongo-healthcheck

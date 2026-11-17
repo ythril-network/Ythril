@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, del, waitFor, createTestSpace } from './helpers.js';
+import { dockerExec, INSTANCES, post, reloadConfig, get, del, waitFor, createTestSpace } from './helpers.js';
 import { elapse } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -244,8 +244,8 @@ describe('Peer credential revocation (H7)', () => {
       // vice versa — same as the invite handshake would set up.
       injectPeerToken('ythril-a', instanceIdB, patOnB.plaintext);
       injectPeerToken('ythril-b', instanceIdA, patOnA.plaintext);
-      await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
-      await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+      await reloadConfig(INSTANCES.a, tokenA);
+      await reloadConfig(INSTANCES.b, tokenB);
 
       // A removes B. The subject does not vote on its own removal, so A is the only voter, and since D-36 (bundle-106) A's yes is
       // cast when the round opens: the removal passes AT OPEN and concludes in the request, 204 (it was 202 and a second call

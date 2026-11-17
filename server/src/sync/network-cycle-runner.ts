@@ -28,9 +28,26 @@ export interface NetworkCycleProgress {
 /** One cycle's work for a network: it reads the network, fills the progress holder it is handed, and answers the cycle's result. */
 export type NetworkCycle = (networkId: string, progress: NetworkCycleProgress) => Promise<NetworkCycleResult>;
 
+/**
+ * A cycle's network is not in the config: it was deleted, left or ejected since the cycle was asked for. The one failure of a rerun that is
+ * expected (see `cycleJob`); the message is what the engine has always said, so a first run's caller reads the same line.
+ */
+export class NetworkNotFoundError extends Error {
+  constructor(networkId: string) {
+    super(`Network ${networkId} not found`);
+    this.name = 'NetworkNotFoundError';
+  }
+}
+
+/** The networks whose queued rerun the runner has just started and whose job has not yet begun: the job reads and clears its own entry. */
+const _rerunsStarting = new Set<string>();
+
 const _syncRunner = createCoalescingRunner<NetworkCycleResult, NetworkCycleProgress>({
   onQueued: (id) => log.debug(`Sync cycle already running for network ${peerText(id)} — queuing rerun`),
-  onRerun: (id) => log.debug(`Rerun requested for network ${peerText(id)} — starting`),
+  onRerun: (id) => {
+    log.debug(`Rerun requested for network ${peerText(id)} — starting`);
+    _rerunsStarting.add(id);
+  },
 });
 
 /** True while a sync cycle for the given network is in-flight. Cheap, in-memory; used by GET /api/spaces for a space's "syncing" chip. */
@@ -51,7 +68,19 @@ export const inCycle = <T>(run: () => Promise<T>): Promise<T> => cycles.track(ru
  * `const f = (a) => (b) => …` is a function they cannot see, so the cycle's loops would have no root reaching them (`every-housekeeping-space-walk-is-isolated`).
  */
 function cycleJob(networkId: string, cycle: NetworkCycle) {
-  return (progress: NetworkCycleProgress): Promise<NetworkCycleResult> => inCycle(() => cycle(networkId, progress));
+  return (progress: NetworkCycleProgress): Promise<NetworkCycleResult> => {
+    // The runner starts a queued rerun and lets its promise go: nobody awaits it, so a failure is an unhandled rejection. A network deleted
+    // between the request and the rerun is no failure (the scheduled door ends the same way, `sync/scheduler.ts`): one line, and the rerun is over.
+    // Any other failure of a rerun is raised as before. A first run is not touched: its caller holds the promise and answers the error.
+    const isRerun = _rerunsStarting.delete(networkId);
+    const run = inCycle(() => cycle(networkId, progress));
+    if (!isRerun) return run;
+    return run.catch((err: unknown) => {
+      if (!(err instanceof NetworkNotFoundError)) throw err;
+      log.info(`Rerun for network ${peerText(networkId)} dropped: the network no longer exists`);
+      return { synced: 0, errors: 0, members: [], outcome: 'success' };
+    });
+  };
 }
 
 /**

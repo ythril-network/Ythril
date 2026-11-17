@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, del, delWithBody, waitFor, triggerSync } from './helpers.js';
+import { dockerExec, INSTANCES, post, reloadConfig, get, del, delWithBody, waitFor, triggerSync } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -138,7 +138,7 @@ describe('Braintree governance — ancestor-path voting', () => {
       assert.equal(r.status, 201);
       networkId = r.body.id;
       injectPeerToken('ythril-a', instanceIdB, peerTokenForA);
-      await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
+      await reloadConfig(INSTANCES.a, tokenA);
     });
 
     after(async () => {
@@ -219,7 +219,7 @@ describe('Braintree governance — ancestor-path voting', () => {
 
       // A: add B as direct child → should be 201 (root, single voter, auto-pass)
       injectPeerToken('ythril-a', instanceIdB, peerTokenForA);
-      await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
+      await reloadConfig(INSTANCES.a, tokenA);
       const addBR = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
         instanceId: instanceIdB,
         label: 'Instance B',
@@ -232,7 +232,7 @@ describe('Braintree governance — ancestor-path voting', () => {
 
       // B: register the same network, declaring A as its parent in the tree
       injectPeerToken('ythril-b', instanceIdA, peerTokenForB);
-      await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+      await reloadConfig(INSTANCES.b, tokenB);
       const regBR = await post(INSTANCES.b, tokenB, '/api/networks', {
         id: networkId,
         label: 'BT-Gov Grandchild',
@@ -350,7 +350,7 @@ describe('Braintree governance — ancestor-path voting', () => {
       networkId = netR.body.id;
 
       injectPeerToken('ythril-a', instanceIdB, peerTokenForA);
-      await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
+      await reloadConfig(INSTANCES.a, tokenA);
       const addBR = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
         instanceId: instanceIdB,
         label: 'Instance B',
@@ -362,7 +362,7 @@ describe('Braintree governance — ancestor-path voting', () => {
       assert.equal(addBR.status, 201);
 
       injectPeerToken('ythril-b', instanceIdA, peerTokenForB);
-      await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+      await reloadConfig(INSTANCES.b, tokenB);
       const regBR = await post(INSTANCES.b, tokenB, '/api/networks', {
         id: networkId,
         label: 'BT-Gov Veto',
@@ -457,7 +457,7 @@ describe('Braintree governance — ancestor-path voting', () => {
       networkId = netR.body.id;
 
       injectPeerToken('ythril-a', instanceIdB, peerTokenForA);
-      await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
+      await reloadConfig(INSTANCES.a, tokenA);
       const addBR = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
         instanceId: instanceIdB,
         label: 'Instance B',

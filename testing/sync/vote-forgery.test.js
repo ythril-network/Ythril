@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, post, del, delWithBody, triggerSync, waitFor, dockerExec, readContainerConfig, getInstanceId } from './helpers.js';
+import { INSTANCES, post, reloadConfig, del, delWithBody, triggerSync, waitFor, dockerExec, readContainerConfig, getInstanceId } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -113,8 +113,8 @@ describe('Vote forgery via gossip pull is rejected', () => {
 
     injectPeerToken('ythril-a', instanceIdB, peerTokenForA);
     injectPeerToken('ythril-b', instanceIdA, peerTokenForB);
-    await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
-    await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+    await reloadConfig(INSTANCES.a, tokenA);
+    await reloadConfig(INSTANCES.b, tokenB);
   });
 
   after(async () => {
@@ -144,7 +144,7 @@ describe('Vote forgery via gossip pull is rejected', () => {
       openedAt: new Date().toISOString(),
       votes: [{ instanceId: instanceIdA, vote: 'yes', castAt: new Date().toISOString() }],
     });
-    await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+    await reloadConfig(INSTANCES.b, tokenB);
 
     // A pulls from B (gossip). Repeat a couple of times to be sure the round was seen.
     await triggerSync(INSTANCES.a, tokenA, networkId);
