@@ -514,11 +514,16 @@ describe('Brain — memory list limit/skip pagination', () => {
     assert.ok(r.results.length <= 3, `Expected ≤3 items, got ${r.results.length}`);
   });
 
+  // Paged over this block's own 8 seeds (Q-866): over the whole of `general`, a fact another file inserted between the two
+  // reads shifted every row one place, so page 2 could repeat page 1's last row and the test failed for no defect.
   it('skip pagination returns disjoint results', async () => {
-    const page1 = await readCollection(INSTANCES.a, token(), 'general', 'facts', { limit: 3, skip: 0 });
-    const page2 = await readCollection(INSTANCES.a, token(), 'general', 'facts', { limit: 3, skip: 3 });
+    const seeds = { _id: { $in: Array.from({ length: 8 }, (_, i) => `paginate-${RUN}-${i}`) } };
+    const page1 = await readCollection(INSTANCES.a, token(), 'general', 'facts', { filter: seeds, limit: 3, skip: 0 });
+    const page2 = await readCollection(INSTANCES.a, token(), 'general', 'facts', { filter: seeds, limit: 3, skip: 3 });
     assert.equal(page1.status, 200);
     assert.equal(page2.status, 200);
+    assert.equal(page1.results.length, 3, `page 1 of the 8 seeds: ${JSON.stringify(page1.body)}`);
+    assert.equal(page2.results.length, 3, `page 2 of the 8 seeds: ${JSON.stringify(page2.body)}`);
     const p1Ids = new Set(page1.results.map(m => m._id));
     for (const m of page2.results) {
       assert.ok(!p1Ids.has(m._id), `Duplicate id ${m._id} across pages`);
