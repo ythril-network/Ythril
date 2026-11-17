@@ -36,12 +36,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './_sources.mjs';
 import { makeScratchRepo } from '../_shared/scratch-git-repo.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
+import { timingResultsDir } from '../_shared/timing-reporter.mjs';
 
 /** Imported inside each case, so a base without the module fails each case by name and not the whole file at load. */
 const unitsModule = () => import(pathToFileURL(join(REPO_ROOT, 'scripts/_shared/slow-first-units.mjs')).href);
@@ -226,7 +227,13 @@ test(${JSON.stringify(`ran ${label} runner-args`)} + ' ' + args, () => {});
       const base = { ...process.env };
       delete base.RUNNER_HEAD;
       const r = spawnSync(process.execPath, [PREFLIGHT, '--static'], { cwd: dir, encoding: 'utf8', env: testChildEnv({ RUNNER_HEAD: 'planted-head' }, base), timeout: 170_000, maxBuffer: 64 * 1024 * 1024 });
-      return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+      // Where the run's own timing files went (Q-872): a preflight writes its results in the checkout it runs in. The planted folder's name is
+      // in every row of a planted run, so a file in the script repository's folder that names it is this run's, whatever else runs beside it.
+      const resultsIn = (folder) => { try { return readdirSync(folder).filter(f => /^preflight-pure-\d+\.jsonl$/.test(f)); } catch { return []; } };
+      const repoResults = timingResultsDir(REPO_ROOT);
+      const plantedHere = resultsIn(join(dir, 'test-results'));
+      const strayInRepo = resultsIn(repoResults).filter(f => readFileSync(join(repoResults, f), 'utf8').includes(basename(dir)));
+      return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, plantedHere, strayInRepo };
     } finally { cleanup(); }
   }
 
@@ -266,6 +273,15 @@ test(${JSON.stringify(`ran ${label} runner-args`)} + ' ' + args, () => {});
     }
     assert.doesNotMatch(r.out, /ran planted-ci-only/, 'a @ci-only file ran in the preflight because the snapshot named it');
     assert.equal(ranNames(r.out).size, FILLERS, 'a pure file was left out, or the plan ran something that is not one');
+  });
+
+  it('the planted run writes its timing files in its own checkout and none in the repository that holds the script (Q-872)', { timeout: 400_000 }, async () => {
+    for (const fileTimes of [timesFile(), null]) {
+      const r = await plantedRun({ fileTimes });
+      assert.equal(r.status, 0, r.out.slice(-3000));
+      assert.ok(r.plantedHere.length > 0, 'the planted checkout\'s test-results holds no preflight-pure-*.jsonl: the run wrote its results somewhere else');
+      assert.deepEqual(r.strayInRepo, [], 'the planted run wrote its preflight results into the script repository\'s test-results');
+    }
   });
 
   it('with no snapshot: the line says the units are cut by path length, and the first unit holds more than one file', { timeout: 200_000 }, async () => {

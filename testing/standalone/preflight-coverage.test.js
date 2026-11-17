@@ -33,6 +33,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { stripComments } from './_strip-comments.mjs';
+import { argumentsOf } from './_structural-window.mjs';
 
 const PREFLIGHT = readFileSync('scripts/preflight.mjs', 'utf8');
 /*
@@ -253,7 +254,7 @@ describe('preflight invokes the offline subset within the platform limit', () =>
   it('preflight reads the file times through readFileTimes, hands the pure runs and the times to slowFirstUnits with at most 2 x its unit width alone, and runs a slow unit with one worker', () => {
     const code = stripComments(script);
     assert.match(code, /import\s*\{[^}]*\bslowFirstUnits\b[^}]*\}\s*from\s*['"][^'"]*_shared\/slow-first-units\.mjs['"]/, 'preflight does not import slowFirstUnits from scripts/_shared/slow-first-units.mjs');
-    assert.match(code, /\breadFileTimes\(\s*timingResultsDir\(/, 'preflight does not read the file times through readFileTimes from the results folder');
+    assert.match(code, /\breadFileTimes\(\s*RESULTS_DIR\s*\)/, 'preflight does not read the file times through readFileTimes from the results folder (RESULTS_DIR, built from timingResultsDir(process.cwd()))');
     assert.match(code, /\bslowFirstUnits\([^;]*\bmaxSlow\s*:\s*2\s*\*\s*UNIT_WIDTH\b/, 'preflight does not pass maxSlow: 2 * UNIT_WIDTH to slowFirstUnits');
     assert.match(code, /\.slow\b/, 'preflight never looks at which unit is a slow one: it cannot run it with one worker');
     assert.match(code, /--test-concurrency=\$\{[^}]*\b1\b[^}]*\}/, 'a slow unit is not given --test-concurrency=1');
@@ -295,5 +296,37 @@ describe('preflight runs the CI-reach check', () => {
     // whose body records the failure under the script's own name.
     assert.match(code, /try\s*\{\s*run\(\s*['"`]node scripts\/unrun-tests\.mjs['"`]\s*\);?\s*\}\s*catch\s*\{\s*failures\.push\(\{\s*name:\s*['"`]unrun-tests['"`]/,
       'preflight does not run scripts/unrun-tests.mjs into its failures list');
+  });
+});
+
+/**
+ * A preflight writes, clears and reads its timing results in the checkout it runs in, through ONE results folder (Q-872).
+ *
+ * CI run 44155982511 could not be recorded: a preflight run planted by a test (cwd a scratch checkout) wrote its
+ * `preflight-pure-1.jsonl` into the REAL repository's `test-results/`, because `clearTimingResults` and `timingReporterFlags` fell back to
+ * the folder of the repository that holds the script while the reads took `timingResultsDir(process.cwd())`. The planted run also cleared the
+ * real repository's `preflight-*` files. The one folder is built once from `timingResultsDir(process.cwd())`; every clearing and every
+ * reporter flag names it as `dir`, so a call that leaves `dir` out (and takes the script's own repository) is found here.
+ *
+ * Read from the script's CODE (comments stripped); each call's arguments are bounded by its own brackets.
+ */
+describe('preflight passes one results folder, the current checkout\'s, to every timing writer', () => {
+  const code = stripComments(readFileSync('scripts/preflight.mjs', 'utf8'));
+  const declared = [...code.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*timingResultsDir\(\s*process\.cwd\(\)\s*\)\s*;/g)].map(m => m[1]);
+  const callsOf = (name) => [...code.matchAll(new RegExp(`\\b${name}\\(`, 'g'))].map(m => argumentsOf(code, m.index + name.length));
+
+  it('builds the folder once, from timingResultsDir(process.cwd())', () => {
+    assert.equal(declared.length, 1, `preflight declares ${declared.length} constants from timingResultsDir(process.cwd()); the one results folder is built once`);
+  });
+
+  it('names that folder as dir in every clearTimingResults and every timingReporterFlags call, and has such calls', () => {
+    const [folder] = declared;
+    assert.ok(folder, 'no results-folder constant to compare the calls with');
+    const named = new RegExp(`\\bdir\\s*:\\s*${folder}\\b`);
+    const clears = callsOf('clearTimingResults');
+    const flags = callsOf('timingReporterFlags');
+    assert.ok(clears.length >= 1 && flags.length >= 1, `preflight has ${clears.length} clearTimingResults and ${flags.length} timingReporterFlags calls`);
+    for (const args of clears) assert.match(args[1] ?? '', named, `clearTimingResults(${args.join(', ')}) does not pass dir: ${folder}, so it clears the script repository's folder`);
+    for (const args of flags) assert.match(args[0] ?? '', named, `timingReporterFlags(${args.join(', ')}) does not pass dir: ${folder}, so its results go to the script repository's folder`);
   });
 });
