@@ -55,6 +55,7 @@ import { timingReporterFlags, clearTimingResults } from '../testing/_shared/timi
 import { testChildEnv } from '../testing/_shared/test-child-env.mjs';
 import { poolEach } from '../testing/_shared/pool.mjs';
 import { runTestUnits } from '../testing/_shared/run-test-units.mjs';
+import { workersPerUnit } from '../testing/_shared/offline-test-width.mjs';
 import { timingResultsDir } from '../testing/_shared/timing-reporter.mjs';
 import { stampRunnerOutcome } from './mask-client-report.mjs';
 import { CLIENT_RESULTS, clientCommandWritingTo } from './_shared/client-results.mjs';
@@ -412,9 +413,11 @@ console.log(`  ${ciOnly.length} file(s) declare @ci-only (too slow for every pus
 /*
  * THE PURE BATCHES RUN AS UNITS, a few at a time (Q-863). Each batch of `offlineRuns` is one test-runner child, and `runTestUnits`
  * (`testing/_shared/run-test-units.mjs`, the pool the runner's -db shards use too) keeps UNIT_WIDTH of them alive at once, each with
- * `--test-concurrency=ceil(cores / UNIT_WIDTH)` workers, so the cores a batch leaves idle while its slowest file finishes are used by the next
- * one. One batch at a time with a worker per core took 317.9 s over the 1 227 pure files on 8 cores, a pool of three batches of three workers
- * 214.7 s; the batch holding the slowest file sets the floor in every setting measured. The runner also gives each unit the time bound (a
+ * `workersPerUnit(UNIT_WIDTH)` workers (`testing/_shared/offline-test-width.mjs`), so the cores a batch leaves idle while its slowest file
+ * finishes are used by the next one, and all units together never run more than 8 offline test files at once
+ * (convention-offline-tests-run-in-parallel). One batch at a time with a worker per core took 317.9 s over the 1 227 pure files on 8 cores, a
+ * pool of three batches of three workers 214.7 s; the batch holding the slowest file sets the floor in every setting measured, so the cap is
+ * spent on more units at once rather than more workers per unit. The runner also gives each unit the time bound (a
  * file that hangs after its tests is ended and named), the held output (units never interleave) and the child environment, so none is
  * written here. The old shape, one synchronous child per batch with node's default width, ran one batch at a time and had no bound.
  *
@@ -432,12 +435,12 @@ const runs = offlineRuns(standaloneSplit, { ciOnly: false }).filter(r => r.kind 
 // unit's place in the list, fixed here before any unit launches, so two units never write one file whatever order they end in.
 // The suite is `preflight`, not `standalone`: this is a subset, and it must not clear or overwrite a full run's files.
 clearTimingResults('preflight');
-const UNIT_WIDTH = 3;
+const UNIT_WIDTH = 4;
 const units = runs.map((r, i) => ({ files: r.files, args: r.args, flags: timingReporterFlags({ suite: 'preflight', batch: `pure-${i + 1}`, scope: STATIC ? 'static' : 'subset' }) }));
 console.log(`  ${runs.length} batch(es) of pure files, ${UNIT_WIDTH} at a time`);
 const { failed } = await runTestUnits(units.map(u => u.files), {
   width: UNIT_WIDTH,
-  args: (files, i) => [`--test-concurrency=${Math.ceil(availableParallelism() / UNIT_WIDTH)}`, ...units[i].args, ...units[i].flags.args],
+  args: (files, i) => [`--test-concurrency=${workersPerUnit(UNIT_WIDTH)}`, ...units[i].args, ...units[i].flags.args],
   envOf: (files, i) => units[i].flags.env,
   labelOf: (files, i) => `pure-${i + 1}`,
   header: ({ label, code, index, total, files, startedAt, endedAt }) =>
