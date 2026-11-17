@@ -447,7 +447,7 @@ Content-Type: application/json
 If cleanup partially fails (e.g. a collection drop or file deletion errors), the server returns `500` with error details. The space is **not** removed from config so the deletion can be retried. Check the response body for specifics:
 
 ```json
-{ "error": "Space 'research' cleanup incomplete (2 error(s)). Space was NOT removed from config. ..." }
+{ "error": "Space 'research' cleanup incomplete (2 error(s)). Deletion will be resumed on retry or next restart. Errors: ..." }
 ```
 
 ---

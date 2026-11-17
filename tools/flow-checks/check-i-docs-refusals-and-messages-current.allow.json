@@ -1,0 +1,32 @@
+[
+  {
+    "text": "Human-readable message",
+    "reason": "the page prints the shape of an error body with a stand-in for the text, not a message any route emits",
+    "reviewBy": "2027-02-17"
+  },
+  {
+    "text": "Unknown field(s): orderBy. Allowed: collection, filter, projection, limit, skip, sort, dir, maxTimeMS, maxChars, maxBytes, maxTokens",
+    "reason": "one concrete instance of a message the code builds from the unknown field and the allowed list (server/src/brain/query.ts:186-187), so no source holds it whole",
+    "reviewBy": "2027-02-17"
+  },
+  {
+    "text": "A person must be an adult",
+    "reason": "the message an operator writes on a schema rule, printed as an example of a rule's own message; no source of Ythril holds it",
+    "reviewBy": "2027-02-17"
+  },
+  {
+    "text": "A name needs at least four characters",
+    "reason": "the message an operator writes on a schema rule, printed as an example; no source of Ythril holds it",
+    "reviewBy": "2027-02-17"
+  },
+  {
+    "text": "Tag every record",
+    "reason": "the message an operator writes on a schema rule, printed as an example; no source of Ythril holds it",
+    "reviewBy": "2027-02-17"
+  },
+  {
+    "text": "introduced: status is required; pre-existing: owner is required",
+    "reason": "the sentence is built at run time from the introduced and pre-existing violation lists, so the page's one instance is in no source; compare with server/src/brain/write-validation.ts:483-494 when the list shape changes",
+    "reviewBy": "2027-02-17"
+  }
+]

@@ -82,7 +82,7 @@ anything is added to the exception list.
 Extended errors may include:
 
 ```json
-{ "error": "Storage limit exceeded", "storageExceeded": true }
+{ "error": "Storage files hard limit exceeded: 10.25 GiB used of 10 GiB allowed", "storageExceeded": true }
 ```
 
 **A request body that fails validation answers `400` with its failing fields named, as `{ "error", "issues" }`:**
