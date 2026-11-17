@@ -33,17 +33,24 @@
  *   the flag set and once without (`reachable`), so `if (!STATIC)`, `STATIC ? a : b`, `!STATIC && x()` and an inline
  *   `process.argv.includes('--static')` are all the same rule;
  * - a REGION is found by the call it makes (the client unit-test command, `build:prod`, the `client/angular.json` read, the
- *   TCP probe of the test database, a `--test` batch), never by a line number or a variable name. Each of the three static-skipped
- *   regions must be reachable in the full run and unreachable under `--static`; the probe region must not exist at all; the batch
- *   call is shared by every plan entry and must therefore sit in a loop whose list selects only kind `pure`, from a test the flag
- *   does not enter (`.filter(r => r.kind === 'pure')`, or an `if` in the loop body that leaves the iteration for a `db` run);
+ *   TCP probe of the test database, the unit runner's call, a hand-started `--test` batch), never by a line number or a variable name.
+ *   Each of the three static-skipped regions must be reachable in the full run and unreachable under `--static`; the probe region and
+ *   the hand-started batch must not exist at all (Q-863: the pure batches go through `runTestUnits`, `testing/_shared/run-test-units.mjs`,
+ *   which holds the pool, the time bound and the child environment); the unit runner's call is run in both modes and must be GIVEN only
+ *   kind `pure` units: its first argument, followed back through the names it is built from, passes through a
+ *   `.filter(r => r.kind === 'pure')` (or `!== 'db'`) whose predicate is that bare comparison, from a test the flag does not enter;
  * - every OTHER step call (`run`, `execSync`, `execFileSync`, `gate`) must be reachable under `--static`, so a step added
  *   later is static unless a guard says it is a suite.
  *
  * Seen red by the RULE, and by mutation: `analyse()` is run over the real file with the flag neutralised, with an unguarded
- * copy of a region's call inserted, with a probe put back, with the kind filter taken out (a db run put back into the plan) and
- * with the old `!STATIC ||` guard put back in front of it; each must name the region. The mutations are in memory and the file is
- * never written.
+ * copy of a region's call inserted, with a probe put back, with the kind filter taken out (a db run put back into the plan), with the
+ * old `!STATIC ||` guard put back in front of it, and with a hand-started `--test` batch put back; each must name the region. The
+ * mutations are in memory and the file is never written.
+ *
+ * Shape history: until Q-863 the plan was run by one synchronous `execFileSync('node', ['--test', ...])` inside a `for` loop, and this
+ * gate found the loop's list or an `if ... continue` in its body. The loop is gone with the synchronous shape; the rule is the same (no db
+ * unit, in either mode, from a selection the flag does not enter) over the list the unit runner is handed. The loop-body form is not
+ * accepted any more: a plan built by pushing into a list inside a loop has no selection this gate reads, so it is named.
  *
  * Not edited by this gate's author, and not read by it: the five other readers of preflight's text
  * (`preflight-coverage`, `ci-workflow-is-sound`, `a-client-report-is-masked-before-upload`,
@@ -171,13 +178,6 @@ const turnsWith = (expr, S) => {
   return a !== undefined && b !== undefined && a !== b;
 };
 
-/** Does `expr` read the flag at all (any sub-expression whose value turns with it)? */
-function readsFlag(expr, S) {
-  let hit = false;
-  visit(expr, (n) => { if (!hit && ts.isExpression(n) && turnsWith(n, S)) hit = true; });
-  return hit;
-}
-
 /** Everything the file says about each named variable: declarations and plain assignments. */
 function bindingsOf(sf) {
   const decls = new Map();
@@ -261,14 +261,20 @@ const REGIONS = {
   'bundle-budgets': (n) => ts.isCallExpression(n) && ['readFileSync', 'readFile'].includes(calleeName(n)) && stringsIn(n).some(s => /angular\.json/.test(s)),
   'database-probe': (n) => (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'Socket')
     || (ts.isCallExpression(n) && ['createConnection', 'connect'].includes(calleeName(n)) && /\bnet\b|socket/i.test(calleeText(n))),
-  'database-batch': (n) => ts.isCallExpression(n) && ['execFileSync', 'spawnSync', 'spawn'].includes(calleeName(n))
+  // The call that runs the plan's units (Q-863): `runTestUnits(units, { width, args, ... })` of testing/_shared/run-test-units.mjs.
+  'database-batch': (n) => ts.isCallExpression(n) && calleeName(n) === 'runTestUnits',
+  // A batch started by hand, the shape the unit runner replaced: a child start whose argument array holds a `--test` and a spread of the files.
+  'hand-batch': (n) => ts.isCallExpression(n) && ['execFileSync', 'spawnSync', 'spawn'].includes(calleeName(n))
     && n.arguments.some(a => ts.isArrayLiteralExpression(a) && a.elements.some(el => isString(el) && el.text === '--test')
       && a.elements.some(el => ts.isSpreadElement(el))),
 };
 /** The three things `--static` leaves out: the client suite, the production build and the bundle budgets. */
 const SKIPPED_UNDER_STATIC = ['client-suite', 'client-build', 'bundle-budgets'];
-/** Regions that must not exist at all: the probe of the test database went with the database batches (Q-588). */
-const GONE = ['database-probe'];
+/** Regions that must not exist at all, each with what its presence means: the probe went with the database batches (Q-588); the hand-started batch with the pool (Q-863). */
+const GONE = {
+  'database-probe': (at) => `database-probe (${at}) is back in ${PREFLIGHT_FILE}: local preflight runs no database test, so nothing local asks whether a database is up`,
+  'hand-batch': (at) => `a node --test batch is started by hand (${at}) in ${PREFLIGHT_FILE}: the pure units go through runTestUnits, which holds the pool, the time bound, the held output and the child environment`,
+};
 
 const STEP_CALLEES = ['run', 'execSync', 'execFileSync', 'gate'];
 
@@ -288,19 +294,24 @@ function otherSteps(sf, regions) {
   return steps;
 }
 
-const isLoop = (p) => ts.isForOfStatement(p) || ts.isForInStatement(p) || ts.isForStatement(p);
-
-/** The expressions a loop around `node` iterates: its own and what each identifier in it was set to. */
-function loopIterables(node, decls) {
-  for (let p = node.parent; p; p = p.parent) {
-    if (ts.isFunctionLike(p)) return [];
-    if (ts.isForOfStatement(p) || ts.isForInStatement(p)) {
-      const exprs = [p.expression];
-      visit(p.expression, (n) => { if (ts.isIdentifier(n) && decls.has(n.text)) exprs.push(...decls.get(n.text)); });
-      return exprs;
-    }
+/**
+ * The expressions the unit runner's call is HANDED as its list of units: its first argument, and what each name in it was set to,
+ * followed back through the names those are built from (`units = runs.map(...)`, `runs = offlineRuns(split).filter(...)`). A name is followed
+ * once, so a name set from itself ends the walk.
+ */
+function unitSources(call, decls) {
+  const first = call.arguments[0];
+  if (!first) return [];
+  const exprs = [first];
+  const seen = new Set();
+  for (let i = 0; i < exprs.length; i++) {
+    visit(exprs[i], (n) => {
+      if (!ts.isIdentifier(n) || seen.has(n.text) || !decls.has(n.text)) return;
+      seen.add(n.text);
+      exprs.push(...decls.get(n.text));
+    });
   }
-  return [];
+  return exprs;
 }
 
 /** `x.kind === 'pure'` / `x.kind !== 'db'` (what a plan keeps) and `x.kind === 'db'` / `x.kind !== 'pure'` (what it drops): a bare comparison, nothing else in it. */
@@ -324,43 +335,22 @@ function filterPredicate(call) {
   return fn.body.statements.find(ts.isReturnStatement)?.expression ?? null;
 }
 
-/** Every `.filter(r => r.kind === 'pure')` in the list a loop around `node` iterates: the predicate is that comparison and nothing else, so the flag is not in it. */
+/** Every `.filter(r => r.kind === 'pure')` in the units the runner call is handed: the predicate is that comparison and nothing else, so the flag is not in it. */
 function pureFilters(node, decls) {
   const out = [];
-  for (const x of loopIterables(node, decls)) {
+  for (const x of unitSources(node, decls)) {
     visit(x, (n) => { const p = filterPredicate(n); if (p && kindComparison(p)?.keepsPure) out.push({ call: n, predicate: p }); });
   }
   return out;
 }
 
-/** The loop's own `if (r.kind === 'db') continue;` (or `!== 'pure'`): an `if` that is that bare comparison, leaves the iteration, and sits under no flag test inside the loop. */
-function dbSkips(node, S) {
-  const out = [];
-  for (let p = node.parent; p && !ts.isFunctionLike(p); p = p.parent) {
-    if (!isLoop(p)) continue;
-    visit(p.statement, (n) => {
-      if (!ts.isIfStatement(n)) return;
-      const c = kindComparison(n.expression);
-      if (!c || c.keepsPure) return;
-      let leaves = false;
-      visit(n.thenStatement, (m) => { if (ts.isContinueStatement(m) || ts.isBreakStatement(m) || ts.isReturnStatement(m)) leaves = true; });
-      let guarded = false;
-      for (let a = n.parent; a && a !== p; a = a.parent) if (ts.isIfStatement(a) && readsFlag(a.expression, S)) guarded = true;
-      if (leaves && !guarded) out.push(n);
-    });
-    break;
-  }
-  return out;
-}
-
 /**
- * Does the plan this `--test` batch runs hold only kind `pure`, whatever the flag? Two shapes, both stated by what they contain: the
- * list the loop iterates is filtered by a bare `kind === 'pure'` comparison, or the loop's own body leaves the iteration for a `db`
- * run. Neither may read the flag: a plan that selects by kind only under `--static` is the old plan, and runs the database half in
- * the full mode.
+ * Are the units this call runs only kind `pure`, whatever the flag? One shape, stated by what it contains: the list the call is handed is
+ * built from a `.filter` whose predicate is a bare `kind === 'pure'` (or `!== 'db'`) comparison. It may not read the flag: a plan that selects
+ * by kind only under `--static` is the old plan, and runs the database half in the full mode.
  */
-function planHoldsOnlyPure(node, decls, S) {
-  return pureFilters(node, decls).length > 0 || dbSkips(node, S).length > 0;
+function planHoldsOnlyPure(node, decls) {
+  return pureFilters(node, decls).length > 0;
 }
 
 // ─────────────────────────────────────────────────── the rule, as violations ─────────────────────────────────────────────────────
@@ -425,12 +415,12 @@ function analyse(src, { floor = STEP_FLOOR } = {}) {
 
   // The regions: kept by the full run, gone under --static.
   const regions = regionNodes(sf);
-  for (const region of Object.keys(REGIONS).filter(k => !GONE.includes(k))) {
+  for (const region of Object.keys(REGIONS).filter(k => !(k in GONE))) {
     if (regions[region].length === 0) say(region, `no call of the '${region}' region found in ${PREFLIGHT_FILE}: the rule would be asserted over nothing`);
   }
-  // The probe of the test database is gone with the database batches: a socket opened to ask whether a stack is up is back.
-  for (const region of GONE) {
-    for (const n of regions[region]) say(region, `${region} (line ${lineOf(sf, n)}) is back in ${PREFLIGHT_FILE}: local preflight runs no database test, so nothing local asks whether a database is up`);
+  // The regions that went: the probe of the test database (a socket opened to ask whether a stack is up) and the hand-started batch.
+  for (const [region, message] of Object.entries(GONE)) {
+    for (const n of regions[region]) say(region, message(`line ${lineOf(sf, n)}`));
   }
   for (const region of SKIPPED_UNDER_STATIC) {
     for (const n of regions[region]) {
@@ -441,10 +431,17 @@ function analyse(src, { floor = STEP_FLOOR } = {}) {
   }
   for (const n of regions['database-batch']) {
     const at = `line ${lineOf(sf, n)}`;
-    if (!reachable(n, false, S)) say('database-batch', `the batch call (${at}) does not run in the full preflight`);
-    if (!reachable(n, true, S)) say('database-batch', `the batch call (${at}) is skipped under ${STATIC_FLAG} whole: the pure half (the timer and walk rule gates live there) must run`);
-    if (!planHoldsOnlyPure(n, decls, S)) say('database-batch', `the batch call (${at}) can run a database batch: no loop around it selects only kind 'pure' from a test the flag does not enter, so a db run is in the plan in at least one mode`);
+    if (!reachable(n, false, S)) say('database-batch', `the unit runner call (${at}) does not run in the full preflight`);
+    if (!reachable(n, true, S)) say('database-batch', `the unit runner call (${at}) is skipped under ${STATIC_FLAG} whole: the pure half (the timer and walk rule gates live there) must run`);
+    if (!planHoldsOnlyPure(n, decls)) say('database-batch', `the unit runner call (${at}) can be handed a database unit: the list it is given is not built from a \`.filter\` that selects only kind 'pure' by a bare comparison the flag does not enter, so a db run is in the plan in at least one mode`);
   }
+
+  // The runner called is the shared one: a local function of the same name would be a second pool with no time bound.
+  const importsRunner = sf.statements.some(s => ts.isImportDeclaration(s) && isString(s.moduleSpecifier)
+    && /(^|\/)run-test-units\.mjs$/.test(s.moduleSpecifier.text)
+    && Boolean(s.importClause?.namedBindings) && ts.isNamedImports(s.importClause.namedBindings)
+    && s.importClause.namedBindings.elements.some(el => (el.propertyName ?? el.name).text === 'runTestUnits'));
+  if (!importsRunner) say('database-batch', `${PREFLIGHT_FILE} does not import runTestUnits from the shared run-test-units.mjs: a runner of its own has no pool, bound or held output of the shared one`);
 
   // Every other step runs under --static.
   const steps = otherSteps(sf, regions);
@@ -528,25 +525,23 @@ function insertUnguardedCopy(src, region) {
   return `${src.slice(0, at)}\n${node.getText()};\n${src.slice(at)}`;
 }
 
-/** The batch loop's selection, as the source ranges a mutation may rewrite: a `.filter` call (replaced by what it filters) or a loop-body `if` that skips db runs. */
+/** The plan's selection, as the source ranges a mutation may rewrite: each `.filter` call in the list the unit runner is handed (replaced by what it filters). */
 function planSelection(src, tag) {
   const sf = parsed(src, tag);
   const decls = bindingsOf(sf);
-  const S = flagNames(decls);
   const node = regionNodes(sf)['database-batch'][0];
-  assert.ok(node, "the mutation found no 'database-batch' call");
-  return { sf, node, filters: pureFilters(node, decls), skips: dbSkips(node, S) };
+  assert.ok(node, "the mutation found no 'database-batch' (unit runner) call");
+  return { sf, node, filters: pureFilters(node, decls) };
 }
 
 /**
- * A db run put back into the plan: the kind filter taken out of the batch loop's list (the `.filter(...)` call becomes what it
- * filtered), or the loop's `if` that skips db runs made empty. The plan then runs every kind, in both modes.
+ * A db run put back into the plan: the kind filter taken out of the list the unit runner is handed (the `.filter(...)` call becomes what it
+ * filtered). The plan then runs every kind, in both modes.
  */
 function putDbRunBack(src) {
-  const { sf, filters, skips } = planSelection(src, 'db-back');
-  const edits = filters.map(({ call }) => ({ start: call.getStart(sf), end: call.getEnd(), text: call.expression.expression.getText() }))
-    .concat(skips.map(n => ({ start: n.getStart(sf), end: n.getEnd(), text: ';' })));
-  assert.ok(edits.length > 0, 'the mutation found no kind selection in the batch loop to take out');
+  const { sf, filters } = planSelection(src, 'db-back');
+  const edits = filters.map(({ call }) => ({ start: call.getStart(sf), end: call.getEnd(), text: call.expression.expression.getText() }));
+  assert.ok(edits.length > 0, 'the mutation found no kind selection in the unit list to take out');
   return edit(src, edits);
 }
 
@@ -556,12 +551,22 @@ function putDbRunBack(src) {
  * new one because it, too, names the kind and reads the flag.
  */
 function putStaticOnlyGuardBack(src) {
-  const { sf, filters, skips } = planSelection(src, 'static-only');
+  const { sf, filters } = planSelection(src, 'static-only');
   const notStatic = `!process.argv.includes('${STATIC_FLAG}')`;
-  const edits = filters.map(({ predicate }) => ({ start: predicate.getStart(sf), end: predicate.getEnd(), text: `${notStatic} || ${predicate.getText()}` }))
-    .concat(skips.map(n => ({ start: n.expression.getStart(sf), end: n.expression.getEnd(), text: `${notStatic} ? false : ${n.expression.getText()}` })));
-  assert.ok(edits.length > 0, 'the mutation found no kind selection in the batch loop to guard');
+  const edits = filters.map(({ predicate }) => ({ start: predicate.getStart(sf), end: predicate.getEnd(), text: `${notStatic} || ${predicate.getText()}` }));
+  assert.ok(edits.length > 0, 'the mutation found no kind selection in the unit list to guard');
   return edit(src, edits);
+}
+
+/**
+ * The batch started by hand put back: the synchronous call the unit runner replaced, as a statement straight after the imports. Typed here and
+ * not copied from the file, because the file no longer holds it: this IS the bad line (it is what scripts/preflight.mjs wrote at d113c9e6, line 430).
+ */
+function putHandBatchBack(src) {
+  const sf = parsed(src, 'hand-batch');
+  const imports = sf.statements.filter(ts.isImportDeclaration);
+  const at = imports.length ? imports[imports.length - 1].getEnd() : 0;
+  return `${src.slice(0, at)}\nexecFileSync('node', ['--test', ...r.args, ...flags.args, ...r.files], { stdio: 'inherit', env: testChildEnv(flags.env) });\n${src.slice(at)}`;
 }
 
 /** The probe of the test database put back: a socket opened as a statement straight after the imports. */
@@ -583,7 +588,9 @@ describe('scripts/preflight.mjs: no database batch in either mode, and --static 
     it(`the ${region} region runs in the full preflight and not under --static`, () => regionHolds(REAL, region));
   }
 
-  it('the run plan holds no database batch in EITHER mode: the loop over offlineRuns selects only kind pure, from a test the flag does not enter', () => regionHolds(REAL, 'database-batch'));
+  it('the run plan holds no database unit in EITHER mode: the list handed to runTestUnits is built from offlineRuns by a filter that selects only kind pure, from a test the flag does not enter', () => regionHolds(REAL, 'database-batch'));
+
+  it('no batch is started by hand: the pure units go through runTestUnits (the pool, the time bound, the held output, the child environment)', () => regionHolds(REAL, 'hand-batch'));
 
   it('the probe of the test database is gone: no socket is opened to ask whether a stack is up', () => regionHolds(REAL, 'database-probe'));
 
@@ -634,7 +641,8 @@ describe('scripts/preflight.mjs: no database batch in either mode, and --static 
       }
     });
 
-    for (const region of [...SKIPPED_UNDER_STATIC, 'database-batch']) {
+    // The unit runner's call is run in BOTH modes by rule, so an unguarded copy of it is not a defect of this rule; the skipped regions are.
+    for (const region of SKIPPED_UNDER_STATIC) {
       it(`an unguarded copy of the ${region} call, moved into the static path, is named`, () => {
         cleanBaseline();
         const v = analyse(insertUnguardedCopy(REAL, region));
@@ -642,10 +650,23 @@ describe('scripts/preflight.mjs: no database batch in either mode, and --static 
       });
     }
 
-    it('a db run put back into the plan (the kind selection taken out of the batch loop) is named', () => {
+    it('a db run put back into the plan (the kind selection taken out of the list the unit runner is handed) is named', () => {
       cleanBaseline();
       const v = analyse(putDbRunBack(REAL));
-      assert.ok(v.some(x => x.region === 'database-batch'), 'a batch loop that runs every kind left the rule green');
+      assert.ok(v.some(x => x.region === 'database-batch'), 'a unit list holding every kind left the rule green');
+    });
+
+    it('a batch started by hand, beside the unit runner, is named', () => {
+      cleanBaseline();
+      const v = analyse(putHandBatchBack(REAL));
+      assert.ok(v.some(x => x.region === 'hand-batch'), 'a hand-started node --test batch left the rule green');
+    });
+
+    it('the unit runner not imported from the shared module (a local copy of the name) is named', () => {
+      cleanBaseline();
+      const mutated = REAL.replace(/run-test-units\.mjs/, 'a-local-copy.mjs');
+      assert.notEqual(mutated, REAL, 'the import of run-test-units.mjs was not found to mutate');
+      assert.ok(analyse(mutated).some(x => x.region === 'database-batch' && /import runTestUnits/.test(x.message)));
     });
 
     it('the old `!--static ||` guard put back in front of the kind selection (db runs in the full mode only) is named', () => {
@@ -683,6 +704,7 @@ describe('scripts/preflight.mjs: no database batch in either mode, and --static 
 /** One right shape: a guard per region, a `.filter` on the batch list that keeps pure runs in both modes, a conditional verdict and scope. */
 const SAMPLE_FILTER = `
 import { execSync, execFileSync } from 'node:child_process';
+import { runTestUnits } from '../testing/_shared/run-test-units.mjs';
 const STATIC = process.argv.slice(2).includes('--static');
 const unknown = process.argv.slice(2).filter(a => a !== '--static');
 if (unknown.length > 0) { console.error('preflight: unknown argument ' + unknown[0]); process.exit(2); }
@@ -693,10 +715,14 @@ const failures = [];
 for (const g of ['a', 'b']) gate(g);
 run('npm run build:server');
 const runs = offlineRuns(split).filter(r => r.kind === 'pure');
-for (const [i, r] of runs.entries()) {
-  const flags = timingReporterFlags({ suite: 'preflight', batch: \`\${r.kind}-\${i}\`, scope: STATIC ? 'static' : 'subset' });
-  execFileSync('node', ['--test', ...r.args, ...flags.args, ...r.files]);
-}
+const units = runs.map((r, i) => {
+  const flags = timingReporterFlags({ suite: 'preflight', batch: \`\${r.kind}-\${i + 1}\`, scope: STATIC ? 'static' : 'subset' });
+  return { files: r.files, flags };
+});
+const { failed } = await runTestUnits(units.map(u => u.files), {
+  width: 3, args: (files, i) => units[i].flags.args, envOf: (files, i) => units[i].flags.env, labelOf: (files, i) => 'pure-' + (i + 1), header: (info) => info.label,
+});
+if (failed > 0) failures.push('test:standalone');
 execSync('git ls-files "testing/**/*.js"', { encoding: 'utf8' });
 run('node scripts/unrun-tests.mjs');
 run('node scripts/surface-matrix-audit.mjs');
@@ -715,18 +741,19 @@ if (failures.length === 0) {
 process.exit(1);
 `;
 
-/** A second right shape, spelled differently: an inline flag test, an unfiltered list with a `continue` for a db run in the loop body, if/else around the verdict and the client block. */
+/** A second right shape, spelled differently: an inline flag test, the filter written inline in the call's own argument (a `function` predicate, `!== 'db'`), if/else around the verdict and the client block. */
 const SAMPLE_CONTINUE = `
 import { execSync, execFileSync } from 'node:child_process';
+import { runTestUnits } from '../testing/_shared/run-test-units.mjs';
 if (process.argv.slice(2).some(a => a !== '--static')) { console.log('usage: preflight [--static]'); process.exit(2); }
 const run = (cmd) => execSync(cmd, { stdio: 'inherit' });
 function gate(name) { run('node --test ' + name); }
 for (const g of ['a', 'b']) gate(g);
 run('npm run build:server');
-for (const [i, r] of offlineRuns(split).entries()) {
-  if (r.kind === 'db') continue;
-  execFileSync('node', ['--test', ...r.files], { env: timingReporterFlags({ scope: process.argv.includes('--static') ? 'static' : 'subset' }).env });
-}
+await runTestUnits(offlineRuns(split).filter(function (r) { return r.kind !== 'db'; }).map(r => r.files), {
+  width: 3, args: () => [], labelOf: (files, i) => 'pure-' + i,
+  envOf: () => timingReporterFlags({ scope: process.argv.includes('--static') ? 'static' : 'subset' }).env,
+});
 execSync('git ls-files "testing/**/*.js"');
 run('node scripts/unrun-tests.mjs');
 run('node scripts/surface-matrix-audit.mjs');
@@ -758,7 +785,7 @@ describe('the preflight rules, over literal samples', () => {
         }
       });
 
-      for (const region of [...SKIPPED_UNDER_STATIC, 'database-batch']) {
+      for (const region of SKIPPED_UNDER_STATIC) {
         it(`goes red when an unguarded ${region} call is moved into the static path`, () => {
           assert.ok(analyse(insertUnguardedCopy(sample, region)).some(x => x.region === region));
         });
@@ -766,6 +793,16 @@ describe('the preflight rules, over literal samples', () => {
 
       it('goes red when a db run is put back into the plan', () => {
         assert.ok(analyse(putDbRunBack(sample)).some(x => x.region === 'database-batch'));
+      });
+
+      it('goes red when a batch is started by hand beside the unit runner', () => {
+        assert.ok(analyse(putHandBatchBack(sample)).some(x => x.region === 'hand-batch'));
+      });
+
+      it('goes red when the unit runner is not the shared one (no import of runTestUnits from run-test-units.mjs)', () => {
+        const local = sample.replace(/import \{ runTestUnits \} from '[^']*run-test-units\.mjs';\n/, 'const runTestUnits = async () => ({ failed: 0 });\n');
+        assert.notEqual(local, sample);
+        assert.ok(analyse(local).some(x => x.region === 'database-batch' && /import runTestUnits/.test(x.message)));
       });
 
       it('goes red when the old static-only guard is put back in front of the kind selection', () => {

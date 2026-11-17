@@ -165,9 +165,18 @@ describe('preflight invokes the offline subset within the platform limit', () =>
     assert.doesNotMatch(script, /batched\(/, 'preflight builds its own command lines again — a second copy of the plan');
   });
 
-  it('keeps running after a batch fails, so a later failure is not hidden', () => {
-    // An all-or-nothing invocation reported the first failing batch and never ran the rest.
-    assert.match(script, /standaloneFailed = true/);
+  it('keeps running after a batch fails, so a later failure is not hidden: the units run through runTestUnits and the stage fails once, after every unit ended', () => {
+    // An all-or-nothing invocation reported the first failing batch and never ran the rest. The unit runner never rejects (a failing
+    // unit, a spawn error and a kill at the bound each resolve to a failed unit; its own gate holds that), so the rule here is how
+    // preflight READS it: the result of the call, awaited, decides one failure of the stage.
+    const code = stripComments(script);
+    assert.match(code, /\bawait\s+runTestUnits\(/, 'preflight does not run its pure units through `await runTestUnits(...)`');
+    assert.match(code, /import\s*\{[^}]*\brunTestUnits\b[^}]*\}\s*from\s*['"][^'"]*_shared\/run-test-units\.mjs['"]/,
+      'preflight does not import runTestUnits from testing/_shared/run-test-units.mjs');
+    const decided = code.match(/if\s*\(([^)]*)\)\s*\{\s*failures\.push\(\{\s*name:\s*['"`]test:standalone \(offline subset\)['"`]/);
+    assert.ok(decided, 'the stage does not push its one failure from an `if` over the unit runner\'s result');
+    assert.match(decided[1], /\bfailed\b/, 'the stage failure is not decided by the unit runner\'s `failed` count');
+    assert.doesNotMatch(code, /standaloneFailed = true/, 'a per-batch failure flag set in a catch is the synchronous shape this replaced');
   });
 
   it('every batch\'s WHOLE command line, the timing reporter\'s flags included, fits the launcher it goes through', async () => {
@@ -187,16 +196,32 @@ describe('preflight invokes the offline subset within the platform limit', () =>
     const { join } = await import('node:path');
     mkdirSync(scratchRoot(), { recursive: true });
     const flags = timingReporterFlags({ suite: 'preflight', batch: 'pure-99', scope: 'subset', dir: mkdtempSync(join(scratchRoot(), 'flags-')) });
-    const longest = Math.max(...runs.map(r => ['node', '--test', ...r.args, ...flags.args, ...r.files].join(' ').length));
+    const { boundedTestArgs } = await import('../_shared/test-file-bound.mjs');
+    // What a unit really carries: the bound, the concurrency flag, the plan's own args, the reporter's flags, then the files.
+    const longest = Math.max(...runs.map(r => ['node', ...boundedTestArgs('--test-concurrency=3', ...r.args, ...flags.args, ...r.files)].join(' ').length));
+    assert.ok(longest < WINDOWS_LIMIT, `the longest unit is ${longest} characters, over the ${WINDOWS_LIMIT} CreateProcess allows`);
+
     const code = stripComments(script);
-    const viaShell = /run\(`node --test \$\{\[\.\.\.r\.args, \.\.\.flags\.args/.test(code);
-    // cmd.exe's 8 191 less what Node wraps the line in (`cmd.exe /d /s /c "…"`): measured, a line the budget let
-    // through at under 8 191 was still refused.
-    const limit = viaShell ? 8_000 : WINDOWS_LIMIT;
-    assert.ok(longest < limit, `the longest batch is ${longest} characters, over the ${limit} its launcher allows`
-      + (viaShell ? ' (launched through a shell: cmd.exe\'s limit)' : ''));
-    assert.match(code, /execFileSync\('node', \['--test', \.\.\.r\.args, \.\.\.flags\.args, \.\.\.r\.files\]/,
-      'preflight launches its batches with execFileSync and an argument array — no shell, no 8 191-character cap');
+    // The pure units go through the unit runner, which starts them as an argument array (its own case below). Preflight itself starts no
+    // batch: not through a shell line (cmd.exe's 8 191-character cap), and not by hand with `--test` (no pool, no time bound, no held output).
+    assert.match(code, /\bawait\s+runTestUnits\(/, 'preflight does not start its pure units through runTestUnits');
+    assert.doesNotMatch(code, /run\(`node --test \$\{\[\.\.\.r\.args/, 'preflight launches a batch through a shell line: cmd.exe caps it at 8 191 characters');
+    assert.doesNotMatch(code, /(?:execFileSync|execSync|spawnSync|spawn)\([^)]*['"`]--test['"`]/,
+      'preflight starts a node --test batch by hand again: no pool, no time bound, no held output');
+    // What the units carry: the timing reporter's flags and environment per unit (a destination per unit, labelled by its place in the list).
+    assert.match(code, /\btimingReporterFlags\(/, 'preflight does not attach the timing reporter to its units');
+    assert.match(code, /\bflags\.args\b/, 'the reporter\'s flags (flags.args) do not reach the units\' command line');
+    assert.match(code, /\bflags\.env\b/, 'the reporter\'s environment (flags.env) does not reach the units');
+  });
+
+  it('the unit runner starts each unit as `node` with an argument array, the time bound, and the environment testChildEnv builds', () => {
+    // The rule the preflight's old `execFileSync('node', ['--test', ...], { env: testChildEnv(flags.env) })` kept, over the module that now holds it:
+    // a caller cannot drop it because it is not the caller's.
+    const unitsSource = stripComments(readFileSync('testing/_shared/run-test-units.mjs', 'utf8'));
+    assert.match(unitsSource, /\bspawn\(\s*'node',\s*boundedTestArgs\(/, 'the unit runner does not start `node` with boundedTestArgs and an argument array');
+    assert.match(unitsSource, /\benv\s*:\s*testChildEnv\(/, 'the unit runner does not give each child testChildEnv(...): the recorder\'s token and the runner\'s context would reach it');
+    assert.doesNotMatch(unitsSource, /\bshell\s*:\s*true|\bexec(?:Sync)?\(/, 'the unit runner starts a unit through a shell');
+    assert.doesNotMatch(unitsSource, /process\.env\b/, 'the unit runner builds a child environment from process.env itself: that is testChildEnv\'s question');
   });
 
   it('would actually exceed the limit unbatched — the guard is not theoretical', () => {

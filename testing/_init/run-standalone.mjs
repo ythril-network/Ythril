@@ -47,13 +47,14 @@
  *
  * Run: node testing/_init/run-standalone.mjs
  */
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { splitStandalone, batched, offlineRuns, DB_TEST_CONCURRENCY } from '../_shared/standalone-split.mjs';
 import { timingReporterFlags, clearTimingResults } from '../_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
 import { boundedTestArgs, batchTimeoutMs } from '../_shared/test-file-bound.mjs';
+import { runTestUnits } from '../_shared/run-test-units.mjs';
 import { planDbShards, unitsOf, dbShardPort, dbFilesThisProcessRuns, dbBatchLabel } from '../_shared/db-shard-plan.mjs';
 import { resolveDbShardConfig, startDbShards, stopDbShards, attachDbShards, dbShardProject } from './db-shard-stack.mjs';
 import { reportContainerState, reportThenStop, TEST_STACK_PROJECT } from './container-state.mjs';
@@ -172,37 +173,27 @@ for (const third of THIRDS) if (wants(third)) clearTimingResults(`standalone-${t
  * Batches are named by `dbBatchLabel`, shard and unit, so shards never write the same results file.
  */
 async function runShardUnits(files, shardIndex, width, port, onUnitDone = () => {}) {
-  const units = unitsOf(files);
-  let next = 0;
-  await Promise.all(Array.from({ length: width }, async () => {
-    while (next < units.length) {
-      const n = ++next;
-      const batch = units[n - 1].map(path);
-      ran++;
-      const startedAt = ((Date.now() - t0) / 1000).toFixed(0);
-      const flags = timingReporterFlags({ suite: 'standalone', batch: dbBatchLabel(shardIndex, n), scope: 'full' });
-      const out = [];
-      const code = await new Promise((resolve) => {
-        const child = spawn('node', boundedTestArgs('--test-concurrency=1', ...flags.args, ...batch),
-          { env: testChildEnv({ ...flags.env, ...(port === undefined ? {} : { YTHRIL_TEST_MONGO_PORT: String(port) }) }), stdio: ['ignore', 'pipe', 'pipe'] });
-        // A unit that never exits (a handle left open after its tests) is ended at its bound and named, never waited on for ever.
-        const bound = setTimeout(() => {
-          out.push(Buffer.from(`standalone: unit ${n} ended at its time bound (${batchTimeoutMs(batch.length)} ms): ${batch.join(', ')}\n`));
-          child.kill('SIGKILL');
-        }, batchTimeoutMs(batch.length));
-        child.stdout.on('data', d => out.push(d));
-        child.stderr.on('data', d => out.push(d));
-        child.on('error', () => { clearTimeout(bound); resolve(1); });
-        child.on('close', (c) => { clearTimeout(bound); resolve(c ?? 1); });
-      });
-      const where = port === undefined ? '' : ` (127.0.0.1:${port})`;
-      process.stdout.write(`# -db shard ${shardIndex}${where} unit ${n} of ${units.length}: ${batch.length} file(s), ${startedAt}s to ${((Date.now() - t0) / 1000).toFixed(0)}s, exit ${code}
-`);
-      process.stdout.write(Buffer.concat(out));
-      onUnitDone();
-      if (code !== 0) failed++;
-    }
-  }));
+  const units = unitsOf(files).map(unit => unit.map(path));
+  const where = port === undefined ? '' : ` (127.0.0.1:${port})`;
+  const seconds = (ms) => ((ms - t0) / 1000).toFixed(0);
+  const flagsOf = units.map((unit, i) => timingReporterFlags({ suite: 'standalone', batch: dbBatchLabel(shardIndex, i + 1), scope: 'full' }));
+  // The pool, the time bound, the child environment and the held output are `runTestUnits`'s (`_shared/run-test-units.mjs`); this says what
+  // a -db unit is: its label, its timing destination, its Mongo and its header.
+  const result = await runTestUnits(units, {
+    width,
+    args: (batch, i) => ['--test-concurrency=1', ...flagsOf[i].args],
+    labelOf: (batch, i) => dbBatchLabel(shardIndex, i + 1),
+    envOf: (batch, i) => ({
+      ...flagsOf[i].env,
+      ...(port === undefined ? {} : { YTHRIL_TEST_MONGO_PORT: String(port) }),
+    }),
+    header: ({ index, total, files: batch, startedAt, endedAt, code }) =>
+      `# -db shard ${shardIndex}${where} unit ${index + 1} of ${total}: ${batch.length} file(s), ${seconds(startedAt)}s to ${seconds(endedAt)}s, exit ${code}
+`,
+    onUnitDone,
+  });
+  ran += result.ran;
+  failed += result.failed;
 }
 
 /**
