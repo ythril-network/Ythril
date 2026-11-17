@@ -67,7 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web:** the Files page's processing poll lives in a module of its own; nothing on the page changes.
 - **Testing:** the size check fails a tracked file that grows past its limit unless an entry in its allow file names the file, its decomposing ticket and a review date.
 - **Testing:** the metric-source tests read declarations through `testing/standalone/_metric-sources.mjs`, which finds every metrics module that declares a metric; a test fails a scanner that reads `registry.ts` on its own.
-- **Testing:** the local preflight runs its source gates first, then the builds, then the client tests, then the standalone batches, and stops at the first failing stage, naming the stages it did not run.
+- **Testing:** the local preflight runs its source gates first, then the builds, then the test suites, and stops at the first failing stage, naming the stages it did not run.
+- **Testing:** within each of those, the preflight runs first the stage whose failure is cheapest to find, from the recorded stage times (`test-results/stage-costs.json`, refreshed after each recorded run), never before a stage it reads; with no snapshot it keeps the listed order.
 - **Testing:** the local preflight runs several standalone batches at once, never more than 8 test files together, parses test files in parallel, and ends a batch that never exits at a time bound.
 - **Testing:** every local preflight run records a `Preflight-Run` with each stage's time and outcome (kept in `test-results/unrecorded` without an instance); `node scripts/test-times.mjs --preflight-trend` prints the stage times over runs.
 - **Testing:** the CI-run recorder lists main's runs without GitHub's `status=completed` filter and keeps the completed ones itself; a run that filter still lacked is now found.

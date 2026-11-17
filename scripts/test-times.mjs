@@ -10,7 +10,8 @@
  *     node scripts/test-times.mjs --rewrite <key>     record one run again, from its own results
  *     node scripts/test-times.mjs --trend [--last N] [--flags]
  *     node scripts/test-times.mjs --preflight-trend [--last N]   each preflight stage's time over the last N preflight runs
- *     node scripts/test-times.mjs --drain-unrecorded  send what the spool holds (the preflight's own record, kept after its verdict)
+ *     node scripts/test-times.mjs --preflight-costs [--runner container|host]   write test-results/stage-costs.json, the stage costs the preflight orders by
+ *     node scripts/test-times.mjs --drain-unrecorded  send what the spool holds (the preflight's own record, kept after its verdict), then refresh that snapshot
  *     node scripts/test-times.mjs --summary --results <dir>   the run's page (CI's advisory job); records nothing
  *     node scripts/test-times.mjs --help
  *
@@ -104,7 +105,8 @@ import { isEntryPoint } from './_shared/script-cli.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
 import { readTimingLog, timingResultsDir, TEST_RESULTS_DIR_ENV } from '../testing/_shared/timing-reporter.mjs';
 import { spoolPayload } from './_shared/unrecorded-spool.mjs';
-import { preflightTrendLines } from './_shared/preflight-run-record.mjs';
+import { preflightTrendLines, stageStats, STAGE_STATS_WINDOW } from './_shared/preflight-run-record.mjs';
+import { writeStageCosts, STAGE_COSTS_FILE } from './_shared/stage-costs.mjs';
 import { maskText } from './_shared/mask-text.mjs';
 import { waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
@@ -643,20 +645,33 @@ function recordUnderLock(payloads, dest) {
 }
 
 /**
+ * After a drain, inside the same record lock: the stage-cost snapshot the preflight orders its stages by is made again from the records the
+ * instance now holds, so the next run's order rests on every run so far (Q-865). Best effort: a refresh that fails is one line and changes
+ * neither the drain nor the exit status.
+ */
+async function refreshStageCosts(dest) {
+  try { console.log(await writeStageCostSnapshot(dest.api, STAGE_COSTS_RUNNER)); } catch (err) {
+    console.log(`test-times: stage costs not refreshed: ${whyOf(err, dest.shownUrl)}`);
+  }
+}
+
+/**
  * `--drain-unrecorded`: send what the spool holds (a `Preflight-Run` the preflight just kept, a `Test-Run` an earlier `--record`
- * kept) and nothing else. Run by `scripts/preflight.mjs` after its verdict, as a child it kills at a time bound. A recording problem
- * is a line and exit 0, like `--record`; with no instance the line says so and the files stay.
+ * kept), then refresh the stage-cost snapshot (also when the spool held nothing), and nothing else. Run by `scripts/preflight.mjs`
+ * after its verdict, as a child it kills at a time bound. A recording problem is a line and exit 0, like `--record`; with no
+ * instance the line says so and the files stay.
  */
 async function drainOnly() {
   const refused = refuseUnderCi('--drain-unrecorded');
   if (refused) return refused;
-  if (!existsSync(unrecordedDir())) { console.log('test-times: nothing to record: no test-results/unrecorded'); return 0; }
-  const kept = readdirSync(unrecordedDir()).filter(n => n.endsWith('.json'));
+  const spooled = existsSync(unrecordedDir());
+  const kept = spooled ? readdirSync(unrecordedDir()).filter(n => n.endsWith('.json')) : [];
   const dest = destination();
+  if (!dest.api && !spooled) { console.log('test-times: nothing to record: no test-results/unrecorded'); return 0; }
   if (!dest.api) { console.log(`test-times: not recorded: ${dest.why}; kept ${kept.length} payload(s) in ${shown(unrecordedDir())}`); return 0; }
   try { recordLockPath(); lockWaitMs(); } catch (err) { console.log(`test-times: not recorded: ${firstLine(err)}; kept ${kept.length} payload(s) in ${shown(unrecordedDir())}`); return 0; }
   let locked;
-  try { locked = await withRecordLock(() => drainUnrecorded(dest.api, dest.shownUrl)); } catch (err) {
+  try { locked = await withRecordLock(async () => { await drainUnrecorded(dest.api, dest.shownUrl); await refreshStageCosts(dest); }); } catch (err) {
     console.log(`test-times: not recorded: ${firstLine(err)}; kept ${kept.length} payload(s) in ${shown(unrecordedDir())}`);
     return 0;
   }
@@ -1201,15 +1216,46 @@ async function trend({ last, flags }) {
 // ---- --preflight-trend --------------------------------------------------------------------------------------------
 
 /** The newest `last` `Preflight-Run` records, read by type and date (embeddings are suppressed; a record is found by filter, never by meaning). */
-async function preflightRows(api, last) {
+async function preflightRows(api, last, where = {}) {
   const answer = await api.call('filter', {
-    space: PREFLIGHT_RUN_SPEC.space, collection: 'chrono', filter: { type: PREFLIGHT_RUN_SPEC.type },
+    space: PREFLIGHT_RUN_SPEC.space, collection: 'chrono', filter: { type: PREFLIGHT_RUN_SPEC.type, ...where },
     sort: 'startsAt', dir: 'desc', limit: last, maxChars: PAGE_MAX_CHARS,
   });
   const rows = answer?.data?.results;
   if (!Array.isArray(rows)) throw new YthrilApiError('filter: the answer carried no results', { tool: 'filter' });
   // The server's type and page size are asked for and checked again, like the other readers'.
   return rows.filter(r => r?.type === PREFLIGHT_RUN_SPEC.type).sort(newestStartFirst).slice(0, last);
+}
+
+/** The runner whose times the snapshot holds when none is asked for: the preflight runs in the in-container runner, and times from the host are several-fold apart. */
+const STAGE_COSTS_RUNNER = 'container';
+
+/** The rows a runner's stage costs rest on, asked of the server: that runner's newest runs, and, while fewer than 3, the records that name no runner too. */
+async function stageCostRows(api, runner) {
+  const own = await preflightRows(api, STAGE_STATS_WINDOW, { 'properties.runner': runner });
+  if (own.length >= 3) return own;
+  return [...own, ...await preflightRows(api, STAGE_STATS_WINDOW, { 'properties.runner': { $exists: false } })];
+}
+
+/**
+ * Write the stage-cost snapshot the preflight orders its stages by (`_shared/stage-costs.mjs`) from the newest runs of one runner on the
+ * instance. A write with no run to rest on is refused rather than made from nothing.
+ *
+ * @returns {Promise<string>} the line to say
+ */
+async function writeStageCostSnapshot(api, runner) {
+  const { runs, stages } = stageStats(await stageCostRows(api, runner), { window: STAGE_STATS_WINDOW, runner });
+  if (runs === 0) throw new Error(`no recorded preflight runs for the ${runner} runner to measure`);
+  writeStageCosts(resultsDir(), { generatedAt: new Date().toISOString(), window: STAGE_STATS_WINDOW, runner, runs, stages });
+  return `test-times: stage costs written to ${shown(join(resultsDir(), STAGE_COSTS_FILE))} (${runs} ${runner} run(s))`;
+}
+
+/** `--preflight-costs`: write the stage-cost snapshot from the instance. */
+async function preflightCosts({ runner }) {
+  const dest = destination();
+  if (!dest.api) { console.error(`test-times: cannot read: ${dest.why}`); return 1; }
+  try { console.log(await writeStageCostSnapshot(dest.api, runner)); } catch (err) { console.error(`test-times: stage costs not written: ${whyOf(err, dest.shownUrl)}`); return 1; }
+  return 0;
 }
 
 /** The stage times of the last `last` preflight runs, each stage's time per run and its median (`_shared/preflight-run-record.mjs` prints it). */
@@ -1379,8 +1425,13 @@ export const HELP = `usage: node scripts/test-times.mjs <command>
                            the named run is walked wherever it sits, past the stop and past the ${BACKFILL_RUNS} runs too.
                            Run by hand.
   --drain-unrecorded       send what test-results/unrecorded/ holds (a Preflight-Run that scripts/preflight.mjs kept, a Test-Run
-                           an earlier --record kept) and nothing else; exits 0 whenever it could not, the files stay. Run by
-                           scripts/preflight.mjs after its verdict, at a time bound
+                           an earlier --record kept), then refresh ${STAGE_COSTS_FILE} (also when nothing was kept); exits 0 whenever
+                           it could not, the files stay. Run by scripts/preflight.mjs after its verdict, at a time bound
+  --preflight-costs [--runner container|host]
+                           write test-results/${STAGE_COSTS_FILE}, the measured cost of each preflight stage the preflight orders
+                           its stages by: per stage, over the newest ${STAGE_STATS_WINDOW} runs of one runner (default ${STAGE_COSTS_RUNNER}, where the preflight
+                           runs; while fewer than 3 carry it, the records naming no runner too), how many runs ran it, how many
+                           failed and its median time
   --preflight-trend [--last N]
                            print the stage times of the newest N preflight runs (default ${PREFLIGHT_TREND_RUNS}): each stage's time in every run
                            (oldest first; failed, or - for a stage the run never reached), its median over the runs where it
@@ -1429,6 +1480,12 @@ async function main(argv) {
     return 0;
   }
   if (command === '--drain-unrecorded' && !rest.length) return drainOnly();
+  if (command === '--preflight-costs') {
+    let runner = STAGE_COSTS_RUNNER;
+    if (rest.length === 2 && rest[0] === '--runner' && ['container', 'host'].includes(rest[1])) runner = rest[1];
+    else if (rest.length) { console.error(HELP); return 1; }
+    return preflightCosts({ runner });
+  }
   if (command === '--preflight-trend') {
     let last = PREFLIGHT_TREND_RUNS;
     for (let i = 0; i < rest.length; i++) {

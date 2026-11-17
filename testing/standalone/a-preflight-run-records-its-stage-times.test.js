@@ -22,6 +22,9 @@
  * - The real `scripts/preflight.mjs`, run in a scratch folder whose CHANGELOG gate is planted to fail, exits 1 as before and
  *   leaves the spooled record naming that stage as first failing and every later stage as not run.
  * - The report prints each stage's time per run and the median per stage, from fixture records.
+ * - Since Q-865 the record lists the stages in the order the run PLANNED them (`planStages`, from a measured snapshot), not the order
+ *   of the stage list, and names the runner that measured them (`container` when `RUNNER_HEAD` is set, else `host`), so the cost of a
+ *   stage is only ever computed from times measured in one place.
  *
  * Run: node --test testing/standalone/a-preflight-run-records-its-stage-times.test.js
  */
@@ -248,14 +251,19 @@ describe('the real preflight leaves its record, and its exit status is the one i
   const PREFLIGHT = join(REPO_ROOT, 'scripts/preflight.mjs');
 
   /** preflight.mjs in a scratch folder whose CHANGELOG gate is planted to fail; returns its status and the spooled records. */
-  function planted(args) {
+  function planted(args, { changelog = 1, unrunTests = 0, seed = () => {}, env = {}, runnerHead = null } = {}) {
     const dir = mkdtempSync(join(scratchRoot(), 'preflight-record-'));
     try {
       mkdirSync(join(dir, 'scripts'));
       writeFileSync(join(dir, 'scripts/unregistered-local-files.mjs'), 'process.exit(0);\n');
-      writeFileSync(join(dir, 'scripts/check-changelog.mjs'), "console.log('planted: no [Unreleased] line'); process.exit(1);\n");
+      writeFileSync(join(dir, 'scripts/check-changelog.mjs'), `console.log('planted: no [Unreleased] line'); process.exit(${changelog});\n`);
+      writeFileSync(join(dir, 'scripts/unrun-tests.mjs'), `console.log('planted: a test no job selects'); process.exit(${unrunTests});\n`);
       writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'planted', private: true, type: 'module', scripts: {} }));
-      const r = spawnSync(process.execPath, [PREFLIGHT, ...args], { cwd: dir, encoding: 'utf8', env: testChildEnv(), timeout: 90_000 });
+      seed(dir);
+      // The runner's own variable is set or left out by the case, never inherited from the container this test runs in.
+      const base = { ...process.env };
+      delete base.RUNNER_HEAD;
+      const r = spawnSync(process.execPath, [PREFLIGHT, ...args], { cwd: dir, encoding: 'utf8', env: testChildEnv({ ...env, ...(runnerHead ? { RUNNER_HEAD: runnerHead } : {}) }, base), timeout: 90_000 });
       const folder = join(dir, 'test-results', 'unrecorded');
       const records = existsSync(folder) ? readdirSync(folder).filter(f => f.endsWith('.json')).map(f => JSON.parse(readFileSync(join(folder, f), 'utf8'))) : [];
       return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, records };
@@ -279,6 +287,44 @@ describe('the real preflight leaves its record, and its exit status is the one i
       assert.deepEqual(stages.filter(s => s.outcome !== 'not-run').map(s => `${s.name}:${s.outcome}`), ['unregistered-local-files:passed', 'check-changelog:failed']);
       assert.ok(stages.filter(s => s.outcome === 'not-run').every(s => s.ms === 0));
       assert.match(r.out, /^preflight: .*not recorded/m, 'the run did not say in one line that it kept the record');
+    });
+
+    it(`${label}: the record's stages are the plan's order, not the list's, when a measured snapshot reorders the run`, async () => {
+      const { PREFLIGHT_STAGES, planStages } = await stagesModule();
+      const runs = 9;
+      const costs = {
+        generatedAt: new Date().toISOString(), window: 20, runner: 'container', runs,
+        stages: {
+          'unregistered-local-files': { ran: runs, failed: 0, medianMs: 40 },
+          'unrun-tests': { ran: runs, failed: 8, medianMs: 90 },
+          'check-changelog': { ran: runs, failed: 0, medianMs: 4000 },
+        },
+      };
+      const r = planted(args, {
+        changelog: 0, unrunTests: 1, runnerHead: 'planted-head',
+        env: {},
+        seed: (dir) => {
+          mkdirSync(join(dir, 'test-results'), { recursive: true });
+          writeFileSync(join(dir, 'test-results', 'stage-costs.json'), JSON.stringify(costs));
+        },
+      });
+      assert.equal(r.status, 1, r.out.slice(-1500));
+      assert.equal(r.records.length, 1, `no record was spooled:\n${r.out.slice(-1500)}`);
+      const stages = JSON.parse(r.records[0].properties.stages);
+      const plan = planStages(PREFLIGHT_STAGES, costs, { static: mode === 'static' }).map(s => s.name);
+      const list = PREFLIGHT_STAGES.filter(s => !(mode === 'static' && s.static === false)).map(s => s.name);
+      assert.notDeepEqual(plan, list, 'the fixture does not reorder anything: the case would prove nothing');
+      assert.deepEqual(stages.map(s => s.name), plan, 'the record lists the stages in the list\'s order, not the order the run planned');
+      assert.deepEqual(stages.filter(s => s.outcome !== 'not-run').map(s => `${s.name}:${s.outcome}`), ['unregistered-local-files:passed', 'unrun-tests:failed']);
+      assert.equal(r.records[0].properties.firstFailingStage, 'unrun-tests');
+    });
+  }
+
+  for (const [label, runnerHead, runner] of [['RUNNER_HEAD set', 'planted-head', 'container'], ['RUNNER_HEAD not set', null, 'host']]) {
+    it(`carries runner ${runner} when ${label}, so the stage times can be told apart by where they were measured`, () => {
+      const r = planted(['--static'], { runnerHead });
+      assert.equal(r.records.length, 1, `no record was spooled:\n${r.out.slice(-1500)}`);
+      assert.equal(r.records[0].properties.runner, runner);
     });
   }
 });
