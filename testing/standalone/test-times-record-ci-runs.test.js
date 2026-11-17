@@ -245,6 +245,12 @@ const INTERVAL_ENV = 'YTHRIL_TEST_RUNS_LISTING_INTERVAL_MS';
 const WAIT_MS = 400;
 const INTERVAL_MS = 40;
 const SHORT_WAIT = { [WAIT_ENV]: String(WAIT_MS), [INTERVAL_ENV]: String(INTERVAL_MS) };
+/**
+ * For a case whose run DOES arrive: a bound far above the reads it needs, so a loaded machine cannot end the wait first (with
+ * SHORT_WAIT, three reads had to fit in 400 ms, and four preflights at once did not, 2026-11-17). The pass ends at the read that
+ * holds the run, so the long bound costs nothing when it passes.
+ */
+const ARRIVING_WAIT = { [WAIT_ENV]: '30000', [INTERVAL_ENV]: String(INTERVAL_MS) };
 
 /** The ids of the runs `trustedRuns` admits and of the ones it must refuse (1008 is added by {@link worldWithFullRun}). */
 const TRUSTED_IDS = ['1001', '1007'];
@@ -365,7 +371,7 @@ function laggingWorld(staleReads) {
 describe('--record-ci <runId> against a listing that lags', () => {
   it('reads the listing again until the named run is in it, then records it and exits 0', async () => {
     await withRecordingWorld(laggingWorld(2), async ({ github, ythril, dir, env }) => {
-      const r = await runTimes(['--record-ci', String(LATE_RUN)], { cwd: dir, env: { ...env, ...SHORT_WAIT } });
+      const r = await runTimes(['--record-ci', String(LATE_RUN)], { cwd: dir, env: { ...env, ...ARRIVING_WAIT } });
       assert.equal(r.code, 0, everything(r));
       assert.equal(github.listingReads(), 3, 'the listing was read once per answer it needed (two stale, then the one that held the run), and not again after it held it');
       assert.ok(Object.keys(records(ythril)).includes(`ci:${LATE_RUN}:1:standalone-pure:standalone`), `the named run was recorded:\n${everything(r)}`);
