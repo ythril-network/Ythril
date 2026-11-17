@@ -17,13 +17,13 @@
  * Run: node --test testing/integration/files.test.js
  */
 
-import { describe, it, before } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, req, reqJson, get, del, post, readCollection } from '../sync/helpers.js';
+import { INSTANCES, req, reqJson, get, del, post, readCollection, createTestSpace } from '../sync/helpers.js';
 import { waitForReading } from '../_shared/wait-for.mjs';
 import { elapse } from '../_shared/sleep.mjs';
 
@@ -525,17 +525,25 @@ describe('File metadata (MongoDB)', () => {
     assert.equal(q2.results.length, 0, 'the metadata must go with the file');
   });
 
+  // In a space of its own (Q-866): every integration file writes into `general` at once and some delete, so a count
+  // read there before and after one upload moved by whatever else ran in between (PR #1631 read 54, then 46).
   it('Brain stats endpoint includes files count', async () => {
-    const before = await getStats(tokenA, 'general');
-    assert.equal(before.status, 200, JSON.stringify(before.body));
-    assert.ok(typeof before.body.files === 'number', 'stats must include files count');
-    assert.ok(before.body.files >= 0, 'files count must be non-negative');
+    const space = await createTestSpace('stats-count', [[INSTANCES.a, tokenA]]);
+    try {
+      const before = await getStats(tokenA, space.id);
+      assert.equal(before.status, 200, JSON.stringify(before.body));
+      assert.equal(before.body.files, 0, `a new space must count no files: ${JSON.stringify(before.body)}`);
 
-    // Upload a new file and verify count increases
-    await uploadFile(tokenA, 'general', `stats-count-${RUN}.txt`, 'counting');
-    const after = await getStats(tokenA, 'general');
-    assert.ok(after.body.files >= before.body.files + 1,
-      `Expected files count to increment: before=${before.body.files}, after=${after.body.files}`);
+      const up = await uploadFile(tokenA, space.id, `stats-count-${RUN}.txt`, 'counting');
+      assert.ok([200, 201, 202].includes(up.status), `upload: ${up.status} ${JSON.stringify(up.body)}`);
+      // The upload answers 202, so the count is waited for; the first reading that moved is the one judged, so a
+      // double count fails here naming 2, not at the deadline.
+      const after = await waitForReading(() => getStats(tokenA, space.id), (r) => r.body?.files > 0, 10_000, 200,
+        { what: 'the stats files count to move off 0' });
+      assert.equal(after.body.files, 1, `one upload must count one file: ${JSON.stringify(after.body)}`);
+    } finally {
+      await space.remove();
+    }
   });
 });
 
@@ -697,17 +705,26 @@ describe('Chunked upload (Content-Range)', () => {
   });
 });
 
+// A space of its own (Q-866): these tests list the space's whole files collection and look for their folder in it. In
+// `general`, which every integration file writes into at once, other files' rows filled the page, so the "before" check
+// could miss the folder and the "nothing remains" check could pass with the rows merely off the page.
 describe('File metadata (MongoDB) — directory operations', () => {
   const RUN = Date.now();
+  let space;
 
-  before(() => {
+  before(async () => {
     tokenA = fs.readFileSync(TOKEN_FILE_A, 'utf8').trim();
+    space = await createTestSpace('meta-dir', [[INSTANCES.a, tokenA]]);
   });
+  after(async () => { await space?.remove(); });
 
   /** Upload a text file via JSON body */
   async function upload(filePath, content) {
-    return uploadFile(tokenA, 'general', filePath, content);
+    return uploadFile(tokenA, space.id, filePath, content);
   }
+
+  /** The whole files collection of this block's space. */
+  const listOwnFileMeta = (args = {}) => listFileMeta(args, space.id);
 
 
   it('Deleting a directory removes metadata for all files inside it', async () => {
@@ -717,12 +734,12 @@ describe('File metadata (MongoDB) — directory operations', () => {
     await upload(`${dir}/sub/c.txt`, 'gamma');
 
     // All three should have metadata
-    const before = await listFileMeta();
+    const before = await listOwnFileMeta();
     const inDir = before.results.filter(f => f.path.startsWith(`${dir}/`));
     assert.ok(inDir.length >= 3, `Expected ≥3 metadata records under ${dir}, got ${inDir.length}`);
 
     // Delete the directory
-    const delUrl = `${INSTANCES.a}/api/files/general?path=${encodeURIComponent(dir)}`;
+    const delUrl = `${INSTANCES.a}/api/files/${space.id}?path=${encodeURIComponent(dir)}`;
     const dr = await fetch(delUrl, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenA}` },
@@ -731,7 +748,7 @@ describe('File metadata (MongoDB) — directory operations', () => {
     assert.equal(dr.status, 204, 'Directory delete should return 204');
 
     // Metadata for all child files must be gone
-    const after = await listFileMeta();
+    const after = await listOwnFileMeta();
     const remaining = after.results.filter(f => f.path.startsWith(`${dir}/`));
     assert.equal(remaining.length, 0, `Metadata must be removed for all files under ${dir}`);
   });
@@ -743,20 +760,20 @@ describe('File metadata (MongoDB) — directory operations', () => {
     // metafile plus a job retrying forever against the now-missing file. A text file adds
     // hidden chunk records that must also be cleaned.
     const jpg = Buffer.from('ffd8ffe0006a706567', 'hex');
-    await uploadRaw(tokenA, 'general', `${dir}/pic.jpg`, jpg, 'image/jpeg');
+    await uploadRaw(tokenA, space.id, `${dir}/pic.jpg`, jpg, 'image/jpeg');
     await upload(`${dir}/note.txt`, 'some text body');
 
     // Sanity: records (including hidden chunk/subfile records) exist under the folder.
     // `includeChunks=true` was the route's opt-IN; `filter` returns chunk records unless a predicate
     // excludes them, so asking for every record is asking for no predicate at all.
-    const before = await listFileMeta({ limit: 200 });
+    const before = await listOwnFileMeta({ limit: 200 });
     assert.ok(
       before.results.some(f => f.path.startsWith(`${dir}/`)),
       `Expected records under ${dir} before delete`,
     );
 
     // Delete the folder.
-    const delUrl = `${INSTANCES.a}/api/files/general?path=${encodeURIComponent(dir)}`;
+    const delUrl = `${INSTANCES.a}/api/files/${space.id}?path=${encodeURIComponent(dir)}`;
     const dr = await fetch(delUrl, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenA}` },
@@ -766,7 +783,7 @@ describe('File metadata (MongoDB) — directory operations', () => {
 
     // No record of ANY kind (file, chunk, or conversion artifact) may remain under the folder —
     // whether its own path or its parent's path is under the deleted directory.
-    const after = await listFileMeta({ limit: 200 });
+    const after = await listOwnFileMeta({ limit: 200 });
     const remaining = after.results.filter(f =>
       f.path.startsWith(`${dir}/`) || (f.parentFileId && f.parentFileId.startsWith(`${dir}/`)),
     );
@@ -784,7 +801,7 @@ describe('File metadata (MongoDB) — directory operations', () => {
     await upload(`${srcDir}/nested/z.txt`, 'z');
 
     // Move the directory
-    const patchUrl = `${INSTANCES.a}/api/files/general?path=${encodeURIComponent(srcDir)}`;
+    const patchUrl = `${INSTANCES.a}/api/files/${space.id}?path=${encodeURIComponent(srcDir)}`;
     const pr = await fetch(patchUrl, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenA}` },
@@ -793,12 +810,12 @@ describe('File metadata (MongoDB) — directory operations', () => {
     assert.equal(pr.status, 200, await pr.text());
 
     // Source paths should have no metadata
-    const srcMeta = await listFileMeta();
+    const srcMeta = await listOwnFileMeta();
     const srcRemaining = srcMeta.results.filter(f => f.path.startsWith(`${srcDir}/`));
     assert.equal(srcRemaining.length, 0, `Source metadata must be gone after directory move`);
 
     // Destination paths should have metadata
-    const dstMeta = await listFileMeta();
+    const dstMeta = await listOwnFileMeta();
     const dstRecords = dstMeta.results.filter(f => f.path.startsWith(`${dstDir}/`));
     assert.ok(dstRecords.length >= 3, `Expected ≥3 metadata records under ${dstDir}, got ${dstRecords.length}`);
     assert.ok(dstRecords.every(f => f.path.startsWith(`${dstDir}/`)), 'All records must use new dir prefix');
@@ -808,12 +825,12 @@ describe('File metadata (MongoDB) — directory operations', () => {
     // at the move — the next offsite backup walked the tree with `fs.cpSync`, which is C++, so
     // `std::filesystem_error: directory iterator cannot open directory: Permission denied` reached `terminate()`
     // and killed the server outright (container exit 139). This exact directory is the one that did it.
-    const listUrl = `${INSTANCES.a}/api/files/general?path=${encodeURIComponent(dstDir)}`;
+    const listUrl = `${INSTANCES.a}/api/files/${space.id}?path=${encodeURIComponent(dstDir)}`;
     const listed = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${tokenA}` } });
     assert.equal(listed.status, 200, `a moved directory must still be listable: ${await listed.text()}`);
 
     const modes = execSync(
-      `docker exec ythril-a stat -c %a /data/files/general/${dstDir} /data/files/general/${dstDir}/nested`,
+      `docker exec ythril-a stat -c %a /data/files/${space.id}/${dstDir} /data/files/${space.id}/${dstDir}/nested`,
     ).toString().trim().split('\n');
     for (const m of modes) {
       assert.equal(m, '700',
