@@ -144,7 +144,7 @@ function routeRead(node, call, ctx) {
 
 /**
  * The aggregate read a call makes, or null: `{ space, narrowing }` with each resolved as far as `ctx` allows.
- * `ctx.helpers` holds the same file's helpers already summarised.
+ * `ctx.helpers` carries the same file's helpers already summarised.
  */
 function callRead(call, ctx) {
   const name = calleeName(call);
