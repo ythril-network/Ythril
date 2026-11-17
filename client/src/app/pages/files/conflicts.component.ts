@@ -235,9 +235,7 @@ export class ConflictsComponent implements OnInit {
   conflictActions: Record<string, ResolveAction> = {};
   conflictTargetSpace: Record<string, string> = {};
   bulkAction: ResolveAction = 'keep-local';
-  /** The label key of each action: the options of both selects are read out of it, so a label is spelled once and an action cannot be offered without one. */
-  protected readonly actionLabelKeys = ACTION_LABEL_KEYS;
-  /** One conflict's actions, in the order the label table lists them. */
+  /** One conflict's actions, in the order the label table lists them (ACTION_LABEL_KEYS: a label is spelled once and an action cannot be offered without one). */
   protected readonly rowActions = Object.keys(ACTION_LABEL_KEYS) as ResolveAction[];
   /** A bulk resolution names no target space, so it offers every action but the one that needs one. */
   private readonly bulkActionsOfCopies = this.rowActions.filter(a => a !== 'save-to-space');

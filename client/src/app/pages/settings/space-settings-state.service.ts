@@ -407,9 +407,6 @@ export class SpaceSettingsState {
   }
 
   readonly KINDS: readonly KnowledgeType[] = KNOWLEDGE_TYPES;
-  readonly KIND_LABELS: Record<KnowledgeType, string> = {
-    entity: 'Entities', fact: 'Memories', edge: 'Edges', chrono: 'Chrono',
-  };
 
   // ── dialog shell ───────────────────────────────────────────────────────────
   settingsSpace  = signal<Space | null>(null);

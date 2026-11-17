@@ -129,7 +129,6 @@ interface StorageData {
 })
 export class StorageComponent implements OnInit {
   private spacesApi = inject(SpacesApi);
-  protected Math = Math;
 
   data = signal<StorageData | null>(null);
   loading = signal(true);

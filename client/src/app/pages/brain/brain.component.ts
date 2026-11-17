@@ -435,8 +435,6 @@ export class BrainComponent implements OnInit, OnDestroy {
   /** The record-collection tabs: their order is `RECORD_TABS`, and what each shows is `RECORD_TAB_FACES` (both in `brain-tabs.ts`). */
   collectionTabs: { key: BrainTab; label: string; icon: string; statsKey?: keyof SpaceStats }[] = RECORD_TABS.map(key => ({ key, ...RECORD_TAB_FACES[key] }));
 
-  readonly pageSize = 20;
-
   spaces = signal<SpaceView[]>([]);
   activeSpaceId = signal('');
   private readonly route = inject(ActivatedRoute);

@@ -1023,18 +1023,6 @@ export class SpaceSchemaTabComponent implements OnInit {
     return recordTtlWindows(this.state.settingsSpace()?.recordTtlDays)[kt];
   }
 
-  /** A one-line, read-only summary of a property's constraints for the linked-type view. */
-  propConstraintSummary(s: PropertySchema): string {
-    const parts: string[] = [];
-    if (s.required) parts.push(this.transloco.translate('spaces.schema.propDetail.required'));
-    if (s.enum?.length) parts.push(`${this.transloco.translate('spaces.schema.propDetail.enumValues')}: ${s.enum.join(', ')}`);
-    if (s.minimum != null) parts.push(`${this.transloco.translate('spaces.schema.propDetail.min')} ${s.minimum}`);
-    if (s.maximum != null) parts.push(`${this.transloco.translate('spaces.schema.propDetail.max')} ${s.maximum}`);
-    if (s.pattern) parts.push(`/${s.pattern}/`);
-    if (s.default != null) parts.push(`${this.transloco.translate('spaces.schema.propDetail.default')} ${s.default}`);
-    return parts.join(' · ') || '—';
-  }
-
   /**
    * Unlink a library-linked type: replace the `$ref` with an inline copy of the library entry's schema
    * so the space can then customise it. Mirrors the inline branch of the state loader; leaves the change
@@ -1209,13 +1197,6 @@ export class SpaceSchemaTabComponent implements OnInit {
     const payload = { knowledgeType: kt, typeName: name, schema };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     saveBlob(blob, `${space.id}_${kt}_${name}.json`);
-  }
-
-  /** Open the file picker for per-type schema import (existing type replacement). */
-  triggerImportTypeSchema(kt: KnowledgeType, name: string): void {
-    this._typeImportTarget = { kt, name };
-    this.schImportError.set('');
-    this.schTypeImportInputRef?.nativeElement.click();
   }
 
 

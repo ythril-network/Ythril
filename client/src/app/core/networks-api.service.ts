@@ -47,10 +47,6 @@ export class NetworksApi {
     return this.http.get<{ networks: Network[] }>('/api/networks');
   }
 
-  getNetwork(id: string): Observable<Network> {
-    return this.http.get<Network>(`/api/networks/${id}`);
-  }
-
   getSyncHistory(networkId: string, limit: number = 20): Observable<{ history: SyncHistoryRecord[] }> {
     return this.http.get<{ history: SyncHistoryRecord[] }>(`/api/networks/${networkId}/sync-history?limit=${limit}`);
   }
