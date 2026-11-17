@@ -46,7 +46,7 @@ import type { ClientSession } from 'mongodb';
 import { col, asFilter } from '../../db/mongo.js';
 import { inBoundedTransaction } from '../../db/bounded-transaction.js';
 import { inHeldTransaction } from '../../brain/held-transaction.js';
-import { outsideWriteBound, withinWriteBoundOf, writeTimeoutMs } from '../../db/write-bound.js';
+import { outsideWriteBound, SERVER_FIRST_MARGIN_MS, withinWriteBoundOf, writeTimeoutMs } from '../../db/write-bound.js';
 import type { MediaJobDoc } from '../../config/types.js';
 import { spaceCollection } from '../../db/space-collection.js';
 import { isSpaceNotWritable } from '../../spaces/space-write-gate.js';
@@ -195,8 +195,12 @@ const leasedWriteBoundMs = (): number => LEASED_WRITE_BOUND_FACTOR * writeTimeou
  *
  * ## What it guarantees
  *
- * No fenced write holds a job document longer than `leasedWriteBoundMs()` (twice the write bound); a revocation or a heartbeat waits no
- * longer than that, and is not ended sooner by an enclosing request's tighter scope. That includes a statement of the write that reaches
+ * No fenced write holds a job document longer than `leasedWriteBoundMs()` (twice the write bound); a revocation or a heartbeat waits that
+ * long PLUS `SERVER_FIRST_MARGIN_MS`, and is not ended sooner by an enclosing request's tighter scope. The margin is why the budget is not
+ * the holder's own figure: a holder may end at its bound with its commit still racing the server's deadline (the commit, the lock
+ * hand-off, a write-conflict retry and the acknowledgement come after the bound's last statement), and a revoker with the same budget,
+ * started after the holder, met that end at the same instant and gave up on its own deadline while the holder's transaction was still
+ * finishing (Q-873: a move's hold failed in CI's Full run 44163324512). The revoker outlives the holder's whole transaction. That includes a statement of the write that reaches
  * the server after the bound ended it: the transaction is sealed (`db/bounded-transaction.ts`), so it cannot open a transaction nobody
  * owns. The one exception is a seal that is never answered, which is logged as an ERROR; until a later seal or kill, a late statement
  * may then hold the job document. A store at its bound costs a media job that figure
@@ -206,7 +210,7 @@ const leasedWriteBoundMs = (): number => LEASED_WRITE_BOUND_FACTOR * writeTimeou
  * request runs inside one. The write is therefore NOT under the request's hold: what bounds it is this figure.
  */
 export function revokingClaims<T>(run: () => Promise<T>): Promise<T> {
-  return outsideWriteBound(() => withinWriteBoundOf(leasedWriteBoundMs(), run));
+  return outsideWriteBound(() => withinWriteBoundOf(leasedWriteBoundMs() + SERVER_FIRST_MARGIN_MS, run));
 }
 
 /**
