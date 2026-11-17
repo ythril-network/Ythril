@@ -23,8 +23,11 @@
 # its configuration under config/, and the wipe records that instance, stops it, and brings it back rebuilt
 # from the commit it ran (scripts/owner-instance.ps1). It refuses - BEFORE the test stack is removed and the prune
 # runs, which cannot be undone either - when the instance's project holds a named volume that the compose file's
-# x-ythril.disposable-volumes list does not name, or another project runs. The guard needs the engine: with it down
-# nothing is checked. Opt-in because the delete cannot be undone. -RestoreOnly, -UseRecord and -DiscardRecord go
+# x-ythril.disposable-volumes list does not name, or another project runs, or a pending record is at the record path and
+# neither -UseRecord nor -DiscardRecord was passed, or the drive would not hold the rebuild (free space), or a registry
+# the rebuild pulls from does not answer. Every refusal of the wipe is asked first (Assert-WipeMayGoAhead, the function
+# docker-wipe.ps1 asks too). The guard needs the engine: with it down nothing is checked. Opt-in because the delete cannot
+# be undone. -RestoreOnly, -UseRecord and -DiscardRecord go
 # with -Wipe and are passed to docker-wipe.ps1.
 #
 # ASCII ONLY: Windows PowerShell 5.1 reads a BOM-less script as ANSI (see docker-compact.ps1).
@@ -72,11 +75,12 @@ Write-Host "  disk free:   C: $(GiB $before.DiskC)   O: $(GiB $before.DiskO)"
 $engine = Test-DockerEngine
 
 if ($Wipe -and $engine -and -not $RestoreOnly) {
-  # The wipe's own refusal, asked FIRST: the removal of the test stack and the prune below are not undone by a
-  # wipe that refuses later, so a refusal must leave the machine as it was.
+  # EVERY refusal of the wipe, asked FIRST: the removal of the test stack and the prune below are not undone by a
+  # wipe that refuses later, so a refusal must leave the machine as it was. They are one function of the module, the
+  # same one docker-wipe.ps1 asks, so a refusal added to the wipe is asked here without a change to this file.
   Section 'Checking the wipe may go ahead'
-  $null = Get-OwnerInstance -RepoRoot $repo
-  Write-Host '  no named volume or other project stands in its way.'
+  $null = Assert-WipeMayGoAhead -RepoRoot $repo -RecordPath (Get-OwnerRecordPath -RepoRoot $repo) -DiskPath (Find-DockerDisk) -UseRecord:$UseRecord -DiscardRecord:$DiscardRecord
+  Write-Host '  no named volume, other project, pending record, lack of room or unreachable registry stands in its way.'
 }
 
 if ($engine -and -not $RestoreOnly) {

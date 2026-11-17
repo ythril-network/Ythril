@@ -495,6 +495,78 @@ function Measure-OwnerImages {
   return $total
 }
 
+# -- The wipe's refusals, asked in one place -------------------------------------------------------------------
+
+# Where the record of the owner's instance is kept: under local-data/, which is bound into containers and never on
+# Docker's disk, so the record survives the wipe it describes.
+function Get-OwnerRecordPath {
+  param([Parameter(Mandatory = $true)][string]$RepoRoot)
+  return (Join-Path $RepoRoot 'local-data\owner-instance\owner-instance.json')
+}
+
+# A TCP connection, bounded at five seconds: can a rebuild reach what it pulls from?
+function Test-Reachable([string]$HostName, [int]$Port) {
+  $client = New-Object System.Net.Sockets.TcpClient
+  try { return $client.ConnectAsync($HostName, $Port).Wait(5000) } catch { return $false } finally { $client.Dispose() }
+}
+
+# The data disk's size and the drive holding it: the free space AFTER the delete is what the rebuild has, because the
+# disk's own size comes back with it.
+function Get-DiskSpace {
+  param([Parameter(Mandatory = $true)][string]$DiskPath)
+  $drive = Split-Path -Qualifier $DiskPath
+  return [pscustomobject]@{
+    Drive = $drive
+    Free  = [long](Get-PSDrive $drive.TrimEnd(':')).Free
+    Size  = [long](Get-Item -LiteralPath $DiskPath).Length
+  }
+}
+
+# EVERY refusal of a wipe, in one function, so that `machine-free -Wipe` can ask all of them before it removes the test stack
+# and prunes (neither can be undone by a wipe that refuses later) and `docker-wipe` asks the very same before it records,
+# stops or deletes anything (Q-577). In the order the wipe always asked them:
+#   1. the data guard (Get-OwnerInstance): a named volume that is not disposable, or another project that runs;
+#   2. a pending record nobody said what to do with (Resolve-PendingRecord): -UseRecord restores it, -DiscardRecord replaces it;
+#   3. the room: what the recorded images took must fit the drive once the disk is gone, with a quarter to spare;
+#   4. the registries the rebuild pulls from, and the npm registry when a recorded service is built.
+# It writes nothing and stops nothing: a refusal leaves the machine as it was. Returns { Found, Record, Hosts, FreeAfterDelete }:
+# what runs now, the record to restore (the pending one, else what runs now, else $null), the hosts probed, and the bytes free
+# after the delete. With no record there is nothing to rebuild, so nothing is measured or probed.
+# -Reachable (host, port -> bool) and -DiskSpace (disk path -> { Drive, Free, Size }) are the seams for the two things only the
+# machine answers.
+function Assert-WipeMayGoAhead {
+  param(
+    [Parameter(Mandatory = $true)][string]$RepoRoot,
+    [Parameter(Mandatory = $true)][string]$RecordPath,
+    [Parameter(Mandatory = $true)][string]$DiskPath,
+    [switch]$UseRecord,
+    [switch]$DiscardRecord,
+    [scriptblock]$Docker = ${function:Invoke-DockerCli},
+    [scriptblock]$Git = ${function:Invoke-GitCli},
+    [scriptblock]$Reachable = ${function:Test-Reachable},
+    [scriptblock]$DiskSpace = ${function:Get-DiskSpace}
+  )
+  $found = Get-OwnerInstance -RepoRoot $RepoRoot -Docker $Docker -Git $Git
+  $pending = Resolve-PendingRecord -Path $RecordPath -UseRecord:$UseRecord -DiscardRecord:$DiscardRecord
+  $record = if ($pending) { $pending } else { $found }
+  $hosts = @()
+  $freeAfter = $null
+  if ($record) {
+    $disk = & $DiskSpace $DiskPath
+    $need = Measure-OwnerImages -Record $record -Docker $Docker
+    $freeAfter = [long]($disk.Free + $disk.Size)
+    if ($need -gt 0 -and $freeAfter -lt [long]($need * 1.25)) {
+      throw ("{0} will have {1:N1} GiB free after the delete, and the owner's images alone took {2:N1} GiB: the rebuild would fill the drive. Free space on {0} first." -f $disk.Drive, ($freeAfter / 1GB), ($need / 1GB))
+    }
+    $hosts = @('registry-1.docker.io')
+    if (@(Get-RecordedServices -Record $record | Where-Object { $record.services.$_.build }).Count -gt 0) { $hosts += 'registry.npmjs.org' }
+    foreach ($h in $hosts) {
+      if (-not (& $Reachable $h 443)) { throw "$h does not answer on 443: the instance could not be rebuilt or pulled after the delete. Nothing was changed." }
+    }
+  }
+  return [pscustomobject]@{ Found = $found; Record = $record; Hosts = $hosts; FreeAfterDelete = $freeAfter }
+}
+
 # -- The engine ------------------------------------------------------------------------------------------------
 
 # Returns once `docker info` answers; throws when it has not by the timeout. Bounded on purpose: an engine that

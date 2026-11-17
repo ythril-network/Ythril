@@ -311,7 +311,7 @@ jobs:
         # The image the compose file pins by digest, read out of the compose file so the pin has one home.
         run: |
           docker compose -p ythril-test -f testing/docker-compose.test.yml config --images \
-            | grep -F mongodb-atlas-local | sort -u | xargs -n1 docker pull --quiet
+            | grep -F mongodb-atlas-local | sort -u | xargs -n1 node scripts/retry-on-registry-failure.mjs -- docker pull --quiet
 
       - name: Start the database
         # Only ythril-mongo-a: it is the one the harness connects to (127.0.0.1:27117). The harness tunes it itself
@@ -400,8 +400,18 @@ jobs:
       - name: Lint docs
         run: npm run lint:docs
 
+      - name: Pull the BuildKit image (retried)
+        # Docker Hub answered late once and failed the run in `Set up Docker Buildx` before any test ran (PR #1450, run 36529590490):
+        # the action pulls moby/buildkit on every run. Pulled here first, through the retry script, so a registry that answers on
+        # the second attempt costs seconds; buildx then finds the image in the local store (when its own pull fails it uses the
+        # local image). A registry that stays down still fails the run, with the registry's own message. The image is named once in
+        # `driver-opts` below, and `a-registry-timeout-does-not-fail-ci-before-a-test-runs` holds that the two agree.
+        run: node scripts/retry-on-registry-failure.mjs -- docker pull --quiet moby/buildkit:buildx-stable-1
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:buildx-stable-1
 
       - name: Expose GitHub Actions cache to Buildx
         # Sets ACTIONS_CACHE_URL / ACTIONS_RUNTIME_TOKEN so `--cache-from/--cache-to type=gha` works from a script.
@@ -418,8 +428,12 @@ jobs:
         # daemon and no `docker save` round trip.
         #
         # The cache is READ on every run and WRITTEN on a push to main only.
+        #
+        # Through the retry script: the build pulls its base images from Docker Hub inside BuildKit, where a store loaded by a
+        # `docker pull` cannot reach, so the whole build is the unit that is run again when the registry did not answer (Q-145).
+        # Any other failure of the build is returned at once.
         run: |
-          docker buildx build \
+          node scripts/retry-on-registry-failure.mjs -- docker buildx build \
             --cache-from type=gha,scope=ythril-test \
             ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '--cache-to type=gha,mode=max,scope=ythril-test' || '' }} \
             --output type=docker,dest=ythril-test-image.tar \
@@ -431,8 +445,8 @@ jobs:
         # run after the first merge reads them warm. `cacheonly`: nothing is loaded or exported here.
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          docker buildx build --cache-from type=gha,scope=ythril-doc-render --cache-to type=gha,mode=max,scope=ythril-doc-render --output type=cacheonly sidecars/doc-render
-          docker buildx build --cache-from type=gha,scope=ythril-doc-office --cache-to type=gha,mode=max,scope=ythril-doc-office --output type=cacheonly sidecars/doc-office
+          node scripts/retry-on-registry-failure.mjs -- docker buildx build --cache-from type=gha,scope=ythril-doc-render --cache-to type=gha,mode=max,scope=ythril-doc-render --output type=cacheonly sidecars/doc-render
+          node scripts/retry-on-registry-failure.mjs -- docker buildx build --cache-from type=gha,scope=ythril-doc-office --cache-to type=gha,mode=max,scope=ythril-doc-office --output type=cacheonly sidecars/doc-office
 
       - name: Upload the test image
         # The Ythril test image only. It carries NOTICE and LICENSE exactly as the published image does (the same
@@ -489,7 +503,7 @@ jobs:
         run: |
           set -euo pipefail
           docker compose -p ythril-test -f testing/docker-compose.test.yml config --images \
-            | grep -F mongodb-atlas-local | sort -u | xargs -n1 docker pull --quiet &
+            | grep -F mongodb-atlas-local | sort -u | xargs -n1 node scripts/retry-on-registry-failure.mjs -- docker pull --quiet &
           pull=$!
           docker load -i ythril-test-image.tar
           docker image inspect ythril-test:latest > /dev/null
@@ -564,14 +578,20 @@ jobs:
         run: |
           set -euo pipefail
           docker compose -p ythril-test -f testing/docker-compose.test.yml config --images \
-            | grep -F mongodb-atlas-local | sort -u | xargs -n1 docker pull --quiet &
+            | grep -F mongodb-atlas-local | sort -u | xargs -n1 node scripts/retry-on-registry-failure.mjs -- docker pull --quiet &
           pull=$!
           docker load -i ythril-test-image.tar
           docker image inspect ythril-test:latest > /dev/null
           wait "$pull"
 
+      - name: Pull the BuildKit image (retried)
+        # As in `prepare`: one Docker Hub timeout does not fail the run before a test runs (Q-145).
+        run: node scripts/retry-on-registry-failure.mjs -- docker pull --quiet moby/buildkit:buildx-stable-1
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:buildx-stable-1
 
       - name: Build the doc-render sidecar (its own layer cache scope)
         # First-party, built in-repo (sidecars/doc-render), not in any registry. Built per job from its own scope and
@@ -662,7 +682,7 @@ jobs:
         run: |
           set -euo pipefail
           docker compose -p ythril-test -f testing/docker-compose.test.yml config --images \
-            | grep -F mongodb-atlas-local | sort -u | xargs -n1 docker pull --quiet &
+            | grep -F mongodb-atlas-local | sort -u | xargs -n1 node scripts/retry-on-registry-failure.mjs -- docker pull --quiet &
           pull=$!
           docker load -i ythril-test-image.tar
           docker image inspect ythril-test:latest > /dev/null
@@ -735,7 +755,7 @@ jobs:
         run: |
           set -euo pipefail
           docker compose -p ythril-test -f testing/docker-compose.test.yml config --images \
-            | grep -F mongodb-atlas-local | sort -u | xargs -n1 docker pull --quiet &
+            | grep -F mongodb-atlas-local | sort -u | xargs -n1 node scripts/retry-on-registry-failure.mjs -- docker pull --quiet &
           pull=$!
           docker load -i ythril-test-image.tar
           docker image inspect ythril-test:latest > /dev/null

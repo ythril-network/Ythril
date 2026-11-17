@@ -53,16 +53,10 @@ $ErrorActionPreference = 'Stop'
 
 function Section($t) { Write-Host ''; Write-Host "-- $t " -NoNewline; Write-Host ('-' * [Math]::Max(0, 62 - $t.Length)) }
 
-# A TCP connection, bounded at five seconds: can a rebuild reach what it pulls from?
-function Test-Reachable([string]$HostName, [int]$Port) {
-  $client = New-Object System.Net.Sockets.TcpClient
-  try { return $client.ConnectAsync($HostName, $Port).Wait(5000) } catch { return $false } finally { $client.Dispose() }
-}
-
 $repo = Split-Path -Parent $PSScriptRoot
 # Under local-data/, which is bound into containers and never on Docker's disk: the record survives the wipe it
 # describes.
-$recordPath = Join-Path $repo 'local-data\owner-instance\owner-instance.json'
+$recordPath = Get-OwnerRecordPath -RepoRoot $repo
 $record = $null
 $reclaimed = $null
 
@@ -77,11 +71,21 @@ if ($RestoreOnly) {
 } else {
   $disk = Find-DockerDisk
 
-  Section "Recording the owner's instance"
   $found = $null
   if ($engine) {
-    # The data guard runs here, BEFORE anything is stopped: a refusal leaves the machine exactly as it was.
-    $found = Get-OwnerInstance -RepoRoot $repo
+    # EVERY refusal of the wipe is asked here, BEFORE anything is recorded, stopped or deleted: a refusal leaves the machine
+    # exactly as it was. They are one function of the module, which machine-free.ps1 asks as well before it prunes (Q-577).
+    Section 'Checking the wipe may go ahead'
+    $check = Assert-WipeMayGoAhead -RepoRoot $repo -RecordPath $recordPath -DiskPath $disk -UseRecord:$UseRecord -DiscardRecord:$DiscardRecord
+    $found = $check.Found
+    if ($check.Record) {
+      Write-Host ('  {0:N1} GiB free after the delete; {1} reachable.' -f ($check.FreeAfterDelete / 1GB), ($check.Hosts -join ', '))
+      Write-Host '  named volumes in x-ythril.disposable-volumes (media models, caches) go with the disk and are fetched again on first use.'
+    }
+  }
+
+  Section "Recording the owner's instance"
+  if ($engine) {
     if ($found) {
       $record = Save-OwnerInstance -Record $found -Path $recordPath -UseRecord:$UseRecord -DiscardRecord:$DiscardRecord
       Write-Host "  recorded at $recordPath"
@@ -102,30 +106,11 @@ if ($RestoreOnly) {
     Write-Host "  discarded the pending record at $recordPath"
   }
 
-  if ($engine -and $record) {
-    Section 'Checking the instance can be brought back'
-    # The free space AFTER the delete is what the rebuild has: the disk's own size comes back with it.
-    $drive = Split-Path -Qualifier $disk
-    $free = (Get-PSDrive $drive.TrimEnd(':')).Free
-    $size = (Get-Item -LiteralPath $disk).Length
-    $need = Measure-OwnerImages -Record $record
-    if ($need -gt 0 -and ($free + $size) -lt [long]($need * 1.25)) {
-      throw ("{0} will have {1:N1} GiB free after the delete, and the owner's images alone took {2:N1} GiB: the rebuild would fill the drive. Free space on {0} first." -f $drive, (($free + $size) / 1GB), ($need / 1GB))
-    }
-    $hosts = @('registry-1.docker.io')
-    if (@(Get-RecordedServices -Record $record | Where-Object { $record.services.$_.build }).Count -gt 0) { $hosts += 'registry.npmjs.org' }
-    foreach ($h in $hosts) {
-      if (-not (Test-Reachable $h 443)) { throw "$h does not answer on 443: the instance could not be rebuilt or pulled after the delete. Nothing was changed." }
-    }
-    Write-Host ('  {0:N1} GiB free after the delete; {1} reachable.' -f (($free + $size) / 1GB), ($hosts -join ', '))
-    Write-Host '  named volumes in x-ythril.disposable-volumes (media models, caches) go with the disk and are fetched again on first use.'
-
-    if ($found) {
-      Section "Stopping the owner's instance"
-      # A clean stop: mongod shuts down rather than being killed with the VM.
-      Stop-OwnerInstance -Record $found
-      Write-Host '  stopped.'
-    }
+  if ($engine -and $found) {
+    Section "Stopping the owner's instance"
+    # A clean stop: mongod shuts down rather than being killed with the VM.
+    Stop-OwnerInstance -Record $found
+    Write-Host '  stopped.'
   }
 
   Section 'Stopping Docker Desktop and WSL'

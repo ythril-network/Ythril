@@ -56,6 +56,12 @@ jobs:
           echo "::add-mask::$pw"
           { echo "MONGO_USERNAME=boot-check"; echo "MONGO_PASSWORD=$pw"; } >> "$GITHUB_ENV"
 
+      - name: Pull the database image (retried)
+        # The 2 GB pull is the step Docker Hub can fail by timing out; `up` then finds the image and pulls nothing (Q-145).
+        run: |
+          docker compose -p "$PROJECT" -f docker-compose.yml config --images ythril-mongo \
+            | xargs -n1 node scripts/retry-on-registry-failure.mjs -- docker pull --quiet
+
       - name: Start the shipped database service alone, with that root password
         run: docker compose -p "$PROJECT" -f docker-compose.yml up -d --wait --wait-timeout 600 ythril-mongo
 
