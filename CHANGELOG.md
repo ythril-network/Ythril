@@ -95,6 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** the restore check no longer reports a file record as having no bytes when its list of unreadable paths was cut at its limit; such a record is left out of the report.
 - **Files:** a folder delete or move over an unreadable subtree answers `500 file_system_fault` and changes nothing.
 - **Files:** a resumed import whose spool cannot be read is retried, not failed and deleted; the at-rest file pass names an unreadable folder and goes on.
+- **Files:** a delete, move or space wipe that waits for a media job's write waits half a second longer than that write may take; before, it could fail with a store timeout while the write was finishing.
 - **Database:** a transaction the write bound ends after it retried a write conflict always keeps that conflict as the timeout's cause; before, it was lost when the bound ended an attempt instead of the pause between two.
 - **Database:** a transaction the database ends at the write bound's deadline answers the bound's timeout, not the database's raw time-limit error.
 - **Sync:** an unreadable file or folder is named in the sync manifest (`unreadable`) instead of looking absent to peers, the hash cache and the restore check; a push over it answers `409 path_unreadable`, and the sender offers it again an hour later.
