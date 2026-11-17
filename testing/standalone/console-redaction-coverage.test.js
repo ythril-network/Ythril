@@ -19,11 +19,12 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { balancedFrom } from './_structural-window.mjs';
 import { SCHEMA_PACKAGE_NAME, RETIRED_SCHEMA_PACKAGE_NAME, schemaSpecifierSource } from './_relative-specifier.mjs';
+import { SERVER_CODE_ROOTS, SERVER_SOURCE_ROOT } from './_sources.mjs';
 
-const ROOT = 'server/src';
+const ROOT = SERVER_SOURCE_ROOT;
 
-/** Every .ts file under server/src, excluding tests. */
-function sources(dir = ROOT, out = []) {
+/** Every .ts file under each of the server's code roots, excluding tests. */
+function sources(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const p = `${dir}/${name}`;
     if (statSync(p).isDirectory()) { sources(p, out); continue; }
@@ -42,7 +43,7 @@ function sources(dir = ROOT, out = []) {
 const SUSPICIOUS = /console\.(?:error|warn|log|info|debug)\([^)]*(?<![\w.$])(?:err|error|reason|e|ex|exception)(?![\w$])/;
 
 describe('console output cannot bypass the redactor', () => {
-  const files = sources();
+  const files = SERVER_CODE_ROOTS.flatMap(root => sources(root));
 
   it('finds the source tree', () => {
     assert.ok(files.length > 50, `expected a populated source tree, got ${files.length} files`);

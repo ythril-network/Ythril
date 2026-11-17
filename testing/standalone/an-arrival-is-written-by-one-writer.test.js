@@ -56,6 +56,7 @@ import assert from 'node:assert/strict';
 import { moduleIndex, routeHandlerRoots, walkFrom, pathTo, spaceActBodies } from './_call-graph.mjs';
 import { mountedRoutes } from './_routes.mjs';
 import { recordWrites } from './_record-writes.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types.js');
 
@@ -183,7 +184,7 @@ const EXEMPT_VIA = {
 const BYTE_DOOR_FILE = 'server/src/api/files-upload.ts';
 const STORE_FILE_RECORD = 'server/src/files/store-file.ts:recordStoredFile';
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 const ROUTES = mountedRoutes();
 // Registered BEFORE the writers are derived, so a write inside an inline handler belongs to its route.
 const ROUTE_ROOTS = new Map(ROUTES.map(r => [`${r.method} ${r.path}`, routeHandlerRoots(INDEX, r)]));

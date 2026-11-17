@@ -46,7 +46,7 @@ import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
 import { elapse } from '../_shared/sleep.mjs';
@@ -279,7 +279,7 @@ describe('a reindex boot failure is retried by the tick (real MongoDB)', { skip 
       });
 
       it('is written at ONE place in server/src', () => {
-        const writers = trackedSources('server/src', { floor: 100 })
+        const writers = trackedSources(SERVER_CODE_ROOTS, { floor: 100 })
           .map(file => ({ file, src: stripComments(fs.readFileSync(file, 'utf8')) }))
           .map(({ file, src }) => ({ file, n: (src.match(/reindexInProgress\s*\.\s*(?:set|inc|dec|reset|zero|labels)\s*\(/g) ?? []).length }))
           .filter(w => w.n > 0);

@@ -35,7 +35,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 import { fieldOrderings } from './_field-orderings.mjs';
@@ -46,7 +46,7 @@ const KEYSET = 'server/src/util/position-keyset.ts';
 const CLOCK = 'server/src/util/position-clock.ts';
 const INDEXES = 'server/src/spaces/space-indexes.ts';
 
-const raw = readTrackedSources('server/src', { specs: false });
+const raw = readTrackedSources(SERVER_CODE_ROOTS, { specs: false });
 const sources = raw.map(s => ({ file: s.file, text: stripComments(s.text) }));
 /** The original text: the checker's line numbers are against it, and `stripComments` drops whole comment lines. */
 const rawByFile = new Map(raw.map(s => [s.file, s.text]));

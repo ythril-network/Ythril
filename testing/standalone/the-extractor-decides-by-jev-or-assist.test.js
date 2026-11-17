@@ -15,7 +15,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 let pickDecisionBackend, decide, DecisionUnavailableError, DecisionError, egressConsented;
 before(async () => {
@@ -57,7 +57,7 @@ describe('egress consent is one rule, not four copies of it', () => {
   });
 
   it('no server source compares acknowledgedHost to a host by hand', () => {
-    const files = trackedSources('server/src', { exclude: ['server/src/config/egress-consent.ts'], untracked: true });
+    const files = trackedSources(SERVER_CODE_ROOTS, { exclude: ['server/src/config/egress-consent.ts'], untracked: true });
     const inline = files
       .filter(f => /acknowledgedHost\s*===|===\s*[\w?.!]*acknowledgedHost\b/.test(
         readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')));

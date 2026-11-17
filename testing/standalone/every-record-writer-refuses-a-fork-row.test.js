@@ -44,6 +44,7 @@ import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { moduleIndex, reachableFrom } from './_call-graph.mjs';
 import { recordWrites } from './_record-writes.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const { FORKING_FAMILIES } = await import('../../server/dist/sync/upsert-plan.js');
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types.js');
@@ -109,7 +110,7 @@ const EXEMPT = {
 
 const exempt = (key) => key in EXEMPT || `${key.slice(0, key.indexOf(':'))}:*` in EXEMPT;
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 const RECORDS = recordWrites(INDEX, { collections: new Set(GOVERNED), floors: { space: 150 }, recordFloor: 5 });
 const KEYS = [...new Set(RECORDS.sites.map(s => s.key))].sort();
 

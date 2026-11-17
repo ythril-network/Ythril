@@ -36,7 +36,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { parseSource, walkEveryNode, outermostFunctionOf, lineOf, routeBlocksOf, ts } from '../_shared/syntax-tree.mjs';
 import { askingFunctions, nearestFunctionOf, ASKING_WRAPPERS } from './_space-write-askers.mjs';
@@ -202,7 +202,7 @@ describe('the outbound turn is cancellable', () => {
     }
     assert.ok(takers.size >= 8, `only ${takers.size} function(s) take a turn: the derivation is broken`);
     const dropped = []; const used = new Set();
-    for (const file of trackedSources(['server/src'], { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'))) {
+    for (const file of trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'))) {
       const sf = parseSource(file, text(file));
       walkEveryNode(sf, (n) => {
         if (!ts.isCallExpression(n) || !ts.isIdentifier(n.expression) || !takers.has(n.expression.text)) return;
@@ -306,7 +306,7 @@ describe('every inbound peer door enters the fence and leaves it on every path',
   it('every function that enters releases in a finally AND on the response close, or hands the transfer on to one that does', () => {
     const offenders = [];
     let enterers = 0;
-    const sources = trackedSources(['server/src'], { untracked: true, floor: 100 }).filter(f => f !== FENCE);
+    const sources = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).filter(f => f !== FENCE);
     const parsedSources = sources.map(file => ({ file, sf: parseSource(file, text(file)) }));
     const releasesInFinally = (fn, sf) => { let found = false; walkEveryNode(fn ?? sf, (n) => { if (ts.isTryStatement(n) && n.finallyBlock && /\brelease\(/.test(n.finallyBlock.getText(sf))) found = true; }); return found; };
     /** The call sites of a function by name: the outermost function each is written in, and the file. */
@@ -353,7 +353,7 @@ describe('every inbound peer door enters the fence and leaves it on every path',
 
   it('no module but the fence keeps a count of a space\'s transfers', () => {
     const owners = new Set([FENCE]);
-    const offenders = trackedSources(['server/src'], { untracked: true, floor: 100 })
+    const offenders = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 })
       .filter(f => !owners.has(f))
       .filter(f => /\b(?:transfersRunning|transferCounts?|inFlightTransfers)\b\s*(?:=|\.set\()/.test(text(f)));
     assert.deepEqual(offenders, [], 'a second counter of transfers is a second answer to "may the act begin"');
@@ -362,7 +362,7 @@ describe('every inbound peer door enters the fence and leaves it on every path',
 });
 
 describe('a write unit is counted from the moment the write gate lets it through', () => {
-  const parsed = () => trackedSources(['server/src'], { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts')).map(file => ({ file, sf: parseSource(file, text(file)) }));
+  const parsed = () => trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts')).map(file => ({ file, sf: parseSource(file, text(file)) }));
   /** An await (or a `for await`) written directly in `fn`, not in a closure inside it: the point where another task can run. */
   const awaitsIn = (fn) => {
     const found = [];

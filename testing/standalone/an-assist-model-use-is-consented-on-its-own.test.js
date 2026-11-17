@@ -17,7 +17,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 let assistConsented;
@@ -46,7 +46,7 @@ describe('every egress path of the assist slot asks through it', () => {
   it('no server source hands the assist slot to egressConsented directly', () => {
     // Derived: every tracked source that names the assist slot's config. A direct `egressConsented(assist…)`
     // reads `acknowledgedHost` — the DOCUMENTS consent — whatever the path sends.
-    const files = trackedSources(['server/src'], { floor: 50 }).filter(f => f.endsWith('.ts'));
+    const files = trackedSources(SERVER_CODE_ROOTS, { floor: 50 }).filter(f => f.endsWith('.ts'));
     const offenders = files.filter(f => !f.endsWith('egress-consent.ts'))
       .filter(f => /egressConsented\(\s*(assist\b|[\w.?]*assistModel\b|s\b)/.test(strip(readFileSync(f, 'utf8'))));
     assert.deepEqual(offenders, [], 'these read the assist model\'s consent without saying which use it is for');

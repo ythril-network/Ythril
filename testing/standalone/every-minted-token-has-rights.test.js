@@ -23,6 +23,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 const require_ = createRequire(import.meta.url);
 
 const strip = s => s.replace(/(^|[^:])\/\/.*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -102,7 +103,7 @@ describe('every rights value DERIVED from legacy fields applies the instance-adm
   // skipped the grant, so an OIDC instance admin reached only the spaces its claim named — the S-11 symptom,
   // found by the pre-ship lens sweep. The derivation sites are found from the source, not listed.
   const { execFileSync } = require_('node:child_process');
-  const files = execFileSync('git', ['grep', '-l', 'migrateToken(', '--', 'server/src'], { encoding: 'utf8' })
+  const files = execFileSync('git', ['grep', '-l', 'migrateToken(', '--', ...SERVER_CODE_ROOTS], { encoding: 'utf8' })
     .split('\n').map(s => s.trim().replace(/\\/g, '/')).filter(Boolean)
     // A comment naming the function is not a call.
     .filter(f => /migrateToken\(/.test(strip(readFileSync(f, 'utf8'))));

@@ -31,7 +31,7 @@ import fs from 'node:fs';
 import { openUnknownWriteFieldsConfig, WARN_SPACE, REFUSE_SPACE } from './_unknown-write-fields-config.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 let cfg, spaces;
 
@@ -69,7 +69,7 @@ describe('unknownWriteFieldsMode answers refuse for the stored value refuse and 
 describe('the mode has one spelling in the server source', () => {
   it('only spaces/spaces.ts compares the stored value to a mode literal, and the judge and the audit snapshot call the reader', () => {
     // Uncommitted files included: the judge is a new module and this runs before it is committed.
-    const files = readTrackedSources('server/src', { floor: 400, untracked: true });
+    const files = readTrackedSources(SERVER_CODE_ROOTS, { floor: 400, untracked: true });
     const mentions = [];
     const comparers = [];
     for (const { file: f, text } of files) {

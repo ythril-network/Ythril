@@ -33,7 +33,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readDoc } from './_docs.mjs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const SCHEMA_PAGE = 'integration-guide/06a-schema-api.md';
@@ -106,7 +106,7 @@ describe('every refusal code of the schema-version doors is answered and documen
   // Q-744 (bundle-268 design r4 §5, §10 T6) adds the type forms' refusals and the pass's 503; seen red at 327b105e, where none exists.
   const CODES = ['bad_fingerprint', 'unknown_fingerprint', 'against_needs_fp', 'against_needs_stored', 'schema_index_building',
     'bad_kind', 'type_needs_kind', 'kind_needs_type', 'fps_needs_type', 'too_many_fps', 'schema_versions_busy'];
-  const sources = trackedSources(['server/src']).filter(p => p.endsWith('.ts')).map(p => readFileSync(join(REPO_ROOT, p), 'utf8'));
+  const sources = trackedSources(SERVER_CODE_ROOTS).filter(p => p.endsWith('.ts')).map(p => readFileSync(join(REPO_ROOT, p), 'utf8'));
 
   it('a code named only in a comment does not count (plant)', () => {
     assert.equal(answersIn("// answers 'against_needs_fp'\nconst x = 1;\n", 'against_needs_fp'), false);

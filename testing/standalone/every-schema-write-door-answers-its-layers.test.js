@@ -24,7 +24,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { indexSources, toolHandlerRoot, routeHandlerRoots, walkFrom } from './_call-graph.mjs';
 import { mountedRoutes } from './_routes.mjs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const TARGET = 'server/src/spaces/meta-update.ts:applySpaceMetaUpdate';
@@ -32,7 +32,7 @@ const STACK_TEST = 'testing/integration/a-multi-network-schema-write-answers-per
 
 /** The doors (route and tool labels) whose handler reaches the schema-write function, derived from the call graph. */
 function schemaWriteDoors() {
-  const files = trackedSources('server/src', { untracked: true });
+  const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true });
   const index = indexSources(new Map(files.map(f => [f, readFileSync(join(REPO_ROOT, f), 'utf8')])));
   assert.ok(index.bodies.has(TARGET), `${TARGET} is not in the index — the schema-write function moved; re-anchor this gate`);
   const toolObjects = [...index.objects.values()].filter(o => o.strings.get('name') && index.bodies.has(`${o.file}:${o.name}.handle`));

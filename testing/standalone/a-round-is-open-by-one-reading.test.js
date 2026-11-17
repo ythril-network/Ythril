@@ -25,7 +25,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
@@ -124,7 +124,7 @@ describe('roundClosedRefusal: one refusal for the operator act, the MCP tool and
 
 // ── The derived gates ────────────────────────────────────────────────────────────────────────────────────────────
 
-const sources = () => trackedSources('server/src', { untracked: true, floor: 100 })
+const sources = () => trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 })
   .map(f => ({ file: f, code: stripComments(fs.readFileSync(f, 'utf8')) }));
 
 /** `!round.concluded`, `!r.concluded`, `!net.pendingRounds[i].concluded` — the negated read: the question "is it still undecided". */

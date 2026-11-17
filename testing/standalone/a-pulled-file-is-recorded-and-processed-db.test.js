@@ -51,7 +51,7 @@ import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openPullDoor, PEER, PEER_AUTHOR } from './_pull-door.mjs';
 import { seedClaim } from './_media-claim.mjs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -90,7 +90,7 @@ async function seedHeld(rel, content, extra = {}) {
 /** Source of the repair cap: derived from the code, never written here (a copied number is a second fact). */
 function repairCap() {
   const hits = [];
-  for (const file of trackedSources('server/src', { floor: 100, untracked: true })) {
+  for (const file of trackedSources(SERVER_CODE_ROOTS, { floor: 100, untracked: true })) {
     const src = stripComments(fs.readFileSync(path.join(REPO_ROOT, file), 'utf8'));
     const m = /\bexport\s+const\s+MAX_FILE_REPAIRS_PER_CYCLE\b[^=]*=\s*(\d[\d_]*)/.exec(src);
     if (m) hits.push({ file, value: Number(m[1].replace(/_/g, '')) });

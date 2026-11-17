@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const SELF = 'aaaaaaaa-0000-4000-8000-000000005e1f';
@@ -178,7 +178,7 @@ describe('this instance\'s round state never crosses the wire', () => {
 describe('nothing outside that module adds a round', () => {
   const OWNER = 'server/src/networks/round-local-state.ts';
   it('every other source file leaves pendingRounds.push to it', () => {
-    const files = trackedSources('server/src', { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'));
+    const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'));
     const pushers = files.filter(f => f !== OWNER && /pendingRounds\s*\.\s*push\s*\(/.test(stripComments(fs.readFileSync(f, 'utf8'))));
     assert.deepEqual(pushers, [], `these add a round without recording whose it is: ${pushers.join(', ')}`);
   });

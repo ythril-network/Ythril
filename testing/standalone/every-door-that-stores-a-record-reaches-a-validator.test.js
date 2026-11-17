@@ -65,7 +65,7 @@ import { mountedRoutes } from './_routes.mjs';
 import { recordWrites } from './_record-writes.mjs';
 import { validationEntryPoints, callsOf } from './_validation-entry-points.mjs';
 import { DISPATCH_SOURCES } from './_tool-dispatch.mjs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types.js');
@@ -100,7 +100,7 @@ const GOVERNED = new Set(KIND_COLLECTION.values());
 
 /** The sources, as `moduleIndex` reads them (tracked and untracked), keyed by repo path — so a test can add a file in memory. */
 function readSources() {
-  const files = trackedSources('server/src', { untracked: true });
+  const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true });
   return new Map(files.map(f => [f, readFileSync(join(REPO_ROOT, f), 'utf8')]));
 }
 
@@ -214,7 +214,7 @@ const EXEMPT = {
     + 'caller names; it writes no entity, edge, fact or chrono property',
 };
 
-const INDEX = indexSources(readSources(), { functionFloor: 500, label: 'server/src' });
+const INDEX = indexSources(readSources(), { functionFloor: 500, label: SERVER_CODE_ROOTS.join(', ') });
 const ROUTES = mountedRoutes();
 const RESULT = doorsWithoutAValidator({ index: INDEX, routes: ROUTES, exempt: EXEMPT });
 

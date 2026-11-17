@@ -26,7 +26,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { argumentsOf, statementAround, bodyOf } from './_structural-window.mjs';
@@ -39,7 +39,7 @@ const { LIVE_FILE_ROW } = await import('../../server/dist/files/live-file-row.js
 const MODULE = 'server/src/brain/link-adjacency.ts';
 
 function serverFiles() {
-  return trackedSources('server/src', { untracked: true });
+  return trackedSources(SERVER_CODE_ROOTS, { untracked: true });
 }
 
 describe('the declaration answers for every link class', () => {

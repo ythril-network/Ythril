@@ -27,7 +27,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { outermostFunctionAt } from './_source-helpers.mjs';
 
@@ -74,7 +74,7 @@ describe('importDocuments lands every family through the page path', () => {
   });
 
   it('server/src/sync/space-import.ts routes every family through importPage, and is the only place it lands one', () => {
-    const files = trackedSources('server/src', { untracked: true, floor: 100 }).filter(f => f.replace(/\\/g, '/').endsWith('sync/space-import.ts'));
+    const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).filter(f => f.replace(/\\/g, '/').endsWith('sync/space-import.ts'));
     assert.equal(files.length, 1, `expected one server/src/sync/space-import.ts, found ${JSON.stringify(files)}: the import moved, re-anchor this gate`);
     const raw = fs.readFileSync(path.isAbsolute(files[0]) ? files[0] : path.join(REPO_ROOT, files[0]), 'utf8');
     assert.deepEqual(pagePathProblems(files[0], raw), [], 'importDocuments (and so the 18 tests that call it) does not take the path the door\'s pages take');

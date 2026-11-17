@@ -20,7 +20,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 let pickAssistBackend, spentInWindow, tokensOf;
@@ -95,7 +95,7 @@ describe('every caller goes through the resolver', () => {
   it('no source outside it reads the assist config AND calls a model with it', () => {
     // A settings route or a connectivity probe reads the config without calling the model for real work, so it is
     // not a caller — the set is code that both reads `assistModel` off the config and makes a model call.
-    const files = trackedSources(['server/src'], { floor: 100 }).filter(f => !f.endsWith('config/assist-backend.ts'));
+    const files = trackedSources(SERVER_CODE_ROOTS, { floor: 100 }).filter(f => !f.endsWith('config/assist-backend.ts'));
     const reads = /(\bcfg|getDocumentProcessingConfig\(\))\??\.assistModel\b/;
     const calls = /\b(postWithBackoff|repairMarkdownExternal|describeDocumentText|decide|generate)\(/;
     const pickers = files.filter(f => { const src = stripComments(readFileSync(f, 'utf8')); return reads.test(src) && calls.test(src); });

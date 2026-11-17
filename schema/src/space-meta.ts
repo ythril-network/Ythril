@@ -30,6 +30,7 @@ import { NAME_QUOTED, peerText, refusalOfParse, type ParseIssueLike, type ParseR
 import { META_FIELD_KINDS, MAX_UNKNOWN_NAMES, PER_TYPE_META_FIELD, boundedNames } from './meta-fields.js';
 import { isPlainObject, setOwn } from './plain-object.js';
 import { libraryEntryNameOf } from './library-ref-name.js';
+import { SCHEMA_FINGERPRINT_FIELD } from './schema-fingerprint.js';
 import {
   TypeRuleZ, SpaceRuleZ, MAX_RULES_PER_TYPE, MAX_RULES_PER_SPACE, ruleMapIssues, typeRuleIssues, spaceRuleIssues, applicableRuleIssues,
   readingStoredRules, type RuleIssue,
@@ -551,7 +552,7 @@ for (const key of Object.keys(SpaceMetaBody.shape)) {
  * `schemaFingerprint` joined in Q-734 (bundle-265): the fingerprint of the schema the space's records are checked and stamped against,
  * derived from the schema itself, so a caller-set value would name a schema that is not the one in force.
  */
-export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema', 'invalidRules', 'unknownWriteFields', 'schemaFingerprint'] as const;
+export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema', 'invalidRules', 'unknownWriteFields', SCHEMA_FINGERPRINT_FIELD] as const;
 
 /** Drop the server-owned housekeeping fields from an incoming `meta`, leaving everything else to Zod. */
 export function stripServerOwnedMeta(meta: unknown): unknown {

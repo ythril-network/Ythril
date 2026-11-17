@@ -33,7 +33,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 
@@ -56,7 +56,7 @@ const NOT_A_RECORD = [
   ['server/src/sync/upsert-plan.ts', 'plan.forks.push', 'a wire doc: the landing stamps it (decision 29)'],
 ];
 
-const sources = trackedSources('server/src', { floor: 200 });
+const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 200 });
 const codeOf = (file) => blankComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
 
 function copiersIn(text) {

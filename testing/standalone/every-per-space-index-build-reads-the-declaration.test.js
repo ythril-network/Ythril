@@ -29,7 +29,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { ts, parseSource, lineOf, walkEveryNode, unwrapExpression, outermostFunctionOf } from '../_shared/syntax-tree.mjs';
 
@@ -49,7 +49,7 @@ const NOT_PER_SPACE = [
   { file: 'server/src/db/migrate-act.ts', why: 'A store migration copies every collection\'s indexes as the source store holds them, to another store: it builds what is there, not what a space declares.' },
 ];
 
-const SOURCES = trackedSources('server/src', { untracked: true }).map(file => {
+const SOURCES = trackedSources(SERVER_CODE_ROOTS, { untracked: true }).map(file => {
   const text = blankComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
   return { file, text, sf: parseSource(file, text) };
 });

@@ -39,6 +39,7 @@ import { delegationOf } from './_delegating-routes.mjs';
 import { moduleIndex, routeHandlerRoots, walkFrom } from './_call-graph.mjs';
 import { toolValidators, zodValidators } from './_validator-schemas.mjs';
 import { BOUND_BY_FIELD } from '../../server/dist/util/request-bounds.js';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 /** Keys that are transport on one door (a path segment) and a parameter on the other. */
 const TRANSPORT = new Set(['space']);
@@ -97,7 +98,7 @@ const statesABound = schema => Object.entries(schema.properties ?? {})
 const TOOLS = new Map(toolValidators().map(v => [v.tool.name, v]));
 const ZODS = new Map((await zodValidators()).map(z => [z.name, z]));
 const ROUTES = mountedRoutesWithSource();
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 
 /** The exported zod schemas a route's handler reaches and parses with. */
 function schemasReachedBy(route) {

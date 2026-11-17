@@ -41,7 +41,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { findMojibake, isValidUtf8, mojibakeOf } from './_mojibake.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 /**
  * Detection is STRUCTURAL now, not a list of signatures — see `_mojibake.mjs` for why and how.
@@ -116,7 +116,7 @@ describe('no source file carries mis-decoded UTF-8', () => {
     // A cp1252 em dash saved raw (0x97) decodes to ONE replacement character, and the detectors above only look
     // at runs of two or more. The bytes are the evidence, so this reads bytes and not a decoded string.
     // The listing is derived from git with a floor inside `trackedSources`; nothing here names a file.
-    const files = trackedSources(['server/src', 'client/src', 'testing', 'docs', 'sidecars', 'scripts'], {
+    const files = trackedSources([...SERVER_CODE_ROOTS, 'client/src', 'testing', 'docs', 'sidecars', 'scripts'], {
       ext: ['.ts', '.js', '.mjs', '.cjs', '.md', '.json', '.html', '.scss', '.css', '.yml', '.yaml', '.sh'],
       floor: 500,
     });

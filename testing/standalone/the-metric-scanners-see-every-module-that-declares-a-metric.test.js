@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { makeScratchRepo } from '../_shared/scratch-git-repo.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
@@ -51,7 +51,7 @@ const plant = (repo, rel, text) => { mkdirSync(dirname(join(repo.dir, rel)), { r
 describe('the helper returns the modules that declare a metric', () => {
   it('is registry.ts plus every tracked server source that constructs a metric, and no module that declares none', async () => {
     const { metricSources } = await import(HELPER);
-    const real = trackedSources(['server/src'], { floor: 100, specs: false, untracked: true })
+    const real = trackedSources(SERVER_CODE_ROOTS, { floor: 100, specs: false, untracked: true })
       .filter(f => DECLARES.test(stripComments(readFileSync(join(REPO_ROOT, f), 'utf8'))));
     const got = metricSources().map(s => s.file);
     assert.ok(real.includes(`${METRICS_DIR}/sync-tombstone-metrics.ts`), 'the first slice no longer declares a metric: re-point this case');

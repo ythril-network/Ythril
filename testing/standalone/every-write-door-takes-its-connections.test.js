@@ -34,7 +34,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const code = (f) => stripComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
@@ -52,7 +52,7 @@ const CREATORS = /\b(?:await saveFact\(|await createChrono\(|await upsertEntity\
 // A file that DEFINES a creator is the writer, not a door — it calls its own planner, and that is not a door
 // asking for a write on somebody's behalf.
 const DEFINES_CREATOR = /export async function (?:saveFact|createChrono|upsertEntity)\(/;
-const doors = trackedSources(['server/src'], { floor: 100 })
+const doors = trackedSources(SERVER_CODE_ROOTS, { floor: 100 })
   .filter(f => CREATORS.test(code(f)) && !DEFINES_CREATOR.test(code(f)));
 
 describe('the create doors are found at all', () => {

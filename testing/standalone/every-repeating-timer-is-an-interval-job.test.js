@@ -46,7 +46,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { balancedFrom, statementUpTo } from './_structural-window.mjs';
 
@@ -135,7 +135,7 @@ describe('the keepalive exemption is its shape (fixtures)', () => {
 });
 
 describe('server/src has no bare repeating timer', () => {
-  const files = trackedSources('server/src', { untracked: true, exclude: [OWNER] });
+  const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true, exclude: [OWNER] });
   const read = file => stripComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
   const sources = new Map([...files, OWNER].map(file => [file, read(file)]));
 

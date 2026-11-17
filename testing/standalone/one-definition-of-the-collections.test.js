@@ -42,7 +42,7 @@
  * Run: node --test testing/standalone/one-definition-of-the-collections.test.js
  */
 import { describe, it } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -93,7 +93,7 @@ const COLS = ['facts', 'entities', 'edges', 'chrono', 'files'];
 const NEAR_COMPLETE = 4;
 
 function sourceFiles() {
-  return trackedSources(['server/src', 'client/src'])
+  return trackedSources([...SERVER_CODE_ROOTS, 'client/src'])
     .filter(f => f.endsWith('.ts') && !f.endsWith('.spec.ts') && !f.endsWith('.d.ts'));
 }
 

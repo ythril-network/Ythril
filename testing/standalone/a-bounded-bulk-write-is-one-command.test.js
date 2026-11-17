@@ -40,7 +40,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { BSON, MongoBulkWriteError, MongoNetworkError, MongoServerError } from 'mongodb';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { lineOf, parseSource, ts, walkEveryNode as walk } from '../_shared/syntax-tree.mjs';
 import { MONGO_MAX_WRITE_BATCH_SIZE, ONE_COMMAND_BYTES, ONE_COMMAND_MAX_OPERATIONS, SlicedBulkWriteError, bulkCommandOf, inOneCommandChunks, writeInOneCommands } from '../../server/dist/db/one-command.js';
@@ -530,7 +530,7 @@ function ledgerViolations(sf, where = '') {
 
 describe('every bulk call site in the server is accounted for', () => {
   const found = () => {
-    const files = trackedSources(['server/src'], { ext: ['.ts'], floor: 200, specs: false });
+    const files = trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 200, specs: false });
     const byFile = new Map();
     for (const f of files) {
       const n = [...sourceOf(f).matchAll(new RegExp(CALL.source, 'g'))].length;

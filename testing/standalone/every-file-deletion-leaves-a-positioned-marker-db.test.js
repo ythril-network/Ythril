@@ -43,7 +43,7 @@ import { join } from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openFeedDoors } from './_file-change-feed.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'fmarkers';
@@ -56,7 +56,7 @@ const LONG_PAST = new Date('2026-01-01T00:00:00.000Z');
 /** The files that call a retire function, outside the module that defines them. Derived from the source. */
 function callers() {
   const out = [];
-  for (const file of trackedSources(['server/src'], { ext: ['.ts'], floor: 50 })) {
+  for (const file of trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 50 })) {
     if (file.replaceAll('\\', '/') === 'server/src/files/file-meta.ts') continue;
     const src = stripComments(fs.readFileSync(join(REPO_ROOT, file), 'utf8'));
     if (/\bretireFileMeta(Many|Under)?\(/.test(src)) out.push(file.replaceAll('\\', '/'));

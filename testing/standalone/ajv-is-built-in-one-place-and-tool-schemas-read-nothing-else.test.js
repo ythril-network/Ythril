@@ -23,7 +23,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { balancedFrom, argumentsOf, bodyOf } from './_structural-window.mjs';
 
@@ -78,7 +78,7 @@ function codeOnly(body) {
 }
 
 describe('Ajv is constructed in one place', () => {
-  const sources = readTrackedSources('server/src', { floor: 200 }).map(s => ({ file: s.file, text: stripComments(s.text) }));
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, { floor: 200 }).map(s => ({ file: s.file, text: stripComments(s.text) }));
 
   it('the scan found the validator module and imports of ajv (floor)', () => {
     const importers = sources.filter(s => ajvBindings(s.text).names.length + ajvBindings(s.text).namespaces.length > 0);

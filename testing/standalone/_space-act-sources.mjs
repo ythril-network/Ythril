@@ -17,7 +17,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { topLevelFunctionSpans } from './_call-graph.mjs';
 
@@ -29,7 +29,7 @@ let cache;
 /** `path -> comment-stripped text` for every source under `server/src`, including files not committed yet. */
 export function serverSources() {
   if (!cache) {
-    const files = trackedSources('server/src', { untracked: true, floor: 100 });
+    const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 });
     cache = new Map(files.map(f => [f, stripComments(readFileSync(join(REPO_ROOT, f), 'utf8'))]));
   }
   return cache;

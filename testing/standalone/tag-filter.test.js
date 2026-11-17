@@ -18,7 +18,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 import { FILTER_DOORS } from '../_shared/search-doors.mjs';
 
@@ -120,7 +120,7 @@ describe('every single-tag call site uses the shared helper', () => {
      * defect — "arch" finding nothing on a record tagged `architecture` — and the file that reintroduces
      * it is by definition one nobody thought to list.
      */
-    const sources = trackedSources(['server/src']);
+    const sources = trackedSources(SERVER_CODE_ROOTS);
     assert.ok(sources.length >= 100, `only ${sources.length} sources scanned — the sweep broke`);
     const anchored = sources.filter(f =>
       /\$regex:\s*`\^\$\{escapeRegex\((?:tag|filter\.tag)\)\}\$`/.test(readFileSync(f, 'utf8')));

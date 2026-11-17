@@ -59,6 +59,7 @@ import { scheduledJobs, JOB_FLOORS } from './_scheduled-jobs.mjs';
 import {
   walkEntryNames, walkRunnerKeys, housekeepingRoots, reachOutsideWalks, insideWalks, spaceReachers, spaceLoopsIn, catchesIn,
 } from './_housekeeping-walks.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const wb = await import('../../server/dist/db/write-bound.js');
 const observer = await import('../../server/dist/db/record-write-observer.js');
@@ -177,7 +178,7 @@ function catchEndsTheLoop(loop) {
   return catchesIn(loop.body).some(c => RETURN_OR_THROW.test(withoutNestedClosures(c.body)));
 }
 
-const index = moduleIndex('server/src');
+const index = moduleIndex(SERVER_CODE_ROOTS);
 const NAMES = walkEntryNames(index);
 const { jobs, found } = scheduledJobs(index);
 const roots = housekeepingRoots(index, jobs);

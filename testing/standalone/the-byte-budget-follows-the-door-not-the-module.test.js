@@ -37,7 +37,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 /**
  * The module that OWNS the two constants and the choice between them. Everything else is a caller.
@@ -55,7 +55,7 @@ const src = (p) => stripComments(readFileSync(p, 'utf8'));
  * result throws instead of passing.
  */
 function callers() {
-  return trackedSources(['server/src'], { exclude: [OWNER] });
+  return trackedSources(SERVER_CODE_ROOTS, { exclude: [OWNER] });
 }
 
 describe('the door decides the budget default, and it decides it once', () => {

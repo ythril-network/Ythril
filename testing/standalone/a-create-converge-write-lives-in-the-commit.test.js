@@ -51,7 +51,7 @@ import assert from 'node:assert/strict';
 import { moduleIndex, walkFrom, pathTo } from './_call-graph.mjs';
 import { MUTATORS } from './_space-writers.mjs';
 import { recordWrites, WRITE_METHODS } from './_record-writes.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types.js');
@@ -137,7 +137,7 @@ const EXEMPT_ORPHAN_FILES = {};
 
 const RECORD_COLLECTIONS = new Set(BRAIN_COLLECTIONS.filter(c => c !== 'files'));
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 // Lowered from 170 when the plan/commit split folded the create/converge writers' direct writes into one
 // commit (`Q-99` part 3): the sites went because the copies did, not because the scan broke.
 // The record floor is 40, from 50: the counter sites (five on 797dbb2e) stopped counting as records when the
@@ -161,7 +161,7 @@ describe('the derivation works', () => {
     // The scanner has its own method list. A write method it does not list is a site this gate never sees, so
     // either it lists it or nothing under server/src calls it.
     const unseen = WRITE_METHODS.filter(m => !MUTATORS.includes(m));
-    const sources = readTrackedSources('server/src', { untracked: true });
+    const sources = readTrackedSources(SERVER_CODE_ROOTS, { untracked: true });
     const called = unseen.filter(m => sources.some(({ text }) => new RegExp(`\\.\\s*${m}\\s*\\(`).test(stripComments(text))));
     assert.deepEqual(called, [], `server/src calls write method(s) the site scanner cannot see: ${called.join(', ')}`);
   });

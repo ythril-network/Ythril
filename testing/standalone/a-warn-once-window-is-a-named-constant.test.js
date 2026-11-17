@@ -30,7 +30,7 @@ import assert from 'node:assert/strict';
 import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { balancedFrom } from './_structural-window.mjs';
 
@@ -111,7 +111,7 @@ describe('the reader finds a literal window in each spelling, and passes a named
 });
 
 describe('no warnOnce in server/src is given a literal window', () => {
-  const files = trackedSources('server/src', { untracked: true });
+  const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true });
   const sources = new Map(files.map(file => [file, readFileSync(join(REPO_ROOT, file), 'utf8')]));
   const calls = [...sources].flatMap(([file, src]) => warnOnceCallsIn(blankComments(src)).map(c => ({ file, ...c })));
 

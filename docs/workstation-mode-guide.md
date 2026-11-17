@@ -403,7 +403,7 @@ npm run build:server
 npm run local-connector:start
 ```
 
-Or run straight from source (no build step, via tsx):
+Or run straight from source with tsx (after `npm install`; the script builds the schema package it imports first, and nothing else):
 
 ```powershell
 npm run local-connector:dev --workspace=server

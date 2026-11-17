@@ -37,7 +37,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/sync/issued-here.ts';
@@ -51,7 +51,7 @@ const READS_TOMBSTONES = /['"`]tombstones['"`]|\bTombstoneDoc\b|\btombstoneDoc\s
 /** The plan's comparison: a tombstone's `instanceId` against this instance's id. */
 const COMPARISON = /\binstanceId\s*(?:===|!==|:)\s*(?:self\b|selfId\b|cfg\.instanceId\b|getConfig\(\)\.instanceId\b)/g;
 
-const sources = trackedSources('server/src', { floor: 200 });
+const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 200 });
 const codeOf = (file) => blankComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
 
 function comparisonsIn(text) {

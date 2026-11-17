@@ -41,7 +41,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const skip = await mongoSkipReason();
@@ -58,7 +58,7 @@ const AUTHOR = { instanceId: 'mergebody-receiver', instanceLabel: 'Receiver' };
 let door, raiseVersionTo, entitiesRouter, duplicatesRouter, toolsRouter;
 
 /** Every caller of `mergeEntities` outside its module — the doors, from the source. */
-const mergeDoors = () => readTrackedSources('server/src', { untracked: true, floor: 300 })
+const mergeDoors = () => readTrackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 300 })
   .filter(({ file, text }) => file !== 'server/src/brain/merge.ts' && /\bmergeEntities\s*\(/.test(stripComments(text)))
   .map(f => f.file);
 

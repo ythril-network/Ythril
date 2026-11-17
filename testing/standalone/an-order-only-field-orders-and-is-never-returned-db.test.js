@@ -39,7 +39,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openB81Mongo, closeB81Mongo, mongoSkipReason } from './_b81e-mongo.mjs';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 
@@ -137,7 +137,7 @@ describe('the cross-space merge orders by an order-only field and answers none',
 
 describe('the one admitting path is not a hand-stripped one', () => {
   it('no caller of projectionForOrderedMerge deletes the merge\'s keys itself (the strip is inside the merge)', () => {
-    const callers = trackedSources('server/src', { floor: 200 })
+    const callers = trackedSources(SERVER_CODE_ROOTS, { floor: 200 })
       .filter(f => /\bprojectionForOrderedMerge\s*\(/.test(blankComments(fs.readFileSync(path.join(REPO_ROOT, f), 'utf8'))) && f !== 'server/src/brain/projection.ts');
     assert.ok(callers.length >= 1, 'no caller of projectionForOrderedMerge found: the derivation is broken');
     const byHand = callers.filter(f => /\bdelete\s+row\[k\]|\bmerge\.strip\b/.test(blankComments(fs.readFileSync(path.join(REPO_ROOT, f), 'utf8'))));

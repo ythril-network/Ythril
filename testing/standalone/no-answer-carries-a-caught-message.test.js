@@ -41,7 +41,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ts, parseSource, lineOf, unwrapExpression, walkEveryNode } from '../_shared/syntax-tree.mjs';
-import { readTrackedSources, REPO_ROOT } from './_sources.mjs';
+import { readTrackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const CALL_TOOL = 'server/src/mcp/call-tool.ts';
 const UPLOAD_DOOR = 'server/src/api/files-upload.ts';
@@ -285,7 +285,7 @@ export function caughtAnswersIn(file, text, { ours, answeredClasses }) {
  * server's (`_routes.mjs` excludes it for the same reason): what it answers is held by its own contract, not by this door's.
  */
 const CONNECTOR = 'server/src/local-agent-connector/index.ts';
-const SOURCES = readTrackedSources('server/src', { specs: false, floor: 200, exclude: [CONNECTOR] });
+const SOURCES = readTrackedSources(SERVER_CODE_ROOTS, { specs: false, floor: 200, exclude: [CONNECTOR] });
 ADMIN_GUARDS = instanceAdminGuards(readFileSync(join(REPO_ROOT, MIDDLEWARE), 'utf8'));
 const OURS = refusalClassesOf(SOURCES);
 const ANSWERED = classesAnsweredByMessage(readFileSync(join(REPO_ROOT, CALL_TOOL), 'utf8'));

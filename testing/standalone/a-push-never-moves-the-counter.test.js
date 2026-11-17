@@ -35,7 +35,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementFrom, bodyOf } from './_structural-window.mjs';
 
@@ -51,7 +51,7 @@ const HANDS_TO_A_WRITER = new RegExp(`\\b(?:${ARRIVAL_WRITERS.map(([, name]) => 
 
 /** `raiseVersionTo` and every server function whose body calls a raiser, to a fixpoint. */
 function raisers() {
-  const sources = readTrackedSources('server/src', { ext: ['.ts'], floor: 200 }).map(({ file, text }) => ({ file, src: stripComments(text) }));
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 200 }).map(({ file, text }) => ({ file, src: stripComments(text) }));
   const decls = [];
   for (const { file, src } of sources) {
     for (const m of src.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)|^(?:export\s+)?const\s+(\w+)\s*=\s*async\b/gm)) {
@@ -113,7 +113,7 @@ describe('no push handler raises the counter to a number a peer sent', () => {
 
   for (const [file, name] of ARRIVAL_WRITERS) {
     it(`${name} (${file}), which every push door hands its page to, raises nothing`, () => {
-      const src = stripComments(readTrackedSources('server/src', { ext: ['.ts'], floor: 200 }).find(s => s.file.replace(/\\/g, '/') === file)?.text ?? '');
+      const src = stripComments(readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 200 }).find(s => s.file.replace(/\\/g, '/') === file)?.text ?? '');
       assert.ok(src.length > 0, `${file} is not among the tracked sources`);
       const body = bodyOf(src, name, `${file} ${name}`);
       const names = [...RAISERS].join('|');

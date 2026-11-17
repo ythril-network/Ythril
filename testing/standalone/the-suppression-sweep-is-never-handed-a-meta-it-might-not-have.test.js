@@ -16,11 +16,11 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const calls = [];
-for (const f of trackedSources('server/src', { specs: false })) {
+for (const f of trackedSources(SERVER_CODE_ROOTS, { specs: false })) {
   const src = stripComments(readFileSync(join(REPO_ROOT, f), 'utf8'));
   for (const m of src.matchAll(/sweepSuppressedVectors\(([^)]*)\)/g)) {
     if (/^\s*spaceId: string/.test(m[1])) continue;   // the definition, not a call

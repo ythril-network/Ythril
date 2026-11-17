@@ -35,14 +35,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 
 const MARKER = '_functionalGuard';
 
 /** Untracked too: the file a change adds is the one this most needs to see. */
-const FILES = trackedSources('server/src', { untracked: true }).map(file => ({
+const FILES = trackedSources(SERVER_CODE_ROOTS, { untracked: true }).map(file => ({
   file, src: stripComments(readFileSync(join(REPO_ROOT, file), 'utf8')),
 }));
 

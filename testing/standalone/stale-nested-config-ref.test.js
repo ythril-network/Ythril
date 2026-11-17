@@ -31,7 +31,7 @@
  */
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -120,7 +120,7 @@ describe('a write through a nested config reference', () => {
 });
 
 describe('no NEW site holds a nested config reference across an await and writes through it', () => {
-  const files = trackedSources('server/src');
+  const files = trackedSources(SERVER_CODE_ROOTS);
   /**
    * Blanks comments IN PLACE, so reported line numbers match the file.
    *

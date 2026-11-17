@@ -35,7 +35,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const description = (file, name) => {
   const s = stripComments(readFileSync(file, 'utf8'));
@@ -130,7 +130,7 @@ describe('which deletes can be refused, and each one says so where the caller is
    * copies go with it, that one version alone can be deleted by its id, and where the versions are listed.
    */
   it('the four deletes say, in ONE shared sentence, that a record\'s unresolved versions are deleted with it', async () => {
-    const owners = readTrackedSources('server/src', { ext: ['.ts'], floor: 300, specs: false, untracked: true })
+    const owners = readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 300, specs: false, untracked: true })
       .filter(s => /export const FORKS_GO_WITH_THEIR_SUBJECT\b/.test(stripComments(s.text)));
     assert.equal(owners.length, 1, `FORKS_GO_WITH_THEIR_SUBJECT is exported by ${owners.length} module(s): the sentence is not written once`);
     const builtPath = owners[0].file.replace(/^server\/src\//, '../../server/dist/').replace(/\.ts$/, '.js');

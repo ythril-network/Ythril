@@ -31,14 +31,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const ROOT = process.cwd();
-const ls = (dir) => execFileSync('git', ['ls-files', dir], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
+const ls = (dir) => execFileSync('git', ['ls-files', ...[dir].flat()], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
 
 /** Widest `z.string().max(N)` per field name across the server — what the API as a whole accepts. */
 function serverCaps() {
   const caps = new Map();
-  for (const f of ls('server/src').filter(x => x.endsWith('.ts'))) {
+  for (const f of ls(SERVER_CODE_ROOTS).filter(x => x.endsWith('.ts'))) {
     const src = readFileSync(join(ROOT, f), 'utf8');
     const re = /(\w+)\s*:\s*z\s*\.\s*string\(\)[^,\n]*?\.max\(\s*([\d_]+)\s*\)/g;
     let m;

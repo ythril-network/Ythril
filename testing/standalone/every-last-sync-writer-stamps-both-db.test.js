@@ -36,7 +36,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 
@@ -49,7 +49,7 @@ const READS = [['server/src/mcp/tools/sync.ts', 'lastSyncAt: m.lastSyncAt ?? nul
 /** The clear: a new member starts with no stamp, and clears both. */
 const CLEARS = [['server/src/api/invite.ts', 'lastSyncAt: undefined']];
 
-const sources = trackedSources('server/src', { floor: 200 });
+const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 200 });
 const codeOf = (file) => blankComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
 
 function hitsIn(text) {

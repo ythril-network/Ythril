@@ -11,7 +11,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 /** Each `createToken({ ... })` call's argument text, braces balanced. */
@@ -33,7 +33,7 @@ function createTokenCalls(src) {
 }
 
 describe('peer token scope', () => {
-  const mints = readTrackedSources('server/src', { untracked: true })
+  const mints = readTrackedSources(SERVER_CODE_ROOTS, { untracked: true })
     .flatMap(({ file, text }) => createTokenCalls(stripComments(text))
       .filter(call => /\bpeerInstanceId\s*:/.test(call))
       .map(call => ({ file, call })));

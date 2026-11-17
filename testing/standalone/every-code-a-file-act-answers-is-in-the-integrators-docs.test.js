@@ -47,7 +47,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { allDocsText, docFiles, DOCS_ROOT } from './_docs.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const ANSWERS = 'server/src/files/act-answers.ts';
 const PAGES = ['docs/integration-guide/03-auth-and-limits.md', 'docs/integration-guide/05-files-api.md'];
@@ -205,7 +205,7 @@ describe('no doc names a code the server source does not spell', () => {
   // Every string literal the server source spells, so a code spelled once and renamed is found by its absence.
   const spelled = new Set();
   // The server's sources and the schema package's, which the server imports: a refusal code the package spells is one the server answers.
-  const sources = readTrackedSources(['server/src', 'schema/src'], { floor: 300, specs: false });
+  const sources = readTrackedSources([...SERVER_CODE_ROOTS], { floor: 300, specs: false });
   for (const { text } of sources) for (const m of stripComments(text).matchAll(/['"]([a-z][a-z0-9_]*)['"]/g)) spelled.add(m[1]);
 
   it('finds the server source and the act codes in it (the sweep itself still works)', () => {

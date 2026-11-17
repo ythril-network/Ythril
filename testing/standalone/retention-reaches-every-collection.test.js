@@ -26,7 +26,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { join } from 'node:path';
 import { balancedFrom } from './_structural-window.mjs';
 
@@ -61,7 +61,7 @@ const TYPED = { ...DOORS, ...PLANNERS };
 
 /** Every source under `server/src` that calls a stamper — the set the map above has to cover. */
 function stamperCallers() {
-  return trackedSources('server/src', { specs: false, untracked: true, exclude: ['server/src/brain/ttl.ts'] })
+  return trackedSources(SERVER_CODE_ROOTS, { specs: false, untracked: true, exclude: ['server/src/brain/ttl.ts'] })
     .filter(f => ttlCalls(read(f)).length > 0);
 }
 

@@ -35,7 +35,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { importClosure, relativeImports } from './_import-closure.mjs';
-import { readTrackedSources, REPO_ROOT } from './_sources.mjs';
+import { readTrackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const SCHEMA_LEAF = 'server/src/sync/incoming-schemas.ts';
@@ -49,7 +49,7 @@ const exists = (f) => existsSync(join(REPO_ROOT, f));
 
 /** Modules whose own text imports the database or the config loader: loading one needs a store or a config file. */
 function storeImporters() {
-  const found = readTrackedSources('server/src', { ext: ['.ts'], floor: 300, specs: false, untracked: true })
+  const found = readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 300, specs: false, untracked: true })
     .filter(s => /from\s*['"][^'"]*\/(?:db\/mongo|config\/loader)\.js['"]/.test(stripComments(s.text)))
     .map(s => s.file);
   assert.ok(found.length >= 20, `only ${found.length} module(s) found importing the store or the config loader: the derivation is broken`);

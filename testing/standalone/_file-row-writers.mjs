@@ -26,6 +26,7 @@ import { MUTATORS } from './_document-mutators.mjs';
 import { argumentsOf } from './_structural-window.mjs';
 import { recordWrites } from './_record-writes.mjs';
 import { fileRowWrites } from './_processing-state-writes.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const { BRAIN_COLLECTIONS } = await import('../../server/dist/config/types.js');
 
@@ -39,7 +40,7 @@ let built;
 /** The call graph of `server/src` and every space write site in it, built once per process. */
 export function sourceTree() {
   if (built) return built;
-  const INDEX = moduleIndex('server/src');
+  const INDEX = moduleIndex(SERVER_CODE_ROOTS);
   const WRITERS = spaceWriters(INDEX, { floors: { space: 150 } });
 
   /** `callersOf.get(key)`: every call of `key`, as `{ from, name, at }` — `at` an offset into `from`'s body. */

@@ -114,7 +114,7 @@ describe('every scheduled pass runs one at a time', () => {
    * - a cron registration (`node-cron` has no overlap guard of its own) must run its pass through `runExclusive` / `singleFlight`
    *   in the registration itself, or be a named row below with its reason.
    */
-  const index = moduleIndex('server/src');
+  const index = moduleIndex(SERVER_CODE_ROOTS);
   const { jobs } = scheduledJobs(index);
   const GUARD = /\b(?:runExclusive|singleFlight)\s*[(<]/;
 
@@ -215,3 +215,4 @@ describe('outbound calls carry a deadline', () => {
 
 // Imported late so the enumeration above reads clearly; Node hoists it regardless.
 import { readdirSync } from 'node:fs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';

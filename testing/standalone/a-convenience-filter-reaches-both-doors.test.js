@@ -33,7 +33,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { FILTER_DOORS } from '../_shared/search-doors.mjs';
 
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
@@ -175,7 +175,7 @@ describe('nobody assembles the conveniences a second time', () => {
     // `untracked: true`: a file the change ADDS is not in `git ls-files` until it is committed, so a
     // pre-commit sweep without it cannot see a new copy — which is the copy a reviewer most needs
     // flagged.
-    const sources = trackedSources(['server/src'], {
+    const sources = trackedSources(SERVER_CODE_ROOTS, {
       untracked: true,
       exclude: [
         'server/src/brain/list-conveniences.ts',

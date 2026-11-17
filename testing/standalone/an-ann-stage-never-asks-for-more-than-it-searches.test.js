@@ -11,7 +11,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const bounds = await import('../../server/dist/brain/search-bounds.js');
@@ -67,7 +67,7 @@ describe('every real vector search is sized by annCandidates', () => {
     ['server/src/db/mongo.ts', 'the $vectorSearch capability probe at startup'],
     ['server/src/spaces/vector-index.ts', 'the per-index readiness probe'],
   ]);
-  const sources = trackedSources('server/src').filter(f => f.endsWith('.ts'));
+  const sources = trackedSources(SERVER_CODE_ROOTS).filter(f => f.endsWith('.ts'));
   const sizesBySearch = sources.filter(f => /\$vectorSearch/.test(stripComments(readFileSync(f, 'utf8'))));
 
   it('the searches are found, or the rule is about nothing', () => {

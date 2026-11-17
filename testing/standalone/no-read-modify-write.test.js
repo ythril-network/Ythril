@@ -36,7 +36,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { ts, parseSource, lineOf, walkEveryNode, unwrapExpression, outermostFunctionOf } from '../_shared/syntax-tree.mjs';
 
 /**
@@ -300,7 +300,7 @@ export function unmatchedExemptions(hits, exempt = EXEMPT) {
 }
 
 function serverSources() {
-  return trackedSources('server/src', { specs: false, floor: 100 }).map(path => ({ path, text: readFileSync(join(REPO_ROOT, path), 'utf8') }));
+  return trackedSources(SERVER_CODE_ROOTS, { specs: false, floor: 100 }).map(path => ({ path, text: readFileSync(join(REPO_ROOT, path), 'utf8') }));
 }
 
 describe('no read-modify-write over a Mongo document', () => {

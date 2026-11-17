@@ -43,7 +43,7 @@ import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const SHARED = 'server/src/api/sync/_shared.ts';
 const REACH = 'server/src/auth/reachable-spaces.ts';
@@ -195,7 +195,7 @@ describe('and every other guard that can see an absent matrix answers the same w
       'and that predicate must read the matrix per space and area, compared against the rung needed');
 
     // Swept, not named: every server source that calls the rule, plus the auth modules that thread scope in.
-    const callers = trackedSources('server/src')
+    const callers = trackedSources(SERVER_CODE_ROOTS)
       .filter(f => /spacesWhereTokenMay\(|legacySpacesOf\(/.test(code(f)));
     assert.ok(callers.length >= 4,
       `only ${callers.length} caller(s) of the reach rule found — the sweep is wrong, and an empty one `

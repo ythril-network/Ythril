@@ -38,7 +38,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 
@@ -116,7 +116,7 @@ describe('"the other edges at (from, label)" — the truth table', () => {
 });
 
 describe('every counting site calls the one module', () => {
-  const sources = trackedSources('server/src', { untracked: true })
+  const sources = trackedSources(SERVER_CODE_ROOTS, { untracked: true })
     .filter(f => f !== MODULE_SRC)
     .map(file => ({ file, src: stripComments(readFileSync(join(REPO_ROOT, file), 'utf8')) }));
   const sites = sources.filter(({ src }) => /\bsubject(?:Key|Counts|Edges)\b/.test(src));

@@ -24,7 +24,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { argumentsOf, bodyOf } from './_structural-window.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
@@ -34,7 +34,7 @@ const { MongoNetworkError } = createRequire(path.resolve('server/package.json'))
 describe('a store failure\'s log line names its operation', () => {
   it('every call of storeFailureAnswer passes the operation it failed', () => {
     const calls = [];
-    for (const f of trackedSources('server/src')) {
+    for (const f of trackedSources(SERVER_CODE_ROOTS)) {
       const code = blankComments(readFileSync(path.join(REPO_ROOT, f), 'utf8'));
       // Every call; the declaration (`function storeFailureAnswer(`) is not one.
       for (const m of code.matchAll(/(?<!function\s+)\bstoreFailureAnswer\(/g)) {

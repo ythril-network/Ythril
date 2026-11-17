@@ -50,7 +50,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseSource, ts, lineOf, walkEveryNode } from '../_shared/syntax-tree.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 /** The module `findSimilar` is imported from, as an import specifier ends. */
 const RECALL_MODULE = /(^|\/)recall(\.js|\.ts)?$/;
@@ -216,7 +216,7 @@ const verdictOf = (site) => (ANSWER_SITES[site.file] ? answerVerdict(site) : sca
 
 // ── The real sources ──────────────────────────────────────────────────────────
 
-const files = trackedSources('server/src', { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'));
+const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'));
 const sources = new Map(files.map(f => [f, fs.readFileSync(f, 'utf8')]));
 const realSites = files.flatMap(f => sitesOf(f, sources.get(f)));
 

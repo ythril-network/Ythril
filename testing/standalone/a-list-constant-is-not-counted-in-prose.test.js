@@ -51,7 +51,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { localRuleSheets } from '../_shared/local-rule-sheets.mjs';
 
@@ -62,7 +62,7 @@ import { localRuleSheets } from '../_shared/local-rule-sheets.mjs';
 const LIST_CONSTANT = /^(?:export\s+)?const\s+([A-Z][A-Z0-9_]{3,})\b[^=\n]*=\s*(?:Object\.freeze\(\s*|new\s+(?:Set|Map)\b[^(\n]*\(\s*)?[[{]/gm;
 
 const SOURCES = [
-  ...trackedSources('server/src', { ext: ['.ts', '.js', '.mjs'], floor: 100 }),
+  ...trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts', '.js', '.mjs'], floor: 100 }),
   ...trackedSources('testing', { ext: ['.ts', '.js', '.mjs'], floor: 100 }),
 ];
 

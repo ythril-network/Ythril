@@ -36,7 +36,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { bodyOf, balancedFrom } from './_structural-window.mjs';
 import { inlineEdgeDoorFiles, serverSource } from './_edge-accepting-sources.mjs';
 
@@ -44,7 +44,7 @@ const WRAPPER = 'ConnectionsNotWritten';
 
 /** The comment-stripped sources of every server file matching `re`, as `{ file, src }`. */
 function serverFilesWith(re) {
-  return trackedSources('server/src', { floor: 100, untracked: true })
+  return trackedSources(SERVER_CODE_ROOTS, { floor: 100, untracked: true })
     .map(file => ({ file, src: serverSource(file) }))
     .filter(f => re.test(f.src));
 }

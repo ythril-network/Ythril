@@ -22,7 +22,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { tempInstanceDir, removeInstanceDir, bootInstance } from './_vote-round-instance.mjs';
 
 const SELF = 'aaaaaaaa-0000-4000-8000-000000005e1f';
@@ -138,7 +138,7 @@ describe('the limit is parsed in one place, for both acts that take one', () => 
   });
 
   it('the refusal sentence is written once in server/src, and both acts call what writes it', () => {
-    const files = trackedSources('server/src', { untracked: true, floor: 100 });
+    const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 });
     const holders = files.filter(f => /must be an integer from/.test(stripComments(fs.readFileSync(f, 'utf8'))));
     assert.equal(holders.length, 1, `the sentence is written in ${holders.length} files: ${holders.join(', ')}`);
     const acts = stripComments(fs.readFileSync('server/src/networks/vote-acts.ts', 'utf8'));

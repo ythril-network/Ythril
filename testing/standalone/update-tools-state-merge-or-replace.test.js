@@ -37,7 +37,7 @@
  * Run: node --test testing/standalone/update-tools-state-merge-or-replace.test.js
  */
 import { describe, it } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -98,7 +98,7 @@ describe('the store still behaves the way the descriptions claim', () => {
      * `updateFileMeta`'s merge while `upsertFileMeta`'s own line replaced the bag — a rewrite of a file destroyed every key the caller
      * never named. The scan, what satisfies a site and the named exceptions are in `_properties-write-sites.mjs`.
      */
-    const files = trackedSources('server/src').map(file => ({ file, text: src(file) }));
+    const files = trackedSources(SERVER_CODE_ROOTS).map(file => ({ file, text: src(file) }));
     const sites = propertiesWriteSites(files);
     assert.ok(sites.filter(s => s.ok).length >= 6,
       `only ${sites.filter(s => s.ok).length} properties-write site(s) merge; the write planners and the update writers are at least six, `

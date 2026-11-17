@@ -18,7 +18,7 @@
  * Run: node --test testing/standalone/graph-spill-is-not-content.test.js
  */
 import { describe, it } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { balancedFrom, bodyOf } from './_structural-window.mjs';
@@ -117,7 +117,7 @@ describe('every door that traverses answers through one builder, and none writes
    * and answers through anything but `traversedAnswer` is a second rule about what a whole row is, which is
    * how the shortened graph shipped in the first place. The count is a floor, not a total (`Q-6`).
    */
-  const doors = trackedSources('server/src')
+  const doors = trackedSources(SERVER_CODE_ROOTS)
     .filter(f => f.endsWith('.ts') && f !== 'server/src/brain/traverse-option.ts')
     .filter(f => /parseTraverseOption\(/.test(read(f)));
 
@@ -158,7 +158,7 @@ describe('every door that traverses answers through one builder, and none writes
   it('no source builds, reports or writes a graph spill', () => {
     // `graphComplete` was the link to the spilled whole graph beside a SHORTENED `_graph`. Its return would
     // be the shortened row returning with it, whatever the spill carried.
-    for (const f of trackedSources('server/src').filter(p => p.endsWith('.ts'))) {
+    for (const f of trackedSources(SERVER_CODE_ROOTS).filter(p => p.endsWith('.ts'))) {
       const code = read(f);
       assert.doesNotMatch(code, /buildGraphWithSpill/, `${f} still builds a graph spill`);
       assert.doesNotMatch(code, /\bgraphComplete\s*:/, `${f} still sends a graphComplete link`);
@@ -237,7 +237,7 @@ describe('the constants say what the ruling said', () => {
      * **DERIVED from who calls the spill writer, and the COUNT is a floor.** Every door's call names its
      * owner and no space — an empty scan passes every loop written over it, hence the floor (`Q-6`).
      */
-    const doors = trackedSources('server/src', { exclude: ['server/src/brain/graph-spill.ts'] })
+    const doors = trackedSources(SERVER_CODE_ROOTS, { exclude: ['server/src/brain/graph-spill.ts'] })
       .filter(f => /spillResultSet\(/.test(read(f)));
     assert.ok(doors.length >= 2,
       `only ${doors.length} door(s) write a spill; REST and MCP are the minimum, so the scan is wrong`);

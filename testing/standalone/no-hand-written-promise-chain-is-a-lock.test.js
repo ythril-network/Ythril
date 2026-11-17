@@ -26,7 +26,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { ts, parseSource, lineOf } from '../_shared/syntax-tree.mjs';
 
 const THE_MODULE = 'server/src/util/keyed-lock.ts';
@@ -111,14 +111,14 @@ describe('the detector sees the shapes it is about, and only those', () => {
   it('sees the module\'s own shape, a tail written through a named constant, which is why it is the one exemption', () => {
     const text = 'const tails = new Map(); function run(k) { const prior = tails.get(k) ?? Promise.resolve(); const tail = prior.then(() => 1); tails.set(k, tail); }';
     assert.equal(seen(text), 1);
-    const real = readTrackedSources('server/src', { floor: 100 }).find(s => s.file === THE_MODULE);
+    const real = readTrackedSources(SERVER_CODE_ROOTS, { floor: 100 }).find(s => s.file === THE_MODULE);
     assert.ok(real, `${THE_MODULE} is not among the tracked sources`);
     assert.equal(handWrittenLocks(real.file, real.text).length, 1, 'the module is where the shape lives: a detector that cannot see it sees nothing');
   });
 });
 
 describe('no hand-written promise chain is a lock', () => {
-  const sources = readTrackedSources('server/src', { floor: 100 });
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, { floor: 100 });
 
   it('outside util/keyed-lock.ts, none remains', () => {
     const found = sources.filter(s => s.file !== THE_MODULE)

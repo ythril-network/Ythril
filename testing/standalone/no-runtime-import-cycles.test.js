@@ -30,14 +30,14 @@
  * Run: node --test testing/standalone/no-runtime-import-cycles.test.js
  */
 import { describe, it } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join, resolve, relative } from 'node:path';
 
 const ROOT = process.cwd();
-const files = trackedSources('server/src');
+const files = trackedSources(SERVER_CODE_ROOTS);
 
 const norm = (p) => relative(ROOT, p).replaceAll('\\', '/');
 

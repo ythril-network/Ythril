@@ -17,7 +17,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const DISTINCT_CALL = /\.distinct\s*[<(]/;
@@ -31,7 +31,7 @@ function callsIn(file, text) {
 
 describe('no server source reads distinct values in one reply', () => {
   it('the sources under server/src do not call the driver\'s distinct', () => {
-    const files = trackedSources('server/src', { floor: 300 });
+    const files = trackedSources(SERVER_CODE_ROOTS, { floor: 300 });
     const calls = files.flatMap(f => callsIn(f, readFileSync(f, 'utf8')));
     assert.deepEqual(calls, [], `these read distinct values in one reply (16 MB cap); use distinctStringsOf (db/distinct-strings.ts):\n  ${calls.map(c => `${c.file}:${c.line}`).join('\n  ')}`);
   });

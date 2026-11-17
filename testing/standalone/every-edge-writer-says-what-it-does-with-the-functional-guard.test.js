@@ -39,6 +39,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleIndex } from './_call-graph.mjs';
 import { recordWrites } from './_record-writes.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const COMMIT = 'server/src/brain/write-plan/commit.ts';
 const HANDLED = new Set(['stamp', 'drop', 'carry-if-unchanged']);
@@ -92,7 +93,7 @@ const WRITERS = {
   'server/src/sync/positions-rollback.ts:rollBackForks': { marker: 'none-by-design', why: 'the offline rollback deletes unresolved fork rows and unsets their decision marks; the write guard is never touched' },
 };
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 const RECORDS = recordWrites(INDEX, { collections: new Set(['edges']), floors: { space: 150 }, recordFloor: 5 });
 // `recordWrites` keeps a space site whose collection is edges or computed, and every unknown receiver: the sites this rule governs.
 const SITES = RECORDS.sites.filter(s => s.file !== COMMIT);

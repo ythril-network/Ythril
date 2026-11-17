@@ -18,7 +18,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { maskStrings } from './_brain-write-pairs.mjs';
 
@@ -37,7 +37,7 @@ describe('the instrument', () => {
 });
 
 describe('res.json is decorated in one module', () => {
-  const sources = trackedSources(['server/src'], { floor: 100, untracked: true });
+  const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 100, untracked: true });
 
   it('the module exists', () => {
     assert.ok(existsSync(MODULE), `${MODULE} does not exist`);

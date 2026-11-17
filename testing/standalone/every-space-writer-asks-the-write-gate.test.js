@@ -54,8 +54,9 @@ import assert from 'node:assert/strict';
 import { moduleIndex, callSitesIn } from './_call-graph.mjs';
 import { spaceWriters } from './_space-writers.mjs';
 import { ASKING_WRAPPERS } from './_space-write-askers.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 // `files` was 40 until the space rename's two bare `fs.rename` calls became the one inside `moveTree` (`files/remove-tree.ts`, Q-171): two sites merged into one.
 const WRITERS = spaceWriters(INDEX, { floors: { space: 150, alias: 65, files: 39 } });
 

@@ -39,7 +39,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const PRIMITIVE_MODULE = 'server/src/util/horizon-holds.ts';
@@ -61,7 +61,7 @@ const CONSTRUCTED_INTO = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)
 const DEFINES_A_STREAM = /:\s*PositionStream\b|\bnew\s+PositionStream\b|\b(?:define|create)\w*Stream\s*\(/;
 
 const codeOf = (file) => blankComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
-const sources = trackedSources('server/src', { floor: 100 });
+const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 100 });
 
 /**
  * The instances `code` builds that are never handed to `heldWhile` — by their variable, as its first argument — and so are

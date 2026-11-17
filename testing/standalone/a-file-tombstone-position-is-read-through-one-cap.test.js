@@ -39,7 +39,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { topLevelFunctionSpans } from './_call-graph.mjs';
 
@@ -119,7 +119,7 @@ describe('every ordering read of a file tombstone position is capped by one func
 describe('bundle-81: every stream of the position clock is read below one cap (the rule, not the file)', () => {
   const CLOCK = 'server/src/util/position-clock.ts';
   const clockCode = blankComments(readFileSync(join(REPO_ROOT, CLOCK), 'utf8'));
-  const sources = trackedSources('server/src', { floor: 100 });
+  const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 100 });
   const imports = (code) => /from\s+['"][^'"]*util\/position-clock\.js['"]|from\s+['"]\.\/position-clock\.js['"]/.test(code);
   const DECLARES_A_STREAM = /:\s*PositionStream\b|\bnew\s+PositionStream\b|\b(?:define|create)\w*Stream\s*\(/;
 

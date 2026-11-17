@@ -30,12 +30,12 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 
 /** Every server source file, tracked AND untracked-but-not-ignored. */
 function sourceFiles() {
-  return trackedSources('server/src', { untracked: true });
+  return trackedSources(SERVER_CODE_ROOTS, { untracked: true });
 }
 
 /**

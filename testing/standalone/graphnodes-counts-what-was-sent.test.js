@@ -36,7 +36,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { statementAround } from './_structural-window.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { routeBody, delegatesCleanly } from './_delegating-routes.mjs';
 
 const { countGraphNodes } = await import('../../server/dist/brain/graph-spill.js');
@@ -48,7 +48,7 @@ const BUILDER = 'server/src/brain/traversed-answer.ts';
  * `[REST search.ts, MCP search.ts]`, and after `Q-89` the REST file does neither: `/recall` and `/similar` delegate
  * to their tools. A hand list keeps checking a file with nothing in it and misses a third door the day one is written.
  */
-const DOORS = trackedSources('server/src')
+const DOORS = trackedSources(SERVER_CODE_ROOTS)
   .filter(f => f.endsWith('.ts') && f !== BUILDER)
   .filter(f => /traversedAnswer\(|graphNodes:/.test(stripComments(readFileSync(f, 'utf8'))));
 /** Every file that emits a count: the builder, plus any door that still does it itself. */

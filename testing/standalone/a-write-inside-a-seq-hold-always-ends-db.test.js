@@ -51,7 +51,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { topLevelFunctionSpans } from './_call-graph.mjs';
 import { lineBefore } from './_structural-window.mjs';
@@ -82,7 +82,7 @@ const DEFINING = new Set(['server/src/util/position-clock.ts', 'server/src/sync/
 const isDefinition = (src, index) => /\bfunction$/.test(lineBefore(src, index, 'a holder match', { orEmpty: true }));
 function holders() {
   const out = new Map();
-  for (const file of trackedSources('server/src', { floor: 100 })) {
+  for (const file of trackedSources(SERVER_CODE_ROOTS, { floor: 100 })) {
     if (DEFINING.has(file.replace(/\\/g, '/'))) continue;
     const src = stripComments(readFileSync(file, 'utf8'));
     const spans = [...topLevelFunctionSpans(src)];

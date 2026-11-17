@@ -47,7 +47,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { authorityComparisons } from './_authority-comparisons.mjs';
 
 const MODULE = 'server/src/sync/deletion-authority.ts';
@@ -95,7 +95,7 @@ describe('the detector reads the syntax tree and finds the shapes this gate is a
 });
 
 describe('the module owns the comparisons', () => {
-  const sources = trackedSources('server/src', { floor: 200, untracked: true });
+  const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 200, untracked: true });
 
   it('scans the whole of server/src, and the module is among what it scans and holds the comparisons itself', () => {
     assert.ok(sources.length >= 200, `only ${sources.length} files scanned`);

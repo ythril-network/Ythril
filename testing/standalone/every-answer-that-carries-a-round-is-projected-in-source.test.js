@@ -33,7 +33,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { parseSource, ts, walkEveryNode as walk } from '../_shared/syntax-tree.mjs';
 import { outermostFunctionAt } from './_source-helpers.mjs';
 import { DOORS } from './_round-answer-doors.mjs';
@@ -177,7 +177,7 @@ describe('the predicates fire on a fixture first', () => {
 });
 
 describe('every door that opens a round is in the table, and answers through the projection', () => {
-  const sources = trackedSources('server/src', { untracked: true, floor: 100 });
+  const sources = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 });
   const parsed = sources.map(file => ({ file, text: readFileSync(file, 'utf8') })).map(s => ({ ...s, sf: parseSource(s.file, s.text) }));
 
   // The openers are what the server DEFINES among the names a round is opened by — derived, so `proposeRound` is in from the commit

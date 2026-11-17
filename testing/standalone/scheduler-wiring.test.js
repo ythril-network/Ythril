@@ -24,6 +24,7 @@ import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readFileSync } from 'node:fs';
 import { moduleIndex, walkFrom } from './_call-graph.mjs';
 import { scheduledJobs, JOB_FLOORS } from './_scheduled-jobs.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 /*
  * The schedulers are DERIVED from the registrations (`_scheduled-jobs.mjs`: every `intervalJob(` and every cron `schedule(`), where
@@ -32,7 +33,7 @@ import { scheduledJobs, JOB_FLOORS } from './_scheduled-jobs.mjs';
  * activity flush were never on it, so for each of them "nobody starts it" was not a thing this could say. A scheduler is whatever
  * REGISTERS a timer, and the file says so.
  */
-const index = moduleIndex('server/src');
+const index = moduleIndex(SERVER_CODE_ROOTS);
 const { jobs } = scheduledJobs(index);
 
 /** Where the process begins: the file `main()` lives in, and the one function it hands the instance's services to. */

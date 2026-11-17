@@ -22,12 +22,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { callsIn, topLevelFunctions } from './_call-graph.mjs';
 
 const textOf = (rel) => stripComments(readFileSync(join(REPO_ROOT, rel), 'utf8').replaceAll('\r\n', '\n'));
-const SOURCES = trackedSources(['server/src'], { floor: 100 });
+const SOURCES = trackedSources(SERVER_CODE_ROOTS, { floor: 100 });
 /** Every top-level function of the server, as `{ file, name, body }`: the unit "who calls X" is answered over. */
 const FUNCTIONS = SOURCES.flatMap(file => [...topLevelFunctions(textOf(file))].map(([name, body]) => ({ file, name, body })));
 /** The functions whose body CALLS `name` (a call, never a mention, an import or a definition), inside the closures it hands on too. */

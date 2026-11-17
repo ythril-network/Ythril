@@ -51,6 +51,7 @@ import { tempInstance, boot } from './_round-open-fixtures.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 import { keepEnv } from '../_shared/env-kept.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 /**
  * Asked before any test of this file starts. Asked later, beside the truth table's 3 002-request floods, the probe's
@@ -117,7 +118,7 @@ describe('the backstop\'s rule, in the source', () => {
 
   it('the flag is written in exactly two places: attachToken before tokenRateLimit, and tokenRateLimit\'s own 429 handler', () => {
     const writers = [];
-    for (const dir of ['server/src']) {
+    for (const dir of SERVER_CODE_ROOTS) {
       const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name))
         : /\.ts$/.test(e.name) ? [path.join(d, e.name)] : []);
       for (const f of walk(dir)) {

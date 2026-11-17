@@ -54,7 +54,7 @@
  * disprove, which costs more than the gap.
  */
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { mountedRoutesWithSource } from './_routes.mjs';
 import { argumentsOf } from './_structural-window.mjs';
@@ -262,7 +262,7 @@ export function bodyKeysFrom(body, exportedSets, fileSrc = '') {
  */
 export function routeAcceptKeys({ apiRoot = null, exportedSets = {} } = {}) {
   const readers = requestReadingHelpers(
-    trackedSources(['server/src'], { floor: 50 }).map(f => stripComments(readFileSync(f, 'utf8'))));
+    trackedSources(SERVER_CODE_ROOTS, { floor: 50 }).map(f => stripComments(readFileSync(f, 'utf8'))));
   const out = [];
   const sources = new Map();
   /*

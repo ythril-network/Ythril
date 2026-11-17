@@ -36,7 +36,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const { peerRelayCaller } = await import('../../server/dist/auth/peer-relay.js');
 
@@ -106,7 +106,7 @@ describe('the peer a token is bound to has one reader', () => {
   });
 
   it('no source but the reader takes `peerInstanceId` off a request\'s token itself', () => {
-    const sources = trackedSources('server/src', { floor: 300 }).filter(f => f !== READER);
+    const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 300 }).filter(f => f !== READER);
     // The shapes a hand read takes: a bracket read, a property read off the authenticated token, a read off a record cast to carry the field.
     const byHand = [/\['peerInstanceId'\]/, /authToken\b[^;\n]*?\??\.peerInstanceId\b/, /\bas \{ (?:readonly )?peerInstanceId\?: [a-z]+ \}[^;\n]*?\??\.peerInstanceId\b/];
     const offenders = sources.filter(f => { const text = stripComments(readFileSync(`${REPO_ROOT}/${f}`, 'utf8')); return byHand.some(re => re.test(text)); });

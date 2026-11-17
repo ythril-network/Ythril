@@ -28,7 +28,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/util/yield-to-event-loop.ts';
@@ -74,7 +74,7 @@ describe('yielding a turn is spelled once', () => {
     assert.equal(immediateRan, true, 'yieldToEventLoop resolved before an immediate queued ahead of it: it is not a check-phase yield');
   });
 
-  const sources = readTrackedSources('server/src', { untracked: true })
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, { untracked: true })
     .map(({ file, text }) => ({ file, code: stripComments(text) }));
 
   it('reads a tree worth reading, and the module has its askers (the floors)', () => {

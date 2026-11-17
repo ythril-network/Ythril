@@ -39,7 +39,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { MongoServerError } from 'mongodb';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/brain/index-not-queryable.ts';
@@ -152,7 +152,7 @@ describe('an index not queryable yet is an empty collection', () => {
     // server source with comments stripped, so prose explaining the rule is not a copy of it.
     const copies = [];
     let scanned = 0;
-    for (const { file, text } of readTrackedSources('server/src', { ext: ['.ts'], floor: 100, exclude: [MODULE] })) {
+    for (const { file, text } of readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 100, exclude: [MODULE] })) {
       scanned++;
       if (regexLiteralNamingAMongotState(stripComments(text))) copies.push(file);
     }

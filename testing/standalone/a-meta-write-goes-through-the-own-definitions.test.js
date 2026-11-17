@@ -15,7 +15,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const ALLOWED = new Map([
@@ -23,7 +23,7 @@ const ALLOWED = new Map([
   ['server/src/spaces/meta-update.ts', 'the edit path for a space in no network; keeps ownMeta in step'],
 ]);
 
-const files = trackedSources(['server/src'], { floor: 100 });
+const files = trackedSources(SERVER_CODE_ROOTS, { floor: 100 });
 const writers = files.filter(f => /updateSpace\([^;]*?\{[^;}]*\bmeta\b/s.test(stripComments(readFileSync(f, 'utf8'))));
 
 describe('a meta write goes through the own definitions', () => {

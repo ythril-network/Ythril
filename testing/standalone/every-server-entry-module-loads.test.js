@@ -43,7 +43,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { readTrackedSources, REPO_ROOT } from './_sources.mjs';
+import { readTrackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const LOAD_BOUND_MS = 30_000;
 const PARALLEL = 8;
@@ -69,11 +69,14 @@ export function loadInFreshProcess(specifier) {
   });
 }
 
-/** The built module of each tracked source: `server/src/a/b.ts` -> `server/dist/a/b.js`. */
+/**
+ * The built module of each tracked source, in its own package's build: `server/src/a/b.ts` -> `server/dist/a/b.js`,
+ * `schema/src/a.ts` -> `schema/dist/a.js` (each root of SERVER_CODE_ROOTS builds `src` into its sibling `dist`).
+ */
 function entryModules() {
-  const sources = readTrackedSources('server/src', { ext: ['.ts'], floor: 300, specs: false, untracked: true })
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 300, specs: false, untracked: true })
     .map(s => s.file).filter(f => !f.endsWith('.d.ts'));
-  return sources.map(file => ({ file, built: file.replace(/^server\/src\//, 'server/dist/').replace(/\.ts$/, '.js') }));
+  return sources.map(file => ({ file, built: file.replace(/^([^/]+)\/src\//, '$1/dist/').replace(/\.ts$/, '.js') }));
 }
 
 async function loadAll(entries) {

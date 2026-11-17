@@ -52,7 +52,7 @@ import { balancedFrom, statementFrom } from './_structural-window.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { moduleIndex, indexSources, reachableFrom as reachableByCalls, callsIn } from './_call-graph.mjs';
 import { walkEntryNames, walkCallbackEdges } from './_housekeeping-walks.mjs';
 
@@ -94,7 +94,7 @@ const WRITES = ['updateMany', 'updateOne', 'bulkWrite', 'deleteMany', 'deleteOne
  * where a person could still choose the lazy migration instead.
  */
 function sourceFiles() {
-  return trackedSources('server/src', { untracked: true });
+  return trackedSources(SERVER_CODE_ROOTS, { untracked: true });
 }
 
 /** Comments stripped, so the gate cannot fire on the prose that documents it. */
@@ -154,7 +154,7 @@ function writesSynced(body) {
 }
 
 /** The module-aware index of the server, built once — parsing 367 files per test case is not free. */
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 
 /**
  * What the boot walk reaches follows CALLS and, since `Q-274`, the callbacks of a WALK (`eachSpace` and its kin).

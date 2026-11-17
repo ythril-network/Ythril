@@ -19,7 +19,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { keepEnv } from '../_shared/env-kept.mjs';
 
@@ -78,7 +78,7 @@ describe('requestAddress', () => {
 });
 
 describe('nothing else in the server says either again', () => {
-  const files = trackedSources(['server/src'], { floor: 200, untracked: true });
+  const files = trackedSources(SERVER_CODE_ROOTS, { floor: 200, untracked: true });
   const sources = new Map(files.map(f => [f, stripComments(readFileSync(f, 'utf8'))]));
 
   it('reads a tree worth reading, and both places exist', () => {

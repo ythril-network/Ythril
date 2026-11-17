@@ -30,7 +30,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { BRAIN_WRITE_PAIRS, RECORD_PAIRS, restHandlerOf, toolHandlerOf } from './_brain-write-pairs.mjs';
 
 const read = (f) => stripComments(readFileSync(f, 'utf8'));
@@ -87,7 +87,7 @@ describe('every record update door asks the shared function and the shared predi
 
 describe('the sentence is made in one place', () => {
   it('only contract/write-accepts.ts builds "At least one of" for a brain write', () => {
-    const makers = trackedSources(['server/src'], { floor: 100 })
+    const makers = trackedSources(SERVER_CODE_ROOTS, { floor: 100 })
       .filter(f => /At least one of \$\{|At least one of '\s*\+|At least one of `/.test(read(f)))
       // The two space-settings doors are out of scope (see the header): their own sentences are their own rule.
       .filter(f => !/mcp\/tools\/spaces\.ts$|spaces\/body-schemas\.ts$/.test(f));

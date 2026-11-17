@@ -36,12 +36,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { readTrackedSources, REPO_ROOT } from './_sources.mjs';
+import { readTrackedSources, REPO_ROOT, SERVER_CODE_ROOTS, SERVER_SOURCE_ROOT } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { argumentsOf, enclosingBlockAround, enclosingBlockMatching } from './_structural-window.mjs';
 import { MOVE_CASCADE_STEPS, guardPrecedesIrreversibleSteps, moveCascadeAsksDestinationFirst } from './_cascade-order.mjs';
 
-const SRC = 'server/src';
+const SRC = SERVER_SOURCE_ROOT;
 const GUARD = 'assertDestinationReachable';
 /** The second guard of the move cascade: something already stands at the destination (`files/destination.ts`). */
 const FREE_GUARD = 'assertDestinationFree';
@@ -223,7 +223,7 @@ function sitesOf(blanked, local) {
  */
 const cascadeGuardsItself = moveCascadeAsksDestinationFirst;
 
-const all = readTrackedSources(SRC, { floor: 300 });
+const all = readTrackedSources(SERVER_CODE_ROOTS, { floor: 300 });
 const nonFiles = all.filter(f => !f.file.startsWith(`${SRC}/files/`));
 const text = (file) => all.find(f => f.file === file)?.text ?? (existsSync(path.join(REPO_ROOT, file)) ? readFileSync(path.join(REPO_ROOT, file), 'utf8') : null);
 

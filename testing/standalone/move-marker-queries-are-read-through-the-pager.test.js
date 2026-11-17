@@ -42,7 +42,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { exportedNames, namesImportedFrom, topLevelDeclarations } from './_module-shape.mjs';
 import { ts } from '../_shared/syntax-tree.mjs';
 import { blankComments } from './_strip-comments.mjs';
@@ -179,7 +179,7 @@ describe('the matcher: what is a marker query shape and what is not (synthetic s
 });
 
 describe('every marker query shape is spelled in files/move-markers.ts, and the walk goes through its pager (the real source)', () => {
-  const files = trackedSources('server/src', { ext: ['.ts'], floor: 100, specs: false });
+  const files = trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 100, specs: false });
   const sources = files.map(file => ({ file, text: readFileSync(join(REPO_ROOT, file), 'utf8') }));
   const { units, declared } = analyse(sources);
 

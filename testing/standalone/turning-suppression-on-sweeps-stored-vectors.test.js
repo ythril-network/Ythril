@@ -45,7 +45,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { matchesFilter } from '../_shared/filter-matcher.mjs';
 
 let SWEEP = null;
@@ -166,7 +166,7 @@ describe('the sweep runs where the flag is written', () => {
       ['server/src/spaces/spaces.ts', 'updateSpace, the one writer of space.meta'],
       ['server/src/brain/suppression-sweep.ts', 'the boot sweep of every space, which writes no meta'],
     ]);
-    const askers = readTrackedSources('server/src')
+    const askers = readTrackedSources(SERVER_CODE_ROOTS)
       .filter(({ text }) => /\bsweepAfterMetaWrite\(/.test(stripComments(text).replace(/export function sweepAfterMetaWrite\(/, '')))
       .map(({ file }) => file);
     assert.ok(askers.includes('server/src/spaces/spaces.ts'), 'the scan found no caller at all — it is looking in the wrong place');

@@ -40,7 +40,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 let spaceCollection;
@@ -121,7 +121,7 @@ describe('the module answers the question, and refuses what it cannot vouch for'
 describe('and nothing builds one by hand any more', () => {
   it('no source concatenates a collection name', () => {
     const suffixes = Object.values(SPACE_COLLECTIONS);
-    const sources = trackedSources(['server/src'], { floor: 200 });
+    const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 200 });
 
     const offenders = [];
     let scanned = 0;
@@ -170,7 +170,7 @@ describe('and nothing builds one by hand any more', () => {
     const unknown = new Map();
     let scanned = 0;
 
-    for (const f of trackedSources(['server/src'], { floor: 200 })) {
+    for (const f of trackedSources(SERVER_CODE_ROOTS, { floor: 200 })) {
       scanned += 1;
       for (const m of code(f).matchAll(new RegExp(anySuffix.source, 'g'))) {
         const suffix = m[1];

@@ -27,8 +27,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleIndex, topLevelFunctionSpans } from './_call-graph.mjs';
 import { scheduledJobs } from './_scheduled-jobs.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
-const index = moduleIndex('server/src');
+const index = moduleIndex(SERVER_CODE_ROOTS);
 const crons = scheduledJobs(index).jobs.filter(j => j.kind === 'cron');
 
 describe('every cron registration is refused once arming closes', () => {

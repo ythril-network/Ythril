@@ -32,12 +32,12 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { metricSourceText } from './_metric-sources.mjs';
 import { blockAfter } from './_structural-window.mjs';
 
-const sources = () => readTrackedSources('server/src', { ext: ['.ts'], floor: 100, specs: false });
+const sources = () => readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 100, specs: false });
 
 /** The module(s) under server/src that export the constant. */
 function exporters() {

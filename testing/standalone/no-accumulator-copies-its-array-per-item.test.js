@@ -19,13 +19,13 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 describe('no accumulator copies its array per item', () => {
   it('no map of lists is grown by spreading its own list back under the same key', () => {
     const found = [];
-    for (const { file, text } of readTrackedSources('server/src')) {
+    for (const { file, text } of readTrackedSources(SERVER_CODE_ROOTS)) {
       const code = stripComments(text);
       // Built fresh per file: a shared global regex would carry `lastIndex` from one file into the next.
       const copy = /(\w+)\.set\(\s*([\w.!]+)\s*,\s*\[\s*\.\.\.\(?\s*\1\.get\(\s*\2\s*\)/g;

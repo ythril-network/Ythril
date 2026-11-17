@@ -17,12 +17,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { balancedFrom } from './_structural-window.mjs';
 
 const CONFIG_DIR = 'server/src/config';
-const SERVER_SRC = 'server/src';
 
 const read = (rel) => stripComments(readFileSync(join(REPO_ROOT, rel), 'utf8'));
 
@@ -30,7 +29,7 @@ let cache = null;
 /** Every tracked `.ts` source under server/src, comments stripped, read once. */
 function sources() {
   if (cache) return cache;
-  const files = trackedSources([SERVER_SRC]).filter(f => f.endsWith('.ts'));
+  const files = trackedSources(SERVER_CODE_ROOTS).filter(f => f.endsWith('.ts'));
   assert.ok(files.length >= 200, `only ${files.length} tracked server sources — the enumeration broke`);
   cache = files.map(rel => ({ rel, text: read(rel) }));
   return cache;

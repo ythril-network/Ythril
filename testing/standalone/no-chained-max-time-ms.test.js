@@ -30,7 +30,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { lineOf, parseSource, ts } from '../_shared/syntax-tree.mjs';
 
 const NAME = 'maxTimeMS';
@@ -65,7 +65,7 @@ export function maxTimeMsSites(file, text) {
 /** The fewest `maxTimeMS` option sites that means the scan read the tree — far under what the server holds. */
 const OPTION_SITE_FLOOR = 8;
 
-const sources = () => trackedSources(['server/src'], { floor: 100 });
+const sources = () => trackedSources(SERVER_CODE_ROOTS, { floor: 100 });
 
 describe('maxTimeMsSites (the detector, held on samples)', () => {
   it('finds a chained call on a cursor, however it is spelled', () => {

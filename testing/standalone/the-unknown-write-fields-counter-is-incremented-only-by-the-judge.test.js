@@ -22,7 +22,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { metricSources, metricSourceText } from './_metric-sources.mjs';
 import { balancedFrom } from './_structural-window.mjs';
@@ -59,7 +59,7 @@ describe('the counter is registered with a fixed label set', () => {
 
 describe('only the judge increments it', () => {
   const d = declaration();
-  const sources = trackedSources(['server/src'], { floor: 100, untracked: true });
+  const sources = trackedSources(SERVER_CODE_ROOTS, { floor: 100, untracked: true });
 
   it('the judge module exists', () => {
     assert.ok(existsSync(JUDGE), `${JUDGE} does not exist`);

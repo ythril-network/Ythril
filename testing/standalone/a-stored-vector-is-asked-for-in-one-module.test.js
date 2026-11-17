@@ -24,7 +24,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const HOME = 'server/src/brain/holds-vector.ts';
@@ -60,7 +60,7 @@ describe('a stored vector is asked for in one module', () => {
   });
 
   it('no file outside holds-vector.ts spells the question itself', () => {
-    const files = trackedSources('server/src', { floor: 200 }).filter(f => f !== HOME);
+    const files = trackedSources(SERVER_CODE_ROOTS, { floor: 200 }).filter(f => f !== HOME);
     const copies = [];
     for (const f of files) {
       for (const name of spellingsIn(readFileSync(f, 'utf8'))) copies.push(`${f}: ${name}`);

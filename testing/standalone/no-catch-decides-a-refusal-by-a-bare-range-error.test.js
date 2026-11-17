@@ -21,7 +21,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { ts, parseSource, lineOf, unwrapExpression, walkEveryNode } from '../_shared/syntax-tree.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 /** Every `x instanceof RangeError` in `text` as `{ line, rethrows }`: whether the `if` it guards only passes the caught value on. */
 export function rangeErrorChecksIn(file, text) {
@@ -48,7 +48,7 @@ export function rangeErrorChecksIn(file, text) {
   return out;
 }
 
-const SOURCES = readTrackedSources('server/src', { specs: false, floor: 200 });
+const SOURCES = readTrackedSources(SERVER_CODE_ROOTS, { specs: false, floor: 200 });
 const ALL = SOURCES.flatMap(({ file, text }) => rangeErrorChecksIn(file, text));
 
 describe('no catch decides a refusal by a bare `instanceof RangeError`', () => {

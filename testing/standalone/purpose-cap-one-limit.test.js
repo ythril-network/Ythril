@@ -24,13 +24,13 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 
 let SpaceMetaBody;
 
 /** Files that could plausibly bound this field — enumerated from the repo, not listed here. */
-const sources = trackedSources(['server/src', 'schema/src']);
+const sources = trackedSources([...SERVER_CODE_ROOTS]);
 
 const strip = s => s.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
 

@@ -33,7 +33,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const { eventEntryOf } = await import('../../server/dist/brain/read-projection.js');
 // The store projection of a CALLER's projection (Q-446). This file used to hold `withoutWriteGuard` — a guard-only pass over
@@ -99,7 +99,7 @@ function emitsIn(file, text) {
   return out;
 }
 
-const EMITS = readTrackedSources('server/src', { floor: 300 }).flatMap(({ file, text }) => emitsIn(file, withoutComments(text)));
+const EMITS = readTrackedSources(SERVER_CODE_ROOTS, { floor: 300 }).flatMap(({ file, text }) => emitsIn(file, withoutComments(text)));
 
 /** Emits whose entry is a system's own report, not a stored record of this space — said with the reason, keyed `file:event`. */
 const NOT_A_RECORD = {

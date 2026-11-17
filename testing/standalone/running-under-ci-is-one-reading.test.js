@@ -16,7 +16,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { ciSignal, runningUnderCi, CI_ENV_NAMES } from '../_shared/running-under-ci.mjs';
 
@@ -121,7 +121,7 @@ describe('the gate sees a reading and only a reading', () => {
 });
 
 describe('no file reads the CI variables except the module', () => {
-  const files = trackedSources(['scripts', 'testing', 'server/src'], { ext: ['.mjs', '.js', '.cjs', '.ts'], floor: 500 })
+  const files = trackedSources(['scripts', 'testing', ...SERVER_CODE_ROOTS], { ext: ['.mjs', '.js', '.cjs', '.ts'], floor: 500 })
     .filter((f) => f !== MODULE && f !== THIS);
 
   it('scans scripts, the test stacks and the server', () => {

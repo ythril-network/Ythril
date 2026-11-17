@@ -29,7 +29,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 // A module that is missing fails each case that asks it, by name, rather than the file at load.
@@ -302,7 +302,7 @@ describe('errorChain reads an AggregateError as every error it holds (vet-B S2)'
 
 describe('the driver is imported by name, never reached through createRequire (O9)', () => {
   it('no source under server/src builds a require with createRequire', () => {
-    const files = trackedSources('server/src', { untracked: true, floor: 300 });
+    const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 300 });
     const hits = files.filter(f => /\bcreateRequire\b/.test(stripComments(readFileSync(f, 'utf8'))));
     assert.deepEqual(hits, [], `createRequire in: ${hits.join(', ')} — a renamed driver class would stop matching with no error`);
   });

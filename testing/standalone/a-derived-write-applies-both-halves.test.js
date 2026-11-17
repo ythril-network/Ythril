@@ -23,7 +23,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { balancedFrom } from './_structural-window.mjs';
 
@@ -76,7 +76,7 @@ describe('a derived write is applied in both halves', () => {
   it('every caller in server/src reads the unset half, inserts, or is the one named exemption', () => {
     const offenders = [];
     let calls = 0;
-    for (const f of trackedSources('server/src', { floor: 200 })) {
+    for (const f of trackedSources(SERVER_CODE_ROOTS, { floor: 200 })) {
       if (f === HOME) continue;
       const src = stripComments(readFileSync(f, 'utf8'));
       if (!src.includes('derivedFieldsForWrite')) continue;

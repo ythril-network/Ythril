@@ -34,7 +34,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { FILTER_DOORS } from '../_shared/search-doors.mjs';
 
 const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
@@ -80,7 +80,7 @@ describe('nobody re-implements a decoration', () => {
     // `untracked: true`, because the file a change ADDS is not in `git ls-files` until it is committed —
     // so a pre-commit sweep without it cannot see the very copy the commit introduces. Found here: the
     // case below reported an EMPTY holder list for a module that was sitting on disk.
-    const offenders = trackedSources(['server/src'], {
+    const offenders = trackedSources(SERVER_CODE_ROOTS, {
       untracked: true,
       // `record-view.ts` OWNS the per-kind field now (`NAME_FIELD`, `endpointNameField`): the view of a record the validators read titles itself
       // from it, and `entity-refs.ts` re-exports it. It is the module that owns the map, which is what this exclusion has always meant.
@@ -94,7 +94,7 @@ describe('nobody re-implements a decoration', () => {
   it('the file-progress join exists once, and NOT in a route file', () => {
     // It lived in `api/brain/file-meta.ts`, which a `brain/` module may not import from — so `filter`
     // could not have reached it wherever it was declared. The module is the reason both doors can.
-    const holders = trackedSources(['server/src'], { untracked: true })
+    const holders = trackedSources(SERVER_CODE_ROOTS, { untracked: true })
       .filter(f => src(f).includes('export async function attachJobProgress'));
     assert.deepEqual(holders, ['server/src/files/file-job-progress.ts'],
       `the progress join should be declared once, outside \`api/\`: ${holders.join(', ')}`);

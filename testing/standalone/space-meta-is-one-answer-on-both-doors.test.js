@@ -25,7 +25,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const restSrc = stripComments(readFileSync('server/src/api/spaces.ts', 'utf8'));
@@ -59,7 +59,7 @@ describe('both doors call the one function', () => {
 
 describe('the actual schema is built in one module', () => {
   it('nothing outside brain/space-shape.ts builds it', () => {
-    const builders = readTrackedSources(['server/src'], { floor: 300, specs: false, untracked: true })
+    const builders = readTrackedSources(SERVER_CODE_ROOTS, { floor: 300, specs: false, untracked: true })
       .filter(f => !f.file.endsWith('.test.ts') && f.file !== 'server/src/brain/space-shape.ts' && f.file !== 'server/src/brain/er-model.ts')
       .filter(f => /\b(buildErModel|observeErShape|readErShape)\(/.test(stripComments(f.text)))
       .map(f => f.file);

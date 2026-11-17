@@ -35,7 +35,7 @@
  * Run: node --test testing/standalone/one-definition-of-the-knowledge-types.test.js
  */
 import { describe, it } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -61,7 +61,7 @@ const HANDS_ON = new Set(['server/src/config/types-knowledge.ts']);
 const handsOnTuple = (text) => new RegExp(`export\\s*\\{[^}]*\\bKNOWLEDGE_TYPES\\b[^}]*\\}\\s*from\\s*'${schemaSpecifierSource([''])}'`).test(text);
 
 function sourceFiles() {
-  return trackedSources(['server/src', 'schema/src', 'client/src'])
+  return trackedSources([...SERVER_CODE_ROOTS, 'client/src'])
     .filter(f => f.endsWith('.ts') && !f.endsWith('.spec.ts') && !f.endsWith('.d.ts'));
 }
 

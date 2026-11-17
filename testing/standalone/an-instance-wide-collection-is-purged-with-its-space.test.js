@@ -29,7 +29,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
 
@@ -42,7 +42,7 @@ const src = (p) => stripComments(readFileSync(p, 'utf8'));
  */
 function instanceWideSpaceKeyed() {
   const out = [];
-  for (const f of trackedSources(['server/src'])) {
+  for (const f of trackedSources(SERVER_CODE_ROOTS)) {
     const s = src(f);
     // A collection name held as a bare string constant — `const COLLECTION = '_x'`, `= 'space_activity'`.
     const named = /^\s*(?:export\s+)?const\s+\w*COLLECTION\w*\s*(?::\s*string\s*)?=\s*'([^']+)'/m.exec(s);

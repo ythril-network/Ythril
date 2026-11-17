@@ -38,7 +38,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { ts, parseSource, lineOf, walkOwnCode } from '../_shared/syntax-tree.mjs';
 
 /** The calls that put the store's question before a wording test. */
@@ -65,6 +65,7 @@ export const EXEMPT_BY_FUNCTION = new Map([
   ['server/src/db/mongo.ts :: checkVectorSearchAvailability', 'a capability PROBE: it asks the server whether a stage exists, so the words are the answer, not a refusal'],
   ['server/src/config/loader.ts :: validateOidcBlock', 'the catch re-reads the message of an error THIS function threw two lines above, before any store is involved'],
   ['server/src/local-agent-connector/index.ts :: ensureDnsRoute', 'the error is a cloudflared child process\'s output, which is not the store; the catch rethrows anything it does not recognise'],
+  ['schema/src/from-typescript.ts :: loadCompiler', 'a module-resolution PROBE: the catch reads the code and the module name of a failed `import(\'typescript\')`; the schema package has no store, and anything it does not recognise is rethrown as it was'],
   ['server/src/files/converters/describe.ts :: describeDocument', 'a converter degrade path: a timeout of the describing model is reported as "timed out", and nothing here reaches the store'],
 ]);
 
@@ -260,7 +261,7 @@ describe('the detector finds a wording test in every spelling it is written in',
 });
 
 describe('every catch that reads an error\'s wording asks the store first', () => {
-  const sources = readTrackedSources('server/src', { ext: ['.ts'], floor: 200 });
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 200 });
   const all = sources.flatMap(s => wordingCatches(s.text, s.file));
 
   it('the scan sees the catches it is about (floor)', () => {

@@ -17,7 +17,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mergePeerRoster, introduceFromPassedJoin, acceptIntroduction, applyPassedJoin, pairRetryDue, PAIR_RETRY_MS } from '../../server/dist/networks/member-introductions.js';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const SELF = 'aaaa-self';
 const ADMITTER = 'bbbb-admitter';
@@ -110,7 +110,7 @@ describe('a passed join lands through one rule, wherever it concludes', () => {
      * credential holder, re-adding a member whose admission a crash lost.
      */
     const owners = ['server/src/networks/member-introductions.ts', 'server/src/networks/member-acts.ts'];
-    const offenders = trackedSources(['server/src'], { untracked: true, exclude: owners })
+    const offenders = trackedSources(SERVER_CODE_ROOTS, { untracked: true, exclude: owners })
       .filter(f => /members\.push\(\s*\w*\.?pendingMember/.test(readFileSync(`${REPO_ROOT}/${f}`, 'utf8')));
     assert.deepEqual(offenders, [], `these admit a passed join themselves instead of through applyPassedJoin: ${offenders.join(', ')}`);
   });

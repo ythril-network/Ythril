@@ -33,7 +33,7 @@
  * (requires a prior `npm run build` in server/)
  */
 import { describe, it } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -119,7 +119,7 @@ describe('the table itself', () => {
      * "nothing writes them out again". A fifth was outside everything it read.
      */
     const written = new RegExp(`\\[\\s*${[...CHRONO_STATUSES].map(v => `'${v}'`).join('\\s*,\\s*')}`);
-    const files = trackedSources('server/src')
+    const files = trackedSources(SERVER_CODE_ROOTS)
       // Re-anchored for Q-624 (design rev 4 section 2): the tuple is DEFINED in `config/chrono-statuses.ts`, a module that imports nothing, because the `Incoming*`
       // schema leaf must read it and `config/types.ts` reaches the config loader and the store through its imports. `types.ts` re-exports it, so it is checked
       // like every other file: it must not write the list out either.

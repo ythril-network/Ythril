@@ -24,7 +24,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/util/derived-id.ts';
@@ -59,7 +59,7 @@ describe('a derived id is shaped in one place', () => {
   it('no other server source shapes a v4 id from a hash, and both derivations use the module', () => {
     const shaping = [/\|\s*0x40\b/, /'89ab'\[/];
     const found = [];
-    for (const { file, text } of readTrackedSources('server/src')) {
+    for (const { file, text } of readTrackedSources(SERVER_CODE_ROOTS)) {
       if (file === MODULE) continue;
       const code = stripComments(text);
       for (const re of shaping) if (re.test(code)) found.push(`${file}: ${re}`);

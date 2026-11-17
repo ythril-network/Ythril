@@ -12,7 +12,7 @@
  *
  * A file's limit is its FROZEN entry when it has one (the size it already carried), else CEILING.
  */
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isEntryPoint } from '../../scripts/_shared/script-cli.mjs';
@@ -21,7 +21,7 @@ export const ROOT = process.cwd();
 
 /** Source files that carry behaviour. Specs are excluded — a long test file is usually a thorough one. */
 export function sourceFiles() {
-  return trackedSources(['server/src', 'client/src'])
+  return trackedSources([...SERVER_CODE_ROOTS, 'client/src'])
     .filter(f => f.endsWith('.ts') && !f.endsWith('.spec.ts') && !f.endsWith('.d.ts'));
 }
 

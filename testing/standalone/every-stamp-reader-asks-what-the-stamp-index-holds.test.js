@@ -28,7 +28,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { matchesFilter } from '../_shared/filter-matcher.mjs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const carried = await import('../../server/dist/spaces/schema-snapshot-carried.js');
@@ -80,7 +80,7 @@ describe('only the index declaration names STAMP_PRESENT', () => {
   });
 
   it('no stamp reader in server/src filters by STAMP_PRESENT', () => {
-    const files = trackedSources(['server/src']).filter(p => p.endsWith('.ts'));
+    const files = trackedSources(SERVER_CODE_ROOTS).filter(p => p.endsWith('.ts'));
     assert.ok(files.length > 200, `the walk found ${files.length} server sources: the gate would pass on nothing`);
     const offenders = [];
     for (const rel of files) {

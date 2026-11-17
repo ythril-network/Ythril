@@ -39,6 +39,7 @@ import { execFileSync } from 'node:child_process';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openB81cDoor, moduleOrNull } from './_b81c-door.mjs';
 import { build, peerToken, ADMIN_TOKEN } from './_push-door.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -129,7 +130,7 @@ describe('a planted tombstone blocks no create', { skip }, () => {
 
   describe('the derivation', () => {
     it('every caller of applyPeerTombstones in server/src is a door this file names (a floor, so an empty listing cannot pass)', () => {
-      const out = execFileSync('git', ['grep', '-l', '-E', 'applyPeerTombstones\\(', '--', 'server/src'], { encoding: 'utf8', cwd: new URL('../../', import.meta.url) })
+      const out = execFileSync('git', ['grep', '-l', '-E', 'applyPeerTombstones\\(', '--', ...SERVER_CODE_ROOTS], { encoding: 'utf8', cwd: new URL('../../', import.meta.url) })
         .trim().split('\n').map(f => f.replace(/\\/g, '/'));
       const callers = out.filter(f => f !== 'server/src/sync/tombstone-apply.ts');
       assert.ok(callers.length >= 2, `only ${callers.length} caller(s) found: ${callers}`);

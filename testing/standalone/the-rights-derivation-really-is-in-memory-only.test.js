@@ -35,7 +35,7 @@
  * Run: node --test testing/standalone/the-rights-derivation-really-is-in-memory-only.test.js
  */
 import { describe, it } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
@@ -75,7 +75,7 @@ describe('no CommonJS require survives in an ESM package', () => {
      * outside everything this gate looked at while the assertion message went on claiming the directory.
      * `Q-6`, 2026-09-07.
      */
-    const files = trackedSources('server/src');
+    const files = trackedSources(SERVER_CODE_ROOTS);
 
     const offenders = files.filter(f => /\brequire\s*\(/.test(code(f)));
     assert.deepEqual(offenders, [],

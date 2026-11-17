@@ -54,6 +54,7 @@ import { moduleIndex } from './_call-graph.mjs';
 import { recordWrites } from './_record-writes.mjs';
 import { suppressionResolvers, resolverCallPattern } from './_suppression-resolvers.mjs';
 import { embeddableIncomingSchemas } from '../_shared/incoming-sync-schemas.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const { BRAIN_COLLECTIONS, KNOWLEDGE_TYPES, COLLECTION_SUFFIX } = await import('../../server/dist/config/types-knowledge.js');
 
@@ -74,7 +75,7 @@ const QUEUE_FILE = 'server/src/brain/embed-queue.ts';
 
 const src = (p) => stripComments(readFileSync(p, 'utf8'));
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 const RECORDS = recordWrites(INDEX, { collections: BRAIN_COLLECTIONS, floors: { space: 150 }, recordFloor: 50 });
 
 /** Every `writeArrivals(` call in the ingest files, with its arguments; comments blanked so a line is the real line. */

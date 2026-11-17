@@ -34,7 +34,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const MODULE = 'server/src/spaces/unknown-space.ts';
@@ -42,7 +42,7 @@ const REST_WRAPPER = 'server/src/api/write-target-answer.ts';
 /** The file acts' typed refusal, `SpaceRetired`, whose message is the module's sentence (b100 row 2). */
 const FILE_ACT_ANSWERS = 'server/src/files/act-answers.ts';
 
-const sources = readTrackedSources('server/src', { specs: false, untracked: true })
+const sources = readTrackedSources(SERVER_CODE_ROOTS, { specs: false, untracked: true })
   .filter(s => s.file !== MODULE)
   .map(s => ({ file: s.file, code: stripComments(s.text) }));
 

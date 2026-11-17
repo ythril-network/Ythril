@@ -34,7 +34,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { lineOf, parseSource, ts } from '../_shared/syntax-tree.mjs';
 
 const OPTIONS = new Set(['timeoutMS', 'defaultTimeoutMS', 'timeoutMode']);
@@ -146,7 +146,7 @@ describe('clientTimeoutUses (the detector, held on samples)', () => {
 });
 
 describe('no server code uses the driver\'s client-side timeout', () => {
-  const files = trackedSources(['server/src'], { floor: 300, untracked: true });
+  const files = trackedSources(SERVER_CODE_ROOTS, { floor: 300, untracked: true });
 
   it('the scan reads enough to mean something (a floor on the files read)', () => {
     assert.ok(files.length >= 300, `only ${files.length} files under server/src were read: the scan is reading the tree wrongly`);

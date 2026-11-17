@@ -21,7 +21,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { tempInstanceDir, removeInstanceDir, bootInstance, callRoute } from './_vote-round-instance.mjs';
 
@@ -54,7 +54,7 @@ function keysDeep(value, path = '$', out = []) {
 
 describe('the doors are derived from the tree', () => {
   it('every networkView / readNetworkAct caller is one this test drives', () => {
-    const files = trackedSources('server/src', { untracked: true, floor: 100 });
+    const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 });
     const callers = files.filter(f => /(?<![.\w$])(?:networkView|readNetworkAct)\s*\(/.test(stripComments(fs.readFileSync(f, 'utf8')).replace(/export\s+function\s+(?:networkView|readNetworkAct)/g, '')));
     assert.ok(callers.length >= 3, `only ${callers.length} caller file(s) found: ${callers.join(', ')}`);
     const DRIVEN = ['server/src/networks/network-acts.ts', 'server/src/api/networks/crud.ts', 'server/src/mcp/tools/networks.ts', 'server/src/api/invite.ts'];

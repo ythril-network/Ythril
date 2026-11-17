@@ -53,7 +53,7 @@ import assert from 'node:assert/strict';
 import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { balancedFrom, statementFrom } from './_structural-window.mjs';
 
@@ -220,7 +220,7 @@ describe('the latch reader finds each spelling (fixtures are the audit\'s own, s
 });
 
 describe('no code in server/src says "once" with a hand-written latch', () => {
-  const files = trackedSources('server/src', { untracked: true });
+  const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true });
   const read = file => stripComments(readFileSync(join(REPO_ROOT, file), 'utf8'));
   const sources = new Map(files.map(file => [file, read(file)]));
   const all = [...sources].flatMap(([file, src]) => latchesIn(src).map(l => ({ file, src, ...l })));

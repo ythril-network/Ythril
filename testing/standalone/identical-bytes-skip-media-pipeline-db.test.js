@@ -41,7 +41,7 @@ import { readFileSync } from 'node:fs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { UPLOAD_DOORS } from './_byte-door-uploads.mjs';
 import { openDispatchDoor, sha256Of, SETTLED_STATUSES } from './_dispatch-door.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -156,7 +156,7 @@ describe('the writers supply the hash, or the guard is dead code', () => {
 
   it('every call of the dispatcher hands over the hash it has', () => {
     const calls = [];
-    for (const file of trackedSources('server/src', { floor: 200 })) {
+    for (const file of trackedSources(SERVER_CODE_ROOTS, { floor: 200 })) {
       const src = strip(readFileSync(file, 'utf8'));
       for (const m of src.matchAll(/(?<![\w.])dispatchFileProcessing\(/g)) {
         if (/function\s+$/.test(src.slice(0, m.index))) continue; // its own definition

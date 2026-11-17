@@ -47,7 +47,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { snapshotParts, changedParts, RECORD_PARTS } from './_space-snapshot.mjs';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 import { requireInput } from '../_shared/absent-input.mjs';
@@ -195,7 +195,7 @@ const REQUEST_DOORS = Object.entries(DRIVERS).filter(([file]) => file !== SCANNE
  * door runs) minus its definition.
  */
 function mergeDoors() {
-  return readTrackedSources('server/src', { untracked: true, floor: 300 })
+  return readTrackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 300 })
     .filter(({ text }) => /\bmergeEntities\s*\(/.test(stripComments(text).replace(/(?:async\s+)?function\s+mergeEntities\s*\(/g, '')))
     .map(f => f.file)
     .filter(f => f !== 'server/src/brain/merge.ts');

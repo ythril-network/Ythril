@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { ALL_TOOLS } from '../../server/dist/mcp/tools/index.js';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { schemaSpecifierSource } from './_relative-specifier.mjs';
 
 /** What a tool schema's `space` parameter is built from — a fixed stand-in, since the gates read shape, not reach. */
@@ -44,14 +44,14 @@ export function toolValidators({ floor = 60 } = {}) {
  * Schema rendering. `name` is the export name, which is how a route handler refers to it.
  */
 export async function zodValidators({ floor = 70 } = {}) {
-  const files = trackedSources('server/src', { untracked: true, exclude: ['server/src/local-agent-connector/index.ts'] })
+  const files = trackedSources(SERVER_CODE_ROOTS, { untracked: true, exclude: ['server/src/local-agent-connector/index.ts'] })
     // A module that declares a zod schema, or hands on one declared by the schema package (the space-schema bodies and the rule bodies are the
     // package's, and the server modules that held them re-export them under the same names a route refers to).
     // The package's specifier comes from its manifest (the one specifier source), never spelled here; the retired name imports nothing.
     .filter(f => new RegExp(`from ['"](?:zod|${schemaSpecifierSource(['', '/internal'])})['"]`).test(readFileSync(join(REPO_ROOT, f), 'utf8')));
   const out = [];
   for (const file of files) {
-    const dist = join(REPO_ROOT, file.replace(/^server\/src\//, 'server/dist/').replace(/\.ts$/, '.js'));
+    const dist = join(REPO_ROOT, file.replace(/^(server|schema)\/src\//, '$1/dist/').replace(/\.ts$/, '.js'));
     const mod = await import(pathToFileURL(dist).href);
     for (const [name, zod] of Object.entries(mod)) {
       if (!zod || typeof zod !== 'object' || !zod._zod) continue;

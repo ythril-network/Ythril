@@ -30,7 +30,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 let errors, isTransientEmbedError, queue;
@@ -49,7 +49,7 @@ describe('the marker', () => {
   });
 
   it('has exactly one definition in the server sources, and the queue takes it from there', () => {
-    const files = trackedSources('server/src', { floor: 100, untracked: true });
+    const files = trackedSources(SERVER_CODE_ROOTS, { floor: 100, untracked: true });
     const holding = files.filter(f => stripComments(readFileSync(join(REPO_ROOT, f), 'utf8')).includes('embedding process lost'));
     assert.deepEqual(holding, ['server/src/brain/embed-errors.ts'],
       'the marker text is written in more than one place; the queue would stop recognising a crash the day one is edited');

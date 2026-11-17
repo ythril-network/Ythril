@@ -16,8 +16,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
-const SRC = 'server/src';
 
 function sourceFiles(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
@@ -27,7 +27,7 @@ function sourceFiles(dir) {
   });
 }
 
-const files = sourceFiles(SRC);
+const files = SERVER_CODE_ROOTS.flatMap(root => sourceFiles(root));
 const text = new Map(files.map(f => [f, fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n')]));
 const callers = (name) => files.filter(f => !f.endsWith('files/derived-rows.ts') && new RegExp(`\\b${name}\\(`).test(text.get(f)));
 

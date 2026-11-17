@@ -55,7 +55,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { readTrackedSources, REPO_ROOT } from './_sources.mjs';
+import { readTrackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 export const IDENT = 'INSTANCE_WRITTEN_PROPERTY_KEYS';
@@ -259,7 +259,7 @@ export function extractorNames(sources, key) {
 /* ───────────────────────────── the gate, over the real tree ───────────────────────────── */
 
 const FLOOR = 300;
-const sources = readTrackedSources('server/src', { ext: ['.ts'], floor: FLOOR });
+const sources = readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: FLOOR });
 const show = (rows) => rows.map(r => `${r.file}:${r.line}${r.why ? ` (${r.why})` : ''}`).join('\n  ');
 
 describe('the instance-written-keys exemption has one source and no door can pass it', () => {

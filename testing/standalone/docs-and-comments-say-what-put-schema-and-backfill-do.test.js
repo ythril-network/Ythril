@@ -34,7 +34,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const THIS_FILE = 'testing/standalone/docs-and-comments-say-what-put-schema-and-backfill-do.test.js';
 
@@ -89,7 +89,7 @@ export function reindexAsWayBack(file, text) {
 
 // ── the repository ────────────────────────────────────────────────────────────────────────────────────────────────
 const DOCS = trackedSources('docs', { ext: ['.md'], floor: 20 });
-const SOURCES = trackedSources(['server/src', 'client/src', 'schema/src'], { ext: ['.ts'], floor: 300 });
+const SOURCES = trackedSources([...SERVER_CODE_ROOTS, 'client/src'], { ext: ['.ts'], floor: 300 });
 const TESTS = trackedSources('testing', { ext: ['.js', '.mjs'], floor: 100 }).filter(f => f !== THIS_FILE);
 const text = (f) => readFileSync(join(REPO_ROOT, f), 'utf8');
 

@@ -25,7 +25,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { withoutBodyOf } from './_structural-window.mjs';
 
@@ -72,7 +72,7 @@ describe('a stale text is asked in one place', () => {
 
   it('no other module compares a stored matchedText with === or !==', () => {
     const copies = [];
-    for (const f of trackedSources('server/src', { floor: 200 })) {
+    for (const f of trackedSources(SERVER_CODE_ROOTS, { floor: 200 })) {
       if (f === HOME) continue;
       let src = stripComments(readFileSync(f, 'utf8'));
       if (f === CLASSIFIER_FILE) src = withoutBodyOf(src, CLASSIFIER).rest;

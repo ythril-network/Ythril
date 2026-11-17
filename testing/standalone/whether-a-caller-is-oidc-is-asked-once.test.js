@@ -23,13 +23,13 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const TEST_HOME = 'server/src/auth/oidc-caller.ts';
 const AUDIT_HOME = 'server/src/audit/middleware.ts';
 
-const sources = readTrackedSources('server/src', { specs: false, untracked: true }).map(s => ({ file: s.file, code: stripComments(s.text) }));
+const sources = readTrackedSources(SERVER_CODE_ROOTS, { specs: false, untracked: true }).map(s => ({ file: s.file, code: stripComments(s.text) }));
 
 describe('whether a caller is OIDC is asked once (Q-531)', () => {
   it('the kind of caller is tested by isOidc alone', () => {

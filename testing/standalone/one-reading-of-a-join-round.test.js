@@ -24,7 +24,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { parseSource, ts, walkEveryNode } from '../_shared/syntax-tree.mjs';
 import { outermostFunctionAt } from './_source-helpers.mjs';
 
@@ -73,7 +73,7 @@ describe('the predicates fire on a fixture first', () => {
 });
 
 describe('a join round is read about a peer in one place', () => {
-  const sources = trackedSources('server/src', { untracked: true, floor: 100 }).map(file => ({ file, text: readFileSync(file, 'utf8') }));
+  const sources = trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).map(file => ({ file, text: readFileSync(file, 'utf8') }));
   const readers = sources.flatMap(s => readersIn(s.file, s.text));
   const OWN = 'server/src/networks/round-state.ts::joinRoundOf';
 

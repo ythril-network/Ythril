@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BUILD_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'server', 'package.json'), 'utf8')).version;
@@ -43,7 +43,7 @@ function compare(a, b) {
 }
 
 describe('a peer-version floor is not above this build', () => {
-  const sources = readTrackedSources('server/src', { untracked: true });
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, { untracked: true });
 
   it('read the server tree and found the floors', () => {
     assert.ok(sources.length >= 150, `only ${sources.length} server sources were read: the listing is broken`);

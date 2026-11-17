@@ -38,7 +38,7 @@
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { KNOWLEDGE_TYPES } from '../../server/dist/config/types-knowledge.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -59,7 +59,7 @@ let merge;
  * shared helper is now the one place that has to know it.
  */
 function sourceFiles() {
-  return trackedSources('server/src', { untracked: true });
+  return trackedSources(SERVER_CODE_ROOTS, { untracked: true });
 }
 
 /**

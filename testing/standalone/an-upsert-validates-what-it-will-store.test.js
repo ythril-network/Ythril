@@ -26,7 +26,7 @@
  * (requires a prior `npm run build` in server/)
  */
 import { describe, it } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripComments } from './_strip-comments.mjs';
@@ -143,7 +143,7 @@ describe('the doors reach the WRITER, and the writer holds the rule', () => {
     const OWNS_IT = [
       'server/src/brain/write-validation.ts', 'server/src/brain/chrono.ts', 'server/src/brain/write-plan/plan-chrono.ts', 'server/src/brain/fork-keep.ts',
     ];
-    const files = trackedSources('server/src', { exclude: OWNS_IT });
+    const files = trackedSources(SERVER_CODE_ROOTS, { exclude: OWNS_IT });
 
     const copies = files.filter(f => /classifyChrono\w*\(/.test(stripComments(readFileSync(f, 'utf8'))));
     assert.deepEqual(copies, [],

@@ -29,7 +29,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const skip = await mongoSkipReason();
@@ -132,7 +132,7 @@ describe('a kind read from a stored record is looked up through one guarded func
 
   it('no file outside the validated write door calls collectionForRefKind', async () => {
     const { readFileSync } = await import('node:fs');
-    const callers = trackedSources('server/src', { floor: 200 })
+    const callers = trackedSources(SERVER_CODE_ROOTS, { floor: 200 })
       .filter(f => !VALIDATED.has(f) && CALLS_TYPED_LOOKUP.test(stripComments(readFileSync(f, 'utf8'))));
     assert.deepEqual(callers, [], 'a caller names a collection from a stored kind with the lookup that throws on an unknown one');
   });

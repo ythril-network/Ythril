@@ -44,7 +44,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { moduleIndex, routeHandlerRoots } from './_call-graph.mjs';
 import { mountedRoutes } from './_routes.mjs';
-import { REPO_ROOT } from './_sources.mjs';
+import { REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const LIVE_MODULE = 'server/src/files/live-file-row.ts';
@@ -175,7 +175,7 @@ const EXEMPT = {
   'server/src/spaces/schema-validate-door.ts:walkStored': 'the stored-data schema validation walks every record of each member collection by `_id`, files included, because a flagged row is stored data the schema still governs; its `progress.total` counts the whole collection, and a predicate here would make the walk answer for fewer rows than it says it checked',
 };
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 for (const r of mountedRoutes()) routeHandlerRoots(INDEX, r);
 
 /** How a body NAMES a files collection. */

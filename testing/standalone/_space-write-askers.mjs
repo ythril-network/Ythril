@@ -18,7 +18,7 @@
  * - **A floor.** An empty derivation passes every loop written over it, so callers assert how many askers they found.
  */
 import { readFileSync } from 'node:fs';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { parseSource, walkEveryNode, lineOf, ts } from '../_shared/syntax-tree.mjs';
 
 /**
@@ -49,7 +49,7 @@ export function nameOfFunction(fn) {
  */
 export function askingFunctions() {
   const out = [];
-  for (const file of trackedSources(['server/src'], { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'))) {
+  for (const file of trackedSources(SERVER_CODE_ROOTS, { untracked: true, floor: 100 }).filter(f => f.endsWith('.ts'))) {
     const sf = parseSource(file, readFileSync(`${REPO_ROOT}/${file}`, 'utf8'));
     const byFn = new Map();
     walkEveryNode(sf, (n) => {

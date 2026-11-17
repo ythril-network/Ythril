@@ -29,10 +29,10 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
-const DIRS = ['server/src', 'schema/src', 'client/src'];
+const DIRS = [...SERVER_CODE_ROOTS, 'client/src'];
 const EXT = ['.ts', '.js', '.mjs', '.cjs'];
 const FLOOR = 1000;
 

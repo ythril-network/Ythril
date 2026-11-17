@@ -27,7 +27,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
 const PAGES = [
@@ -47,7 +47,7 @@ function answeredCodes(files) {
 const namedIn = (text) => new Set(text.match(/\bMFA_[A-Z_]+\b/g) ?? []);
 
 describe('the MFA error codes the guide names', () => {
-  const codes = answeredCodes(trackedSources(['server/src'], { floor: 200, untracked: true }));
+  const codes = answeredCodes(trackedSources(SERVER_CODE_ROOTS, { floor: 200, untracked: true }));
 
   it('the server answers MFA_REQUIRED, MFA_INVALID and MFA_LOCKED (the scan holds something)', () => {
     for (const expected of ['MFA_REQUIRED', 'MFA_INVALID', 'MFA_LOCKED']) {

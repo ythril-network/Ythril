@@ -38,7 +38,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 import { bracketsOpenAt, balancedFrom, lineBefore } from './_structural-window.mjs';
 import { topLevelFunctionSpans, topLevelObjects } from './_call-graph.mjs';
@@ -220,7 +220,7 @@ function scan(file, code) {
   return out;
 }
 
-const SOURCES = readTrackedSources('server/src', { floor: 100, specs: false, untracked: true })
+const SOURCES = readTrackedSources(SERVER_CODE_ROOTS, { floor: 100, specs: false, untracked: true })
   .map(s => ({ file: s.file, code: blankComments(s.text) }));
 const FOUND = SOURCES.flatMap(s => scan(s.file, s.code));
 const READS = FOUND.filter(f => f.kind !== 'write');

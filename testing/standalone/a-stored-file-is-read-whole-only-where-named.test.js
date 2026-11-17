@@ -45,7 +45,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { trackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { ts, parseSource, lineOf } from '../_shared/syntax-tree.mjs';
 
 /** The wrappers of `files/files.ts` that read a stored file whole, by the name a caller imports. */
@@ -136,7 +136,7 @@ export function wholeReadSites(file, text) {
   return sites;
 }
 
-const SOURCES = trackedSources('server/src', { floor: 300 });
+const SOURCES = trackedSources(SERVER_CODE_ROOTS, { floor: 300 });
 const sweep = SOURCES.flatMap(file => wholeReadSites(file, readFileSync(join(REPO_ROOT, file), 'utf8')));
 const named = new Map(NAMED.map(n => [n.key, n.why]));
 

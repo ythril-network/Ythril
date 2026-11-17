@@ -37,6 +37,7 @@ import { openPushDoor, build } from './_push-door.mjs';
 import { moduleIndex, routeHandlerRoots, walkFrom } from './_call-graph.mjs';
 import { mountedRoutes } from './_routes.mjs';
 import { withCounterCeiling } from './_write-faults.mjs';
+import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -46,7 +47,7 @@ const TOP = 500;
 /** The counter's one raiser: the function no push door may reach. */
 const RAISE = 'server/src/util/version-stamp.ts:raiseVersionTo';
 
-const INDEX = moduleIndex('server/src');
+const INDEX = moduleIndex(SERVER_CODE_ROOTS);
 /** The two writers of what a peer delivers: a page of records (`sync/arrivals.ts`) and a page of tombstones (`sync/tombstone-apply.ts`). */
 const ARRIVAL_WRITERS = ['server/src/sync/arrivals.ts:writeArrivals', 'server/src/sync/tombstone-apply.ts:applyPeerTombstones'];
 /** The push doors: the POST routes of the sync surface whose handler reaches an arrival writer (closures followed). */

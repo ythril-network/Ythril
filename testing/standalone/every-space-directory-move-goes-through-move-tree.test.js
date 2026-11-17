@@ -36,7 +36,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO_ROOT, trackedSources } from './_sources.mjs';
+import { REPO_ROOT, trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const SRC_FLOOR = 300;
@@ -73,7 +73,7 @@ function fsRenamesOf(file) {
 }
 
 describe('every file-system rename is moveTree or a named exemption', () => {
-  const sources = trackedSources('server/src', { floor: SRC_FLOOR });
+  const sources = trackedSources(SERVER_CODE_ROOTS, { floor: SRC_FLOOR });
 
   it('no module under server/src renames a path through the file system outside moveTree and the named exemptions', () => {
     const found = [];

@@ -29,7 +29,7 @@
  * Run: node --test testing/standalone/the-legacy-suppression-spelling-is-gone.test.js
  */
 import { describe, it, before } from 'node:test';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { incomingSchemas } from '../_shared/incoming-sync-schemas.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -39,7 +39,7 @@ const LEGACY = 'excludeFromVectorSearch';
 
 /** Tracked server sources only, comments stripped — a docblock explaining the removal is not a use. */
 function serverSources() {
-  return trackedSources('server/src');
+  return trackedSources(SERVER_CODE_ROOTS);
 }
 
 describe('the legacy spelling is gone from the server', () => {
