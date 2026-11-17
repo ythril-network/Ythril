@@ -241,6 +241,69 @@ const sameFile = (before) => (r) => {
   assert.equal(r.value?.text, before, 'the record on disk changed');
 };
 
+/**
+ * `Assert-WipeMayGoAhead` (Q-577): the one place the wipe's refusals are asked, so `machine-free -Wipe` can ask them all before it
+ * removes the test stack or prunes (a prune cannot be undone) and `docker-wipe` asks the very same before it stops anything.
+ * The data guard, a pending record nobody said what to do with, the room the rebuild needs and the registries it pulls from.
+ * `-Reachable` and `-DiskSpace` are the seams for the two things the machine answers: a TCP probe of `<host> <port>`, and
+ * `{ Drive, Free, Size }` of the data disk's drive. It returns `{ Found, Record, Hosts }` and writes nothing.
+ */
+function wipeAskCases() {
+  const REACH_ALL = `{ param($h, $p) [void]$global:Probes.Add("\${h}:$p"); $true }`;
+  const ROOMY = `{ param($path) [pscustomobject]@{ Drive = 'E:'; Free = 500GB; Size = 40GB } }`;
+  const ask = (extra = '') => `Assert-WipeMayGoAhead -RepoRoot '${REPO}' -RecordPath $p -DiskPath 'E:\\docker_data.vhdx' -Docker $Docker -Git $Git ${extra}`;
+  const running = (configs) => ({ files: scenario({ running: owner(['ythril', 'ythril-mongo']), configs: configs ?? { ythril: ownerConfig() } }) });
+  const refusal = (...names) => (r) => {
+    assert.ok(r.error, `the question returned instead of refusing: ${JSON.stringify(r.value)}`);
+    assert.doesNotMatch(r.error, /is not recognized|ObjectNotFound|could not find the command/i, `the refusal is a missing command: ${r.error}`);
+    for (const n of names) assert.ok(r.error.includes(n), `the refusal does not name ${n}: ${r.error}`);
+  };
+  return [
+    { name: 'Assert-WipeMayGoAhead passes for a running instance with room and reachable registries, and names the instance',
+      ...running(),
+      body: `$p = Join-Path $fx '${STATE}'; $V = ${ask(`-Reachable ${REACH_ALL} -DiskSpace ${ROOMY}`)}`,
+      expect: (r) => { assert.equal(r.error, null, `it refused: ${r.error}`); assert.equal(r.value.Record.project, 'ythril'); assert.ok(r.value.Found, 'no running instance reported'); } },
+    { name: 'Assert-WipeMayGoAhead probes the registry, and the npm registry too when a recorded service is built',
+      ...running(),
+      body: `$p = Join-Path $fx '${STATE}'; $null = ${ask(`-Reachable ${REACH_ALL} -DiskSpace ${ROOMY}`)}; $V = @($global:Probes)`,
+      expect: (r) => { assert.equal(r.error, null, `it refused: ${r.error}`); assert.deepEqual(r.value, ['registry-1.docker.io:443', 'registry.npmjs.org:443']); } },
+    { name: 'Assert-WipeMayGoAhead refuses a pending record nobody said what to do with, naming its commit, and probes nothing',
+      files: { ...running().files, [STATE]: storedRecord('pending', OLD) },
+      body: `${MUST_EXIST('Assert-WipeMayGoAhead')} $p = Join-Path $fx '${STATE}'; try { $null = ${ask(`-Reachable ${REACH_ALL} -DiskSpace ${ROOMY}`)}; $err2 = $null } catch { $err2 = $_.Exception.Message }; $V = @{ msg = $err2; probes = @($global:Probes).Count; text = [IO.File]::ReadAllText($p) }`,
+      expect: (r) => {
+        assert.equal(r.error, null, `the case itself failed: ${r.error}`);
+        assert.ok(r.value.msg, 'a pending record was passed over without -UseRecord or -DiscardRecord');
+        assert.ok(r.value.msg.includes(OLD.slice(0, 7)) && r.value.msg.includes('-UseRecord'), `the refusal does not name the commit and the way out: ${r.value.msg}`);
+        assert.equal(r.value.probes, 0, 'a registry was probed before the refusal');
+        assert.equal(r.value.text, storedRecord('pending', OLD), 'the question wrote the record');
+      } },
+    { name: 'Assert-WipeMayGoAhead -UseRecord accepts the pending record and answers it, leaving the file as it was',
+      files: { ...running().files, [STATE]: storedRecord('pending', OLD) },
+      body: `$p = Join-Path $fx '${STATE}'; $V = @{ rec = ${ask(`-UseRecord -Reachable ${REACH_ALL} -DiskSpace ${ROOMY}`)}; text = [IO.File]::ReadAllText($p) }`,
+      expect: (r) => { assert.equal(r.error, null, `it refused: ${r.error}`); assert.equal(r.value.rec.Record.commit, OLD); assert.equal(r.value.text, storedRecord('pending', OLD)); } },
+    { name: 'Assert-WipeMayGoAhead -DiscardRecord accepts the pending record and answers what runs now',
+      files: { ...running().files, [STATE]: storedRecord('pending', OLD) },
+      body: `$p = Join-Path $fx '${STATE}'; $V = ${ask(`-DiscardRecord -Reachable ${REACH_ALL} -DiskSpace ${ROOMY}`)}`,
+      expect: (r) => { assert.equal(r.error, null, `it refused: ${r.error}`); assert.equal(r.value.Record.commit, HEAD); } },
+    { name: 'Assert-WipeMayGoAhead refuses a registry that does not answer, naming the host and that nothing was changed',
+      ...running(),
+      body: `${MUST_EXIST('Assert-WipeMayGoAhead')} $p = Join-Path $fx '${STATE}'; ${ask(`-Reachable { param($h, $p2) $h -ne 'registry-1.docker.io' } -DiskSpace ${ROOMY}`)} | Out-Null`,
+      expect: refusal('registry-1.docker.io', 'Nothing was changed') },
+    { name: 'Assert-WipeMayGoAhead refuses when the drive would not hold the rebuild, naming the drive',
+      ...running(),
+      body: `${MUST_EXIST('Assert-WipeMayGoAhead')} $global:ImageSize = 50GB; $p = Join-Path $fx '${STATE}'; ${ask(`-Reachable ${REACH_ALL} -DiskSpace { param($path) [pscustomobject]@{ Drive = 'E:'; Free = 1GB; Size = 1GB } }`)} | Out-Null`,
+      expect: refusal('E:', 'free') },
+    { name: 'Assert-WipeMayGoAhead keeps the data guard: another project that runs is refused, naming it',
+      files: scenario({ running: [...owner(['ythril', 'ythril-mongo']), container('oth0', 'notes', 'D:\\work\\notes', ['D:\\work\\notes\\compose.yml'], 'app')], configs: { ythril: ownerConfig() } }),
+      body: `${MUST_EXIST('Assert-WipeMayGoAhead')} $p = Join-Path $fx '${STATE}'; ${ask(`-Reachable ${REACH_ALL} -DiskSpace ${ROOMY}`)} | Out-Null`,
+      expect: refusal('notes') },
+    { name: 'Assert-WipeMayGoAhead with nothing running and nothing pending answers no record and probes nothing',
+      files: scenario({ running: [], configs: { ythril: ownerConfig() } }),
+      body: `$p = Join-Path $fx '${STATE}'; $V = @{ rec = (${ask(`-Reachable ${REACH_ALL} -DiskSpace ${ROOMY}`)}).Record; probes = @($global:Probes).Count }`,
+      expect: (r) => { assert.equal(r.error, null, `it refused: ${r.error}`); assert.equal(r.value.rec, null); assert.equal(r.value.probes, 0); } },
+  ];
+}
+
 const CASES = [
   // pure
   { name: 'ConvertTo-ComparablePath folds case and the separator, and drops a trailing slash',
@@ -561,6 +624,8 @@ const CASES = [
   { name: 'Wait-Engine returns once the engine answers',
     body: `$global:InfoFailures = 2; Wait-Engine -Docker $Docker -TimeoutSeconds 30 -IntervalSeconds 0 | Out-Null; $V = $global:InfoCalls`,
     expect: (r) => { assert.equal(r.error, null, `Wait-Engine threw: ${r.error}`); assert.equal(r.value, 3, `docker info was asked ${r.value} times`); } },
+  // Q-577: every refusal of the wipe, asked in one place, before anything is removed.
+  ...wipeAskCases(),
   { name: 'Wait-Engine throws when the engine has not answered by the timeout',
     body: `${MUST_EXIST('Wait-Engine')} $global:InfoFailures = 1000000; try { Wait-Engine -Docker $Docker -TimeoutSeconds 1 -IntervalSeconds 0 | Out-Null; $V = 'returned' } catch { $V = 'threw' }; $global:Calls.Clear()`,
     expect: (r) => { assert.equal(r.error, null, `the case itself failed: ${r.error}`); assert.equal(r.value, 'threw'); } },
@@ -602,6 +667,8 @@ function New-DockerStub([string]$fx) {
         })
       }
       'image' {
+        # What the recorded services' images weigh (Measure-OwnerImages asks for the size alone).
+        if ($a -contains '{{.Size}}') { return "$($global:ImageSize)" }
         $imgs = [IO.File]::ReadAllText((Join-Path $fx 'images.json')) | ConvertFrom-Json
         $known = @($imgs.PSObject.Properties | ForEach-Object { $_.Name })
         $name = @($a | Where-Object { $known -contains $_ }) | Select-Object -First 1
@@ -625,6 +692,7 @@ $GitStub = {
 const caseScript = (id, dir, body) => `
 $global:Calls = New-Object System.Collections.ArrayList
 $global:InfoCalls = 0; $global:InfoFailures = 0; $global:DockerFailOn = $null
+$global:ImageSize = 0; $global:Probes = New-Object System.Collections.ArrayList
 $fx = ${q(dir)}
 $Docker = New-DockerStub $fx
 $Git = $GitStub

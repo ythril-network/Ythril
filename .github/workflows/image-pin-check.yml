@@ -43,12 +43,20 @@ jobs:
           # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every later step.
           persist-credentials: false
 
+      - name: Pull the BuildKit image (retried)
+        # The builder below is a BuildKit container pulled from Docker Hub: one timeout of that pull is not a pin that cannot be
+        # resolved, and must not fail this check (Q-145). The pins themselves are checked below, unretried: a pin that does not
+        # resolve fails at once.
+        run: node scripts/retry-on-registry-failure.mjs -- docker pull --quiet moby/buildkit:buildx-stable-1
+
       - name: Set up Docker Buildx
         # `docker buildx imagetools inspect` resolves a remote manifest via the registry's
         # normal anonymous token flow and never pulls layers — the faithful, registry-agnostic
         # equivalent of "can `docker pull` see this?" for Docker Hub, quay, and the
         # downloads.unstructured.io mirror alike.
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:buildx-stable-1
 
       - name: Check container image manifests
         run: |

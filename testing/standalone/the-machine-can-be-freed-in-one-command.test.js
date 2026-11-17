@@ -116,17 +116,57 @@ describe('docker-wipe.ps1 records the owner\'s instance before the delete and br
   });
 });
 
-describe('machine-free -Wipe asks the wipe\'s refusal before it removes anything', () => {
-  it('the data guard runs before the test stack is removed and before the prune, and only with -Wipe', () => {
+describe('machine-free -Wipe asks every refusal of the wipe before it removes anything (Q-577)', () => {
+  // The refusals of docker-wipe.ps1, by what each reads: the data guard (Get-OwnerInstance), a pending record nobody said what to do
+  // with (Resolve-PendingRecord), the room the rebuild needs and the registries it pulls from (Assert-WipeMayGoAhead's own checks).
+  // They live in ONE function of the module, which both scripts call, so a refusal added to the wipe is asked by machine-free too.
+  const ASK = /\bAssert-WipeMayGoAhead\b/;
+
+  it('the one question is asked before the test stack is removed and before the prune, and only with -Wipe', () => {
     const src = code();
-    const guard = at(src, /\bGet-OwnerInstance\b/);
+    const guard = at(src, ASK);
     const down = at(src, /docker compose[^\n]*\bdown\b/);
     const prune = at(src, /docker system prune/);
-    assert.ok(guard > -1, `${SCRIPT} never asks Get-OwnerInstance: a refusing wipe is found out after the test stack is gone and everything is pruned`);
+    assert.ok(guard > -1, `${SCRIPT} never asks Assert-WipeMayGoAhead: a refusing wipe is found out after the test stack is gone and everything is pruned`);
     assert.ok(down > -1 && prune > -1, `${SCRIPT} no longer removes the test stack or prunes`);
     assert.ok(guard < down, `${SCRIPT} removes the test stack before it asks whether the wipe may go ahead`);
     assert.ok(guard < prune, `${SCRIPT} prunes before it asks whether the wipe may go ahead`);
     assert.match(src.slice(Math.max(0, src.lastIndexOf('if (', guard)), guard), /\$Wipe\b/, `${SCRIPT} asks the wipe's refusal without -Wipe`);
+  });
+
+  it('it passes the wipe\'s own switches, so a pending record the owner already decided about is not refused again', () => {
+    const call = /Assert-WipeMayGoAhead[^\n]*/.exec(code())?.[0] ?? '';
+    for (const sw of ['UseRecord', 'DiscardRecord']) assert.match(call, new RegExp(`-${sw}:\\$${sw}\\b`), `${SCRIPT} does not pass -${sw} to the question`);
+  });
+
+  it('the question holds every refusal the wipe has: the data guard, the pending record, the room and the registries', () => {
+    const body = /function Assert-WipeMayGoAhead\b[\s\S]*?\n}\r?\n/.exec(codeOf(OWNER))?.[0] ?? '';
+    assert.ok(body, `${OWNER} has no Assert-WipeMayGoAhead`);
+    for (const [what, re] of [['the data guard', /\bGet-OwnerInstance\b/], ['the pending record', /\bResolve-PendingRecord\b/],
+      ['the free space', /\bMeasure-OwnerImages\b/], ['the registries', /\$Reachable\b/]]) {
+      assert.match(body, re, `Assert-WipeMayGoAhead does not ask ${what}`);
+    }
+  });
+
+  it('docker-wipe.ps1 asks the same question before it records, stops, quits Docker or deletes, and keeps no refusal of its own after', () => {
+    const src = codeOf(WIPE);
+    const ask = at(src, ASK);
+    assert.ok(ask > -1, `${WIPE} does not ask Assert-WipeMayGoAhead`);
+    for (const [what, re] of [['records the instance', /\bSave-OwnerInstance\b/], ['stops the instance', /\bStop-OwnerInstance\b/],
+      ['quits Docker Desktop', /\bStop-DockerDesktop\b/], ['deletes the disk', /Remove-Item[^\n]*\$disk/]]) {
+      const pos = at(src, re);
+      assert.ok(pos > -1, `${WIPE} no longer ${what}`);
+      assert.ok(ask < pos, `${WIPE} ${what} before it asks whether the wipe may go ahead`);
+    }
+    assert.doesNotMatch(src, /\bTest-Reachable\b/, `${WIPE} still probes a registry itself: the registries are a refusal of the question`);
+    assert.doesNotMatch(src, /\bMeasure-OwnerImages\b/, `${WIPE} still measures the room itself: the room is a refusal of the question`);
+  });
+
+  it('the header names the refusals asked first, not only the data guard', () => {
+    const h = headerOf(SCRIPT);
+    for (const [what, re] of [['the pending record', /pending record/i], ['the registries', /registr/i], ['the room', /\b(room|space|free)\b/i]]) {
+      assert.match(h, re, `${SCRIPT}'s header does not say ${what} is asked before the prune`);
+    }
   });
 });
 
@@ -152,6 +192,32 @@ describe('every probe of the engine is bounded, and the guard says it needs the 
     for (const file of [WIPE, SCRIPT, OWNER]) {
       assert.doesNotMatch(readFileSync(file, 'utf8'), /\blabell?ed disposable/i, `${file} still says a volume is labelled disposable`);
     }
+  });
+});
+
+describe('the wipe guide names what the guard cannot see, and the engine it needs (Q-577)', () => {
+  // The guard reads this compose project's labelled volumes and the volumes a running service mounts. Three things sit outside its
+  // reach, and two versions are its floor; the guide's wipe section says each, so nobody reads "it checked" as "nothing else is lost".
+  const section = () => {
+    const text = readFileSync('docs/workstation-mode-guide.md', 'utf8').replace(/\r\n/g, '\n');
+    const start = text.indexOf("### Wiping Docker's disk");
+    assert.ok(start > -1, 'the workstation guide has no wipe section');
+    const next = text.indexOf('\n---', start);
+    return text.slice(start, next < 0 ? undefined : next).replace(/\s+/g, ' ');
+  };
+
+  it('names the volumes the guard does not check: external ones, and a project started under another name', () => {
+    const s = section();
+    assert.match(s, /external volumes?/i, 'the wipe section does not name external volumes as unchecked');
+    assert.match(s, /another project name/,'the wipe section does not name a project started under another name as unchecked');
+    assert.match(s, /not checked[^.]*external|external[^.]*not checked/i, 'external volumes are named but not said to be unchecked');
+  });
+
+  it('names the version floor, and says an older engine refuses rather than passes', () => {
+    const s = section();
+    assert.match(s, /Docker 23/, 'the wipe section does not name the Docker 23 floor of `docker volume ls --format json`');
+    assert.match(s, /compose[^.]*(project )?name/i, 'the wipe section does not name the compose that reports the project name');
+    assert.match(s, /refuses[^.]*(older|too old|below)|(older|too old|below)[^.]*refuses/i, 'the wipe section does not say an older engine or compose refuses');
   });
 });
 
