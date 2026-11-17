@@ -1,6 +1,6 @@
 import { Injectable, signal, computed } from '@angular/core';
 import {
-  Fact, Entity, Edge, ChronoEntry, FileMeta, SpaceMetaResponse, PropertySchema,
+  Fact, Entity, Edge, ChronoEntry, SpaceMetaResponse, PropertySchema,
   KnowledgeType, ChronoType, ChronoStatus,
 } from '../../core/api.types';
 
@@ -37,7 +37,6 @@ export class BrainStore {
   entities = signal<Entity[]>([]);
   edges = signal<Edge[]>([]);
   chrono = signal<ChronoEntry[]>([]);
-  fileMetas = signal<FileMeta[]>([]);
   // Settings tab (schema only — UI lives in Admin → Spaces)
   spaceMeta = signal<SpaceMetaResponse | null>(null);
   /** Live-update tick (F12): the shell bumps this when a brain-change SSE event lands for the active

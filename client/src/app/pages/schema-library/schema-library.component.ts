@@ -932,12 +932,6 @@ export class SchemaLibraryComponent implements OnInit {
 
   // ── Name slugify ───────────────────────────────────────────────────────────
 
-  slugifyName(): void {
-    if (!this.editingName()) {
-      this.form.name = this.form.name.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 200);
-    }
-  }
-
   autoSlugFromTypeName(val: string): void {
     this.form.typeName = val;
     if (!this.editingName()) {
@@ -990,12 +984,6 @@ export class SchemaLibraryComponent implements OnInit {
         this.dialogError.set(refusalText(this.transloco, err, 'schemaLib.error.saveFailed'));
       },
     });
-  }
-
-  deleteEntry(name: string): void {
-    // Legacy inline confirm path — now superseded by initiateDelete().
-    // Kept for safety; should not be reachable from current template.
-    this._doDelete(name);
   }
 
   // ── Publish toggle ────────────────────────────────────────────────────────

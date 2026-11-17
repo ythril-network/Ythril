@@ -7,6 +7,8 @@ import { SpaceSettingsState } from './space-settings-state.service';
 import { PluralText } from '../../core/plural-text.service';
 import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
+/** The code of Angular's RuntimeError for a required input read before it is bound (NG0950). */
+const REQUIRED_INPUT_UNSET = -950;
 type Clash = SchemaLayersView['clashes'][number];
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
 
@@ -126,11 +128,26 @@ export class SpaceSchemaLayersComponent {
     // A moved network not yet saved; `show()` (after a load or a save) re-takes the order and clears the flag.
     holdUnsavedEdits(() => this.dirty());
     effect(() => {
-      this.spaceId();
+      if (!this.spaceIdIsBound()) return;
       // The Schema tab asks for a reload after it proposed something.
       this.shared?.layersRefresh();
       untracked(() => this.load());
     });
+  }
+
+  /**
+   * Whether the template has bound `spaceId` yet. An effect is scheduled the moment the component is created, and the scheduler's next pass can run it before the
+   * binding (Angular's NG0950, a required input read before it is set; the client suite failed at random under load, Q-508). The read still registers the dependency
+   * before it throws, so the effect runs again once the input is bound.
+   */
+  private spaceIdIsBound(): boolean {
+    try {
+      this.spaceId();
+      return true;
+    } catch (e) {
+      if ((e as { code?: unknown }).code === REQUIRED_INPUT_UNSET) return false;
+      throw e;
+    }
   }
 
   /** Load the layers (again). A failure is said, with a retry; it no longer hides the panel. */

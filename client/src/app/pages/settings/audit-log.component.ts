@@ -712,14 +712,6 @@ export class AuditLogComponent implements OnInit, OnDestroy {
     });
   }
 
-  toggleServerLogStream(): void {
-    if (this.serverLogStreaming()) {
-      this.stopServerLogStream();
-    } else {
-      this.startServerLogStream();
-    }
-  }
-
   private startServerLogStream(): void {
     // First load existing lines, then start the SSE stream. EventSource can't send an Authorization
     // header and a raw token in the URL leaks into logs/history, so mint a single-use ticket first, then

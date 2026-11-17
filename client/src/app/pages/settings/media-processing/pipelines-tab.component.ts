@@ -401,9 +401,6 @@ export class PipelinesTabComponent {
     return PipelinesTabComponent.RUNS[cls]?.[resolved] ?? [];
   }
 
-  /** True when this class runs nothing at all — the whole card reads as inert. */
-  mediaOff(cls: string): boolean { return this.runsAt(cls).length === 0; }
-
   /** Drawn as not-running: the class is off, or this rung skips the step. */
   mediaStepDim(cls: string, key: string): boolean { return !this.runsAt(cls).includes(key); }
 

@@ -218,10 +218,6 @@ export class SchemaApi {
     return this.http.get<{ entries: SchemaLibraryEntry[]; usageCounts?: Record<string, number> }>('/api/schema-library');
   }
 
-  getSchemaLibraryEntry(name: string): Observable<{ entry: SchemaLibraryEntry }> {
-    return this.http.get<{ entry: SchemaLibraryEntry }>(`/api/schema-library/${encodeURIComponent(name)}`);
-  }
-
   createSchemaLibraryEntry(body: Omit<SchemaLibraryEntry, 'createdAt' | 'updatedAt'>): Observable<{ entry: SchemaLibraryEntry }> {
     return this.http.post<{ entry: SchemaLibraryEntry }>('/api/schema-library', body);
   }
@@ -240,15 +236,6 @@ export class SchemaApi {
 
   publishSchemaLibraryEntry(name: string, published: boolean): Observable<{ entry: SchemaLibraryEntry }> {
     return this.http.patch<{ entry: SchemaLibraryEntry }>(`/api/schema-library/${encodeURIComponent(name)}/publish`, { published });
-  }
-
-  getPublicSchemaLibrary(): Observable<{ entries: ForeignCatalogEntry[] }> {
-    return this.http.get<{ entries: ForeignCatalogEntry[] }>('/api/schema-library/public');
-  }
-
-  /** List all distinct schema group names and their entry counts. */
-  listSchemaLibraryGroups(): Observable<{ groups: { name: string; count: number }[] }> {
-    return this.http.get<{ groups: { name: string; count: number }[] }>('/api/schema-library/groups');
   }
 
   /** Export a space's full typeSchemas into the library as a named group. */

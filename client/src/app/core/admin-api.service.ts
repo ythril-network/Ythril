@@ -146,12 +146,6 @@ export class AdminApi {
     return this.http.put<{ ok: boolean; config: BackupConfigData }>('/api/admin/data/backup-config', config);
   }
 
-  browseDirs(dirPath: string): Observable<{ path: string; dirs: string[] }> {
-    return this.http.get<{ path: string; dirs: string[] }>('/api/admin/data/browse-dirs', {
-      params: { path: dirPath },
-    });
-  }
-
   // ── Webhooks (C1) ─────────────────────────────────────────────────────────
   // All routes require admin + MFA server-side; the mfa.interceptor handles the challenge/retry.
 

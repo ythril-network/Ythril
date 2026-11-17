@@ -1,4 +1,4 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { Subject } from 'rxjs';
 
 export interface MfaChallenge {
@@ -11,7 +11,7 @@ export interface MfaChallenge {
  * dialog).
  *
  * The interceptor calls `prompt()` and awaits the Promise.
- * The modal calls `respond()` when the user submits or cancels.
+ * The modal answers the Promise through the `resolve` function the challenge carries.
  *
  * Session cache: after a successful MFA check the code + timestamp are cached
  * for MFA_WINDOW_MS.  Within that window the interceptor re-uses the cached
@@ -21,9 +21,6 @@ export interface MfaChallenge {
 export class MfaService {
   /** Emits whenever the interceptor needs a TOTP code */
   readonly challenge$ = new Subject<MfaChallenge>();
-
-  /** True while a prompt dialog is open */
-  readonly prompting = signal(false);
 
   private _cachedCode: string | null = null;
   private _cachedAt = 0;
@@ -56,15 +53,7 @@ export class MfaService {
    */
   prompt(): Promise<string | null> {
     return new Promise<string | null>((resolve) => {
-      this.prompting.set(true);
       this.challenge$.next({ resolve });
     });
-  }
-
-  /** Called by the prompt component when the user submits or cancels */
-  respond(_code: string | null): void {
-    this.prompting.set(false);
-    // The Subject already delivered the resolve fn to the interceptor;
-    // that fn is called directly by MfaPromptComponent — nothing to do here.
   }
 }
