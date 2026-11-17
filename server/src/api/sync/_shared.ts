@@ -501,6 +501,7 @@ export const FILE_META_SENDER_KEYS: Readonly<Record<Exclude<keyof FileMetaDoc, F
   feedMarker: true,
   bytesAbsentSince: true,
   retiredBy: true,
+  _expireAt: true, syncBase: true,
 };
 
 /**

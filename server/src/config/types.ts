@@ -108,7 +108,7 @@ export interface TokenRecord {
 // Moved to `types-knowledge.ts` — a LEAF that imports nothing, so it cannot become half of a cycle. See that
 // file for why that matters. Imported as well as re-exported, because `export ... from` does not bring a name
 // into local scope and `TtlBucket` below is built from `KnowledgeType`.
-import type { MergeFn, NumericMergeFn, BooleanMergeFn, PropertySchema, TypeSchema, ValidationMode, KnowledgeType, RecordType, TombstoneType, RefKind, SpaceMeta, StampSkewable, SchemaStamped } from './types-knowledge.js';
+import type { MergeFn, NumericMergeFn, BooleanMergeFn, PropertySchema, TypeSchema, ValidationMode, KnowledgeType, RecordType, TombstoneType, RefKind, SpaceMeta, StampSkewable, SchemaStamped, ForkMarked } from './types-knowledge.js';
 export type { MergeFn, NumericMergeFn, BooleanMergeFn, PropertySchema, TypeSchema, ValidationMode, KnowledgeType, SpaceMeta };
 // A VALUE, so it needs its own import and re-export: everything else above is a type. Re-exported from here
 // rather than importing the leaf directly, because `config/types.js` is the one path this codebase's modules
@@ -814,89 +814,9 @@ import type { NetworkType, SyncDirection, VoteValue, VoteRoundType, NetworkMembe
 export type { NetworkType, SyncDirection, VoteValue, VoteRoundType, NetworkMember, VoteCast, VoteRound, NetworkConfig };
 
 
-// ── OIDC types ─────────────────────────────────────────────────────────────
-
-/** Maps a single IdP claim to an Ythril permission.
- *  `claim` supports dot-notation for nested objects (e.g. "realm_access.roles"). */
-export interface OidcClaimRule {
-  /** Dot-notated path to the claim value in the JWT payload. */
-  claim: string;
-  /** When present, the claim must equal this value (or be an array containing it).
-   *  When absent, the claim merely needs to be truthy. */
-  value?: string;
-}
-
-export interface OidcClaimMapping {
-  /** When matched, the user is granted admin access. */
-  admin?: OidcClaimRule;
-  /** When matched, the user is restricted to read-only access. */
-  readOnly?: OidcClaimRule;
-  /** When matched, the claim value is treated as the list of allowed space IDs.
-   *  The claim itself must be a JSON array of strings. */
-  spaces?: OidcClaimRule;
-  /**
-   * When true, any OIDC token that does not match the `admin` or `readOnly`
-   * rule is rejected with 401.  PAT tokens are unaffected.
-   * Default: false (unmatched tokens are accepted with no special permissions).
-   */
-  requireMatch?: boolean;
-}
-
-export interface OidcConfig {
-  /** Set to true to enable OIDC authentication. Default: false. */
-  enabled: boolean;
-  /** Base URL of the IdP realm, e.g. https://keycloak.example.com/realms/my-realm.
-   *  The well-known discovery URL is derived by appending
-   *  /.well-known/openid-configuration */
-  issuerUrl: string;
-  /** OAuth2 client ID registered at the IdP. */
-  clientId: string;
-  /** Expected `aud` claim value in issued JWTs.
-   *  Defaults to `clientId` when omitted. */
-  audience?: string;
-  /** Scopes to request during the authorization code flow.
-   *  Defaults to ["openid", "profile", "email"]. */
-  scopes?: string[];
-  /** JWS algorithms accepted when verifying ID tokens. Defaults to the
-   *  asymmetric set in `DEFAULT_OIDC_ALGORITHMS` (RS/PS/ES/EdDSA). Override only
-   *  to NARROW it (e.g. ["RS256"]); adding an HMAC alg would let anyone holding
-   *  the shared secret mint tokens. */
-  allowedAlgorithms?: string[];
-  /** Maps IdP JWT claims to Ythril permission flags. */
-  claimMapping?: OidcClaimMapping;
-  /**
-   * When true, the browser SPA rejects cached PAT (Personal Access Token)
-   * sessions and forces re-authentication through the IdP.  PATs continue to
-   * work for programmatic access (API / MCP via Authorization: ******;
-   * only the browser localStorage session path is gated.
-   * Default: false.  The API endpoint (`/api/auth/oidc-info`) normalises an
-   * absent value to `false` so clients always receive a boolean.
-   */
-  enforceForBrowser?: boolean;
-  /**
-   * URI the IdP should redirect to after a successful end-session request.
-   * Passed as `post_logout_redirect_uri` to the IdP's end_session_endpoint.
-   * Defaults to the instance origin (i.e. the login page).
-   */
-  postLogoutRedirectUri?: string;
-  /**
-   * Allow the issuer — and the endpoints its discovery document names — to live on a
-   * private/reserved address. An internal IdP is a normal deployment (Keycloak on
-   * `http://keycloak.internal:8080`, Authentik on a cluster service, Dex on `10.x`), and the
-   * default is public-only, so **that deployment needs this flag or nobody can sign in**.
-   *
-   * Enabling it does NOT drop the egress guard: discovery and JWKS still go through
-   * `ssrfSafeFetch`, which DNS-resolves, pins the resolved IP for the connection and re-validates
-   * every redirect — only the private-address rejection relaxes. Crown-jewel addresses (loopback,
-   * link-local / cloud IMDS, unspecified) stay blocked either way, including when a hostname
-   * resolves to one.
-   *
-   * The allowance is scoped to the issuer's own address class: a PUBLIC issuer may never hand back
-   * a private `jwks_uri`, flag or no flag. Mirrors `allowPrivateModelEndpoints`.
-   * Overridable via YTHRIL_OIDC_ALLOW_PRIVATE_ISSUER.
-   */
-  allowPrivateIssuer?: boolean;
-}
+// The OIDC sign-in types moved WHOLE to `types-oidc.ts` (Q-730); imported here for `Config`, re-exported with it.
+import type { OidcConfig } from './types-oidc.js';
+export type { OidcClaimRule, OidcClaimMapping, OidcConfig } from './types-oidc.js';
 
 // ── Audit log types ────────────────────────────────────────────────────────
 
@@ -1291,7 +1211,7 @@ export interface AuthorRef {
   instanceLabel: string;
 }
 
-export interface FactDoc extends StampSkewable, SchemaStamped {
+export interface FactDoc extends StampSkewable, SchemaStamped, ForkMarked {
   /**
    * Keep this record stored, but stop it being EMBEDDED — the top tier of the switch a type schema and the
    * space also carry under this same name, resolving `record > schema > space`.
@@ -1350,13 +1270,12 @@ export interface FactDoc extends StampSkewable, SchemaStamped {
   updatedAt: string;
   seq: number;
   embeddingModel?: string;
-  forkOf?: string;
   /** Absolute expiry (F10). Set when a per-record `ttlDays` or the space's `recordTtlDays` applies;
    *  the TTL sweep deletes the record (through the normal delete path) once it passes. */
   _expireAt?: Date;
 }
 
-export interface EntityDoc extends StampSkewable, SchemaStamped {
+export interface EntityDoc extends StampSkewable, SchemaStamped, ForkMarked {
   /**
    * Keep this record stored, but stop it being EMBEDDED — the top tier of the switch a type schema and the
    * space also carry under this same name, resolving `record > schema > space`.
@@ -1412,7 +1331,7 @@ export interface EntityDoc extends StampSkewable, SchemaStamped {
   _expireAt?: Date;
 }
 
-export interface EdgeDoc extends StampSkewable, SchemaStamped {
+export interface EdgeDoc extends StampSkewable, SchemaStamped, ForkMarked {
   /**
    * Keep this record stored, but stop it being EMBEDDED — the top tier of the switch a type schema and the
    * space also carry under this same name, resolving `record > schema > space`.
@@ -1565,7 +1484,7 @@ import { CHRONO_STATUSES } from './chrono-statuses.js';
 /** @see CHRONO_STATUSES — derived, never written out a second time. */
 export type ChronoStatus = typeof CHRONO_STATUSES[number];
 
-export interface ChronoEntry extends StampSkewable, SchemaStamped {
+export interface ChronoEntry extends StampSkewable, SchemaStamped, ForkMarked {
   /**
    * Keep this record stored, but stop it being EMBEDDED — the top tier of the switch a type schema and the
    * space also carry under this same name, resolving `record > schema > space`.
@@ -1735,6 +1654,12 @@ export interface FileMetaDoc {
   createdAt: string;    // ISO8601 — first write timestamp
   updatedAt: string;    // ISO8601 — last write timestamp
   sizeBytes: number;    // file size in bytes at last write
+  /** The record's own opt-out of embedding, as a record of any family carries it (`IncomingFileMetaDoc`). */
+  suppressEmbeddings?: boolean;
+  /** Absolute expiry — see FactDoc._expireAt. LOCAL: this instance's retention policy, never sent; an import keeps the backup's (`RESTORED_LOCAL_FIELDS`). */
+  _expireAt?: Date;
+  /** Per peer, the file hash this instance and that peer last both held (`sync/file-sync.ts`). LOCAL: never sent; an import keeps it from its own backup only. */
+  syncBase?: Record<string, string>;
   bytesAbsentSince?: string; // LOCAL: when this disk was first found without the bytes (files/absent-bytes-sweep.ts, Q-337)
   /**
    * SHA-256 of the bytes as last written, when the writer supplied it.

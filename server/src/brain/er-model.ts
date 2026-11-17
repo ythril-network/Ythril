@@ -41,7 +41,7 @@
  * complete. "Absent" and "not looked at" are different answers and this endpoint is required to say
  * which one it is giving.
  */
-import { col } from '../db/mongo.js';
+import { col, asFilter } from '../db/mongo.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { EntityDoc, EdgeDoc, PropertySchema } from '../config/types.js';
 import { LINK_CLASSES, linkGroupsOfClass } from './link-adjacency.js';
@@ -258,7 +258,7 @@ export async function readErShape(spaceId: string): Promise<ErObserved> {
 
   const [totalEntities, totalEdges] = await Promise.all([
     entities.countDocuments({}),
-    edges.countDocuments({ ...CHOSEN_VERSION_ROWS }),
+    edges.countDocuments(asFilter<EdgeDoc>({ ...CHOSEN_VERSION_ROWS })),
   ]);
 
   // Read through the covering indexes: `{ name: 1, type: 1 }` carries `_id`, as every index does, and the
@@ -267,7 +267,7 @@ export async function readErShape(spaceId: string): Promise<ErObserved> {
   const [entityRows, edgeRows] = await Promise.all([
     entities.find({}, { projection: { type: 1 }, limit: ER_ENTITY_SCAN_LIMIT })
       .toArray() as Promise<Array<{ _id: string; type?: string }>>,
-    edges.find({ ...CHOSEN_VERSION_ROWS }, { projection: { from: 1, to: 1, label: 1 }, limit: ER_EDGE_SCAN_LIMIT })
+    edges.find(asFilter<EdgeDoc>({ ...CHOSEN_VERSION_ROWS }), { projection: { from: 1, to: 1, label: 1 }, limit: ER_EDGE_SCAN_LIMIT })
       .toArray() as Promise<Array<{ from: string; to: string; label: string }>>,
   ]);
 

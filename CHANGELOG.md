@@ -80,9 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** tests that could only restate a constant's value are removed or rewritten to drive the behaviour the value controls, and a gate refuses new ones.
 - **Testing:** a preflight writes, clears and reads its timing results only in the checkout it runs in, and the CI recorder leaves a stray `preflight-*` result out of a run's record, saying so, instead of failing it.
 - **Testing:** CI pulls the BuildKit image, the test database image and the test image's build through `scripts/retry-on-registry-failure.mjs`: a pull Docker Hub did not answer is run again, at most twice; any other failure fails at once.
+- **Testing:** the export round trip now covers fork marks on facts, entities, edges and chrono entries and a file row's expiry and sync base, and a gate fails when a record interface leaves out a field the store keeps.
 - **Tooling:** `machine:free -Wipe` asks every refusal of the wipe (data guard, pending record, free space, registries) before it removes the test stack or prunes; the workstation guide names what the guard cannot see.
 - **Docs:** changed: the upgrading guide names the removal of records whose file bytes are gone, its timings and holds, and putting lost bytes back before upgrading.
 - **Build:** the build stops with one line naming the package and `run npm ci` when the install differs from package-lock.json or lacks a package the build needs, instead of failing with misleading type errors.
+- **Build:** the OIDC settings types moved out of `config/types.ts` into `config/types-oidc.ts`, which brings that file back under its size limit; no behaviour changes.
 
 ### Fixed
 

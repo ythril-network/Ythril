@@ -78,6 +78,8 @@ const NOT_DERIVED = Object.freeze({
   deletedAt: 'the deletion flag itself',
   sizeBytes: 'a byte fact the byte doors record (`recordArrivedFile`, `upsertFileMeta`), held by an-arrival-is-written-by-one-writer',
   sha256: 'a byte fact the byte doors record, held by an-arrival-is-written-by-one-writer',
+  _expireAt: 'the retention stamp this instance computes from its own policy, not from bytes: the byte doors and the retention backfill stamp it (declared since Q-797)',
+  syncBase: 'what this instance last agreed with each peer about a file: file sync writes it, and no byte produces it (declared since Q-797)',
 });
 
 const DELETE_OPS = new Set(['deleteOne', 'deleteMany', 'findOneAndDelete']);
