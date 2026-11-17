@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, del, delWithBody, reqJson, triggerSync, waitFor } from './helpers.js';
+import { dockerExec, INSTANCES, post, reloadConfig, get, del, delWithBody, reqJson, triggerSync, waitFor } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -137,8 +137,8 @@ describe('Gossip: member list exchange', () => {
     injectPeerToken('ythril-b', instanceIdA, peerTokenForB);
 
     // Reload in-memory secrets on both instances
-    await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
-    await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+    await reloadConfig(INSTANCES.a, tokenA);
+    await reloadConfig(INSTANCES.b, tokenB);
 
     // Mirror the network on B: add A as a member so B's engine has something to call
     const netOnB = await post(INSTANCES.b, tokenB, '/api/networks', {

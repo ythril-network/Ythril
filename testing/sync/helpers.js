@@ -106,6 +106,18 @@ export async function post(baseUrl, token, path, data) {
 }
 
 /**
+ * `POST /api/admin/reload-config` on an instance, answering only when it says 200. A dead store answers 503 with the cause in its body: a
+ * setup that threw the answer away went on, and its first test then timed out waiting for a state the instance could not reach (Full run
+ * 44163324512: `ythril-mongo-b` was killed for memory, and 15 tests failed as timeouts and "not found"). The body is in the message.
+ * Every call in `testing/sync/` reads its answer (`a-sync-reload-config-call-asserts-its-status.test.js`).
+ */
+export async function reloadConfig(baseUrl, token) {
+  const r = await post(baseUrl, token, '/api/admin/reload-config', {});
+  if (r.status !== 200) throw new Error(`reload-config on ${baseUrl} answered ${r.status}: ${JSON.stringify(r.body)}`);
+  return r;
+}
+
+/**
  * POST with automatic retry on 429 (rate limit).
  * Reads the standard Retry-After HTTP header (seconds); defaults to 5 s.
  */
@@ -233,8 +245,8 @@ export async function mirroredNetwork({ label, spaces, a, b, type = 'closed', co
   await add(baseB, tokenB, idA, `${label} A`, `http://${hostA}:3200`, forB.body.plaintext);
   injectPeerToken(hostA, idB, forA.body.plaintext);
   injectPeerToken(hostB, idA, forB.body.plaintext);
-  await post(baseA, tokenA, '/api/admin/reload-config', {});
-  await post(baseB, tokenB, '/api/admin/reload-config', {});
+  await reloadConfig(baseA, tokenA);
+  await reloadConfig(baseB, tokenB);
   const remove = async () => {
     await del(baseA, tokenA, `/api/networks/${networkId}`).catch(() => {});
     await del(baseB, tokenB, `/api/networks/${networkId}`).catch(() => {});

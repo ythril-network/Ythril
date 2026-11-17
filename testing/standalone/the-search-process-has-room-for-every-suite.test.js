@@ -35,6 +35,18 @@ const HARNESS = readFileSync('testing/standalone/_mongo-harness.mjs', 'utf8');
 /** The heap the full CI order (integration, sync, redteam, then standalone on one Mongo) was measured to need. */
 const MEASURED_HEAP_MIB = 1280;
 
+/**
+ * The peak memory (MiB) of each instance database in the full CI order, as measured 2026-10-05 (the figures the compose file's
+ * ythril-mongo-b comment records). The scope is derived: every atlas-local service that is not the harness Mongo must have an entry,
+ * so a database added to the stack without a measurement fails. A re-measured peak is edited here with its date.
+ */
+const RECORDED_PEAK_MIB = { 'ythril-mongo-b': 1092, 'ythril-mongo-c': 733, 'ythril-mongo-d': 715 };
+/**
+ * How far above its recorded peak a ceiling must stand. Full run 44163324512 (2026-11-17) killed ythril-mongo-b for memory at 1344m with
+ * a recorded peak of 1092 MiB, 23% under: a peak measured in one run is not the next run's, so a quarter is not a margin, half is.
+ */
+const PEAK_MARGIN = 0.5;
+
 /** The two log files an atlas-local service is told to write, `[MONGOT_LOG_FILE, RUNNER_LOG_FILE]`, empty when unset. */
 const logFilesOf = (svc) => ['MONGOT_LOG_FILE', 'RUNNER_LOG_FILE'].map((k) => String(environmentOf(svc)[k] ?? '').trim());
 
@@ -60,6 +72,32 @@ describe('the search process has room for every suite, and says when it dies', (
     const limit = memoryMiB(resolvedValue(svc, 'mem_limit') ?? '');
     assert.ok(heap >= MEASURED_HEAP_MIB, `${name}'s mongot heap is ${heap} MiB; the full CI order needs ${MEASURED_HEAP_MIB}`);
     assert.ok(heap <= limit / 2, `${name}'s mongot heap ${heap} MiB leaves mongod less than half of ${limit} MiB`);
+  });
+
+  it('every atlas-local service sets mongot\'s heap, at most half its container, so mongod keeps the rest', () => {
+    const unset = [];
+    for (const [name, svc] of atlas) {
+      const xmx = resolveDefaults(environmentOf(svc).JAVA_TOOL_OPTIONS ?? '').match(/-Xmx([\d.]+[gmk])/i);
+      if (!xmx) { unset.push(`${name} sets no mongot heap cap (-Xmx)`); continue; }
+      const heap = memoryMiB(xmx[1]);
+      const limit = memoryMiB(resolvedValue(svc, 'mem_limit') ?? '');
+      if (heap > limit / 2) unset.push(`${name}'s mongot heap ${heap} MiB leaves mongod less than half of ${limit} MiB`);
+    }
+    assert.deepEqual(unset, [], 'a mongot with no cap takes a quarter of whatever the container is given, and the kernel kills the container when mongod and mongot together pass it (ythril-mongo-b, run 44163324512)');
+  });
+
+  it('every other atlas-local service has a ceiling above its recorded peak by the margin', () => {
+    const others = atlas.filter(([name]) => name !== harness?.[0]);
+    assert.ok(others.length >= 3, `found only ${others.map(([n]) => n).join(', ') || 'none'} instance databases`);
+    const unrecorded = others.map(([n]) => n).filter(n => !(n in RECORDED_PEAK_MIB));
+    assert.deepEqual(unrecorded, [], 'a database with no recorded peak has a ceiling nothing was measured against: record its peak in RECORDED_PEAK_MIB');
+    const short = [];
+    for (const [name, svc] of others) {
+      const limit = memoryMiB(resolvedValue(svc, 'mem_limit') ?? '');
+      const needed = Math.ceil(RECORDED_PEAK_MIB[name] * (1 + PEAK_MARGIN));
+      if (limit < needed) short.push(`${name}: ${limit} MiB, recorded peak ${RECORDED_PEAK_MIB[name]} MiB needs ${needed} MiB (peak plus ${PEAK_MARGIN * 100}%)`);
+    }
+    assert.deepEqual(short, [], 'the full run killed ythril-mongo-b for memory with its measured peak 23% under the ceiling: that is no margin');
   });
 
   it('every atlas-local service writes mongot\'s and the runner\'s logs to a file', () => {

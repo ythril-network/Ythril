@@ -35,7 +35,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'url';
 import {
-  INSTANCES, post, get, del, delWithBody, waitFor, triggerSync,
+  INSTANCES, post, reloadConfig, get, del, delWithBody, waitFor, triggerSync,
   getInstanceId, readContainerConfig, readContainerSecrets, dockerExec,
 } from './helpers.js';
 
@@ -77,7 +77,7 @@ async function setupBraintreeAB(label) {
   const networkId = netR.body.id;
 
   injectPeerToken('ythril-a', instanceIdB, peerTokenForA);
-  await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
+  await reloadConfig(INSTANCES.a, tokenA);
   const addBR = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
     instanceId: instanceIdB,
     label: 'Instance B',
@@ -89,7 +89,7 @@ async function setupBraintreeAB(label) {
   assert.equal(addBR.status, 201, `Add B to A: ${JSON.stringify(addBR.body)}`);
 
   injectPeerToken('ythril-b', instanceIdA, peerTokenForB);
-  await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+  await reloadConfig(INSTANCES.b, tokenB);
   const regBR = await post(INSTANCES.b, tokenB, '/api/networks', {
     id: networkId,
     label,

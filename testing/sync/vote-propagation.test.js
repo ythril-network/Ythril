@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, del, delWithBody, reqJson, triggerSync, makeTriggerProbe, waitFor } from './helpers.js';
+import { dockerExec, INSTANCES, post, reloadConfig, get, del, delWithBody, reqJson, triggerSync, makeTriggerProbe, waitFor } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -153,8 +153,8 @@ describe('Vote propagation via gossip', () => {
     injectPeerToken('ythril-a', instanceIdB, peerTokenForA);
     injectPeerToken('ythril-b', instanceIdA, peerTokenForB);
 
-    await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
-    await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+    await reloadConfig(INSTANCES.a, tokenA);
+    await reloadConfig(INSTANCES.b, tokenB);
   });
 
   after(async () => {

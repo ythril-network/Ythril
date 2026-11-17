@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, del, waitFor, triggerSync, createTestSpace } from './helpers.js';
+import { dockerExec, INSTANCES, post, reloadConfig, get, del, waitFor, triggerSync, createTestSpace } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -207,8 +207,8 @@ describe('Merkle root', () => {
       injectPeerToken('ythril-a', instanceIdB, peerTokenForA);  // A uses peerTokenForA to call B
       injectPeerToken('ythril-b', instanceIdA, peerTokenForB);  // B uses peerTokenForB to call A
 
-      await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
-      await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+      await reloadConfig(INSTANCES.a, tokenA);
+      await reloadConfig(INSTANCES.b, tokenB);
 
       const addBOnA = await post(INSTANCES.a, tokenA, `/api/networks/${networkId}/members`, {
         instanceId: instanceIdB,

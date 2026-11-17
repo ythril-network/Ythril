@@ -19,7 +19,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, del, delWithBody, waitFor, makeTriggerProbe } from './helpers.js';
+import { dockerExec, INSTANCES, post, reloadConfig, del, delWithBody, waitFor, makeTriggerProbe } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -73,7 +73,7 @@ async function patchAndConfirm(container, baseUrl, token, netId, fnBody, verify,
     } else {
       stable = 0;
       patch(container, netId, fnBody);
-      await post(baseUrl, token, '/api/admin/reload-config', {});
+      await reloadConfig(baseUrl, token);
     }
     return false;
   }, timeoutMs, 700, () => `last state: ${JSON.stringify(lastNet?.members?.map(m => m.instanceId) ?? lastNet)}`,
@@ -137,8 +137,8 @@ describe('Signed governance votes and safe relay', () => {
 
     injectPeerToken('ythril-a', instanceIdB, peerTokenForA);
     injectPeerToken('ythril-b', instanceIdA, peerTokenForB);
-    await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
-    await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+    await reloadConfig(INSTANCES.a, tokenA);
+    await reloadConfig(INSTANCES.b, tokenB);
   });
 
   after(async () => {

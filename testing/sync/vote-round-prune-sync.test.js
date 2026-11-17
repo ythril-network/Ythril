@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, del, delWithBody, waitFor, makeTriggerProbe, patchContainerNetwork } from './helpers.js';
+import { dockerExec, INSTANCES, post, reloadConfig, del, delWithBody, waitFor, makeTriggerProbe, patchContainerNetwork } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -61,7 +61,7 @@ describe('Expired vote rounds are pruned during sync', () => {
     // Give the network a member so the cycle has something to iterate. It is virtual and
     // unreachable — irrelevant to the prune, which runs after the member loop regardless.
     patch('ythril-a', networkId, `n.members.push({instanceId:'virt-prune-${Date.now()}',label:'Virtual',url:'http://virtual-prune.internal:3200',tokenHash:'x',direction:'both'});`);
-    await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
+    await reloadConfig(INSTANCES.a, tokenA);
   });
 
   after(async () => {
@@ -86,7 +86,7 @@ describe('Expired vote rounds are pruned during sync', () => {
       `n.pendingRounds.push(${JSON.stringify(mk('drop-concluded-expired', true, pastDeadline))});` +
       `n.pendingRounds.push(${JSON.stringify(mk('keep-concluded-future', true, futureDeadline))});` +
       `n.pendingRounds.push(${JSON.stringify(mk('keep-open-expired', false, pastDeadline))});`);
-    await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
+    await reloadConfig(INSTANCES.a, tokenA);
 
     // Each injected round landed: it is still held, or it is already in the record of how rounds ended. An EXPIRED round may be
     // pruned before this read by a cycle the test did not run - A's own scheduled sync, or the expiry job's tick a minute (Q-484);

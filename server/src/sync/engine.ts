@@ -34,7 +34,7 @@ import { selfRecordFor } from '../networks/self-record.js';
 import { mergePeerRoster, revokeRemoved, pairIntroduced } from '../networks/member-introductions.js';
 import { peerSafeFetch, isPeerUrlAllowed } from './peer-fetch.js';
 import { settleRounds } from '../networks/round-conclusion.js';
-import { inCycle, joinNetworkCycle, runNetworkCycle, type NetworkCycleProgress, type NetworkCycleResult } from './network-cycle-runner.js';
+import { inCycle, joinNetworkCycle, NetworkNotFoundError, runNetworkCycle, type NetworkCycleProgress, type NetworkCycleResult } from './network-cycle-runner.js';
 import { warnOnce } from '../util/warn-once.js';
 import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
 import { syncCyclesTotal, syncDurationSeconds } from '../metrics/registry.js';
@@ -97,7 +97,7 @@ export function joinSyncForNetwork(networkId: string): { promise: Promise<Networ
 async function _runSyncForNetworkImpl(networkId: string, progress: NetworkCycleProgress): Promise<NetworkCycleResult> {
   const cfg = getConfig();
   const net = cfg.networks.find(n => n.id === networkId);
-  if (!net) throw new Error(`Network ${networkId} not found`);
+  if (!net) throw new NetworkNotFoundError(networkId);
   progress.membersTotal = net.members.length;
 
   const triggeredAt = new Date().toISOString();

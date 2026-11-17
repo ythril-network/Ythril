@@ -669,8 +669,9 @@ Every variable the scripts and runners in `scripts/` and `testing/_init/` read i
 | `CLIENT_TEST_OUTCOME` | `scripts/mask-client-report.mjs` | The client test command's own result (`success`, `failure`, `cancelled` or `skipped`), which CI's mask step passes and which is written into the masked report as `runnerOutcome`; the recorder reads a failed runner with no failure counted as an incomplete run. Unset: nothing is stamped. |
 | `YTHRIL_TEST_WAIT_TIMING_FILE` | `testing/_shared/wait-for.mjs` | A file every wait appends one timing line to. Unset: nothing is recorded. |
 | `YTHRIL_TEST_APP_CPUS`, `YTHRIL_TEST_APP_MEM`, `YTHRIL_TEST_APP_A_MEM` | `testing/docker-compose.test.yml` | CPU and memory ceilings of the Ythril instances; instance A has its own memory variable because it carries the heaviest suites. |
-| `YTHRIL_TEST_MONGO_CPUS`, `YTHRIL_TEST_MONGO_MEM`, `YTHRIL_TEST_MONGO_A_MEM` | `testing/docker-compose.test.yml` | The same for the databases. |
+| `YTHRIL_TEST_MONGO_CPUS`, `YTHRIL_TEST_MONGO_MEM`, `YTHRIL_TEST_MONGO_A_MEM`, `YTHRIL_TEST_MONGO_B_MEM` | `testing/docker-compose.test.yml` | The same for the databases; `YTHRIL_TEST_MONGO_MEM` is the ceiling of the third and fourth, and the second has its own because its peak is the highest of the three. |
 | `YTHRIL_TEST_MONGOT_A_HEAP` | `testing/docker-compose.test.yml` | The search process's JVM heap in the first database. Raise it with `YTHRIL_TEST_MONGO_A_MEM`. |
+| `YTHRIL_TEST_MONGOT_HEAP` | `testing/docker-compose.test.yml` | The search process's JVM heap in the second, third and fourth databases. |
 | `YTHRIL_TEST_DOCRENDER_CPUS`, `YTHRIL_TEST_DOCRENDER_MEM`, `YTHRIL_TEST_DOCRENDER_PIDS` | `testing/docker-compose.test.yml` | The PDF renderer sidecar's ceilings. |
 | `YTHRIL_TEST_DOCOFFICE_CPUS`, `YTHRIL_TEST_DOCOFFICE_MEM`, `YTHRIL_TEST_DOCOFFICE_PIDS` | `testing/docker-compose.test.yml` | The LibreOffice sidecar's ceilings. |
 | `BENCH_REPEATS` | `scripts/bench-link-readers.mjs` | How many times the link-reader benchmark repeats. |

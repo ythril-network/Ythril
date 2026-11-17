@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { dockerExec, INSTANCES, post, get, del, reqJson, waitFor, createTestSpace } from './helpers.js';
+import { dockerExec, INSTANCES, post, reloadConfig, get, del, reqJson, waitFor, createTestSpace } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -154,8 +154,8 @@ async function setupClubNetwork() {
 
   // Reload in-memory config+secrets on both instances so they see the injected peer tokens
   // and the peerInstanceId tags set during the before() hook.
-  await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
-  await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+  await reloadConfig(INSTANCES.a, tokenA);
+  await reloadConfig(INSTANCES.b, tokenB);
 
   return nid;
 }
@@ -215,8 +215,8 @@ async function setupDemocraticNetwork() {
   injectPeerToken('ythril-a', instanceIdB, peerTokenForA);
   injectPeerToken('ythril-b', instanceIdA, peerTokenForB);
 
-  await post(INSTANCES.a, tokenA, '/api/admin/reload-config', {});
-  await post(INSTANCES.b, tokenB, '/api/admin/reload-config', {});
+  await reloadConfig(INSTANCES.a, tokenA);
+  await reloadConfig(INSTANCES.b, tokenB);
 
   return nid;
 }
