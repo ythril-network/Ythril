@@ -22,6 +22,10 @@
  * `StoreTimeout` the bound ending mid-attempt throws (`commitWithin`'s race, the write-bound scope). The bound is generous, so the
  * second attempt is always reached; nothing waits on a deadline.
  *
+ * The server's end at the deadline (bundle-310): an attempt begun with a few ms left sends them as `maxTimeMS`, and the server answers
+ * MaxTimeMSExpired, which escaped as the raw driver error. Those rows wait past the short bound inside the callback before throwing the
+ * server's error, so the deadline has passed whatever the machine's speed; their control throws it well inside a generous bound.
+ *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-transaction-timeout-after-a-retry-keeps-the-failure-as-its-cause-db.test.js
  * (requires a prior `npm run build` in server/)
@@ -34,6 +38,7 @@ import path from 'node:path';
 import { MongoServerError } from 'mongodb';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { setWriteBoundForTest } from './_write-faults.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-txn-timeout-cause-'));
@@ -143,4 +148,45 @@ describe('a transaction timeout after a retry keeps the failure that made it ret
     assert.ok(err instanceof StoreTimeout, `it threw ${err?.name}: ${err?.message}, not a StoreTimeout`);
     assert.ok(failures.includes(err.cause), 'the StoreTimeout the bound ended the retrying with does not carry one of the transient failures as its cause');
   });
+
+  // The server's own end of a statement at the transaction's deadline: a later attempt that starts with a few ms left sends its
+  // statements with that few ms as `maxTimeMS`, and the server answers MaxTimeMSExpired. That is the bound ending the transaction,
+  // so it is answered as the bound's StoreTimeout, never as the raw driver error (bundle-310's Full run, run 44104649536, shard 3).
+  it('the server ending a later attempt at the deadline is answered StoreTimeout, carrying the transient failure that made it retry', async () => {
+    restoreBound = await setWriteBoundForTest(SHORT_BOUND);
+    const first = transientFailure('first');
+    let calls = 0;
+    const err = await thrownBy(async () => {
+      calls += 1;
+      if (calls === 1) throw first;
+      await elapse(SHORT_BOUND.writeTimeoutMs + 100, 'ttl elapses: the transaction\'s deadline passes before the server answers');
+      throw serverDeadlineFailure();
+    });
+    assert.equal(calls, 2, 'fixture: the callback did not run a second time, so the retry was never reached');
+    assert.ok(err instanceof StoreTimeout, `it threw ${err?.name}: ${err?.message}, not a StoreTimeout`);
+    assert.equal(err.cause, first, 'the StoreTimeout does not carry the transient failure that made the transaction retry');
+  });
+
+  it('the server ending the only attempt at the deadline is answered StoreTimeout, carrying the server\'s error', async () => {
+    restoreBound = await setWriteBoundForTest(SHORT_BOUND);
+    const ended = serverDeadlineFailure();
+    const err = await thrownBy(async () => {
+      await elapse(SHORT_BOUND.writeTimeoutMs + 100, 'ttl elapses: the transaction\'s deadline passes before the server answers');
+      throw ended;
+    });
+    assert.ok(err instanceof StoreTimeout, `it threw ${err?.name}: ${err?.message}, not a StoreTimeout`);
+    assert.equal(err.cause, ended, 'the StoreTimeout does not carry the server\'s own error as its cause');
+  });
+
+  it('control: a server time limit that ends a statement BEFORE the transaction\'s deadline is thrown as it came', async () => {
+    restoreBound = await setWriteBoundForTest(GENEROUS_BOUND);
+    const ended = serverDeadlineFailure();
+    const err = await thrownBy(async () => { throw ended; });
+    assert.equal(err, ended, 'a statement\'s own time limit, inside the transaction\'s bound, was re-dressed as the bound\'s StoreTimeout');
+  });
 });
+
+/** The server's answer to a statement whose `maxTimeMS` ran out, as the driver delivers it: no transient label, so no retry. */
+function serverDeadlineFailure() {
+  return new MongoServerError({ message: 'operation exceeded time limit', code: 50, codeName: 'MaxTimeMSExpired' });
+}
