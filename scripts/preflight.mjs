@@ -75,8 +75,15 @@ if (unknownArgs.length) {
   process.exit(2);
 }
 
-/** Where the client's Vitest JSON report is written; the path ci.yml's client step and the recorder read (the results folder is `timingResultsDir`'s). */
-const CLIENT_REPORT = join(timingResultsDir(process.cwd()), CLIENT_RESULTS);
+/**
+ * The ONE results folder of this run: the checkout the preflight runs in (or the folder `YTHRIL_TEST_RESULTS_DIR` names), never the folder of the
+ * repository that holds this script. Every write, clear and read of timing results goes through it (Q-872): a preflight a test plants in a
+ * scratch checkout must leave its files, and clear the files, of that checkout only.
+ */
+const RESULTS_DIR = timingResultsDir(process.cwd());
+
+/** Where the client's Vitest JSON report is written; the path ci.yml's client step and the recorder read. */
+const CLIENT_REPORT = join(RESULTS_DIR, CLIENT_RESULTS);
 
 // Every child gets `testChildEnv`'s environment, not this process's: the recorder's token and the runner's wire stay out of
 // anything a test (or a dependency a test imports) can read. A caller that needs more passes `env` itself.
@@ -139,7 +146,7 @@ function orderSource({ costs, why }) {
   return `preflight: stage order follows the measured costs of ${costs.runs} recorded run(s), snapshot ${age} old`;
 }
 
-const snapshot = readStageCosts(timingResultsDir(process.cwd()));
+const snapshot = readStageCosts(RESULTS_DIR);
 const plan = planStages(PREFLIGHT_STAGES, snapshot.costs, { static: STATIC });
 const stages = createStageRunner({ failures, isStatic: STATIC, stages: plan, onStop: ({ notRun }) => conclude(notRun) });
 
@@ -467,7 +474,7 @@ stage('test:standalone (offline subset)', async () => {
   // them, so the units that run alone do not outnumber the workers. The other files stay in the batches `offlineRuns` cut. With no usable
   // snapshot the units are those batches in list order, and the line says why.
   const UNIT_WIDTH = 4;
-  const fileTimes = readFileTimes(timingResultsDir(process.cwd()));
+  const fileTimes = readFileTimes(RESULTS_DIR);
   const planned = slowFirstUnits(runs, fileTimes.times, { maxSlow: 2 * UNIT_WIDTH });
   const slowAlone = planned.filter(u => u.slow).length;
   console.log(fileTimes.times
@@ -478,8 +485,8 @@ stage('test:standalone (offline subset)', async () => {
   // unit's place in the list, fixed here before any unit launches, so two units never write one file whatever order they end in.
   // The suite is `preflight`, not `standalone`: this is a subset, and it must not clear or overwrite a full run's files (the stage-cost
   // snapshot is not a `preflight-*` file, so the clear leaves it).
-  clearTimingResults('preflight');
-  const units = planned.map((r, i) => ({ files: r.files, args: r.args, slow: r.slow, flags: timingReporterFlags({ suite: 'preflight', batch: `pure-${i + 1}`, scope: STATIC ? 'static' : 'subset' }) }));
+  clearTimingResults('preflight', { dir: RESULTS_DIR });
+  const units = planned.map((r, i) => ({ files: r.files, args: r.args, slow: r.slow, flags: timingReporterFlags({ suite: 'preflight', batch: `pure-${i + 1}`, dir: RESULTS_DIR, scope: STATIC ? 'static' : 'subset' }) }));
   console.log(`  ${units.length} unit(s) of pure files, ${UNIT_WIDTH} at a time`);
   const { failed } = await runTestUnits(units.map(u => u.files), {
     width: UNIT_WIDTH,

@@ -819,6 +819,7 @@ const recordedJobsOf = (have) => new Set([...have].map(parseRecordKey).filter(Bo
  * the artifact LIST and those keys (the zip of a job already recorded proves nothing the record does not). A run whose
  * artifacts are all expired but which has records is recorded, so it yields no `none` row either.
  *
+ * `notes` are what was left out on purpose and fails nothing (a `preflight-*` file: no CI job runs the preflight), one line each.
  * `problems` are artifacts that could not be read, each `{ text, persistent }`: persistent is a file that is not what it
  * says (not a zip, past the size cap, no suite), which the next pass will find the same way; a download that failed is
  * not, and is tried again.
@@ -838,6 +839,7 @@ async function ciPayloads(gh, run, have = new Set()) {
 
   const payloads = [];
   const problems = [];
+  const notes = [];
   const recordedJobs = recordedJobsOf(have);
   for (const [job, found] of latest) {
     if (recordedJobs.has(JSON.stringify([String(found.attempt), job]))) continue;
@@ -851,6 +853,9 @@ async function ciPayloads(gh, run, have = new Set()) {
       const text = e.data.toString('utf8');
       const suite = suiteOf(text, e.name.split('/').at(-1));
       if (!suite) { problems.push({ text: `${job}: ${e.name} names no suite`, persistent: true }); continue; }
+      // No CI job runs the preflight, so a `preflight-*` file in an artifact is a stray (a preflight a test planted wrote it into the
+      // repository's results folder, Q-872): it is left out, said, and never fails the run's record.
+      if (suite === 'preflight') { notes.push(`${job}: ${e.name} is a preflight result no CI job produces; left out of the record`); continue; }
       if (!bySuite.has(suite)) bySuite.set(suite, []);
       bySuite.get(suite).push(text);
     }
@@ -878,7 +883,7 @@ async function ciPayloads(gh, run, have = new Set()) {
     const wall = wallBetween(startsAt, endsAt) ?? 0;
     payloads.push(buildPayload({ ...common, attempt: run.run_attempt, job: 'workflow', suite: 'ci', summary: { ...summary, ms: wall }, wallMs: wall }));
   }
-  return { payloads, problems };
+  return { payloads, problems, notes };
 }
 
 /**
@@ -998,6 +1003,7 @@ async function recordCi({ rewriteKey, runId } = {}) {
         const have = rewriteKey ? new Set() : await recordedKeysOfRun(dest.api, run.id);
         const built = await ciPayloads(gh, run, have);
         const { problems } = built;
+        for (const n of built.notes) console.log(`test-times: run ${run.id}: ${n}`);
         // A recorded run is the stop: the instance holds records of it and nothing the run still lists is missing one. A run
         // with SOME is completed: only the missing ones are written (a record the run already has is left as it is;
         // `--rewrite <recordKey>` replaces one on purpose). What cannot be read for good (a file that is not a zip) does

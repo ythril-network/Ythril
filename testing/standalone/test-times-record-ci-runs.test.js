@@ -96,6 +96,25 @@ describe('--record-ci', () => {
     });
   });
 
+  it('a stray preflight-*.jsonl in a job\'s artifact is left out with one line naming it; the run\'s own suites are recorded and the pass does not fail (Q-872)', async () => {
+    const w = world();
+    // A preflight run planted inside a test wrote this into the real repository's results (scope static, which the instance refuses): no CI job produces it.
+    w.artifactsByRun[1001][0] = artifact(5001, 'test-results-standalone-pure-1',
+      ['standalone-pure.jsonl', spec('standalone', 'pure', 'testing/standalone/a.test.js')],
+      ['preflight-pure-1.jsonl', spec('preflight', 'pure-1', 'testing/standalone/planted.test.js', { scope: 'static' })]);
+    await withRecordingWorld(w, async ({ ythril, dir, env }) => {
+      const r = await runTimes(['--record-ci'], { cwd: dir, env });
+      assert.equal(r.code, 0, everything(r));
+      assert.deepEqual(Object.keys(records(ythril)).sort(), [
+        'ci:1001:1:integration:integration',
+        'ci:1001:1:standalone-pure:standalone',
+        'ci:1007:1:build-and-test:standalone',
+      ], 'the stray suite was recorded, or the run\'s own suites were not');
+      const named = everything(r).split(/\r?\n/).filter(l => l.includes('preflight-pure-1.jsonl'));
+      assert.equal(named.length, 1, `the left-out file is named on ${named.length} lines:\n${everything(r)}`);
+    });
+  });
+
   it('never asks about an untrusted or unfinished run — it is refused before its artifact is read, not after', async () => {
     await withWorld(async ({ github, dir, env }) => {
       const r = await runTimes(['--record-ci'], { cwd: dir, env });
