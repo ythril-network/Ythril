@@ -44,13 +44,17 @@
  *         type-check. Both modes run the pure test files only; `--static` also skips the client unit tests, the
  *         production build and its budgets, and it is NEVER a push pass: its verdict says so, Q-584.)
  */
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync, execFile } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
+import { promisify } from 'node:util';
 
 import { join } from 'node:path';
 import { splitStandalone, offlineRuns } from '../testing/_shared/standalone-split.mjs';
 import { timingReporterFlags, clearTimingResults } from '../testing/_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../testing/_shared/test-child-env.mjs';
+import { poolEach } from '../testing/_shared/pool.mjs';
+import { runTestUnits } from '../testing/_shared/run-test-units.mjs';
 import { timingResultsDir } from '../testing/_shared/timing-reporter.mjs';
 import { stampRunnerOutcome } from './mask-client-report.mjs';
 import { CLIENT_RESULTS, clientCommandWritingTo } from './_shared/client-results.mjs';
@@ -211,15 +215,22 @@ console.log('\n── every test file parses (incl. the Docker-only suites CI ru
   //
   // So the BOM is removed before checking. Do not "simplify" this back into a bare `node --check` — it will
   // fail the whole gate on a working file, which is how a gate gets switched off.
-  const check = (p) => {
-    try { execSync(`node --check ${JSON.stringify(p)}`, { stdio: 'pipe' }); return null; }
-    catch (e) { return String(e.stderr ?? e).split('\n').find(l => /Error/.test(l)) ?? 'unparseable'; }
+  // One `node --check` per file, spawned with an argument array (no shell: a path is never parsed) and bounded, `availableParallelism()` of them
+  // at a time through the shared pool (`testing/_shared/pool.mjs`): 2 367 files took 54 s one after the other and 9 s this way (Q-863).
+  const PARSE_BOUND_MS = 60_000;
+  const execFileAsync = promisify(execFile);
+  const check = async (p) => {
+    try { await execFileAsync('node', ['--check', p], { env: testChildEnv(), encoding: 'utf8', timeout: PARSE_BOUND_MS, killSignal: 'SIGKILL' }); return null; }
+    catch (e) {
+      if (e.killed) return `node --check did not end within ${PARSE_BOUND_MS / 1000} s`;
+      return String(e.stderr ?? e).split('\n').find(l => /Error/.test(l)) ?? 'unparseable';
+    }
   };
 
-  const unparseable = [];
-  for (const f of testFiles) {
-    const err = check(f);
-    if (!err) continue;
+  // One file's verdict: null when it parses, else the message. Never throws, so one broken file does not stop the pool.
+  const verdictOf = async (f) => {
+    const err = await check(f);
+    if (!err) return null;
 
     // A leading UTF-8 BOM makes `node --check` reject a file node RUNS fine (verified with a fixture: BOM,
     // then shebang, checks as a SyntaxError and executes without complaint). Many files here carry one, so a
@@ -228,21 +239,22 @@ console.log('\n── every test file parses (incl. the Docker-only suites CI ru
     // The retry copy MUST stay inside the repo. The first version wrote it to the OS temp dir, where no
     // `package.json` applies, so node parsed it under different rules and a genuinely broken file came back
     // clean — a gate with a silent-success path, which is worse than no gate. Caught by planting a syntax
-    // error and watching the gate pass.
+    // error and watching the gate pass. Its name is the file's own, so concurrent checks never share one.
     const src = readFileSync(f, 'utf8');
     if (src.charCodeAt(0) === 0xfeff) {
       const sibling = `${f}.parse-check.tmp.mjs`;
       try {
         writeFileSync(sibling, src.slice(1));
-        const retry = check(sibling);
-        if (retry) unparseable.push(`${f}\n      ${retry}`);
+        const retry = await check(sibling);
+        return retry ? `${f}\n      ${retry}` : null;
       } finally {
         rmSync(sibling, { force: true });
       }
-      continue;
     }
-    unparseable.push(`${f}\n      ${err}`);
-  }
+    return `${f}\n      ${err}`;
+  };
+
+  const unparseable = (await poolEach(testFiles, availableParallelism(), verdictOf)).filter(Boolean);
 
   if (unparseable.length > 0) {
     console.log(`  ${unparseable.length} file(s) do not parse:\n    ${unparseable.join('\n    ')}`);
@@ -398,15 +410,16 @@ console.log(`  ${offlineDb.length} database test files are not run here; CI's Fu
 console.log(`  ${ciOnly.length} file(s) declare @ci-only (too slow for every push); CI's standalone-pure job runs them.`);
 
 /*
- * DEFAULT CONCURRENCY — one worker per core — and the flag that was here is gone.
+ * THE PURE BATCHES RUN AS UNITS, a few at a time (Q-863). Each batch of `offlineRuns` is one test-runner child, and `runTestUnits`
+ * (`testing/_shared/run-test-units.mjs`, the pool the runner's -db shards use too) keeps UNIT_WIDTH of them alive at once, each with
+ * `--test-concurrency=ceil(cores / UNIT_WIDTH)` workers, so the cores a batch leaves idle while its slowest file finishes are used by the next
+ * one. One batch at a time with a worker per core took 317.9 s over the 1 227 pure files on 8 cores, a pool of three batches of three workers
+ * 214.7 s; the batch holding the slowest file sets the floor in every setting measured. The runner also gives each unit the time bound (a
+ * file that hangs after its tests is ended and named), the held output (units never interleave) and the child environment, so none is
+ * written here. The old shape, one synchronous child per batch with node's default width, ran one batch at a time and had no bound.
  *
- * `--test-concurrency=1` is right for a suite sharing ONE live instance: `testing/integration` run
- * concurrently latches maintenance mode and reports 314 false failures. These files have no instance to
- * share; that is what `@needs-instance` declares, and the ones that do are not in this list.
- *
- * Measured over the 591 offline files on this machine: 191.0s serialised, 46.6s parallel, both green.
- * Preflight ran them serially too, so the offline set cost about three and a half minutes twice per
- * cycle — once here and once in `test:all:core`.
+ * The one-worker setting that is right for a suite sharing ONE live instance does not apply: the files here need no instance, which is
+ * what `@needs-instance` declares, and the ones that do are not in this list.
  *
  * The database-backed files are NOT in this run, in either mode (Q-588, owner decision 2026-10-22): they share one MongoDB
  * (`DB_TEST_CONCURRENCY` in the shared split caps them there), a machine without the test stack skipped them silently, and
@@ -414,26 +427,24 @@ console.log(`  ${ciOnly.length} file(s) declare @ci-only (too slow for every pus
  * gate `a-preflight-runs-no-database-batch-and-static-is-never-a-push-pass` holds that for both modes.
  */
 const runs = offlineRuns(standaloneSplit, { ciOnly: false }).filter(r => r.kind === 'pure');
-let standaloneFailed = false;
-// Timing, through the shared helper: one destination per batch, the flags AFTER the plan's own args so the batch
-// budget and the cap stay about the files, and the recorder's credentials out of the children's environment.
+// Timing, through the shared helper: one destination per unit, the flags AFTER the plan's own args so the batch budget stays about the
+// files, and the recorder's credentials out of the children's environment (`runTestUnits` builds it with `testChildEnv`). The label is the
+// unit's place in the list, fixed here before any unit launches, so two units never write one file whatever order they end in.
 // The suite is `preflight`, not `standalone`: this is a subset, and it must not clear or overwrite a full run's files.
 clearTimingResults('preflight');
-const batchesOfKind = {};
-for (const [i, r] of runs.entries()) {
-  if (runs.length > 1) console.log(`  batch ${i + 1}/${runs.length} — ${r.files.length} ${r.kind} file(s)`);
-  batchesOfKind[r.kind] = (batchesOfKind[r.kind] ?? 0) + 1;
-  const flags = timingReporterFlags({ suite: 'preflight', batch: `${r.kind}-${batchesOfKind[r.kind]}`, scope: STATIC ? 'static' : 'subset' });
-  // An argument array and no shell: through cmd.exe the line is capped at 8 191 characters, and the reporter's flags
-  // on top of a budget-sized batch went over it ("The command line is too long", no test output). CreateProcess
-  // allows 32 767, which is the limit the batch budget is sized under.
-  try { execFileSync('node', ['--test', ...r.args, ...flags.args, ...r.files], { stdio: 'inherit', env: testChildEnv(flags.env) }); } catch {
-    // Keep going: one batch failing must not hide a second failure in a later batch, which is exactly the
-    // information a single all-or-nothing invocation used to give.
-    standaloneFailed = true;
-  }
-}
-if (standaloneFailed) {
+const UNIT_WIDTH = 3;
+const units = runs.map((r, i) => ({ files: r.files, args: r.args, flags: timingReporterFlags({ suite: 'preflight', batch: `pure-${i + 1}`, scope: STATIC ? 'static' : 'subset' }) }));
+console.log(`  ${runs.length} batch(es) of pure files, ${UNIT_WIDTH} at a time`);
+const { failed } = await runTestUnits(units.map(u => u.files), {
+  width: UNIT_WIDTH,
+  args: (files, i) => [`--test-concurrency=${Math.ceil(availableParallelism() / UNIT_WIDTH)}`, ...units[i].args, ...units[i].flags.args],
+  envOf: (files, i) => units[i].flags.env,
+  labelOf: (files, i) => `pure-${i + 1}`,
+  header: ({ label, code, index, total, files, startedAt, endedAt }) =>
+    `  batch ${index + 1}/${total} (${label}) — ${files.length} pure file(s), ${((endedAt - startedAt) / 1000).toFixed(0)}s, exit ${code}\n`,
+});
+// Every unit has ended (a failing one lets the others finish, so a second failure is not hidden): the stage fails once.
+if (failed > 0) {
   failures.push({ name: 'test:standalone (offline subset)', why: 'server contracts and pure logic — no Docker needed, so no reason to learn this from CI' });
 }
 
