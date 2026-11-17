@@ -726,7 +726,6 @@ describe('File metadata (MongoDB) — directory operations', () => {
   /** The whole files collection of this block's space. */
   const listOwnFileMeta = (args = {}) => listFileMeta(args, space.id);
 
-
   it('Deleting a directory removes metadata for all files inside it', async () => {
     const dir = `meta-dir-del-${RUN}`;
     await upload(`${dir}/a.txt`, 'alpha');
