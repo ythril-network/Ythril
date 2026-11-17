@@ -32,20 +32,25 @@
  * - the flag is whatever expression reads `'--static'` from the command line, and every guard is evaluated twice, once with
  *   the flag set and once without (`reachable`), so `if (!STATIC)`, `STATIC ? a : b`, `!STATIC && x()` and an inline
  *   `process.argv.includes('--static')` are all the same rule;
+ * - since Q-865 the stages are registered bodies, `stage('<name>', async () => { ... })`, run in the order `planStages` computes, and a
+ *   static run leaves a stage out by the stage list's `static: false` flag and nothing else: NO stage is skipped by a guard on the flag,
+ *   in its registration or in its body (the one mention of the flag a body may have is the timing scope of the standalone batches);
  * - a REGION is found by the call it makes (the client unit-test command, `build:prod`, the `client/angular.json` read, the
  *   TCP probe of the test database, the unit runner's call, a hand-started `--test` batch), never by a line number or a variable name.
- *   Each of the three static-skipped regions must be reachable in the full run and unreachable under `--static`; the probe region and
- *   the hand-started batch must not exist at all (Q-863: the pure batches go through `runTestUnits`, `testing/_shared/run-test-units.mjs`,
- *   which holds the pool, the time bound and the child environment); the unit runner's call is run in both modes and must be GIVEN only
- *   kind `pure` units: its first argument, followed back through the names it is built from, passes through a
- *   `.filter(r => r.kind === 'pure')` (or `!== 'db'`) whose predicate is that bare comparison, from a test the flag does not enter;
- * - every OTHER step call (`run`, `execSync`, `execFileSync`, `gate`) must be reachable under `--static`, so a step added
- *   later is static unless a guard says it is a suite.
+ *   Each of the three static-skipped regions must sit in the body of the stage the list marks `static: false` for it, unguarded; the
+ *   probe region and the hand-started batch must not exist at all (Q-863: the pure batches go through `runTestUnits`,
+ *   `testing/_shared/run-test-units.mjs`, which holds the pool, the time bound and the child environment); the unit runner's call sits
+ *   in the standalone stage's body, runs in both modes and must be GIVEN only kind `pure` units: its first argument, followed back
+ *   through the names it is built from, passes through a `.filter(r => r.kind === 'pure')` (or `!== 'db'`) whose predicate is that
+ *   bare comparison, from a test the flag does not enter;
+ * - every OTHER step call (`run`, `execSync`, `execFileSync`) is counted INSIDE a stage body, none is skipped by a guard on the flag,
+ *   and none sits outside every stage (a step at the top level of the script runs before the plan and in no order the plan knows).
  *
  * Seen red by the RULE, and by mutation: `analyse()` is run over the real file with the flag neutralised, with an unguarded
- * copy of a region's call inserted, with a probe put back, with the kind filter taken out (a db run put back into the plan), with the
- * old `!STATIC ||` guard put back in front of it, and with a hand-started `--test` batch put back; each must name the region. The
- * mutations are in memory and the file is never written.
+ * copy of a region's call inserted at the top level, with a guard on the flag put inside a stage body, around a stage's registration,
+ * with a stage renamed so a region sits in the wrong stage, with a probe put back, with the kind filter taken out (a db run put back
+ * into the plan), with the old `!STATIC ||` guard put back in front of it, and with a hand-started `--test` batch put back; each must
+ * name the region. The mutations are in memory and the file is never written.
  *
  * Shape history: until Q-863 the plan was run by one synchronous `execFileSync('node', ['--test', ...])` inside a `for` loop, and this
  * gate found the loop's list or an `if ... continue` in its body. The loop is gone with the synchronous shape; the rule is the same (no db
@@ -62,6 +67,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { scratchRoot as scratchRootOf } from '../../scripts/_shared/scratch-root.mjs';
 
 /** The project's scratch root, made to exist (it is outside the checkout, and a fresh machine may not have it yet). */
@@ -76,8 +82,10 @@ const STATIC_FLAG = '--static';
 const PREFLIGHT_FILE = 'scripts/preflight.mjs';
 const REAL = readFileSync(join(REPO_ROOT, PREFLIGHT_FILE), 'utf8');
 
-/** How many step calls (`run`, `execSync`, `execFileSync`, `gate`) outside the skipped regions the file must be found to hold. */
+/** How many step calls (`run`, `execSync`, `execFileSync`) inside the stage bodies, outside the skipped regions, the file must be found to hold. */
 const STEP_FLOOR = 8;
+/** How many `stage('<name>', <body>)` registrations the file must be found to hold (the gate loops register theirs through `gate`, so fewer are spelt out). */
+const STAGE_FLOOR = 10;
 /** The steps the plan names as static, found by the command text of the call that makes them. A floor on WHICH, beside the derived rule. */
 const NAMED_STATIC_STEPS = ['build:server', 'unrun-tests', 'surface-matrix-audit', 'lint:docs', 'todo:check', 'check-changelog', 'typecheck:client', 'git ls-files'];
 
@@ -105,6 +113,22 @@ function stringsIn(node) {
 
 const insideFunction = (node) => {
   for (let p = node.parent; p; p = p.parent) if (ts.isFunctionLike(p)) return true;
+  return false;
+};
+
+/** `stage('<name>', <function>)`: the registration of one stage's body. The name is a literal, or a variable in `gate()`, which registers the gate loops' stages. */
+const isStageCall = (n) => ts.isCallExpression(n) && calleeName(n) === 'stage' && n.arguments.length >= 2 && ts.isFunctionLike(n.arguments[1]);
+const stageNameOf = (call) => (call.arguments[0] && isString(call.arguments[0]) ? call.arguments[0].text : null);
+/** The registration whose body `node` sits in (the innermost one), or null when it sits in no stage body. */
+function stageOf(node) {
+  for (let p = node.parent; p; p = p.parent) {
+    if (ts.isFunctionLike(p) && p.parent && isStageCall(p.parent) && p.parent.arguments[1] === p) return p.parent;
+  }
+  return null;
+}
+/** Is `node` inside a `timingReporterFlags(...)` call: the one place a stage body may read the flag (the timing scope of the batches). */
+const insideTimingFlags = (node) => {
+  for (let p = node.parent; p; p = p.parent) if (ts.isCallExpression(p) && calleeName(p) === 'timingReporterFlags') return true;
   return false;
 };
 
@@ -270,13 +294,15 @@ const REGIONS = {
 };
 /** The three things `--static` leaves out: the client suite, the production build and the bundle budgets. */
 const SKIPPED_UNDER_STATIC = ['client-suite', 'client-build', 'bundle-budgets'];
+/** The stage whose body holds each region, written by hand: the stage list marks exactly these `static: false`, which is how a static run leaves them out. */
+const REGION_STAGE = { 'client-suite': 'client unit tests', 'client-build': 'build:prod', 'bundle-budgets': 'bundle-budgets', 'database-batch': 'test:standalone (offline subset)' };
 /** Regions that must not exist at all, each with what its presence means: the probe went with the database batches (Q-588); the hand-started batch with the pool (Q-863). */
 const GONE = {
   'database-probe': (at) => `database-probe (${at}) is back in ${PREFLIGHT_FILE}: local preflight runs no database test, so nothing local asks whether a database is up`,
   'hand-batch': (at) => `a node --test batch is started by hand (${at}) in ${PREFLIGHT_FILE}: the pure units go through runTestUnits, which holds the pool, the time bound, the held output and the child environment`,
 };
 
-const STEP_CALLEES = ['run', 'execSync', 'execFileSync', 'gate'];
+const STEP_CALLEES = ['run', 'execSync', 'execFileSync'];
 
 function regionNodes(sf) {
   const out = Object.fromEntries(Object.keys(REGIONS).map(k => [k, []]));
@@ -284,12 +310,18 @@ function regionNodes(sf) {
   return out;
 }
 
-/** Calls that are a step of the run and belong to no skipped region: what must still run under `--static`. */
+/**
+ * Calls that are a step of the run and belong to no skipped region, as `{ node, stage }`: `stage` is the registration whose body holds it,
+ * or null when it sits in none. A step inside a helper function that is no stage body (`const run = (cmd) => execSync(cmd)`) is the
+ * helper's own definition, not a step of the run, and is left out; a step at the top level of the script is returned with a null stage.
+ */
 function otherSteps(sf, regions) {
   const inRegion = (n) => Object.values(regions).flat().some(r => r === n || (r.pos <= n.pos && n.end <= r.end));
   const steps = [];
   visit(sf, (n) => {
-    if (ts.isCallExpression(n) && STEP_CALLEES.includes(calleeName(n)) && !insideFunction(n) && !inRegion(n)) steps.push(n);
+    if (!ts.isCallExpression(n) || !STEP_CALLEES.includes(calleeName(n)) || inRegion(n)) return;
+    const stage = stageOf(n);
+    if (stage || !insideFunction(n)) steps.push({ node: n, stage });
   });
   return steps;
 }
@@ -422,17 +454,21 @@ function analyse(src, { floor = STEP_FLOOR } = {}) {
   for (const [region, message] of Object.entries(GONE)) {
     for (const n of regions[region]) say(region, message(`line ${lineOf(sf, n)}`));
   }
-  for (const region of SKIPPED_UNDER_STATIC) {
+  // Where a region sits: in the body of its own stage, which the stage list leaves out of a static run, and under no guard on the flag.
+  const holder = (n) => { const call = stageOf(n); return call ? (stageNameOf(call) ?? '(a stage with a computed name)') : null; };
+  for (const region of [...SKIPPED_UNDER_STATIC, 'database-batch']) {
     for (const n of regions[region]) {
       const at = `line ${lineOf(sf, n)}`;
-      if (reachable(n, true, S)) say(region, `${region} (${at}) still runs under ${STATIC_FLAG}: it needs a database or runs a suite`);
+      const inStage = holder(n);
+      if (inStage !== REGION_STAGE[region]) {
+        say(region, `${region} (${at}) sits ${inStage === null ? 'outside every stage body' : `in the body of stage ${JSON.stringify(inStage)}`}, not in the body of ${JSON.stringify(REGION_STAGE[region])}: a static run leaves a stage out by its static:false flag, so the code must live in that stage's body`);
+      }
+      if (!reachable(n, true, S)) say(region, `${region} (${at}) is skipped by a guard on ${STATIC_FLAG}: the stage list's static:false flag is the only way a static run leaves a stage out`);
       if (!reachable(n, false, S)) say(region, `${region} (${at}) does not run in the full preflight`);
     }
   }
   for (const n of regions['database-batch']) {
     const at = `line ${lineOf(sf, n)}`;
-    if (!reachable(n, false, S)) say('database-batch', `the unit runner call (${at}) does not run in the full preflight`);
-    if (!reachable(n, true, S)) say('database-batch', `the unit runner call (${at}) is skipped under ${STATIC_FLAG} whole: the pure half (the timer and walk rule gates live there) must run`);
     if (!planHoldsOnlyPure(n, decls)) say('database-batch', `the unit runner call (${at}) can be handed a database unit: the list it is given is not built from a \`.filter\` that selects only kind 'pure' by a bare comparison the flag does not enter, so a db run is in the plan in at least one mode`);
   }
 
@@ -443,17 +479,34 @@ function analyse(src, { floor = STEP_FLOOR } = {}) {
     && s.importClause.namedBindings.elements.some(el => (el.propertyName ?? el.name).text === 'runTestUnits'));
   if (!importsRunner) say('database-batch', `${PREFLIGHT_FILE} does not import runTestUnits from the shared run-test-units.mjs: a runner of its own has no pool, bound or held output of the shared one`);
 
-  // Every other step runs under --static.
+  // The stages: registered in both modes, and none reads the flag to skip itself (the stage list's static:false is the one way out).
+  const registrations = [];
+  visit(sf, (n) => { if (isStageCall(n)) registrations.push(n); });
+  if (registrations.length < STAGE_FLOOR) say('stages', `only ${registrations.length} stage(s) registered with stage('<name>', <body>), floor ${STAGE_FLOOR}: the scan is broken or the file lost its stages`);
+  for (const call of registrations) {
+    const label = stageNameOf(call) ?? '(a stage with a computed name)';
+    if (!reachable(call, true, S) || !reachable(call, false, S)) {
+      say('stages', `the registration of stage ${JSON.stringify(label)} (line ${lineOf(sf, call)}) is guarded by ${STATIC_FLAG}: the stage list's static:false flag is the only way a static run leaves a stage out`);
+    }
+    visit(call.arguments[1], (n) => {
+      const reads = (ts.isIdentifier(n) && S.has(n.text) && !(n.parent && ts.isVariableDeclaration(n.parent) && n.parent.name === n)) || (ts.isExpression(n) && isFlagTest(n));
+      if (reads && !insideTimingFlags(n)) say('stages', `stage ${JSON.stringify(label)} reads the ${STATIC_FLAG} flag (line ${lineOf(sf, n)}): no stage body skips itself, and the one mention a body may have is the timing scope of the standalone batches`);
+    });
+  }
+
+  // Every other step is counted inside a stage body, and runs under --static (the plan drops a stage by its flag, never a guard).
   const steps = otherSteps(sf, regions);
   // With no flag every step trivially "runs under --static": say so, so that is not read as the rule holding.
   if (!turns) say('steps', `no ${STATIC_FLAG} flag turns anything in ${PREFLIGHT_FILE}, so no step is static`);
-  if (steps.length < floor) say('steps', `only ${steps.length} step call(s) found outside the skipped regions, floor ${floor}: the scan is broken or the file lost its steps`);
-  for (const n of steps) {
+  const inBodies = steps.filter(x => x.stage);
+  if (inBodies.length < floor) say('steps', `only ${inBodies.length} step call(s) found inside the stage bodies outside the skipped regions, floor ${floor}: the scan is broken or the file lost its steps`);
+  for (const { node: n, stage } of steps) {
+    if (!stage) { say('steps', `${n.getText().slice(0, 70)} (line ${lineOf(sf, n)}) sits outside every stage body: it runs before the plan, in every mode, in no order the plan knows`); continue; }
     if (!reachable(n, true, S)) say('steps', `${n.getText().slice(0, 70)} (line ${lineOf(sf, n)}) is skipped under ${STATIC_FLAG}, and it is not a suite`);
     if (!reachable(n, false, S)) say('steps', `${n.getText().slice(0, 70)} does not run in the full preflight`);
   }
   for (const token of NAMED_STATIC_STEPS) {
-    if (!steps.some(n => stringsIn(n).some(s => s.includes(token)))) say('steps', `no step call names '${token}': the plan lists it as a static step`);
+    if (!inBodies.some(({ node: n }) => stringsIn(n).some(s => s.includes(token)))) say('steps', `no step call in a stage body names '${token}': the plan lists it as a static step`);
   }
 
   // The verdict.
@@ -577,6 +630,47 @@ function putProbeBack(src) {
   return `${src.slice(0, at)}\nnew Socket().connect(27117, '127.0.0.1');\n${src.slice(at)}`;
 }
 
+/** The first stage registration whose body is a block holding a step call (so a mutation has a real body to enter). */
+function firstStageWithBlock(src, tag) {
+  const sf = parsed(src, tag);
+  const found = [];
+  visit(sf, (n) => { if (isStageCall(n) && ts.isBlock(n.arguments[1].body)) found.push(n); });
+  const call = found[0];
+  assert.ok(call, 'the mutation found no stage registration with a block body');
+  return { sf, call };
+}
+
+/** A guard on the flag put inside a stage body, as its first statement: the stage now skips itself under `--static` (the shape the stage list's flag replaced). */
+function putStaticGuardInStage(src) {
+  const { sf, call } = firstStageWithBlock(src, 'guard-in-body');
+  const body = call.arguments[1].body;
+  return edit(src, [{ start: body.getStart(sf) + 1, end: body.getStart(sf) + 1, text: `\nif (process.argv.includes('${STATIC_FLAG}')) return;\n` }]);
+}
+
+/** A guard on the flag around a stage's registration: the stage is not registered under `--static`, so the plan would name a stage with no body. */
+function putStaticGuardAroundRegistration(src) {
+  const { sf, call } = firstStageWithBlock(src, 'guard-around');
+  return edit(src, [{ start: call.getStart(sf), end: call.getStart(sf), text: `if (!process.argv.includes('${STATIC_FLAG}')) ` }]);
+}
+
+/** The first step call that is no region's, copied as a statement straight after the imports: it now runs before the plan, outside every stage body. */
+function putStepAtTopLevel(src) {
+  const sf = parsed(src, 'top-level-step');
+  const regions = regionNodes(sf);
+  const step = otherSteps(sf, regions).find(x => x.stage)?.node;
+  assert.ok(step, 'the mutation found no step call inside a stage body to copy');
+  const imports = sf.statements.filter(ts.isImportDeclaration);
+  const at = imports.length ? imports[imports.length - 1].getEnd() : 0;
+  return `${src.slice(0, at)}\n${step.getText()};\n${src.slice(at)}`;
+}
+
+/** The registration of the production build renamed to another stage's name: the build's code now sits in the wrong stage's body. */
+function renameBuildStage(src) {
+  const mutated = src.replace(/\bstage\(\s*(['"`])build:prod\1/, (m, q) => `stage(${q}lint:docs${q}`);
+  assert.notEqual(mutated, src, "the mutation found no stage('build:prod', ...) to rename");
+  return mutated;
+}
+
 // ─────────────────────────────────────────── the rule over the real file (red at base) ───────────────────────────────────────────
 
 describe('scripts/preflight.mjs: no database batch in either mode, and --static (the real file, read as text)', () => {
@@ -585,8 +679,18 @@ describe('scripts/preflight.mjs: no database batch in either mode, and --static 
   it('refuses an argument it does not know, so a mistyped flag never runs the full preflight silently', () => regionHolds(REAL, 'refusal'));
 
   for (const region of SKIPPED_UNDER_STATIC) {
-    it(`the ${region} region runs in the full preflight and not under --static`, () => regionHolds(REAL, region));
+    it(`the ${region} region sits in the body of the ${REGION_STAGE[region]} stage, under no guard on the flag`, () => regionHolds(REAL, region));
   }
+
+  it('registers its stages with stage(<name>, <body>) and no stage skips itself by reading the flag (the stage list\'s static:false is the one way out)', () => regionHolds(REAL, 'stages'));
+
+  it('a static run leaves out exactly the stages the list marks static:false, and those are the stages that hold the client suite, the production build and the budgets', async () => {
+    const { PREFLIGHT_STAGES, planStages } = await import(pathToFileURL(join(REPO_ROOT, 'scripts/_shared/preflight-stages.mjs')).href);
+    const marked = PREFLIGHT_STAGES.filter(s => s.static === false).map(s => s.name).sort();
+    const left = PREFLIGHT_STAGES.map(s => s.name).filter(n => !planStages(PREFLIGHT_STAGES, null, { static: true }).some(s => s.name === n)).sort();
+    assert.deepEqual(left, marked, 'a static plan leaves out something the list does not mark static:false, or keeps something it marks');
+    assert.deepEqual(marked, SKIPPED_UNDER_STATIC.map(r => REGION_STAGE[r]).sort(), 'the stages marked static:false are not the stages that hold the three regions a static run skips');
+  });
 
   it('the run plan holds no database unit in EITHER mode: the list handed to runTestUnits is built from offlineRuns by a filter that selects only kind pure, from a test the flag does not enter', () => regionHolds(REAL, 'database-batch'));
 
@@ -633,22 +737,42 @@ describe('scripts/preflight.mjs: no database batch in either mode, and --static 
       assert.equal(v.length, 0, `the real file does not hold the rule, so no mutation of it can be judged:\n${v.map(x => `  - [${x.region}] ${x.message}`).join('\n')}`);
     };
 
-    it('the flag neutralised: every skipped region, the verdict and the scope go red', () => {
+    it('the flag neutralised: the verdict, the scope and the flag itself go red', () => {
       cleanBaseline();
       const v = analyse(neutraliseFlag(REAL));
-      for (const region of [...SKIPPED_UNDER_STATIC, 'verdict', 'scope', 'flag']) {
+      for (const region of ['verdict', 'scope', 'flag']) {
         assert.ok(v.some(x => x.region === region), `neutralising the flag left '${region}' green`);
       }
     });
 
     // The unit runner's call is run in BOTH modes by rule, so an unguarded copy of it is not a defect of this rule; the skipped regions are.
     for (const region of SKIPPED_UNDER_STATIC) {
-      it(`an unguarded copy of the ${region} call, moved into the static path, is named`, () => {
+      it(`a copy of the ${region} call at the top level of the script, outside every stage body, is named`, () => {
         cleanBaseline();
         const v = analyse(insertUnguardedCopy(REAL, region));
-        assert.ok(v.some(x => x.region === region), `an unguarded ${region} call left the rule green`);
+        assert.ok(v.some(x => x.region === region), `a ${region} call outside its stage left the rule green`);
       });
     }
+
+    it('a guard on the flag put inside a stage body (the stage skips itself under --static) is named', () => {
+      cleanBaseline();
+      assert.ok(analyse(putStaticGuardInStage(REAL)).some(x => x.region === 'stages'), 'a stage that returns under --static left the rule green');
+    });
+
+    it('a guard on the flag around a stage\'s registration is named', () => {
+      cleanBaseline();
+      assert.ok(analyse(putStaticGuardAroundRegistration(REAL)).some(x => x.region === 'stages'), 'a stage registered only in the full run left the rule green');
+    });
+
+    it('a step moved to the top level of the script, outside every stage body, is named', () => {
+      cleanBaseline();
+      assert.ok(analyse(putStepAtTopLevel(REAL)).some(x => x.region === 'steps' && /outside every stage body/.test(x.message)));
+    });
+
+    it('the production build\'s code in another stage\'s body (the stage renamed) is named', () => {
+      cleanBaseline();
+      assert.ok(analyse(renameBuildStage(REAL)).some(x => x.region === 'client-build'), 'the production build sitting in the wrong stage left the rule green');
+    });
 
     it('a db run put back into the plan (the kind selection taken out of the list the unit runner is handed) is named', () => {
       cleanBaseline();
@@ -710,30 +834,37 @@ const unknown = process.argv.slice(2).filter(a => a !== '--static');
 if (unknown.length > 0) { console.error('preflight: unknown argument ' + unknown[0]); process.exit(2); }
 // Preflight PASSED. npm run test --workspace=client -- --reporter=json   (prose, not a call)
 const run = (cmd) => execSync(cmd, { stdio: 'inherit' });
-function gate(name) { run('node --test ' + name); }
+const stage = (name, body) => bodies.set(name, body);
+function gate(name) { stage(name, async () => { run('node --test ' + name); }); }
 const failures = [];
+const bodies = new Map();
 for (const g of ['a', 'b']) gate(g);
-run('npm run build:server');
-const runs = offlineRuns(split).filter(r => r.kind === 'pure');
-const units = runs.map((r, i) => {
-  const flags = timingReporterFlags({ suite: 'preflight', batch: \`\${r.kind}-\${i + 1}\`, scope: STATIC ? 'static' : 'subset' });
-  return { files: r.files, flags };
+stage('build:server', async () => { run('npm run build:server'); });
+stage('test:standalone (offline subset)', async () => {
+  const runs = offlineRuns(split).filter(r => r.kind === 'pure');
+  const units = runs.map((r, i) => {
+    const flags = timingReporterFlags({ suite: 'preflight', batch: \`\${r.kind}-\${i + 1}\`, scope: STATIC ? 'static' : 'subset' });
+    return { files: r.files, flags };
+  });
+  const { failed } = await runTestUnits(units.map(u => u.files), {
+    width: 3, args: (files, i) => units[i].flags.args, envOf: (files, i) => units[i].flags.env, labelOf: (files, i) => 'pure-' + (i + 1), header: (info) => info.label,
+  });
+  if (failed > 0) failures.push('test:standalone');
 });
-const { failed } = await runTestUnits(units.map(u => u.files), {
-  width: 3, args: (files, i) => units[i].flags.args, envOf: (files, i) => units[i].flags.env, labelOf: (files, i) => 'pure-' + (i + 1), header: (info) => info.label,
-});
-if (failed > 0) failures.push('test:standalone');
-execSync('git ls-files "testing/**/*.js"', { encoding: 'utf8' });
-run('node scripts/unrun-tests.mjs');
-run('node scripts/surface-matrix-audit.mjs');
-run('npm run lint:docs');
-run('npm run todo:check');
-run('node ./scripts/check-changelog.mjs');
-run('npm run typecheck:client');
-if (!STATIC) {
+stage('test files parse', async () => { execSync('git ls-files "testing/**/*.js"', { encoding: 'utf8' }); });
+stage('unrun-tests', async () => { run('node scripts/unrun-tests.mjs'); });
+stage('surface-matrix-audit', async () => { run('node scripts/surface-matrix-audit.mjs'); });
+stage('lint:docs', async () => { run('npm run lint:docs'); });
+stage('todo:check', async () => { run('npm run todo:check'); });
+stage('check-changelog', async () => { run('node ./scripts/check-changelog.mjs'); });
+stage('typecheck:client', async () => { run('npm run typecheck:client'); });
+stage('client unit tests', async () => {
   try { run('npm run test --workspace=client -- --reporter=json'); } catch { failures.push('client'); }
-  try { execSync('npm run build:prod --workspace=client -- --verbose'); readFileSync('client/angular.json', 'utf8'); } catch { failures.push('build'); }
-}
+});
+stage('build:prod', async () => {
+  try { execSync('npm run build:prod --workspace=client -- --verbose'); } catch { failures.push('build'); }
+});
+stage('bundle-budgets', async () => { readFileSync('client/angular.json', 'utf8'); });
 if (failures.length === 0) {
   console.log(STATIC ? 'Preflight STATIC passed - not a push pass.' : 'Preflight PASSED. Docker-dependent suites still run in CI.');
   process.exit(0);
@@ -747,25 +878,25 @@ import { execSync, execFileSync } from 'node:child_process';
 import { runTestUnits } from '../testing/_shared/run-test-units.mjs';
 if (process.argv.slice(2).some(a => a !== '--static')) { console.log('usage: preflight [--static]'); process.exit(2); }
 const run = (cmd) => execSync(cmd, { stdio: 'inherit' });
-function gate(name) { run('node --test ' + name); }
+const stage = (name, body) => bodies.set(name, body);
+const bodies = new Map();
+function gate(name) { stage(name, () => { run('node --test ' + name); }); }
 for (const g of ['a', 'b']) gate(g);
-run('npm run build:server');
-await runTestUnits(offlineRuns(split).filter(function (r) { return r.kind !== 'db'; }).map(r => r.files), {
+stage('build:server', () => run('npm run build:server'));
+stage('test:standalone (offline subset)', () => runTestUnits(offlineRuns(split).filter(function (r) { return r.kind !== 'db'; }).map(r => r.files), {
   width: 3, args: () => [], labelOf: (files, i) => 'pure-' + i,
   envOf: () => timingReporterFlags({ scope: process.argv.includes('--static') ? 'static' : 'subset' }).env,
-});
-execSync('git ls-files "testing/**/*.js"');
-run('node scripts/unrun-tests.mjs');
-run('node scripts/surface-matrix-audit.mjs');
-run('npm run lint:docs');
-run('npm run todo:check');
-run('node ./scripts/check-changelog.mjs');
-run('npm run typecheck:client');
-if (process.argv.includes('--static') === false) {
-  run('npm run test --workspace=client');
-  run('npm run build:prod --workspace=client');
-  readFileSync('client/angular.json');
-}
+}));
+stage('test files parse', () => execSync('git ls-files "testing/**/*.js"'));
+stage('unrun-tests', () => run('node scripts/unrun-tests.mjs'));
+stage('surface-matrix-audit', () => run('node scripts/surface-matrix-audit.mjs'));
+stage('lint:docs', () => run('npm run lint:docs'));
+stage('todo:check', () => run('npm run todo:check'));
+stage('check-changelog', () => run('node ./scripts/check-changelog.mjs'));
+stage('typecheck:client', () => run('npm run typecheck:client'));
+stage('client unit tests', () => run('npm run test --workspace=client'));
+stage('build:prod', () => run('npm run build:prod --workspace=client'));
+stage('bundle-budgets', () => readFileSync('client/angular.json'));
 if (process.argv.includes('--static')) { console.log('Preflight STATIC passed - not a push pass'); }
 else { console.log('Preflight PASSED.'); }
 `;
@@ -778,18 +909,34 @@ describe('the preflight rules, over literal samples', () => {
         assert.deepEqual(v, [], v.map(x => `[${x.region}] ${x.message}`).join('\n'));
       });
 
-      it('goes red with the flag neutralised, naming every skipped region', () => {
+      it('goes red with the flag neutralised, naming the verdict, the scope and the flag', () => {
         const v = analyse(neutraliseFlag(sample));
-        for (const region of [...SKIPPED_UNDER_STATIC, 'verdict', 'scope', 'flag']) {
+        for (const region of ['verdict', 'scope', 'flag']) {
           assert.ok(v.some(x => x.region === region), `'${region}' stayed green with the flag neutralised`);
         }
       });
 
       for (const region of SKIPPED_UNDER_STATIC) {
-        it(`goes red when an unguarded ${region} call is moved into the static path`, () => {
+        it(`goes red when a ${region} call is put at the top level, outside every stage body`, () => {
           assert.ok(analyse(insertUnguardedCopy(sample, region)).some(x => x.region === region));
         });
       }
+
+      it('goes red when a stage body skips itself under --static', () => {
+        assert.ok(analyse(putStaticGuardInStage(sample)).some(x => x.region === 'stages'));
+      });
+
+      it('goes red when a stage is registered only in the full run', () => {
+        assert.ok(analyse(putStaticGuardAroundRegistration(sample)).some(x => x.region === 'stages'));
+      });
+
+      it('goes red when a step is at the top level, outside every stage body', () => {
+        assert.ok(analyse(putStepAtTopLevel(sample)).some(x => x.region === 'steps' && /outside every stage body/.test(x.message)));
+      });
+
+      it('goes red when the production build\'s code sits in another stage\'s body', () => {
+        assert.ok(analyse(renameBuildStage(sample)).some(x => x.region === 'client-build'));
+      });
 
       it('goes red when a db run is put back into the plan', () => {
         assert.ok(analyse(putDbRunBack(sample)).some(x => x.region === 'database-batch'));
@@ -853,7 +1000,15 @@ describe('the preflight rules, over literal samples', () => {
 
   it('is red when a gate sits inside a guard that skips it under --static', () => {
     const skipsAGate = SAMPLE_FILTER.replace("run('npm run lint:docs');", "if (!STATIC) run('npm run lint:docs');");
-    assert.ok(analyse(skipsAGate).some(x => x.region === 'steps' && /lint:docs/.test(x.message)));
+    assert.notEqual(skipsAGate, SAMPLE_FILTER);
+    const v = analyse(skipsAGate);
+    assert.ok(v.some(x => x.region === 'steps' && /lint:docs/.test(x.message)));
+    assert.ok(v.some(x => x.region === 'stages' && /lint:docs/.test(x.message)), 'the guard inside the stage body is not named as a stage that skips itself');
+  });
+
+  it('allows the one mention of the flag a stage body may have: the timing scope of the standalone batches', () => {
+    assert.deepEqual(analyse(SAMPLE_FILTER).filter(x => x.region === 'stages'), []);
+    assert.ok(stringsIn(parsed(SAMPLE_FILTER, 'scope-mention')).includes('static'), 'the sample no longer carries the scope the case is about');
   });
 
   it('is red when the step scan finds nothing (the floor), not green about an empty file', () => {

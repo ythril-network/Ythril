@@ -24,19 +24,19 @@
  *
  * ── The order ───────────────────────────────────────────────────────────────────────────────────
  *
- * Cheapest first, and the first failing stage ends the run (Q-862). The stages and their kinds are data,
- * `scripts/_shared/preflight-stages.mjs`: the `source` stages (no build: the cheap text gates, docs lint, the CHANGELOG
- * entry), then the `build` stages (the server build, the gates that import it, the client type-check and production
- * build), then the `test` stages (the client unit tests, then the standalone batches, the slowest). A full run took
- * about 35 minutes, 26 of them in test batches that ran BEFORE the sub-minute gates, and it went on to the end after a
- * failure; every failure on 2026-11-16 was one of those gates. A stage that fails finishes (a second failing batch of the
- * same stage is still shown), the next stage is not started, and the summary names every stage that did not run. Each
- * stage opens with `stages.begin(<name>)`, which throws when the script enters a stage out of the list's order, so the
- * code and the list cannot drift apart. The runner times each stage, and after the verdict the run records one `Preflight-Run`
- * (each stage's name, kind, time and outcome; Q-864): spooled to test-results/unrecorded, sent through `scripts/test-times.mjs`
- * within a bound, and a recording that fails is one line and changes neither the verdict nor the exit status. `node
- * scripts/test-times.mjs --preflight-trend` prints the stage times of the last runs. No caller asks for the old run-everything behaviour (package.json, the
- * in-container runner and `~/.claude/hooks/preflight-mark.js` all run it bare), so there is no flag for it.
+ * Computed, not written here (Q-865): `planStages` (`scripts/_shared/preflight-stages.mjs`) orders the stages by what each reads of
+ * another's output (their `needs`, with the kinds `source`, `build`, `test` as barriers) and, among the stages that may run, by the
+ * measured cost of finding a failure, from `test-results/stage-costs.json` (`scripts/_shared/stage-costs.mjs`; the run prints where
+ * its order came from, and with no usable snapshot it is the stage list's own order). Every stage below is REGISTERED with its body,
+ * `stage('<name>', async () => { ... })`, and `runStages` runs the bodies in the plan's order, one at a time, awaited; it refuses a
+ * registered set that is not the stage list, so the code and the list cannot drift apart. The first failing stage ends the run (Q-862):
+ * a stage that fails finishes (a second failing batch of the same stage is still shown), the next is not started, and the summary names
+ * every stage that did not run. A full run took about 35 minutes, 26 of them in test batches that ran BEFORE the sub-minute gates; every
+ * failure on 2026-11-16 was one of those gates. The runner times each stage, and after the verdict the run records one `Preflight-Run`
+ * (each stage's name, kind, time and outcome, and the runner that measured it; Q-864): spooled to test-results/unrecorded, sent through
+ * `scripts/test-times.mjs` within a bound, and a recording that fails is one line and changes neither the verdict nor the exit status.
+ * `node scripts/test-times.mjs --preflight-trend` prints the stage times of the last runs. No caller asks for the old run-everything
+ * behaviour (package.json, the in-container runner and `~/.claude/hooks/preflight-mark.js` all run it bare), so there is no flag for it.
  *
  * Usage:  npm run preflight
  *         npm run preflight:static   (`--static`: every gate that runs no suite of its own - the source and built
@@ -59,7 +59,8 @@ import { workersPerUnit } from '../testing/_shared/offline-test-width.mjs';
 import { timingResultsDir } from '../testing/_shared/timing-reporter.mjs';
 import { stampRunnerOutcome } from './mask-client-report.mjs';
 import { CLIENT_RESULTS, clientCommandWritingTo } from './_shared/client-results.mjs';
-import { SOURCE_GATES, BUILT_GATES, createStageRunner } from './_shared/preflight-stages.mjs';
+import { PREFLIGHT_STAGES, SOURCE_GATES, BUILT_GATES, createStageRunner, planStages, runStages } from './_shared/preflight-stages.mjs';
+import { readStageCosts } from './_shared/stage-costs.mjs';
 import { buildPreflightRunPayload, preflightRunIdentity, recordPreflightRun } from './_shared/preflight-run-record.mjs';
 
 /**
@@ -124,55 +125,86 @@ function conclude(notRun) {
   finish(1);
 }
 
-const stages = createStageRunner({ failures, isStatic: STATIC, onStop: ({ notRun }) => conclude(notRun) });
+// ── the plan: which stage runs when ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The order's source, in one line: the measured snapshot the host keeps (never fetched here: a down instance would delay the fast
+ * failure this run exists for), or the stage list's own order and the reason there is no usable snapshot (missing, garbage, stale).
+ */
+function orderSource({ costs, why }) {
+  if (!costs) return `preflight: stage order is the list order (${why})`;
+  const hours = Math.max(0, Math.round((Date.now() - Date.parse(costs.generatedAt)) / 3_600_000));
+  const age = hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} days`;
+  return `preflight: stage order follows the measured costs of ${costs.runs} recorded run(s), snapshot ${age} old`;
+}
+
+const snapshot = readStageCosts(timingResultsDir(process.cwd()));
+const plan = planStages(PREFLIGHT_STAGES, snapshot.costs, { static: STATIC });
+const stages = createStageRunner({ failures, isStatic: STATIC, stages: plan, onStop: ({ notRun }) => conclude(notRun) });
+
+/** The stage bodies by name; `runStages` runs them in the plan's order. A stage registered twice is a copy that would silently replace its first. */
+const bodies = new Map();
+function stage(name, body) {
+  if (bodies.has(name)) throw new Error(`preflight: stage ${JSON.stringify(name)} is registered twice`);
+  bodies.set(name, body);
+}
 
 function gate(name, why, file) {
-  stages.begin(name);
-  process.stdout.write(`\n── ${name} ──\n`);
-  try {
-    run(`node --test testing/standalone/${file}.test.js`);
-  } catch {
-    failures.push({ name, why });
-  }
+  stage(name, async () => {
+    process.stdout.write(`\n── ${name} ──\n`);
+    try {
+      run(`node --test testing/standalone/${file}.test.js`);
+    } catch {
+      failures.push({ name, why });
+    }
+  });
 }
 
 console.log('Preflight — the checks that catch failures with no error message.\n');
+console.log(orderSource(snapshot));
 
-// ── the `source` stages: nothing here needs a build, so they run first and fail fastest ──────────────────────────
+// The old report goes before any stage runs, in BOTH modes, so a run that dies (or stops at an early failure) before writing one
+// cannot leave an earlier run's report standing as this run's (the client unit tests stage writes the new one; a static run writes none).
+rmSync(CLIENT_REPORT, { force: true });
+
+// ── the `source` stages: nothing here needs a build ─────────────────────────────────────────────────────────────
 
 // A file git does not track that only a catch-all rule (*.log, *.txt) hides is clutter nobody is told about: agent runs left logs,
 // a stack dump, test output and stray worktree copies in the checkout this way (Q-626). Scratch goes outside every checkout (scratchRoot), not to a folder in it. The check names a
-// place for what stays local. It asks git alone, so it is the cheapest step here and runs first, in both modes.
-stages.begin('unregistered-local-files');
-console.log('\n── no untracked file hidden only by a catch-all ignore rule ──');
-try { run('node scripts/unregistered-local-files.mjs'); } catch {
-  failures.push({ name: 'unregistered-local-files', why: 'a file git does not track that no rule naming a place registers: clutter the catch-all ignore rules hide' });
-}
+// place for what stays local. It asks git alone, so it is the cheapest step here, and every other source stage waits for it.
+stage('unregistered-local-files', async () => {
+  console.log('\n── no untracked file hidden only by a catch-all ignore rule ──');
+  try { run('node scripts/unregistered-local-files.mjs'); } catch {
+    failures.push({ name: 'unregistered-local-files', why: 'a file git does not track that no rule naming a place registers: clutter the catch-all ignore rules hide' });
+  }
+});
 
 // CI has run this since it was written; preflight never did. So eleven PRs in a row passed locally with an entry, and
 // the twelfth — the only one in that run to change access rules — got as far as a red CI job before anyone noticed the
 // CHANGELOG had no line for it. A gate that only exists after the push is a gate that teaches you to push and see.
 //
 // It works locally for the same reason CI can run it: the comparison is against `origin/main`, which is already
-// fetched. Nothing about it needed the runner. It is a git diff, so it runs right after the first stage: a missing entry
+// fetched. Nothing about it needed the runner. It is a git diff, so it is cheap: a missing entry
 // was the failure found half an hour late most often (2026-11-16).
-stages.begin('check-changelog');
-console.log('\n── CHANGELOG entry for shipped changes ──');
-try { run('node ./scripts/check-changelog.mjs'); } catch {
-  failures.push({ name: 'check-changelog', why: 'a file that changes what ships, with no [Unreleased] line' });
-}
+stage('check-changelog', async () => {
+  console.log('\n── CHANGELOG entry for shipped changes ──');
+  try { run('node ./scripts/check-changelog.mjs'); } catch {
+    failures.push({ name: 'check-changelog', why: 'a file that changes what ships, with no [Unreleased] line' });
+  }
+});
 
 // The owner reads todo/ directly, and the release cadence is "cut the tag when _TODO-ORDERED.md is empty" — so a
 // domain tracker holding an item the ordered list never mentions makes "empty" a claim about one file rather than
 // about the work. todo/ is gitignored, so this can only ever run here; the script exits 0 when the folder is
 // absent, which is what makes it safe in a clean checkout.
-stages.begin('todo:check');
-console.log('\n── todo/ is open items only, all indexed ──');
-try { run('npm run todo:check'); } catch {
-  failures.push({ name: 'todo:check', why: 'a tracker holds closed work, or an open item the ordered list never references' });
-}
+stage('todo:check', async () => {
+  console.log('\n── todo/ is open items only, all indexed ──');
+  try { run('npm run todo:check'); } catch {
+    failures.push({ name: 'todo:check', why: 'a tracker holds closed work, or an open item the ordered list never references' });
+  }
+});
 
-// Each gate() begins its own stage.
+// Each gate() registers its own stage.
 for (const [file, why] of SOURCE_GATES) gate(file, why, file);
 
 /*
@@ -183,15 +215,17 @@ for (const [file, why] of SOURCE_GATES) gate(file, why, file);
  * asks the run half of this (which file produced no test event); this is the static half, derived from the workflow, the
  * package scripts and the vitest config, and it needs nothing a developer's machine lacks.
  */
-stages.begin('unrun-tests');
-console.log('\n── every tracked test file is reached by a CI job ──');
-try { run('node scripts/unrun-tests.mjs'); } catch {
-  failures.push({ name: 'unrun-tests', why: 'a tracked test file that no CI job selects: it is never run, and "all tests pass" says nothing about it' });
-}
+stage('unrun-tests', async () => {
+  console.log('\n── every tracked test file is reached by a CI job ──');
+  try { run('node scripts/unrun-tests.mjs'); } catch {
+    failures.push({ name: 'unrun-tests', why: 'a tracked test file that no CI job selects: it is never run, and "all tests pass" says nothing about it' });
+  }
+});
 
-stages.begin('lint:docs');
-console.log('\n── docs lint ──');
-try { run('npm run lint:docs'); } catch { failures.push({ name: 'lint:docs', why: 'markdown that will fail CI' }); }
+stage('lint:docs', async () => {
+  console.log('\n── docs lint ──');
+  try { run('npm run lint:docs'); } catch { failures.push({ name: 'lint:docs', why: 'markdown that will fail CI' }); }
+});
 
 // ── every test file PARSES, including the ones only CI runs ────────────────────────────────────────────────
 //
@@ -204,9 +238,8 @@ try { run('npm run lint:docs'); } catch { failures.push({ name: 'lint:docs', why
 // Paid for on 2026-08-06: an apostrophe lost its backslash on the way through a shell heredoc, the file
 // stopped parsing, local preflight was green, and CI spent a full Docker run to say so. `node --check` over
 // every test file costs about a second and would have said it immediately.
-stages.begin('test files parse');
-console.log('\n── every test file parses (incl. the Docker-only suites CI runs) ──');
-{
+stage('test files parse', async () => {
+  console.log('\n── every test file parses (incl. the Docker-only suites CI runs) ──');
   const testFiles = execSync('git ls-files "testing/**/*.js" "testing/**/*.mjs"', { encoding: 'utf8' })
     .split(/\r?\n/).filter(Boolean);
 
@@ -263,7 +296,7 @@ console.log('\n── every test file parses (incl. the Docker-only suites CI ru
   } else {
     console.log(`  ${testFiles.length} test files parse.`);
   }
-}
+});
 
 // ── the `build` stages: the server build, what imports it, the client type-check and the production build ────────
 
@@ -275,11 +308,12 @@ console.log('\n── every test file parses (incl. the Docker-only suites CI ru
 // standalone test that contradicts the change had been run against the PREVIOUS build. A stale pass is
 // worse than no check, because it is indistinguishable from a real one. A `tsc` run is cheap; being
 // told the wrong answer is not.
-stages.begin('build:server');
-console.log('\n── building server (the gates below import from server/dist) ──');
-try { run('npm run build:server'); } catch { failures.push({ name: 'build:server', why: 'the server does not compile' }); }
+stage('build:server', async () => {
+  console.log('\n── building server (the gates below import from server/dist) ──');
+  try { run('npm run build:server'); } catch { failures.push({ name: 'build:server', why: 'the server does not compile' }); }
+});
 
-// Each gate() begins its own stage.
+// Each gate() registers its own stage; the stage list says they need the server build.
 for (const [file, why] of BUILT_GATES) gate(file, why, file);
 
 /*
@@ -288,18 +322,19 @@ for (const [file, why] of BUILT_GATES) gate(file, why, file);
  * Every gate that says "every route" reads one module, and that module reads SOURCE. This is the only check
  * in the repository that compares it against the live express router objects — the one thing that cannot be
  * wrong about what is served — so it is the check that catches the module being wrong. It imports the router
- * modules from server/dist, so it runs after the build.
+ * modules from server/dist, so it needs the build.
  *
  * It is here because nothing ran it. Left as a manual script it rotted into reporting all 46 tools as
  * unmapped (it grepped a file the map had moved out of) and one route as unserved (its own scan could not
  * resolve a router passed as a parameter). Forty-seven false findings is worse than no audit: the next
  * person to run it stops trusting the tooling. A check nobody runs is a claim.
  */
-stages.begin('surface-matrix-audit');
-console.log('\n── the route list agrees with what express serves ──');
-try { run('node scripts/surface-matrix-audit.mjs'); } catch {
-  failures.push({ name: 'surface-matrix-audit', why: 'the static route list and the live express routers disagree' });
-}
+stage('surface-matrix-audit', async () => {
+  console.log('\n── the route list agrees with what express serves ──');
+  try { run('node scripts/surface-matrix-audit.mjs'); } catch {
+    failures.push({ name: 'surface-matrix-audit', why: 'the static route list and the live express routers disagree' });
+  }
+});
 
 /*
  * ── client type-check, BOTH projects ──
@@ -314,71 +349,69 @@ try { run('node scripts/surface-matrix-audit.mjs'); } catch {
  * so it reported 297 errors of which 175 were `Cannot find name 'expect'` — noise a real error hides inside.
  * The two real projects are the question worth asking.
  */
-stages.begin('typecheck:client');
-console.log('\n── client type-check (app + spec projects) ──');
-try { run('npm run typecheck:client'); } catch {
-  failures.push({ name: 'typecheck:client', why: 'types the test run transpiles past and the AOT build never sees' });
-}
+stage('typecheck:client', async () => {
+  console.log('\n── client type-check (app + spec projects) ──');
+  try { run('npm run typecheck:client'); } catch {
+    failures.push({ name: 'typecheck:client', why: 'types the test run transpiles past and the AOT build never sees' });
+  }
+});
 
 // The production build type-checks TEMPLATES (AOT) and compiles under the app's own tsconfig, neither of
 // which the unit-test run does. It caught a `[...NodeList]` spread that every test passed straight over,
 // and it is where an unknown element, a bad binding or a broken inline template surfaces. ~7 seconds.
-// The build and the budget check read one output, so a static run skips them together.
-if (!STATIC) {
-stages.begin('build:prod');
-console.log('\n── client production build (AOT template type-check) ──');
-let buildOut = '';
-try {
-  // Captured, not inherited, so the chunk table below can be read — then printed, because a build whose
-  // output vanishes is a build nobody can debug.
-  // `--verbose` because the gate below reads the chunk TABLE, and without it the table stops at the fifteen
-  // largest lazy chunks ("…and 158 more"). A budgeted chunk that SHRANK out of that top fifteen — the settings
-  // dialog, once its tabs were deferred (Q-112) — then read as "names no emitted chunk" although it was there.
-  buildOut = execSync('npm run build:prod --workspace=client -- --verbose', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  process.stdout.write(buildOut);
-} catch (e) {
-  buildOut = `${e.stdout ?? ''}${e.stderr ?? ''}`;
-  process.stdout.write(buildOut);
-  failures.push({ name: 'build:prod', why: 'AOT template errors and tsconfig differences the unit tests never see' });
-}
+// The build and the budget check read one output (`ctx.buildOut`); the stage list marks both `static: false`, so a static run leaves them out together.
+stage('build:prod', async (ctx) => {
+  console.log('\n── client production build (AOT template type-check) ──');
+  ctx.buildOut = '';
+  try {
+    // Captured, not inherited, so the chunk table below can be read — then printed, because a build whose
+    // output vanishes is a build nobody can debug.
+    // `--verbose` because the gate below reads the chunk TABLE, and without it the table stops at the fifteen
+    // largest lazy chunks ("…and 158 more"). A budgeted chunk that SHRANK out of that top fifteen — the settings
+    // dialog, once its tabs were deferred (Q-112) — then read as "names no emitted chunk" although it was there.
+    ctx.buildOut = execSync('npm run build:prod --workspace=client -- --verbose', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    process.stdout.write(ctx.buildOut);
+  } catch (e) {
+    ctx.buildOut = `${e.stdout ?? ''}${e.stderr ?? ''}`;
+    process.stdout.write(ctx.buildOut);
+    failures.push({ name: 'build:prod', why: 'AOT template errors and tsconfig differences the unit tests never see' });
+  }
+});
 
 // A `bundle`-type budget names a chunk. Angular does NOT complain when that name matches nothing — the
 // budget is simply never evaluated, the build stays green, and the chunk it was meant to guard grows
 // without limit. That is the same silent no-op the budgets exist to prevent, one level up, and the only
 // place it can be checked is against the real chunk table the build just printed.
-stages.begin('bundle-budgets');
-console.log('\n── bundle budgets bind to real chunks ──');
-try {
-  const cfg = JSON.parse(readFileSync('client/angular.json', 'utf8'));
-  const project = cfg.projects[Object.keys(cfg.projects)[0]];
-  const named = (project.architect.build.configurations.production.budgets ?? [])
-    .filter(b => b.type === 'bundle').map(b => b.name);
-  const plain = buildOut.replace(/\x1b\[[0-9;]*m/g, '');
-  const unmatched = named.filter(n => !new RegExp(`\\|\\s*${n}\\s*\\|`).test(plain));
-  if (unmatched.length) {
-    console.log(`  budgets naming no emitted chunk: ${unmatched.join(', ')}`);
-    failures.push({
-      name: 'bundle-budgets',
-      why: `${unmatched.join(', ')} — Angular evaluates these against nothing, so the build stays green while the chunk grows`,
-    });
-  } else {
-    console.log(`  ${named.length} bundle budget(s) matched an emitted chunk.`);
+stage('bundle-budgets', async (ctx) => {
+  console.log('\n── bundle budgets bind to real chunks ──');
+  try {
+    const cfg = JSON.parse(readFileSync('client/angular.json', 'utf8'));
+    const project = cfg.projects[Object.keys(cfg.projects)[0]];
+    const named = (project.architect.build.configurations.production.budgets ?? [])
+      .filter(b => b.type === 'bundle').map(b => b.name);
+    const plain = (ctx.buildOut ?? '').replace(/\x1b\[[0-9;]*m/g, '');
+    const unmatched = named.filter(n => !new RegExp(`\\|\\s*${n}\\s*\\|`).test(plain));
+    if (unmatched.length) {
+      console.log(`  budgets naming no emitted chunk: ${unmatched.join(', ')}`);
+      failures.push({
+        name: 'bundle-budgets',
+        why: `${unmatched.join(', ')} — Angular evaluates these against nothing, so the build stays green while the chunk grows`,
+      });
+    } else {
+      console.log(`  ${named.length} bundle budget(s) matched an emitted chunk.`);
+    }
+  } catch (e) {
+    failures.push({ name: 'bundle-budgets', why: `could not verify budget names: ${e}` });
   }
-} catch (e) {
-  failures.push({ name: 'bundle-budgets', why: `could not verify budget names: ${e}` });
-}
-}
+});
 
-// ── the `test` stages: the suites, slowest last (the client unit tests, about four minutes, before the standalone batches, about twenty-six) ──
+// ── the `test` stages: the suites ────────────────────────────────────────────────────────────────────────────────
 
 // The command is ci.yml's client step, character for character (`ci-workflow-is-sound` holds the two equal): this step is
-// the local producer of `test-results/client.json`, which `npm run test:client` does not write. The old report goes first,
-// so a run that dies before writing one cannot leave an earlier run's report standing as this run's; the runner's own
-// verdict is stamped into whatever it wrote, so the recorder can call a run incomplete that counts no failure.
-// A static run clears it too and writes none, so no earlier run's report is read as this one's.
-rmSync(CLIENT_REPORT, { force: true });
-if (!STATIC) {
-  stages.begin('client unit tests');
+// the local producer of `test-results/client.json`, which `npm run test:client` does not write. The old report was cleared
+// before any stage ran (above), so a run that dies before writing one cannot leave an earlier run's report standing as this run's;
+// the runner's own verdict is stamped into whatever it wrote, so the recorder can call a run incomplete that counts no failure.
+stage('client unit tests', async () => {
   console.log('\n── client unit tests (includes i18n key coverage) ──');
   let clientOutcome = 'success';
   try { run(clientCommandWritingTo('npm run test --workspace=client -- --reporter=default --reporter=json --outputFile.json=../test-results/client.json', CLIENT_REPORT, join(timingResultsDir(process.cwd(), {}), CLIENT_RESULTS))); } catch {
@@ -386,9 +419,7 @@ if (!STATIC) {
     failures.push({ name: 'test:client', why: 'component behaviour, and translation keys missing from de/pl' });
   }
   stampRunnerOutcome(CLIENT_REPORT, clientOutcome);
-} else {
-  console.log('\n── client unit tests: not in a static run ──');
-}
+});
 
 // Every standalone test that needs neither a running instance nor the test database, rather than the curated handful above.
 //
@@ -401,55 +432,58 @@ if (!STATIC) {
 // measurements that produced them. `test:standalone` asks the same question, and two copies of it is two
 // places for preflight and the suite to disagree about which gates exist — which is the one divergence
 // that makes a green preflight worthless.
-stages.begin('test:standalone (offline subset)');
-const standaloneSplit = splitStandalone();
-const { all: allStandalone, offline, offlinePure: pure, offlineDb, ciOnly } = standaloneSplit;
-console.log(`
+stage('test:standalone (offline subset)', async () => {
+  const standaloneSplit = splitStandalone();
+  const { all: allStandalone, offline, offlinePure: pure, offlineDb, ciOnly } = standaloneSplit;
+  console.log(`
 ── standalone tests that need no running instance and no database (${pure.length} of ${allStandalone.length}; `
-  + `${allStandalone.length - offline.length} declare @needs-instance and run in CI) ──`);
-console.log(`  ${offlineDb.length} database test files are not run here; CI's Full run runs them.`);
-console.log(`  ${ciOnly.length} file(s) declare @ci-only (too slow for every push); CI's standalone-pure job runs them.`);
+    + `${allStandalone.length - offline.length} declare @needs-instance and run in CI) ──`);
+  console.log(`  ${offlineDb.length} database test files are not run here; CI's Full run runs them.`);
+  console.log(`  ${ciOnly.length} file(s) declare @ci-only (too slow for every push); CI's standalone-pure job runs them.`);
 
-/*
- * THE PURE BATCHES RUN AS UNITS, a few at a time (Q-863). Each batch of `offlineRuns` is one test-runner child, and `runTestUnits`
- * (`testing/_shared/run-test-units.mjs`, the pool the runner's -db shards use too) keeps UNIT_WIDTH of them alive at once, each with
- * `workersPerUnit(UNIT_WIDTH)` workers (`testing/_shared/offline-test-width.mjs`), so the cores a batch leaves idle while its slowest file
- * finishes are used by the next one, and all units together never run more than 8 offline test files at once
- * (convention-offline-tests-run-in-parallel). One batch at a time with a worker per core took 317.9 s over the 1 227 pure files on 8 cores, a
- * pool of three batches of three workers 214.7 s; the batch holding the slowest file sets the floor in every setting measured, so the cap is
- * spent on more units at once rather than more workers per unit. The runner also gives each unit the time bound (a
- * file that hangs after its tests is ended and named), the held output (units never interleave) and the child environment, so none is
- * written here. The old shape, one synchronous child per batch with node's default width, ran one batch at a time and had no bound.
- *
- * The one-worker setting that is right for a suite sharing ONE live instance does not apply: the files here need no instance, which is
- * what `@needs-instance` declares, and the ones that do are not in this list.
- *
- * The database-backed files are NOT in this run, in either mode (Q-588, owner decision 2026-10-22): they share one MongoDB
- * (`DB_TEST_CONCURRENCY` in the shared split caps them there), a machine without the test stack skipped them silently, and
- * CI's Full run runs them. `offlineRuns` is the plan `test:standalone` runs too; this keeps its pure batches only, and the
- * gate `a-preflight-runs-no-database-batch-and-static-is-never-a-push-pass` holds that for both modes.
- */
-const runs = offlineRuns(standaloneSplit, { ciOnly: false }).filter(r => r.kind === 'pure');
-// Timing, through the shared helper: one destination per unit, the flags AFTER the plan's own args so the batch budget stays about the
-// files, and the recorder's credentials out of the children's environment (`runTestUnits` builds it with `testChildEnv`). The label is the
-// unit's place in the list, fixed here before any unit launches, so two units never write one file whatever order they end in.
-// The suite is `preflight`, not `standalone`: this is a subset, and it must not clear or overwrite a full run's files.
-clearTimingResults('preflight');
-const UNIT_WIDTH = 4;
-const units = runs.map((r, i) => ({ files: r.files, args: r.args, flags: timingReporterFlags({ suite: 'preflight', batch: `pure-${i + 1}`, scope: STATIC ? 'static' : 'subset' }) }));
-console.log(`  ${runs.length} batch(es) of pure files, ${UNIT_WIDTH} at a time`);
-const { failed } = await runTestUnits(units.map(u => u.files), {
-  width: UNIT_WIDTH,
-  args: (files, i) => [`--test-concurrency=${workersPerUnit(UNIT_WIDTH)}`, ...units[i].args, ...units[i].flags.args],
-  envOf: (files, i) => units[i].flags.env,
-  labelOf: (files, i) => `pure-${i + 1}`,
-  header: ({ label, code, index, total, files, startedAt, endedAt }) =>
-    `  batch ${index + 1}/${total} (${label}) — ${files.length} pure file(s), ${((endedAt - startedAt) / 1000).toFixed(0)}s, exit ${code}\n`,
+  /*
+   * THE PURE BATCHES RUN AS UNITS, a few at a time (Q-863). Each batch of `offlineRuns` is one test-runner child, and `runTestUnits`
+   * (`testing/_shared/run-test-units.mjs`, the pool the runner's -db shards use too) keeps UNIT_WIDTH of them alive at once, each with
+   * `workersPerUnit(UNIT_WIDTH)` workers (`testing/_shared/offline-test-width.mjs`), so the cores a batch leaves idle while its slowest file
+   * finishes are used by the next one, and all units together never run more than 8 offline test files at once
+   * (convention-offline-tests-run-in-parallel). One batch at a time with a worker per core took 317.9 s over the 1 227 pure files on 8 cores, a
+   * pool of three batches of three workers 214.7 s; the batch holding the slowest file sets the floor in every setting measured, so the cap is
+   * spent on more units at once rather than more workers per unit. The runner also gives each unit the time bound (a
+   * file that hangs after its tests is ended and named), the held output (units never interleave) and the child environment, so none is
+   * written here. The old shape, one synchronous child per batch with node's default width, ran one batch at a time and had no bound.
+   *
+   * The one-worker setting that is right for a suite sharing ONE live instance does not apply: the files here need no instance, which is
+   * what `@needs-instance` declares, and the ones that do are not in this list.
+   *
+   * The database-backed files are NOT in this run, in either mode (Q-588, owner decision 2026-10-22): they share one MongoDB
+   * (`DB_TEST_CONCURRENCY` in the shared split caps them there), a machine without the test stack skipped them silently, and
+   * CI's Full run runs them. `offlineRuns` is the plan `test:standalone` runs too; this keeps its pure batches only, and the
+   * gate `a-preflight-runs-no-database-batch-and-static-is-never-a-push-pass` holds that for both modes.
+   */
+  const runs = offlineRuns(standaloneSplit, { ciOnly: false }).filter(r => r.kind === 'pure');
+  // Timing, through the shared helper: one destination per unit, the flags AFTER the plan's own args so the batch budget stays about the
+  // files, and the recorder's credentials out of the children's environment (`runTestUnits` builds it with `testChildEnv`). The label is the
+  // unit's place in the list, fixed here before any unit launches, so two units never write one file whatever order they end in.
+  // The suite is `preflight`, not `standalone`: this is a subset, and it must not clear or overwrite a full run's files (the stage-cost
+  // snapshot is not a `preflight-*` file, so the clear leaves it).
+  clearTimingResults('preflight');
+  const UNIT_WIDTH = 4;
+  const units = runs.map((r, i) => ({ files: r.files, args: r.args, flags: timingReporterFlags({ suite: 'preflight', batch: `pure-${i + 1}`, scope: STATIC ? 'static' : 'subset' }) }));
+  console.log(`  ${runs.length} batch(es) of pure files, ${UNIT_WIDTH} at a time`);
+  const { failed } = await runTestUnits(units.map(u => u.files), {
+    width: UNIT_WIDTH,
+    args: (files, i) => [`--test-concurrency=${workersPerUnit(UNIT_WIDTH)}`, ...units[i].args, ...units[i].flags.args],
+    envOf: (files, i) => units[i].flags.env,
+    labelOf: (files, i) => `pure-${i + 1}`,
+    header: ({ label, code, index, total, files, startedAt, endedAt }) =>
+      `  batch ${index + 1}/${total} (${label}) — ${files.length} pure file(s), ${((endedAt - startedAt) / 1000).toFixed(0)}s, exit ${code}\n`,
+  });
+  // Every unit has ended (a failing one lets the others finish, so a second failure is not hidden): the stage fails once.
+  if (failed > 0) {
+    failures.push({ name: 'test:standalone (offline subset)', why: 'server contracts and pure logic — no Docker needed, so no reason to learn this from CI' });
+  }
 });
-// Every unit has ended (a failing one lets the others finish, so a second failure is not hidden): the stage fails once.
-if (failed > 0) {
-  failures.push({ name: 'test:standalone (offline subset)', why: 'server contracts and pure logic — no Docker needed, so no reason to learn this from CI' });
-}
 
+await runStages(plan, bodies, stages);
 stages.end();
 conclude([]);

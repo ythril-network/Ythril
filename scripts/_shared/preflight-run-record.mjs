@@ -24,7 +24,8 @@
  *
  * {@link preflightTrendLines} prints, for the records it is given (the newest N, from `test-times.mjs --preflight-trend`), each
  * run, then each stage's time in every run (oldest run first; `failed` for a stage that failed, `-` for one the run never reached)
- * and its median over the runs where it passed: the figure a plan is computed from (Q-865). A record whose stages cannot be read
+ * and its median over the runs where it passed. {@link stageStats} reads the same records for the plan (Q-865): per stage, over the newest
+ * runs of one runner (a record names its `runner`, `container` or `host`), how many runs ran it, how many failed, and its median. A record whose stages cannot be read
  * is counted and skipped, never printed as a zero.
  */
 import { spawnSync, execFileSync } from 'node:child_process';
@@ -48,6 +49,8 @@ const TEST_TIMES = resolve(fileURLToPath(new URL('../test-times.mjs', import.met
 
 const OUTCOMES = ['passed', 'failed', 'not-run'];
 const MODES = ['full', 'static'];
+/** Where a run was measured: inside the in-container runner (it sets `RUNNER_HEAD`), or on the host. Times from the two are several-fold apart. */
+const RUNNERS = ['container', 'host'];
 
 const firstLine = (err) => String(err?.message ?? err).split('\n')[0];
 
@@ -64,7 +67,8 @@ const firstLine = (err) => String(err?.message ?? err).split('\n')[0];
  * @param {boolean} run.dirty
  * @param {string} run.host
  */
-export function buildPreflightRunPayload({ stages, mode, startedAt, endedAt, commit, branch, dirty, host }) {
+export function buildPreflightRunPayload({ stages, mode, startedAt, endedAt, commit, branch, dirty, host, runner }) {
+  if (runner !== undefined && !RUNNERS.includes(runner)) throw new Error(`preflight run record: runner must be ${RUNNERS.join(' or ')}, not ${JSON.stringify(runner)}`);
   if (!MODES.includes(mode)) throw new Error(`preflight run record: mode must be ${MODES.join(' or ')}, not ${JSON.stringify(mode)}`);
   if (!Array.isArray(stages)) throw new Error('preflight run record: stages must be a list');
   const kept = stages.map((s, i) => {
@@ -80,6 +84,7 @@ export function buildPreflightRunPayload({ stages, mode, startedAt, endedAt, com
   const properties = checkTelemetryProperties(PREFLIGHT_RUN_SPEC, {
     recordKey: `local:${host}:${startedAt}:preflight`,
     formatVersion: PREFLIGHT_RUN_FORMAT_VERSION, source: 'local', commit, branch, dirty, host, mode,
+    ...(runner === undefined ? {} : { runner }),
     outcome: firstFailing ? 'failed' : 'passed',
     ...(firstFailing ? { firstFailingStage: firstFailing.name } : {}),
     wallMs, stageCount: kept.length, stages: JSON.stringify(kept),
@@ -92,12 +97,12 @@ export function buildPreflightRunPayload({ stages, mode, startedAt, endedAt, com
 }
 
 /** What git says about the working tree, or `unknown` where it cannot say (not a checkout, no git): a record is still worth keeping. */
-export function preflightRunIdentity(cwd = process.cwd()) {
+export function preflightRunIdentity(cwd = process.cwd(), env = process.env) {
   const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15_000 }).trim();
   const ask = (...args) => { try { return git(...args) || 'unknown'; } catch { return 'unknown'; } };
   let dirty = false;
   try { dirty = git('status', '--porcelain').length > 0; } catch { /* not a checkout: nothing to be dirty */ }
-  return { commit: ask('rev-parse', 'HEAD'), branch: ask('rev-parse', '--abbrev-ref', 'HEAD'), dirty, host: hostname() };
+  return { commit: ask('rev-parse', 'HEAD'), branch: ask('rev-parse', '--abbrev-ref', 'HEAD'), dirty, host: hostname(), runner: env.RUNNER_HEAD ? 'container' : 'host' };
 }
 
 const shown = (cwd, p) => { const r = relative(cwd, p).split(sep).join('/'); return r.startsWith('..') || isAbsolute(r) ? p : r; };
@@ -143,6 +148,43 @@ function medianOf(values) {
   const s = [...values].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+/** The newest runs `stageStats` counts when it is not told another number. */
+export const STAGE_STATS_WINDOW = 20;
+
+/** How many rows must carry a runner before the rows that name none stop counting beside them. */
+const RUNNER_ROWS_ENOUGH = 3;
+
+/**
+ * What each stage cost over the newest `window` runs of ONE runner: per stage, how many of those runs ran it (`ran`: a `not-run` stage
+ * is not a run of it), how many of those failed, and its median time. The median is over the runs where the stage passed, so a failed
+ * run's time (it stopped early) is not in it; a stage with no passed run takes the median of its failed runs, so every figure is finite.
+ * A record whose stages cannot be read is skipped. The rows named for another runner never count; the rows that name none (the records
+ * written before the field existed) count only while fewer than {@link RUNNER_ROWS_ENOUGH} rows carry `runner`. This is the figure a
+ * plan is computed from (`planStages`, Q-865); the preflight trend prints the same times per run.
+ *
+ * @param {Array<{ startsAt: string, properties: object }>} rows `Preflight-Run` records, in any order
+ * @param {{ window?: number, runner?: 'container'|'host' }} [options]
+ * @returns {{ runs: number, stages: Record<string, { ran: number, failed: number, medianMs: number }> }}
+ */
+export function stageStats(rows, { window = STAGE_STATS_WINDOW, runner } = {}) {
+  const readable = rows.map(row => ({ row, stages: stagesOf(row) })).filter(x => x.stages);
+  const named = readable.filter(x => x.row.properties.runner === runner);
+  const counted = named.length >= RUNNER_ROWS_ENOUGH ? named : readable.filter(x => x.row.properties.runner === runner || x.row.properties.runner === undefined);
+  const newest = [...counted].sort((a, b) => b.row.startsAt.localeCompare(a.row.startsAt)).slice(0, window);
+  const per = new Map();
+  for (const { stages } of newest) {
+    for (const s of stages) {
+      if (s.outcome === 'not-run') continue;
+      if (!per.has(s.name)) per.set(s.name, { passed: [], failed: [] });
+      per.get(s.name)[s.outcome === 'passed' ? 'passed' : 'failed'].push(Math.max(0, s.ms));
+    }
+  }
+  const stages = Object.fromEntries([...per].map(([name, t]) => [name, {
+    ran: t.passed.length + t.failed.length, failed: t.failed.length, medianMs: medianOf(t.passed.length ? t.passed : t.failed),
+  }]));
+  return { runs: newest.length, stages };
 }
 
 /** A record's stages as a list, or null when the record is not one this report reads. */

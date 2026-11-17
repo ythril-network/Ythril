@@ -170,6 +170,7 @@ export const PREFLIGHT_RUN_SCHEMA = Object.freeze({
   branch: text('The branch git reported, or `unknown`.'),
   dirty: { type: 'boolean', required: true, doc: 'The working tree had uncommitted changes.' },
   host: text('`os.hostname()`: stage times are only comparable on one machine.'),
+  runner: { type: 'string', required: false, values: ['container', 'host'], doc: 'Where the run was measured: `container` inside the in-container runner (it sets `RUNNER_HEAD`), `host` otherwise. Absent on a record written before this field existed. A stage\'s cost is only computed from the times of one runner.' },
   mode: { type: 'string', required: true, values: ['full', 'static'], doc: 'A full run, or `--static` (which leaves out the client unit tests, the production build and its budgets).' },
   outcome: { type: 'string', required: true, values: ['passed', 'failed'], doc: '`failed` when any stage failed.' },
   firstFailingStage: { type: 'string', required: false, doc: 'The first stage whose outcome is `failed`; absent on a pass.' },
