@@ -146,6 +146,15 @@ import { TranslocoService } from '@jsverse/transloco';
                            [purpose]="'about.card.helpDesc' | transloco">
           <a class="btn btn-sm btn-secondary" routerLink="/settings/help">{{ 'about.openHelp' | transloco }}</a>
         </app-settings-card>
+
+        <!-- Whose software this instance is made of. The notices ship in the image, where someone using the
+             web client never sees them, so the page that says what this instance is leads to them. They are a
+             Help document like the guides: bundled, readable offline. -->
+        <app-settings-card icon="file"
+                           [heading]="'about.card.notices' | transloco"
+                           [purpose]="'about.card.noticesDesc' | transloco">
+          <a class="btn btn-sm btn-secondary" routerLink="/settings/help" [queryParams]="{ doc: 'third-party-notices' }">{{ 'about.openNotices' | transloco }}</a>
+        </app-settings-card>
       </div>
     }
   `,

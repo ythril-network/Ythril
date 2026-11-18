@@ -1,7 +1,1 @@
-[
-  {
-    "id": "about:unattributed",
-    "reason": "the About page shows instance identity, disk use and component health and names no third party; attribution lives in the NOTICE shipped in the image. A card that lists or points to the notices needs a component and the three locale files, so it is a gap to close, not a one-line fix",
-    "reviewBy": "2027-02-18"
-  }
-]
+[]

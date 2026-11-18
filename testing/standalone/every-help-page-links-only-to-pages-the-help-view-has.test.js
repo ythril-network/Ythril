@@ -158,11 +158,18 @@ function problemOf(target, guide, guides, idsOf) {
 }
 
 const guides = helpGuides();
+/**
+ * Where a page the view lists lives in the repository. Every page is a file of `docs/` but the third-party notices,
+ * which are the repository's NOTICE and are copied beside the guides by their own asset entry (`Q-916`;
+ * `help-docs-coverage.test.js` holds that entry). Named here, not guessed from the shape of a name.
+ */
+const ROOT_PAGES = new Set(['NOTICE']);
+const pagePath = (page) => (ROOT_PAGES.has(page) ? page : `docs/${page}`);
 const idCache = new Map();
 const idsOfGuide = (guide) => {
   if (!idCache.has(guide.id)) {
     const files = renderedPagesOf(guide);
-    idCache.set(guide.id, idsOfDocument(renderedDocumentOf(joinHelpParts(files.map(f => read(`docs/${f}`)), files))));
+    idCache.set(guide.id, idsOfDocument(renderedDocumentOf(joinHelpParts(files.map(f => read(pagePath(f))), files))));
   }
   return idCache.get(guide.id);
 };
@@ -172,7 +179,7 @@ function everyLink() {
   for (const guide of guides) {
     const files = renderedPagesOf(guide);
     for (const page of files) {
-      const text = files.length === 1 ? read(`docs/${page}`) : foldPartLinks(stripPartHeader(read(`docs/${page}`)), files);
+      const text = files.length === 1 ? read(pagePath(page)) : foldPartLinks(stripPartHeader(read(pagePath(page))), files);
       for (const target of linksOf(text)) out.push({ guide, page, target });
     }
   }
@@ -190,8 +197,8 @@ describe('the pages the Help view renders, and what it does with their links', (
     assert.ok(everyLink().length >= 100, 'too few links found in the pages: the pattern is broken');
   });
 
-  it('every page is a file of docs/ (a page the view lists must exist to be read)', () => {
-    const missing = guides.flatMap(g => [g.file, ...(g.parts ?? [])]).filter(p => { try { read(`docs/${p}`); return false; } catch { return true; } });
+  it('every page is a file of docs/, or the notices file at the root (a page the view lists must exist to be read)', () => {
+    const missing = guides.flatMap(g => [g.file, ...(g.parts ?? [])]).filter(p => { try { read(pagePath(p)); return false; } catch { return true; } });
     assert.deepEqual(missing, []);
   });
 
@@ -222,7 +229,7 @@ describe('the pages the Help view renders, and what it does with their links', (
     const nameless = [];
     for (const guide of guides.filter(g => g.parts)) {
       const files = renderedPagesOf(guide);
-      const doc = renderedDocumentOf(joinHelpParts(files.map(f => read(`docs/${f}`)), files));
+      const doc = renderedDocumentOf(joinHelpParts(files.map(f => read(pagePath(f))), files));
       for (const part of guide.parts) {
         const anchor = [...doc.querySelectorAll('[id]')].find(n => n.id === partAnchorId(part));
         anchors++;
@@ -238,7 +245,7 @@ describe('the pages the Help view renders, and what it does with their links', (
     const lost = [];
     for (const guide of guides) {
       const files = renderedPagesOf(guide);
-      const doc = renderedDocumentOf(joinHelpParts(files.map(f => read(`docs/${f}`)), files));
+      const doc = renderedDocumentOf(joinHelpParts(files.map(f => read(pagePath(f))), files));
       for (const h of doc.querySelectorAll('h1, h2, h3, h4, h5, h6')) { headings++; if (h.id === '') lost.push(`${guide.id}: <${h.tagName.toLowerCase()}> ${h.textContent.trim()}`); }
     }
     assert.ok(headings >= 200, `only ${headings} heading(s) rendered`);

@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** `filesAwaitingBytes` on REST stats and MCP `space_stats`: records whose bytes are missing here, which file counts leave out. The change feed gains reason `bytes_lost` and the audit log `file.absent_bytes.sweep`.
 - **Files:** the Brain page's Files tab, a view's Overview and the Danger zone show "+N awaiting bytes" beside the file count when some records wait for their bytes.
 - **Files:** metrics `ythril_files_absent_bytes_removed_total`, `ythril_files_awaiting_bytes` and `ythril_files_absent_bytes_held`.
+- **Web:** Settings → About has a "Third-party software" card, and Settings → Help offers the third-party notices as a document readable inside the instance.
 
 ### Changed
 

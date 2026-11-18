@@ -31,6 +31,9 @@ RUN npm ci --workspace=client
 # no route to github.com. Without this COPY the asset glob resolves to nothing and Help ships empty.
 COPY client/ ./client/
 COPY docs/ ./docs/
+# The third-party notices are one of those documents (Help offers them, the About page links there), and they live
+# at the repository root, not under docs/. Without this COPY the page would link to a document the image lacks.
+COPY NOTICE ./
 RUN npm run build:prod --workspace=client
 # Angular output: client/dist/browser/
 

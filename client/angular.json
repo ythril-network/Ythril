@@ -31,6 +31,7 @@
             "assets": [
               { "glob": "**/*", "input": "public" },
               { "glob": "**/*.md", "input": "../docs", "output": "assets/docs" },
+              { "glob": "NOTICE", "input": "..", "output": "assets/docs" },
               { "glob": "**/*", "input": "../docs/assets", "output": "assets/docs/assets" }
             ],
             "styles": [

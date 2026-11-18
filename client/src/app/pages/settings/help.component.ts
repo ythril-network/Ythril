@@ -151,6 +151,9 @@ export const HELP_DOCS = [
   { id: 'dependencies', file: 'dependencies.md' },
   { id: 'dev-guide', file: 'dev-guide.md' },
   { id: 'testing-guide', file: 'testing-guide.md' },
+  // The third-party notices: Markdown like the guides, but the repository's NOTICE file, copied beside them by its own
+  // asset entry in angular.json. The About page links here.
+  { id: 'third-party-notices', file: 'NOTICE' },
 ] as const satisfies ReadonlyArray<{ id: string; file: string; parts?: readonly string[] }>;
 
 export type HelpDocId = typeof HELP_DOCS[number]['id'];

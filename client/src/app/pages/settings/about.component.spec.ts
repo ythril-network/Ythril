@@ -59,6 +59,18 @@ describe('AboutComponent', () => {
     expect(text).toContain('7.0.5');
   });
 
+  it('has a card for the third-party software, whose link opens the notices in Help (Q-916)', () => {
+    // The notices ship in the image, where a user of the web client never sees them: the page that says what this
+    // instance is has to say whose software it is made of, and lead to the notices themselves.
+    const f = make(() => of({ ...INFO }));
+    const text = el(f).textContent ?? '';
+    expect(text).toContain('about.card.notices');
+    expect(text).toContain('about.card.noticesDesc');
+    const link = Array.from(el(f).querySelectorAll('a')).find(a => (a.textContent ?? '').includes('about.openNotices'));
+    expect(link, 'no link labelled about.openNotices').toBeTruthy();
+    expect(link!.getAttribute('href')).toBe('/settings/help?doc=third-party-notices');
+  });
+
   it('renders the disk usage figures (used / total)', () => {
     const f = make(() => of({ ...INFO }));
     const text = el(f).textContent ?? '';
@@ -114,9 +126,10 @@ describe('AboutComponent', () => {
 
   it('renders the grouped cards + shared usage bar', () => {
     const f = make(() => of({ ...INFO }));
-    // Instance, System, the Documentation card that points at the bundled guides — and Components,
-    // which is present from the first paint in a pending state (see the test below).
-    expect(el(f).querySelectorAll('app-settings-card').length).toBe(4);
+    // Instance, System, the Documentation card that points at the bundled guides, the Third-party software
+    // card that points at the notices — and Components, which is present from the first paint in a pending
+    // state (see the test below).
+    expect(el(f).querySelectorAll('app-settings-card').length).toBe(5);
     expect(el(f).querySelector('app-usage-bar')).toBeTruthy();
     expect(el(f).querySelectorAll('app-status-pill').length).toBe(3);
   });
@@ -139,8 +152,8 @@ describe('AboutComponent', () => {
     );
     const text = el(f).textContent ?? '';
     expect(text).not.toContain('about.components.pending');
-    // Still four cards: the resolved Components card takes the pending one's place.
-    expect(el(f).querySelectorAll('app-settings-card').length).toBe(4);
+    // Still five cards: the resolved Components card takes the pending one's place.
+    expect(el(f).querySelectorAll('app-settings-card').length).toBe(5);
   });
 
   it('a load failure renders the shared error-state (with the reason), and Retry re-loads', () => {
