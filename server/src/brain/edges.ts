@@ -285,7 +285,9 @@ export async function updateEdgeById(
      * `If-Match` is checked HERE rather than by the filter below, because there is no `findOneAndUpdate` on
      * this branch to carry `writeFilterFor`. Skipping it would make the precondition lapse on exactly one
      * kind of patch — an option that silently stops working on one code path is the defect this file's
-     * neighbours keep fixing.
+     * neighbours keep fixing. That check is against this function's own read, so the version also rides the
+     * re-key's delete (`atReadVersion`): a write that lands after the read keeps its row, the re-key moves
+     * nothing, and the in-place write below, filtered by the same version, answers the edge as moved (`null`).
      */
     if (ifMatchSeq !== undefined && existing.seq !== ifMatchSeq) {
       brainWriteSeqTotal.labels({ collection: 'edges', outcome: writeOutcome(false, true, true) }).inc();
@@ -310,7 +312,7 @@ export async function updateEdgeById(
         // The schema stamp rides the re-key: the moved row is `existing` with this patch, exactly what the last classification judged.
         const relabelStamp = stampOp(write, check);
         const rekeyed = await rekeyEdge(spaceId, existing, { label: newLabel }, { ...carried, ...stampSetOf(relabelStamp) },
-          [...Object.keys($unset), ...Object.keys(stampUnsetOf(relabelStamp))], session, functionalGuard);
+          [...Object.keys($unset), ...Object.keys(stampUnsetOf(relabelStamp))], session, functionalGuard, { atReadVersion: ifMatchSeq !== undefined });
         // The subject's forks follow it onto the new id by a re-mint, in this transaction; their own label is authored body and stays (Q-624 §7).
         if (rekeyed) await remintForks(spaceId, 'edge', [{ oldSubject: existing._id, newSubject: rekeyed.edge._id }], { session, now });
         return rekeyed;
