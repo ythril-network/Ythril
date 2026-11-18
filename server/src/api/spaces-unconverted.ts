@@ -10,14 +10,14 @@
  * Both routes are thin: the decisions, the rights and every refusal's sentence and code are `spaces/unconverted-acts.ts`'s, the same acts MCP
  * `list_unconverted` and `dismiss_unconverted` run, so the doors cannot take other parameters or answer other bodies. The act asks the rung itself
  * (`knowledge: read` for the list, `knowledge: write` for the dismiss), so a mount that leaves a guard row out still refuses a caller without it;
- * the guard rows (`ROUTE_RIGHTS`) say the same rung at the edge. There is no read-only middleware here on purpose: the act's refusal is the area
- * guard's own sentence, and a second sentence for the same refusal is what two doors disagreeing looks like.
+ * the guard rows (`ROUTE_RIGHTS`) say the same rung at the edge. The two dismissals also carry `denyReadOnly`, as every mutating route does
+ * (`route-guard-coverage` holds it): a token that cannot write anywhere is refused at the edge, and a token that can write elsewhere meets the act's rung.
  *
  * `app.ts` mounts it; the rights rows are `ROUTE_RIGHTS`' and the audit rules `ROUTE_RULES`'. A dismissal hands the audit entry what it did
  * (`req.auditChangesExplicit`: the item id, or the filter, `expect` and count), which the operation's allowlist cuts to scalars.
  */
 import { Router } from 'express';
-import { requireSpaceAuthScoped } from '../auth/middleware.js';
+import { denyReadOnly, requireSpaceAuthScoped } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import {
   listUnconvertedAct, dismissUnconvertedAct, dismissShownUnconvertedAct, refusalBody, type UnconvertedCaller, type UnconvertedActResult,
@@ -52,7 +52,7 @@ spaceUnconvertedRouter.get('/:id/schema-convert/items', globalRateLimit, require
 
 // POST /api/spaces/:id/schema-convert/items/:itemId/dismiss - keep the item as dismissed: the record is unchanged and the item is not opened
 // again for the same record version and target.
-spaceUnconvertedRouter.post('/:id/schema-convert/items/:itemId/dismiss', globalRateLimit, requireSpaceAuthScoped('id'), async (req, res) => {
+spaceUnconvertedRouter.post('/:id/schema-convert/items/:itemId/dismiss', globalRateLimit, requireSpaceAuthScoped('id'), denyReadOnly, async (req, res) => {
   const spaceId = req.params['id'] as string;
   try {
     const answer = await dismissUnconvertedAct(spaceId, req.params['itemId'], callerOf(req));
@@ -65,7 +65,7 @@ spaceUnconvertedRouter.post('/:id/schema-convert/items/:itemId/dismiss', globalR
 
 // POST /api/spaces/:id/schema-convert/items/dismiss {kind?, type?, reason?, expect} - dismiss every OPEN item the filter lists, when the caller was
 // shown exactly `expect` of them (else 409 with the current number and nothing dismissed); answers `{ dismissed }`. Validated inside the act.
-spaceUnconvertedRouter.post('/:id/schema-convert/items/dismiss', globalRateLimit, requireSpaceAuthScoped('id'), async (req, res) => {
+spaceUnconvertedRouter.post('/:id/schema-convert/items/dismiss', globalRateLimit, requireSpaceAuthScoped('id'), denyReadOnly, async (req, res) => {
   const spaceId = req.params['id'] as string;
   const body = (req.body ?? {}) as Record<string, unknown>;
   try {
