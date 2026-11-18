@@ -18,6 +18,7 @@ import { globalRateLimit } from '../rate-limit/middleware.js';
 import { schemaConvertStartAct, schemaConvertStatusAct } from '../spaces/schema-convert-acts.js';
 import { useSchemaConvertActs } from '../mcp/tools/schema-convert.js';
 import type { TokenRights } from '../config/rights-shape.js';
+import type { SchemaConvertCaller } from '../spaces/schema-convert-terms.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { sendSpaceActAnswer } from './send-act-answer.js';
 import { convertStartChanges } from '../audit/audit-changes.js';
@@ -29,8 +30,14 @@ const FIRST_REFUSAL_STATUS = 400;
 
 export const spaceSchemaConvertRouter = Router();
 
-/** Who is asking, as the acts need it: the rights of the token the guards accepted. */
-const callerOf = (req: { authToken?: unknown }): { rights: TokenRights | undefined } => ({ rights: (req.authToken as { rights?: TokenRights } | undefined)?.rights });
+/**
+ * Who is asking, as the acts need it: the rights of the token the guards accepted, and the key the heavy-call rail counts a start against (the
+ * token's id, or the address when it has none: the key `callTool` gives the tool, so both doors spend one allowance).
+ */
+const callerOf = (req: { authToken?: unknown; ip?: string }): SchemaConvertCaller => {
+  const token = req.authToken as { id?: string; rights?: TokenRights } | undefined;
+  return { rights: token?.rights, rateKey: token?.id ?? req.ip ?? '' };
+};
 
 // POST /api/spaces/:id/schema-convert - convert the records of the named types toward the space's current schema: { types: [{ kind, type }], steps? }.
 spaceSchemaConvertRouter.post('/:id/schema-convert', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, async (req, res) => {

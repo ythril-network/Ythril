@@ -34,13 +34,17 @@
  *   no opt-in parameter: every copy held here is converted) is refused alike by the route and the tool.
  * - **A second run on a run.** An unfinished run refuses an explicit start (`409 schema_convert_running`); only a schema save or a passed round joins
  *   one (`startSchemaConvertRun`).
+ * - **A door that rewrites without the rail's price.** A start rewrites every record of its types, as heavy as a space data deletion, so it is
+ *   priced on the heavy-call rail (`consumeHeavyToolCall`, keyed by the caller's token id or address, `SchemaConvertCaller.rateKey`) HERE, where
+ *   the route and the tool share one allowance and neither can drop it; a caller over it is refused `429 schema_convert_rate_limited`. The price is
+ *   asked after every other refusal, the busy one included, so a refused request costs the caller nothing.
  *
  * ## The answers
  *
  * `{ status, body }`; a refusal's body is `{ error, code?, step? }`. Refusals: `400 bad_convert_types` (no `types`, one that is not a `{ kind, type }`
  * of a knowledge kind and a type name, or the run's own whole-kind marker), `400 too_many_convert_types` (more than `SCHEMA_CONVERT_TYPES_MAX`),
  * `400 bad_convert_request` (any other key, or `steps` that is not a list), `400 bad_conversion_step`, `403 knowledge_rung`, `403
- * space_admin_required`, `409 schema_convert_running`.
+ * space_admin_required`, `409 schema_convert_running`, `429 schema_convert_rate_limited`.
  */
 import { z } from 'zod';
 import {
@@ -56,16 +60,22 @@ import { lostSpaceAnswer } from './unknown-space.js';
 import { readMetaForWrite } from './schema-stamp.js';
 import { startSchemaConvertRun, schemaConvertStatus, type SchemaConvertType } from './schema-convert-run.js';
 import {
-  SCHEMA_CONVERT_TYPES_MAX, SCHEMA_CONVERT_REFUSAL_CODES, SchemaConvertBody, ConvertTypeZ, type SchemaConvertActResult, type SchemaConvertCaller,
+  SCHEMA_CONVERT_TYPES_MAX, SCHEMA_CONVERT_REFUSAL_CODES, SCHEMA_CONVERT_RATE_LIMITED, SchemaConvertBody, ConvertTypeZ,
+  type SchemaConvertActResult, type SchemaConvertCaller,
 } from './schema-convert-terms.js';
+import { consumeHeavyToolCall } from '../rate-limit/heavy-tool.js';
 
 // The terms both doors share live in `schema-convert-terms.ts`, a module the MCP tools may import without drawing this one into the server's
 // largest import cycle; re-exported for the readers that name them here.
 export { SCHEMA_CONVERT_REFUSAL_CODES, SchemaConvertBody, type SchemaConvertActResult, type SchemaConvertCaller };
-const [BAD_TYPES, TOO_MANY_TYPES, BAD_REQUEST, BAD_STEP, KNOWLEDGE_RUNG, SPACE_ADMIN_REQUIRED] = SCHEMA_CONVERT_REFUSAL_CODES;
-/** The statuses the acts answer with: a request refused for what it says, a caller refused for what it holds, a start accepted, a read answered. */
+const [BAD_TYPES, TOO_MANY_TYPES, BAD_REQUEST, BAD_STEP, KNOWLEDGE_RUNG, SPACE_ADMIN_REQUIRED, , RATE_LIMITED] = SCHEMA_CONVERT_REFUSAL_CODES;
+/**
+ * The statuses the acts answer with: a request refused for what it says, a caller refused for what it holds, a caller over the heavy-call rail, a
+ * start accepted, a read answered.
+ */
 const BAD_BODY = 400;
 const FORBIDDEN = 403;
+const TOO_MANY_REQUESTS = 429;
 const ACCEPTED = 202;
 const OK = 200;
 
@@ -150,7 +160,12 @@ export async function schemaConvertStartAct(spaceId: string, input: unknown, cal
   const bad = stepRefusal(spaceId, steps);
   if (bad) return bad;
 
-  const started = await startSchemaConvertRun({ spaceId, types: named.types, steps, source: { kind: 'act' } });
+  // Priced on the heavy-call rail HERE, inside the act both doors run, so they spend one allowance per caller and neither can leave it out. The run
+  // module asks the price once it found no unfinished run, so a start refused as busy costs the caller nothing; a refused one writes nothing.
+  const admit = () => (consumeHeavyToolCall(caller.rateKey)
+    ? null
+    : { ok: false as const, status: TOO_MANY_REQUESTS, code: RATE_LIMITED, error: SCHEMA_CONVERT_RATE_LIMITED });
+  const started = await startSchemaConvertRun({ spaceId, types: named.types, steps, source: { kind: 'act' }, admit });
   if (!started.ok) return refusal(started.status, started.error, started.code);
   const types = named.types.map(t => ({ kind: t.kind, type: t.type }));
   return { status: ACCEPTED, body: { state: 'started', toFp: started.run?.toFp ?? readMetaForWrite(spaceId).stamp.fp, types, steps: steps.length } };

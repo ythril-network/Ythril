@@ -134,11 +134,19 @@ export interface SchemaConvertStart {
   stepsRefused?: readonly SchemaConvertRefusedStep[];
   source: { kind: SchemaConvertSource['kind']; roundId?: string };
   before?: ConversionMeta;
+  /**
+   * An act's price (`schemaConvertStartAct` hands the heavy-call rail): asked once, after the start found no unfinished run and before anything is
+   * written, so a start refused as busy costs the caller nothing. A refusal it answers is the start's answer, and nothing is written.
+   */
+  admit?: () => SchemaConvertStartRefusal | null;
 }
+
+/** A start refused: an act's while a run is unfinished (409 `schema_convert_running`), or the refusal its `admit` answered. */
+export interface SchemaConvertStartRefusal { ok: false; status: number; code: string; error: string }
 
 export type SchemaConvertStartOutcome =
   | { ok: true; state: 'started' | 'restarted' | 'nothing'; run: SchemaConvertRunDoc | null }
-  | { ok: false; status: typeof SCHEMA_CONVERT_RUNNING_STATUS; code: 'schema_convert_running'; error: string };
+  | SchemaConvertStartRefusal;
 
 /** One peer's sync, as the manual trigger answers it (`peerSyncOutcome`). */
 export type SchemaConvertSyncPeer = (peerId: string, opts: { wait: true }) => Promise<{ status: number; body: Record<string, unknown> }>;
@@ -306,6 +314,9 @@ export async function startSchemaConvertRun(start: SchemaConvertStart, deps: Sch
   if (unfinished(existing) && start.source.kind === 'act') {
     return { ok: false, status: SCHEMA_CONVERT_RUNNING_STATUS, code: 'schema_convert_running', error: `A schema conversion of '${peerText(spaceId)}' is already running` };
   }
+  // The act's price, asked after the busy refusal (a start refused as busy costs the caller nothing) and before anything is written.
+  const priced = start.admit?.() ?? null;
+  if (priced) return priced;
   if (start.types.length === 0 && !unfinished(existing)) return { ok: true, state: 'nothing', run: null };
   const at = new Date().toISOString();
   const now = readMetaForWrite(spaceId);
