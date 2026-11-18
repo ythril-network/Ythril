@@ -106,7 +106,13 @@ describe('vote-round retention — a passed schema round whose conversion run is
 
   const STEPS = { steps: [{ op: 'renameProperty', kind: 'entity', type: 'Person', from: 'fullName', to: 'name' }] };
   const schemaRound = (over) => round({
-    type: 'meta_change', concluded: true, passed: true, deadline: past, votes: [{ instanceId: 's', vote: 'yes' }], convertRecords: STEPS, ...over,
+    type: 'meta_change', concluded: true, passed: true, deadline: past, votes: [{ instanceId: 's', vote: 'yes' }], convertRecords: STEPS,
+    convertOwed: true, ...over,
+  });
+
+  it('a schema round an earlier release concluded (no local mark that a run is owed) is pruned: nothing runs on upgrade', () => {
+    const net = { pendingRounds: [schemaRound({ roundId: 'before-upgrade', convertOwed: undefined })] };
+    assert.equal(pruneExpiredRounds(net, NOW), 1);
   });
 
   it('an owed schema round past its deadline is kept', () => {

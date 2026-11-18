@@ -68,8 +68,11 @@ describe('the owed predicates, over the truth table', () => {
   });
 
   it('a schema round\'s conversion run owed is the same question, with the same veto, and only for a round that carries steps', () => {
-    const schema = (over = {}) => round({ type: 'meta_change', convertRecords: { steps: [] }, ...over });
+    // `convertOwed`: the local mark this release sets when IT concluded the round and owed a run from it (lens sweep S8).
+    const schema = (over = {}) => round({ type: 'meta_change', convertRecords: { steps: [] }, convertOwed: true, ...over });
     assert.equal(state.roundConversionOwed(schema()), true);
+    assert.equal(state.roundConversionOwed(schema({ convertOwed: undefined })), false,
+      'a round concluded before this instance could convert (no local mark) owes no run: nothing starts on upgrade');
     assert.equal(state.roundConversionOwed(schema({ votes: [{ vote: 'veto' }] })), false);
     assert.equal(state.roundConversionOwed(schema({ appliedHere: true })), false);
     assert.equal(state.roundConversionOwed(schema({ passed: false })), false);
