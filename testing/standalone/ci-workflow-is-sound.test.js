@@ -349,6 +349,16 @@ const RUNNER = /\bnpm run test(?::[\w-]+)*\b|\bnpm (?:test|t)\b|\bnode\s+(?:\.\/
 const RESULTS_JOB_FLOOR = 3;
 const runnersIn = (text) => [...String(text).matchAll(new RegExp(RUNNER.source, 'g'))].map((m) => m[0]);
 
+/**
+ * A step that runs the TEXT kind of the standalone runner (`run-standalone.mjs --only=text`, Q-870): the files that read only tracked text, which the pure
+ * job runs first, before `npm ci` and the builds, so that a file wrongly judged text-only fails for want of what it needs. It is a part of the pure job's
+ * ONE suite (the same runner, the same `standalone` timing files, the one artifact), not a second suite, and it runs no test that imports `server/dist`
+ * (that is the classifier's guarantee, `testing/_shared/text-only-test.mjs`, and the step's own check). The two rules that read runner commands
+ * (`one suite per results artifact`, `test jobs build the server`) leave this one step out; the pure kind that follows is counted and must still follow a
+ * build, and a job whose only runner is a text step has none left and fails the first.
+ */
+const runsTextKind = (step) => /\brun-standalone\.mjs\s+--only=text\b/.test(shellOf(step));
+
 /** The `npm` script a runner command runs: `npm run test:x` is `test:x`, `npm test` and `npm t` are `test`; any other spelling names none. */
 const scriptNamed = (runner) => /^npm run (\S+)$/.exec(runner)?.[1] ?? (/^npm (?:test|t)$/.test(runner) ? 'test' : undefined);
 
@@ -387,7 +397,7 @@ function oneSuitePerResultsArtifactViolations(doc, scripts = packageScripts()) {
     if (uploads.length === 0) continue;
     jobsWithResults++;
     if (uploads.length > 1) v.push(`${id}: ${uploads.length} results artifacts from one job`);
-    const runners = stepsOf(job).flatMap((st) => runnersIn(st.run ?? ''));
+    const runners = stepsOf(job).filter((st) => !runsTextKind(st)).flatMap((st) => runnersIn(st.run ?? ''));
     if (runners.length !== 1) v.push(`${id}: uploads results and carries ${runners.length} suite runner command(s) (${runners.join('; ') || 'none'}): its artifact must hold exactly one suite`);
     for (const r of runners) {
       const name = scriptNamed(r);
@@ -751,7 +761,7 @@ function historyViolations(doc) {
 }
 
 /** A step that runs a suite on the host with node (the client's vitest suite is the one that imports no server code). */
-const runsServerSuite = (s) => runnersIn(shellOf(s)).some((r) => !/vitest/.test(r)) && !/--workspace[= ]client\b/.test(shellOf(s));
+const runsServerSuite = (s) => runnersIn(shellOf(s)).some((r) => !/vitest/.test(r)) && !/--workspace[= ]client\b/.test(shellOf(s)) && !runsTextKind(s);
 
 /**
  * A job that runs a suite on the host builds the server first. The test files import `server/dist` (the shared helpers do:
@@ -1889,6 +1899,19 @@ describe('ci.yml — the rules, held against the real workflow', () => {
       assert.equal(found.length, 0, `the committed workflows break the ${name} rule:\n  ${found.join('\n  ')}`);
     });
   }
+
+  it('a step that runs the text kind before the build is one suite with the run that follows and imports no server code; the pure kind in its place is neither', () => {
+    const withStep = (command) => {
+      const d = clone(GOOD);
+      const steps = stepsOf(job(d, 'sync'));
+      steps.splice(steps.findIndex((x) => /build:server/.test(shellOf(x))), 0, { name: 'Standalone tests that read only tracked text', run: command });
+      return d;
+    };
+    const rules = [oneSuitePerResultsArtifactViolations, serverBuildViolations];
+    for (const rule of rules) assert.deepEqual(rule(withStep('node testing/_init/run-standalone.mjs --only=text')), [], `${rule.name} refuses the text kind`);
+    assert.match(oneSuitePerResultsArtifactViolations(withStep('node testing/_init/run-standalone.mjs --only=pure')).join('\n'), /sync: uploads results and carries 2 suite runner/, 'the pure kind before the build was read as no second suite');
+    assert.match(serverBuildViolations(withStep('node testing/_init/run-standalone.mjs --only=pure')).join('\n'), /sync: runs tests that import server\/dist/, 'the pure kind before the build was read as importing no server code');
+  });
 
   it('the client job writes the file the skips check reads, and the gate installs nothing the checks do not need', async () => {
     const { CLIENT_RESULTS } = await import('../../scripts/unexpected-skips.mjs');
