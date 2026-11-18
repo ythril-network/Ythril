@@ -43,14 +43,18 @@ const STEPS_PARAMETER: Record<string, unknown> = {
  * The `types` parameter WRITTEN BY zod's converter from the schema the act parses a start with (`SchemaConvertTypesZ`), so the tool and the route state
  * one set of bounds (how many types, which kinds, how long a name); `$schema` is left out, as for every property of a tool.
  */
-const TYPES_PARAMETER: Record<string, unknown> = (() => {
-  const { $schema: _draft, ...shape } = z.toJSONSchema(SchemaConvertTypesZ, { io: 'input' }) as Record<string, unknown>;
-  return {
-    ...shape,
-    description: `The types to convert, at least one and at most ${SCHEMA_CONVERT_TYPES_MAX}: \`[{ kind, type }]\`. Every record of each type this instance holds is `
-      + 'read, so the run takes as long as those records take; the records of other types are not read.',
-  };
-})();
+const { $schema: _typesDraft, ...TYPES_SHAPE } = z.toJSONSchema(SchemaConvertTypesZ, { io: 'input' }) as Record<string, unknown>;
+const TYPES_PARAMETER: Record<string, unknown> = {
+  ...TYPES_SHAPE,
+  description: `The types to convert, at least one and at most ${SCHEMA_CONVERT_TYPES_MAX}: \`[{ kind, type }]\`. Every record of each type this instance holds is `
+    + 'read, so the run takes as long as those records take; the records of other types are not read.',
+};
+
+/**
+ * The refusal codes as the description lists them. Built here, not in a template nested inside the description, which the call-graph index
+ * (`testing/standalone/_call-graph.mjs`) cannot read past: it found no `space_schema_convert` handler object to root a walk at.
+ */
+const REFUSAL_CODES_TEXT = SCHEMA_CONVERT_REFUSAL_CODES.map(c => `\`${c}\``).join(', ');
 
 export const space_schema_convertTool: ToolHandler = {
   name: 'space_schema_convert',
@@ -66,11 +70,11 @@ export const space_schema_convertTool: ToolHandler = {
     + 'record at the same time, both write the same converted record and the later version wins, and when the two use different steps the later write '
     + 'decides.\n\n'
     + 'IT NEEDS AN ADMIN: `knowledge: admin` on the space AND the space\'s admin right, because the rewrite reaches every peer. A read-only token is refused.\n\n'
-    + `AT MOST ${HEAVY_CALLS_PER_WINDOW} STARTS A MINUTE PER TOKEN, counted with the REST route and the server's other heavy calls: a start over the limit `
+    + `AT MOST ${HEAVY_CALLS_PER_WINDOW} STARTS A MINUTE PER TOKEN, counted with the REST route and the other heavy calls of the server: a start over the limit `
     + 'is refused (429 `schema_convert_rate_limited`) and starts nothing; a start refused for any other reason costs nothing.\n\n'
     + 'THE ANSWER comes at once, `{ state: \'started\', toFp, types, steps }` (`toFp` is the schema fingerprint the run converts toward, `steps` how many '
     + 'steps it holds); the conversion runs in the background, one page at a time, and survives a restart. Read how it went with `space_schema_conversion`.\n\n'
-    + `REFUSALS (\`code\`): ${SCHEMA_CONVERT_REFUSAL_CODES.map(c => `\`${c}\``).join(', ')}. \`schema_convert_running\` (409) while a run of the space is unfinished: `
+    + `REFUSALS (\`code\`): ${REFUSAL_CODES_TEXT}. \`schema_convert_running\` (409) while a run of the space is unfinished: `
     + 'wait for it, or read it.',
   mutating: true,
   spaceRequired: true,
