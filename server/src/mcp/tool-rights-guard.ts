@@ -3,6 +3,7 @@ import { effectiveRung } from '../auth/mint-cap.js';
 import { satisfies } from '../auth/required-rung.js';
 import { isSpaceAdminFor } from '../auth/editor-scope.js';
 import type { TokenRights } from '../config/rights-shape.js';
+import { toolErrorText } from './tool-error-text.js';
 
 /**
  * The spaces a tool's HANDLER is given to work across: its reach, narrowed to where the token holds the tool's
@@ -105,9 +106,9 @@ export function spaceAdminRefusal(
    * caller reads it, sets four rungs, is refused again, and has been told to do the wrong thing by the
    * error explaining what they may not do.
    */
-  return `Error: tool '${tool.name ?? 'unknown'}' configures a space, so it needs either instance-admin rights `
+  return toolErrorText(`tool '${tool.name ?? 'unknown'}' configures a space, so it needs either instance-admin rights `
     + `or SPACE ADMIN on '${space}' — the \`spaceAdmin\` grant, which is its own right and is not the same `
-    + 'as holding the admin rung on all four areas. Administering a different space does not grant this one.';
+    + 'as holding the admin rung on all four areas. Administering a different space does not grant this one.');
 }
 
 export function toolRightsRefusal(
@@ -136,16 +137,16 @@ export function toolRightsRefusal(
   if (!need) return null;
 
   if (!rights) {
-    return `Error: tool '${toolName}' needs ${need.area}: ${need.needs} on space '${space}', and this `
-      + 'connection presented no rights matrix. A token with no matrix reaches nothing.';
+    return toolErrorText(`tool '${toolName}' needs ${need.area}: ${need.needs} on space '${space}', and this `
+      + 'connection presented no rights matrix. A token with no matrix reaches nothing.');
   }
   if (!space) {
-    return `Error: tool '${toolName}' needs ${need.area}: ${need.needs} on a space, and this call named none.`;
+    return toolErrorText(`tool '${toolName}' needs ${need.area}: ${need.needs} on a space, and this call named none.`);
   }
 
   const held = effectiveRung(rights, space, need.area);
   if (satisfies(held, need.needs)) return null;
 
-  return `Error: tool '${toolName}' needs ${need.area}: ${need.needs} on space '${space}'; `
-    + `this token holds ${need.area}: ${held}`;
+  return toolErrorText(`tool '${toolName}' needs ${need.area}: ${need.needs} on space '${space}'; `
+    + `this token holds ${need.area}: ${held}`);
 }

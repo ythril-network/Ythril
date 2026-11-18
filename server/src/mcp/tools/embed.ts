@@ -23,6 +23,7 @@ import {
 import type { ToolContext, ToolHandler, ToolResult, ToolSchemas } from './types.js';
 import { embedJobsPage, MAX_JOB_PAGE, DEFAULT_JOB_PAGE } from '../../brain/embed-jobs-page.js';
 import { LOST_MARKER, NOT_SENT_MARKER } from '../../brain/embed-errors.js';
+import { toolErrorResult } from '../tool-error-text.js';
 
 const RECORD_TYPES = [...EMBED_RECORD_TYPES];
 
@@ -274,10 +275,7 @@ export const space_reindexTool: ToolHandler = {
     if (!decision.ok) {
       // The status is reported alongside the message: 409 means "this space's run is still going". An agent that cannot tell that
       // from a refusal that can never work retries the wrong one.
-      return {
-        content: [{ type: 'text' as const, text: `Error (${decision.refusal.status}): ${decision.refusal.body.error}` }],
-        isError: true,
-      };
+      return toolErrorResult(decision.refusal.body.error, decision.refusal.status);
     }
 
     await startReindex(decision.plan);

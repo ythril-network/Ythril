@@ -31,6 +31,7 @@ import { WIPE_COLLECTION_TYPES, wipeResultOf, type WipeCollectionType } from './
 import { decidedBy, wipeSpaceAsRequested, wipeTypesOf, type WipeOutcome } from './wipe-vote.js';
 import { queuedActBody, spaceActFailureAnswer } from './space-act-failure.js';
 import type { ToolResult } from '../mcp/tools/types.js';
+import { toolErrorResult } from '../mcp/tool-error-text.js';
 import { unknownSpaceAnswer } from './unknown-space.js';
 
 export interface DeleteSpaceDataArgs {
@@ -120,7 +121,7 @@ export function wipeToolResult(space: string, outcome: WipeOutcome, types: WipeC
     case 'failed': {
       const answer = spaceActFailureAnswer(outcome.cause, decidedBy(outcome), `tool delete_space_data on '${space}'`);
       if (answer.store) throw outcome.cause;
-      return { content: text(`Error: ${answer.body.error}`), isError: true, structuredContent: { ...answer.body } };
+      return { ...toolErrorResult(answer.body.error), structuredContent: { ...answer.body } };
     }
     case 'wiped': {
       const d = wipeResultOf(outcome.deleted);

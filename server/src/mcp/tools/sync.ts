@@ -1,4 +1,5 @@
 import { visibleNetworks } from '../../auth/network-rights.js';
+import { toolErrorResult } from '../tool-error-text.js';
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { getConfig } from '../../config/loader.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../../sync/peer-floor.js';
@@ -234,7 +235,7 @@ export const network_syncTool: ToolHandler = {
     const wait = resolveSyncWait(a['wait'], ctx.transport);
     const timeoutMs = syncTimeoutMs(a['timeoutMs']);
     const syncCfg = getConfig();
-    const fail = (status: number, error: string): ToolResult => ({ content: [{ type: 'text' as const, text: `Error (${status}): ${error}` }], isError: true });
+    const fail = (status: number, error: string): ToolResult => toolErrorResult(error, status);
 
     if (peerId && networkId) return fail(400, 'Send `peerId` or `networkId`, not both: a sync has one subject.');
     if (!networkId && (a['note'] !== undefined || a['spaces'] !== undefined)) {
@@ -278,10 +279,7 @@ export const network_syncTool: ToolHandler = {
       // and a security rule with two implementations is how the weaker one ends up in charge.
       const refusal = unknownPeerRefusal(peerId);
       if (refusal) {
-        return {
-          content: [{ type: 'text' as const, text: `Error (${refusal.status}): ${refusal.error}` }],
-          isError: true,
-        };
+        return toolErrorResult(refusal.error, refusal.status);
       }
       const answer = await peerSyncOutcome(peerId, { wait });
       if (answer.failure) throw answer.failure.err;

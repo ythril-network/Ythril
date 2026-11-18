@@ -33,7 +33,8 @@
  * whichever door its author was not using that day.
  */
 import { getConfig } from '../config/loader.js';
-import { log, peerText } from '../util/log.js';
+import { log, peerText, NAME_QUOTED } from '../util/log.js';
+import { toolErrorText, toolErrorResult } from './tool-error-text.js';
 import { reachableSpaceIds } from '../auth/space-reach.js';
 import { toolRightsRefusal, spaceAdminRefusal, toolReach } from './tool-rights-guard.js';
 import { TOOL_RIGHTS, toolTakesAView } from '../auth/space-rights.js';
@@ -158,7 +159,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
   if (peerRefusal !== undefined) {
     return await auditedToolCall(req.name, req.caller, req.args, async facts => {
       nameAuditSpace(req.args, getConfig(), facts);
-      return refuse(403, `Error (403): ${peerRefusal}`);
+      return refuse(403, toolErrorText(peerRefusal, 403));
     });
   }
   // A peer token's call is counted in the fence of every space it names for as long as it runs; the release is HERE, in a `finally`, so no
@@ -212,7 +213,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
    * the caller then goes looking for the field rather than at the body.
    */
   if (a === null || typeof a !== 'object' || Array.isArray(a)) {
-    return refuse(400, `Error: arguments for '${name}' must be an object`);
+    return refuse(400, toolErrorText(`arguments for '${peerText(name, { max: NAME_QUOTED })}' must be an object`));
   }
 
   // Unknown tools carry no flags and fall through the gates to be reported below, as they always did.
@@ -234,23 +235,23 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
   // The caller's OWN view named on a tool that does not take one (every write) is answered as what it is, with the owner-only hint, BEFORE the
   // rights below are judged - the REST path routes ask the existence rule first, so the order is one on every door (`ownViewNamedIn`).
   const notASpace = tool && !toolTakesAView(name) ? ownViewNamedIn(ownerKey, a['space'], cfg) : null;
-  if (notASpace) return refuse(notASpace.status, `Error: ${notASpace.body.error}`);
+  if (notASpace) return refuse(notASpace.status, toolErrorText(notASpace.body.error));
 
   // Reachability, from the same predicate that builds `tools/list` — so a listing cannot advertise a tool
   // this refuses. Filtering the list stays advisory; this is the enforcement point.
   if (tool && !toolIsVisible(tool, rights, peerId)) {
     // A space-creating tool is refused in the REST create's own sentence (Q-134): one predicate, one refusal.
     const createRefusal = tool.createsSpaces ? createSpacesRefusal({ rights }) : null;
-    if (createRefusal) return refuse(403, `Error (403): ${createRefusal}`);
-    return refuse(403, tool.admin
-      ? `Error: tool '${name}' requires a token with instance-admin rights`
+    if (createRefusal) return refuse(403, toolErrorText(createRefusal, 403));
+    return refuse(403, toolErrorText(tool.admin
+      ? `tool '${name}' requires a token with instance-admin rights`
       // Without its own branch a space-admin tool would be refused as "mutates, and this token holds no
       // write rung", which names the wrong missing thing — a token can hold write everywhere and still
       // administer nothing.
       : tool.spaceAdmin
-        ? `Error: tool '${name}' configures a space, and this token administers none — it needs the `
+        ? `tool '${name}' configures a space, and this token administers none — it needs the `
           + 'spaceAdmin grant on some space, or instance-admin rights'
-        : `Error: tool '${name}' mutates, and this token holds no write rung in any space`);
+        : `tool '${name}' mutates, and this token holds no write rung in any space`));
   }
 
   /*
@@ -263,24 +264,24 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
   let rawSpaces: string[];
   if (Array.isArray(spaceArg)) {
     if (!tool?.spaceList) {
-      return refuse(400, `Error: tool '${name}' takes one 'space', not a list`);
+      return refuse(400, toolErrorText(`tool '${peerText(name, { max: NAME_QUOTED })}' takes one 'space', not a list`));
     }
     if (!spaceArg.every(v => typeof v === 'string')) {
-      return refuse(400, `Error: every entry in 'space' must be a space name`);
+      return refuse(400, toolErrorText(`every entry in 'space' must be a space name`));
     }
     if (spaceArg.length === 0) {
       // NOT read as "no space named". An empty list is what a caller's own filter produces when it matches
       // nothing, and widening that to every reachable space is the opposite of what they meant.
-      return refuse(400, `Error: 'space' is an empty list. Name at least one space, or omit 'space' to search every space you can reach`);
+      return refuse(400, toolErrorText(`'space' is an empty list. Name at least one space, or omit 'space' to search every space you can reach`));
     }
     rawSpaces = [...new Set(spaceArg.map(v => v.trim()).filter(v => v.length > 0))];
     if (rawSpaces.length === 0) {
-      return refuse(400, `Error: every entry in 'space' must be a space name`);
+      return refuse(400, toolErrorText(`every entry in 'space' must be a space name`));
     }
   } else if (spaceArg !== undefined && spaceArg !== null && typeof spaceArg !== 'string') {
     // An object or a number here used to reach the handler as the empty string — the cross-space case — so
     // a malformed `space` WIDENED the call instead of failing it.
-    return refuse(400, `Error: 'space' must be a space name, or a list of them`);
+    return refuse(400, toolErrorText(`'space' must be a space name, or a list of them`));
   } else {
     const one = typeof spaceArg === 'string' ? spaceArg.trim() : '';
     rawSpaces = one ? [one] : [];
@@ -316,8 +317,8 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
      * fetch what the error could have told them.
      */
     const reachable = accessibleSpaceIds.length ? accessibleSpaceIds.join(', ') : 'none';
-    return refuse(400, `Error: tool '${name}' needs a 'space' — this token reaches more than one, so `
-      + `there is no single space it could mean. Choose one of: ${reachable}`);
+    return refuse(400, toolErrorText(`tool '${name}' needs a 'space' — this token reaches more than one, so `
+      + `there is no single space it could mean. Choose one of: ${reachable}`));
   }
 
   /*
@@ -346,15 +347,15 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     }
     const unknown = unknownSpaceAnswer(ownerKey, sid, false, cfg);
     if (unknown) {
-      // A retired id is answered with its sentence alone and its code, to every caller; the rest carry the tool door's "Error: " prefix.
+      // A retired id is answered with its sentence alone and its code, to every caller; the rest carry the tool door's prefix.
       return unknown.status === 410
         ? refuse(410, unknown.body.error, '', { ...unknown.body })
-        : refuse(unknown.status, `Error: ${unknown.body.error}`);
+        : refuse(unknown.status, toolErrorText(unknown.body.error));
     }
     // A space that exists (a name that does not was refused above): the row of a refusal below names it.
     facts.auditSpace = sid;
     if (!accessibleSpaceIds.includes(sid)) {
-      return refuse(403, `Error: token does not have access to '${sid}'`);
+      return refuse(403, toolErrorText(`token does not have access to '${peerText(sid, { max: NAME_QUOTED })}'`));
     }
     const rightsRefusal = toolRightsRefusal(name, rights, sid);
     if (rightsRefusal) return refuse(403, rightsRefusal);
@@ -389,7 +390,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     // tool's failure, because nothing failed.
     if (err instanceof ToolRefusal) {
       return {
-        result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, ...(err.body ? { structuredContent: { ...err.body } } : {}) },
+        result: { ...toolErrorResult(message), ...(err.body ? { structuredContent: { ...err.body } } : {}) },
         status: err.status, callSpace,
       };
     }
@@ -433,13 +434,13 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     // a `SchemaViolationError` now, and that mapping would flip `graph_merge` to 422 on this door and leave REST at 400 (R5-3).
     const merge = mergeRefusal(err);
     if (merge) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${merge.refusal.message}` }], isError: true, structuredContent: merge.refusal.toStructured() }, status: merge.status, callSpace };
+      return { result: { ...toolErrorResult(merge.refusal.message), structuredContent: merge.refusal.toStructured() }, status: merge.status, callSpace };
     }
     if (err instanceof SchemaViolationError) {
       countSchemaRefusal(writeDoor, err);
       // A tool is an edit of what the caller named: the status is an update's, not spelled here.
       return {
-        result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: err.toStructured() },
+        result: { ...toolErrorResult(message), structuredContent: err.toStructured() },
         status: schemaRefusalStatus('update'), callSpace,
       };
     }
@@ -453,18 +454,18 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
      * (`Q-89`: `similar` for an entry that does not exist). The prose is the tool's either way.
      */
     if (err instanceof NotFoundError) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: 404, callSpace };
+      return { result: toolErrorResult(message), status: 404, callSpace };
     }
     // A read of schema versions over a collection that lists no stamp index yet, or a pass past its deadline: the REST door's 503 and body
     // (`sendCaughtFailure`), the code in the text too.
     const building = schemaReadUnavailableAnswer(err);
     if (building) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${message} (${building.body.code})` }], isError: true, structuredContent: building.body }, status: building.status, callSpace };
+      return { result: { ...toolErrorResult(`${message} (${building.body.code})`), structuredContent: building.body }, status: building.status, callSpace };
     }
     // A relabel onto an identity another edge holds: the REST route's 409 and body (`edgeIdentityTakenAnswer`).
     const identityTaken = edgeIdentityTakenAnswer(err);
     if (identityTaken) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...identityTaken.body } }, status: identityTaken.status, callSpace };
+      return { result: { ...toolErrorResult(message), structuredContent: { ...identityTaken.body } }, status: identityTaken.status, callSpace };
     }
     /*
      * A file act's refusal or failure (the kinds `files/act-answers.ts` defines): the status and body every REST door answers
@@ -475,7 +476,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     const fileAct = answerFileActFailure(err, `tool ${name}`);
     if (fileAct) {
       return {
-        result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...fileAct.body } },
+        result: { ...toolErrorResult(message), structuredContent: { ...fileAct.body } },
         status: fileAct.status, callSpace, ...(fileAct.retryAfterSeconds !== undefined ? { retryAfterSeconds: fileAct.retryAfterSeconds } : {}),
       };
     }
@@ -486,11 +487,11 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
      */
     const spaceClosed = spaceActAnswer(err);
     if (spaceClosed) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${spaceClosed.body.error}` }], isError: true, structuredContent: { ...spaceClosed.body } }, status: spaceClosed.status, callSpace };
+      return { result: { ...toolErrorResult(spaceClosed.body.error), structuredContent: { ...spaceClosed.body } }, status: spaceClosed.status, callSpace };
     }
     // The same 409 the REST door answers: another write kept moving the record, nothing was written, retry.
     if (err instanceof WriteConflict) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }, status: writeRefusalAnswer(err, 'update')!.status, callSpace };
+      return { result: toolErrorResult(message), status: writeRefusalAnswer(err, 'update')!.status, callSpace };
     }
     // The refusals of a local write's stamp (`record_version_at_ceiling`, a clock before the first usable instant, a position seed the store could
     // not read): the status and body REST answers (`writeRefusalAnswer`), carried as `structuredContent` beside the same sentence.
@@ -500,17 +501,16 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
       || err instanceof ForkRowReadOnly || err instanceof ForkCapRefusal || err instanceof EndpointRemoved || err instanceof LinkTargetRemoved
       ? writeRefusalAnswer(err, 'update') : null;
     if (stampRefusal) {
-      return { result: { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true, structuredContent: { ...stampRefusal.body } }, status: stampRefusal.status, callSpace };
+      return { result: { ...toolErrorResult(message), structuredContent: { ...stampRefusal.body } }, status: stampRefusal.status, callSpace };
     }
     // The store's condition, answered as every door answers it (`storeFailureAnswer`, bundle-30 I6 `C1`); this
-    // transport has no status line to carry it, so `storeSideFailure: true` says it in the body. The text is the
-    // answer's message EXACTLY — no `Error: ` before it — so `/api/<tool>`, `/api/brain/recall` and MCP spell one
-    // failure one way (bundle-30 I12, verify-drive-2 finding 5).
+    // transport has no status line to carry it, so `storeSideFailure: true` says it in the body. The text is the tool
+    // door's like every other tool error's (`toolErrorResult`, Q-339): the answer's message after the prefix; the
+    // structured body keeps the sentence alone, as the routes that answer the sentence without a tool's text do.
     if (store) {
       return {
         result: {
-          content: [{ type: 'text' as const, text: store.body.error }],
-          isError: true,
+          ...toolErrorResult(store.body.error),
           structuredContent: { ...store.body, storeSideFailure: true },
         },
         status: store.status, callSpace, storeFailure: store,
@@ -526,8 +526,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     toolFailuresTotal.inc({ door: caller.transport, tool: name, class: caught.kind });
     if (caught.kind === 'refusal') sayRefusal();
     return {
-      result: { content: [{ type: 'text' as const, text: `Error: ${caught.body.error}` }], isError: true,
-        ...(caught.status === 400 ? {} : { structuredContent: { ...caught.body } }) },
+      result: { ...toolErrorResult(caught.body.error), ...(caught.status === 400 ? {} : { structuredContent: { ...caught.body } }) },
       status: caught.status, callSpace,
     };
   }
@@ -543,7 +542,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     // Refused BEFORE it is counted (`Q-108`): `name` is whatever the caller sent, and as a metric label an
     // unknown one mints a new time series per spelling — unbounded cardinality from any authenticated caller.
     if (!tool) {
-      return refuse(404, `Unknown tool: ${name}`, callSpace);
+      return refuse(404, `Unknown tool: ${peerText(name, { max: NAME_QUOTED })}`, callSpace);
     }
     // A view's id is the caller's own text and unbounded as a label: it is one label, as a space's id is one per configured space.
     toolCallsTotal.inc({ tool: name, space: viewReads.size > 0 ? '@view' : (callSpace || 'global'), door: caller.transport });
@@ -566,7 +565,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
       const judged = answerUnknownWriteFields(writeBodyOfToolCall(a, judgedOperation), judgedOperation, callSpace, writeDoor);
       rows = judged.rows;
       if (judged.refused) {
-        return withUnknownFieldRows(refuse(400, `Error: ${judged.refusal!.error}`, callSpace, { ...judged.refusal }), rows);
+        return withUnknownFieldRows(refuse(400, toolErrorText(judged.refusal!.error), callSpace, { ...judged.refusal }), rows);
       }
     }
     // Enforce the advertised inputSchema before the handler runs — except partial-success tools
@@ -574,7 +573,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     // tolerated (its unknown arguments were answered above); everything nested is still held to the closed schema.
     if (!tool.skipSchemaValidation) {
       const argErr = validatorFor(accessibleSpaceIds, ownViewIds).validate(tool, a, { tolerateTopLevel: judgedOperation !== null });
-      if (argErr) return withUnknownFieldRows(refuse(400, `Error: ${argErr}`, callSpace), rows);
+      if (argErr) return withUnknownFieldRows(refuse(400, toolErrorText(argErr), callSpace), rows);
     }
     /*
      * The destructive-call throttle, immediately before the handler runs — which is the LAST point at
@@ -593,7 +592,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
      */
     const rateKey = caller.tokenId ?? caller.ip;
     if (tool.heavy && !consumeHeavyToolCall(rateKey)) {
-      return withUnknownFieldRows(refuse(429, `Error: tool '${name}' is rate limited — too many destructive calls, try again shortly`, callSpace), rows);
+      return withUnknownFieldRows(refuse(429, toolErrorText(`tool '${name}' is rate limited — too many destructive calls, try again shortly`), callSpace), rows);
     }
     const handlerSpaceIds = withoutHeldFor(toolReach(name, rights, accessibleSpaceIds), peerId);
     const handled = await tool.handle({

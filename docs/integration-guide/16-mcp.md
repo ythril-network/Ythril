@@ -52,8 +52,9 @@ On connect, the server sends global instructions listing all available space IDs
 > ```
 >
 > The message is ours, never the driver's (which names internal hosts and ports and goes to the server log). `code` and
-> `codeName` are the store's own, when it supplied them. The text in `content` is the same sentence as `error`, word
-> for word, as on the REST doors. A pool checkout that timed out and a closed connection pool are this same retryable
+> `codeName` are the store's own, when it supplied them. The text in `content` is the word `Error:` and a space,
+> then the same sentence as `error` word for word, as every error of a tool reads on this transport; `POST /api/<tool>` carries that
+> text in its body's `error`, and the structured body keeps the sentence alone. A pool checkout that timed out and a closed connection pool are this same retryable
 > answer. A driver error the server does not recognise as a store condition arrives with `retryable: false` and
 > *"An internal database fault stopped this operation; its cause is in the server log."*: not yours to fix, and not
 > known to clear on a retry. **A write concern the deployment can never meet** is the other answer that is not

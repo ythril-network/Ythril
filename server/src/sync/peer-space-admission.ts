@@ -35,6 +35,7 @@ import { enterSpaceTransfer } from './space-exchange-set.js';
 import { holdTransferWhileOpen, type SpaceTransfer } from './space-transfer-fence.js';
 import { spaceActKnob } from '../spaces/space-act-runner.js';
 import { spaceHeldRefusalsTotal } from '../metrics/registry.js';
+import { toolErrorText } from '../mcp/tool-error-text.js';
 
 /**
  * Admit one transfer of `spaceId` with `peerId`, or count the refusal: the transfer, counted in the fence until it is released, or `null`
@@ -80,7 +81,7 @@ export type ToolCallAdmission =
 export function admitPeerToolCall(peerId: string, space: string): ToolCallAdmission {
   const transfer = admitPeer(space, peerId, undefined, 'tool');
   if (!transfer) {
-    return { held: { status: 423, text: `Error: ${SPACE_HELD_ANSWER.error} (space '${space}', ${SPACE_HELD_ANSWER.code})`, body: SPACE_HELD_ANSWER } };
+    return { held: { status: 423, text: toolErrorText(`${SPACE_HELD_ANSWER.error} (space '${space}', ${SPACE_HELD_ANSWER.code})`), body: SPACE_HELD_ANSWER } };
   }
   const timer = setTimeout(() => transfer.release(), spaceActKnob('INBOUND_TRANSFER_MS'));
   timer.unref?.();

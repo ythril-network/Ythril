@@ -10,7 +10,6 @@
     { "file": "server/src/util/entry-path.ts", "expression": "tsEntry", "reason": "A path this process derives from its own install folder, in a launch Error.", "reviewBy": "2027-05-18" },
     { "file": "server/src/util/entry-path.ts", "expression": "jsEntry", "reason": "A path this process derives from its own install folder, in a launch Error.", "reviewBy": "2027-05-18" },
     { "file": "server/src/util/entry-path.ts", "expression": "tsxCli", "reason": "A path this process derives from its own install folder, in a launch Error.", "reviewBy": "2027-05-18" },
-    { "file": "server/src/util/entry-path.ts", "expression": "name", "reason": "The name of one of this server's own entry points, passed by its own launcher code.", "reviewBy": "2027-05-18" },
-    { "file": "server/src/mcp/call-tool.ts", "expression": "name", "reason": "OPEN, not excused as safe: `Unknown tool: ${name}` quotes the caller's tool name whole. call-tool.ts is being rebuilt by another slice of this bundle (it rebuilds how error texts are written), so the fix goes in with that rebuild; this row goes then.", "reviewBy": "2026-12-18" }
+    { "file": "server/src/util/entry-path.ts", "expression": "name", "reason": "The name of one of this server's own entry points, passed by its own launcher code.", "reviewBy": "2027-05-18" }
   ]
 }
