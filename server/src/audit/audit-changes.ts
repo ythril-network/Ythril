@@ -28,7 +28,7 @@
 
 import { AUDIT_SCHEMA_SUMMARY } from './audit-schema-summary.js';
 import { BRAIN_COLLECTIONS } from '../config/types-knowledge.js';
-import type { ImportTotals } from '../sync/space-import.js';
+import type { ImportTotals } from '../sync/import-totals.js';
 
 /**
  * A single recorded field change.
