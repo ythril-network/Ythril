@@ -296,7 +296,7 @@ A member that applies no step still stamps the copies that conform, lists the on
 
 **Types on a network.** A network never removes a type: a `meta_change` round merges per type, and a type the change leaves out is kept. So `renameType` and `splitType` on a network add the target types to the layer and keep the source; the records move when the round passes. A property rename or enum map is the same round that replaces the type by name in the layer, which is what removes the old name.
 
-**A member on an older release** keeps the steps on the round, takes the schema and converts nothing. After it upgrades, running Convert on its types converts its copies. See [Upgrading](02b-upgrading.md).
+**A member on an older release** keeps the steps on the round, takes the schema and converts nothing. After it upgrades, nothing starts by itself: a round only a member of this release concluded is owed a run, so a round the older release concluded is not; running Convert on its types converts its copies. See [Upgrading](02b-upgrading.md).
 
 ## Refusals
 
