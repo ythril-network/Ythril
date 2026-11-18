@@ -199,6 +199,8 @@ const NARROWINGS = [
 const DEPTHS = [1, 2, 5];
 const WINDOWS = [1, 3, 16];
 const CEILINGS = [5000, 12];
+/** How many differential cases run at once: the round trips of one overlap those of another, which is the time they spend waiting on the store. */
+const DIFFERENTIALS_AT_ONCE = 4;
 
 /**
  * The reads exactly as the walk made them before Q-136: each its own query, no sort. Written out rather than
@@ -348,20 +350,26 @@ describe('a window of rows walked in step is each row\'s own walk', { skip }, ()
     }
   }
 
-  for (const rowNodes of CEILINGS) {
-    for (const narrowing of NARROWINGS) {
-      for (const depth of DEPTHS) {
-        it(`ceiling ${rowNodes}, depth ${depth}, narrowing ${describeNarrowing(narrowing)}: every row, every window`,
-          () => differential(SPACE, rowNodes, narrowing, depth));
+  // The differential cases only READ the seeded graph and share nothing but the order-insensitive `seen` counters, and each is a run of
+  // awaited round trips, so the store is idle between them: they run a few at a time. The suite's own cases stay in order around this
+  // one (node runs a suite's children one after another), so the floors below read the finished counters, and the cases that set the
+  // process-global walk bounds (`rows as the answer sees them`, which `afterEach` clears) never overlap a differential.
+  describe('every row, every window', { concurrency: DIFFERENTIALS_AT_ONCE }, () => {
+    for (const rowNodes of CEILINGS) {
+      for (const narrowing of NARROWINGS) {
+        for (const depth of DEPTHS) {
+          it(`ceiling ${rowNodes}, depth ${depth}, narrowing ${describeNarrowing(narrowing)}: every row, every window`,
+            () => differential(SPACE, rowNodes, narrowing, depth));
+        }
+      }
+      for (const narrowing of [undefined, { direction: 'inbound' }]) {
+        for (const depth of DEPTHS) {
+          it(`other edge index — ceiling ${rowNodes}, depth ${depth}, narrowing ${describeNarrowing(narrowing)}`,
+            () => differential(ALT, rowNodes, narrowing, depth));
+        }
       }
     }
-    for (const narrowing of [undefined, { direction: 'inbound' }]) {
-      for (const depth of DEPTHS) {
-        it(`other edge index — ceiling ${rowNodes}, depth ${depth}, narrowing ${describeNarrowing(narrowing)}`,
-          () => differential(ALT, rowNodes, narrowing, depth));
-      }
-    }
-  }
+  });
 
   it('the other-index space really reads in another order', () => {
     // Otherwise its cases pass for the easy reason: the planner agreeing with `edgeReadOrder` by luck.
