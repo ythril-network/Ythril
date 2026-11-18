@@ -13,7 +13,8 @@
  *
  * - the open round's row carries the round's `convertRecords` exactly as the round holds it, on REST and on MCP;
  * - both doors answer the same row, and neither hands out what the projection keeps from an operator (`pendingMeta`, `metaBase`);
- * - a round that carried no steps has no `convertRecords` key on its row.
+ * - a round that carried no steps has no `convertRecords` key on its row;
+ * - the MCP tool's description names the field and says what a yes on such a round means: a yes to rewriting records on every member.
  *
  * Run: node --test testing/standalone/a-voter-sees-the-steps-of-the-round.test.js
  * (requires a prior server build)
@@ -88,6 +89,13 @@ describe('a voter sees the steps of the round it votes on', () => {
       assert.equal('convertRecords' in row, false);
     });
   }
+
+  it('the MCP tool says in its description that a schema round\'s row carries convertRecords, and what a yes on it means', () => {
+    const text = network_votesTool.description;
+    assert.match(text, /convertRecords/, 'the tool does not name the field a voter reads the steps from');
+    assert.match(text, /rewrit/i, 'the tool does not say a yes is also a yes to rewriting records');
+    assert.match(text, /every member/i, 'the tool does not say the rewrite happens on every member');
+  });
 
   it('both doors answer the same rows', async () => {
     assert.deepEqual(await mcp(), await rest());
