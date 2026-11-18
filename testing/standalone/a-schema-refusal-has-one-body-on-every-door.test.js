@@ -52,6 +52,12 @@ import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 const BODY_OWNER = 'server/src/brain/write-validation.ts';
 const BULK = 'server/src/brain/bulk.ts';
 const BULK_EXEMPT_FUNCTION = 'itemReason';
+/**
+ * The conversion run's converter answers no door: a strict refusal of a record it rewrites is that record's unconverted ITEM (`not_conforming`
+ * with the refusal's violations, names only), which the list doors answer in their own one shape, never a refusal body (bundle-284, lens sweep S4).
+ */
+const CONVERTER = 'server/src/brain/schema-convert-record.ts';
+const CONVERTER_EXEMPT_FUNCTION = 'refusalOf';
 const BODY_TAG = /^(?:Error(?: \(\d+\))?: )?schema_violation\b/;
 const MAPPING = /\btoStructured\s*\(|\bconnectionRefusalAnswer\s*\(|\bwriteRefusalAnswer\s*\(/;
 
@@ -112,7 +118,7 @@ export function analyse(files) {
 }
 
 const answersOrReraises = (b) => MAPPING.test(b.branch) || /\bthrow\b/.test(b.branch);
-const exempt = (s) => s.file === BULK && s.fn === BULK_EXEMPT_FUNCTION;
+const exempt = (s) => (s.file === BULK && s.fn === BULK_EXEMPT_FUNCTION) || (s.file === CONVERTER && s.fn === CONVERTER_EXEMPT_FUNCTION);
 
 /** The rules, as lists of what breaks them. */
 export function breaches({ classes, tags, branches }) {
@@ -134,6 +140,8 @@ describe('a schema refusal has one body, built in one place', () => {
     assert.ok(found.tags.some(t => t.file === BODY_OWNER), 'the body owner writes no tag — the tag matcher has stopped matching');
     assert.ok(found.tags.some(t => t.file === BULK && t.fn === BULK_EXEMPT_FUNCTION), `${BULK_EXEMPT_FUNCTION} in bulk.ts writes no tag — the named exemption no longer names anything`);
     assert.ok(found.branches.length >= 4, `only ${found.branches.length} instanceof site(s) of the family found`);
+    assert.ok(found.branches.some(b => b.file === CONVERTER && b.fn === CONVERTER_EXEMPT_FUNCTION),
+      `${CONVERTER_EXEMPT_FUNCTION} in the converter has no branch on the family — the named exemption no longer names anything`);
   });
 
   it('exactly one class defines toStructured; the rest inherit the one body', () => {
