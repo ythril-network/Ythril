@@ -97,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Web:** a document-processing setting an environment variable pins is shown locked on the Media processing page, and a save no longer sends it. Before, one pinned setting made every save on the page fail with no reason shown.
 - **Web:** a screen reader reads the token hint on the login page, and the password hint and mismatch message on the setup page, with their fields.
 - **Records:** `entityName`, `fromName` and `toName` on `POST /api/filter` and MCP `filter` narrow the caller's `filter` instead of replacing its `_id`, `$or`, `from` or `to`; the web client's fact list by ids and an entity name now answers their intersection.
 - **Spaces:** a search-index readiness check stops within a second when its database connection closes, instead of asking the closed connection for up to a minute.

@@ -261,8 +261,14 @@ describe('check-i-ux-env-only-config-surfaced', () => {
     assert.match(v.reason, /vision\.baseUrl/);
   });
 
-  it('finds the real unlocked fields: documentProcessing.renderDpi is shown and not locked, embedding.model is locked through the area helper', () => {
-    const open = envOnly.findings(inputs.paths, inputs.components, inputs.sources).map((f) => f.id);
+  // The real lock call of a document-processing knob, replaced as above: the probe must see the field open again.
+  const dpiNeedle = "s.isLocked('documentProcessing.renderDpi')";
+  const dpiOpen = () => ({ ...inputs, components: replaced(inputs.components, dpiNeedle), sources: replaced(inputs.sources, dpiNeedle) });
+
+  it('finds an unlocked field (documentProcessing.renderDpi with its real lock call replaced), and embedding.model is locked through the area helper', () => {
+    assert.ok(inputs.sources.some((s) => s.code.includes(dpiNeedle)), 'the real lock call is in the settings source');
+    const planted = dpiOpen();
+    const open = envOnly.findings(planted.paths, planted.components, planted.sources).map((f) => f.id);
     assert.ok(open.includes('documentProcessing.renderDpi'));
     assert.ok(!open.includes('embedding.model'));
     assert.ok(!open.includes('faceRecognition.confidenceThreshold'), 'locked through the area-wide lock call');
@@ -276,8 +282,9 @@ describe('check-i-ux-env-only-config-surfaced', () => {
 
   it('fails an exception for a field that is now locked, one with no reason and one past its date', () => {
     assert.match(envOnly.decide(inputs, [...real, { id: 'vision.baseUrl', reason: 'the vision endpoint input is locked, so this excuses nothing', reviewBy: '2099-01-01' }], TODAY).reason, /excuses nothing/);
-    assert.match(envOnly.decide(inputs, [{ ...real[0], reason: '' }, ...real.slice(1)], TODAY).reason, /reason/);
-    assert.match(envOnly.decide(inputs, [{ ...real[0], reviewBy: '2026-01-01' }, ...real.slice(1)], TODAY).reason, /past its reviewBy/);
+    const entry = { id: 'documentProcessing.renderDpi', reason: 'a planted exception for the probe test, long enough to count', reviewBy: '2099-01-01' };
+    assert.match(envOnly.decide(dpiOpen(), [{ ...entry, reason: '' }], TODAY).reason, /reason/);
+    assert.match(envOnly.decide(dpiOpen(), [{ ...entry, reviewBy: '2026-01-01' }], TODAY).reason, /past its reviewBy/);
   });
 });
 
