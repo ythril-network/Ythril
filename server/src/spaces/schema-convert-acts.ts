@@ -98,6 +98,9 @@ export function schemaConvertPrice(spaceId: string, caller: SchemaConvertCaller)
 /** The knowledge rung a call needs, then the space admin right a start needs on top of it; the refusal, or `null`. */
 function rightsRefusal(spaceId: string, rights: TokenRights | null | undefined, needs: 'admin' | 'read'): SchemaConvertActResult | null {
   if (!rights) return refusal(FORBIDDEN, rungRefusal(needs, 'knowledge'), KNOWLEDGE_RUNG);
+  // An instance administrator always may, as the settings-field table's shortcut lets it save any field: a save with `convertRecords` it could make
+  // before this price must not be refused by it (N20 made the save ask this function).
+  if (rights.instanceAdmin === true) return null;
   if (!holdsRung(rights, spaceId, 'knowledge', needs)) return refusal(FORBIDDEN, rungRefusal(needs, 'knowledge', spaceId), KNOWLEDGE_RUNG);
   if (needs === 'admin' && rights.instanceAdmin !== true && !isSpaceAdminFor(rights, spaceId)) {
     return refusal(FORBIDDEN, `Converting records rewrites them on every peer, so it needs the admin right of space '${spaceId}', not only 'admin' on knowledge`, SPACE_ADMIN_REQUIRED);
