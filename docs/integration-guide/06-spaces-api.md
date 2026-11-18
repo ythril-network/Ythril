@@ -45,7 +45,7 @@ worth querying. A space's `actPending` (here and on MCP `list_spaces`) is the ac
 }
 ```
 
-> **Note:** `counts` fields are only present when `?counts=true` is passed. `storage.usageGiB` is the instance total (files + brain), and `storage.limits` echoes the configured quota (`totalLimitGiB`, `warnAtPercent`); each space object also carries its own `usageGiB` number. `docExtractionCeiling` is the instance document-extraction ceiling (`off` / `ocr` / `vlm` / `repair` / `auto`) — the highest mode any space may pick; the admin UI uses it to constrain each space's extraction dropdown.
+> **Note:** `counts` fields are only present when `?counts=true` is passed. `storage.usageGiB` is the instance total (files + brain), and `storage.limits` echoes the configured quota (`totalLimitGiB`, `warnAtPercent`); each space object also carries its own `usageGiB` number. `docExtractionCeiling` is the instance document-extraction ceiling (`off` / `ocr` / `vlm` / `repair` / `auto`) — the highest mode any space may pick; the admin UI uses it to constrain each space's extraction dropdown. `mediaCeilings` (`{ image, audio, video, text }`, on every `200`) is the same contract per media class: the highest media-embedding level the instance's policy allows (`auto` = no policy limit); offer a space no level above it, because the runtime would cap it silently.
 
 #### `usageGiB` can be a FLOOR, and `usageIncomplete` is how you know
 

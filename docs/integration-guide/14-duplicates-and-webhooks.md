@@ -147,7 +147,7 @@ sticky dismissal — because the Review tab presents both under one vocabulary.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/contradictions?status=open&space=<id>&limit=100&skip=0` | any token (space-scoped) | List candidates, one page, paged exactly as duplicates are. `status` = `open` (default), `dismissed`, `resolved`, or `all`. |
+| `GET` | `/api/contradictions?status=open&space=<id>&limit=100&skip=0` | any token (space-scoped) | List candidates, one page, paged exactly as duplicates are. `status` = `open` (default), `dismissed`, `resolved`, or `all`. The answer carries `nliConfigured` (boolean): whether the model-judged pass is among the ones that run here, so a client can tell an empty list from a judge that never ran (the structured pass needs no model). |
 | `POST` | `/api/contradictions/:id/dismiss` | non-read-only | Reviewed / not a real disagreement. Content-gated exactly like a duplicate dismissal. A **resolved** finding is refused `409` `{ code: "alreadyResolved", resolution }` and left as it is (its edge and mark stand); `404` when there is no such finding. Releases an unfinished resolve's claim and answers its `notes` (below). |
 | `POST` | `/api/contradictions/:id/reopen` | non-read-only | Bring a **dismissed** pair back onto the open list. `404` if it is not currently dismissed. |
 | `POST` | `/api/contradictions/:id/resolve` | non-read-only | Body `{ "resolution": "edited" \| "linked" \| "superseded" }`. Records HOW a human settled it. `superseded` also needs `"winner": "a" \| "b"` — see below. |
@@ -623,7 +623,8 @@ Authorization: Bearer <admin-token>
 ```
 
 Sends a synthetic `test.ping` event to the subscription's URL. Useful for verifying connectivity. A test delivery your
-endpoint answers with a `2xx` makes a failing subscription `active` again; a disabled one stays disabled.
+endpoint answers with a `2xx` makes a failing subscription `active` again; a disabled one stays disabled. The route answers
+`{ "ok": true, "message": "Test event queued for delivery" }` once the event is queued; the delivery itself is read from the delivery log below.
 
 ### Delivery Log
 

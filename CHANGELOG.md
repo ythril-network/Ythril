@@ -85,8 +85,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** CI pulls the BuildKit image, the test database image and the test image's build through `scripts/retry-on-registry-failure.mjs`: a pull Docker Hub did not answer is run again, at most twice; any other failure fails at once.
 - **Testing:** the export round trip now covers fork marks on facts, entities, edges and chrono entries and a file row's expiry and sync base, and a gate fails when a record interface leaves out a field the store keeps.
 - **Testing:** two flow-check probes (`tools/flow-checks`) answer whether an operator can export their data and whether each documented error message still exists in the source, instead of "cannot answer".
+- **Testing:** 17 more flow-check probes (`tools/flow-checks`) decide the docs, security, deployment, interface, architecture and licence lens checks from the code, instead of "cannot answer".
 - **Tooling:** `machine:free -Wipe` asks every refusal of the wipe (data guard, pending record, free space, registries) before it removes the test stack or prunes; the workstation guide names what the guard cannot see.
 - **Docs:** fixed: the integration guide's examples of the storage-limit and incomplete space-delete errors quote the messages the server sends.
+- **Docs:** fixed: the integration guide names every parameter and answer field the probes found missing, among them `skipTlsVerify`, `merkle`, `superseded`, `mediaCeilings` and `temporary`.
 - **Docs:** changed: the upgrading guide names the removal of records whose file bytes are gone, its timings and holds, and putting lost bytes back before upgrading.
 - **Build:** the build stops with one line naming the package and `run npm ci` when the install differs from package-lock.json or lacks a package the build needs, instead of failing with misleading type errors.
 - **Build:** the OIDC settings types moved out of `config/types.ts` into `config/types-oidc.ts`, which brings that file back under its size limit; no behaviour changes.

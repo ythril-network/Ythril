@@ -1,0 +1,12 @@
+[
+  {
+    "id": "docker-compose.yml#ythril#encryption-db",
+    "reason": "the shipped stack is one tenant on one host and compose sets no encryption on the bundled mongod; docs/integration-guide/02-hosting.md has the operator put it on an encrypted volume (LUKS, a cloud disk) when tenants share hardware",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#ythril#encryption-app",
+    "reason": "compose passes no master secret by default (encryption at rest is the operator's opt-in, docs/integration-guide/02a-encryption-at-rest.md shows the two lines to add); .env.example lists the variables commented out",
+    "reviewBy": "2027-02-18"
+  }
+]

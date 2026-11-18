@@ -1,0 +1,111 @@
+[
+  {
+    "id": "transport:server/src/auth/middleware.ts->api",
+    "reason": "the auth middleware calls mfaCodeHolds and decorateJsonAnswer, two helpers that live under api/ and belong in a layer both can import",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/auth/middleware.ts->mcp",
+    "reason": "the auth middleware builds the OAuth resource-metadata URL with mcpResourceMetadataUrl from mcp/oauth.ts, an helper of the MCP door that the auth layer needs",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/brain/forks.ts->mcp",
+    "reason": "forks.ts words an invalid-arguments refusal with helpers from mcp/argument-sentence.ts that both doors share; the sentence helpers belong outside the MCP folder",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/contract/judged-write-operations.ts->mcp",
+    "reason": "the contract folder reads MCP_TOOL_OPERATIONS from mcp/audit-map.ts to state which writes are judged: the contract is derived from the door's own table",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/contract/write-accepts.ts->mcp",
+    "reason": "the contract folder reads the MCP tool schemas (mcp/tools/*) to derive what a write accepts, so the contract cannot drift from the tools",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/networks/join-remote-act.ts->api",
+    "reason": "BCRYPT_ROUNDS and SSRF_SAFE_URL live in api/networks/_shared.ts and the networks acts import them from the transport folder; they belong in networks/",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/networks/member-acts.ts->api",
+    "reason": "BCRYPT_ROUNDS, SSRF_SAFE_URL and safeMemberList live in api/networks/_shared.ts; they belong in networks/",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/networks/member-introductions.ts->api",
+    "reason": "BCRYPT_ROUNDS lives in api/networks/_shared.ts; it belongs in networks/",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/networks/network-acts.ts->api",
+    "reason": "BCRYPT_ROUNDS lives in api/networks/_shared.ts; it belongs in networks/",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/networks/topology-acts.ts->api",
+    "reason": "SSRF_SAFE_URL lives in api/networks/_shared.ts; it belongs in networks/",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/spaces/delete-space-data.ts->mcp",
+    "reason": "a type-only import of ToolResult from mcp/tools/types.ts; the space-data deletion returns the MCP tool's result shape",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/sync/arrival-shape.ts->api",
+    "reason": "the sync layer reads fileMetaFromSender from api/sync/_shared.ts, a helper of the sync route folder that the sync module itself owns the meaning of",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/sync/arrivals.ts->api",
+    "reason": "the sync layer reads fileMetaForWire from api/sync/_shared.ts, a helper that belongs in sync/",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/sync/file-meta-write.ts->api",
+    "reason": "the sync layer reads removedFileMetaKeys and FILE_META_AUTHORED_KEYS from api/sync/_shared.ts; they belong in sync/",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/sync/push-family.ts->api",
+    "reason": "the sync layer reads the file-meta wire helpers from api/sync/_shared.ts; they belong in sync/",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/sync/stray-filemeta-drain.ts->api",
+    "reason": "the sync layer reads fileMetaForWire and FILE_META_WIRE_KEYS from api/sync/_shared.ts; they belong in sync/",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "transport:server/src/sync/trigger.ts->api",
+    "reason": "the sync trigger answers a failure with sendCaughtFailure and sendStoreFailure from api/send-failure.ts, a helper of the HTTP door",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "cycles:server/src:components",
+    "max": 4,
+    "reason": "the server's import graph has four cyclic sets today (a large core one, a 17-module one and two pairs); no bundle removes a cycle of this size alone, so the count may not grow while a design splits them",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "cycles:server/src:largest",
+    "max": 316,
+    "reason": "the largest cyclic set of server/src holds 316 modules (the brain, sync, spaces, files, config and db layers import each other); it may not grow while a design splits it",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "cycles:client/src/app:components",
+    "max": 3,
+    "reason": "the client has three cyclic sets of three modules today; the count may not grow while each is split",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "cycles:client/src/app:largest",
+    "max": 3,
+    "reason": "the largest cyclic set of the client holds three modules; it may not grow while each is split",
+    "reviewBy": "2027-02-18"
+  }
+]
