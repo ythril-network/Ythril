@@ -24,6 +24,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { testMongoUri, tuneTestMongo } from './_mongo-harness.mjs';
 import { RECORD_PARTS } from './_space-snapshot.mjs';
+import { initSpacesTogether } from './_init-spaces-together.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
 
 /** Every database this slice creates starts with this. */
@@ -69,7 +70,7 @@ export async function openB81cDoor({ name, spaces, instanceId, app = false, netw
     await mongo.getDb().dropDatabase();
     (await import('../../server/dist/config/loader.js')).loadConfig();
     const { initSpace } = await import('../../server/dist/spaces/lifecycle.js');
-    for (const id of spaces) await initSpace(id, { waitForVectorReady: false });
+    await initSpacesTogether(spaces, initSpace);
 
     const docs = await import('../../server/dist/api/sync/docs.js');
     const tombs = await import('../../server/dist/api/sync/tombstones.js');

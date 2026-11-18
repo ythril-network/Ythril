@@ -37,7 +37,7 @@ import { openTestMongo, closeTestMongo, openFixtureMongo, testMongoUri } from '.
 import { wipeParts, RECORD_PARTS } from './_space-snapshot.mjs';
 import { drainWrites } from './_active-operations.mjs';
 import { refuseConflictingPushDoorOptions } from './_push-door-options.mjs';
-import { poolEach } from '../_shared/pool.mjs';
+import { initSpacesTogether } from './_init-spaces-together.mjs';
 
 /** A peer-bound token that reaches every space by its own scope (an unknown peer falls through to space scope). */
 export const PEER_TOKEN = Object.freeze({
@@ -189,30 +189,6 @@ async function releaseHarness(tmpDir, fixtureMongo) {
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
 }
 
-/** How many of a door's spaces are initialised at once: each is a run of index builds against the harness database, independent of the others. */
-const INIT_WIDTH = 4;
-
-/**
- * Initialise every space of a door, `INIT_WIDTH` at a time, instead of one after another.
- *
- * Why: a door that opens many spaces (a pull case needs a new space each) spent most of its time initialising them in turn before the first case ran. The product itself initialises a space on its own when a space is created, and two admins can create two at once.
- *
- * What it prevents: a failed initialisation that goes unseen, or leaves work running. The first space to fail stops any further one from starting, the
- * ones already running are awaited to the end (so `releaseHarness` closes the client with no initialisation in flight on it, which would keep the
- * process alive), and that first failure is thrown as it is. The pool is given a job that never rejects for the same reason (`pool.mjs`).
- *
- * @param {{ id: string }[]} spaces
- * @param {(id: string, options: { waitForVectorReady: boolean }) => Promise<unknown>} initSpace  the server's own `initSpace`
- */
-async function initSpacesTogether(spaces, initSpace) {
-  let failed = null;
-  await poolEach(spaces, INIT_WIDTH, async (s) => {
-    if (failed) return;
-    try { await initSpace(s.id, { waitForVectorReady: false }); } catch (error) { failed ??= { error }; }
-  });
-  if (failed) throw failed.error;
-}
-
 /** Everything `openPushDoor` builds once the harness database is open; split out so its failure can close it. */
 async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir, fixtureMongo }) {
   const DB = `ythril_harness_${suite}`;
@@ -233,7 +209,7 @@ async function assemblePushDoor({ suite, spaces, monitorCommands, mongo, tmpDir,
   const manifest = await import('../../server/dist/api/sync/manifest.js');
   const { resolveNetworkSpaceAlias } = await import('../../server/dist/api/sync/space-alias.js');
   const { initSpace } = await import('../../server/dist/spaces/lifecycle.js');
-  await initSpacesTogether(spaces, initSpace);
+  await initSpacesTogether(spaces.map(s => s.id), initSpace);
   const { searchIndexPresenceSettled } = await import('../../server/dist/spaces/search-index-presence.js');
   /** Every search-index presence reconcile queued so far on the door's spaces has finished. */
   const presenceSettled = () => Promise.all(spaces.map(s => searchIndexPresenceSettled(s.id)));
