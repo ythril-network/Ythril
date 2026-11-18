@@ -23,8 +23,12 @@ import { buildBraintreeAncestors } from '../util/braintree.js';
 import { sendNotice } from '../networks/notify-members.js';
 import { publishesOn } from '../networks/network-role.js';
 import { parseMetaRound, type MetaRoundParse, type MetaRoundProposal } from './meta-round-merge.js';
-import type { NetworkConfig, VoteRound } from '../config/types.js';
+import type { NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
 import type { ParsedSpaceMeta } from '../spaces/body-schemas.js';
+import type { SchemaConvertStart, SchemaConvertStartOutcome, SchemaConvertType } from '../spaces/schema-convert-run.js';
+import { keyedLock } from '../util/keyed-lock.js';
+import { reportSpaceFailure } from '../util/space-failure.js';
+import { declareStep } from '../util/housekeeping-signals.js';
 import { metaChangeNote, queueGeneratedNote } from './change-notes.js';
 import { isSpaceActRound, roundPastDeadline } from '../networks/round-state.js';
 import { roundElectorate, votersOf } from '../networks/round-electorate.js';
@@ -291,6 +295,8 @@ export const passedMetaChange = {
     const currentMeta = getConfig().spaces.find(s => s.id === plan.localSpace)?.meta;
     if (plan.own) commitOwnMetaEdit(plan.localSpace, () => plan.own!);
     if (plan.layer) storeNetworkLayer(net.id, plan.localSpace, plan.layer);
+    // `Q-746`: what this member does with its records, decided from the effective schema before the stores above were written and after.
+    startRoundConversion(net, round, plan, currentMeta);
     // F-42 / Q-61: the proposer tells the members below what the network just changed — on every path a round
     // passes by, at once or later. A no-op on a network with nobody below this instance.
     if (round.proposedHere) {
@@ -404,6 +410,115 @@ export function decideRoundConvertRecords(net: Pick<NetworkConfig, 'id' | 'membe
     }
   }
   return { schema: 'apply', convert: { state: 'apply', convertRecords: parsed.data } };
+}
+
+// ── The conversion run a schema change starts or restarts, one start at a time per space ──────────────────────────────
+
+/** The housekeeping step a start or restart that failed is reported under. */
+const SCHEMA_CONVERT_START_STEP = declareStep('Schema convert start');
+/** The longest a failure's words are kept on an answer. */
+const START_ERROR_TEXT_MAX = 300;
+/** Every start and restart of a space's run takes this space's turn, in the order asked. */
+const convertTurns = keyedLock();
+/** The start a passed round made here, while it is being made: the proposer's own save reads it to say what started (`roundConvertStartOf`). */
+const roundConvertStarts = new Map<string, Promise<SchemaConvertStarted>>();
+
+/** What a start answered, or the failure it threw, said as an answer (the save that asked it has landed and is not undone). */
+export type SchemaConvertStarted = SchemaConvertStartOutcome | { ok: false; status: 500; code: 'schema_convert_not_started'; error: string };
+
+/** The run module, loaded when first needed: it reaches this module through the sync engine, so a static import would be a runtime cycle. */
+const runModule = () => import('../spaces/schema-convert-run.js');
+
+/** `err` as the words an answer carries, bounded. */
+const failureText = (err: unknown): string => peerText(err instanceof Error ? err.message : String(err), { max: START_ERROR_TEXT_MAX });
+
+/**
+ * Start a conversion run in the space's turn (`Q-746`): the start of a schema save (source `write`), of a passed round (`round`), each after the
+ * one before it for the same space has finished.
+ *
+ * ## What it prevents
+ *
+ * - **Two starts that each read "no run" and write their own.** A start reads the run document and then writes it; two at once on one space (a save
+ *   whose rounds passed in two networks, a round concluded while a save starts) would each write a new run and the second would erase the
+ *   first's source, a round's owed mark among them. In one turn, the second finds the first unfinished and joins it.
+ * - **A failed start failing the save that already landed.** It never rejects: a failure is reported through the shared reporter and answered as
+ *   `schema_convert_not_started` with its words, for the caller to say on its answer.
+ */
+export function startSchemaConvertInTurn(start: SchemaConvertStart): Promise<SchemaConvertStarted> {
+  return convertTurns.run(start.spaceId, async () => {
+    try {
+      return await (await runModule()).startSchemaConvertRun(start);
+    } catch (err) {
+      reportSpaceFailure(SCHEMA_CONVERT_START_STEP, start.spaceId, err, { when: 'with the next schema save or passed round' });
+      return { ok: false, status: 500, code: 'schema_convert_not_started', error: failureText(err) };
+    }
+  });
+}
+
+/**
+ * Restart the unfinished run of each of `spaceIds` toward the schema it has now, in the space's turn (`restartSchemaConvertRun`): what a door that
+ * changes a schema and takes no `convertRecords` asks after its write (design 2.1, 5.2), so the types the run had not finished are converted
+ * toward the schema the door left and not one that is gone. A space with no unfinished run is left alone. Never rejects: a failure is reported
+ * through the shared reporter, and the run's own fingerprint check restarts it at its next page.
+ */
+export async function restartSchemaConvertInTurn(spaceIds: readonly string[]): Promise<void> {
+  await Promise.all([...new Set(spaceIds)].map(spaceId => convertTurns.run(spaceId, async () => {
+    try {
+      await (await runModule()).restartSchemaConvertRun(spaceId);
+    } catch (err) {
+      reportSpaceFailure(SCHEMA_CONVERT_START_STEP, spaceId, err, { when: 'at the run\'s next page' });
+    }
+  })));
+}
+
+/** The start the passed round `roundId` is making here, while it is in flight; `undefined` when it made none or has finished. */
+export function roundConvertStartOf(roundId: string): Promise<SchemaConvertStarted> | undefined {
+  return roundConvertStarts.get(roundId);
+}
+
+/** A meta as a conversion step and the run read it: library `$ref`s inlined. */
+const resolvedMeta = (meta: Partial<SpaceMeta> | undefined): ConversionMeta | undefined =>
+  (meta === undefined ? undefined : inlineResolvableRefs(meta) as ConversionMeta);
+
+/**
+ * What a passed `meta_change` round starts on THIS member once its stores are written (`Q-745`, `Q-746`, design 3, 4.1, 4.2): the decision of
+ * {@link decideRoundConvertRecords} on the member's effective schema before the round landed and after, made into a run.
+ *
+ * - `apply`: a run with the round's steps, source `round` with the round's id, owed until it completes;
+ * - `refused` (owner: "Schema yes, steps no"): a run with NO steps and `stepsRefused` naming why, so the copies that conform are stamped and the rest
+ *   reach Review, and this member rewrites nothing;
+ * - `none`: no run; an unfinished one is restarted toward the schema the round left, as any door that takes no steps does.
+ *
+ * **Once per round on this member**, by the mark a passed act is made idempotent with (`appliedHere`, local state never taken from or sent to a peer):
+ * written when the run is started, saved with the conclusion, so a round concluded again, here or after a restart, starts nothing more.
+ */
+function startRoundConversion(net: NetworkConfig, round: VoteRound, plan: Extract<MetaRoundPlan, { ok: true }>, before: SpaceMeta | undefined): void {
+  if (round.appliedHere === true) return;
+  const after = getConfig().spaces.find(s => s.id === plan.localSpace)?.meta;
+  const held: HeldForConvert = { before: resolvedMeta(before), after: resolvedMeta(after) };
+  const decision = decideRoundConvertRecords(net, round, plan, held);
+  if (decision.schema !== 'apply') return;
+  if (decision.convert.state === 'none') { void restartSchemaConvertInTurn([plan.localSpace]); return; }
+  round.appliedHere = true;
+  const steps = decision.convert.state === 'apply' ? [...(decision.convert.convertRecords.steps ?? [])] : [];
+  const stepsRefused = decision.convert.state === 'refused' ? [{ step: null, reason: decision.convert.reason }] : [];
+  const started = (async (): Promise<SchemaConvertStarted> => {
+    let types: SchemaConvertType[];
+    try {
+      types = (await runModule()).typesToConvert({
+        changedTypes: round.changedTypes ?? [], droppedTypes: [], inNetwork: true, rulesBefore: before?.rules, rulesAfter: after?.rules, steps,
+      });
+    } catch (err) {
+      reportSpaceFailure(SCHEMA_CONVERT_START_STEP, plan.localSpace, err, { when: 'with the next schema save or passed round' });
+      return { ok: false, status: 500, code: 'schema_convert_not_started', error: failureText(err) };
+    }
+    return await startSchemaConvertInTurn({
+      spaceId: plan.localSpace, types, steps, ...(stepsRefused.length > 0 ? { stepsRefused } : {}),
+      source: { kind: 'round', roundId: round.roundId }, before: beforeOfRound(round, held.before),
+    });
+  })();
+  roundConvertStarts.set(round.roundId, started);
+  void started.then(() => { roundConvertStarts.delete(round.roundId); });
 }
 
 // ── Notify ejected member after a remove vote passes ──────────────────────

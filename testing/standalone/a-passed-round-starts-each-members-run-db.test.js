@@ -93,7 +93,8 @@ describe('a passed round starts each member\'s run', { skip }, () => {
   }
 
   /** The proposer's rename-and-map round of Person in `space`, adopted here with its signed yes, open until tomorrow. */
-  function adoptRound(space, { convertRecords = STEPS, withCsig = true } = {}) {
+  function adoptRound(space, { withoutSteps = false, withCsig = true } = {}) {
+    const convertRecords = withoutSteps ? undefined : STEPS;
     const now = Date.now();
     const served = {
       roundId: `round-${space}-${now}`, type: 'meta_change', subjectInstanceId: PROPOSER, subjectLabel: 'proposer', subjectUrl: '',
@@ -134,7 +135,8 @@ describe('a passed round starts each member\'s run', { skip }, () => {
   });
 
   it('decision none: a round that carried no steps starts nothing', async () => {
-    const round = adoptRound('none', { convertRecords: undefined });
+    const round = adoptRound('none', { withoutSteps: true });
+    assert.equal('convertRecords' in round, false, 'precondition: the round carries no steps');
     assert.equal(governance.concludeRoundIfReady(net(), round), true);
     assert.ok(inst.heldTypes('none').entity?.Person, 'precondition: the schema half landed');
     await settled();
