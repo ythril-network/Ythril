@@ -1,5 +1,6 @@
 /**
- * The slow-file check names every test file over the time budget, and it reads one snapshot of per-file times. That snapshot was the
+ * A slow-file check, run after a merge by the development flow and not held in this repository, names every test file over the time
+ * budget, and it reads one snapshot of per-file times. That snapshot was the
  * pure job's alone (`test-results/file-times.json`), so the database, instance, integration, sync, red-team and client files were never
  * named, and they are 14 of the 15 slowest. `--preflight-costs` and the drain also write `test-results/file-times-all.json`: per test file
  * of EVERY test job, the median of its time over the newest five trusted full runs of main (Q-923).
@@ -24,7 +25,8 @@
  *   untrusted rows (source, branch, scope, job) and unusable files (a `__proto__` key, a time that is no count) contribute nothing; the
  *   newest five runs of a file only; a rerun's attempts once; no row, no trusted row, no file, or a job without a file THROWS.
  * - `node scripts/test-times.mjs --preflight-costs` writes `file-times.json` (the pure job, as before) and `file-times-all.json`, asking the
- *   server once per job of `ci.yml`; with a job unrecorded it writes the pure one only, says one every-suite line naming the job, writes the
+ *   server per job of `ci.yml`; both count five distinct RUNS per job, a rerun's attempts once (a newest run with three attempts takes
+ *   one slot; a job with only two runs, each with attempts, rests on two and says so); with a job unrecorded it writes the pure one only, says one every-suite line naming the job, writes the
  *   stage costs and exits 0. `--drain-unrecorded` writes it when it is missing or over a day old. Local fake instance only.
  *
  * Run: node --test testing/standalone/the-every-suite-file-times-snapshot-covers-every-test-job.test.js
@@ -289,6 +291,46 @@ describe('test-times writes file-times-all.json beside file-times.json (a fake i
       assert.ok(!Object.keys(all.files).some(f => f.includes('poison')), 'a record that is not CI\'s full run of main, or of a job ci.yml has, set a time');
       assert.equal(all.runs, 5);
       assert.equal(Object.keys(all.files).length, JOBS_OF_CI.length * 2);
+    });
+  });
+
+  /** Attempts 2 and 3 of run `n` of `job`, each later than the one before, holding `ms` for both of the job's files. */
+  const seedReruns = (server, job, n, [second, third]) => [second, third].forEach((ms, i) => seedCiTestRun(server, {
+    n, job, suite: suiteOf(job), rows: [[fileOf(job, 'a'), ms], [fileOf(job, 'b'), ms]],
+    over: { attempt: i + 2, recordKey: `ci:${n}:${i + 2}:${job}:${suiteOf(job)}` },
+    top: { startsAt: `${ciRunDay(n).slice(0, 11)}${11 + i}:00:00.000Z` },
+  }));
+
+  it('the five are five distinct RUNS per job: a newest run with three attempts does not take three of the slots', async () => {
+    await withInstance(async ({ server, work, env }) => {
+      seedPreflightRun(server);
+      seedEveryJob(server);
+      seedReruns(server, 'standalone-pure', 5, [7777, 9000]);
+      const r = await runTimes(['--preflight-costs'], { cwd: work.dir, env });
+      assert.equal(r.code, 0, everything(r));
+      const scale = JOBS_OF_CI.indexOf('standalone-pure') + 1;
+      // Runs 1..4 hold 100..400 (a) and 1000..4000 (b), scaled; run 5 holds its newest attempt's 9000 in both. Five runs: the median is the third.
+      const expected = { [fileOf('standalone-pure', 'a')]: 300 * scale, [fileOf('standalone-pure', 'b')]: 3000 * scale };
+      assert.deepEqual(readJson(work.dir, ALL).files[fileOf('standalone-pure', 'a')], expected[fileOf('standalone-pure', 'a')], 'the rerun\'s attempts took slots: the median rests on fewer than five runs (every-suite)');
+      assert.deepEqual(readJson(work.dir, ALL).files[fileOf('standalone-pure', 'b')], expected[fileOf('standalone-pure', 'b')]);
+      assert.deepEqual(readJson(work.dir, PURE).files, expected, 'the pure snapshot has the same slots, and the same defect (file-times.json)');
+      assert.equal(readJson(work.dir, PURE).runs, 5);
+    });
+  });
+
+  it('a job whose server holds fewer than five runs (each with attempts) is measured over the runs it has, and the run count says so', async () => {
+    await withInstance(async ({ server, work, env }) => {
+      seedPreflightRun(server);
+      const fewer = 'standalone-pure';
+      seedEveryJob(server, [fewer]);
+      for (const n of [1, 2]) {
+        seedCiTestRun(server, { n, job: fewer, rows: [[fileOf(fewer, 'a'), n * 100], [fileOf(fewer, 'b'), n * 100]] });
+        seedReruns(server, fewer, n, [n * 100, n * 100]);
+      }
+      const r = await runTimes(['--preflight-costs'], { cwd: work.dir, env });
+      assert.equal(r.code, 0, everything(r));
+      assert.equal(readJson(work.dir, ALL).files[fileOf(fewer, 'a')], 150, 'two runs, 100 and 200');
+      assert.equal(readJson(work.dir, PURE).runs, 2);
     });
   });
 

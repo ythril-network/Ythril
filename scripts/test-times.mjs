@@ -10,7 +10,7 @@
  *     node scripts/test-times.mjs --rewrite <key>     record one run again, from its own results
  *     node scripts/test-times.mjs --trend [--last N] [--flags]
  *     node scripts/test-times.mjs --preflight-trend [--last N]   each preflight stage's time over the last N preflight runs
- *     node scripts/test-times.mjs --preflight-costs [--runner container|host]   write test-results/stage-costs.json, the stage costs the preflight orders by, and test-results/file-times.json, the per-file times it starts its slowest pure files by, and test-results/file-times-all.json, the per-file times of every test job (the slow-test-file check reads it)
+ *     node scripts/test-times.mjs --preflight-costs [--runner container|host]   write test-results/stage-costs.json, the stage costs the preflight orders by, and test-results/file-times.json, the per-file times it starts its slowest pure files by, and test-results/file-times-all.json, the per-file times of every test job (for a slow-file check the development flow runs after a merge)
  *     node scripts/test-times.mjs --drain-unrecorded  send what the spool holds (the preflight's own record, kept after its verdict), then refresh those snapshots (each file-times one when missing or over a day old)
  *     node scripts/test-times.mjs --summary --results <dir>   the run's page (CI's advisory job); records nothing
  *     node scripts/test-times.mjs --help
@@ -1265,16 +1265,52 @@ const FILE_TIMES_WHERE = asProperties({ ...TRUSTED_RUN_KIND, job: 'standalone-pu
 const isFileTimesRow = (r) => r?.type === CHRONO_TYPE && typeof r.startsAt === 'string' && typeof r._id === 'string'
   && Object.entries(FILE_TIMES_WHERE).every(([path, value]) => r.properties?.[path.slice('properties.'.length)] === value);
 
-/** The newest {@link FILE_TIMES_RUNS} `Test-Run` records of the pure job: the predicate is asked of the server and checked again here. */
-async function fileTimesRows(api) {
-  const answer = await api.call('filter', {
-    space: SPACE, collection: 'chrono', filter: { type: CHRONO_TYPE, ...FILE_TIMES_WHERE }, projection: { 'properties.measurements': 0 },
-    sort: 'startsAt', dir: 'desc', limit: FILE_TIMES_RUNS, maxChars: PAGE_MAX_CHARS,
-  });
-  const rows = answer?.data?.results;
-  if (!Array.isArray(rows)) throw new YthrilApiError('filter: the answer carried no results', { tool: 'filter' });
-  return rows.filter(isFileTimesRow).sort(newestStartFirst).slice(0, FILE_TIMES_RUNS);
+/** The records one page of {@link newestRunRows} asks for. */
+const RUN_ROWS_PAGE = 10;
+/** The most pages {@link newestRunRows} reads: a bound on a walk whose server may ignore what it is asked. */
+const RUN_ROWS_PAGES = 5;
+
+/**
+ * The newest record of each of the newest {@link FILE_TIMES_RUNS} distinct CI runs that match `where` (asked of the server) and
+ * `qualifies` (checked again here), newest first.
+ *
+ * ## What it prevents
+ *
+ * A run that was rerun has one record per attempt. Taken as runs, the newest records of a job rerun twice are three attempts of one run
+ * and two other runs, and a file's median rests on fewer runs than it says. Here a run counts once, by its newest attempt: the records
+ * are read page by page, newest first, until {@link FILE_TIMES_RUNS} distinct runs are held, the server has no more (its `total`, a short
+ * page, or a page that adds no record it has not answered already, as a server that ignores `skip` would), or {@link RUN_ROWS_PAGES}
+ * pages were read. With fewer runs on the server, the runs it has are returned; the caller says how many it rests on.
+ *
+ * @param {object} where the properties a record must hold, as the server's `filter` names them
+ * @param {(row: object) => boolean} qualifies the same predicate over one record as it came back
+ */
+async function newestRunRows(api, where, qualifies) {
+  const answered = new Set();
+  const byRun = new Map();
+  for (let page = 0; page < RUN_ROWS_PAGES && byRun.size < FILE_TIMES_RUNS; page++) {
+    const answer = await api.call('filter', {
+      space: SPACE, collection: 'chrono', filter: { type: CHRONO_TYPE, ...where }, projection: { 'properties.measurements': 0 },
+      sort: 'startsAt', dir: 'desc', limit: RUN_ROWS_PAGE, skip: page * RUN_ROWS_PAGE, maxChars: PAGE_MAX_CHARS,
+    });
+    const rows = answer?.data?.results;
+    if (!Array.isArray(rows)) throw new YthrilApiError('filter: the answer carried no results', { tool: 'filter' });
+    const fresh = rows.filter(r => typeof r?._id === 'string' && !answered.has(r._id));
+    for (const r of fresh) {
+      answered.add(r._id);
+      if (r.type !== CHRONO_TYPE || typeof r.startsAt !== 'string' || !qualifies(r)) continue;
+      const run = String(r.properties.runId ?? r.startsAt);
+      const held = byRun.get(run);
+      if (!held || newestStartFirst(r, held) < 0) byRun.set(run, r);
+    }
+    const total = answer.data.total;
+    if (!fresh.length || rows.length < RUN_ROWS_PAGE || (Number.isFinite(total) && (page + 1) * RUN_ROWS_PAGE >= total)) break;
+  }
+  return [...byRun.values()].sort(newestStartFirst).slice(0, FILE_TIMES_RUNS);
 }
+
+/** The newest record of each of the newest {@link FILE_TIMES_RUNS} distinct CI runs of the pure job ({@link newestRunRows}). */
+const fileTimesRows = (api) => newestRunRows(api, FILE_TIMES_WHERE, isFileTimesRow);
 
 /**
  * Write the file-times snapshot the preflight starts its slowest pure files by (`_shared/stage-costs.mjs`, `_shared/slow-first-units.mjs`):
@@ -1309,22 +1345,14 @@ async function writeFileTimeSnapshot(api) {
 const testJobs = () => expectedResultsStems(readFileSync(resolve(import.meta.dirname, '..', CI_WORKFLOW), 'utf8'));
 
 /**
- * The newest {@link FILE_TIMES_RUNS} trusted `Test-Run` records of each of `jobs`, each with its per-file times (null when its
- * measurements do not parse), as {@link allSuiteFileTimes} reads them. One question to the server per job (the job's own newest five, not
- * the newest five of all jobs, which a busy job would fill); the predicate is asked of the server and checked again here.
+ * The newest record of each of the newest {@link FILE_TIMES_RUNS} distinct trusted CI runs of each of `jobs` ({@link newestRunRows}),
+ * each with its per-file times (null when its measurements do not parse), as {@link allSuiteFileTimes} reads them. Asked per job (the
+ * job's own newest runs, not the newest runs of all jobs, which a busy job would fill).
  */
 async function allSuiteRuns(api, jobs) {
   const runs = [];
   for (const job of jobs) {
-    const answer = await api.call('filter', {
-      space: SPACE, collection: 'chrono', filter: { type: CHRONO_TYPE, ...asProperties({ ...TRUSTED_RUN_KIND, job }) }, projection: { 'properties.measurements': 0 },
-      sort: 'startsAt', dir: 'desc', limit: FILE_TIMES_RUNS, maxChars: PAGE_MAX_CHARS,
-    });
-    const rows = answer?.data?.results;
-    if (!Array.isArray(rows)) throw new YthrilApiError('filter: the answer carried no results', { tool: 'filter' });
-    const ofJob = rows
-      .filter(r => r?.type === CHRONO_TYPE && typeof r.startsAt === 'string' && typeof r._id === 'string' && isTrustedRun({ ...r.properties }, [job]))
-      .sort(newestStartFirst).slice(0, FILE_TIMES_RUNS);
+    const ofJob = await newestRunRows(api, asProperties({ ...TRUSTED_RUN_KIND, job }), r => isTrustedRun({ ...r.properties }, [job]));
     for (const r of ofJob) {
       const { source, branch, scope, runId } = r.properties;
       runs.push({ job, source, branch, scope, runId, startsAt: r.startsAt, files: await filesOf(api, r) });
@@ -1334,8 +1362,9 @@ async function allSuiteRuns(api, jobs) {
 }
 
 /**
- * Write the every-suite file-times snapshot the slow-test-file check reads (`_shared/all-suite-file-times.mjs`): the pure snapshot's
- * shape, for every test job of `ci.yml`. A write with a job unmeasured is refused (the builder throws) rather than made from less.
+ * Write the every-suite file-times snapshot (`_shared/all-suite-file-times.mjs`): the pure snapshot's shape, for every test job of
+ * `ci.yml`, for a check that reads a `{ files: { path: ms } }` snapshot and that the development flow runs after a merge (no reader of it
+ * is in this repository). A write with a job unmeasured is refused (the builder throws) rather than made from less.
  *
  * @returns {Promise<string>} the line to say
  */
@@ -1565,8 +1594,8 @@ export const HELP = `usage: node scripts/test-times.mjs <command>
                            failed and its median time; and test-results/${FILE_TIMES_FILE}, the per-file times the preflight starts its
                            slowest pure files by: per file, the median over the newest ${FILE_TIMES_RUNS} CI runs of the standalone-pure job on
                            main (scope full; a run whose measurements do not parse is not counted); and test-results/${FILE_TIMES_ALL_FILE},
-                           the same for every test job of ci.yml (the slow-test-file check reads it; made only when every job
-                           has times). A failure of a file-times snapshot is one line and changes neither ${STAGE_COSTS_FILE}
+                           the same for every test job of ci.yml (for a slow-file check the development flow runs after a
+                           merge; made only when every job has times). A failure of a file-times snapshot is one line and changes neither ${STAGE_COSTS_FILE}
                            nor the exit status
   --preflight-trend [--last N]
                            print the stage times of the newest N preflight runs (default ${PREFLIGHT_TREND_RUNS}): each stage's time in every run
