@@ -34,11 +34,12 @@ export const LOAD_BOUND_MS = 30_000;
 
 /**
  * How many shard files the gate is cut into, fixed by measurement and not by guess: the work is CPU-bound, so the files a node batch runs together
- * (three at once on four CPUs) each take about three quarters of the whole gate's time divided by the shard count, and four shards took 66 to 69 s each
- * when run together on four CPUs. Eight bring each under the 45 s the change aims for, and a runner with fewer CPUs runs the shards one at a time. The
- * number of shard files is asserted equal to it.
+ * (three at once on four CPUs) each take a share of the whole gate's time that falls with the shard count. Four shards took 66 to 69 s each in the
+ * measuring runner. Eight took 44 to 55 s each on CI's own runner, under the 60 s a file may take but with no margin for the run-to-run variation of a
+ * tenth, and the schema package's modules were added to the gate after eight was chosen. Twelve aim at about two thirds of that, with real margin,
+ * and a runner with fewer CPUs runs the shards one at a time. The number of shard files is asserted equal to it.
  */
-export const SHARDS = 8;
+export const SHARDS = 12;
 
 /** A module that is a process's own program and is not importable as a library: `file` (as `server/src/...ts`) -> why. */
 export const NOT_IMPORTABLE = {
@@ -64,7 +65,9 @@ export function loadInFreshProcess(specifier, { boundMs = LOAD_BOUND_MS, env = {
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       child.stderr.destroy();
-      answer({ ok: false, reason: `did not finish loading in ${boundMs} ms` });
+      // What the child had said by then, so a hang names where it was (a module that waits on something) and not only that it was cut off.
+      const said = stderr.trim().split(/\r?\n/).slice(-2).join(' | ').slice(0, 200);
+      answer({ ok: false, reason: `did not finish loading in ${boundMs} ms${said ? ` (stderr: ${said})` : ''}` });
     }, boundMs);
     child.on('error', (error) => answer({ ok: false, reason: `could not start a process: ${error.message}` }));
     child.on('exit', (code) => {

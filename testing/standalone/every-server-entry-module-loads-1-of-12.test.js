@@ -1,5 +1,5 @@
 /**
- * Every module of the server loads when it is the FIRST module a process imports (Q-624, design rev 4 section 2, section 16 test 19). Shard 1 of 8.
+ * Every module of the server loads when it is the FIRST module a process imports (Q-624, design rev 4 section 2, section 16 test 19). Shard 1.
  *
  * ## The defect this prevents
  *
@@ -42,7 +42,7 @@
  *
  * @ci-only
  *
- * Run: node --test testing/standalone/every-server-entry-module-loads-1-of-8.test.js
+ * Run: node --test testing/standalone/every-server-entry-module-loads-1-of-12.test.js
  * (requires a prior `npm run build` in server/)
  */
 import { describe, it } from 'node:test';
