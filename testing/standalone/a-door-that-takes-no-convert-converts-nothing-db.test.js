@@ -124,8 +124,9 @@ describe('a door that takes no convertRecords converts nothing, and restarts an 
         3_000, 50, async () => `the run was left as it was: ${JSON.stringify(await runDoc())}`, { what: 'the unfinished run to be restarted' });
       assert.equal(doc.toFp, after, 'the run was restarted toward a fingerprint other than the one the door left');
       assert.equal(doc.generation, seeded.generation + 1);
-      assert.equal(doc.state, 'running');
-      assert.deepEqual(doc.types.map(t => `${t.kind}:${t.type}:${t.done}`), ['entity:Person:false']);
+      // The restart releases the lease and wakes a pass (no records here), so the restarted run may already be complete when read.
+      assert.ok(['running', 'complete'].includes(doc.state), `the restarted run is ${doc.state}`);
+      assert.deepEqual(doc.types.map(t => `${t.kind}:${t.type}`), ['entity:Person']);
       assert.deepEqual(doc.sources.map(s => s.kind), ['act'], 'a door that takes no convert joined a source to the run');
     });
   }
