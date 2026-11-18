@@ -10,7 +10,13 @@
  */
 import { getConfig } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
-import { log, peerList, peerText } from '../util/log.js';
+import { log, peerList, peerText, refusalOfParse } from '../util/log.js';
+import { convertRecordsSignedByProposer } from '../util/signing.js';
+import { inlineResolvableRefs } from '../spaces/schema-validation.js';
+import {
+  ConvertRecordsZ, conversionStepIssues,
+  type ConvertRecords, type ConversionStep, type ConversionMeta, type ConversionIssueCode,
+} from '@ythril-network/schema/internal';
 import { commitOwnMetaEdit, storeNetworkLayer } from '../spaces/effective-meta.js';
 import { carriedLocalId } from './space-map.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
@@ -305,6 +311,100 @@ export const passedMetaChange = {
     }
   },
 };
+
+// ── What a member does with the steps a passed round carries ──────────────────────
+
+/** Why a member refused the steps of a round: the proposer did not sign them, they do not fit the round's own change, or a step's own code. */
+export type RoundConvertRefusal =
+  | 'steps_not_signed' | 'step_target_not_in_round' | 'property_still_declared_here' | ConversionIssueCode;
+
+/**
+ * What a member decided for a passed `meta_change` round: the SCHEMA half (apply it, or refuse the round whole because this member cannot read it)
+ * and the STEPS half (none carried, apply them, or refuse them with a reason). A refused step leaves the schema half as the plan has it.
+ */
+export type RoundConvertDecision =
+  | { schema: 'refused'; convert: { state: 'none' } }
+  | { schema: 'apply'; convert:
+      | { state: 'none' }
+      | { state: 'apply'; convertRecords: ConvertRecords }
+      | { state: 'refused'; reason: RoundConvertRefusal; message: string; step: number | null } };
+
+/** What the member itself holds that the round does not carry: its effective meta before the round lands, and once it has landed. */
+export interface HeldForConvert { before?: ConversionMeta; after?: ConversionMeta }
+
+/** The types of `held` the round does not carry, laid under the types it does: the schema a member reads as "before". */
+function beforeOfRound(round: VoteRound, held: ConversionMeta | undefined): ConversionMeta {
+  const carried = inlineResolvableRefs(round.metaBase ?? {}).typeSchemas as Record<string, Record<string, unknown> | undefined> | undefined;
+  const have = (held?.typeSchemas ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  const typeSchemas: Record<string, Record<string, unknown>> = {};
+  for (const kind of new Set([...Object.keys(have), ...Object.keys(carried ?? {})])) typeSchemas[kind] = { ...(have[kind] ?? {}), ...(carried?.[kind] ?? {}) };
+  return { typeSchemas };
+}
+
+/** The `kind:Type` each type step moves records INTO: what the round has to have changed for the move to be the round's own. */
+function typeStepTargets(step: ConversionStep): string[] {
+  if (step.op === 'renameType') return [`${step.kind}:${step.to}`];
+  if (step.op === 'splitType') return [...new Set([...step.cases.map(c => c.to), ...(step.otherwise === undefined ? [] : [step.otherwise])])].map(t => `${step.kind}:${t}`);
+  return [];
+}
+
+/**
+ * What THIS member does with the steps a passed `meta_change` round carries, decided from the round itself (`Q-745`, bundle-284 design 2.4, 3, 1.5).
+ *
+ * ## What it prevents
+ *
+ * Steps on a round can make every member rewrite its records, and the round came through whoever relayed it. So a member never applies steps on a
+ * relayer's word, and a refused step never refuses the schema:
+ *
+ * - **Unsigned steps are not applied.** Only when the proposer's cast carries a `csig` that verifies over the steps as the round carries them
+ *   (`convertRecordsSignedByProposer`). A missing, stripped or failing `csig`, and steps added to a round whose proposer chose none, are refused as
+ *   `steps_not_signed`: the schema lands as the network voted it and the steps do not.
+ * - **Steps that do not fit the round's own change are not applied.** Each is held to the round's `metaBase` and `pendingMeta`, which every member sees
+ *   alike (a layer this member already pulled cannot make the check fail), by the same check the save made (`conversionStepIssues`); each type step's
+ *   target must be a type the round changed; and the member's own effective meta once the round has landed must no longer declare a renamed property's
+ *   old name, because own and layer definitions union their properties and a name any definition keeps is a name records may still hold.
+ * - **What the round does not carry, the member holds.** `metaBase` holds the types the round CHANGED, and a type a type step moves records out of is
+ *   one the round leaves alone (a network keeps it), so `held.before` fills in the types the round did not carry. Never over one it did.
+ * - **A round this member cannot read is refused whole, as ever,** and starts nothing: `plan.ok === false` is the schema half, not a step's.
+ *
+ * Pure: it reads the net's pinned keys and nothing of the instance, and it starts nothing. What it answers is the one thing a later step wires to
+ * the run: `convert.state === 'apply'` with the steps to start it from, or `'refused'` with the reason to record, or `'none'`.
+ */
+export function decideRoundConvertRecords(net: Pick<NetworkConfig, 'id' | 'members'>, round: VoteRound, plan: MetaRoundPlan, held: HeldForConvert = {}): RoundConvertDecision {
+  if (!plan.ok) return { schema: 'refused', convert: { state: 'none' } };
+  if (round.convertRecords === undefined) return { schema: 'apply', convert: { state: 'none' } };
+
+  const refuse = (reason: RoundConvertRefusal, message: string, step: number | null = null): RoundConvertDecision =>
+    ({ schema: 'apply', convert: { state: 'refused', reason, message, step } });
+
+  if (!convertRecordsSignedByProposer(net, round)) {
+    return refuse('steps_not_signed', 'the steps are not signed by the proposer of this round, so this instance applies the schema as voted and none of the steps');
+  }
+  const parsed = ConvertRecordsZ.safeParse(round.convertRecords);
+  if (!parsed.success) return refuse('malformed_step', `the steps the round carries are not valid: ${refusalOfParse(parsed.error).error}`);
+  const steps = parsed.data.steps ?? [];
+
+  if (steps.length > 0) {
+    const issue = conversionStepIssues(steps, beforeOfRound(round, held.before), inlineResolvableRefs(round.pendingMeta ?? {}) as ConversionMeta)[0];
+    if (issue) return refuse(issue.code, `step ${issue.step}: ${issue.message}`, issue.step);
+
+    const changed = new Set(round.changedTypes ?? []);
+    for (const [i, step] of steps.entries()) {
+      const missing = typeStepTargets(step).find(t => !changed.has(t));
+      if (missing !== undefined) {
+        return refuse('step_target_not_in_round', `step ${i}: the round does not change ${peerText(missing)}, the type this step moves records into`, i);
+      }
+    }
+    const heldAfter = held.after?.typeSchemas as Record<string, Record<string, { propertySchemas?: Record<string, unknown> } | undefined> | undefined> | undefined;
+    for (const [i, step] of steps.entries()) {
+      if (step.op === 'renameProperty' && heldAfter?.[step.kind]?.[step.type]?.propertySchemas?.[step.from] !== undefined) {
+        return refuse('property_still_declared_here', `step ${i}: this instance's own definitions still declare ${peerText(step.from)} on the ${step.kind} type `
+          + `${peerText(step.type)} once the round has landed, so records may still hold it`, i);
+      }
+    }
+  }
+  return { schema: 'apply', convert: { state: 'apply', convertRecords: parsed.data } };
+}
 
 // ── Notify ejected member after a remove vote passes ──────────────────────
 // Fire-and-forget: non-fatal if the peer is unreachable. Sent through the one notice sender (`networks/notify-members.ts`), which
