@@ -1,6 +1,7 @@
 {
   "entries": [
     { "file": "testing/standalone/_sources.mjs", "reason": "Defines SERVER_SOURCE_ROOT and SERVER_CODE_ROOTS: the one place the literal is written.", "reviewBy": "2027-05-17" },
+    { "file": "testing/standalone/every-port-a-module-is-handed-is-wired-at-boot.test.js", "reason": "Its rule is about the server's own boot: a port kept a module out of the server's import cycle and is wired by a module server/src/index.ts loads; the schema package boots nothing, and its useSchemaLibrary has no-library as a deliberate default.", "reviewBy": "2027-05-17" },
     { "file": "testing/standalone/an-outside-apps-schema-validates-through-the-schema-package.test.js", "reason": "Its rule is about the server's own tree: the declarations that moved to the package must not be declared there again, and the server reaches the package by name; the package's source is where they are meant to be.", "reviewBy": "2027-05-17" }
   ]
 }

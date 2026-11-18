@@ -54,7 +54,7 @@ import {
 import type { TokenRights } from '../config/rights-shape.js';
 import { holdsRung, rungRefusal } from '../auth/reachable-spaces.js';
 import { isSpaceAdminFor } from '../auth/editor-scope.js';
-import { refusalOfParse, peerText, NAME_QUOTED } from '../util/log.js';
+import { refusalOfParse, peerText, NAME_QUOTED, type ParseRefusal } from '../util/log.js';
 import { isConfiguredSpace } from './space-lookup.js';
 import { lostSpaceAnswer } from './unknown-space.js';
 import { readMetaForWrite } from './schema-stamp.js';
@@ -145,12 +145,13 @@ function typesRefusal(raw: unknown): SchemaConvertActResult | null {
  * the doors state and the gates compare; these name a broken one by the code both doors answer, never by the schema's words. A failure none of them
  * names is answered in the schema's words as a bad request: a request the schema refused is never started.
  */
-function startRefusal(spaceId: string, input: unknown, error: z.ZodError): SchemaConvertActResult {
-  const whole = refusal(BAD_BODY, refusalOfParse(error).error, BAD_REQUEST);
-  const atRoot = error.issues.filter(i => i.path.length === 0);
-  if (atRoot.length > 0) return refusal(BAD_BODY, refusalOfParse({ issues: atRoot }).error, BAD_REQUEST);
+function startRefusal(spaceId: string, input: unknown, parsed: ParseRefusal): SchemaConvertActResult {
+  const whole = refusal(BAD_BODY, parsed.error, BAD_REQUEST);
+  // An issue about the body itself (not an object, or a key the start has none for): its own sentences, as the start always worded them.
+  const atRoot = parsed.reasons.filter((_, i) => parsed.issues[i]?.path.length === 0);
+  if (atRoot.length > 0) return refusal(BAD_BODY, peerText(atRoot.join('; ')), BAD_REQUEST);
   const raw = (input ?? {}) as Record<string, unknown>;
-  if (error.issues.some(i => i.path[0] === 'types')) return typesRefusal(raw['types']) ?? whole;
+  if (parsed.issues.some(i => i.path[0] === 'types')) return typesRefusal(raw['types']) ?? whole;
   const steps = raw['steps'];
   if (!Array.isArray(steps)) return refusal(BAD_BODY, '`steps` must be a list of conversion steps', BAD_REQUEST);
   return stepRefusal(spaceId, steps as ConversionStep[]) ?? whole;
@@ -167,7 +168,7 @@ export async function schemaConvertStartAct(spaceId: string, input: unknown, cal
   if (denied) return denied;
 
   const body = SchemaConvertBody.safeParse(input ?? {});
-  if (!body.success) return startRefusal(spaceId, input, body.error);
+  if (!body.success) return startRefusal(spaceId, input, refusalOfParse(body.error));
   const steps = (body.data.steps ?? []) as ConversionStep[];
   const bad = stepRefusal(spaceId, steps);
   if (bad) return bad;
