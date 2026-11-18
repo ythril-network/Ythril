@@ -3,21 +3,29 @@
  *
  * ## What it prevents
  *
- * - **Two shapes of one parameter.** `CONVERT_RECORDS_PARAMETER` is the input schema of `convertRecords` WRITTEN BY zod's converter from the REST
- *   body's own declaration (`UpdateSpaceBody`), so the tool and `PATCH /api/spaces/:id` cannot declare it two ways. `$schema` is left out, as it is
- *   for every property of the tool. Its description is the guarantee and its cost to the caller; the mechanism is in `meta-update.ts` and the design.
+ * - **Two shapes of one parameter.** `CONVERT_RECORDS_PARAMETER` is the input schema of `convertRecords` WRITTEN BY zod's converter from the
+ *   schema package's own body (`ConvertRecordsZ`, which is what `UpdateSpaceBody.convertRecords` is), so the tool and `PATCH /api/spaces/:id` cannot
+ *   declare it two ways. `$schema` is left out, as it is for every property of the tool. Its description is the guarantee and its cost to the
+ *   caller; the mechanism is in `meta-update.ts`.
  * - **A refusal the tool says in words and the REST body says in a code.** `refusedMetaUpdate` words a planner refusal as the tools always have
  *   (`Error (status): sentence`) and carries the refusal's own body, `code` and `step` included, as structured content, so a caller that branches on
  *   `bad_conversion_step` reads it the way a REST caller does.
+ *
+ * It imports no module of the server (only the schema package and zod), so it joins no import cycle: a tool module that imported the planner's types
+ * or the tools' shared types would be one more module of the server's large cyclic set, which a ceiling holds from growing.
  */
 import { z } from 'zod';
-import { CONVERSION_STEPS_MAX } from '@ythril-network/schema/internal';
-import { UpdateSpaceBody } from '../../spaces/body-schemas.js';
-import type { MetaUpdateRefusal } from '../../spaces/meta-update.js';
-import type { ToolResult } from './types.js';
+import { ConvertRecordsZ, CONVERSION_STEPS_MAX } from '@ythril-network/schema/internal';
 
 const SHAPE: Record<string, unknown> = (() => {
-  const { $schema: _draft, ...shape } = z.toJSONSchema(UpdateSpaceBody.shape.convertRecords, { io: 'input' }) as Record<string, unknown>;
+  const { $schema: _draft, ...shape } = z.toJSONSchema(ConvertRecordsZ.optional(), { io: 'input' }) as Record<string, unknown>;
+  // A parameter nested in an object is described too (`tool-parameters-are-all-described`): the words only, never a second shape.
+  const properties = shape['properties'] as Record<string, Record<string, unknown>>;
+  properties['steps'] = {
+    ...properties['steps'],
+    description: 'The conversion steps, applied in a fixed order whatever the list order: the type steps (`renameType`, `splitType`) first, '
+      + 'then the property steps (`renameProperty`, `mapEnum`) of the type each record has afterwards. Each step names one `kind` and one type.',
+  };
   return shape;
 })();
 
@@ -38,7 +46,9 @@ export const CONVERT_RECORDS_PARAMETER: Record<string, unknown> = {
 };
 
 /** A planner's refusal as a tool result: the sentence, and (when the refusal has a `code`) the body REST answers with, `step` included. */
-export function refusedMetaUpdate(refusal: MetaUpdateRefusal): ToolResult {
+export function refusedMetaUpdate(refusal: { status: number; body: { error: string; code?: string } }): {
+  content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown>; isError: true;
+} {
   return {
     content: [{ type: 'text' as const, text: `Error (${refusal.status}): ${refusal.body.error}` }],
     ...(refusal.body.code !== undefined ? { structuredContent: { ...refusal.body } } : {}),
