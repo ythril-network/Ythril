@@ -156,6 +156,15 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   'duplicate.automerge': ['absorbed'],
   // The records the absent-bytes sweep retired (Q-337): their paths (`added`, at most the sweep's cap), how many in all, and how many past the cap.
   'file.absent_bytes.sweep': ['retiredPaths', 'removed', 'pathsNotListed'],
+  // A schema conversion (Q-746, bundle-284). A start records the types it names (`added`, as `kind:type`, schema names and never a record) and how
+  // many steps it carries, never the steps' text. A finished run (written by the server, no token) records the same types, the kinds of start the run
+  // had (`sources`, joined: `write`, `round`, `act`) and its counts. Nothing of a record's content is a field of either.
+  'schema.convert.start': ['types', 'steps'],
+  'schema.convert.run': ['stamped', 'rewritten', 'unconverted', 'moved', 'edgesRestamped', 'types', 'sources'],
+  // The records a conversion could not convert (Q-919): the item a dismissal named, and for the bulk one the filter it was given, the number the caller
+  // said it was shown (`expect`) and the number it dismissed. Names and numbers only: an item holds field names, never a value.
+  'unconverted.dismiss': ['itemId'],
+  'unconverted.dismiss_shown': ['kind', 'type', 'reason', 'expect', 'dismissed'],
 };
 
 /** Scalars only — anything else is dropped rather than stringified. */
@@ -182,7 +191,7 @@ function scalarOrDrop(v: unknown): string | number | boolean | null | undefined 
  * Recording added/removed rather than the whole before/after list keeps the entry proportional to the
  * change. Re-tagging one fact should not copy forty tags into the audit log twice.
  */
-const LIST_FIELDS: ReadonlySet<string> = new Set(['tags', 'linkEntities', 'linkFacts', 'linkChronos', 'retiredPaths']);
+const LIST_FIELDS: ReadonlySet<string> = new Set(['tags', 'linkEntities', 'linkFacts', 'linkChronos', 'retiredPaths', 'types']);
 
 /** An array of primitives, or undefined if it is not one. Nested values disqualify the whole field. */
 function primitiveListOrDrop(v: unknown): (string | number | boolean)[] | undefined {
@@ -262,6 +271,39 @@ export function auditChanges(operation: string, before: unknown, after: unknown)
       ...(to === undefined ? {} : { to }),
     });
   }
+  return out;
+}
+
+/**
+ * What an accepted start of a schema conversion records (`schema.convert.start`): the types it named, as `kind:type` strings in one list change, and
+ * how many steps it carried. Built from the act's own answer (`{ types: [{ kind, type }], steps: number }`), so both doors record what the act
+ * accepted and neither records the steps' text. An answer that is not that shape records nothing of it.
+ */
+export function convertStartChanges(answer: Record<string, unknown>): AuditChange[] {
+  const types = Array.isArray(answer['types'])
+    ? (answer['types'] as unknown[]).flatMap(t => (t && typeof (t as { kind?: unknown }).kind === 'string' && typeof (t as { type?: unknown }).type === 'string'
+      ? [`${(t as { kind: string }).kind}:${(t as { type: string }).type}`] : []))
+    : [];
+  return [
+    ...(types.length ? [{ field: 'types', added: types }] : []),
+    ...(typeof answer['steps'] === 'number' ? [{ field: 'steps', to: answer['steps'] }] : []),
+  ];
+}
+
+/** What a dismissal of one unconverted item records (`unconverted.dismiss`): its id. */
+export const dismissChanges = (itemId: string): AuditChange[] => [{ field: 'itemId', to: itemId }];
+
+/**
+ * What a bulk dismissal records (`unconverted.dismiss_shown`): the filter fields the caller gave, the `expect` it gave and the number dismissed. The
+ * allowlist drops a value that is not a scalar, so a filter the act would have refused is not recorded; an absent filter field is no change.
+ */
+export function dismissShownChanges(given: Record<string, unknown>, dismissed: number): AuditChange[] {
+  const out: AuditChange[] = [];
+  for (const field of ['kind', 'type', 'reason', 'expect'] as const) {
+    const v = scalarOrDrop(given[field]);
+    if (v !== undefined) out.push({ field, to: v });
+  }
+  out.push({ field: 'dismissed', to: dismissed });
   return out;
 }
 
