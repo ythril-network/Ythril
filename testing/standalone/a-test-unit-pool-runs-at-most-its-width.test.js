@@ -82,7 +82,9 @@ describe('poolEach: at most `width` jobs at once, results in input order', () =>
       started.push(item);
       if (started.length === 2) release();
       // A job waits for the other to start: a pool that runs them one after the other never gets there.
-      await Promise.race([bothStarted, new Promise((r) => setTimeout(r, 3000))]);
+      let timer;
+      const giveUp = new Promise((r) => { timer = setTimeout(r, 3000); });
+      try { await Promise.race([bothStarted, giveUp]); } finally { clearTimeout(timer); }
       return started.length;
     };
     const results = await poolEach(['a', 'b'], 2, work);

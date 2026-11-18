@@ -208,9 +208,10 @@ describe('the file door', () => {
     const a = file('cross-a.txt'), b = file('cross-b.txt');
     await stored.writeStored(a, Buffer.from('a'));
     await stored.writeStored(b, Buffer.from('b'));
-    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('the crossing moves deadlocked')), 2000));
+    let timer;
+    const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('the crossing moves deadlocked')), 2000); });
     // a -> b and b -> a together: locked source-first, one holds a and waits on b while the other holds b and waits on a.
-    await Promise.race([Promise.allSettled([stored.moveStored(a, b), stored.moveStored(b, a)]), timeout]);
+    try { await Promise.race([Promise.allSettled([stored.moveStored(a, b), stored.moveStored(b, a)]), timeout]); } finally { clearTimeout(timer); }
   });
 
   it('removes temporary files a crash left behind', async () => {

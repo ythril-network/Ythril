@@ -134,8 +134,10 @@ describe('a push cycle records no violation for a target later in it', { skip },
     try {
       const answered = door.push('/batch-upsert',
         { edges: [build.edge(S, edge, 2, { from, to: missing, fromKind: 'chrono', toKind: 'chrono' })] }, { spaceId: S });
-      const outcome = await Promise.race([answered.then(r => r.code),
-        new Promise(r => setTimeout(() => r('still waiting'), 5_000))]);
+      // The timer is cleared once the push answers: left armed it keeps the process alive after the last case.
+      let timer;
+      const stillWaiting = new Promise(r => { timer = setTimeout(() => r('still waiting'), 5_000); });
+      const outcome = await Promise.race([answered.then(r => r.code), stillWaiting]).finally(() => clearTimeout(timer));
       assert.equal(outcome, 200, 'the push answer waited on the linkage check — a stalled store holds it past the sender\'s timeout');
     } finally {
       release();

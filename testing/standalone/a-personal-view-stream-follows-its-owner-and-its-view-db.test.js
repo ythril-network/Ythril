@@ -72,7 +72,11 @@ async function openStream(key, mintSpelling, openSpelling = mintSpelling) {
     // waits-differently: it reads a stream chunk by chunk until a predicate over what arrived holds, and some calls wait out the whole
     // window on purpose (that nothing more arrives, or that the server ends the stream); waitFor polls a condition, it reads nothing.
     while (!pred(buf) && !ended && Date.now() < deadline) {
-      const next = await Promise.race([reader.read(), new Promise(res => setTimeout(() => res(null), Math.max(1, deadline - Date.now())))]);
+      // The window's timer is cleared once the read answers: left armed it keeps the process alive after the last case.
+      let timer;
+      const windowEnds = new Promise(res => { timer = setTimeout(() => res(null), Math.max(1, deadline - Date.now())); });
+      let next;
+      try { next = await Promise.race([reader.read(), windowEnds]); } finally { clearTimeout(timer); }
       if (next === null) break;
       if (next.done) { ended = true; break; }
       buf += dec.decode(next.value, { stream: true });
