@@ -59,6 +59,7 @@ import { backoffDelayMs } from '../util/backoff.js';
 import { peerText } from '../util/log.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { SCHEMA_CONVERT_RUN_OPERATION } from '../audit/middleware.js';
+import { startOwedRoundConversions } from '../sync/governance.js';
 
 /** The operation of the one internal audit entry a finished run writes: declared in the audit middleware beside the other operations no route produces, re-exported here for the run's own readers. */
 export { SCHEMA_CONVERT_RUN_OPERATION };
@@ -612,6 +613,8 @@ function walkAnswered(walk: WalkResult<unknown>, spaces: number): boolean {
  * the background; the stale items of a space that has any are removed (bounded per space). Exported so a test drives it instead of a timer.
  */
 export async function schemaConvertRunTick(): Promise<void> {
+  // A passed round's run still owed (its start crashed or failed) is started again first: an owed act is never given up (decision 12).
+  startOwedRounds();
   const spaces = configuredSpaces();
   let active = 0;
   const walk = await eachSpace(WATCH_STEP, spaces, async (space) => {
@@ -631,12 +634,27 @@ const watcher = intervalJob('Schema convert watcher', WATCH_MS, schemaConvertRun
 /** End the watcher's timer: for a shutdown, and for a test that drives the tick itself. A tick already running is left to finish. */
 export function stopSchemaConvertWatcher(): void { watcher.stop(); }
 
+/** Arm the watcher: after a passed round's start failed, so its tick starts the run again (`startOwedRoundConversions`). */
+export function wakeSchemaConvertWatcher(): void { watcher.start(); }
+
+/** Start every passed round's run still owed here; answers how many are owed. A failure to ask is reported, and the next tick asks again. */
+function startOwedRounds(): number {
+  try {
+    return startOwedRoundConversions();
+  } catch (err) {
+    reportSpaceFailure(RESUME_STEP, '*', err, { when: WHEN, unit: 'owed round runs' });
+    return 0;
+  }
+}
+
 /**
  * Pick up every run this instance had when it stopped: once services start, on every boot. A run whose lease is stale is taken and continued
  * in the background; one another process holds is left to it. A space that could not be read is not a space with no run: the watcher is armed
  * whenever a run or an item was found, or any space could not be asked, and its tick does what this boot could not.
  */
 export async function resumeSchemaConvertRuns(): Promise<void> {
+  // A passed round's run that a crash or a failed start left unstarted is started at boot, once (the start asks whether its run already exists).
+  const owedRounds = startOwedRounds();
   const spaces = configuredSpaces();
   let active = 0;
   let items = false;
@@ -649,6 +667,6 @@ export async function resumeSchemaConvertRuns(): Promise<void> {
     if (await hasUnconvertedItems(space.id)) items = true;
   }, { when: WHEN });
   const answered = walkAnswered(walk, spaces.length);
-  if (active > 0 || items || !answered) watcher.start();
+  if (active > 0 || items || !answered || owedRounds > 0) watcher.start();
   if (answered) schemaConvertRunsInProgress.set(active);
 }
