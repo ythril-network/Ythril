@@ -30,7 +30,7 @@ import { hasRoundShape, canonicalRoundWipeTypes } from './round-shape.js';
 import { DEFAULT_STAMP_SKEW_WARN_MINUTES } from '../brain/stamp-skew.js';
 
 /** The fields that describe this instance, never the network. A peer never sends them and never receives them. */
-export const LOCAL_ROUND_FIELDS = ['appliedHere', 'proposedHere', 'outcome', 'concludedAt', 'refusedHere', 'actLocalId', 'peersConcluded'] as const;
+export const LOCAL_ROUND_FIELDS = ['appliedHere', 'proposedHere', 'outcome', 'concludedAt', 'refusedHere', 'actLocalId', 'peersConcluded', 'convertOwed'] as const;
 type LocalField = typeof LOCAL_ROUND_FIELDS[number];
 
 /** `round` with every local field removed. */

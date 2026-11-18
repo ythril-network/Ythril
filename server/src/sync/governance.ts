@@ -576,6 +576,8 @@ function startRoundConversion(net: NetworkConfig, round: VoteRound, plan: Extrac
   const stepsRefused = decision.convert.state === 'refused' ? [{ step: null, reason: decision.convert.reason }] : [];
   const { roundId } = round;
   const spaceId = plan.localSpace;
+  // This conclusion owes the run (saved with it): the mark the owed-round sweep and the prune read (`roundConversionOwed`).
+  round.convertOwed = true;
   startingRounds.add(roundId);
   const started = convertTurns.run(spaceId, async (): Promise<SchemaConvertStarted> => {
     try {

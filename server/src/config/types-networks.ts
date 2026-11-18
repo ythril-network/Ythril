@@ -330,6 +330,12 @@ export interface VoteRound {
    */
   appliedHere?: boolean;
   /**
+   * LOCAL: THIS instance concluded this passed `meta_change` round and owes a conversion run from it (`Q-746`): written when the conclusion decides
+   * to start one, so a round a release before conversion concluded is never owed after an upgrade (nothing runs on upgrade; Convert is how its
+   * records are converted). Never taken from a peer: adopting a round and serving one both strip it.
+   */
+  convertOwed?: boolean;
+  /**
    * LOCAL: this instance opened the round (`S-7`). Never inferred from `subjectInstanceId`, which a peer sets, and
    * never taken from or served to a peer — `networks/round-local-state.ts` is the only writer.
    */

@@ -118,9 +118,13 @@ export function spaceAdditionOwed(r: PassedRoundReadable): boolean {
  * the owed-round sweep that starts it (`sync/governance.ts`, `startOwedRoundConversions`) and by the prune, which keeps such a round past its
  * deadline (`sync/vote-round-retention.ts`), so a round the sweep still owes is never pruned from under it. A sibling of {@link spaceActOwed} on the
  * same veto ({@link roundPassedUnvetoed}).
+ *
+ * Only a round THIS instance concluded and decided to convert from (`convertOwed`, local, written by that conclusion): a round a release before
+ * conversion concluded carries no mark, so an upgrade starts no run anybody did not ask for (lens sweep S8; the upgrade note: nothing runs on
+ * upgrade, and Convert is how such records are converted).
  */
-export function roundConversionOwed(r: PassedRoundReadable & { convertRecords?: unknown }): boolean {
-  return r.type === 'meta_change' && r.convertRecords !== undefined && roundPassedUnvetoed(r) && r.appliedHere !== true;
+export function roundConversionOwed(r: PassedRoundReadable & { convertRecords?: unknown; convertOwed?: boolean }): boolean {
+  return r.type === 'meta_change' && r.convertRecords !== undefined && r.convertOwed === true && roundPassedUnvetoed(r) && r.appliedHere !== true;
 }
 
 /**
