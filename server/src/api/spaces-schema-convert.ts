@@ -1,0 +1,42 @@
+/**
+ * A space's schema conversion - start one, read how it went (Q-746, bundle-284 design r5 section 2.3): `POST` and `GET /api/spaces/:id/schema-convert`.
+ * Mounted at `/api/spaces` beside the spaces router, in its own file as `spaces-schema-versions.ts` is, because `api/spaces.ts` is on the god-file ratchet.
+ *
+ * The decisions are `spaces/schema-convert-acts.ts` (`schemaConvertStartAct`, `schemaConvertStatusAct`), the acts MCP `space_schema_convert` and
+ * `space_schema_conversion` run, so one capability has one request shape on both doors. The body goes to the act whole and the rights are decided
+ * inside it (the knowledge rung, and for a start the space's admin right), so no mounting can leave them out; the guards here are the door's own
+ * (rate limit, authentication and reach, a second factor and the read-only refusal for a start). Rights rows come from `ROUTE_RIGHTS`:
+ * `knowledge: admin` for the start, `knowledge: read` for the read.
+ */
+import { Router } from 'express';
+import { denyReadOnly, requireSpaceAuthMfaScoped, requireSpaceAuthScoped } from '../auth/middleware.js';
+import { globalRateLimit } from '../rate-limit/middleware.js';
+import { schemaConvertStartAct, schemaConvertStatusAct } from '../spaces/schema-convert-acts.js';
+import type { TokenRights } from '../config/rights-shape.js';
+import { sendCaughtFailure } from './send-failure.js';
+import { sendSpaceActAnswer } from './send-act-answer.js';
+
+export const spaceSchemaConvertRouter = Router();
+
+/** Who is asking, as the acts need it: the rights of the token the guards accepted. */
+const callerOf = (req: { authToken?: unknown }): { rights: TokenRights | undefined } => ({ rights: (req.authToken as { rights?: TokenRights } | undefined)?.rights });
+
+// POST /api/spaces/:id/schema-convert - convert the records of the named types toward the space's current schema: { types: [{ kind, type }], steps? }.
+spaceSchemaConvertRouter.post('/:id/schema-convert', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, async (req, res) => {
+  const spaceId = req.params['id'] as string;
+  try {
+    sendSpaceActAnswer(res, await schemaConvertStartAct(spaceId, req.body, callerOf(req)));
+  } catch (err) {
+    sendCaughtFailure(res, 'POST /api/spaces/:id/schema-convert', err);
+  }
+});
+
+// GET /api/spaces/:id/schema-convert - the run as it stands (or { state: 'none' }); writes nothing.
+spaceSchemaConvertRouter.get('/:id/schema-convert', globalRateLimit, requireSpaceAuthScoped('id'), async (req, res) => {
+  const spaceId = req.params['id'] as string;
+  try {
+    sendSpaceActAnswer(res, await schemaConvertStatusAct(spaceId, callerOf(req)));
+  } catch (err) {
+    sendCaughtFailure(res, 'GET /api/spaces/:id/schema-convert', err);
+  }
+});
