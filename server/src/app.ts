@@ -17,6 +17,8 @@ import { brainRouter } from './api/brain/index.js';
 import { spacesRouter } from './api/spaces.js';
 import { spaceSchemaLayersRouter } from './api/spaces-schema-layers.js';
 import { spaceSchemaVersionsRouter } from './api/spaces-schema-versions.js';
+import { spaceSchemaConvertRouter } from './api/spaces-schema-convert.js';
+import { spaceUnconvertedRouter } from './api/spaces-unconverted.js';
 import { fileStoreRouter } from './api/files.js';
 import { toolsRouter } from './api/tools.js';
 import { conflictsRouter } from './api/conflicts.js';
@@ -313,6 +315,8 @@ export function createApp() {
   app.use('/api/spaces', spacesRouter);
   app.use('/api/spaces', spaceSchemaLayersRouter);  // F-39.3: schema layers and network precedence
   app.use('/api/spaces', spaceSchemaVersionsRouter);  // Q-742: schema versions listed, read and compared
+  app.use('/api/spaces', spaceSchemaConvertRouter);  // Q-746: a schema conversion started and read
+  app.use('/api/spaces', spaceUnconvertedRouter);  // Q-919: the records a conversion could not convert, listed and dismissed
   app.use('/api/files', fileStoreRouter);
   app.use('/api/conflicts', conflictsRouter);
   app.use('/api/duplicates', duplicatesRouter);

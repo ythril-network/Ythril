@@ -22,6 +22,15 @@
  *
  * Seen red on a91e522e: the act module, the router and the tools are not built.
  *
+ * ## The mounted part (slice 6)
+ *
+ * The cases above call the router's last handler and the tool's handler themselves, so they hold while `app.ts` mounts no router and the tool
+ * list offers no tool. The last part asks the way a client does, with a token: the application on loopback (rate limit, authentication,
+ * rights guard, router stack) and `POST /mcp` (`tools/list`, `tools/call` through the registry), and compares the answers with the act asked
+ * as the same caller. A mutating tool is not offered to a token that cannot write; a refusal carries its own code on both doors; a bulk
+ * dismiss through either door dismisses exactly the set the list shows. Seen red on 8ca143bb: the three routes answer 404 (no router is
+ * mounted) and `tools/list` offers none of the three tools.
+ *
  * Run: node --test testing/standalone/the-unconverted-doors-answer-alike-db.test.js (test stack up, after `npm run build:server`)
  */
 import { describe, it, before, after } from 'node:test';
@@ -30,6 +39,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openConvertDoor, CONVERT_META } from './_schema-convert.mjs';
 import { moduleOrNull } from './_b81c-door.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
+import { openMountedDoor } from './_mounted-door.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'unconv';
@@ -588,5 +598,158 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     assert.match(shownTool.description, /expect/, 'does not say what expect is for');
     assert.ok(typeof shownSchema.properties.expect.description === 'string' && shownSchema.properties.expect.description.length > 20);
     assert.ok('reason' in listSchema.properties && listSchema.properties.reason.description.length > 20, 'list_unconverted declares no reason filter');
+  });
+
+  // ── The MOUNTED application and the REGISTERED tools (slice 6) ───────────────────────────────────────────────────────────────────
+
+  describe('through the mounted application and the registered tools', () => {
+    let mounted;
+    const who = {};
+    const base = (space = S) => `/api/spaces/${space}/schema-convert/items`;
+    const query = (args) => {
+      const q = new URLSearchParams(Object.entries(args).map(([k, v]) => [k, String(v)])).toString();
+      return q ? `?${q}` : '';
+    };
+    const stateOfItems = async () => JSON.stringify(await itemsCol(S).find({}).sort({ _id: 1 }).toArray());
+
+    before(async () => {
+      mounted = await openMountedDoor();
+      who.admin = await mounted.mint('unconv-admin', 'admin');
+      who.reader = await mounted.mint('unconv-reader', READER);
+      who.writer = await mounted.mint('unconv-writer', WRITER);
+      who.noKnowledge = await mounted.mint('unconv-none', NO_KNOWLEDGE);
+      // The cases above leave the space as they need it (a deleted record, an item the watcher then removed): put the five records and their five
+      // items back, so every case below starts from the fixture it states.
+      if (!await door.coll(S, 'entities').findOne({ _id: 'p2' })) {
+        await door.seed(S, 'entities', [{ _id: 'p2', name: 'Bob', type: 'person', properties: { age: `${SECRET}-bob` } }]);
+      }
+      await runAgain();
+      for (const row of await door.itemRows(S)) itemOf[row.recordId] = row._id;
+      assert.deepEqual(Object.keys(itemOf).sort(), ['c1', 'f1', 'o1', 'p1', 'p2'], 'the fixture does not hold the five items');
+    });
+    after(async () => { await mounted?.close(); });
+
+    it('mounts the list route and registers the three tools: a reader is offered the list and not the two that dismiss, a writer all three', async () => {
+      await arrange(ALL_OPEN);
+      const list = await mounted.rest(who.reader.key, 'GET', base());
+      assert.equal(list.status, 200, `GET ${base()} is not served: no router is mounted for it (${JSON.stringify(list).slice(0, 200)})`);
+      const mutating = ['dismiss_unconverted', 'dismiss_unconverted_shown'];
+      const readerNames = await mounted.toolNames(who.reader.key);
+      assert.ok(readerNames.includes('list_unconverted'), 'tools/list does not offer list_unconverted to a reader: the tool is not registered');
+      for (const name of mutating) assert.ok(!readerNames.includes(name), `tools/list offers ${name} to a token that holds no write rung`);
+      const writerNames = await mounted.toolNames(who.writer.key);
+      for (const name of ['list_unconverted', ...mutating]) assert.ok(writerNames.includes(name), `tools/list does not offer ${name} to a writer: the tool is not registered`);
+    });
+
+    it('lists as the act does, on the mounted route and through the registered tool: every filter, every page, the same rows and counts', async () => {
+      await arrange(ALL_OPEN);
+      for (const args of [{}, { kind: 'entity' }, { type: 'person' }, { kind: 'fact', type: 'claim' }, { status: 'dismissed' }, { reason: 'not_conforming' },
+        { limit: 2 }, { limit: 2, skip: 2 }, { skip: 10 }, { kind: '', type: '', status: '' }]) {
+        const expected = await viaAct('list', args, who.reader.rights, 'rest');
+        assert.equal(expected.status, 200, JSON.stringify(expected));
+        const route = await mounted.rest(who.reader.key, 'GET', `${base()}${query(args)}`);
+        assert.deepEqual(route, expected, `${JSON.stringify(args)}: the mounted route answered otherwise than the act`);
+        const tool = await mounted.mcp(who.reader.key, 'list_unconverted', { space: S, ...args });
+        assert.equal(tool.isError, false, `${JSON.stringify(args)}: ${tool.text}`);
+        assert.deepEqual(withoutBudget(tool.body), withoutBudget(expected.body), `${JSON.stringify(args)}: the registered tool answered otherwise than the act`);
+      }
+    });
+
+    it('refuses a malformed list by its own code on the mounted route and the tool, and a token without the rung by 403', async () => {
+      for (const [args, code] of [[{ kind: 'file' }, 'unconverted_bad_kind'], [{ status: 'all' }, 'unconverted_bad_status'], [{ reason: 'nope' }, 'unconverted_bad_reason'],
+        [{ skip: -1 }, 'unconverted_bad_paging'], [{ skip: 'abc' }, 'unconverted_bad_paging'], [{ limit: 0 }, 'unconverted_bad_paging'],
+        [{ limit: 'abc' }, 'unconverted_bad_paging']]) {
+        const expected = await viaAct('list', args, who.reader.rights, 'rest');
+        const route = await mounted.rest(who.reader.key, 'GET', `${base()}${query(args)}`);
+        assert.deepEqual(route, expected, `${JSON.stringify(args)}: the mounted route answered otherwise than the act`);
+        assert.equal(route.body.code, code);
+        const tool = await mounted.mcp(who.reader.key, 'list_unconverted', { space: S, ...args });
+        assert.deepEqual([tool.isError, tool.body?.code], [true, code], `${JSON.stringify(args)}: ${tool.text}`);
+      }
+      const route = await mounted.rest(who.noKnowledge.key, 'GET', base());
+      assert.equal(route.status, 403, JSON.stringify(route));
+      assert.equal((await mounted.mcp(who.noKnowledge.key, 'list_unconverted', { space: S })).isError, true);
+    });
+
+    it('a list through the mounted route and the tool writes nothing', async () => {
+      await arrange(ALL_OPEN);
+      const before = await stateOfItems();
+      for (const key of [who.reader.key, who.admin.key]) {
+        await mounted.rest(key, 'GET', base());
+        await mounted.mcp(key, 'list_unconverted', { space: S });
+      }
+      assert.equal(await stateOfItems(), before, 'a list changed an item');
+    });
+
+    it('dismisses one item through the mounted route and through the registered tool, as the act does; a reader is refused on the route and the tool is not offered', async () => {
+      await arrange(ALL_OPEN);
+      const refused = await mounted.rest(who.reader.key, 'POST', `${base()}/${itemOf.p1}/dismiss`);
+      assert.equal(refused.status, 403, `a reader dismissed: ${JSON.stringify(refused)}`);
+      const hidden = await mounted.mcp(who.reader.key, 'dismiss_unconverted', { space: S, itemId: itemOf.p1 });
+      assert.equal(hidden.isError, true, 'a reader dismissed through the tool');
+      assert.deepEqual(await statusMap(), { p1: 'open', p2: 'open', o1: 'open', f1: 'open', c1: 'open' }, 'a refused dismiss changed an item');
+
+      const route = await mounted.rest(who.writer.key, 'POST', `${base()}/${itemOf.p1}/dismiss`);
+      const expected = await viaAct('dismiss', { itemId: itemOf.p1 }, who.writer.rights, 'rest');
+      assert.deepEqual(route, expected, 'the mounted route answered otherwise than the act');
+      assert.equal(route.status, 200, JSON.stringify(route));
+      assert.equal(route.body.item.status, 'dismissed');
+      const tool = await mounted.mcp(who.writer.key, 'dismiss_unconverted', { space: S, itemId: itemOf.p2 });
+      assert.deepEqual([tool.isError, tool.body.item.status, tool.body.item.recordId], [false, 'dismissed', 'p2'], JSON.stringify(tool));
+      assert.deepEqual(await statusMap(), { p1: 'dismissed', p2: 'dismissed', o1: 'open', f1: 'open', c1: 'open' });
+
+      const unknown = await mounted.rest(who.writer.key, 'POST', `${base()}/no-such-item/dismiss`);
+      assert.deepEqual([unknown.status, unknown.body.code], [404, 'unconverted_item_not_found']);
+      const toolUnknown = await mounted.mcp(who.writer.key, 'dismiss_unconverted', { space: S, itemId: 'no-such-item' });
+      assert.deepEqual([toolUnknown.isError, toolUnknown.body?.code], [true, 'unconverted_item_not_found']);
+    });
+
+    it('refuses a malformed item id or a malformed expect by the act\'s own code through the registered tool, as the mounted route does: the dispatcher words none of them', async () => {
+      await arrange(ALL_OPEN);
+      const before = await stateOfItems();
+      for (const itemId of ['', 123, 'x'.repeat(201)]) {
+        const expected = await viaAct('dismiss', { itemId }, who.writer.rights, 'mcp');
+        assert.deepEqual([expected.status, expected.body.code], [400, 'unconverted_bad_item_id'], JSON.stringify(expected));
+        const tool = await mounted.mcp(who.writer.key, 'dismiss_unconverted', { space: S, itemId });
+        assert.deepEqual([tool.isError, tool.body?.code, tool.body?.error], [true, 'unconverted_bad_item_id', expected.body.error], `itemId ${JSON.stringify(itemId).slice(0, 20)}: ${tool.text}`);
+      }
+      for (const expect of [undefined, '3', -1, 1.5, null]) {
+        const given = { kind: 'entity', ...(expect === undefined ? {} : { expect }) };
+        const expected = await viaAct('shown', given, who.writer.rights, 'mcp');
+        assert.deepEqual([expected.status, expected.body.code], [400, 'unconverted_bad_expect'], JSON.stringify(expected));
+        const route = await mounted.rest(who.writer.key, 'POST', `${base()}/dismiss`, given);
+        assert.deepEqual(route, expected, `expect ${JSON.stringify(expect)}: the mounted route answered otherwise than the act`);
+        const tool = await mounted.mcp(who.writer.key, 'dismiss_unconverted_shown', { space: S, ...given });
+        assert.deepEqual([tool.isError, tool.body?.code, tool.body?.error], [true, 'unconverted_bad_expect', expected.body.error], `expect ${JSON.stringify(expect)}: ${tool.text}`);
+      }
+      assert.equal(await stateOfItems(), before, 'a refused dismissal wrote an item');
+    });
+
+    it('dismisses every open item a filter lists through the mounted route and the registered tool, exactly the set the list shows, and refuses a wrong count', async () => {
+      await arrange(ALL_OPEN);
+      const before = await stateOfItems();
+      for (const expect of [4, 6]) {
+        const wrong = await mounted.rest(who.writer.key, 'POST', `${base()}/dismiss`, { expect });
+        assert.deepEqual([wrong.status, wrong.body.code, wrong.body.current], [409, 'unconverted_changed', 5], JSON.stringify(wrong));
+        const toolWrong = await mounted.mcp(who.writer.key, 'dismiss_unconverted_shown', { space: S, expect });
+        assert.deepEqual([toolWrong.isError, toolWrong.body?.code, toolWrong.body?.current], [true, 'unconverted_changed', 5]);
+      }
+      const reader = await mounted.rest(who.reader.key, 'POST', `${base()}/dismiss`, { expect: 5 });
+      assert.equal(reader.status, 403, `a reader dismissed every open item: ${JSON.stringify(reader)}`);
+      assert.equal(await stateOfItems(), before, 'a refused bulk dismiss wrote an item');
+
+      const listed = (await mounted.rest(who.reader.key, 'GET', `${base()}${query({ kind: 'entity' })}`)).body.total;
+      assert.equal(listed, 3);
+      const route = await mounted.rest(who.writer.key, 'POST', `${base()}/dismiss`, { kind: 'entity', expect: listed });
+      assert.deepEqual(route, { status: 200, body: { dismissed: 3 } }, JSON.stringify(route));
+      assert.deepEqual(await statusMap(), { p1: 'dismissed', p2: 'dismissed', o1: 'dismissed', f1: 'open', c1: 'open' });
+      const tool = await mounted.mcp(who.writer.key, 'dismiss_unconverted_shown', { space: S, expect: 2 });
+      assert.deepEqual([tool.isError, tool.body], [false, { dismissed: 2 }], JSON.stringify(tool));
+      assert.deepEqual(Object.values(await statusMap()), ['dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed']);
+      const none = await mounted.rest(who.writer.key, 'POST', `${base()}/dismiss`, { expect: 0 });
+      assert.deepEqual([none.status, none.body], [200, { dismissed: 0 }]);
+      const missing = await mounted.rest(who.writer.key, 'POST', `${base()}/dismiss`, {});
+      assert.deepEqual([missing.status, missing.body.code], [400, 'unconverted_bad_expect']);
+    });
   });
 });

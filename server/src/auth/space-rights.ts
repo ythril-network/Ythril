@@ -236,6 +236,19 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // the same router. A backfill queues a job for every vectorless record in the space — an unbounded amount of
   // model work from one call — so it sits with `rebuild-indexes` at `admin` rather than with the `write` mutations.
   { route: '/api/spaces/:id/reembed', method: 'POST', area: 'knowledge', needs: 'admin', scope: 'path' },
+  /*
+   * A SCHEMA CONVERSION AND THE RECORDS IT COULD NOT CONVERT are `knowledge`, not `schema` (Q-746, Q-919): they change no type definition, they
+   * read and rewrite the space's records, and a start reaches every peer through the new versions. Registered from `spaces-schema-convert.ts` and
+   * `spaces-unconverted.ts` onto `/api/spaces`, so a sweep of `spaces.ts` cannot see them.
+   *
+   * The start is `admin` beside reembed and rebuild-indexes (an unbounded rewrite from one call); the act also asks the space's admin right, which
+   * no rung can say. The reads are `read`, and the two dismissals `write`: they change a record of this instance's own review list, never a record.
+   */
+  { route: '/api/spaces/:id/schema-convert', method: 'POST', area: 'knowledge', needs: 'admin', scope: 'path' },
+  { route: '/api/spaces/:id/schema-convert', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
+  { route: '/api/spaces/:id/schema-convert/items', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
+  { route: '/api/spaces/:id/schema-convert/items/:itemId/dismiss', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
+  { route: '/api/spaces/:id/schema-convert/items/dismiss', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/reindex', method: 'POST', area: 'knowledge', needs: 'admin', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/reindex-status', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
 
@@ -353,6 +366,13 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   // The BACKFILL, priced with its route rather than with the other `write` mutations: it rewrites what
   // recall can find, and the route has sat at `knowledge: admin` beside `rebuild-indexes` since 4.4.
   { tool: 'space_reembed', area: 'knowledge', needs: 'admin' },
+  // The conversion and the records it could not convert, priced with their routes (Q-746, Q-919): the start `admin` (and the act asks the
+  // space's admin right), the two reads `read`, the two dismissals `write`.
+  { tool: 'space_schema_convert', area: 'knowledge', needs: 'admin' },
+  { tool: 'space_schema_conversion', area: 'knowledge', needs: 'read' },
+  { tool: 'list_unconverted', area: 'knowledge', needs: 'read' },
+  { tool: 'dismiss_unconverted', area: 'knowledge', needs: 'write' },
+  { tool: 'dismiss_unconverted_shown', area: 'knowledge', needs: 'write' },
   { tool: 'list_embed_jobs', area: 'knowledge', needs: 'read' },
   { tool: 'retry_embed_record', area: 'knowledge', needs: 'write' },
   { tool: 'list_forks', area: 'knowledge', needs: 'read' },

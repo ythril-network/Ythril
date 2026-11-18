@@ -1,6 +1,8 @@
 import type { ToolHandler } from './types.js';
 import { space_schema_layersTool, space_set_network_precedenceTool } from './schema-layers.js';
 import { space_schema_versionsTool } from './schema-versions.js';
+import { space_schema_convertTool, space_schema_conversionTool } from './schema-convert.js';
+import { list_unconvertedTool, dismiss_unconvertedTool, dismiss_unconverted_shownTool } from './unconverted.js';
 import { list_spacesTool, space_statsTool, space_metaTool, update_spaceTool, space_renameTool, schema_updateTool, save_spaceTool, delete_space_dataTool , list_tokensTool } from './spaces.js';
 import { save_factTool, update_factTool, delete_factTool } from './fact.js';
 import { recallTool, find_similarTool } from './search.js';
@@ -50,6 +52,11 @@ export const ALL_TOOLS: ToolHandler[] = [
   space_schema_layersTool,
   space_set_network_precedenceTool,
   space_schema_versionsTool,
+  space_schema_convertTool,
+  space_schema_conversionTool,
+  list_unconvertedTool,
+  dismiss_unconvertedTool,
+  dismiss_unconverted_shownTool,
   queryTool,
   save_entityTool,
   save_edgeTool,

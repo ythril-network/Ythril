@@ -118,6 +118,13 @@ export const CAPABILITIES = [
    * So the route was REST-only, and the parity gate read a covered capability because the map said so.
    */
   ['Spaces', 'space_reembed', 'POST /api/spaces/:id/reembed'],
+  // Q-746 and Q-919 (bundle-284): a schema conversion started and read, and the records it could not convert listed and dismissed. One act each,
+  // behind the route and the tool; the bulk dismissal is its own capability (it takes `expect` and a filter, never an item id).
+  ['Spaces', 'space_schema_convert', 'POST /api/spaces/:id/schema-convert'],
+  ['Spaces', 'space_schema_conversion', 'GET /api/spaces/:id/schema-convert'],
+  ['Spaces', 'list_unconverted', 'GET /api/spaces/:id/schema-convert/items'],
+  ['Spaces', 'dismiss_unconverted', 'POST /api/spaces/:id/schema-convert/items/:itemId/dismiss'],
+  ['Spaces', 'dismiss_unconverted_shown', 'POST /api/spaces/:id/schema-convert/items/dismiss'],
   ['Spaces', 'file_stamp_report', 'POST /api/spaces/:id/file-stamp-report'],
   // F-46: the live check of a schema, both modes (one record, or the stored ones) — no longer a UI-only dry run.
   ['Spaces', 'schema_validate', 'POST /api/spaces/:id/validate-schema'],
