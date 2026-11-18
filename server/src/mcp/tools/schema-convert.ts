@@ -14,9 +14,12 @@ import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
 import { toolRefusalOfAct, type ToolRefusal } from '../../util/errors.js';
 import { CONVERT_RECORDS_PARAMETER } from './schema-update-parts.js';
 
+/** The lowest status an act answers a refusal with. */
+const FIRST_REFUSAL_STATUS = 400;
+
 /** An act's answer as a tool result: the body in `content` and in `structuredContent`, or the refusal the REST door answers, code and `step` included. */
 function resultOf(r: SchemaConvertActResult): ToolResult {
-  if (r.status >= 400) throw toolRefusalOfAct(r.status as ToolRefusal['status'], String(r.body['error']), r.body);
+  if (r.status >= FIRST_REFUSAL_STATUS) throw toolRefusalOfAct(r.status as ToolRefusal['status'], String(r.body['error']), r.body);
   return { content: [{ type: 'text' as const, text: JSON.stringify(r.body) }], structuredContent: { ...r.body } };
 }
 

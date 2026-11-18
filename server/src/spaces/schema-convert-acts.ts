@@ -70,6 +70,11 @@ export const SCHEMA_CONVERT_REFUSAL_CODES = [
   'bad_convert_types', 'too_many_convert_types', 'bad_convert_request', 'bad_conversion_step', 'knowledge_rung', 'space_admin_required', 'schema_convert_running',
 ] as const;
 const [BAD_TYPES, TOO_MANY_TYPES, BAD_REQUEST, BAD_STEP, KNOWLEDGE_RUNG, SPACE_ADMIN_REQUIRED] = SCHEMA_CONVERT_REFUSAL_CODES;
+/** The statuses the acts answer with: a request refused for what it says, a caller refused for what it holds, a start accepted, a read answered. */
+const BAD_BODY = 400;
+const FORBIDDEN = 403;
+const ACCEPTED = 202;
+const OK = 200;
 
 const refusal = (status: number, error: string, code?: string, extra: Record<string, unknown> = {}): SchemaConvertActResult =>
   ({ status, body: { error, ...(code ? { code } : {}), ...extra } });
@@ -88,16 +93,16 @@ const ConvertTypeZ = z.object({
 
 /** The knowledge rung a call needs, then the space admin right a start needs on top of it; the refusal, or `null`. */
 function rightsRefusal(spaceId: string, rights: TokenRights | null | undefined, needs: 'admin' | 'read'): SchemaConvertActResult | null {
-  if (!rights) return refusal(403, rungRefusal(needs, 'knowledge'), KNOWLEDGE_RUNG);
-  if (!holdsRung(rights, spaceId, 'knowledge', needs)) return refusal(403, rungRefusal(needs, 'knowledge', spaceId), KNOWLEDGE_RUNG);
+  if (!rights) return refusal(FORBIDDEN, rungRefusal(needs, 'knowledge'), KNOWLEDGE_RUNG);
+  if (!holdsRung(rights, spaceId, 'knowledge', needs)) return refusal(FORBIDDEN, rungRefusal(needs, 'knowledge', spaceId), KNOWLEDGE_RUNG);
   if (needs === 'admin' && rights.instanceAdmin !== true && !isSpaceAdminFor(rights, spaceId)) {
-    return refusal(403, `Converting records rewrites them on every peer, so it needs the admin right of space '${spaceId}', not only 'admin' on knowledge`, SPACE_ADMIN_REQUIRED);
+    return refusal(FORBIDDEN, `Converting records rewrites them on every peer, so it needs the admin right of space '${spaceId}', not only 'admin' on knowledge`, SPACE_ADMIN_REQUIRED);
   }
   return null;
 }
 
 /** The names the "before" half of a step's check judges: the schema the records were written under, which an act cannot know. */
-const judgesBefore = (code: ConversionIssueCode): code is Extract<ConversionIssueCode, `${string}_before`> => code.endsWith('_before');
+const judgesBefore = (code: ConversionIssueCode): boolean => code.endsWith('_before');
 
 /**
  * The first step the schema NOW cannot hold, as a refusal; `null` when every step holds. Held to the current schema as both the "before" and the "after"
@@ -110,22 +115,22 @@ function stepRefusal(spaceId: string, steps: readonly ConversionStep[]): SchemaC
   // A list over the bound names the first step past it, whatever its earlier steps are (as a schema save does): the bound is the first thing wrong with it.
   const issue = issues.find(i => i.code === 'too_many_steps') ?? issues[0];
   return issue
-    ? refusal(400, `steps[${issue.step}]: ${issue.message}`, BAD_STEP, { step: issue.step })
+    ? refusal(BAD_BODY, `steps[${issue.step}]: ${issue.message}`, BAD_STEP, { step: issue.step })
     : null;
 }
 
 /** The types of a request, or the refusal: a list of one to the most a run takes, each a named type. */
 function typesOf(raw: unknown): { ok: true; types: SchemaConvertType[] } | { ok: false; refusal: SchemaConvertActResult } {
   if (!Array.isArray(raw) || raw.length === 0) {
-    return { ok: false, refusal: refusal(400, '`types` must be a list of the types to convert: [{ kind, type }, ...], at least one', BAD_TYPES) };
+    return { ok: false, refusal: refusal(BAD_BODY, '`types` must be a list of the types to convert: [{ kind, type }, ...], at least one', BAD_TYPES) };
   }
   if (raw.length > SCHEMA_CONVERT_TYPES_MAX) {
-    return { ok: false, refusal: refusal(400, `\`types\` names at most ${SCHEMA_CONVERT_TYPES_MAX} types: ${raw.length} were sent`, TOO_MANY_TYPES) };
+    return { ok: false, refusal: refusal(BAD_BODY, `\`types\` names at most ${SCHEMA_CONVERT_TYPES_MAX} types: ${raw.length} were sent`, TOO_MANY_TYPES) };
   }
   const parsed = z.array(ConvertTypeZ).safeParse(raw);
   return parsed.success
     ? { ok: true, types: parsed.data }
-    : { ok: false, refusal: refusal(400, refusalOfParse(parsed.error).error, BAD_TYPES) };
+    : { ok: false, refusal: refusal(BAD_BODY, refusalOfParse(parsed.error).error, BAD_TYPES) };
 }
 
 /**
@@ -139,11 +144,11 @@ export async function schemaConvertStartAct(spaceId: string, input: unknown, cal
   if (denied) return denied;
 
   const body = SchemaConvertBody.safeParse(input ?? {});
-  if (!body.success) return refusal(400, refusalOfParse(body.error).error, BAD_REQUEST);
+  if (!body.success) return refusal(BAD_BODY, refusalOfParse(body.error).error, BAD_REQUEST);
   const named = typesOf(body.data.types);
   if (!named.ok) return named.refusal;
   const stepList = z.array(z.unknown()).optional().safeParse(body.data.steps);
-  if (!stepList.success) return refusal(400, '`steps` must be a list of conversion steps', BAD_REQUEST);
+  if (!stepList.success) return refusal(BAD_BODY, '`steps` must be a list of conversion steps', BAD_REQUEST);
   const steps = (stepList.data ?? []) as ConversionStep[];
   const bad = stepRefusal(spaceId, steps);
   if (bad) return bad;
@@ -151,7 +156,7 @@ export async function schemaConvertStartAct(spaceId: string, input: unknown, cal
   const started = await startSchemaConvertRun({ spaceId, types: named.types, steps, source: { kind: 'act' } });
   if (!started.ok) return refusal(started.status, started.error, started.code);
   const types = named.types.map(t => ({ kind: t.kind, type: t.type }));
-  return { status: 202, body: { state: 'started', toFp: started.run?.toFp ?? readMetaForWrite(spaceId).stamp.fp, types, steps: steps.length } };
+  return { status: ACCEPTED, body: { state: 'started', toFp: started.run?.toFp ?? readMetaForWrite(spaceId).stamp.fp, types, steps: steps.length } };
 }
 
 /**
@@ -163,5 +168,5 @@ export async function schemaConvertStatusAct(spaceId: string, caller: SchemaConv
   const denied = rightsRefusal(spaceId, caller.rights, 'read');
   if (denied) return denied;
   const status = await schemaConvertStatus(spaceId);
-  return { status: 200, body: status ? { ...status } : { state: 'none' } };
+  return { status: OK, body: status ? { ...status } : { state: 'none' } };
 }
