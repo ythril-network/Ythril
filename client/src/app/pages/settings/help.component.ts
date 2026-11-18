@@ -89,6 +89,8 @@ export const HELP_DOCS = [
       'integration-guide/06c-space-deletion-and-wipe-api.md',
       // A personal view is a token's own read lens over spaces it reaches (Q-531); it is not a space, so it is its own part.
       'integration-guide/06d-personal-views.md',
+      // Converting records after a schema change came out of 06a at its ceiling: steps, the Convert act, and what is left for Review.
+      'integration-guide/06e-converting-records.md',
       'integration-guide/07-tokens-api.md', 'integration-guide/08-networks-api.md', 'integration-guide/08a-invite-api.md',
       'integration-guide/09-sync-api.md', 'integration-guide/09a-sync-file-metadata.md',
       'integration-guide/10-mfa-and-conflicts.md',
