@@ -299,6 +299,36 @@ export function withRecordingWorld(world, body) {
   });
 }
 
+// ── A Test-Run record as CI's recorder stores one, for the readers of the instance's records ─────────────────────
+
+/** The day (ISO) the `n`th seeded CI run started: later `n`, later run. */
+export const ciRunDay = (n) => `2026-11-${String(10 + n).padStart(2, '0')}T10:00:00.000Z`;
+
+/** The `measurements` text of a record holding `rows` (`[file, ms]` pairs); `extra` adds keys beside `files` (`truncated: true`). */
+export const ciMeasurements = (rows, extra = {}) => JSON.stringify({ files: rows.map(([file, ms]) => ({ file, ms, tests: 3 })), slowest: [], ...extra });
+
+/**
+ * Seed the fake instance with the `Test-Run` record CI's recorder writes for run `n` of one job: source ci, branch main, scope full,
+ * outcome passed, `rows` as its per-file times. `over` replaces properties (a branch, a scope, a job, a source, `measurements`) and `top`
+ * the record's own fields: a record that is wrong in one field only is how a reader's re-check of the server's filter is held.
+ * The one spelling of that record for every test of a reader of `Test-Run` records, so each is shown records the recorder could write.
+ *
+ * @param {{ seed: Function }} server the fake instance
+ * @param {{ n: number, rows: Array<[string, number]>, job?: string, suite?: string, over?: object, top?: object }} o
+ */
+export function seedCiTestRun(server, { n, rows, job = 'standalone-pure', suite = 'standalone', over = {}, top = {} }) {
+  return server.seed({
+    title: suite, startsAt: ciRunDay(n), endsAt: ciRunDay(n),
+    properties: {
+      recordKey: `ci:${n}:1:${job}:${suite}`, source: 'ci', commit: String(n).repeat(40), branch: 'main', runId: String(n), attempt: 1,
+      job, suite, outcome: 'passed', scope: 'full', layout: 'ci-parallel-v2', formatVersion: 1,
+      ms: 100_000, files: rows.length, tests: 3 * rows.length, passed: 3 * rows.length, failed: 0, cancelled: 0, skipped: 0, todo: 0, dirty: false,
+      measurements: ciMeasurements(rows), ...over,
+    },
+    ...top,
+  });
+}
+
 /** The record keys the fake instance holds, sorted. */
 export const keysOf = (ythril) => ythril.store.map(e => e.properties.recordKey).sort();
 
