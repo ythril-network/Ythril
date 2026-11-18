@@ -11,6 +11,9 @@
  *   right interface, by a helper (`local-server.mjs`) or by an author who says why not.
  * - {@link awaitedSleeps}: which awaited calls are a sleep? The same question `poll-loops.mjs` asks of a loop body, so it
  *   takes its answer from {@link awaitsASleepIn} below, never from a name list of its own.
+ * - {@link uncancelledRaceTimers}: where does a `Promise.race` hold a `setTimeout` that is never cleared or `unref()`ed? The
+ *   timer that loses the race keeps the process alive after the file's last test, so the file outlives its tests by the
+ *   timer's length. {@link promiseRaceCount} is the independent count a gate sets against it.
  * - {@link delayCalls}: does every fixed delay say which KIND of delay it is (`Q-401`)? Each call of the shared `elapse`
  *   — awaited or not, inside a `Promise.race`, a `.then` or a wrapper — passes a literal `<kind>: <detail>` that
  *   `sleep.mjs` accepts; every other sleep (a browser page's `waitForTimeout`, a helper named like a sleep) carries the
@@ -426,6 +429,125 @@ export function delayCalls(text, file = 'snippet.js') {
     ts.forEachChild(n, visit);
   };
   visit(sf);
+  return out.sort((a, b) => a.line - b.line);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// a race timer that outlives the race
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** Every `Promise.race(...)` call in a parsed file, in source order. */
+function raceCalls(sf) {
+  const out = [];
+  const visit = (n) => {
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)
+      && n.expression.name.text === 'race' && n.expression.expression.getText(sf) === 'Promise') out.push(n);
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/**
+ * How many `Promise.race(...)` calls one source text holds. The independent count a gate sets against a plain-text reading, so
+ * a spelling of the call the tree reader does not see is named.
+ *
+ * @param {string} text
+ * @param {string} [file]
+ * @returns {number}
+ */
+export function promiseRaceCount(text, file = 'snippet.js') {
+  return raceCalls(parseSource(file, text)).length;
+}
+
+/** The smallest function around `node`, or the file when it sits at the top level. */
+function scopeOf(node, sf) {
+  for (let p = node.parent; p; p = p.parent) if (isFunctionNode(p)) return p;
+  return sf;
+}
+
+/** Does `scope` clear a timer held in `name`: `clearTimeout(name)` or `x.clearTimeout(name)`? */
+function clearsTimerHeldIn(scope, name) {
+  let hit = false;
+  const visit = (n) => {
+    if (hit) return;
+    if (ts.isCallExpression(n) && n.arguments.length >= 1 && ts.isIdentifier(n.arguments[0]) && n.arguments[0].text === name) {
+      const e = n.expression;
+      if ((ts.isIdentifier(e) && e.text === 'clearTimeout') || (ts.isPropertyAccessExpression(e) && e.name.text === 'clearTimeout')) { hit = true; return; }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(scope);
+  return hit;
+}
+
+/** The name a timer call's handle is kept in (`timer = setTimeout(...)`, `const timer = setTimeout(...)`), or null. */
+function handleNameOf(call) {
+  const p = call.parent;
+  if (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.right === call && ts.isIdentifier(p.left)) return p.left.text;
+  if (ts.isVariableDeclaration(p) && p.initializer === call && ts.isIdentifier(p.name)) return p.name.text;
+  return null;
+}
+
+/**
+ * Every global `setTimeout(...)` that sits in a `Promise.race(...)` and is neither cleared nor `unref()`ed, in line order.
+ *
+ * ## What it prevents
+ *
+ * A timer that loses the race is still armed. A test that races its answer against `setTimeout(() => r('hung'), 20_000)` and
+ * never clears the timer ends its last case at once and then waits the timer out before the process may exit: the file's
+ * row in CI is the timer's length longer than its tests (bundle-348 found five files from the timing records). The cost is
+ * invisible to every test, so only a gate over the source can name it.
+ *
+ * ## What counts
+ *
+ * - The timer is in an argument of `Promise.race`, or in the initializer of a local variable an argument names
+ *   (`const hung = new Promise(...)` raced as `[work, hung]`): one level, in this file.
+ * - It is settled when it is `setTimeout(...).unref()`, or its handle is kept in a variable that `clearTimeout` is called on
+ *   in the function around the race (or around the variable's declaration). A timer that goes through `settleWithin`
+ *   (`standalone/_write-faults.mjs`, which clears its own) is not written here at all.
+ * - NOT judged, each another question: the shared `elapse(ms, 'race timeout: ...')` and `node:timers/promises`' `setTimeout`
+ *   (a named kind of delay that `delayCalls` reads), and a timer the race does not hold.
+ *
+ * @param {string} text
+ * @param {string} [file]
+ * @returns {Array<{ file: string, line: number, kind: string, reason: null, text: string }>}
+ */
+export function uncancelledRaceTimers(text, file = 'snippet.js') {
+  const sf = parseSource(file, text);
+  const bound = timersPromisesBindings(sf);
+  const declared = new Map();
+  const index = (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) declared.set(n.name.text, n);
+    ts.forEachChild(n, index);
+  };
+  index(sf);
+  const seen = new Set();
+  const out = [];
+  for (const race of raceCalls(sf)) {
+    const roots = [];
+    for (const arg of race.arguments) {
+      roots.push({ node: arg, scope: scopeOf(race, sf) });
+      const members = ts.isArrayLiteralExpression(arg) ? arg.elements : [arg];
+      for (const m of members) {
+        const decl = ts.isIdentifier(m) ? declared.get(m.text) : null;
+        if (decl) roots.push({ node: decl.initializer, scope: scopeOf(decl, sf) });
+      }
+    }
+    for (const { node, scope } of roots) {
+      const visit = (n) => {
+        if (ts.isCallExpression(n) && armsGlobalTimer(n, bound) && !seen.has(n)) {
+          seen.add(n);
+          const unrefed = ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n && n.parent.name.text === 'unref';
+          const handle = handleNameOf(n);
+          const cleared = handle !== null && (clearsTimerHeldIn(scope, handle) || clearsTimerHeldIn(scopeOf(race, sf), handle));
+          if (!unrefed && !cleared) out.push(finding(sf, file, n, 'race-timer', null));
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(node);
+    }
+  }
   return out.sort((a, b) => a.line - b.line);
 }
 
