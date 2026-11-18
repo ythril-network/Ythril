@@ -212,6 +212,28 @@ describe('the Convert act and the status of a run answer alike on every door (re
       });
     }
 
+    it('a split of a type the schema no longer declares is refused with its step index: its conditions cannot be judged, and no run starts', async () => {
+      // `ghost` is declared by no type of the current schema: a condition could not be compiled against its properties, so every record of it would
+      // become an unconverted item. The split has to be declared with the schema change that removes the type, or the type put back first.
+      const split = { op: 'splitType', kind: 'entity', from: 'ghost', cases: [{ when: 'self.name == "a"', to: 'person' }], otherwise: 'person' };
+      const before = await stateOf(REFUSE);
+      const got = await alike(d => d.start(REFUSE, { types: [{ kind: 'entity', type: 'ghost' }], steps: [RENAME, split] }, rights.spaceAdmin), 'a split of an undeclared type');
+      assert.deepEqual([got.status, got.body.code, got.body.step], [400, 'bad_conversion_step', 1], JSON.stringify(got));
+      assert.match(got.body.error, /^steps\[1\]: /);
+      assert.match(got.body.error, /'ghost'/, 'the refusal does not name the type');
+      assert.match(got.body.error, /no longer in the schema/, 'the refusal does not say the type is gone from the schema');
+      assert.match(got.body.error, /conditions cannot be judged/, 'the refusal does not say why');
+      assert.match(got.body.error, /declare the split with the schema change that removes the type/, 'the refusal does not say how to do it');
+      assert.match(got.body.error, /put the type back first/);
+      assert.deepEqual(await stateOf(REFUSE), before, 'a refused start wrote something');
+      await noRun(REFUSE, 'a split of an undeclared type');
+      // A split of a type the schema still declares is held (and may be started): the refusal is for the undeclared one alone.
+      const declared = { ...split, from: 'person', cases: [{ when: 'true', to: 'person' }] };
+      const ok = await acts.schemaConvertStartAct(MAXED, { types: PERSON, steps: [declared] }, caller(rights.spaceAdmin));
+      assert.equal(ok.status < 300, true, JSON.stringify(ok));
+      await completed(MAXED);
+    });
+
     it('too many steps name the first step past the bound, and the exact number of types is taken', async () => {
       const steps = Array.from({ length: 51 }, (_, i) => ({ ...RENAME, from: `n${i}`, to: `a${i}` }));
       const got = await alike(d => d.start(REFUSE, { types: PERSON, steps }, rights.spaceAdmin), 'too many steps');

@@ -27,8 +27,9 @@
  * - **A step checked against a schema it was never written for.** The steps are held to the schema the space has now (`conversionStepIssues`, its
  *   "after" half: the new names are declared, and a renamed property's old name is not), and a split's conditions are judged against the type as the
  *   schema declares it. Its "before" half is not asked: the schema the records were written under is not known to an act, and the old names a
- *   conversion moves are by definition no longer declared. A refused step answers `400 bad_conversion_step` with its index in `step`, and nothing is
- *   started.
+ *   conversion moves are by definition no longer declared. The one exception is a split: its conditions are read against the properties of the type it
+ *   splits, so a split of a type the schema no longer declares is refused too (its conditions cannot be judged, and every record of the type would become
+ *   an unconverted item). A refused step answers `400 bad_conversion_step` with its index in `step`, and nothing is started.
  * - **Two answers to one request.** Both doors hand the raw body to {@link schemaConvertStartAct}, which judges every key, so an unknown key (there is
  *   no opt-in parameter: every copy held here is converted) is refused alike by the route and the tool.
  * - **A second run on a run.** An unfinished run refuses an explicit start (`409 schema_convert_running`); only a schema save or a passed round joins
@@ -50,7 +51,7 @@ import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { holdsRung, rungRefusal } from '../auth/reachable-spaces.js';
 import { isSpaceAdminFor } from '../auth/editor-scope.js';
-import { refusalOfParse } from '../util/log.js';
+import { refusalOfParse, peerText, NAME_QUOTED } from '../util/log.js';
 import { isConfiguredSpace } from './space-lookup.js';
 import { lostSpaceAnswer } from './unknown-space.js';
 import { readMetaForWrite } from './schema-stamp.js';
@@ -104,6 +105,12 @@ function rightsRefusal(spaceId: string, rights: TokenRights | null | undefined, 
 /** The names the "before" half of a step's check judges: the schema the records were written under, which an act cannot know. */
 const judgesBefore = (code: ConversionIssueCode): boolean => code.endsWith('_before');
 
+/** Does `meta` declare a type of this kind and name? Own keys only: a record's type name is data, and `constructor` is not a declared type. */
+function declaresType(meta: ConversionMeta | undefined, kind: string, type: string): boolean {
+  const ofKind = (meta?.typeSchemas as Record<string, Record<string, unknown> | undefined> | undefined)?.[kind];
+  return ofKind !== undefined && Object.hasOwn(ofKind, type);
+}
+
 /**
  * The first step the schema NOW cannot hold, as a refusal; `null` when every step holds. Held to the current schema as both the "before" and the "after"
  * (the schema package reads them alike), with every issue about the "before" dropped (see the docblock): a name the current schema still declares
@@ -111,7 +118,17 @@ const judgesBefore = (code: ConversionIssueCode): boolean => code.endsWith('_bef
  */
 function stepRefusal(spaceId: string, steps: readonly ConversionStep[]): SchemaConvertActResult | null {
   const current = readMetaForWrite(spaceId).meta as ConversionMeta | undefined;
-  const issues = conversionStepIssues(steps, current, current).filter(i => !judgesBefore(i.code));
+  const issues: { step: number; code: string; message: string }[] = conversionStepIssues(steps, current, current).filter(i => !judgesBefore(i.code));
+  // A split of a type the schema no longer declares: the run judges its conditions against the type's declared properties, and a type that is gone declares
+  // none, so every record of it would become an unconverted item. The "before" half would have named it; an act drops that half, so this is its one case.
+  steps.forEach((s, step) => {
+    // A step that is not a well-formed split is `conversionStepIssues`' to name (`malformed_step`); only a split that names its type is asked here.
+    if (s?.op === 'splitType' && typeof s.kind === 'string' && typeof s.from === 'string' && !declaresType(current, s.kind, s.from)) {
+      issues.push({ step, code: 'split_type_not_declared', message: `the ${s.kind} type '${peerText(s.from, { max: NAME_QUOTED })}' the split reads is no longer in the schema, so its conditions cannot be judged: `
+        + 'declare the split with the schema change that removes the type (or put the type back first)' });
+    }
+  });
+  issues.sort((a, b) => a.step - b.step);
   // A list over the bound names the first step past it, whatever its earlier steps are (as a schema save does): the bound is the first thing wrong with it.
   const issue = issues.find(i => i.code === 'too_many_steps') ?? issues[0];
   return issue
