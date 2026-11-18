@@ -14,9 +14,11 @@
  * both doors share from `spaces/schema-convert-terms.ts` and is handed the two acts through {@link useSchemaConvertActs}, which the route module
  * (`api/spaces-schema-convert.ts`, mounted by the application at its load) calls. A call before anything wired them throws, naming the port.
  */
+import { z } from 'zod';
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { SCHEMA_CONVERT_REFUSAL_CODES, SCHEMA_CONVERT_TYPES_MAX, type SchemaConvertActResult, type SchemaConvertCaller } from '../../spaces/schema-convert-terms.js';
-import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
+import {
+  SCHEMA_CONVERT_REFUSAL_CODES, SCHEMA_CONVERT_TYPES_MAX, SchemaConvertTypesZ, type SchemaConvertActResult, type SchemaConvertCaller,
+} from '../../spaces/schema-convert-terms.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
 import { toolRefusalOfAct, type ToolRefusal } from '../../util/errors.js';
 import { CONVERT_RECORDS_PARAMETER } from './schema-update-parts.js';
@@ -59,6 +61,19 @@ const STEPS_PARAMETER: Record<string, unknown> = {
     + 'stamp the records that already conform and list the ones that do not, rewriting nothing.',
 };
 
+/**
+ * The `types` parameter WRITTEN BY zod's converter from the schema the act parses a start with (`SchemaConvertTypesZ`), so the tool and the route state
+ * one set of bounds (how many types, which kinds, how long a name); `$schema` is left out, as for every property of a tool.
+ */
+const TYPES_PARAMETER: Record<string, unknown> = (() => {
+  const { $schema: _draft, ...shape } = z.toJSONSchema(SchemaConvertTypesZ, { io: 'input' }) as Record<string, unknown>;
+  return {
+    ...shape,
+    description: `The types to convert, at least one and at most ${SCHEMA_CONVERT_TYPES_MAX}: \`[{ kind, type }]\`. Every record of each type this instance holds is `
+      + 'read, so the run takes as long as those records take; the records of other types are not read.',
+  };
+})();
+
 export const space_schema_convertTool: ToolHandler = {
   name: 'space_schema_convert',
   description: 'Convert the records of the types you name to the schema the space has now, so records written under an older schema conform to it and '
@@ -87,18 +102,7 @@ export const space_schema_convertTool: ToolHandler = {
     type: 'object',
     properties: {
       space: s.requiredSpace,
-      types: {
-        type: 'array', minItems: 1, maxItems: SCHEMA_CONVERT_TYPES_MAX,
-        items: {
-          type: 'object', additionalProperties: false, required: ['kind', 'type'],
-          properties: {
-            kind: { type: 'string', enum: [...KNOWLEDGE_TYPES], description: 'The kind of the records to convert: `entity`, `fact`, `edge` or `chrono`. A kind that is none of them refuses the whole call and starts nothing.' },
-            type: { type: 'string', minLength: 1, description: 'The type name (for an edge, its label). Naming a type no record has costs nothing.' },
-          },
-        },
-        description: `The types to convert, at least one and at most ${SCHEMA_CONVERT_TYPES_MAX}: \`[{ kind, type }]\`. Every record of each type this instance holds is `
-          + 'read, so the run takes as long as those records take; the records of other types are not read.',
-      },
+      types: TYPES_PARAMETER,
       steps: STEPS_PARAMETER,
     },
     required: ['space', 'types'],

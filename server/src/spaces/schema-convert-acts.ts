@@ -58,7 +58,7 @@ import { refusalOfParse, peerText, NAME_QUOTED } from '../util/log.js';
 import { isConfiguredSpace } from './space-lookup.js';
 import { lostSpaceAnswer } from './unknown-space.js';
 import { readMetaForWrite } from './schema-stamp.js';
-import { startSchemaConvertRun, schemaConvertStatus, type SchemaConvertType } from './schema-convert-run.js';
+import { startSchemaConvertRun, schemaConvertStatus } from './schema-convert-run.js';
 import {
   SCHEMA_CONVERT_TYPES_MAX, SCHEMA_CONVERT_REFUSAL_CODES, SCHEMA_CONVERT_RATE_LIMITED, SchemaConvertBody, ConvertTypeZ,
   type SchemaConvertActResult, type SchemaConvertCaller,
@@ -126,18 +126,34 @@ function stepRefusal(spaceId: string, steps: readonly ConversionStep[]): SchemaC
     : null;
 }
 
-/** The types of a request, or the refusal: a list of one to the most a run takes, each a named type. */
-function typesOf(raw: unknown): { ok: true; types: SchemaConvertType[] } | { ok: false; refusal: SchemaConvertActResult } {
+/** The refusal of the `types` of a request, or `null`: a list of one to the most a run takes, each a named type. */
+function typesRefusal(raw: unknown): SchemaConvertActResult | null {
   if (!Array.isArray(raw) || raw.length === 0) {
-    return { ok: false, refusal: refusal(BAD_BODY, '`types` must be a list of the types to convert: [{ kind, type }, ...], at least one', BAD_TYPES) };
+    return refusal(BAD_BODY, '`types` must be a list of the types to convert: [{ kind, type }, ...], at least one', BAD_TYPES);
   }
   if (raw.length > SCHEMA_CONVERT_TYPES_MAX) {
-    return { ok: false, refusal: refusal(BAD_BODY, `\`types\` names at most ${SCHEMA_CONVERT_TYPES_MAX} types: ${raw.length} were sent`, TOO_MANY_TYPES) };
+    return refusal(BAD_BODY, `\`types\` names at most ${SCHEMA_CONVERT_TYPES_MAX} types: ${raw.length} were sent`, TOO_MANY_TYPES);
   }
   const parsed = z.array(ConvertTypeZ).safeParse(raw);
-  return parsed.success
-    ? { ok: true, types: parsed.data }
-    : { ok: false, refusal: refusal(BAD_BODY, refusalOfParse(parsed.error).error, BAD_TYPES) };
+  return parsed.success ? null : refusal(BAD_BODY, refusalOfParse(parsed.error).error, BAD_TYPES);
+}
+
+/**
+ * The coded refusal of a start {@link SchemaConvertBody} refused, in the order a caller is told: a body that is not an object or holds a key the start
+ * has no parameter for (`bad_convert_request`), then `types` ({@link typesRefusal}: `bad_convert_types`, `too_many_convert_types`), then `steps` (not
+ * a list: `bad_convert_request`; over the bound: the step check, naming the first step past it as `bad_conversion_step`). The schema holds the bounds
+ * the doors state and the gates compare; these name a broken one by the code both doors answer, never by the schema's words. A failure none of them
+ * names is answered in the schema's words as a bad request: a request the schema refused is never started.
+ */
+function startRefusal(spaceId: string, input: unknown, error: z.ZodError): SchemaConvertActResult {
+  const whole = refusal(BAD_BODY, refusalOfParse(error).error, BAD_REQUEST);
+  const atRoot = error.issues.filter(i => i.path.length === 0);
+  if (atRoot.length > 0) return refusal(BAD_BODY, refusalOfParse({ issues: atRoot }).error, BAD_REQUEST);
+  const raw = (input ?? {}) as Record<string, unknown>;
+  if (error.issues.some(i => i.path[0] === 'types')) return typesRefusal(raw['types']) ?? whole;
+  const steps = raw['steps'];
+  if (!Array.isArray(steps)) return refusal(BAD_BODY, '`steps` must be a list of conversion steps', BAD_REQUEST);
+  return stepRefusal(spaceId, steps as ConversionStep[]) ?? whole;
 }
 
 /**
@@ -151,12 +167,8 @@ export async function schemaConvertStartAct(spaceId: string, input: unknown, cal
   if (denied) return denied;
 
   const body = SchemaConvertBody.safeParse(input ?? {});
-  if (!body.success) return refusal(BAD_BODY, refusalOfParse(body.error).error, BAD_REQUEST);
-  const named = typesOf(body.data.types);
-  if (!named.ok) return named.refusal;
-  const stepList = z.array(z.unknown()).optional().safeParse(body.data.steps);
-  if (!stepList.success) return refusal(BAD_BODY, '`steps` must be a list of conversion steps', BAD_REQUEST);
-  const steps = (stepList.data ?? []) as ConversionStep[];
+  if (!body.success) return startRefusal(spaceId, input, body.error);
+  const steps = (body.data.steps ?? []) as ConversionStep[];
   const bad = stepRefusal(spaceId, steps);
   if (bad) return bad;
 
@@ -165,9 +177,9 @@ export async function schemaConvertStartAct(spaceId: string, input: unknown, cal
   const admit = () => (consumeHeavyToolCall(caller.rateKey)
     ? null
     : { ok: false as const, status: TOO_MANY_REQUESTS, code: RATE_LIMITED, error: SCHEMA_CONVERT_RATE_LIMITED });
-  const started = await startSchemaConvertRun({ spaceId, types: named.types, steps, source: { kind: 'act' }, admit });
+  const started = await startSchemaConvertRun({ spaceId, types: body.data.types, steps, source: { kind: 'act' }, admit });
   if (!started.ok) return refusal(started.status, started.error, started.code);
-  const types = named.types.map(t => ({ kind: t.kind, type: t.type }));
+  const types = body.data.types.map(t => ({ kind: t.kind, type: t.type }));
   return { status: ACCEPTED, body: { state: 'started', toFp: started.run?.toFp ?? readMetaForWrite(spaceId).stamp.fp, types, steps: steps.length } };
 }
 

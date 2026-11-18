@@ -92,19 +92,23 @@ export interface UnconvertedCaller {
 /** An empty value is no value: the one rule every list of the Brain reads a blank filter by (`kind=` in a query string). */
 const blankIsAbsent = (v: unknown): unknown => (v === '' ? undefined : v);
 
+/** A filter both doors may leave out or send blank: optional outside the blank rule too, so the schema states it as optional, as the tools do. */
+const optionalFilter = <T extends z.ZodType>(inner: T) => z.preprocess(blankIsAbsent, inner.optional()).optional();
+
 /**
- * The filters both doors take, parsed by this one schema so the route's query and the tool's arguments cannot state different bounds.
+ * The filters both doors take, parsed by this one schema so the route's query and the tool's arguments cannot state different bounds: the MCP
+ * tools declare the same kinds, reasons and name length from the same constants, and the bounds gate compares the two.
  * `skip` and `limit` are the list module's (`resolveListPaging`) and are not parsed here.
  */
 export const UnconvertedFilterParams = z.object({
-  kind: z.preprocess(blankIsAbsent, z.enum(KNOWLEDGE_TYPES).optional()),
-  type: z.preprocess(blankIsAbsent, z.string().max(TYPE_NAME_MAX).optional()),
-  reason: z.preprocess(blankIsAbsent, z.enum(UNCONVERTED_REASONS).optional()),
+  kind: optionalFilter(z.enum(KNOWLEDGE_TYPES)),
+  type: optionalFilter(z.string().max(TYPE_NAME_MAX)),
+  reason: optionalFilter(z.enum(UNCONVERTED_REASONS)),
 });
 
 /** The list's parameters: the filter the bulk dismiss shares, and the `status` only a list chooses. */
 export const UnconvertedListParams = UnconvertedFilterParams.extend({
-  status: z.preprocess(blankIsAbsent, z.enum(UNCONVERTED_STATUSES).optional()),
+  status: optionalFilter(z.enum(UNCONVERTED_STATUSES)),
 });
 
 /** The bulk dismiss's parameters: the same filter, and `expect`, the number of open items the caller was shown (required, a whole number). */

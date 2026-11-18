@@ -52,26 +52,6 @@ const DIFFER_ON_PURPOSE = new Map([
   ['schema_update:typeSchemas.required',
     'the tool is the meta door as a whole — it writes type schemas AND the other meta fields, and merges — while '
     + '`PUT /api/spaces/:id/schema` is the type-schema half alone; the meta-only half is `PATCH /api/spaces/:id`.'],
-  /*
-   * The conversion doors (Q-746, Q-919, bundle-284 slice 6). Each capability is ONE act (`spaces/schema-convert-acts.ts`, `spaces/unconverted-acts.ts`)
-   * that judges every parameter with the coded refusal both doors answer, and the tools skip the dispatcher's own argument check for that reason
-   * (`skipSchemaValidation`: a bound the dispatcher refused first would answer in its words and without the code, on the tool door only). So the
-   * zod schemas the acts parse with hold the parameters loosely, and the tool states the bound for the caller to read.
-   */
-  ...[
-    ['space_schema_convert', ['types.minItems', 'types.maxItems', 'steps.maxItems', 'steps.required'],
-      'the act judges `types` and `steps` itself (`typesOf`, `stepRefusal`), by the codes `bad_convert_types`, `too_many_convert_types` and `bad_conversion_step` '
-      + 'both doors answer; `SchemaConvertBody` holds them as `z.unknown()` so that those codes, and not a schema message, are what a caller reads. The tool '
-      + 'states the bounds (1 to 50 types, at most 50 steps) and `steps` as optional for the caller; the act, not the schema, is what refuses.'],
-    ['list_unconverted', ['kind.enum', 'kind.required', 'type.maxLength', 'type.required', 'reason.enum', 'reason.required', 'status.enum', 'status.required'],
-      'the act parses the filters with `UnconvertedListParams`, which wraps each in a preprocess (an empty value is no filter), so the JSON schema it renders '
-      + 'lists them as required and carries the enum; the tool declares no enum or length on purpose, because the act refuses a wrong one by its own code '
-      + '(`unconverted_bad_kind`, `unconverted_bad_type`, `unconverted_bad_reason`, `unconverted_bad_status`), the words the route answers too.'],
-    ['dismiss_unconverted_shown', ['kind.enum', 'kind.required', 'type.maxLength', 'type.required', 'reason.enum', 'reason.required'],
-      'the act parses the filter with `UnconvertedDismissShownParams`, which wraps each field in a preprocess (an empty value is no filter), so the JSON schema '
-      + 'it renders lists them as required and carries the enum; the tool declares no enum or length on purpose, because the act refuses a wrong one by its own '
-      + 'code (`unconverted_bad_kind`, `unconverted_bad_type`, `unconverted_bad_reason`), the words the route answers too.'],
-  ].flatMap(([tool, params, why]) => params.map(p => [`${tool}:${p}`, why])),
 ]);
 
 /**

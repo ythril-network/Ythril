@@ -12,7 +12,7 @@
  * (`check-i-architecture-dependency-direction`). A term moved here is re-exported by the module it came from, for that module's own readers.
  */
 import { z } from 'zod';
-import { isDeclarableTypeName, TYPE_NAME_MAX } from '@ythril-network/schema/internal';
+import { CONVERSION_STEPS_MAX, isDeclarableTypeName, TYPE_NAME_MAX } from '@ythril-network/schema/internal';
 import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../rate-limit/heavy-tool.js';
@@ -46,14 +46,24 @@ export interface SchemaConvertCaller {
   readonly rateKey: string;
 }
 
-/**
- * The start's parameters, every key judged by the act: `types` and `steps` are taken as sent here and judged by their own refusals in the act, so a
- * bad `types` and a bad `steps` answer by their own codes on both doors. Strict: a key this capability has no parameter for is refused, never ignored.
- */
-export const SchemaConvertBody = z.object({ types: z.unknown(), steps: z.unknown() }).strict();
-
 /** One named type: a knowledge kind and a type name (an edge's type is its label). The run's own whole-kind marker is not a type name. */
 export const ConvertTypeZ = z.object({
-  kind: z.enum(KNOWLEDGE_TYPES),
-  type: z.string().min(1).max(TYPE_NAME_MAX).refine(name => isDeclarableTypeName(name) && name !== '*', 'is not a type name'),
+  kind: z.enum(KNOWLEDGE_TYPES)
+    .describe('The kind of the records to convert: `entity`, `fact`, `edge` or `chrono`. A kind that is none of them refuses the whole call and starts nothing.'),
+  type: z.string().min(1).max(TYPE_NAME_MAX).refine(name => isDeclarableTypeName(name) && name !== '*', 'is not a type name')
+    .describe('The type name (for an edge, its label). Naming a type no record has costs nothing.'),
+}).strict();
+
+/** The types of a start: at least one, at most {@link SCHEMA_CONVERT_TYPES_MAX}, each a named type. */
+export const SchemaConvertTypesZ = z.array(ConvertTypeZ).min(1).max(SCHEMA_CONVERT_TYPES_MAX);
+
+/**
+ * The start's parameters, the bounds both doors state: {@link SchemaConvertTypesZ}, and `steps`, which may be left out and holds at most the schema
+ * package's `CONVERSION_STEPS_MAX` (what each step says is judged against the schema by the act, `conversionStepIssues`, by step index). The act
+ * names a broken bound by its own code (`bad_convert_types`, `too_many_convert_types`, `bad_convert_request`, `bad_conversion_step`), never by this
+ * schema's words, and the MCP tool declares `types` from this schema. Strict: a key this capability has no parameter for is refused, never ignored.
+ */
+export const SchemaConvertBody = z.object({
+  types: SchemaConvertTypesZ,
+  steps: z.array(z.unknown()).max(CONVERSION_STEPS_MAX).optional(),
 }).strict();
