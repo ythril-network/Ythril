@@ -55,7 +55,9 @@ describe('preflight', () => {
     assert.match(src, /import \{[^}]*\bworkersPerUnit\b[^}]*\} from '\.\.\/testing\/_shared\/offline-test-width\.mjs'/,
       'scripts/preflight.mjs does not import workersPerUnit from testing/_shared/offline-test-width.mjs');
     const settings = [...src.matchAll(/--test-concurrency=\$\{([^}]*)\}/g)].map(m => m[1].trim());
-    assert.ok(settings.length > 0, 'scripts/preflight.mjs sets no --test-concurrency for its pure units');
+    // Two stages run units (Q-870): the text stage and the pure stage. Each sets its own --test-concurrency, and each must take it from workersPerUnit, so
+    // the files alive at once are the cap in whichever stage is running (the stages run one after the other, never beside each other).
+    assert.ok(settings.length >= 2, `scripts/preflight.mjs sets ${settings.length} --test-concurrency value(s): the text stage and the pure stage each set one for their units`);
     for (const s of settings) {
       // A unit the recorded times put alone (Q-869, `.slow`) runs with one worker, the only other setting; every other unit takes workersPerUnit.
       assert.match(s, /^(?:[\w.[\]]+\.slow\s*\?\s*1\s*:\s*)?workersPerUnit\(\s*UNIT_WIDTH\s*\)$/, `preflight sets --test-concurrency=\${${s}}, not \${workersPerUnit(UNIT_WIDTH)} (or one worker for a unit that runs alone)`);

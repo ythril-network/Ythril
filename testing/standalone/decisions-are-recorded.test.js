@@ -37,6 +37,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { REPO_ROOT, trackedSources } from './_sources.mjs';
 
 const DIR = join('docs', 'decisions');
 /**
@@ -118,19 +119,26 @@ describe('every record reasons, rather than announcing', () => {
 });
 
 describe('the records point at things that are actually there', () => {
-  it('every cited repository path exists', () => {
+  it('every cited repository path is a file or a folder the repository tracks', () => {
     // The failure mode for a retrospective record: it cites a file that has since moved, and now the pointer is
-    // worse than no pointer.
+    // worse than no pointer. Checked against the TRACKED tree from the repository root (Q-870), never the disk: a record
+    // that cites a build output (`server/dist`) passes where a build exists and fails in a fresh checkout, and that
+    // made the file a build-dependent test, which cannot run in the preflight's source stage before the builds.
+    const tracked = new Set();
+    for (const file of trackedSources('.', { ext: null, floor: 500 })) {
+      tracked.add(file);
+      for (let at = file.lastIndexOf('/'); at > 0; at = file.lastIndexOf('/', at - 1)) tracked.add(file.slice(0, at));
+    }
     const missing = [];
-    for (const f of readdirSync(DIR).filter(x => /^\d{2}-.+\.md$/.test(x))) {
-      const src = readFileSync(join(DIR, f), 'utf8');
+    for (const f of readdirSync(join(REPO_ROOT, DIR)).filter(x => /^\d{2}-.+\.md$/.test(x))) {
+      const src = readFileSync(join(REPO_ROOT, DIR, f), 'utf8');
       for (const m of src.matchAll(/`((?:server|client|testing|docs|sidecars)\/[A-Za-z0-9._\-/]+|Dockerfile|NOTICE)`/g)) {
         const p = m[1];
         // Skip globby or illustrative references.
         if (p.includes('*')) continue;
-        if (!existsSync(p)) missing.push(`${f} → ${p}`);
+        if (!tracked.has(p.replace(/\/$/, ''))) missing.push(`${f} → ${p}`);
       }
     }
-    assert.deepEqual(missing, [], `these citations point at paths that do not exist:\n  ${missing.join('\n  ')}`);
+    assert.deepEqual(missing, [], `these citations point at paths the repository does not track (a build output is not one; cite the source):\n  ${missing.join('\n  ')}`);
   });
 });

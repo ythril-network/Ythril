@@ -160,8 +160,10 @@ describe('preflight invokes the offline subset within the platform limit', () =>
       'batching by a fixed file count drifts back over the limit as names grow');
     // Re-anchored (bundle-30 I9): preflight no longer calls `batched` itself. It runs `offlineRuns`, the shared plan
     // that batches inside it and caps the database-backed files — the same plan `test:standalone` runs.
-    assert.match(SPLIT, /export function offlineRuns\([^]*?batched\(split\.offlinePure[^]*?batched\(split\.offlineDb/,
-      'the shared plan must batch both halves through `batched`');
+    // Since Q-870 the plan has three kinds (text, pure, db); the rule is that EVERY kind goes through `batched`, however the file lists are named.
+    const plan = SPLIT.match(/export function offlineRuns\([^]*?\n\}/)?.[0] ?? '';
+    assert.ok((plan.match(/\bbatched\(/g) ?? []).length >= 3 && /offlinePure/.test(plan) && /offlineDb/.test(plan),
+      'the shared plan must batch every kind (text, pure, db) through `batched`');
     assert.match(script, /offlineRuns\(/, 'preflight must run the shared plan, not its own copy');
     assert.doesNotMatch(script, /batched\(/, 'preflight builds its own command lines again — a second copy of the plan');
   });
@@ -249,6 +251,31 @@ describe('preflight invokes the offline subset within the platform limit', () =>
     const flags = timingReporterFlags({ suite: 'preflight', batch: 'pure-99', scope: 'subset', dir: mkdtempSync(join(scratchRoot(), 'flags-')) });
     const longest = Math.max(...units.map(u => ['node', ...boundedTestArgs('--test-concurrency=1', ...u.args, ...flags.args, ...u.files)].join(' ').length));
     assert.ok(longest < WINDOWS_LIMIT, `the longest unit is ${longest} characters, over the ${WINDOWS_LIMIT} CreateProcess allows`);
+  });
+
+  it('the pure units hold no text-only file, the text stage holds the text-only files minus the gate files, and each gate file runs once in its own stage: every pure file exactly once', async () => {
+    /*
+     * Q-870: a pure file that reads only tracked text runs in the source stage, before the builds, so it must not run again in the pure units; the eleven
+     * gate files are text-only too but have a stage each (their sentence and their place in the cost order), so the text stage leaves them out. The rule
+     * over the whole set: pure units + text stage + gate stages = every pure file the preflight runs, each exactly once, with a floor so a classifier
+     * that found nothing cannot make the three lists look disjoint.
+     */
+    const { offlineRuns, splitStandalone } = await import('../_shared/standalone-split.mjs');
+    const { slowFirstUnits } = await import('../../scripts/_shared/slow-first-units.mjs');
+    const { SOURCE_GATE_FILES } = await import('../../scripts/_shared/preflight-stages.mjs');
+    assert.ok(SOURCE_GATE_FILES instanceof Set && SOURCE_GATE_FILES.size >= 11, 'preflight-stages.mjs exports no SOURCE_GATE_FILES set: the text stage cannot leave the gate files to their own stages');
+    const split = splitStandalone();
+    const runs = offlineRuns(split, { ciOnly: false });
+    const filesOf = (kind) => runs.filter(r => r.kind === kind).flatMap(r => r.files);
+    const textRuns = runs.filter(r => r.kind === 'text').map(r => ({ ...r, files: r.files.filter(f => !SOURCE_GATE_FILES.has(f)) })).filter(r => r.files.length > 0);
+    const textStage = slowFirstUnits(textRuns, null, { maxSlow: 8 }).flatMap(u => u.files);
+    const pureUnits = slowFirstUnits(runs.filter(r => r.kind === 'pure'), null, { maxSlow: 8 }).flatMap(u => u.files);
+    assert.ok(textStage.length >= 150, `the text stage runs only ${textStage.length} file(s): the classifier found almost nothing`);
+    const all = [...pureUnits, ...textStage, ...SOURCE_GATE_FILES];
+    assert.equal(new Set(all).size, all.length, 'a pure file is in two of: the pure units, the text stage, a gate stage');
+    const expected = split.offlinePure.filter(f => !split.ciOnly.includes(f)).map(f => `testing/standalone/${f}`);
+    assert.deepEqual([...all].sort(), [...expected].sort(), 'the pure units, the text stage and the gate stages are not the preflight\'s pure files exactly once');
+    for (const gate of SOURCE_GATE_FILES) assert.ok(filesOf('text').includes(gate), `${gate} is a gate stage's file and is not text-only: it would run in a source stage that needs no build while reading one`);
   });
 
   it('preflight reads the file times through readFileTimes, hands the pure runs and the times to slowFirstUnits with at most 2 x its unit width alone, and runs a slow unit with one worker', () => {
