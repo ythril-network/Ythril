@@ -28,7 +28,7 @@ import { z } from 'zod';
 import { KNOWLEDGE_TYPES, type KnowledgeType } from './vocabulary.js';
 import { VIEW_FIELDS } from './view-fields.js';
 import { MAX_RULES_PER_SPACE, MAX_RULE_LENGTH, conditionIssues } from './rules.js';
-import { TYPE_NAME_MAX, PROPERTY_NAME_MAX } from './space-meta.js';
+import { TYPE_NAME_MAX } from './space-meta.js';
 import { canonicalJson } from './canonical-json.js';
 import { isPlainObject, ownValue, setOwn } from './plain-object.js';
 import { NAME_QUOTED, peerText, refusalOfParse } from './text.js';
@@ -55,6 +55,8 @@ export interface ConvertRecords { steps?: ConversionStep[] }
 
 const KindZ = z.enum(KNOWLEDGE_TYPES);
 const TypeNameZ = z.string().min(1).max(TYPE_NAME_MAX);
+/** The longest property name a step may name: the key bound of a type's `propertySchemas` (space-meta.ts), as long as any name a type can declare. */
+const PROPERTY_NAME_MAX = TYPE_NAME_MAX;
 const PropertyNameZ = z.string().min(1).max(PROPERTY_NAME_MAX);
 const SplitCaseZ = z.object({ when: z.string().min(1).max(MAX_RULE_LENGTH), to: TypeNameZ }).strict();
 
