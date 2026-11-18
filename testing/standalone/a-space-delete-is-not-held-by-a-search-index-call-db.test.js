@@ -47,7 +47,7 @@ import path from 'node:path';
 import { openTestMongo, openFixtureMongo, closeTestMongo, mongoSkipReason, TEST_MONGO_HOST, TEST_MONGO_PORT } from './_mongo-harness.mjs';
 import { startDelayedWriteRelay } from './_delayed-write-relay.mjs';
 import { waitUntilTrue } from './_vector-harness.mjs';
-import { elapse } from '../_shared/sleep.mjs';
+import { elapse, raceDeadline } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-delete-index-'));
@@ -126,7 +126,7 @@ describe('a space delete and a search-index call', { skip }, () => {
     let deleting;
     try {
       deleting = lifecycle.removeSpace(id).then(v => ({ v }), err => ({ err }));
-      const outcome = await Promise.race([deleting, elapse(ANSWER_MS, 'race timeout: the delete must answer within its bound, not when the call is released').then(() => 'held')]);
+      const outcome = await raceDeadline(deleting, ANSWER_MS, 'race timeout: the delete must answer within its bound, not when the call is released', () => 'held');
       assert.equal(held.held.length >= 1, true, 'fixture: the delete never sent a dropSearchIndex for the relay to hold');
       assert.notEqual(outcome, 'held', `the delete was still waiting on the held search-index call after ${ANSWER_MS} ms (the bound is ${KNOB_MS} ms)`);
       assert.equal(outcome.v, true, `the delete did not complete: ${outcome.err?.message ?? outcome.v}`);

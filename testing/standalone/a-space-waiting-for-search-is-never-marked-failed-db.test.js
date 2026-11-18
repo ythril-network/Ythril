@@ -42,7 +42,7 @@ import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { unitAt, queryAxis, startStubEmbedder, waitUntilTrue } from './_vector-harness.mjs';
 import { installSearchOutage } from './_search-outage.mjs';
-import { elapse } from '../_shared/sleep.mjs';
+import { elapse, raceDeadline } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -121,10 +121,10 @@ describe('a space waiting for search is never marked failed', { skip }, () => {
   it('waitForSpaceIndexesReady on a down service answers `deferred` at once and polls nothing', async () => {
     const before = ['facts', 'entities', 'edges', 'chrono', 'files'].reduce((n, s) => n + outage.calls('listSearchIndexes', `${WAIT}_${s}`), 0);
     const started = Date.now();
-    const verdict = await Promise.race([
+    const verdict = await raceDeadline(
       vectorIndex.waitForSpaceIndexesReady(WAIT, { timeoutMs: 600_000 }),
-      elapse(20_000, 'race timeout: the wait that should answer at once is reported as still waiting').then(() => 'still waiting after 20 s'),
-    ]);
+      20_000, 'race timeout: the wait that should answer at once is reported as still waiting', () => 'still waiting after 20 s',
+    );
     assert.equal(verdict, 'deferred', 'a down search service must be reported as deferred, not as ready, failed or pending');
     assert.ok(Date.now() - started < 5_000, `took ${Date.now() - started} ms: it polled a service that is not there`);
     const after = ['facts', 'entities', 'edges', 'chrono', 'files'].reduce((n, s) => n + outage.calls('listSearchIndexes', `${WAIT}_${s}`), 0);

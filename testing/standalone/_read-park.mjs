@@ -27,7 +27,7 @@
  * `for await` over the cursor is not parked, and the arm then fails `reached` — loudly, never silently.
  */
 import assert from 'node:assert/strict';
-import { elapse } from '../_shared/sleep.mjs';
+import { raceDeadline } from '../_shared/sleep.mjs';
 
 /** The prototype that defines `toArray` for every find cursor: the driver's `AbstractCursor`. */
 function cursorPrototype(mongo) {
@@ -86,7 +86,7 @@ export function parkReadsAfterAnswer(mongo) {
 export async function holdWhileOtherRuns(park, { first, second, windowMs = 10_000, reachedWithinMs = 8_000 }) {
   const firstP = first();
   firstP.catch(() => {});
-  const reached = await Promise.race([park.reached.then(() => true), elapse(reachedWithinMs, 'race timeout: the park was never reached, which the assertion below names').then(() => false)]);
+  const reached = await raceDeadline(park.reached.then(() => true), reachedWithinMs, 'race timeout: the park was never reached, which the assertion below names', () => false);
   if (!reached) {
     park.release();
     await firstP.catch(() => {});
@@ -94,7 +94,7 @@ export async function holdWhileOtherRuns(park, { first, second, windowMs = 10_00
   assert.ok(reached, `the read of ${park.name} that was to be parked never happened: the interleaving was not reached, so nothing below says anything`);
   const secondP = second();
   secondP.catch(() => {});
-  const secondFinishedWhileFirstWasParked = await Promise.race([secondP.then(() => true, () => true), elapse(windowMs, 'race timeout: the window the second runner is given while the first is parked').then(() => false)]);
+  const secondFinishedWhileFirstWasParked = await raceDeadline(secondP.then(() => true, () => true), windowMs, 'race timeout: the window the second runner is given while the first is parked', () => false);
   park.release();
   await Promise.all([firstP, secondP]);
   return { secondFinishedWhileFirstWasParked };
