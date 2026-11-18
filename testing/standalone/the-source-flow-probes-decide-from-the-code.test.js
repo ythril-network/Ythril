@@ -398,8 +398,10 @@ describe('check-i-architecture-dependency-direction', () => {
     const back = posix.relative(posix.dirname(outside), member).replace(/\.ts$/, '.js');
     const v = decide(plant(SERVER, outside, `import './${back}';`.replace("'./../", "'../")));
     assert.equal(v.holds, false);
-    assert.match(v.reason, /a cyclic set of 317 modules in server\/src, above its ceiling/);
-    assert.equal(real.find((e) => e.id === 'cycles:server/src:largest').max, 316);
+    // The planted import adds one module to the set, so it measures one over the ceiling the allow file holds (the measure, since it only goes down).
+    const ceiling = real.find((e) => e.id === 'cycles:server/src:largest').max;
+    assert.equal(sets[0].length, ceiling, 'the largest set no longer measures its ceiling: lower the ceiling to the measure');
+    assert.match(v.reason, new RegExp(`a cyclic set of ${ceiling + 1} modules in server/src, above its ceiling`));
   });
 
   it('counts a cycle by its strongly connected set, a chain of imports as none', () => {
