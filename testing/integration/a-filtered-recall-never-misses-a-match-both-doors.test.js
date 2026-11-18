@@ -89,7 +89,9 @@ before(async () => {
   };
   // A verdict, not a throw: `ready()` below turns "never indexed" into the named failure — or into a skip when the
   // embedding model is unavailable — in each test, where a throw here would cancel the whole file.
-  indexed = await holdsWithin(async () => await served(TARGET_NAME) && await served(lastDecoy), 600_000, 2000,
+  // The poll is short because the wait ends when the index serves both records, which is all this waits for: the seed's size, not the
+  // poll, is the rule's cost, and a long interval only adds its own length to the end of the wait.
+  indexed = await holdsWithin(async () => await served(TARGET_NAME) && await served(lastDecoy), 600_000, 500,
     { what: 'the target and the last decoy to be served by the index' });
   session = await openMcpSession(token());
 });
