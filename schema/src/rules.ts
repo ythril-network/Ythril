@@ -478,6 +478,30 @@ export function typeRuleIssues(collection: string, schema: unknown): RuleIssue[]
   return issues;
 }
 
+/**
+ * The refusals for the conditions of ONE conversion split (`conversion-steps.ts`): each text the judge refuses for a type-level scope
+ * over the declared properties of `beforeTypeSchema`, with the judge's own words, filed under the text's index; and the cost of all the
+ * texts together over the budget, filed under no index. A split evaluates every case's condition against each record, so the price that
+ * must fit is the sum of its cases, as `typeRuleIssues` sums a type's rules. The question is "may an instance apply these texts to
+ * a record of this type", so it is answered by the one judge, never by a compile of its own.
+ */
+export function conditionIssues(kind: ViewKind, beforeTypeSchema: unknown, texts: readonly string[]): RuleIssue[] {
+  if (!ALL_KINDS.includes(kind)) throw new Error(`conditionIssues: '${quoted(String(kind))}' is not a kind of record`);
+  const scope: RuleScope = { level: 'type', kinds: [kind], declared: declaredOf(isPlainObject(beforeTypeSchema) ? beforeTypeSchema : {}) };
+  const issues: RuleIssue[] = [];
+  let cost = 0;
+  texts.forEach((text, index) => {
+    const v = judge(text, scope);
+    cost += v.cost;
+    for (const why of v.problems) issues.push({ path: [index], message: `the condition of case ${index + 1} ${why}` });
+  });
+  if (cost > COST_BUDGET) {
+    issues.push({ path: [], message: `the conditions of this split are over the cost budget the conditions of one split may have together `
+      + '(loops over lists and regex scans cost the most): remove or simplify some' });
+  }
+  return issues;
+}
+
 /** The refusals for a space's own rules: each rule the instance cannot apply for the kinds it names. Paths relative to the meta. */
 export function spaceRuleIssues(rules: unknown): RuleIssue[] {
   if (storedReads > 0) return [];
