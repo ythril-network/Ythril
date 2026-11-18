@@ -1,9 +1,10 @@
 /**
  * No boot migration may write to a collection that replicates across a network.
  *
- * ## The rule, which is already written down and enforced by nothing
+ * ## The rule, which is the maintainer's and was enforced by nothing
  *
- * `docs/contribution-guide.md`:
+ * The maintainer's convention `convention-ythril-synced-data-heals-on-access-never-migrates-at-boot`, whose text is quoted here so a
+ * reader without the maintainer's process graph still has the rule:
  *
  * > **Synced data → self-healing (lazy), never a one-time boot migration.** The per-space MongoDB record
  * > collections that replicate across networks — facts, entities, edges, chrono, links, `{space}_files`, and
@@ -386,19 +387,7 @@ describe('no boot migration writes to a synced collection', () => {
   });
 });
 
-describe('the rule and the gate move together', () => {
-  it('the contribution guide still states the rule this gate enforces', () => {
-    // A gate outliving its documented rule is a gate nobody can argue with. If the rule is deliberately
-    // changed, this failing is the prompt to change the gate in the same commit — not to delete this assertion.
-    const doc = readFileSync(join(ROOT, 'docs/contribution-guide.md'), 'utf8');
-    assert.match(doc, /never a one-time boot migration/i,
-      'the synced-data migration rule is gone from the contribution guide, but this gate still enforces it');
-    for (const coll of SYNCED) {
-      assert.ok(doc.includes(coll),
-        `the guide no longer names \`${coll}\` as a synced collection, so this gate's list may be out of date`);
-    }
-  });
-
+describe('the gate reads the tree it claims to', () => {
   it('the scan reads the tree it claims to', () => {
     assert.ok(sourceFiles().length > 100, 'the server source listing is too short to be the server');
   });

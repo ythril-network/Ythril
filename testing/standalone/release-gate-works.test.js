@@ -175,7 +175,7 @@ describe('every release-specific rule actually fires', () => {
 describe('the tag is compared with the version through release-tags.mjs, not re-derived in the gate', () => {
   // Bundle-225 (Q-683). The gate used to check that the four manifests agree with EACH OTHER and never with the tag, so a `v6.5.1`
   // cut on a tree that says 6.5.0 published an image, a Release and (now) an npm version under the wrong number, none of which can
-  // be taken back; `contribution-guide.md` claimed the check existed. The comparison is a pure function with its own truth table
+  // be taken back; the release steps claimed the check existed. The comparison is a pure function with its own truth table
   // (release-tags.test.js: match, mismatch, no tag, non-v, prerelease, a dispatch on tagged main); this row holds that the GATE
   // asks that function, on the comment-stripped source, so a comment that mentions the tag satisfies nothing.
   const code = withoutComments(src);

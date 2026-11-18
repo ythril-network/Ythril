@@ -33,7 +33,7 @@
  * the job's tag restriction lives in the GitHub environment `npm-publish`, and GitHub creates a missing environment UNPROTECTED, so
  * nothing but a read of it could say "only a `v*` tag reaches the credential". The decision refuses, before the registry is
  * believed, unless the environment exists, has custom deployment policies, and lists the `v*` tag policy and no branch policy; a
- * refusal names the setup step of `docs/contribution-guide.md`.
+ * refusal states the setup step itself (where the environment is made and its one tag rule), so no page is needed to act on it.
  *
  * ## The failure that bought it
  *
@@ -331,8 +331,9 @@ describe('publishDecision: no token in the environment, because a token is used 
 });
 
 describe('publishDecision: the environment that restricts the credential to v* tags exists and is set up (the pre-ship sweep, Q-683)', () => {
-  const GUIDE = 'docs/contribution-guide.md';
-  const refusesEnvironment = (environment, why) => assertRefuses(decide({ environment }), [ENVIRONMENT_NAME, GUIDE], why);
+  // The refusal carries the setup step itself, so the maintainer needs no page: where the environment is made, and its one tag rule.
+  const STEP = ['Settings, Environments', `Tag rule with the pattern ${RELEASE_TAG_PATTERN}`];
+  const refusesEnvironment = (environment, why) => assertRefuses(decide({ environment }), [ENVIRONMENT_NAME, ...STEP], why);
 
   it('the environment restricts to the v* tag policy and nothing else: publish', () => {
     const d = decide({ environment: GOOD_ENVIRONMENT });
@@ -344,7 +345,7 @@ describe('publishDecision: the environment that restricts the credential to v* t
   });
 
   it('no environment answer at all refuses (the effect never read it)', () => {
-    assertRefuses(decide({ environment: undefined }), [ENVIRONMENT_NAME, GUIDE], 'no environment read');
+    assertRefuses(decide({ environment: undefined }), [ENVIRONMENT_NAME, ...STEP], 'no environment read');
   });
 
   it('deployment_branch_policy null (any branch or tag may deploy): refuse', () => {

@@ -23,7 +23,7 @@
  *  - a GitHub environment that does not restrict the credential to `v*` tags: the job's tag restriction lives in the environment
  *    {@link ENVIRONMENT_NAME}, GitHub creates a missing environment UNPROTECTED, and nothing else checks it, so every publish reads it
  *    from the public REST API and refuses unless it exists, has custom deployment policies, and lists the {@link RELEASE_TAG_PATTERN}
- *    tag policy and no branch policy (a refusal names the setup step of the contribution guide; the unauthenticated read can hit
+ *    tag policy and no branch policy (a refusal states the setup step; the unauthenticated read can hit
  *    GitHub's rate limit, which refuses loudly, and a re-run reads again);
  *  - a tarball without LICENSE, NOTICE or `dist/index.js`, or with one empty: Apache-2.0 4(d) unmet on a public registry for good;
  *  - a registry answer that is not understood (a 5xx, a malformed or oversize body, a network error);
@@ -67,8 +67,8 @@ export const TOKEN_KEY = /^(NPM_TOKEN|NODE_AUTH_TOKEN)$|^npm_config_.*(_auth|aut
 export const ENVIRONMENT_NAME = 'npm-publish';
 export const RELEASE_TAG_PATTERN = 'v*';
 
-/** Where a refusal about the environment sends the maintainer. */
-const SETUP_GUIDE = 'docs/contribution-guide.md, "First publish of the schema package", step 0';
+/** The setup step a refusal about the environment states, so the maintainer needs no page to act on it. Built from the two constants above, never from retyped values. */
+const ENVIRONMENT_SETUP_STEP = `create the GitHub environment ${ENVIRONMENT_NAME} (repository Settings, Environments), with deployment branches and tags set to selected, exactly one Tag rule with the pattern ${RELEASE_TAG_PATTERN}, and no branch rule`;
 
 /** The files a tarball must carry, each with bytes. */
 const REQUIRED_FILES = ['LICENSE', 'NOTICE', 'dist/index.js'];
@@ -153,12 +153,12 @@ export function publishDecision({ npmVersion, env, environment, registry, versio
   const tokenKey = Object.keys(env ?? {}).find((key) => TOKEN_KEY.test(key));
   if (tokenKey) return refuse(`${tokenKey} is set in the environment: npm would use it instead of the OIDC exchange, and provenance would not describe the publish`);
   const environmentProblem = environmentRefusal(environment);
-  if (environmentProblem) return refuse(`${environmentProblem}; see ${SETUP_GUIDE}`);
+  if (environmentProblem) return refuse(`${environmentProblem}; to set it up, ${ENVIRONMENT_SETUP_STEP}`);
 
   if (registry?.error) return refuse(`the registry read failed: ${registry.error.message}`);
   if (registry?.status === 404) {
     if (version === FIRST_NPM_VERSION) {
-      return { action: 'skip', level: 'warning', message: `${version} is the first npm version and the package does not exist on npm yet: publish it by hand (contribution guide), then re-run this job` };
+      return { action: 'skip', level: 'warning', message: `${version} is the first npm version and the package does not exist on npm yet: publish it by hand (from a clean checkout of the tag, signed in to npm as a member of the organisation, run \`npm publish -w ${NAME}\`), then re-run this job` };
     }
     return refuse(`the package is missing on npm but ${version} is not the first publish (${FIRST_NPM_VERSION}): the first publish never happened`);
   }
@@ -269,7 +269,7 @@ async function main() {
   if (publishFailure !== null) {
     console.log(workflowCommand('error', 'publish-schema', `npm publish failed (${publishFailure})`));
     if (/\b(E404|E401|ENEEDAUTH)\b/.test(result.stderr ?? '')) {
-      console.log(workflowCommand('error', 'trusted publisher', 'npm publish answered E404, E401 or ENEEDAUTH: the trusted publisher is not set for this package, repository, workflow file and environment; see the trusted-publishing steps in the contribution guide'));
+      console.log(workflowCommand('error', 'trusted publisher', 'npm publish answered E404, E401 or ENEEDAUTH: the trusted publisher is not set for this package, repository, workflow file and environment; on npmjs.com open the package settings, Trusted publisher, GitHub Actions, and set organisation ythril-network, repository Ythril, workflow file publish.yml and environment name ' + ENVIRONMENT_NAME));
     }
     process.exit(1);
   }

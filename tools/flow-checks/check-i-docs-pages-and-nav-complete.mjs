@@ -115,7 +115,7 @@ export function decide({ docs, readme, changelog, toolNames, allow, today }) {
 if (isMain(import.meta.url)) {
   await answer(() => decide({
     docs: readTrackedSources(['docs'], { ext: ['.md'], floor: 30 }),
-    readme: readTrackedSources(['README.md', 'CONTRIBUTING.md'], { ext: ['.md'], floor: 2 }),
+    readme: readTrackedSources(['README.md'], { ext: ['.md'], floor: 1 }),
     changelog: readTrackedSources(['CHANGELOG.md'], { ext: ['.md'], floor: 1 })[0].text,
     toolNames: toolNamesOf(readTrackedSources(['server/src/mcp/tools'], { ext: ['.ts'], floor: 20, specs: false })),
     allow: readAllowFile(import.meta.url, CHECK),

@@ -93,9 +93,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tooling:** `machine:free -Wipe` asks every refusal of the wipe (data guard, pending record, free space, registries) before it removes the test stack or prunes; the workstation guide names what the guard cannot see.
 - **Docs:** fixed: the integration guide's examples of the storage-limit and incomplete space-delete errors quote the messages the server sends.
 - **Docs:** fixed: the integration guide names every parameter and answer field the probes found missing, among them `skipTlsVerify`, `merkle`, `superseded`, `mediaCeilings` and `temporary`.
+- **Docs:** changed: the contribution guide is replaced by a short dev guide (setup, building, tests); the README says Ythril takes no outside code and welcomes issues; Settings → Help lists the dev guide.
 - **Docs:** changed: the upgrading guide names the removal of records whose file bytes are gone, its timings and holds, and putting lost bytes back before upgrading.
 - **Build:** the build stops with one line naming the package and `run npm ci` when the install differs from package-lock.json or lacks a package the build needs, instead of failing with misleading type errors.
 - **Build:** the OIDC settings types moved out of `config/types.ts` into `config/types-oidc.ts`, which brings that file back under its size limit; no behaviour changes.
+- **Repository:** the contributor licence agreement, its signing workflow and the pull-request template are removed, and a standalone test fails if a guide, agreement or template for outside code returns.
 
 ### Fixed
 

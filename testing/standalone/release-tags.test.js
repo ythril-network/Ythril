@@ -14,7 +14,7 @@
  *
  * ## The defect it prevents (Q-683)
  *
- *  1. `release-gate.mjs` never compared the tag with the manifests' version (`contribution-guide.md` claimed it did): a tag
+ *  1. `release-gate.mjs` never compared the tag with the manifests' version (the release steps claimed it did): a tag
  *     `v6.5.1` cut on a tree that says 6.5.0 published an image, a Release and now an npm version under the wrong number, and
  *     none of the three can be taken back (npm never accepts the same version twice).
  *  2. The Release step's `--latest` came from `git tag --list 'v*' --sort=-v:refname | head -n1`, which ranks `v7.0.0-rc.1`

@@ -60,11 +60,10 @@ describe('ci.yml', () => {
   });
 });
 
-describe('the guides', () => {
-  for (const guide of ['docs/contribution-guide.md', 'docs/testing-guide.md']) {
-    it(`${guide} names the script of each kind`, () => {
-      const text = readFileSync(join(REPO_ROOT, guide), 'utf8');
-      for (const kind of KINDS) assert.ok(text.includes(`test:standalone:${kind}`), `${guide} never names \`npm run test:standalone:${kind}\``);
-    });
-  }
+describe('the testing guide', () => {
+  const guide = 'docs/testing-guide.md';
+  it(`${guide} names the script of each kind`, () => {
+    const text = readFileSync(join(REPO_ROOT, guide), 'utf8');
+    for (const kind of KINDS) assert.ok(text.includes(`test:standalone:${kind}`), `${guide} never names \`npm run test:standalone:${kind}\``);
+  });
 });

@@ -2,7 +2,7 @@
 
 **Status:** accepted, 2026-11-01 · **Scope:** the types, tuples and limits of a space schema, the zod bodies of a space meta and its type schemas, the parses that mint a stored meta (`parseSpaceMeta`, `parseTypeSchema`, `readStoredMeta`, `readPeerMeta`), the save-time CEL rule checks, and the text a refusal of them is worded in
 
-**Amended 2026-11-05 (Q-683):** the package is published to npm under the scope the owner holds there, as `@ythril-network/schema`, not under the workspace name it was first given; the first version published is **6.5.0** (the 6.3.2 named below, and every version before 6.5.0, was never published); and it is published by the release workflow's `publish-schema` job through npm trusted publishing (OIDC, with provenance), so no npm token is stored anywhere. Where this decision says 6.3.2 was the first version published, read 6.5.0. The first publish is by hand, once (`docs/contribution-guide.md`, "First publish of the schema package").
+**Amended 2026-11-05 (Q-683):** the package is published to npm under the scope the owner holds there, as `@ythril-network/schema`, not under the workspace name it was first given; the first version published is **6.5.0** (the 6.3.2 named below, and every version before 6.5.0, was never published); and it is published by the release workflow's `publish-schema` job through npm trusted publishing (OIDC, with provenance), so no npm token is stored anywhere. Where this decision says 6.3.2 was the first version published, read 6.5.0. The first publish is by hand, once (the maintainer's release steps).
 
 ## Context
 
