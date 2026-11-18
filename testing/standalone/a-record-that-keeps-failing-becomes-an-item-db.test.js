@@ -46,9 +46,16 @@ describe('a record that keeps failing becomes an item (real MongoDB)', { skip },
     run.stopSchemaConvertWatcher();
     const started = await run.startSchemaConvertRun({ spaceId: space, types: [{ kind: 'entity', type: 'person' }], steps: [STEP], source: { kind: 'act' } }, { onRewrite });
     assert.equal(started.ok, true, JSON.stringify(started));
-    // The run's own background passes (they hold the lease), each failed one retried after its backoff: the end is waited for, never driven.
-    return await waitForValue(async () => { const d = await door.runDoc(space); return d && d.state !== 'running' ? d : null; },
-      30_000, 100, async () => `the run did not end: ${JSON.stringify(await door.runDoc(space))}`, { what: `the run of ${space} to end` });
+    // The watcher's tick would retry a failed pass WITHOUT the hook (it holds no deps), so it is stopped, and each pass after the first is driven
+    // here with the hook, once the pass before it has let go of the lease.
+    run.stopSchemaConvertWatcher();
+    for (let pass = 0; pass < 10; pass++) {
+      const doc = await waitForValue(async () => { const d = await door.runDoc(space); return d && (d.state !== 'running' || d.sweepLeaseAt === 0) ? d : null; },
+        10_000, 50, async () => `the pass did not let go: ${JSON.stringify(await door.runDoc(space))}`, { what: `a pass of ${space} to end` });
+      if (doc.state !== 'running') return doc;
+      await run.driveSchemaConvertRun(space, { onRewrite });
+    }
+    return await door.runDoc(space);
   }
 
   it('a SchemaViolationError from the rewrite is the record\'s refusal at once: an item not_conforming, the run goes on', async () => {
