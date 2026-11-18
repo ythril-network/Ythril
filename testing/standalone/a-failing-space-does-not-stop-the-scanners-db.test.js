@@ -43,7 +43,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
-import { setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads, HUNG_READ_STALL_MS, hungReadLookMs } from './_write-faults.mjs';
+import { withWriteBound, settleWithin, withCollectionAsView, withStalledReads, HUNG_READ_STALL_MS, hungReadLookMs } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 
 const skip = await mongoSkipReason();
@@ -84,7 +84,7 @@ const ALL = [...SCANNERS.flatMap(s => [FAIL(s), HANG(s), SEEDTO(s), SEEDFAIL(s)]
 const fact = (space, i) => ({ _id: `${space}-f${i}`, spaceId: space, fact: `fact ${i} of ${space}`, seq: i, pos: i, posAtSeq: i, createdAt: '2025-01-01T00:00:00.000Z' });
 
 describe('a failing or hung space does not stop the scanners', { skip }, () => {
-  let door; let restoreBound; let proto; let realFindOne; let StoreTimeout;
+  let door; let proto; let realFindOne; let StoreTimeout;
   /** The `findOne` calls the patch saw, per collection, and the collections it is armed to answer with a timeout. */
   const findOneSeen = new Map();
   const armed = new Map();
@@ -96,8 +96,9 @@ describe('a failing or hung space does not stop the scanners', { skip }, () => {
     ({ StoreTimeout } = await import('../../server/dist/db/write-timeout.js'));
     const { raiseVersionTo } = await import('../../server/dist/util/version-stamp.js');
     for (const space of ALL) await raiseVersionTo(space, 20);
-    restoreBound = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
-    proto = Object.getPrototypeOf(door.mongo.col('probe'));
+    // No bound is set here: only the HANGS case needs the short one (`withWriteBound`), and every other case runs at the product's own, so an
+    // ordinary read of a healthy space on a loaded host cannot run past a 1 s bound and stop a pass that planted some other fault.
+    proto =Object.getPrototypeOf(door.mongo.col('probe'));
     realFindOne = proto.findOne;
     proto.findOne = function recording(filter, ...rest) {
       const name = this.collectionName;
@@ -111,7 +112,6 @@ describe('a failing or hung space does not stop the scanners', { skip }, () => {
   });
   after(async () => {
     if (proto && realFindOne) proto.findOne = realFindOne;
-    await restoreBound?.();
     await door?.close();
   });
   beforeEach(async () => {
@@ -166,10 +166,11 @@ describe('a failing or hung space does not stop the scanners', { skip }, () => {
         const seed = Array.from({ length: Math.ceil(STALL_MS / STALL_STEP_MS) }, (_, i) => fact(space, i + 1));
         const lookMs = await hungReadLookMs({ boundMs: BOUND_MS, stallMs: STALL_MS });
         let outcome; let lines;
-        await withStalledReads(db, `${space}_facts`, `${space}_facts_src`, { ms: STALL_MS, readerFilter, seed }, async () => {
+        // The one case that needs the short bound: it asserts the pass ends at it.
+        await withWriteBound({ housekeepingOpMs: BOUND_MS }, () => withStalledReads(db, `${space}_facts`, `${space}_facts_src`, { ms: STALL_MS, readerFilter, seed }, async () => {
           ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(run(), lookMs)));
           if (!outcome.settled) await outcome.rest;   // the stall's own end is waited for before the view is put back
-        });
+        }));
         assert.ok(outcome.settled, `the pass was still waiting after ${outcome.elapsedMs} ms on a read that stalls for ${STALL_MS} ms: nothing ended it at the ${BOUND_MS} ms bound`);
         assert.equal(outcome.ok, true, `the pass returns for a hung space: ${outcome.error}`);
         assert.equal(await cursorOf(scanner, OK), 3, 'the space behind the hung one was not scanned');

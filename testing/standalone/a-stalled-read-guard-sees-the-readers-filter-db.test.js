@@ -143,6 +143,20 @@ describe('a stalled-read fixture stalls the reader\'s read, or throws', { skip }
     await assert.rejects(() => faults.hungReadLookMs({ boundMs: undefined, stallMs: 8000 }), /positive numbers/);
   });
 
+  it('withWriteBound sets the bound for its body only, puts the product\'s own back whether the body returned or threw, and refuses to nest', async () => {
+    const bound = await import('../../server/dist/db/write-bound.js');
+    const own = bound.housekeepingOpMs();
+    assert.notEqual(own, 1500, 'the product\'s own housekeeping bound is the figure this case sets: it would prove nothing');
+    assert.equal(await faults.withWriteBound({ housekeepingOpMs: 1500 }, async () => bound.housekeepingOpMs()), 1500, 'the bound was not set inside the body');
+    assert.equal(bound.housekeepingOpMs(), own, 'the bound was left set after the body returned');
+    await assert.rejects(() => faults.withWriteBound({ housekeepingOpMs: 1500 }, async () => { throw new Error('the body failed'); }), /the body failed/);
+    assert.equal(bound.housekeepingOpMs(), own, 'the bound was left set after the body threw');
+    await assert.rejects(() => faults.withWriteBound({ housekeepingOpMs: 1500 }, () => faults.withWriteBound({ housekeepingOpMs: 2500 }, async () => {})),
+      /already set by an enclosing withWriteBound/);
+    assert.equal(bound.housekeepingOpMs(), own, 'a refused nesting left the bound set');
+    assert.equal(await faults.withWriteBound({ housekeepingOpMs: 1500 }, async () => 'a later call works'), 'a later call works', 'the refusal left the guard held');
+  });
+
   it('a call with NO readerFilter is refused, naming the collection it was for: the guard is not a thing a caller can leave out', async () => {
     let ran = false;
     await assert.rejects(

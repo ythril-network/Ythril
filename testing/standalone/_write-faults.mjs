@@ -171,6 +171,34 @@ export async function setWriteBoundForTest(bounds) {
   return () => mod.setWriteBoundForTest(null);
 }
 
+/** Whether a {@link withWriteBound} is running: the bound it set is put back to the product's own, never to an outer one. */
+let boundHeldByACase = false;
+
+/**
+ * Run `fn` with the write bound set to `bounds` (`setWriteBoundForTest`), and put the product's own bound back when it ends, whatever
+ * happened. THROWS when another `withWriteBound` is running.
+ *
+ * ## What it prevents
+ *
+ * A bound set for a whole file is set for every case in it, and only the cases that assert something about the bound need it. The
+ * scanners' file set `housekeepingOpMs` to 1000 ms for all of them, so on a loaded shard an ORDINARY read of a healthy space ran past
+ * the 1 s bound and stopped a pass whose case planted a failure and nothing else: the case went red with no defect in what it tests.
+ * A case that needs the short bound wraps its own body in this; every other case runs at the product's own bound. The restore is the
+ * one `finally` here, so a case cannot leave its bound set for the next. It refuses to nest because the restore puts back the product's
+ * bound, not the enclosing one: an inner call would end the outer's bound early without a word.
+ *
+ * @template T
+ * @param {{ writeTimeoutMs?: number, holdDeadlineMs?: number, housekeepingOpMs?: number }} bounds
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export async function withWriteBound(bounds, fn) {
+  assert.ok(!boundHeldByACase, 'withWriteBound: a bound is already set by an enclosing withWriteBound; the inner restore would put the product\'s own bound back under the outer one');
+  const restore = await setWriteBoundForTest(bounds);
+  boundHeldByACase = true;
+  try { return await fn(); } finally { boundHeldByACase = false; restore(); }
+}
+
 // ── A collection that refuses ────────────────────────────────────────────────────────────────────────────────
 
 /**
