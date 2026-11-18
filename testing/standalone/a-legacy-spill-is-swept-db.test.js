@@ -39,7 +39,7 @@ import { randomUUID } from 'node:crypto';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import {
-  failWrites, setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads, HUNG_READ_STALL_MS, hungReadLookMs,
+  failWrites, withWriteBound, settleWithin, withCollectionAsView, withStalledReads, HUNG_READ_STALL_MS, hungReadLookMs,
 } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
@@ -192,18 +192,13 @@ describe('legacy read spills are swept from the space', { skip }, () => {
       const readerFilter = { _id: { $regex: `^${SPILL_DIR}/` } };
       // One source document costs a read one step (`withStalledReads`: 200 ms), so the seeds are as many as the stall has steps.
       const seed = Array.from({ length: HUNG_READ_STALL_MS / 200 }, () => ({ _id: `_tmp/graph-${randomUUID()}.json` }));
-      const restoreBound = await setWriteBoundForTest({ housekeepingOpMs: 1_000 });
       const lookMs = await hungReadLookMs({ boundMs: 1_000, stallMs: HUNG_READ_STALL_MS });
       let outcome, lines;
-      try {
-        await withStalledReads(db, `${HUNG}_files`, `${HUNG}_src`, { ms: HUNG_READ_STALL_MS, readerFilter, seed }, async () => {
-          ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(sweepMod.sweepLegacySpills(), lookMs)));
-          // Left unsettled, the stall's own end is waited for before the view is put back.
-          if (!outcome.settled) await outcome.rest;
-        });
-      } finally {
-        restoreBound();
-      }
+      await withWriteBound({ housekeepingOpMs: 1_000 }, () => withStalledReads(db, `${HUNG}_files`, `${HUNG}_src`, { ms: HUNG_READ_STALL_MS, readerFilter, seed }, async () => {
+        ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(sweepMod.sweepLegacySpills(), lookMs)));
+        // Left unsettled, the stall's own end is waited for before the view is put back.
+        if (!outcome.settled) await outcome.rest;
+      }));
 
       assert.ok(outcome.settled, `the sweep was still waiting after ${outcome.elapsedMs}ms on a read that stalls for ${HUNG_READ_STALL_MS}ms: nothing ended it at the 1000ms bound`);
       assert.equal(outcome.ok, true, `the sweep returns its result for a hung space: ${outcome.error}`);

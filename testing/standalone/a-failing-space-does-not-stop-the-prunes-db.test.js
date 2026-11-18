@@ -39,7 +39,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import {
-  holdDocumentLock, setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads, HUNG_READ_STALL_MS, hungReadLookMs,
+  holdDocumentLock, withWriteBound, settleWithin, withCollectionAsView, withStalledReads, HUNG_READ_STALL_MS, hungReadLookMs,
 } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 
@@ -160,18 +160,13 @@ describe('one space\'s trouble does not stop the prunes', { skip }, () => {
     it('a read that HANGS ends at the housekeeping bound, is said once, and the space behind it is pruned', async () => {
       const db = mongo.getDb();
       await mongo.col(`${OK}_dupe_candidates`).insertOne(orphan('ok-hung-d'));
-      const restoreBound = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
       const lookMs = await hungReadLookMs({ boundMs: BOUND_MS, stallMs: STALL_MS });
       let outcome, lines;
-      try {
-        // The reader's filter is empty (`coll.find({})` in `brain/candidate-prune.ts`), so every source document of the view reaches the stalling stage.
-        await withStalledReads(db, `${HUNG_CANDIDATES}_dupe_candidates`, `${HUNG_CANDIDATES}_dupe_src`, { ms: STALL_MS, readerFilter: {} }, async () => {
-          ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(candidate.pruneAllSpaces(), lookMs)));
-          if (!outcome.settled) await outcome.rest;   // the stall's own end is waited for before the view is put back
-        });
-      } finally {
-        await restoreBound();
-      }
+      // The reader's filter is empty (`coll.find({})` in `brain/candidate-prune.ts`), so every source document of the view reaches the stalling stage.
+      await withWriteBound({ housekeepingOpMs: BOUND_MS }, () => withStalledReads(db, `${HUNG_CANDIDATES}_dupe_candidates`, `${HUNG_CANDIDATES}_dupe_src`, { ms: STALL_MS, readerFilter: {} }, async () => {
+        ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(candidate.pruneAllSpaces(), lookMs)));
+        if (!outcome.settled) await outcome.rest;   // the stall's own end is waited for before the view is put back
+      }));
       assert.ok(outcome.settled, `the prune was still waiting after ${outcome.elapsedMs} ms on a read that stalls for ${STALL_MS} ms: nothing ended it at the ${BOUND_MS} ms bound`);
       assert.equal(outcome.ok, true, `the prune answers for a hung space: ${outcome.error}`);
       assert.deepEqual(await idsIn(`${OK}_dupe_candidates`), [], 'the space behind the hung one was pruned');
@@ -231,17 +226,17 @@ describe('one space\'s trouble does not stop the prunes', { skip }, () => {
 
     it('a delete that HANGS behind another session\'s lock ends at the bound, is said once, and the space behind it is pruned', async () => {
       await seed(LOCKED); await seed(OK);
-      const restoreBound = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
       // The lock is held until the look ends, so there is no stall to wait out: the look is the same one as the stalled read's, and a case that passes spends none of it.
       const lookMs = await hungReadLookMs({ boundMs: BOUND_MS, stallMs: STALL_MS });
-      const lock = await holdDocumentLock(mongo, `${LOCKED}_tombstones`, { filter: { _id: `${LOCKED}-t1` } });
       let outcome, lines;
-      try {
-        ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(tombstone.pruneAllTombstones(), lookMs)));
-      } finally {
-        await lock.release();   // drains the write the lock held, so nothing lands after the case
-        await restoreBound();
-      }
+      await withWriteBound({ housekeepingOpMs: BOUND_MS }, async () => {
+        const lock = await holdDocumentLock(mongo, `${LOCKED}_tombstones`, { filter: { _id: `${LOCKED}-t1` } });
+        try {
+          ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(tombstone.pruneAllTombstones(), lookMs)));
+        } finally {
+          await lock.release();   // drains the write the lock held, so nothing lands after the case
+        }
+      });
       if (!outcome.settled) await outcome.rest;
       assert.ok(outcome.settled, `the prune was still waiting after ${outcome.elapsedMs} ms on a delete behind a held lock: nothing ended it at the ${BOUND_MS} ms bound`);
       assert.equal(outcome.ok, true, `the prune answers for a hung space: ${outcome.error}`);
