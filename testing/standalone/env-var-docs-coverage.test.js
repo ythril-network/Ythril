@@ -37,21 +37,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isAmbient } from '../_shared/env-var-reads.mjs';
 import { trackedSources } from './_sources.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
-
-/**
- * The files under `dir` that git holds or would hold (committed, or new and not ignored), as absolute paths: git decides what the repository contains,
- * never the disk, so no build output or installed package is in the scan and this file names neither (it is a source gate: the preflight runs it before
- * anything is built or installed, and `testing/_shared/text-only-test.mjs` refuses a file that names `node_modules`).
- */
-function walk(dir) {
-  return trackedSources(relative(ROOT, dir).replace(/\\/g, '/'), { ext: null, floor: 1, untracked: true, root: ROOT }).map(f => join(ROOT, f));
-}
 
 const TOOLING_REASON = 'read by the test and maintenance tooling (scripts/, testing/, the test compose file), never by the server; '
   + 'named in docs/testing-guide.md, where scripts-and-test-runners-document-their-env-vars requires the ones scripts/ and '
@@ -157,8 +148,10 @@ const READ_PATTERNS = [
 /** Where a variable can legitimately be "used": source, plus compose/Dockerfile interpolation. */
 function collectUsage() {
   const files = [
-    ...walk(join(ROOT, 'server', 'src')).filter(f => f.endsWith('.ts')),
-    ...walk(join(ROOT, 'sidecars')).filter(f => f.endsWith('.py')),
+    // What git holds or would hold (committed, or new and not ignored), never the disk: no build output or installed package is in the scan, and this
+    // file names neither (a source gate runs before anything is built or installed; `testing/_shared/text-only-test.mjs` refuses a file that names them).
+    ...trackedSources('server/src', { ext: ['.ts'], floor: 300, untracked: true }).map(f => join(ROOT, f)),
+    ...trackedSources('sidecars', { ext: ['.py'], floor: 1, untracked: true }).map(f => join(ROOT, f)),
     ...['docker-compose.yml', 'Dockerfile'].map(f => join(ROOT, f)).filter(existsSync),
   ];
 
