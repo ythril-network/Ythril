@@ -241,6 +241,11 @@ const NON_USAGE_SUFFIXES = ['.ticket', '.ingest.status', '.spill.read'] as const
 /**
  * Verbs that mean something changed. `retry_embed_file` and `mkdir` are here because they are mutations whose
  * names do not end in an obvious verb, and `write` because the bulk endpoint is called `bulk.write`.
+ *
+ * `start` is `schema.convert.start`: someone asking for every record of a type to be rewritten, a write by its
+ * caller although the rewrite runs afterwards. `dismiss_shown` is the bulk form of `dismiss` (`unconverted.dismiss_shown`),
+ * as `bulk_resolve` is of `resolve`. The run's own entry (`schema.convert.run`) is the system's write, logged with no
+ * request, so it never reaches this classifier, as `ttl.expire` does not.
  */
 const MUTATION_VERB =
-  /\.(create|update|delete|merge|import|restore|reindex|rebuild|wipe|write|mkdir|retry_embedding(_all)?|resolve|bulk_resolve|dismiss|reopen|seed|scan|publish|apply|fork|adopt|ingest)$/;
+  /\.(create|update|delete|merge|import|restore|reindex|rebuild|wipe|write|mkdir|retry_embedding(_all)?|resolve|bulk_resolve|dismiss(_shown)?|reopen|seed|scan|publish|apply|fork|adopt|ingest|start)$/;
