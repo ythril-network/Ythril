@@ -29,6 +29,7 @@ import { collectingSearchDegraded } from './conversation/shortlist.js';
 import type { DegradedReason } from '../brain/degraded-reasons.js';
 import { log, peerText } from '../util/log.js';
 import { unknownBodyFields } from '../brain/query.js';
+import { extractionCountError } from '../util/request-bounds.js';
 
 export const INGEST_KINDS = ['conversation'] as const;
 /** The body both doors read. MCP's `space` / `targetSpace` are the tool's addressing, stripped before this. */
@@ -63,6 +64,9 @@ export function parseIngestRequest(body: unknown): { ok: true; request: IngestRe
   if (hasExtraction) {
     const x = b['extraction'];
     if (!x || typeof x !== 'object' || Array.isArray(x)) return { ok: false, error: '`extraction` must be an object in the committed extraction format' };
+    // Counted before anything reads the payload: every entry of every array becomes a record, so a request past a bound writes nothing.
+    const tooMany = extractionCountError(x as Record<string, unknown>);
+    if (tooMany) return { ok: false, error: tooMany };
     const extraction = x as Extraction;
     const id = (b['conversationId'] as string | undefined) ?? extraction.conversationId;
     if (typeof id !== 'string' || !CONVERSATION_ID_RE.test(id)) {

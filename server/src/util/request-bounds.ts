@@ -64,6 +64,38 @@ export const MAX_INGEST_SESSIONS = 1_000;
 /** Turns across all the sessions of one `ingest`. Every turn is read by the model phases. */
 export const MAX_INGEST_TURNS = 20_000;
 
+/**
+ * Entities in a caller-supplied `ingest` extraction. Each becomes a record. A conversation of at most `MAX_INGEST_TURNS` turns names
+ * a few people, places and things per hundred turns, so a quarter of the turn count is a generous ceiling.
+ */
+export const MAX_EXTRACTION_ENTITIES = 5_000;
+
+/** Claims in a caller-supplied `ingest` extraction. Each becomes a fact. Sized to the turn count: a turn yields about one claim. */
+export const MAX_EXTRACTION_CLAIMS = 20_000;
+
+/** Dated events in a caller-supplied `ingest` extraction. Each becomes a chrono record; far fewer than claims, as the entities. */
+export const MAX_EXTRACTION_CHRONO = 5_000;
+
+/** Edges in a caller-supplied `ingest` extraction. Each becomes an edge record; at most about one per claim, so the claim count. */
+export const MAX_EXTRACTION_EDGES = 20_000;
+
+/** Entities the space already held that an extraction names (`existingEntities`). Each is resolved by id; the entity count's ceiling. */
+export const MAX_EXTRACTION_EXISTING_ENTITIES = 5_000;
+
+/**
+ * The bound each array of an `ingest` extraction carries, by name — read by the shared parser, which refuses past it, and by the MCP tool
+ * schema, which states it as `maxItems`. `sessions` is the raw conversation's own count: the same transcripts, the same ceiling. The names are
+ * the array properties of the `Extraction` type, and `every-quantity-a-caller-sends-has-a-bound.test.js` fails when one has no entry.
+ */
+export const INGEST_EXTRACTION_BOUNDS: Readonly<Record<string, number>> = Object.freeze({
+  sessions: MAX_INGEST_SESSIONS,
+  entities: MAX_EXTRACTION_ENTITIES,
+  existingEntities: MAX_EXTRACTION_EXISTING_ENTITIES,
+  edges: MAX_EXTRACTION_EDGES,
+  chrono: MAX_EXTRACTION_CHRONO,
+  claims: MAX_EXTRACTION_CLAIMS,
+});
+
 /** `ingest` runs that may be unfinished at once, instance-wide. Each holds model calls for minutes. */
 export const MAX_ACTIVE_INGEST_RUNS = 4;
 
@@ -103,6 +135,32 @@ export function tooManyError(field: string, got: number, max: number): string {
 /** The refusal when `value` is an array longer than `max`, else null. Not-an-array is the caller's own check. */
 export function countError(field: string, value: unknown, max: number): string | null {
   return Array.isArray(value) && value.length > max ? tooManyError(field, value.length, max) : null;
+}
+
+/**
+ * The turns across `sessions` checked against `MAX_INGEST_TURNS`, else null. One question for the raw conversation (`what` = "the sessions")
+ * and for the sessions an extraction carries ("the extraction's sessions"), so the two cannot count differently.
+ */
+export function sessionTurnsError(sessions: unknown, what = 'the sessions'): string | null {
+  if (!Array.isArray(sessions)) return null;
+  const turns = sessions.reduce((n: number, s) => n + (Array.isArray(s?.turns) ? s.turns.length : 0), 0);
+  return turns > MAX_INGEST_TURNS ? `${what} may hold at most ${MAX_INGEST_TURNS} turns between them (got ${turns})` : null;
+}
+
+/**
+ * The first array of an `ingest` extraction that is not an array or is past its bound in `INGEST_EXTRACTION_BOUNDS`, as a refusal naming it
+ * and the bound, else null. A property the caller left out is not checked: the validator judges what a format requires. Runs before the
+ * space is looked at, so a refused extraction costs the instance a count and writes nothing.
+ */
+export function extractionCountError(extraction: Record<string, unknown>): string | null {
+  for (const [name, max] of Object.entries(INGEST_EXTRACTION_BOUNDS)) {
+    const value = extraction[name];
+    if (value === undefined) continue;
+    if (!Array.isArray(value)) return `\`extraction.${name}\` must be an array`;
+    const over = countError(`extraction.${name}`, value, max);
+    if (over) return over;
+  }
+  return sessionTurnsError(extraction['sessions'], 'the extraction\'s sessions');
 }
 
 /** `tags` checked whole: an array of strings, at most `MAX_TAGS`. */

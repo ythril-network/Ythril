@@ -73,6 +73,11 @@ Everything that would make the run fail is checked first, and the answer lists e
 `400` is a malformed body (with every problem the loader found); `404` a space that does not exist. A conversation
 holds at most **1 000 sessions** and **20 000 turns** between them; more is a `400` saying which.
 
+An `extraction` has a limit on each list in it: at most 1000 `sessions` (with 20000 turns between them), 5000 `entities`,
+5000 `existingEntities`, 5000 `chrono`, 20000 `claims` and 20000 `edges`. A list past its limit is a `400` that names the
+list and the limit, answered before the space is looked at, so nothing is written; a list that is not a list is refused
+the same way. The MCP `ingest` tool declares the same limits as `maxItems` on the lists of `extraction`.
+
 ## Rate limited — `429`
 
 **At most four runs are in progress at once, instance-wide** — each holds model calls for minutes. A fifth start is
