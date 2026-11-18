@@ -54,7 +54,7 @@ const FIXTURE = {
   'testing/sync/helpers.js': "export const helper = 1;\n",
   'testing/standalone/git.test.js': "import { execFileSync } from 'node:child_process';\nvoid execFileSync('git', ['ls-files']);\n",
   // not text-only
-  'testing/standalone/dist-import.test.js': "import { f } from '../../server/dist/x.js';\nvoid f;\n",
+  'testing/standalone/dist-import.test.js': "import { f } from '../../server/dist/index.js';\nvoid f;\n",
   'testing/standalone/src-import.test.js': "import { f } from '../../server/src/x.ts';\nvoid f;\n",
   'testing/standalone/named-server.test.js': "import { readFileSync } from 'node:fs';\nvoid readFileSync('server/dist/x.js');\n",
   'testing/standalone/named-client.test.js': "import { join } from 'node:path';\nvoid join('root', 'client', 'dist', 'index.html');\n",
