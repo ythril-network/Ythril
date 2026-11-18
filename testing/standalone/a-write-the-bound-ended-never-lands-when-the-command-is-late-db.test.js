@@ -29,50 +29,38 @@
  * ## The lateness is DERIVED, never a literal
  *
  * Both figures are read out of the built `write-bound.js`. A literal here would go stale the day either is changed, and the file
- * would go on passing at a lateness the product is no longer beaten by. The floor below asserts the figure really is past both,
- * and the experiment's own case asserts the relay held writes back at all.
+ * would go on passing at a lateness the product is no longer beaten by. The floor case (`lateCommandExperiment` in
+ * `_write-landing-experiment.mjs`, which holds this variant's options for every part) asserts the figure really is past both, and the
+ * experiment's own case asserts the relay held writes back at all.
  *
  * Three repetitions per lane, as the diagnosis found enough to be red without the kill step: a lane is a window, not a race.
+ *
+ * ## More stalls at once, and cut into parts
+ *
+ * A repetition here is spent sleeping (the relay's lateness on every bounded write of the lane, then the bound), not on the event
+ * loop, so this variant stalls more lanes at once than the base file (`LATE_WORKERS`). The lanes are still more
+ * than a file's time holds, so they are cut into part files, each its own process with its own door: this file is part 1 and
+ * `a-write-the-bound-ended-never-lands-when-the-command-is-late-part-2-db.test.js` the next. The cut is `_landing-parts.mjs`'s, and
+ * that the parts run every lane exactly once is `the-parts-of-a-split-landing-experiment-run-every-lane-once.test.js`'s.
  *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-write-the-bound-ended-never-lands-when-the-command-is-late-db.test.js
  * (requires a prior `npm run build` in server/)
  */
 import { describe, it, before, after } from 'node:test';
-import assert from 'node:assert/strict';
-import { landingExperiment } from './_write-landing-experiment.mjs';
-import * as writeBound from '../../server/dist/db/write-bound.js';
+import { lateCommandExperiment } from './_write-landing-experiment.mjs';
+import { partOf } from './_landing-parts.mjs';
 
-// A namespace import: a build without `KILL_WAIT_MS` fails the floor below instead of the whole file at link time.
-const { SERVER_FIRST_MARGIN_MS, KILL_WAIT_MS } = writeBound;
-/** How far past the backstop's last look the server's deadline falls: enough that it is plainly after the answer. */
-const LATE_PAST_MS = 100;
-
-// Declared HERE, not in the helper: node records a test against the file that calls `it`.
-const x = landingExperiment({
-  title: 'a write the bound ended never lands afterwards, when its command reaches the server later than the backstop can wait',
+const PART = 0;
+// Declared HERE, not in the helper: node records a test against the file that calls `it`. The options, and the floor case that the
+// lateness is past the margin and the kill window, are `lateCommandExperiment`'s: one copy for every part.
+const x = lateCommandExperiment({
+  title: `a write the bound ended never lands afterwards, when its command reaches the server later than the backstop can wait (part ${PART + 1})`,
   suite: 'boundlandslate',
-  query: '',
-  reps: 3,
-  minReps: 3,
-  lateByMs: SERVER_FIRST_MARGIN_MS + (KILL_WAIT_MS ?? 0) + LATE_PAST_MS,
-  // The relay holds EVERY bounded write of a lane back, so an operation that is not the first of its hold starts its clock a
-  // lateness later each. At the 1000 ms hold the 80 ms file keeps, the hold's own deadline was spent by the first writes of the
-  // pushed-fork lanes and the write the lane stalls was never SENT (a hold whose time is spent refuses the next operation): the
-  // lane stalled nothing. A hold of 10 000 ms leaves every lane's stalled write its own full bound; the per-operation bound
-  // stays the 1000 ms minimum.
-  holdMs: 10_000,
-  boundMs: 1000,
+  part: partOf('a-write-the-bound-ended-never-lands-when-the-command-is-late', PART),
 });
 describe(x.title, { skip: x.skip }, () => {
   before(x.before, { timeout: x.timeout });
   after(x.after);
-  it('the lateness is past the backstop\'s margin AND its kill window, so only the kill ends the operation before the answer', () => {
-    assert.ok(Number.isInteger(SERVER_FIRST_MARGIN_MS) && SERVER_FIRST_MARGIN_MS > 0, `SERVER_FIRST_MARGIN_MS is ${SERVER_FIRST_MARGIN_MS}`);
-    assert.ok(Number.isInteger(KILL_WAIT_MS) && KILL_WAIT_MS > 0, `KILL_WAIT_MS is ${KILL_WAIT_MS}`);
-    assert.ok(x.lateByMs > SERVER_FIRST_MARGIN_MS + KILL_WAIT_MS,
-      `the relay holds a write back ${x.lateByMs} ms, not past the ${SERVER_FIRST_MARGIN_MS} ms margin plus the ${KILL_WAIT_MS} ms kill window: `
-      + 'a backstop that only waited would pass');
-  });
   for (const c of x.cases) it(c.name, c.fn);
 });

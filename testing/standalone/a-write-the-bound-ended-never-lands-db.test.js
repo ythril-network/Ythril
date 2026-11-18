@@ -44,15 +44,22 @@
  * ## Repeated, at the bound's minimum
  *
  * Each lane is run `reps` times with the bound at its 1000 ms minimum (`setWriteBoundForTest`). Every repetition is its
- * own result; a lane is green only when none of them landed anything.
+ * own result; a lane is green only when none of them landed anything. `reps` is the module's floor (`minReps`): the defect this
+ * file exists for, the client-first bound, landed in nearly every repetition of every lane when it was seen red (86caea3a), so a
+ * lane that holds at the floor is not a lucky draw.
  *
- * ## And on a client whose own defaults would end the write first
+ * ## Cut into parts
  *
- * An operator may put `timeoutMS` in `MONGO_URI`; every operation without a `timeoutMS` of its own inherits it, and a bounded
- * plain write sets none (a driver clock is what the bound avoids), so the bound has to switch it off for the write. That is
- * held by the same experiment on a client whose URI carries one below the bound:
- * `a-write-the-bound-ended-never-lands-under-a-client-timeout-db.test.js` (a file of its own: the server's modules are one
- * client per process, `_write-landing-experiment.mjs`).
+ * The whole table does not fit in the time a file may take, so the lanes are cut into part files, each its own process with its
+ * own door: this file is part 1 and `a-write-the-bound-ended-never-lands-part-2-db.test.js` the next. A part file says only which
+ * part it is; the cut is `_landing-parts.mjs`'s, and that the parts run every lane exactly once is
+ * `the-parts-of-a-split-landing-experiment-run-every-lane-once.test.js`'s.
+ *
+ * ## And on a client whose URI names a timeoutMS
+ *
+ * An operator may put `timeoutMS` in `MONGO_URI`. From driver 7.8.0 it is parsed and ignored (`Q-716`), and the bound carries the
+ * server's deadline, never a client clock. `a-write-the-bound-ended-never-lands-under-a-client-timeout-db.test.js` holds that on such
+ * a client (a file of its own: the server's modules are one client per process, `_write-landing-experiment.mjs`).
  *
   * ## What else a lane proves
  *
@@ -76,13 +83,16 @@
  */
 import { describe, it, before, after } from 'node:test';
 import { landingExperiment } from './_write-landing-experiment.mjs';
+import { partOf } from './_landing-parts.mjs';
 
+const PART = 0;
 // Declared HERE, not in the helper: node records a test against the file that calls `it`.
 const x = landingExperiment({
-  title: 'a write the bound ended never lands afterwards',
+  title: `a write the bound ended never lands afterwards (part ${PART + 1})`,
   suite: 'boundlands',
   query: '',
-  reps: 20,
+  reps: 5,
+  part: partOf('a-write-the-bound-ended-never-lands', PART),
 });
 describe(x.title, { skip: x.skip }, () => {
   before(x.before, { timeout: x.timeout });

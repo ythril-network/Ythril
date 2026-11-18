@@ -27,6 +27,12 @@
  * - `laneIndexes`: run only these lanes of the full table (default all), by index. A narrow run has fewer lanes than
  *   workers, which is the shape that exposed `runAll` starting a lane's next repetition while the last one's settle window was
  *   still open (`Q-380`); the full table is still derived and floored whatever is run;
+ * - `part`: run one part of a split experiment, `partOf(stem, index)` from `_landing-parts.mjs` (default none). The lanes are cut
+ *   HERE from the table this module derives (`lanesOfPart`), so a part file cannot hand in a lane list that leaves a lane out;
+ *   given together with `laneIndexes` it throws. That the parts of one experiment are its whole table, each lane once, is
+ *   `the-parts-of-a-split-landing-experiment-run-every-lane-once.test.js`'s;
+ * - `workers`: how many lanes are stalled at once (default `WORKERS`). A variant whose repetitions are spent sleeping (the relay's
+ *   lateness on every bounded write, then the bound) and not on the event loop passes more;
  * - `boundMs`: the write bound and the hold deadline (default 1000). The client-timeout variant runs a longer bound so the
  *   client's clock, which every OTHER operation of the lane inherits too (reads, seeds, the door's own lookups), can sit
  *   well above how long those take under load and still below the bound;
@@ -45,6 +51,8 @@ import { openStalledWriteDoors, seedDoorSpace, stalledWriteDoors } from './_stal
 import { holderCases, loadHolderModules, seedHolderSpace, serverCallsOfLocks, LOCK_MAY_CALL } from './_seq-hold-cases.mjs';
 import { elapse } from '../_shared/sleep.mjs';
 import { assertLaneHeld } from './_landing-verdict.mjs';
+import { lanesOfPart } from './_landing-parts.mjs';
+import * as writeBound from '../../server/dist/db/write-bound.js';
 
 const skip = await mongoSkipReason();
 
@@ -63,7 +71,7 @@ const CLOCK_WINDOW_MS = 400;
 /** How long, after a stall was released, a landing is waited for. */
 const SETTLE_MS = 3000;
 const POLL_MS = 250;
-/** Lanes stalled at once: enough to keep the file's time down, few enough not to starve the driver's pool or the event loop. */
+/** Lanes stalled at once by default: enough to keep the file's time down, few enough not to starve the driver's pool or the event loop. */
 const WORKERS = 4;
 /** How long past the bound a call may take to answer. */
 let CAP_MS = BOUND.holdDeadlineMs + 2500;
@@ -272,19 +280,19 @@ const notASample = (r) => r.answered && !r.fixtureError && !r.sawStall;
  * this one has closed, so its seed never lands under another attempt's open window. `discarded[i]` holds the attempts
  * of lane `i` that were not samples; `results[i]` holds exactly one entry per repetition.
  */
-async function runAll(lanes, results, reps, discarded) {
+async function runAll(lanes, results, reps, discarded, workers) {
   let tasks = [];
   for (let rep = 0; rep < reps; rep++) lanes.forEach((lane, i) => tasks.push({ lane, i, rep, attempt: 1 }));
   const previous = lanes.map(() => Promise.resolve());
   while (tasks.length > 0) {
     const queue = tasks;
     tasks = [];
-    await runRound(queue, previous, results, discarded, tasks);
+    await runRound(queue, previous, results, discarded, tasks, workers);
   }
 }
 
-/** One pass over `tasks`: the repetitions that proved nothing are pushed onto `again` for the next. */
-async function runRound(tasks, previous, results, discarded, again) {
+/** One pass over `tasks`, `workers` stalls at a time: the repetitions that proved nothing are pushed onto `again` for the next. */
+async function runRound(tasks, previous, results, discarded, again, workers) {
   const watching = [];
   let next = 0;
   async function worker() {
@@ -312,7 +320,7 @@ async function runRound(tasks, previous, results, discarded, again) {
       watching.push(finished);
     }
   }
-  await Promise.all(Array.from({ length: WORKERS }, worker));
+  await Promise.all(Array.from({ length: workers }, worker));
   await Promise.all(watching);
 }
 
@@ -331,16 +339,19 @@ async function runRound(tasks, previous, results, discarded, again) {
  * { timeout: x.timeout }); after(x.after); for (const c of x.cases) it(c.name, c.fn); })`. `a-test-is-declared-where-it-runs`
  * holds that no helper module declares a test.
  *
- * @param {{ title: string, suite: string, query: string, reps: number, clientTimeoutMs?: number, boundMs?: number, holdMs?: number }} o
+ * @param {{ title: string, suite: string, query: string, reps: number, minReps?: number, lateByMs?: number, laneIndexes?: number[], part?: { stem: string, index: number, count: number }, workers?: number, clientTimeoutMs?: number, boundMs?: number, holdMs?: number }} o
  *   `boundMs`: the write bound the experiment sets (default 1000, the least it may be); `holdMs`: the hold deadline (default
  *   the same). A variant that asserts WHEN an answer came gives the hold more than the bound: an operation late in a hold is
  *   bounded by what is left of the hold, which is less than the bound, and would read as an early answer
  * @returns {{ title: string, skip: string | false | undefined, lateByMs: number, laneCount: number, timeout: number, before: () => Promise<void>, after: () => Promise<void>, cases: Array<{ name: string, fn: () => void }> }}
  */
-export function landingExperiment({ title, suite, query, reps, minReps = 5, lateByMs = LATE_BY_MS, laneIndexes, clientTimeoutMs, boundMs = 1000, holdMs = boundMs }) {
+export function landingExperiment({ title, suite, query, reps, minReps = 5, lateByMs = LATE_BY_MS, laneIndexes: given, part, workers = WORKERS, clientTimeoutMs, boundMs = 1000, holdMs = boundMs }) {
   const REPS = reps;
   BOUND = { writeTimeoutMs: boundMs, holdDeadlineMs: holdMs };
   CAP_MS = holdMs + 2500;
+  if (!Number.isInteger(workers) || workers < 1) throw new Error(`landingExperiment: workers ${workers} is not a count of stalls`);
+  if (part !== undefined && given !== undefined) throw new Error('landingExperiment: a part takes its lanes from partOf alone, never from laneIndexes as well');
+  const laneIndexes = part === undefined ? given : lanesOfPart(LANES.length, part.index, part.count);
   if (laneIndexes !== undefined && !laneIndexes.every(i => Number.isInteger(i) && i >= 0 && i < LANES.length)) {
     throw new Error(`landingExperiment: laneIndexes [${laneIndexes}] names a lane outside the table of ${LANES.length}`);
   }
@@ -433,7 +444,7 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
     skip,
     lateByMs,
     laneCount: lanes.length,
-    timeout: 120_000 + REPS * lanes.length * repetitionBudgetMs() / WORKERS,
+    timeout: 120_000 + REPS * lanes.length * repetitionBudgetMs() / workers,
     async before() {
       relay = await startDelayedWriteRelay({ host: TEST_MONGO_HOST, port: TEST_MONGO_PORT });
       doors = await openStalledWriteDoors({ suite, spaces: lanes.map(l => l.space), mongoPort: relay.port, mongoQuery: query, fixtureClient: true });
@@ -448,7 +459,7 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
         if (/answered 5\d\d/.test(line)) { answered5xx.push({ at: Date.now(), line }); if (answered5xx.length > 500) answered5xx.shift(); }
         if (/record position held .* ended=timeout/.test(line)) { heldToTimeout.push({ at: Date.now(), line }); if (heldToTimeout.length > 500) heldToTimeout.shift(); }
       });
-      await runAll(lanes, results, REPS, discarded);
+      await runAll(lanes, results, REPS, discarded, workers);
     },
     async after() {
       stopListening();
@@ -458,4 +469,54 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
     },
     cases,
   };
+}
+
+// A namespace import: a build without `KILL_WAIT_MS` fails the late variant's floor case instead of every file at link time.
+const { SERVER_FIRST_MARGIN_MS, KILL_WAIT_MS } = writeBound;
+/** How far past the backstop's last look the late variant's server deadline falls: enough that it is plainly after the answer. */
+const LATE_PAST_MS = 100;
+/**
+ * Lanes the late variant stalls at once. Its repetitions are spent sleeping (the relay's lateness on every bounded write, then the
+ * bound), not on the event loop: twice the default puts no more load on the loop than the base file's stalls do.
+ */
+const LATE_WORKERS = 2 * WORKERS;
+
+/**
+ * The LATE variant (`Q-380`): the experiment with every bounded write reaching the server past the backstop's margin AND its kill
+ * window, so only the kill ends the operation before the answer. One copy for each of its part files; what the figures are and why
+ * is `a-write-the-bound-ended-never-lands-when-the-command-is-late-db.test.js`'s docblock. Its first case is the floor that the
+ * lateness really is past both, derived from the built `write-bound.js`, never a literal.
+ *
+ * @param {{ title: string, suite: string, part: { stem: string, index: number, count: number } }} o
+ */
+export function lateCommandExperiment({ title, suite, part }) {
+  const x = landingExperiment({
+    title,
+    suite,
+    query: '',
+    // As the diagnosis found enough to be red without the kill step: a lane is a window, not a race.
+    reps: 3,
+    minReps: 3,
+    lateByMs: SERVER_FIRST_MARGIN_MS + (KILL_WAIT_MS ?? 0) + LATE_PAST_MS,
+    // The relay holds EVERY bounded write of a lane back, so an operation that is not the first of its hold starts its clock a
+    // lateness later each. At the 1000 ms hold the 80 ms file keeps, the hold's own deadline was spent by the first writes of the
+    // pushed-fork lanes and the write the lane stalls was never SENT (a hold whose time is spent refuses the next operation): the
+    // lane stalled nothing. A hold of 10 000 ms leaves every lane's stalled write its own full bound; the per-operation bound
+    // stays the 1000 ms minimum.
+    holdMs: 10_000,
+    boundMs: 1000,
+    workers: LATE_WORKERS,
+    part,
+  });
+  const floor = {
+    name: 'the lateness is past the backstop\'s margin AND its kill window, so only the kill ends the operation before the answer',
+    fn: () => {
+      assert.ok(Number.isInteger(SERVER_FIRST_MARGIN_MS) && SERVER_FIRST_MARGIN_MS > 0, `SERVER_FIRST_MARGIN_MS is ${SERVER_FIRST_MARGIN_MS}`);
+      assert.ok(Number.isInteger(KILL_WAIT_MS) && KILL_WAIT_MS > 0, `KILL_WAIT_MS is ${KILL_WAIT_MS}`);
+      assert.ok(x.lateByMs > SERVER_FIRST_MARGIN_MS + KILL_WAIT_MS,
+        `the relay holds a write back ${x.lateByMs} ms, not past the ${SERVER_FIRST_MARGIN_MS} ms margin plus the ${KILL_WAIT_MS} ms kill window: `
+        + 'a backstop that only waited would pass');
+    },
+  };
+  return { ...x, cases: [floor, ...x.cases] };
 }
