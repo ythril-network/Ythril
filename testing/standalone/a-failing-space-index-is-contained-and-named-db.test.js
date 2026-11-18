@@ -11,9 +11,12 @@
  *   too, R5), and an index whose policy is `report` or `best-effort` that the store refuses does not stop it: it resolves, every
  *   other declared index stands, and a `report` one is said through the shared reporter naming the space and the index;
  * - **the background pass** (`ensureQueryIndexes`) runs EVERY declared index as its own unit (`eachUnit`): one that the store
- *   refuses is said in a line naming the space and the index, and every other index of the space is built. Derived from every index
- *   a fresh space carries once all its builders ran (`buildReferenceSpace`) and from the declaration, one refused build per case,
- *   on a space whose indexes were all dropped first.
+ *   refuses is said in a line naming the space and the index, and every other index of the space is built. The case that holds it
+ *   for every index, one refused build per case, is in `a-failing-space-index-in-the-background-pass-is-named-db.test.js`: it is the
+ *   longest of the rule's cases, so it runs as a file of its own, and
+ *   `a-failing-space-index-cases-are-held-once-across-their-files.test.js` holds that every case of the rule is in exactly one of
+ *   the two files. The cases here are the rest of the pass's rule: a best-effort index warned once, a store that does not answer,
+ *   and a sweep tick whose listing hangs.
  *
  * Every refusal is the store's own (`_failing-index-build.mjs`), and each case asserts it fired: an index the code never builds
  * fails nothing, and is reported as never built.
@@ -21,9 +24,7 @@
  * ## Seen red
  *
  * At df2e7534: the `initSpace` case on the declaration (`spaces/space-indexes.ts` is not built); the background pass on what it
- * builds (`tags_1`, the chrono, files, conflicts and candidates indexes, `lexical_text`, the TTL indexes and more are never built by
- * it) and on the names (a unit is `file tombstone indexes` or `facts type index`, so the line does not name `type_1`; and a refused
- * file tombstone index stops the other four of its unit).
+ * builds and on the names (seen red in the file above).
  *
  * Run: a Mongo the harness accepts, then `node --test testing/standalone/a-failing-space-index-is-contained-and-named-db.test.js`
  * (a prior `npm run build` in server/).
@@ -33,36 +34,17 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
-import {
-  loadSpaceIndexDeclaration, requireSpaceIndexDeclaration, indexesOfSpace, buildReferenceSpace, dropSpaceIndexes, specDifference,
-} from './_space-index-declaration.mjs';
+import { requireSpaceIndexDeclaration, indexesOfSpace, dropSpaceIndexes } from './_space-index-declaration.mjs';
 import { failIndexBuild, storeIndexRefusal } from './_failing-index-build.mjs';
+import { notStanding, named } from './_failing-index-findings.mjs';
+import { settleWithin } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 
 const SUITE = 'q445contained';
 const T = { timeout: 300_000 };
-const OPTIONAL = 'lexical_text';
-const REFERENCE_FLOOR = 20;
 
-let door, db, reference, refusal, fault, initSpace, ensureQueryIndexes;
-
-/** The findings of `expected` against what `space` carries now, `skip` (an `indexId`) left out. */
-async function notStanding(space, expected, skipId) {
-  const now = await indexesOfSpace(db, space);
-  const out = [];
-  for (const [id, { spec }] of expected) {
-    if (id === skipId) continue;
-    const got = now.get(id);
-    if (!got) { if (spec.name !== OPTIONAL) out.push(`${id} missing`); continue; }
-    const diff = specDifference(spec, got.spec);
-    if (diff.length) out.push(`${id} differs in ${diff.join(', ')}`);
-  }
-  return out;
-}
-
-/** Whether one emitted line names the space and the index. */
-const named = (lines, space, name) => lines.some(l => l.includes(`'${space}'`) && l.includes(name));
+let door, db, refusal, fault, initSpace, ensureQueryIndexes;
 
 describe('a failing space index is contained and named (real MongoDB)', { skip }, () => {
   before(async () => {
@@ -70,7 +52,6 @@ describe('a failing space index is contained and named (real MongoDB)', { skip }
     db = door.mongo.getDb();
     ({ initSpace } = await import('../../server/dist/spaces/lifecycle.js'));
     ({ ensureQueryIndexes } = await import('../../server/dist/spaces/ensure-query-indexes.js'));
-    reference = await buildReferenceSpace(db, 'reference');
     refusal = await storeIndexRefusal(db);
     fault = failIndexBuild(Object.getPrototypeOf(db.collection('x')));
   });
@@ -91,31 +72,11 @@ describe('a failing space index is contained and named (real MongoDB)', { skip }
       fault.clear();
       if (fired === 0) { findings.push(`${e.id} (${e.policy}): initSpace on a new space never built it`); continue; }
       if (result !== 'resolved') { findings.push(`${e.id} (${e.policy}): initSpace failed: ${String(result?.message ?? result)}`); continue; }
-      const rest = await notStanding(space, expected, e.id);
+      const rest = await notStanding(db, space, expected, e.id);
       if (rest.length) findings.push(`${e.id} (${e.policy}) refused, and then not standing: ${rest.join(', ')}`);
       if (e.policy === 'report' && !named(lines, space, e.spec.name)) findings.push(`${e.id} (report): no line names the space and the index`);
     }
     assert.deepEqual(findings, [], `a refused index stopped initSpace or took other indexes with it: ${findings.join('; ')}`);
-  });
-
-  it('the background pass names a refused index and builds every other index of the space', T, async () => {
-    assert.ok(reference.size >= REFERENCE_FLOOR, `the reference space carries ${reference.size} indexes: the builders read as not having run`);
-    const expected = new Map(reference);
-    const declaration = await loadSpaceIndexDeclaration();
-    for (const e of declaration.entries ?? []) expected.set(e.id, e);
-    const findings = [];
-    for (const [id, { suffix, spec }] of expected) {
-      await dropSpaceIndexes(db, 'walked');
-      fault.fail(`walked_${suffix}`, spec.name, refusal);
-      const { lines } = await logLinesDuring(() => ensureQueryIndexes());
-      const fired = fault.fired();
-      fault.clear();
-      if (fired === 0) { findings.push(`${id}: the background pass never builds it`); continue; }
-      if (!named(lines, 'walked', spec.name)) findings.push(`${id}: no line names the space and the index`);
-      const rest = await notStanding('walked', expected, id);
-      if (rest.length) findings.push(`${id} refused, and then not standing: ${rest.join(', ')}`);
-    }
-    assert.deepEqual(findings, [], `the background pass over one refused index: ${findings.join('; ')}`);
   });
 
   // Added by the bundle-101 pre-ship lens (L11): a best-effort index is best effort in the background pass too. The pass ran every
@@ -192,8 +153,11 @@ describe('a failing space index is contained and named (real MongoDB)', { skip }
     let lines = [];
     let outcome;
     try {
-      const run = logLinesDuring(() => ensureSweepIndexes());
-      outcome = await Promise.race([run.then(r => { lines = r.lines; return 'ended'; }), new Promise(r => setTimeout(() => r('hung'), 20_000))]);
+      // `settleWithin` clears its own timer: a bare race against a 20 s timer kept the process alive that long after the last case.
+      const ticked = await settleWithin(logLinesDuring(() => ensureSweepIndexes()), 20_000);
+      if (ticked.settled && !ticked.ok) throw ticked.error;
+      outcome = ticked.settled ? 'ended' : 'hung';
+      if (ticked.settled) lines = ticked.value.lines;
     } finally {
       proto.listIndexes = original;
       bound.setWriteBoundForTest(null);
