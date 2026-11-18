@@ -152,6 +152,8 @@ POST /api/invite/finalize
 { "status": "joined", "instanceId": "joiner-uuid", "networkId": "net-uuid" }
 ```
 
+`temporary` (boolean) is on every `200`: `true` when the handshake was begun to move this instance under a new parent (a re-parenting), `false` for an ordinary join.
+
 On vote-governed networks (`closed`, `democratic`, `braintree`) the join is **held in a vote round**
 instead of taking effect immediately — the response is then
 `{ "status": "vote_pending", "roundId": "..." }`: the handshake answers the joiner with the round's id only. The inviting instance's own yes vote is cast

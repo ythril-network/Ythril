@@ -1,0 +1,7 @@
+[
+  {
+    "id": "closure:server:@types/node",
+    "reason": "the server lists @types/node as a devDependency, but three production dependencies (@fast-csv/format, @fast-csv/parse, protobufjs) require it, so an --omit=dev install holds it; it is type declarations only and ships no code",
+    "reviewBy": "2027-02-18"
+  }
+]

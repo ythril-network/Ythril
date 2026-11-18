@@ -1,0 +1,82 @@
+[
+  {
+    "id": "docker-compose.yml#ythril#user",
+    "reason": "compose names the published image, not a build, so the probe cannot read its user; the tracked root Dockerfile ends with USER node",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#ythril#cap_drop",
+    "reason": "the application is the trust boundary and compose-sidecar-hardening.test.js exempts it; it keeps its default capabilities today, so this is a gap to close, not a design",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#ythril#read_only",
+    "reason": "the app writes under /config and /data (volumes) and a read-only root has not been measured against it; compose-sidecar-hardening.test.js exempts the app",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#ythril#no-new-privileges",
+    "reason": "the app is exempt from the sidecar hardening test; nothing needs a privilege gain, so setting it is a gap to close",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#ythril#limits",
+    "reason": "the app has a memory ceiling (YTHRIL_MEM_LIMIT) but no cpus or pids_limit; an infra deployment sets its own pod limits",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#ythril-mongo#user",
+    "reason": "third-party mongodb-atlas-local image whose user compose does not set; its mongod and mongot processes are not measured here",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#ythril-mongo#cap_drop",
+    "reason": "the database is exempt from the sidecar hardening test: it parses no user-controlled input and sits alone on the internal database network",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#ythril-mongo#read_only",
+    "reason": "the database writes its data, config and log volumes, and the atlas-local image has not been run with a read-only root",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#ythril-mongo#no-new-privileges",
+    "reason": "the database is exempt from the sidecar hardening test; the flag has not been run against the atlas-local image",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#ythril-mongo#limits",
+    "reason": "the database has a memory ceiling (YTHRIL_MONGO_MEM_LIMIT) but no cpus or pids_limit; its mongot heap is sized from that ceiling",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#ollama#user",
+    "reason": "the ollama image runs as root and keeps its models under /root/.ollama; compose sets no user and the image offers no non-root form",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#ollama#network",
+    "reason": "ollama pulls its model from the internet, so it sits on ythril-media (outbound, deliberately not on the database network); kubernetes/manifests/media-netpol.yaml limits its egress to DNS and 80/443",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#whisper#user",
+    "reason": "the faster-whisper-server image runs as root and keeps its cache under /root/.cache; compose sets no user",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#whisper#read_only",
+    "reason": "waived in compose-sidecar-hardening.test.js: the server is launched via uv run, which rewrites its own virtualenv on every start and crash-loops on a read-only root",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#whisper#network",
+    "reason": "whisper pulls its model from the internet, so it sits on ythril-media (outbound, deliberately not on the database network); media-netpol.yaml limits its egress to DNS and 80/443",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "docker-compose.yml#unstructured#user",
+    "reason": "third-party unstructured-api image whose user compose does not set; the image's own user is not measured here",
+    "reviewBy": "2027-02-18"
+  }
+]

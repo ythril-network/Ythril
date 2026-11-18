@@ -27,6 +27,8 @@ Authorization: Bearer <admin-token>
 }
 ```
 
+`migrationEnabled` (boolean) says whether this instance offers the database migration at all; it is on every `200`, beside `source` and `mongoUriRedacted`.
+
 `source` indicates where the active connection string comes from, in priority order (highest first):
 
 | Value | Meaning |

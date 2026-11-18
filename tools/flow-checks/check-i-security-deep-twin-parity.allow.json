@@ -1,0 +1,42 @@
+[
+  {
+    "id": "read_spill <-> GET /api/brain/spills/:id :: guard",
+    "reason": "both doors call the one act in brain/read-spill-act.ts, which checks the rung against the spill's stored member spaces (a spill names no space for a guard to read); the route's chain only authenticates",
+    "reviewBy": "2027-02-17"
+  },
+  {
+    "id": "read_spill <-> GET /api/brain/spills/:id :: rights-row",
+    "reason": "the route has no ROUTE_RIGHTS row because the act, shared with the tool, prices the read per stored member space; the tool's TOOL_RIGHTS row names the rung the act checks",
+    "reviewBy": "2027-02-17"
+  },
+  {
+    "id": "space_reindex <-> POST /api/brain/spaces/:spaceId/reindex :: guard",
+    "reason": "A REAL DOOR DIFFERENCE, reported by the Q-876 probe: the route asks the knowledge admin rung of the space, the tool is flagged admin (instance admin), so a space admin can reindex over REST and not over MCP. Which door is right is the owner's; the exception stays until it is decided",
+    "reviewBy": "2027-02-17"
+  },
+  {
+    "id": "update_space <-> PATCH /api/spaces/:id :: guard",
+    "reason": "PATCH /api/spaces/:id judges each field in its handler by auth/space-field-rights.ts after the rung guard requireSpaceAuthMfaScoped, so the chain asks a token; the tool is flagged spaceAdmin and its act applies the same per-field rights",
+    "reviewBy": "2027-02-17"
+  },
+  {
+    "id": "update_space <-> PATCH /api/spaces/:id :: rights-row",
+    "reason": "the route is priced per field by auth/space-field-rights.ts in its handler, not by one ROUTE_RIGHTS row (a meta field is schema write, other fields need the space admin); the tool carries the schema write row for the meta half",
+    "reviewBy": "2027-02-17"
+  },
+  {
+    "id": "list_tokens <-> GET /api/tokens :: guard",
+    "reason": "A REAL DOOR DIFFERENCE, reported by the Q-876 probe: GET /api/tokens admits a space admin (requireAdminOrSpaceAdmin, who lists the tokens that reach that space) and the tool list_tokens is flagged admin (instance admin). MCP is the stricter door; whether to widen it is the owner's",
+    "reviewBy": "2027-02-17"
+  },
+  {
+    "id": "view_copy <-> POST /api/views/:id/copy :: guard",
+    "reason": "the route adds the guard and second factor of managing the target token (views.ts: 'a copy is a grant of reading to another token'); the tool reaches the same act, which refuses a caller who may manage no token with view_copy_forbidden on both doors",
+    "reviewBy": "2027-02-17"
+  },
+  {
+    "id": "view_copy <-> POST /api/views/:id/copy :: read-only",
+    "reason": "the route refuses a read-only token through requireAdminOrSpaceAdminMfa (managing a token); the tool is ownerScoped, visible to read-only tokens by design, and its act refuses a caller who manages no token, which a read-only token does not",
+    "reviewBy": "2027-02-17"
+  }
+]

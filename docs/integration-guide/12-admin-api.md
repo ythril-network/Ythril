@@ -439,6 +439,6 @@ Installs and starts the connector. `os` is optional and inferred when omitted. I
 
 Performs the host-side steps that let this instance accept peer connections. `hostname` is validated against RFC 952 /
 1123 label rules, both fields are required, and the OS is not inferred here because the steps differ per platform and a
-wrong guess would run the wrong ones.
+wrong guess would run the wrong ones. Four more fields complete the body: `acknowledgeCriticalChanges` (must be `true`: the steps change the host, and the call is refused without it), `autostart` (boolean, default `true`), `overwriteDns` (boolean, default `false`) and `localOrigin` (an `http` or `https` URL the tunnel forwards to; the server derives it from its own `PORT` when it is omitted).
 
 ---

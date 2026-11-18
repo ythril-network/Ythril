@@ -336,7 +336,7 @@ Content-Type: application/json
 ```
 
 The source is found as a download finds it: a file this instance holds under another Unicode form of the name (the decomposed spelling a
-listing reports) is the file named, and its bytes are the ones moved. MCP `move_file` does the same.
+listing reports) is the file named, and its bytes are the ones moved. MCP `move_file` does the same, and takes the source as `src` and the destination as `dst`; a failed move is safe to retry with the same `src` and `dst`.
 
 **Response** `200`:
 

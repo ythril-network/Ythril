@@ -137,6 +137,8 @@ POST /api/networks
 
 **`votingDeadlineHours`** (optional, 1–72, default 24): how long a vote round on this network stays open. A round is open until its deadline and never after it: it is not listed as open, a cast on it is refused naming the deadline, and the round is concluded as expired (kept, with how it ended, on [Vote Outcomes](#vote-outcomes)).
 
+**`merkle`** (optional, boolean): when `true` the members compare a space's hash (its Merkle root) to see whether they hold the same records. **`myParentInstanceId`** (optional, `braintree` only): this instance's parent in the tree; omit it and this instance is the root. On MCP both are `network_create` arguments.
+
 **`requireSignedVotes`** (optional, default `false`): when `true`, governance vote casts must carry a valid Ed25519 signature from the voting member (strict mode). Leave it off until every member has synced at least once so their signing keys are published; then enable it (also settable via `PATCH`) to reject any unsigned or forged vote. Since 5.6.0 every cast also signs the round's type and target (`bsig`), so a member relaying a space deletion or wipe cannot re-aim it at another space; see [Sync Protocol → Signed vote casts](../sync-protocol.md#signed-vote-casts) for the transition while older members remain.
 
 **`syncSchedule`** (optional): how often this network syncs automatically. Give a standard **cron expression** (e.g. `"*/5 * * * *"` = every 5 minutes, `"0 * * * *"` = hourly) — the same node-cron engine the backup scheduler uses. Omit it (or set it empty) for manual-sync only.
@@ -274,6 +276,8 @@ POST /api/networks/:id/members
   "direction": "both"
 }
 ```
+
+`skipTlsVerify` (optional, boolean, default `false`) accepts this peer's TLS certificate without verifying it; it is stored with the member and never returned. The same field is on `POST /api/networks/:id/join` and on MCP `network_member_add` and `network_member_admit`; turn it on only for a peer you reach over a network you trust.
 
 In `closed`/`democratic` networks this opens a voting round: `202` `{ "status": "vote_pending", "roundId": "...", "round": { ... } }`, `round` being the round as [List Open Vote Rounds](#list-open-vote-rounds) shows it (no candidate record, no invite-key hash). Where this instance's own yes passes the round (the proposer's yes always counts, and a closed or democratic network where the two are its only members passes at open), the answer is `201` with the member added.
 In `club` networks the member is added immediately (`201`).
@@ -565,7 +569,7 @@ POST /api/networks/join-remote
 }
 ```
 
-Executes the full 3-step RSA handshake server-side. No plaintext tokens cross the wire.
+Executes the full 3-step RSA handshake server-side. No plaintext tokens cross the wire. The body may also carry **`inviteCode`** (optional, informational only): the code from the invite bundle, which the handshake does not read. MCP `network_join_remote` takes the same fields.
 
 **`spaceMap`** (optional) — a `Record<string, string>` from a space of the network to the local space id it goes into. Use this when a space name collides with an existing local space and you want it under a different local name instead of merging. **Key it by the name the invite shows for the space** (`spaces` in the bundle); the network's id for it (`networkSpaces`) is accepted too. A space not named keeps the name the invite shows. The recorded aliases are persisted on the `NetworkConfig`, and the sync engine translates through them in both directions.
 

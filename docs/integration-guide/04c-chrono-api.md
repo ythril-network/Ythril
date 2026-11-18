@@ -33,6 +33,8 @@ fact. See [Retry Safety](04-brain-api.md#retry-safety).
 }
 ```
 
+`superseded` (boolean) marks an entry no longer true, on the create as on the `PATCH`; see [Marking a record as no longer true](04f-write-semantics.md#marking-a-record-as-no-longer-true).
+
 - `type` — `event`, `deadline`, `plan`, `prediction`, `milestone` **unless the space declares its own chrono
   types**, in which case those **replace** this list rather than extending it. A space with
   `typeSchemas.chrono` set accepts its declared type names and **rejects all five built-ins**; a write with a
