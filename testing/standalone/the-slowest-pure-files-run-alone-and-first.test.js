@@ -290,8 +290,17 @@ test(${JSON.stringify(`ran ${label} runner-args`)} + ' ' + args, () => {});
     ...over,
   });
 
+  /**
+   * The two end-to-end runs the cases read, each made once, by the first case that asks. Each case reads what a run printed and left behind, never
+   * changes it, so five runs of the same two inputs answered nothing a shared pair does not (each run is a whole preflight in a scratch checkout). The
+   * promise is kept, so a run that failed fails every case that reads it, by name. A case that must change the input (`bare`) makes its own run.
+   */
+  const once = (make) => { let run; return () => (run ??= make()); };
+  const withSnapshot = once(() => plantedRun({ fileTimes: timesFile() }));
+  const withoutSnapshot = once(() => plantedRun({ fileTimes: null }));
+
   it('with a planted snapshot: one slow file runs alone first and with one worker, the @ci-only and gone files are not run, every other pure file runs', { timeout: 200_000 }, async () => {
-    const r = await plantedRun({ fileTimes: timesFile() });
+    const r = await withSnapshot();
     assert.equal(r.status, 0, r.out.slice(-3000));
     assert.match(r.out, /Preflight STATIC passed/, r.out.slice(-1500));
     const said = unitsLine(r.out);
@@ -312,8 +321,8 @@ test(${JSON.stringify(`ran ${label} runner-args`)} + ' ' + args, () => {});
   });
 
   it('the planted run writes its timing files in its own checkout and none in the repository that holds the script (Q-872)', { timeout: 400_000 }, async () => {
-    for (const fileTimes of [timesFile(), null]) {
-      const r = await plantedRun({ fileTimes });
+    for (const run of [withSnapshot, withoutSnapshot]) {
+      const r = await run();
       assert.equal(r.status, 0, r.out.slice(-3000));
       assert.ok(r.plantedHere.length > 0, 'the planted checkout\'s test-results holds no preflight-pure-*.jsonl: the run wrote its results somewhere else');
       assert.deepEqual(r.strayInRepo, [], 'the planted run wrote its preflight results into the script repository\'s test-results');
@@ -321,7 +330,7 @@ test(${JSON.stringify(`ran ${label} runner-args`)} + ' ' + args, () => {});
   });
 
   it('with no snapshot: the line says the units are cut by path length, and the first unit holds more than one file', { timeout: 200_000 }, async () => {
-    const r = await plantedRun({ fileTimes: null });
+    const r = await withoutSnapshot();
     assert.equal(r.status, 0, r.out.slice(-3000));
     const said = unitsLine(r.out);
     assert.ok(said, `no line starting 'preflight: units':\n${r.out.slice(0, 2500)}`);
@@ -333,7 +342,7 @@ test(${JSON.stringify(`ran ${label} runner-args`)} + ' ' + args, () => {});
 
   // Q-870: the text-only filler (it names no build) is taken by the text stage, before the build; every filler that names the build stays in the pure units.
   it('a filler that reads only tracked text runs in the text stage before the server build, the others in the pure units after it, each once, and the text stage\'s timing files survive the run', { timeout: 200_000 }, async () => {
-    const r = await plantedRun({ fileTimes: timesFile() });
+    const r = await withSnapshot();
     assert.equal(r.status, 0, r.out.slice(-3000));
     const path = (label) => `testing/standalone/${label}.test.js`;
     assert.deepEqual(r.textHere, [path(TEXT_FILLER)], `the text stage's timing files name ${JSON.stringify(r.textHere)}: they were not written, were cleared by a later stage, or name more than the one text-only file (the gate files have their own stages)`);
