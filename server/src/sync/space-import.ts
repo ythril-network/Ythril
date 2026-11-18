@@ -92,6 +92,7 @@ import { readFamilyPages, type ExportBodyIndex } from './export-stream.js';
 import { SNAPSHOTS_EXPORT_KEY } from './schema-snapshot-export.js';
 import { importSnapshots, senderOf, type ImportedSnapshots } from './schema-snapshot-import.js';
 import type { RestoreOrigin } from './local-only-fields.js';
+import type { ImportTotals } from './import-totals.js';
 
 /**
  * What an import may carry: every REPLICATED family, by collection name — the same list the export streams, so
@@ -191,19 +192,11 @@ export interface ImportResult {
   unknownKeysTotal?: number;
 }
 
-/** What a whole import came to, every family together: the counts its audit row carries, never an id or a name. */
-export interface ImportTotals {
-  inserted: number;
-  updated: number;
-  refused: number;
-  deletedOnRestore: number;
-  due: number;
-  /** Snapshot rows the import inserted, and elements it skipped; present when the result says what it did with snapshots. */
-  snapshotsLanded?: number;
-  snapshotsRefused?: number;
-  /** Array keys of the body not read (the answer's `unknownKeysTotal`); present when the result counts them. Named apart from it because an audit field name must not read as a credential. */
-  unreadArraysTotal?: number;
-}
+/**
+ * What a whole import came to, every family together: the shape lives in `import-totals.ts`, a module that imports nothing, so the audit allowlist
+ * holds itself to it without reaching this importer; re-exported for this module's readers.
+ */
+export type { ImportTotals };
 
 /** The totals of an import's result over every family: the door's audit row and the act's completion row say the same numbers. */
 export function importTotals(result: ImportResult): ImportTotals {
