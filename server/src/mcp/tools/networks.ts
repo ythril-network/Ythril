@@ -206,7 +206,10 @@ export const network_votesTool: ToolHandler = {
     + '`GET /api/networks/:id/votes`. Requires instance-admin rights.\n\n'
     + 'A ROUND IS HOW A NETWORK APPROVES A CHANGE. Cast on one with `network_vote`. A round past its deadline is never '
     + 'listed as open, and a round nobody concluded by its deadline failed: how it ended is `network_vote_outcomes`. '
-    + 'A schema change is listed with a `summary` saying what it would change, not the proposal itself.',
+    + 'A schema change is listed with a `summary` saying what it would change, not the proposal itself.\n\n'
+    + 'A SCHEMA CHANGE MAY ALSO REWRITE RECORDS. When its proposer chose conversion steps, its row carries them as `convertRecords`: '
+    + 'a yes on that round is also a yes to rewriting the stored records of the named types on every member that applies the steps '
+    + '(a member that cannot verify the proposer\'s signature over them takes the schema without them). Read the steps before you vote.',
   admin: true,
   inputSchema: (_s: ToolSchemas) => ({
     type: 'object', properties: { id: networkIdSchema }, required: ['id'], additionalProperties: false,
