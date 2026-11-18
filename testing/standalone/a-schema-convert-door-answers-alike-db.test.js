@@ -17,9 +17,13 @@
  *   and leave no run), status needs `knowledge: read`;
  * - the run the start made rewrites every copy of its type this instance holds, whoever last wrote it (a row written here, one a peer delivered, one
  *   whose author left the network), and leaves a fork row untouched;
- * - status answers the run's counts, and a space with no run in a stable shape (`{ state: 'none' }`), and writes nothing.
+ * - status answers the run's counts, and a space with no run in a stable shape (`{ state: 'none' }`), and writes nothing;
+ * - a start is priced on the heavy-call rail (`consumeHeavyToolCall`, the limit `delete_space_data` and the ingest share) INSIDE the act, keyed by
+ *   the caller (a token's id, or its address), so the route and the tool spend one allowance: a caller past it is refused with 429
+ *   `schema_convert_rate_limited` on every door, and another caller is not.
  *
  * Seen red on a91e522e: `server/dist/spaces/schema-convert-acts.js` does not exist (no act, no router, no tool).
+ * The rail seen red on 4c20b928: the start past the allowance is accepted (`'ok'`) on every door, since neither the act nor the route prices it.
  *
  * ## The mounted part (slice 6)
  *
@@ -59,7 +63,9 @@ const MOUNTED_ROUTE = 'scv-mroute';
 const MOUNTED_TOOL = 'scv-mtool';
 const MOUNTED_BUSY = 'scv-mbusy';
 const MOUNTED_REFUSE = 'scv-mrefuse';
-const ALL = [REFUSE, VIA_ACT, VIA_ROUTE, VIA_TOOL, BUSY, MAXED, MOUNTED_ROUTE, MOUNTED_TOOL, MOUNTED_BUSY, MOUNTED_REFUSE];
+/** A space with no record, started again and again by one caller until the heavy-call rail refuses it. */
+const RAIL = 'scv-rail';
+const ALL = [REFUSE, VIA_ACT, VIA_ROUTE, VIA_TOOL, BUSY, MAXED, MOUNTED_ROUTE, MOUNTED_TOOL, MOUNTED_BUSY, MOUNTED_REFUSE, RAIL];
 
 const RENAME = { op: 'renameProperty', kind: 'entity', type: 'person', from: 'nick', to: 'alias' };
 /** The schema the conversion leads to: `nick` is gone, `alias` is declared. */
@@ -110,10 +116,15 @@ describe('the Convert act and the status of a run answer alike on every door (re
   /** `{ status, body }` of an answer: `'ok'` for any success (the tool does not carry a status), the HTTP status of a refusal. */
   const answer = (status, body) => ({ status: typeof status === 'number' && status < 300 ? 'ok' : status, body });
 
-  const caller = (r) => ({ rights: r });
+  /**
+   * The caller an act is asked as: its rights and the key the heavy-call rail counts it under (a token's id, or its address, on the doors). A case
+   * that does not test the rail gets a key of its own per call, so the starts of the other cases never exhaust one caller's allowance.
+   */
+  let callerSeq = 0;
+  const caller = (r, rateKey = `scv-act-${++callerSeq}`) => ({ rights: r, rateKey });
   const viaAct = {
     name: 'the act',
-    start: async (space, args, r) => { const a = await acts.schemaConvertStartAct(space, args, caller(r)); return answer(a.status, a.body); },
+    start: async (space, args, r, key) => { const a = await acts.schemaConvertStartAct(space, args, caller(r, key)); return answer(a.status, a.body); },
     status: async (space, r) => { const a = await acts.schemaConvertStatusAct(space, caller(r)); return answer(a.status, a.body); },
   };
 
@@ -123,30 +134,30 @@ describe('the Convert act and the status of a run answer alike on every door (re
     assert.ok(layer, `${method.toUpperCase()} ${path} is not on the router`);
     return layer.route.stack.at(-1).handle;
   };
-  async function request(method, space, body, r) {
+  async function request(method, space, body, r, tokenId = 'scv-token') {
     const res = {
       statusCode: 200, body: undefined,
       status(c) { this.statusCode = c; return this; },
       json(b) { this.body = b; return this; },
       setHeader() { return this; },
     };
-    const req = { params: { id: space }, query: {}, body, headers: {}, ip: '127.0.0.1', authToken: { id: 'scv-token', name: 'scv-token', rights: r }, get: () => undefined };
+    const req = { params: { id: space }, query: {}, body, headers: {}, ip: '127.0.0.1', authToken: { id: tokenId, name: tokenId, rights: r }, get: () => undefined };
     await routeHandler(method, '/:id/schema-convert')(req, res);
     return answer(res.statusCode, res.body);
   }
   const viaRoute = {
     name: 'the route',
-    start: (space, args, r) => request('post', space, args, r),
+    start: (space, args, r, key) => request('post', space, args, r, key),
     status: (space, r) => request('get', space, undefined, r),
   };
 
-  const toolContext = (tool, space, args, r) => ({
+  const toolContext = (tool, space, args, r, rateKey = 'scv') => ({
     args: { space, ...args }, callSpace: space, callSpaces: [space], name: tool.name, transport: 'mcp', cfg: {}, accessibleSpaces: [], accessibleSpaceIds: [space],
-    ...(r ? { rights: r } : {}), viewReads: new Map(), rateKey: 'scv',
+    ...(r ? { rights: r } : {}), viewReads: new Map(), rateKey,
   });
-  async function callTool(tool, space, args, r) {
+  async function callTool(tool, space, args, r, key) {
     try {
-      const out = await tool.handle(toolContext(tool, space, args, r));
+      const out = await tool.handle(toolContext(tool, space, args, r, key));
       assert.ok(out.structuredContent, 'a tool answered without structuredContent');
       assert.equal(out.content[0].text, JSON.stringify(out.structuredContent), 'the tool answers the same body in content and in structuredContent');
       return answer(200, out.structuredContent);
@@ -157,7 +168,7 @@ describe('the Convert act and the status of a run answer alike on every door (re
   }
   const viaTool = {
     name: 'the tool',
-    start: (space, args, r) => callTool(tools.start, space, args, r),
+    start: (space, args, r, key) => callTool(tools.start, space, args, r, key),
     status: (space, r) => callTool(tools.status, space, {}, r),
   };
   const doors = [viaAct, viaRoute, viaTool];
@@ -430,6 +441,35 @@ describe('the Convert act and the status of a run answer alike on every door (re
         assert.deepEqual(again, { status: 'ok', body: { state: 'started', toFp: door.fp(VIA_ACT), types: PERSON, steps: 0 } }, d.name);
         await completed(VIA_ACT);
       }
+    });
+  });
+
+  // ── The heavy-call rail, inside the act ──────────────────────────────────────────────────────────────────────────────────────────
+
+  describe('the heavy-call rail is inside the act, so both doors share one allowance per caller', () => {
+    const NOTHING = [{ kind: 'entity', type: 'nothing-of-this-name' }];
+    const KEY = 'scv-rail-caller';
+    let limit;
+    before(async () => { ({ HEAVY_CALLS_PER_WINDOW: limit } = await import('../../server/dist/rate-limit/heavy-tool.js')); });
+
+    it('a caller past the rail\'s allowance is refused the next start with 429 schema_convert_rate_limited on every door, and nothing starts', async () => {
+      assert.ok(Number.isInteger(limit) && limit > 0, 'rate-limit/heavy-tool.ts exports no HEAVY_CALLS_PER_WINDOW');
+      // The allowance is spent across the three doors in turn, under one caller: a door with an allowance of its own would let the next start through.
+      for (let i = 0; i < limit; i++) {
+        const d = doors[i % doors.length];
+        const got = await d.start(RAIL, { types: NOTHING }, rights.spaceAdmin, KEY);
+        assert.equal(got.status, 'ok', `${d.name}, start ${i + 1} of ${limit}: ${JSON.stringify(got)}`);
+        await completed(RAIL);
+      }
+      const before = await stateOf(RAIL);
+      const got = await alike(d => d.start(RAIL, { types: NOTHING }, rights.spaceAdmin, KEY), 'a start past the rail');
+      assert.deepEqual([got.status, got.body.code], [429, 'schema_convert_rate_limited'], JSON.stringify(got));
+      assert.match(got.body.error, new RegExp(`\\b${limit}\\b`), 'the refusal does not say how many starts a caller may make');
+      assert.deepEqual(await stateOf(RAIL), before, 'a start the rail refused wrote something');
+      // The allowance is the caller's: another caller starts at once.
+      const other = await viaAct.start(RAIL, { types: NOTHING }, rights.spaceAdmin, 'scv-rail-other');
+      assert.equal(other.status, 'ok', JSON.stringify(other));
+      await completed(RAIL);
     });
   });
 
