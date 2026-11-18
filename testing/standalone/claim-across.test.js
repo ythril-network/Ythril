@@ -11,6 +11,7 @@
  * ## The truth table pinned here (no Mongo: the clock and `storeAnswers` are injected)
  *
  *   empty in every pass, none threw  -> noteEmpty        (the space leaves the probe hint)
+ *   empty, announced meanwhile       -> stays hinted     (the answer is older than the announcement)
  *   claimed                          -> noteClaimed      (the space stays hinted)
  *   threw                            -> neither          (a failing HINTED space stays hinted)
  *   skipped (quarantined)            -> neither          (the quarantine is honoured by a full scan; C4)
@@ -81,6 +82,41 @@ describe('claimAcross: the truth table', () => {
     const out = await signal.claimAcross(['a', 'b'], PASSES, script().tryClaim, { step: STEP });
     assert.equal(out, null);
     assert.deepEqual(hinted(signal, ['a', 'b']), [], 'both answered empty in both passes: neither stays hinted');
+  });
+
+  // A job becomes claimable (its settle delay ends, a retry's backoff elapses) and the space is announced while a claim that asked
+  // a moment too early is still waiting for the store. The claim's "empty" is older than the announcement: dropping the hint on it
+  // left the job waiting for the next full scan (Full run 44250534468, `an-arrived-image-gets-faces-...-db`: pending, never claimed).
+  it('empty, but announced while the claim was asking -> the space stays hinted, and the next claim asks it', async () => {
+    const { signal } = make();
+    await spendFullScan(signal, ['a', 'b']);
+    for (const s of ['a', 'b']) signal.markSpaceMayHaveWork(s);
+    const during = async (spaceId, pass) => {
+      if (spaceId === 'a' && pass === 'p1') signal.markSpaceMayHaveWork('a');
+      return null;
+    };
+    assert.equal(await signal.claimAcross(['a', 'b'], PASSES, during, { step: STEP }), null);
+    assert.deepEqual(hinted(signal, ['a', 'b']), ['a'], 'a was announced during the claim and stays; b answered empty and leaves');
+    const next = script({ 'a:p0': { id: 'job-a' } });
+    assert.deepEqual(await signal.claimAcross(['a', 'b'], PASSES, next.tryClaim, { step: STEP }), { id: 'job-a' });
+    assert.deepEqual(next.asked, ['a:p0'], 'the next claim is no full scan and asks the announced space alone');
+  });
+
+  it('a claim that asked before an announcement and answers after it does not erase it; a claim that asked after it does', async () => {
+    const { signal } = make();
+    await spendFullScan(signal, ['a']);
+    signal.markSpaceMayHaveWork('a');
+    let release;
+    const held = new Promise((r) => { release = r; });
+    // The first claim asks before the announcement and answers after it; the second asks and answers wholly after it.
+    const first = signal.claimAcross(['a'], ['p0'], async () => { await held; return null; }, { step: STEP });
+    await new Promise((r) => setImmediate(r));
+    signal.markSpaceMayHaveWork('a');
+    release();
+    assert.equal(await first, null);
+    assert.deepEqual(hinted(signal, ['a']), ['a'], 'the first claim asked before the announcement: its empty answer does not drop the hint');
+    assert.equal(await signal.claimAcross(['a'], ['p0'], async () => null, { step: STEP }), null);
+    assert.deepEqual(hinted(signal, ['a']), [], 'a claim that asked after the announcement and found nothing drops it');
   });
 
   it('claimed -> noteClaimed: the space is hinted, the value is returned, and no later space is asked', async () => {

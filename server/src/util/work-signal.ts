@@ -29,6 +29,8 @@
  *
  *  - **the probe is taken once per claim**, then private to it. `spacesToProbe` CONSUMES the full-scan slot; taken per pass, the
  *    second pass would see only the hinted spaces and strand an unhinted lane-2 job until the next scan. It is not exported.
+ *  - **an announcement made while the claim is asking outlives the claim's "empty"**. A job becomes claimable and its space is
+ *    announced while a claim that asked a moment earlier still waits for the store; that claim's empty answer does not drop the hint.
  *  - **one pass at a time across the spaces**, in the caller's pass order (embed: three lanes x two dues; media: one pass), so a
  *    write in the last space overtakes a reindex in the first.
  *  - **a failed space is isolated**, reported once per window through the reporter, and not asked again in this claim's later
@@ -114,6 +116,12 @@ export function createWorkSignal(opts: {
   const walk = opts.walk ?? { walkSpaces, liftQuarantine };
 
   const pendingHint = new Set<string>();
+  /**
+   * How often each space was announced. A claim reads it before it asks and drops a space from the hint only when the count has
+   * not moved: an "empty" answered by a question asked before an announcement is older than the announcement, and dropping the
+   * hint on it left a job that had just become claimable waiting for the next full scan.
+   */
+  const announced = new Map<string, number>();
   let lastFullScan = 0;
   let epoch = 0;
   let waiters: Array<() => void> = [];
@@ -143,6 +151,8 @@ export function createWorkSignal(opts: {
   ): Promise<R | null> {
     // Before any early return: a claim over no passes still spends the slot, so the caller's cadence does not depend on its input.
     const probe = spacesToProbe(spaceIds);
+    /** Each probed space's announcement count before the first question of this claim. */
+    const announcedBefore = new Map(probe.map(s => [s, announced.get(s) ?? 0]));
     /** Spaces that answered empty, in how many passes. */
     const emptyIn = new Map<string, number>();
     /** Spaces that threw or were passed over in this claim: asked no more, noted neither way. */
@@ -167,7 +177,9 @@ export function createWorkSignal(opts: {
       }
     }
     for (const [spaceId, passesEmpty] of emptyIn) {
-      if (passesEmpty === passes.length && !unanswered.has(spaceId)) pendingHint.delete(spaceId);
+      // Not a space announced while this claim was asking: its answer may be older than the work the announcement names.
+      const announcedMeanwhile = (announced.get(spaceId) ?? 0) !== announcedBefore.get(spaceId);
+      if (passesEmpty === passes.length && !unanswered.has(spaceId) && !announcedMeanwhile) pendingHint.delete(spaceId);
     }
     return null;
   }
@@ -200,6 +212,7 @@ export function createWorkSignal(opts: {
 
     markSpaceMayHaveWork(spaceId) {
       pendingHint.add(spaceId);
+      announced.set(spaceId, (announced.get(spaceId) ?? 0) + 1);
       // A write is what makes a space that hung worth asking again: let ONE probe through its quarantine.
       walk.liftQuarantine(spaceId);
       epoch++;
