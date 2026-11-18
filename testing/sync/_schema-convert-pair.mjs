@@ -11,18 +11,22 @@
  * - **A wait on a run that was never started.** `runEnds` accepts a run only when it is `complete` and one of its sources is a passed round, so a
  *   space that has no run yet (`{ state: 'none' }`) or one the test did not expect is a named timeout, never a pass.
  * - **A fork the assertions never look at.** `forksIn` reads the space's fork list on one instance and every test of the set asks it of both.
- * - **Four copies of the club.** `joinedClub` is the one place the organiser's club and the member that joins it by invite are built; the
- *   organiser's own yes passes a round at once, so what the organiser converts is finished before the member has heard of the round, which is the
- *   order the tests that need one member to convert first stand on.
- *
- * The networks themselves are not built here for a closed network: `mirroredNetwork` of `helpers.js` is that, and the tests call it.
+ * - **An order of events that holds only by timing.** `joinedPubsub` is the one place the network of the tests that need ONE member to convert
+ *   first is built: A publishes, B subscribes. A publisher's own yes passes a schema round at once, and its run asks no peer for a first sync
+ *   (it pulls from nobody), so A converts before B has heard of the round; B hears of it only when the test syncs B. A club looked the same
+ *   but is not: its organiser pulls from the member, so the organiser's own run asked the member for one sync before reading, that sync told
+ *   the member of the passed round, and the member converted the copies first (the first run of the stack, 2026-11-18).
+ * - **A test that cannot run where the tests run.** The sync tests run in the container runner, which has no `docker` command. `mirroredPair`
+ *   builds the closed network two instances both hold (the `mirroredNetwork` of `helpers.js`) by their own doors alone: each instance id is read
+ *   from `GET /api/about`, and the peer token each keeps is the one the member add stores. `patchNetworkOnDisk` changes a network in an
+ *   instance's `config.json` through the stack's bind mount (`testing/sync/configs/<x>`), where `patchContainerNetwork` used `docker exec`.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { waitForReading } from '../_shared/wait-for.mjs';
-import { INSTANCES, post, patch, get, del, delWithBody, syncUntil, readRecord, readCollection } from './helpers.js';
+import { INSTANCES, post, patch, get, del, delWithBody, syncUntil, readRecord, readCollection, pubsubNetwork, reloadConfig } from './helpers.js';
 
 const CONFIGS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'configs');
 
@@ -143,29 +147,72 @@ export async function rootOn(base, token, space) {
 }
 
 /**
- * A club that A organises over `space`, joined by B through an invite, with the space held by B; answers the network id and the function that
+ * A pub/sub network A publishes over `space`, which B subscribes to by an invite key and adopts; answers the network id and the function that
  * removes the network on both instances and the space on B (the space on A is the test's own, removed with its `createTestSpace`).
  *
- * A club's organiser decides a round by its own yes, so a schema change A saves is concluded on A at once and A's conversion starts before B has
- * heard of the round: B hears of it at its next sync, as a member that never saw the round open.
+ * The order the tests that need one member to convert first stand on: A's own yes passes a schema round at once, and A's run asks no peer for a
+ * first sync (a publisher pulls from nobody: `syncedFirst.asked` is 0 on A), so nothing tells B of the round until the test syncs B, and A's
+ * conversion is finished by then. B, a subscriber, pulls from A, so B's run asks A for one sync first and reads what A converted.
  */
-export async function joinedClub({ label, space }) {
+export async function joinedPubsub({ label, space }) {
   const A = INSTANCES.a, B = INSTANCES.b, tA = tokenOf('a'), tB = tokenOf('b');
-  const net = await post(A, tA, '/api/networks', { label, type: 'club', spaces: [space] });
-  assert.equal(net.status, 201, `the club on A: ${net.status} ${JSON.stringify(net.body)}`);
-  const networkId = net.body.id;
-  const inv = await post(A, tA, '/api/invite/generate', { networkId });
-  assert.equal(inv.status, 201, `the invite: ${inv.status} ${JSON.stringify(inv.body)}`);
-  const join = await post(B, tB, '/api/networks/join-remote', {
-    handshakeId: inv.body.handshakeId, inviteUrl: 'http://ythril-a:3200/api/invite/apply', rsaPublicKeyPem: inv.body.rsaPublicKeyPem,
-    networkId, myUrl: 'http://ythril-b:3200',
-  });
-  assert.equal(join.status, 200, `B joins the club: ${join.status} ${JSON.stringify(join.body)}`);
-  await syncUntil(B, tB, networkId, async () => (await get(B, tB, `/api/spaces/${space}/meta`)).status === 200, `B to hold the space ${space}`, { timeoutMs: 90_000 });
+  const net = await pubsubNetwork({ label, spaces: [space], publisher: [A, tA, 'ythril-a'], subscriber: [B, tB, 'ythril-b'] });
+  await net.adopted(space, 90_000);
   const remove = async () => {
-    await del(B, tB, `/api/networks/${networkId}`).catch(() => {});
-    await del(A, tA, `/api/networks/${networkId}`).catch(() => {});
+    await net.remove();
     await delWithBody(B, tB, `/api/spaces/${space}`, { confirm: true }).catch(() => {});
   };
+  return { networkId: net.networkId, remove };
+}
+
+/** The instance id of the instance at `base`, as it answers `GET /api/about`. */
+async function instanceIdOf(base, token) {
+  const r = await get(base, token, '/api/about');
+  assert.equal(r.status, 200, `GET /api/about on ${base}: ${r.status} ${JSON.stringify(r.body)}`);
+  return r.body.instanceId;
+}
+
+/**
+ * A closed network over `spaces` that A and B BOTH hold, each listing the other, so each instance runs its own conclusion of every round: the
+ * `mirroredNetwork` of `helpers.js` built through the instances' own doors, with no `docker exec` (the runner the tests run in has none). Each
+ * member add stores the peer token the other instance minted for it, which is the token its sync engine calls the other with. The spaces must
+ * already exist on both.
+ */
+export async function mirroredPair({ label, spaces }) {
+  const A = INSTANCES.a, B = INSTANCES.b, tA = tokenOf('a'), tB = tokenOf('b');
+  const must = (r, what) => { assert.ok(r.status < 300, `${what}: ${r.status} ${JSON.stringify(r.body)}`); return r; };
+  const [idA, idB] = [await instanceIdOf(A, tA), await instanceIdOf(B, tB)];
+  const forA = must(await post(B, tB, '/api/tokens', { name: `${label}-a-${Date.now()}`, peerInstanceId: idA }), 'the peer token B mints for A');
+  const forB = must(await post(A, tA, '/api/tokens', { name: `${label}-b-${Date.now()}`, peerInstanceId: idB }), 'the peer token A mints for B');
+  const net = must(await post(A, tA, '/api/networks', { label, type: 'closed', spaces, votingDeadlineHours: 1 }), 'the network on A');
+  const networkId = net.body.id;
+  const add = async (base, token, instanceId, memberLabel, url, peerToken) => {
+    const r = must(await post(base, token, `/api/networks/${networkId}/members`, { instanceId, label: memberLabel, url, token: peerToken, direction: 'both' }), `member ${memberLabel}`);
+    if (r.status === 202) must(await post(base, token, `/api/networks/${networkId}/votes/${r.body.roundId}`, { vote: 'yes' }), `the yes on ${memberLabel}`);
+  };
+  await add(A, tA, idB, `${label} B`, 'http://ythril-b:3200', forA.body.plaintext);
+  const onB = await post(B, tB, '/api/networks', { id: networkId, label, type: 'closed', spaces, votingDeadlineHours: 1 });
+  assert.ok(onB.status === 201 || onB.status === 409, `the network on B: ${onB.status} ${JSON.stringify(onB.body)}`);
+  await add(B, tB, idA, `${label} A`, 'http://ythril-a:3200', forB.body.plaintext);
+  const remove = async () => {
+    await del(A, tA, `/api/networks/${networkId}`).catch(() => {});
+    await del(B, tB, `/api/networks/${networkId}`).catch(() => {});
+  };
   return { networkId, remove };
+}
+
+/**
+ * Change network `networkId` in the `config.json` of instance `x` (`a`, `b`) through the stack's bind mount: `change(n, cfg)` edits it in place.
+ * The caller reloads the instance (`reloadConfig`) for it to take effect. A read that races the instance's own write of the file is tried again.
+ */
+export async function patchNetworkOnDisk(x, networkId, change) {
+  const file = path.join(CONFIGS, x, 'config.json');
+  let cfg;
+  await waitForReading(() => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return undefined; } },
+    v => v !== undefined, 5_000, 100, { what: `a whole read of ${file}` }).then(v => { cfg = v; });
+  const n = cfg.networks.find(x2 => x2.id === networkId);
+  assert.ok(n, `network ${networkId} is not in ${file}`);
+  change(n, cfg);
+  fs.writeFileSync(file, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  await reloadConfig(INSTANCES[x], tokenOf(x));
 }

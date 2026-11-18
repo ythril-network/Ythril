@@ -13,19 +13,23 @@
  *
  * ## The setup, and why the order of events is fixed
  *
- * A organises a club carrying one space; A's own definitions declare `person` with `fullName` and a `status` of `a` or `b`; B joins by invite and holds
- * the space. A writes four entities of type `person` (three the steps change, one that has neither property and so already fits any version of the
- * type) and B receives them. A then saves the new definition (`name`, `status` of `x` or `y`) with a `renameProperty` and a `mapEnum`.
- * A club's organiser decides a round by its own yes, so the round passes on A at once and A's run converts A's copies BEFORE B has heard of the round:
- * the test reads A's finished run and the versions it left, and only then lets B sync. B hears of the passed round as a member that never saw it open
- * (the organiser serves the passed round), applies it, and its run asks A for one sync first. What B holds when that run reads its first page is what
- * A converted, so B has nothing left to rewrite. The closed network's second yes passes the same round on a member by the same function; the club is
- * used because its order is fixed and a closed network's two members would convert at the same moment.
+ * A publishes a pub/sub network carrying one space; A's own definitions declare `person` with `fullName` and a `status` of `a` or `b`; B subscribes by
+ * an invite key and adopts the space. A writes four entities of type `person` (three the steps change, one that has neither property and so already
+ * fits any version of the type) and B receives them. A then saves the new definition (`name`, `status` of `x` or `y`) with a `renameProperty` and a
+ * `mapEnum`. A publisher's own yes passes the round at once, and A's run asks no peer for a first sync (a publisher pulls from nobody), so A's run
+ * converts A's copies BEFORE B has heard of the round: the test reads A's finished run and the versions it left, and only then lets B sync. B hears of
+ * the passed round as a member that never saw it open (the publisher serves the passed round), applies it, and its run asks A for one sync first. What
+ * B holds when that run reads its first page is what A converted, so B has nothing left to rewrite.
+ *
+ * Not a club (the first version of this test): a club's organiser PULLS from its member, so the organiser's own run asked B for one sync before it
+ * read, that sync told B of the passed round, and B converted the copies while A waited: A then stamped what arrived converted (rewritten 0) and B
+ * rewrote all three. The server did what the design says (the first sync of a save- or vote-started run, amendment A2); the order this test needs
+ * is the one only a member that pulls from nobody gives.
  *
  * ## What is asserted, on BOTH instances (each read through its own door), and what each defect would turn red
  *
- * 1. **A's own run**: the save answers `convert.state: 'started'`; A's run is `complete`, sourced from the round, with `rewritten` 3, `stamped` 1,
- *    `unconverted` 0. Red when a passed round starts no run on its proposer, or the steps are not the ones saved.
+ * 1. **A's own run**: the save answers `convert.state: 'started'`; A's run is `complete`, sourced from the round, asked no peer for a first sync,
+ *    with `rewritten` 3, `stamped` 1, `unconverted` 0. Red when a passed round starts no run on its proposer, or the steps are not the ones saved.
  * 2. **B's run**: `complete`, sourced from the round, holding the steps (none refused), having asked one peer (`syncedFirst.asked` 1), and
  *    `rewritten` 0. Red when a member does not start a run from a round it adopts, when it applies none of the steps it should, when its run does not
  *    sync first (it would read its unconverted copies and rewrite them: `rewritten` above 0), or when it rewrites what a peer already converted.
@@ -50,7 +54,7 @@ import assert from 'node:assert/strict';
 import { INSTANCES, patch, createTestSpace, syncUntil } from './helpers.js';
 import {
   tokenOf, entityType, text, oneOf, setOwnSchema, writeEntities, recordOn, holdsAll, fingerprintOn, conversionOf, runEnds, runEndsHere,
-  forksIn, rootOn, itemsOf, joinedClub,
+  forksIn, rootOn, itemsOf, joinedPubsub,
 } from './_schema-convert-pair.mjs';
 
 const RUN = Date.now();
@@ -72,7 +76,7 @@ const ROWS = {
 const CONVERTED = { ada: { name: 'Ada', status: 'x' }, bo: { name: 'Bo', status: 'y' }, cy: { name: 'Cy', status: 'x' } };
 const REWRITTEN = Object.keys(CONVERTED);
 
-let tA, tB, space, club, SPACE;
+let tA, tB, space, pubsub, SPACE;
 /** name -> id of each record A wrote. */
 const ids = {};
 /** name -> `{ a, b }`: what each instance held of the record after B received it and before the conversion. */
@@ -87,10 +91,10 @@ before(async () => {
   space = await createTestSpace('cvvote', [[A, tA]]);
   SPACE = space.id;
   await setOwnSchema(A, tA, SPACE, BEFORE);
-  club = await joinedClub({ label: `cvvote-${RUN}`, space: SPACE });
+  pubsub = await joinedPubsub({ label: `cvvote-${RUN}`, space: SPACE });
   const written = await writeEntities(A, tA, SPACE, Object.values(ROWS));
   Object.keys(ROWS).forEach((name, i) => { ids[name] = written[i]; });
-  await syncUntil(B, tB, club.networkId, () => holdsAll(B, tB, SPACE, Object.values(ids)), 'B to hold the four records A wrote', { timeoutMs: 90_000 });
+  await syncUntil(B, tB, pubsub.networkId, () => holdsAll(B, tB, SPACE, Object.values(ids)), 'B to hold the four records A wrote', { timeoutMs: 90_000 });
   for (const name of Object.keys(ROWS)) {
     before_[name] = { a: await recordOn(A, tA, SPACE, ids[name]), b: await recordOn(B, tB, SPACE, ids[name]) };
     assert.equal(before_[name].a.seq, before_[name].b.seq, `${name} is held at one version on both instances before the conversion`);
@@ -98,19 +102,20 @@ before(async () => {
 });
 
 after(async () => {
-  await club?.remove();
+  await pubsub?.remove();
   await space?.remove();
 });
 
 describe('a conversion carried by a vote converges on every member', () => {
-  it('A saves the change with the steps: the organiser\'s own yes passes the round and A\'s run converts A\'s copies', async () => {
+  it('A saves the change with the steps: the publisher\'s own yes passes the round and A\'s run converts A\'s copies', async () => {
     const r = await patch(A, tA, `/api/spaces/${SPACE}`, { meta: AFTER, convertRecords: { steps: STEPS } });
-    assert.equal(r.status, 200, `the save on the organiser: ${r.status} ${JSON.stringify(r.body)}`);
+    assert.equal(r.status, 200, `the save on the publisher: ${r.status} ${JSON.stringify(r.body)}`);
     assert.equal(r.body.convert?.state, 'started', `the save did not start a run on the instance whose yes passed the round: ${JSON.stringify(r.body.convert)}`);
     // A plain poll: a sync triggered from A here would let B hear of the round before A's conversion is finished.
     aRun = await runEndsHere({ base: A, token: tA, space: SPACE, who: 'A' });
     assert.deepEqual(aRun.steps, STEPS, 'A\'s run holds the steps that were saved');
     assert.deepEqual(aRun.stepsRefused, [], 'A refused none of its own steps');
+    assert.equal(aRun.syncedFirst?.asked, 0, `A's run asked a peer for a first sync, which would tell B of the round: ${JSON.stringify(aRun.syncedFirst)}`);
     assert.equal(aRun.counts.rewritten, REWRITTEN.length, `A rewrote the copies the steps change: ${JSON.stringify(aRun.counts)}`);
     assert.equal(aRun.counts.stamped, 1, `A stamped the copy that already fitted: ${JSON.stringify(aRun.counts)}`);
     assert.equal(aRun.counts.unconverted, 0, 'A left nothing unconverted');
@@ -118,7 +123,7 @@ describe('a conversion carried by a vote converges on every member', () => {
   });
 
   it('B hears of the passed round at its next sync, and its run converts nothing a peer already converted', async () => {
-    bRun = await runEnds({ base: B, token: tB, networkId: club.networkId, space: SPACE, who: 'B' });
+    bRun = await runEnds({ base: B, token: tB, networkId: pubsub.networkId, space: SPACE, who: 'B' });
     assert.deepEqual(bRun.steps, STEPS, 'B applied the steps the proposer signed');
     assert.deepEqual(bRun.stepsRefused, [], `B refused steps it should have applied: ${JSON.stringify(bRun.stepsRefused)}`);
     assert.equal(bRun.syncedFirst?.asked, 1, `B's run did not ask its one peer for a sync before it read: ${JSON.stringify(bRun.syncedFirst)}`);
@@ -129,7 +134,7 @@ describe('a conversion carried by a vote converges on every member', () => {
 
   it('after one more sync the two instances report one root for the space', async () => {
     let rootA, rootB;
-    await syncUntil(A, tA, club.networkId, async () => {
+    await syncUntil(A, tA, pubsub.networkId, async () => {
       [rootA, rootB] = [await rootOn(A, tA, SPACE), await rootOn(B, tB, SPACE)];
       return rootA !== undefined && rootA === rootB;
     }, 'A and B to report one Merkle root for the space', { timeoutMs: 90_000, onTimeout: () => `A ${rootA}, B ${rootB}` });
