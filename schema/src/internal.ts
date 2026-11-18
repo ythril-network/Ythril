@@ -21,6 +21,12 @@ export { canonicalJson } from './canonical-json.js';
 export { schemaFingerprintTextOf, SCHEMA_FINGERPRINT_FORMAT, SCHEMA_FINGERPRINT_FIELD, isSchemaFingerprint, type FingerprintedMeta } from './schema-fingerprint.js';
 export { errorHeader, textOf, render, escapeLineBreaks, redact, redactSecrets, logSafe } from './text.js';
 export {
-  ruleEngine, ENGINE_INPUT_CAPS, compileRule, rulesIn, namesKinds, spaceRuleKinds,
+  ruleEngine, ENGINE_INPUT_CAPS, compileRule, rulesIn, namesKinds, spaceRuleKinds, conditionIssues,
   type CompiledRule, type Refs, type StoredRule,
 } from './rules.js';
+export {
+  CONVERSION_STEPS_MAX, CONVERSION_VALUES_MAX, CONVERSION_CASES_MAX, ConversionStepZ, ConvertRecordsZ, canonicalConvertRecordsText,
+  conversionStepIssues, convertedRecord,
+  type ConversionStep, type ConvertRecords, type ConversionIssueCode, type ConversionStepIssue, type ConversionMeta,
+  type ConversionCheckOptions, type ConditionJudge, type RecordChange, type NotConvertible,
+} from './conversion-steps.js';
