@@ -132,6 +132,8 @@ export const PROXY_TEST_CLASSIFICATION = Object.freeze([
     why: 'writes through proxies with targetSpace; those cases go, the member writes stay' },
   { file: 'testing/standalone/an-unknown-field-is-answered-alike-on-both-doors-db.test.js', verdict: 'rewrite', base: 'ed2a861d957386d9',
     why: 'addresses writes through targetSpace on both doors; those cases go' },
+  { file: 'testing/standalone/_unknown-field-doors.mjs', verdict: 'unaffected',
+    why: 'the shared doors and fixtures of the unknown-field cases, moved out of an-unknown-field-is-answered-alike-on-both-doors-db (bundle-348): it spells targetSpace only to assert it is refused by name' },
   { file: 'testing/standalone/an-unknown-field-rides-every-answer-after-the-judge-db.test.js', verdict: 'rewrite', base: 'b6c724e5ccab9d71',
     why: 'writes through a proxy with targetSpace; those cases go' },
   { file: 'testing/standalone/area-rung-is-staged.test.js', verdict: 'rewrite', base: '04e8d5bfbe108b3f',
