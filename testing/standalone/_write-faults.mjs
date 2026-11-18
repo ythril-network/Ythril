@@ -238,9 +238,77 @@ const stalledViewPipeline = (stepMs, collapseTo) => [
   ...(collapseTo ? [{ $group: { _id: null } }, { $replaceWith: collapseTo }] : []),
 ];
 
+/** The server's code for a read its `maxTimeMS` ended (`MaxTimeMSExpired`). */
+const MAX_TIME_EXPIRED = 50;
+/** The server's code for an interrupted operation (`Interrupted`): what a kill answers, and a deadline that falls inside JavaScript. */
+const INTERRUPTED = 11601;
+/** What the server says when it stopped server-side JavaScript: the wording of a deadline inside a stall, and of a `killOp` on one. */
+const JAVASCRIPT_INTERRUPTED = /JavaScript execution interrupted/;
+
+/**
+ * What one deadline-bound read of a stalled view shows: `'cut'`, `'busy'` or `'not-cut'`.
+ *
+ * `error` is what the read threw (undefined when it completed), `limit` the `maxTimeMS` it carried, `tookMs` how long the caller
+ * waited for it, and `ms` the stall. All three figures are required and a missing one THROWS: without `limit` an interrupt cannot
+ * be told from a kill, and without `ms` a read that ran the whole stall would count as cut.
+ *
+ * - `'cut'`: code 50 before the stall was over. The server's `maxTimeMS` ended the read; this is the only proof.
+ * - `'busy'`: the read shows nothing either way and is asked again (`readCutByItsDeadline`). Two ends: code 11601 with
+ *   "JavaScript execution interrupted" no sooner than the deadline, and code 50 only after the stall was over.
+ * - `'not-cut'`: every other end. A read that completed, any other failure, an interrupt of another wording (a step-down, a
+ *   killed session), and an interrupt sooner than the deadline, which only a kill from outside produces.
+ *
+ * ## What it prevents
+ *
+ * **Failing a run on the server's second answer.** The stall is server-side JavaScript, and a busy server whose deadline falls
+ * inside it answers code 11601 where an idle one answers 50. Measured on mongod 8.3.4 with no kill sent by anyone: one read at a
+ * time ended with code 50 every time; beside two dozen other readers more than a quarter ended with 11601, none sooner than its
+ * `maxTimeMS`. A guard that demanded 50 of its one read failed a CI run of a change that touched no database code (`Q-921`).
+ *
+ * **Taking that second answer as proof.** Under the same load the server interrupts the JavaScript of the `$addFields` stall as
+ * well, the form `maxTimeMS` cannot end, so an 11601 says the server was busy and not that the bound works: a guard that
+ * accepted it passed that form in 4 of 26 loaded runs. A `killOp` answers the same code and words too.
+ */
+export function deadlineVerdict(error, { limit, tookMs, ms } = {}) {
+  assert.ok([limit, tookMs, ms].every((n) => Number.isFinite(n)), `deadlineVerdict: limit, tookMs and ms must be numbers, got ${limit}, ${tookMs}, ${ms}`);
+  if (error?.code === MAX_TIME_EXPIRED) return tookMs < ms ? 'cut' : 'busy';
+  if (error?.code === INTERRUPTED && tookMs >= limit && JAVASCRIPT_INTERRUPTED.test(String(error?.message))) return 'busy';
+  return 'not-cut';
+}
+
+/** How many times a deadline-bound read is made before a server that never showed a cut is reported: the first and three more. */
+const DEADLINE_READS = 4;
+
+/**
+ * Read `coll` with `maxTimeMS: limit` until one read is `'cut'` or `'not-cut'` (`deadlineVerdict`), at most `DEADLINE_READS`
+ * times, and answer `{ cut, reads }`: whether the server's deadline ended a read before the `ms` stall was over, and every
+ * read made, as a sentence each.
+ *
+ * ## What it prevents
+ *
+ * **Reporting a busy server as a broken stall, or as a working one** (`pitfall-slow-load-reported-as-failure`). A read that
+ * came back `'busy'` is made again; only a code 50 before the stall was over is `cut: true`, a `'not-cut'` read ends it at once,
+ * and reads that were all `'busy'` are `cut: false`: a stall `maxTimeMS` cannot end answers that way every time. The caller gets
+ * every read to print, so a fixture that keeps needing a second read is seen.
+ */
+export async function readCutByItsDeadline(coll, filter, { limit, ms }) {
+  const reads = [];
+  for (let n = 1; n <= DEADLINE_READS; n += 1) {
+    const started = Date.now();
+    let ended;
+    try { await coll.find(filter, { maxTimeMS: limit }).toArray(); } catch (err) { ended = err; }
+    const tookMs = Date.now() - started;
+    const verdict = deadlineVerdict(ended, { limit, tookMs, ms });
+    reads.push(`read ${n} ${ended ? `ended after ${tookMs}ms with code ${ended.code} (${ended.name}: ${ended.message})` : `completed after ${tookMs}ms`}: ${verdict}`);
+    if (verdict !== 'busy') return { cut: verdict === 'cut', reads };
+  }
+  return { cut: false, reads };
+}
+
 /**
  * Throw unless reading view `name` really stalls: (a) a raw read takes at least `ms`, and (b) a raw read with
- * `maxTimeMS` well under `ms` ends with the server's own code 50 - before the stall would have ended on its own.
+ * `maxTimeMS` well under `ms` ends with the server's own code 50 - before the stall would have ended on its own; a read a
+ * busy server answered without showing either is made again (`readCutByItsDeadline`).
  *
  * ## What it prevents
  *
@@ -273,15 +341,13 @@ export async function assertViewStalls(db, name, { ms, filter = {} }) {
       + 'so every bound test over it passes whatever the bound does.');
   }
   const limit = Math.max(1, Math.floor(ms / 3));
-  const cutStarted = Date.now();
-  let ended;
-  try { await coll.find(filter, { maxTimeMS: limit }).toArray(); } catch (err) { ended = err; }
-  const cutMs = Date.now() - cutStarted;
-  if (ended?.code !== 50 || cutMs >= ms) {
-    throw new Error(`assertViewStalls: a read of ${name} with maxTimeMS ${limit} ${ended ? `ended after ${cutMs}ms with code ${ended.code} (${ended.name})` : `completed after ${cutMs}ms`}, `
-      + 'not with the server\'s own code 50 before the stall was over. The stall cannot be interrupted by maxTimeMS '
-      + '($addFields + $function is not; only $match over $expr / $function is), so a server-side bound cannot be shown on it.');
+  const { cut, reads } = await readCutByItsDeadline(coll, filter, { limit, ms });
+  if (!cut) {
+    throw new Error(`assertViewStalls: no read of ${name} with maxTimeMS ${limit} was ended by the server's own code 50 before the ${ms}ms stall was over (${reads.join('; ')}). `
+      + 'The stall cannot be interrupted by maxTimeMS ($addFields + $function is not; only $match over $expr / $function is), or something else ended the read, '
+      + 'so a server-side bound cannot be shown on it.');
   }
+  if (reads.length > 1) console.warn(`assertViewStalls: ${name} needed ${reads.length} reads with maxTimeMS ${limit} before the server showed its cut (${reads.join('; ')})`);
 }
 
 /**
