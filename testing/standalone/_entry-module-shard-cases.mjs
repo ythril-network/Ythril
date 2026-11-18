@@ -71,8 +71,10 @@ export function shardCases({ index, modules, parallel }) {
   cases.push({
     name: 'each one loads as the first and only import of a fresh process',
     options: { timeout: 600_000 },
-    run: async () => {
+    run: async (t) => {
       const results = await loadAll(modules.filter(e => !(e.file in NOT_IMPORTABLE)), { parallel });
+      // A module that stalled and loaded the second time is not a finding, and is said here so a stall is visible and countable, never swallowed.
+      for (const r of results.retried) t.diagnostic(`entry-module load retried: ${r.file}: first try ${r.first}; second try ${r.second}`);
       const failed = [...results].filter(([, r]) => !r.ok).map(([file, r]) => `${file.replace('server/src/', '')}: ${r.reason}`);
       assert.deepEqual(failed, [], 'these modules fail to load when they are the entry module: an import cycle whose binding is read at load, or a module that needs another to have been loaded first');
     },
