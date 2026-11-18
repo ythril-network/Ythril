@@ -22,6 +22,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openConvertDoor, CONVERT_META } from './_schema-convert.mjs';
+import { waitForValue } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 const RENAMED = structuredClone(CONVERT_META);
@@ -45,7 +46,9 @@ describe('a record that keeps failing becomes an item (real MongoDB)', { skip },
     run.stopSchemaConvertWatcher();
     const started = await run.startSchemaConvertRun({ spaceId: space, types: [{ kind: 'entity', type: 'person' }], steps: [STEP], source: { kind: 'act' } }, { onRewrite });
     assert.equal(started.ok, true, JSON.stringify(started));
-    return await door.driveToEnd(space, { onRewrite }, 20);
+    // The run's own background passes (they hold the lease), each failed one retried after its backoff: the end is waited for, never driven.
+    return await waitForValue(async () => { const d = await door.runDoc(space); return d && d.state !== 'running' ? d : null; },
+      30_000, 100, async () => `the run did not end: ${JSON.stringify(await door.runDoc(space))}`, { what: `the run of ${space} to end` });
   }
 
   it('a SchemaViolationError from the rewrite is the record\'s refusal at once: an item not_conforming, the run goes on', async () => {

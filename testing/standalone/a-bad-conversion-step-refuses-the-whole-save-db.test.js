@@ -188,7 +188,8 @@ describe('a bad conversion step refuses the whole save', { skip }, () => {
       inst.reset();
       const before = held();
       const a = await viaDispatcher({ steps: [STEPS.steps[0], { op: 'dropEverything', kind: 'entity' }] });
-      assert.equal(a.status, 400, a.text);
+      // The tool's sentence names the status REST answers; the dispatcher's own status for a refused call is its audit's (422 for any tool refusal).
+      assert.match(a.text, /^Error \(400\)/, a.text);
       assert.equal(a.structured?.code, 'bad_conversion_step', `the dispatcher answered: ${a.text}`);
       assert.equal(a.structured.step, 1);
       assert.deepEqual(held(), before);
@@ -197,7 +198,8 @@ describe('a bad conversion step refuses the whole save', { skip }, () => {
     it('more steps than the bound answers the same code at the first step past it', async () => {
       inst.reset();
       const a = await viaDispatcher({ steps: Array.from({ length: 51 }, () => STEPS.steps[0]) });
-      assert.equal(a.status, 400, a.text);
+      // The tool's sentence names the status REST answers; the dispatcher's own status for a refused call is its audit's (422 for any tool refusal).
+      assert.match(a.text, /^Error \(400\)/, a.text);
       assert.equal(a.structured?.code, 'bad_conversion_step', `the dispatcher answered: ${a.text}`);
       assert.equal(a.structured.step, 50);
     });
