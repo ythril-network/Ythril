@@ -308,7 +308,8 @@ export async function readCutByItsDeadline(coll, filter, { limit, ms }) {
 /**
  * Throw unless reading view `name` really stalls: (a) a raw read takes at least `ms`, and (b) a raw read with
  * `maxTimeMS` well under `ms` ends with the server's own code 50 - before the stall would have ended on its own; a read a
- * busy server answered without showing either is made again (`readCutByItsDeadline`).
+ * busy server answered without showing either is made again (`readCutByItsDeadline`). The two reads are made together, never
+ * one after the other: they read the same view independently, so the guard costs the stall once.
  *
  * ## What it prevents
  *
@@ -331,17 +332,23 @@ export async function assertViewStalls(db, name, { ms, filter = {} }) {
   assert.ok(Number.isFinite(ms) && ms > 0, `assertViewStalls: ms must be a positive number, got ${ms}`);
   const coll = db.collection(name);
   const asked = Object.keys(filter).length > 0 ? ` with the reader's filter ${JSON.stringify(filter)}` : '';
-  const started = Date.now();
-  await coll.find(filter).toArray();
-  const tookMs = Date.now() - started;
+  const limit = Math.max(1, Math.floor(ms / 3));
+  // The two reads are independent reads of the same view and each half asserts what it asserted, so they run together: the
+  // guard costs the stall, not the stall and a third of it. The raw read's verdict is read first, as it was when they ran in turn.
+  const [tookMs, { cut, reads }] = await Promise.all([
+    (async () => {
+      const started = Date.now();
+      await coll.find(filter).toArray();
+      return Date.now() - started;
+    })(),
+    readCutByItsDeadline(coll, filter, { limit, ms }),
+  ]);
   if (tookMs < ms) {
     throw new Error(`assertViewStalls: a raw read of ${name}${asked} took ${tookMs}ms, less than the ${ms}ms stall asked for. `
       + 'The view stalls nothing (an empty source, a plain view, server-side JavaScript off, or a reader\'s filter that matches none of the documents '
       + 'the stall was seeded on: the server applies the filter before the stall, so an excluded document costs nothing), '
       + 'so every bound test over it passes whatever the bound does.');
   }
-  const limit = Math.max(1, Math.floor(ms / 3));
-  const { cut, reads } = await readCutByItsDeadline(coll, filter, { limit, ms });
   if (!cut) {
     throw new Error(`assertViewStalls: no read of ${name} with maxTimeMS ${limit} was ended by the server's own code 50 before the ${ms}ms stall was over (${reads.join('; ')}). `
       + 'The stall cannot be interrupted by maxTimeMS ($addFields + $function is not; only $match over $expr / $function is), or something else ended the read, '
@@ -384,7 +391,12 @@ export async function assertViewStalls(db, name, { ms, filter = {} }) {
  * `ms` that is not a positive number throws first: 0 seeds nothing and would stall nothing. Then a `readerFilter` that is not an object
  * (absent included) throws, naming `name`: the guard above is only as good as the filter it reads with, so the filter is not optional.
  */
-export async function withStalledReads(db, name, viewOn, { ms, restore, readerFilter, seed: given, collapseTo } = {}, fn) {
+export async function withStalledReads(db, name, viewOn, opts = {}, fn) {
+  return withStalledReadsMany(db, [{ name, viewOn, ...opts }], fn);
+}
+
+/** One stall's arguments, checked and completed: its seeds and the sleep per source document. Throws before anything is made. */
+function plannedStall({ name, viewOn, ms, restore, readerFilter, seed: given, collapseTo } = {}) {
   assert.ok(Number.isFinite(ms) && ms > 0, `withStalledReads: ms must be a positive number, got ${ms} - a stall of nothing stalls nothing`);
   assert.ok(readerFilter && typeof readerFilter === 'object' && !Array.isArray(readerFilter),
     `withStalledReads(${name}): readerFilter is required - the filter the code under test reads this view with, copied from the server source `
@@ -397,15 +409,47 @@ export async function withStalledReads(db, name, viewOn, { ms, restore, readerFi
   const docs = given ? given.length : Math.max(2, Math.ceil(ms / STALL_STEP_MS));
   const stepMs = Math.ceil(ms / docs);
   const seed = given ?? Array.from({ length: docs }, (_, i) => ({ _id: `${STALL_SEED_PREFIX}${i}` }));
-  const source = db.collection(viewOn);
-  await source.insertMany(seed);
+  return { name, viewOn, ms, restore, readerFilter, collapseTo, seed, stepMs };
+}
+
+/**
+ * Several views stall at once while `fn` runs (`withStalledReads` for one): each spec is `{ name, viewOn, ms, readerFilter, restore?,
+ * seed?, collapseTo? }`, as that function's arguments. Every view is made and every guard (`assertViewStalls`) is run together,
+ * then `fn` runs once, so a test that needs three hung spaces pays one stall, not three nested ones.
+ *
+ * ## The guard a hand-written nesting drops
+ *
+ * Every view is guarded, whatever its position in the list, and the guard THROWS before `fn` runs: the list cannot be made with a
+ * view that stalls nothing. Each spec is checked as `withStalledReads` checks its own, before anything is seeded. Two specs on one
+ * source collection throw too: both would seed the same documents, and removing one's seed would take the other's.
+ *
+ * @param {import('mongodb').Db} db
+ * @param {Array<{ name: string, viewOn: string, ms: number, readerFilter: object, restore?: () => Promise<void>, seed?: object[], collapseTo?: object }>} specs
+ * @param {() => Promise<any>} fn
+ */
+export async function withStalledReadsMany(db, specs, fn) {
+  assert.ok(Array.isArray(specs) && specs.length >= 1, 'withStalledReadsMany: specs must list at least one view - a list of none stalls nothing');
+  const planned = specs.map(plannedStall);
+  assert.equal(new Set(planned.map((p) => p.viewOn)).size, planned.length,
+    `withStalledReadsMany: two views over one source collection (${planned.map((p) => p.viewOn).join(', ')}) would seed and remove the same documents`);
+  assert.equal(new Set(planned.map((p) => p.name)).size, planned.length, 'withStalledReadsMany: two specs name one view');
+  const seeded = [];
   try {
-    return await withCollectionAsView(db, name, viewOn, async () => {
-      await assertViewStalls(db, name, { ms, filter: readerFilter });
+    for (const p of planned) {
+      await db.collection(p.viewOn).insertMany(p.seed);
+      seeded.push(p);
+    }
+    const guarded = async () => {
+      await Promise.all(planned.map((p) => assertViewStalls(db, p.name, { ms: p.ms, filter: p.readerFilter })));
       return fn();
-    }, { restore, pipeline: stalledViewPipeline(stepMs, collapseTo) });
+    };
+    const nested = planned.reduceRight(
+      (inner, p) => () => withCollectionAsView(db, p.name, p.viewOn, inner, { restore: p.restore, pipeline: stalledViewPipeline(p.stepMs, p.collapseTo) }),
+      guarded,
+    );
+    return await nested();
   } finally {
-    await source.deleteMany({ _id: { $in: seed.map((d) => d._id) } });
+    for (const p of seeded) await db.collection(p.viewOn).deleteMany({ _id: { $in: p.seed.map((d) => d._id) } });
   }
 }
 
