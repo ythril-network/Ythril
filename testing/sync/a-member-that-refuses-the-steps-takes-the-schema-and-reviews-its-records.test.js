@@ -76,7 +76,7 @@ before(async () => {
   // The own definitions are set BEFORE the network exists, so each space is a plain one and no round carries a layer.
   await setOwnSchema(A, tA, SPACE, OWN_A);
   await setOwnSchema(B, tB, SPACE, OWN_B);
-  // Built by the instances' own doors: the runner the sync tests run in has no `docker` command, which `mirroredNetwork` needs.
+  // Built by the instances' own doors (`mirroredPair`), the network the other conversion tests share.
   net = await mirroredPair({ label: `cvrefuse-${RUN}`, spaces: [SPACE] });
   const written = await writeEntities(A, tA, SPACE, Object.values(ROWS));
   Object.keys(ROWS).forEach((name, i) => { ids[name] = written[i]; });
