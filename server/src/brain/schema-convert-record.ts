@@ -13,9 +13,9 @@
  * - **A write over a record that moved.** Both writes are filtered by the version (and, for the stamp, the stamp) the run READ: a record another
  *   write reached first matches nothing and is answered `moved`, never overwritten. The record is handed in as read for that reason.
  * - **A fork row touched.** The quiet stamp's filter excludes fork rows; the update functions refuse one (`fork`).
- * - **One refused record failing the run.** A refusal of the record itself (not conforming, an identity or functional guard in the way, a version
- *   at the ceiling, a fork) is answered as an `unconverted` outcome with its reason; only a store or write-gate failure (or anything unknown) is
- *   thrown, for the run to fail the page.
+ * - **One refused record failing the run.** A refusal of the record itself (not conforming by the pre-check or the guard, an identity or
+ *   functional guard in the way, a version at the ceiling, a fork) is answered as an `unconverted` outcome with its reason; only a store or
+ *   write-gate failure (or anything unknown, a strict refusal that raced a schema write among them) is thrown, for the run to fail the page.
  * - **The edges of a re-typed entity left unstamped.** A rewrite that changes an entity's type takes the stamp off every edge at it; the edges
  *   that still conform are classified again and stamped quietly.
  *
@@ -40,7 +40,7 @@ import { edgeEndsAt } from './edge-ends-of-record.js';
 import { resolveEdgeEndsOfPage } from './write-plan/plan-edge.js';
 import {
   classifyEntityUpsertAgainst, classifyFactUpsertAgainst, classifyChronoUpsertAgainst, classifyEdgeUpsertAgainst, recordAfterPatch,
-  SchemaViolationError, type UpdateValidation,
+  type UpdateValidation,
 } from './write-validation.js';
 import type { SchemaViolation, ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { updateEntityById } from './entities.js';
@@ -111,21 +111,37 @@ function judgeOf(run: SchemaConvertRecordRun): ConditionJudge {
   return (kind, from, text, record) => evaluateCondition(kind, run.splitDeclared[splitDeclaredKey(kind, from)] ?? [], text, recordViewOf(kind, record));
 }
 
-/** The classification of `record` as stored against `meta` (resolved), as its kind's update path classifies a write. */
-function classifyStored(kind: KnowledgeType, meta: SpaceMeta | undefined, record: ReadRecord, ends?: ResolvedEdgeEnds): UpdateValidation {
-  const left = recordAfterPatch(record, {}, {});
+/**
+ * The classification of `record` as `change` leaves it (as stored, for none) against `meta` (resolved), as its kind's update path classifies a
+ * write: the same classifier, the record as read beside the record the write would store.
+ */
+function classifyStored(kind: KnowledgeType, meta: SpaceMeta | undefined, record: ReadRecord, ends?: ResolvedEdgeEnds, change?: RecordChange): UpdateValidation {
+  const left = recordAfterPatch(record, change ? patchOf(kind, record, change) : {}, {});
   const stored = record as never;
   switch (kind) {
     case 'entity': return classifyEntityUpsertAgainst(meta, stored, left);
     case 'fact': return classifyFactUpsertAgainst(meta, stored, left);
     case 'chrono': return classifyChronoUpsertAgainst(meta, stored, left);
-    case 'edge': return classifyEdgeUpsertAgainst(meta, stored, left, ends ?? {});
+    case 'edge': {
+      // The ends the page resolved (the endpoint rule and the functional count read them); an edge judged without them would be judged wrong.
+      if (!ends) throw new Error(`classifyStored: edge '${record._id}' was handed no resolved ends`);
+      return classifyEdgeUpsertAgainst(meta, stored, left, ends);
+    }
   }
 }
 
-/** Resolved ends for the edges of a page, in order (`{}` for a record that is not an edge). */
+/** What `change` sets on `record`: the type field when the type moves, and the properties with the renamed and mapped names. */
+function patchOf(kind: KnowledgeType, record: ReadRecord, change: RecordChange): Record<string, unknown> {
+  const properties: Record<string, unknown> = { ...(record['properties'] && typeof record['properties'] === 'object' ? record['properties'] as Record<string, unknown> : {}) };
+  for (const name of change.unset) delete properties[name];
+  // Own data properties, so a property named like something on `Object.prototype` is a property and never a prototype.
+  for (const [name, value] of Object.entries(change.set)) Object.defineProperty(properties, name, { value, enumerable: true, writable: true, configurable: true });
+  return { ...(change.type !== undefined ? { [TYPE_FIELD[kind]]: change.type } : {}), properties };
+}
+
+/** Resolved ends for the edges of a page, in order; none for a page of another kind, whose records have no ends. */
 async function endsOfPage(spaceId: string, kind: KnowledgeType, records: readonly ReadRecord[]): Promise<ResolvedEdgeEnds[]> {
-  if (kind !== 'edge' || records.length === 0) return records.map(() => ({}));
+  if (kind !== 'edge' || records.length === 0) return [];
   return await resolveEdgeEndsOfPage(spaceId, records.map(r => ({ from: r['from'], to: r['to'], label: r['label'], fromKind: r['fromKind'], toKind: r['toKind'] })));
 }
 
@@ -180,7 +196,6 @@ async function rewrite(spaceId: string, kind: KnowledgeType, record: ReadRecord,
 /** The reason class of a refusal the record itself drew, or `undefined` for anything else (a store or gate failure: the page fails). */
 function refusalOf(err: unknown): { reason: UnconvertedReason; violations: readonly SchemaViolation[] } | undefined {
   if (err instanceof ConversionNotConforming) return { reason: 'not_conforming', violations: err.violations };
-  if (err instanceof SchemaViolationError) return { reason: 'not_conforming', violations: err.check.all };
   if (err instanceof EdgeIdentityTaken) return { reason: 'relationship_exists', violations: [] };
   if (err instanceof WriteConflict) return { reason: 'functional_taken', violations: [] };
   if (err instanceof RecordVersionAtCeiling) return { reason: 'version_ceiling', violations: [] };
@@ -243,6 +258,13 @@ export async function convertRecordsPage(
       out[i] = unconverted(wouldChange ? 'step_refused' : 'not_conforming', check.all);
       continue;
     }
+    // The pre-check (design 5.3 step 4): the record as the change leaves it, against the schema now. Any violation is an item and nothing is
+    // written; the guard inside the write (`ConversionNotConforming`) still holds if the schema moved in between.
+    const patchedEnds = kind === 'edge'
+      ? (await endsOfPage(spaceId, 'edge', [{ ...record, ...(change.type !== undefined ? { label: change.type } : {}) }]))[0]
+      : undefined;
+    const precheck = classifyStored(kind, pair.meta, record, patchedEnds, change);
+    if (precheck.all.length > 0) { out[i] = unconverted('not_conforming', precheck.all, change); continue; }
     try {
       const { written } = await rewrite(spaceId, kind, record, change);
       if (!written) { out[i] = { outcome: 'moved' }; continue; }

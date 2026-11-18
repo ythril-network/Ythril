@@ -213,6 +213,19 @@ export function ruleReadsChanged(row: SchemaViolation, before: RecordView, after
   return false;
 }
 
+/** Milliseconds in a second: the duration observers are handed seconds. */
+const MS_PER_SECOND = 1000;
+
+/** Run a compiled program on `self`, counted as an evaluation and timed for the duration observers: the one place a program runs. */
+function runCounted(program: Extract<Program, { ok: true }>, self: Record<string, unknown>): unknown {
+  evaluations++;
+  const t0 = performance.now();
+  const out = program.run({ self });
+  const seconds = (performance.now() - t0) / MS_PER_SECOND;
+  for (const observe of durationObservers) observe(seconds);
+  return out;
+}
+
 /** The rows the rules of `meta` give `view`, a `kind` record of type schema `typeSchema` (resolved). Nothing when validation is off. */
 export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView, typeSchema: TypeSchema | undefined): SchemaViolation[] {
   if (meta?.validationMode !== 'warn' && meta?.validationMode !== 'strict') return [];
@@ -247,11 +260,7 @@ export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView,
     if ([...program.refs.props].some(p => !Object.hasOwn(view.properties, p))) continue; // absent: the rule does not apply
     const large = tooLarge(program.refs, self);
     if (large) { say('too_large', `too large to check: ${large}`, program.refs); continue; }
-    evaluations++;
-    const t0 = performance.now();
-    const out = program.run({ self });
-    const seconds = (performance.now() - t0) / 1000;
-    for (const observe of durationObservers) observe(seconds);
+    const out = runCounted(program, self);
     if (cel!.isCelError(out)) couldNot(/overload/i.test(out.message) ? 'a value of a type the rule does not compare' : 'an evaluation error', program.refs);
     else if (typeof out !== 'boolean') couldNot('it did not answer true or false', program.refs);
     else if (!out) addRow(`${rule.message} (rule ${hash})`, program.refs);
@@ -278,11 +287,7 @@ export function evaluateCondition(kind: ViewKind, declared: readonly string[], t
   if ([...program.refs.props].some(p => !Object.hasOwn(view.properties, p))) return false;
   const self = engineSelf(kind, view);
   if (tooLarge(program.refs, self)) return 'could_not_evaluate';
-  evaluations++;
-  const t0 = performance.now();
-  const out = program.run({ self });
-  const seconds = (performance.now() - t0) / 1000;
-  for (const observe of durationObservers) observe(seconds);
+  const out = runCounted(program, self);
   if (cel!.isCelError(out) || typeof out !== 'boolean') return 'could_not_evaluate';
   return out;
 }
