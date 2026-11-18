@@ -147,7 +147,7 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // many steps it carries, never the steps' text. A finished run (written by the server, no token) records the same types, the kinds of start the run
   // had (`sources`, joined: `write`, `round`, `act`) and its counts. Nothing of a record's content is a field of either.
   'schema.convert.start': ['types', 'steps'],
-  'schema.convert.run': ['stamped', 'rewritten', 'unconverted', 'moved', 'edgesRestamped', 'types', 'sources'],
+  'schema.convert.run': ['stamped', 'rewritten', 'unconverted', 'moved', 'edgesRestamped', 'types', 'sources', 'state'],
   // The records a conversion could not convert (Q-919): the item a dismissal named, and for the bulk one the filter it was given, the number the caller
   // said it was shown (`expect`) and the number it dismissed. Names and numbers only: an item holds field names, never a value.
   'unconverted.dismiss': ['itemId'],

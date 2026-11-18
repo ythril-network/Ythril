@@ -32,7 +32,7 @@ A run reads **every copy of the types it reaches that this instance holds**, who
 | `stamped` | The copy already fits the new schema and no step changes it. | The new `schemaFingerprint`, written in place. **No new version, no change date, no new position, nothing replicated, no webhook, no embedding job.** Lists do not reorder. |
 | `rewritten` | A step changes it. | An ordinary write of the record with the new stamp in the same write: a new version (`seq`), a new `updatedAt`, a new position (it moves to the top of every list sorted by change date, here and on every peer), it replicates to every peer, and it is embedded again. No webhook fires: the run writes as the instance, not as a token. |
 | `unconverted` | It cannot be converted: the steps would leave it not conforming, no case of a split matches, a rename would collide, or its version cannot go higher. | Nothing. It is left exactly as it is and listed as an [unconverted item](#the-unconverted-list). |
-| `moved` | The record changed while the run was reading it. | Nothing from this run. A later run passes it again. |
+| `moved` | The record changed while the run was reading it. | Nothing from this run, which does not pass it again. The write that moved it was validated and stamped as every write is, so a copy written in the new shape carries the stamp; one written in the old names is converted by the next run of its type (a schema change of it, or Convert). |
 
 An edge of an entity that was re-typed by a `renameType` is stamped again after the entity moves (`edgesRestamped`), because a re-typed entity takes the stamp off its edges.
 

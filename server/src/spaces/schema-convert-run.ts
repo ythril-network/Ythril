@@ -307,7 +307,7 @@ export function restartedSchemaConvertRun(run: SchemaConvertRunDoc, opts: {
 
 // ── Start ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** A run that still has work: running, or failed while owed (an owed run is never given up; a failed one is a status a new start replaces). */
+/** A run that still has work: `running` (an owed run is never set `failed`, so it stays running; a failed one is a status a new start replaces). */
 const unfinished = (run: SchemaConvertRunDoc | null): run is SchemaConvertRunDoc => run !== null && run.state === 'running';
 
 /**
@@ -516,9 +516,10 @@ function auditFinished(spaceId: string, run: SchemaConvertRunDoc): void {
     changes: [
       ...(Object.keys(ZERO) as (keyof SchemaConvertCounts)[]).map(k => ({ field: k, to: run.counts[k] })),
       // The types as a list (`kind:type`), which the allowlist records as `added`, so an operator reads each type as a name and not one joined
-      // string. How the run was started: the kinds of its sources, each once, in order.
+      // string. How the run was started: the kinds of its sources, each once, in order. How it ended: `complete`, or `failed` (lens sweep N11).
       { field: 'types', added: run.types.map(t => `${t.kind}:${t.type}`) },
       { field: 'sources', to: [...new Set(run.sources.map(s => s.kind))].join(',') },
+      { field: 'state', to: run.state },
     ],
   });
 }
@@ -602,13 +603,15 @@ async function pass(spaceId: string, held: SchemaConvertRunDoc, deps: SchemaConv
     reportSpaceFailure(PASS_STEP, spaceId, err, { when: givenUp ? 'with the next start' : WHEN });
     // A record whose rewrite failed for a reason no class names: its passes in a row are counted, so the page lists it once they reach the bound.
     const recordFailure = err instanceof RecordConversionFailed ? { kind: err.kind, id: err.id, passes: err.passes } : undefined;
-    await updateRun(spaceId, current.generation, {
+    const recorded = await updateRun(spaceId, current.generation, {
       $set: {
         failures, error: peerText(err instanceof Error ? err.message : String(err), { max: ERROR_TEXT_MAX }), sweepLeaseAt: 0,
         retryAt: Date.now() + backoffDelayMs(failures - 1, RETRY_BASE_MS, RETRY_CAP_MS), ...(givenUp ? { state: 'failed' } : {}),
         ...(recordFailure ? { recordFailure } : {}),
       },
-    }).catch((recordErr: unknown) => { reportSpaceFailure(PASS_STEP, spaceId, recordErr, { when: WHEN, unit: 'record the failure' }); });
+    }).catch((recordErr: unknown) => { reportSpaceFailure(PASS_STEP, spaceId, recordErr, { when: WHEN, unit: 'record the failure' }); return false; });
+    // A run given up is a finished run too, and writes its audit entry as a complete one does (lens sweep N11).
+    if (givenUp && recorded) auditFinished(spaceId, { ...current, failures, state: 'failed' });
     return await readRun(spaceId).catch(() => null);
   }
 }

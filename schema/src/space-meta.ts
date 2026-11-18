@@ -151,6 +151,9 @@ function rulesMapOf<R extends z.ZodType>(ruleZ: R, max: number) {
   })) as unknown as z.ZodType<Record<string, z.output<R>>>;
 }
 
+/** The longest property name a type may declare: the `propertySchemas` key bound, read by every door that names a property (a conversion step's). */
+export const PROPERTY_NAME_MAX = 200;
+
 /*
  * EVERY write of a type schema parses through here — the space meta PATCH and `schema_update`, `PUT .../schema`, the
  * single-type PUT, space creation, the dry-run, a peer's replicated meta, a passed round, the library (`parseSpaceMeta`,
@@ -169,7 +172,7 @@ export const TypeSchemaZ = z.preprocess(takeBackLibraryDefinition, z.union([
   z.object({
     description: z.string().max(SCHEMA_DESCRIPTION_MAX).optional(),
     namingPattern: SchemaPatternZ.optional(),
-    propertySchemas: z.preprocess(refuseInternalKeys, z.record(z.string().min(1).max(200), PropertySchemaZ)).optional(),
+    propertySchemas: z.preprocess(refuseInternalKeys, z.record(z.string().min(1).max(PROPERTY_NAME_MAX), PropertySchemaZ)).optional(),
     // The schema tier of record > schema > space. `.strict()` above means an unlisted key is REJECTED, so
     // without this the field would be stripped from every PATCH and the feature would silently not exist.
     retention: z.object({

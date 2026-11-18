@@ -128,14 +128,14 @@ const plain = (part: SpacePart, keys: SpaceIndex['keys'], options: SpaceIndexOpt
 const declaredOptions = (o: { unique?: boolean; sparse?: boolean }): SpaceIndexOptions =>
   ({ ...(o.unique ? { unique: true } : {}), ...(o.sparse ? { sparse: true } : {}) });
 
+/** The name of the schema conversion run's `(type field, _id)` index on the four stamped collections: the run's page reads by it. */
+export const SCHEMA_CONVERT_INDEX = 'schema_convert_keyset';
+
 /**
  * The TTL sweep's indexes: plain (not `expireAfterSeconds`) indexes over the retention stamps, which only keep the sweep's queries
  * cheap - the sweep deletes through the normal delete path so the deletion tombstones and replicates. Sparse, so a space that sets
  * no retention carries empty ones. `report`: a space without them is swept by a collection scan, which is slow and still correct.
  */
-/** The name of the schema conversion run's `(type field, _id)` index on the four stamped collections: the run's page reads by it. */
-export const SCHEMA_CONVERT_INDEX = 'schema_convert_keyset';
-
 const TTL_INDEXES: readonly SpaceIndex[] = [
   ...TTL_COLLECTIONS.map((part): SpaceIndex => ({
     part, keys: { _expireAt: 1 }, options: { name: 'ttl_expireAt', sparse: true }, policy: 'report', bootSafe: false, sweep: true,
