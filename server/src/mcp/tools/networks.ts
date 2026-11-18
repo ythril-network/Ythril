@@ -20,6 +20,7 @@ import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
 import { rereadNetworkAct, REREAD_COST } from '../../networks/reread-act.js';
 import { callerIsAskedForMfa } from '../../auth/mfa-asked.js';
 import { ToolRefusal } from '../../util/errors.js';
+import { toolErrorResult } from '../tool-error-text.js';
 
 /** The caller an act sees: this connection's matrix, and the token id memberships are recorded against. */
 export const callerOf = (ctx: ToolContext) => ({ ...(ctx.rights ? { rights: ctx.rights } : {}), ...(ctx.actor?.tokenId ? { id: ctx.actor.tokenId } : {}) });
@@ -32,7 +33,7 @@ export function toResult(r: NetworkActResult, done: string): ToolResult {
     const deadline = 'deadline' in r && r.deadline ? r.deadline : undefined;
     const retryable = 'retryable' in r && r.retryable ? true : undefined;
     return {
-      content: [{ type: 'text' as const, text: `Error (${r.status}): ${r.error}` }], isError: true,
+      ...toolErrorResult(r.error, r.status),
       ...(code ? { structuredContent: { error: r.error, code, ...(deadline ? { deadline } : {}), ...(retryable ? { retryable } : {}) } } : {}),
     };
   }

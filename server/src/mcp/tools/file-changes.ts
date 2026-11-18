@@ -7,6 +7,7 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { peerBoundTo } from '../../auth/peer-bound.js';
 import { refusalOfParse } from '../../util/log.js';
+import { toolErrorResult } from '../tool-error-text.js';
 import {
   FILE_CHANGES_MAX_LIMIT, FILE_CHANGES_DEFAULT_LIMIT, FILE_CHANGES_MAX_CURSOR, FILE_CHANGES_MAX_PREFIX,
   FileChangesQuery, fileChangesSpaceRefusal, readFileChanges,
@@ -14,8 +15,7 @@ import {
 
 /** A refusal as a tool result: the sentence in the text (with the door's `Error: ` prefix) and the body, `code` included, as structured content. */
 const refused = (body: { error: string; code?: string }): ToolResult => ({
-  content: [{ type: 'text' as const, text: `Error: ${body.error}${body.code ? ` (code: ${body.code})` : ''}` }],
-  isError: true,
+  ...toolErrorResult(`${body.error}${body.code ? ` (code: ${body.code})` : ''}`),
   structuredContent: { ...body },
 });
 

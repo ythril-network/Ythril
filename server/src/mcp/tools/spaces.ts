@@ -14,6 +14,7 @@ import { countRecordsOfSpaces } from '../../spaces/space-counts.js';
 import { spaceForWire } from '../../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
+import { toolErrorResult, toolErrorText } from '../tool-error-text.js';
 import { lostSpaceAnswer } from '../../spaces/unknown-space.js';
 import { forwardedArgNames } from '../../contract/write-accepts.js';
 
@@ -295,7 +296,7 @@ export const update_spaceTool: ToolHandler = {
       const { refuseFaceWidthChange } = await import('../../spaces/face-width-change.js');
       const current = getConfig().spaces.find(sp => sp.id === callSpace);
       const refusal = await refuseFaceWidthChange(callSpace, newDims, current?.faceDescriptorDims);
-      if (refusal) throw new Error(`Error (${refusal.status}): ${refusal.reason}`);
+      if (refusal) throw new Error(toolErrorText(refusal.reason, refusal.status));
       updates.faceDescriptorDims = newDims;
     }
 
@@ -356,11 +357,7 @@ async function runSpaceMetaUpdate(
    */
   const refused = refusalsForSpaceUpdate(body, spaceId, !!rights?.instanceAdmin, rights);
   if (refused.length) {
-    return {
-      content: [{ type: 'text' as const, text: `Error (403): Not allowed to change `
-        + `${refused.map(describeFieldRequirement).join(', ')}.` }],
-      isError: true,
-    };
+    return toolErrorResult(`Not allowed to change ${refused.map(describeFieldRequirement).join(', ')}.`, 403);
   }
 
   // No `If-Match`: MCP has no header to carry one, and absence means "no precondition asked for" — the same
@@ -368,10 +365,7 @@ async function runSpaceMetaUpdate(
   // that has not asked for one.
   const decision = planSpaceMetaUpdate({ spaceId, space, body, ifMatch: undefined });
   if (!decision.ok) {
-    return {
-      content: [{ type: 'text' as const, text: `Error (${decision.refusal.status}): ${decision.refusal.body.error}` }],
-      isError: true,
-    };
+    return toolErrorResult(decision.refusal.body.error, decision.refusal.status);
   }
 
   // Q-50: the snapshot pair the REST route hands its audit entry, taken before anything is applied.
@@ -379,7 +373,7 @@ async function runSpaceMetaUpdate(
   const result = await applySpaceMetaUpdate(decision.plan);
   if (result.outcome === 'not_found') {
     const lost = lostSpaceAnswer(null, spaceId);
-    return { content: [{ type: 'text' as const, text: `Error (${lost.status}): ${lost.body.error}` }], isError: true };
+    return toolErrorResult(lost.body.error, lost.status);
   }
   const notice = noticeOf(result);
   if (result.outcome === 'vote_pending') {
@@ -690,10 +684,7 @@ export const save_spaceTool: ToolHandler = {
     const { planSpaceCreate, applySpaceCreate } = await import('../../spaces/space-create.js');
     const decision = planSpaceCreate(body);
     if (!decision.ok) {
-      return {
-        content: [{ type: 'text' as const, text: `Error (${decision.refusal.status}): ${decision.refusal.body.error}` }],
-        isError: true,
-      };
+      return toolErrorResult(decision.refusal.body.error, decision.refusal.status);
     }
 
     // The calling token is credited, so it administers what it created (Q-134) — as the REST door credits its caller.
@@ -701,22 +692,14 @@ export const save_spaceTool: ToolHandler = {
     if (result.outcome === 'conflict') {
       // 409, and reported as its own thing rather than as a generic failure: the id being taken is often a successful
       // retry of a request whose response was lost, and an agent that can tell the two apart stops retrying.
-      return {
-        content: [{ type: 'text' as const, text: `Error (409): ${result.error}` }],
-        isError: true,
-        structuredContent: { outcome: 'conflict' },
-      };
+      return { ...toolErrorResult(result.error, 409), structuredContent: { outcome: 'conflict' } };
     }
     if (result.outcome === 'retry') {
       // 503 on REST with `Retry-After`: MCP has no header, so `retryable` rides beside the code in the structured content.
-      return {
-        content: [{ type: 'text' as const, text: `Error (503): ${result.error}` }],
-        isError: true,
-        structuredContent: { outcome: 'retry', code: result.code, retryable: true },
-      };
+      return { ...toolErrorResult(result.error, 503), structuredContent: { outcome: 'retry', code: result.code, retryable: true } };
     }
     if (result.outcome === 'failed') {
-      return { content: [{ type: 'text' as const, text: `Error (500): ${result.error}` }], isError: true };
+      return toolErrorResult(result.error, 500);
     }
 
     const s = result.space;

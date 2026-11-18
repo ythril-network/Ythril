@@ -1,6 +1,7 @@
 import type { ToolHandler, ToolContext, ToolResult } from './types.js';
 import { readSpillAct } from '../../brain/read-spill-act.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
+import { toolErrorResult } from '../tool-error-text.js';
 
 /**
  * `read_spill` — the MCP half of `GET /api/brain/spills/:id` (Q-92). Same act, same parameters, same refusals.
@@ -47,8 +48,7 @@ export const read_spillTool: ToolHandler = {
     });
     if (r.status !== 200) {
       const error = String(r.body['error']);
-      return { content: [{ type: 'text' as const, text: `Error: ${error}` }], isError: true,
-        structuredContent: { status: r.status, error } };
+      return { ...toolErrorResult(error), structuredContent: { status: r.status, error } };
     }
     return { content: [{ type: 'text' as const, text: JSON.stringify(r.body) }], structuredContent: r.body };
   },

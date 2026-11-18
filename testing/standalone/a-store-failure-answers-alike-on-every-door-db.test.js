@@ -12,6 +12,10 @@
  * written by hand, and a gate built on the one shared helper's CALL SITES could only see the doors that already
  * called it.
  *
+ * "One spelling" is the SENTENCE. A tool's text (MCP, and the `error` of `POST /api/<tool>`) is `Error: ` before it, as every
+ * error of a tool is (`mcp/tool-error-text.ts`, Q-339: the store failure was the one kind that lacked it); every other door
+ * answers the sentence alone. Each door is held to its own grammar, and the sentences are compared with the prefix taken off.
+ *
  * ## The doors are read from the mounts, never from the sender
  *
  * Every route the server mounts (`_routes.mjs`, the mount graph), with `/api/:tool` expanded over every tool, plus every
@@ -391,7 +395,7 @@ describe('a store failure answers alike on every door', { skip }, () => {
     const out = [];
     for (const r of mountedRoutesWithSource()) {
       if (r.path.includes(':tool')) {
-        for (const t of TOOLS) out.push({ kind: 'rest', name: `${r.method} ${r.path.replace(':tool', t)}`, method: r.method, url: r.path.replace(':tool', t), body: argsFor(schemaOf(t)) });
+        for (const t of TOOLS) out.push({ kind: 'rest', toolText: true, name: `${r.method} ${r.path.replace(':tool', t)}`, method: r.method, url: r.path.replace(':tool', t), body: argsFor(schemaOf(t)) });
         continue;
       }
       out.push({ kind: 'rest', name: `${r.method} ${r.path}`, method: r.method, url: fill(r.path), body: BODY });
@@ -399,7 +403,7 @@ describe('a store failure answers alike on every door', { skip }, () => {
         out.push({ kind: 'rest', name: `${r.method} ${r.path}?${flag}=true`, method: r.method, url: `${fill(r.path)}?${flag}=true`, body: BODY, variant: true });
       }
     }
-    for (const t of TOOLS) out.push({ kind: 'mcp', name: `MCP ${t}`, tool: t, args: argsFor(schemaOf(t)) });
+    for (const t of TOOLS) out.push({ kind: 'mcp', toolText: true, name: `MCP ${t}`, tool: t, args: argsFor(schemaOf(t)) });
     return out;
   }
 
@@ -486,6 +490,11 @@ describe('a store failure answers alike on every door', { skip }, () => {
     for (const { d, a } of reached) {
       if (a.streaming || REPORTS_THE_STORE.has(d.name) || (answers === 'misconfigured' && ANSWERS_AROUND_A_FAILED_WRITE.has(d.name))) continue;
       const why = [];
+      // A TOOL's text (MCP, and `error` of `POST /api/<tool>`) is `Error: ` before the sentence, as every error of a tool is (`toolErrorText`,
+      // Q-339); every other door answers the sentence alone. The spelling compared below is the sentence, so one failure stays one sentence.
+      const tooled = d.toolText === true && typeof a.error === 'string' && a.error.startsWith('Error: ');
+      if (d.toolText === true && !tooled) why.push(`a tool's text does not start \`Error: \`: ${JSON.stringify(a.error)?.slice(0, 80)}`);
+      const sentence = tooled ? a.error.slice('Error: '.length) : a.error;
       if (answers === 'retry') {
         if (a.status !== 503) why.push(`status ${a.status}`);
         if (d.kind === 'rest' && !(Number(a.retryAfter) > 0)) why.push('no Retry-After');
@@ -497,10 +506,10 @@ describe('a store failure answers alike on every door', { skip }, () => {
         if (a.retryable !== false) why.push(`retryable ${a.retryable}`);
         if (a.code !== 100) why.push(`code ${a.code}`);
         if (a.codeName !== 'UnsatisfiableWriteConcern') why.push(`codeName ${a.codeName}`);
-        if (a.error !== UNSATISFIABLE_WRITE_CONCERN_MESSAGE) why.push(`error ${JSON.stringify(a.error)?.slice(0, 80)}`);
+        if (sentence !== UNSATISFIABLE_WRITE_CONCERN_MESSAGE) why.push(`error ${JSON.stringify(a.error)?.slice(0, 80)}`);
       }
-      if (typeof a.error !== 'string' || a.error.startsWith('Error:')) why.push(`error ${JSON.stringify(a.error)?.slice(0, 80)}`);
-      else messages.set(a.error, [...(messages.get(a.error) ?? []), d.name]);
+      if (typeof sentence !== 'string' || sentence.startsWith('Error:')) why.push(`error ${JSON.stringify(a.error)?.slice(0, 80)}`);
+      else messages.set(sentence, [...(messages.get(sentence) ?? []), d.name]);
       // The operator's log: the driver's text once for this request's answer, not once per layer that saw it. Lines
       // after the answer belong to other operations (the audit row a finished request writes logs its own failure).
       // A misconfiguration is logged once per operation and code per window, so the same text is not repeated per door.

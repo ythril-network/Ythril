@@ -97,7 +97,10 @@ export function refusalClassesOf(sources) {
   return ours;
 }
 
-/** The classes `answerThrown` answers with their own message (`Error: ${message}`): a `new X(caught.message)` anywhere reaches a caller. */
+/** The functions of `mcp/tool-error-text.ts` that turn a message into a tool's error text (and result): what once was the template `Error: ${message}`. */
+const TOOL_ERROR_BUILDERS = new Set(['toolErrorText', 'toolErrorResult']);
+
+/** The classes `answerThrown` answers with their own message (`toolErrorResult(message)`): a `new X(caught.message)` anywhere reaches a caller. */
 export function classesAnsweredByMessage(callToolText) {
   const sf = parseSource(CALL_TOOL, callToolText);
   let fn;
@@ -111,6 +114,8 @@ export function classesAnsweredByMessage(callToolText) {
     let echoes = false;
     walkEveryNode(n.thenStatement, (t) => {
       if (ts.isTemplateSpan(t) && ts.isIdentifier(t.expression) && t.expression.text === 'message') echoes = true;
+      if (ts.isCallExpression(t) && ts.isIdentifier(t.expression) && TOOL_ERROR_BUILDERS.has(t.expression.text)
+        && t.arguments[0] && ts.isIdentifier(t.arguments[0]) && t.arguments[0].text === 'message') echoes = true;
     });
     if (echoes) out.add(cond.right.text);
   });
@@ -201,6 +206,8 @@ function answersIn(body, answeredClasses) {
       }
     }
     if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'sendCaughtFailure' && n.arguments[3]) out.push([n, n.arguments[3]]);
+    // A tool's error text built by its one module (`mcp/tool-error-text.ts`): its message is the answer, as `text` of the content is.
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && TOOL_ERROR_BUILDERS.has(n.expression.text) && n.arguments[0]) out.push([n, n.arguments[0]]);
     if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && answeredClasses.has(n.expression.text)) for (const a of n.arguments ?? []) out.push([n, a]);
   });
   return pairs;
@@ -350,6 +357,7 @@ describe('no answer carries a caught message', () => {
       for (const body of ['res.status(500).json({ error: err.message })', 'res.json({ error: String(err) })',
         'res.status(400).json({ error: `failed: ${err}` })', 'const msg = err instanceof Error ? err.message : String(err); res.status(400).json({ error: msg })',
         "return { content: [{ type: 'text', text: `Error: ${(err as Error).message}` }] }",
+        'return toolErrorResult((err as Error).message)', 'return { content: [{ type: \'text\', text: toolErrorText(String(err), 400) }] }',
         "sendCaughtFailure(res, 'w', err, { error: (err as Error).message })", 'throw new ToolRefusal(400, err.message)',
         'return { status: 502, error: `Could not reach the peer: ${err}` }',
         'return { status: 502, body: { error: `Could not reach the introduced address: ${err}` } }']) {

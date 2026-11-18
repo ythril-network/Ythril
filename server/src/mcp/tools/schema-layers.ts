@@ -6,10 +6,11 @@
  * `TOOL_RIGHTS`: `schema: read` to see, `schema: admin` to reorder.
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
+import { toolErrorResult } from '../tool-error-text.js';
 import { schemaLayersAct, setNetworkPrecedenceAct, type SchemaLayersActResult } from '../../spaces/schema-layers-acts.js';
 
 function toResult(r: SchemaLayersActResult): ToolResult {
-  if ('error' in r) return { content: [{ type: 'text' as const, text: `Error (${r.status}): ${r.error}` }], isError: true };
+  if ('error' in r) return toolErrorResult(r.error, r.status);
   return { content: [{ type: 'text' as const, text: JSON.stringify(r.body) }], structuredContent: r.body };
 }
 
