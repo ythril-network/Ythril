@@ -13,6 +13,9 @@
  *   (`sweepStaleUnconvertedItems`).
  * - {@link dismissUnconvertedAct}: `{ item }`, the row as listed, now `dismissed`. The record is not touched, and a run that meets the same
  *   record version toward the same target does not open the item again (`recordUnconvertedItem`).
+ * - {@link dismissShownUnconvertedAct}: `{ dismissed }`, every open item a `kind`/`type`/`reason` filter lists (the list takes the same filter, so
+ *   a count shown and the set dismissed are one question), when the caller was shown exactly `expect` of them; bounded, one write, refused
+ *   with the current number when the count moved. The list's `record.summary` is part of the rows the byte budget counts.
  *
  * ## What it prevents
  *
@@ -35,7 +38,10 @@ import { KNOWLEDGE_TYPES, COLLECTION_SUFFIX, type KnowledgeType } from '../confi
 import { TYPE_NAME_MAX } from '@ythril-network/schema/internal';
 import type { TokenRights } from '../config/rights-shape.js';
 import { holdsRung, rungRefusal } from '../auth/reachable-spaces.js';
-import { listUnconvertedItems, dismissUnconvertedItem, type UnconvertedItem } from '../brain/schema-convert-items.js';
+import {
+  listUnconvertedItems, dismissUnconvertedItem, dismissOpenUnconvertedItems, UNCONVERTED_REASONS,
+  type UnconvertedItem, type ListedUnconvertedItem,
+} from '../brain/schema-convert-items.js';
 import { CHOSEN_VERSION_ROWS } from '../brain/chosen-versions.js';
 import { mapToRecallResult } from '../brain/recall-result.js';
 import { summariseRecall } from '../brain/recall-shape.js';
@@ -50,11 +56,19 @@ const BAD_REQUEST = 400;
 const FORBIDDEN = 403;
 const NOT_FOUND = 404;
 const GONE = 410;
+const CONFLICT = 409;
 
-/** What an act answers: a body, or a refusal with its status and code. */
+/**
+ * What an act answers: a body, or a refusal with its status and code. A refusal may carry `detail`, whole numbers a door sends beside `error`
+ * and `code` (`current` of a changed count, `max` of a call that names too many): both doors build their body from the one {@link refusalBody}.
+ */
 export type UnconvertedActResult =
   | { status: typeof OK; body: Record<string, unknown> }
-  | { status: typeof BAD_REQUEST | typeof FORBIDDEN | typeof NOT_FOUND | typeof GONE; error: string; code?: string };
+  | { status: typeof BAD_REQUEST | typeof FORBIDDEN | typeof NOT_FOUND | typeof GONE | typeof CONFLICT; error: string; code?: string; detail?: Readonly<Record<string, number>> };
+
+/** The body a door sends for a refusal: `{ error, code?, ...detail }`. */
+export const refusalBody = (r: Extract<UnconvertedActResult, { error: string }>): Record<string, unknown> =>
+  ({ error: r.error, ...(r.code ? { code: r.code } : {}), ...(r.detail ?? {}) });
 
 /** Who is asking: the rights the rung is judged from (`null` or absent: no matrix, no rung) and the door, whose byte-budget default applies. */
 export interface UnconvertedCaller {
@@ -70,8 +84,10 @@ export interface UnconvertedCaller {
 export const UNCONVERTED_REFUSAL_CODES = [
   'unconverted_bad_kind', 'unconverted_bad_status', 'unconverted_bad_type', 'unconverted_bad_paging', 'unconverted_bad_item_id',
   'unconverted_item_not_found', 'unconverted_rung',
+  // The bulk dismiss.
+  'unconverted_bad_reason', 'unconverted_bad_expect', 'unconverted_changed', 'unconverted_too_many',
 ] as const;
-const [BAD_KIND, BAD_STATUS, BAD_TYPE, BAD_PAGING, BAD_ITEM_ID, ITEM_NOT_FOUND, RUNG] = UNCONVERTED_REFUSAL_CODES;
+const [BAD_KIND, BAD_STATUS, BAD_TYPE, BAD_PAGING, BAD_ITEM_ID, ITEM_NOT_FOUND, RUNG, BAD_REASON, BAD_EXPECT, CHANGED, TOO_MANY] = UNCONVERTED_REFUSAL_CODES;
 
 /** The statuses an item holds, and the one the list shows unless another is asked. */
 export const UNCONVERTED_STATUSES = ['open', 'dismissed'] as const;
@@ -89,18 +105,28 @@ const blankIsAbsent = (v: unknown): unknown => (v === '' ? undefined : v);
  * The filters both doors take, parsed by this one schema so the route's query and the tool's arguments cannot state different bounds.
  * `skip` and `limit` are the list module's (`resolveListPaging`) and are not parsed here.
  */
-export const UnconvertedListParams = z.object({
+export const UnconvertedFilterParams = z.object({
   kind: z.preprocess(blankIsAbsent, z.enum(KNOWLEDGE_TYPES).optional()),
   type: z.preprocess(blankIsAbsent, z.string().max(TYPE_NAME_MAX).optional()),
+  reason: z.preprocess(blankIsAbsent, z.enum(UNCONVERTED_REASONS).optional()),
+});
+
+/** The list's parameters: the filter the bulk dismiss shares, and the `status` only a list chooses. */
+export const UnconvertedListParams = UnconvertedFilterParams.extend({
   status: z.preprocess(blankIsAbsent, z.enum(UNCONVERTED_STATUSES).optional()),
+});
+
+/** The bulk dismiss's parameters: the same filter, and `expect`, the number of open items the caller was shown (required, a whole number). */
+export const UnconvertedDismissShownParams = UnconvertedFilterParams.extend({
+  expect: z.number().int().min(0),
 });
 
 /** The row one item is listed as: the stored item under its public names, and the record part when the record is stored. */
 export type UnconvertedRow = Omit<UnconvertedItem, '_id' | 'typeDefinition'> & { itemId: string; record?: { summary: string } };
 
-const rowOf = (item: UnconvertedItem, summary?: string): UnconvertedRow => {
-  const { _id, typeDefinition: _definition, ...rest } = item;
-  return { itemId: _id, ...rest, ...(summary !== undefined ? { record: { summary } } : {}) };
+const rowOf = (item: ListedUnconvertedItem): UnconvertedRow => {
+  const { _id, typeDefinition: _definition, record, ...rest } = item;
+  return { itemId: _id, ...rest, ...(record ? { record } : {}) };
 };
 
 /** The fields the summary line of each kind is made from, and no others: a read of a record for this list never reads a property. */
@@ -137,7 +163,7 @@ function refusedBefore(spaceId: string, caller: UnconvertedCaller, needs: 'read'
   return null;
 }
 
-const FILTER_CODES: Readonly<Record<string, string>> = { kind: BAD_KIND, type: BAD_TYPE, status: BAD_STATUS };
+const FILTER_CODES: Readonly<Record<string, string>> = { kind: BAD_KIND, type: BAD_TYPE, status: BAD_STATUS, reason: BAD_REASON, expect: BAD_EXPECT };
 
 /**
  * One page of the space's unconverted items (needs `knowledge: read`), refused in this order: an unknown space (404, or 410 for a retired
@@ -147,23 +173,30 @@ const FILTER_CODES: Readonly<Record<string, string>> = { kind: BAD_KIND, type: B
 export async function listUnconvertedAct(spaceId: string, params: Record<string, unknown>, caller: UnconvertedCaller): Promise<UnconvertedActResult> {
   const before = refusedBefore(spaceId, caller, 'read');
   if (before) return before;
-  const parsed = UnconvertedListParams.safeParse({ kind: params['kind'], type: params['type'], status: params['status'] });
+  const parsed = UnconvertedListParams.safeParse({ kind: params['kind'], type: params['type'], reason: params['reason'], status: params['status'] });
   if (!parsed.success) {
     const refusal = refusalOfParse(parsed.error);
     const field = String(refusal.issues[0]?.path[0] ?? '');
     return { status: BAD_REQUEST, error: refusal.error, code: FILTER_CODES[field] ?? BAD_KIND };
   }
-  const { kind, type, status } = parsed.data;
+  const { kind, type, reason, status } = parsed.data;
+  // The record part is added before the byte budget is applied, so the bytes the answer reports and the page it cuts count it.
+  const withSummaries = async (rows: UnconvertedItem[]): Promise<ListedUnconvertedItem[]> => {
+    const summaries = await summariesOf(spaceId, rows);
+    return rows.map(item => {
+      const summary = summaries.get(`${item.kind}\u0000${item.recordId}`);
+      return summary === undefined ? item : { ...item, record: { summary } };
+    });
+  };
   const listed = await listUnconvertedItems(spaceId, {
     skip: params['skip'], limit: params['limit'], maxChars: params['maxChars'], maxBytes: params['maxBytes'], maxTokens: params['maxTokens'],
-    status: status ?? 'open', ...(kind !== undefined ? { kind } : {}), ...(type !== undefined ? { type } : {}),
-  }, caller.transport);
+    status: status ?? 'open', ...(kind !== undefined ? { kind } : {}), ...(type !== undefined ? { type } : {}), ...(reason !== undefined ? { reason } : {}),
+  }, caller.transport, withSummaries);
   if (!listed.ok) return { status: BAD_REQUEST, error: listed.error, code: BAD_PAGING };
-  const summaries = await summariesOf(spaceId, listed.items);
   return {
     status: OK,
     body: {
-      items: listed.items.map(item => rowOf(item, summaries.get(`${item.kind}\u0000${item.recordId}`))),
+      items: listed.items.map(rowOf),
       ...listed.fields,
       counts: { open: listed.open, dismissed: listed.dismissed },
     },
@@ -186,4 +219,34 @@ export async function dismissUnconvertedAct(spaceId: string, itemId: unknown, ca
     return { status: NOT_FOUND, error: `Space '${spaceSentence(spaceId)}' holds no unconverted item '${peerText(itemId, { max: NAME_QUOTED })}'`, code: ITEM_NOT_FOUND };
   }
   return { status: OK, body: { item: rowOf(item) } };
+}
+
+/**
+ * Dismiss every OPEN item the filter (`kind`, `type`, `reason`) lists, in one call (needs `knowledge: write`), when the caller was shown exactly
+ * `expect` of them. Refused in this order: an unknown space, a missing rung (a read-only token included), a malformed filter or an `expect` that
+ * is not a whole number of at least zero (400, by its own code), more than `UNCONVERTED_DISMISS_MAX` matches (400 `unconverted_too_many`, with
+ * `max`: narrow the filter), a count that is not `expect` (409 `unconverted_changed`, with `current`: nothing is dismissed, so a confirmation of
+ * one number never dismisses another). The guard is here, inside the act, where no door can drop it. Answers `{ dismissed }`.
+ *
+ * Not built, on purpose: a personal view as the space. The act names one configured space, as every act of this module does.
+ */
+export async function dismissShownUnconvertedAct(spaceId: string, params: Record<string, unknown>, caller: UnconvertedCaller): Promise<UnconvertedActResult> {
+  const before = refusedBefore(spaceId, caller, 'write');
+  if (before) return before;
+  const parsed = UnconvertedDismissShownParams.safeParse({ kind: params['kind'], type: params['type'], reason: params['reason'], expect: params['expect'] });
+  if (!parsed.success) {
+    const refusal = refusalOfParse(parsed.error);
+    const field = String(refusal.issues[0]?.path[0] ?? '');
+    return { status: BAD_REQUEST, error: refusal.error, code: FILTER_CODES[field] ?? BAD_EXPECT };
+  }
+  const { expect, kind, type, reason } = parsed.data;
+  const done = await dismissOpenUnconvertedItems(spaceId, { ...(kind !== undefined ? { kind } : {}), ...(type !== undefined ? { type } : {}), ...(reason !== undefined ? { reason } : {}) }, expect);
+  if (done.ok) return { status: OK, body: { dismissed: done.dismissed } };
+  if (done.refusal === 'too_many') {
+    return { status: BAD_REQUEST, error: `This filter matches more than ${done.max} open unconverted items, the most one call dismisses: narrow it by kind, type or reason. Nothing was dismissed`, code: TOO_MANY, detail: { max: done.max } };
+  }
+  return {
+    status: CONFLICT, code: CHANGED, detail: { current: done.current },
+    error: `The space now holds ${done.current} open unconverted items for this filter, not the ${expect} you were shown. Nothing was dismissed: list again and confirm the new number`,
+  };
 }
