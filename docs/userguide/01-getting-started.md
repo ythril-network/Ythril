@@ -47,7 +47,7 @@ control never pretends to be an answer.
 **Settings → Help** is this documentation, readable *inside* the instance. Every guide that ships with
 Ythril — this user guide, the integration guide, the use-case examples, **the decisions log**, workstation
 mode, network types, the sync protocol, **the UI primitives reference**, dependencies and licences, and
-contributing — is bundled with the application and rendered in place. It needs no internet connection, which is the point: the installs that most need the
+the dev guide — is bundled with the application and rendered in place. It needs no internet connection, which is the point: the installs that most need the
 documentation are often the ones with no route to the outside. Each guide has its own link
 (`/settings/help?doc=userguide`), so a page can point at the guide that explains it.
 

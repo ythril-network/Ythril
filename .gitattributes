@@ -7,7 +7,7 @@
 #
 # WHO THIS ACTUALLY AFFECTS, because the first version of this comment overstated it. The committed bytes are
 # LF and always have been, so a Linux or macOS checkout is unaffected and no deployment ever saw this. It
-# reaches exactly one person: a contributor on Windows, whose checkout converts to CRLF, at the moment a POSIX
+# reaches exactly one person: a developer on Windows, whose checkout converts to CRLF, at the moment a POSIX
 # shell runs that working tree — a container bind-mounting it, or WSL. That is a narrow case and it is still
 # worth pinning, because it is invisible until it happens and the error names nothing useful.
 *.sh text eol=lf

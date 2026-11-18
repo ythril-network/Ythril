@@ -1,10 +1,10 @@
 # 17 — The first carry into position space is an owed job, and a space answers `positions_building` until it ends
 
-**Status:** accepted, 2026-10 (D-24 and the contribution guide's migration rule) · **Scope:** the first 6.0 start of a space, the re-upgrade repair, the rollback tool, and why this is a one-time migration of a synced collection
+**Status:** accepted, 2026-10 (D-24 and the rule that synced data is never migrated at boot) · **Scope:** the first 6.0 start of a space, the re-upgrade repair, the rollback tool, and why this is a one-time migration of a synced collection
 
 ## Context
 
-The contribution guide says synced data heals lazily and is never migrated once at boot, because a mixed-version peer can silently revert a boot migration. Bundle-81 needs the opposite for three fields: every row a 5.6 build stored has a version and no position, and sync pages by position. The three fields (`pos`, `posAtSeq`, `writtenHere`) are **local-only**: no peer overwrites them and none crosses the wire, so the revert the rule guards against cannot happen. The cost is another matter: the carry rewrites every document of every collection once, and the vector index re-reads each.
+The project's migration rule says synced data heals lazily and is never migrated once at boot, because a mixed-version peer can silently revert a boot migration. Bundle-81 needs the opposite for three fields: every row a 5.6 build stored has a version and no position, and sync pages by position. The three fields (`pos`, `posAtSeq`, `writtenHere`) are **local-only**: no peer overwrites them and none crosses the wire, so the revert the rule guards against cannot happen. The cost is another matter: the carry rewrites every document of every collection once, and the vector index re-reads each.
 
 ## Decision
 

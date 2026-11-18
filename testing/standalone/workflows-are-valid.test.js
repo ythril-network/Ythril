@@ -3,7 +3,7 @@
  *
  * ## The failure this exists for
  *
- * `cla.yml` shipped in #665 with `if: ${{ secrets.CLA_SIGNATURES_TOKEN == '' }}` on a step. The `secrets` context
+ * `cla.yml` (since removed: Ythril takes no outside code) shipped in #665 with `if: ${{ secrets.CLA_SIGNATURES_TOKEN == '' }}` on a step. The `secrets` context
  * is **not available in an `if:` conditional** — only in `env:` and `with:`. So the expression was invalid, and
  * GitHub responded the way it does to any invalid workflow: it created a run for every push, concluded it
  * **failure**, ran **zero jobs**, and emailed about each one.
@@ -107,8 +107,8 @@ describe('every workflow would start', () => {
  * The events that run a workflow in the BASE repository's context, with its secrets and a write token, on behalf of
  * a pull request from anywhere. `ci.yml` installs and runs the code of the pull request it is triggered by — `npm ci`
  * executes its install scripts, the suites execute its tests — so under either of these a fork's pull request would
- * run its own code with this repository's credentials. `cla.yml` uses `pull_request_target` legitimately (it runs a
- * pinned action and no repository code), which is why this is asked of `ci.yml` and not of every workflow.
+ * run its own code with this repository's credentials. No workflow uses either trigger now (the one that did, `cla.yml`, is
+ * removed), and this is asked of `ci.yml` and not of every workflow.
  */
 const PRIVILEGED_TRIGGERS = ['pull_request_target', 'workflow_run'];
 

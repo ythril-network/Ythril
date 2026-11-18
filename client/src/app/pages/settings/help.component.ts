@@ -114,9 +114,9 @@ export const HELP_DOCS = [
     ],
   },
   // The decision records, as ONE entry with the records as parts — the same shape as the integration guide above.
-  // Four separate entries would crowd an operator's nav with contributor material; one entry keeps every record
-  // reachable (the coverage gate requires that) while costing a single line in the list. The contribution guide is
-  // already offered here, so contributor docs belonging in Help is the existing convention, not a new one.
+  // Four separate entries would crowd an operator's nav with developer material; one entry keeps every record
+  // reachable (the coverage gate requires that) while costing a single line in the list. The dev guide is
+  // already offered here, so developer docs belonging in Help is the existing convention, not a new one.
   {
     id: 'decisions', file: 'decisions.md',
     parts: [
@@ -149,7 +149,7 @@ export const HELP_DOCS = [
   { id: 'sync-protocol', file: 'sync-protocol.md' },
   { id: 'ui-primitives', file: 'ui-primitives.md' },
   { id: 'dependencies', file: 'dependencies.md' },
-  { id: 'contribution-guide', file: 'contribution-guide.md' },
+  { id: 'dev-guide', file: 'dev-guide.md' },
   { id: 'testing-guide', file: 'testing-guide.md' },
 ] as const satisfies ReadonlyArray<{ id: string; file: string; parts?: readonly string[] }>;
 

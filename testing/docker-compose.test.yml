@@ -151,7 +151,7 @@ services:
     cpus: "${YTHRIL_TEST_MONGO_CPUS:-1.0}"
     # A ceiling for TESTS, not a sizing guide: a space of 44 000 records ran the database out of memory at this
     # limit, and 5 GB held. Raise YTHRIL_TEST_MONGO_A_MEM for a test that seeds tens of thousands of records. The
-    # production knob is YTHRIL_MONGO_MEM_LIMIT (default 4g, unmeasured at that size); see docs/contribution-guide.md.
+    # production knob is YTHRIL_MONGO_MEM_LIMIT (default 4g, unmeasured at that size).
     # 3072m with mongot's heap set to 1280m below: the harness Mongo carries every suite in CI's order, and its search
     # process (mongot, a JVM) defaults to a quarter of the container — 640 MiB at the old 2560m — which the live
     # vector indexes of standalone's concurrent db batches, on top of what the earlier suites left, exhausted:

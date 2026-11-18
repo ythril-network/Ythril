@@ -20,7 +20,7 @@
  *
  * ## Licence
  *
- * axe-core is MPL-2.0 and `docs/contribution-guide.md` keeps copyleft out of the application dependency tree, so neither it nor
+ * axe-core is MPL-2.0 and the project keeps copyleft out of the application dependency tree (the maintainer's rule `convention-ythril-no-copyleft-in-shipped-dependencies`), so neither it nor
  * `@axe-core/playwright` nor `playwright` is in any package.json. They are loaded with `createRequire` from `--modules <folder>` or the
  * `AXE_MODULES` environment variable, and a missing folder is exit 2.
  *

@@ -5,7 +5,7 @@
 
 Audience: integrators building clients, automation, or multi-instance deployments on top of Ythril.
 
-If you are here for web UI usage, read [User Guide](../userguide.md). If you are contributing to source code, read [Contribution Guide](../contribution-guide.md).
+If you are here for web UI usage, read [User Guide](../userguide.md). If you are changing your own copy of the source, read the [Dev Guide](../dev-guide.md).
 
 ## Which version does this describe?
 

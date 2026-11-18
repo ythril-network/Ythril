@@ -95,7 +95,7 @@
   "help.doc.sync-protocol": "Protokół synchronizacji",
   "help.doc.ui-primitives": "Prymitywy UI",
   "help.doc.dependencies": "Zależności i licencje",
-  "help.doc.contribution-guide": "Współtworzenie",
+  "help.doc.dev-guide": "Przewodnik dewelopera",
   "help.doc.testing-guide": "Testy i CI",
   "about.card.help": "Dokumentacja",
   "about.card.helpDesc": "Pełne przewodniki, dołączone do tej instancji i czytelne bez jej opuszczania.",

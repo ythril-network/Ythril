@@ -1,7 +1,7 @@
 # Testing guide
 
 How to run Ythril's tests, how to write one that CI will actually run, and how CI is put together. The
-[contribution guide](contribution-guide.md) says what to run before you push and where a maintainer's full run happens; this page is the reference behind it.
+[dev guide](dev-guide.md) covers setup and building; this page is the reference for tests and CI.
 
 Two rules run through everything below, because both were learned the expensive way:
 
@@ -122,7 +122,7 @@ and fails the run (see [Skips](#skips)).
 
 A suite that got slower is a defect nobody reports, so every run leaves a record of how long each test took.
 
-**On a pull request or a main run**, a contributor has three places, none of which needs any access beyond the repository:
+**On a pull request or a main run**, there are three places to read the timings, none of which needs any access beyond the repository:
 
 1. **The job's own log.** Each job ends with node's usual summary (`# pass`, `# fail`, `# skipped`) because the console
    reporter stays on beside the recording one.
@@ -240,7 +240,7 @@ prints. It records nothing.
 
 ## Recording runs to a Ythril instance (optional)
 
-This is for maintainers who want a long history of how long main takes. A contributor needs none of it, and the line
+This is for maintainers who want a long history of how long main takes. Nothing else needs it, and the line
 `test-times: not recorded: …` that a run may print is normal when it is not set up.
 
 `scripts/test-times.mjs` turns the JSONL into one `Test-Run` chrono entry per node suite, and the client's vitest report
@@ -520,7 +520,7 @@ The authoritative description is the comment at the top of `.github/workflows/ci
   latest attempt, with its `Full run / Build & Test` a success; and every results artifact of that attempt is listed and
   unexpired. Its one output, `full_run`, is `<run id>.<attempt>` or empty. It **fails open**: anything it cannot establish
   (an API error, a short page, a 120 s deadline) is "no reuse", the whole graph runs, and the reason is in its step summary.
-  A push to `main` and a Full run never reuse (the job is skipped). An outside contributor's pull request never reuses: a Full
+  A push to `main` and a Full run never reuse (the job is skipped). A pull request from a fork never reuses: a Full
   run must belong to this repository. A pull request into a release branch reuses only when its head has a green Full run of
   the same tree, which a patch branch usually has not, so it usually runs every suite.
 - **`changelog`** is the pull request's CHANGELOG check, a job of its own because a reused run skips every suite job and the
@@ -549,7 +549,7 @@ The authoritative description is the comment at the top of `.github/workflows/ci
 **`ci:full` forces the whole graph.** A pull request that carries the label `ci:full` never reuses: add the label (adding it
 starts a run, because `pull_request` includes the `labeled` type, and that run sees the label) and every suite runs. Removing
 the label and pushing returns to the decision. A re-run of a run keeps the labels of its event, so to force the graph on a run
-that already finished, add the label and let that new run go. An outside contributor's pull request never reuses, because no
+that already finished, add the label and let that new run go. A pull request from a fork never reuses, because no
 Full run of its commit exists.
 
 Every job of `ci.yml` has a `timeout-minutes` with its reason beside it. A concurrency group keeps one run per ref; a newer
@@ -587,8 +587,8 @@ locally only the test files its diff reaches.
   the pull request reads them, so a full run older than that, or a pull request whose tree differs (`main` moved, a commit
   after the full run), runs the whole graph again, and so does one carrying `ci:full`. A full run also writes no image or sidecar cache (see
   [What is cached](#what-is-cached-and-what-is-not)), so one after a bundle that changed image layers builds them cold.
-- **An outside contributor is not asked for one.** Only someone with push access to the repository can push a `full-run/` ref, and a
-  contributor's pull request runs every suite through its own `Build & Test`. A fork may run the same workflow in its own
+- **A pull request from a fork has none.** Only someone with push access to the repository can push a `full-run/` ref, and a
+  pull request from a fork runs every suite through its own `Build & Test`. A fork may run the same workflow in its own
   Actions.
 
 **Release lines keep their single-job workflow.** A patch is cut from a `release/X.Y.x` branch whose `ci.yml` is one job

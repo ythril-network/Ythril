@@ -8,7 +8,7 @@ made it.
 The reasoning was there — it just did not ship. Ythril's code comments carry an unusual amount of *why*, and the
 working trackers carry more. But `todo/` is **gitignored** (`.gitignore:51`), so `_REFERENCE.md` and
 `_PARKED-DECISIONS.md` — where the rationale for the cross-cutting calls actually lived — are invisible to anyone who
-clones the repository. A contributor could read every comment in the tree and still not know why PDF rasterisation
+clones the repository. A reader could read every comment in the tree and still not know why PDF rasterisation
 avoids the obvious library, or why a "broken" model load must not be fixed by letting it download.
 
 That has a cost beyond onboarding: a decision nobody can see gets **accidentally reversed**. Each record below names

@@ -274,8 +274,7 @@ Ythril's media-embedding and document-conversion pipelines run as **separate
 container images**, pulled independently at deployment time exactly like the
 MongoDB image above. None of them are bundled into or distributed by Ythril, and
 none are linked into the application — Ythril talks to each over HTTP on a private
-network. They are documented here per the [contribution guide's](contribution-guide.md)
-Legal principle that runtime infrastructure must be listed with its licensing impact.
+network. They are documented here because runtime infrastructure must be listed with its licensing impact.
 
 | Image | Role | License |
 |---|---|---|

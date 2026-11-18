@@ -135,7 +135,7 @@ curl -X POST http://localhost:3200/api/recall \
 |---|---|
 | 👤 User / operator | [Workstation Mode](docs/workstation-mode-guide.md) · [User Guide](docs/userguide.md) · [Use-case examples](docs/usecase-examples.md) |
 | 🔌 Integrator (API / MCP) | [Integration Guide](docs/integration-guide.md) · [Network Types](docs/network-types.md) · [Sync Protocol](docs/sync-protocol.md) |
-| 🛠️ Developer | [Contribution Guide](docs/contribution-guide.md) · [UI Primitives](docs/ui-primitives.md) · [Testing and CI caching](docs/testing-guide.md#what-is-cached-and-what-is-not) |
+| 🛠️ Developer | [Dev Guide](docs/dev-guide.md) · [UI Primitives](docs/ui-primitives.md) · [Testing and CI caching](docs/testing-guide.md#what-is-cached-and-what-is-not) |
 
 </div>
 
@@ -212,10 +212,11 @@ licensed under the [Apache License 2.0](schema/LICENSE), with its own [NOTICE](s
 no telemetry, no call home — a test asserts the absence rather than promising it. The licence limits **who**
 may use Ythril commercially, never **what** the software does.
 
-## Contributing
+## Issues and code
 
-Issues and PRs welcome — keep changes scoped and testable, and include a short rationale. See the
-[Contribution Guide](docs/contribution-guide.md).
+Ythril is built by one maintainer and takes no outside code, so a pull request is closed without review.
+Bug reports and ideas are welcome as [issues](https://github.com/ythril-network/Ythril/issues).
+To change your own copy, start with the [Dev Guide](docs/dev-guide.md).
 
 <div align="center">
 <br/>

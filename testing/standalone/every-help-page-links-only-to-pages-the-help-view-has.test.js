@@ -185,7 +185,7 @@ describe('the pages the Help view renders, and what it does with their links', (
     assert.ok(guides.length >= 8, `only ${guides.length} guide(s) found in HELP_DOCS`);
     assert.ok(pages.length >= 20, `only ${pages.length} page(s) found in HELP_DOCS`);
     assert.ok(guides.some(g => g.parts && g.parts.length >= 5), 'no split guide found: the part-to-part rule is not exercised');
-    for (const g of ['testing-guide.md', 'dependencies.md', 'contribution-guide.md']) assert.ok(pages.includes(g), `${g} is not among the view's pages`);
+    for (const g of ['testing-guide.md', 'dependencies.md', 'dev-guide.md']) assert.ok(pages.includes(g), `${g} is not among the view's pages`);
     assert.ok(guides.reduce((n, g) => n + idsOfGuide(g).size, 0) >= 200, 'the headings the view renders were not found: the replay of its renderer is broken');
     assert.ok(everyLink().length >= 100, 'too few links found in the pages: the pattern is broken');
   });

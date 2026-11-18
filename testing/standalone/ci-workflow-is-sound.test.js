@@ -1017,12 +1017,6 @@ const CREDENTIAL_ALLOWLIST = {
       return v;
     },
   },
-  '.github/workflows/cla.yml': {
-    reason: 'runs on pull_request_target with the base repository secrets and executes no repository code: it has no checkout and no local action',
-    holds: (doc) => stepEntries(doc)
-      .filter(({ step }) => usesOf(step)?.action === CHECKOUT || (typeof step.uses === 'string' && step.uses.startsWith('./')))
-      .map(({ where }) => `${where} brings repository code into a job that holds the base repository's secrets`),
-  },
 };
 
 /** The floor on checkouts the real scan must meet: ci.yml's jobs and image-pin-check's, at the least. */
@@ -2157,10 +2151,6 @@ describe('the credential rules, held against their own truth tables', () => {
     assert.ok(publish(wf('on:\n  pull_request:' + job)).some((m) => /pull_request/.test(m)), 'a pull_request trigger on the release workflow was not found');
     assert.ok(publish(wf("on:\n  push:\n    branches: [main]" + job)).some((m) => /tags-only/.test(m)), 'a branch push on the release workflow was not found');
     assert.ok(publish(wf("on:\n  pull_request_target:" + job)).length > 0);
-    const cla = CREDENTIAL_ALLOWLIST['.github/workflows/cla.yml'].holds;
-    assert.deepEqual(cla(wf('on:\n  pull_request_target:' + job)), []);
-    assert.equal(cla(wf('on:\n  pull_request_target:' + job.replace('- run: echo hi', '- uses: actions/checkout@v4'))).length, 1, 'a checkout in the secret-holding workflow was not found');
-    assert.equal(cla(wf('on:\n  pull_request_target:' + job.replace('- run: echo hi', '- uses: ./.github/actions/x'))).length, 1, 'a local action in the secret-holding workflow was not found');
   });
 });
 
