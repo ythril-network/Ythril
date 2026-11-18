@@ -51,8 +51,7 @@ import { readStoredById } from '../db/read-by-id.js';
 import { NAME_QUOTED, peerText, refusalOfParse } from '../util/log.js';
 import { unknownSpaceAnswer } from './unknown-space.js';
 
-// The terms both doors share live in `unconverted-terms.ts`, a module the MCP tools may import without drawing this one into the server's
-// largest import cycle; re-exported for the readers that name them here.
+// The terms the acts and both doors share live in `unconverted-terms.ts` (the bounds the tools declare from); re-exported for the readers that name them here.
 export {
   UNCONVERTED_REFUSAL_CODES, UNCONVERTED_STATUSES, UnconvertedFilterParams, UnconvertedListParams, UnconvertedDismissShownParams, refusalBody,
   type UnconvertedActResult, type UnconvertedCaller, type UnconvertedRow,

@@ -5,12 +5,11 @@
  *
  * ## What it prevents
  *
- * **The conversion joining the server's largest import cycle.** The MCP tools are registered by the tools index, which is a module of that cycle,
- * so whatever a tool module imports, and whatever that reaches, is drawn into it unless it reaches nothing of the cycle. The tools read their
- * parameters, bounds and codes from HERE, which imports no module of the server but the knowledge kinds and the rights' type, and they reach the
- * acts through the port `useUnconvertedActs` (`mcp/tools/unconverted.ts`), wired by the route module the application mounts. So neither the acts
- * nor the item store and the readers they reach are modules of that cycle, whose size a ceiling holds from growing
- * (`check-i-architecture-dependency-direction`). A term moved here is re-exported by the module it came from, for that module's own readers.
+ * **Two statements of one bound, or of one item.** The acts parse the filters with {@link UnconvertedFilterParams} and the MCP tools declare the
+ * same kinds, reasons, statuses and name length from the same constants, so the bounds gate (`a-tool-and-its-route-agree-on-bounds`) compares real
+ * bounds; the item store writes the {@link UnconvertedItem} the acts list. A leaf (it imports no module of the server but the knowledge kinds and the
+ * rights' type), so the store, the acts, the routes and the tools may all read it. A term moved here is re-exported by the module it came from, for
+ * that module's own readers.
  */
 import { z } from 'zod';
 import { TYPE_NAME_MAX } from '@ythril-network/schema/internal';

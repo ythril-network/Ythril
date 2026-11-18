@@ -4,12 +4,10 @@
  *
  * ## What it prevents
  *
- * **The conversion joining the server's largest import cycle.** The MCP tools are registered by the tools index, which is a module of that cycle,
- * so whatever a tool module imports, and whatever that reaches, is drawn into it unless it reaches nothing of the cycle. The tools read their
- * parameters, bounds and codes from HERE, which imports no module of the server but the knowledge kinds and the rights' type, and they reach the
- * acts through the port `useSchemaConvertActs` (`mcp/tools/schema-convert.ts`), wired by the route module the application mounts. So neither the
- * acts nor the run, the converter, the items or the metrics they reach are modules of that cycle, whose size a ceiling holds from growing
- * (`check-i-architecture-dependency-direction`). A term moved here is re-exported by the module it came from, for that module's own readers.
+ * **Two statements of one bound.** The act parses a start with {@link SchemaConvertBody}, and the MCP tool writes its `types` parameter from
+ * {@link SchemaConvertTypesZ} (zod's converter), so the doors, the act and the bounds gate (`a-tool-and-its-route-agree-on-bounds`) read one set of
+ * bounds. A leaf (it imports no module of the server but the knowledge kinds, the rights' type and the heavy-call rail's figure), so the run, the
+ * acts, the route and the tool may all read it. A term moved here is re-exported by the module it came from, for that module's own readers.
  */
 import { z } from 'zod';
 import { CONVERSION_STEPS_MAX, isDeclarableTypeName, TYPE_NAME_MAX } from '@ythril-network/schema/internal';

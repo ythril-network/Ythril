@@ -65,8 +65,7 @@ import {
 } from './schema-convert-terms.js';
 import { consumeHeavyToolCall } from '../rate-limit/heavy-tool.js';
 
-// The terms both doors share live in `schema-convert-terms.ts`, a module the MCP tools may import without drawing this one into the server's
-// largest import cycle; re-exported for the readers that name them here.
+// The terms the act and both doors share live in `schema-convert-terms.ts` (the bounds the tool declares from); re-exported for the readers that name them here.
 export { SCHEMA_CONVERT_REFUSAL_CODES, SchemaConvertBody, type SchemaConvertActResult, type SchemaConvertCaller };
 const [BAD_TYPES, TOO_MANY_TYPES, BAD_REQUEST, BAD_STEP, KNOWLEDGE_RUNG, SPACE_ADMIN_REQUIRED, , RATE_LIMITED] = SCHEMA_CONVERT_REFUSAL_CODES;
 /**
