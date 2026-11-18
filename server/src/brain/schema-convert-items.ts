@@ -34,8 +34,8 @@ import { peerText } from '../util/log.js';
 import { isPlainObject } from '../util/plain-object.js';
 import { UNCONVERTED_REASONS, UNCONVERTED_DISMISS_MAX, type UnconvertedReason, type UnconvertedItem } from '../spaces/unconverted-terms.js';
 
-// What an item is, its reason classes and the bulk dismissal's bound are terms the doors share (`spaces/unconverted-terms.ts`, a module the MCP
-// tools may import without drawing this one into the server's largest import cycle); re-exported for the readers that name them here.
+// What an item is, its reason classes and the bulk dismissal's bound are terms the store, the acts and both doors share (`spaces/unconverted-terms.ts`);
+// re-exported for the readers that name them here.
 export { UNCONVERTED_REASONS, UNCONVERTED_DISMISS_MAX, type UnconvertedReason, type UnconvertedItem };
 
 /** The most violations one item names. */
