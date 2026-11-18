@@ -27,6 +27,7 @@ import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import type { KnowledgeType, SpaceMeta } from '../config/types.js';
 import { readMetaForWrite } from '../spaces/schema-stamp.js';
 import { TYPE_FIELD } from './ttl.js';
+import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 import { pageMemberList, type ListPage, type ListPageRequest } from './list-page.js';
 import { defaultBudgetChars } from './result-budget.js';
 import { peerText } from '../util/log.js';
@@ -45,6 +46,11 @@ export const UNCONVERTED_ITEMS_PER_RUN_MAX = 10_000;
 export const UNCONVERTED_SWEEP_PER_TICK = 500;
 /** The longest reason an item keeps for one violation. */
 const REASON_MAX = 300;
+/** Hex characters of an item id: half a sha-256, as unique per space as a record id needs. */
+const ITEM_ID_HEX = 32;
+/** The page size a list states none for, and the largest it serves. */
+const LIST_DEFAULT_LIMIT = 100;
+const LIST_MAX_LIMIT = 500;
 
 /** One record a conversion could not convert, as stored. */
 export interface UnconvertedItem {
@@ -82,7 +88,7 @@ const items = (spaceId: string) => col<UnconvertedItem>(spaceCollection(spaceId,
 
 /** The id of the one item of record `recordId` of `kind`: the same record is always the same item. */
 export function unconvertedItemId(kind: KnowledgeType, recordId: string): string {
-  return createHash('sha256').update(`${kind}|${recordId}`).digest('hex').slice(0, 32);
+  return createHash('sha256').update(`${kind}|${recordId}`).digest('hex').slice(0, ITEM_ID_HEX);
 }
 
 /**
@@ -92,9 +98,9 @@ export function unconvertedItemId(kind: KnowledgeType, recordId: string): string
 export function typeDefinitionOf(meta: SpaceMeta | undefined, kind: KnowledgeType, type: string): string {
   const types = isPlainObject(meta?.typeSchemas) ? (meta!.typeSchemas as Record<string, unknown>)[kind] : undefined;
   const definition = isPlainObject(types) ? (types as Record<string, unknown>)[type] ?? null : null;
-  const spaceRules = rulesIn((meta as Record<string, unknown> | undefined)?.['rules'])
-    .filter(([, r]) => spaceRuleKinds(r).includes(kind))
-    .sort(([a], [b]) => a.localeCompare(b));
+  // A map, so the canonical text orders the rules by name whatever order the meta holds them in.
+  const spaceRules = Object.fromEntries(rulesIn((meta as Record<string, unknown> | undefined)?.['rules'])
+    .filter(([, r]) => spaceRuleKinds(r).includes(kind)));
   return createHash('sha256').update(String(canonicalJson({ definition, spaceRules }))).digest('hex');
 }
 
@@ -162,7 +168,7 @@ export async function listUnconvertedItems(
     countMember: id => items(id).countDocuments(asFilter<UnconvertedItem>(filter)),
     compare: (a, b) => b.detectedAt.localeCompare(a.detectedAt) || a._id.localeCompare(b._id),
     req,
-    page: { defaultLimit: 100, maxLimit: 500, budgetChars: defaultBudgetChars(transport) },
+    page: { defaultLimit: LIST_DEFAULT_LIMIT, maxLimit: LIST_MAX_LIMIT, budgetChars: defaultBudgetChars(transport) },
     ceiling: UNCONVERTED_ITEMS_PER_RUN_MAX,
   });
   if (!page.ok) return page;
@@ -212,7 +218,7 @@ export async function sweepStaleUnconvertedItems(spaceId: string, limit = UNCONV
   for (const item of page) (byKind.get(item.kind) ?? byKind.set(item.kind, []).get(item.kind)!).push(item);
   for (const [kind, kindItems] of byKind) {
     const byId = await readStoredById<Record<string, unknown>>(spaceCollection(spaceId, COLLECTION_SUFFIX[kind]), kindItems.map(i => i.recordId),
-      { _id: 1, seq: 1, schemaFingerprint: 1 });
+      { _id: 1, seq: 1, schemaFingerprint: 1 }, { filter: CHOSEN_VERSION_ROWS });   // an item names a record, never a fork row of one
     for (const item of kindItems) {
       const record = byId.get(item.recordId);
       const key = `${kind}\u0000${item.type}`;

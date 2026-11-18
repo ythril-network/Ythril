@@ -50,6 +50,7 @@ import {
 } from '../brain/schema-convert-items.js';
 import { schemaConvertRecordsTotal, schemaConvertRunsInProgress } from '../metrics/registry.js';
 import { createCoalescingRunner } from '../sync/coalescing-runner.js';
+import { outsideWriteBound, withinHousekeepingBound } from '../db/write-bound.js';
 import { eachSpace, type WalkResult } from '../util/housekeeping-walk.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { intervalJob } from '../util/interval-job.js';
@@ -75,6 +76,12 @@ const RETRY_BASE_MS = 1_000;
 const RETRY_CAP_MS = 5 * 60_000;
 /** The longest a status read counts the records left. */
 const LEFT_COUNT_MS = 2_000;
+/** The store's code for a read its `maxTimeMS` ended (`MaxTimeMSExpired`). */
+const MAX_TIME_EXPIRED = 50;
+/** The longest a run keeps the words of its last failure. */
+const ERROR_TEXT_MAX = 300;
+/** The status of the refusal of an explicit start while a run is unfinished. */
+const SCHEMA_CONVERT_RUNNING_STATUS = 409;
 
 const WATCH_STEP = declareStep('Schema convert watcher');
 const RESUME_STEP = declareStep('Schema convert resume');
@@ -129,7 +136,7 @@ export interface SchemaConvertStart {
 
 export type SchemaConvertStartOutcome =
   | { ok: true; state: 'started' | 'restarted' | 'nothing'; run: SchemaConvertRunDoc | null }
-  | { ok: false; status: 409; code: 'schema_convert_running'; error: string };
+  | { ok: false; status: typeof SCHEMA_CONVERT_RUNNING_STATUS; code: 'schema_convert_running'; error: string };
 
 /** One peer's sync, as the manual trigger answers it (`peerSyncOutcome`). */
 export type SchemaConvertSyncPeer = (peerId: string, opts: { wait: true }) => Promise<{ status: number; body: Record<string, unknown> }>;
@@ -225,7 +232,8 @@ function splitDeclaredOf(steps: readonly ConversionStep[], before: ConversionMet
   for (const s of steps) {
     if (s.op !== 'splitType') continue;
     const type = (before?.typeSchemas as Record<string, Record<string, { propertySchemas?: Record<string, unknown> }> | undefined> | undefined)?.[s.kind]?.[s.from];
-    out[splitDeclaredKey(s.kind, s.from)] = Object.keys(type?.propertySchemas ?? {}).sort();
+    // In declaration order: the compiled-program cache keys a declared set by its sorted names itself (`programFor`).
+    out[splitDeclaredKey(s.kind, s.from)] = Object.keys(type?.propertySchemas ?? {});
   }
   return out;
 }
@@ -294,7 +302,7 @@ export async function startSchemaConvertRun(start: SchemaConvertStart, deps: Sch
   const { spaceId } = start;
   const existing = await runs(spaceId).findOne(asFilter<SchemaConvertRunDoc>({ _id: RUN_ID })) as SchemaConvertRunDoc | null;
   if (unfinished(existing) && start.source.kind === 'act') {
-    return { ok: false, status: 409, code: 'schema_convert_running', error: `A schema conversion of '${peerText(spaceId)}' is already running` };
+    return { ok: false, status: SCHEMA_CONVERT_RUNNING_STATUS, code: 'schema_convert_running', error: `A schema conversion of '${peerText(spaceId)}' is already running` };
   }
   if (start.types.length === 0 && !unfinished(existing)) return { ok: true, state: 'nothing', run: null };
   const at = new Date().toISOString();
@@ -389,7 +397,8 @@ async function syncFirst(spaceId: string, run: SchemaConvertRunDoc, syncPeer: Sc
   const answers = await Promise.all(peers.map(async (peerId) => {
     let answered = false;
     try {
-      const answer = await syncPeer(peerId, { wait: true });
+      // A sync is bounded by the peer's own request timeouts, as the manual trigger is: never by the pass's per-operation figure.
+      const answer = await outsideWriteBound(() => syncPeer(peerId, { wait: true }));
       const rows = Array.isArray(answer.body['members']) ? answer.body['members'] as { outcome?: unknown }[] : [];
       answered = answer.body['status'] === 'completed' && rows.some(r => typeof r.outcome === 'string' && ANSWERED.has(r.outcome));
     } catch { /* a peer that cannot be reached is asked and not answered: it receives the converted records at its next sync */ }
@@ -506,7 +515,7 @@ async function pass(spaceId: string, held: SchemaConvertRunDoc, deps: SchemaConv
     reportSpaceFailure(PASS_STEP, spaceId, err, { when: givenUp ? 'with the next start' : WHEN });
     await updateRun(spaceId, current.generation, {
       $set: {
-        failures, error: peerText(err instanceof Error ? err.message : String(err), { max: 300 }), sweepLeaseAt: 0,
+        failures, error: peerText(err instanceof Error ? err.message : String(err), { max: ERROR_TEXT_MAX }), sweepLeaseAt: 0,
         retryAt: Date.now() + backoffDelayMs(failures - 1, RETRY_BASE_MS, RETRY_CAP_MS), ...(givenUp ? { state: 'failed' } : {}),
       },
     }).catch((recordErr: unknown) => { reportSpaceFailure(PASS_STEP, spaceId, recordErr, { when: WHEN, unit: 'record the failure' }); });
@@ -532,15 +541,19 @@ const background = createCoalescingRunner<void>();
 
 /** Run the run of `spaceId` in the background, pass after pass while a pass leaves it running and not waiting for a retry. Never rejects. */
 function runInBackground(spaceId: string, deps: SchemaConvertDeps = {}): void {
-  void background.run(spaceId, async () => {
-    try {
-      for (;;) {
-        const after = await driveSchemaConvertRun(spaceId, deps);
-        if (!after || after.state !== 'running' || after.retryAt !== undefined) return;
+  // Out of the caller's scope (a request's hold, or the watcher's walk unit, which only kicks the run): the passes are the run's own work, each
+  // database operation of them ended at the housekeeping figure, and no deadline across a pass that converts as many records as it holds.
+  outsideWriteBound(() => {
+    void background.run(spaceId, () => withinHousekeepingBound(async () => {
+      try {
+        for (;;) {
+          const after = await driveSchemaConvertRun(spaceId, deps);
+          if (!after || after.state !== 'running' || after.retryAt !== undefined) return;
+        }
+      } catch (err) {
+        reportSpaceFailure(PASS_STEP, spaceId, err, { when: WHEN });
       }
-    } catch (err) {
-      reportSpaceFailure(PASS_STEP, spaceId, err, { when: WHEN });
-    }
+    }));
   });
 }
 
@@ -558,7 +571,7 @@ export async function schemaConvertStatus(spaceId: string): Promise<SchemaConver
         left += await col(spec.collection).countDocuments(asFilter<Record<string, unknown>>(spec.filter as Record<string, unknown>), { maxTimeMS: LEFT_COUNT_MS });
       }
     } catch (err) {
-      if ((err as { code?: unknown } | null)?.code !== 50) throw err;   // MaxTimeMSExpired: the count did not finish in its bound
+      if ((err as { code?: unknown } | null)?.code !== MAX_TIME_EXPIRED) throw err;   // MaxTimeMSExpired: the count did not finish in its bound
       left = null;
     }
   }
