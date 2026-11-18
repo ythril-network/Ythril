@@ -33,6 +33,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { trackedSources, TEST_FILE_SUFFIXES } from '../standalone/_sources.mjs';
+import { textOnlyFiles } from './text-only-test.mjs';
 
 /**
  * Anchored to a HEADER line, never a bare substring.
@@ -147,24 +148,35 @@ export function splitStandalone({ root = process.cwd() } = {}) {
     throw new Error(`only ${offlineDb.length} database-backed standalone file(s) found — the import scan for `
       + `${DB_HARNESS} is broken, and the db files would run uncapped against one MongoDB.`);
   }
-  return { all, offline, needsInstance, offlineDb, offlinePure, ciOnly };
+  return { all, offline, needsInstance, offlineDb, offlinePure, ciOnly, root };
 }
 
 /**
  * The command lines that run the offline half: what `test:standalone` and preflight both execute.
  *
- * Pure files first, at node's default width; then the database-backed files at `DB_TEST_CONCURRENCY`. Each is
- * `batched` under the Windows command-line limit. One plan, so the two runners cannot disagree about which files
- * run capped — preflight against a developer's local test stack meets the same Mongo the suite does.
+ * Three kinds, so a caller selects by kind and no flag switches the selection (Q-870): the TEXT files first (the pure files that read only tracked
+ * text, `testing/_shared/text-only-test.mjs`, which need no build and no install), then the other pure files, at node's default width; then the
+ * database-backed files at `DB_TEST_CONCURRENCY`. Every offline file is in exactly one kind. Each is `batched` under the Windows command-line limit.
+ * One plan, so the two runners cannot disagree about which files run capped — preflight against a developer's local test stack meets the same Mongo
+ * the suite does. Preflight runs the text kind in its own source stage and the pure kind after the builds; CI runs the text kind before it installs
+ * anything and the pure kind after the builds, so each file runs once.
  *
- * `ciOnly: false` (preflight) leaves the `@ci-only` pure files out of the pure batches; the default (CI, `test:standalone`) keeps them.
+ * `ciOnly: false` (preflight) leaves the `@ci-only` pure files out of the pure batches; the default (CI, `test:standalone`) keeps them. A `@ci-only` file
+ * is never of the text kind: the kind is for what is fast enough to run first.
  *
- * @returns {Array<{ kind: 'pure' | 'db', args: string[], files: string[] }>} `args` go after `--test`
+ * The text kind is classified here, lazily and once per call, from the split's own checkout (`split.root`, default the working directory): the
+ * classifier is asked only by a caller that asks for the plan, never by `splitStandalone`, so the database and instance runs are not paid for it and are not
+ * broken by it.
+ *
+ * @returns {Array<{ kind: 'text' | 'pure' | 'db', args: string[], files: string[] }>} `args` go after `--test`
  */
 export function offlineRuns(split = splitStandalone(), { ciOnly = true } = {}) {
   const path = (f) => `testing/standalone/${f}`;
+  const text = new Set(textOnlyFiles(split, { root: split.root ?? process.cwd() }));
+  const pure = split.offlinePure.filter(f => ciOnly || !split.ciOnly.includes(f)).map(path);
   return [
-    ...batched(split.offlinePure.filter(f => ciOnly || !split.ciOnly.includes(f)).map(path)).map(files => ({ kind: 'pure', args: [], files })),
+    ...batched(pure.filter(f => text.has(f))).map(files => ({ kind: 'text', args: [], files })),
+    ...batched(pure.filter(f => !text.has(f))).map(files => ({ kind: 'pure', args: [], files })),
     ...batched(split.offlineDb.map(path))
       .map(files => ({ kind: 'db', args: [`--test-concurrency=${DB_TEST_CONCURRENCY}`], files })),
   ];

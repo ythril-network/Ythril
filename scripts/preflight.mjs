@@ -59,7 +59,7 @@ import { workersPerUnit } from '../testing/_shared/offline-test-width.mjs';
 import { timingResultsDir } from '../testing/_shared/timing-reporter.mjs';
 import { stampRunnerOutcome } from './mask-client-report.mjs';
 import { CLIENT_RESULTS, clientCommandWritingTo } from './_shared/client-results.mjs';
-import { PREFLIGHT_STAGES, SOURCE_GATES, BUILT_GATES, createStageRunner, planStages, runStages } from './_shared/preflight-stages.mjs';
+import { PREFLIGHT_STAGES, SOURCE_GATES, SOURCE_GATE_FILES, BUILT_GATES, createStageRunner, planStages, runStages } from './_shared/preflight-stages.mjs';
 import { readStageCosts, readFileTimes } from './_shared/stage-costs.mjs';
 import { slowFirstUnits } from './_shared/slow-first-units.mjs';
 import { buildPreflightRunPayload, preflightRunIdentity, recordPreflightRun } from './_shared/preflight-run-record.mjs';
@@ -81,6 +81,13 @@ if (unknownArgs.length) {
  * scratch checkout must leave its files, and clear the files, of that checkout only.
  */
 const RESULTS_DIR = timingResultsDir(process.cwd());
+
+/**
+ * How many units of standalone files run at once, in the text stage and in the test stage alike (Q-863, Q-870): one width, so the two stages cannot
+ * disagree, and each unit takes `workersPerUnit(UNIT_WIDTH)` workers, so together they never run more than the 8 offline test files at once
+ * (`convention-offline-tests-run-in-parallel`).
+ */
+const UNIT_WIDTH = 4;
 
 /** Where the client's Vitest JSON report is written; the path ci.yml's client step and the recorder read. */
 const CLIENT_REPORT = join(RESULTS_DIR, CLIENT_RESULTS);
@@ -175,6 +182,12 @@ console.log(orderSource(snapshot));
 // cannot leave an earlier run's report standing as this run's (the client unit tests stage writes the new one; a static run writes none).
 rmSync(CLIENT_REPORT, { force: true });
 
+// Results of an earlier preflight are not this run's, and the clear happens HERE, before any stage: the text stage (a source stage) writes its own
+// `preflight-text-N` files long before the test stage, and a clear inside the test stage's body removed them every time the run got that far, so a
+// recorded run never held them. The suite is `preflight`, not `standalone`: this is a subset, and it must not clear or overwrite a full run's files
+// (the stage-cost snapshot is not a `preflight-*` file, so the clear leaves it).
+clearTimingResults('preflight', { dir: RESULTS_DIR });
+
 // ── the `source` stages: nothing here needs a build ─────────────────────────────────────────────────────────────
 
 // A file git does not track that only a catch-all rule (*.log, *.txt) hides is clutter nobody is told about: agent runs left logs,
@@ -214,6 +227,43 @@ stage('todo:check', async () => {
 
 // Each gate() registers its own stage.
 for (const [file, why] of SOURCE_GATES) gate(file, why, file);
+
+/*
+ * ── the standalone files that read only tracked text (Q-870) ──
+ *
+ * A standalone file whose import closure reads no build, no install, no network and no process but git (`testing/_shared/text-only-test.mjs`
+ * decides, by computation, so the set grows with the tree and no list holds it) needs nothing a build writes, so it runs here, before both builds, and a
+ * failure in one is found in seconds and not after minutes of compiling. The gate files above keep their own stages (each its sentence and its place in
+ * the cost order), so they are left out here by `SOURCE_GATE_FILES`; every other text file runs once, here, and `offlineRuns` leaves it out of the pure
+ * kind the test stage runs.
+ *
+ * The units are the pure stage's own shape: `slowFirstUnits` (a slow text file runs alone and first) through `runTestUnits` (the pool, the time bound,
+ * the held output, the child environment) at `UNIT_WIDTH` units of `workersPerUnit(UNIT_WIDTH)` workers. The split throws in a checkout whose tree is not
+ * whole (a missing folder, too few files), and that is charged to this stage: a listing that found nothing must not read as a pass.
+ */
+stage('text-only standalone tests', async () => {
+  const runs = offlineRuns(splitStandalone(), { ciOnly: false })
+    .filter(r => r.kind === 'text')
+    .map(r => ({ ...r, files: r.files.filter(f => !SOURCE_GATE_FILES.has(f)) }))
+    .filter(r => r.files.length > 0);
+  const fileTimes = readFileTimes(RESULTS_DIR);
+  const planned = slowFirstUnits(runs, fileTimes.times, { maxSlow: 2 * UNIT_WIDTH });
+  const files = planned.reduce((n, u) => n + u.files.length, 0);
+  console.log(`\n── ${files} standalone test file(s) that read only tracked text, in ${planned.length} unit(s), ${UNIT_WIDTH} at a time ──`);
+  if (files === 0) throw new Error('the split found no standalone file that reads only tracked text: the classification is broken, not the tests, and an empty run would pass about nothing');
+  const units = planned.map((r, i) => ({ files: r.files, args: r.args, slow: r.slow, flags: timingReporterFlags({ suite: 'preflight', batch: `text-${i + 1}`, dir: RESULTS_DIR, scope: STATIC ? 'static' : 'subset' }) }));
+  const { failed } = await runTestUnits(units.map(u => u.files), {
+    width: UNIT_WIDTH,
+    args: (batch, i) => [`--test-concurrency=${units[i].slow ? 1 : workersPerUnit(UNIT_WIDTH)}`, ...units[i].args, ...units[i].flags.args],
+    envOf: (batch, i) => units[i].flags.env,
+    labelOf: (batch, i) => `text-${i + 1}`,
+    header: ({ label, code, index, total, files: batch, startedAt, endedAt }) =>
+      `  batch ${index + 1}/${total} (${label}) — ${batch.length} text-only file(s), ${((endedAt - startedAt) / 1000).toFixed(0)}s, exit ${code}\n`,
+  });
+  if (failed > 0) {
+    failures.push({ name: 'text-only standalone tests', why: 'a standalone test that reads only tracked text: no build is needed to see it fail, so no reason to learn it after the builds' });
+  }
+});
 
 /*
  * ── every test file is REACHED by a CI job's selection ──
@@ -473,7 +523,6 @@ stage('test:standalone (offline subset)', async () => {
   // the host, never fetched here) put each file of 15 s or more in a unit of its own, slowest first, at the front; at most 2 x UNIT_WIDTH of
   // them, so the units that run alone do not outnumber the workers. The other files stay in the batches `offlineRuns` cut. With no usable
   // snapshot the units are those batches in list order, and the line says why.
-  const UNIT_WIDTH = 4;
   const fileTimes = readFileTimes(RESULTS_DIR);
   const planned = slowFirstUnits(runs, fileTimes.times, { maxSlow: 2 * UNIT_WIDTH });
   const slowAlone = planned.filter(u => u.slow).length;
@@ -483,9 +532,8 @@ stage('test:standalone (offline subset)', async () => {
   // Timing, through the shared helper: one destination per unit, the flags AFTER the plan's own args so the batch budget stays about the
   // files, and the recorder's credentials out of the children's environment (`runTestUnits` builds it with `testChildEnv`). The label is the
   // unit's place in the list, fixed here before any unit launches, so two units never write one file whatever order they end in.
-  // The suite is `preflight`, not `standalone`: this is a subset, and it must not clear or overwrite a full run's files (the stage-cost
-  // snapshot is not a `preflight-*` file, so the clear leaves it).
-  clearTimingResults('preflight', { dir: RESULTS_DIR });
+  // The suite is `preflight`, not `standalone`: this is a subset, and it must not overwrite a full run's files. Earlier results were cleared when the run
+  // started (above the stages), so the text stage's own files stand.
   const units = planned.map((r, i) => ({ files: r.files, args: r.args, slow: r.slow, flags: timingReporterFlags({ suite: 'preflight', batch: `pure-${i + 1}`, dir: RESULTS_DIR, scope: STATIC ? 'static' : 'subset' }) }));
   console.log(`  ${units.length} unit(s) of pure files, ${UNIT_WIDTH} at a time`);
   const { failed } = await runTestUnits(units.map(u => u.files), {

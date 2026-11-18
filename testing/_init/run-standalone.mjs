@@ -79,22 +79,25 @@ function refuseStaleDist() {
   process.exit(1);
 }
 
-refuseStaleDist();
-
 /**
- * `--only=pure|db|instance` runs one third of the plan: the pure offline files, the database-backed ones, or the
- * `@needs-instance` ones. CI runs the three as separate jobs because they need different things (nothing, one
- * MongoDB, two instances); no argument runs all three, in the order they always ran. The thirds are the plan's own
- * (`offlineRuns` kinds, and the instance batches below), never a second list of files. An unknown value, or a
- * selection that matches nothing, is an error: an empty run reports success about nothing.
+ * `--only=text|pure|db|instance` runs one part of the plan: the text-only offline files (they read only tracked text, `_shared/text-only-test.mjs`),
+ * the other pure offline files, the database-backed ones, or the `@needs-instance` ones. CI runs the pure third and the database third as separate
+ * jobs because they need different things (the built server, one MongoDB, two instances), and runs the text kind as the first step of the pure job,
+ * before anything is installed or built, so a file the classifier wrongly calls text-only fails there for want of what it needs; `--only=pure` then
+ * runs the pure kind without those files, so every file still runs exactly once. No argument runs all of them, in the order they always ran (text and
+ * pure files, database files, instance files). The parts are the plan's own (`offlineRuns` kinds, and the instance batches below), never a second
+ * list of files. An unknown value, or a selection that matches nothing, is an error: an empty run reports success about nothing.
+ *
+ * The stale-build refusal below is not asked for `--only=text`: those files read no build, and refusing a missing one is the point of running them first.
  */
-const THIRDS = ['pure', 'db', 'instance'];
+const THIRDS = ['text', 'pure', 'db', 'instance'];
 const onlyArg = process.argv.find(a => a.startsWith('--only='));
 const only = onlyArg ? onlyArg.slice('--only='.length) : null;
 if (only !== null && !THIRDS.includes(only)) {
   console.error(`standalone: --only=${only} is not one of ${THIRDS.join(', ')}`);
   process.exit(1);
 }
+if (only !== 'text') refuseStaleDist();
 const wants = (third) => only === null || only === third;
 
 const split = splitStandalone();

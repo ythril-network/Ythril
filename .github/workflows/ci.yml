@@ -46,7 +46,8 @@ concurrency:
 # Everything that does not need the application image starts at t=0, in parallel (after `reuse`'s answer):
 #
 #   client-tests        the client's unit tests and its production build (its own `npm ci`)
-#   standalone-pure     the standalone files that need nothing but `server/dist` (and `client/dist`)
+#   standalone-pure     the standalone files that need nothing but `server/dist` (and `client/dist`); first, before the install, the
+#                       files that read only tracked text (`run-standalone.mjs --only=text`)
 #   standalone-db       the standalone files that open the harness MongoDB: ythril-mongo-a and nothing else. A MATRIX, one
 #                       job per shard of the `-db` plan (`testing/_shared/db-shard-plan.mjs`), each with its own fresh Mongo:
 #                       the runner's one-shard mode (`YTHRIL_TEST_DB_SHARDS` with `YTHRIL_TEST_DB_SHARD_INDEX`) runs only that
@@ -240,6 +241,13 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+
+      - name: Standalone tests that read only tracked text
+        # Before the install and the builds, on purpose (Q-870): these files are the ones the classifier (testing/_shared/text-only-test.mjs) says need
+        # no build and no package, and here nothing is built or installed, so a file it wrongly calls text-only fails for want of what it needs. A build
+        # path that lives in data (a record that cites `server/dist`) is the one thing a static rule cannot see; on a developer machine a stale build
+        # hides it. The next step runs the rest of the pure third without them, so every file runs once.
+        run: node testing/_init/run-standalone.mjs --only=text
 
       - name: Install dependencies
         run: npm ci
