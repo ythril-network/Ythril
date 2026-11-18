@@ -12,6 +12,7 @@ import type { RefKind } from '../../config/types-knowledge.js';
 import { isStrictLinkage } from '../../spaces/space-lookup.js';
 import { findFirstAcrossMembers } from '../../spaces/across-members.js';
 import { DELETION_REACH } from './shared.js';
+import { notFoundSentence } from '../../util/errors.js';
 import { UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
 
 /** Every legal class, as the arrays spell them — used in the schema text and in the refusal. */
@@ -149,7 +150,7 @@ export const delete_linkTool: ToolHandler = {
     if (!id) throw new Error('id must not be empty');
 
     const removed = await findFirstAcrossMembers([callSpace], mid => removeLink(mid, id, ctx.actor));
-    if (!removed) throw new Error(`Link '${id}' not found`);
+    if (!removed) throw new Error(notFoundSentence('Link', id));
     return { content: [{ type: 'text' as const, text: `Link removed (ID ${id}).` }],
       structuredContent: { _id: id, deleted: true } };
   },

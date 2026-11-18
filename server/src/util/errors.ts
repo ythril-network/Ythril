@@ -1,4 +1,29 @@
 /** Typed error classes for structured error handling across the codebase. */
+import { peerText, NAME_QUOTED } from '@ythril-network/schema/internal';
+
+/**
+ * What a door says when a record, a path or a space the caller NAMED is not there: `Fact 'abc' not found`, `File 'a.txt' not found in space
+ * 's'`. The value is the caller's, so it goes through the bounded renderer INSIDE this function (`peerText` cut at `NAME_QUOTED`: escaped,
+ * redacted, at most 256 characters and the count of what was cut), and no caller can leave the bound out.
+ *
+ * What it prevents: a not-found answer as large as the question. A 100 000-character id sent to `update_fact` came back whole in a 100 kB
+ * refusal, in the answer, the audit row and every log line after it, because each site wrote the sentence with `'${id}'` itself
+ * (`Q-367`). A gate (`a-not-found-answer-bounds-the-value-it-names`) refuses a not-found text that quotes a value any other way.
+ *
+ * An ordinary short value reads as it always did. `noun` is the kind of thing and must be a literal at the call site (the gate holds it);
+ * `after` is more fixed words after `not found` (`'.'`, `' or not accessible'`), also a literal; `space` names the space the thing was looked
+ * for in, bounded the same way; `colon: true` is the older `File not found: <value>` order.
+ */
+export function notFoundSentence(
+  noun: string,
+  value: unknown,
+  { space, after = '', colon = false }: { space?: unknown; after?: string; colon?: boolean } = {},
+): string {
+  const named = peerText(value, { max: NAME_QUOTED });
+  if (colon) return `${noun} not found: ${named}${after}`;
+  const where = space === undefined ? '' : ` in space '${peerText(space, { max: NAME_QUOTED })}'`;
+  return `${noun} '${named}' not found${where}${after}`;
+}
 
 /** Thrown when a requested resource does not exist. */
 export class NotFoundError extends Error {

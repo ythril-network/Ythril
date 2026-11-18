@@ -28,6 +28,7 @@
 import { Router } from 'express';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
+import { peerText, NAME_QUOTED } from '../../util/log.js';
 import { readSpacesOfRequest } from '../../spaces/read-scope.js';
 import { retiredWriteFieldError } from '../../brain/retired-write-fields.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
@@ -93,7 +94,7 @@ embedJobsRouter.post('/spaces/:spaceId/embedding-queue/records/retry', globalRat
   const result = await retryEmbedJob(spaceId, body.recordType, recordId);
   if (result === 'not_found') {
     res.status(404).json({
-      error: `No embed job for ${body.recordType} '${recordId}' in space '${spaceId}'`,
+      error: `No embed job for ${peerText(body.recordType, { max: NAME_QUOTED })} '${peerText(recordId, { max: NAME_QUOTED })}' in space '${peerText(spaceId, { max: NAME_QUOTED })}'`,
       result,
     });
     return;

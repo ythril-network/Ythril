@@ -24,7 +24,7 @@ import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, connectionSubject } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS, MAX_FACT_LENGTH } from '../../util/request-bounds.js';
-import { NotFoundError } from '../../util/errors.js';
+import { NotFoundError, notFoundSentence } from '../../util/errors.js';
 
 export const save_factTool: ToolHandler = {
   name: 'save_fact',
@@ -357,7 +357,7 @@ export const update_factTool: ToolHandler = {
     let updCheck: UpdateValidation | undefined;
     const updated = await findFirstAcrossMembers([callSpace], mid => updateFact(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
     if (updated) { const s = audit.snapshots(updated); ctx.recordChanges?.(s.before, s.after); }
-    if (!updated) throw new NotFoundError(`Fact '${id}' not found`);
+    if (!updated) throw new NotFoundError(notFoundSentence('Fact', id));
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
     // live in `applyConnections`, after the record write, exactly as the create tool does it.
     // `updated.spaceId` rather than `callSpace`: the space the record was written in, read from the record.
@@ -424,7 +424,7 @@ export const delete_factTool: ToolHandler = {
     const block = await findFirstAcrossMembers([callSpace], mid => entityDeleteBlockers(mid, id, 'fact'));
     if (block) throw new Error(block.message);
     const deleted = await findFirstAcrossMembers([callSpace], mid => deleteFact(mid, id, ctx.actor));
-    if (!deleted) throw new NotFoundError(`Fact '${id}' not found`);
+    if (!deleted) throw new NotFoundError(notFoundSentence('Fact', id));
     return {
       content: [{ type: 'text' as const, text: `Fact deleted (ID ${id}).` }],
       structuredContent: { _id: id, deleted: true },

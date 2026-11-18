@@ -21,6 +21,7 @@ import { entityEmbedText } from './embed-text.js';
 import { getEntityById } from './entities.js';
 import { getConfig } from '../config/loader.js';
 import { log, peerList, peerText, NAME_QUOTED, REFUSAL_NAMES_MAX } from '../util/log.js';
+import { notFoundSentence } from '../util/errors.js';
 import { mergeTags } from './merge-fields.js';
 import { edgeIdFor } from './edge-id.js';
 import type { EdgeRekey } from './edge-rekey.js';
@@ -191,10 +192,10 @@ export async function computeMergePlan(
   resolutions: PropertyResolution[] = [],
 ): Promise<{ plan: MergePlan; fullyResolved: boolean; survivor: EntityDoc; absorbed: EntityDoc } | { error: string; status: number }> {
   const survivor = await getEntityById(spaceId, survivorId);
-  if (!survivor) return { error: `Survivor entity '${survivorId}' not found`, status: 404 };
+  if (!survivor) return { error: notFoundSentence('Survivor entity', survivorId), status: 404 };
 
   const absorbed = await getEntityById(spaceId, absorbedId);
-  if (!absorbed) return { error: `Absorbed entity '${absorbedId}' not found`, status: 404 };
+  if (!absorbed) return { error: notFoundSentence('Absorbed entity', absorbedId), status: 404 };
 
   const meta = getConfig().spaces.find(s => s.id === spaceId)?.meta;
   const entitySchemas = meta?.typeSchemas?.entity?.[survivor.type ?? '']?.propertySchemas;

@@ -31,7 +31,8 @@ import { resolveRecallFilter, type RawMongoFilter } from '../../brain/recall-fil
 import { observeRecallPath } from '../../brain/recall.js';
 import { type RecallKnowledgeType, type RecallResult, findSimilar, recallGlobal, effectiveBudgetFor, RECALL_BUDGET_MS } from '../../brain/recall.js';
 import { readSpacesOfCall, readSpacesOfCallAcross } from '../../spaces/read-scope.js';
-import { NotFoundError, NotEmbeddedYetError } from '../../util/errors.js';
+import { NotFoundError, NotEmbeddedYetError, notFoundSentence } from '../../util/errors.js';
+import { peerText, NAME_QUOTED } from '../../util/log.js';
 // The SAME resolver the nine per-collection list routes use — not a second name lookup with its own cap
 // and its own idea of what 'contains' means. Two spellings of one join is how the doors start
 // disagreeing about which records a name matches.
@@ -316,7 +317,7 @@ export const recallTool: ToolHandler = {
       const acc: Partial<Record<RecallKnowledgeType, number>> = {};
       for (const [key, raw] of Object.entries(a['maxPerType'] as Record<string, unknown>)) {
         if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1) {
-          throw new Error(`maxPerType.${key} must be an integer of at least 1 (use \`types\` to exclude a knowledge type entirely)`);
+          throw new Error(`maxPerType.${peerText(key, { max: NAME_QUOTED })} must be an integer of at least 1 (use \`types\` to exclude a knowledge type entirely)`);
         }
         acc[key as RecallKnowledgeType] = Math.min(raw, topK);
       }
@@ -341,7 +342,7 @@ export const recallTool: ToolHandler = {
       for (const [t, floor] of Object.entries(minPerType) as [RecallKnowledgeType, number][]) {
         const ceiling = maxPerType[t];
         if (ceiling !== undefined && floor > ceiling) {
-          throw new Error(`minPerType.${t} (${floor}) is greater than maxPerType.${t} (${ceiling}) — the two contradict, so neither can be applied`);
+          throw new Error(`minPerType.${peerText(t, { max: NAME_QUOTED })} (${floor}) is greater than maxPerType.${peerText(t, { max: NAME_QUOTED })} (${ceiling}) — the two contradict, so neither can be applied`);
         }
       }
     }
@@ -585,7 +586,7 @@ export const find_similarTool: ToolHandler = {
         throw e;
       }
     }
-    if (!result || !usedBase) throw located ?? new NotFoundError(`Entry '${entryId}' not found in any accessible space (type: ${entryType}).`);
+    if (!result || !usedBase) throw located ?? new NotFoundError(`${notFoundSentence('Entry', entryId, { after: ' in any accessible space' })} (type: ${peerText(entryType)}).`);
 
     const includeFileContent = a['includeFileContent'] !== false;
     const includeDiagnostics = a['includeDiagnostics'] === true;

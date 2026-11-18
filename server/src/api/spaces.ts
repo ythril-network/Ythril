@@ -30,7 +30,8 @@ import { spaceMetaAnswer, META_RESOLVE_DEFAULT } from '../spaces/space-meta-answ
 import { isNetworkSyncing } from '../sync/engine.js';
 import { spaceNetworkInfo } from '../spaces/network-status.js';
 import { z } from 'zod';
-import { log, refusalOfParse } from '../util/log.js';
+import { log, peerText, refusalOfParse } from '../util/log.js';
+import { notFoundSentence } from '../util/errors.js';
 import { reconcileSpaceSearchIndexes } from '../spaces/search-index-presence.js';
 import { searchReadinessSnapshot, isSearchDown } from '../spaces/search-readiness.js';
 import type { SpaceMeta, KnowledgeType } from '../config/types.js';
@@ -497,7 +498,7 @@ spacesRouter.get('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
   const kt = knowledgeType as KnowledgeType;
   const typeMap = space.meta?.typeSchemas?.[kt] ?? {};
   if (!(typeName in typeMap)) {
-    res.status(404).json({ error: `Type '${typeName}' not found in typeSchemas.${kt}` });
+    res.status(404).json({ error: `${notFoundSentence('Type', typeName)} in typeSchemas.${peerText(kt)}` });
     return;
   }
 
@@ -606,7 +607,7 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
   const existingKtMap = existingMeta.typeSchemas?.[kt] ?? {};
 
   if (!(typeName in existingKtMap)) {
-    res.status(404).json({ error: `Type '${typeName}' not found in typeSchemas.${kt}` });
+    res.status(404).json({ error: `${notFoundSentence('Type', typeName)} in typeSchemas.${peerText(kt)}` });
     return;
   }
 

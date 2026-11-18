@@ -1,0 +1,16 @@
+{
+  "entries": [
+    { "file": "server/src/api/brain/links.ts", "expression": "msg", "reason": "Relays the sentence addLink threw (refusalText of the error); that sentence is built at brain/links.ts, which this gate reads and which bounds the id it names.", "reviewBy": "2027-05-18" },
+    { "file": "server/src/spaces/rename.ts", "expression": "msg", "reason": "Relays the text of a refusal that the rename's own code threw, in fixed words; it names no value a caller chose.", "reviewBy": "2027-05-18" },
+    { "file": "server/src/spaces/unknown-space.ts", "expression": "hint", "reason": "The hint is viewIsNotASpaceHint(id), which renders the id through peerText cut at NAME_QUOTED.", "reviewBy": "2027-05-18" },
+    { "file": "server/src/brain/forks.ts", "expression": "word.toLowerCase()", "reason": "The noun is read from the fixed KIND_WORD table by a kind the params parser already refused or accepted, never a caller's text; the fork id and the space beside it go through peerText.", "reviewBy": "2027-05-18" },
+    { "file": "server/src/spaces/act-set-abandon.ts", "expression": "kind", "reason": "The kind is a ReportedActSetKind, a fixed union of act-set names the code passes, not a request value.", "reviewBy": "2027-05-18" },
+    { "file": "server/src/local-agent-connector/index.ts", "expression": "tunnelName", "reason": "An operator-configured tunnel name in a startup Error, not an answer to a request.", "reviewBy": "2027-05-18" },
+    { "file": "server/src/local-agent-connector/index.ts", "expression": "credPath", "reason": "A credentials path this process derives from its own home folder, in a startup Error.", "reviewBy": "2027-05-18" },
+    { "file": "server/src/util/entry-path.ts", "expression": "tsEntry", "reason": "A path this process derives from its own install folder, in a launch Error.", "reviewBy": "2027-05-18" },
+    { "file": "server/src/util/entry-path.ts", "expression": "jsEntry", "reason": "A path this process derives from its own install folder, in a launch Error.", "reviewBy": "2027-05-18" },
+    { "file": "server/src/util/entry-path.ts", "expression": "tsxCli", "reason": "A path this process derives from its own install folder, in a launch Error.", "reviewBy": "2027-05-18" },
+    { "file": "server/src/util/entry-path.ts", "expression": "name", "reason": "The name of one of this server's own entry points, passed by its own launcher code.", "reviewBy": "2027-05-18" },
+    { "file": "server/src/mcp/call-tool.ts", "expression": "name", "reason": "OPEN, not excused as safe: `Unknown tool: ${name}` quotes the caller's tool name whole. call-tool.ts is being rebuilt by another slice of this bundle (it rebuilds how error texts are written), so the fix goes in with that rebuild; this row goes then.", "reviewBy": "2026-12-18" }
+  ]
+}

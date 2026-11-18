@@ -41,6 +41,7 @@ import { effectiveMongoUri, redactUri } from '../config/mongo-uri.js';
 import { testConnection } from '../db/conn-test.js';
 import { isSsrfSafeMongoUri } from '../util/ssrf.js';
 import { refusalOfParse } from '../util/log.js';
+import { notFoundSentence } from '../util/errors.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { isMissingPath } from '../files/stored-bytes.js';
 import { pathPresentSync } from '../util/path-present.js';
@@ -371,7 +372,7 @@ dataRouter.post('/restore', requireAdminMfa, async (req, res) => {
     return;
   }
   if (!backupDir) {
-    res.status(404).json({ error: `Backup '${backupId}' not found` });
+    res.status(404).json({ error: notFoundSentence('Backup', backupId) });
     return;
   }
 

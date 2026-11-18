@@ -33,7 +33,7 @@ import { queueGeneratedNote } from '../sync/change-notes.js';
 import { syncScheduleRefusal } from '../sync/schedule.js';
 import { scheduleSyncForNetwork } from '../sync/scheduler.js';
 import { MIN_PEER_VERSION, peerFloorRefusal } from '../sync/peer-floor.js';
-import { log, peerText, refusalOfParse } from '../util/log.js';
+import { log, peerText, refusalOfParse, NAME_QUOTED } from '../util/log.js';
 import { networkRole } from './network-role.js';
 import { introductionView } from './member-introductions.js';
 import { addSpacesToNetwork } from './network-spaces.js';
@@ -395,7 +395,7 @@ export async function resolvePendingSpaceAct(caller: Caller, id: string, input: 
   const wasDismissed = net.dismissedSpaces?.includes(spaceId) ?? false;
   const entry = (net.pendingSpaces ?? []).find(p => p.networkId === spaceId)
     ?? (wasDismissed && action === 'accept' ? { networkId: spaceId, localId: remoteToLocal(net, spaceId), why: 'dismissed earlier', from: 'operator', at: new Date().toISOString() } : undefined);
-  if (!entry) return { status: 404, error: `The network has no pending space '${spaceId}'.` };
+  if (!entry) return { status: 404, error: `The network has no pending space '${peerText(spaceId, { max: NAME_QUOTED })}'.` };
   const before = pendingSnapshot(net);
   const dropPending = () => {
     net.pendingSpaces = (net.pendingSpaces ?? []).filter(p => p.networkId !== spaceId);

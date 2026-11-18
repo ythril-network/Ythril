@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { log, peerText } from '../util/log.js';
+import { log, peerText, NAME_QUOTED } from '../util/log.js';
 import { tokenRateLimit, callerKeyOf } from '../rate-limit/middleware.js';
 import { findMatchingToken, touchToken } from './tokens.js';
 import { consumeSseTicket } from './sse-ticket.js';
@@ -455,7 +455,7 @@ function enforceAreaRung(
   for (const sid of targets) {
     if (!satisfies(effectiveRung(rights, sid, need.area), need.needs)) {
       res.status(403).json({
-        error: `Token needs '${need.needs}' on ${need.area} in space '${sid}'`,
+        error: `Token needs '${need.needs}' on ${need.area} in space '${peerText(sid, { max: NAME_QUOTED })}'`,
       });
       return false;
     }
@@ -478,7 +478,7 @@ function enforceSpaceScope(
    */
   const rights = (record as { rights?: Parameters<typeof reachesSpace>[0] }).rights;
   if (!rights || !reachesSpace(rights, spaceId)) {
-    res.status(403).json({ error: `Token does not have access to space '${spaceId}'` });
+    res.status(403).json({ error: `Token does not have access to space '${peerText(spaceId, { max: NAME_QUOTED })}'` });
     return false;
   }
   return true;

@@ -39,6 +39,7 @@ import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 import { knownTypesDiffering, typesDifferingBetween, type TypesDiffering } from './schema-diff.js';
 import { fingerprintsOfType, unnamedFingerprintsIn, stampPlanOf, type StampedCollection } from './schema-snapshot-carried.js';
 import { busyOnTimeout, mayHave, notSameStanding, scopeKeyOf, standingsOf, textChunksFor, type PassScope } from './type-standing.js';
+import { peerText, NAME_QUOTED } from '../util/log.js';
 
 /** The most classes one history lists; the 64th is drawn, a run that matches none of them is not. */
 export const CLASS_MAX = 64;
@@ -274,7 +275,7 @@ export async function typeHistoryOf(
   return busyOnTimeout(spaceId, async () => {
     const collection = COLLECTION_SUFFIX[kind] as StampedCollection;
     const variation = variationOf(spaceId);
-    if (!variation) throw new Error(`space '${spaceId}' is not configured`);
+    if (!variation) throw new Error(`space '${peerText(spaceId, { max: NAME_QUOTED })}' is not configured`);
     const current = variation.stamp.fp;
     const declared = declaredOf(spaceId, kind, type);
     // The versions in question: the stamps the type's records carry (and the stamps R2 marks unnamed among them), or, for a caller who may

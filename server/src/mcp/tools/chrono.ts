@@ -37,7 +37,7 @@ import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, connectionSubject } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
-import { NotFoundError } from '../../util/errors.js';
+import { NotFoundError, notFoundSentence } from '../../util/errors.js';
 
 export const save_chronoTool: ToolHandler = {
   name: 'save_chrono',
@@ -439,7 +439,7 @@ export const update_chronoTool: ToolHandler = {
     // entry lives in the member the audit read just found — updating the target as though it held it answered "not found".
     let updCheck: UpdateValidation | undefined;
     const entry = await findFirstAcrossMembers([callSpace], mid => updateChrono(mid, id, updates as Parameters<typeof updateChrono>[2], dfPaths, ctx.actor, ttlDaysFromArgs(a), undefined, c => { updCheck = c; }));
-    if (!entry) throw new NotFoundError(`Chrono entry '${id}' not found`);
+    if (!entry) throw new NotFoundError(notFoundSentence('Chrono entry', id));
     { const s = audit.snapshots(entry); ctx.recordChanges?.(s.before, s.after); }
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both semantics
     // live in `applyConnections`, after the record write, exactly as the create tool does it.
@@ -512,7 +512,7 @@ export const delete_chronoTool: ToolHandler = {
     const block = await findFirstAcrossMembers([callSpace], mid => entityDeleteBlockers(mid, id, 'chrono'));
     if (block) throw new Error(block.message);
     const deleted = await findFirstAcrossMembers([callSpace], mid => deleteChrono(mid, id, ctx.actor));
-    if (!deleted) throw new NotFoundError(`Chrono entry '${id}' not found`);
+    if (!deleted) throw new NotFoundError(notFoundSentence('Chrono entry', id));
     return { content: [{ type: 'text' as const, text: `Chrono entry deleted (ID ${id}).` }],
       structuredContent: { _id: id, deleted: true } };
   },

@@ -50,7 +50,8 @@ import { libraryUsages } from '../spaces/library-usages.js';
 import { keepSnapshotsOfSpacesLinking } from '../spaces/schema-snapshot-store.js';
 import { mergeTypeDefinition } from '../spaces/meta-fields.js';
 import { applyDeleteFields, validateDeleteFields } from '../brain/delete-fields.js';
-import { log, peerText, peerList, refusalOfParse } from '../util/log.js';
+import { log, peerText, peerList, refusalOfParse, NAME_QUOTED } from '../util/log.js';
+import { notFoundSentence } from '../util/errors.js';
 import { sendLostSpace } from './write-target-answer.js';
 
 export const schemaLibraryRouter = Router();
@@ -242,7 +243,7 @@ schemaLibraryRouter.get('/public/:name', publicRateLimit, acceptSchemaLibraryTok
   const entry = getSchemaLibrary().find(e => e.name === name);
 
   if (!entry || !entry.published) {
-    res.status(404).json({ error: `Published schema library entry '${name}' not found` });
+    res.status(404).json({ error: notFoundSentence('Published schema library entry', name) });
     return;
   }
 
@@ -431,7 +432,7 @@ schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMf
 
   const groupEntries = getSchemaLibrary().filter(e => e.schemaGroup === group);
   if (groupEntries.length === 0) {
-    res.status(404).json({ error: `No library entries found for group '${group}'` });
+    res.status(404).json({ error: `No library entries found for group '${peerText(group, { max: NAME_QUOTED })}'` });
     return;
   }
 
@@ -475,7 +476,7 @@ schemaLibraryRouter.get('/:name', globalRateLimit, requireAuth, (req, res) => {
   const name = req.params['name'] as string;
   const entry = getSchemaLibrary().find(e => e.name === name);
   if (!entry) {
-    res.status(404).json({ error: `Schema library entry '${name}' not found` });
+    res.status(404).json({ error: notFoundSentence('Schema library entry', name) });
     return;
   }
   res.json({ entry });
@@ -664,7 +665,7 @@ schemaLibraryRouter.patch('/:name', globalRateLimit, requireAdminMfa, (req, res)
   const library = getSchemaLibrary();
   const idx = library.findIndex(e => e.name === name);
   if (idx === -1) {
-    res.status(404).json({ error: `Library entry '${name}' not found. Use PUT to create one.` });
+    res.status(404).json({ error: notFoundSentence('Library entry', name, { after: '. Use PUT to create one.' }) });
     return;
   }
   const existing = library[idx]!;
@@ -762,7 +763,7 @@ schemaLibraryRouter.delete('/:name', globalRateLimit, requireAdminMfa, (req, res
   const idx = library.findIndex(e => e.name === name);
 
   if (idx === -1) {
-    res.status(404).json({ error: `Schema library entry '${name}' not found` });
+    res.status(404).json({ error: notFoundSentence('Schema library entry', name) });
     return;
   }
 
@@ -779,7 +780,7 @@ schemaLibraryRouter.patch('/:name/publish', globalRateLimit, requireAdminMfa, (r
   const idx = library.findIndex(e => e.name === name);
 
   if (idx === -1) {
-    res.status(404).json({ error: `Schema library entry '${name}' not found` });
+    res.status(404).json({ error: notFoundSentence('Schema library entry', name) });
     return;
   }
 
@@ -837,7 +838,7 @@ schemaLibraryRouter.delete('/catalogs/:name', globalRateLimit, requireAdminMfa, 
   const name = req.params['name'] as string;
   const catalogs = getSchemaCatalogs();
   if (!catalogs.some(c => c.name === name)) {
-    res.status(404).json({ error: `Catalog '${name}' not found.` });
+    res.status(404).json({ error: notFoundSentence('Catalog', name, { after: '.' }) });
     return;
   }
   saveSchemaCatalogs(catalogs.filter(c => c.name !== name));
@@ -878,7 +879,7 @@ schemaLibraryRouter.get('/catalogs/:name/entries', catalogProxyRateLimit, requir
   const catalogName = req.params['name'] as string;
   const catalog = getSchemaCatalogs().find(c => c.name === catalogName);
   if (!catalog) {
-    res.status(404).json({ error: `Catalog '${catalogName}' not found.` });
+    res.status(404).json({ error: notFoundSentence('Catalog', catalogName, { after: '.' }) });
     return;
   }
 
@@ -903,7 +904,7 @@ schemaLibraryRouter.get('/catalogs/:name/entries/:entryName', catalogProxyRateLi
 
   const catalog = getSchemaCatalogs().find(c => c.name === catalogName);
   if (!catalog) {
-    res.status(404).json({ error: `Catalog '${catalogName}' not found.` });
+    res.status(404).json({ error: notFoundSentence('Catalog', catalogName, { after: '.' }) });
     return;
   }
 

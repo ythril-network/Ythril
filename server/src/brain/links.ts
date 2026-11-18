@@ -51,6 +51,7 @@ import { assertRefs, missingRefs, missingRefsRefusal, ReferenceRefusal } from '.
 import { isStrictLinkage } from '../spaces/space-lookup.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { LinkTargetRemoved } from '../util/errors.js';
+import { peerText, NAME_QUOTED } from '../util/log.js';
 import type { AuthorRef, LinkDoc } from '../config/types.js';
 // `RefKind` is re-exported by `types.ts` as a type only, so it comes from the leaf that DECLARES it —
 // the same import every other `brain/` module that needs it uses.
@@ -387,7 +388,7 @@ export async function addLink(
    * names no link class leaves the links entirely alone, so a directly-created row survives.
    */
   const doc = await sourceDoc(spaceId, suffix as string, from);
-  if (!doc) throw new Error(`${fromKind} '${from}' not found`);
+  if (!doc) throw new Error(`${peerText(fromKind)} '${peerText(from, { max: NAME_QUOTED })}' not found`);
 
   // Existing ∪ {to}, because `reconcileLinks` REPLACES the class it is given. Adding one link by handing
   // it a one-element set would remove every other link of that class — the same trap the file move and

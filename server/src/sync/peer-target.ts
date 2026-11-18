@@ -20,6 +20,7 @@
  * its own set is a caller that can supply the wrong one.
  */
 import { getConfig } from '../config/loader.js';
+import { peerText, NAME_QUOTED } from '../util/log.js';
 
 /** A refusal ready to answer with, or `null` when the peer is a known member of some network. */
 export function unknownPeerRefusal(peerId: string): { status: number; error: string } | null {
@@ -27,6 +28,6 @@ export function unknownPeerRefusal(peerId: string): { status: number; error: str
   if (known.has(peerId)) return null;
   return {
     status: 404,
-    error: `peerId '${peerId}' is not a registered member in any network.`,
+    error: `peerId '${peerText(peerId, { max: NAME_QUOTED })}' is not a registered member in any network.`,
   };
 }

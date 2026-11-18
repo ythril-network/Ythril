@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
+import { peerText, NAME_QUOTED } from '../../util/log.js';
 import { beginIngest, ingestStatus } from '../../extractor/ingest-door.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { readSpacesOfRequest } from '../../spaces/read-scope.js';
@@ -26,7 +27,7 @@ ingestRouter.post('/spaces/:spaceId/ingest', globalRateLimit, requireSpaceAuth, 
 ingestRouter.get('/spaces/:spaceId/ingest/:runId', globalRateLimit, requireSpaceAuth, (req, res) => {
   const run = ingestStatus(readSpacesOfRequest(req, req.params['spaceId'] as string), req.params['runId'] as string);
   if (!run) {
-    res.status(404).json({ error: `No ingest run '${req.params['runId']}' in this space. Runs are held in memory, so a restart forgets them — not the records a finished run wrote.` });
+    res.status(404).json({ error: `No ingest run '${peerText(req.params['runId'], { max: NAME_QUOTED })}' in this space. Runs are held in memory, so a restart forgets them — not the records a finished run wrote.` });
     return;
   }
   res.json(run);
