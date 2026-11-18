@@ -171,6 +171,38 @@ describe('a bad conversion step refuses the whole save', { skip }, () => {
     });
   }
 
+  /*
+   * Through the real MCP dispatcher (`callTool`), not the handler: the dispatcher validates the arguments against the tool's input schema BEFORE
+   * the handler runs, so a step that is not a step, or one past the bound, answered the validator's generic words there while REST answered
+   * `bad_conversion_step` with the step (lens sweep S5). The same body, the same answer, on both doors.
+   */
+  describe('through the MCP dispatcher (tools/call), as REST answers it', () => {
+    const viaDispatcher = async (convertRecords) => {
+      const { callTool } = await import('../../server/dist/mcp/call-tool.js');
+      const out = await callTool({ name: 'schema_update', args: { space: SPACE, ...EDIT, convertRecords },
+        caller: { rights: RIGHTS, ip: '127.0.0.1', authMethod: 'pat', oidcSubject: null, transport: 'mcp', tokenId: 'b284-s5', tokenLabel: 'b284-s5' } });
+      return { status: out.status, structured: out.result?.structuredContent, text: (out.result?.content ?? []).map(c => c.text ?? '').join('\n') };
+    };
+
+    it('a step that is not a step answers 400 bad_conversion_step with the index of that step', async () => {
+      inst.reset();
+      const before = held();
+      const a = await viaDispatcher({ steps: [STEPS.steps[0], { op: 'dropEverything', kind: 'entity' }] });
+      assert.equal(a.status, 400, a.text);
+      assert.equal(a.structured?.code, 'bad_conversion_step', `the dispatcher answered: ${a.text}`);
+      assert.equal(a.structured.step, 1);
+      assert.deepEqual(held(), before);
+    });
+
+    it('more steps than the bound answers the same code at the first step past it', async () => {
+      inst.reset();
+      const a = await viaDispatcher({ steps: Array.from({ length: 51 }, () => STEPS.steps[0]) });
+      assert.equal(a.status, 400, a.text);
+      assert.equal(a.structured?.code, 'bad_conversion_step', `the dispatcher answered: ${a.text}`);
+      assert.equal(a.structured.step, 50);
+    });
+  });
+
   describe('the order of the refusals (the planner\'s contract)', () => {
     const plan = (body, ifMatch) => meta.planSpaceMetaUpdate({ spaceId: SPACE, space: inst.loader.getConfig().spaces.find(s => s.id === SPACE), body, ifMatch });
 
