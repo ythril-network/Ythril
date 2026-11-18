@@ -35,10 +35,37 @@ the test files its diff reaches.
 | Sync | the test stack | `npm run test:up`, `npm run test:sync` |
 | Red team | the test stack | `npm run test:up`, `npm run test:redteam` |
 
-`npm run test:up` (and `test:up:rebuild`) first takes down a stack that was started from the same compose file without
-`-p ythril-test` (compose then names it `testing`): its containers hold the same names, so it would otherwise block the
-new stack at the first container.
-`npm run test:down` takes the stack down and wipes its volumes. `npm run test:all:core` runs the stack suites and then
+`npm run test:up` (and `test:up:rebuild`) first runs `node testing/_init/stack-down.mjs --for-start`, which takes down a stack
+that was started from the same compose file under either project name (`ythril-test`, and the default project, named
+`testing` and written out as `-p testing`): the two stacks hold the same container names, so a stack left under the other
+name would otherwise block the new one at the first container. The default project's volumes go on a start too; before,
+a start left them. That module is the one place that takes the stack down: no package script spells a compose `down` of
+the test file (`a-script-that-starts-the-test-stack-first-downs-both-projects` refuses one).
+
+`npm run test:down` runs the same module without `--for-start`. It removes the stack's containers and volumes of both
+projects and wipes the instances' bind-mounted configs under `testing/sync/configs/`, except what another session holds:
+a container a live hold names stays running with its volumes, a network it is attached to stays, and the config of a
+kept instance stays. It prints one line per kept container with the holder's label. While anything of the stack is held,
+`test:up` refuses to start (exit 1, the holder's label and how to end the hold), and removes and wipes nothing: two
+sessions on one database server would change each other's server-wide settings. `npm run test:down:all` ignores holds
+(and reads none), for the session that holds the stack and wants it gone. `npm run test:down:clean` is `test:down`
+followed by a prune of the build cache, dangling images and unused volumes. Compose's own `down` is not what runs: it
+would remove a held container with the rest.
+
+**Holds.** A hold is a file `*.json` in the directory the variable `YTHRIL_TEST_STACK_HOLDS_DIR` names, written by whatever
+books the stack for a session (the maintainers' machine has a booking tool that writes them, and the variable points at its
+directory). The file is a JSON object: `label` (text, printed beside the kept container), `expiresAt` (epoch milliseconds, or
+`null`, or left out for a hold with no end) and `containers` (container names) and/or `project` (a compose project). A hold is
+live while it has not expired and one of its keys is the name or the compose project of a running container (every key is
+matched against both), and it keeps those containers. A hold written a moment before its container runs does not count yet.
+Unset or empty, no hold is read and the take-down removes everything of the stack, which is what CI and a machine with no
+booking tool get; the module prints one line saying so. A set variable whose directory is missing or unreadable ends the run
+(exit 1) naming it, and so does a hold file that cannot be read, after one more try. A hold with neither `containers` nor
+`project`, or whose `expiresAt` is not `null`, absent or a finite number, is read as a hold on everything and is printed. Docker that
+fails to list, or does not answer within its time, ends the run with exit 1 and the reason before anything is removed; a removal that
+fails is named, the others are still tried, and the run ends with exit 1.
+
+`npm run test:all:core` runs the stack suites and then
 standalone, never stops at the first failure, and prints one status line per suite; it does not run the client suite, so
 run that beside it. `npm run test:all` is `test:all:core` plus the cleanup, and does **not** start the stack. CI runs
 the same npm scripts, split across jobs.
@@ -671,6 +698,8 @@ Every variable the scripts and runners in `scripts/` and `testing/_init/` read i
 | `GH_TOKEN`, `GITHUB_API_URL` | `scripts/test-times.mjs` | Read access to this repository's Actions runs, and the API base. |
 | `CLIENT_TEST_OUTCOME` | `scripts/mask-client-report.mjs` | The client test command's own result (`success`, `failure`, `cancelled` or `skipped`), which CI's mask step passes and which is written into the masked report as `runnerOutcome`; the recorder reads a failed runner with no failure counted as an incomplete run. Unset: nothing is stamped. |
 | `YTHRIL_TEST_WAIT_TIMING_FILE` | `testing/_shared/wait-for.mjs` | A file every wait appends one timing line to. Unset: nothing is recorded. |
+| `YTHRIL_TEST_STACK_HOLDS_DIR` | `testing/_init/stack-down.mjs` | The directory of hold files (`*.json`: `label`, `expiresAt`, `containers` and/or `project`) that keep a container of the test stack through `npm run test:down` and refuse `npm run test:up` while held. Unset or empty: no holds are read and the take-down removes the whole stack. A set value that names a missing or unreadable directory ends the run. See [the stack's take-down](#running-the-suites). |
+| `YTHRIL_TEST_STACK_DOWN_DOCKER` | `testing/standalone/the-test-stack-take-down-keeps-a-held-container-docker.test.js` | `1` registers the test that runs the take-down on real containers of a scratch compose project (two idle services on the pinned Mongo image, a planted hold file; about a minute and 2 GB of Docker memory). Absent, the test is not registered, so no run reports it skipped. |
 | `YTHRIL_TEST_APP_CPUS`, `YTHRIL_TEST_APP_MEM`, `YTHRIL_TEST_APP_A_MEM` | `testing/docker-compose.test.yml` | CPU and memory ceilings of the Ythril instances; instance A has its own memory variable because it carries the heaviest suites. |
 | `YTHRIL_TEST_MONGO_CPUS`, `YTHRIL_TEST_MONGO_MEM`, `YTHRIL_TEST_MONGO_A_MEM`, `YTHRIL_TEST_MONGO_B_MEM` | `testing/docker-compose.test.yml` | The same for the databases; `YTHRIL_TEST_MONGO_MEM` is the ceiling of the third and fourth, and the second has its own because its peak is the highest of the three. |
 | `YTHRIL_TEST_MONGOT_A_HEAP` | `testing/docker-compose.test.yml` | The search process's JVM heap in the first database. Raise it with `YTHRIL_TEST_MONGO_A_MEM`. |

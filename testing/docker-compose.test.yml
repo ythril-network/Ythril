@@ -16,10 +16,10 @@
 ##   Braintree:          a (root) -> b (node) -> c (leaf)
 ##   Democratic:         a, b, c  (3-way vote)
 ##
-## Usage (locally; `npm run test:up` does all of it, `npm run test:down` removes it):
+## Usage (locally; `npm run test:up` does all of it, `npm run test:down` removes what no other session holds; docs/testing-guide.md, "Running the suites"):
 ##   docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait
 ##   node testing/sync/setup.js [a b ...]   # completes setup and writes each instance's token under testing/sync/configs/
-##   docker compose -p ythril-test -f testing/docker-compose.test.yml down -v
+##   npm run test:down   # not `docker compose ... down -v` on this file: that removes a container another session holds, with its data
 ##
 ## In CI the image is built once, by the `prepare` job, and every stack job loads it and starts its services with
 ## `--no-build --pull never`; `ythril-a` below is the only service that carries a build, for a local `up`.

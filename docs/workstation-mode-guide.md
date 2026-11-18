@@ -48,10 +48,10 @@ Why: all compose paths and mounts in this guide assume you run commands from the
 ## Step 2: Ensure no old test stack is running
 
 ```bash
-docker compose -p ythril-test -f testing/docker-compose.test.yml down -v --remove-orphans
+npm run test:down
 ```
 
-Why: test containers and networks can clutter Docker Desktop and cause confusion while validating the real instance.
+Why: test containers and networks can clutter Docker Desktop and cause confusion while validating the real instance. Run the npm script, not `docker compose ... down -v` on the test file: the script leaves a container another session holds (see [the testing guide](testing-guide.md#running-the-suites)), and the raw command removes it with its data. `npm run test:down:all` removes held containers too.
 
 ---
 
@@ -283,6 +283,8 @@ docker compose down -v
 `npm run docker:wipe` (or `npm run machine:free -- -Wipe`) deletes Docker Desktop's data disk: every image, container and named volume. Data in bind mounts survives it; with the override in [Workstation (Docker) setup](#workstation-docker-setup--one-time) that is `local-data/` and `config/`.
 
 While the engine answers, the wipe first records the instance running from this checkout in `local-data/owner-instance/owner-instance.json` (services, images, builds, bind mounts and the commit; never an environment, and of a build only its argument names), stops it cleanly, and after Docker is back rebuilds every service with a `build:` at that commit (passed as the `GIT_REVISION` build argument, which the Ythril image keeps as its `org.opencontainers.image.revision` label; `unknown` when unset) and starts the recorded services with `docker compose up --wait`. The commit is the one the running images were built at, read from that label when every built service carries it, else the checkout's HEAD; the wipe says so when the two differ.
+
+`npm run machine:free`, with or without `-Wipe`, frees the whole machine and ignores holds: it removes the test stack with its volumes, a container another session holds (`YTHRIL_TEST_STACK_HOLDS_DIR`, see [the testing guide](testing-guide.md#running-the-suites)) included, and restarts Docker, which ends every hold in any case.
 
 It refuses, before stopping anything (and, with `machine:free -- -Wipe`, before it removes the test stack or prunes), when this checkout's compose project holds a named volume, running or not, that the compose file's `x-ythril: disposable-volumes:` list does not name, and always one at `/data`, `/data/db` or `/data/configdb`: the default `ythril-data`, `ythril-mongo-data` and `ythril-mongo-configdb` volumes are refused, so bind them as the override does first. Only the two model-cache volumes are named there; their models are fetched again on first use. It is a list rather than a label on each volume because adding a label to an existing volume makes `docker compose up` offer to recreate it, which deletes it. It refuses as well while another project runs besides the test stack, because the wipe deletes it and brings back only this checkout's instance. At the same point, before anything is removed, it also refuses a pending record that neither `-UseRecord` nor `-DiscardRecord` was told about, a drive that would not hold the rebuild, and a registry the rebuild pulls from (Docker Hub, and npm for a built service) that does not answer. Volumes of other projects and anonymous volumes are not checked: the wipe deletes them. Not checked, and so deleted with the disk: an external volume (declared `external: true` or made by hand, so it carries no project label of this checkout's), a stopped instance of this checkout that was started under another project name (`-p`, or the variable that sets compose's project name; a running one is refused as another project), and everything while the engine is down. The check needs Docker 23 or newer (`docker volume ls --format json`) and, for a stopped instance, a compose that reports the project name from `compose config`: with an older Docker or a compose that does not report the name, the wipe refuses rather than passes, and so does a stopped instance whose `.env` is missing. The check runs only while the engine answers; with the engine down nothing is checked.
 

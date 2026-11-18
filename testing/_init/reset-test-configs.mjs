@@ -9,6 +9,10 @@
  * makes the instance boot NON-first-run. That masks first-run-only bugs (e.g.
  * background workers that were gated on `!isFirstRun`) locally while CI — always
  * first-run — fails. Running this before `up` keeps local and CI in lockstep.
+ *
+ * `testing/_init/stack-down.mjs` (the one take-down of the stack, run first by `test:up`) wipes the configs of the instances whose container it
+ * removed, and keeps those of an instance another session holds; this script, which runs after it, wipes all four. A start is refused while
+ * anything of the stack is held, so by the time this runs nothing is.
  */
 import fs from 'node:fs';
 import path from 'node:path';
