@@ -82,8 +82,8 @@ const EXEMPT = {
     'brain/list-edges.ts:listEdges', 'brain/query.ts:queryBrain', 'brain/query.ts:countBrain', 'brain/lexical-search.ts:lexicalSearch',
     'brain/recall.ts:recallByType', 'brain/recall.ts:introduceLexicalOnly', 'brain/recall.ts:checkDuplicates', 'brain/recall.ts:hydrateFreshHits',
     'brain/recall.ts:getEntryEmbedding', 'spaces/completeness.ts:gatherCompletenessFacts', 'brain/space-shape.ts:build',
-    'mcp/tools/spaces.ts:list_spacesTool.handle', 'mcp/tools/spaces.ts:space_statsTool.handle',
-    'api/brain/search.ts:GET /api/brain/spaces/:spaceId/stats', 'api/spaces.ts:GET /api/spaces',
+    // The one count of a space's records, which REST stats, MCP `space_stats`, `GET /api/spaces?counts=true` and MCP `list_spaces` all read (bundle-38, Q-169).
+    'spaces/space-counts.ts:recordsOf',
   ]),
   ...reasoned('a fork is an ordinary replicated row: sync paging, positions, merkle, export, import, removal and wipe carry it with the rest', [
     'api/sync/warm.ts:POST /api/sync/warm', 'api/admin-space-transfer.ts:GET /api/admin/spaces/:spaceId/export', 'sync/space-import.ts:dueOf', 'api/sync/docs.ts:oneById',
@@ -273,7 +273,7 @@ describe('a fork row is not a second relationship: every reader of the edges col
       'brain/relink-references.ts:relinkEdgesOfRecord', 'brain/list-edges.ts:listEdges', 'brain/entity-delete-guard.ts:endsOfEdges']) {
       assert.ok(keys.has(k), `${k} reads the edges collection and the derivation did not find it: it is blind to that shape`);
     }
-    assert.ok([...keys].some(k => k.startsWith('api/brain/search.ts:GET ')), 'an inline route handler was not found: the routes are not registered');
+    assert.ok([...keys].some(k => k.startsWith('api/admin-space-transfer.ts:GET ')), 'an inline route handler was not found: the routes are not registered');
     assert.ok(readers.some(r => r.carries), 'no reader carries the clause: the carry test is broken');
   });
 

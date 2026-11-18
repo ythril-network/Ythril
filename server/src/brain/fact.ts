@@ -302,8 +302,3 @@ export async function listFacts(
     .limit(parseLimit(limit, 20, 1000))
     .toArray();
 }
-
-/** Count facts in a space */
-export async function countFacts(spaceId: string): Promise<number> {
-  return col<FactDoc>(spaceCollection(spaceId, 'facts')).countDocuments();
-}

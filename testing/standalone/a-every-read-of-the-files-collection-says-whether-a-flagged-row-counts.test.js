@@ -279,13 +279,13 @@ describe('the derivation finds the readers at all, so the rule cannot pass by fi
     const keys = new Set(READERS.map(r => r.key.replace('server/src/', '')));
     for (const k of ['brain/entity-refs.ts:missingRefs', 'brain/edge-endpoint-names.ts:resolveEndpointName',
       'brain/traverse-bodies.ts:withTraverseBodies', 'files/dispatch.ts:readPriorProcessing', 'files/disk-against-rows.ts:heldRowsFor',
-      'brain/space-shape.ts:build', 'mcp/tools/spaces.ts:space_statsTool.handle', 'brain/embed-record.ts:embedStoredRecord',
+      'brain/space-shape.ts:build', 'spaces/space-meta-answer.ts:spaceStatsAnswer', 'brain/embed-record.ts:embedStoredRecord',
       // Read through the `_id` pager once Q-481 converts them: a reader whose read is `idKeysetPage` must still be found.
       'files/file-stamp-report.ts:readCandidates', 'brain/links-conversion.ts:convertSpaceInWalk']) {
       assert.ok(keys.has(k), `${k} reads the files collection and the derivation did not find it — it is blind to that shape`);
     }
-    assert.ok([...keys].some(k => k.startsWith('api/brain/search.ts:GET ')),
-      'the REST stats handler is an inline route handler and was not found — the routes are not registered');
+    assert.ok([...keys].some(k => k.startsWith('api/admin-space-transfer.ts:GET ')),
+      'the space export handler is an inline route handler and was not found — the routes are not registered');
   });
 
   it('some reader already carries a predicate, and the exports are read from the module', () => {
