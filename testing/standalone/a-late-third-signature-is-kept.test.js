@@ -15,7 +15,9 @@
  * - a cast stored without `csig`, then served with a `csig` that verifies: the stored cast gains it;
  * - a cast stored with its `csig`, then served without it: the stored cast keeps it;
  * - a cast served with a `csig` that does not verify never replaces one that does;
- * - a different vote still replaces the stored cast.
+ * - a different vote still replaces the stored cast;
+ * - the vote relay route (`POST /api/sync/networks/:networkId/votes/:roundId`), the other place a peer's cast replaces a held one, decides by the
+ *   same rule: a relayed copy without the `csig` keeps the held one, a relayed `csig` that verifies is gained, a different vote replaces.
  *
  * Run: node --test testing/standalone/a-late-third-signature-is-kept.test.js
  * (requires a prior server build)
@@ -111,5 +113,45 @@ describe('a late third signature is kept', () => {
     const kept = net.pendingRounds[0].votes.find(v => v.instanceId === SELF);
     assert.equal(kept.vote, 'veto', 'a changed vote did not replace the stored cast');
     assert.equal(out.changed, true);
+  });
+});
+
+describe('the vote relay route keeps the csig by the same rule', () => {
+  /** Put `round` with `stored` as its one cast into the live config, relay `cast` to the route's own handler as the relayer, and answer the held cast. */
+  async function relay(round, stored, cast) {
+    const { getConfig } = await import('../../server/dist/config/loader.js');
+    const { syncVotesRouter } = await import('../../server/dist/api/sync/votes.js');
+    const { callRoute } = await import('./_vote-round-instance.mjs');
+    const nets = getConfig().networks;
+    nets.splice(0, nets.length, netWith(round, stored));
+    const res = await callRoute(syncVotesRouter, 'post', '/networks/:networkId/votes/:roundId', {
+      params: { networkId: NET, roundId: round.roundId }, body: cast, authToken: { peerInstanceId: P1, rights: { instanceAdmin: false } },
+    });
+    assert.ok(res.code < 300, `the relay refused the cast: ${res.code} ${JSON.stringify(res.body)}`);
+    const live = getConfig().networks.find(n => n.id === NET);
+    return { live, held: live.pendingRounds[0].votes.find(v => v.instanceId === SELF) };
+  }
+
+  it('a relayed cast without csig does not replace a held cast that has a valid one', async () => {
+    const round = roundOf();
+    const full = signing.makeSignedOwnCast(NET, round, SELF, 'yes');
+    const { live, held } = await relay(round, full, withoutCsig(full));
+    assert.equal(held.csig, full.csig, 'a relaying member took the csig away');
+    assert.equal(signing.convertRecordsSignedByProposer(live, live.pendingRounds[0]), true);
+  });
+
+  it('a relayed cast with a valid csig replaces a held one without it', async () => {
+    const round = roundOf();
+    const full = signing.makeSignedOwnCast(NET, round, SELF, 'yes');
+    const { held } = await relay(round, withoutCsig(full), full);
+    assert.equal(held.csig, full.csig, 'the relayed csig was not kept');
+  });
+
+  it('a relayed different vote still replaces the held cast', async () => {
+    const round = roundOf();
+    const yes = signing.makeSignedOwnCast(NET, round, SELF, 'yes');
+    const veto = withoutCsig(signing.makeSignedOwnCast(NET, round, SELF, 'veto'));
+    const { held } = await relay(round, yes, veto);
+    assert.equal(held.vote, 'veto');
   });
 });
