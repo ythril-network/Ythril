@@ -58,9 +58,10 @@ import { reportSpaceFailure } from '../util/space-failure.js';
 import { backoffDelayMs } from '../util/backoff.js';
 import { peerText } from '../util/log.js';
 import { logInternalAudit } from '../audit/audit.js';
+import { SCHEMA_CONVERT_RUN_OPERATION } from '../audit/middleware.js';
 
-/** The operation of the one internal audit entry a finished run writes. Declared here, beside the run, not in the audit middleware. */
-export const SCHEMA_CONVERT_RUN_OPERATION = 'schema.convert.run';
+/** The operation of the one internal audit entry a finished run writes: declared in the audit middleware beside the other operations no route produces, re-exported here for the run's own readers. */
+export { SCHEMA_CONVERT_RUN_OPERATION };
 /** The most types one start may name. */
 export const SCHEMA_CONVERT_TYPES_MAX = 50;
 /** Records read per page. */
@@ -431,7 +432,10 @@ function auditFinished(spaceId: string, run: SchemaConvertRunDoc): void {
     method: 'SWEEP', path: 'internal:schema-convert', spaceId, operation: SCHEMA_CONVERT_RUN_OPERATION, startedAt: Date.parse(run.startedAt),
     changes: [
       ...(Object.keys(ZERO) as (keyof SchemaConvertCounts)[]).map(k => ({ field: k, to: run.counts[k] })),
-      { field: 'types', to: run.types.map(t => `${t.kind}:${t.type}`).join(',') },
+      // The types as a list (`kind:type`), which the allowlist records as `added`, so an operator reads each type as a name and not one joined
+      // string. How the run was started: the kinds of its sources, each once, in order.
+      { field: 'types', added: run.types.map(t => `${t.kind}:${t.type}`) },
+      { field: 'sources', to: [...new Set(run.sources.map(s => s.kind))].join(',') },
     ],
   });
 }
