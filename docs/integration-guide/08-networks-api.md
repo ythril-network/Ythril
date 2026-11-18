@@ -407,7 +407,7 @@ refused naming the deadline ([Cast a Vote](#cast-a-vote)). A concluded round is 
 
 A round carries the fields it travels with — `roundId`, `type`, the subject (`subjectInstanceId`, `subjectLabel`,
 `subjectUrl`), `openedAt`, `deadline`, `votes`, and by type `spaceId`, `networkSpaceId`, `wipeTypes`,
-`metaChangedFields`, `changedTypes`, `keptTypes`, `proposesLayer`, `requiredVoters` — and never a proposal's body
+`metaChangedFields`, `changedTypes`, `keptTypes`, `proposesLayer`, `requiredVoters`, `convertRecords` — and never a proposal's body
 (`pendingMeta`), the values its changed fields held when it was proposed (`metaBase`), a joining member
 (`pendingMember`) or an invite-key hash. A round about a space carries `localSpaceId`
 (since 5.6.0): what THIS instance calls the space, which after a rename is neither the network's id nor the proposer's name.
@@ -419,6 +419,13 @@ An `outcome` this client does not know means the round did not pass: keep the ro
 **`summary`** (a `meta_change` round) is one plain sentence per change saying what the proposal would do to the space,
 named as this instance calls it and worded as a proposal rather than a done thing. It is English text and is text only: a
 client shows it as such. MCP: `network_votes`.
+
+**A schema round may carry conversion steps.** When its proposer chose `convertRecords` (the steps that rename or split what the records
+hold), the row carries them as `convertRecords: { "steps": [ … ] }`, exactly as the round holds them, on this route and on MCP `network_votes`,
+so they are read before the cast. **A yes on such a round is a yes to the schema and to rewriting the stored records of the types the steps
+name on every member that applies them.** A round whose proposer chose none has no `convertRecords` key. A member applies the steps only when
+the proposer's signature over them verifies and they match the round's own change; otherwise it takes the schema and converts nothing
+([Converting Records](06e-converting-records.md#on-a-network)).
 
 **Every door that opens a round answers it this way**: the round that opened, as this list shows it, with the same `summary`. The doors are the
 add-space, schema and meta writes, space delete and wipe (their `rounds`, one entry per network, each `{ "networkId", "networkLabel", "roundId", "round" }`),
