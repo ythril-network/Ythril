@@ -355,9 +355,10 @@ const runnersIn = (text) => [...String(text).matchAll(new RegExp(RUNNER.source, 
  * ONE suite (the same runner, the same `standalone` timing files, the one artifact), not a second suite, and it runs no test that imports `server/dist`
  * (that is the classifier's guarantee, `testing/_shared/text-only-test.mjs`, and the step's own check). The two rules that read runner commands
  * (`one suite per results artifact`, `test jobs build the server`) leave this one step out; the pure kind that follows is counted and must still follow a
- * build, and a job whose only runner is a text step has none left and fails the first.
+ * build, and a job whose only runner is a text step has none left and fails the first. Only a step whose WHOLE command is that one call is exempt: a step
+ * that chains it with another runner, or adds to it, is held to both rules.
  */
-const runsTextKind = (step) => /\brun-standalone\.mjs\s+--only=text\b/.test(shellOf(step));
+const runsTextKind = (step) => /^\s*node\s+(?:\.\/)?testing\/_init\/run-standalone\.mjs\s+--only=text\s*$/.test(shellOf(step));
 
 /** The `npm` script a runner command runs: `npm run test:x` is `test:x`, `npm test` and `npm t` are `test`; any other spelling names none. */
 const scriptNamed = (runner) => /^npm run (\S+)$/.exec(runner)?.[1] ?? (/^npm (?:test|t)$/.test(runner) ? 'test' : undefined);
@@ -1911,6 +1912,24 @@ describe('ci.yml — the rules, held against the real workflow', () => {
     for (const rule of rules) assert.deepEqual(rule(withStep('node testing/_init/run-standalone.mjs --only=text')), [], `${rule.name} refuses the text kind`);
     assert.match(oneSuitePerResultsArtifactViolations(withStep('node testing/_init/run-standalone.mjs --only=pure')).join('\n'), /sync: uploads results and carries 2 suite runner/, 'the pure kind before the build was read as no second suite');
     assert.match(serverBuildViolations(withStep('node testing/_init/run-standalone.mjs --only=pure')).join('\n'), /sync: runs tests that import server\/dist/, 'the pure kind before the build was read as importing no server code');
+  });
+
+  it('a step is exempt only when its whole command is the text kind: a chained step, or one that runs more after it, is held to both rules', () => {
+    const withStep = (command) => {
+      const d = clone(GOOD);
+      const steps = stepsOf(job(d, 'sync'));
+      steps.splice(steps.findIndex((x) => /build:server/.test(shellOf(x))), 0, { name: 'Chained', run: command });
+      return d;
+    };
+    for (const command of [
+      'node testing/_init/run-standalone.mjs --only=text && npm run test:standalone:db',
+      'node testing/_init/run-standalone.mjs --only=text; npm run test:standalone:db',
+      'npm run test:standalone:db\nnode testing/_init/run-standalone.mjs --only=text',
+      'node testing/_init/run-standalone.mjs --only=text --also-everything',
+    ]) {
+      assert.match(oneSuitePerResultsArtifactViolations(withStep(command)).join('\n'), /sync: uploads results and carries \d+ suite runner/, `the chained step ${JSON.stringify(command)} was exempt from one suite per results artifact`);
+      assert.match(serverBuildViolations(withStep(command)).join('\n'), /sync: runs tests that import server\/dist/, `the chained step ${JSON.stringify(command)} was exempt from the server build rule`);
+    }
   });
 
   it('the client job writes the file the skips check reads, and the gate installs nothing the checks do not need', async () => {
