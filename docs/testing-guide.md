@@ -59,7 +59,9 @@ narrowed like that is recorded as a subset, never as the whole suite.
   needs ranking uses the stub embedder (`EMBEDDING_URL`), and no database test sets the model variables itself.
 - **instance**: declares `@needs-instance` in its header comment and drives a running Ythril. Runs one file at a time.
 
-A pure file may also declare `@ci-only` in its header comment (anchored to a header line, like `@needs-instance`). It stays a pure file: CI's `standalone-pure` job and `npm run test:standalone` run it, and only preflight's pure batches leave it out, for a test that is too slow, or too sensitive to a loaded machine, to run at every push (`every-server-entry-module-loads`, about 44 s, is the one today). `a-ci-only-test-runs-in-a-ci-job` holds that every `@ci-only` file is a pure file that a CI job runs, so the marker can never mean "runs nowhere".
+A pure file may also declare `@ci-only` in its header comment (anchored to a header line, like `@needs-instance`). It stays a pure file: CI's `standalone-pure` job and `npm run test:standalone` run it, and only preflight's pure batches leave it out, for a test that is too slow, or too sensitive to a loaded machine, to run at every push (the `every-server-entry-module-loads-<n>-of-<k>` files, the module-by-module load gate cut into shards, are the ones today).
+
+A pure file whose imports reach nothing a build or an install writes (no `server/`, `client/` or `schema/` import, no `dist` or `node_modules` path, no package, no `fetch`, no process but git) is **text-only**, and `testing/_shared/text-only-test.mjs` decides that by computation, never by a list. The preflight runs those files in a source stage, `text-only standalone tests`, before it builds anything, and the pure units after the builds leave them out, so each file runs once. CI's `standalone-pure` job runs them as its first step, before `npm ci` and the builds (`node testing/_init/run-standalone.mjs --only=text`), which is the guard for what a static rule cannot see, a build path that lives in a document or a data file: a test the classifier wrongly calls text-only fails there for want of what it needs, while on a developer machine a stale `server/dist` can let it pass until CI runs it. `a-ci-only-test-runs-in-a-ci-job` holds that every `@ci-only` file is a pure file that a CI job runs, so the marker can never mean "runs nowhere".
 
 You do not choose the kind: write the file and the split reads it. `npm run test:standalone` refuses to start when
 `server/dist` is older than the server source (`--allow-stale` overrides it when you know the build is what you meant),
@@ -169,7 +171,7 @@ the checkouts and every place the workflows hand a credential to repository code
 before it reaches a log.
 
 **On your machine**, the same JSONL lands in `test-results/` (gitignored). Every runner (`run-suite`, `run-standalone`,
-preflight) clears its own suite's earlier files first, so what is there is only the last run's, one file per `node --test`
+preflight) clears its own suite's earlier files first (preflight does it before its first stage, so the text stage's files stand), so what is there is only the last run's, one file per `node --test`
 invocation: `test-results/<suite>-<batch>.jsonl`.
 
 `YTHRIL_TEST_RESULTS_DIR` moves that folder out of the checkout: an absolute path, honoured by every runner, by `test-times.mjs` and by preflight's client report (`client.json`). Unset, the folder is `test-results/` in the checkout, which is what CI uses and uploads, so CI is unchanged; a relative value is refused. The test children a runner starts do not inherit it (`testChildEnv`). The folder's place is decided in one function, `timingResultsDir` in `testing/_shared/timing-reporter.mjs`.
