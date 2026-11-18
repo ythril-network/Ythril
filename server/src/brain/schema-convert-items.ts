@@ -123,10 +123,13 @@ export async function recordUnconvertedItem(spaceId: string, input: UnconvertedI
   return 'written';
 }
 
-/** An item as a list gives it: the stored item and, when the caller's `enrich` found one, a part naming its record. */
-export type ListedUnconvertedItem = UnconvertedItem & { record?: { summary: string } };
+/**
+ * An item as a list gives it: the stored item, the space it lives in (the one a dismissal names; through a personal view the list merges several),
+ * and, when the caller's `enrich` found one, a part naming its record.
+ */
+export type ListedUnconvertedItem = UnconvertedItem & { space: string; record?: { summary: string } };
 
-/** What a list of the items answers: the page, its fields, and how many rows are open and dismissed in the whole space. */
+/** What a list of the items answers: the page, its fields, and how many rows are open and dismissed in the whole of the spaces it read. */
 export type UnconvertedList =
   | { ok: true; items: ListedUnconvertedItem[]; fields: Record<string, unknown>; open: number; dismissed: number }
   | { ok: false; error: string };
@@ -148,38 +151,43 @@ const filterOf = (f: UnconvertedFilter): Record<string, unknown> => ({
 });
 
 /**
- * The items of `spaceId`, newest first, narrowed by `kind`, `type`, `reason` and `status` (all of them when none is given, so the filter is the
- * caller's to state: the door's act states `open` by default), paged by the one list rule (`skip`, `limit`, the byte budget). Writes
- * nothing: a stale item is listed until the watcher's tick removes it. `transport` names the door, whose budget default applies.
+ * The items of the `spaces` (one space, or the members a personal view reads), newest first across them, narrowed by `kind`, `type`, `reason`
+ * and `status` (all of them when none is given, so the filter is the caller's to state: the door's act states `open` by default), paged by the
+ * one list rule (`skip`, `limit`, the byte budget; over several spaces the merge reads at most `UNCONVERTED_ITEMS_PER_RUN_MAX` deep). Each row
+ * names its space. Writes nothing: a stale item is listed until the watcher's tick removes it. `transport` names the door, whose budget default
+ * applies.
  *
  * `enrich` adds to the rows read for the page before the byte budget is applied, so what it adds is counted in the bytes the answer reports
  * and in where the page is cut (the door's `record.summary`); it never changes which rows are listed, their order or the totals.
  */
 export async function listUnconvertedItems(
-  spaceId: string, req: ListPageRequest & UnconvertedFilter, transport: 'rest' | 'mcp' = 'rest',
-  enrich?: (rows: UnconvertedItem[]) => Promise<ListedUnconvertedItem[]>,
+  spaces: readonly string[], req: ListPageRequest & UnconvertedFilter, transport: 'rest' | 'mcp' = 'rest',
+  enrich?: (space: string, rows: ListedUnconvertedItem[]) => Promise<ListedUnconvertedItem[]>,
 ): Promise<UnconvertedList> {
   const filter = filterOf(req);
   const page: ListPage<ListedUnconvertedItem> = await pageMemberList<ListedUnconvertedItem>({
-    members: [spaceId],
+    members: spaces,
     readMember: async (id, limit, skip) => {
-      const rows = await items(id).find(asFilter<UnconvertedItem>(filter))
+      const stored = await items(id).find(asFilter<UnconvertedItem>(filter))
         .sort({ detectedAt: -1, _id: 1 }).skip(skip).limit(limit).toArray() as UnconvertedItem[];
-      return enrich ? await enrich(rows) : rows;
+      const rows = stored.map(r => ({ ...r, space: id }));
+      return enrich ? await enrich(id, rows) : rows;
     },
     countMember: id => items(id).countDocuments(asFilter<UnconvertedItem>(filter)),
-    compare: (a, b) => b.detectedAt.localeCompare(a.detectedAt) || a._id.localeCompare(b._id),
+    compare: (a, b) => b.detectedAt.localeCompare(a.detectedAt) || a._id.localeCompare(b._id) || a.space.localeCompare(b.space),
     req,
     page: { defaultLimit: LIST_DEFAULT_LIMIT, maxLimit: LIST_MAX_LIMIT, budgetChars: defaultBudgetChars(transport) },
     ceiling: UNCONVERTED_ITEMS_PER_RUN_MAX,
   });
   if (!page.ok) return page;
-  const [open, dismissed] = await Promise.all([
-    items(spaceId).countDocuments(asFilter<UnconvertedItem>({ status: 'open' })),
-    items(spaceId).countDocuments(asFilter<UnconvertedItem>({ status: 'dismissed' })),
-  ]);
-  return { ok: true, items: page.rows, fields: page.fields, open, dismissed };
+  const counts = await Promise.all(spaces.map(id => Promise.all([
+    items(id).countDocuments(asFilter<UnconvertedItem>({ status: 'open' })),
+    items(id).countDocuments(asFilter<UnconvertedItem>({ status: 'dismissed' })),
+  ])));
+  return { ok: true, items: page.rows, fields: page.fields, open: sumOf(counts.map(c => c[0])), dismissed: sumOf(counts.map(c => c[1])) };
 }
+
+const sumOf = (ns: readonly number[]): number => ns.reduce((n, m) => n + m, 0);
 
 /** Dismiss item `itemId` of `spaceId`: it stays, `dismissed`, and is not re-opened for the same record version and target. `null`: no such item. */
 export async function dismissUnconvertedItem(spaceId: string, itemId: string): Promise<UnconvertedItem | null> {

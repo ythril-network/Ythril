@@ -22,6 +22,7 @@ import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
 import { TYPE_NAME_MAX } from '@ythril-network/schema/internal';
 import { toolRefusalOfAct } from '../../util/errors.js';
 import { dismissChanges, dismissShownChanges } from '../../audit/audit-changes.js';
+import { viewReadOfCall } from '../../spaces/read-scope.js';
 
 /** The filters' bounds as the act's schema holds them (`UnconvertedFilterParams`), from the same constants; each tool adds its own words. */
 const KIND_FILTER = { type: 'string', enum: [...KNOWLEDGE_TYPES] } as const;
@@ -40,12 +41,13 @@ const WHAT_IT_IS = 'An unconverted record is one that a schema change left behin
 
 /** The one-line form of a row, for the tool's text: kind, record, type, why, and the id the dismiss takes. */
 const lineOf = (r: UnconvertedRow): string =>
-  `- ${r.kind} ${r.recordId} (${r.type || 'no type'}): ${r.reason}${r.record ? ` "${r.record.summary}"` : ' (record gone)'} [itemId ${r.itemId}${r.status === 'dismissed' ? ', dismissed' : ''}]`;
+  `- ${r.kind} ${r.recordId} (${r.type || 'no type'}): ${r.reason}${r.record ? ` "${r.record.summary}"` : ' (record gone)'} [itemId ${r.itemId} in '${r.space}'${r.status === 'dismissed' ? ', dismissed' : ''}]`;
 
 export const list_unconvertedTool: ToolHandler = {
   name: 'list_unconverted',
-  description: `List the unconverted records of a space. ${WHAT_IT_IS} Each row is \`{ itemId, kind, recordId, type, seq, fromFp, toFp, reason, violations, `
-    + 'proposed, status, detectedAt, record? }`: `reason` says why it was not converted (`not_conforming`, `no_case_matched`, `both_set`, `could_not_evaluate`, '
+  description: `List the unconverted records of a space. ${WHAT_IT_IS} Each row is \`{ itemId, space, kind, recordId, type, seq, fromFp, toFp, reason, violations, `
+    + 'proposed, status, detectedAt, record? }`: `space` is the space the item lives in, the one to dismiss it in (a personal view lists the items of '
+    + 'every member it reads, merged newest first, with `counts` summed over them); `reason` says why it was not converted (`not_conforming`, `no_case_matched`, `both_set`, `could_not_evaluate`, '
     + '`relationship_exists`, `functional_taken`, `version_ceiling`, `fork`, `step_refused`, `conversion_failed`: a rewrite that kept failing for a reason '
     + 'no other class names, its one violation naming the kind of error and never its words), `violations` names the fields that do not conform and why '
     + '(never their values), `proposed` what the steps would have made of it (a new type, the property names set and removed), and `record.summary` is '
@@ -78,7 +80,8 @@ export const list_unconvertedTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { kind, type, reason, status, skip, limit } = ctx.args;
-    const r = await listUnconvertedAct(ctx.callSpace, { kind, type, reason, status, skip, limit }, { rights: ctx.rights, transport: ctx.transport });
+    const r = await listUnconvertedAct(ctx.callSpace, { kind, type, reason, status, skip, limit }, { rights: ctx.rights, transport: ctx.transport },
+      viewReadOfCall(ctx, ctx.callSpace));
     if ('error' in r) throw toolRefusalOfAct(r.status, r.error, refusalBody(r));
     const body = r.body as { items: UnconvertedRow[]; counts: { open: number; dismissed: number }; count: number; total: number };
     const head = `Unconverted records of '${ctx.callSpace}': ${body.counts.open} open, ${body.counts.dismissed} dismissed; ${body.items.length} on this page of ${body.total} matching.`;

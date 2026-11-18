@@ -22,9 +22,25 @@ export interface ReadRequest {
 
 /** The spaces the request reads for `spaceId`: the accepted view's members, or `[spaceId]` when the caller reaches it, else `[]`. */
 export function readSpacesOfRequest(req: ReadRequest, spaceId: string): string[] {
-  if (req.viewRead && req.viewRead.id === spaceId) return [...req.viewRead.spaces];
+  const view = viewReadOfRequest(req, spaceId);
+  if (view) return view;
   const rights = (req.authToken as { rights?: TokenRights } | undefined)?.rights;
   return rights && reachesSpace(rights, spaceId) ? [spaceId] : [];
+}
+
+/**
+ * The members of the caller's own view the guard accepted for `spaceId`, or `undefined` when the request names no such view: for an act that
+ * answers a space and a view differently (a view has no rung of its own to ask, and its answer names each member). An id the guard did not
+ * accept as the caller's view is `undefined`, so the act asks its existence and its rung as for any space.
+ */
+export function viewReadOfRequest(req: ReadRequest, spaceId: string): string[] | undefined {
+  return req.viewRead && req.viewRead.id === spaceId ? [...req.viewRead.spaces] : undefined;
+}
+
+/** The same for a tool call: the members the dispatcher resolved for the caller's own view `space`, or `undefined` for anything else. */
+export function viewReadOfCall(ctx: ReadCall, space: string): string[] | undefined {
+  const view = ctx.viewReads.get(space);
+  return view ? [...view] : undefined;
 }
 
 /** The same for a request that names several spaces at once: the union in the caller's order, each space once. */
@@ -42,8 +58,8 @@ export interface ReadCall {
 
 /** The spaces a tool call reads for `space`: the view's members, or `[space]` when the connection reaches it, else `[]`. */
 export function readSpacesOfCall(ctx: ReadCall, space: string): string[] {
-  const view = ctx.viewReads.get(space);
-  if (view) return [...view];
+  const view = viewReadOfCall(ctx, space);
+  if (view) return view;
   return ctx.accessibleSpaceIds.includes(space) ? [space] : [];
 }
 

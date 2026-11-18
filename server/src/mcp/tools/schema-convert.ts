@@ -18,6 +18,7 @@ import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
 import { toolRefusalOfAct, type ToolRefusal } from '../../util/errors.js';
 import { CONVERT_RECORDS_PARAMETER } from './schema-update-parts.js';
 import { convertStartChanges } from '../../audit/audit-changes.js';
+import { viewReadOfCall } from '../../spaces/read-scope.js';
 
 /** The lowest status an act answers a refusal with. */
 const FIRST_REFUSAL_STATUS = 400;
@@ -111,12 +112,14 @@ export const space_schema_conversionTool: ToolHandler = {
     + 'new version, records rewritten, records that could not be converted (listed as items), records that changed while the run read them and are '
     + 'left for a later run, and edges marked again after their entity was re-typed. `left` counts the records of the unfinished types still to read (`null` '
     + 'when counting them took longer than a request may); `syncedFirst` says how many peers the run asked for one sync before it began and how many '
-    + 'answered. A space that never had a run answers `{ state: \'none\' }`.',
+    + 'answered. A space that never had a run answers `{ state: \'none\' }`.\n\n'
+    + 'TAKES A PERSONAL VIEW: a view that reads one member answers as that member does; one that reads several answers '
+    + '`{ state: \'per_member\', runs: [{ space, ...that member\'s answer }] }`, a run being one space\'s.',
   spaceRequired: true,
   inputSchema: (s: ToolSchemas) => ({
     type: 'object', properties: { space: s.requiredSpace }, required: ['space'], additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    return resultOf(await schemaConvertStatusAct(ctx.callSpace, { rights: ctx.rights, rateKey: ctx.rateKey }));
+    return resultOf(await schemaConvertStatusAct(ctx.callSpace, { rights: ctx.rights, rateKey: ctx.rateKey }, viewReadOfCall(ctx, ctx.callSpace)));
   },
 };

@@ -212,9 +212,10 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     assert.equal(a.body.truncated, false);
     const p1 = a.body.items.find(r => r.recordId === 'p1');
     assert.deepEqual(Object.keys(p1).sort(),
-      ['detectedAt', 'fromFp', 'itemId', 'kind', 'proposed', 'reason', 'record', 'recordId', 'seq', 'status', 'toFp', 'type', 'violations'].sort(),
-      'a row is the stored item (its id as itemId, no internal staleness hash) and the record part');
+      ['detectedAt', 'fromFp', 'itemId', 'kind', 'proposed', 'reason', 'record', 'recordId', 'seq', 'space', 'status', 'toFp', 'type', 'violations'].sort(),
+      'a row is the stored item (its id as itemId, no internal staleness hash), the space it lives in, and the record part');
     assert.equal(p1.itemId, itemOf.p1);
+    assert.equal(p1.space, S, 'a row names the space a dismissal of it names');
     assert.equal(p1.status, 'open');
     assert.equal(p1.reason, 'not_conforming');
     assert.equal(p1.toFp, door.fp(S));

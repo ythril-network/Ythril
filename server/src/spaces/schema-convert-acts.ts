@@ -15,7 +15,8 @@
  *
  * It answers at once with `202 { state: 'started', toFp, types, steps }` (`steps` counts the steps the run holds); the conversion runs in the background
  * (`schema-convert-run.ts`). {@link schemaConvertStatusAct} answers how it went: the run as `schemaConvertStatus` gives it, or `{ state: 'none' }`
- * for a space that never had a run, and it writes nothing.
+ * for a space that never had a run, and it writes nothing. It is a read, so it takes the caller's own personal view (every derived read door does,
+ * `a-personal-view-reads-alike-on-every-door-db`): one member's answer, or each member's run.
  *
  * ## What it prevents
  *
@@ -204,11 +205,25 @@ export async function schemaConvertStartAct(spaceId: string, input: unknown, cal
 /**
  * The run of `spaceId` as `schemaConvertStatus` gives it (state, target, types, steps, steps refused, sources, counts, what is left, the sync it
  * asked for first, failures), or `{ state: 'none' }` for a space that never had a run. Writes nothing.
+ *
+ * Through the caller's own personal view (`viewRead`: the members the door's guard accepted it for, read in the knowledge area, so no rung is asked
+ * again here): a view that reads ONE member answers exactly as that member does; one that reads none or several answers
+ * `{ state: 'per_member', runs: [{ space, ...that member's answer }] }` in the view's order. A run is one space's, toward that space's schema, so
+ * runs of several members are listed, never summed. The members are read at once, so the one bound of `left` holds for the whole answer.
  */
-export async function schemaConvertStatusAct(spaceId: string, caller: SchemaConvertCaller): Promise<SchemaConvertActResult> {
+export async function schemaConvertStatusAct(spaceId: string, caller: SchemaConvertCaller, viewRead?: readonly string[]): Promise<SchemaConvertActResult> {
+  if (viewRead) {
+    if (viewRead.length === 1) return { status: OK, body: await statusBodyOf(viewRead[0]!) };
+    return { status: OK, body: { state: 'per_member', runs: await Promise.all(viewRead.map(async space => ({ space, ...await statusBodyOf(space) }))) } };
+  }
   if (!isConfiguredSpace(spaceId)) return lostSpaceAnswer(null, spaceId);
   const denied = rightsRefusal(spaceId, caller.rights, 'read');
   if (denied) return denied;
+  return { status: OK, body: await statusBodyOf(spaceId) };
+}
+
+/** One space's status body: its run, or `{ state: 'none' }`. */
+async function statusBodyOf(spaceId: string): Promise<Record<string, unknown>> {
   const status = await schemaConvertStatus(spaceId);
-  return { status: OK, body: status ? { ...status } : { state: 'none' } };
+  return status ? { ...status } : { state: 'none' };
 }
