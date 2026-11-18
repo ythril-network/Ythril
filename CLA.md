@@ -43,7 +43,7 @@ royalty-free, irrevocable copyright license to:
 - **sublicense and relicense** Your Contributions and derivative works thereof, under any license terms,
   including terms different from those under which Ythril is distributed at the time of Your Contribution.
 
-This sublicensing right is the operative clause. Ythril ships under the PolyForm Small Business License, and
+This sublicensing right is the operative clause. Ythril ships under the Ythril License, and
 the Project Owner may in future offer it under other terms — commercial licences, a different open licence, or
 both. Without this grant, every such change would require the individual agreement of every contributor.
 

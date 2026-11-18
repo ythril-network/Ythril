@@ -492,7 +492,7 @@ The image packages two components:
   MongoDB, Inc. distributes `mongot` free of charge for use with MongoDB Community
   and Atlas Local deployments under their terms of service.
 
-#### Relationship to Ythril's PolyForm license
+#### Relationship to the Ythril License
 
 Ythril communicates with `mongod`/`mongot` exclusively over a TCP network socket
 on the private `ythril-db` Docker bridge network. No MongoDB or `mongot`
@@ -501,7 +501,7 @@ binary or source tree.
 
 Under established software licensing interpretation, a program communicating with a separate
 server process over a network socket does not form a "combined work" that triggers
-copyleft extension to that server. The PolyForm obligations that apply to Ythril's
+copyleft extension to that server. The Ythril License obligations that apply to Ythril's
 source code do not extend to `mongod` or `mongot`.
 
 Ythril does not offer MongoDB or `mongot` as a hosted service. SSPL's "Service
@@ -512,7 +512,7 @@ that clause's scope.
 #### Practical consequence for users
 
 Users who deploy Ythril accept the `mongodb/mongodb-atlas-local` image terms
-separately and independently of Ythril's PolyForm license. Ythril's source
+separately and independently of the Ythril License. Ythril's source
 obligations are unaffected.
 
 The dependency on the proprietary `mongot` binary means that the semantic recall

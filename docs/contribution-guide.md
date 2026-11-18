@@ -533,7 +533,7 @@ Code should be boring to read. Clever tricks create maintenance debt.
 
 ### 6. Legal
 
-Ythril ships under the PolyForm Small Business License 1.0.0. Every contribution must respect this. The exception is
+Ythril ships under the Ythril License 1.0.0. Every contribution must respect this. The exception is
 `schema/` (`@ythril-network/schema`), which is Apache-2.0 with its own `schema/LICENSE` and `schema/NOTICE`: a dependency added to
 it is named in `schema/NOTICE` too (a gate reads the package's production closure from the lock file). The one exception is the
 optional peer `typescript` of its `from-typescript` entry: the caller's own, never bundled or installed, so the closure leaves it
@@ -645,13 +645,13 @@ Use conventional-commit-style prefixes:
 
 ## License and contributor agreement
 
-Ythril is distributed under the **PolyForm Small Business License 1.0.0**. See `LICENSE` for the full text. `schema/`
+Ythril is licensed under the **Ythril License 1.0.0**. See `LICENSE` for the full text. `schema/`
 (the `@ythril-network/schema` package) is the exception: it is licensed under the Apache License 2.0 (`schema/LICENSE`).
 
 **Contributing requires signing the Contributor License Agreement (`CLA.md` in the repository root).** It is a licence, not an assignment: **you keep the copyright in everything you write.** What you grant is a licence broad enough for the project to be maintained, redistributed, and — this is the operative part — **licensed to others under different terms in future**, whether commercial, a different open licence, or both.
 
 Signing is one click on your first pull request, via a bot, and it covers every contribution you make afterwards. There is nothing to print and nothing to repeat.
 
-**Why this replaced the previous wording.** This section used to say only that "your contributions are licensed under the same terms". That reads as reassuring and was in fact the problem: a contribution arriving under PolyForm Small Business does **not** carry the right to sublicense or relicense it, so the one sentence that looked like it settled the question was the sentence that would have made a future relicence require the individual agreement of every past contributor. The CLA grants that right explicitly and up front, which is the whole point of having one.
+**Why this replaced the previous wording.** This section used to say only that "your contributions are licensed under the same terms". That reads as reassuring and was in fact the problem: a contribution arriving under the Ythril License does **not** carry the right to sublicense or relicense it, so the one sentence that looked like it settled the question was the sentence that would have made a future relicence require the individual agreement of every past contributor. The CLA grants that right explicitly and up front, which is the whole point of having one.
 
 If a term in the CLA is a blocker for you, open an issue and say so.
