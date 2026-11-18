@@ -10,7 +10,7 @@ import { deleteSpaceData, wipeToolResult } from '../../spaces/delete-space-data.
 import { spacePurpose, unknownWriteFieldsToReport, spaceActPendingField } from '../../spaces/spaces.js';
 import { SPACE_PURPOSE_MAX } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
-import { countRecords } from '../../spaces/space-counts.js';
+import { countRecordsOfSpaces } from '../../spaces/space-counts.js';
 import { spaceForWire } from '../../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
@@ -21,7 +21,7 @@ export const list_spacesTool: ToolHandler = {
   name: 'list_spaces',
   description: 'List every space this token can reach, with ids, labels, purposes and entry counts. CALL THIS FIRST in an unfamiliar instance: every other tool takes a space id, and the ids are not guessable from the labels.\n\n'
     + 'READ THE `purpose`. It is the space owner telling you what belongs there and how to behave in it — conventions, what to write, what not to. A space with a purpose has one because somebody needed you to follow it.\n\n'
-    + 'The counts are what make this a planning tool rather than a directory: an empty space is not worth a recall, and a space with 40 000 records needs a filter rather than a broad query. Your personal views are listed by `view_list`, not here: a view is not a space.\n\n'
+    + 'The counts are what make this a planning tool rather than a directory: an empty space is not worth a recall, and a space with 40 000 records needs a filter rather than a broad query. A space whose count failed has NO `counts` and its id is in `countsIncomplete`, beside `spaces` in the structured answer (absent when every count succeeded): it is not an empty space, so ask `space_stats` for it before leaving it alone. Your personal views are listed by `view_list`, not here: a view is not a space.\n\n'
     + 'STORAGE: `maxGiB` is the space\'s quota and `usageGiB` what its files occupy, the same figures `GET /api/spaces` reports and from the same measurement. `usageGiB` is a FLOOR whenever `usageIncomplete` is present — a directory the instance could not read contributes nothing, and an unreadable space would otherwise be indistinguishable from an empty one. A space with no `maxGiB` has no quota rather than a quota of zero.\n\n'
     + 'Accessibility is per TOKEN. A space absent here is not a space that does not exist; it is one this token holds no rung in.',
   inputSchema: (_s: ToolSchemas) => ({ type: 'object', properties: {}, required: [], additionalProperties: false }),
@@ -36,15 +36,11 @@ export const list_spacesTool: ToolHandler = {
      * an omission, and the schema description was the surface that was wrong.
      */
     const usageBySpaceId = await measureSpaceUsage(accessibleSpaces.map(sp => sp.id));
-    const spaceCountResults = await Promise.allSettled(
-      accessibleSpaces.map(async s => {
-        return { id: s.id, counts: await countRecords(readSpacesOfCall(ctx, s.id)) };
-      }),
+    // A space whose count failed has NO `counts` and is named in `countsIncomplete`, as on `GET /api/spaces?counts=true` (Q-332). It used
+    // to be answered `{ facts: 0, entities: 0, edges: 0, chrono: 0 }`, which is what an empty space answers.
+    const { countsBySpaceId, countsIncomplete } = await countRecordsOfSpaces(
+      accessibleSpaces.map(s => ({ id: s.id, memberIds: readSpacesOfCall(ctx, s.id) })),
     );
-    const countsBySpaceId: Record<string, { facts: number; entities: number; edges: number; chrono: number }> = {};
-    for (const r of spaceCountResults) {
-      if (r.status === 'fulfilled') countsBySpaceId[r.value.id] = r.value.counts;
-    }
     // `purpose` is the field an admin can edit, the one `space_meta` returns, and since 3.0 the only
     // spelling — its `description` alias was removed from every surface in the same release.
     const result = accessibleSpaces.map(s => {
@@ -58,7 +54,7 @@ export const list_spacesTool: ToolHandler = {
       id: s.id,
       label: s.label ?? null,
       purpose: spacePurpose(s) ?? null,
-      counts: countsBySpaceId[s.id] ?? { facts: 0, entities: 0, edges: 0, chrono: 0 },
+      ...(countsBySpaceId[s.id] ? { counts: countsBySpaceId[s.id] } : {}),
       // `null` rather than an omission: a space with no quota is a FACT about that space, and a missing key
       // reads as "this tool does not report quotas" — which is the misunderstanding this whole change fixes.
       maxGiB: s.maxGiB ?? null,
@@ -74,8 +70,9 @@ export const list_spacesTool: ToolHandler = {
       content: [{ type: 'text' as const, text: JSON.stringify(result) }],
       // NAMED, because `structuredContent` must be an object and this tool's text half is a bare array.
       // Naming it here changes nothing about that array: the two halves are the same answer, not the
-      // same bytes.
-      structuredContent: { spaces: result },
+      // same bytes. `countsIncomplete` rides beside the list here, where the bare array of the text half has no room for it:
+      // a space missing from it with no `counts` is the same fact in both halves.
+      structuredContent: { spaces: result, ...(countsIncomplete.length > 0 ? { countsIncomplete } : {}) },
     };
   },
 };
