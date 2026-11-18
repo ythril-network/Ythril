@@ -39,7 +39,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 
@@ -62,7 +62,8 @@ const norm = (p) => p
 function knownRoutes() {
   // What git holds or would hold (committed, or new and not ignored), never the disk: no build output or installed package is in the scan, and this file
   // names neither (a source gate runs before anything is built or installed; `testing/_shared/text-only-test.mjs` refuses a file that names them).
-  const files = trackedSources('server/src', { ext: ['.ts'], floor: 300, untracked: true }).map(f => join(ROOT, f));
+  // Every root of the server's code, as the other route gates read it (`_routes.mjs`); the routers are in the server's tree, and `app.ts` below names it.
+  const files = trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 300, untracked: true }).map(f => join(ROOT, f));
   const sources = new Map(files.map(f => [f, readFileSync(f, 'utf8')]));
 
   // (1) mount prefixes — a router may have several.
