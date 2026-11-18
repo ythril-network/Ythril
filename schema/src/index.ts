@@ -35,6 +35,9 @@ export {
   type ParsedTypeSchema, type ParsedSpaceMeta, type MetaParse, type MetaParseOptions, type WrongKindLibraryRef,
 } from './space-meta.js';
 export { validateSpaceMeta, libraryRefRefusal, type ValidateSpaceMetaOptions } from './validate.js';
+// The body a schema save's `convertRecords` takes (Q-745): named, because a server or an app that accepts it must parse it with the one body. The
+// checks, the canonical text and what a step makes of a record are the server's (`./internal`).
+export { ConvertRecordsZ, type ConvertRecords } from './conversion-steps.js';
 export {
   typesOfSpaceMeta, UNTRANSLATED_REASONS, ENUM_LITERAL_MAX, type TypeScriptOptions, type TypeScriptSource, type Untranslated,
 } from './typescript.js';

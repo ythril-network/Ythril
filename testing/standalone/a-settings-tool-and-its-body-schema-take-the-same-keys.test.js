@@ -5,7 +5,7 @@
  * ## Two parity gates, one file
  *
  *  - **(i) `schema_update` against `SpaceMetaBody`.** The tool's declared properties are the meta body's keys, plus the two
- *    top-level `UpdateSpaceBody` keys it also forwards (`typeSchemasMode`, `targetNetwork`), minus a reasoned `NOT_META` list
+ *    top-level `UpdateSpaceBody` keys it also forwards (`typeSchemasMode`, `targetNetwork`, `convertRecords`), minus a reasoned `NOT_META` list
  *    (EMPTY today, and it may only be added to with a reason). P16 found that nothing compared them: a new meta key reached REST
  *    and not the tool, which is the door-parity defect (y-flows convention `convention-ythril-both-doors-same-parameters`). It holds today (this half is a guard against the next key,
  *    and is NOT red on the unchanged base; its comparison is shown to fail by a control).
@@ -35,6 +35,7 @@ const declared = (name) => Object.keys(ALL_TOOLS.find(t => t.name === name)?.inp
 const SCHEMA_UPDATE_TAKES_TOP_LEVEL = new Map([
   ['typeSchemasMode', 'a top-level body key in the schema area, and the one a `replace` of the type map needs'],
   ['targetNetwork', 'a top-level body key in the networks area: sending a definition to a network'],
+  ['convertRecords', 'a top-level body key in the knowledge area (Q-745): the choice made with a schema change, held out of the meta'],
 ]);
 /** `SpaceMetaBody` keys `schema_update` does not take. EMPTY, and an entry needs its reason. */
 const NOT_META = new Map();
@@ -50,6 +51,7 @@ const EXEMPT = new Map([
   ['meta', 'the container of the meta settings, which `schema_update` writes'],
   ['typeSchemasMode', '`schema_update` takes it (see SCHEMA_UPDATE_TAKES_TOP_LEVEL)'],
   ['targetNetwork', '`schema_update` takes it (see SCHEMA_UPDATE_TAKES_TOP_LEVEL)'],
+  ['convertRecords', '`schema_update` takes it (see SCHEMA_UPDATE_TAKES_TOP_LEVEL): it goes with a schema change, which `update_space` is not'],
   ...['maxGiB', 'recordTtlDays', 'dupeRules', 'dupeMergeSurvivor', 'dupeRulesOnInsert',
     'documentExtraction', 'imageAnalysis', 'audioAnalysis', 'videoAnalysis', 'textAnalysis']
     .map(k => [k, 'an instance-local setting `update_space` does not take yet: Q-500 closes this gap']),

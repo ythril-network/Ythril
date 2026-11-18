@@ -119,6 +119,11 @@ export const SPACE_FIELD_RIGHTS: Readonly<Record<string, FieldRight>> = {
   // It DELETES records on a clock.
   recordTtlDays: area('knowledge', 'admin'),
 
+  // `Q-745`: it can make this instance, and every member of a network the schema change is voted in, REWRITE every record of a type — a mass
+  // write of the knowledge graph that no schema write alone makes. Priced as the other whole-space rewrites are: `recordTtlDays` above and the
+  // `space_reindex` / `space_reembed` rows (`space-rights.ts`), the knowledge area's `admin`. Top level, never `meta.`: it is not part of the schema.
+  convertRecords: area('knowledge', 'admin'),
+
   // Q-320: this instance's answer to a top-level field a brain write does not take. `refuse` makes writes that used to succeed start
   // failing for every caller in the space, so it is priced as the enforcement rows above are: the schema area's `admin`, the rung of
   // `meta.validationMode`. Top level, not `meta.`: it is a local setting, never replicated or voted (`SpaceConfig.unknownWriteFields`).

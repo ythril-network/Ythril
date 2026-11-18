@@ -36,7 +36,7 @@
  * later without `.strict()` fails the build instead of quietly rejoining the lenient half.
  */
 import { z } from 'zod';
-import { SpaceMetaBody, TypeSchemasZ, type ParsedTypeSchema } from '@ythril-network/schema';
+import { SpaceMetaBody, TypeSchemasZ, ConvertRecordsZ, type ParsedTypeSchema } from '@ythril-network/schema';
 import './library-ref-expansion.js';
 import { isSsrfSafeUrl, SSRF_SAFE_MESSAGE } from '../util/ssrf.js';
 import { DOC_EXTRACTION_MODES_IN, IMAGE_LEVELS, AUDIO_LEVELS, VIDEO_LEVELS, TEXT_LEVELS } from '../config/types.js';
@@ -171,6 +171,8 @@ const TtlWindowZ = z.number().int().nonnegative().max(36500).nullable().optional
 const UPDATABLE = [
   'label', 'maxGiB', 'meta', 'dupeRules', 'dupeMergeSurvivor', 'dupeRulesOnInsert', 'recordTtlDays',
   'documentExtraction', 'imageAnalysis', 'audioAnalysis', 'videoAnalysis', 'textAnalysis', 'completeLinkage', 'unknownWriteFields',
+  // Asked for on its own, it is an empty request the planner can say what is missing from (`convert_needs_meta`), not one this guard words as "nothing sent".
+  'convertRecords',
 ] as const;
 
 export const UpdateSpaceBody = z.object({
@@ -211,6 +213,13 @@ export const UpdateSpaceBody = z.object({
    * because nothing else about a space is the network's to vote on.
    */
   targetNetwork: z.string().uuid().optional(),
+  /**
+   * What to do with the records already stored when this schema change lands (`Q-745`): conversion steps (rename a property, map an enum value,
+   * rename or split a type), or `{}` to stamp what conforms and rewrite nothing. A TOP-LEVEL key and never a meta field: it is not part of the
+   * schema, it is the choice made with the change, so it is held out of the meta on every door and carried by a network's round beside the meta.
+   * Checked against the schema before and after the edit by the planner, which refuses a bad step whole (`bad_conversion_step`).
+   */
+  convertRecords: ConvertRecordsZ.optional(),
   dupeRules: z.array(DupeActionRuleBody).max(20).optional(),
   dupeMergeSurvivor: z.enum(['older', 'newer']).optional(),
   dupeRulesOnInsert: z.boolean().optional(),

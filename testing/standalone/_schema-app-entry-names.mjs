@@ -14,7 +14,7 @@
 
 /** The app entry's values. */
 export const APP_VALUES = [
-  'ALL_VIEW_FIELDS', 'BOOLEAN_MERGE_FNS', 'DATE_PASSED_VALUES', 'ENUM_LITERAL_MAX', 'EndpointMemberZ', 'InlineTypeSchemaZ', 'KNOWLEDGE_TYPES',
+  'ALL_VIEW_FIELDS', 'BOOLEAN_MERGE_FNS', 'ConvertRecordsZ', 'DATE_PASSED_VALUES', 'ENUM_LITERAL_MAX', 'EndpointMemberZ', 'InlineTypeSchemaZ', 'KNOWLEDGE_TYPES',
   'LIBRARY_REF_PREFIX', 'LIBRARY_SCHEMA_KEYS', 'LOG_VALUE_MAX', 'LONGEST_CHECKED_STRING', 'MAX_APPLICABLE_RULES', 'MAX_MESSAGE_LENGTH',
   'MAX_PATTERN_LENGTH', 'MAX_RULES_PER_SPACE', 'MAX_RULES_PER_TYPE', 'MAX_RULE_LENGTH', 'MAX_UNKNOWN_NAMES', 'MERGE_FNS',
   'META_FIELD_KINDS', 'NAME_QUOTED', 'NUMERIC_MERGE_FNS', 'PER_TYPE_META_FIELD', 'PROPERTY_DESCRIPTION_MAX', 'PropertySchemaZ',
@@ -40,7 +40,7 @@ export const FROM_TYPESCRIPT_TYPES = ['FromTypeScriptOptions', 'FromTypeScriptRe
 
 /** The app entry's types (names with no value). */
 export const APP_TYPES = [
-  'BooleanMergeFn', 'ChangedRuleParts', 'DatePassedPolicy', 'KnowledgeType', 'MergeFn', 'MetaFieldKind', 'MetaParse',
+  'BooleanMergeFn', 'ChangedRuleParts', 'ConvertRecords', 'DatePassedPolicy', 'KnowledgeType', 'MergeFn', 'MetaFieldKind', 'MetaParse',
   'MetaParseOptions', 'NumericMergeFn', 'ParseIssueLike', 'ParseRefusal', 'ParseRefusalIssue', 'ParseRefusalOptions', 'ParsedSpaceMeta',
   'ParsedTypeSchema', 'PropertySchema', 'RuleIssue', 'SchemaLibraryEntryLike', 'SchemaLibrarySource', 'SchemaRule', 'SpaceMeta',
   'SpaceSchemaRule', 'TypeSchema', 'TypeScriptOptions', 'TypeScriptSource', 'Untranslated', 'ValidateSpaceMetaOptions', 'ValidationMode',

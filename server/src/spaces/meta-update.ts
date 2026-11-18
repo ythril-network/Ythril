@@ -24,14 +24,19 @@
  * ## The ORDER is part of the contract, not an implementation detail
  *
  * `space-meta-update-contract.test.js` pins it, because a refactor loses it silently. Existence, then the
- * precondition, then the body, then the schema-library refs. A precondition evaluated after validation is not a
+ * precondition, then the body, then the schema-library refs, then — once the merge has said what the schema becomes — the
+ * conversion steps held to the schema before and after it (`Q-745`; a step is held to the schema the edit LEAVES, so it
+ * cannot be asked sooner, and a plan with a bad step is never returned). A precondition evaluated after validation is not a
  * precondition — it reports a body problem for a write that was never allowed to be applied, and the caller hits
  * the real conflict on their second attempt instead of their first. And a rejected write must change NOTHING,
  * which is why the audit snapshot is returned in the plan rather than taken as we go.
  */
 import { localToRemote } from '../sync/space-map.js';
-import { replicatedMetaOf } from '../sync/replicated-meta.js';
-import type { SpaceConfig, SpaceMeta, DocExtractionMode, NetworkConfig } from '../config/types.js';
+import { replicatedMetaOf, effectiveMeta } from '../sync/replicated-meta.js';
+import { layersFor } from './network-layers.js';
+import { inlineResolvableRefs } from './schema-validation.js';
+import { conversionStepIssues, CONVERSION_STEPS_MAX, type ConvertRecords, type ConversionMeta } from '@ythril-network/schema/internal';
+import type { SpaceConfig, SpaceMeta, DocExtractionMode, NetworkConfig, Config } from '../config/types.js';
 import { normalizeDocExtractionMode } from '../config/types.js';
 import { getConfig, saveConfig, getDocumentProcessingConfig } from '../config/loader.js';
 import { updateSpace, refuseRemovedDescription, unknownWriteFieldsMode } from './spaces.js';
@@ -192,8 +197,51 @@ function memberSkewWarnings(skew: readonly MemberSkew[], caller: WriteCaller): R
  */
 export type MetaUpdateRefusal = {
   status: 400 | 404 | 410 | 412 | 422;
-  body: { error: string; code?: string; expectedVersion?: number; currentVersion?: number };
+  /** `step` is the index of the conversion step a `bad_conversion_step` refusal names (`Q-745`). */
+  body: { error: string; code?: string; expectedVersion?: number; currentVersion?: number; step?: number };
 };
+
+/**
+ * The refusal of a body whose `convertRecords` does not parse, said as `bad_conversion_step` with the index of the step (`Q-745`), or `undefined` when
+ * the failure is not all under `convertRecords` (a body with another fault too keeps its one generic answer, which names every path).
+ *
+ * The parse refuses a step that is not a step (an unknown op, a missing field) and a list over the bound before the planner can hold any step to the
+ * schema, so without this the same mistake answered by two codes depending on which check saw it first. A list over the bound names the first step
+ * past it, as `conversionStepIssues` does; a failure with no step in its path (an unknown key of `convertRecords`) names no step.
+ */
+function badConversionStepRefusal(refusal: { error: string; issues: readonly { path: readonly string[] }[] }): MetaUpdateRefusal | undefined {
+  const { issues } = refusal;
+  if (issues.length === 0 || !issues.every(i => i.path[0] === 'convertRecords')) return undefined;
+  const first = issues[0]!.path;
+  const at = first[1] === 'steps' && first[2] !== undefined ? Number(first[2]) : first[1] === 'steps' && first.length === 2 ? CONVERSION_STEPS_MAX : NaN;
+  return { status: 400, body: { ...refusal, code: 'bad_conversion_step', ...(Number.isInteger(at) ? { step: at } : {}) } };
+}
+
+/**
+ * The effective meta of `space` once an edit has landed (`Q-745`): the schema a conversion step is held to AFTER the change, as the stamp reads a
+ * schema — own definitions laid under each network's layer (`effectiveMeta`).
+ *
+ * - An edit to this instance's own definitions replaces them with the merged meta; on a space in a network a `replace` is applied as a MERGE on every
+ *   member, because deleting a type in a network can break another member (`typesAReplaceWouldDrop`), so the types it leaves out are still there.
+ * - An edit to ONE network's layer (`targetNetwork`) replaces that layer and leaves the own definitions as they are.
+ */
+function effectiveMetaAfterEdit(cfg: Config, space: SpaceConfig, edit: {
+  base: Partial<SpaceMeta>; incoming: Partial<SpaceMeta>; mode: 'merge' | 'replace'; merged: ParsedSpaceMeta; targetNetwork: string | undefined;
+}): SpaceMeta {
+  const layers = layersFor(cfg, space.id);
+  if (edit.targetNetwork !== undefined) {
+    const replaced = { networkId: edit.targetNetwork, meta: edit.merged };
+    const among = layers.some(l => l.networkId === edit.targetNetwork)
+      ? layers.map(l => (l.networkId === edit.targetNetwork ? replaced : l)) : [...layers, replaced];
+    return effectiveMeta(space.ownMeta ?? space.meta, among);
+  }
+  const networked = cfg.networks.some(n => n.spaces.includes(space.id));
+  const own = networked && edit.mode === 'replace' ? mergeSpaceMeta(edit.base, edit.incoming, 'merge') : edit.merged;
+  return effectiveMeta(own as SpaceMeta, layers);
+}
+
+/** A meta as a conversion step reads it: resolved, library `$ref`s inlined as the fingerprint takes them. */
+const resolvedForSteps = (meta: Partial<SpaceMeta> | undefined): ConversionMeta => inlineResolvableRefs(meta ?? {}) as ConversionMeta;
 
 /** What a caller must write, with every decision already made. */
 export type MetaUpdatePlan = {
@@ -231,6 +279,12 @@ export type MetaUpdatePlan = {
   droppedTypes: string[];
   /** `kind:Type` the edit adds or changes against the base (`typesAnEditChanges`). */
   changedTypes: string[];
+  /**
+   * What the caller chose to do with the records already stored, once its steps were held to the schema before and after the edit (`Q-745`):
+   * conversion steps, or `{}` to stamp only. Absent when the request named none. Never part of the meta stored: a round carries it beside the meta,
+   * and the outcome hands it on ({@link ConvertCarried}).
+   */
+  convertRecords?: ConvertRecords;
 };
 
 export type MetaUpdateDecision =
@@ -283,7 +337,14 @@ export function planSpaceMetaUpdate(input: {
   if (!parsed.success) {
     const refusal = refusalOfParse(parsed.error);
     log.warn(`space update refused: ${peerText(refusal.error)}`);
-    return { ok: false, refusal: { status: 400, body: refusal } };
+    return { ok: false, refusal: badConversionStepRefusal(refusal) ?? { status: 400, body: refusal } };
+  }
+  // A conversion step is held to a schema, and a request with no meta has no schema to hold it to: refused here, before anything else is read.
+  if (parsed.data.convertRecords !== undefined && parsed.data.meta === undefined) {
+    return { ok: false, refusal: { status: 400, body: {
+      error: 'convertRecords goes with a schema change: send it with a meta (a conversion step is held to the schema before and after the change)',
+      code: 'convert_needs_meta',
+    } } };
   }
 
   // Validate any $ref values in the incoming meta against the instance schema library: an entry that does not exist, or one of ANOTHER
@@ -346,7 +407,7 @@ export function planSpaceMetaUpdate(input: {
   // The networks are read only for a write that targets one: a write to the own definitions asks nothing of the config.
   const writeBase = metaWriteBase(space, targetNetwork, targetNetwork === undefined ? [] : getConfig().networks);
   if (targetNetwork !== undefined) {
-    const extra = Object.keys(parsed.data).filter(k => !['meta', 'typeSchemasMode', 'targetNetwork'].includes(k)
+    const extra = Object.keys(parsed.data).filter(k => !['meta', 'typeSchemasMode', 'targetNetwork', 'convertRecords'].includes(k)
       && (parsed.data as Record<string, unknown>)[k] !== undefined);
     if (extra.length) {
       return { ok: false, refusal: { status: 400, body: { error: `targetNetwork proposes that network's schema only: send meta (and typeSchemasMode), not ${extra.join(', ')}` } } };
@@ -387,6 +448,24 @@ export function planSpaceMetaUpdate(input: {
   }
   const changedTypes = typesAnEditChanges(base, parsed.data.meta as Partial<SpaceMeta> | undefined);
 
+  // `Q-745`: the steps, held to the schema BEFORE the edit (what the space runs now) and the schema AFTER it (what the merge above leaves, laid under
+  // the networks' layers). Here, after the merge and before the plan is returned, because a step is held to the schema the edit leaves, and a save that
+  // stored first and found the step wrong later would leave the new schema with no conversion — or, on a network, a round carrying the bad step to every
+  // member. `{}` has no step and reads nothing. The first refusal answers; the refusal names the step.
+  const convertRecords = parsed.data.convertRecords;
+  const steps = convertRecords?.steps ?? [];
+  if (steps.length > 0 && mergedMeta !== undefined) {
+    const after = effectiveMetaAfterEdit(getConfig(), space, {
+      base, incoming: parsed.data.meta as Partial<SpaceMeta>, mode: parsed.data.typeSchemasMode ?? 'merge', merged: mergedMeta, targetNetwork,
+    });
+    const issue = conversionStepIssues(steps, resolvedForSteps(space.meta), resolvedForSteps(after))[0];
+    if (issue) {
+      return { ok: false, refusal: { status: 400, body: {
+        error: `convertRecords.steps[${issue.step}]: ${issue.message}`, code: 'bad_conversion_step', step: issue.step,
+      } } };
+    }
+  }
+
   return {
     ok: true,
     plan: {
@@ -404,6 +483,7 @@ export function planSpaceMetaUpdate(input: {
       ...(targetNetwork !== undefined ? { targetNetwork } : {}),
       droppedTypes: typesAReplaceWouldDrop(base, parsed.data.meta as Partial<SpaceMeta> | undefined, parsed.data.typeSchemasMode ?? 'merge'),
       changedTypes,
+      ...(convertRecords !== undefined ? { convertRecords } : {}),
     },
   };
 }
@@ -416,9 +496,25 @@ export function planSpaceMetaUpdate(input: {
  * into "ok" would tell an agent its schema was written when it was not.
  */
 export type MetaUpdateOutcome =
-  | ({ outcome: 'applied'; space: SpaceConfig; keptTypes?: string[] } & NetworkedWrite)
-  | ({ outcome: 'vote_pending'; rounds: RoundAnswer[]; keptTypes?: string[] } & NetworkedWrite)
+  | ({ outcome: 'applied'; space: SpaceConfig; keptTypes?: string[] } & NetworkedWrite & ConvertCarried)
+  | ({ outcome: 'vote_pending'; rounds: RoundAnswer[]; keptTypes?: string[] } & NetworkedWrite & ConvertCarried)
   | { outcome: 'not_found' };
+
+/**
+ * What a save that chose a conversion hands on to the run that is started from it (`Q-745`): the steps it checked, the types the edit changed and the
+ * types a `replace` left out (kept on a networked space). Present only when the request carried `convertRecords`. The run is started from this by the
+ * one place that starts it; nothing here calls anything, so the checked steps and the types they apply to are what a later step reads and never
+ * something it derives again from the request.
+ */
+export interface ConvertCarried {
+  convert?: { convertRecords: ConvertRecords; changedTypes: string[]; droppedTypes: string[] };
+}
+
+/** The {@link ConvertCarried} of a plan: nothing for a plan that chose no conversion. */
+function convertCarriedBy(plan: MetaUpdatePlan): ConvertCarried {
+  return plan.convertRecords === undefined ? {}
+    : { convert: { convertRecords: plan.convertRecords, changedTypes: plan.changedTypes, droppedTypes: plan.droppedTypes } };
+}
 
 /** What a write to a space in networks became in ONE of them: its round passed on this instance's own vote, or is open (R5-1). */
 export interface LayerOutcome {
@@ -538,6 +634,9 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
           // Q-61: what the change note says when the round passes (`sync/governance.ts`).
           ...(plan.changedTypes.length ? { changedTypes: plan.changedTypes } : {}),
           ...(plan.droppedTypes.length ? { keptTypes: plan.droppedTypes } : {}),
+          // `Q-745`: the choice made with the change travels with it, so every member decides for itself what to do with its own records. Bound to
+          // this instance by the `csig` the open path signs over it (`makeSignedOwnCast`); a round that chose nothing carries no key and no `csig`.
+          ...(plan.convertRecords !== undefined ? { convertRecords: plan.convertRecords } : {}),
         });
         const concluded = decided === 'passed';
         if (!concluded) rounds.push(answer);
@@ -567,13 +666,13 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
       if (Object.keys(nonMetaUpdates).length > 0) updateSpace(id, nonMetaUpdates);
       else saveConfig(cfg);
 
-      if (rounds.length > 0) return { outcome: 'vote_pending', rounds, ...kept, ...reached };
+      if (rounds.length > 0) return { outcome: 'vote_pending', rounds, ...kept, ...reached, ...convertCarriedBy(plan) };
 
       // Every round passed on the proposer's own vote, so the meta is already written by the conclusion — and swept by
       // it: the conclusion writes through `updateSpace`, which asks for the sweep (a second one here swept it twice).
       const applied = getConfig().spaces.find(s => s.id === id);
       if (!applied) return { outcome: 'not_found' };
-      return { outcome: 'applied', space: applied, ...kept, ...reached };
+      return { outcome: 'applied', space: applied, ...kept, ...reached, ...convertCarriedBy(plan) };
     }
   }
 
@@ -581,10 +680,13 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   // values, and letting the raw body through here overwrote that with itself — so a partial TTL write cleared the
   // four buckets it did not mention, and an all-cleared write stored five explicit nulls instead of nothing. Both
   // returned 200 and looked like they had worked; found by driving the UI.
-  // `unknownWriteFields` was applied above for every request, so it leaves the spread too: exactly one site writes it. All three leave in this
-  // ONE destructure, whatever their spelling: `record-ttl-buckets.test.js` holds the RULE (a partial TTL write through `applySpaceMetaUpdate`
-  // never clears a bucket it did not name), not this text.
-  const { documentExtraction: _rawMode, recordTtlDays: _rawTtl, unknownWriteFields: _rawUnknownWriteFields, ...storablePatch } = patchData;
+  // `unknownWriteFields` was applied above for every request, so it leaves the spread too: exactly one site writes it. `convertRecords` leaves it
+  // as well, and for the opposite reason: it is never applied as a setting at all (the choice made with the change, carried by the outcome and a
+  // network's round), so nothing of it may reach the space. Each of them leaves in this ONE destructure, whatever its spelling:
+  // `record-ttl-buckets.test.js` holds the RULE (a partial TTL write through `applySpaceMetaUpdate` never clears a bucket it did not name), not this text.
+  const {
+    documentExtraction: _rawMode, recordTtlDays: _rawTtl, unknownWriteFields: _rawUnknownWriteFields, convertRecords: _heldOutOfTheSpace, ...storablePatch
+  } = patchData;
   // F-39.2: a space in no network has no layer, so its own definitions ARE the edited meta — kept in step, or a stale
   // `ownMeta` would come back the next time a network sends this space a layer.
   const held = getConfig().spaces.find(s => s.id === id);
@@ -596,7 +698,7 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   });
   // The stored vectors follow the flag, which is what the userguide has always said happens: `updateSpace` asks for
   // the sweep, not awaited — see `sweepAfterMetaWrite` for why a failure is logged rather than surfaced here.
-  return updated ? { outcome: 'applied', space: updated } : { outcome: 'not_found' };
+  return updated ? { outcome: 'applied', space: updated, ...convertCarriedBy(plan) } : { outcome: 'not_found' };
 }
 
 /**
