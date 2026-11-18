@@ -27,9 +27,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { REPO_ROOT } from './_sources.mjs';
+import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { makeScratchRepo } from '../_shared/scratch-git-repo.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
 import { importOrFail } from '../_shared/import-or-fail.mjs';
@@ -55,12 +55,16 @@ describe('the standalone runner runs the text kind and the pure kind apart', () 
     for (let i = 1; i <= 30; i++) writeFileSync(join(dir, `testing/standalone/db-${i}.test.js`), "import { openTestMongo } from './_mongo-harness.mjs';\nvoid openTestMongo;\n");
     for (let i = 1; i <= 20; i++) writeFileSync(join(dir, `testing/_shared/helper-${i}.mjs`), 'export {};\n');
     if (built) {
-      // A build the runner accepts: the source is older than the built entry point.
-      mkdirSync(join(dir, 'server/src'), { recursive: true });
-      mkdirSync(join(dir, 'server/dist'), { recursive: true });
-      writeFileSync(join(dir, 'server/src/a.ts'), 'export {};\n');
-      writeFileSync(join(dir, 'server/dist/index.js'), 'export {};\n');
-      utimesSync(join(dir, 'server/src/a.ts'), new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+      // The builds the runner accepts: for each root of the server's code (the server and the schema package it imports), the source is older than the
+      // built entry point of its sibling dist (`_shared/stale-build.mjs` refuses a missing or older one).
+      for (const src of SERVER_CODE_ROOTS) {
+        const pkg = dirname(src);
+        mkdirSync(join(dir, src), { recursive: true });
+        mkdirSync(join(dir, pkg, 'dist'), { recursive: true });
+        writeFileSync(join(dir, src, 'a.ts'), 'export {};\n');
+        writeFileSync(join(dir, pkg, 'dist/index.js'), 'export {};\n');
+        utimesSync(join(dir, src, 'a.ts'), new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+      }
     }
     repo.git('add', '-A');
     return repo;
@@ -83,7 +87,7 @@ describe('the standalone runner runs the text kind and the pure kind apart', () 
       assert.equal(r.status, 0, `--only=text did not run clean: ${r.out.slice(0, 1500)}`);
       assert.equal(r.text.size, TEXT_FILES, `the text kind ran ${r.text.size} file(s), not ${TEXT_FILES}:\n${r.out.slice(0, 1500)}`);
       assert.equal(r.pure.size, 0, 'a file that names the server build ran under --only=text');
-      assert.doesNotMatch(r.out, /server\/dist is missing/, 'the text kind was refused for a missing server build it does not need');
+      assert.doesNotMatch(r.out, /\b(?:server|schema)\/dist\b[^\n]*\bmissing\b|\bis missing\b/, 'the text kind was refused for a missing server or schema build it does not need');
     } finally { repo.cleanup(); }
   });
 
@@ -95,6 +99,22 @@ describe('the standalone runner runs the text kind and the pure kind apart', () 
       assert.equal(r.pure.size, PURE_FILES, `the pure kind ran ${r.pure.size} file(s), not ${PURE_FILES}`);
       assert.equal(r.text.size, 0, 'a text-only file ran under --only=pure as well, so it runs twice in CI');
     } finally { repo.cleanup(); }
+  });
+
+  it('the pure kind is refused for a missing build of any root of the server code, and the text kind runs clean in the same checkout', () => {
+    for (const src of SERVER_CODE_ROOTS) {
+      const pkg = dirname(src);
+      const repo = checkout({ built: true });
+      try {
+        rmSync(join(repo.dir, pkg, 'dist'), { recursive: true, force: true });
+        const pure = runIn(repo, ['--only=pure']);
+        assert.equal(pure.status, 1, `--only=pure ran without ${pkg}/dist: ${pure.out.slice(0, 800)}`);
+        assert.match(pure.out, new RegExp(`${pkg}/dist/index\\.js is missing`), `the refusal does not name ${pkg}/dist`);
+        const text = runIn(repo, ['--only=text']);
+        assert.equal(text.status, 0, `--only=text needed ${pkg}/dist: ${text.out.slice(0, 800)}`);
+        assert.equal(text.text.size, TEXT_FILES);
+      } finally { repo.cleanup(); }
+    }
   });
 
   it('an unknown value is still refused, and the refusal lists the text kind among the values the runner knows', () => {

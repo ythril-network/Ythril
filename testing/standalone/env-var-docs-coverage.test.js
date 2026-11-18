@@ -40,7 +40,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isAmbient } from '../_shared/env-var-reads.mjs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 
@@ -150,7 +150,8 @@ function collectUsage() {
   const files = [
     // What git holds or would hold (committed, or new and not ignored), never the disk: no build output or installed package is in the scan, and this
     // file names neither (a source gate runs before anything is built or installed; `testing/_shared/text-only-test.mjs` refuses a file that names them).
-    ...trackedSources('server/src', { ext: ['.ts'], floor: 300, untracked: true }).map(f => join(ROOT, f)),
+    // The server's code is every root of SERVER_CODE_ROOTS: the schema package is imported and run by the server, so a variable it reads is read by the server.
+    ...trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 300, untracked: true }).map(f => join(ROOT, f)),
     ...trackedSources('sidecars', { ext: ['.py'], floor: 1, untracked: true }).map(f => join(ROOT, f)),
     ...['docker-compose.yml', 'Dockerfile'].map(f => join(ROOT, f)).filter(existsSync),
   ];
