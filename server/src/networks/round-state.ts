@@ -113,6 +113,17 @@ export function spaceAdditionOwed(r: PassedRoundReadable): boolean {
 }
 
 /**
+ * A passed, unvetoed `meta_change` round that carries conversion steps (`convertRecords`) and whose conversion run this instance has not yet started
+ * and marked (`appliedHere`, written once the run document exists) (`Q-746`, decision 12). THE predicate of "a round's run still owed here": read by
+ * the owed-round sweep that starts it (`sync/governance.ts`, `startOwedRoundConversions`) and by the prune, which keeps such a round past its
+ * deadline (`sync/vote-round-retention.ts`), so a round the sweep still owes is never pruned from under it. A sibling of {@link spaceActOwed} on the
+ * same veto ({@link roundPassedUnvetoed}).
+ */
+export function roundConversionOwed(r: PassedRoundReadable & { convertRecords?: unknown }): boolean {
+  return r.type === 'meta_change' && r.convertRecords !== undefined && roundPassedUnvetoed(r) && r.appliedHere !== true;
+}
+
+/**
  * The round types a peer still needs after they end: a round whose effect every member applies is served after it passes, because its
  * proposer may have decided it at open (design v5 §3.1). `join` and `remove` stay out.
  */

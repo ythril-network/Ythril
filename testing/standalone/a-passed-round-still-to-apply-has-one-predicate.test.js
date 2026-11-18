@@ -67,6 +67,16 @@ describe('the owed predicates, over the truth table', () => {
     assert.equal(state.spaceActApplied(round({ passed: false, appliedHere: true })), false);
   });
 
+  it('a schema round\'s conversion run owed is the same question, with the same veto, and only for a round that carries steps', () => {
+    const schema = (over = {}) => round({ type: 'meta_change', convertRecords: { steps: [] }, ...over });
+    assert.equal(state.roundConversionOwed(schema()), true);
+    assert.equal(state.roundConversionOwed(schema({ votes: [{ vote: 'veto' }] })), false);
+    assert.equal(state.roundConversionOwed(schema({ appliedHere: true })), false);
+    assert.equal(state.roundConversionOwed(schema({ passed: false })), false);
+    assert.equal(state.roundConversionOwed(schema({ convertRecords: undefined })), false, 'a round with no steps owes no run');
+    assert.equal(state.roundConversionOwed(round()), false, 'a wipe is no schema round');
+  });
+
   it('the act types are the pair, and a type nobody knows is no act', () => {
     for (const type of ['space_deletion', 'space_wipe']) assert.equal(state.isSpaceActRound(type), true);
     for (const type of ['space_addition', 'meta_change', 'join', 'remove', '', undefined, null, 7]) assert.equal(state.isSpaceActRound(type), false, String(type));
