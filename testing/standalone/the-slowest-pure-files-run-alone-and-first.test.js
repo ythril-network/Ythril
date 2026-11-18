@@ -41,7 +41,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './_sources.mjs';
 import { makeScratchRepo } from '../_shared/scratch-git-repo.mjs';
@@ -260,7 +260,9 @@ test(${JSON.stringify(`ran ${label} runner-args`)} + ' ' + args, () => {});
         try { listed = readdirSync(folder).filter(f => new RegExp(`^preflight-${stage}-\\d+\\.jsonl$`).test(f)); } catch { /* none written */ }
         for (const f of listed) {
           for (const line of readFileSync(join(folder, f), 'utf8').split(/\r?\n/)) {
-            try { const row = JSON.parse(line); if (row.type === 'file') names.add(String(row.file)); } catch { /* not a data line */ }
+            // A row's `file` is relative to the repository that holds the timing reporter (this one), not to the scratch checkout the planted run ran in, so a
+            // file of the scratch checkout reads `../tmp/<scratch>/testing/...`: put it back relative to the checkout.
+            try { const row = JSON.parse(line); if (row.type === 'file') names.add(relative(dir, resolve(REPO_ROOT, String(row.file))).replaceAll('\\', '/')); } catch { /* not a data line */ }
           }
         }
         return [...names].sort();
