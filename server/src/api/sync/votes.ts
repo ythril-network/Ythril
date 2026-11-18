@@ -16,6 +16,7 @@ import { settleRounds } from '../../networks/round-conclusion.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { requireNetworkStanding } from '../../auth/network-standing.js';
 import { memberView } from '../../networks/member-view.js';
+import { castReplaces } from '../../sync/served-rounds.js';
 
 export const syncVotesRouter = Router();
 
@@ -110,10 +111,11 @@ syncVotesRouter.post('/networks/:networkId/votes/:roundId', syncRateLimit, requi
       return;
     }
 
-    // Deduplicate: replace existing vote from this instance if present
+    // Deduplicate: a held cast of the same voter is replaced only as the gossip merge replaces it (`castReplaces`, the one rule): a different vote or
+    // signature replaces it, a relayed copy of the same vote never strips the proposer's `csig` the held one carries, and a verifying `csig` is gained.
     const existing = round.votes.findIndex(v => v.instanceId === cast.instanceId);
-    if (existing >= 0) { round.votes[existing] = cast; }
-    else { round.votes.push(cast); }
+    if (existing < 0) round.votes.push(cast);
+    else if (castReplaces(net, round, round.votes[existing]!, cast)) round.votes[existing] = cast;
 
     // Check if the round should auto-conclude, and apply what its conclusion does here. A peer's yes can be the one that
     // carries the round, so this path must apply it too — through the one function every conclusion site calls.
