@@ -259,6 +259,34 @@ export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView,
   return rows;
 }
 
+// ── Run time of a conversion: one split condition on one record ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Whether the split condition `text` holds for `view`, a `kind` record of the type the split moves records out of, whose declared
+ * properties the run stored as `declared` when it was created (never read from the live meta, which may no longer hold that type).
+ * `true` or `false`, or `'could_not_evaluate'` (the engine is not available, the condition no longer compiles against `declared`, a value
+ * it reads is over the input caps, the engine failed or did not answer true or false), which makes the record not convertible.
+ *
+ * Run as {@link evaluateRules} runs a type rule, through the same compiled-program cache (`programFor`) and the same `self`, with one
+ * difference the split needs: a condition that reads a property the record lacks answers `false` (its case does not match), where a rule
+ * that reads one does not apply.
+ */
+export function evaluateCondition(kind: ViewKind, declared: readonly string[], text: string, view: RecordView): boolean | 'could_not_evaluate' {
+  if (!ruleEngineAvailable()) return 'could_not_evaluate';
+  const program = programFor(kind, 'type', new Set(declared), text);
+  if (!program.ok) return 'could_not_evaluate';
+  if ([...program.refs.props].some(p => !Object.hasOwn(view.properties, p))) return false;
+  const self = engineSelf(kind, view);
+  if (tooLarge(program.refs, self)) return 'could_not_evaluate';
+  evaluations++;
+  const t0 = performance.now();
+  const out = program.run({ self });
+  const seconds = (performance.now() - t0) / 1000;
+  for (const observe of durationObservers) observe(seconds);
+  if (cel!.isCelError(out) || typeof out !== 'boolean') return 'could_not_evaluate';
+  return out;
+}
+
 // ── Stored rules that went bad: named, counted, said once ───────────────────────────────────────────────────────────────────────────
 
 /**
