@@ -468,7 +468,7 @@ export function useSchemaConvertRuns(runs: SchemaConvertRuns): void { convertRun
 
 /** The run module's functions, or a throw naming what was never wired: a start without them is a failure said, never a run silently not made. */
 function runsOrThrow(): SchemaConvertRuns {
-  if (!convertRuns) throw new Error('the schema conversion run was never wired into governance (useSchemaConvertRuns): spaces/meta-update.js is not loaded');
+  if (!convertRuns) throw new Error('the schema conversion run was never wired into governance (useSchemaConvertRuns): api/spaces.js is not loaded');
   return convertRuns;
 }
 

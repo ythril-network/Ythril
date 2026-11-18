@@ -63,8 +63,8 @@ import { startOwedRoundConversions } from '../sync/governance.js';
 
 /** The operation of the one internal audit entry a finished run writes: declared in the audit middleware beside the other operations no route produces, re-exported here for the run's own readers. */
 export { SCHEMA_CONVERT_RUN_OPERATION };
-/** The most types one start may name. */
-export const SCHEMA_CONVERT_TYPES_MAX = 50;
+/** The most types one start may name: a term the doors share (`schema-convert-terms.ts`), re-exported for the run's own readers. */
+export { SCHEMA_CONVERT_TYPES_MAX } from './schema-convert-terms.js';
 /** Records read per page. */
 export const SCHEMA_CONVERT_PAGE_SIZE = 100;
 /** A sweeper renews its lease with every page; one that has not for this long died, and another may take the run. */

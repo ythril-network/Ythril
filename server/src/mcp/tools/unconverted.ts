@@ -11,14 +11,38 @@
  *
  * Registered in `mcp/tools/index.ts`, priced in `TOOL_RIGHTS` and named in `MCP_TOOL_OPERATIONS`. A dismissal hands the audit entry what it did
  * (`ctx.recordAuditChanges`: the item id, or the filter, `expect` and count), which the operation's allowlist cuts to scalars.
+ *
+ * ## The acts are handed in, never imported
+ *
+ * This module is registered by the tools index, a module of the server's largest import cycle, so a module it imports joins that cycle unless it
+ * reaches nothing of it. The acts reach the item store and the brain's readers, so this module does not name them: it reads the terms both
+ * doors share from `spaces/unconverted-terms.ts` and is handed the three acts through {@link useUnconvertedActs}, which the route module
+ * (`api/spaces-unconverted.ts`, mounted by the application at its load) calls. A call before anything wired them throws, naming the port.
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import {
-  listUnconvertedAct, dismissUnconvertedAct, dismissShownUnconvertedAct, refusalBody, UNCONVERTED_REFUSAL_CODES, type UnconvertedRow,
-} from '../../spaces/unconverted-acts.js';
-import { UNCONVERTED_DISMISS_MAX } from '../../brain/schema-convert-items.js';
+  refusalBody, UNCONVERTED_REFUSAL_CODES, UNCONVERTED_DISMISS_MAX, type UnconvertedRow, type UnconvertedActResult, type UnconvertedCaller,
+} from '../../spaces/unconverted-terms.js';
 import { toolRefusalOfAct } from '../../util/errors.js';
 import { dismissChanges, dismissShownChanges } from '../../audit/audit-changes.js';
+
+/** The three acts the tools run (`spaces/unconverted-acts.ts`): method syntax, so the acts' own parameter types are accepted as they are. */
+export interface UnconvertedActs {
+  list(spaceId: string, params: Record<string, unknown>, caller: UnconvertedCaller): Promise<UnconvertedActResult>;
+  dismiss(spaceId: string, itemId: unknown, caller: UnconvertedCaller): Promise<UnconvertedActResult>;
+  dismissShown(spaceId: string, params: Record<string, unknown>, caller: UnconvertedCaller): Promise<UnconvertedActResult>;
+}
+
+let unconvertedActs: UnconvertedActs | undefined;
+
+/** Hand this module the acts it runs (once, at the load of the module that mounts their routes). */
+export function useUnconvertedActs(acts: UnconvertedActs): void { unconvertedActs = acts; }
+
+/** The acts, or a throw naming what was never wired: a call is a failure said, never an answer made up here. */
+function actsOrThrow(): UnconvertedActs {
+  if (!unconvertedActs) throw new Error('the unconverted-record acts were never wired into the MCP tools (useUnconvertedActs): api/spaces-unconverted.js is not loaded');
+  return unconvertedActs;
+}
 
 /** The refusal codes a list can answer: the filters, the paging and the rung. */
 const LIST_CODES: ReadonlySet<string> = new Set([
@@ -69,7 +93,7 @@ export const list_unconvertedTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { kind, type, reason, status, skip, limit } = ctx.args;
-    const r = await listUnconvertedAct(ctx.callSpace, { kind, type, reason, status, skip, limit }, { rights: ctx.rights, transport: ctx.transport });
+    const r = await actsOrThrow().list(ctx.callSpace, { kind, type, reason, status, skip, limit }, { rights: ctx.rights, transport: ctx.transport });
     if ('error' in r) throw toolRefusalOfAct(r.status, r.error, refusalBody(r));
     const body = r.body as { items: UnconvertedRow[]; counts: { open: number; dismissed: number }; count: number; total: number };
     const head = `Unconverted records of '${ctx.callSpace}': ${body.counts.open} open, ${body.counts.dismissed} dismissed; ${body.items.length} on this page of ${body.total} matching.`;
@@ -101,7 +125,7 @@ export const dismiss_unconvertedTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const r = await dismissUnconvertedAct(ctx.callSpace, ctx.args['itemId'], { rights: ctx.rights, transport: ctx.transport });
+    const r = await actsOrThrow().dismiss(ctx.callSpace, ctx.args['itemId'], { rights: ctx.rights, transport: ctx.transport });
     if ('error' in r) throw toolRefusalOfAct(r.status, r.error, refusalBody(r));
     const item = (r.body as { item: UnconvertedRow }).item;
     ctx.recordAuditChanges?.(dismissChanges(item.itemId));
@@ -138,7 +162,7 @@ export const dismiss_unconverted_shownTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { kind, type, reason, expect } = ctx.args;
-    const r = await dismissShownUnconvertedAct(ctx.callSpace, { kind, type, reason, expect }, { rights: ctx.rights, transport: ctx.transport });
+    const r = await actsOrThrow().dismissShown(ctx.callSpace, { kind, type, reason, expect }, { rights: ctx.rights, transport: ctx.transport });
     if ('error' in r) throw toolRefusalOfAct(r.status, r.error, refusalBody(r));
     ctx.recordAuditChanges?.(dismissShownChanges({ kind, type, reason, expect }, (r.body as { dismissed: number }).dismissed));
     const text = `Dismissed ${(r.body as { dismissed: number }).dismissed} open unconverted item(s) in '${ctx.callSpace}': they stay listed under status "dismissed", and the records themselves are unchanged.`;
