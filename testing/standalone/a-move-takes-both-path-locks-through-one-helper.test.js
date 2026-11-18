@@ -93,7 +93,10 @@ describe('crossing moves of one pair of paths do not deadlock', () => {
     const b = path.join(root, 'cross-b.txt');
     fs.writeFileSync(a, 'A');
     const ended = Promise.allSettled([stored.moveStored(a, b), stored.moveStored(b, a), stored.moveStored(a, b), stored.moveStored(b, a)]);
-    const result = await Promise.race([ended, new Promise(r => setTimeout(() => r('deadlock'), 10_000))]);
+    // The timer is cleared when the moves end: left armed it keeps the process alive for its whole length after the last case.
+    let timer;
+    const deadlock = new Promise(r => { timer = setTimeout(() => r('deadlock'), 10_000); });
+    const result = await Promise.race([ended, deadlock]).finally(() => clearTimeout(timer));
     assert.notEqual(result, 'deadlock', 'two crossing moves did not end: each held one lock and waited for the other');
     assert.equal([a, b].filter(p => fs.existsSync(p)).length, 1, 'the file is gone or was copied');
   });

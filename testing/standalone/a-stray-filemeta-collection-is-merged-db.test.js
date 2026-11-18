@@ -87,8 +87,12 @@ const arrivedRow = (space, id, extra = {}) => {
   const { author: _none, ...row } = build.filemeta(space, id, 0);
   return { ...row, ...extra };
 };
-/** Fail rather than hang when a hold is never reached. */
-const within = (p, what) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(`${what} was never reached`)), 5000))]);
+/** Fail rather than hang when a hold is never reached. The timer is cleared when the wait ends: left armed it keeps the process alive after the last case. */
+async function within(p, what) {
+  let timer;
+  const late = new Promise((_, no) => { timer = setTimeout(() => no(new Error(`${what} was never reached`)), 5000); });
+  try { return await Promise.race([p, late]); } finally { clearTimeout(timer); }
+}
 
 /** The audit write is fire-and-forget, so wait for the entry rather than read once. */
 async function auditFor(space, operation) {
