@@ -18,8 +18,8 @@
  *   refused, once, naming the budget; `conversionStepIssues` answers the same with the code `conditions_over_budget` at the step.
  * - Source gate: `conditionIssues` calls the one private `judge`, `conversion-steps.ts` holds no compiler of its own, and the package has one
  *   place that parses CEL.
- * - The run-time half (`evaluateCondition` in `server/src/spaces/schema-rules.ts` calls `programFor`; no other compile site there) is slice 2's
- *   and is a todo here until that slice fills it.
+ * - The run-time half (slice 2): `evaluateCondition` in `server/src/spaces/schema-rules.ts` calls `programFor` and reads the record through
+ *   `engineSelf`, and `programFor` is the one `compileRule` call in the server. Seen red on 14af4644: `evaluateCondition` is not declared.
  *
  * Seen red on afb6eb8c: `schema/dist/internal.js` has no `conditionIssues` and no `conversionStepIssues`, so every behaviour case fails on that.
  *
@@ -190,5 +190,31 @@ describe('the one judge, in the source', () => {
     assert.equal((code('rules.ts').match(/\bcel\.parse\(/g) ?? []).length, 1, 'one parse call in the package');
   });
 
-  it.todo('slice 2: `evaluateCondition` (server/src/spaces/schema-rules.ts) is built on `programFor`, and the server has no other compile site');
+  it('slice 2: `evaluateCondition` (server/src/spaces/schema-rules.ts) is built on `programFor`, and the server has no other compile site', () => {
+    const rulesSrc = stripComments(readFileSync('server/src/spaces/schema-rules.ts', 'utf8').replace(/\r\n/g, '\n'));
+    const body = bodyOf(rulesSrc, 'evaluateCondition');
+    assert.match(body, /\bprogramFor\(/, 'evaluateCondition compiles through programFor, the cache every rule evaluation shares');
+    assert.match(body, /\bengineSelf\(/, 'and reads the record through engineSelf, as evaluateRules does');
+    assert.doesNotMatch(body, /\bcompileRule\(|\bcel\.(parse|plan)\(/, 'it compiles nothing by hand');
+    const sites = [];
+    const walk = (dir) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (p.endsWith('.ts')) for (const m of stripComments(readFileSync(p, 'utf8')).matchAll(/\bcompileRule\(/g)) sites.push(p.replace(/\\/g, '/'));
+      }
+    };
+    walk('server/src');
+    assert.deepEqual(sites, ['server/src/spaces/schema-rules.ts'], 'the server compiles a rule in one place');
+    const insideProgramFor = bodyOfFunction(rulesSrc, 'programFor');
+    assert.match(insideProgramFor, /\bcompileRule\(/, 'and that place is programFor');
+  });
 });
+
+/** The text of `function name(...) { ... }` (exported or not), to the first closing brace at the start of a line. */
+function bodyOfFunction(src, name) {
+  const at = src.search(new RegExp(`\\bfunction ${name}\\(`));
+  assert.ok(at >= 0, `${name} is declared`);
+  const end = src.indexOf('\n}\n', at);
+  return src.slice(at, end);
+}
