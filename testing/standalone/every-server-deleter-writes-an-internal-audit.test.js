@@ -182,7 +182,15 @@ describe('every deletion the server makes on its own is audited by the act that 
   const { jobs } = scheduledJobs(index);
   const roots = housekeepingRoots(index, jobs);
   const sinks = recordDeleters(index);
-  const edges = (entry) => [...walkCallbackEdges(index, names)(entry), ...intervalJobEdges(intervalJobRuns(index))(entry), ...dispatchEdges(index)(entry)];
+  // Built once, after `scheduledJobs` (which inserts the synthetic job bodies `unauditedPairs` copies): an arrow that built them per call repeated a
+  // regex scan of every server source once per function the walk visited (10 530 times a walk, 58 s).
+  const callbackEdges = walkCallbackEdges(index, names);
+  const jobEdges = intervalJobEdges(intervalJobRuns(index));
+  const dispatch = dispatchEdges(index);
+  const edges = (entry) => [...callbackEdges(entry), ...jobEdges(entry), ...dispatch(entry)];
+  // Shared by the two tests that read the pairs; computed when the first of them runs, so a run of another test does not pay for it.
+  let pairs = null;
+  const unaudited = () => (pairs ??= unauditedPairs(index, roots, sinks, edges));
 
   it('derives the sinks from the delete table with a floor, and the record deleters among them', () => {
     assert.ok(sinks.length >= 3, `only ${sinks.length} sinks derived: ${sinks.join(', ')}`);
@@ -213,9 +221,8 @@ describe('every deletion the server makes on its own is audited by the act that 
   });
 
   it('every job or worker that reaches a record deleter writes the deletion\'s own audit row, or is exempt with a reason', () => {
-    const unaudited = unauditedPairs(index, roots, sinks, edges)
-      .filter(p => !EXEMPT.has(rootId(p.root)));
-    const text = unaudited.map(p => `${CLASS[p.root.form]} ${rootId(p.root)} reaches ${p.sink.replace('server/src/', '')} with no logInternalAudit on `
+    const findings = unaudited().filter(p => !EXEMPT.has(rootId(p.root)));
+    const text = findings.map(p => `${CLASS[p.root.form]} ${rootId(p.root)} reaches ${p.sink.replace('server/src/', '')} with no logInternalAudit on `
       + `the path: ${p.path.map(k => k.replace('server/src/', '')).join(' > ')}`);
     assert.deepEqual(text, [],
       'these deletions are made by the server with nobody asking and leave no audit row; write logInternalAudit({ method: \'SWEEP\', … }) '
@@ -223,7 +230,7 @@ describe('every deletion the server makes on its own is audited by the act that 
   });
 
   it('an exemption names a root that exists and still reaches a sink, and says why', () => {
-    const reaching = new Set(unauditedPairs(index, roots, sinks, edges).map(p => rootId(p.root)));
+    const reaching = new Set(unaudited().map(p => rootId(p.root)));
     const known = new Set(roots.filter(r => r.key).map(rootId));
     for (const [id, reason] of EXEMPT) {
       assert.ok(known.has(id), `the exemption ${id} names no root of this tree: delete it`);

@@ -691,36 +691,66 @@ export function walkFrom(index, roots, { closures = false, edges } = {}) {
  *   a gate that counts jobs must see it and either name it in an exemption or fail. That is the one place this module could hand
  *   back a smaller set quietly.
  *
+ * ## Asking again costs nothing
+ *
+ * The scan (a regex over every source, and a parse of each match's arguments) is remembered per `sources` map (`scanIntervalJobs`), so a caller that
+ * asks inside a walk's edge callback, once per function the walk visits, does not repeat it. Only the scan is remembered: the synthetic bodies are
+ * inserted into the index given on EVERY call, because a copy of an index shares `sources` and owns its `bodies`.
+ *
  * @param {ReturnType<typeof moduleIndex>} index  gains the synthetic bodies (idempotent: calling twice adds nothing)
  * @returns {{file: string, at: number, label: string, run: string, key: string|null, how: 'closure'|'reference'|'unfollowable'}[]}
  *   `at` is the offset of the `intervalJob` token in the comment-stripped source
  */
 export function intervalJobRuns(index) {
   const out = [];
-  for (const [file, src] of index.sources) {
+  for (const s of scanIntervalJobs(index.sources)) {
+    let key = null;
+    let how = 'unfollowable';
+    if (s.shape === 'closure') {
+      key = `${s.file}:intervalJob@${s.at}`;
+      how = 'closure';
+      // On every call, never only on the first: a copy of the index shares `sources` but owns its `bodies`, and the memoised scan below
+      // must not leave it without the body its walk is going to look for.
+      if (!index.bodies.has(key)) {
+        index.bodies.set(key, { file: s.file, name: `intervalJob@${s.at}`, body: s.run, start: s.start, end: s.start + s.run.length, synthetic: true });
+      }
+    } else if (s.shape === 'reference') {
+      key = index.resolve(s.file, s.run);
+      how = key ? 'reference' : 'unfollowable';
+    }
+    out.push({ file: s.file, at: s.at, label: s.label, run: s.run, key, how });
+  }
+  return out;
+}
+
+/** The textual scan of `intervalJobRuns`, remembered per `sources` map (the one thing an index and its cut copies share). */
+const intervalJobScans = new WeakMap();
+
+/**
+ * Every `intervalJob(` registration in the sources and the shape of its `run`, with no index state: what a copy of the index
+ * needs from the scan. Remembered per `sources` map, so a caller that asks again (a walk's edge callback runs once per function
+ * it visits) does not scan every source again.
+ *
+ * @param {Map<string, string>} sources
+ * @returns {{file: string, at: number, label: string, run: string, start: number, shape: 'closure'|'reference'|'other'}[]}
+ */
+function scanIntervalJobs(sources) {
+  const known = intervalJobScans.get(sources);
+  if (known) return known;
+  const scan = [];
+  for (const [file, src] of sources) {
     for (const m of src.matchAll(/(?<![.\w$])intervalJob\s*(?:<[^>(;]*>)?\s*\(/g)) {
       // The declaration (`export function intervalJob(`) is not a registration.
       if (/\bfunction\s*$/.test(src.slice(Math.max(0, m.index - 12), m.index))) continue;
       const open = m.index + m[0].length - 1;
       const args = argumentsOf(src, open, `the intervalJob registration in ${file}`);
       const run = args[2] ?? '';
-      let key = null;
-      let how = 'unfollowable';
-      if (/=>|^(?:async\s+)?function\b/.test(run)) {
-        key = `${file}:intervalJob@${m.index}`;
-        how = 'closure';
-        if (!index.bodies.has(key)) {
-          const start = src.indexOf(run, open);
-          index.bodies.set(key, { file, name: `intervalJob@${m.index}`, body: run, start, end: start + run.length, synthetic: true });
-        }
-      } else if (/^[A-Za-z_$][\w$]*$/.test(run)) {
-        key = index.resolve(file, run);
-        how = key ? 'reference' : 'unfollowable';
-      }
-      out.push({ file, at: m.index, label: args[0] ?? '', run, key, how });
+      const shape = /=>|^(?:async\s+)?function\b/.test(run) ? 'closure' : /^[A-Za-z_$][\w$]*$/.test(run) ? 'reference' : 'other';
+      scan.push({ file, at: m.index, label: args[0] ?? '', run, start: shape === 'closure' ? src.indexOf(run, open) : -1, shape });
     }
   }
-  return out;
+  intervalJobScans.set(sources, scan);
+  return scan;
 }
 
 /**
