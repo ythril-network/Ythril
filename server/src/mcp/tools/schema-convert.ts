@@ -28,7 +28,8 @@ const STEPS_PARAMETER: Record<string, unknown> = {
   ...((CONVERT_RECORDS_PARAMETER['properties'] as Record<string, Record<string, unknown>>)['steps']),
   description: 'How to change a record the conversion reads: `renameProperty`, `mapEnum`, `renameType` and `splitType` steps, applied in a fixed order '
     + 'whatever the list order (the type steps first, then the property steps of the type each record has afterwards). Each step names one `kind` and '
-    + 'one type. They are held to the schema the space has NOW: a new name must be declared, and a renamed property\'s old name must no longer be; a '
+    + 'one type. They are held to the schema the space has NOW: a new name must be declared, a renamed property\'s old name must no longer be, and the '
+    + 'type a `splitType` splits must still be declared (its conditions are read against that type\'s properties); a '
     + 'step it cannot hold refuses the whole call (400 `bad_conversion_step`, naming the step\'s index in `step`) and nothing is started. Omit them to '
     + 'stamp the records that already conform and list the ones that do not, rewriting nothing.',
 };
