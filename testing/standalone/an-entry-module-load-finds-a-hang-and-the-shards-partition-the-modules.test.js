@@ -141,4 +141,41 @@ describe('the gate is SHARDS files, each a CI-only shard of the one helper', () 
       assert.doesNotMatch(stripComments(text), /\bPARALLEL\s*=\s*8\b/, `${file} still runs eight children`);
     }
   });
+
+  /**
+   * What is wrong with the shard indices a set of shard files declares (`const SHARD = <n>`), as sentences: each file names its own slice, and the slices
+   * are exactly 0 to count-1, one file each. Two files with one index would load one slice twice and another never, and every file would be green.
+   * @param {Array<{ file: string, text: string }>} files
+   */
+  const indexProblems = (files, count) => {
+    const problems = [];
+    const seen = new Map();
+    for (const { file, text } of files) {
+      const index = /^const SHARD = (\d+);/m.exec(stripComments(text))?.[1];
+      const named = /-(\d+)-of-(\d+)\.test\.js$/.exec(file);
+      if (index === undefined) { problems.push(`${file} declares no \`const SHARD = <n>;\``); continue; }
+      if (named && Number(named[1]) !== Number(index) + 1) problems.push(`${file} loads slice ${index}, which is not the shard its name says (${Number(named[1]) - 1})`);
+      if (named && Number(named[2]) !== count) problems.push(`${file} says it is one of ${named[2]}, not ${count}`);
+      seen.set(index, [...(seen.get(index) ?? []), file]);
+    }
+    for (const [index, owners] of seen) if (owners.length > 1) problems.push(`slice ${index} is loaded by ${owners.length} files (${owners.join(', ')})`);
+    for (let i = 0; i < count; i++) if (!seen.has(String(i))) problems.push(`no file loads slice ${i}: its modules are loaded nowhere`);
+    for (const index of seen.keys()) if (Number(index) >= count) problems.push(`slice ${index} is outside 0 to ${count - 1}`);
+    return problems;
+  };
+
+  it('has each shard file load its own slice: the indices are exactly 0 to SHARDS-1, one file each, and the name says the same', async () => {
+    const { SHARDS } = await helper();
+    const files = trackedSources('testing/standalone', { ext: ['.test.js'], floor: 100 }).filter(f => /\/every-server-entry-module-loads[^/]*\.test\.js$/.test(f));
+    assert.deepEqual(indexProblems(files.map(file => ({ file, text: readFileSync(join(REPO_ROOT, file), 'utf8') })), SHARDS), []);
+  });
+
+  it('flags two files that load one slice, a slice nobody loads and a name that disagrees with the index (a planted set)', () => {
+    const file = (n, index) => ({ file: `testing/standalone/every-server-entry-module-loads-${n}-of-3.test.js`, text: `const SHARD = ${index};\n` });
+    assert.deepEqual(indexProblems([file(1, 0), file(2, 1), file(3, 2)], 3), []);
+    assert.match(indexProblems([file(1, 0), file(2, 1), file(3, 1)], 3).join('\n'), /slice 1 is loaded by 2 files/);
+    assert.match(indexProblems([file(1, 0), file(2, 1), file(3, 1)], 3).join('\n'), /no file loads slice 2/);
+    assert.match(indexProblems([file(1, 0), file(2, 2), file(3, 1)], 3).join('\n'), /not the shard its name says/);
+    assert.match(indexProblems([file(1, 0), file(2, 1), file(3, 5)], 3).join('\n'), /outside 0 to 2/);
+  });
 });
