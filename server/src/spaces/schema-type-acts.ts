@@ -28,6 +28,7 @@ import { pageList } from '../brain/list-page.js';
 import { defaultBudgetChars, carriagesFor, type BudgetRequest } from '../brain/result-budget.js';
 import { createCoalescingRunner } from '../sync/coalescing-runner.js';
 import { UNKNOWN_FINGERPRINT } from '../util/errors.js';
+import { peerText, NAME_QUOTED } from '../util/log.js';
 import { variationOf } from './schema-stamp.js';
 import { layersFor } from './network-layers.js';
 import { heldVersionsKept } from './schema-version-text.js';
@@ -44,7 +45,7 @@ export const FPS_MAX = 100;
 /** The current version, when the caller may have it; else the refusal (design r3 §3.2). */
 async function currentFor(spaceId: string, caller: SchemaVersionsCaller): Promise<string | SchemaVersionsActResult> {
   const variation = variationOf(spaceId);
-  if (!variation) return { status: 404, error: `space '${spaceId}' is not configured` };
+  if (!variation) return { status: 404, error: `space '${peerText(spaceId, { max: NAME_QUOTED })}' is not configured` };
   const current = variation.stamp.fp;
   const held = (await heldVersionsKept(spaceId, [current])).get(current);
   if (!held || !mayHave(held, caller.shared)) {

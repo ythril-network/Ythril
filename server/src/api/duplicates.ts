@@ -26,6 +26,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { pageMemberList } from '../brain/list-page.js';
 import { defaultBudgetChars } from '../brain/result-budget.js';
 import { sendCaughtFailure } from './send-failure.js';
+import { notFoundSentence } from '../util/errors.js';
 
 /**
  * The canonical key both candidate collections use for a pair: the two ids, lower first.
@@ -323,7 +324,7 @@ duplicatesRouter.post('/scan', globalRateLimit, requireAuthMfa, denyReadOnly, as
     const targets = configuredSpaces()
       .filter(s => allowed.has(s.id) && (!spaceFilter || s.id === spaceFilter))
       .map(s => s.id);
-    if (spaceFilter && targets.length === 0) { res.status(404).json({ error: `Space '${spaceFilter}' not found or not accessible` }); return; }
+    if (spaceFilter && targets.length === 0) { res.status(404).json({ error: notFoundSentence('Space', spaceFilter, { after: ' or not accessible' }) }); return; }
 
     // A space that fails is named in `failedSpaces` and the rest are still scanned; a store that is not answering ends the request
     // (the `catch` below answers it 503). `scannedSpaces` counts the spaces that were scanned, so it equals `targets.length` on success.

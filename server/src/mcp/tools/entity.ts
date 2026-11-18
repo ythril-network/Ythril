@@ -17,7 +17,7 @@ import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, connectionSubject } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
-import { NotFoundError } from '../../util/errors.js';
+import { NotFoundError, notFoundSentence } from '../../util/errors.js';
 
 export const save_entityTool: ToolHandler = {
   name: 'save_entity',
@@ -300,7 +300,7 @@ export const update_entityTool: ToolHandler = {
     const updatedEnt = await findFirstAcrossMembers([callSpace], mid => updateEntityById(mid, id, updates, dfPaths, ctx.actor, ttlDays, undefined, c => { updCheck = c; }));
     if (updatedEnt) { const s = audit.snapshots(updatedEnt); ctx.recordChanges?.(s.before, s.after); }
     // A record the call names and cannot find is a 404, as the PATCH route answers it (`NotFoundError`, mapped once by `callTool`).
-    if (!updatedEnt) throw new NotFoundError(`Entity '${id}' not found`);
+    if (!updatedEnt) throw new NotFoundError(notFoundSentence('Entity', id));
     // `Q-30`: connections on the UPDATE too. Links REPLACE per class and edges UPSERT; both
     // semantics live in `applyConnections`, after the record write, exactly as the create does it.
     // `updated.spaceId` rather than `callSpace`: the space the record was written in, read from the record.
@@ -546,6 +546,6 @@ What would go now: ${JSON.stringify(r.preview)}`);
       structuredContent: { _id: id, deleted: true } };
       }
     }
-    throw new NotFoundError(`Entity '${id}' not found`);
+    throw new NotFoundError(notFoundSentence('Entity', id));
   },
 };

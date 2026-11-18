@@ -13,7 +13,7 @@
  */
 import { col, isVectorSearchAvailable, asFilter } from '../db/mongo.js';
 import { readRowsById } from '../db/read-by-id.js';
-import { NotFoundError, NotEmbeddedYetError } from '../util/errors.js';
+import { NotFoundError, NotEmbeddedYetError, notFoundSentence } from '../util/errors.js';
 import { embed } from './embedding.js';
 import type { EmbeddingResult } from './embedding.js';
 import { getEmbeddingConfig } from '../config/loader.js';
@@ -43,7 +43,7 @@ import { warnOnce, SAY_ONCE_WINDOW_MS } from '../util/warn-once.js';
 import { MongoServerError } from 'mongodb';
 import type { RecordType } from '../config/types.js';
 import { RECORD_TYPES } from '../config/types.js';
-import { log, peerText } from '../util/log.js';
+import { log, peerText, NAME_QUOTED } from '../util/log.js';
 import { recallDegradedTotal } from '../metrics/registry.js';
 import { envInt } from '../config/env-num.js';
 import { notFlaggedIfFile } from '../files/live-file-row.js';
@@ -1258,13 +1258,13 @@ export async function findSimilar(
   const entry = await getEntryEmbedding(spaceId, entryId, entryType);
   if (entry === 'no-embedding') {
     throw new NotEmbeddedYetError(
-      `Entry '${entryId}' exists in space '${spaceId}' (type: ${entryType}) but is not embedded yet, so ` +
+      `Entry '${peerText(entryId, { max: NAME_QUOTED })}' exists in space '${peerText(spaceId, { max: NAME_QUOTED })}' (type: ${peerText(entryType)}) but is not embedded yet, so ` +
       'there is nothing to compare it against. Embedding is queued and normally completes in milliseconds — ' +
       'retry, or write with waitForEmbedding: true when you need the record searchable the moment the write returns.',
     );
   }
   if (!entry) {
-    throw new NotFoundError(`Entry '${entryId}' not found in space '${spaceId}' (type: ${entryType}).`);
+    throw new NotFoundError(`${notFoundSentence('Entry', entryId, { space: spaceId })} (type: ${peerText(entryType)}).`);
   }
   if (!isVectorSearchAvailable()) {
     throw new Error(

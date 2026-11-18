@@ -24,7 +24,7 @@ import { createToken, revokeToken, adoptPeerToken } from '../auth/tokens.js';
 import { peerTokenSpaces } from '../auth/peer-token-scope.js';
 import { createSpace } from '../spaces/lifecycle.js';
 import { throwIfStoreSide } from '../brain/store-failure.js';
-import { log, peerText, refusalOfParse } from '../util/log.js';
+import { log, peerText, refusalOfParse, NAME_QUOTED } from '../util/log.js';
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import { mergePeerRoster } from './member-introductions.js';
 import { peerSafeFetch } from '../sync/peer-fetch.js';
@@ -172,7 +172,7 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
   // is recorded at — otherwise another server is borrowing its id, and a token scoped by it would reach that peer's
   // networks here and overwrite the one this instance keeps for it. Refused before anything is written.
   if (!inviterIsWhoItClaims(cfg, applyData.instanceId, inviteUrl)) {
-    return { status: 403, error: `The inviter claims the instance id of a peer this instance reaches at another address (${applyData.instanceId}); refused` };
+    return { status: 403, error: `The inviter claims the instance id of a peer this instance reaches at another address (${peerText(applyData.instanceId, { max: NAME_QUOTED })}); refused` };
   }
 
   // Decrypt tokenForB — the PAT Brain A created on its own server for Brain B to use

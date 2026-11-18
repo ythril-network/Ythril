@@ -22,6 +22,7 @@
  *    are not areas and do not cap — they are held or they are not.
  */
 import { SPACE_AREAS, SPACE_ADMIN_AREAS, RUNG_IMPLICATIONS } from '../config/rights-shape.js';
+import { peerText, NAME_QUOTED } from '../util/log.js';
 import type { TokenRights, AreaRungs, Rung, SpaceArea } from '../config/rights-shape.js';
 
 const ORDER: readonly Rung[] = ['none', 'read', 'write', 'admin'];
@@ -216,7 +217,7 @@ export function capRights(minter: TokenRights, requested: TokenRights): Excess[]
 /** A refusal message that names every excess, in a stable order, short enough to read in a response body. */
 export function describeExcess(excess: Excess[]): string {
   return excess
-    .map(e => `${e.space === '*' ? 'floor' : e.space}.${e.area}: asked ${e.requested}, you hold ${e.allowed}`)
+    .map(e => `${e.space === '*' ? 'floor' : peerText(e.space, { max: NAME_QUOTED })}.${e.area}: asked ${e.requested}, you hold ${e.allowed}`)
     .sort()
     .join('; ');
 }

@@ -88,7 +88,7 @@ import { raiseFileFeedFloorOver } from './file-feed-floor.js';
 import { versionsFor } from '../util/version-stamp.js';
 import { isDuplicateKey } from '../db/write-errors.js';
 import { spaceCollection } from '../db/space-collection.js';
-import { NotFoundError } from '../util/errors.js';
+import { NotFoundError, notFoundSentence } from '../util/errors.js';
 import { toDocId } from '../util/paths.js';
 import type { FileMetaDoc } from '../config/types.js';
 import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
@@ -335,7 +335,7 @@ async function finishOrRefuse(spaceId: string, src: string, dst: string): Promis
   // sidecars, so it is refused. A path that cannot be looked at is thrown, never read as "not owed".
   if (!(await moveIsOwed(spaceId, src, dst))) {
     await abandonMove(spaceId, src, dst);
-    throw new NotFoundError(`Path '${src}' not found in space '${spaceId}'`);
+    throw new NotFoundError(notFoundSentence('Path', src, { space: spaceId }));
   }
   await finishBegunMove(spaceId, src, dst);
 }

@@ -24,7 +24,7 @@ import { getFileMeta } from '../../files/file-meta.js';
 import { writeWarningFields } from '../../brain/write-validation.js';
 import { linkTargetRemovedWarnings } from '../../brain/gone-entity-references.js';
 import { toDocId } from '../../util/paths.js';
-import { NotFoundError } from '../../util/errors.js';
+import { NotFoundError, notFoundSentence } from '../../util/errors.js';
 
 export const read_fileTool: ToolHandler = {
   name: 'read_file',
@@ -102,7 +102,7 @@ export const read_fileTool: ToolHandler = {
         if (fault) throw fault;
       }
     }
-    if (w === null) throw new NotFoundError(`File not found: ${filePath}`);
+    if (w === null) throw new NotFoundError(notFoundSentence('File', filePath, { colon: true }));
     let listing: Record<string, unknown> | null = null;
     if (listingAsked) {
       // Resolved per MEMBER and the member kept, as the route does: the derived records live beside their parent's record.

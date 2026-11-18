@@ -8,6 +8,7 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { previewEntityCascade } from '../../brain/entity-delete-cascade.js';
 import { getEntityById } from '../../brain/entities.js';
 import { readSpacesOfCall } from '../../spaces/read-scope.js';
+import { notFoundSentence } from '../../util/errors.js';
 
 export const delete_entity_previewTool: ToolHandler = {
   name: 'delete_entity_preview',
@@ -74,6 +75,6 @@ export const delete_entity_previewTool: ToolHandler = {
       // Not pretty-printed: indentation is billed to the caller's context and read by nothing.
       return { content: [{ type: 'text' as const, text: JSON.stringify(preview) }], structuredContent: { ...preview } };
     }
-    throw new Error(`Entity '${id}' not found`);
+    throw new Error(notFoundSentence('Entity', id));
   },
 };

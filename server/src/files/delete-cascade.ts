@@ -47,7 +47,7 @@
  * answer `204`, write a second tombstone, move the record's seq and fire a second `file.deleted`.
  */
 import { log, peerText } from '../util/log.js';
-import { NotFoundError, RequestRefusal } from '../util/errors.js';
+import { NotFoundError, RequestRefusal, notFoundSentence } from '../util/errors.js';
 import { toDocId } from '../util/paths.js';
 import fs from 'fs/promises';
 import { resolveSafePathChecked, spaceRoot } from './sandbox.js';
@@ -73,7 +73,7 @@ import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
 import { adoptLegacyRowsUnder } from './legacy-file-keys.js';
 
 /** The refusal of a path with nothing to delete, in one sentence for every way a delete reaches it (`404` on REST, an error result in MCP). */
-const fileNotFound = (spaceId: string, filePath: string): NotFoundError => new NotFoundError(`File '${filePath}' not found in space '${spaceId}'`);
+const fileNotFound = (spaceId: string, filePath: string): NotFoundError => new NotFoundError(notFoundSentence('File', filePath, { space: spaceId }));
 
 /** The seams a test narrows: the two intervals a re-upload can land in. Production passes none. */
 interface DeleteSteps {

@@ -24,6 +24,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { MAX_CONFLICT_IDS, countError } from '../util/request-bounds.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { RequestRefusal } from '../util/errors.js';
+import { peerText, NAME_QUOTED } from '../util/log.js';
 import { answerForCaught } from '../util/answer-for-caught.js';
 
 export const conflictsRouter = Router();
@@ -284,7 +285,7 @@ conflictsRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     // caller asking about one space got every space's conflicts and read them as that space's.
     const requested = typeof req.query['spaceId'] === 'string' ? req.query['spaceId'] : undefined;
     const reachable = spacesWhereTokenMay(req.authToken?.rights, 'dataQuality', 'read');
-    if (requested && !reachable.includes(requested)) { res.status(403).json({ error: `Token does not have access to space '${requested}'` }); return; }
+    if (requested && !reachable.includes(requested)) { res.status(403).json({ error: `Token does not have access to space '${peerText(requested, { max: NAME_QUOTED })}'` }); return; }
     const spaces = requested ? [requested] : reachable;
     const results: AnyConflictDoc[] = [];
     let truncated = false;

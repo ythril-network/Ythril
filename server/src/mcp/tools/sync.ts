@@ -7,6 +7,7 @@ import { attachSyncNote } from '../../sync/change-notes.js';
 import { networkSyncOutcome, peerSyncOutcome, resolveSyncWait, syncAnswerIsError, syncShutdownRefusal, syncTimeoutMs, verdictFields, type SyncAnswer } from '../../sync/trigger.js';
 import { refusedMemberCount, syncVerdict, type MemberResult } from '../../sync/cycle-outcome.js';
 import { reportServerFailure } from '../../util/report-failure.js';
+import { notFoundSentence } from '../../util/errors.js';
 
 /** The members that did not simply sync, one line each — what a reader of the text half needs to know which member to look at. */
 function memberLines(members: readonly MemberResult[]): string {
@@ -296,7 +297,7 @@ export const network_syncTool: ToolHandler = {
         content: [{
           type: 'text' as const,
           text: result.notFound
-            ? `Peer '${peerId}' not found in any network.`
+            ? notFoundSentence('Peer', peerId, { after: ' in any network.' })
             : `Sync complete: ${result.networksSynced} network(s) synced, ${result.errors} error(s)${(result.refused ?? 0) > 0 ? `, ${result.refused} member(s) too old to exchange with (pre-6.0)` : ''} — ${result.verdict.outcome}.${memberLines(result.members)}`,
         }],
         // `notFound` is carried EXPLICITLY rather than inferred from a sentence. It is the one
