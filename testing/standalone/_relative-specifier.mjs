@@ -16,11 +16,17 @@ import { posix } from 'node:path';
 import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { readSchemaPackage } from '../../scripts/_shared/schema-package.mjs';
 
-/** The repo-relative `.ts` path `spec` (as written in `fromFile`) names, or `null` for a non-relative specifier or one that resolves to no tracked file. */
+/**
+ * The repo-relative path `spec` (as written in `fromFile`) names, or `null` for a non-relative specifier or one that resolves to no tracked file.
+ *
+ * A `.js` specifier names the `.ts` file of that name when there is one (the server's own spelling), and otherwise the tracked `.js` file itself: a test
+ * helper written as `helpers.js` has no `.ts` twin, and a resolver that knew only the first answered `null` for every import of one, so a gate that follows
+ * imports read such a helper as "resolves to nothing". A `.mjs` or `.cjs` specifier, a directory and a data file resolve as themselves.
+ */
 export function resolveRelativeSpecifier(spec, fromFile, has) {
   if (!spec.startsWith('.')) return null;
   const base = posix.join(posix.dirname(fromFile.replace(/\\/g, '/')), spec);
-  return [base.replace(/\.js$/, '.ts'), `${base}.ts`, posix.join(base, 'index.ts')].find(has) ?? null;
+  return [base.replace(/\.js$/, '.ts'), `${base}.ts`, posix.join(base, 'index.ts'), base].find(has) ?? null;
 }
 
 /**
