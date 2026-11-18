@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "scripts/machine-free.ps1",
+      "reason": "Frees the whole machine on purpose: it removes the test stack with its volumes, prunes every image and volume, and restarts Docker, which ends every hold anyway. It is a different question from taking the stack down for a session, and its header says it ignores holds.",
+      "reviewBy": "2027-05-19"
+    }
+  ]
+}

@@ -45,11 +45,14 @@ CI.
 
 5. Mandatory cleanup after heavy or repeated runs:
    ```
-   docker compose -p ythril-test -f testing/docker-compose.test.yml down -v --rmi local --remove-orphans
+   npm run test:down
    docker builder prune --reserved-space 3g --force
    docker image prune -f
    docker volume prune -f
    ```
+   Run `npm run test:down`, not `docker compose ... down -v` on the test file: the script leaves a container another session holds,
+   and the raw command removes it with its data (`docs/testing-guide.md`, "Running the suites"). `npm run test:down:clean` is the script
+   followed by the three prunes.
 
 ## QA policy for high-volume tests
 

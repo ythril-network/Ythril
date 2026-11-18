@@ -9,8 +9,11 @@
 #
 # ## What it does, in order
 #
-#   1. Removes the test stack (containers AND volumes). It is rebuilt by `npm run test:up:rebuild`, which
-#      re-provisions its tokens - a bare `down -v` without that is what breaks the suites, not the removal.
+#   1. Removes the test stack (containers AND volumes) and ignores holds: a container another session holds
+#      (YTHRIL_TEST_STACK_HOLDS_DIR, docs/testing-guide.md) goes with the rest, as everything else does when Docker
+#      restarts in step 4; `npm run test:down` is the take-down that leaves held containers. The stack is rebuilt by
+#      `npm run test:up:rebuild`, which re-provisions its tokens - a bare `down -v` without that is what breaks the
+#      suites, not the removal.
 #   2. `docker system prune -af --volumes`: every image, build cache entry, stopped container and unused volume
 #      no RUNNING container needs. Running containers and their data are never touched.
 #   3. fstrim inside the VM, so compaction has freed blocks to give back.
