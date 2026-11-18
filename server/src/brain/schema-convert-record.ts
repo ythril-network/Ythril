@@ -14,8 +14,11 @@
  *   write reached first matches nothing and is answered `moved`, never overwritten. The record is handed in as read for that reason.
  * - **A fork row touched.** The quiet stamp's filter excludes fork rows; the update functions refuse one (`fork`).
  * - **One refused record failing the run.** A refusal of the record itself (not conforming by the pre-check or the guard, an identity or
- *   functional guard in the way, a version at the ceiling, a fork) is answered as an `unconverted` outcome with its reason; only a store or
- *   write-gate failure (or anything unknown, a strict refusal that raced a schema write among them) is thrown, for the run to fail the page.
+ *   functional guard in the way, the update function's own strict refusal, a version at the ceiling, a fork) is answered as an `unconverted`
+ *   outcome with its reason; a store or write-gate failure is thrown, for the run to fail the page.
+ * - **One record holding a run for ever.** Any other failure of a record's rewrite fails the page too, but only until that record has failed
+ *   {@link SCHEMA_CONVERT_RECORD_FAILED_PASSES} passes in a row (the run counts them, `recordFailure`): then it is an item `conversion_failed`
+ *   naming the error's kind, never its words, and the run goes on. An owed run, which is never set `failed`, would otherwise retry it for ever.
  * - **The edges of a re-typed entity left unstamped.** A rewrite that changes an entity's type takes the stamp off every edge at it; the edges
  *   that still conform are classified again and stamped quietly.
  *
@@ -33,15 +36,16 @@ import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import type { KnowledgeType, SpaceMeta } from '../config/types.js';
 import { readMetaForWrite, stampOp, stampSetOf, SCHEMA_FINGERPRINT_FIELD, type MetaForWrite } from '../spaces/schema-stamp.js';
 import { evaluateCondition } from '../spaces/schema-rules.js';
-import { admitSpaceWrite } from '../spaces/space-write-gate.js';
+import { admitSpaceWrite, SpaceNotWritableError } from '../spaces/space-write-gate.js';
 import { recordViewOf, viewSourceProjection } from './record-view.js';
 import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 import { edgeEndsAt } from './edge-ends-of-record.js';
 import { resolveEdgeEndsOfPage } from './write-plan/plan-edge.js';
 import {
   classifyEntityUpsertAgainst, classifyFactUpsertAgainst, classifyChronoUpsertAgainst, classifyEdgeUpsertAgainst, recordAfterPatch,
-  type UpdateValidation,
+  SchemaViolationError, type UpdateValidation,
 } from './write-validation.js';
+import { classifyReadFailure } from './store-failure.js';
 import type { SchemaViolation, ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { updateEntityById } from './entities.js';
 import { updateFact } from './fact.js';
@@ -78,7 +82,44 @@ export interface SchemaConvertRecordRun {
   readonly stepsRefused?: readonly { readonly step: ConversionStep | null; readonly reason: string }[];
   /** Keyed by {@link splitDeclaredKey}: the property names the split's source type declared when the run was created. */
   readonly splitDeclared: Readonly<Record<string, readonly string[]>>;
+  /** The record whose rewrite failed the run's last failed pass for a reason no class names, and on how many passes in a row. */
+  readonly recordFailure?: { readonly kind: KnowledgeType; readonly id: string; readonly passes: number };
 }
+
+/** What a page can be handed besides the run: a hook called before each rewrite (a test makes a record's rewrite fail through it). */
+export interface ConvertPageOptions {
+  onRewrite?: (kind: KnowledgeType, record: ReadRecord) => void | Promise<void>;
+}
+
+/** How many passes in a row one record's rewrite may fail for a reason no class names before it is an item `conversion_failed`. */
+export const SCHEMA_CONVERT_RECORD_FAILED_PASSES = 3;
+
+/**
+ * A record's rewrite failed for a reason no refusal class names, on fewer passes than {@link SCHEMA_CONVERT_RECORD_FAILED_PASSES}: the page fails
+ * (the run counts the record's passes, `recordFailure`). The message names the record and the error's kind, never the error's words.
+ */
+export class RecordConversionFailed extends Error {
+  constructor(readonly kind: KnowledgeType, readonly id: string, readonly passes: number, cause: unknown) {
+    super(`the ${kind} ${id} could not be rewritten (${errorKindOf(cause)}), pass ${passes} of ${SCHEMA_CONVERT_RECORD_FAILED_PASSES} before it is listed`, { cause });
+    this.name = 'RecordConversionFailed';
+  }
+}
+
+/** The kind of an error as an item may name it: its class name when that is a plain identifier, else `Error`. Never its message. */
+function errorKindOf(err: unknown): string {
+  const name = (err as { name?: unknown } | null)?.name;
+  return typeof name === 'string' && ERROR_KIND.test(name) ? name : 'Error';
+}
+/** A class name: a letter, then letters, digits or underscores, short. */
+const ERROR_KIND = /^[A-Za-z]\w{0,63}$/;
+
+/** Is this failure the store's or the write gate's (the page fails and is retried), rather than something about one record? */
+function pageFailure(err: unknown): boolean {
+  if (err instanceof SpaceNotWritableError) return true;
+  return classifyReadFailure(err).status !== NOT_THE_STORE;
+}
+/** The status `classifyReadFailure` gives a failure that is not the store's (a refusal in its own words). */
+const NOT_THE_STORE = 400;
 
 /** A record as a run read it: its id, version and stamp beside its body. */
 export type ReadRecord = { readonly _id: string; readonly seq?: unknown; readonly [field: string]: unknown };
@@ -193,9 +234,11 @@ async function rewrite(spaceId: string, kind: KnowledgeType, record: ReadRecord,
   }
 }
 
-/** The reason class of a refusal the record itself drew, or `undefined` for anything else (a store or gate failure: the page fails). */
+/** The reason class of a refusal the record itself drew, or `undefined` for anything else (judged by {@link pageFailure} and the record's bound). */
 function refusalOf(err: unknown): { reason: UnconvertedReason; violations: readonly SchemaViolation[] } | undefined {
   if (err instanceof ConversionNotConforming) return { reason: 'not_conforming', violations: err.violations };
+  // The update function's own strict refusal, made before the guard runs: the record's refusal too (design 5.3's table; lens sweep S4).
+  if (err instanceof SchemaViolationError) return { reason: 'not_conforming', violations: err.check.all };
   if (err instanceof EdgeIdentityTaken) return { reason: 'relationship_exists', violations: [] };
   if (err instanceof WriteConflict) return { reason: 'functional_taken', violations: [] };
   if (err instanceof RecordVersionAtCeiling) return { reason: 'version_ceiling', violations: [] };
@@ -234,7 +277,7 @@ const EDGES_PER_PAGE = 100;
  *   write-gate failure, or anything a record's own refusal does not explain, as thrown.
  */
 export async function convertRecordsPage(
-  spaceId: string, run: SchemaConvertRecordRun, kind: KnowledgeType, records: readonly ReadRecord[],
+  spaceId: string, run: SchemaConvertRecordRun, kind: KnowledgeType, records: readonly ReadRecord[], opts: ConvertPageOptions = {},
 ): Promise<SchemaConvertOutcome[]> {
   const pair = readMetaForWrite(spaceId);
   if (pair.stamp.fp !== run.toFp) throw new SchemaConvertTargetMoved(run.toFp, pair.stamp.fp);
@@ -266,14 +309,22 @@ export async function convertRecordsPage(
     const precheck = classifyStored(kind, pair.meta, record, patchedEnds, change);
     if (precheck.all.length > 0) { out[i] = unconverted('not_conforming', precheck.all, change); continue; }
     try {
+      await opts.onRewrite?.(kind, record);
       const { written } = await rewrite(spaceId, kind, record, change);
       if (!written) { out[i] = { outcome: 'moved' }; continue; }
       const retyped = kind === 'entity' && change.type !== undefined;
       out[i] = { outcome: 'rewritten', edgesRestamped: retyped ? await restampEdgesAt(spaceId, record._id, pair) : 0 };
     } catch (err) {
       const refusal = refusalOf(err);
-      if (!refusal) throw err;
-      out[i] = unconverted(refusal.reason, refusal.violations, change);
+      if (refusal) { out[i] = unconverted(refusal.reason, refusal.violations, change); continue; }
+      // The store's or the write gate's condition fails the page, which the run retries; it says nothing about this record.
+      if (pageFailure(err)) throw err;
+      // Anything else is about this record: it fails the page until the record has failed the stated number of passes, then it is an item that
+      // names the kind of error (never its words) and the run goes on, so one record never holds an owed run for ever (lens sweep S4).
+      const failed = run.recordFailure;
+      const passes = (failed?.kind === kind && failed.id === record._id ? failed.passes : 0) + 1;
+      if (passes < SCHEMA_CONVERT_RECORD_FAILED_PASSES) throw new RecordConversionFailed(kind, record._id, passes, err);
+      out[i] = { outcome: 'unconverted', reason: 'conversion_failed', violations: [{ field: '', reason: errorKindOf(err) }], proposed: change };
     }
   }
 
