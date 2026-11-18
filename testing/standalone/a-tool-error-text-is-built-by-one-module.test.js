@@ -16,6 +16,8 @@
  *    literal, a template, or the first operand of a `+` chain, whose text starts with `Error: ` or `Error (`.
  *  - **The rule**: such a literal exists in `mcp/tool-error-text.ts` and nowhere else; and the function it exports is called from at
  *    least {@link FLOOR_CALLS} sites, so a scan that reads the wrong place, or sites that were never moved, cannot pass for nothing.
+ *  - **No built text inside a thrown error**: the dispatcher writes the prefix of what a tool throws, so `new Error(toolErrorText(...))`
+ *    answers two prefixes. `update_space` did that for its face-width refusal; the line is planted and flagged.
  *
  * ## Proven
  *
@@ -69,6 +71,22 @@ function builderCalls(file, source) {
   return n;
 }
 
+/**
+ * The lines where a built tool text is handed to a constructor (`new Error(toolErrorText(...))`). A thrown error is answered by the
+ * dispatcher, which writes the prefix itself, so a text built before the throw comes out with two (`Error: Error (409): ...`) and with
+ * the status of an unknown failure. A refusal with its own status is thrown as a `ToolRefusal(status, sentence)`.
+ */
+function builtTextsHandedToAConstructor(file, source) {
+  const sf = parseSource(file, source);
+  const found = [];
+  walkEveryNode(sf, (node) => {
+    if (!ts.isNewExpression(node)) return;
+    const built = (node.arguments ?? []).some(a => ts.isCallExpression(a) && ts.isIdentifier(a.expression) && BUILDERS.includes(a.expression.text));
+    if (built) found.push(sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1);
+  });
+  return found;
+}
+
 const files = trackedSources(SERVER_CODE_ROOTS, { floor: 300 });
 const sources = new Map(files.map(f => [f, readFileSync(join(REPO_ROOT, f), 'utf8')]));
 
@@ -88,6 +106,15 @@ describe('a tool error text is built by one module', () => {
       for (const h of handWrittenPrefixes(f, s)) open.push(`${f}:${h.line} ${JSON.stringify(h.text.slice(0, 40))}`);
     }
     assert.deepEqual(open, [], 'a tool error text is written with its prefix by hand: build it with toolErrorText(message, status?) or toolErrorResult(message, status?)');
+  });
+
+  it('no built text is thrown inside an error, where the dispatcher would write the prefix a second time', () => {
+    const open = [];
+    for (const [f, s] of sources) for (const line of builtTextsHandedToAConstructor(f, s)) open.push(`${f}:${line}`);
+    assert.deepEqual(open, [], 'a built tool text is the message of a thrown error: throw new ToolRefusal(status, sentence) and let the dispatcher write the prefix');
+    // The line `update_space` had for its face-width refusal is flagged at its line, and the form that replaced it is not.
+    assert.deepEqual(builtTextsHandedToAConstructor('server/src/x.ts', 'const a = 1;\nif (r) throw new Error(toolErrorText(r.reason, r.status));\n'), [2]);
+    assert.deepEqual(builtTextsHandedToAConstructor('server/src/x.ts', 'if (r) throw new ToolRefusal(r.status, r.reason);\n// throw new Error(toolErrorText(a))\n'), []);
   });
 
   describe('a planted copy, taken off the module\'s own line', () => {
