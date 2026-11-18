@@ -25,7 +25,7 @@
  * Anything that is not a plain object where an object is expected yields no entry for that level. A
  * malformed snapshot records nothing rather than guessing, exactly as `scalarOrDrop` does.
  */
-import type { AuditChange } from './audit-changes.js';
+import type { AuditChange } from './audit-change.js';
 import { KNOWLEDGE_TYPES } from '../config/types.js';
 import { isPlainObject } from '../util/plain-object.js';
 
