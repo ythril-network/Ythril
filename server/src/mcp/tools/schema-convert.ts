@@ -17,6 +17,7 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { SCHEMA_CONVERT_REFUSAL_CODES, SCHEMA_CONVERT_TYPES_MAX, type SchemaConvertActResult, type SchemaConvertCaller } from '../../spaces/schema-convert-terms.js';
 import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
+import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
 import { toolRefusalOfAct, type ToolRefusal } from '../../util/errors.js';
 import { CONVERT_RECORDS_PARAMETER } from './schema-update-parts.js';
 import { convertStartChanges } from '../../audit/audit-changes.js';
@@ -72,6 +73,8 @@ export const space_schema_convertTool: ToolHandler = {
     + 'record at the same time, both write the same converted record and the later version wins, and when the two use different steps the later write '
     + 'decides.\n\n'
     + 'IT NEEDS AN ADMIN: `knowledge: admin` on the space AND the space\'s admin right, because the rewrite reaches every peer. A read-only token is refused.\n\n'
+    + `AT MOST ${HEAVY_CALLS_PER_WINDOW} STARTS A MINUTE PER TOKEN, counted with the REST route and the server's other heavy calls: a start over the limit `
+    + 'is refused (429 `schema_convert_rate_limited`) and starts nothing; a start refused for any other reason costs nothing.\n\n'
     + 'THE ANSWER comes at once, `{ state: \'started\', toFp, types, steps }` (`toFp` is the schema fingerprint the run converts toward, `steps` how many '
     + 'steps it holds); the conversion runs in the background, one page at a time, and survives a restart. Read how it went with `space_schema_conversion`.\n\n'
     + `REFUSALS (\`code\`): ${SCHEMA_CONVERT_REFUSAL_CODES.map(c => `\`${c}\``).join(', ')}. \`schema_convert_running\` (409) while a run of the space is unfinished: `
@@ -103,7 +106,7 @@ export const space_schema_convertTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { space: _space, ...body } = ctx.args;
-    const answer = await actsOrThrow().start(ctx.callSpace, body, { rights: ctx.rights });
+    const answer = await actsOrThrow().start(ctx.callSpace, body, { rights: ctx.rights, rateKey: ctx.rateKey });
     const result = resultOf(answer);   // throws a refusal: nothing below runs for one
     // What the act accepted, for the audit entry (`schema.convert.start`), as the route hands it: the types and the number of steps.
     ctx.recordAuditChanges?.(convertStartChanges(answer.body));
@@ -127,6 +130,6 @@ export const space_schema_conversionTool: ToolHandler = {
     type: 'object', properties: { space: s.requiredSpace }, required: ['space'], additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    return resultOf(await actsOrThrow().status(ctx.callSpace, { rights: ctx.rights }));
+    return resultOf(await actsOrThrow().status(ctx.callSpace, { rights: ctx.rights, rateKey: ctx.rateKey }));
   },
 };
