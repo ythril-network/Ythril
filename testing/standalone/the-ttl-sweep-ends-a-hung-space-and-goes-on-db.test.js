@@ -32,27 +32,32 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
-import { setWriteBoundForTest, withStalledReads } from './_write-faults.mjs';
+import { setWriteBoundForTest, withStalledReadsMany } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 const PAST = new Date('2020-01-01T00:00:00Z');
 const BOUND_MS = 1000;
 // Far above the bound: "the sweep ended at the bound, not at the stall" is told apart by STALL_MS - 500, and the sweep's own work on
 // the healthy spaces counts into the same clock. At 3000 the margin was 1.5 s and four -db files running at once used it up
-// (2820 ms, bundle-211); a stall the sweep never waits out costs nothing, so a long one costs the run no time.
+// (2820 ms, bundle-211). The fixture's guard waits the stall out once per case, however many views the case stalls
+// (`withStalledReadsMany` guards them together), so a longer stall costs the run its length once per case.
 const STALL_MS = 8000;
 /** What `withStalledReads` costs one source document, ms (`_write-faults.mjs`). */
 const STALL_STEP_MS = 200;
 
 const factDoc = (space, id) => ({ _id: id, spaceId: space, content: `expired ${id}`, seq: 1, createdAt: '2020-01-01T00:00:00.000Z', _expireAt: PAST });
 
-/** Reads of `<space>_<part>` stall for at least STALL_MS for the sweep's own query while `fn` runs. */
-async function hung(db, space, part, fn) {
+/**
+ * Reads of each `[space, part]` (`<space>_<part>`) stall for at least STALL_MS for the sweep's own query while `fn` runs, all of
+ * them together and each one guarded.
+ */
+async function hung(db, views, fn) {
   // The sweep's own first read of a collection (`expiredPage`, `brain/ttl-sweep.ts`): `_expireAt <= now`, plus `SWEEP_FILTER[part]` for
   // files (not used here: facts and entities have none). `now` is the sweep's tick, which a later `new Date()` is at or after.
   const readerFilter = { _expireAt: { $lte: new Date() } };
-  const seed = Array.from({ length: Math.ceil(STALL_MS / STALL_STEP_MS) }, (_, i) => ({ _id: `__hung_${i}`, _expireAt: PAST }));
-  return withStalledReads(db, `${space}_${part}`, `${space}_${part}_src`, { ms: STALL_MS, readerFilter, seed }, fn);
+  const seed = () => Array.from({ length: Math.ceil(STALL_MS / STALL_STEP_MS) }, (_, i) => ({ _id: `__hung_${i}`, _expireAt: PAST }));
+  const specs = views.map(([space, part]) => ({ name: `${space}_${part}`, viewOn: `${space}_${part}_src`, ms: STALL_MS, readerFilter, seed: seed() }));
+  return withStalledReadsMany(db, specs, fn);
 }
 
 describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, () => {
@@ -91,7 +96,7 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
   it('space 1 stalled, space 2 healthy: ends in about one bound, says space 1 once, sweeps space 2', { timeout: 120_000 }, async () => {
     const db = door.mongo.getDb();
     await door.coll(OK1, 'facts').insertMany([0, 1, 2].map((i) => factDoc(OK1, `ok1-${i}`)));
-    await hung(db, H1, 'facts', async () => {
+    await hung(db, [[H1, 'facts']], async () => {
       const started = Date.now();
       await sweepExpired(new Date());
       const tookMs = Date.now() - started;
@@ -108,9 +113,9 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
   it('a timeout ends the SPACE: two stalled collections cost one bound and say one line', { timeout: 120_000 }, async () => {
     const db = door.mongo.getDb();
     await door.coll(OK2, 'facts').insertOne(factDoc(OK2, 'ok2-0'));
-    await hung(db, H2, 'facts', () => hung(db, H2, 'entities', async () => {
+    await hung(db, [[H2, 'facts'], [H2, 'entities']], async () => {
       await sweepExpired(new Date());
-    }));
+    });
     // The sweep reads the collections in TTL_COLLECTIONS order: the first of the two is read and times out, the second is never read.
     const [first, second] = ['facts', 'entities'].sort((a, b) => TTL_COLLECTIONS.indexOf(a) - TTL_COLLECTIONS.indexOf(b));
     assert.equal(said(`TTL sweep: ${first}`, H2).length, 1);
@@ -121,11 +126,11 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
   it('three spaces in a row that time out end the walk once; the space behind waits, and the next cycle sweeps it', { timeout: 180_000 }, async () => {
     const db = door.mongo.getDb();
     await door.coll(TAIL, 'facts').insertOne(factDoc(TAIL, 'tail-0'));
-    await hung(db, K1, 'facts', () => hung(db, K2, 'facts', () => hung(db, K3, 'facts', async () => {
+    await hung(db, [[K1, 'facts'], [K2, 'facts'], [K3, 'facts']], async () => {
       const started = Date.now();
       await sweepExpired(new Date());
       assert.ok(Date.now() - started < 3 * BOUND_MS + 3000, `three bounds were expected, it took ${Date.now() - started} ms`);
-    })));
+    });
     const stops = lines.filter((l) => /^TTL sweep stopped: 3 spaces timed out in a row; the store looks stalled — retried next cycle$/.test(l));
     assert.equal(stops.length, 1, `one stop line, got ${stops.length}`);
     for (const k of [K1, K2, K3]) assert.equal(said('TTL sweep: facts', k).length, 1, `${k} is said once`);
