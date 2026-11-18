@@ -201,6 +201,9 @@ export type MetaUpdateRefusal = {
   body: { error: string; code?: string; expectedVersion?: number; currentVersion?: number; step?: number };
 };
 
+/** The status of a body the planner refuses for what it says, a conversion step's refusals among them. */
+const BAD_BODY = 400 as const;
+
 /**
  * The refusal of a body whose `convertRecords` does not parse, said as `bad_conversion_step` with the index of the step (`Q-745`), or `undefined` when
  * the failure is not all under `convertRecords` (a body with another fault too keeps its one generic answer, which names every path).
@@ -212,9 +215,9 @@ export type MetaUpdateRefusal = {
 function badConversionStepRefusal(refusal: { error: string; issues: readonly { path: readonly string[] }[] }): MetaUpdateRefusal | undefined {
   const { issues } = refusal;
   if (issues.length === 0 || !issues.every(i => i.path[0] === 'convertRecords')) return undefined;
-  const first = issues[0]!.path;
-  const at = first[1] === 'steps' && first[2] !== undefined ? Number(first[2]) : first[1] === 'steps' && first.length === 2 ? CONVERSION_STEPS_MAX : NaN;
-  return { status: 400, body: { ...refusal, code: 'bad_conversion_step', ...(Number.isInteger(at) ? { step: at } : {}) } };
+  const [, member, index] = issues[0]!.path;
+  const at = member !== 'steps' ? NaN : index === undefined ? CONVERSION_STEPS_MAX : Number(index);
+  return { status: BAD_BODY, body: { ...refusal, code: 'bad_conversion_step', ...(Number.isInteger(at) ? { step: at } : {}) } };
 }
 
 /**
@@ -341,7 +344,7 @@ export function planSpaceMetaUpdate(input: {
   }
   // A conversion step is held to a schema, and a request with no meta has no schema to hold it to: refused here, before anything else is read.
   if (parsed.data.convertRecords !== undefined && parsed.data.meta === undefined) {
-    return { ok: false, refusal: { status: 400, body: {
+    return { ok: false, refusal: { status: BAD_BODY, body: {
       error: 'convertRecords goes with a schema change: send it with a meta (a conversion step is held to the schema before and after the change)',
       code: 'convert_needs_meta',
     } } };
@@ -460,7 +463,7 @@ export function planSpaceMetaUpdate(input: {
     });
     const issue = conversionStepIssues(steps, resolvedForSteps(space.meta), resolvedForSteps(after))[0];
     if (issue) {
-      return { ok: false, refusal: { status: 400, body: {
+      return { ok: false, refusal: { status: BAD_BODY, body: {
         error: `convertRecords.steps[${issue.step}]: ${issue.message}`, code: 'bad_conversion_step', step: issue.step,
       } } };
     }
