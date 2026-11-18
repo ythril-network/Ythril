@@ -34,7 +34,7 @@ import { COUNTED_FILE_ROW } from '../files/live-file-row.js';
 import { filesAwaitingBytes as awaitingBytesIn } from '../files/absent-bytes-sweep.js';
 
 /** How much of a space is not searchable yet: records queued, in flight, and given up on. */
-export type EmbedQueueCounts = { pending: number; processing: number; failed: number };
+export type EmbedQueueCounts = Awaited<ReturnType<typeof getEmbedJobCounts>>;
 
 /** The body of a space's stats, as REST stats and MCP `space_stats` both send it (a type alias, so a tool can carry it as its structured answer). */
 export type SpaceStatsAnswer = RecordCounts & {

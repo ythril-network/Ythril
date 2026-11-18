@@ -95,10 +95,16 @@ describe('a space whose count failed is marked, not read as empty (real MongoDB)
         assert.equal(Object.hasOwn(bad, 'counts'), false, `the failed space carries counts ${JSON.stringify(bad.counts)}`);
         assert.deepEqual(entryOf(result.body.spaces, GOOD)?.counts, { facts: 2, entities: 1, edges: 0, chrono: 0 }, 'the other space was not counted');
         assert.ok(lines.some(l => l.includes('Counting records failed') && l.includes(BAD)), `the failed count was not logged: ${lines.slice(0, 5).join(' | ')}`);
+        // The same space still failing on the next listing is not news: the line is said once, not once per call.
+        const again = await logLinesDuring(() => restList());
+        assert.deepEqual(again.result.body.countsIncomplete, [BAD], 'the second listing no longer names the failed space');
+        assert.equal(again.lines.filter(l => l.includes('Counting records failed')).length, 0, 'a second listing of the same failed space logged the failure again');
       });
     });
 
     it('MCP list_spaces names the failed space in countsIncomplete beside spaces, and answers no zeros for it', async () => {
+      // A listing where every count succeeds clears what was said, so the failure below is logged as news.
+      assert.equal((await restList()).body.countsIncomplete, undefined, 'the listing still names a failed space after the store recovered');
       await whileCountFails(async () => {
         const { lines, result } = await logLinesDuring(() => mcpList());
         assert.deepEqual(result.structured.countsIncomplete, [BAD], `countsIncomplete ${JSON.stringify(result.structured.countsIncomplete)}`);
