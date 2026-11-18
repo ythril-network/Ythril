@@ -10,9 +10,19 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { beginIngest, ingestStatus } from '../../extractor/ingest-door.js';
 import { INGEST_KINDS } from '../../extractor/ingest.js';
 import { HEAVY_CALLS_PER_WINDOW } from '../../rate-limit/heavy-tool.js';
-import { MAX_INGEST_SESSIONS } from '../../util/request-bounds.js';
+import { MAX_INGEST_SESSIONS, INGEST_EXTRACTION_BOUNDS } from '../../util/request-bounds.js';
 import { readSpacesOfCall } from '../../spaces/read-scope.js';
 import { retiredWriteFieldError } from '../../brain/retired-write-fields.js';
+
+/** What each list of an `extraction` holds, in the caller's words; the limit is appended from the one table the parser reads. */
+const EXTRACTION_LISTS: Readonly<Record<string, string>> = {
+  sessions: 'The sessions of the conversation, each with its `date` and `turns`',
+  entities: 'The entities (people, places, things), each written as a record',
+  existingEntities: 'Entities the space already holds that the extraction names, each by `key` and `id`',
+  edges: 'The labelled relationships between entities, claims and events, each written as an edge',
+  chrono: 'The dated events, each written as a chrono record',
+  claims: 'The claims, each written as a fact',
+};
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text' as const, text: t }], isError });
 
@@ -54,7 +64,13 @@ export const ingestTool: ToolHandler = {
         description: 'A raw conversation: sessions with a `date` each, and their turns in order.',
         items: { type: 'object' },
       },
-      extraction: { type: 'object', description: 'An extraction already made, in the committed format. Validated, then written.' },
+      extraction: {
+        type: 'object',
+        description: 'An extraction already made, in the committed format. Validated, then written. Each list in it has a size limit '
+          + '(`maxItems`), and a request past one is refused naming the list and the limit, before anything is written.',
+        properties: Object.fromEntries(Object.entries(INGEST_EXTRACTION_BOUNDS).map(([name, max]) =>
+          [name, { type: 'array', maxItems: max, description: `${EXTRACTION_LISTS[name] ?? name}, at most ${max}. One entry past that is refused.`, items: { type: 'object' } }])),
+      },
     },
     required: ['space', 'kind'],
     additionalProperties: false,

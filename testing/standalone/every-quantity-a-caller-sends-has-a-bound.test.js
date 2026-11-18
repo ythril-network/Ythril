@@ -36,6 +36,7 @@ import { join } from 'node:path';
 import { REPO_ROOT, trackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { toolValidators, zodValidators, quantities } from './_validator-schemas.mjs';
+import { extractionArrays } from './_extraction-arrays.mjs';
 
 const BOUNDS = await import('../../server/dist/util/request-bounds.js').catch(() => null);
 
@@ -119,11 +120,31 @@ describe('every quantity a caller sends has a bound', () => {
     assert.ok(BOUNDS?.BOUND_BY_FIELD, 'server/dist/util/request-bounds.js exports no BOUND_BY_FIELD — the one place the bounds live is missing');
     const wrong = [];
     for (const [field, max] of Object.entries(BOUNDS.BOUND_BY_FIELD)) {
-      const sites = ALL.filter(q => q.kind === 'array' && q.seg === field && !q.path.endsWith('[]'));
+      // `ingest`'s `extraction.edges` is a conversation's edges, written one record each — not a record's inline `edges`; it has its own bound,
+      // held to its own table by the extraction test below (Q-167).
+      const sites = ALL.filter(q => q.kind === 'array' && q.seg === field && !q.path.endsWith('[]')
+        && !(q.door === 'MCP ingest' && q.path.startsWith('.extraction.')));
       assert.ok(sites.length > 0, `no validator declares \`${field}\` — the name moved, and the bound on it now binds nothing`);
       for (const q of sites) if (q.node.maxItems !== max) wrong.push(`${q.door} ${q.path}: maxItems ${q.node.maxItems ?? 'absent'}, expected ${max}`);
     }
     assert.deepEqual(wrong, [], `a shared field bounded differently by door:\n  ${wrong.join('\n  ')}`);
+  });
+
+  it('every array an ingest extraction carries is declared in the tool schema, bounded by the number the parser enforces', () => {
+    // The arrays come from the `Extraction` type the writer reads, not from the schema: the schema walker above sees only what the schema
+    // declares, so an array the writer loops over and the schema never names would pass it unseen (Q-167).
+    assert.ok(BOUNDS?.INGEST_EXTRACTION_BOUNDS, 'server/dist/util/request-bounds.js exports no INGEST_EXTRACTION_BOUNDS');
+    const ingest = VALIDATORS.find(v => v.door === 'MCP ingest');
+    const declared = ingest?.schema.properties?.extraction?.properties ?? {};
+    const wrong = extractionArrays().flatMap(name => {
+      const node = declared[name];
+      const max = BOUNDS.INGEST_EXTRACTION_BOUNDS[name];
+      if (!node || node.type !== 'array') return [`extraction.${name}: not declared as an array in the ingest tool schema`];
+      if (node.maxItems === undefined) return [`extraction.${name}: no maxItems`];
+      return node.maxItems === max ? [] : [`extraction.${name}: maxItems ${node.maxItems}, the parser enforces ${max ?? 'nothing'}`];
+    });
+    assert.deepEqual(wrong, [], `an ingest extraction array without its bound:\n  ${wrong.join('\n  ')}\n`
+      + 'Name it in INGEST_EXTRACTION_BOUNDS (util/request-bounds.ts) and declare it under `extraction` in mcp/tools/ingest.ts from that table.');
   });
 
   it('an array of a closed set is bounded by the size of the set', () => {

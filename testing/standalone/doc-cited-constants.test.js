@@ -639,6 +639,28 @@ const CITED = [
     doc,
     text,
   })),
+  // The count limits on an ingest `extraction` (Q-167): the Ingest API page states each beside the list it limits.
+  ...[
+    ['MAX_INGEST_SESSIONS', 'sessions', 'sessions'],
+    ['MAX_EXTRACTION_ENTITIES', 'entities', 'entities'],
+    ['MAX_EXTRACTION_EXISTING_ENTITIES', 'existingEntities', 'existing entities'],
+    ['MAX_EXTRACTION_CHRONO', 'chrono', 'dated events'],
+    ['MAX_EXTRACTION_CLAIMS', 'claims', 'claims'],
+    ['MAX_EXTRACTION_EDGES', 'edges', 'edges'],
+  ].map(([constant, list, what]) => ({
+    what: `the most ${what} an ingest extraction holds`,
+    source: 'server/src/util/request-bounds.ts',
+    code: new RegExp(`export const ${constant} = ([0-9_]+);`),
+    doc: 'docs/integration-guide/04i-ingest-api.md',
+    text: (v) => new RegExp(`${v} \`${list}\``),
+  })),
+  {
+    what: 'the most turns an ingest extraction holds between its sessions',
+    source: 'server/src/util/request-bounds.ts',
+    code: /export const MAX_INGEST_TURNS = ([0-9_]+);/,
+    doc: 'docs/integration-guide/04i-ingest-api.md',
+    text: (v) => new RegExp(`${v} turns between them`),
+  },
 ];
 
 /**
