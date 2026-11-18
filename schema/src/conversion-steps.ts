@@ -28,7 +28,7 @@ import { z } from 'zod';
 import { KNOWLEDGE_TYPES, type KnowledgeType } from './vocabulary.js';
 import { VIEW_FIELDS } from './view-fields.js';
 import { MAX_RULES_PER_SPACE, MAX_RULE_LENGTH, conditionIssues } from './rules.js';
-import { TYPE_NAME_MAX } from './space-meta.js';
+import { TYPE_NAME_MAX, PROPERTY_NAME_MAX } from './space-meta.js';
 import { canonicalJson } from './canonical-json.js';
 import { isPlainObject, ownValue, setOwn } from './plain-object.js';
 import { NAME_QUOTED, peerText, refusalOfParse } from './text.js';
@@ -38,7 +38,7 @@ import type { FingerprintedMeta } from './schema-fingerprint.js';
 
 /** Steps one `convertRecords` may hold: as many as a space may have rules. */
 export const CONVERSION_STEPS_MAX = MAX_RULES_PER_SPACE;
-/** Entries one `mapEnum` may hold in its `values`: as many as a map of properties may hold (a type's `propertySchemas`). */
+/** Entries one `mapEnum` may hold in its `values`: a bound of its own, refused over it and never cut (design 1.1). */
 export const CONVERSION_VALUES_MAX = 200;
 /** Cases one `splitType` may hold. */
 export const CONVERSION_CASES_MAX = 20;
@@ -55,7 +55,7 @@ export interface ConvertRecords { steps?: ConversionStep[] }
 
 const KindZ = z.enum(KNOWLEDGE_TYPES);
 const TypeNameZ = z.string().min(1).max(TYPE_NAME_MAX);
-const PropertyNameZ = z.string().min(1);
+const PropertyNameZ = z.string().min(1).max(PROPERTY_NAME_MAX);
 const SplitCaseZ = z.object({ when: z.string().min(1).max(MAX_RULE_LENGTH), to: TypeNameZ }).strict();
 
 /** One step, strict: an unknown key or op is refused, never ignored. */
