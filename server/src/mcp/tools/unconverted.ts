@@ -46,7 +46,8 @@ export const list_unconvertedTool: ToolHandler = {
   name: 'list_unconverted',
   description: `List the unconverted records of a space. ${WHAT_IT_IS} Each row is \`{ itemId, kind, recordId, type, seq, fromFp, toFp, reason, violations, `
     + 'proposed, status, detectedAt, record? }`: `reason` says why it was not converted (`not_conforming`, `no_case_matched`, `both_set`, `could_not_evaluate`, '
-    + '`relationship_exists`, `functional_taken`, `version_ceiling`, `fork`, `step_refused`), `violations` names the fields that do not conform and why '
+    + '`relationship_exists`, `functional_taken`, `version_ceiling`, `fork`, `step_refused`, `conversion_failed`: a rewrite that kept failing for a reason '
+    + 'no other class names, its one violation naming the kind of error and never its words), `violations` names the fields that do not conform and why '
     + '(never their values), `proposed` what the steps would have made of it (a new type, the property names set and removed), and `record.summary` is '
     + 'the record\'s own name or summary, absent when the record is gone. Newest first. The answer carries `total`, `skip`, `limit`, `count`, `truncated`, '
     + '`nextSkip` when the page is cut, and `counts` (`{ open, dismissed }`, of the whole space whatever the filters). This call writes nothing: a row for a '

@@ -43,7 +43,8 @@ import { exchangeDirections } from '../sync/space-exchange.js';
 import { TYPE_FIELD } from '../brain/ttl.js';
 import { CHOSEN_VERSION_ROWS } from '../brain/chosen-versions.js';
 import {
-  convertRecordsPage, convertProjectionOf, splitDeclaredKey, SchemaConvertTargetMoved, type ReadRecord, type SchemaConvertOutcome,
+  convertRecordsPage, convertProjectionOf, splitDeclaredKey, SchemaConvertTargetMoved, RecordConversionFailed, SCHEMA_CONVERT_RECORD_FAILED_PASSES,
+  type ReadRecord, type SchemaConvertOutcome, type ConvertPageOptions,
 } from '../brain/schema-convert-record.js';
 import {
   recordUnconvertedItem, sweepStaleUnconvertedItems, hasUnconvertedItems, UNCONVERTED_ITEMS_PER_RUN_MAX,
@@ -64,7 +65,7 @@ import { keyedLock } from '../util/keyed-lock.js';
 import { isDuplicateKeyOnly } from '../db/write-errors.js';
 
 /** The operation of the one internal audit entry a finished run writes: declared in the audit middleware beside the other operations no route produces, re-exported here for the run's own readers. */
-export { SCHEMA_CONVERT_RUN_OPERATION };
+export { SCHEMA_CONVERT_RUN_OPERATION, SCHEMA_CONVERT_RECORD_FAILED_PASSES };
 /** The most types one start may name: a term the doors share (`schema-convert-terms.ts`), re-exported for the run's own readers. */
 export { SCHEMA_CONVERT_TYPES_MAX } from './schema-convert-terms.js';
 /** Records read per page. */
@@ -118,6 +119,8 @@ export interface SchemaConvertRunDoc {
   counts: SchemaConvertCounts;
   /** Items the run did not write because it had written {@link UNCONVERTED_ITEMS_PER_RUN_MAX}. */
   unconvertedNotListed?: number;
+  /** The record whose rewrite failed the last failed pass for a reason no class names, and on how many passes in a row (`RecordConversionFailed`). */
+  recordFailure?: { kind: KnowledgeType; id: string; passes: number };
   state: 'running' | 'complete' | 'failed';
   failures: number;
   /** Before this (epoch ms) the tick does not retry a failed pass. */
@@ -157,6 +160,8 @@ export type SchemaConvertSyncPeer = (peerId: string, opts: { wait: true }) => Pr
 export interface SchemaConvertDeps {
   syncPeer?: SchemaConvertSyncPeer;
   afterPage?: (page: { kind: KnowledgeType; type: string; rows: number }) => Promise<void> | void;
+  /** Called before each rewrite (`ConvertPageOptions.onRewrite`): a throw there is the rewrite's own failure. A test's hook. */
+  onRewrite?: ConvertPageOptions['onRewrite'];
 }
 
 /** What the status doors answer. */
@@ -555,7 +560,7 @@ async function pass(spaceId: string, held: SchemaConvertRunDoc, deps: SchemaConv
       const page = await idKeysetPage<ReadRecord & { _id: string }>(schemaConvertPageSpec(spaceId, target.kind, target.type, run.toFp), after);
       let outcomes: SchemaConvertOutcome[];
       try {
-        outcomes = page.rows.length > 0 ? await convertRecordsPage(spaceId, run, target.kind, page.rows) : [];
+        outcomes = page.rows.length > 0 ? await convertRecordsPage(spaceId, run, target.kind, page.rows, { ...(deps.onRewrite ? { onRewrite: deps.onRewrite } : {}) }) : [];
       } catch (err) {
         if (!(err instanceof SchemaConvertTargetMoved)) throw err;
         continue;   // the next turn sees the moved fingerprint and restarts the run
@@ -595,10 +600,13 @@ async function pass(spaceId: string, held: SchemaConvertRunDoc, deps: SchemaConv
     const failures = (current.failures ?? 0) + 1;
     const givenUp = !current.owed && failures >= FAILED_AFTER_PASSES;
     reportSpaceFailure(PASS_STEP, spaceId, err, { when: givenUp ? 'with the next start' : WHEN });
+    // A record whose rewrite failed for a reason no class names: its passes in a row are counted, so the page lists it once they reach the bound.
+    const recordFailure = err instanceof RecordConversionFailed ? { kind: err.kind, id: err.id, passes: err.passes } : undefined;
     await updateRun(spaceId, current.generation, {
       $set: {
         failures, error: peerText(err instanceof Error ? err.message : String(err), { max: ERROR_TEXT_MAX }), sweepLeaseAt: 0,
         retryAt: Date.now() + backoffDelayMs(failures - 1, RETRY_BASE_MS, RETRY_CAP_MS), ...(givenUp ? { state: 'failed' } : {}),
+        ...(recordFailure ? { recordFailure } : {}),
       },
     }).catch((recordErr: unknown) => { reportSpaceFailure(PASS_STEP, spaceId, recordErr, { when: WHEN, unit: 'record the failure' }); });
     return await readRun(spaceId).catch(() => null);

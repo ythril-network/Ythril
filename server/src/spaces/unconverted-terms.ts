@@ -16,10 +16,14 @@ import { TYPE_NAME_MAX } from '@ythril-network/schema/internal';
 import { KNOWLEDGE_TYPES, type KnowledgeType } from '../config/types-knowledge.js';
 import type { TokenRights } from '../config/rights-shape.js';
 
-/** Why a record was not converted. `could_not_evaluate` is a split condition the engine could not answer on the record (its own class). */
+/**
+ * Why a record was not converted. `could_not_evaluate` is a split condition the engine could not answer on the record (its own class);
+ * `conversion_failed` is a rewrite that failed for a reason no other class names, on as many passes as a run allows one record, its violation
+ * naming the error's kind and never its words.
+ */
 export const UNCONVERTED_REASONS = [
   'not_conforming', 'no_case_matched', 'both_set', 'could_not_evaluate',
-  'relationship_exists', 'functional_taken', 'version_ceiling', 'fork', 'step_refused',
+  'relationship_exists', 'functional_taken', 'version_ceiling', 'fork', 'step_refused', 'conversion_failed',
 ] as const;
 export type UnconvertedReason = typeof UNCONVERTED_REASONS[number];
 
