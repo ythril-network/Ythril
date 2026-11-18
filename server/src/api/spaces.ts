@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { voteOnSchemaEditIfNetworked, type WriteCaller } from '../spaces/meta-update.js';
 import { commitOwnMetaEdit, withType, withoutType } from '../spaces/effective-meta.js';
+import { restartSchemaConvertInTurn } from '../sync/governance.js';
 import { registerReembedRoute } from './spaces-reembed.js';
 import { registerActivityResetRoute } from './spaces-activity.js';
 import { registerFileStampReportRoute } from './spaces-file-stamp-report.js';
@@ -44,7 +45,7 @@ import {
   DeleteSpaceBody, RenameSpaceBody, ReorderSpacesBody, PutSchemaBody,
 } from '../spaces/body-schemas.js';
 import { requireSettingsFields, singleTypeEditBody } from '../auth/require-settings-fields.js';
-import { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice } from '../spaces/meta-update.js';
+import { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice, convertNotice } from '../spaces/meta-update.js';
 import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
 import type { TokenRights } from '../config/rights-shape.js';
@@ -345,10 +346,10 @@ spacesRouter.patch('/:id', globalRateLimit, requireSpaceAuthMfaScoped('id'), den
     return;
   }
   if (result.outcome === 'vote_pending') {
-    res.status(202).json({ status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkWriteNotice(result, req.authToken as WriteCaller) });
+    res.status(202).json({ status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkWriteNotice(result, req.authToken as WriteCaller), ...convertNotice(result) });
     return;
   }
-  res.json({ space: spaceForWire(result.space), ...networkWriteNotice(result, req.authToken as WriteCaller) });
+  res.json({ space: spaceForWire(result.space), ...networkWriteNotice(result, req.authToken as WriteCaller), ...convertNotice(result) });
 });
 
 // PUT /api/spaces/:id/schema — full replacement of the space's typeSchemas.
@@ -419,6 +420,8 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
     sendLostSpace(req, res, id);
     return;
   }
+  // `Q-746`: this door converts nothing, and an unfinished conversion run is restarted toward the schema it leaves (design 2.1, 5.2).
+  await restartSchemaConvertInTurn([id]);
   // Full-replace: `previousTypeSchemas` was read before the write, so this is a true before/after. The
   // audit layer summarises it as type and property-key NAMES — a schema replacement that recorded
   // nothing was the whole gap here.
@@ -567,6 +570,7 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
     sendLostSpace(req, res, id);
     return;
   }
+  await restartSchemaConvertInTurn([id]);   // `Q-746`: converts nothing; an unfinished run follows the schema it leaves
 
   // A single-type upsert is audited under the same `space.schema.update` operation as the full replace,
   // so it needs the same snapshot shape. Without it the granular route — the one the Schema tab actually
@@ -621,6 +625,7 @@ spacesRouter.delete('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRate
     sendLostSpace(req, res, id);
     return;
   }
+  await restartSchemaConvertInTurn([id]);   // `Q-746`: converts nothing; an unfinished run follows the schema it leaves
 
   // Deleting a type is the change most worth having in the log: it silently widens what the space
   // accepts from then on, and the definition it removed is not recoverable from the entry alone.

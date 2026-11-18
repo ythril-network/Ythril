@@ -16,6 +16,7 @@ import { clashesOf, ownAgainstEffective, replicatedMetaOf } from '../sync/replic
 import { carriedLocalId } from '../sync/space-map.js';
 import { layersFor, recomputeEffectiveMeta } from './effective-meta.js';
 import { lostSpaceAnswer } from './unknown-space.js';
+import { restartSchemaConvertInTurn } from '../sync/governance.js';
 
 /** An act's answer: the HTTP status is the contract, so both doors carry it. */
 export type SchemaLayersActResult =
@@ -86,6 +87,8 @@ export function setNetworkPrecedenceAct(spaceId: string, input: unknown): Schema
   const order = [...new Set(parsed.data.networks)];
   space.networkPrecedence = order.length ? order : undefined;
   saveConfig(cfg);
-  recomputeEffectiveMeta(spaceId);
+  // `Q-746`: a reorder converts nothing; when it moved the schema, an unfinished conversion run is restarted toward it (design 2.1, 5.2). Not
+  // awaited: the act answers both doors synchronously, and the restart never rejects.
+  if (recomputeEffectiveMeta(spaceId)) void restartSchemaConvertInTurn([spaceId]);
   return schemaLayersAct(spaceId);
 }
