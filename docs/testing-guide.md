@@ -453,6 +453,7 @@ and whether a timer is left armed. They are made once, in
 | The same wait, answering the value the condition held with | `waitForValue(…)` |
 | Wait until a state was read that you accept, and get that reading back (the timeout names the last one read) | `waitForReading(read, accept, timeout, interval, options)` |
 | Wait for one operation for at most a time, without abandoning it, and learn whether it finished | `settleWithin(promise, ms)` in `testing/standalone/_write-faults.mjs` |
+| Race an answer against a deadline, the deadline answering (or throwing) when it passes first | `raceDeadline(work, ms, 'race timeout: <detail>', onLate)` from `testing/_shared/sleep.mjs`; it clears the deadline's timer the moment `work` settles, so a won race does not keep the process alive for the rest of `ms` |
 | A fixed delay: time itself is the subject. Anything else is a guess that wants a condition | `elapse(ms, '<kind>: <detail>')` from `testing/_shared/sleep.mjs`, the kind one of the kinds below |
 | A throwaway server on loopback, ended without waiting for a client that never leaves | `const local = await listenOnLoopback(http.createServer(app))` from `testing/_shared/local-server.mjs`; it gives `{ port, url, close }`, binds `127.0.0.1` only, and `close()` is safe twice |
 
@@ -475,11 +476,17 @@ before arming any timer, unless the kind is one of these:
 | `pacing` | a rate the subject enforces, or one the test keeps to on purpose |
 | `bind-mount propagation` | a file written on the host is not yet seen inside the container (a reload before then writes the stale file back) |
 | `sampler interval` | a sampler takes readings at a fixed rate until it is told to stop |
-| `race timeout` | the losing side of a `Promise.race` |
+| `race timeout` | the losing side of a race against a deadline: the one kind `raceDeadline` takes, and the one it requires |
 
-The gate reads every call of `elapse` — awaited or not, in a `Promise.race`, a `.then`, a wrapper, under any import name
-— and wants its reason as a literal. Import it by name; a namespace or default import of `sleep.mjs`, or a re-export of
-it, is refused, because the gate could not see the calls through it.
+The gate reads every call of `elapse` — awaited or not, in a `.then`, a wrapper, under any import name — and wants its
+reason as a literal. Import it by name; a namespace or default import of `sleep.mjs`, or a re-export of it, is refused,
+because the gate could not see the calls through it.
+
+**A race against a deadline goes through `raceDeadline`, never through `elapse` or a timer inside a `Promise.race`.** The
+timer that loses a race stays armed, so the process lives for its whole length after the last test has ended and the file's
+time in CI is that much longer than its tests. A bare `setTimeout` in a race that is neither cleared nor `unref()`ed, and a
+race against `elapse` or against `node:timers/promises`' `setTimeout` (neither gives a handle to clear), are findings of
+`a-test-waits-and-listens-through-one-helper`. `raceDeadline` holds the timer in the one place that clears it.
 
 **A site that asks a different question stays, with a marker** in the comment block directly above it. Which marker
 depends on the site:
