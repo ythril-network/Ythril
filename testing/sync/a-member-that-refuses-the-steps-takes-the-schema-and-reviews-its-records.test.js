@@ -40,9 +40,9 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { INSTANCES, post, patch, get, createTestSpace, mirroredNetwork, syncUntil } from './helpers.js';
+import { INSTANCES, post, patch, get, createTestSpace, syncUntil } from './helpers.js';
 import {
-  tokenOf, entityType, text, oneOf, setOwnSchema, writeEntities, recordOn, holdsAll, fingerprintOn, metaOn, runEnds, runEndsHere, forksIn, itemsOf,
+  mirroredPair, tokenOf, entityType, text, oneOf, setOwnSchema, writeEntities, recordOn, holdsAll, fingerprintOn, metaOn, runEnds, runEndsHere, forksIn, itemsOf,
 } from './_schema-convert-pair.mjs';
 
 const RUN = Date.now();
@@ -76,7 +76,8 @@ before(async () => {
   // The own definitions are set BEFORE the network exists, so each space is a plain one and no round carries a layer.
   await setOwnSchema(A, tA, SPACE, OWN_A);
   await setOwnSchema(B, tB, SPACE, OWN_B);
-  net = await mirroredNetwork({ label: `cvrefuse-${RUN}`, spaces: [SPACE], a: [A, tA], b: [B, tB] });
+  // Built by the instances' own doors: the runner the sync tests run in has no `docker` command, which `mirroredNetwork` needs.
+  net = await mirroredPair({ label: `cvrefuse-${RUN}`, spaces: [SPACE] });
   const written = await writeEntities(A, tA, SPACE, Object.values(ROWS));
   Object.keys(ROWS).forEach((name, i) => { ids[name] = written[i]; });
   await syncUntil(B, tB, net.networkId, () => holdsAll(B, tB, SPACE, Object.values(ids)), 'B to hold the three records A wrote', { timeoutMs: 90_000 });

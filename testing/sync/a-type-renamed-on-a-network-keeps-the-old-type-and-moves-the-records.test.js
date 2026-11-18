@@ -11,11 +11,15 @@
  *
  * ## The setup
  *
- * A organises a club carrying one space; A's own definitions declare `person` with `fullName`; B joins by invite and holds the space. A writes three
- * entities of type `person`, B receives them, and A saves a definition of a new type `human` (the same property) with
- * `renameType` from `person` to `human`. The organiser's own yes passes the round on A at once, so A's run moves its copies before B has heard of the
- * round; the test reads A's finished run and only then lets B sync, so B's copies arrive already moved (the same fixed order as
- * `a-conversion-carried-by-a-vote-converges-on-every-member`, whose header says why a club).
+ * A publishes a pub/sub network carrying one space; A's own definitions declare `person` with `fullName`; B subscribes by an invite key and adopts the
+ * space. A writes three entities of type `person`, B receives them, and A saves a definition of a new type `human` (the same property) with
+ * `renameType` from `person` to `human`. The publisher's own yes passes the round on A at once and A's run asks no peer for a first sync, so A's run
+ * moves its copies before B has heard of the round; the test reads A's finished run and only then lets B sync, so B's copies arrive already moved
+ * (the same fixed order as `a-conversion-carried-by-a-vote-converges-on-every-member`, whose header says why not a club).
+ *
+ * A subscriber takes its publisher's schema, so B holds the source type too. The case of a member that holds no definition of the source (a club
+ * or closed network's joiner, lens sweep B1) is held by `testing/standalone/a-networked-save-holds-its-steps-to-what-the-round-carries.test.js`:
+ * the round now carries the source of every type step.
  *
  * ## What is asserted, on BOTH instances, and what each defect would turn red
  *
@@ -36,7 +40,7 @@ import assert from 'node:assert/strict';
 import { INSTANCES, patch, createTestSpace, syncUntil } from './helpers.js';
 import {
   tokenOf, entityType, text, setOwnSchema, writeEntities, recordOn, holdsAll, metaOn, conversionOf, runEnds, runEndsHere, forksIn, rootOn, itemsOf,
-  entitiesOfType, joinedClub,
+  entitiesOfType, joinedPubsub,
 } from './_schema-convert-pair.mjs';
 
 const RUN = Date.now();
@@ -49,7 +53,7 @@ const STEPS = [{ op: 'renameType', kind: 'entity', from: 'person', to: 'human' }
 const NAMES = ['ada', 'bo', 'cy'];
 const ROWS = NAMES.map(n => ({ name: `${n} ${RUN}`, type: 'person', properties: { fullName: n } }));
 
-let tA, tB, space, club, SPACE;
+let tA, tB, space, pubsub, SPACE;
 let ids = [];
 /** id -> what A held after A's run was complete, before B had heard of the round. */
 const convertedOnA = {};
@@ -62,14 +66,14 @@ before(async () => {
   space = await createTestSpace('cvtype', [[A, tA]]);
   SPACE = space.id;
   await setOwnSchema(A, tA, SPACE, BEFORE);
-  club = await joinedClub({ label: `cvtype-${RUN}`, space: SPACE });
+  pubsub = await joinedPubsub({ label: `cvtype-${RUN}`, space: SPACE });
   ids = await writeEntities(A, tA, SPACE, ROWS);
-  await syncUntil(B, tB, club.networkId, () => holdsAll(B, tB, SPACE, ids), 'B to hold the three records A wrote', { timeoutMs: 90_000 });
+  await syncUntil(B, tB, pubsub.networkId, () => holdsAll(B, tB, SPACE, ids), 'B to hold the three records A wrote', { timeoutMs: 90_000 });
   for (const id of ids) before_[id] = await recordOn(B, tB, SPACE, id);
 });
 
 after(async () => {
-  await club?.remove();
+  await pubsub?.remove();
   await space?.remove();
 });
 
@@ -78,7 +82,7 @@ const typesOf = (run) => run.types.map(t => `${t.kind}:${t.type}`).sort();
 describe('a type renamed on a network keeps the old type and moves the records', () => {
   it('A saves the new type with the step: A\'s run reaches the source type as well as the target and moves A\'s copies', async () => {
     const r = await patch(A, tA, `/api/spaces/${SPACE}`, { meta: AFTER, convertRecords: { steps: STEPS } });
-    assert.equal(r.status, 200, `the save on the organiser: ${r.status} ${JSON.stringify(r.body)}`);
+    assert.equal(r.status, 200, `the save on the publisher: ${r.status} ${JSON.stringify(r.body)}`);
     assert.equal(r.body.convert?.state, 'started', `the save did not start a run: ${JSON.stringify(r.body.convert)}`);
     assert.deepEqual(r.body.convert.types.map(t => `${t.kind}:${t.type}`).sort(), ['entity:human', 'entity:person'], 'the save names the source and the target type');
     const run = await runEndsHere({ base: A, token: tA, space: SPACE, who: 'A' });
@@ -89,7 +93,7 @@ describe('a type renamed on a network keeps the old type and moves the records',
   });
 
   it('B hears of the passed round at its next sync and applies the step; its copies arrive moved', async () => {
-    const run = await runEnds({ base: B, token: tB, networkId: club.networkId, space: SPACE, who: 'B' });
+    const run = await runEnds({ base: B, token: tB, networkId: pubsub.networkId, space: SPACE, who: 'B' });
     assert.deepEqual(run.steps, STEPS, 'B applied the step the proposer signed');
     assert.deepEqual(run.stepsRefused, [], `B refused the step: ${JSON.stringify(run.stepsRefused)}`);
     assert.deepEqual(typesOf(run), ['entity:human', 'entity:person'], 'B\'s run reaches the source type too');
@@ -99,7 +103,7 @@ describe('a type renamed on a network keeps the old type and moves the records',
 
   it('after one more sync the two instances report one root for the space', async () => {
     let rootA, rootB;
-    await syncUntil(A, tA, club.networkId, async () => {
+    await syncUntil(A, tA, pubsub.networkId, async () => {
       [rootA, rootB] = [await rootOn(A, tA, SPACE), await rootOn(B, tB, SPACE)];
       return rootA !== undefined && rootA === rootB;
     }, 'A and B to report one Merkle root for the space', { timeoutMs: 90_000, onTimeout: () => `A ${rootA}, B ${rootB}` });

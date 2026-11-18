@@ -37,9 +37,9 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { INSTANCES, post, patch, get, createTestSpace, mirroredNetwork, syncUntil, patchContainerNetwork, reloadConfig } from './helpers.js';
+import { INSTANCES, post, patch, get, createTestSpace, syncUntil } from './helpers.js';
 import {
-  tokenOf, entityType, text, oneOf, setOwnSchema, writeEntities, recordOn, holdsAll, metaOn, runEnds, runEndsHere, itemsOf,
+  mirroredPair, patchNetworkOnDisk, tokenOf, entityType, text, oneOf, setOwnSchema, writeEntities, recordOn, holdsAll, metaOn, runEnds, runEndsHere, itemsOf,
 } from './_schema-convert-pair.mjs';
 
 const RUN = Date.now();
@@ -65,7 +65,8 @@ before(async () => {
   held.one.space = one.id;
   held.two.space = two.id;
   for (const space of [one.id, two.id]) await setOwnSchema(A, tA, space, BEFORE);
-  net = await mirroredNetwork({ label: `cvrelay-${RUN}`, spaces: [one.id, two.id], a: [A, tA], b: [B, tB] });
+  // Built by the instances' own doors: the runner the sync tests run in has no `docker` command, which `mirroredNetwork` needs.
+  net = await mirroredPair({ label: `cvrelay-${RUN}`, spaces: [one.id, two.id] });
   for (const slot of [held.one, held.two]) {
     [slot.id] = await writeEntities(A, tA, slot.space, [{ name: `Ada ${slot.space}`, ...RECORD }]);
   }
@@ -99,16 +100,16 @@ describe('steps a relayer adds are not applied', () => {
 
   it('the rounds A holds are altered after A cast on them: steps added to the first, a step added to the second\'s', async () => {
     assert.ok(held.one.round && held.two.round, 'the rounds were opened by the previous case');
-    patchContainerNetwork('ythril-a', net.networkId, `
+    // Through the stack's bind mount of A's config (the runner has no `docker exec`); `patchNetworkOnDisk` reloads A after the write.
+    await patchNetworkOnDisk('a', net.networkId, (n) => {
       const alter = (roundId, change) => {
         const round = n.pendingRounds.find(x => x.roundId === roundId);
-        if (!round) throw new Error('round ' + roundId + ' is not held by this instance');
+        assert.ok(round, `round ${roundId} is not held by A`);
         change(round);
       };
-      alter(${JSON.stringify(held.one.round)}, round => { round.convertRecords = ${JSON.stringify({ steps: [RENAME] })}; });
-      alter(${JSON.stringify(held.two.round)}, round => { round.convertRecords.steps.push(${JSON.stringify(MAP)}); });
-    `);
-    await reloadConfig(A, tA);
+      alter(held.one.round, round => { round.convertRecords = { steps: [RENAME] }; });
+      alter(held.two.round, round => { round.convertRecords.steps.push(MAP); });
+    });
   });
 
   it('B reads the altered steps on its vote rows and votes yes on both rounds', async () => {
