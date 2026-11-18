@@ -9,15 +9,17 @@
  *   caller; the mechanism is in `meta-update.ts`.
  * - **A notice the tool says in words and leaves out of its text.** `metaUpdateNoticeText` is the words of every part of a space write's notice
  *   (`networkWriteNotice` and `convertNotice`), so the conversion run a save started, or why it did not, is in the text as well as the structure.
- * - **A refusal the tool says in words and the REST body says in a code.** `refusedMetaUpdate` words a planner refusal as the tools always have
- *   (`Error (status): sentence`) and carries the refusal's own body, `code` and `step` included, as structured content, so a caller that branches on
- *   `bad_conversion_step` reads it the way a REST caller does.
+ * - **A refusal the tool says in words and the REST body says in a code.** `refusedMetaUpdate` words a planner refusal through the one tool-error
+ *   module (`toolErrorResult`: `Error (status): sentence`) and carries the refusal's own body, `code` and `step` included, as structured content
+ *   beside it, so a caller that branches on `bad_conversion_step` reads it the way a REST caller does.
  *
- * It imports no module of the server (only the schema package and zod), so it joins no import cycle: a tool module that imported the planner's types
- * or the tools' shared types would be one more module of the server's large cyclic set, which a ceiling holds from growing.
+ * It imports no module of the server but the tool-error module, which imports nothing of the app (only the schema package and zod besides), so it
+ * joins no import cycle: a tool module that imported the planner's types or the tools' shared types would be one more module of the server's large
+ * cyclic set, which a ceiling holds from growing.
  */
 import { z } from 'zod';
 import { ConvertRecordsZ, CONVERSION_STEPS_MAX } from '@ythril-network/schema/internal';
+import { toolErrorResult } from '../tool-error-text.js';
 
 const SHAPE: Record<string, unknown> = (() => {
   const { $schema: _draft, ...shape } = z.toJSONSchema(ConvertRecordsZ.optional(), { io: 'input' }) as Record<string, unknown>;
@@ -86,9 +88,9 @@ export function metaUpdateNoticeText(notice: Record<string, unknown>): string {
 export function refusedMetaUpdate(refusal: { status: number; body: { error: string; code?: string } }): {
   content: { type: 'text'; text: string }[]; structuredContent?: Record<string, unknown>; isError: true;
 } {
+  // The text from the one tool-error module, the structured half beside it, as main's own structured refusals do (`update_space`).
   return {
-    content: [{ type: 'text' as const, text: `Error (${refusal.status}): ${refusal.body.error}` }],
+    ...toolErrorResult(refusal.body.error, refusal.status),
     ...(refusal.body.code !== undefined ? { structuredContent: { ...refusal.body } } : {}),
-    isError: true,
   };
 }
