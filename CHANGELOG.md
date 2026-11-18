@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** `filesAwaitingBytes` on REST stats and MCP `space_stats`: records whose bytes are missing here, which file counts leave out. The change feed gains reason `bytes_lost` and the audit log `file.absent_bytes.sweep`.
 - **Files:** the Brain page's Files tab, a view's Overview and the Danger zone show "+N awaiting bytes" beside the file count when some records wait for their bytes.
 - **Files:** metrics `ythril_files_absent_bytes_removed_total`, `ythril_files_awaiting_bytes` and `ythril_files_absent_bytes_held`.
+- **Files:** a text window of `read_file` and of `converted` on `GET /api/brain/spaces/:spaceId/files/extract` that was cut carries `budgetBoundBy`, naming `maxChars`, `maxTokens` or `maxBytes` to raise.
+- **Spaces:** `GET /api/spaces?counts=true` and MCP `list_spaces` name a space whose count failed in `countsIncomplete` beside `spaces` and give it no `counts`; MCP answers no zeros for it. The key is absent when every count succeeded.
 - **Web:** Settings → About has a "Third-party software" card, and Settings → Help offers the third-party notices as a document readable inside the instance.
 
 ### Changed
@@ -63,6 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** the media worker no longer removes a record whose source file is gone; it drops the job.
 - **Embeddings:** the embed sweep and the suppression sweep read the three suppression tiers through one classification; no answer changes.
 - **Recall:** the collection, projection and parent-file steps of a recall result live in their own module; no answer changes.
+- **API:** a store failure on `POST /api/<tool>` and on MCP now reads `Error: ` before its sentence, as every other tool error does; the structured body's `error` and the sentence on other routes are unchanged.
+- **Ingest:** each list of an `extraction` sent to `ingest` (REST and MCP) has a size limit (sessions 1000, entities 5000, existing entities 5000, dated events 5000, claims 20000, edges 20000); a request past one is a 400 naming the list and the limit, and nothing is written.
 - **Metrics:** the sync tombstone metrics are declared in a module of their own; their names, labels and help texts are unchanged.
 - **Web:** the conflict badge in the top bar no longer asks for its count while the browser tab is hidden; it asks again at its next minute once the tab is shown.
 - **Web:** the graph page reads what a tap selects and hides edge labels through its helper modules; nothing on the page changes.
@@ -108,6 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web:** a screen reader reads the token hint on the login page, and the password hint and mismatch message on the setup page, with their fields.
 - **Records:** `entityName`, `fromName` and `toName` on `POST /api/filter` and MCP `filter` narrow the caller's `filter` instead of replacing its `_id`, `$or`, `from` or `to`; the web client's fact list by ids and an entity name now answers their intersection.
 - **Spaces:** a search-index readiness check stops within a second when its database connection closes, instead of asking the closed connection for up to a minute.
+- **Spaces:** MCP `space_stats` answers `embedQueue` (`pending`, `processing`, `failed`: records not searchable yet) as REST stats does; the doors that count a space's records read one function and answer one number.
+- **Spaces:** `update_space` refused for a face width the space's stored descriptors rule out answers 409 and `Error: <sentence>` on MCP and `POST /api/update_space`, as `PATCH /api/spaces/:id` does; it read `Error: Error (409): …` with status 400.
 - **Housekeeping:** a space set aside after a slow answer is checked again once its pause ends, even when its last check found it still building its positions. Before, no background task, the media queue included, checked that space again until a restart.
 - **Media:** a file whose analysis becomes due at the moment the queue is looking is picked up at once. Before, a replaced or retried file could wait up to 30 seconds for the queue's next full look, and an embedding job the same way.
 - **Startup:** a `config.json` that is there but empty, null, not JSON or unreadable stops the start, naming the file, instead of opening first-run setup; the status door reports the boot's answer.
@@ -124,6 +130,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** the source-hygiene gates read the schema package's source with the server's, and the standalone runner refuses a schema build older than its source or missing.
 - **Sync:** an unreadable file or folder is named in the sync manifest (`unreadable`) instead of looking absent to peers, the hash cache and the restore check; a push over it answers `409 path_unreadable`, and the sender offers it again an hour later.
 - **Sync:** a sync run queued behind a running one for a network that is deleted before it starts ends with one info line; it used to end as an unhandled rejection.
+
+### Security
+
+- **Security:** a not-found answer (a record id, an entry id, a file path, a backup or library name) quotes what the caller sent cut at 256 characters with the count of what was cut, on REST and MCP; a 100 000-character id is no longer echoed whole.
 
 ## [6.5.5] — 2026-11-08
 

@@ -14,7 +14,8 @@ import { countRecordsOfSpaces } from '../../spaces/space-counts.js';
 import { spaceForWire } from '../../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
-import { toolErrorResult, toolErrorText } from '../tool-error-text.js';
+import { toolErrorResult } from '../tool-error-text.js';
+import { ToolRefusal } from '../../util/errors.js';
 import { lostSpaceAnswer } from '../../spaces/unknown-space.js';
 import { forwardedArgNames } from '../../contract/write-accepts.js';
 
@@ -296,7 +297,9 @@ export const update_spaceTool: ToolHandler = {
       const { refuseFaceWidthChange } = await import('../../spaces/face-width-change.js');
       const current = getConfig().spaces.find(sp => sp.id === callSpace);
       const refusal = await refuseFaceWidthChange(callSpace, newDims, current?.faceDescriptorDims);
-      if (refusal) throw new Error(toolErrorText(refusal.reason, refusal.status));
+      // A `ToolRefusal`, so the dispatcher answers the refusal's own status and writes the prefix once. Thrown as a plain
+      // `Error` around an already-built text, it came out as "Error: Error (409): ..." with the status of an unknown failure.
+      if (refusal) throw new ToolRefusal(refusal.status, refusal.reason);
       updates.faceDescriptorDims = newDims;
     }
 
