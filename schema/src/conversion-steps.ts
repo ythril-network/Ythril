@@ -31,7 +31,7 @@ import { MAX_RULES_PER_SPACE, MAX_RULE_LENGTH, conditionIssues } from './rules.j
 import { TYPE_NAME_MAX } from './space-meta.js';
 import { canonicalJson } from './canonical-json.js';
 import { isPlainObject, ownValue, setOwn } from './plain-object.js';
-import { NAME_QUOTED, peerText } from './text.js';
+import { NAME_QUOTED, peerText, refusalOfParse } from './text.js';
 import type { FingerprintedMeta } from './schema-fingerprint.js';
 
 // ── The shape ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -176,7 +176,7 @@ export function conversionStepIssues(
     }
     const parsed = ConversionStepZ.safeParse(raw);
     if (parsed.success) return parsed.data;
-    add(index, 'malformed_step', `is not a conversion step: ${q(parsed.error.issues[0]?.message ?? 'it does not parse')}`);
+    add(index, 'malformed_step', `is not a conversion step: ${refusalOfParse(parsed.error).error}`);
     return undefined;
   });
   const each = <T extends ConversionStep['op']>(op: T, run: (step: Extract<ConversionStep, { op: T }>, index: number) => void): void => {
