@@ -27,7 +27,7 @@
  *
  * It imports the schema leaf and the canonical text and nothing else that loads a store, the space hash or the planner. The space hash imports neither
  * (`docLeaf` needs only its derived fields), the planner, the writer, the fork module and the client's field list import this one, and there is no
- * registration and nothing that throws on load order. `the-schema-leaf-imports-no-sync-machinery` holds it; `every-server-entry-module-loads` holds what
+ * registration and nothing that throws on load order. `the-schema-leaf-imports-no-sync-machinery` holds it; the entry-module load gate (`testing/standalone/_entry-module-load.mjs`, run as shard files) holds what
  * a cycle would do.
  */
 import { SCHEMA_FINGERPRINT_FIELD } from '@ythril-network/schema/internal';

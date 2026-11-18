@@ -11,7 +11,7 @@
  * load with a temporal-dead-zone error. Here they import only what a schema is made of (zod, the endpoint kinds, the record
  * bounds, the chrono statuses, the sequence ceiling and the machine-made description sources), and none of it imports the store,
  * the config loader, the space hash or the planner. `the-schema-leaf-imports-no-sync-machinery` holds that over the transitive
- * imports, and `every-server-entry-module-loads` holds what a cycle does.
+ * imports, and the entry-module load gate (`testing/standalone/_entry-module-load.mjs`, run as shard files) holds what a cycle does.
  *
  * `api/sync/_shared.ts` and `sync/arrival-shape.ts` re-export what they held, so no importer changes.
  */

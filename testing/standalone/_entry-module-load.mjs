@@ -14,13 +14,14 @@
  *   killed the whole file, and the answer was a killed batch, not a finding.
  * - **A cold compile cache in every child.** Each child compiles the server's modules again, and most of a module's load is that. {@link loadAll} gives its
  *   children one `NODE_COMPILE_CACHE` directory (node 22.1 or later; an older node ignores the variable, and the gate is only slower), made for the run under
- *   the scratch root and removed afterwards, so nothing outlives the run and a stale entry cannot be read.
+ *   the scratch root and removed afterwards, so a stale entry cannot be read. A run the batch bound SIGKILLs never reaches the removal, so each `loadAll` first
+ *   sweeps the folders of its own prefix older than `CACHE_MAX_AGE_MS` (a younger one belongs to a shard running beside it).
  *
  * One question: *"does this module load as the first import of a process, and which modules does this shard load?"*. What a shard file asserts about the
  * tree (the floor, the leaves, the exemption check) is `_entry-module-shard-cases.mjs`'s.
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { scratchRoot } from '../../scripts/_shared/scratch-root.mjs';
@@ -104,13 +105,32 @@ export function shardOf(list, index, count) {
 /** How many modules one shard loads at a time: half the CPUs, so the shards a batch starts together do not overload the runner. */
 export const childWidth = (cpus) => Math.max(1, Math.floor(cpus / 2));
 
+/** The name every compile-cache folder of a run starts with, and how old one must be before the next run takes it for a killed run's. */
+const CACHE_PREFIX = 'entry-module-compile-cache-';
+const CACHE_MAX_AGE_MS = 6 * 3_600_000;
+
+/**
+ * Remove the compile-cache folders under `root` that a killed run left (older than `CACHE_MAX_AGE_MS`). Best effort by design: a folder that vanishes between
+ * the listing and the removal is another shard's finishing, and one that cannot be removed costs disk, never a verdict, so neither fails a gate.
+ */
+function sweepOldCaches(root) {
+  for (const name of readdirSync(root)) {
+    if (!name.startsWith(CACHE_PREFIX)) continue;
+    const dir = join(root, name);
+    try {
+      if (Date.now() - statSync(dir).mtimeMs > CACHE_MAX_AGE_MS) rmSync(dir, { recursive: true, force: true });
+    } catch { /* see above */ }
+  }
+}
+
 /**
  * Load every module of `modules` (each `{ file, built }`), `parallel` at a time, in children that share one compile cache. Resolves a Map of
  * `file -> { ok, reason }`.
  */
 export async function loadAll(modules, { parallel, boundMs = LOAD_BOUND_MS } = {}) {
   mkdirSync(scratchRoot(), { recursive: true });
-  const cacheDir = mkdtempSync(join(scratchRoot(), 'entry-module-compile-cache-'));
+  sweepOldCaches(scratchRoot());
+  const cacheDir = mkdtempSync(join(scratchRoot(), CACHE_PREFIX));
   const results = new Map();
   try {
     // The pool is `poolEach`'s (`testing/_shared/pool.mjs`), which refuses a width that would start nothing.
