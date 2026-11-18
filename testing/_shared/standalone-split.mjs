@@ -165,20 +165,22 @@ export function splitStandalone({ root = process.cwd() } = {}) {
  * is never of the text kind: the kind is for what is fast enough to run first.
  *
  * The text kind is classified here, lazily and once per call, from the split's own checkout (`split.root`, default the working directory): the
- * classifier is asked only by a caller that asks for the plan, never by `splitStandalone`, so the database and instance runs are not paid for it and are not
- * broken by it.
+ * classifier is asked only when `kinds` (the kinds the caller wants, default all three) holds `text` or `pure`, never by `splitStandalone`, so the database
+ * and instance runs (`kinds: ['db']`, `kinds: []`) are not paid for it and are not broken by it.
  *
  * @returns {Array<{ kind: 'text' | 'pure' | 'db', args: string[], files: string[] }>} `args` go after `--test`
  */
-export function offlineRuns(split = splitStandalone(), { ciOnly = true } = {}) {
+export function offlineRuns(split = splitStandalone(), { ciOnly = true, kinds = ['text', 'pure', 'db'] } = {}) {
   const path = (f) => `testing/standalone/${f}`;
-  const text = new Set(textOnlyFiles(split, { root: split.root ?? process.cwd() }));
+  // Asked only when a kind that needs it is wanted (the pure kind is the rest, so it needs the text set to leave it out): a plan for the database kind alone,
+  // or for none (the instance-only run), never reads a pure file's imports and cannot be broken by the classifier.
+  const text = kinds.includes('text') || kinds.includes('pure') ? new Set(textOnlyFiles(split, { root: split.root ?? process.cwd() })) : new Set();
   const pure = split.offlinePure.filter(f => ciOnly || !split.ciOnly.includes(f)).map(path);
   return [
-    ...batched(pure.filter(f => text.has(f))).map(files => ({ kind: 'text', args: [], files })),
-    ...batched(pure.filter(f => !text.has(f))).map(files => ({ kind: 'pure', args: [], files })),
-    ...batched(split.offlineDb.map(path))
-      .map(files => ({ kind: 'db', args: [`--test-concurrency=${DB_TEST_CONCURRENCY}`], files })),
+    ...(kinds.includes('text') ? batched(pure.filter(f => text.has(f))).map(files => ({ kind: 'text', args: [], files })) : []),
+    ...(kinds.includes('pure') ? batched(pure.filter(f => !text.has(f))).map(files => ({ kind: 'pure', args: [], files })) : []),
+    ...(kinds.includes('db') ? batched(split.offlineDb.map(path))
+      .map(files => ({ kind: 'db', args: [`--test-concurrency=${DB_TEST_CONCURRENCY}`], files })) : []),
   ];
 }
 

@@ -217,7 +217,8 @@ async function runDbSharded(shardCount, width, started) {
 
 /** The pure files at node's default width (one worker per core); the database-backed ones capped. */
 const dbShards = wants('db') ? await resolveDbShardConfig({ defaultWidth: DB_TEST_CONCURRENCY }) : { count: 1, width: DB_TEST_CONCURRENCY };
-for (const run of offlineRuns(split)) {
+// The plan for the offline kinds this run wants only: `--only=db` and `--only=instance` never ask the text-only classifier (`offlineRuns` asks it for text or pure).
+for (const run of offlineRuns(split, { kinds: ['text', 'pure', 'db'].filter(wants) })) {
   if (!wants(run.kind)) continue;
   if (run.kind === 'db' && (oneShardFiles !== null || dbShards.count > 1)) continue; // the paths below run the database-backed files
   runBatch(run.kind, run.args, run.files);

@@ -75,7 +75,8 @@ describe('a @ci-only file runs in a CI job', () => {
 
   it('the pure runner runs the plan with the @ci-only files in it', () => {
     const runner = stripComments(readFileSync(join(REPO_ROOT, 'testing/_init/run-standalone.mjs'), 'utf8'));
-    assert.match(runner, /offlineRuns\(split\)/, 'run-standalone.mjs does not run `offlineRuns(split)`');
+    // The plan may name the kinds the run wants (`offlineRuns(split, { kinds })`, so `--only=db` never classifies the pure files); it never names `ciOnly`.
+    assert.match(runner, /offlineRuns\(split(?:,\s*\{\s*kinds\b[^}]*\})?\)/, 'run-standalone.mjs does not run `offlineRuns(split)`');
     assert.doesNotMatch(runner, /ciOnly\s*:\s*false/, 'run-standalone.mjs leaves the @ci-only files out: CI would never run them');
     const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
     assert.match(pkg.scripts[PURE_SCRIPT], /run-standalone\.mjs\s+--only=pure/, `${PURE_SCRIPT} is not the pure third of the standalone runner`);
