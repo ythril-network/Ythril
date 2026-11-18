@@ -151,13 +151,15 @@ export type UnconvertedList =
   | { ok: false; error: string };
 
 /**
- * The items of `spaceId`, newest first, narrowed by `kind` and `type`, paged by the one list rule (`skip`, `limit`, the byte budget). Writes
+ * The items of `spaceId`, newest first, narrowed by `kind`, `type` and `status` (all of them when none is given, so the filter is the caller's
+ * to state: the door's act states `open` by default), paged by the one list rule (`skip`, `limit`, the byte budget). Writes
  * nothing: a stale item is listed until the watcher's tick removes it. `transport` names the door, whose budget default applies.
  */
 export async function listUnconvertedItems(
-  spaceId: string, req: ListPageRequest & { kind?: string; type?: string }, transport: 'rest' | 'mcp' = 'rest',
+  spaceId: string, req: ListPageRequest & { kind?: string; type?: string; status?: UnconvertedItem['status'] }, transport: 'rest' | 'mcp' = 'rest',
 ): Promise<UnconvertedList> {
   const filter: Record<string, unknown> = {
+    ...(req.status !== undefined ? { status: req.status } : {}),
     ...(typeof req.kind === 'string' && req.kind !== '' ? { kind: req.kind } : {}),
     ...(typeof req.type === 'string' && req.type !== '' ? { type: req.type } : {}),
   };
