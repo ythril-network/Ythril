@@ -552,7 +552,7 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     }
   });
 
-  it('declares the same parameters on the tools as the routes read, says in words what an unconverted record is, and mounts three routes', () => {
+  it('declares the same parameters on the tools as the routes read, says in words what an unconverted record is, and mounts three routes', async () => {
     const schemas = { requiredSpace: { type: 'string' }, optionalSpace: { type: 'string' } };
     const list = tools().list_unconvertedTool;
     const dismiss = tools().dismiss_unconvertedTool;
@@ -560,7 +560,14 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     assert.deepEqual(Object.keys(listSchema.properties).sort(), ['kind', 'limit', 'reason', 'skip', 'space', 'status', 'type']);
     assert.deepEqual(listSchema.required, ['space']);
     assert.equal(listSchema.additionalProperties, false);
-    for (const p of ['kind', 'status']) assert.equal('enum' in listSchema.properties[p], false, `${p} declares an enum: the act refuses it by its own code on both doors`);
+    // The tool states the enums the act's schema holds (slice 6b: a caller reads the real bounds, and the bounds gate compares them), and still leaves
+    // the refusal to the act: the dispatcher's own check is skipped, so a wrong value answers the act's code on both doors (asserted on the refusals above).
+    const { KNOWLEDGE_TYPES } = await import('../../server/dist/config/types-knowledge.js');
+    assert.deepEqual(listSchema.properties.kind.enum, [...KNOWLEDGE_TYPES], 'kind does not declare the knowledge kinds the act parses with');
+    assert.deepEqual(listSchema.properties.status.enum, ['open', 'dismissed'], 'status does not declare the statuses the act parses with');
+    for (const t of [list, dismiss, tools().dismiss_unconverted_shownTool]) {
+      assert.equal(t.skipSchemaValidation, true, `${t.name}: the dispatcher would refuse a declared bound in its own words, before the act's code`);
+    }
     const dismissSchema = dismiss.inputSchema(schemas);
     assert.deepEqual(Object.keys(dismissSchema.properties).sort(), ['itemId', 'space']);
     assert.deepEqual(dismissSchema.required.sort(), ['itemId', 'space']);

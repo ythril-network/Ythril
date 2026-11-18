@@ -5,9 +5,10 @@
  * ## Both surfaces, the same parameters
  *
  * Both doors run `spaces/unconverted-acts.ts`, which owns the parameters (`UnconvertedListParams` and the list module's paging), the rights
- * (`knowledge: read` for the list, `knowledge: write` for the dismiss, asked inside the act) and every refusal's sentence and code. `kind` and
- * `status` declare no `enum` here on purpose: the act refuses a wrong one by its own code (`unconverted_bad_kind`, `unconverted_bad_status`), the
- * words the route answers too, where a schema `enum` would be refused by the dispatcher in other words.
+ * (`knowledge: read` for the list, `knowledge: write` for the dismiss, asked inside the act) and every refusal's sentence and code. The filters
+ * declare the kinds, reasons, statuses and name length the act's schema holds (`UnconvertedFilterParams`, from the same constants), so a caller
+ * reads the real bounds and the bounds gate compares them; the dispatcher's own check is skipped (`skipSchemaValidation`), so a wrong one is still
+ * refused by the act's own code (`unconverted_bad_kind`, `unconverted_bad_status`...), the words the route answers too.
  *
  * Registered in `mcp/tools/index.ts`, priced in `TOOL_RIGHTS` and named in `MCP_TOOL_OPERATIONS`. A dismissal hands the audit entry what it did
  * (`ctx.recordAuditChanges`: the item id, or the filter, `expect` and count), which the operation's allowlist cuts to scalars.
@@ -21,10 +22,18 @@
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import {
-  refusalBody, UNCONVERTED_REFUSAL_CODES, UNCONVERTED_DISMISS_MAX, type UnconvertedRow, type UnconvertedActResult, type UnconvertedCaller,
+  refusalBody, UNCONVERTED_REFUSAL_CODES, UNCONVERTED_DISMISS_MAX, UNCONVERTED_REASONS, UNCONVERTED_STATUSES,
+  type UnconvertedRow, type UnconvertedActResult, type UnconvertedCaller,
 } from '../../spaces/unconverted-terms.js';
+import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
+import { TYPE_NAME_MAX } from '@ythril-network/schema/internal';
 import { toolRefusalOfAct } from '../../util/errors.js';
 import { dismissChanges, dismissShownChanges } from '../../audit/audit-changes.js';
+
+/** The filters' bounds as the act's schema holds them (`UnconvertedFilterParams`), from the same constants; each tool adds its own words. */
+const KIND_FILTER = { type: 'string', enum: [...KNOWLEDGE_TYPES] } as const;
+const TYPE_FILTER = { type: 'string', maxLength: TYPE_NAME_MAX } as const;
+const REASON_FILTER = { type: 'string', enum: [...UNCONVERTED_REASONS] } as const;
 
 /** The three acts the tools run (`spaces/unconverted-acts.ts`): method syntax, so the acts' own parameter types are accepted as they are. */
 export interface UnconvertedActs {
@@ -80,11 +89,11 @@ export const list_unconvertedTool: ToolHandler = {
     type: 'object',
     properties: {
       space: s.requiredSpace,
-      // No enum or bound on these: the act refuses each by its own code, the words the route answers too.
-      kind: { type: 'string', description: 'Only the items of records of this kind: `entity`, `fact`, `edge` or `chrono`. Omit for every kind. Anything else is refused (`unconverted_bad_kind`).' },
-      type: { type: 'string', description: 'Only the items of records of this type (a relationship\'s label for an edge), as a row\'s `type` says. Omit for every type. A name no schema could declare is refused (`unconverted_bad_type`).' },
-      reason: { type: 'string', description: 'Only the items with this reason class (a row\'s `reason`, for example `not_conforming` or `no_case_matched`). Omit for every reason. The same filter the bulk dismissal takes, so the number you are shown is the number it dismisses. Anything else is refused (`unconverted_bad_reason`).' },
-      status: { type: 'string', description: '`open` (the default) lists the records still to settle, `dismissed` the ones that were dismissed. One status per call: `counts` carries both numbers. Anything else is refused (`unconverted_bad_status`).' },
+      // The bounds of the act's schema (`UnconvertedListParams`); the act still refuses a wrong one by its own code, the words the route answers too.
+      kind: { ...KIND_FILTER, description: 'Only the items of records of this kind: `entity`, `fact`, `edge` or `chrono`. Omit for every kind. Anything else is refused (`unconverted_bad_kind`).' },
+      type: { ...TYPE_FILTER, description: 'Only the items of records of this type (a relationship\'s label for an edge), as a row\'s `type` says. Omit for every type. A name no schema could declare is refused (`unconverted_bad_type`).' },
+      reason: { ...REASON_FILTER, description: 'Only the items with this reason class (a row\'s `reason`, for example `not_conforming` or `no_case_matched`). Omit for every reason. The same filter the bulk dismissal takes, so the number you are shown is the number it dismisses. Anything else is refused (`unconverted_bad_reason`).' },
+      status: { type: 'string', enum: [...UNCONVERTED_STATUSES], description: '`open` (the default) lists the records still to settle, `dismissed` the ones that were dismissed. One status per call: `counts` carries both numbers. Anything else is refused (`unconverted_bad_status`).' },
       skip: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: 'Rows to skip before the page, newest first: the `nextSkip` of the previous page. The server reads past them, so a deep skip costs a deep read.' },
       limit: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: 'Rows in the page. A limit above the largest page is held to it and the answer\'s `limit` says what applied; the page also stops at the byte budget, and `truncated` and `nextSkip` say so.' },
     },
@@ -152,9 +161,9 @@ export const dismiss_unconverted_shownTool: ToolHandler = {
     type: 'object',
     properties: {
       space: s.requiredSpace,
-      kind: { type: 'string', description: 'Only the items of records of this kind: `entity`, `fact`, `edge` or `chrono`. Omit for every kind. Anything else is refused (`unconverted_bad_kind`). The same filter `list_unconverted` takes.' },
-      type: { type: 'string', description: 'Only the items of records of this type (a relationship\'s label for an edge). Omit for every type. A name no schema could declare is refused (`unconverted_bad_type`).' },
-      reason: { type: 'string', description: 'Only the items with this reason class (a `list_unconverted` row\'s `reason`). Omit for every reason. Anything else is refused (`unconverted_bad_reason`).' },
+      kind: { ...KIND_FILTER, description: 'Only the items of records of this kind: `entity`, `fact`, `edge` or `chrono`. Omit for every kind. Anything else is refused (`unconverted_bad_kind`). The same filter `list_unconverted` takes.' },
+      type: { ...TYPE_FILTER, description: 'Only the items of records of this type (a relationship\'s label for an edge). Omit for every type. A name no schema could declare is refused (`unconverted_bad_type`).' },
+      reason: { ...REASON_FILTER, description: 'Only the items with this reason class (a `list_unconverted` row\'s `reason`). Omit for every reason. Anything else is refused (`unconverted_bad_reason`).' },
       expect: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: 'REQUIRED: the number of open items `list_unconverted` told you this filter lists (`total` with `status: "open"`). If the number now differs, nothing is dismissed and the call is refused (409, `unconverted_changed`, with the `current` number), so a confirmation of one number never dismisses another. Cost: list again and confirm when it moved.' },
     },
     required: ['space', 'expect'],
