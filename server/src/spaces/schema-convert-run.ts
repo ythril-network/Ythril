@@ -79,8 +79,8 @@ const WATCH_MS = 5_000;
 /** The backoff of a failed pass before the tick retries it: from one second, at most five minutes. */
 const RETRY_BASE_MS = 1_000;
 const RETRY_CAP_MS = 5 * 60_000;
-/** The longest a status read counts the records left. */
-const LEFT_COUNT_MS = 2_000;
+/** The longest a status read counts the records left, for all its types together (one bound for the answer). */
+export const SCHEMA_CONVERT_LEFT_COUNT_MS = 2_000;
 /** The store's code for a read its `maxTimeMS` ended (`MaxTimeMSExpired`). */
 const MAX_TIME_EXPIRED = 50;
 /** The longest a run keeps the words of its last failure. */
@@ -649,16 +649,31 @@ function runInBackground(spaceId: string, deps: SchemaConvertDeps = {}): void {
 
 // ── Status ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** What the status can be handed: the count of what is left (a test makes it slow). */
+export interface SchemaConvertStatusOptions {
+  countLeft?: (collection: string, filter: Record<string, unknown>, maxTimeMS: number) => Promise<number>;
+}
+
+/** The store's count of the records `filter` selects in `collection`, ended by the store after `maxTimeMS`. */
+const countLeftInStore = (collection: string, filter: Record<string, unknown>, maxTimeMS: number): Promise<number> =>
+  col(collection).countDocuments(asFilter<Record<string, unknown>>(filter), { maxTimeMS });
+
 /** The run of `spaceId` as the status doors answer it, or `null` when the space never had one. Writes nothing. */
-export async function schemaConvertStatus(spaceId: string): Promise<SchemaConvertStatus | null> {
+export async function schemaConvertStatus(spaceId: string, opts: SchemaConvertStatusOptions = {}): Promise<SchemaConvertStatus | null> {
   const run = await readRun(spaceId);
   if (!run) return null;
+  const countLeft = opts.countLeft ?? countLeftInStore;
   let left: number | null = 0;
   if (run.state === 'running') {
+    // ONE bound for the whole count, however many types are left (lens sweep S6): each type's count gets what remains of it, and when it runs out
+    // the answer says the count was not finished (`left: null`) rather than a part of it.
+    const deadline = Date.now() + SCHEMA_CONVERT_LEFT_COUNT_MS;
     try {
       for (const t of run.types.filter(x => !x.done)) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) { left = null; break; }
         const spec = schemaConvertPageSpec(spaceId, t.kind, t.type, run.toFp);
-        left += await col(spec.collection).countDocuments(asFilter<Record<string, unknown>>(spec.filter as Record<string, unknown>), { maxTimeMS: LEFT_COUNT_MS });
+        left = (left ?? 0) + await countLeft(spec.collection, spec.filter as Record<string, unknown>, remaining);
       }
     } catch (err) {
       if ((err as { code?: unknown } | null)?.code !== MAX_TIME_EXPIRED) throw err;   // MaxTimeMSExpired: the count did not finish in its bound
