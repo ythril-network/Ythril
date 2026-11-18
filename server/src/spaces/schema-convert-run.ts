@@ -48,7 +48,7 @@ import {
 import {
   recordUnconvertedItem, sweepStaleUnconvertedItems, hasUnconvertedItems, UNCONVERTED_ITEMS_PER_RUN_MAX,
 } from '../brain/schema-convert-items.js';
-import { schemaConvertRecordsTotal, schemaConvertRunsInProgress } from '../metrics/registry.js';
+import { schemaConvertRecordsTotal, schemaConvertRunsInProgress } from '../metrics/schema-convert-metrics.js';
 import { createCoalescingRunner } from '../sync/coalescing-runner.js';
 import { outsideWriteBound, withinHousekeepingBound } from '../db/write-bound.js';
 import { eachSpace, type WalkResult } from '../util/housekeeping-walk.js';

@@ -65,7 +65,8 @@ describe('a conversion run resumes at boot (real MongoDB)', { skip }, () => {
     await door.seed(HELD, 'entities', [{ _id: 'h-1', name: 'H', type: 'person', properties: { age: 1 } }]);
     await door.mongo.col(door.spaceCollection(HELD, 'schemaConvertRun')).insertOne(runLeftBy(door.fp(HELD), Date.now() + 60 * 60_000));
     await run.resumeSchemaConvertRuns();
-    await new Promise(r => setTimeout(r, 500));
+    // Nothing of the boot's may sweep it, now or later: the lease is the other process's, so no pass of this one can take it.
+    assert.equal(await run.driveSchemaConvertRun(HELD), null, 'a pass took a run whose lease another process holds');
     const row = await door.coll(HELD, 'entities').findOne({ _id: 'h-1' });
     assert.equal(row.schemaFingerprint, undefined, 'a run another process holds was swept here');
     assert.equal((await door.runDoc(HELD)).state, 'running');

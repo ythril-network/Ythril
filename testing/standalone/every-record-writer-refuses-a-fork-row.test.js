@@ -85,6 +85,9 @@ const EXEMPT = {
   ...reasoned('an entity re-type takes the schema stamp off every edge that names it, forks included: a fork edge was judged against the old type too, and only the stamp is removed, never an authored field', [
     'brain/retyped-entity-edges.ts:unstampEdgesOfRetypedEntity',
   ]),
+  ...reasoned('a schema conversion run\'s quiet stamp filters fork rows out (`CHOSEN_VERSION_ROWS` in the write\'s own filter) and sets only the schema stamp; its rewrites go through the update functions, which refuse a fork', [
+    'brain/schema-convert-record.ts:stampQuietly',
+  ]),
   ...reasoned('retention applies to a fork as to any record: the sweep selects fork rows by their own stamp and writes no authored field (R14)', [
     'brain/chrono-redaction.ts:redactLapsedChronoContent', 'brain/chrono-redaction.ts:backfillTypedExpiry', 'brain/retention-stamp-heal.ts:healStoredStamps',
   ]),

@@ -163,6 +163,8 @@ const EXEMPT = {
   'server/src/brain/suppression-sweep.ts:sweepFiles': 'removes the stored VECTORS of what is suppressed; taking a vector off a flagged row is the intent, and it surfaces nothing',
   'server/src/brain/suppression-sweep.ts:dropFileVectors': 'removes vectors from the rows derived from a file; it surfaces nothing',
   'server/src/brain/suppression-sweep.ts:sweepSuppressedVectors': 'the vector sweep over the record collections of a space, files included; it surfaces nothing',
+  'server/src/brain/schema-convert-items.ts:sweepStaleUnconvertedItems': 'reads the version and stamp of the records a conversion item names, by id, in the four knowledge collections (`COLLECTION_SUFFIX` of a knowledge type, never files); it surfaces nothing',
+  'server/src/brain/schema-convert-record.ts:stampQuietly': 'the read-back of which quiet stamps landed, by id, in a knowledge collection (never files); it surfaces nothing',
   'server/src/sync/fill-file-meta.ts:fillFileMetaFromStray': 'the stray-metadata drain\'s recovery: finds the row a stray record belongs to and fills it; it returns a verdict, never a row',
   'server/src/sync/fill-file-meta.ts:fillReceiverMadeRow': 'the fill half of the drain above',
   // ── face rows: child rows selected by entity
