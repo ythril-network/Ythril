@@ -47,7 +47,7 @@ const csigHolds = (net: NetworkConfig, round: VoteRound, cast: VoteCast): boolea
  * the same vote that arrives WITHOUT a `csig` (or with one that does not verify) never replaces a held cast whose `csig` verifies, so a relayer
  * cannot make a member read the steps as unsigned.
  */
-function castReplaces(net: NetworkConfig, round: VoteRound, had: VoteCast, served: VoteCast): boolean {
+export function castReplaces(net: NetworkConfig, round: VoteRound, had: VoteCast, served: VoteCast): boolean {
   const heldHolds = csigHolds(net, round, had);
   if (heldHolds && had.vote === served.vote && !csigHolds(net, round, served)) return false;
   if (had.vote !== served.vote || had.sig !== served.sig || had.bsig !== served.bsig) return true;
