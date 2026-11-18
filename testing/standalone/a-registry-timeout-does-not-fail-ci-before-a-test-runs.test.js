@@ -16,6 +16,9 @@
  *    also retried `manifest unknown` would hide a wrong pin behind three attempts. The truth table is held here row by row.
  * 2. Every workflow, derived from the tracked `.github/workflows` and read from the parsed YAML (never its text):
  *    - every `docker pull` and every `docker buildx build` of a run step goes through that script;
+ *    - every `npm ci` (and `npm install`) of a run step goes through that script too: run 44266883292 failed its
+ *      `Standalone (database, shard 0)` job in `npm ci --workspace=server --include-workspace-root` with `npm error code ECONNRESET`
+ *      before any test ran, the same registry hiccup on the npm side;
  *    - every `docker/setup-buildx-action` names its BuildKit image in `driver-opts` and an earlier step in the job pulls THAT
  *      image through the script (buildx starts a builder from the local image when it is there, and pulls only when it is not);
  *    - a `docker compose ... up` that may pull (no `--pull never`) follows a step that pulled through the script;
@@ -55,6 +58,11 @@ const TRANSIENT = [
   'toomanyrequests: You have reached your pull rate limit.',
   'dial tcp: lookup registry-1.docker.io: no such host',
   'dial tcp: lookup registry-1.docker.io on 127.0.0.53:53: server misbehaving',
+  // npm's own wording (run 44266883292, `npm ci` of the database shard 0 job, and the codes npm prints for the same causes)
+  'npm error code ECONNRESET',
+  'npm error code ETIMEDOUT',
+  'npm error code EAI_AGAIN',
+  'npm error network This is a problem related to network connectivity.',
 ];
 const PERMANENT = [
   'manifest for mongodb/mongodb-atlas-local:nope not found: manifest unknown: manifest unknown',
@@ -62,6 +70,9 @@ const PERMANENT = [
   'unauthorized: authentication required',
   'ERROR: failed to solve: process "/bin/sh -c npm ci" did not complete successfully: exit code: 1',
   'error TS2339: Property \'x\' does not exist on type \'Y\'.',
+  'npm error code E404\nnpm error 404 Not Found - GET https://registry.npmjs.org/no-such-package-here - Not found',
+  'npm error code EUSAGE\nnpm error `npm ci` can only install packages when your package.json and package-lock.json are in sync.',
+  'npm error code ERESOLVE\nnpm error ERESOLVE could not resolve',
   '',
 ];
 
@@ -197,7 +208,9 @@ const UNWRAPPED_BUILD_PUSH = [
 const RETRY = /retry-on-registry-failure\.mjs(?:\s+--[a-z-]+\s+\S+)*\s+--\s+$/;
 const PULLS = /\bdocker\s+(?:pull|buildx\s+build)\b/g;
 const PULL_OF = /\bdocker\s+pull\s+(?:--\S+\s+)*([^\s&|;\\]+)/;
-const COMPOSE_UP = /\bdocker\s+compose\b[^\n]*?\bup\b[^\n]*/g;
+/** An install from the npm registry: `npm ci`, `npm install` and the short and alias spellings of the latter. */
+const NPM_INSTALLS = /\bnpm\s+(?:ci|clean-install|install|i|add)(?![\w-])/g;
+const COMPOSE_UP =/\bdocker\s+compose\b[^\n]*?\bup\b[^\n]*/g;
 
 const retriedPullOf = (step) => {
   const text = shellOf(step);
@@ -216,6 +229,9 @@ function registryViolations(doc, file) {
       const where = `${file} ${id} step ${JSON.stringify(s.name ?? s.uses ?? s.run?.split('\n')[0])}`;
       const text = shellOf(s);
       for (const m of text.matchAll(PULLS)) {
+        if (!RETRY.test(text.slice(0, m.index))) v.push(`${where}: \`${m[0]}\` runs without ${SCRIPT}`);
+      }
+      for (const m of text.matchAll(NPM_INSTALLS)) {
         if (!RETRY.test(text.slice(0, m.index))) v.push(`${where}: \`${m[0]}\` runs without ${SCRIPT}`);
       }
       if (text.includes('retry-on-registry-failure.mjs') && !steps.slice(0, i).some(isCheckout)) v.push(`${where}: runs ${SCRIPT} before any checkout puts it on the runner`);
@@ -259,6 +275,8 @@ describe('no workflow fails on one registry timeout before a test runs', () => {
     assert.ok(steps.filter(runsRetriedPull).length >= 6, 'fewer than six retried pulls found');
     const builds = steps.reduce((n, s) => n + [...shellOf(s).matchAll(/\bdocker\s+buildx\s+build\b/g)].length, 0);
     assert.ok(builds >= 3, `${builds} buildx builds found, fewer than three`);
+    const installs = steps.reduce((n, s) => n + [...shellOf(s).matchAll(NPM_INSTALLS)].length, 0);
+    assert.ok(installs >= 9, `${installs} npm installs found, fewer than nine`);
   });
 
   it('each listed build-push exception has a reason, a review date still ahead, and matches a real step', () => {
@@ -290,6 +308,34 @@ describe('the rule refuses a planted copy of each defect', () => {
     assert.notEqual(text, ci(), 'the plant changed nothing');
     const v = registryViolations(parseWorkflow(text, CI), CI);
     assert.ok(v.some((m) => /`docker buildx build` runs without/.test(m)), JSON.stringify(v));
+  });
+
+  it('the wrapper dropped from every real npm install, in every workflow', () => {
+    for (const file of ['.github/workflows/ci.yml', '.github/workflows/publish.yml']) {
+      const real = readFileSync(join(REPO_ROOT, file), 'utf8');
+      const text = real.replaceAll(/node scripts\/retry-on-registry-failure\.mjs\s+(?:--[a-z-]+\s+\S+\s+)*--\s+npm\s+ci/g, 'npm ci');
+      assert.notEqual(text, real, `${file}: the plant changed nothing: the real npm ci does not use the wrapper in the shape the plant expects`);
+      const v = registryViolations(parseWorkflow(text, file), file);
+      assert.ok(v.some((m) => /`npm ci` runs without/.test(m)), `${file}: ${JSON.stringify(v)}`);
+    }
+  });
+
+  it('one real npm install step unwrapped on its own: the rule names that step and no other', () => {
+    const doc = parseWorkflow(ci(), CI);
+    const [first] = jobEntries(doc).flatMap(({ job }) => stepsOf(job)).filter((s) => /\bnpm\s+ci\b/.test(shellOf(s)));
+    first.run = shellOf(first).replace(/^.*?(npm\s+ci\b)/s, '$1');
+    const v = registryViolations(doc, CI);
+    assert.equal(v.filter((m) => /npm ci/.test(m)).length, 1, JSON.stringify(v));
+  });
+
+  it('a planted npm install in a workflow nobody wrapped, and the wrapped spelling of it passing', () => {
+    const plant = (run) => parseWorkflow(`on: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: ${run}\n`, 'planted.yml');
+    for (const bare of ['npm install --no-save left-pad', 'npm i left-pad', 'npm ci --workspace=server']) {
+      const v = registryViolations(plant(bare), 'planted.yml');
+      assert.ok(v.some((m) => /runs without/.test(m)), `${bare}: ${JSON.stringify(v)}`);
+      assert.deepEqual(registryViolations(plant(`node scripts/retry-on-registry-failure.mjs -- ${bare}`), 'planted.yml'), [], bare);
+    }
+    assert.deepEqual(registryViolations(plant('npm run build && npm install-test-nothing'), 'planted.yml'), [], 'a longer command name is not an install');
   });
 
   it('the BuildKit pre-pull step removed from the real job that sets up buildx', () => {
