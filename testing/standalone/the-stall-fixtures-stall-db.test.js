@@ -91,9 +91,9 @@ describe('the stall and freeze fixtures stall, freeze and refuse for real', { sk
         const slow = await timedRead('stall_view');
         assert.ok(!slow.error, `a plain read of the stalled view threw: ${slow.error?.message}`);
         assert.ok(slow.ms >= 600, `the read took ${slow.ms} ms, less than the 600 ms asked for`);
-        const cut = await timedRead('stall_view', { maxTimeMS: 150 });
-        assert.equal(cut.error?.code, 50, `maxTimeMS did not end the read with code 50: ${cut.error?.message ?? 'it completed'}`);
-        assert.ok(cut.ms < 600, `maxTimeMS 150 ended the read after ${cut.ms} ms: it was not interrupted`);
+        // A read a busy server answered without showing its cut is made again, never taken as proof or as failure (Q-921).
+        const cut = await faults.readCutByItsDeadline(db.collection('stall_view'), {}, { limit: 150, ms: 600 });
+        assert.ok(cut.cut, `maxTimeMS 150 did not end a read with code 50 before the 600 ms stall was over: ${cut.reads.join('; ')}`);
         return 'the callback ran';
       });
       assert.equal(out, 'the callback ran', 'the callback\'s value did not come back');
