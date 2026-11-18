@@ -83,6 +83,10 @@ export const SPACE_COLLECTIONS = {
   // The schema versions the space's server keeps, named by fingerprint: each while a record here carries it, or while it is current, a layer, or
   // linked by a kept version. Private, never a brain family (`spaces/schema-snapshot-store.ts`).
   schemaSnapshots: 'schema_snapshots',
+  // The schema conversion run (Q-746, `spaces/schema-convert-run.ts`): one document `_id: 'run'`, and the records it could not convert
+  // (`brain/schema-convert-items.ts`). Both local, never synced and never hashed; a restore drops them and never loads them.
+  schemaConvertRun: 'schema_convert_run',
+  schemaConvertItems: 'schema_convert_items',
 } as const;
 
 export type SpacePart = keyof typeof SPACE_COLLECTIONS;
