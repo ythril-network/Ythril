@@ -95,11 +95,13 @@ before(async () => {
   assert.ok(SCHEMA_VERSION_REFUSAL_CODES?.length >= 3, 'the schema-version refusal codes were not read');
   // And the codes a schema conversion's doors refuse with, the reason classes an unconverted record carries and the codes of its list and dismissals
   // (`space_schema_convert`, `list_unconverted`, `dismiss_unconverted` and `dismiss_unconverted_shown` name them), each from the one list the acts answer from.
-  const { SCHEMA_CONVERT_REFUSAL_CODES } = await import('../../server/dist/spaces/schema-convert-acts.js');
+  // And the state a conversion status read through a personal view of several members answers (`per_member`: `space_schema_conversion` and help() name it).
+  const { SCHEMA_CONVERT_REFUSAL_CODES, SCHEMA_CONVERT_VIEW_STATE } = await import('../../server/dist/spaces/schema-convert-acts.js');
+  assert.equal(typeof SCHEMA_CONVERT_VIEW_STATE, 'string', 'the per-member conversion state was not read');
   const { UNCONVERTED_REFUSAL_CODES } = await import('../../server/dist/spaces/unconverted-acts.js');
   const { UNCONVERTED_REASONS } = await import('../../server/dist/brain/schema-convert-items.js');
   assert.ok(SCHEMA_CONVERT_REFUSAL_CODES?.length >= 5 && UNCONVERTED_REFUSAL_CODES?.length >= 5 && UNCONVERTED_REASONS?.length >= 5, 'the conversion refusal codes and reason classes were not read');
-  ANSWER_VALUES = [...SCHEMA_CONVERT_REFUSAL_CODES, ...UNCONVERTED_REFUSAL_CODES, ...UNCONVERTED_REASONS, ...DEGRADED_REASONS, ...FILE_CHANGES_REFUSAL_CODES, ...SCHEMA_VERSION_REFUSAL_CODES,...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
+  ANSWER_VALUES = [SCHEMA_CONVERT_VIEW_STATE, ...SCHEMA_CONVERT_REFUSAL_CODES,...UNCONVERTED_REFUSAL_CODES, ...UNCONVERTED_REASONS, ...DEGRADED_REASONS, ...FILE_CHANGES_REFUSAL_CODES, ...SCHEMA_VERSION_REFUSAL_CODES,...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
     ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, SPACE_STILL_BEING_REMOVED, ...SYNC_ANSWER_CODES];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });

@@ -203,6 +203,12 @@ export async function schemaConvertStartAct(spaceId: string, input: unknown, cal
 }
 
 /**
+ * The state a conversion status read through a personal view of none or several members answers. One spelling: the answer is built from it,
+ * and the gate that MCP texts name only real tools, parameters and answer values reads it, so a text naming another spelling fails there.
+ */
+export const SCHEMA_CONVERT_VIEW_STATE = 'per_member';
+
+/**
  * The run of `spaceId` as `schemaConvertStatus` gives it (state, target, types, steps, steps refused, sources, counts, what is left, the sync it
  * asked for first, failures), or `{ state: 'none' }` for a space that never had a run. Writes nothing.
  *
@@ -214,7 +220,7 @@ export async function schemaConvertStartAct(spaceId: string, input: unknown, cal
 export async function schemaConvertStatusAct(spaceId: string, caller: SchemaConvertCaller, viewRead?: readonly string[]): Promise<SchemaConvertActResult> {
   if (viewRead) {
     if (viewRead.length === 1) return { status: OK, body: await statusBodyOf(viewRead[0]!) };
-    return { status: OK, body: { state: 'per_member', runs: await Promise.all(viewRead.map(async space => ({ space, ...await statusBodyOf(space) }))) } };
+    return { status: OK, body: { state: SCHEMA_CONVERT_VIEW_STATE, runs: await Promise.all(viewRead.map(async space => ({ space, ...await statusBodyOf(space) }))) } };
   }
   if (!isConfiguredSpace(spaceId)) return lostSpaceAnswer(null, spaceId);
   const denied = rightsRefusal(spaceId, caller.rights, 'read');
