@@ -210,7 +210,8 @@ Here `steps` counts the steps the run holds. MCP `space_schema_convert` takes `s
 
 - **It converts every copy this instance holds**, as a run does, and **does not sync first**: its caller asked for it now. A copy another member already converted is skipped (it carries the stamp). When another instance converts the same record at the same moment, both write the same converted record and the later version wins; when the two use different steps (one of them refused its steps), the later write decides.
 - **Rights: `knowledge: admin` and the space's admin right.** The rewrite reaches every peer, so a token with `knowledge: admin` that does not administer the space is refused (`403` `space_admin_required`).
-- **One run at a time for an explicit start.** While a run of the space is unfinished the act answers `409` `schema_convert_running`. A schema save or a passed vote joins an unfinished run instead.
+- **One run at a time for an explicit start.** While a run of the space is unfinished the act answers `409` `schema_convert_running`. A schema save or a passed vote joins an unfinished run instead. Every start of a space, whichever door asks, is made one after another, so two starts at once never lose a run.
+- **Bounded.** A start is a heavy call: it shares the server's heavy-call allowance, a few a minute per token on both doors, and over it answers `429` `schema_convert_rate_limited`; a start refused for another reason costs none of it. `types` is bounded as above and `steps` as a save's are.
 
 The status of a run is read with `GET` (MCP `space_schema_conversion`, `knowledge: read`). It writes nothing and answers `{ "state": "none" }` for a space that never had a run:
 
@@ -311,6 +312,7 @@ Every refusal carries a `code`; the same code is on both doors.
 | `knowledge_rung` | `403` | the act, the status | The token needs `knowledge: admin` to start and `knowledge: read` to read. |
 | `space_admin_required` | `403` | the act | Use a token that administers the space. |
 | `schema_convert_running` | `409` | the act | Read the status and start again when the run is no longer `running`. |
+| `schema_convert_rate_limited` | `429` | the act | Wait and start again: starts share the heavy-call allowance of the server's other heavy calls, a few a minute per token (the same allowance on REST and MCP). A start refused for any other reason costs none of it. |
 | `unconverted_rung` | `403` | the lists and dismissals | The token needs `knowledge: read` to list and `knowledge: write` to dismiss. |
 | `unconverted_bad_kind`, `unconverted_bad_type`, `unconverted_bad_status`, `unconverted_bad_reason` | `400` | the lists and dismissals | Send a filter from the lists above. |
 | `unconverted_bad_paging` | `400` | the list | Send `skip` and `limit` as whole numbers. |
