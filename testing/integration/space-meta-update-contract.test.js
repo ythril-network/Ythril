@@ -167,6 +167,23 @@ describe('PATCH /api/spaces/:id — the order of the chain is part of the contra
     assert.equal(r.status, 400, `expected the strict parse to win, got ${r.status}: ${JSON.stringify(r.body)}`);
     assert.equal((await metaNow()).version, before.version);
   });
+
+  it('a stale If-Match beats a bad conversion step, and a bad step is checked after the merge: refused whole, nothing written (Q-745)', async () => {
+    // `convertRecords` is held to the schema the edit leaves, so it is asked last: after the precondition, the parse and the refs. A step naming a
+    // property no type declares answers 400 `bad_conversion_step` with its index, and the meta is the version it was.
+    const before = await metaNow();
+    const bad = { meta: { purpose: 'a save that carries a bad step' },
+      convertRecords: { steps: [{ op: 'renameProperty', kind: 'entity', type: 'NoSuchType', from: 'a', to: 'b' }] } };
+    const stale = await patch(INSTANCES.a, token, `/api/spaces/${SPACE}`, bad, { 'If-Match': String(before.version + 7) });
+    assert.equal(stale.status, 412, `expected the precondition to win, got ${stale.status}: ${JSON.stringify(stale.body)}`);
+    const r = await patch(INSTANCES.a, token, `/api/spaces/${SPACE}`, bad);
+    assert.equal(r.status, 400, JSON.stringify(r.body));
+    assert.equal(r.body.code, 'bad_conversion_step');
+    assert.equal(r.body.step, 0);
+    const after = await metaNow();
+    assert.equal(after.version, before.version, 'a refused save must not bump the version');
+    assert.notEqual(after.body.purpose, 'a save that carries a bad step', 'the schema half of a refused save was written');
+  });
 });
 
 describe('PATCH /api/spaces/:id — accept what we emit', () => {
