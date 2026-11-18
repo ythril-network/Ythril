@@ -16,7 +16,7 @@ import { StoredFileUnreadable } from '../../files/stored-bytes.js';
 import { readSpillByPath } from '../../brain/read-spill-act.js';
 import { linkInputSchemasFor, linkInputError, linkFieldsFrom } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS } from '../../util/request-bounds.js';
-import { resolveTextWindow, WINDOW_PAGER, type MarkdownWindow } from '../../files/markdown-window.js';
+import { resolveTextWindow, windowCeilingFields, WINDOW_PAGER, type MarkdownWindow } from '../../files/markdown-window.js';
 import { carriagesFor, defaultBudgetChars } from '../../brain/result-budget.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 import { extractListingAsked, extractListingRefusal, readExtractListing } from '../../files/extract-listing.js';
@@ -28,7 +28,7 @@ import { NotFoundError } from '../../util/errors.js';
 
 export const read_fileTool: ToolHandler = {
   name: 'read_file',
-  description: 'Read the text contents of a file in the space file store, a window at a time. The window is whole paragraphs from `markdownSkip` (a character offset, default 0) that fit the answer budget (`maxChars` / `maxBytes` / `maxTokens`); `truncated` says more follows and `markdownNextSkip` is where — send it back as `markdownSkip`, and the windows joined are the file, character for character. A paragraph larger than the budget is split at a line break. The same two parameters page the converted Markdown on `GET /api/brain/spaces/:spaceId/files/extract`, which this tool is the twin of: `limit`, `skip`, `imagesLimit` and `imagesSkip` (all four, with the route\'s defaults and ceilings) add the file\'s chunk and extracted-image listing to the answer, and without them the answer is the text window alone. Prefer `recall` with `includeFileContent: false` to find WHICH file and WHICH passage first.\n\n'
+  description: 'Read the text contents of a file in the space file store, a window at a time. The window is whole paragraphs from `markdownSkip` (a character offset, default 0) that fit the answer budget (`maxChars` / `maxBytes` / `maxTokens`); `truncated` says more follows and `markdownNextSkip` is where — send it back as `markdownSkip`, and the windows joined are the file, character for character. A cut window also carries `budgetBoundBy`, the size parameter(s) to raise to get more in one window (`maxChars`, `maxTokens` or `maxBytes`; non-ASCII text hits `maxBytes` before `maxChars`), and no such field when the window was not cut. A paragraph larger than the budget is split at a line break. The same two parameters page the converted Markdown on `GET /api/brain/spaces/:spaceId/files/extract`, which this tool is the twin of: `limit`, `skip`, `imagesLimit` and `imagesSkip` (all four, with the route\'s defaults and ceilings) add the file\'s chunk and extracted-image listing to the answer, and without them the answer is the text window alone. Prefer `recall` with `includeFileContent: false` to find WHICH file and WHICH passage first.\n\n'
     + 'It reads the STORED TEXT, which for an uploaded PDF or image is the extracted text rather than the original bytes. A file whose extraction has not finished, or whose type yields no text, reads as empty — that is a pending or unextractable document, not an empty file. `list_dir` shows what is present, and `list_embed_jobs` shows whether its indexing is still queued or failed.\n\n'
     + 'A file system that FAILS while reading (a disk error, a permission the server lost) is refused `500` with `code: "file_system_fault"` and `retryable: false`, never read as a missing file.\n\n'
     + 'This is a path lookup, not a search: an unknown path is an error, not an empty result. A file held under another Unicode form of the path (a decomposed name) is found by the path as you spell it, as `GET /api/files/:space?path=` finds it.',
@@ -130,6 +130,7 @@ export const read_fileTool: ToolHandler = {
         path: filePath, content: w.markdown, truncated: w.truncated, markdownSkip: w.skip, markdownChars: w.totalChars,
         ...(w.nextSkip !== undefined ? { markdownNextSkip: w.nextSkip } : {}),
         budgetChars: stated.chars, budgetBytes: stated.bytes,
+        ...windowCeilingFields(w, window.budget),
         ...(listing ?? {}),
       },
     };

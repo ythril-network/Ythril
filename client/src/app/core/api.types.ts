@@ -791,7 +791,7 @@ export interface FileExtract {
   /** `unreadable` carries the reason when the sidecar exists but cannot be decrypted (F-43). */
   converted?: { path: string; markdown: string; truncated: boolean; sizeBytes: number; unreadable?: string;
     /** Q-128: the window's start, the document's length and where the next window starts (whole paragraphs). */
-    markdownSkip?: number; markdownChars?: number; markdownNextSkip?: number } | null;
+    markdownSkip?: number; markdownChars?: number; markdownNextSkip?: number; budgetBoundBy?: string[] } | null;
   /** Q-128: the image list's own page. */
   imagesTotal?: number;
   imagesTruncated?: boolean;
