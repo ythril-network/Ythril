@@ -13,7 +13,8 @@
  * the guard rows (`ROUTE_RIGHTS`) say the same rung at the edge. There is no read-only middleware here on purpose: the act's refusal is the area
  * guard's own sentence, and a second sentence for the same refusal is what two doors disagreeing looks like.
  *
- * Not wired yet: `app.ts` mounts it, with the rights and audit rows (the wiring slice).
+ * `app.ts` mounts it; the rights rows are `ROUTE_RIGHTS`' and the audit rules `ROUTE_RULES`'. A dismissal hands the audit entry what it did
+ * (`req.auditChangesExplicit`: the item id, or the filter, `expect` and count), which the operation's allowlist cuts to scalars.
  */
 import { Router } from 'express';
 import { requireSpaceAuthScoped } from '../auth/middleware.js';
@@ -24,6 +25,7 @@ import {
 import type { TokenRights } from '../config/rights-shape.js';
 import type { Response } from 'express';
 import { sendCaughtFailure } from './send-failure.js';
+import { dismissChanges, dismissShownChanges } from '../audit/audit-changes.js';
 
 export const spaceUnconvertedRouter = Router();
 
@@ -53,7 +55,9 @@ spaceUnconvertedRouter.get('/:id/schema-convert/items', globalRateLimit, require
 spaceUnconvertedRouter.post('/:id/schema-convert/items/:itemId/dismiss', globalRateLimit, requireSpaceAuthScoped('id'), async (req, res) => {
   const spaceId = req.params['id'] as string;
   try {
-    sendAnswer(res, await dismissUnconvertedAct(spaceId, req.params['itemId'], callerOf(req)));
+    const answer = await dismissUnconvertedAct(spaceId, req.params['itemId'], callerOf(req));
+    if (!('error' in answer)) req.auditChangesExplicit = dismissChanges(String(req.params['itemId']));
+    sendAnswer(res, answer);
   } catch (err) {
     sendCaughtFailure(res, 'POST /api/spaces/:id/schema-convert/items/:itemId/dismiss', err);
   }
@@ -65,9 +69,10 @@ spaceUnconvertedRouter.post('/:id/schema-convert/items/dismiss', globalRateLimit
   const spaceId = req.params['id'] as string;
   const body = (req.body ?? {}) as Record<string, unknown>;
   try {
-    sendAnswer(res, await dismissShownUnconvertedAct(spaceId, {
-      kind: body['kind'], type: body['type'], reason: body['reason'], expect: body['expect'],
-    }, callerOf(req)));
+    const given = { kind: body['kind'], type: body['type'], reason: body['reason'], expect: body['expect'] };
+    const answer = await dismissShownUnconvertedAct(spaceId, given, callerOf(req));
+    if (!('error' in answer)) req.auditChangesExplicit = dismissShownChanges(given, (answer.body as { dismissed: number }).dismissed);
+    sendAnswer(res, answer);
   } catch (err) {
     sendCaughtFailure(res, 'POST /api/spaces/:id/schema-convert/items/dismiss', err);
   }
