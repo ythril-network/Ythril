@@ -70,7 +70,8 @@ export const space_schema_convertTool: ToolHandler = {
     + 'record at the same time, both write the same converted record and the later version wins, and when the two use different steps the later write '
     + 'decides.\n\n'
     + 'IT NEEDS AN ADMIN: `knowledge: admin` on the space AND the space\'s admin right, because the rewrite reaches every peer. A read-only token is refused.\n\n'
-    + `AT MOST ${HEAVY_CALLS_PER_WINDOW} STARTS A MINUTE PER TOKEN, counted with the REST route and the other heavy calls of the server: a start over the limit `
+    + `AT MOST ${HEAVY_CALLS_PER_WINDOW} STARTS A MINUTE PER TOKEN, counted with the REST route, with every schema save that carries \`convertRecords\` (it `
+    + 'pays this same price) and with the other heavy calls of the server: a start over the limit '
     + 'is refused (429 `schema_convert_rate_limited`) and starts nothing; a start refused for any other reason costs nothing.\n\n'
     + 'THE ANSWER comes at once, `{ state: \'started\', toFp, types, steps }` (`toFp` is the schema fingerprint the run converts toward, `steps` how many '
     + 'steps it holds); the conversion runs in the background, one page at a time, and survives a restart. Read how it went with `space_schema_conversion`.\n\n'

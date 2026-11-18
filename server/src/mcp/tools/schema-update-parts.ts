@@ -36,7 +36,9 @@ export const CONVERT_RECORDS_PARAMETER: Record<string, unknown> = {
   ...SHAPE,
   description: 'What to do with the records already stored when this schema change lands: `{}` stamps the records that already '
     + `conform and rewrites nothing; \`steps\` (at most ${CONVERSION_STEPS_MAX}) rename a property, map an enum value, rename a type or split a type by a `
-    + 'condition. It goes with a schema change: it needs the `meta` of that change (`convert_needs_meta`) and the `knowledge` admin rung, because it can '
+    + 'condition. It goes with a schema change: it needs the `meta` of that change (`convert_needs_meta`), and it pays the price of `space_schema_convert`, '
+    + 'which starts the same rewrite: the `knowledge` admin rung AND the space\'s admin right (403 `space_admin_required`), and one call of the heavy-call '
+    + 'allowance that tool and the server\'s other heavy calls share (429 `schema_convert_rate_limited`; a save refused for another reason costs none), because it can '
     + 'rewrite every record of a type. Each step is held to the schema before and the schema after the change and the save is refused whole '
     + '(400 `bad_conversion_step`, naming the step\'s index) if one cannot hold: nothing is written. The run rewrites every record of its '
     + 'types that this instance holds and the steps change, whoever last wrote it; on a space in a network it first asks each peer for one '

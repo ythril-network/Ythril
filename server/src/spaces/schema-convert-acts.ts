@@ -37,7 +37,8 @@
  * - **A door that rewrites without the rail's price.** A start rewrites every record of its types, as heavy as a space data deletion, so it is
  *   priced on the heavy-call rail (`consumeHeavyToolCall`, keyed by the caller's token id or address, `SchemaConvertCaller.rateKey`) HERE, where
  *   the route and the tool share one allowance and neither can drop it; a caller over it is refused `429 schema_convert_rate_limited`. The price is
- *   asked after every other refusal, the busy one included, so a refused request costs the caller nothing.
+ *   asked after every other refusal, the busy one included, so a refused request costs the caller nothing. It is ONE function,
+ *   `schemaConvertPrice`, which a schema save that carries `convertRecords` asks too: both start the same mass rewrite, so both pay one price.
  *
  * ## The answers
  *
@@ -80,6 +81,19 @@ const OK = 200;
 
 const refusal = (status: number, error: string, code?: string, extra: Record<string, unknown> = {}): SchemaConvertActResult =>
   ({ status, body: { error, ...(code ? { code } : {}), ...extra } });
+
+/**
+ * THE price of starting a mass rewrite of records (`Q-745`, `Q-746`; lens sweep N20, decided): the knowledge admin rung, the space's admin right, and one
+ * call of the heavy-call allowance (`consumeHeavyToolCall`, keyed by `caller.rateKey`, the allowance both doors and the server's other heavy calls
+ * share). Asked by the Convert act and by a schema save that carries `convertRecords` (PATCH and `schema_update`), so both pay one price from one
+ * allowance. The allowance is spent LAST, only by a caller the rights admit, so a refused caller costs nothing; ask it after every other refusal of
+ * the call and before anything is written. A member applying a passed round is not priced: it did not call. Answers the refusal, or `null`.
+ */
+export function schemaConvertPrice(spaceId: string, caller: SchemaConvertCaller): SchemaConvertActResult | null {
+  const denied = rightsRefusal(spaceId, caller.rights, 'admin');
+  if (denied) return denied;
+  return consumeHeavyToolCall(caller.rateKey) ? null : refusal(TOO_MANY_REQUESTS, SCHEMA_CONVERT_RATE_LIMITED, RATE_LIMITED);
+}
 
 /** The knowledge rung a call needs, then the space admin right a start needs on top of it; the refusal, or `null`. */
 function rightsRefusal(spaceId: string, rights: TokenRights | null | undefined, needs: 'admin' | 'read'): SchemaConvertActResult | null {
@@ -174,9 +188,10 @@ export async function schemaConvertStartAct(spaceId: string, input: unknown, cal
 
   // Priced on the heavy-call rail HERE, inside the act both doors run, so they spend one allowance per caller and neither can leave it out. The run
   // module asks the price once it found no unfinished run, so a start refused as busy costs the caller nothing; a refused one writes nothing.
-  const admit = () => (consumeHeavyToolCall(caller.rateKey)
-    ? null
-    : { ok: false as const, status: TOO_MANY_REQUESTS, code: RATE_LIMITED, error: SCHEMA_CONVERT_RATE_LIMITED });
+  const admit = () => {
+    const priced = schemaConvertPrice(spaceId, caller);
+    return priced ? { ok: false as const, status: priced.status, code: String(priced.body['code']), error: String(priced.body['error']) } : null;
+  };
   const started = await startSchemaConvertRun({ spaceId, types: body.data.types, steps, source: { kind: 'act' }, admit });
   if (!started.ok) return refusal(started.status, started.error, started.code);
   const types = body.data.types.map(t => ({ kind: t.kind, type: t.type }));
