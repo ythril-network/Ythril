@@ -233,7 +233,7 @@ The status of a run is read with `GET` (MCP `space_schema_conversion`, `knowledg
 | `syncedFirst` | `{ asked, answered }`: the peers it asked for one sync before it began, and how many answered. Absent while that sync has not ended; `{ 0, 0 }` for a run that asks none (an act, a space in no network). |
 | `counts` | `stamped`, `rewritten`, `unconverted`, `moved` and `edgesRestamped`, as in [What a run does](#what-a-run-does-to-each-record). |
 | `unconvertedNotListed` | Present when a run found more unconvertible records than it lists; the number it did not list. |
-| `left` | The records of the unfinished types still to read, counted within a bound; `null` when the count did not finish in it. |
+| `left` | The records of the unfinished types still to read, counted within one bound for the whole answer (two seconds, however many types are left); `null` when the count did not finish in it, never a part of it. |
 | `failures`, `error` | The passes that failed so far (the store did not answer, or a space act held the space) and the words of the last failure. A pass that failed is retried. |
 
 ## The unconverted list
