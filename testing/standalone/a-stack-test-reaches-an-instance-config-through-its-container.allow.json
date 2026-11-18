@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "testing/red-team-tests/file-hardening.test.js",
+      "reason": "reads A's config.json through the bind mount only on a Windows host (USE_DOCKER_EXEC is false there), where the mount ignores the 0600 mode; on Linux, CI included, it reads and writes it through docker exec",
+      "reviewBy": "2027-05-18"
+    }
+  ]
+}

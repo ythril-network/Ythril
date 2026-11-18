@@ -16,17 +16,18 @@
  *   (it pulls from nobody), so A converts before B has heard of the round; B hears of it only when the test syncs B. A club looked the same
  *   but is not: its organiser pulls from the member, so the organiser's own run asked the member for one sync before reading, that sync told
  *   the member of the passed round, and the member converted the copies first (the first run of the stack, 2026-11-18).
- * - **A test that cannot run where the tests run.** The sync tests run in the container runner, which has no `docker` command. `mirroredPair`
- *   builds the closed network two instances both hold (the `mirroredNetwork` of `helpers.js`) by their own doors alone: each instance id is read
- *   from `GET /api/about`, and the peer token each keeps is the one the member add stores. `patchNetworkOnDisk` changes a network in an
- *   instance's `config.json` through the stack's bind mount (`testing/sync/configs/<x>`), where `patchContainerNetwork` used `docker exec`.
+ * - **A network built from outside the instances.** `mirroredPair` builds the closed network two instances both hold (the `mirroredNetwork` of
+ *   `helpers.js`) by their own doors alone: each instance id is read from `GET /api/about`, and the peer token each keeps is the one the member
+ *   add stores. A test that must alter what an instance holds (a round) edits its `config.json` through the container (`patchContainerNetwork`):
+ *   the instance writes the file 0600 as the container's user, so CI's runner cannot read it through the bind mount (CI run 44354113429;
+ *   `a-stack-test-reaches-an-instance-config-through-its-container`).
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { waitForReading } from '../_shared/wait-for.mjs';
-import { INSTANCES, post, patch, get, del, delWithBody, syncUntil, readRecord, readCollection, pubsubNetwork, reloadConfig } from './helpers.js';
+import { INSTANCES, post, patch, get, del, delWithBody, syncUntil, readRecord, readCollection, pubsubNetwork } from './helpers.js';
 
 const CONFIGS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'configs');
 
@@ -199,20 +200,4 @@ export async function mirroredPair({ label, spaces }) {
     await del(B, tB, `/api/networks/${networkId}`).catch(() => {});
   };
   return { networkId, remove };
-}
-
-/**
- * Change network `networkId` in the `config.json` of instance `x` (`a`, `b`) through the stack's bind mount: `change(n, cfg)` edits it in place.
- * The caller reloads the instance (`reloadConfig`) for it to take effect. A read that races the instance's own write of the file is tried again.
- */
-export async function patchNetworkOnDisk(x, networkId, change) {
-  const file = path.join(CONFIGS, x, 'config.json');
-  let cfg;
-  await waitForReading(() => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return undefined; } },
-    v => v !== undefined, 5_000, 100, { what: `a whole read of ${file}` }).then(v => { cfg = v; });
-  const n = cfg.networks.find(x2 => x2.id === networkId);
-  assert.ok(n, `network ${networkId} is not in ${file}`);
-  change(n, cfg);
-  fs.writeFileSync(file, JSON.stringify(cfg, null, 2), { mode: 0o600 });
-  await reloadConfig(INSTANCES[x], tokenOf(x));
 }
