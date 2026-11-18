@@ -486,6 +486,14 @@ export class MediaProcessingStateService {
   get managed(): boolean { return !!this.form.infraManaged; }
   // When infra-managed, EVERY field is locked (the API refuses edits) — so isLocked() short-circuits.
   isLocked(field: string): boolean { return this.managed || this.lockedByInfra.includes(field); }
+  /**
+   * `block` without the keys an env pin holds at `<area>.<key>`. The server refuses a PATCH that names a pinned
+   * field (403 for the whole body), so a save must never carry one: every payload goes through here, which is why
+   * no caller can forget it (Q-914: one pinned document-processing knob made every save on the page fail).
+   */
+  private unpinned<T extends object>(area: string, block: T): T {
+    return Object.fromEntries(Object.entries(block).filter(([key]) => !this.isLocked(`${area}.${key}`))) as T;
+  }
 
   // ── per-card sections ──
 
@@ -835,10 +843,10 @@ export class MediaProcessingStateService {
         model: this.nli.model || null,
       },
       // Only the PATCH-writable doc fields (vlmModel/repairModel/URLs are env-only, never sent).
-      documentProcessing: {
+      documentProcessing: this.unpinned('documentProcessing', {
         mode: dp.mode, renderDpi: dp.renderDpi, maxPages: dp.maxPages, pageTimeoutMs: dp.pageTimeoutMs,
         concurrency: dp.concurrency, ocrTimeoutMs: dp.ocrTimeoutMs,
-      },
+      }),
       /*
        * Only the PATCH-writable face fields.
        *

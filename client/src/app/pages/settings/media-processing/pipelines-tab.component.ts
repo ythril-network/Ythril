@@ -193,12 +193,12 @@ interface Step {
         <div class="knobs-h">{{ 'mediaProcessing.pipelines.extractionMode' | transloco }}</div>
         <div class="modeseg" role="group" [attr.aria-label]="'mediaProcessing.pipelines.extractionMode' | transloco">
           @for (m of s.MODES; track m) {
-            <button type="button" [class.on]="s.docMode() === m" [attr.aria-pressed]="s.docMode() === m" (click)="s.setMode(m)" [disabled]="s.managed">
+            <button type="button" [class.on]="s.docMode() === m" [attr.aria-pressed]="s.docMode() === m" (click)="s.setMode(m)" [disabled]="s.isLocked('documentProcessing.mode')">
               {{ 'mediaProcessing.mode.' + m | transloco }}
             </button>
           }
         </div>
-        <p class="modedesc"><b>{{ 'mediaProcessing.mode.' + s.docMode() | transloco }}</b> — {{ s.modeDescKey() | transloco }}</p>
+        <p class="modedesc"><b>{{ 'mediaProcessing.mode.' + s.docMode() | transloco }}</b> — {{ s.modeDescKey() | transloco }} @if (s.isLocked('documentProcessing.mode')) { <app-status-pill variant="env">{{ 'mediaProcessing.pill.env' | transloco }}</app-status-pill> }</p>
 
         <!-- The "no vision model configured, falls back to OCR" case is already carried by the header
              pill ("OCR fallback") and the pipeline summary line, so the extra warning box was redundant
@@ -206,24 +206,24 @@ interface Step {
 
         <div class="grid">
           <div class="field">
-            <label for="dp-dpi">{{ 'mediaProcessing.knob.renderDpi' | transloco }}</label>
-            <input id="dp-dpi" type="number" min="72" max="600" [(ngModel)]="s.form.documentProcessing!.renderDpi" [disabled]="s.managed" />
+            <label for="dp-dpi">{{ 'mediaProcessing.knob.renderDpi' | transloco }}</label>@if (s.isLocked('documentProcessing.renderDpi')) { <app-status-pill variant="env">{{ 'mediaProcessing.pill.env' | transloco }}</app-status-pill> }
+            <input id="dp-dpi" type="number" min="72" max="600" [(ngModel)]="s.form.documentProcessing!.renderDpi" [disabled]="s.isLocked('documentProcessing.renderDpi')" />
           </div>
           <div class="field">
-            <label for="dp-maxpages">{{ 'mediaProcessing.knob.maxPages' | transloco }}</label>
-            <input id="dp-maxpages" type="number" min="1" max="2000" [(ngModel)]="s.form.documentProcessing!.maxPages" [disabled]="s.managed" />
+            <label for="dp-maxpages">{{ 'mediaProcessing.knob.maxPages' | transloco }}</label>@if (s.isLocked('documentProcessing.maxPages')) { <app-status-pill variant="env">{{ 'mediaProcessing.pill.env' | transloco }}</app-status-pill> }
+            <input id="dp-maxpages" type="number" min="1" max="2000" [(ngModel)]="s.form.documentProcessing!.maxPages" [disabled]="s.isLocked('documentProcessing.maxPages')" />
           </div>
           <div class="field">
-            <label for="dp-pagetimeout">{{ 'mediaProcessing.knob.pageTimeout' | transloco }}</label>
-            <input id="dp-pagetimeout" type="number" min="1000" max="600000" [(ngModel)]="s.form.documentProcessing!.pageTimeoutMs" [disabled]="s.managed" />
+            <label for="dp-pagetimeout">{{ 'mediaProcessing.knob.pageTimeout' | transloco }}</label>@if (s.isLocked('documentProcessing.pageTimeoutMs')) { <app-status-pill variant="env">{{ 'mediaProcessing.pill.env' | transloco }}</app-status-pill> }
+            <input id="dp-pagetimeout" type="number" min="1000" max="600000" [(ngModel)]="s.form.documentProcessing!.pageTimeoutMs" [disabled]="s.isLocked('documentProcessing.pageTimeoutMs')" />
           </div>
           <div class="field">
-            <label for="dp-concurrency">{{ 'mediaProcessing.knob.pageConcurrency' | transloco }}</label>
-            <input id="dp-concurrency" type="number" min="1" max="8" [(ngModel)]="s.form.documentProcessing!.concurrency" [disabled]="s.managed" />
+            <label for="dp-concurrency">{{ 'mediaProcessing.knob.pageConcurrency' | transloco }}</label>@if (s.isLocked('documentProcessing.concurrency')) { <app-status-pill variant="env">{{ 'mediaProcessing.pill.env' | transloco }}</app-status-pill> }
+            <input id="dp-concurrency" type="number" min="1" max="8" [(ngModel)]="s.form.documentProcessing!.concurrency" [disabled]="s.isLocked('documentProcessing.concurrency')" />
           </div>
           <div class="field">
-            <label for="dp-ocrtimeout">{{ 'mediaProcessing.knob.ocrTimeout' | transloco }}</label>
-            <input id="dp-ocrtimeout" type="number" min="10000" max="1800000" [(ngModel)]="s.form.documentProcessing!.ocrTimeoutMs" [disabled]="s.managed" />
+            <label for="dp-ocrtimeout">{{ 'mediaProcessing.knob.ocrTimeout' | transloco }}</label>@if (s.isLocked('documentProcessing.ocrTimeoutMs')) { <app-status-pill variant="env">{{ 'mediaProcessing.pill.env' | transloco }}</app-status-pill> }
+            <input id="dp-ocrtimeout" type="number" min="10000" max="1800000" [(ngModel)]="s.form.documentProcessing!.ocrTimeoutMs" [disabled]="s.isLocked('documentProcessing.ocrTimeoutMs')" />
           </div>
         </div>
         @if (s.pipeDirty('pipe-documents')) {
