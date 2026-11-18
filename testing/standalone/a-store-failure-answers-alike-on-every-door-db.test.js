@@ -33,6 +33,13 @@
  * that stopped getting past validation — cannot leave a short list that passes. Every door, reached or not, is held
  * to carrying none of the driver's text.
  *
+ * ## An event stream is judged on a bounded look
+ *
+ * A door that answers `text/event-stream` never ends its answer, so the gate reads what it sent for a short look and closes it
+ * (`lookAtStream`): status, content type and first bytes are then judged like any door's body (the driver's text, and the shared
+ * 503 rule when the stream's request reached the failing store). Waiting for the abort instead cost a whole per-door deadline per
+ * stream per fault and judged the stream on nothing.
+ *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-store-failure-answers-alike-on-every-door-db.test.js
  * (requires a prior `npm run build` in server/)
@@ -48,6 +55,7 @@ import { driverTextIn } from './_driver-text.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { mountedRoutesWithSource } from './_routes.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
+import { settleWithin } from './_write-faults.mjs';
 
 const skip = await mongoSkipReason();
 // Five faults run over every door in ONE process: ~376 requests each, from one credential. The instance's limiter
@@ -64,6 +72,17 @@ const ADDRESS = '172.16.0.9';
 /** How many doors must reach the failing store for the run to conclude anything. Raise it; never lower it. */
 const REACHED_FLOOR = 60;
 const PER_DOOR_MS = 20_000;
+/**
+ * How long an event stream is read before the look ends. A stream door writes its open comment in the tick it answers, so its first
+ * bytes are on the wire when the headers are; the look is only the time a loaded runner needs to deliver them.
+ */
+const STREAM_LOOK_MS = 1000;
+/**
+ * How many event-stream doors the mounts must hold and the look must have read, per fault. A stream judged on nothing was the slip this
+ * floor closes: a door that stopped answering as a stream (or a content-type check that stopped matching) would leave no stream to judge.
+ * Raise it; never lower it.
+ */
+const STREAM_DOORS_FLOOR = 2;
 
 // The driver the SERVER loads, so the patched class is the one its operations go through.
 const requireFromServer = createRequire(path.resolve('server/package.json'));
@@ -407,6 +426,35 @@ describe('a store failure answers alike on every door', { skip }, () => {
     return out;
   }
 
+  const isEventStream = (r) => (r.headers.get('content-type') ?? '').startsWith('text/event-stream');
+
+  /**
+   * What a door that answered with an event stream sent, read for at most {@link STREAM_LOOK_MS} and then closed from our side.
+   * A stream never ends, so waiting for it is waiting out the abort and judging the door on nothing: every stream door cost a whole
+   * {@link PER_DOOR_MS} per fault and its answer was thrown away. The look keeps the status, the content type and the first bytes
+   * (the open comment, and any event the door wrote at once), which is everything a stream can say about a store failure before
+   * a change happens; the same checks as every other door then read them (`driverTextIn`, and the shared 503 rule when the
+   * door reached the failing store). Closing the stream also ends the door's subscription, as the abort did.
+   */
+  async function lookAtStream(r) {
+    let raw = '';
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    const reading = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        raw += decoder.decode(value, { stream: true });
+      }
+    })();
+    const look = await settleWithin(reading, STREAM_LOOK_MS);
+    await reader.cancel().catch(() => {});
+    await look.rest;
+    return { requestId: r.headers.get('x-request-id'), status: r.status, retryAfter: r.headers.get('retry-after'),
+      retryable: undefined, code: undefined, codeName: undefined, error: null, raw,
+      streaming: true, contentType: r.headers.get('content-type'), endedInLook: look.settled };
+  }
+
   async function ask(d) {
     if (d.kind === 'mcp') {
       // An MCP request is one id for the whole call, as the HTTP middleware gives one; the fault reads it.
@@ -429,9 +477,11 @@ describe('a store failure answers alike on every door', { skip }, () => {
     let r, raw;
     try {
       r = await fetch(url, init);
+      // An event stream has no end to wait for: it is judged on what it sent in a bounded look, never on its abort.
+      if (isEventStream(r)) return await lookAtStream(r);
       raw = await r.text();
     } catch (err) {
-      return { status: r?.status ?? 0, raw: String(err), error: String(err), timedOut: true, streaming: !!r };
+      return { status: r?.status ?? 0, raw: String(err), error: String(err), timedOut: true };
     }
     let body; try { body = JSON.parse(raw); } catch { body = null; }
     const retryable = body?.retryable ?? body?.data?.retryable;
@@ -482,13 +532,13 @@ describe('a store failure answers alike on every door', { skip }, () => {
         const end = a.raw.indexOf('\n', leak.index);
         wrong.push(`${d.name}: answered with the driver's text (${a.status}): ${a.raw.slice(start, end < 0 ? undefined : end)}`);
       }
-      // A stream that opened (a status line, then events) is a stream, not an answer that never came.
-      if (a.timedOut && !(a.streaming && a.status === 200)) wrong.push(`${d.name}: no answer within ${PER_DOOR_MS} ms of a store failure`);
+      // A stream opened in the look is read, never waited for (`lookAtStream`); a door that gave no answer at all is the one that timed out.
+      if (a.timedOut) wrong.push(`${d.name}: no answer within ${PER_DOOR_MS} ms of a store failure`);
       // MFA is off before every door (`undoNeighbours`): a door that asks the probe for a code was closed by its neighbour, not asked.
       if (a.status === 403 && /MFA_REQUIRED/.test(a.raw)) wrong.push(`${d.name}: answered MFA_REQUIRED, so it was never asked about the store`);
     }
     for (const { d, a } of reached) {
-      if (a.streaming || REPORTS_THE_STORE.has(d.name) || (answers === 'misconfigured' && ANSWERS_AROUND_A_FAILED_WRITE.has(d.name))) continue;
+      if (REPORTS_THE_STORE.has(d.name) || (answers === 'misconfigured' && ANSWERS_AROUND_A_FAILED_WRITE.has(d.name))) continue;
       const why = [];
       // A TOOL's text (MCP, and `error` of `POST /api/<tool>`) is `Error: ` before the sentence, as every error of a tool is (`toolErrorText`,
       // Q-339); every other door answers the sentence alone. The spelling compared below is the sentence, so one failure stays one sentence.
@@ -534,6 +584,14 @@ describe('a store failure answers alike on every door', { skip }, () => {
       wrong.push(`one failure, ${messages.size} spellings: ${[...messages].map(([m, ds]) => `${JSON.stringify(m)} (${ds.length} doors, e.g. ${ds[0]})`).join(' | ')}`);
     }
 
+    // The event streams, judged on the look: each says what it answered, and whether the store was reached before it opened. A stream
+    // that reached the failing store is held to the shared answer above like every door (it is in `reached`); one that did not is a
+    // stream the store failure never touched, held to opening as a stream and to carrying none of the driver's text (the leak check above).
+    const streams = results.filter(({ a }) => a.streaming);
+    t.diagnostic(`event-stream doors read in a look of ${STREAM_LOOK_MS} ms under ${faultId}: ${streams.map(({ d, a }) => `${d.name} ${a.status} ${a.contentType} reached=${reached.some(x => x.d === d)} first bytes ${JSON.stringify(a.raw.slice(0, 60))}`).join(' | ')}`);
+    assert.ok(streams.length >= STREAM_DOORS_FLOOR,
+      `only ${streams.length} door(s) answered as an event stream under ${faultId}: ${streams.map(({ d }) => d.name)} - the look has nothing to judge`);
+    for (const { d, a } of streams) assert.equal(a.status, 200, `${d.name} answered as an event stream with status ${a.status}`);
     const unreached = new Map();
     for (const { a } of results.filter(r => !reached.includes(r))) unreached.set(a.status, (unreached.get(a.status) ?? 0) + 1);
     t.diagnostic(`doors that did not reach the store, by status: ${JSON.stringify([...unreached])}`);
