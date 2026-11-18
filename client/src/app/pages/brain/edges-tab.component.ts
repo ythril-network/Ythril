@@ -415,7 +415,6 @@ export class EdgesTabComponent extends RecordTabBase {
     });
   }
 
-
   openEdgeForm(): void {
     const firstLabel = Object.keys(this.store.spaceMeta()?.typeSchemas?.edge ?? {})[0] ?? '';
     this.edgeForm = { from: '', fromDisplay: '', to: '', toDisplay: '', label: firstLabel, weight: null, tags: [], description: '', properties: this.store.buildPropertiesObject('edge', {}, firstLabel) };

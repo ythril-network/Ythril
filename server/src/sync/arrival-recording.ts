@@ -84,7 +84,6 @@ export function schemaKindOf(collection: BrainCollection): KnowledgeType | undef
   return type !== null && (KNOWLEDGE_TYPES as readonly string[]).includes(type) ? type as KnowledgeType : undefined;
 }
 
-
 /** The state {@link watchArrivals} takes before a write and {@link recordedOf} reads after it. */
 export interface ArrivalWatch {
   spaceId: string;

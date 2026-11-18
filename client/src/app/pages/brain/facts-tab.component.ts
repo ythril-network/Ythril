@@ -407,7 +407,6 @@ export class FactsTabComponent extends RecordTabBase {
     ), hydrated => this.store.facts.set(hydrated));
   }
 
-
   applyFilter(type: 'tag' | 'entity', value: string): void {
     if (type === 'tag') this.recordFilter.set({ ...this.recordFilter(), tag: value });
     else this.filterEntity.set(value);

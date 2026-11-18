@@ -46,7 +46,6 @@ export function backfillTokenRights(config: Config): number {
   return filled;
 }
 
-
 /**
  * Bring every MALFORMED rights object back to the validated shape, and say how many needed it.
  *

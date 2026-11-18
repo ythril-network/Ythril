@@ -416,7 +416,6 @@ export class ChronoTabComponent extends RecordTabBase {
     ), hydrated => this.store.chrono.set(hydrated));
   }
 
-
   /** Effective chrono type for schema lookup. */
   chronoFormKind(): string {
     return this.chronoForm.kind;

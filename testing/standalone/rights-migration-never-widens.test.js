@@ -25,7 +25,6 @@ before(async () => {
   DATA = AREAS.filter(a => a !== 'networks');
 });
 
-
 describe('the shapes that exist today', () => {
   it('admin — every area at admin, as a FLOOR, plus the instance switch', () => {
     const r = migrateToken({ admin: true });

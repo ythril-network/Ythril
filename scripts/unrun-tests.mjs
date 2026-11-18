@@ -81,7 +81,6 @@ function simpleCommands(script) {
     .filter(words => words.length > 0);
 }
 
-
 /**
  * What the commands CI runs select, as `{ regex, why }` entries over repo-relative paths.
  *

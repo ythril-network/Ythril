@@ -356,7 +356,6 @@ export const MediaConfigPatchSchema = z.object({
   stalledJobTimeoutMs: bounded('mediaEmbedding.stalledJobTimeoutMs'),
 }).strict();
 
-
 /** The value at a dotted path, or `undefined`. One level deep, which is every path in the list above. */
 function atPath(obj: unknown, path: string): unknown {
   const [block, field] = path.split('.');

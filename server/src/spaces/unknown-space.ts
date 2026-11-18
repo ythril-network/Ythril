@@ -62,7 +62,6 @@ export interface SpaceAnswer {
   body: { error: string; code?: string };
 }
 
-
 /** The first retired proxy id a call's `space` argument names (one name or a list), or `null`: asked before anything else about the call. */
 export function retiredIdNamedIn(space: unknown, config: Config = getConfig()): string | null {
   const names = typeof space === 'string' ? [space] : Array.isArray(space) ? space : [];
@@ -71,7 +70,6 @@ export function retiredIdNamedIn(space: unknown, config: Config = getConfig()): 
   }
   return null;
 }
-
 
 /**
  * The answer for the caller's OWN view named in a call's `space` (one name or a list) on a door that takes no view, or `null`: the existence rule,

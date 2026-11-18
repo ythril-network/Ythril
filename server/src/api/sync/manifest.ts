@@ -14,7 +14,6 @@ import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncManifestRouter = Router();
 
-
 // ═══════════════════════════════════════════════════════════════════════════
 // FILE MANIFEST
 // ═══════════════════════════════════════════════════════════════════════════
@@ -49,7 +48,6 @@ syncManifestRouter.get('/manifest', syncRateLimit, requireAuth, async (req, res)
     sendCaughtFailure(res, `sync GET manifest`, err);
   }
 });
-
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MERKLE ROOT

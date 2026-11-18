@@ -62,7 +62,6 @@ async function rejection(promise) {
   assert.fail('expected the call to reject');
 }
 
-
 describe('the URL the client will send a token to', () => {
   const refused = [
     ['plain http to a public host', 'http://example.com'],

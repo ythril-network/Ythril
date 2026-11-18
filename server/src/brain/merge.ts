@@ -682,7 +682,6 @@ interface MergeWrite {
   deletedDuplicateEdgeIds: string[];
 }
 
-
 /**
  * Execute the merge: relink edges, links and face labels, drop an absorbed edge whose relinked identity a survivor
  * edge holds, apply the resolved properties to the survivor, delete the absorbed entity — ONE transaction under the

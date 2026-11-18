@@ -39,7 +39,6 @@ crudRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
   }
 });
 
-
 // ── GET /api/networks/:id ──────────────────────────────────────────────────
 
 // F-34: readable with `networks: read` on every space it carries; otherwise a 404, because a 403 says it exists.
@@ -51,7 +50,6 @@ crudRouter.get('/:id', globalRateLimit, requireAuth, async (req, res) => {
   }
 });
 
-
 // ── GET /api/networks/:id/sync-history ─────────────────────────────────────
 
 // The act is shared with MCP `network_sync_history` (F-36 slice 2).
@@ -62,7 +60,6 @@ crudRouter.get('/:id/sync-history', globalRateLimit, requireAdmin, async (req, r
     sendCaughtFailure(res, `GET /api/networks/:id/sync-history`, err);
   }
 });
-
 
 // ── POST /api/networks/:id/sync — manually trigger a sync run ──────────────
 
@@ -127,7 +124,6 @@ crudRouter.post('/peers/:peerId/sync', globalRateLimit, requireAdmin, async (req
   await triggerPeerSync(res, peerId, { wait });
 });
 
-
 // F-34: `networks: write` on EVERY space it carries (instance admin passes). `denyReadOnly` because this was
 // `requireAdmin`, which a read-only token never passed — swapping down to a rung check must not let it in.
 crudRouter.post('/', globalRateLimit, requireAuth, denyReadOnly, (req, res) => {
@@ -137,7 +133,6 @@ crudRouter.post('/', globalRateLimit, requireAuth, denyReadOnly, (req, res) => {
   sendAct(res, createNetworkAct(req.authToken as Parameters<typeof createNetworkAct>[0], parsed.data));
 });
 
-
 // ── DELETE /api/networks/:id — leave/delete a network ─────────────────────
 
 // F-34: leaving takes each of the network's spaces out of it, so each membership is decided by the leave rule —
@@ -145,7 +140,6 @@ crudRouter.post('/', globalRateLimit, requireAuth, denyReadOnly, (req, res) => {
 crudRouter.delete('/:id', globalRateLimit, requireAuth, denyReadOnly, async (req, res) => {
   sendAct(res, await leaveNetworkAct(req.authToken as Parameters<typeof leaveNetworkAct>[0], req.params['id'] as string));
 });
-
 
 // ── PATCH /api/networks/:id — update mutable network fields ───────────────
 

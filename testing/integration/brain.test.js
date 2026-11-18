@@ -234,7 +234,6 @@ describe('Brain -- entity properties', () => {
   });
 });
 
-
 // ── Edges CRUD ────────────────────────────────────────────────────────────
 
 describe('Brain — edges CRUD (/api/brain/spaces/:spaceId/edges)', () => {
@@ -658,7 +657,6 @@ describe('Brain — POST /api/brain/spaces/:spaceId/reindex', () => {
     assert.equal(r.status, 404);
   });
 });
-
 
 // ── Memory fact validation ────────────────────────────────────────────────
 
@@ -1811,7 +1809,6 @@ describe('Brain — graph traversal (/api/brain/spaces/:spaceId/traverse)', () =
     assert.equal(r.body.nodes.find(n => n._id === entA)?.depth, 1);
   });
 });
-
 
 // ── Brain — structured query endpoint ───────────────────────────────────────
 

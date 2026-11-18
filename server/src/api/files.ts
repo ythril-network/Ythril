@@ -289,7 +289,6 @@ fileStoreRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOn
   }
 });
 
-
 // Extensions whose content can execute script when rendered inline by a
 // browser — always served as attachments (stored-XSS guard).
 const ACTIVE_CONTENT_EXTS = new Set(['.html', '.htm', '.svg', '.xml', '.xhtml']);

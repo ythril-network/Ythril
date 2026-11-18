@@ -27,7 +27,6 @@ import { isAbandonment, stopIfLeaseLost } from './lease.js';
 import { upsertDerivedFileRow } from '../derived-fields.js';
 import { assertSpaceTakesWrites } from '../../spaces/space-write-gate.js';
 
-
 // ── ffmpeg helpers ────────────────────────────────────────────────────────
 
 /**

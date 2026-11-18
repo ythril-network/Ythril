@@ -316,7 +316,6 @@ async function runRound(tasks, previous, results, discarded, again) {
   await Promise.all(watching);
 }
 
-
 // ── The experiment, then one case per lane ───────────────────────────────────────────────────────────────────
 
 /**
@@ -408,7 +407,6 @@ export function landingExperiment({ title, suite, query, reps, minReps = 5, late
       assert.ok(relay.delayedWrites() > 0,
         `the relay held back no bounded write in ${REPS * lanes.length} lane-repetitions — the lateness this file depends on was not produced`);
     });
-
 
     it('a stalled call\'s window is counted from its stall: the lanes\' holds were seen opening (util/horizon-holds.ts horizonHoldsForTest)', () => {
       const all = results.flat();

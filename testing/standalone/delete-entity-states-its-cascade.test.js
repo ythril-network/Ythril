@@ -29,7 +29,6 @@ import { schemaDescriptions } from './_schema-descriptions.mjs';
 
 const schemas = toolSchemasFor(['general']);
 
-
 const served = ALL_TOOLS.map(t => {
   const schema = typeof t.inputSchema === 'function' ? t.inputSchema(schemas) : t.inputSchema;
   return { name: t.name, description: t.description, schema, text: [t.description, ...schemaDescriptions(schema)].join('\n') };

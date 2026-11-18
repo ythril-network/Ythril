@@ -57,7 +57,6 @@ export function spellsThePointer(obj) {
   return POINTER_KEYS.every(k => keys.includes(k));
 }
 
-
 /** Names of the functions this source DEFINES that are in `names`, with where each definition ends. */
 function definitionsIn(sf, names) {
   const out = [];

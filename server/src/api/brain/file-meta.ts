@@ -52,11 +52,7 @@ import { tagsError } from '../../util/request-bounds.js';
 const rightsOf = (t: unknown): TokenRights | undefined =>
   (t as { rights?: TokenRights } | undefined)?.rights;
 
-
-
 export const fileMetaRouter = Router();
-
-
 
 /**
  * GET /api/brain/spaces/:spaceId/files/extract?path=… — what retrieval actually sees for one file.
@@ -254,7 +250,6 @@ fileMetaRouter.get('/spaces/:spaceId/token-access', globalRateLimit, requireSpac
   res.json({ tokens });
 });
 
-
 /*
  * THE METADATA-ONLY DELETE IS GONE, and it was redundant rather than merely awkward.
  *
@@ -267,7 +262,6 @@ fileMetaRouter.get('/spaces/:spaceId/token-access', globalRateLimit, requireSpac
  * So it was a second door onto half of one act, and the half it did alone left a file with no metadata —
  * the state the File Meta tab cannot render and nothing else can repair.
  */
-
 
 // PATCH /api/brain/spaces/:spaceId/files — update file metadata by path (query param ?path=)
 fileMetaRouter.patch('/spaces/:spaceId/files', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {

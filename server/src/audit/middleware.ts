@@ -275,7 +275,6 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/contradictions\/([^/]+)\/reopen$/,          operation: 'contradiction.reopen' },
   { method: 'POST',   pattern: /^\/api\/contradictions\/([^/]+)\/resolve$/,         operation: 'contradiction.resolve' },
 
-
   // ── Schema library ───────────────────────────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/schema-library$/,                           operation: 'schema_library.create' },
   { method: 'PUT',    pattern: /^\/api\/schema-library\/([^/]+)$/,                  operation: 'schema_library.update' },

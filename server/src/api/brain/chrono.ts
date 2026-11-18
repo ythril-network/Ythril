@@ -26,7 +26,6 @@ import { readEditAudit } from '../../brain/edit-audit.js';
 
 export const chronoRouter = Router();
 
-
 // ── Chrono CRUD ───────────────────────────────────────────────────────────────
 
 // DERIVED. These five were written out here, in `brain/bulk.ts`, and in the shared write-shape table —
@@ -160,7 +159,6 @@ chronoRouter.post('/spaces/:spaceId/chrono', globalRateLimit, requireSpaceAuth, 
   Object.assign(result, writeWarningFields(warnings));
   res.status(201).json(result);
 });
-
 
 // PATCH /api/brain/spaces/:spaceId/chrono/:id — partial update a chrono entry by ID
 // What a body may carry is `acceptedWriteKeys('chrono.update')` (the id is the path's, so it is not among them).
@@ -320,7 +318,6 @@ chronoRouter.patch('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceA
   res.status(404).json({ error: 'Chrono entry not found' });
 });
 
-
 // DELETE /api/brain/spaces/:spaceId/chrono/:id
 chronoRouter.delete('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -345,5 +342,4 @@ chronoRouter.delete('/spaces/:spaceId/chrono/:id', globalRateLimit, requireSpace
   if (await deleteChrono(mid, id, webhookToken(req))) { res.status(204).end(); return; }
   res.status(404).json({ error: 'Chrono entry not found' });
 });
-
 

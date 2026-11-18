@@ -455,7 +455,6 @@ export const delete_edgeTool: ToolHandler = {
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
 
-
     const deleted = await findFirstAcrossMembers([callSpace], mid => deleteEdge(mid, id, ctx.actor));
     if (!deleted) throw new NotFoundError(`Edge '${id}' not found`);
     return { content: [{ type: 'text' as const, text: `Edge deleted (ID ${id}).` }],

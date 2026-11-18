@@ -257,7 +257,6 @@ export function parseQueryPaging(
   };
 }
 
-
 /**
  * The ceiling on a VIEW's merged window.
  *

@@ -30,7 +30,6 @@ import { COLLECTION_TABS } from './brain-tabs';
 import { SpaceSettingsState } from '../settings/space-settings-state.service';
 import { isOnPush } from '../../testing/onpush';
 
-
 /** Read-only stub: brain's init cascade is listSpaces → getSpaceStats/getReindexStatus/getSpaceMeta. */
 function makeApi(spaceIds: readonly string[] = ['work']) {
   return {

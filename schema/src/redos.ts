@@ -7,7 +7,6 @@
 /** Maximum length accepted for a user-supplied regex pattern. */
 export const MAX_PATTERN_LENGTH = 500;
 
-
 /**
  * Rejects patterns with nested quantifiers like (a+)+, (a*)*b, (a|a)+, etc.
  * This is a conservative heuristic — it may block some safe patterns, which

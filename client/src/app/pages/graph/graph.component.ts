@@ -74,8 +74,6 @@ import { GRAPH_STYLES } from './graph.styles';
 import { canWriteAnywhere } from '../../core/token-capability';
 import { lookupForNode, lookupForEdge } from './graph-record-lookup';
 
-
-
 @Component({
   selector: 'app-graph-view',
   standalone: true,

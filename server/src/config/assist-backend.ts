@@ -161,7 +161,6 @@ export function assistBackend(use: AssistUse, now = Date.now()): AssistEndpoint 
   return { ...picked, ...(apiKey ? { apiKey } : {}) };
 }
 
-
 /**
  * What a call to `endpoint` came to. A success is charged to the budget (the primary's only); a failure that means
  * the primary cannot answer now — unreachable, rate- or session-limited, overloaded — passes it over for a minute.

@@ -81,7 +81,6 @@ const EMPTY_MARKERS = /class="[^"]*\b(?:empty-state|empty-state-inner|sch-empty-
 /** A condition derived from something error-shaped. `false` and `x().length === 0` deliberately do not match. */
 const IS_FAILURE_COND = (cond: string): boolean => /(^|[^\w])[\w.$]*(error|fail)/i.test(cond);
 
-
 interface Block {
   /** `if` | `else if` | `else` | `for` | `empty` */
   kind: string;

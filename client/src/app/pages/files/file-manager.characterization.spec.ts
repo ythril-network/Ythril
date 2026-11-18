@@ -655,8 +655,6 @@ describe('FileManagerComponent — what a write MEANS beyond the write (characte
     expect(listed, 'a create no longer re-lists the tree root').not.toContain('/');
   });
 
-
-
   it('a REFUSED rename leaves the row in edit mode', () => {
     const { c } = createWith({ moveFile: () => throwError(() => new Error('nope')) });
     c.renamingEntry.set('a.txt');
@@ -1315,7 +1313,6 @@ describe('FileManagerComponent — what a preview decides (characterization for 
       f.restore();
     }
   });
-
 
   it('every preview branch sends the token in the HEADER, never in the URL', () => {
     /*

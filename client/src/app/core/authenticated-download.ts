@@ -58,7 +58,6 @@ export function saveBlob(blob: Blob, filename: string, opts: SaveBlobOptions = {
   }
 }
 
-
 @Injectable({ providedIn: 'root' })
 export class AuthenticatedDownload {
   private readonly auth = inject(AuthService);

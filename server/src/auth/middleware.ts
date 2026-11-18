@@ -290,7 +290,6 @@ async function resolveAuthOrFail(
   return { record, bearer };
 }
 
-
 /**
  * Does `req` carry an instance-admin credential: the token a guard already attached, else its bearer resolved here. Answers and never
  * refuses - no `401`, no failure counted - for a gate that runs before the routers' own guards (maintenance) and must let an instance

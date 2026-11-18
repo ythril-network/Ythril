@@ -95,7 +95,6 @@ const nested = (results, id) => allNested(results).find(n => n.node?._id === id)
  */
 const hitId = (h) => h?.record?._id;
 
-
 // The MCP client harness lives in ../sync/mcp-session.js. It was copy-pasted into ten files while the
 // transport was SSE; 4.0 removed SSE and one shared `POST /mcp` caller replaced every copy.
 

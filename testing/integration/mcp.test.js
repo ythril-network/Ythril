@@ -46,8 +46,6 @@ const postMcpHttp = async (body) => (await openSharedMcpSession(token)).postJson
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
-
-
 describe('MCP tools', () => {
   before(async () => {
     token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();

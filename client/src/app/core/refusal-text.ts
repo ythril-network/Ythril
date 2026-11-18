@@ -174,7 +174,6 @@ const isUndeclaredRow = (r: WireRow): boolean => r.field.startsWith(PROPERTIES_P
 
 const languageOf = (transloco: Translate, language?: string): string => language || transloco.getActiveLang?.() || 'en';
 
-
 type Outcome = RefusalRow['outcome'];
 
 /** Which of the four kinds of wrong a row is. An outcome this client has no word for is a violation: its reason is the answer. */

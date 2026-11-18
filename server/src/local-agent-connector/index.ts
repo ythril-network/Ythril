@@ -365,7 +365,6 @@ app.post('/v1/actions/enable-networks', requireConnectorAuth, async (req, res) =
   const overwriteDns = parsed.data.overwriteDns;
   const localOrigin = parsed.data.localOrigin;
 
-
   try {
     await ensureCloudflaredAvailable();
     await ensureCloudflareLogin();

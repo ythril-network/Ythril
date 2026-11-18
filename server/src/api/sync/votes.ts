@@ -19,7 +19,6 @@ import { memberView } from '../../networks/member-view.js';
 
 export const syncVotesRouter = Router();
 
-
 /**
  * GET /api/sync/networks/:networkId/votes
  * Return the vote rounds a peer may act on: those still open — before their deadline, not concluded — and the PASSED
@@ -53,7 +52,6 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, re
     sendCaughtFailure(res, 'sync GET /networks/:networkId/votes', err);
   }
 });
-
 
 /**
  * POST /api/sync/networks/:networkId/votes/:roundId

@@ -18,7 +18,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { SERVER_CODE_ROOTS } from './_sources.mjs';
 
-
 function sourceFiles(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
     const p = path.join(dir, e.name);

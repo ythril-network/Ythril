@@ -476,8 +476,6 @@ export async function recall(
   return final;
 }
 
-
-
 /**
  * Fuse a lexical ranking into the candidate pool's order, in place.
  *
@@ -652,8 +650,6 @@ async function introduceLexicalOnly(
   }
 }
 
-
-
 /**
  * The effective budget for one recall: the caller may lower the instance ceiling, never raise it. Exported so
  * a traversing recall's graph walk runs under the SAME deadline as its search (Q-126), not a fresh one.
@@ -717,8 +713,6 @@ export interface SimilarMatch {
 /** Default cosine-similarity threshold at/above which an insert is flagged as a likely duplicate. */
 export const DEFAULT_DUPE_THRESHOLD = 0.92;
 const DEFAULT_DUPE_TOPK = 3;
-
-
 
 /**
  * Insert-time near-duplicate check: return existing records of the same type scoring at or above

@@ -25,7 +25,6 @@ membersRouter.put('/:id/members/:instanceId/signing-key', globalRateLimit, requi
   sendAct(res, setSigningKeyAct(String(req.params['id']), String(req.params['instanceId']), parsed.data));
 });
 
-
 // ── POST /api/networks/:id/members — add a peer member ────────────────────
 // ── DELETE /api/networks/:id/members/:instanceId — remove a member ─────────
 // Both are `networks/member-acts.ts`, which MCP `network_member_add` / `network_member_remove` call too (F-36).

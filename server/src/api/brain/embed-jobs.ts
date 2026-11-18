@@ -36,10 +36,7 @@ import {
 } from '../../brain/embed-queue.js';
 import { embedJobsPage } from '../../brain/embed-jobs-page.js';
 
-
 export const embedJobsRouter = Router();
-
-
 
 // GET /api/brain/spaces/:spaceId/embedding-queue/records — the brain-record half of the queue: counts, plus the jobs.
 //

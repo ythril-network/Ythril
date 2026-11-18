@@ -63,7 +63,6 @@ export function isMediaFormat(fmt: ResolvedFormat): fmt is 'image' | 'audio' | '
   return MEDIA_FORMATS.has(fmt);
 }
 
-
 const EXT_MAP: Record<string, ResolvedFormat> = {
   '.pdf': 'pdf',
   '.docx': 'docx',
@@ -299,7 +298,6 @@ export async function runConversionPipeline(
 
   return { chunks, convertedMarkdown, extractedImages: [] };
 }
-
 
 /**
  * Refuse to write a file's converted Markdown over bytes that are not its own (Q-467).

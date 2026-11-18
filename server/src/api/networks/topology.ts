@@ -24,7 +24,6 @@ topologyRouter.post('/:id/reparent-self', globalRateLimit, requireAdmin, (req, r
   sendAct(res, reparentSelfAct(String(req.params['id']), parsed.data));
 });
 
-
 // ── POST /api/networks/:id/members/:instanceId/adopt ───────────────────────
 // Called on the GRANDPARENT side. Makes a temporary reparent permanent by clearing
 // originalParentInstanceId from the grandchild's member record.
@@ -32,7 +31,6 @@ topologyRouter.post('/:id/reparent-self', globalRateLimit, requireAdmin, (req, r
 topologyRouter.post('/:id/members/:instanceId/adopt', globalRateLimit, requireAdmin, (req, res) => {
   sendAct(res, adoptMemberAct(String(req.params['id']), String(req.params['instanceId'])));
 });
-
 
 // ── POST /api/networks/:id/members/:instanceId/revert-parent ───────────────
 // Called on the GRANDPARENT side when the original parent is back online.

@@ -660,7 +660,6 @@ export const update_file_metaTool: ToolHandler = {
     const filePath = String(a['path'] ?? '').trim();
     if (!filePath) throw new Error('path must not be empty');
 
-
     const { isStrictLinkage } = await import('../../spaces/space-lookup.js');
     const { updateFileMeta } = await import('../../files/file-meta.js');
 

@@ -131,7 +131,6 @@ function candidatesOf(spaceId: string): string[] {
   return [...ids];
 }
 
-
 /** The arguments of one turn's fetch. `requestInit` is the engine's, which carries the control plane's signal: it is passed through `transferInit`. */
 export interface SnapshotFetch {
   member: NetworkMember;

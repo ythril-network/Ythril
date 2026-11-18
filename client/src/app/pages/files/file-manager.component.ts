@@ -41,9 +41,6 @@ import { BrainStore } from '../brain/brain-store.service';
 import { ModalDirective } from '../../shared/modal.directive';
 import { PluralText } from '../../core/plural-text.service';
 
-
-
-
 @Component({
   selector: 'app-file-manager',
   standalone: true,
@@ -629,7 +626,6 @@ export class FileManagerComponent implements OnInit, OnDestroy {
    * "the whole list is busy".
    */
 
-
   // ── Tree sidebar state ───────────────────────────────────────────────────
   /**
    * The tree's state and its two requests live in `FileTreeStore`, provided by this page.
@@ -877,8 +873,6 @@ export class FileManagerComponent implements OnInit, OnDestroy {
       this.toast.error(`${this.transloco.translate('files.downloadFailed')} ${httpErrorReason(e)}`.trim());
     }
   }
-
-
 
   /**
    * Shared with the tree store, which builds every node's path with it.

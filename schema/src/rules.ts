@@ -119,7 +119,6 @@ const TYPE_IDENTS: ReadonlySet<string> = new Set(['int', 'uint', 'double', 'bool
 /** Operators the planner implements itself rather than through the function table. */
 const PLANNER_OPERATORS: ReadonlySet<string> = new Set(['_&&_', '_||_', '_?_:_', '_[_]', '@not_strictly_false']);
 
-
 // ── Reading a rule's syntax tree ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The protobuf shape `parse` returns, as much of it as this module reads. */

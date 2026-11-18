@@ -31,7 +31,6 @@ export interface ImageRunOpts {
   galleryMayDefer?: boolean;
 }
 
-
 /**
  * May faces be analysed in this image? The one place `faceRecognition.reprocessSyncedImages` is applied to a media job.
  *

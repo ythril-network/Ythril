@@ -41,7 +41,6 @@ export function spacePurpose(space: { meta?: SpaceMeta }): string | undefined {
   return purpose ? purpose : undefined;
 }
 
-
 /**
  * What THIS instance does with a top-level field a brain write to `space` does not take: `'refuse'` for the one stored value
  * `'refuse'`, `'warn'` for everything else (absent, a hand-edited word this build cannot read, a number, `true`).

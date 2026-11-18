@@ -21,7 +21,6 @@ votesRouter.get('/:id/votes', globalRateLimit, requireAdmin, (req, res) => {
   sendAct(res, listOpenVotesAct(req.params['id'] as string));
 });
 
-
 // ── GET /api/networks/:id/vote-outcomes — how rounds ended on this instance ─
 
 // The act is shared with MCP `network_vote_outcomes`; `limit` is parsed once, in the act, from the query string's text.
@@ -32,7 +31,6 @@ votesRouter.get('/:id/vote-outcomes', globalRateLimit, requireAdmin, (req, res) 
     sendCaughtFailure(res, `GET /api/networks/:id/vote-outcomes`, err);
   }
 });
-
 
 // ── POST /api/networks/:id/votes/:roundId — cast a vote ────────────────────
 

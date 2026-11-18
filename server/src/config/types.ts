@@ -225,7 +225,6 @@ export interface SchemaCatalog {
 //
 // `SpaceMeta` moved to `types-knowledge.ts` with the schema vocabulary it carries, and is re-exported below.
 
-
 export interface SpaceConfig extends SpaceSchemaLayering {
   id: string;
   label: string;
@@ -813,7 +812,6 @@ export interface MediaLevelCeilings {
 import type { NetworkType, SyncDirection, VoteValue, VoteRoundType, NetworkMember, VoteCast, VoteRound, NetworkConfig, SpaceSchemaLayering } from './types-networks.js';
 export type { NetworkType, SyncDirection, VoteValue, VoteRoundType, NetworkMember, VoteCast, VoteRound, NetworkConfig };
 
-
 // The OIDC sign-in types moved WHOLE to `types-oidc.ts` (Q-730); imported here for `Config`, re-exported with it.
 import type { OidcConfig } from './types-oidc.js';
 export type { OidcClaimRule, OidcClaimMapping, OidcConfig } from './types-oidc.js';
@@ -845,7 +843,6 @@ export interface AuditConfig {
 // `AuditLogEntry` moved to `audit/entry.ts`. An audit row is not configuration — it was here only
 // because this file was where types went, which is the god-file failure the ratchet describes: every
 // change lands in the same place because that is where the code already is.
-
 
 export interface Config extends BodyLimitsConfig {
   instanceId: string;

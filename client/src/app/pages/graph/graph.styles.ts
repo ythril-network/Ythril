@@ -213,7 +213,6 @@ export const GRAPH_STYLES = `
     }
 `;
 
-
 /**
  * Styles for `GraphLinkedRecordsComponent` — the memory/chrono lists under a node or edge panel.
  *
@@ -327,7 +326,6 @@ export const GRAPH_LINKED_RECORDS_STYLES = `
   .detail-filters select:focus,
   .detail-filters input:focus { outline: none; border-color: var(--accent); }
 `;
-
 
 /**
  * The record cards' own rules — the LEFT column of a side panel.

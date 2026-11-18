@@ -665,7 +665,6 @@ export function classifyEdgeUpsertAgainst(
   );
 }
 
-
 /**
  * As above, for a fact. The one that did not exist.
  *
@@ -705,5 +704,4 @@ export function classifyChronoUpsertAgainst(
     recordViewOf('chrono', recordAfter(existing, incoming)),
   );
 }
-
 

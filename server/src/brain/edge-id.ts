@@ -34,7 +34,6 @@ import type { RefKind } from '../config/types-knowledge.js';
  */
 const EDGE_NAMESPACE = '8fdb66f3-a72f-574e-91a9-55e2a04e19a7';
 
-
 /**
  * The `_id` for the relationship `(from) -[label]-> (to)`.
  *

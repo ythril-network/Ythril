@@ -24,7 +24,6 @@ import { memberView } from '../../networks/member-view.js';
 
 export const syncMembersRouter = Router();
 
-
 // ═══════════════════════════════════════════════════════════════════════════
 // GOSSIP — member list & votes
 // ═══════════════════════════════════════════════════════════════════════════
@@ -60,7 +59,6 @@ syncMembersRouter.get('/networks/:networkId/members', syncRateLimit, requireAuth
     sendCaughtFailure(res, 'sync GET /networks/:networkId/members', err);
   }
 });
-
 
 /**
  * POST /api/sync/networks/:networkId/members

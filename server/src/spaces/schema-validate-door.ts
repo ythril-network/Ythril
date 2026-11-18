@@ -245,7 +245,6 @@ function decodeCursor(text: string, memberIds: readonly string[]): Cursor | null
   }
 }
 
-
 /**
  * Run the live check for `spaceId`.
  *

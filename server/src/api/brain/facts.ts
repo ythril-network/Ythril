@@ -165,7 +165,6 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
   res.status(201).json(body);
 });
 
-
 // DELETE /api/brain/spaces/:spaceId/facts/:id
 memoriesRouter.delete('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -193,7 +192,6 @@ memoriesRouter.delete('/spaces/:spaceId/facts/:id', globalRateLimit, requireSpac
   if (await deleteFact(mid, id, webhookToken(req))) { res.status(204).end(); return; }
   res.status(404).json({ error: 'Fact not found' });
 });
-
 
 // PATCH /api/brain/spaces/:spaceId/facts/:id — partial update a fact (long-form)
 // What a body may carry is `acceptedWriteKeys('fact.update')` (the id is the path's, so it is not among them).

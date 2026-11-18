@@ -136,7 +136,6 @@ export const retry_embed_recordTool: ToolHandler = {
     const recordId = String(a['recordId'] ?? '').trim();
     if (!recordId) throw new Error('recordId must not be empty');
 
-
     const result = await retryEmbedJob(callSpace, a['recordType'], recordId);
     const text = result === 'ok'
       ? `Re-queued ${a['recordType']} '${recordId}' for embedding.`

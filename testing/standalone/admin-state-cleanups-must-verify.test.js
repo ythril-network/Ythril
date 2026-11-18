@@ -228,7 +228,6 @@ describe('the replacement is EXERCISED, not read', () => {
       /Could not restore truthy but not ok/);
   });
 
-
   it('RESOLVES as soon as the verify passes, and stops trying', async () => {
     let applied = 0;
     await restoreOrFail('the thing', async () => { applied++; }, async () => applied >= 2,

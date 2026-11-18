@@ -96,7 +96,6 @@ export const save_linkTool: ToolHandler = {
       throw new Error(`a ${fromKind} cannot link to a ${toKind} — the link classes are: ${PAIR_LABELS}`);
     }
 
-
     if (isStrictLinkage(callSpace)) {
       await assertRefsResolve(callSpace, 'from', fromKind, [from]);
       await assertRefsResolve(callSpace, 'to', toKind, [to]);
@@ -148,7 +147,6 @@ export const delete_linkTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
-
 
     const removed = await findFirstAcrossMembers([callSpace], mid => removeLink(mid, id, ctx.actor));
     if (!removed) throw new Error(`Link '${id}' not found`);

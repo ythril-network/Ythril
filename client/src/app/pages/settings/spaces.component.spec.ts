@@ -159,7 +159,6 @@ describe('SpacesComponent — storageInfo / fmtGiB', () => {
   });
 });
 
-
 describe('SpacesComponent — summary strip (U9 pt2)', () => {
   it('reports the space count, aggregate storage in use, and an indexing-attention count', () => {
     const c = create([

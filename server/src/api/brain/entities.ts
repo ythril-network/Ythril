@@ -26,7 +26,6 @@ import { sendCaughtFailure } from '../send-failure.js';
 
 export const entitiesRouter = Router();
 
-
 // POST /api/brain/spaces/:spaceId/entities — create/upsert an entity
 // What a body may carry is `acceptedWriteKeys('entity.create')`: the paired tool's own schema, not a list kept beside this route.
 entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
@@ -160,7 +159,6 @@ entitiesRouter.post('/spaces/:spaceId/entities', globalRateLimit, requireSpaceAu
   }
 });
 
-
 // DELETE /api/brain/spaces/:spaceId/entities/:id
 entitiesRouter.delete('/spaces/:spaceId/entities/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -229,7 +227,6 @@ entitiesRouter.delete('/spaces/:spaceId/entities/:id', globalRateLimit, requireS
   res.status(404).json({ error: 'Entity not found' });
 });
 
-
 // GET /api/brain/spaces/:spaceId/entities/:id/cascade-preview — what a cascade delete would remove
 /**
  * The first half of `F-17`: exactly what would go, and a token that authorises removing that set.
@@ -252,7 +249,6 @@ entitiesRouter.get('/spaces/:spaceId/entities/:id/cascade-preview', globalRateLi
   }
   res.status(404).json({ error: 'Entity not found' });
 });
-
 
 // PATCH /api/brain/spaces/:spaceId/entities/:id — partial update an entity by ID
 // What a body may carry is `acceptedWriteKeys('entity.update')` (the id is the path's, so it is not among them).
@@ -385,7 +381,6 @@ entitiesRouter.patch('/spaces/:spaceId/entities/:id', globalRateLimit, requireSp
   }
   res.status(404).json({ error: 'Entity not found' });
 });
-
 
 // POST /api/brain/spaces/:spaceId/entities/:survivorId/merge/:absorbedId — merge two entities
 entitiesRouter.post('/spaces/:spaceId/entities/:survivorId/merge/:absorbedId', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {

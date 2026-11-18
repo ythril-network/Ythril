@@ -320,7 +320,6 @@ export type ReadSpillPage =
 /** THE refusal for "not yours", "unknown" and "expired" alike. One object, so they cannot drift apart. */
 const NOT_FOUND = { status: 404 } as const;
 
-
 /**
  * One window of a spill, for its owner. Decodes only the pages the window touches. Every item is whole: the
  * first item is returned even when it alone passes the ceiling, or it could never be read.

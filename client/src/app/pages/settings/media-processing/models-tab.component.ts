@@ -749,8 +749,6 @@ export class ModelsTabComponent implements OnInit {
     this.s.touched.set(true);
   }
 
-
-
   /** Narrows the string union for `testConnection` call sites in the template. */
   target(t: TestTarget): TestTarget { return t; }
 }

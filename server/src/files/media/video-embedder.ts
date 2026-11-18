@@ -26,7 +26,6 @@ import { assertSpaceTakesWrites } from '../../spaces/space-write-gate.js';
 
 const DEFAULT_KEYFRAME_INTERVAL_S = 30;
 
-
 // ── ffmpeg helpers ────────────────────────────────────────────────────────
 
 /** Extract audio track to a temporary WAV file. Returns the path. */

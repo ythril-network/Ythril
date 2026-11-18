@@ -152,7 +152,6 @@ export interface EdgeMove {
   next: { from?: string; to?: string; label?: string };
 }
 
-
 /**
  * Move many edges onto the ids their identities derive — THE re-key, for one edge (`rekeyEdge`) or a merge's
  * thousands (`Q-107` part 3a). Each move is decided exactly as one is, and the writes are one command per chunk:

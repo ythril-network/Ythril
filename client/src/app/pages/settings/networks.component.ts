@@ -394,7 +394,6 @@ export class NetworksComponent implements OnInit {
     this.needsNetworkEnable.set(false);
   }
 
-
   load(): void {
     this.loading.set(true);
     this.loadError.set(null);

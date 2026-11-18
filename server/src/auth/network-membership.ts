@@ -25,7 +25,6 @@
 
 import type { Rung } from '../config/rights-shape.js';
 
-
 export interface LeaveRequest {
   /** `spaceId` -> id of the token that established the membership. Absent entries are unknown. */
   origins: Record<string, string> | undefined;

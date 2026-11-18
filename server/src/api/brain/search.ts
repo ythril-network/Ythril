@@ -31,7 +31,6 @@ import { answeredUnknownSpace } from '../write-target-answer.js';
 
 export const searchRouter = Router();
 
-
 // GET /api/brain/spaces/:spaceId/stats
 searchRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -69,7 +68,6 @@ searchRouter.get('/spaces/:spaceId/stats', globalRateLimit, requireSpaceAuth, as
   res.json({ spaceId, facts, entities, edges, chrono, files, filesAwaitingBytes, embedQueue });
 });
 
-
 /**
  * GET /api/brain/spaces/:spaceId/activity — is this space earning its keep?
  *
@@ -95,7 +93,6 @@ searchRouter.get('/spaces/:spaceId/activity', globalRateLimit, requireSpaceAuth,
   res.json({ spaceId, hours, spaces: rows });
 });
 
-
 // POST /api/brain/spaces/:spaceId/traverse — graph traversal (BFS)
 searchRouter.post('/spaces/:spaceId/traverse', globalRateLimit, requireSpaceAuth, statesRetryability, async (req, res) => {
   /*
@@ -117,7 +114,6 @@ searchRouter.post('/spaces/:spaceId/traverse', globalRateLimit, requireSpaceAuth
   }
   res.status(outcome.status).json(JSON.parse(text));
 });
-
 
 /*
  * POST /api/brain/recall — meaning-ranked search, across one space or across every space you can read.
@@ -209,7 +205,6 @@ searchRouter.post('/recall', globalRateLimit, requireAuth, statesRetryability, a
   res.status(outcome.status).json(answer);
 });
 
-
 /*
  * POST /api/brain/similar — vector similarity to an entry that already exists.
  *
@@ -240,7 +235,6 @@ searchRouter.post('/similar', globalRateLimit, requireAuth, statesRetryability, 
   res.status(outcome.status).json(JSON.parse(text));
 });
 
-
 // `reindexRun` is the progress of a running reindex, from the same function `space_meta` answers with on both doors.
 searchRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -248,7 +242,6 @@ searchRouter.get('/spaces/:spaceId/reindex-status', globalRateLimit, requireSpac
   const state = await reindexStateFor(readSpacesOfRequest(req, spaceId));
   res.json({ spaceId, ...state });
 });
-
 
 // POST /api/brain/spaces/:spaceId/reindex
 //

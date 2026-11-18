@@ -30,7 +30,6 @@ joinRouter.post('/join-remote', globalRateLimit, requireAuth, denyReadOnly, asyn
   }
 });
 
-
 // ── POST /api/networks/join-by-key ─────────────────────────────────────────
 // F-41: join a pub/sub with its publisher's URL and published key; the act redeems the key and runs the same
 // handshake as join-remote, so the rights are that act's. MCP `network_join_by_key` calls it too.
@@ -44,7 +43,6 @@ joinRouter.post('/join-by-key', globalRateLimit, requireAuth, denyReadOnly, asyn
   }
 });
 
-
 // ── POST /api/networks/:id/invite — generate invite key ───────────────────
 
 // `denyReadOnly` because this was `requireAdmin`, which a read-only token never passed (`F-37`).
@@ -56,7 +54,6 @@ joinRouter.post('/:id/invite', globalRateLimit, requireAuth, denyReadOnly, async
     sendCaughtFailure(res, `POST /api/networks/:id/invite`, err);
   }
 });
-
 
 // ── POST /api/networks/:id/join — join via invite key ─────────────────────
 
@@ -70,7 +67,6 @@ joinRouter.post('/:id/join', globalRateLimit, requireAdmin, async (req, res) => 
     sendCaughtFailure(res, `POST /api/networks/:id/join`, err);
   }
 });
-
 
 // ── POST /api/networks/:id/fork ──────────────────────────────────────────────
 // Creates a new standalone/closed network seeded from the caller's copy of the
