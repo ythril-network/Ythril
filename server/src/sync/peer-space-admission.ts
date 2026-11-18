@@ -35,7 +35,6 @@ import { enterSpaceTransfer } from './space-exchange-set.js';
 import { holdTransferWhileOpen, type SpaceTransfer } from './space-transfer-fence.js';
 import { spaceActKnob } from '../spaces/space-act-runner.js';
 import { spaceHeldRefusalsTotal } from '../metrics/registry.js';
-import { toolErrorText } from '../mcp/tool-error-text.js';
 
 /**
  * Admit one transfer of `spaceId` with `peerId`, or count the refusal: the transfer, counted in the fence until it is released, or `null`
@@ -71,7 +70,7 @@ export function admitPeerOnResponse(
 
 /** What a peer's tool call met on a space it named: the refusal to answer it with, or the release its dispatcher calls when the call ends. */
 export type ToolCallAdmission =
-  | { held: { status: 423; text: string; body: typeof SPACE_HELD_ANSWER } }
+  | { held: { status: 423; sentence: string; body: typeof SPACE_HELD_ANSWER } }
   | { release: () => void };
 
 /**
@@ -81,7 +80,8 @@ export type ToolCallAdmission =
 export function admitPeerToolCall(peerId: string, space: string): ToolCallAdmission {
   const transfer = admitPeer(space, peerId, undefined, 'tool');
   if (!transfer) {
-    return { held: { status: 423, text: toolErrorText(`${SPACE_HELD_ANSWER.error} (space '${space}', ${SPACE_HELD_ANSWER.code})`), body: SPACE_HELD_ANSWER } };
+    // The sentence only: the tool door's dispatcher builds the tool text from it, so this module of the sync layer imports nothing of that door.
+    return { held: { status: 423, sentence: `${SPACE_HELD_ANSWER.error} (space '${space}', ${SPACE_HELD_ANSWER.code})`, body: SPACE_HELD_ANSWER } };
   }
   const timer = setTimeout(() => transfer.release(), spaceActKnob('INBOUND_TRANSFER_MS'));
   timer.unref?.();

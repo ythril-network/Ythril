@@ -140,6 +140,11 @@ function refuse(status: number, text: string, callSpace = '', structuredContent?
   };
 }
 
+/** A refusal whose text names its status (`Error (<status>): ...`): the status is written once, so the text and the answer cannot name two. */
+function refuseNamingStatus(status: number, message: string): ToolCallOutcome {
+  return refuse(status, toolErrorText(message, status));
+}
+
 export interface ToolCallRequest {
   name: string;
   args: Record<string, unknown>;
@@ -159,7 +164,7 @@ export async function callTool(req: ToolCallRequest): Promise<ToolCallOutcome> {
   if (peerRefusal !== undefined) {
     return await auditedToolCall(req.name, req.caller, req.args, async facts => {
       nameAuditSpace(req.args, getConfig(), facts);
-      return refuse(403, toolErrorText(peerRefusal, 403));
+      return refuseNamingStatus(403, peerRefusal);
     });
   }
   // A peer token's call is counted in the fence of every space it names for as long as it runs; the release is HERE, in a `finally`, so no
@@ -242,7 +247,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
   if (tool && !toolIsVisible(tool, rights, peerId)) {
     // A space-creating tool is refused in the REST create's own sentence (Q-134): one predicate, one refusal.
     const createRefusal = tool.createsSpaces ? createSpacesRefusal({ rights }) : null;
-    if (createRefusal) return refuse(403, toolErrorText(createRefusal, 403));
+    if (createRefusal) return refuseNamingStatus(403, createRefusal);
     return refuse(403, toolErrorText(tool.admin
       ? `tool '${name}' requires a token with instance-admin rights`
       // Without its own branch a space-admin tool would be refused as "mutates, and this token holds no
@@ -367,7 +372,7 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     // naming a space that is not held is counted in its fence until the call ends, as on every door (`sync/peer-space-admission.ts`).
     if (peerId) {
       const admission = admitPeerToolCall(peerId, sid);
-      if ('held' in admission) return refuse(admission.held.status, admission.held.text, '', { ...admission.held.body });
+      if ('held' in admission) return refuse(admission.held.status, toolErrorText(admission.held.sentence), '', { ...admission.held.body });
       admitted.push(admission.release);
     }
   }
