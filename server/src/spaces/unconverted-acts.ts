@@ -27,8 +27,10 @@
  *   record's name or summary (never a property). The record is read with a projection of the fields that line is made from.
  * - **Two doors with two grammars.** The parameters are {@link UnconvertedListParams} and the paging rule is the list module's; every refusal
  *   has a code ({@link UNCONVERTED_REFUSAL_CODES}) that the tool names in its text and the route sends in its body.
- * - **A personal view read as a space.** The act names one configured space: a view id, an unknown id and a retired id are answered by the one
- *   existence rule (`unknownSpaceAnswer`), as every door that writes or administers does.
+ * - **A personal view read as a space.** The list is a read, so it takes the caller's own view as every derived read door does: the members its
+ *   door's guard accepted it for (`viewRead`) are listed together, newest first, each row naming its space, the counts summed. The dismissals
+ *   write, so they name one configured space: a view id, an unknown id and a retired id are answered by the one existence rule
+ *   (`unknownSpaceAnswer`), as every door that writes or administers does.
  *
  * Whether a caller may read ONE record is not asked: `knowledge: read` on the space is the right to read every record of it, so a row for a
  * record of the space is never left out for a caller that holds the rung (the forks list narrows a personal view's members by the same rung).
@@ -118,9 +120,13 @@ const FILTER_CODES: Readonly<Record<string, string>> = { kind: BAD_KIND, type: B
  * id), a missing rung (403 `unconverted_rung`), a malformed `kind`, `type` or `status` (400 by its own code), a malformed `skip` or `limit`
  * or byte budget (400 `unconverted_bad_paging`).
  */
-export async function listUnconvertedAct(spaceId: string, params: Record<string, unknown>, caller: UnconvertedCaller): Promise<UnconvertedActResult> {
-  const before = refusedBefore(spaceId, caller, 'read');
+export async function listUnconvertedAct(
+  spaceId: string, params: Record<string, unknown>, caller: UnconvertedCaller, viewRead?: readonly string[],
+): Promise<UnconvertedActResult> {
+  // The caller's own view: the members its guard accepted it for, each read in the knowledge area already, so no rung is asked again.
+  const before = viewRead ? null : refusedBefore(spaceId, caller, 'read');
   if (before) return before;
+  const spaces = viewRead ?? [spaceId];
   const parsed = UnconvertedListParams.safeParse({ kind: params['kind'], type: params['type'], reason: params['reason'], status: params['status'] });
   if (!parsed.success) {
     const refusal = refusalOfParse(parsed.error);
@@ -129,14 +135,14 @@ export async function listUnconvertedAct(spaceId: string, params: Record<string,
   }
   const { kind, type, reason, status } = parsed.data;
   // The record part is added before the byte budget is applied, so the bytes the answer reports and the page it cuts count it.
-  const withSummaries = async (rows: UnconvertedItem[]): Promise<ListedUnconvertedItem[]> => {
-    const summaries = await summariesOf(spaceId, rows);
+  const withSummaries = async (space: string, rows: ListedUnconvertedItem[]): Promise<ListedUnconvertedItem[]> => {
+    const summaries = await summariesOf(space, rows);
     return rows.map(item => {
       const summary = summaries.get(`${item.kind}\u0000${item.recordId}`);
       return summary === undefined ? item : { ...item, record: { summary } };
     });
   };
-  const listed = await listUnconvertedItems(spaceId, {
+  const listed = await listUnconvertedItems(spaces, {
     skip: params['skip'], limit: params['limit'], maxChars: params['maxChars'], maxBytes: params['maxBytes'], maxTokens: params['maxTokens'],
     status: status ?? 'open', ...(kind !== undefined ? { kind } : {}), ...(type !== undefined ? { type } : {}), ...(reason !== undefined ? { reason } : {}),
   }, caller.transport, withSummaries);
@@ -166,7 +172,7 @@ export async function dismissUnconvertedAct(spaceId: string, itemId: unknown, ca
   if (!item) {
     return { status: NOT_FOUND, error: `Space '${spaceSentence(spaceId)}' holds no unconverted item '${peerText(itemId, { max: NAME_QUOTED })}'`, code: ITEM_NOT_FOUND };
   }
-  return { status: OK, body: { item: rowOf(item) } };
+  return { status: OK, body: { item: rowOf({ ...item, space: spaceId }) } };
 }
 
 /**

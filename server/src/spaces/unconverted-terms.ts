@@ -59,8 +59,11 @@ export interface UnconvertedItem {
   detectedAt: string;
 }
 
-/** The row one item is listed as: the stored item under its public names, and the record part when the record is stored. */
-export type UnconvertedRow = Omit<UnconvertedItem, '_id' | 'typeDefinition'> & { itemId: string; record?: { summary: string } };
+/**
+ * The row one item is listed as: the stored item under its public names, the space it lives in (the one a dismissal names: a list through a
+ * personal view merges several), and the record part when the record is stored.
+ */
+export type UnconvertedRow = Omit<UnconvertedItem, '_id' | 'typeDefinition'> & { itemId: string; space: string; record?: { summary: string } };
 
 /**
  * The codes the two acts refuse with, one list: the acts answer from it, and the tool's description and the parity gates read it.

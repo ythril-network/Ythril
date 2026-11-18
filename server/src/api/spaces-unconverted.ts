@@ -25,6 +25,7 @@ import {
 import type { TokenRights } from '../config/rights-shape.js';
 import type { Response } from 'express';
 import { sendCaughtFailure } from './send-failure.js';
+import { viewReadOfRequest } from '../spaces/read-scope.js';
 import { dismissChanges, dismissShownChanges } from '../audit/audit-changes.js';
 
 export const spaceUnconvertedRouter = Router();
@@ -44,7 +45,7 @@ spaceUnconvertedRouter.get('/:id/schema-convert/items', globalRateLimit, require
   try {
     sendAnswer(res, await listUnconvertedAct(spaceId, {
       kind: req.query['kind'], type: req.query['type'], reason: req.query['reason'], status: req.query['status'], skip: req.query['skip'], limit: req.query['limit'],
-    }, callerOf(req)));
+    }, callerOf(req), viewReadOfRequest(req, spaceId)));
   } catch (err) {
     sendCaughtFailure(res, 'GET /api/spaces/:id/schema-convert/items', err);
   }

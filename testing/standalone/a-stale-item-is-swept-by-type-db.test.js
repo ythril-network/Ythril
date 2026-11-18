@@ -53,7 +53,7 @@ describe('a stale item is swept by type (real MongoDB)', { skip }, () => {
 
     door.setMeta(S, OWN_TYPE_CHANGED);
     const rowsBefore = await door.itemRows(S);
-    const listed = await items.listUnconvertedItems(S, {});
+    const listed = await items.listUnconvertedItems([S], {});
     assert.deepEqual(listed.items.map(i => i.recordId), ['bad'], 'until the tick, the stale item is still listed');
     assert.deepEqual(await door.itemRows(S), rowsBefore, 'the list wrote to the items');
 

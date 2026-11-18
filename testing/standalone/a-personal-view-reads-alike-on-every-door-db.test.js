@@ -58,6 +58,11 @@ const SEED_LOCATED = /vectorSearch|Semantic recall is unavailable|unavailable|ex
  * the-file-change-feed-refuses-what-it-cannot-serve-db). Every other read door takes a view; these two are left out of the derivations below, and only these two.
  */
 const ONE_SPACE_STREAM = { routes: new Set(['/api/files/:spaceId/changes']), tools: new Set(['file_changes']) };
+/**
+ * The path parameter a read route names its space by: `:spaceId`, or `:id` on a route under `/api/spaces/:id` (the conversion's status and
+ * unconverted list are mounted there; reading `:spaceId` alone left both out of the derivation, CI run 44354113429). `null`: it names none.
+ */
+const spaceParamOf = (route) => (route.includes(':spaceId') ? ':spaceId' : route.startsWith('/api/spaces/:id/') ? ':id' : null);
 
 let d, owner, mixedOwner, admin, rowTok, floorTok, markers;
 const fmt = (a) => `${a.status ?? ''} ${(a.text ?? '').slice(0, 220)}`;
@@ -122,12 +127,13 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
   it('every derived read door accepts the owner\'s view id (REST path read rows, MCP read tools)', async () => {
     const { ROUTE_RIGHTS, TOOL_RIGHTS } = await import('../../server/dist/auth/space-rights.js');
     // The SSE stream is held open by design; its ticket door (POST .../events/ticket) is asked instead.
-    const paths = ROUTE_RIGHTS.filter(r => r.needs === 'read' && !ONE_SPACE_STREAM.routes.has(r.route) && r.area !== 'schema' && r.scope === 'path' && r.route.includes(':spaceId') && !r.route.endsWith('/events'));
+    const paths = ROUTE_RIGHTS.filter(r => r.needs === 'read' && !ONE_SPACE_STREAM.routes.has(r.route) && r.area !== 'schema' && r.scope === 'path' && spaceParamOf(r.route) && !r.route.endsWith('/events'));
     const tools = TOOL_RIGHTS.filter(r => r.needs === 'read' && !ONE_SPACE_STREAM.tools.has(r.tool) && r.area !== 'schema' && r.tool !== 'read_spill');
     assert.ok(paths.length >= 8 && tools.length >= 9, `derived ${paths.length} path read route(s) and ${tools.length} read tool(s); the derivation is broken`);
+    assert.ok(paths.some(r => spaceParamOf(r.route) === ':id'), 'no read route under /api/spaces/:id was derived: the conversion\'s two reads are out of the rule again');
     const refused = [];
     for (const r of paths) {
-      const url = r.route.replace(':spaceId', encodeURIComponent('@team')).replace(/:\w+/g, 'x');
+      const url = r.route.replace(spaceParamOf(r.route), encodeURIComponent('@team')).replace(/:\w+/g, 'x');
       const a = await d.rest(owner.key, r.method, url, r.method === 'GET' ? undefined : {});
       if (a.status === 403 || a.error.includes(UNKNOWN('@team'))) refused.push(`${r.method} ${r.route}: ${fmt(a)}`);
     }
@@ -151,15 +157,16 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
     await mustCreate(owner.key, 'solo', [QA]);
     // Only the doors that take no id but the space's: one with a record id would read 'x' on both sides and agree about nothing.
     const paths = ROUTE_RIGHTS.filter(r => r.needs === 'read' && !ONE_SPACE_STREAM.routes.has(r.route) && r.method === 'GET' && r.area !== 'schema' && r.scope === 'path'
-      && /^[^:]*:spaceId[^:]*$/.test(r.route) && !r.route.endsWith('/events'));
+      && spaceParamOf(r.route) && (r.route.match(/:\w+/g) ?? []).length === 1 && !r.route.endsWith('/events'));
     const tools = TOOL_RIGHTS.filter(r => r.needs === 'read' && !ONE_SPACE_STREAM.tools.has(r.tool) && r.area !== 'schema' && r.tool !== 'read_spill');
     assert.ok(paths.length >= 6 && tools.length >= 9, `derived ${paths.length} path read route(s) and ${tools.length} read tool(s); the derivation is broken`);
     assert.ok(paths.some(r => r.route.endsWith('/forks')) && tools.some(t => t.tool === 'list_forks'), 'the fork list is not among the derived read doors');
+    assert.ok(paths.some(r => r.route.endsWith('/schema-convert/items')), 'the unconverted list route is not among the derived read doors');
     // The space's own name and the view's members list are the two things that differ by design; everything else must not.
     const same = (a) => JSON.stringify(a, (k, v) => (k === 'viewMembers' ? undefined : v)).replaceAll('@solo', '<space>').replaceAll(QA, '<space>');
     const differ = [];
     for (const r of paths) {
-      const at = (space) => d.rest(owner.key, 'GET', r.route.replace(':spaceId', encodeURIComponent(space)));
+      const at = (space) => d.rest(owner.key, 'GET', r.route.replace(spaceParamOf(r.route), encodeURIComponent(space)));
       const member = await at(QA); const view = await at('@solo'); const again = await at(QA);
       if (same(member.body) !== same(again.body)) continue; // the answer moves between two reads of the member: nothing to compare against
       if (member.status !== view.status || same(member.body) !== same(view.body)) differ.push(`GET ${r.route}: member ${fmt(member)} | view ${fmt(view)}`);
@@ -171,6 +178,36 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
       if (same(member) !== same(view)) differ.push(`MCP ${t.tool}: member ${member.slice(0, 160)} | view ${view.slice(0, 160)}`);
     }
     assert.deepEqual(differ, [], 'read doors that answer a one-member view differently from its member');
+  });
+
+  // A view of SEVERAL members on the conversion's two reads (bundle-284): a run is one space's, so the status answers each member's run in the
+  // view's order, `{ state: 'per_member', runs: [{ space, ...the member's answer }] }`, never a sum of runs toward different schemas; the list is a
+  // list, so it merges the members' items newest first, each row naming the member it lives in (the space a dismissal names), the counts summed.
+  it('a view of several members answers the conversion status per member and merges the unconverted list, each row naming its member, alike on both doors', async () => {
+    const db = (await import('../../server/dist/db/mongo.js')).getDb();
+    const { spaceCollection } = await import('../../server/dist/db/space-collection.js');
+    const item = (space, n) => ({
+      _id: `vp-item-${space}`, kind: 'entity', recordId: markers[space], type: 'thing', seq: 1, fromFp: null, toFp: 'f'.repeat(64), typeDefinition: 'vp',
+      reason: 'not_conforming', violations: [{ field: 'properties.x', reason: 'vp' }], proposed: { set: [], unset: [] }, status: 'open', detectedAt: `2026-03-0${n}T00:00:00.000Z`,
+    });
+    await db.collection(spaceCollection(QA, 'schemaConvertItems')).insertOne(item(QA, 1));
+    await db.collection(spaceCollection(OPS, 'schemaConvertItems')).insertOne(item(OPS, 2));
+
+    const restStatus = await d.rest(owner.key, 'GET', `/api/spaces/${encodeURIComponent('@team')}/schema-convert`);
+    const mcpStatus = await d.mcp(owner.key, 'space_schema_conversion', { space: '@team' });
+    const PER_MEMBER = { state: 'per_member', runs: [{ space: QA, state: 'none' }, { space: OPS, state: 'none' }] };
+    assert.equal(restStatus.status, 200, `REST status of a two-member view: ${fmt(restStatus)}`);
+    assert.deepEqual(restStatus.body, { ...PER_MEMBER, viewMembers: [QA, OPS] }, 'REST status of a two-member view');
+    assert.deepEqual(mcpStatus.structured, { ...PER_MEMBER, viewMembers: [QA, OPS] }, `MCP status of a two-member view: ${mcpStatus.text}`);
+
+    const restList = await d.rest(owner.key, 'GET', `/api/spaces/${encodeURIComponent('@team')}/schema-convert/items`);
+    const mcpList = await d.mcp(owner.key, 'list_unconverted', { space: '@team' });
+    const shape = (b) => ({ rows: (b?.items ?? []).map(r => [r.space, r.itemId, typeof r.record?.summary]), counts: b?.counts, total: b?.total, viewMembers: b?.viewMembers });
+    const want = { rows: [[OPS, `vp-item-${OPS}`, 'string'], [QA, `vp-item-${QA}`, 'string']], counts: { open: 2, dismissed: 0 }, total: 2, viewMembers: [QA, OPS] };
+    assert.equal(restList.status, 200, `REST list of a two-member view: ${fmt(restList)}`);
+    assert.deepEqual(shape(restList.body), want, 'REST list of a two-member view: newest first across the members, each row naming its member');
+    assert.deepEqual(shape(mcpList.structured), want, `MCP list of a two-member view: ${mcpList.text.slice(0, 200)}`);
+    for (const s of [QA, OPS]) await db.collection(spaceCollection(s, 'schemaConvertItems')).deleteOne({ _id: `vp-item-${s}` });
   });
 
   it('a mixed-rung owner reads the readable member\'s marker and not the other\'s; viewMembers names only the one read', async () => {

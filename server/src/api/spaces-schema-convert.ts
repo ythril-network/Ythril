@@ -13,6 +13,7 @@ import { denyReadOnly, requireSpaceAuthMfaScoped, requireSpaceAuthScoped } from 
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { schemaConvertStartAct, schemaConvertStatusAct } from '../spaces/schema-convert-acts.js';
 import { schemaConvertCallerOf } from '../spaces/schema-convert-terms.js';
+import { viewReadOfRequest } from '../spaces/read-scope.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { sendSpaceActAnswer } from './send-act-answer.js';
 import { convertStartChanges } from '../audit/audit-changes.js';
@@ -38,11 +39,11 @@ spaceSchemaConvertRouter.post('/:id/schema-convert', globalRateLimit, requireSpa
   }
 });
 
-// GET /api/spaces/:id/schema-convert - the run as it stands (or { state: 'none' }); writes nothing.
+// GET /api/spaces/:id/schema-convert - the run as it stands (or { state: 'none' }); writes nothing. Takes the caller's own view (the guard's `viewRead`).
 spaceSchemaConvertRouter.get('/:id/schema-convert', globalRateLimit, requireSpaceAuthScoped('id'), async (req, res) => {
   const spaceId = req.params['id'] as string;
   try {
-    sendSpaceActAnswer(res, await schemaConvertStatusAct(spaceId, callerOf(req)));
+    sendSpaceActAnswer(res, await schemaConvertStatusAct(spaceId, callerOf(req), viewReadOfRequest(req, spaceId)));
   } catch (err) {
     sendCaughtFailure(res, 'GET /api/spaces/:id/schema-convert', err);
   }

@@ -71,7 +71,10 @@ changes, and an empty body is `400` (`view_nothing_to_change`).
 **Which doors take a view.** A door takes a view in place of a space when it reads data and its area is not the
 schema: `recall`, `similar`, `filter` (`POST /api/filter`), graph reads (`graph_traverse`, `traverse`), `space_stats` and the
 stats routes, the embed-job and ingest status reads, the forks list (`GET /api/brain/spaces/:id/forks`, `list_forks`), file reads and listings (`read_file`, `list_dir`; a listing merges the members by name, the first member winning a collision, and a member that holds nothing at the path contributes nothing while a storage fault in one is `500` `file_system_fault`), the
-`delete_entity_preview` read, and the live-event stream of a view (`GET /api/brain/spaces/:id/events`). The file change feed
+`delete_entity_preview` read, a schema conversion's status and its unconverted list (`GET /api/spaces/:id/schema-convert`,
+`space_schema_conversion`; `GET /api/spaces/:id/schema-convert/items`, `list_unconverted`: a run is one space's, so a view that
+reads several members answers each member's run, and the list merges the members' items, each row naming its space;
+[Converting records](06e-converting-records.md)), and the live-event stream of a view (`GET /api/brain/spaces/:id/events`). The file change feed
 (`file_changes`, `GET /api/files/:id/changes`) is a files read that does NOT take a view: one cursor is one space's history,
 so a view id answers it `404` in an unknown space's words. Their `space`
 parameter (REST: the path segment or the body field) accepts the owner's `@view`. A write, admin or schema door never
@@ -96,7 +99,7 @@ The ten `view_*` tools are the twins of the doors above, with the same parameter
 
 - **The `space` enum lists your views.** The `inputSchema` of exactly the read tools that take a view (`recall`,
   `similar`, `filter`, `graph_traverse`, `space_stats`, `list_embed_jobs`, `ingest_status`, `list_forks`, `read_file`, `list_dir`,
-  `delete_entity_preview`) offers your views beside the spaces; the write enum does not. `tools/list` advertises
+  `delete_entity_preview`, `space_schema_conversion`, `list_unconverted`) offers your views beside the spaces; the write enum does not. `tools/list` advertises
   `listChanged`, and `view_create`, `view_update` and `view_delete` send `notifications/tools/list_changed`, so a
   client that honours it refetches the schemas.
 - **`viewMembers`** is in `structuredContent`, or a closing `viewMembers:` line on a text-only answer.

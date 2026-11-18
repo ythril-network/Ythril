@@ -237,6 +237,12 @@ The status of a run is read with `GET` (MCP `space_schema_conversion`, `knowledg
 | `left` | The records of the unfinished types still to read, counted within one bound for the whole answer (two seconds, however many types are left); `null` when the count did not finish in it, never a part of it. |
 | `failures`, `error` | The passes that failed so far (the store did not answer, or a space act held the space) and the words of the last failure. A pass that failed is retried. |
 
+**Through a personal view** ([Personal views](06d-personal-views.md)) the status reads the members the view reads for you. A view that reads one member answers exactly as that member does; one that reads several (or none) answers each member's run, in the view's order, because a run is one space's, toward that space's schema, and runs toward different schemas do not add up:
+
+```json
+{ "state": "per_member", "runs": [{ "space": "qa", "state": "none" }, { "space": "ops", "state": "running", "toFp": "…", "left": 12 }], "viewMembers": ["qa", "ops"] }
+```
+
 ## The unconverted list
 
 A record a run could not convert is left as it is and listed. An item is local to this instance and never synced, so a record no member can convert is listed on each member that holds it.
@@ -248,10 +254,12 @@ GET /api/spaces/:id/schema-convert/items?kind=&type=&reason=&status=&skip=&limit
 MCP `list_unconverted` (`knowledge: read`) takes the same parameters. The list is newest first; `status` is `open` unless you ask for `dismissed`. It is paged as the Brain's other lists are (`total`, `count`, `skip`, `limit`, `truncated`, and `nextSkip` when a page was cut) and carries `counts: { open, dismissed }` for the whole space whatever the filters. A row:
 
 ```json
-{ "itemId": "…", "kind": "entity", "recordId": "…", "type": "person", "seq": 105, "fromFp": "…", "toFp": "…",
+{ "itemId": "…", "space": "qa", "kind": "entity", "recordId": "…", "type": "person", "seq": 105, "fromFp": "…", "toFp": "…",
   "reason": "not_conforming", "violations": [{ "field": "properties.status", "reason": "…" }],
   "proposed": { "set": ["alias"], "unset": ["nick"] }, "status": "open", "detectedAt": "…", "record": { "summary": "Ada" } }
 ```
+
+`space` is the space the item lives in, the one a dismissal names. **Through a personal view** the list reads every member the view reads for you and merges their items newest first, each row naming its member, with `counts` summed over them; past `skip + limit` of the merge's bound the page is refused (`unconverted_bad_paging`): page a member directly.
 
 `reason` says why: `not_conforming` (the converted record would still not conform, or a record that needed no step does not conform), `no_case_matched`, `both_set`, `could_not_evaluate`, `relationship_exists` (an edge relabel onto a relationship that already exists), `functional_taken` (a relabel onto a subject the label's functional rule already holds), `version_ceiling`, `fork`, `step_refused` and `conversion_failed` (the rewrite failed for a reason no other class names, on three passes of the run in a row; its one violation names the kind of error, never its words, and the run went on without it). `violations` names fields and reasons, **never a stored value**. `proposed` is what the steps would have made of it. `record.summary` is the record's own name or text, and is absent when the record is gone.
 
@@ -322,7 +330,7 @@ Every refusal carries a `code`; the same code is on both doors.
 | `unconverted_changed` | `409`, with `current` | the bulk dismissal | List again and confirm the new number. |
 | `unconverted_too_many` | `400`, with `max` | the bulk dismissal | Narrow the filter. |
 
-A space that is not configured here (a personal view's id included) is `404`, an id the 6.0 upgrade retired `410` `space_retired`.
+A space that is not configured here is `404` (on the start and the dismissals a personal view's id too: they write), an id the 6.0 upgrade retired `410` `space_retired`.
 
 ## Audit and metrics
 
@@ -330,7 +338,7 @@ A start is audited as `schema.convert.start`, a finished run as `schema.convert.
 
 ## Not built
 
-- **A personal view as the space** of the status, the list and the dismissals: they name one configured space, as every act that writes or administers does.
+- **A personal view as the space** of a start or a dismissal: they write, so they name one configured space, as every act that writes or administers does.
 - **Undo of a rewrite.** A converted record keeps no copy of its old shape.
 - **A conversion on the other doors that change a schema** (the full-schema `PUT`, the single-type `PUT` and `DELETE`, the schema library, precedence, a layer arriving): they convert nothing until you run Convert.
 - **A network vote that deletes a type.** A rename or split on a network keeps the source type.
