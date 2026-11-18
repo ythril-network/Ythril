@@ -44,7 +44,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads } from './_write-faults.mjs';
+import { setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads, HUNG_READ_STALL_MS, hungReadLookMs } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
@@ -56,8 +56,8 @@ const skip = await mongoSkipReason();
 const DIMS = 8;
 const BOUND_MS = 1_000;
 const STALL_STEP_MS = 200;
-const STALL_STEPS = 23; // 4 600 ms: well past the bound, and past what a settle window below would tolerate
-const STALL_MS = STALL_STEP_MS * STALL_STEPS;
+/** How long the hung read stalls: the shared figure and the rule for its length are `HUNG_READ_STALL_MS` and `hungReadLookMs` in `_write-faults.mjs`. */
+const STALL_MS = HUNG_READ_STALL_MS;
 
 // A space that is FAULTY sits BEFORE the healthy one in the config: a walk that stops at the first failure leaves exactly the
 // spaces after it unprocessed. Each hung space is armed by exactly one case (a hung space is quarantined for a minute).
@@ -427,10 +427,11 @@ describe('a reindex boot failure is retried by the tick (real MongoDB)', { skip 
         shared.setReindexNeeded('hung-tick-2', true);
         await seedRun('hung-tick-2', { flagged: true, sweepComplete: true, sweepLeaseAt: STALE() });
         const restore = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
+        const lookMs = await hungReadLookMs({ boundMs: BOUND_MS, stallMs: STALL_MS });
         let outcome; let lines;
         try {
           await withStalledRunReads('hung-tick-1', async () => {
-            ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(reindex.reindexRunTick(), 3_500)));
+            ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(reindex.reindexRunTick(), lookMs)));
             if (!outcome.settled) await outcome.rest; // the stall's own end, before the view is put back
           });
         } finally { restore(); }
@@ -446,10 +447,11 @@ describe('a reindex boot failure is retried by the tick (real MongoDB)', { skip 
         await seedFacts('hung-boot-2', 4);
         await seedRun('hung-boot-2', { sweepLeaseAt: STALE() });
         const restore = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
+        const lookMs = await hungReadLookMs({ boundMs: BOUND_MS, stallMs: STALL_MS });
         let outcome; let lines;
         try {
           await withStalledRunReads('hung-boot-1', async () => {
-            ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(reindex.resumeReindexRuns(), 3_500)));
+            ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(reindex.resumeReindexRuns(), lookMs)));
             if (!outcome.settled) await outcome.rest;
             if (outcome.settled) await sweepDone('hung-boot-2');
           });
