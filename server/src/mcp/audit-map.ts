@@ -75,6 +75,13 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   // Under the operation its REST twin already records, not a new one: a compliance reader asks who
   // backfilled a space's embeddings, and two names for one act makes every query have to know both.
   space_reembed: 'space.embeddings.reembed',
+  // A schema conversion and the records it could not convert (Q-746, Q-919), under the operations their routes record. The status read has no
+  // rule of its own and is `space.list` on both doors, as `space_schema_versions` is.
+  space_schema_convert: 'schema.convert.start',
+  space_schema_conversion: 'space.list',
+  list_unconverted: 'unconverted.list',
+  dismiss_unconverted: 'unconverted.dismiss',
+  dismiss_unconverted_shown: 'unconverted.dismiss_shown',
   delete_space_data: 'space.wipe',
   // `null` here does NOT mean "not audited": this tool IS audited, every call, as an ACT through `MCP_ACT_OPERATIONS` (which
   // `logReads` does not gate). It is kept out of this map because a non-mutating tool recorded here is a read (`mcp-audit-coverage`),

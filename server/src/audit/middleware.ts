@@ -48,6 +48,9 @@ export interface RouteRule {
   writtenWhenCutOff?: boolean;
 }
 
+/** The capture group that holds the item id in the dismissal's pattern (`/api/spaces/<space>/schema-convert/items/<item>/dismiss`): the space is group 1. */
+const DISMISS_ITEM_GROUP = 2;
+
 export const ROUTE_RULES: RouteRule[] = [
   // ── Fact CRUD ──────────────────────────────────────────────────────────
   { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/facts$/,   operation: 'fact.create',  spaceGroup: 1 },
@@ -140,6 +143,14 @@ export const ROUTE_RULES: RouteRule[] = [
   // change as a rebuild, and it is the action an operator takes after turning suppression off. "Who un-suppressed
   // this space and when" is answerable from the meta write; "who then backfilled it" needs this row.
   { method: 'POST',   pattern: /^\/api\/spaces\/([^/]+)\/reembed$/,                 operation: 'space.embeddings.reembed', spaceGroup: 1 },
+  // A schema conversion (Q-746) and the records it could not convert (Q-919). The start rewrites records and reaches every peer through the new
+  // versions, so it is an act of its own; its status read is `space.list` (the read the schema-versions read is), with a rule of its own only so that the entry names the space. The list is
+  // a read (dropped when `logReads` is off); a dismissal names its item (`entryGroup`) and the bulk dismissal is the one route no item names.
+  { method: 'POST',   pattern: /^\/api\/spaces\/([^/]+)\/schema-convert$/,          operation: 'schema.convert.start', spaceGroup: 1 },
+  { method: 'GET',    pattern: /^\/api\/spaces\/([^/]+)\/schema-convert$/,          operation: 'space.list', spaceGroup: 1, read: true },
+  { method: 'GET',    pattern: /^\/api\/spaces\/([^/]+)\/schema-convert\/items$/,   operation: 'unconverted.list', spaceGroup: 1, read: true },
+  { method: 'POST',   pattern: /^\/api\/spaces\/([^/]+)\/schema-convert\/items\/dismiss$/, operation: 'unconverted.dismiss_shown', spaceGroup: 1 },
+  { method: 'POST',   pattern: /^\/api\/spaces\/([^/]+)\/schema-convert\/items\/([^/]+)\/dismiss$/, operation: 'unconverted.dismiss', spaceGroup: 1, entryGroup: DISMISS_ITEM_GROUP },
   // An ACT and not a read (no `read: true`): the report contacts every peer holding the space with this instance's
   // credentials, so "who asked the peers about this space, and when" is a question the trail answers whether or not
   // `logReads` is on. The tool door records the same operation (`audit-map.ts`).
@@ -681,6 +692,12 @@ export const TTL_EXPIRE_OPERATION = 'ttl.expire';
  * per merge that landed, the survivor as the entry and the absorbed entity's id in its changes. A merge a request asked for is `entity.merge`.
  */
 export const DUPLICATE_AUTOMERGE_OPERATION = 'duplicate.automerge';
+
+/**
+ * The one internal entry a finished schema conversion run writes (`spaces/schema-convert-run.ts`, Q-746, bundle-284), no token: how it was started, its
+ * types and its counts, never record content. Outside the route rules, so named here for the same reason as the operations above.
+ */
+export const SCHEMA_CONVERT_RUN_OPERATION = 'schema.convert.run';
 
 /**
  * What a personal view's own lifecycle does (Q-531), written by the shared view acts for REST and MCP alike (`spaces/view-acts.ts`), outside the
