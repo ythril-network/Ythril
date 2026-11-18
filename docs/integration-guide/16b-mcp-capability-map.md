@@ -85,6 +85,11 @@ and the two are identical by construction. The REST routes with no tool are in
 | | `space_schema_versions` | `POST /api/space_schema_versions` · legacy: `GET /api/spaces/:id/schema-versions` | read `schema` |
 | | `space_set_network_precedence` | `POST /api/space_set_network_precedence` · legacy: `PUT /api/spaces/:id/network-precedence` | admin `schema` |
 | | `space_reembed` | `POST /api/space_reembed` · legacy: `POST /api/spaces/:id/reembed` | admin `knowledge` |
+| | `space_schema_convert` | `POST /api/space_schema_convert` · legacy: `POST /api/spaces/:id/schema-convert` | admin `knowledge` |
+| | `space_schema_conversion` | `POST /api/space_schema_conversion` · legacy: `GET /api/spaces/:id/schema-convert` | read `knowledge` |
+| | `list_unconverted` | `POST /api/list_unconverted` · legacy: `GET /api/spaces/:id/schema-convert/items` | read `knowledge` |
+| | `dismiss_unconverted` | `POST /api/dismiss_unconverted` · legacy: `POST /api/spaces/:id/schema-convert/items/:itemId/dismiss` | write `knowledge` |
+| | `dismiss_unconverted_shown` | `POST /api/dismiss_unconverted_shown` · legacy: `POST /api/spaces/:id/schema-convert/items/dismiss` | write `knowledge` |
 | | `file_stamp_report` | `POST /api/file_stamp_report` · legacy: `POST /api/spaces/:id/file-stamp-report` | instance-admin (MCP) · REST exempt |
 | | `schema_validate` | `POST /api/schema_validate` · legacy: `POST /api/spaces/:id/validate-schema` | read `schema` |
 | **Tokens** | | | |

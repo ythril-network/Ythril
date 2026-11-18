@@ -21,6 +21,16 @@
  *
  * Seen red on a91e522e: `server/dist/spaces/schema-convert-acts.js` does not exist (no act, no router, no tool).
  *
+ * ## The mounted part (slice 6)
+ *
+ * The cases above call the router's last handler and the tool's handler themselves: they hold while `app.ts` mounts no router and
+ * `mcp/tools/index.ts` registers no tool. The last part asks the way a client does, with a token: the application on loopback (its rate
+ * limit, authentication, rights guard and the router stack) and `POST /mcp` (`tools/list`, `tools/call` through the registry), and compares
+ * what comes back with the act asked as the same caller. A request the act refuses is answered as the act answers it (status and body) on
+ * the route, and by the same code on the tool; a mutating tool is not offered to a token that cannot write; a start through the mounted
+ * route and through the registered tool converts the records and is read back by the mounted status.
+ * Seen red on 8ca143bb: `POST` and `GET /api/spaces/:id/schema-convert` answer 404 (no router is mounted) and `tools/list` offers neither tool.
+ *
  * Run: node --test testing/standalone/a-schema-convert-door-answers-alike-db.test.js (test stack up, after `npm run build:server`)
  */
 import { describe, it, before, after } from 'node:test';
@@ -30,6 +40,7 @@ import { openConvertDoor, CONVERT_META, SEEDED_AT } from './_schema-convert.mjs'
 import { moduleOrNull } from './_b81c-door.mjs';
 import { RECORD_PARTS } from './_space-snapshot.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
+import { openMountedDoor } from './_mounted-door.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -43,7 +54,12 @@ const VIA_TOOL = 'scv-tool';
 const BUSY = 'scv-busy';
 /** A space with no record: a start with the most types a start takes completes at once. */
 const MAXED = 'scv-max';
-const ALL = [REFUSE, VIA_ACT, VIA_ROUTE, VIA_TOOL, BUSY, MAXED];
+/** The spaces the MOUNTED application and the REGISTERED tools convert (one each) and refuse an explicit start on (a run that is unfinished). */
+const MOUNTED_ROUTE = 'scv-mroute';
+const MOUNTED_TOOL = 'scv-mtool';
+const MOUNTED_BUSY = 'scv-mbusy';
+const MOUNTED_REFUSE = 'scv-mrefuse';
+const ALL = [REFUSE, VIA_ACT, VIA_ROUTE, VIA_TOOL, BUSY, MAXED, MOUNTED_ROUTE, MOUNTED_TOOL, MOUNTED_BUSY, MOUNTED_REFUSE];
 
 const RENAME = { op: 'renameProperty', kind: 'entity', type: 'person', from: 'nick', to: 'alias' };
 /** The schema the conversion leads to: `nick` is gone, `alias` is declared. */
@@ -413,6 +429,144 @@ describe('the Convert act and the status of a run answer alike on every door (re
         const again = await d.start(VIA_ACT, { types: PERSON }, rights.spaceAdmin);
         assert.deepEqual(again, { status: 'ok', body: { state: 'started', toFp: door.fp(VIA_ACT), types: PERSON, steps: 0 } }, d.name);
         await completed(VIA_ACT);
+      }
+    });
+  });
+
+  // ── The MOUNTED application and the REGISTERED tools ─────────────────────────────────────────────────────────────────────────────
+
+  describe('through the mounted application and the registered tools', () => {
+    let mounted;
+    /** The space every refusal below is asked of. Its own, because the cases above end by starting a run in `REFUSE`, and a refusal that started one must be seen. */
+    const REFUSE = MOUNTED_REFUSE;
+    /** Tokens by who they are: `{ key, rights }`, the rights as the token record stored them. */
+    const who = {};
+    const ROUTE = '/schema-convert';
+    const restPath = (space) => `/api/spaces/${space}${ROUTE}`;
+
+    before(async () => {
+      mounted = await openMountedDoor();
+      const everyArea = (r) => Object.fromEntries(SPACE_AREAS.map(a => [a, r]));
+      who.admin = await mounted.mint('scv-admin', 'admin');
+      who.reader = await mounted.mint('scv-reader', { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { [REFUSE]: { ...everyArea('none'), knowledge: 'read' } } });
+      // Holds knowledge: admin on the space (so the route's rights row lets it in) and does not administer the space (so the act refuses it).
+      who.knowledgeAdmin = await mounted.mint('scv-kadmin', { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { [REFUSE]: { ...everyArea('none'), knowledge: 'admin' } } });
+      who.filesOnly = await mounted.mint('scv-files', { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { [REFUSE]: { ...everyArea('none'), files: 'admin' } } });
+    });
+    after(async () => { await mounted?.close(); });
+
+    const actStart = async (space, body, r) => { const a = await acts.schemaConvertStartAct(space, body, caller(r)); return { status: a.status, body: a.body }; };
+    const actStatus = async (space, r) => { const a = await acts.schemaConvertStatusAct(space, caller(r)); return { status: a.status, body: a.body }; };
+
+    it('mounts both routes and registers both tools: an administrator reads the status of a space with no run, and is offered start and status', async () => {
+      const read = await mounted.rest(who.admin.key, 'GET', restPath(REFUSE));
+      assert.deepEqual(read, { status: 200, body: { state: 'none' } }, `GET ${restPath(REFUSE)} is not served: no router is mounted for it (${JSON.stringify(read)})`);
+      const names = await mounted.toolNames(who.admin.key);
+      for (const name of ['space_schema_convert', 'space_schema_conversion']) assert.ok(names.includes(name), `tools/list does not offer ${name}: the tool is not registered`);
+      const viaTool = await mounted.mcp(who.admin.key, 'space_schema_conversion', { space: REFUSE });
+      assert.deepEqual([viaTool.isError, viaTool.body], [false, { state: 'none' }], JSON.stringify(viaTool));
+    });
+
+    it('offers a token that cannot write the read tool and not the start: a mutating tool is hidden from it, and a call is refused', async () => {
+      const names = await mounted.toolNames(who.reader.key);
+      assert.ok(names.includes('space_schema_conversion'), 'a reader is not offered the status tool');
+      assert.ok(!names.includes('space_schema_convert'), 'tools/list offers a token that holds no write rung the tool that starts a rewrite');
+      const refused = await mounted.mcp(who.reader.key, 'space_schema_convert', { space: REFUSE, types: PERSON });
+      assert.equal(refused.isError, true, JSON.stringify(refused));
+      assert.match(refused.text, /mutates/);
+      await noRun(REFUSE, 'a read-only token through the tool');
+    });
+
+    const MOUNTED_REFUSALS = [
+      ['no `types`', {}, 400, 'bad_convert_types'],
+      ['a type with an unknown kind', { types: [{ kind: 'person', type: 'person' }] }, 400, 'bad_convert_types'],
+      ['one type more than the most a start takes', { types: Array.from({ length: 51 }, (_, i) => ({ kind: 'entity', type: `t${i}` })) }, 400, 'too_many_convert_types'],
+      ['a key the start has no parameter for', { types: PERSON, takeOver: true }, 400, 'bad_convert_request'],
+      ['a step the schema now cannot honour', { types: PERSON, steps: [RENAME, { ...RENAME, to: 'handle' }] }, 400, 'bad_conversion_step', 1],
+    ];
+    for (const [what, body, status, code, step] of MOUNTED_REFUSALS) {
+      it(`${what}: the mounted route answers what the act answers (${status} ${code}) and the registered tool the same code, and nothing starts`, async () => {
+        const before = await stateOf(REFUSE);
+        const expected = await actStart(REFUSE, body, who.admin.rights);
+        assert.deepEqual([expected.status, expected.body.code], [status, code], JSON.stringify(expected));
+        const route = await mounted.rest(who.admin.key, 'POST', restPath(REFUSE), body);
+        assert.deepEqual(route, expected, `${what}: the mounted route did not answer what the act answers (${JSON.stringify(route)})`);
+        const tool = await mounted.mcp(who.admin.key, 'space_schema_convert', { space: REFUSE, ...body });
+        assert.equal(tool.isError, true, `${what}: the registered tool did not refuse (${JSON.stringify(tool)})`);
+        assert.deepEqual([tool.body?.code, tool.body?.step], [code, step], `${what}: the tool refused by another code (${JSON.stringify(tool)})`);
+        assert.equal(tool.body?.error, expected.body.error, `${what}: the tool worded the refusal otherwise than the route`);
+        assert.deepEqual(await stateOf(REFUSE), before, `${what}: a refused start wrote something`);
+        await noRun(REFUSE, what);
+      });
+    }
+
+    it('refuses a token without the rights on both doors: the reader and the token that holds no knowledge right are 403 on the route, and start nothing', async () => {
+      for (const name of ['reader', 'filesOnly']) {
+        const route = await mounted.rest(who[name].key, 'POST', restPath(REFUSE), { types: PERSON, steps: [RENAME] });
+        assert.equal(route.status, 403, `${name}: ${JSON.stringify(route)}`);
+        assert.equal((await actStart(REFUSE, { types: PERSON, steps: [RENAME] }, who[name].rights)).status, 403, `${name}: the act asked as the same token`);
+      }
+      const read = await mounted.rest(who.filesOnly.key, 'GET', restPath(REFUSE));
+      assert.equal(read.status, 403, `a token with no knowledge right read the status: ${JSON.stringify(read)}`);
+      assert.deepEqual(await mounted.rest(who.reader.key, 'GET', restPath(REFUSE)), { status: 200, body: { state: 'none' } }, 'a reader may read the status');
+      assert.deepEqual((await mounted.mcp(who.reader.key, 'space_schema_conversion', { space: REFUSE })).body, { state: 'none' });
+      await noRun(REFUSE, 'a token without the rights');
+    });
+
+    it('the rights row lets knowledge: admin through and the act refuses a token that does not administer the space: the same 403 code on both doors', async () => {
+      const body = { types: PERSON, steps: [RENAME] };
+      const expected = await actStart(REFUSE, body, who.knowledgeAdmin.rights);
+      assert.deepEqual([expected.status, expected.body.code], [403, 'space_admin_required'], JSON.stringify(expected));
+      assert.deepEqual(await mounted.rest(who.knowledgeAdmin.key, 'POST', restPath(REFUSE), body), expected, 'the mounted route did not answer what the act answers');
+      const tool = await mounted.mcp(who.knowledgeAdmin.key, 'space_schema_convert', { space: REFUSE, ...body });
+      assert.deepEqual([tool.isError, tool.body?.code], [true, 'space_admin_required'], JSON.stringify(tool));
+      await noRun(REFUSE, 'a token that does not administer the space');
+    });
+
+    it('refuses an explicit start with 409 schema_convert_running on the mounted route and the registered tool while a run is unfinished', async () => {
+      await seedPeople(MOUNTED_BUSY);
+      await door.mongo.col(door.spaceCollection(MOUNTED_BUSY, 'schemaConvertRun')).insertOne({
+        _id: 'run', toFp: 'f'.repeat(64), types: [{ kind: 'entity', type: 'person', done: false }], steps: [], splitDeclared: {}, stepsRefused: [],
+        sources: [{ kind: 'act', at: SEEDED_AT }], owed: false, syncedFirst: { asked: 0, answered: 0 }, startedAt: SEEDED_AT, cursor: null,
+        counts: { ...ZERO_COUNTS, stamped: 7 }, state: 'running', failures: 0, sweepLeaseAt: Date.now() + 3_600_000, generation: 1,
+      });
+      const before = await stateOf(MOUNTED_BUSY);
+      const expected = await actStart(MOUNTED_BUSY, { types: PERSON, steps: [RENAME] }, who.admin.rights);
+      assert.deepEqual([expected.status, expected.body.code], [409, 'schema_convert_running']);
+      assert.deepEqual(await mounted.rest(who.admin.key, 'POST', restPath(MOUNTED_BUSY), { types: PERSON, steps: [RENAME] }), expected);
+      const tool = await mounted.mcp(who.admin.key, 'space_schema_convert', { space: MOUNTED_BUSY, types: PERSON, steps: [RENAME] });
+      assert.deepEqual([tool.isError, tool.body?.code], [true, 'schema_convert_running'], JSON.stringify(tool));
+      const status = await mounted.rest(who.reader.key, 'GET', restPath(MOUNTED_BUSY));
+      assert.equal(status.status, 403, 'the reader of another space reads this one');
+      assert.deepEqual(await mounted.rest(who.admin.key, 'GET', restPath(MOUNTED_BUSY)), await actStatus(MOUNTED_BUSY, who.admin.rights));
+      assert.deepEqual(await stateOf(MOUNTED_BUSY), before, 'a refused start or a status read wrote something');
+    });
+
+    it('a start through the mounted route and one through the registered tool each convert every copy held here, and the mounted status reads the run as the act does', async () => {
+      for (const space of [MOUNTED_ROUTE, MOUNTED_TOOL]) await seedPeople(space);
+      const toFp = door.fp(MOUNTED_ROUTE);
+      const viaRoute = await mounted.rest(who.admin.key, 'POST', restPath(MOUNTED_ROUTE), { types: PERSON, steps: [RENAME] });
+      assert.deepEqual(viaRoute, { status: 202, body: { state: 'started', toFp, types: PERSON, steps: 1 } },
+        `the mounted route did not start the run: ${JSON.stringify(viaRoute)}`);
+      const viaTool = await mounted.mcp(who.admin.key, 'space_schema_convert', { space: MOUNTED_TOOL, types: PERSON, steps: [RENAME] });
+      assert.deepEqual([viaTool.isError, viaTool.body], [false, { state: 'started', toFp: door.fp(MOUNTED_TOOL), types: PERSON, steps: 1 }], JSON.stringify(viaTool));
+
+      for (const space of [MOUNTED_ROUTE, MOUNTED_TOOL]) {
+        const done = await completed(space);
+        for (const [id, nick] of [['here', 'h'], ['peer', 'p'], ['gone', 'g']]) {
+          const row = await door.coll(space, 'entities').findOne({ _id: id });
+          assert.deepEqual(row.properties, { alias: nick }, `${space}/${id}: not rewritten`);
+          assert.equal(row.schemaFingerprint, door.fp(space));
+        }
+        assert.deepEqual((await door.coll(space, 'entities').findOne({ _id: 'fork-of-here' })).properties, { nick: 'fork' }, `${space}: a fork row was rewritten`);
+        assert.deepEqual(done.counts, { ...ZERO_COUNTS, rewritten: 3, stamped: 1 }, space);
+        assert.deepEqual(done.sources.map(s => s.kind), ['act'], `${space}: the run does not say an act started it`);
+
+        const expected = await actStatus(space, who.admin.rights);
+        assert.equal(expected.body.state, 'complete');
+        assert.deepEqual(await mounted.rest(who.admin.key, 'GET', restPath(space)), expected, `${space}: the mounted status answered otherwise than the act`);
+        const tool = await mounted.mcp(who.admin.key, 'space_schema_conversion', { space });
+        assert.deepEqual([tool.isError, tool.body], [false, expected.body], `${space}: the registered status tool answered otherwise than the act`);
       }
     });
   });
