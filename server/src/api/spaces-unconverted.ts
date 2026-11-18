@@ -15,6 +15,10 @@
  *
  * `app.ts` mounts it; the rights rows are `ROUTE_RIGHTS`' and the audit rules `ROUTE_RULES`'. A dismissal hands the audit entry what it did
  * (`req.auditChangesExplicit`: the item id, or the filter, `expect` and count), which the operation's allowlist cuts to scalars.
+ *
+ * It also hands the MCP tools the same three acts (`useUnconvertedActs`): the tool module is registered by the tools index, a module of the
+ * server's largest import cycle, and does not name the acts so they stay out of it; this module is the one of the capability the application
+ * always loads (it mounts the routes) and no member of that cycle reaches.
  */
 import { Router } from 'express';
 import { denyReadOnly, requireSpaceAuthScoped } from '../auth/middleware.js';
@@ -22,10 +26,13 @@ import { globalRateLimit } from '../rate-limit/middleware.js';
 import {
   listUnconvertedAct, dismissUnconvertedAct, dismissShownUnconvertedAct, refusalBody, type UnconvertedCaller, type UnconvertedActResult,
 } from '../spaces/unconverted-acts.js';
+import { useUnconvertedActs } from '../mcp/tools/unconverted.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import type { Response } from 'express';
 import { sendCaughtFailure } from './send-failure.js';
 import { dismissChanges, dismissShownChanges } from '../audit/audit-changes.js';
+
+useUnconvertedActs({ list: listUnconvertedAct, dismiss: dismissUnconvertedAct, dismissShown: dismissShownUnconvertedAct });
 
 export const spaceUnconvertedRouter = Router();
 

@@ -7,15 +7,22 @@
  * inside it (the knowledge rung, and for a start the space's admin right), so no mounting can leave them out; the guards here are the door's own
  * (rate limit, authentication and reach, a second factor and the read-only refusal for a start). Rights rows come from `ROUTE_RIGHTS`:
  * `knowledge: admin` for the start, `knowledge: read` for the read.
+ *
+ * It also hands the MCP tools the same two acts (`useSchemaConvertActs`): the tool module is registered by the tools index, a module of the
+ * server's largest import cycle, and does not name the acts so they stay out of it; this module is the one of the capability the application
+ * always loads (it mounts the route) and no member of that cycle reaches.
  */
 import { Router } from 'express';
 import { denyReadOnly, requireSpaceAuthMfaScoped, requireSpaceAuthScoped } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { schemaConvertStartAct, schemaConvertStatusAct } from '../spaces/schema-convert-acts.js';
+import { useSchemaConvertActs } from '../mcp/tools/schema-convert.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { sendSpaceActAnswer } from './send-act-answer.js';
 import { convertStartChanges } from '../audit/audit-changes.js';
+
+useSchemaConvertActs({ start: schemaConvertStartAct, status: schemaConvertStatusAct });
 
 /** The lowest status an act answers a refusal with: below it the start was accepted. */
 const FIRST_REFUSAL_STATUS = 400;

@@ -33,15 +33,16 @@
  * Whether a caller may read ONE record is not asked: `knowledge: read` on the space is the right to read every record of it, so a row for a
  * record of the space is never left out for a caller that holds the rung (the forks list narrows a personal view's members by the same rung).
  */
-import { z } from 'zod';
 import { KNOWLEDGE_TYPES, COLLECTION_SUFFIX, type KnowledgeType } from '../config/types-knowledge.js';
 import { TYPE_NAME_MAX } from '@ythril-network/schema/internal';
-import type { TokenRights } from '../config/rights-shape.js';
 import { holdsRung, rungRefusal } from '../auth/reachable-spaces.js';
 import {
-  listUnconvertedItems, dismissUnconvertedItem, dismissOpenUnconvertedItems, UNCONVERTED_REASONS,
-  type UnconvertedItem, type ListedUnconvertedItem,
+  listUnconvertedItems, dismissUnconvertedItem, dismissOpenUnconvertedItems, type ListedUnconvertedItem,
 } from '../brain/schema-convert-items.js';
+import {
+  UNCONVERTED_REFUSAL_CODES, UNCONVERTED_STATUSES, UnconvertedFilterParams, UnconvertedListParams, UnconvertedDismissShownParams, refusalBody,
+  type UnconvertedActResult, type UnconvertedCaller, type UnconvertedItem, type UnconvertedRow,
+} from './unconverted-terms.js';
 import { CHOSEN_VERSION_ROWS } from '../brain/chosen-versions.js';
 import { mapToRecallResult } from '../brain/recall-result.js';
 import { summariseRecall } from '../brain/recall-shape.js';
@@ -50,79 +51,27 @@ import { readStoredById } from '../db/read-by-id.js';
 import { NAME_QUOTED, peerText, refusalOfParse } from '../util/log.js';
 import { unknownSpaceAnswer } from './unknown-space.js';
 
+// The terms both doors share live in `unconverted-terms.ts`, a module the MCP tools may import without drawing this one into the server's
+// largest import cycle; re-exported for the readers that name them here.
+export {
+  UNCONVERTED_REFUSAL_CODES, UNCONVERTED_STATUSES, UnconvertedFilterParams, UnconvertedListParams, UnconvertedDismissShownParams, refusalBody,
+  type UnconvertedActResult, type UnconvertedCaller, type UnconvertedRow,
+};
+
 /** The statuses the acts answer: the contract both doors carry. */
 const OK = 200;
 const BAD_REQUEST = 400;
 const FORBIDDEN = 403;
 const NOT_FOUND = 404;
-const GONE = 410;
 const CONFLICT = 409;
 
-/**
- * What an act answers: a body, or a refusal with its status and code. A refusal may carry `detail`, whole numbers a door sends beside `error`
- * and `code` (`current` of a changed count, `max` of a call that names too many): both doors build their body from the one {@link refusalBody}.
- */
-export type UnconvertedActResult =
-  | { status: typeof OK; body: Record<string, unknown> }
-  | { status: typeof BAD_REQUEST | typeof FORBIDDEN | typeof NOT_FOUND | typeof GONE | typeof CONFLICT; error: string; code?: string; detail?: Readonly<Record<string, number>> };
-
-/** The body a door sends for a refusal: `{ error, code?, ...detail }`. */
-export const refusalBody = (r: Extract<UnconvertedActResult, { error: string }>): Record<string, unknown> =>
-  ({ error: r.error, ...(r.code ? { code: r.code } : {}), ...(r.detail ?? {}) });
-
-/** Who is asking: the rights the rung is judged from (`null` or absent: no matrix, no rung) and the door, whose byte-budget default applies. */
-export interface UnconvertedCaller {
-  readonly rights: TokenRights | null | undefined;
-  readonly transport: 'rest' | 'mcp';
-}
-
-/**
- * The codes the two acts refuse with, one list: the acts answer from it, and the tool's description and the parity gates read it.
- * The rung and the unknown-space refusals of a door's own guard are not here; `unconverted_rung` is the act's own, answered when a caller
- * reaches the act without the rung (a door that mounts it with no guard, or a guard row that is wrong).
- */
-export const UNCONVERTED_REFUSAL_CODES = [
-  'unconverted_bad_kind', 'unconverted_bad_status', 'unconverted_bad_type', 'unconverted_bad_paging', 'unconverted_bad_item_id',
-  'unconverted_item_not_found', 'unconverted_rung',
-  // The bulk dismiss.
-  'unconverted_bad_reason', 'unconverted_bad_expect', 'unconverted_changed', 'unconverted_too_many',
-] as const;
 const [BAD_KIND, BAD_STATUS, BAD_TYPE, BAD_PAGING, BAD_ITEM_ID, ITEM_NOT_FOUND, RUNG, BAD_REASON, BAD_EXPECT, CHANGED, TOO_MANY] = UNCONVERTED_REFUSAL_CODES;
-
-/** The statuses an item holds, and the one the list shows unless another is asked. */
-export const UNCONVERTED_STATUSES = ['open', 'dismissed'] as const;
 
 /** An item id is a hash, bounded like every name a caller sends in a path or an argument. */
 const ITEM_ID_MAX = TYPE_NAME_MAX;
 
 /** The longest `record.summary`: a name or a title is the writer's text and a row must not double in size by it (a fact is cut shorter by `summariseRecall`). */
 const SUMMARY_MAX = 160;
-
-/** An empty value is no value: the one rule every list of the Brain reads a blank filter by (`kind=` in a query string). */
-const blankIsAbsent = (v: unknown): unknown => (v === '' ? undefined : v);
-
-/**
- * The filters both doors take, parsed by this one schema so the route's query and the tool's arguments cannot state different bounds.
- * `skip` and `limit` are the list module's (`resolveListPaging`) and are not parsed here.
- */
-export const UnconvertedFilterParams = z.object({
-  kind: z.preprocess(blankIsAbsent, z.enum(KNOWLEDGE_TYPES).optional()),
-  type: z.preprocess(blankIsAbsent, z.string().max(TYPE_NAME_MAX).optional()),
-  reason: z.preprocess(blankIsAbsent, z.enum(UNCONVERTED_REASONS).optional()),
-});
-
-/** The list's parameters: the filter the bulk dismiss shares, and the `status` only a list chooses. */
-export const UnconvertedListParams = UnconvertedFilterParams.extend({
-  status: z.preprocess(blankIsAbsent, z.enum(UNCONVERTED_STATUSES).optional()),
-});
-
-/** The bulk dismiss's parameters: the same filter, and `expect`, the number of open items the caller was shown (required, a whole number). */
-export const UnconvertedDismissShownParams = UnconvertedFilterParams.extend({
-  expect: z.number().int().min(0),
-});
-
-/** The row one item is listed as: the stored item under its public names, and the record part when the record is stored. */
-export type UnconvertedRow = Omit<UnconvertedItem, '_id' | 'typeDefinition'> & { itemId: string; record?: { summary: string } };
 
 const rowOf = (item: ListedUnconvertedItem): UnconvertedRow => {
   const { _id, typeDefinition: _definition, record, ...rest } = item;

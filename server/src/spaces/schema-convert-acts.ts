@@ -44,10 +44,9 @@
  */
 import { z } from 'zod';
 import {
-  conversionStepIssues, isDeclarableTypeName, TYPE_NAME_MAX,
+  conversionStepIssues,
   type ConversionStep, type ConversionMeta, type ConversionIssueCode,
 } from '@ythril-network/schema/internal';
-import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { holdsRung, rungRefusal } from '../auth/reachable-spaces.js';
 import { isSpaceAdminFor } from '../auth/editor-scope.js';
@@ -55,21 +54,14 @@ import { refusalOfParse, peerText, NAME_QUOTED } from '../util/log.js';
 import { isConfiguredSpace } from './space-lookup.js';
 import { lostSpaceAnswer } from './unknown-space.js';
 import { readMetaForWrite } from './schema-stamp.js';
-import { startSchemaConvertRun, schemaConvertStatus, SCHEMA_CONVERT_TYPES_MAX, type SchemaConvertType } from './schema-convert-run.js';
+import { startSchemaConvertRun, schemaConvertStatus, type SchemaConvertType } from './schema-convert-run.js';
+import {
+  SCHEMA_CONVERT_TYPES_MAX, SCHEMA_CONVERT_REFUSAL_CODES, SchemaConvertBody, ConvertTypeZ, type SchemaConvertActResult, type SchemaConvertCaller,
+} from './schema-convert-terms.js';
 
-/** What an act answers: the HTTP status is the contract, so both doors carry it; a refusal carries `{ error, code?, step? }`. */
-export interface SchemaConvertActResult { readonly status: number; readonly body: Record<string, unknown> }
-
-/** Who is asking: the rights the call is judged by (`undefined` or `null`: a caller that presented none holds nothing). */
-export interface SchemaConvertCaller { readonly rights: TokenRights | null | undefined }
-
-/**
- * The codes the doors refuse with, one list: the acts answer from it and a text that names them (the tool's description) is checked against it.
- * `schema_convert_running` is the run module's (`startSchemaConvertRun`), `bad_conversion_step` the one a schema save answers too.
- */
-export const SCHEMA_CONVERT_REFUSAL_CODES = [
-  'bad_convert_types', 'too_many_convert_types', 'bad_convert_request', 'bad_conversion_step', 'knowledge_rung', 'space_admin_required', 'schema_convert_running',
-] as const;
+// The terms both doors share live in `schema-convert-terms.ts`, a module the MCP tools may import without drawing this one into the server's
+// largest import cycle; re-exported for the readers that name them here.
+export { SCHEMA_CONVERT_REFUSAL_CODES, SchemaConvertBody, type SchemaConvertActResult, type SchemaConvertCaller };
 const [BAD_TYPES, TOO_MANY_TYPES, BAD_REQUEST, BAD_STEP, KNOWLEDGE_RUNG, SPACE_ADMIN_REQUIRED] = SCHEMA_CONVERT_REFUSAL_CODES;
 /** The statuses the acts answer with: a request refused for what it says, a caller refused for what it holds, a start accepted, a read answered. */
 const BAD_BODY = 400;
@@ -79,18 +71,6 @@ const OK = 200;
 
 const refusal = (status: number, error: string, code?: string, extra: Record<string, unknown> = {}): SchemaConvertActResult =>
   ({ status, body: { error, ...(code ? { code } : {}), ...extra } });
-
-/**
- * The start's parameters, every key judged by the act: `types` and `steps` are taken as sent here and judged by their own refusals below, so a bad
- * `types` and a bad `steps` answer by their own codes on both doors. Strict: a key this capability has no parameter for is refused, never ignored.
- */
-export const SchemaConvertBody = z.object({ types: z.unknown(), steps: z.unknown() }).strict();
-
-/** One named type: a knowledge kind and a type name (an edge's type is its label). The run's own whole-kind marker is not a type name. */
-const ConvertTypeZ = z.object({
-  kind: z.enum(KNOWLEDGE_TYPES),
-  type: z.string().min(1).max(TYPE_NAME_MAX).refine(name => isDeclarableTypeName(name) && name !== '*', 'is not a type name'),
-}).strict();
 
 /** The knowledge rung a call needs, then the space admin right a start needs on top of it; the refusal, or `null`. */
 function rightsRefusal(spaceId: string, rights: TokenRights | null | undefined, needs: 'admin' | 'read'): SchemaConvertActResult | null {

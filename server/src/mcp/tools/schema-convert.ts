@@ -6,10 +6,16 @@
  * arguments to the act whole (less `space`) and the dispatcher's own argument check is skipped for it (`skipSchemaValidation`), so a key the capability
  * has no parameter for is refused by the act, by the code the route answers with. The rights are decided inside the act (the knowledge rung, and for a
  * start the space's admin right); `TOOL_RIGHTS` rows (`knowledge: admin` for the start, `knowledge: read` for the read) are the wiring's.
+ *
+ * ## The acts are handed in, never imported
+ *
+ * This module is registered by the tools index, a module of the server's largest import cycle, so a module it imports joins that cycle unless it
+ * reaches nothing of it. The acts reach the run, the converter and the brain's writers, so this module does not name them: it reads the terms
+ * both doors share from `spaces/schema-convert-terms.ts` and is handed the two acts through {@link useSchemaConvertActs}, which the route module
+ * (`api/spaces-schema-convert.ts`, mounted by the application at its load) calls. A call before anything wired them throws, naming the port.
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { schemaConvertStartAct, schemaConvertStatusAct, SCHEMA_CONVERT_REFUSAL_CODES, type SchemaConvertActResult } from '../../spaces/schema-convert-acts.js';
-import { SCHEMA_CONVERT_TYPES_MAX } from '../../spaces/schema-convert-run.js';
+import { SCHEMA_CONVERT_REFUSAL_CODES, SCHEMA_CONVERT_TYPES_MAX, type SchemaConvertActResult, type SchemaConvertCaller } from '../../spaces/schema-convert-terms.js';
 import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
 import { toolRefusalOfAct, type ToolRefusal } from '../../util/errors.js';
 import { CONVERT_RECORDS_PARAMETER } from './schema-update-parts.js';
@@ -17,6 +23,23 @@ import { convertStartChanges } from '../../audit/audit-changes.js';
 
 /** The lowest status an act answers a refusal with. */
 const FIRST_REFUSAL_STATUS = 400;
+
+/** The two acts the tools run (`spaces/schema-convert-acts.ts`): method syntax, so the acts' own parameter types are accepted as they are. */
+export interface SchemaConvertActs {
+  start(spaceId: string, input: unknown, caller: SchemaConvertCaller): Promise<SchemaConvertActResult>;
+  status(spaceId: string, caller: SchemaConvertCaller): Promise<SchemaConvertActResult>;
+}
+
+let convertActs: SchemaConvertActs | undefined;
+
+/** Hand this module the acts it runs (once, at the load of the module that mounts their route). */
+export function useSchemaConvertActs(acts: SchemaConvertActs): void { convertActs = acts; }
+
+/** The acts, or a throw naming what was never wired: a call is a failure said, never an answer made up here. */
+function actsOrThrow(): SchemaConvertActs {
+  if (!convertActs) throw new Error('the schema conversion acts were never wired into the MCP tools (useSchemaConvertActs): api/spaces-schema-convert.js is not loaded');
+  return convertActs;
+}
 
 /** An act's answer as a tool result: the body in `content` and in `structuredContent`, or the refusal the REST door answers, code and `step` included. */
 function resultOf(r: SchemaConvertActResult): ToolResult {
@@ -80,7 +103,7 @@ export const space_schema_convertTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { space: _space, ...body } = ctx.args;
-    const answer = await schemaConvertStartAct(ctx.callSpace, body, { rights: ctx.rights });
+    const answer = await actsOrThrow().start(ctx.callSpace, body, { rights: ctx.rights });
     const result = resultOf(answer);   // throws a refusal: nothing below runs for one
     // What the act accepted, for the audit entry (`schema.convert.start`), as the route hands it: the types and the number of steps.
     ctx.recordAuditChanges?.(convertStartChanges(answer.body));
@@ -104,6 +127,6 @@ export const space_schema_conversionTool: ToolHandler = {
     type: 'object', properties: { space: s.requiredSpace }, required: ['space'], additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    return resultOf(await schemaConvertStatusAct(ctx.callSpace, { rights: ctx.rights }));
+    return resultOf(await actsOrThrow().status(ctx.callSpace, { rights: ctx.rights }));
   },
 };

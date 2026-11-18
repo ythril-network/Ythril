@@ -32,24 +32,16 @@ import { pageMemberList, type ListPage, type ListPageRequest } from './list-page
 import { defaultBudgetChars } from './result-budget.js';
 import { peerText } from '../util/log.js';
 import { isPlainObject } from '../util/plain-object.js';
+import { UNCONVERTED_REASONS, UNCONVERTED_DISMISS_MAX, type UnconvertedReason, type UnconvertedItem } from '../spaces/unconverted-terms.js';
 
-/** Why a record was not converted. `could_not_evaluate` is a split condition the engine could not answer on the record (its own class). */
-export const UNCONVERTED_REASONS = [
-  'not_conforming', 'no_case_matched', 'both_set', 'could_not_evaluate',
-  'relationship_exists', 'functional_taken', 'version_ceiling', 'fork', 'step_refused',
-] as const;
-export type UnconvertedReason = typeof UNCONVERTED_REASONS[number];
+// What an item is, its reason classes and the bulk dismissal's bound are terms the doors share (`spaces/unconverted-terms.ts`, a module the MCP
+// tools may import without drawing this one into the server's largest import cycle); re-exported for the readers that name them here.
+export { UNCONVERTED_REASONS, UNCONVERTED_DISMISS_MAX, type UnconvertedReason, type UnconvertedItem };
 
 /** The most violations one item names. */
 export const UNCONVERTED_VIOLATIONS_MAX = 20;
 /** The most items one run writes; past it the run counts what it did not list (`unconvertedNotListed`). */
 export const UNCONVERTED_ITEMS_PER_RUN_MAX = 10_000;
-/**
- * The most open items one bulk dismiss names. The call reads the ids it will dismiss once (one more than this, to know there are too many) and
- * names them in one update, so its cost and the update's size are bounded by this; it is above what the Review page shows for one schema change
- * of a thousand records, and a filter that matches more is narrowed by kind, type or reason, never cut.
- */
-export const UNCONVERTED_DISMISS_MAX = 2_000;
 /** The most items one tick of the watcher judges in one space. */
 export const UNCONVERTED_SWEEP_PER_TICK = 500;
 /** The longest reason an item keeps for one violation. */
@@ -59,28 +51,6 @@ const ITEM_ID_HEX = 32;
 /** The page size a list states none for, and the largest it serves. */
 const LIST_DEFAULT_LIMIT = 100;
 const LIST_MAX_LIMIT = 500;
-
-/** One record a conversion could not convert, as stored. */
-export interface UnconvertedItem {
-  _id: string;
-  kind: KnowledgeType;
-  recordId: string;
-  type: string;
-  /** The record's version when the run read it (`null`: it carried none). */
-  seq: number | null;
-  /** The stamp the record carried when the run read it. */
-  fromFp: string | null;
-  /** The fingerprint the run converted toward. */
-  toFp: string;
-  /** What the record's type was under `toFp`: the hash its staleness is judged by ({@link typeDefinitionOf}). */
-  typeDefinition: string;
-  reason: UnconvertedReason;
-  violations: { field: string; reason: string }[];
-  /** What the steps would have made of it: the new type, and the property names set and removed. */
-  proposed: { type?: string; set: string[]; unset: string[] };
-  status: 'open' | 'dismissed';
-  detectedAt: string;
-}
 
 /** What a run hands in for one record it could not convert. */
 export interface UnconvertedInput {
