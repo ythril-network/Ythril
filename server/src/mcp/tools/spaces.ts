@@ -744,7 +744,7 @@ export const delete_space_dataTool: ToolHandler = {
     + 'merely stale, it is unopenable. Wiping `files` also deletes the space\'s file directory on disk and '
     + 'recreates it empty.\n\n'
     + 'PARAMETERS:\n'
-    + `- \`types\` — a subset of ${BRAIN_COLLECTIONS.map(t => `\`${t}\``).join(', ')}. OMIT IT TO WIPE THEM ALL; `
+    + `- \`types\` — a subset of ${BRAIN_COLLECTIONS.map(t => '`' + t + '`').join(', ')}. OMIT IT TO WIPE THEM ALL; ` // no nested template: the call-graph index cannot read past one
     + 'an omitted `types` is not a safe default. A partial wipe clears only the tombstones and review findings '
     + 'belonging to the types you named.\n'
     + '- `space` — the space to empty.\n\n'
