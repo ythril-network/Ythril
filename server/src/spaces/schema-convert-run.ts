@@ -60,6 +60,8 @@ import { peerText } from '../util/log.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { SCHEMA_CONVERT_RUN_OPERATION } from '../audit/middleware.js';
 import { startOwedRoundConversions } from '../sync/governance.js';
+import { keyedLock } from '../util/keyed-lock.js';
+import { isDuplicateKeyOnly } from '../db/write-errors.js';
 
 /** The operation of the one internal audit entry a finished run writes: declared in the audit middleware beside the other operations no route produces, re-exported here for the run's own readers. */
 export { SCHEMA_CONVERT_RUN_OPERATION };
@@ -308,7 +310,34 @@ const unfinished = (run: SchemaConvertRunDoc | null): run is SchemaConvertRunDoc
  * the document is written (a restart from then on resumes it) and never awaits the conversion, which runs in the background. An act refuses
  * while a run is unfinished (`409 schema_convert_running`); a save or a round joins it. No types: nothing to run.
  */
-export async function startSchemaConvertRun(start: SchemaConvertStart, deps: SchemaConvertDeps = {}): Promise<SchemaConvertStartOutcome> {
+export function startSchemaConvertRun(start: SchemaConvertStart, deps: SchemaConvertDeps = {}): Promise<SchemaConvertStartOutcome> {
+  // Every start of the space takes its one turn, whoever asks (the act, a save, a round): a second start reads what the first wrote (lens sweep S1).
+  // The act's price is asked once however often the start reads again: a retry is the server's, not the caller's.
+  let priced: { answer: SchemaConvertStartRefusal | null } | undefined;
+  const admit = start.admit ? () => (priced ??= { answer: start.admit!() }).answer : undefined;
+  return startTurns.run(start.spaceId, async () => {
+    for (let attempt = 1; ; attempt++) {
+      const out = await startOnce({ ...start, ...(admit ? { admit } : {}) }, deps);
+      if (out !== RUN_MOVED) return out;
+      // A pass rewrote the run between the read and the write (its own restart): read it again and start over it, never over a stale copy.
+      if (attempt >= START_ATTEMPTS_MAX) throw new Error(`the conversion run of '${peerText(start.spaceId)}' moved under ${START_ATTEMPTS_MAX} starts in a row`);
+    }
+  });
+}
+
+/** Every start of a space's run, one after another (`startSchemaConvertRun`). */
+const startTurns = keyedLock();
+/** How often a start reads the run again after a pass rewrote it between the read and the write, before it gives up and says so. */
+const START_ATTEMPTS_MAX = 3;
+/** What one start answers when the document it read was rewritten before it could write: it reads again. */
+const RUN_MOVED = Symbol('run moved');
+
+/**
+ * One start of {@link startSchemaConvertRun}: read the run, decide, and write only over what was read (a new run only where none exists, a restart
+ * only over the generation read), so no start replaces a run document it did not read; answers {@link RUN_MOVED} when the write found the document
+ * moved.
+ */
+async function startOnce(start: SchemaConvertStart, deps: SchemaConvertDeps): Promise<SchemaConvertStartOutcome | typeof RUN_MOVED> {
   const { spaceId } = start;
   const existing = await runs(spaceId).findOne(asFilter<SchemaConvertRunDoc>({ _id: RUN_ID })) as SchemaConvertRunDoc | null;
   if (unfinished(existing) && start.source.kind === 'act') {
@@ -343,10 +372,28 @@ export async function startSchemaConvertRun(start: SchemaConvertStart, deps: Sch
   doc.sweepLeaseAt = 0;
   delete doc.retryAt;
   delete doc.error;
-  await runs(spaceId).replaceOne(asFilter<SchemaConvertRunDoc>({ _id: RUN_ID }), doc, { upsert: true });
+  if (!await writeOverRead(spaceId, existing, doc)) return RUN_MOVED;
   runInBackground(spaceId, deps);
   watcher.start();
   return { ok: true, state: unfinished(existing) ? 'restarted' : 'started', run: doc };
+}
+
+/**
+ * Write `doc` as the run of `spaceId` over exactly the document `read` was: inserted where none existed (a duplicate key means another start
+ * wrote first), or replaced where the stored one is still the generation read. Answers whether it was written.
+ */
+async function writeOverRead(spaceId: string, read: SchemaConvertRunDoc | null, doc: SchemaConvertRunDoc): Promise<boolean> {
+  if (read === null) {
+    try {
+      await runs(spaceId).insertOne(doc);
+      return true;
+    } catch (err) {
+      if (isDuplicateKeyOnly(err)) return false;
+      throw err;
+    }
+  }
+  const done = await runs(spaceId).replaceOne(asFilter<SchemaConvertRunDoc>({ _id: RUN_ID, generation: read.generation }), doc);
+  return done.matchedCount === 1;
 }
 
 /**
@@ -358,7 +405,13 @@ export async function startSchemaConvertRun(start: SchemaConvertStart, deps: Sch
  * of the space (a pass already running there is joined, never doubled), never left until the old lease goes stale. A page restarting its own
  * run keeps its lease instead (`restartInPlace`).
  */
-export async function restartSchemaConvertRun(spaceId: string): Promise<boolean> {
+export function restartSchemaConvertRun(spaceId: string): Promise<boolean> {
+  // In the space's one turn, as every start: a restart never lands between a start's read and its write.
+  return startTurns.run(spaceId, () => restartOnce(spaceId));
+}
+
+/** One restart of {@link restartSchemaConvertRun}, written only over the generation it read. */
+async function restartOnce(spaceId: string): Promise<boolean> {
   const run = await runs(spaceId).findOne(asFilter<SchemaConvertRunDoc>({ _id: RUN_ID })) as SchemaConvertRunDoc | null;
   if (!unfinished(run)) return false;
   const now = readMetaForWrite(spaceId);
