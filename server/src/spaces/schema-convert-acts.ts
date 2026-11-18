@@ -96,12 +96,6 @@ function rightsRefusal(spaceId: string, rights: TokenRights | null | undefined, 
   return null;
 }
 
-/** The unknown-space answer, in this act's shape (404, or 410 `space_retired` for a retired id): the one existence rule. */
-function unknownSpace(spaceId: string): SchemaConvertActResult {
-  const lost = lostSpaceAnswer(null, spaceId);
-  return { status: lost.status, body: lost.body as Record<string, unknown> };
-}
-
 /** The names the "before" half of a step's check judges: the schema the records were written under, which an act cannot know. */
 const judgesBefore = (code: ConversionIssueCode): code is Extract<ConversionIssueCode, `${string}_before`> => code.endsWith('_before');
 
@@ -139,7 +133,8 @@ function typesOf(raw: unknown): { ok: true; types: SchemaConvertType[] } | { ok:
  * types, steps }`, or the refusal. `input` is the request's body or the tool's arguments without `space`, as sent.
  */
 export async function schemaConvertStartAct(spaceId: string, input: unknown, caller: SchemaConvertCaller): Promise<SchemaConvertActResult> {
-  if (!isConfiguredSpace(spaceId)) return unknownSpace(spaceId);
+  // The one existence rule (404, or 410 `space_retired` for a retired id).
+  if (!isConfiguredSpace(spaceId)) return lostSpaceAnswer(null, spaceId);
   const denied = rightsRefusal(spaceId, caller.rights, 'admin');
   if (denied) return denied;
 
@@ -164,7 +159,7 @@ export async function schemaConvertStartAct(spaceId: string, input: unknown, cal
  * asked for first, failures), or `{ state: 'none' }` for a space that never had a run. Writes nothing.
  */
 export async function schemaConvertStatusAct(spaceId: string, caller: SchemaConvertCaller): Promise<SchemaConvertActResult> {
-  if (!isConfiguredSpace(spaceId)) return unknownSpace(spaceId);
+  if (!isConfiguredSpace(spaceId)) return lostSpaceAnswer(null, spaceId);
   const denied = rightsRefusal(spaceId, caller.rights, 'read');
   if (denied) return denied;
   const status = await schemaConvertStatus(spaceId);
