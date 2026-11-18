@@ -25,7 +25,8 @@ import { openConvertDoor } from './_schema-convert.mjs';
 
 const skip = await mongoSkipReason();
 const SPACES = Array.from({ length: 8 }, (_, i) => `race${i}`);
-const ADMIN = { instanceAdmin: true, perSpace: {} };
+/** A space administrator everywhere: the knowledge admin rung and the space's admin right the start asks. */
+const ADMIN = { perSpace: {}, floor: {}, spaceAdmin: { floor: true, spaces: [] } };
 /** The two acts' types: two different types the conversion schema declares, so the stored run says which act it is. */
 const TWO = [{ kind: 'entity', type: 'person' }, { kind: 'fact', type: 'claim' }];
 

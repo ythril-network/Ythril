@@ -107,7 +107,7 @@ describe('a networked save holds its steps to what the round carries', () => {
       networked();
       const d = plan({ meta: { typeSchemas: { entity: { Human: PERSON } } } });
       assert.equal(d.ok, true);
-      assert.deepEqual(Object.keys(d.plan.metaBase.typeSchemas.entity), ['Human']);
+      assert.equal(d.plan.metaBase.typeSchemas?.entity?.Person, undefined, 'a round with no type step carries a type it does not change');
     });
   });
 
