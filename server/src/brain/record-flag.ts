@@ -143,7 +143,6 @@ export function applyRecordFlags(doc: RecordFlags, opts?: RecordFlags): void {
   }
 }
 
-
 /**
  * Every per-record flag a body states, each read by `parseRecordFlag` — for a door that takes them all at once.
  *

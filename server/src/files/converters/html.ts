@@ -9,7 +9,6 @@ import TurndownService from 'turndown';
 import type { FileConverter } from './types.js';
 import { ConversionUnavailableError } from './types.js';
 
-
 // jsdom builds the full DOM in-process — parsing cost is highly non-linear in
 // input size, so HTML gets a tighter cap than the sidecar-backed formats.
 const MAX_HTML_BYTES = 25 * 1024 * 1024;

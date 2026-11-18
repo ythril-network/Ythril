@@ -202,7 +202,6 @@ export function startRestore(plan: Extract<RestorePlan, { ok: true }>): RestoreS
   return { restoreId: set.id, backupId: plan.backupId, spaces: plan.spaces, emptied: plan.emptied, leftOut: plan.leftOut };
 }
 
-
 // ── the end ────────────────────────────────────────────────────────────────────────────────────────────────────
 // (The report of a restore is the act-set report, `spaces/act-set-report.ts`, and its abandon the act-set abandon,
 // `spaces/act-set-abandon.ts`; a migrate shares both.)

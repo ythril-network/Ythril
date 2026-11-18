@@ -98,7 +98,6 @@ export function stampSkewSettings(meta: SpaceMeta | undefined): { warnMs: number
   };
 }
 
-
 /**
  * Compare a record's caller-supplied stamp against the server's `createdAt`.
  *

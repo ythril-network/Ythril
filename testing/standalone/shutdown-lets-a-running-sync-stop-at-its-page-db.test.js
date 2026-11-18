@@ -71,7 +71,6 @@ const ENTITY_POS = 10, ENTITY_COUNT = 2;
 
 let door, runShutdown, shutdownMissing, lifecycle, engine, trigger, notifyHandler, syncTool, proto;
 
-
 const need = () => assert.ok(runShutdown,
   `the shutdown sequence is not exported: ${SHUTDOWN_MODULE} exports no runShutdown (${shutdownMissing?.message ?? 'no module'}). `
   + 'Nothing can drive a shutdown with a cycle in flight until the sequence is a function; see the contract in this file\'s header');

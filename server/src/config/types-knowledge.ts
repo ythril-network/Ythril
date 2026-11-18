@@ -158,8 +158,6 @@ export const LINK_INPUT_FIELDS: Readonly<Record<RefKind, string>> = Object.freez
   })) as Record<RefKind, string>,
 );
 
-
-
 /**
  * A recorded disagreement between a record's own timestamp and the server's write time.
  *

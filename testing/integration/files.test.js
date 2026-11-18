@@ -365,7 +365,6 @@ describe('File metadata (MongoDB)', () => {
     tokenA = fs.readFileSync(TOKEN_FILE_A, 'utf8').trim();
   });
 
-
   /** Fetch brain stats for a space */
   async function getStats(token, spaceId) {
     const url = `${INSTANCES.a}/api/brain/spaces/${spaceId}/stats`;

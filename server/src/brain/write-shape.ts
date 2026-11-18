@@ -65,8 +65,6 @@ type Check = (v: unknown) => string | null;
 /** The cap on a fact's `fact`. Declared once, in `util/request-bounds.ts` — it was written out at six sites. */
 export { MAX_FACT_LENGTH };
 
-
-
 // ── the small checks the tables are built from ──────────────────────────────────────────────
 
 const str = (field: string): Check => v =>

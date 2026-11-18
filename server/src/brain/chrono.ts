@@ -34,7 +34,6 @@ import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-g
 // module only to keep chrono.ts ↔ recall.ts from importing each other. See chrono-status.ts.
 export { deriveChronoStatus } from './chrono-status.js';
 
-
 /**
  * The recurrence frequencies a chrono entry may repeat on. EXPORTED so a test can exercise all of them
  * rather than naming four -- a fifth would otherwise be accepted by this validator and tried by nothing.
@@ -538,7 +537,6 @@ export function buildChronoQuery(
     if (filter.before !== undefined) range['$lt'] = filter.before;
     query['createdAt'] = range;
   }
-
 
   if (and.length > 0) query['$and'] = and;
 

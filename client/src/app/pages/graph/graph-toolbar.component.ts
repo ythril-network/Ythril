@@ -104,7 +104,6 @@ export class GraphToolbarComponent {
   /** True while the page hides its drawn graph (an error, or a load in flight): Fit and Reset have nothing shown to act on (Q-209). */
   readonly graphHidden = input<boolean>(false);
 
-
   private readonly plural = inject(PluralText);
 
   /** "N nodes · M edges": each number takes the plural form its own count needs, so it is two sentences joined and not one. */

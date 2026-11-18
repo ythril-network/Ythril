@@ -124,7 +124,6 @@ function enumerationsIn(src) {
  * declared, never read, and not in the template either. Deleted rather than converted.
  */
 
-
 describe('the knowledge types are named in one place per side', () => {
   it('no file re-enumerates them', () => {
     const offenders = [];

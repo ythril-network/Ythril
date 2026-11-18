@@ -97,7 +97,6 @@ export interface MediaJobDoc {
   updatedAt: string;          // ISO8601
 }
 
-
 /**
  * The brain record types that carry their own embedding and therefore their own embedding job.
  *

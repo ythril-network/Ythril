@@ -54,7 +54,6 @@ const QUARANTINED = 'ythril_housekeeping_quarantined_spaces';
 // `not_ready` (bundle-81): a space that owes its positions is skipped by a walk and counted, not failed.
 const KINDS = ['failure', 'timeout', 'store_down', 'stalled', 'not_ready'];
 
-
 /** Every sample of one series name in a scrape, keyed by its labels in a stable spelling. */
 function samples(text, name) {
   const out = new Map();

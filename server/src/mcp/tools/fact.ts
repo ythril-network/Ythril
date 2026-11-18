@@ -414,7 +414,6 @@ export const delete_factTool: ToolHandler = {
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
 
-
     /*
      * `M-2`: what points at this record can be SEEN now, so under strict linkage it can also block.
      *

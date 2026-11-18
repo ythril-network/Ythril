@@ -14,7 +14,6 @@
 import type { NetworkConfig, NetworkMember } from '../config/types.js';
 import { PER_SPACE_WATERMARKS, RECEIVE_MARKS, ROLLBACK_MARKS, POSITION_TWIN, type PerSpaceWatermark } from '../config/types-networks.js';
 
-
 /**
  * Visit every mark map of every member `net` holds, the members AND the member each join round in flight carries, for the marks in
  * `which` (all of `PER_SPACE_WATERMARKS` by default). `localSpaceId`: only the maps that hold a mark for that space; `null`: every map

@@ -39,7 +39,6 @@ import { getSpaceMeta } from '../spaces/schema-validation.js';
  * apply the edge half and forget the file half, because it never sees either.
  */
 
-
 /**
  * Rewrite a chrono predicate's `status` clause so it means the DERIVED status.
  *
@@ -89,7 +88,6 @@ export function derivedStatusPredicate(
    */
   return { predicate: Object.keys(rest).length ? { $and: [rest, clause] } : clause };
 }
-
 
 /**
  * The predicate a call should actually run, from the arguments it arrived with.

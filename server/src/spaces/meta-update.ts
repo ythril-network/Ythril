@@ -286,7 +286,6 @@ export function planSpaceMetaUpdate(input: {
     return { ok: false, refusal: { status: 400, body: refusal } };
   }
 
-
   // Validate any $ref values in the incoming meta against the instance schema library: an entry that does not exist, or one of ANOTHER
   // kind, whose endpoints and functional would never apply (`Q-215`). Checked here, at the save of the reference, against this
   // instance's library — never inside the shared parse, because a peer's library is its own. The one refusal is the package's.

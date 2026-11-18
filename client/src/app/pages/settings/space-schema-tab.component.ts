@@ -1199,7 +1199,6 @@ export class SpaceSchemaTabComponent implements OnInit {
     saveBlob(blob, `${space.id}_${kt}_${name}.json`);
   }
 
-
   /** Handle the file chosen for per-type import. */
   onImportTypeSchemaFile(event: Event): void {
     const file = (event.target as HTMLInputElement).files?.[0];
@@ -1331,7 +1330,6 @@ export class SpaceSchemaTabComponent implements OnInit {
     if (target?.kt) this.triggerImportFromLibrary(target.kt, target.name);
     else this.triggerImportFromLibraryAny();
   }
-
 
   /**
    * Open the library picker unscoped — every entry, from the top action row.

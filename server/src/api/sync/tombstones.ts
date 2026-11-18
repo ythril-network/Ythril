@@ -26,7 +26,6 @@ import { refusalOfParse } from '../../util/log.js';
 
 export const syncTombstonesRouter = Router();
 
-
 // ═══════════════════════════════════════════════════════════════════════════
 // TOMBSTONES
 // ═══════════════════════════════════════════════════════════════════════════
@@ -62,7 +61,6 @@ syncTombstonesRouter.get('/tombstones', syncRateLimit, requireAuth, async (req, 
     sendCaughtFailure(res, `sync GET tombstones`, err);
   }
 });
-
 
 /** The push body: an array of elements, unvalidated here, at most `MAX_TOMBSTONES_PER_REQUEST` of them. */
 export const TombstonePage = z.object({ tombstones: z.array(z.unknown()).max(MAX_TOMBSTONES_PER_REQUEST).default([]) });
@@ -112,7 +110,6 @@ syncTombstonesRouter.post('/tombstones', syncRateLimit, requireAuth, denyReadOnl
   }
 });
 
-
 // ═══════════════════════════════════════════════════════════════════════════
 // FILE TOMBSTONES
 // ═══════════════════════════════════════════════════════════════════════════
@@ -153,7 +150,6 @@ syncTombstonesRouter.get('/file-tombstones', syncRateLimit, requireAuth, async (
     sendCaughtFailure(res, `sync GET file-tombstones`, err);
   }
 });
-
 
 /**
  * POST /api/sync/file-tombstones

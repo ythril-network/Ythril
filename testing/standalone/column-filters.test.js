@@ -26,7 +26,6 @@ function serverSources() {
 }
 const read = (f) => readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8');
 
-
 let textContains, tagContains;
 
 before(async () => {

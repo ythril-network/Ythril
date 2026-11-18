@@ -25,7 +25,6 @@ interface SpaceLike {
   meta?: { typeSchemas?: Partial<Record<string, Record<string, unknown> | undefined>> };
 }
 
-
 /** Entry name → every space type that references it, in space order and then knowledge-type order. */
 export function libraryUsages(spaces: readonly SpaceLike[]): Map<string, LibraryUsage[]> {
   const out = new Map<string, LibraryUsage[]>();

@@ -17,9 +17,7 @@ import { sendCaughtFailure } from '../send-failure.js';
 
 export const syncWarmRouter = Router();
 
-
 // ── Vote conclusion logic ──────────────────────────────────────────────────
-
 
 // ── Presync warm-up ─────────────────────────────────────────────────────────
 /**

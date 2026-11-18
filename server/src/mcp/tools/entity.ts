@@ -387,7 +387,6 @@ export const graph_mergeTool: ToolHandler = {
     if (!absorbedId || !UUID_V4_RE.test(absorbedId)) throw new Error('absorbedId must be a valid UUID v4');
     if (survivorId === absorbedId) throw new Error('Cannot merge an entity with itself');
 
-
     const resolutions: PropertyResolution[] = [];
     if (Array.isArray(a['resolutions'])) {
       for (const r of a['resolutions'] as Array<Record<string, unknown>>) {
@@ -513,7 +512,6 @@ export const delete_entityTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const id = String(a['id'] ?? '').trim();
     if (!id) throw new Error('id must not be empty');
-
 
     for (const mid of [callSpace]) {
       const existing = await getEntityById(mid, id);

@@ -33,7 +33,6 @@ const created = [];
 // The MCP client harness lives in ../sync/mcp-session.js. It was copy-pasted into ten files while the
 // transport was SSE; 4.0 removed SSE and one shared `POST /mcp` caller replaced every copy.
 
-
 const idFor = (what) => `mcp-reindex-${what}-${RUN}`;
 
 async function makeSpace(id, body = {}) {

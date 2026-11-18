@@ -57,7 +57,6 @@ export interface MemberSkew {
   members: Array<{ label: string; networkId: string; neverHeardFrom: boolean }>;
 }
 
-
 /**
  * The new keys a proposal sets, by the release that reads them: its top-level keys and, inside the types it carries, the fields of each
  * type. A key set to `undefined` is a clear, which an older member never sees as a key.

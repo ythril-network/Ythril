@@ -59,7 +59,6 @@ import { warnOnce } from '../util/warn-once.js';
 import { schemaSnapshotTotal, type SchemaSnapshotOutcome } from '../metrics/schema-snapshot-count.js';
 import { log, peerText } from '../util/log.js';
 
-
 /** The name the cycle's step, and every failure of a snapshot write, is reported under. */
 export const SCHEMA_SNAPSHOT_STEP = declareStep('Schema snapshots');
 

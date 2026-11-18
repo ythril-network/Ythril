@@ -455,7 +455,6 @@ console.log(`\n${YELLOW}todo/ consistency${R}  ${DIM}(owner rules 2026-08-02 and
     : `${RED}  ✗${R} a verify line disagrees with the tree, or cannot be checked`);
 }
 
-
 // ── rule 3b: a tracker holds WORK — not watches, and not things blocked on the owner
 {
   /**

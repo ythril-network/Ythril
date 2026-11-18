@@ -98,7 +98,6 @@ export interface UpsertResult {
   contradicts?: ContradictionWarning[];
 }
 
-
 /** Derive the text to embed for an entity (name + type + tags + description + properties). */
 
 /**

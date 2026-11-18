@@ -554,7 +554,6 @@ function topLevelEdgeWant(spaceId: string, item: Record<string, unknown>): ReadW
   return mergeWants([{ records }, edgeWant(spaceId, { from: from.id, to: to.id, label, opts: { fromKind: from.kind, toKind: to.kind } })]);
 }
 
-
 /** A plan waiting for the commit, with what the batch reports about it. */
 interface Pending {
   plan: WritePlan;

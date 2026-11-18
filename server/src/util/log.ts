@@ -89,7 +89,6 @@ export function currentRequestId(): string | undefined {
   return requestContext.getStore()?.requestId;
 }
 
-
 /*
  * How a value from OUTSIDE is said in a line or a refusal — `peerText`, `peerList`, the secret redaction and `refusalOfParse` — is
  * `@ythril-network/schema`'s (`schema/src/text.ts`), because a schema refusal the package words and a line this logger writes must say a value
@@ -140,7 +139,6 @@ function causesOf(err: Error): string {
     return '';
   }
 }
-
 
 function fmt(level: string, msg: string, meta?: unknown): string {
   const ts = new Date().toISOString();

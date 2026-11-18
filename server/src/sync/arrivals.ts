@@ -373,7 +373,6 @@ function receiverStamps(doc: Doc, recordType: BrainEmbedRecordType, space: Reten
   return (space ? retentionStamps(space, recordType, doc) : {}) as Doc;
 }
 
-
 /**
  * What the replace carries of a write-guard field (`Q-439`): the stored value, but only while the arriving document's `from`
  * and `label` are the stored ones. A guard is a function of `(from, label)`, so a peer's edit that moves the edge to another

@@ -584,4 +584,3 @@ async function propagateVotesWithPeer(
   }
 }
 
-

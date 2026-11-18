@@ -18,7 +18,6 @@ import { headingIdFor, headingSlug, headingTextOf, makeSlugger } from './heading
 // Where the slug rule lives, so the Help gate can run it; kept exported here for the callers that read it from the renderer.
 export { headingSlug };
 
-
 @Injectable({ providedIn: 'root' })
 export class MarkdownRenderService {
   /**

@@ -171,7 +171,6 @@ export function chunkEmbedText(headingText: string | null | undefined, content: 
   return headingText ? `${headingText} ${content}` : content;
 }
 
-
 // ── What is EMBEDDED: the one builder, and the bytes it may hold ────────────────────────────────────────────────
 
 /**

@@ -857,4 +857,3 @@ tokensRouter.delete('/:id', requireAdminOrSpaceAdminMfa, async (req, res) => {
   res.status(204).end();
 });
 
-

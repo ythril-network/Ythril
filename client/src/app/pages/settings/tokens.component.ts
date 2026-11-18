@@ -237,7 +237,6 @@ export class TokensComponent implements OnInit {
     this.spacesFilter.set('');
   }
 
-
   ngOnInit(): void {
     this.authApi.getMe().subscribe({ next: (t) => this.selfToken.set(t), error: () => {} });
     this.spacesApi.listSpaces().subscribe({
@@ -256,7 +255,6 @@ export class TokensComponent implements OnInit {
     });
   }
 
-
   /** The dialog owns the create flow; the page owns the list and the one-time plaintext reveal. */
   onRightsSaved(updated: TokenRecord): void {
     this.editRightsFor.set(null);
@@ -269,9 +267,6 @@ export class TokensComponent implements OnInit {
     this.tokens.update(list => [e.token, ...list]);
     this.newToken.set(e.plaintext);
   }
-
-
-
 
   /**
    * A danger action asked for from inside the editor.

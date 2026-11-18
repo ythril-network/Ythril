@@ -582,7 +582,6 @@ export type ParsedTypeSchema = TypeSchema & { readonly [PARSED]: 'type-schema' }
  */
 export type ParsedSpaceMeta = SpaceMeta & { readonly [PARSED]: 'space-meta' };
 
-
 type Obj = Record<string, unknown>;
 
 /** The unknown names a tolerant reader met, collected up to the bound and counted beyond it (`boundedNames` says them). */

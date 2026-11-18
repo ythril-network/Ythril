@@ -169,7 +169,6 @@ describe('whenDuePasses is CHRONO only, because only a chrono entry has a due mo
   });
 });
 
-
 describe('the refusal says what to do instead', () => {
   it('the message names the field, the collection it belongs to, and a way forward', () => {
     /*

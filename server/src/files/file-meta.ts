@@ -63,9 +63,6 @@ import { LIVE_FILE_ROW, NOT_A_FLAGGED_ROW } from './live-file-row.js';
 import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 import { isLocalFileField, stripDerivedStages, replacedBytesStages } from './derived-fields.js';
 
-
-
-
 // `resolveEntityNames` lived here, used only to build embedding text. That job moved to `buildEmbedText`,
 // which resolves the names itself from the STORED record — so keeping a second resolver here would be a
 // spare copy waiting to be reached for, and the last spare copy in this file is what let its embedding text
@@ -327,7 +324,6 @@ export function isArrivedPlaceholder(row: { seq?: number; author?: { instanceId?
   const author = row.author?.instanceId;
   return row.seq === 0 && author !== undefined && author !== '' && author === row.deliveredBy;
 }
-
 
 /**
  * Read one file-metadata record by path, or null.

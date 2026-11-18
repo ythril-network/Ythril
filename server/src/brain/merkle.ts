@@ -167,7 +167,6 @@ export function docLeaf(collType: string, doc: Record<string, unknown>): string 
 // Derived from DERIVED_FIELDS itself: a hand-written copy here missed `syncBase` the day it was added (Q-66).
 const DERIVED_PROJECTION: Readonly<Record<string, 0>> = Object.fromEntries([...DERIVED_FIELDS].map(f => [f, 0]));
 
-
 /**
  * What is INCLUDED from a file's metadata — and it is an inclusion projection, unlike every other collection.
  *

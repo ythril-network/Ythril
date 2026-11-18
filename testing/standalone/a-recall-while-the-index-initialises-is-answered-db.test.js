@@ -108,7 +108,6 @@ function watchVectorSearch() {
   return { of: (ns) => seen.get(ns) ?? { refused: 0, served: 0 }, restore: patch.restore };
 }
 
-
 describe('a vector read while the index initialises is answered', { skip }, () => {
   before(async () => {
     stub = await startStubEmbedder(() => queryAxis(DIMS));

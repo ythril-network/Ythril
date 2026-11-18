@@ -786,7 +786,6 @@ async function reconcileDeletedSource(spaceId: string, claim: JobClaim): Promise
   return true;
 }
 
-
 /** Resolve the absolute file path on disk for a given space + relative path. */
 function resolveFilePath(spaceId: string, filePath: string): string {
   const base = spaceRoot(spaceId);

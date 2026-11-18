@@ -12,7 +12,6 @@ import { formatSize } from './file-format';
 
 const LANGS = ['en', 'de', 'pl'] as const;
 
-
 /** A node of the tree sidebar's state, by path. */
 function findNode(page: MountedPage, path: string): any {
   const walk = (nodes: any[]): any => {

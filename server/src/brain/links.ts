@@ -198,7 +198,6 @@ export async function reconcileLinks(
   return counts!;
 }
 
-
 /**
  * Remove every link record a deleted record was the FROM of.
  *

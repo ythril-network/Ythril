@@ -26,7 +26,6 @@ import { sendReadFailure } from './_read-failure.js';
 
 export const edgesRouter = Router();
 
-
 // POST /api/brain/spaces/:spaceId/edges — create/upsert an edge
 // What a body may carry is `acceptedWriteKeys('edge.create')`: the paired tool's own schema, not a list kept beside this route.
 edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
@@ -159,7 +158,6 @@ edgesRouter.post('/spaces/:spaceId/edges', globalRateLimit, requireSpaceAuth, de
   res.status(201).json(result);
 });
 
-
 // DELETE /api/brain/spaces/:spaceId/edges/:id
 edgesRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
@@ -171,7 +169,6 @@ edgesRouter.delete('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAu
   if (deleted) { res.status(204).end(); return; }
   res.status(404).json({ error: 'Edge not found' });
 });
-
 
 // PATCH /api/brain/spaces/:spaceId/edges/:id — partial update an edge by ID
 // What a body may carry is `acceptedWriteKeys('edge.update')` (the id is the path's, so it is not among them).
@@ -324,5 +321,4 @@ edgesRouter.patch('/spaces/:spaceId/edges/:id', globalRateLimit, requireSpaceAut
   }
   res.status(404).json({ error: 'Edge not found' });
 });
-
 

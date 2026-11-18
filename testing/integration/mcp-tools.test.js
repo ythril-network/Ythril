@@ -833,7 +833,6 @@ describe('MCP recall_global — full-access token, multi-space isolation', () =>
   });
 });
 
-
 describe('MCP brain tools � update_memory / delete_memory / get_stats', () => {
   let session;
   let storedMemoryId;

@@ -66,7 +66,6 @@ export interface ChatTransport {
 /** The Messages API version this module speaks. */
 const ANTHROPIC_VERSION = '2023-06-01';
 
-
 /**
  * How to list a Claude endpoint's models — for the probe, so it reaches the same host with the same credential
  * shape inference uses. A Bearer token is not how the Claude API takes a key, so the OpenAI-style probe would

@@ -73,7 +73,6 @@ export function rightsRank(rights: TokenRights | undefined | null): number {
   return Math.max(held(rights.floor as never), ...Object.values(rights.perSpace ?? {}).map(a => held(a as never)));
 }
 
-
 /**
  * Tick or untick an instance-level flag on a rights draft. Granting instance admin also sets space admin on the
  * FLOOR — what the server stores for every instance admin (`auth/instance-admin-grants.ts`, S-11) — so the matrix

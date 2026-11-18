@@ -42,7 +42,6 @@ const PEERS = description('server/src/mcp/tools/sync.ts', 'network_peers');
 const SYNCNOW = description('server/src/mcp/tools/sync.ts', 'network_sync');
 const TOKENS = description('server/src/mcp/tools/spaces.ts', 'list_tokens');
 
-
 /*
  * TWO OF THIS FILE'S FINDINGS WERE DISSOLVED BY A FOLD, NOT FIXED, AND THAT IS WORTH THE PARAGRAPH.
  *
@@ -85,7 +84,6 @@ describe('list_dir: the proxy merge loses a duplicate name', () => {
       'empty means "nothing here OR no such path" and the two are indistinguishable');
   });
 });
-
 
 describe('the sync tools say what their answers do not cover', () => {
   it('list_peers: one row per peer PER NETWORK', () => {

@@ -453,8 +453,6 @@ export class BrainComponent implements OnInit, OnDestroy {
   /** Instance identity/health for the Overview's Instance panel — fetched once (instance-wide, not per space). */
   aboutInfo = signal<AboutInfo | null>(null);
 
-
-
   // Reindex: the one state both Reindex buttons follow, and the poll of a running reindex — `brain-reindex.ts`.
   private readonly rx = new BrainReindex({
     spacesApi: this.spacesApi, toast: this.toast, transloco: this.transloco,
@@ -652,11 +650,6 @@ export class BrainComponent implements OnInit, OnDestroy {
      * would have fixed the same bug and is the obvious move — do not reintroduce it.
      */
   }
-
-
-
-
-
 
   /**
    * Deep-link state: which space and which tab, read from the URL.

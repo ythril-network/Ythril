@@ -432,7 +432,6 @@ function closestBranch(branches: readonly ParseIssueLike[][]): readonly ParseIss
   return best;
 }
 
-
 export function redact(msg: string): string {
   return msg
     .replace(/Bearer\s+[A-Za-z0-9_.\-]+/gi, REDACTED)

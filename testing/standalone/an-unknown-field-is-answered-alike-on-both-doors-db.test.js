@@ -342,7 +342,6 @@ describe('an unknown field on a brain write is answered alike on both doors (b12
 
   // ── the subject set ──────────────────────────────────────────────────────────────────────────────────────────────
 
-
   // ── (a) the unknown key, under each mode ─────────────────────────────────────────────────────────────────────────
 
   it('(a) under warn every door stores the write and names the unknown field; the rows are the same on all three', async () => {

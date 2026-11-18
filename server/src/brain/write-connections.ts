@@ -191,7 +191,6 @@ export function linkInputError(body: unknown, kind: ConnectionKind, opts: { stri
   return null;
 }
 
-
 /**
  * The `link*` properties for a tool's `inputSchema`, built from the same map the readers use.
  *
@@ -396,7 +395,6 @@ export function edgeInputError(body: unknown): string | null {
   }
   return null;
 }
-
 
 /**
  * Everything a body says about relationships, refused in one call.

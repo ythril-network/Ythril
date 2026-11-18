@@ -706,7 +706,6 @@ function bodyOf(kind: ForkKind, row: Record<string, unknown>): Record<string, un
   return { _id: row['_id'], ...Object.fromEntries(fields.filter(f => row[f] !== undefined).map(f => [f, row[f]])) };
 }
 
-
 /** The relink kinds' modules, loaded when a resolve needs them (they import this module: see the module docblock). */
 async function relinkModule() { return import('./relink-references.js'); }
 

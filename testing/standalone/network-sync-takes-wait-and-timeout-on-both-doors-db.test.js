@@ -39,7 +39,6 @@ process.env['DATA_ROOT'] = tmpDir;
 const NET = 'net-wait-test';
 let tool, trigger, getConfig, mongo;
 
-
 describe('network_sync takes wait and timeoutMs on both doors and says what it used', { skip }, () => {
   before(async () => {
     fs.mkdirSync(path.dirname(process.env['CONFIG_PATH']), { recursive: true });
