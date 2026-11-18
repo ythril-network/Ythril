@@ -15,6 +15,10 @@ import { schemaConvertStartAct, schemaConvertStatusAct } from '../spaces/schema-
 import type { TokenRights } from '../config/rights-shape.js';
 import { sendCaughtFailure } from './send-failure.js';
 import { sendSpaceActAnswer } from './send-act-answer.js';
+import { convertStartChanges } from '../audit/audit-changes.js';
+
+/** The lowest status an act answers a refusal with: below it the start was accepted. */
+const FIRST_REFUSAL_STATUS = 400;
 
 export const spaceSchemaConvertRouter = Router();
 
@@ -25,7 +29,10 @@ const callerOf = (req: { authToken?: unknown }): { rights: TokenRights | undefin
 spaceSchemaConvertRouter.post('/:id/schema-convert', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, async (req, res) => {
   const spaceId = req.params['id'] as string;
   try {
-    sendSpaceActAnswer(res, await schemaConvertStartAct(spaceId, req.body, callerOf(req)));
+    const answer = await schemaConvertStartAct(spaceId, req.body, callerOf(req));
+    // What the act accepted, for the audit entry (`schema.convert.start`): the types and the number of steps, never the steps' text.
+    if (answer.status < FIRST_REFUSAL_STATUS) req.auditChangesExplicit = convertStartChanges(answer.body);
+    sendSpaceActAnswer(res, answer);
   } catch (err) {
     sendCaughtFailure(res, 'POST /api/spaces/:id/schema-convert', err);
   }

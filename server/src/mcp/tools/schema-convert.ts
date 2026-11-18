@@ -13,6 +13,7 @@ import { SCHEMA_CONVERT_TYPES_MAX } from '../../spaces/schema-convert-run.js';
 import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
 import { toolRefusalOfAct, type ToolRefusal } from '../../util/errors.js';
 import { CONVERT_RECORDS_PARAMETER } from './schema-update-parts.js';
+import { convertStartChanges } from '../../audit/audit-changes.js';
 
 /** The lowest status an act answers a refusal with. */
 const FIRST_REFUSAL_STATUS = 400;
@@ -65,7 +66,7 @@ export const space_schema_convertTool: ToolHandler = {
         items: {
           type: 'object', additionalProperties: false, required: ['kind', 'type'],
           properties: {
-            kind: { type: 'string', enum: [...KNOWLEDGE_TYPES], description: 'The kind of the records.' },
+            kind: { type: 'string', enum: [...KNOWLEDGE_TYPES], description: 'The kind of the records to convert: `entity`, `fact`, `edge` or `chrono`. A kind that is none of them refuses the whole call and starts nothing.' },
             type: { type: 'string', minLength: 1, description: 'The type name (for an edge, its label). Naming a type no record has costs nothing.' },
           },
         },
@@ -79,13 +80,17 @@ export const space_schema_convertTool: ToolHandler = {
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { space: _space, ...body } = ctx.args;
-    return resultOf(await schemaConvertStartAct(ctx.callSpace, body, { rights: ctx.rights }));
+    const answer = await schemaConvertStartAct(ctx.callSpace, body, { rights: ctx.rights });
+    const result = resultOf(answer);   // throws a refusal: nothing below runs for one
+    // What the act accepted, for the audit entry (`schema.convert.start`), as the route hands it: the types and the number of steps.
+    ctx.recordAuditChanges?.(convertStartChanges(answer.body));
+    return result;
   },
 };
 
 export const space_schema_conversionTool: ToolHandler = {
   name: 'space_schema_conversion',
-  description: 'Read how the conversion of a space\'s records went, whether a schema save, a passed vote or `space_schema_convert` started it. Same as '
+  description: 'Read how the conversion of a space\'s records went, whether a schema save, a passed vote or a conversion an administrator started by hand started it. Same as '
     + '`GET /api/spaces/:id/schema-convert`; it needs `knowledge: read` and writes nothing.\n\n'
     + 'THE ANSWER is `{ state, toFp, types, steps, stepsRefused, sources, owed, syncedFirst?, startedAt, finishedAt?, counts, left, failures, error? }`. '
     + '`state` is `running`, `complete` or `failed`; `types` lists each type with `done`; `steps` are the steps the run holds and `stepsRefused` the ones '
