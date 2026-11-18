@@ -61,8 +61,10 @@ import { isDeepStrictEqual } from 'node:util';
 import { spaceForWire } from './space-for-wire.js';
 import { lostSpaceAnswer } from './unknown-space.js';
 import {
-  startSchemaConvertInTurn, roundConvertStartOf, schemaConvertTypes, type SchemaConvertStarted, type SchemaConvertTypeRef,
+  startSchemaConvertInTurn, roundConvertStartOf, schemaConvertTypes, roundStepIssue, type SchemaConvertStarted, type SchemaConvertTypeRef,
 } from '../sync/governance.js';
+import { parseMetaRound, type MetaRoundProposal } from '../sync/meta-round-merge.js';
+import type { ConversionStep } from '@ythril-network/schema/internal';
 // The trigger lives beside the sweep (bundle-30 `R5`): the effective-meta recompute fires it too.
 
 // The merge a write makes, and the base it is merged over, live with the rights check's copy of the same question (`meta-write-base.ts`).
@@ -258,6 +260,54 @@ function effectiveMetaAfterEdit(cfg: Config, space: SpaceConfig, edit: {
   const networked = cfg.networks.some(n => n.spaces.includes(space.id));
   const own = networked && edit.mode === 'replace' ? mergeSpaceMeta(edit.base, edit.incoming, 'merge') : edit.merged;
   return effectiveMeta(own as SpaceMeta, layers);
+}
+
+/**
+ * The effective meta of `space` on the proposer once the round a networked edit opens has passed here (`Q-745`, lens sweep S2): the schema a
+ * conversion step is held to as the proposer's own conclusion holds it (`planPassedMetaChange`), so the save refuses exactly what that conclusion
+ * would refuse.
+ *
+ * - The own definitions: the merged meta for an own edit (a networked `replace` read as a merge), unchanged for a proposal to one network.
+ * - Each network the round reaches whose layer the conclusion writes (a proposal to a network always; an own edit where this instance holds a layer
+ *   of that network) has that layer replaced by what the conclusion stores there: the round parsed over it (`parseMetaRound`), which replaces each
+ *   type the round carries by name. A layer that unparseable round would leave is kept as it is (the conclusion refuses the round whole then).
+ */
+function effectiveMetaAfterRound(cfg: Config, space: SpaceConfig, reached: readonly NetworkConfig[], edit: {
+  base: Partial<SpaceMeta>; incoming: Partial<SpaceMeta>; mode: 'merge' | 'replace'; merged: ParsedSpaceMeta; targetNetwork: string | undefined;
+}, round: MetaRoundProposal): SpaceMeta {
+  const own = edit.targetNetwork !== undefined ? (space.ownMeta ?? space.meta) : (edit.mode === 'replace' ? mergeSpaceMeta(edit.base, edit.incoming, 'merge') : edit.merged);
+  const layers = layersFor(cfg, space.id);
+  const after = new Map(layers.map(l => [l.networkId, l.meta]));
+  for (const net of reached) {
+    const held = net.schemaLayers?.[space.id];
+    if (edit.targetNetwork === undefined && held === undefined) continue;
+    const parsed = parseMetaRound(held ?? {}, round);
+    if (parsed.ok) after.set(net.id, parsed.meta);
+  }
+  const among = [...layers.map(l => ({ networkId: l.networkId, meta: after.get(l.networkId)! })),
+    ...[...after.entries()].filter(([id]) => !layers.some(l => l.networkId === id)).map(([networkId, meta]) => ({ networkId, meta }))];
+  return effectiveMeta(own as SpaceMeta, among);
+}
+
+/**
+ * `metaBase` with the definition, resolved, of each type a type step of `steps` moves records out of, taken from `held` (the effective meta before
+ * the edit) where `metaBase` does not already carry it (`Q-745`, lens sweep B1). A round's before-schema held only the types the edit changed, and a
+ * type step's source is one it leaves alone; a member that never held the proposer's own definitions then refused the step. Nothing is added for
+ * steps with no type step, so a round without one carries what it always did; `metaBase` is signed by no cast (`sig` and `bsig` cover the round's
+ * type and target, `csig` the steps), so an older member reads the extra type as one more type of the base, which only the types the round changes
+ * are compared against.
+ */
+function withTypeStepSources(metaBase: SpaceMeta, held: SpaceMeta | undefined, steps: readonly ConversionStep[]): SpaceMeta {
+  const sources = steps.flatMap(s => (s.op === 'renameType' || s.op === 'splitType' ? [[s.kind, s.from] as const] : []));
+  if (sources.length === 0) return metaBase;
+  const known = (inlineResolvableRefs(held ?? {}).typeSchemas ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  const carried = { ...((metaBase.typeSchemas ?? {}) as Record<string, Record<string, unknown> | undefined>) };
+  for (const [kind, from] of sources) {
+    const def = known[kind]?.[from];
+    if (def === undefined || carried[kind]?.[from] !== undefined) continue;
+    carried[kind] = { ...(carried[kind] ?? {}), [from]: def };
+  }
+  return { ...metaBase, typeSchemas: carried as SpaceMeta['typeSchemas'] };
 }
 
 /** A meta as a conversion step reads it: resolved, library `$ref`s inlined as the fingerprint takes them. */
@@ -474,11 +524,25 @@ export function planSpaceMetaUpdate(input: {
   // member. `{}` has no step and reads nothing. The first refusal answers; the refusal names the step.
   const convertRecords = parsed.data.convertRecords;
   const steps = convertRecords?.steps ?? [];
+  const named = parsed.data.meta as Partial<SpaceMeta> | undefined;
+  const proposal = mergedMeta === undefined ? undefined : proposalOf(mergedMeta, named, changedTypes);
+  // The round's before-schema: what the changed types held, and (B1) the definition of each type a type step moves records OUT of, which the edit
+  // leaves alone: a member that never held the proposer's own definitions holds no definition of it, and refused the step for that.
+  const metaBase = mergedMeta === undefined ? undefined : withTypeStepSources(proposalOf(base as SpaceMeta, named, changedTypes), space.meta, steps);
   if (steps.length > 0 && mergedMeta !== undefined) {
-    const after = effectiveMetaAfterEdit(getConfig(), space, {
-      base, incoming: parsed.data.meta as Partial<SpaceMeta>, mode: parsed.data.typeSchemasMode ?? 'merge', merged: mergedMeta, targetNetwork,
-    });
-    const issue = conversionStepIssues(steps, resolvedForSteps(space.meta), resolvedForSteps(after))[0];
+    const cfg = getConfig();
+    const edit = { base, incoming: parsed.data.meta as Partial<SpaceMeta>, mode: parsed.data.typeSchemasMode ?? 'merge' as const, merged: mergedMeta, targetNetwork };
+    const reached = cfg.networks.filter(n => n.spaces.includes(space.id) && (targetNetwork === undefined || n.id === targetNetwork));
+    // A networked save is held to what its round carries, by the check every member makes of it (`roundStepIssue`, S2/S3): one check, one pair. A
+    // space in no network has no round: its steps are held to its effective schema before the edit and after it.
+    const issue = reached.length > 0
+      ? roundStepIssue(steps, { metaBase, pendingMeta: proposal, changedTypes }, {
+        before: resolvedForSteps(space.meta),
+        after: resolvedForSteps(effectiveMetaAfterRound(cfg, space, reached, edit, {
+          pendingMeta: proposal!, metaChangedFields: proposedMetaFields(named ?? {}), baseMetaVersion: space.meta?.version ?? 0, ...(metaBase ? { metaBase } : {}),
+        })),
+      })
+      : conversionStepIssues(steps, resolvedForSteps(space.meta), resolvedForSteps(effectiveMetaAfterEdit(cfg, space, edit)))[0];
     if (issue) {
       return { ok: false, refusal: { status: BAD_BODY, body: {
         error: `convertRecords.steps[${issue.step}]: ${issue.message}`, code: 'bad_conversion_step', step: issue.step,
@@ -493,8 +557,8 @@ export function planSpaceMetaUpdate(input: {
       space,
       data: parsed.data,
       mergedMeta,
-      proposal: mergedMeta === undefined ? undefined : proposalOf(mergedMeta, parsed.data.meta as Partial<SpaceMeta> | undefined, changedTypes),
-      metaBase: mergedMeta === undefined ? undefined : proposalOf(base as SpaceMeta, parsed.data.meta as Partial<SpaceMeta> | undefined, changedTypes),
+      proposal,
+      metaBase,
       documentExtraction,
       hasDocExtraction,
       recordTtlDays,
