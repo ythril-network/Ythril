@@ -11,7 +11,8 @@
  *   larger than the list.
  * - **A hang that is not a finding.** {@link loadInFreshProcess} ends a child at its bound with SIGKILL and answers at once. A polite kill (SIGTERM) left a
  *   module that registers a handler for it, and keeps a handle open, holding the child's stderr pipe: the test file then waited until the batch's own bound
- *   killed the whole file, and the answer was a killed batch, not a finding.
+ *   killed the whole file, and the answer was a killed batch, not a finding. A hang is a finding only after a second, solitary try (see {@link loadAll}): a
+ *   machine that starved a child of CPU for the bound would otherwise fail the gate.
  * - **A cold compile cache in every child.** Each child compiles the server's modules again, and most of a module's load is that. {@link loadAll} gives its
  *   children one `NODE_COMPILE_CACHE` directory (node 22.1 or later; an older node ignores the variable, and the gate is only slower), made for the run under
  *   the scratch root and removed afterwards, so a stale entry cannot be read. A run the batch bound SIGKILLs never reaches the removal, so each `loadAll` first
@@ -67,7 +68,7 @@ export function loadInFreshProcess(specifier, { boundMs = LOAD_BOUND_MS, env = {
       child.stderr.destroy();
       // What the child had said by then, so a hang names where it was (a module that waits on something) and not only that it was cut off.
       const said = stderr.trim().split(/\r?\n/).slice(-2).join(' | ').slice(0, 200);
-      answer({ ok: false, reason: `did not finish loading in ${boundMs} ms${said ? ` (stderr: ${said})` : ''}` });
+      answer({ ok: false, timedOut: true, reason: `did not finish loading in ${boundMs} ms${said ? ` (stderr: ${said})` : ''}` });
     }, boundMs);
     child.on('error', (error) => answer({ ok: false, reason: `could not start a process: ${error.message}` }));
     child.on('exit', (code) => {
@@ -128,20 +129,39 @@ function sweepOldCaches(root) {
 
 /**
  * Load every module of `modules` (each `{ file, built }`), `parallel` at a time, in children that share one compile cache. Resolves a Map of
- * `file -> { ok, reason }`.
+ * `file -> { ok, reason }`, with `retried` on it: `{ file, first, second }` for every module that was loaded a second time (`second` is `'loaded'` or its reason).
+ *
+ * ## What the retry prevents, and why one is the bound
+ *
+ * A module that does not finish loading inside the bound is loaded once more, ALONE: after the pool has drained, with nothing else of this call running. This is
+ * what a loaded machine does to a gate (the reason it was CI-only: a load failure that was not one): a child starved of CPU for the bound is reported as a hang.
+ * Alone and with the same bound, a module that was only starved loads at once, and a real hang fails again, so the second try tells them apart. It is a finding
+ * only when it does not finish the second time either (its reason says it was tried twice). One retry is the bound: a real hang fails twice, and a second retry
+ * would only hide a machine that is slower than the gate is meant to run on. The retry lives here so no shard file can drop it; a module that throws, exits non-zero
+ * or cannot start is a finding at once and is never retried, since another load cannot change what it says. Every retry is returned in `retried`, for the caller
+ * to say in its output, so a stall is visible and countable and never swallowed.
  */
 export async function loadAll(modules, { parallel, boundMs = LOAD_BOUND_MS } = {}) {
   mkdirSync(scratchRoot(), { recursive: true });
   sweepOldCaches(scratchRoot());
   const cacheDir = mkdtempSync(join(scratchRoot(), CACHE_PREFIX));
   const results = new Map();
+  const retried = [];
+  const load = (m) => loadInFreshProcess(pathToFileURL(join(REPO_ROOT, m.built)).href, { boundMs, env: { NODE_COMPILE_CACHE: cacheDir } });
   try {
     // The pool is `poolEach`'s (`testing/_shared/pool.mjs`), which refuses a width that would start nothing.
-    await poolEach(modules, parallel, async (m) => {
-      results.set(m.file, await loadInFreshProcess(pathToFileURL(join(REPO_ROOT, m.built)).href, { boundMs, env: { NODE_COMPILE_CACHE: cacheDir } }));
-    });
+    await poolEach(modules, parallel, async (m) => { results.set(m.file, await load(m)); });
+    // The pool has drained: each module that stalled is loaded once more, one at a time.
+    for (const m of modules) {
+      const first = results.get(m.file);
+      if (first.ok || !first.timedOut) continue;
+      const second = await load(m);
+      retried.push({ file: m.file, first: first.reason, second: second.ok ? 'loaded' : second.reason });
+      results.set(m.file, second.ok || !second.timedOut ? second : { ...second, reason: `${second.reason}; tried twice, it did not finish either time` });
+    }
   } finally {
     rmSync(cacheDir, { recursive: true, force: true });
   }
+  results.retried = retried;
   return results;
 }
