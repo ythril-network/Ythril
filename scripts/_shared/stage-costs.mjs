@@ -38,6 +38,13 @@ export const STAGE_COSTS_FILE = 'stage-costs.json';
 /** The file-times snapshot's name in the results folder. */
 export const FILE_TIMES_FILE = 'file-times.json';
 
+/**
+ * The every-suite file-times snapshot's name in the results folder: the same shape as {@link FILE_TIMES_FILE}, for EVERY test job. The
+ * preflight does not read it (it starts its pure files by the pure snapshot); the slow-test-file check does
+ * (`scripts/_shared/all-suite-file-times.mjs` says what it holds).
+ */
+export const FILE_TIMES_ALL_FILE = 'file-times-all.json';
+
 /** A snapshot older than this many days is not trusted. */
 export const MAX_AGE_DAYS = 14;
 
@@ -149,3 +156,11 @@ export const writeStageCosts = (dir, snapshot) => writeSnapshot(dir, STAGE_COSTS
  * @param {object} snapshot `{ generatedAt, newestSourceAt, runs, files }`
  */
 export const writeFileTimes = (dir, snapshot) => writeSnapshot(dir, FILE_TIMES_FILE, snapshot);
+
+/**
+ * Write the every-suite file-times snapshot whole.
+ *
+ * @param {string} dir the results folder
+ * @param {object} snapshot `{ generatedAt, newestSourceAt, runs, files }`
+ */
+export const writeFileTimesAll = (dir, snapshot) => writeSnapshot(dir, FILE_TIMES_ALL_FILE, snapshot);

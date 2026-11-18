@@ -41,7 +41,7 @@ import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from './_sources.mjs';
 import { scratchRoot as scratchRootOf } from '../../scripts/_shared/scratch-root.mjs';
 import { startFakeYthril } from '../_shared/fake-ythril-tool-server.mjs';
-import { makeWorkdir, runTimes, everything } from '../_shared/test-times-harness.mjs';
+import { makeWorkdir, runTimes, everything, ciRunDay, seedCiTestRun } from '../_shared/test-times-harness.mjs';
 
 const url = (p) => pathToFileURL(join(REPO_ROOT, p)).href;
 /** Imported inside each case, so a base without the module fails each case by name and not the whole file at load. */
@@ -257,20 +257,10 @@ describe('writeFileTimes writes the file whole', () => {
 
 describe('test-times writes the file times from CI\'s records (a fake instance, a scratch repository)', () => {
   const FILTER_CALLS = (server) => server.callsTo('filter').filter(c => JSON.stringify(c.args.filter ?? {}).includes('Test-Run'));
-  const day = (n) => `2026-11-${String(10 + n).padStart(2, '0')}T10:00:00.000Z`;
-  const measurements = (rows, extra = {}) => JSON.stringify({ files: rows.map(([file, ms]) => ({ file, ms, tests: 3 })), slowest: [], ...extra });
+  const day = ciRunDay;
 
-  /** A Test-Run as the instance holds one; `over` replaces properties and `top` the record's own fields. */
-  const seedTestRun = (server, n, rows, over = {}, top = {}) => server.seed({
-    title: 'standalone', startsAt: day(n), endsAt: day(n),
-    properties: {
-      recordKey: `ci:${n}:1:standalone-pure:standalone`, source: 'ci', commit: String(n).repeat(40), branch: 'main', runId: String(n), attempt: 1,
-      job: 'standalone-pure', suite: 'standalone', outcome: 'passed', scope: 'full', layout: 'ci-parallel-v2', formatVersion: 1,
-      ms: 100_000, files: rows.length, tests: 3 * rows.length, passed: 3 * rows.length, failed: 0, cancelled: 0, skipped: 0, todo: 0, dirty: false,
-      measurements: measurements(rows), ...over,
-    },
-    ...top,
-  });
+  /** A pure-job Test-Run as the instance holds one; `over` replaces properties and `top` the record's own fields. */
+  const seedTestRun = (server, n, rows, over = {}, top = {}) => seedCiTestRun(server, { n, rows, over, top });
   /** A Preflight-Run, so the stage costs beside the file times have something to rest on. */
   const seedPreflightRun = (server, n) => {
     const startsAt = at(Date.parse('2026-11-16T10:00:00.000Z') + n * 60_000);
@@ -286,8 +276,8 @@ describe('test-times writes the file times from CI\'s records (a fake instance, 
     const work = makeWorkdir();
     try { return await fn({ server, work, env: { YTHRIL_TEST_RUNS_URL: server.url, YTHRIL_TEST_RUNS_TOKEN: server.token, RUNNER_HEAD: 'planted-head' } }); } finally { await server.close(); work.cleanup(); }
   };
-  /** The lines a run says about the file times. */
-  const aboutFileTimes = (r) => everything(r).split(/\r?\n/).filter(l => /file[- ]?times|per-file/i.test(l));
+  /** The lines a run says about the pure job's file times (the every-suite snapshot's lines are held by its own test file). */
+  const aboutFileTimes = (r) => everything(r).split(/\r?\n/).filter(l => /file[- ]?times|per-file/i.test(l) && !/every-suite/i.test(l));
 
   /** Five qualifying records: A in all five (100..500), B in four (1000..4000), the third record's measurements cut for size. */
   const seedFive = (server) => {
