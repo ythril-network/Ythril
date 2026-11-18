@@ -338,13 +338,26 @@ export async function startSchemaConvertRun(start: SchemaConvertStart, deps: Sch
 }
 
 /**
- * Restart the unfinished run of `spaceId` toward the fingerprint the space has now, in place, with nothing new joined: what a page and the tick
- * do when the fingerprint moved. Answers whether there was a run to restart.
+ * Restart the unfinished run of `spaceId` toward the fingerprint the space has now, in place, with nothing new joined: what a door that changes a
+ * schema and takes no steps asks. Answers whether there was a run to restart.
+ *
+ * The restarted document is written with the lease RELEASED and a pass is woken, as a start does: a pass that was sweeping the old generation
+ * stops at its next step (the generation moved) and writes nothing more for it, and the restarted run is taken at once by the one background job
+ * of the space (a pass already running there is joined, never doubled), never left until the old lease goes stale. A page restarting its own
+ * run keeps its lease instead (`restartInPlace`).
  */
 export async function restartSchemaConvertRun(spaceId: string): Promise<boolean> {
   const run = await runs(spaceId).findOne(asFilter<SchemaConvertRunDoc>({ _id: RUN_ID })) as SchemaConvertRunDoc | null;
   if (!unfinished(run)) return false;
-  await restartInPlace(spaceId, run);
+  const now = readMetaForWrite(spaceId);
+  const next = restartedSchemaConvertRun(run, { toFp: now.stamp.fp, after: now.meta as ConversionMeta | undefined, at: new Date().toISOString() });
+  next.sweepLeaseAt = 0;
+  delete next.retryAt;
+  const done = await runs(spaceId).replaceOne(asFilter<SchemaConvertRunDoc>({ _id: RUN_ID, generation: run.generation }), next);
+  if (done.matchedCount === 1) {
+    runInBackground(spaceId);
+    watcher.start();
+  }
   return true;
 }
 
