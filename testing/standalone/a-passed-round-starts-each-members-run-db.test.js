@@ -28,6 +28,7 @@ import { tempInstanceDir } from './_vote-round-instance.mjs';
 import { bootSchemaInstance } from './_schema-doors.mjs';
 import { P1 } from './_vote-round-sites.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const dir = tempInstanceDir('ythril-round-starts-run-');
 const skip = await mongoSkipReason();
@@ -78,7 +79,7 @@ describe('a passed round starts each member\'s run', { skip }, () => {
 
   const net = () => inst.loader.getConfig().networks.find(n => n.id === NET);
   const runDoc = (space) => mongo.getDb().collection(spaceCollection(space, 'schemaConvertRun')).findOne({ _id: 'run' });
-  const settled = () => new Promise(r => setTimeout(r, 500));
+  const settled = () => elapse(500, 'absence window: a run the conclusion started in the background would have written its document by now');
 
   /** The proposer's signed yes on `round`: `sig`, `bsig`, and `csig` over the steps unless `withCsig` is false. */
   function proposerCast(round, withCsig) {

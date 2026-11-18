@@ -27,6 +27,7 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 import { tempInstanceDir, callRoute } from './_vote-round-instance.mjs';
 import { bootSchemaInstance } from './_schema-doors.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const dir = tempInstanceDir('ythril-no-convert-doors-');
 const skip = await mongoSkipReason();
@@ -109,7 +110,7 @@ describe('a door that takes no convertRecords converts nothing, and restarts an 
       const a = await doors[name]();
       assert.ok(a.code < 300, `the door refused the edit: ${a.code} ${JSON.stringify(a.body)}`);
       assert.notEqual(fp(), before, 'precondition: the door moved the fingerprint');
-      await new Promise(r => setTimeout(r, 300));
+      await elapse(300, 'absence window: a run the door started in the background would have written its document by now');
       assert.equal(await runDoc(), null, `${name} started a conversion run`);
     });
 

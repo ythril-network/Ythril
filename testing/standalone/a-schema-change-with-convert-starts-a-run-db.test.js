@@ -30,6 +30,10 @@ import { tempInstanceDir, callRoute } from './_vote-round-instance.mjs';
 import { bootSchemaInstance } from './_schema-doors.mjs';
 import { P1 } from './_vote-round-sites.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
+import { elapse } from '../_shared/sleep.mjs';
+
+/** Long enough for a run started in the background by the save to have written its document. */
+const absence = () => elapse(300, 'absence window: a run the save started would have written its document by now');
 
 const dir = tempInstanceDir('ythril-save-starts-run-');
 const skip = await mongoSkipReason();
@@ -121,14 +125,14 @@ describe('a schema change with convertRecords starts a run', { skip }, () => {
     it(`${name}: a refused save starts no run`, async () => {
       const a = await doors[door](BAD_ENUM);
       assert.equal(a.status, 400);
-      await new Promise(r => setTimeout(r, 300));
+      await absence();
       assert.equal(await runDoc(), null, 'a refused save started a run');
     });
 
     it(`${name}: a save without convertRecords starts no run and answers no convert`, async () => {
       const a = await doors[door](undefined);
       assert.equal(a.status, 200, JSON.stringify(a.body ?? a.text));
-      await new Promise(r => setTimeout(r, 300));
+      await absence();
       assert.equal(await runDoc(), null, 'a save that chose no conversion started a run');
       assert.equal('convert' in (a.body ?? {}), false, `a save without convertRecords answered a convert: ${JSON.stringify(a.body)}`);
     });
@@ -160,7 +164,7 @@ describe('a schema change with convertRecords starts a run', { skip }, () => {
       assert.equal(a.body?.convert?.state, 'after_vote', `the answer does not say the run waits for the vote: ${JSON.stringify(a.body)}`);
       assert.deepEqual(a.body.convert.types, run.typesToConvert({ changedTypes: ['entity:Person'], droppedTypes: [], inNetwork: true, steps: STEPS.steps })
         .map(t => ({ kind: t.kind, type: t.type })));
-      await new Promise(r => setTimeout(r, 300));
+      await absence();
       assert.equal(await runDoc(), null, 'a save that only opened a vote started a run');
     });
   }
