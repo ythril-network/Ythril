@@ -160,6 +160,9 @@ export async function runShutdown(opts: ShutdownOptions): Promise<void> {
   // The reindex watcher resumes a run whose lease is stale, which starts a sweep: not while the process drains.
   const { stopReindexWatcher } = await import('./brain/reindex.js');
   stopReindexWatcher();
+  // The schema conversion watcher resumes a run whose lease is stale, which starts a page of writes: not while the process drains.
+  const { stopSchemaConvertWatcher } = await import('./spaces/schema-convert-run.js');
+  stopSchemaConvertWatcher();
   // Every other scheduled job (`every-started-job-is-stopped-at-shutdown` derives the set): a tick that starts while the HTTP
   // drain runs reaches into a database the shutdown is about to close, and a tick that lands late is a write racing `closeMongo`.
   // The TTL sweep, the candidate and tombstone prunes and the contradiction scanner exported a stop that nothing called.
