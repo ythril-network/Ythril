@@ -248,7 +248,7 @@ What each situation does now:
 |---|---|
 | the image, default model | loads from the baked cache — no network, ever |
 | the image, a model id it does not carry | **fails to load**, with an error naming `MODEL_CACHE_DIR` and this flag |
-| the image with `HF_HUB_OFFLINE=0` | downloads on a miss, and **logs a warning first** naming the host, the model, and the size |
+| the image with `HF_HUB_OFFLINE=0` | downloads on a miss, and **logs a warning first** naming the host, the model, and the size. Under the shipped Compose file the image's own cache is read-only, so also set `MODEL_CACHE_DIR` to a folder under `/data` |
 | from source, empty cache | downloads on first use, with the same warning — this is how you populate a cache |
 
 The flag does **not** disable the bundled model: the library consults its on-disk cache *before* deciding

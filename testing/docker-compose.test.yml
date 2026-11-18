@@ -48,11 +48,26 @@ x-mongo-healthcheck: &mongo-healthcheck
   retries: 18
   start_period: 40s
 
+# The app's confinement, as docker-compose.yml ships it (see the comment there for what was measured), on all four
+# instances: every stack suite then runs against a confined app, so a control the app cannot live with fails a suite
+# here and not an operator's instance. Held by `the-app-container-is-confined.test.js`.
+x-app-confinement: &app-confinement
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp:size=256m
+    - /home/node:size=16m,uid=1000,gid=1000,mode=0700
+  pids_limit: "${YTHRIL_TEST_APP_PIDS:-1024}"
+
 services:
   # ──────────────────────────────────────────
   # Instance A  (port 3200)
   # ──────────────────────────────────────────
   ythril-a:
+    <<: *app-confinement
     # Sole builder of the shared test image for a LOCAL `up`. Instances b/c/d only reference the tag
     # below — building the same tag from four services at once races on the export
     # and intermittently corrupts the image locally. CI never builds here: its `prepare` job builds
@@ -190,6 +205,7 @@ services:
   # Instance B  (port 3201)
   # ──────────────────────────────────────────
   ythril-b:
+    <<: *app-confinement
     image: ythril-test:latest  # built by ythril-a locally, loaded from CI's prepare job there; reused here, never rebuilt
     container_name: ythril-b
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
@@ -267,6 +283,7 @@ services:
   # Instance C  (port 3202)  — braintree leaf
   # ──────────────────────────────────────────
   ythril-c:
+    <<: *app-confinement
     image: ythril-test:latest  # built by ythril-a locally, loaded from CI's prepare job there; reused here, never rebuilt
     container_name: ythril-c
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"
@@ -323,6 +340,7 @@ services:
   # Used exclusively by red-team-tests/infra-managed-migration.test.js.
   # ──────────────────────────────────────────
   ythril-d:
+    <<: *app-confinement
     image: ythril-test:latest  # built by ythril-a locally, loaded from CI's prepare job there; reused here, never rebuilt
     container_name: ythril-d
     cpus: "${YTHRIL_TEST_APP_CPUS:-1.0}"

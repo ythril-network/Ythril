@@ -66,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web:** the conflict badge in the top bar no longer asks for its count while the browser tab is hidden; it asks again at its next minute once the tab is shown.
 - **Web:** the graph page reads what a tap selects and hides edge labels through its helper modules; nothing on the page changes.
 - **Web:** the Files page's processing poll lives in a module of its own; nothing on the page changes.
+- **Deployment:** the app's container in `docker-compose.yml` drops all capabilities, forbids new privileges and has a read-only root and a process ceiling (`YTHRIL_PIDS_LIMIT`, default 1024). A model that is not bundled needs `MODEL_CACHE_DIR` under `/data`.
 - **Testing:** the size check fails a tracked file that grows past its limit unless an entry in its allow file names the file, its decomposing ticket and a review date.
 - **Testing:** the metric-source tests read declarations through `testing/standalone/_metric-sources.mjs`, which finds every metrics module that declares a metric; a test fails a scanner that reads `registry.ts` on its own.
 - **Testing:** the local preflight runs its source gates first, then the builds, then the test suites, and stops at the first failing stage, naming the stages it did not run.

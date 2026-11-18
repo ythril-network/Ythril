@@ -35,7 +35,7 @@ const UNTRUSTED_PARSERS = ['ollama', 'whisper', 'unstructured', 'doc-render', 'd
 
 /** Services that legitimately need no such confinement, with the reason they are exempt. */
 const EXEMPT = {
-  ythril: 'the application itself — it is the trust boundary, not a parser behind it',
+  ythril: 'the application itself, not a parser behind it: its own confinement (no CPU default, two scratch mounts) is held by the-app-container-is-confined.test.js',
   'ythril-mongo': 'the database: no user-controlled parsing, and already isolated on an internal network',
 };
 
