@@ -16,6 +16,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { tuneTestMongo } from '../standalone/_mongo-harness.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { firstAdminToken } from '../_shared/first-admin-token.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS_DIR = path.join(__dirname, 'configs');
@@ -79,24 +80,7 @@ async function setupInstance(inst) {
   }
 
   // Complete setup via JSON API — returns the first admin token directly
-  const setupRes = await fetch(`${inst.url}/api/setup/json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      label: `Test Instance ${inst.name.toUpperCase()}`,
-      settingsPassword: 'testpassword123!',
-    }),
-  });
-
-  if (!setupRes.ok) {
-    const body = await setupRes.text();
-    throw new Error(`Setup failed for ${inst.name}: ${setupRes.status} ${body}`);
-  }
-
-  const { plaintext } = await setupRes.json();
-  if (!plaintext) {
-    throw new Error(`Setup response for ${inst.name} did not include a token`);
-  }
+  const plaintext = await firstAdminToken(inst.url, { who: inst.name, label: `Test Instance ${inst.name.toUpperCase()}` });
 
   fs.writeFileSync(tok, plaintext, { mode: 0o600 });
   console.log(`  Setup complete. PAT saved to ${tok}`);

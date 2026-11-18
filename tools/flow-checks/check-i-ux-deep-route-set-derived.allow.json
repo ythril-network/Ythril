@@ -1,0 +1,4 @@
+[
+  { "id": "testing/responsive-sweep.mjs", "reason": "the sweep carries a written list of sixteen paths (and the Files tab, a query on /brain); deriving it from the router file changes what a running-instance run visits, which cannot be seen red without a stack; Q-917 reports it, the stack part (Q-918) is where it gets driven", "reviewBy": "2027-02-17" },
+  { "id": "testing/ux-drift-sweep.mjs", "reason": "the drift pass walks a written table of page and label pairs, and each label is the heading the pass looks for; deriving the pages from the router needs a label per route, which the router does not hold; reported by Q-917, to be settled with the browser probes of Q-918", "reviewBy": "2027-02-17" }
+]

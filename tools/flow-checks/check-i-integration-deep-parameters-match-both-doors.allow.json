@@ -1,0 +1,5 @@
+[
+  { "id": "network_sync:networkId", "reason": "the same network under two spellings: the tool names it networkId beside peerId, and REST puts it in the path as /networks/:id/sync; the reader matches a path parameter by name and id is the path's generic name", "reviewBy": "2027-02-17" },
+  { "id": "list_spaces:counts", "reason": "GET /api/spaces?counts=true makes the per-space counts optional because REST callers often want the list cheap; the tool is the list an agent reads to choose a space and always carries the counts (its description says why)", "reviewBy": "2027-02-17" },
+  { "id": "schema_update:typeSchemas.required", "reason": "the tool is the meta door as a whole (type schemas and the other meta fields, merging) while PUT /api/spaces/:id/schema is the type-schema half alone; the meta-only half is PATCH /api/spaces/:id", "reviewBy": "2027-02-17" }
+]

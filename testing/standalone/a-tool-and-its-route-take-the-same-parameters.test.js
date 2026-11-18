@@ -29,42 +29,14 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { routeAcceptKeys } from './_route-accept-keys.mjs';
-import { trackedSources } from './_sources.mjs';
-import { CAPABILITIES } from './_capability-map.mjs';
+import {
+  loadDoorWorld, doorPairing, keyPairs, declaredKeys, toolOnlyKeys, routeOnlyKeys, acceptedKeys, operationsOf, concrete, routeKey, KEEP_PAIRING,
+} from '../../tools/flow-checks/_door-pairs.mjs';
 
-const { ROUTE_RULES } = await import('../../server/dist/audit/middleware.js');
-const { MCP_TOOL_OPERATIONS } = await import('../../server/dist/mcp/audit-map.js');
-const { ALL_TOOLS } = await import('../../server/dist/mcp/tools/index.js');
-const { REST_ONLY_CAPABILITIES } = await import('../../server/dist/mcp/parity.js');
-const query = await import('../../server/dist/brain/query.js');
-const bodySchemas = await import('../../server/dist/spaces/body-schemas.js');
-// The network acts' bodies (F-36): the routes parse with them, and so do the tools through the same acts. Every
-// module in `networks/`, read from the tree rather than named, so an act file added next is not invisible here.
-const networkActs = Object.assign({}, ...await Promise.all(trackedSources(['server/src/networks/*.ts'], { floor: 3 })
-  .map(f => import(`../../${f.replace('server/src/', 'server/dist/').replace(/\.ts$/, '.js')}`))));
-
-/** Schemas the parser cannot see from inside a route file: supplied, never guessed. */
-function exportedSets() {
-  const sets = {
-    QUERY_BODY_FIELDS: query.QUERY_BODY_FIELDS,
-    TRAVERSE_BODY_FIELDS: query.TRAVERSE_BODY_FIELDS,
-    FIND_SIMILAR_BODY_FIELDS: query.FIND_SIMILAR_BODY_FIELDS,
-  };
-  for (const [name, v] of [...Object.entries(bodySchemas), ...Object.entries(networkActs)]) {
-    const shape = v?.shape ?? v?._def?.schema?.shape;
-    if (shape) sets[name] = Object.keys(shape);
-  }
-  return sets;
-}
-
-/**
- * Keys that are TRANSPORT on one door and not a parameter on the other, so their absence is never a gap.
- *
- * `space` names the space in a tool argument and is a path segment on REST. It is not a body key and not a capability.
- * (`targetSpace` is not here: it is a retired field refused by name on both doors, so a tool declaring it would be a gap.)
- */
-const TRANSPORT = new Set(['space']);
+// The tool registry, the routes' accepted keys, the pairing and its subtraction are read by `tools/flow-checks/_door-pairs.mjs`, the one place that
+// holds them (the door-parity flow-check probes read the same). What stays here is this gate's sanctioned differences and its floors.
+const world = await loadDoorWorld();
+const { rows, ROUTE_RULES } = world;
 
 /**
  * Pairs that legitimately differ, each with its reason. Never a bare name — an exemption with no `why` is
@@ -90,91 +62,14 @@ const KNOWN_GAP = new Map([
   // police yet. A row here is a defect somebody has not got to; the list may only shrink.
 ]);
 
-/**
- * Pairings the subtraction would drop and must not, each with its reason (`tool <TAB> METHOD route`). Kept apart from the
- * two maps above because it is about WHICH ROUTES a tool is compared with, not about which parameters differ.
- */
-const KEEP_PAIRING = new Map([
-  ['schema_update\tPATCH /api/spaces/:id',
-    'the tool\'s default mode MERGES types, which is this route\'s typeSchemas merge (`typeSchemasMode: "replace"` is the '
-    + 'whole-map `PUT /api/spaces/:id/schema` the capability map gives it), and it declares the settings this route takes. '
-    + 'Dropping it left only the PUT, whose body is the type map alone, and reported ten settings as gaps that are not: '
-    + 'the route stays unreadable, so the tool stays outside the tool -> route case, as it was, until Q-646 classifies it.'],
-]);
-
-/** `/api/spaces/:id/schema` → a concrete path an audit rule's regex can be tested against. */
-const concrete = route => route.replace(/:[^/]+/g, 'x');
-
 describe('a tool and its route take the same parameters', () => {
-  const rows = routeAcceptKeys({ exportedSets: exportedSets() });
-
-  const byOperation = new Map();
-  for (const rule of ROUTE_RULES) {
-    if (!byOperation.has(rule.operation)) byOperation.set(rule.operation, []);
-    byOperation.get(rule.operation).push(rule);
-  }
-
-  // A tool may name SEVERAL operations, because one capability's REST half can be more than one route —
-  // `network_sync` is a full cycle or one named peer, and REST spells those apart because a path has to
-  // name its subject. Reading only the first compared the tool against half of itself and reported
-  // `peerId` as a parameter no route accepts.
-  const operationsOf = (tool) => {
-    const op = MCP_TOOL_OPERATIONS[tool];
-    return op == null ? [] : (Array.isArray(op) ? op : [op]);
-  };
-
-  /*
-   * THE PAIRING. An audit operation is shared by routes that are different capabilities (`space.list` is `list_spaces` AND
-   * `space_meta`; `file.list` is `list_dir` AND the extract route; `file.read` is `read_file` AND the bytes download), so a
-   * join through the operation alone pairs a tool with another tool's route. Compared in the route->tool direction that
-   * reported the other tool's parameters as gaps in this one (`list_dir` "lacked" the extract route's `limit`), so the join is
-   * SUBTRACTED, from the two registries that already say whose a route is: the capability map gives a route to a tool, and
-   * `REST_ONLY_CAPABILITIES` says a route no tool answers. Neither is a list kept here.
-   *
-   * A tool the subtraction leaves with no route falls back to the routes the capability map gives it, and that is what pairs
-   * `read_file` with `GET …/files/extract` (its bytes route is REST-only, so nothing else is left): the audit join alone
-   * cannot reach it, because the extract route's operation is `file.list`.
-   */
-  const routeKey = r => `${r.method} ${r.route}`;
-  const mapOwner = new Map(CAPABILITIES.map(([, tool, route]) => [route, tool]));
-  const restOnly = new Set(REST_ONLY_CAPABILITIES.map(c => `${c.method} ${c.restEndpoint}`));
-  /** Why a route the audit operation reaches is NOT this tool's, or `null` when it is. */
-  const notThisToolsRoute = (tool, r) => {
-    if (KEEP_PAIRING.has(`${tool}\t${routeKey(r)}`)) return null;
-    const owner = mapOwner.get(routeKey(r));
-    if (owner !== undefined && owner !== tool) return `the capability map gives it to ${owner}`;
-    if (restOnly.has(routeKey(r))) return 'it is declared REST-only';
-    return null;
-  };
-  const joinedRoutes = (tool) => {
-    const rules = operationsOf(tool).flatMap(op => byOperation.get(op) ?? []);
-    return rows.filter(r => rules.some(u => u.method === r.method && u.pattern.test(concrete(r.route))));
-  };
-  const routesFor = (tool) => {
-    const kept = joinedRoutes(tool).filter(r => notThisToolsRoute(tool, r) === null);
-    return kept.length ? kept : rows.filter(r => mapOwner.get(routeKey(r)) === tool);
-  };
-
-  const declared = t => Object.keys(t.inputSchema({}).properties ?? {}).filter(k => !TRANSPORT.has(k));
-  const paired = ALL_TOOLS
-    .filter(t => MCP_TOOL_OPERATIONS[t.name])
-    .map(t => ({ tool: t, routes: routesFor(t.name) }));
-
-  const pathParams = r => [...r.route.matchAll(/:(\w+)/g)].map(m => m[1]);
-  const acceptedBy = routes => new Set(routes.flatMap(r => [...r.keys, ...(r.queryKeys ?? []), ...pathParams(r)]));
+  const { joinedRoutes, whyNotThisToolsRoute, wouldDrop } = doorPairing(world);
+  const paired = keyPairs(world);
 
   /** Every `tool:param` a tool declares that none of its routes accepts: the tool -> route half, before any exemption. */
-  const toolOnlyParams = () => paired.flatMap(({ tool, routes }) => {
-    if (!routes.length || routes.some(r => !r.keys)) return [];
-    const accepted = acceptedBy(routes);
-    return declared(tool).filter(k => !accepted.has(k)).map(k => `${tool.name}:${k}`);
-  });
+  const toolOnlyParams = () => paired.flatMap(pair => toolOnlyKeys(pair).map(k => `${pair.tool}:${k}`));
   /** Every `tool:param` a paired route accepts that the tool does not declare: the route -> tool half, before any exemption. */
-  const routeOnlyParams = () => paired.flatMap(({ tool, routes }) => {
-    const have = new Set([...declared(tool), ...TRANSPORT]);
-    return routes.filter(r => r.keys).flatMap(r => [...new Set([...r.keys, ...(r.queryKeys ?? [])])]
-      .filter(k => !have.has(k) && !pathParams(r).includes(k)).map(k => `${tool.name}:${k}\t${routeKey(r)}`));
-  });
+  const routeOnlyParams = () => paired.flatMap(pair => routeOnlyKeys(pair).map(({ key, route }) => `${pair.tool}:${key}\t${routeKey(route)}`));
 
   it('the pairing found its subjects', () => {
     // A floor. An empty join passes every loop written over it while checking nothing — and this gate
@@ -188,21 +83,21 @@ describe('a tool and its route take the same parameters', () => {
     /*
      * Derived from the two registries (`CAPABILITIES`, `REST_ONLY_CAPABILITIES`), with a floor: an empty set of dropped
      * pairings is a subtraction that does nothing, and every case below would then run over another tool's routes.
-     * Seen red by deleting the `notThisToolsRoute` filter from `routesFor`.
+     * Seen red by deleting the `whyNotThisToolsRoute` filter from `routesFor` in `_door-pairs.mjs`.
      */
-    const dropped = paired.flatMap(({ tool }) => joinedRoutes(tool.name)
-      .map(r => ({ tool: tool.name, route: routeKey(r), why: notThisToolsRoute(tool.name, r) }))
+    const dropped = paired.flatMap(({ tool }) => joinedRoutes(tool)
+      .map(r => ({ tool, route: routeKey(r), why: whyNotThisToolsRoute(tool, r) }))
       .filter(d => d.why !== null));
     assert.ok(dropped.length > 0,
       'no pairing was dropped — the audit join no longer reaches another tool\'s route, or the subtraction reads nothing');
     const kept = paired.flatMap(({ tool, routes }) => routes
-      .filter(r => notThisToolsRoute(tool.name, r) !== null)
-      .map(r => `${tool.name} is paired with ${routeKey(r)}: ${notThisToolsRoute(tool.name, r)}`));
+      .filter(r => whyNotThisToolsRoute(tool, r) !== null)
+      .map(r => `${tool} is paired with ${routeKey(r)}: ${whyNotThisToolsRoute(tool, r)}`));
     assert.deepEqual(kept, [], `a tool is compared against a route that is not its capability:\n  ${kept.join('\n  ')}`);
   });
 
   it('a tool the audit join cannot reach is paired through the capability map: read_file with the extract route', () => {
-    const entry = paired.find(p => p.tool.name === 'read_file');
+    const entry = paired.find(p => p.tool === 'read_file');
     assert.deepEqual(entry?.routes.map(routeKey), ['GET /api/brain/spaces/:spaceId/files/extract'],
       'read_file must be compared with its text route and not with the bytes download');
   });
@@ -253,7 +148,7 @@ describe('a tool and its route take the same parameters', () => {
      */
     const stillCovered = [];
     for (const name of ['recall', 'graph_traverse', 'similar']) {
-      const entry = paired.find(p => p.tool.name === name);
+      const entry = paired.find(p => p.tool === name);
       /*
        * `delegatesTo` counts, and counts as the strongest of the three answers rather than as a let-off.
        * A route that hands its whole body to `callTool` has no parameter list to compare, because the
@@ -298,7 +193,7 @@ describe('a tool and its route take the same parameters', () => {
     assert.ok(delegating.length >= 3,
       `only ${delegating.length} delegating route(s) found — the parser lost the callTool shape`);
     for (const row of delegating) {
-      if (!ALL_TOOLS.some(t => t.name === row.delegatesTo)) {
+      if (!world.tools.has(row.delegatesTo)) {
         wrong.push(`${row.method} ${row.route} forwards to '${row.delegatesTo}', which is not a tool`);
         continue;
       }
@@ -310,7 +205,7 @@ describe('a tool and its route take the same parameters', () => {
         wrong.push(`${row.method} ${row.route} forwards to '${row.delegatesTo}' but no audit rule names the route`);
         continue;
       }
-      const toolOps = operationsOf(row.delegatesTo);
+      const toolOps = operationsOf(world, row.delegatesTo);
       if (!routeOps.some(op => toolOps.includes(op))) {
         wrong.push(`${row.method} ${row.route} (${routeOps.join('|')}) forwards to the '${row.delegatesTo}' `
           + `tool (${toolOps.join('|') || 'no operation'})`);
@@ -322,34 +217,27 @@ describe('a tool and its route take the same parameters', () => {
 
   it('no tool declares a parameter its route will not accept', () => {
     const gaps = [];
-    for (const { tool, routes } of paired) {
+    for (const pair of paired) {
       /*
-       * ALL of them readable, or none of this tool is compared.
+       * ALL of a tool's routes readable, or none of this tool is compared (`toolOnlyKeys`).
        *
        * A capability can map to several routes, and taking the union of the readable ones is not a partial
        * answer — it is the wrong one. `chrono.list` covers `GET /chrono` and `GET /chrono/:id`; the list
        * route reads its filters field by field so the parser declines it, leaving the single-entry route to
        * answer for both, and `list_chrono`'s nine filters were reported as gaps against a route that was
        * never going to accept them.
+       *
+       * A tool may map to more than one route — the singular and bulk DELETE of a collection. A key any of
+       * them accepts is accepted; refusing on the strictest would report the bulk route's silence as a gap.
+       * BODY and QUERY together: which one a key arrives in is the route's transport decision. PATH
+       * parameters too: `delete_fact` declares `id` and the route spells it `/facts/:id` — the record is
+       * named in the URL rather than in a body, which is a transport difference and not a parameter the
+       * route refuses. Reported as sixteen gaps before path parameters were counted.
        */
-      if (!routes.length || routes.some(r => !r.keys)) continue;
-      const readable = routes;
-      // A tool may map to more than one route — the singular and bulk DELETE of a collection. A key any of
-      // them accepts is accepted; refusing on the strictest would report the bulk route's silence as a gap.
-      // BODY and QUERY together: which one a key arrives in is the route's transport decision.
-      const accepted = new Set(readable.flatMap(r => [
-        ...r.keys,
-        ...(r.queryKeys ?? []),
-        // PATH parameters. `delete_fact` declares `id` and the route spells it `/facts/:id` — the
-        // record is named in the URL rather than in a body, which is a transport difference and not a
-        // parameter the route refuses. Reported as sixteen gaps before this was here.
-        ...[...r.route.matchAll(/:(\w+)/g)].map(m => m[1]),
-      ]));
-      for (const key of declared(tool)) {
-        const pair = `${tool.name}:${key}`;
-        if (accepted.has(key) || DIFFER_ON_PURPOSE.has(pair) || KNOWN_GAP.has(pair)) continue;
-        gaps.push(`${tool.name} declares '${key}', accepted by none of: `
-          + readable.map(r => `${r.method} ${r.route}`).join(', '));
+      for (const key of toolOnlyKeys(pair)) {
+        if (DIFFER_ON_PURPOSE.has(`${pair.tool}:${key}`) || KNOWN_GAP.has(`${pair.tool}:${key}`)) continue;
+        gaps.push(`${pair.tool} declares '${key}', accepted by none of: `
+          + pair.routes.map(r => `${r.method} ${r.route}`).join(', '));
       }
     }
     assert.deepEqual(gaps, [],
@@ -362,12 +250,9 @@ describe('a tool and its route take the same parameters', () => {
     const fixed = [];
     for (const pair of KNOWN_GAP.keys()) {
       const [toolName, key] = pair.split(':');
-      const entry = paired.find(p => p.tool.name === toolName);
+      const entry = paired.find(p => p.tool === toolName);
       if (!entry || !entry.routes.length || entry.routes.some(r => !r.keys)) continue;
-      const accepted = new Set(entry.routes.flatMap(r => [
-        ...r.keys, ...(r.queryKeys ?? []), ...[...r.route.matchAll(/:(\w+)/g)].map(m => m[1]),
-      ]));
-      if (accepted.has(key)) fixed.push(pair);
+      if (acceptedKeys(entry.routes).has(key)) fixed.push(pair);
     }
     assert.deepEqual(fixed, [], `these gaps are closed — delete their KNOWN_GAP rows: ${fixed.join(', ')}`);
   });
@@ -392,10 +277,8 @@ describe('a tool and its route take the same parameters', () => {
   });
 
   it('every KEEP_PAIRING row still keeps a pairing the subtraction would drop', () => {
-    const wouldDrop = new Set(ALL_TOOLS.flatMap(t => joinedRoutes(t.name)
-      .filter(r => { const owner = mapOwner.get(routeKey(r)); return (owner !== undefined && owner !== t.name) || restOnly.has(routeKey(r)); })
-      .map(r => `${t.name}\t${routeKey(r)}`)));
-    const stale = [...KEEP_PAIRING.keys()].filter(k => !wouldDrop.has(k));
+    const dropped = wouldDrop([...world.tools.keys()]);
+    const stale = [...KEEP_PAIRING.keys()].filter(k => !dropped.has(k));
     assert.deepEqual(stale, [], `these rows keep a pairing nothing drops any more — delete them: ${stale.join('; ')}`);
     for (const [k, why] of KEEP_PAIRING) assert.ok(why.length >= 40, `${k}: no reason worth the name`);
   });
@@ -432,11 +315,11 @@ describe('a tool and its route take the same parameters', () => {
     assert.ok(READ_TWINS.size >= 1);
     const gaps = [];
     for (const [toolName, twin] of READ_TWINS) {
-      const tool = ALL_TOOLS.find(t => t.name === toolName);
+      const tool = world.tools.get(toolName);
       const row = rows.find(r => r.method === twin.method && r.route === twin.route);
       if (!tool || !row || !row.keys) { gaps.push(`${toolName} ↔ ${twin.method} ${twin.route}: not readable`); continue; }
       const routeKeys = new Set([...row.keys, ...(row.queryKeys ?? [])]);
-      const toolKeys = new Set(declared(tool));
+      const toolKeys = new Set(declaredKeys(tool));
       for (const k of toolKeys) if (!routeKeys.has(k)) gaps.push(`${toolName} declares '${k}', the route does not`);
       for (const k of routeKeys) if (!toolKeys.has(k)) gaps.push(`${twin.method} ${twin.route} accepts '${k}', ${toolName} does not`);
     }
@@ -463,12 +346,12 @@ describe('a tool and its route take the same parameters', () => {
       .filter(r => r.method !== 'GET' && r.method !== 'DELETE' && r.pattern.source.includes('brain'))
       .map(r => r.operation)
       .filter(op => /\.(create|update|merge)$/.test(op)));
-    const subjects = paired.filter(p => operationsOf(p.tool.name).some(op => judged.has(op)));
+    const subjects = paired.filter(p => operationsOf(world, p.tool).some(op => judged.has(op)));
     assert.ok(subjects.length >= 11, `only ${subjects.length} brain write pairs were derived — the derivation is wrong, not the code`);
 
     const skipped = [];
     for (const { tool, routes } of subjects) {
-      if (!routes.length) { skipped.push(`${tool.name}: no route registered for it`); continue; }
+      if (!routes.length) { skipped.push(`${tool}: no route registered for it`); continue; }
       for (const r of routes) {
         if (!r.keys || !/acceptedWriteKeys/.test(r.via ?? '')) {
           skipped.push(`${r.method} ${r.route}: ${r.unresolved ?? `resolved through ${r.via ?? 'nothing'}, not acceptedWriteKeys`}`);
@@ -481,7 +364,7 @@ describe('a tool and its route take the same parameters', () => {
     const { acceptedWriteKeys } = await import('../../server/dist/contract/write-accepts.js');
     const differing = [];
     for (const { tool, routes } of subjects) {
-      const op = operationsOf(tool.name).find(o => judged.has(o));
+      const op = operationsOf(world, tool).find(o => judged.has(o));
       const want = [...acceptedWriteKeys(op)].sort();
       for (const r of routes) {
         const have = [...r.keys].sort();

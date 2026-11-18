@@ -1,0 +1,7 @@
+[
+  { "id": "Preflight-Run :: scope", "reason": "the record's `mode` (full or static) is what the run covered, and the baseline readers filter on it; renaming it to `scope` changes the stored type and every reader, which is a layout change of its own", "reviewBy": "2027-02-17" },
+  { "id": "Preflight-Run :: end marker", "reason": "the record is written once, after the run's verdict, by scripts/preflight.mjs: a run cut short writes nothing, so no torn record exists to tell from a whole one", "reviewBy": "2027-02-17" },
+  { "id": "Trade :: outcome", "reason": "a Trade record sums the finished runs of one bundle, written whole in one upsert and kept over a fuller one by replaceWhen: it has no run outcome of its own (afterFailures and afterTimeouts count the failed runs)", "reviewBy": "2027-02-17" },
+  { "id": "Trade :: scope", "reason": "the bundle number (`bundle`) is the scope of a Trade record and the one record per bundle is its key; there is no partial selection to keep out of a baseline", "reviewBy": "2027-02-17" },
+  { "id": "Trade :: end marker", "reason": "a Trade record is written only for a bundle with a counted run after the cut-over, and is built from runs that finished, so no torn record exists; unfinished runs are counted apart (afterUnresolved)", "reviewBy": "2027-02-17" }
+]

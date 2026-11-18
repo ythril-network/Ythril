@@ -1,0 +1,70 @@
+##
+## The scratch stack of a flow-check probe (Q-917) — an OVERRIDE of `docker-compose.test.yml`, never a copy.
+##
+## `tools/flow-checks/_stack.mjs` starts the services a probe names in a compose project of its own
+## (`docker compose -p ythril-probe-<check>-<pid> -f docker-compose.test.yml -f docker-compose.probe.yml up -d --wait --no-build <services>`)
+## and removes them with their volumes when the probe ends, whatever the answer. The services, their image pins, healthchecks, credentials,
+## memory and CPU ceilings, environment and `depends_on` are the base file's own, so a change to the test stack reaches every probe and there
+## is no second definition to drift. The base file is `docker-compose.test.yml`, whose fixed container names, host ports 3200-3203 and 27117
+## and bind mounts under `sync/configs` belong to the shared test stack: a probe must be able to run beside it, and beside the owner's own
+## instance on 3210, so this file changes exactly what makes a second copy impossible and nothing else.
+##
+##   container names   dropped, so compose names each by project (`ythril-probe-...-ythril-a-1`), and no probe stops or reaches a container
+##                     of the shared stack by its fixed name
+##   published ports   an app publishes on loopback with a port Docker picks (`docker compose port` reads it back); a Mongo and a sidecar
+##                     publish nothing, they are reached by service name on the project network
+##   the app's config  `/config` is a tmpfs, not `./sync/configs/<x>`: a probe's first-run setup never writes into the checkout
+##   the Mongos        their data directories are tmpfs, as the db-shard overlay's: a probe's database is gone with its container
+##   the app image     `YTHRIL_PROBE_IMAGE`, set by `_stack.mjs` (an image built from the checkout, or the one a CI job passes), so the
+##                     shared `ythril-test:latest` tag is never rebuilt under a running test stack
+##
+## `the-stack-probe-shape-guards-and-tears-down.test.js` drives the module that starts it; the overlay itself is read by `docker compose config`.
+##
+x-app: &app
+  image: ${YTHRIL_PROBE_IMAGE:?set by tools/flow-checks/_stack.mjs}
+  build: !reset null
+  container_name: !reset null
+  ports: !override
+    - "127.0.0.1::3200"
+  tmpfs:
+    - /config:uid=1000,gid=1000
+
+x-mongo: &mongo
+  container_name: !reset null
+  ports: !reset []
+  volumes: !reset []
+  tmpfs:
+    - /data/db:uid=1000,gid=1000
+    - /data/configdb:uid=1000,gid=1000
+
+services:
+  ythril-a:
+    <<: *app
+    volumes: !override
+      - ythril-data-a:/data
+  ythril-b:
+    <<: *app
+    volumes: !override
+      - ythril-data-b:/data
+  ythril-c:
+    <<: *app
+    volumes: !override
+      - ythril-data-c:/data
+  ythril-d:
+    <<: *app
+    volumes: !override
+      - ythril-data-d:/data
+  ythril-mongo-a:
+    <<: *mongo
+  ythril-mongo-b:
+    <<: *mongo
+  ythril-mongo-c:
+    <<: *mongo
+  ythril-mongo-d:
+    <<: *mongo
+  doc-render:
+    container_name: !reset null
+    ports: !reset []
+  doc-office:
+    container_name: !reset null
+    ports: !reset []

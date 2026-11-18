@@ -33,18 +33,17 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { CAPABILITIES } from './_capability-map.mjs';
-import { mountedRoutesWithSource } from './_routes.mjs';
-import { delegationOf } from './_delegating-routes.mjs';
-import { moduleIndex, routeHandlerRoots, walkFrom } from './_call-graph.mjs';
-import { toolValidators, zodValidators } from './_validator-schemas.mjs';
-import { BOUND_BY_FIELD } from '../../server/dist/util/request-bounds.js';
-import { SERVER_CODE_ROOTS } from './_sources.mjs';
+import { loadDoorWorld, capabilityPairs, attributeFindings, boundsOf, CAP_KEYS, FLOOR_KEYS, TRANSPORT } from '../../tools/flow-checks/_door-pairs.mjs';
 
-/** Keys that are transport on one door (a path segment) and a parameter on the other. */
-const TRANSPORT = new Set(['space']);
+// The pairs (the capability map's rows with their tool schema and the zod schemas the route parses with), the bound normalisation and the comparison
+// are `tools/flow-checks/_door-pairs.mjs`, the one place that holds them (the door-parity flow-check probes read the same). What stays here is this
+// gate's sanctioned differences, its ceiling and its floors.
+const world = await loadDoorWorld();
+const PAIRS = capabilityPairs(world);
 
-const BOUND_KEYS = ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems'];
+/** What is compared per shared parameter: every bound, the enum, and whether it is required. */
+const ATTRIBUTES = [...CAP_KEYS, ...FLOOR_KEYS, 'enum', 'required'];
+const compared = attributeFindings(PAIRS, ATTRIBUTES, world.BOUND_BY_FIELD);
 
 /**
  * Pairs that differ on purpose, each with its reason — never a bare name.
@@ -61,93 +60,6 @@ const DIFFER_ON_PURPOSE = new Map([
  */
 const UNREADABLE_CEILING = 33;
 
-/**
- * One node's bounds, normalised so two spellings of the same rule compare equal: an integer's exclusive bound is
- * the next inclusive one, a URL/URI/email format is a non-empty string, and a union's bound is its envelope (the
- * loosest branch), because a union accepts what any branch accepts. A `null` branch is dropped.
- */
-function boundsOf(node) {
-  if (!node || typeof node !== 'object') return {};
-  const branches = (node.anyOf ?? node.oneOf)?.filter(b => b.type !== 'null');
-  if (branches?.length) {
-    const each = branches.map(boundsOf);
-    const out = {};
-    for (const k of BOUND_KEYS) {
-      if (each.some(b => b[k] === undefined)) continue;
-      out[k] = k.startsWith('min') ? Math.min(...each.map(b => b[k])) : Math.max(...each.map(b => b[k]));
-    }
-    const enums = each.map(b => b.enum);
-    if (enums.every(Boolean)) out.enum = [...new Set(enums.flat())].sort();
-    return out;
-  }
-  const out = {};
-  for (const k of BOUND_KEYS) if (node[k] !== undefined) out[k] = node[k];
-  const integer = [node.type].flat().includes('integer');
-  if (node.exclusiveMinimum !== undefined) out.minimum = integer ? node.exclusiveMinimum + 1 : node.exclusiveMinimum;
-  if (node.exclusiveMaximum !== undefined) out.maximum = integer ? node.exclusiveMaximum - 1 : node.exclusiveMaximum;
-  if (['uri', 'url', 'email'].includes(node.format)) out.minLength = Math.max(out.minLength ?? 0, 1);
-  const e = node.enum ?? node.items?.enum;
-  if (Array.isArray(e)) out.enum = [...e].sort();
-  return out;
-}
-
-/** Whether the tool states any bound a comparison could disagree with (transport and BOUND_BY_FIELD aside). */
-const statesABound = schema => Object.entries(schema.properties ?? {})
-  .some(([k, v]) => !TRANSPORT.has(k) && !(k in BOUND_BY_FIELD) && Object.keys(boundsOf(v)).length > 0);
-
-const TOOLS = new Map(toolValidators().map(v => [v.tool.name, v]));
-const ZODS = new Map((await zodValidators()).map(z => [z.name, z]));
-const ROUTES = mountedRoutesWithSource();
-const INDEX = moduleIndex(SERVER_CODE_ROOTS);
-
-/** The exported zod schemas a route's handler reaches and parses with. */
-function schemasReachedBy(route) {
-  const { seen } = walkFrom(INDEX, routeHandlerRoots(INDEX, route), { closures: true });
-  const names = new Set();
-  for (const key of seen) {
-    for (const m of INDEX.bodies.get(key).body.matchAll(/\b([A-Za-z_$][\w$]*)\s*\.\s*(?:safeParse|parse)\s*\(/g)) {
-      if (ZODS.has(m[1])) names.add(m[1]);
-    }
-  }
-  return [...names];
-}
-
-const PAIRS = CAPABILITIES.map(([, toolName, key]) => {
-  const [method, path] = key.split(' ');
-  const route = ROUTES.find(r => r.method === method && r.path === path);
-  const tool = TOOLS.get(toolName);
-  assert.ok(route && tool, `CAPABILITIES pairs ${toolName} with ${key}, and ${route ? 'no such tool' : 'no such route'} exists`);
-  const delegation = delegationOf(route.source);
-  return { toolName, key, route, tool, delegation, schemas: delegation ? [] : schemasReachedBy(route) };
-});
-
-/** Every disagreement between a tool and the schemas its route parses with. */
-function disagreements() {
-  const out = [];
-  for (const p of PAIRS.filter(x => x.schemas.length > 0)) {
-    const toolSchema = p.tool.schema;
-    for (const name of p.schemas) {
-      const restSchema = ZODS.get(name).schema;
-      for (const [param, toolNode] of Object.entries(toolSchema.properties ?? {})) {
-        const restNode = restSchema.properties?.[param];
-        if (!restNode || TRANSPORT.has(param) || param in BOUND_BY_FIELD) continue;
-        const t = boundsOf(toolNode);
-        const r = boundsOf(restNode);
-        for (const k of [...BOUND_KEYS, 'enum']) {
-          if (JSON.stringify(t[k]) === JSON.stringify(r[k])) continue;
-          const id = `${p.toolName}:${param}.${k}`;
-          if (!DIFFER_ON_PURPOSE.has(id)) out.push(`${id} — MCP ${JSON.stringify(t[k])}, ${p.key} (${name}) ${JSON.stringify(r[k])}`);
-        }
-        const tr = (toolSchema.required ?? []).includes(param);
-        const rr = (restSchema.required ?? []).includes(param);
-        const id = `${p.toolName}:${param}.required`;
-        if (tr !== rr && !DIFFER_ON_PURPOSE.has(id)) out.push(`${id} — MCP ${tr}, ${p.key} (${name}) ${rr}`);
-      }
-    }
-  }
-  return out;
-}
-
 describe('a tool and its route agree on every bound of a shared parameter', () => {
   it('the pairing found its subjects on every axis', () => {
     assert.ok(PAIRS.length >= 60, `only ${PAIRS.length} tool/route pair(s) — the capability map or the route scan broke`);
@@ -162,34 +74,23 @@ describe('a tool and its route agree on every bound of a shared parameter', () =
   });
 
   it('every shared parameter carries the same bounds on both doors', () => {
-    const found = disagreements();
+    const found = compared.findings.filter(f => !DIFFER_ON_PURPOSE.has(f.id)).map(f => f.text);
     assert.deepEqual(found, [], `${found.length} bound(s) differ by door — make the weaker door refuse what the stronger `
       + `does, in the same words:\n  ${found.join('\n  ')}`);
   });
 
   it('every sanctioned difference still exists', () => {
-    const all = new Set();
-    for (const p of PAIRS.filter(x => x.schemas.length > 0)) {
-      for (const name of p.schemas) {
-        const restSchema = ZODS.get(name).schema;
-        for (const param of Object.keys(p.tool.schema.properties ?? {})) {
-          if (!restSchema.properties?.[param]) continue;
-          if ((p.tool.schema.required ?? []).includes(param) !== (restSchema.required ?? []).includes(param)) all.add(`${p.toolName}:${param}.required`);
-          const t = boundsOf(p.tool.schema.properties[param]);
-          const r = boundsOf(restSchema.properties[param]);
-          for (const k of [...BOUND_KEYS, 'enum']) if (JSON.stringify(t[k]) !== JSON.stringify(r[k])) all.add(`${p.toolName}:${param}.${k}`);
-        }
-      }
-    }
+    // Live only when the comparison itself sees the difference: a row for a parameter it never evaluates (transport, `BOUND_BY_FIELD`) is stale.
+    const all = new Set(compared.findings.map(f => f.id));
     const stale = [...DIFFER_ON_PURPOSE.keys()].filter(id => !all.has(id));
     assert.deepEqual(stale, [], `sanctioned differences that no longer differ — delete them: ${stale.join(', ')}`);
   });
 
   it('the routes whose bounds cannot be read only get FEWER', () => {
-    const unreadable = PAIRS.filter(p => !p.delegation && p.schemas.length === 0 && statesABound(p.tool.schema));
+    const { unreadable } = compared;
     assert.ok(unreadable.length <= UNREADABLE_CEILING,
       `${unreadable.length} route(s) whose tool states a bound validate by hand, up from ${UNREADABLE_CEILING}. Give the `
-      + `route a schema this gate can read, or delegate it to the tool:\n  ${unreadable.map(p => `${p.toolName} ${p.key}`).join('\n  ')}`);
+      + `route a schema this gate can read, or delegate it to the tool:\n  ${unreadable.join('\n  ')}`);
   });
 });
 
@@ -223,8 +124,7 @@ describe('the fork capability\'s parameters are compared on both doors (Q-624)',
   const doorOf = pair => {
     const properties = {};
     const required = new Set();
-    for (const name of pair.schemas) {
-      const s = ZODS.get(name).schema;
+    for (const { schema: s } of pair.schemas) {
       Object.assign(properties, s.properties ?? {});
       for (const r of s.required ?? []) required.add(r);
     }
@@ -235,20 +135,20 @@ describe('the fork capability\'s parameters are compared on both doors (Q-624)',
     assert.ok(resolvePair && listPair, `the capability map pairs ${FORK_PAIRS.length} route(s) under /forks; list and resolve are both expected`);
     for (const p of FORK_PAIRS) {
       assert.ok(p.delegation || p.schemas.length > 0,
-        `${p.toolName} <-> ${p.key} parses with no schema this gate can read, so none of its parameters is compared by anything`);
+        `${p.tool} <-> ${p.key} parses with no schema this gate can read, so none of its parameters is compared by anything`);
     }
   });
 
   it('the resolve takes kind, forkId, keep, ifMatchSeq and ifMatchParentSeq on both doors, every one required', () => {
     assert.ok(resolvePair, 'no resolve pair');
     const door = doorOf(resolvePair);
-    const toolHas = Object.keys(resolvePair.tool.schema.properties ?? {});
-    const toolRequired = new Set(resolvePair.tool.schema.required ?? []);
+    const toolHas = Object.keys(resolvePair.toolSchema.properties ?? {});
+    const toolRequired = new Set(resolvePair.toolSchema.required ?? []);
     const problems = [];
     for (const param of RESOLVE_PARAMS) {
-      if (!toolHas.includes(param)) problems.push(`MCP ${resolvePair.toolName} does not declare '${param}'`);
-      else if (!toolRequired.has(param)) problems.push(`MCP ${resolvePair.toolName} does not require '${param}'`);
-      if (!(param in door.properties)) problems.push(`${resolvePair.key} parses with no schema that declares '${param}' (${resolvePair.schemas.join(', ')})`);
+      if (!toolHas.includes(param)) problems.push(`MCP ${resolvePair.tool} does not declare '${param}'`);
+      else if (!toolRequired.has(param)) problems.push(`MCP ${resolvePair.tool} does not require '${param}'`);
+      if (!(param in door.properties)) problems.push(`${resolvePair.key} parses with no schema that declares '${param}' (${resolvePair.schemas.map(x => x.name).join(', ')})`);
       else if (!door.required.has(param)) problems.push(`${resolvePair.key}: its schema does not require '${param}'`);
     }
     assert.deepEqual(problems, [], `the resolve's parameters differ by door:\n  ${problems.join('\n  ')}`);
@@ -259,10 +159,10 @@ describe('the fork capability\'s parameters are compared on both doors (Q-624)',
     for (const p of FORK_PAIRS) {
       if (p.delegation) continue;
       const door = doorOf(p);
-      const tool = Object.keys(p.tool.schema.properties ?? {}).filter(k => !TRANSPORT.has(k));
+      const tool = Object.keys(p.toolSchema.properties ?? {}).filter(k => !TRANSPORT.has(k));
       const rest = Object.keys(door.properties).filter(k => !TRANSPORT.has(k));
-      for (const k of tool) if (!rest.includes(k)) problems.push(`MCP ${p.toolName} declares '${k}', ${p.key} parses with no schema that does`);
-      for (const k of rest) if (!tool.includes(k)) problems.push(`${p.key} (${p.schemas.join(', ')}) declares '${k}', MCP ${p.toolName} does not`);
+      for (const k of tool) if (!rest.includes(k)) problems.push(`MCP ${p.tool} declares '${k}', ${p.key} parses with no schema that does`);
+      for (const k of rest) if (!tool.includes(k)) problems.push(`${p.key} (${p.schemas.map(x => x.name).join(', ')}) declares '${k}', MCP ${p.tool} does not`);
     }
     assert.deepEqual(problems, [], problems.join('\n  '));
   });
@@ -273,16 +173,16 @@ describe('the fork capability\'s parameters are compared on both doors (Q-624)',
       'sync/upsert-plan.js exports no FORKING_FAMILIES of at least the four families (facts, entities, chrono, edges) the design forks');
     assert.ok(resolvePair && listPair);
     for (const [pair, mustRequire] of [[resolvePair, true], [listPair, false]]) {
-      const tool = pair.tool.schema.properties?.kind;
+      const tool = pair.toolSchema.properties?.kind;
       const rest = doorOf(pair).properties.kind;
-      assert.ok(tool, `MCP ${pair.toolName} declares no 'kind'`);
+      assert.ok(tool, `MCP ${pair.tool} declares no 'kind'`);
       assert.ok(rest, `${pair.key} parses with no schema that declares 'kind'`);
       const toolEnum = boundsOf(tool).enum;
       const restEnum = boundsOf(rest).enum;
       assert.ok(toolEnum && restEnum, `'kind' must be an enum on both doors (MCP ${JSON.stringify(toolEnum)}, REST ${JSON.stringify(restEnum)}): an id is unique per collection only, so a free string is a guess`);
-      assert.deepEqual(toolEnum, restEnum, `'kind' differs by door for ${pair.toolName}`);
+      assert.deepEqual(toolEnum, restEnum, `'kind' differs by door for ${pair.tool}`);
       assert.equal(toolEnum.length, FORKING_FAMILIES.length, `the 'kind' enum has ${toolEnum.length} member(s) and there are ${FORKING_FAMILIES.length} forking families`);
-      assert.equal((pair.tool.schema.required ?? []).includes('kind'), mustRequire, `MCP ${pair.toolName}: 'kind' ${mustRequire ? 'is required' : 'is optional'}`);
+      assert.equal((pair.toolSchema.required ?? []).includes('kind'), mustRequire, `MCP ${pair.tool}: 'kind' ${mustRequire ? 'is required' : 'is optional'}`);
       assert.equal(doorOf(pair).required.has('kind'), mustRequire, `${pair.key}: 'kind' ${mustRequire ? 'is required' : 'is optional'}`);
     }
   });
@@ -291,8 +191,8 @@ describe('the fork capability\'s parameters are compared on both doors (Q-624)',
     assert.ok(resolvePair);
     const door = doorOf(resolvePair).properties;
     for (const param of ['ifMatchSeq', 'ifMatchParentSeq']) {
-      const tool = resolvePair.tool.schema.properties?.[param];
-      assert.ok(tool, `MCP ${resolvePair.toolName} declares no '${param}'`);
+      const tool = resolvePair.toolSchema.properties?.[param];
+      assert.ok(tool, `MCP ${resolvePair.tool} declares no '${param}'`);
       assert.ok(door[param], `${resolvePair.key} parses with no schema that declares '${param}'`);
       for (const [side, node] of [['MCP', tool], ['REST', door[param]]]) {
         assert.ok([node.type].flat().includes('integer'), `${side} '${param}' is not an integer`);
