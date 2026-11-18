@@ -133,6 +133,9 @@ const declaredOptions = (o: { unique?: boolean; sparse?: boolean }): SpaceIndexO
  * cheap - the sweep deletes through the normal delete path so the deletion tombstones and replicates. Sparse, so a space that sets
  * no retention carries empty ones. `report`: a space without them is swept by a collection scan, which is slow and still correct.
  */
+/** The name of the schema conversion run's `(type field, _id)` index on the four stamped collections: the run's page reads by it. */
+export const SCHEMA_CONVERT_INDEX = 'schema_convert_keyset';
+
 const TTL_INDEXES: readonly SpaceIndex[] = [
   ...TTL_COLLECTIONS.map((part): SpaceIndex => ({
     part, keys: { _expireAt: 1 }, options: { name: 'ttl_expireAt', sparse: true }, policy: 'report', bootSafe: false, sweep: true,
@@ -154,6 +157,15 @@ const TTL_INDEXES: readonly SpaceIndex[] = [
     part, keys: { [SCHEMA_FINGERPRINT_FIELD]: 1, [stampTypeFieldOf(part)]: 1 },
     options: { name: STAMP_INDEX, partialFilterExpression: { [SCHEMA_FINGERPRINT_FIELD]: { ...STAMP_PRESENT } } },
     policy: 'report', bootSafe: false, sweep: true, replaces: [REPLACED_STAMP_INDEX],
+  })),
+  /*
+   * The schema conversion run's page (Q-746, `spaces/schema-convert-run.ts`, `schemaConvertPageSpec`): one type at a time in `_id` order, every
+   * copy whose stamp is not the run's fingerprint. `{ type: 1 }` has no `_id` suffix for the keyset, the stamp index is partial on a present stamp
+   * (an unstamped copy is exactly what the run must read), and edges had no index led by `label`; so `(type field, _id)` on the four stamped
+   * collections, NOT partial. Built by the sweep like the stamp index, `report`: a space without it is read by a slower plan, correct.
+   */
+  ...STAMPED_COLLECTIONS.map((part): SpaceIndex => ({
+    part, keys: { [stampTypeFieldOf(part)]: 1, _id: 1 }, options: { name: SCHEMA_CONVERT_INDEX }, policy: 'report', bootSafe: false, sweep: true,
   })),
 ];
 

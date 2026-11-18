@@ -47,7 +47,7 @@
 import { getDb, reportDatabaseReplaced } from './mongo.js';
 import { backupIsWhole, backupManifestHolds, backupLoader, backupRecords, BackupNotWhole, type BackupCollection } from './restore.js';
 import { backupDirOf } from './backup-location.js';
-import { parseSpaceCollection } from './space-collection.js';
+import { parseSpaceCollection, SPACE_COLLECTIONS } from './space-collection.js';
 import { isDuplicateKey } from './write-errors.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import { initSpace } from '../spaces/lifecycle.js';
@@ -73,6 +73,8 @@ import { raiseFileFeedFloorToHead } from '../files/file-feed-floor.js';
 
 const KIND = 'restore' satisfies SpaceActKind;
 const COUNTERS = 'ythril_counters';
+/** The space collections a restore drops and never loads from its backup: the schema conversion run and its items (Q-746). */
+const NEVER_RESTORED: ReadonlySet<string> = new Set([SPACE_COLLECTIONS.schemaConvertRun, SPACE_COLLECTIONS.schemaConvertItems]);
 
 // ── what a restore says about a space's files ───────────────────────────────────────────────────────────────────────
 
@@ -327,7 +329,9 @@ async function restoreSpace(ctx: SpaceActBodyContext): Promise<SpaceActBodyOutco
   await initSpace(spaceId, { waitForVectorReady: false });
 
   const load = backupLoader();
-  for (const c of fromBackup) {
+  // The schema conversion run and its items describe the records as they were, toward a fingerprint and at versions the restored records do not
+  // have: dropped above with the rest and never loaded, so a restored database never resumes a run toward the restored bits (Q-746, design S10).
+  for (const c of fromBackup.filter(c => !NEVER_RESTORED.has(parseSpaceCollection(c.name)?.suffix ?? ''))) {
     try { await load(db, dir, c); }
     catch (err) { throw inputFailure(err, c.name) ?? err; }
   }
