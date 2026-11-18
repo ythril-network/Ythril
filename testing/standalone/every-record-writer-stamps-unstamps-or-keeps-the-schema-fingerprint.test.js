@@ -20,7 +20,10 @@
  * schema and carries no stamp field), grouped by enclosing function. Every one of them must sit in exactly one class below, and an
  * entry naming a function that no longer writes fails (a stale entry outlives nothing it describes). The STAMP entries name the
  * functions that hold the validation (`stampers`) and the named hand-offs the pair travels through (`HAND_OFFS`: `finishInsert`,
- * `edgeRefusal`, `classifyKeep`); everything else is read from the source with comments stripped.
+ * `edgeRefusal`, `classifyKeep`, the conversion's `stampQuietly` and `restampEdgesAt`); everything else is read from the source with comments
+ * stripped. A stamp spread away from its stamper with plain `stampOp` (`ops.in` of form `stampOp`) names the version filter its write
+ * lands on (`filteredBy`), so a record that moved since it was classified is never stamped (DI-4); the conversion's quiet stamp bought this
+ * (CI run 44354113429 found `stampQuietly` in no class).
  *
  * ## Mutation runs (T1)
  *
@@ -67,6 +70,8 @@ const HAND_OFFS = {
   [S('brain/write-plan/plan-steps.ts:finishInsert')]: { param: 'write', op: 'stampOp', why: 'an insert gets the field or nothing from the pair its planner validated with' },
   [S('brain/write-plan/plan-edge.ts:edgeRefusal')]: { param: 'write', op: null, why: 'classifies an edge with the pair its planner read and returns it with the check' },
   [S('brain/fork-keep.ts:classifyKeep')]: { param: 'write', op: null, why: 'classifies the keep with the pair the keep-writer read and returns it with the check' },
+  [S('brain/schema-convert-record.ts:stampQuietly')]: { param: 'pair', op: 'stampOp', why: 'a quiet stamp gets the field or nothing from the pair the conversion page classified with' },
+  [S('brain/schema-convert-record.ts:restampEdgesAt')]: { param: 'pair', op: null, why: 'classifies the edges a re-type unstamped with the pair the conversion page read and hands it to stampQuietly' },
 };
 
 const HAND_OFF_NAMES = new Set(Object.keys(HAND_OFFS).map(k => k.slice(k.lastIndexOf(':') + 1)));
@@ -89,6 +94,12 @@ const STAMP = {
   [S('brain/merge.ts:relinkAndAbsorb')]: {
     why: 'the merge survivor: executeMerge validates, relinkAndAbsorb writes on the version it read in the transaction (survivorVersion)',
     stampers: [S('brain/merge.ts:executeMerge')], ops: { form: 'stampOpIfUnmoved', in: [S('brain/merge.ts:relinkAndAbsorb')], names: 'survivorVersion' },
+  },
+  [S('brain/schema-convert-record.ts:stampQuietly')]: {
+    why: 'the conversion\'s quiet stamp: convertRecordsPage reads the pair once and classifies each record as stored with its meta (restampEdgesAt the '
+      + 'edges a re-type unstamped, with the same pair), and stampQuietly sets stampOp(pair, check) in one command whose filter is the version '
+      + 'each record was read at (atReadSeq), so a record that moved since it was classified is not stamped',
+    stampers: [S('brain/schema-convert-record.ts:convertRecordsPage')], ops: { form: 'stampOp', in: [S('brain/schema-convert-record.ts:stampQuietly')], filteredBy: 'atReadSeq' },
   },
 };
 
@@ -279,7 +290,13 @@ function classify(index) {
         const calls = callsOf(text, spec.ops.form);
         if (calls.length === 0) say(k, `spreads no ${spec.ops.form}(: ${spec.why.split(':')[0]} lands unstamped`);
         for (const c of calls) if (spec.ops.names && !c.args[0]?.includes(spec.ops.names)) say(k, `${spec.ops.form}( is not asked about ${spec.ops.names}, the version the write lands on`);
-        if (callsOf(text, 'stampOp').length > 0) say(k, 'spreads stampOp( on a version read after the validation (DI-4)');
+        if (spec.ops.form === 'stampOpIfUnmoved' && callsOf(text, 'stampOp').length > 0) say(k, 'spreads stampOp( on a version read after the validation (DI-4)');
+        // A plain stampOp away from its stamper holds only when the write itself lands on the version that was classified (DI-4).
+        // The filter is called bare or spread (`...atReadSeq(`), never as a member of something else.
+        const filtered = spec.ops.filteredBy && new RegExp(`(?:^|[^\\w$.]|\\.\\.\\.)${spec.ops.filteredBy}\\s*\\(`).test(text);
+        if (spec.ops.form === 'stampOp' && !filtered) {
+          say(k, `spreads stampOp( in a write not filtered by ${spec.ops.filteredBy ?? 'the version read'}(: a record that moved since it was classified would be stamped (DI-4)`);
+        }
       }
     }
   }
@@ -372,6 +389,18 @@ describe('the gate fails on a planted defect (T1 mutation runs)', () => {
     const findings = mutant('server/src/brain/chrono-redaction.ts', t => t.replace(/\.\.\.\s*UNSTAMP\b|\bUNSTAMP\s*\.\s*\$unset\b/g, '...{}'), 'brain/chrono-redaction.ts:redactLapsedChronoContent');
     assert.ok(findings.some(f => f.startsWith('brain/chrono-redaction.ts:redactLapsedChronoContent')),
       `a redaction that keeps the stamp passed the gate: ${findings.join(' | ')}`);
+  });
+
+  it('the version filter removed from the conversion\'s quiet stamp fails it', () => {
+    const findings = mutant('server/src/brain/schema-convert-record.ts', t => t.replace(/\.\.\.\s*atReadSeq\s*\(([^)]*)\),/, '_id: r._id,'), 'brain/schema-convert-record.ts:stampQuietly');
+    assert.ok(findings.some(f => f.startsWith('brain/schema-convert-record.ts:stampQuietly') && /atReadSeq/.test(f)),
+      `a quiet stamp that lands on a moved record passed the gate: ${findings.join(' | ')}`);
+  });
+
+  it('a classification of the conversion page with a meta other than its pair\'s fails it', () => {
+    const findings = mutant('server/src/brain/schema-convert-record.ts', t => t.replace(/const check = classifyStored\(pair\.meta,/, 'const check = classifyStored(getSpaceMeta(spaceId),'), 'brain/schema-convert-record.ts:convertRecordsPage');
+    assert.ok(findings.some(f => f.startsWith('brain/schema-convert-record.ts:convertRecordsPage')),
+      `a conversion page that judges with a second meta read passed the gate: ${findings.join(' | ')}`);
   });
 
   it('the edge unstamp removed from the entity re-type fails it', () => {

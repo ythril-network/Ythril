@@ -154,9 +154,10 @@ function judgeOf(run: SchemaConvertRecordRun): ConditionJudge {
 
 /**
  * The classification of `record` as `change` leaves it (as stored, for none) against `meta` (resolved), as its kind's update path classifies a
- * write: the same classifier, the record as read beside the record the write would store.
+ * write: the same classifier, the record as read beside the record the write would store. The meta comes first, as in every classification a
+ * stamp follows: the stamp gate reads the first argument as the schema judged with.
  */
-function classifyStored(kind: KnowledgeType, meta: SpaceMeta | undefined, record: ReadRecord, ends?: ResolvedEdgeEnds, change?: RecordChange): UpdateValidation {
+function classifyStored(meta: SpaceMeta | undefined, kind: KnowledgeType, record: ReadRecord, ends?: ResolvedEdgeEnds, change?: RecordChange): UpdateValidation {
   const left = recordAfterPatch(record, change ? patchOf(kind, record, change) : {}, {});
   const stored = record as never;
   switch (kind) {
@@ -259,7 +260,7 @@ async function restampEdgesAt(spaceId: string, entityId: string, pair: MetaForWr
     size: EDGES_PER_PAGE,
   }, async (edges) => {
     const ends = await endsOfPage(spaceId, 'edge', edges);
-    const conforming = edges.map((e, i) => ({ e, check: classifyStored('edge', pair.meta, e, ends[i]) })).filter(x => x.check.all.length === 0);
+    const conforming = edges.map((e, i) => ({ e, check: classifyStored(pair.meta, 'edge', e, ends[i]) })).filter(x => x.check.all.length === 0);
     const landed = await stampQuietly(spaceId, 'edge', pair, conforming.map(x => x.e), conforming.map(x => x.check));
     stamped += landed.filter(Boolean).length;
   });
@@ -294,7 +295,7 @@ export async function convertRecordsPage(
     const change = convertedRecord(run.steps, kind, record, judge);
     if ('notConvertible' in change) { out[i] = unconverted(change.notConvertible); continue; }
     if (isEmptyChange(change)) {
-      const check = classifyStored(kind, pair.meta, record, ends[i]);
+      const check = classifyStored(pair.meta, kind, record, ends[i]);
       if (check.all.length === 0) { toStamp.push({ at: i, record, check }); continue; }
       // A step the run refused would have changed this record: the reason is the refusal, which an operator can answer with other steps.
       const wouldChange = refused.length > 0 && (() => { const c = convertedRecord(refused, kind, record, judge); return !('notConvertible' in c) && !isEmptyChange(c); })();
@@ -306,7 +307,7 @@ export async function convertRecordsPage(
     const patchedEnds = kind === 'edge'
       ? (await endsOfPage(spaceId, 'edge', [{ ...record, ...(change.type !== undefined ? { label: change.type } : {}) }]))[0]
       : undefined;
-    const precheck = classifyStored(kind, pair.meta, record, patchedEnds, change);
+    const precheck = classifyStored(pair.meta, kind, record, patchedEnds, change);
     if (precheck.all.length > 0) { out[i] = unconverted('not_conforming', precheck.all, change); continue; }
     try {
       await opts.onRewrite?.(kind, record);
