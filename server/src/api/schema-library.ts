@@ -53,8 +53,21 @@ import { applyDeleteFields, validateDeleteFields } from '../brain/delete-fields.
 import { log, peerText, peerList, refusalOfParse, NAME_QUOTED } from '../util/log.js';
 import { notFoundSentence } from '../util/errors.js';
 import { sendLostSpace } from './write-target-answer.js';
+import { restartSchemaConvertInTurn } from '../sync/governance.js';
 
 export const schemaLibraryRouter = Router();
+
+/**
+ * What a save of library entries `names` owes every space that links one of them, whose fingerprint it moved (refs are inlined into it): the
+ * space keeps its new schema version (`keepSnapshotsOfSpacesLinking`, Q-735), and an unfinished conversion run of the space is restarted toward
+ * the schema the edit left (`Q-746`, design 2.1, 5.2) — a library edit converts nothing, and without the restart the types the run had not
+ * finished would be converted toward a schema that is gone. One call, so no library door keeps the one and drops the other.
+ */
+function afterLibraryEdit(names: readonly string[]): void {
+  keepSnapshotsOfSpacesLinking(names);
+  const usages = libraryUsages(getConfig().spaces);
+  void restartSchemaConvertInTurn(names.flatMap(n => (usages.get(n) ?? []).map(u => u.spaceId)));
+}
 
 // ── Rate limiters ──────────────────────────────────────────────────────────
 
@@ -395,7 +408,7 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
   }
 
   saveSchemaLibrary(library);
-  keepSnapshotsOfSpacesLinking(resultEntries.map(e => e.name));
+  afterLibraryEdit(resultEntries.map(e => e.name));
   res.json({
     created, updated, entries: resultEntries,
     ...(skipped.length ? { skipped } : {}),
@@ -466,6 +479,8 @@ schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMf
     sendLostSpace(req, res, spaceId);
     return;
   }
+  // `Q-746`: applying a group converts nothing, and an unfinished conversion run is restarted toward the schema it leaves (design 2.1, 5.2).
+  await restartSchemaConvertInTurn([spaceId]);
 
   res.json({ applied, count: applied.length });
 });
@@ -528,7 +543,7 @@ schemaLibraryRouter.post('/', globalRateLimit, requireAdminMfa, (req, res) => {
   };
 
   saveSchemaLibrary([...library, entry]);
-  keepSnapshotsOfSpacesLinking([entry.name]);
+  afterLibraryEdit([entry.name]);
   res.status(201).json({ entry });
 });
 
@@ -589,7 +604,7 @@ schemaLibraryRouter.put('/:name', globalRateLimit, requireAdminMfa, (req, res) =
       updatedAt: now,
     };
     saveSchemaLibrary([...library, newEntry]);
-    keepSnapshotsOfSpacesLinking([name]);
+    afterLibraryEdit([name]);
     res.status(201).json({ entry: newEntry });
   } else {
     const existing = library[existingIdx]!;
@@ -621,7 +636,7 @@ schemaLibraryRouter.put('/:name', globalRateLimit, requireAdminMfa, (req, res) =
     const updatedLibrary = [...library];
     updatedLibrary[existingIdx] = updatedEntry;
     saveSchemaLibrary(updatedLibrary);
-    keepSnapshotsOfSpacesLinking([name]);
+    afterLibraryEdit([name]);
     // A library entry is referenced by `$ref` from any number of spaces, so editing one changes what all
     // of them validate against. The audit layer records the scalar metadata plus the property-key names
     // that changed — never the property schemas, which can carry example values.
@@ -739,7 +754,7 @@ schemaLibraryRouter.patch('/:name', globalRateLimit, requireAdminMfa, (req, res)
   const next = [...library];
   next[idx] = updated;
   saveSchemaLibrary(next);
-  keepSnapshotsOfSpacesLinking([updated.name]);
+  afterLibraryEdit([updated.name]);
   // Same reasoning as PUT: this entry is `$ref`d from any number of spaces, so editing it changes what all of
   // them validate against. The audit layer records the scalar metadata and which property KEYS changed, never
   // the property schemas themselves, which can carry example values.
@@ -768,7 +783,7 @@ schemaLibraryRouter.delete('/:name', globalRateLimit, requireAdminMfa, (req, res
   }
 
   saveSchemaLibrary(library.filter(e => e.name !== name));
-  keepSnapshotsOfSpacesLinking([name]);
+  afterLibraryEdit([name]);
   res.status(204).end();
 });
 

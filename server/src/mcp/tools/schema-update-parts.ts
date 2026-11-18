@@ -7,6 +7,8 @@
  *   schema package's own body (`ConvertRecordsZ`, which is what `UpdateSpaceBody.convertRecords` is), so the tool and `PATCH /api/spaces/:id` cannot
  *   declare it two ways. `$schema` is left out, as it is for every property of the tool. Its description is the guarantee and its cost to the
  *   caller; the mechanism is in `meta-update.ts`.
+ * - **A notice the tool says in words and leaves out of its text.** `metaUpdateNoticeText` is the words of every part of a space write's notice
+ *   (`networkWriteNotice` and `convertNotice`), so the conversion run a save started, or why it did not, is in the text as well as the structure.
  * - **A refusal the tool says in words and the REST body says in a code.** `refusedMetaUpdate` words a planner refusal as the tools always have
  *   (`Error (status): sentence`) and carries the refusal's own body, `code` and `step` included, as structured content, so a caller that branches on
  *   `bad_conversion_step` reads it the way a REST caller does.
@@ -42,8 +44,41 @@ export const CONVERT_RECORDS_PARAMETER: Record<string, unknown> = {
     + 'here; when two members rewrite the same record before either copy has travelled, both write the same converted record and the '
     + 'later version wins. A rewrite moves the record\'s version and `updatedAt` and so reaches every peer. On a space in a network the '
     + 'steps travel with the vote, signed by this instance, and a member applies them only if the signature and the round agree, else it '
-    + 'takes the schema without them. Same as `convertRecords` on `PATCH /api/spaces/:id`.',
+    + 'takes the schema without them. The answer\'s `convert` says what became of the run: `started` here, `after_vote` while the vote is '
+    + 'open, `nothing` when the change reaches no type, or `not_started` with the reason, the schema saved all the same. '
+    + 'Same as `convertRecords` on `PATCH /api/spaces/:id`.',
 };
+
+/** What a save's `convert` notice says in words, per state (`convertNotice` in `meta-update.ts` is the structured half). */
+const CONVERT_STATE_WORDS: Readonly<Record<string, string>> = {
+  started: 'The conversion run has started on this instance and continues in the background',
+  after_vote: 'The conversion runs on each member when the vote passes there',
+  nothing: 'The change reaches no type a conversion converts, so nothing was started',
+  not_started: 'The schema was saved, but the conversion run could not be started',
+};
+
+/**
+ * What a space write's notice says in words beside its structured half, as the text of a tool result: the merge note, what became of the write in
+ * each network it reached, each warning, and what became of the conversion run the save chose. Empty when the notice says nothing.
+ */
+export function metaUpdateNoticeText(notice: Record<string, unknown>): string {
+  const lines: string[] = [];
+  if (typeof notice['mergeNote'] === 'string') lines.push(notice['mergeNote']);
+  if (Array.isArray(notice['layers'])) {
+    lines.push('Per network: ' + (notice['layers'] as Array<{ networkLabel: string; outcome: string }>)
+      .map(l => `${l.networkLabel} ${l.outcome === 'applied' ? 'applied it' : 'is voting on it'}`).join('; ') + '.');
+  }
+  for (const w of Array.isArray(notice['warnings']) ? notice['warnings'] as Array<{ message?: string }> : []) {
+    if (typeof w.message === 'string') lines.push(`Warning: ${w.message}`);
+  }
+  const convert = notice['convert'] as { state?: string; types?: { kind: string; type: string }[]; error?: string } | undefined;
+  if (convert?.state !== undefined) {
+    const types = (convert.types ?? []).map(t => `${t.kind}:${t.type}`).join(', ');
+    lines.push(`${CONVERT_STATE_WORDS[convert.state] ?? `Conversion: ${convert.state}`}${types ? ` (types: ${types})` : ''}`
+      + `${convert.error ? `: ${convert.error}` : ''}.`);
+  }
+  return lines.length > 0 ? `\n\n${lines.join('\n\n')}` : '';
+}
 
 /** A planner's refusal as a tool result: the sentence, and (when the refusal has a `code`) the body REST answers with, `step` included. */
 export function refusedMetaUpdate(refusal: { status: number; body: { error: string; code?: string } }): {

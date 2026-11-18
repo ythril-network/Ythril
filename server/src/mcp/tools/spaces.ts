@@ -18,7 +18,7 @@ import { toolErrorResult } from '../tool-error-text.js';
 import { ToolRefusal } from '../../util/errors.js';
 import { lostSpaceAnswer } from '../../spaces/unknown-space.js';
 import { forwardedArgNames } from '../../contract/write-accepts.js';
-import { CONVERT_RECORDS_PARAMETER, refusedMetaUpdate } from './schema-update-parts.js';
+import { CONVERT_RECORDS_PARAMETER, refusedMetaUpdate, metaUpdateNoticeText } from './schema-update-parts.js';
 
 /** The status a refused or failed space write names in its text, as the REST door answers the same outcome. */
 const SPACE_WRITE_STATUS = { notAllowed: 403, conflict: 409, retry: 503, failed: 500 } as const;
@@ -332,25 +332,14 @@ async function runSpaceMetaUpdate(
   rights: TokenRights | undefined,
   recordChanges?: ToolContext['recordChanges'],
 ): Promise<ToolResult> {
-  const { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice } = await import('../../spaces/meta-update.js');
-  // What the write says beyond its outcome, as REST's body carries it (`networkWriteNotice`, the one spread): the structured half is the
-  // notice itself and the text says the same in words — the merge note (Q-61: a networked replace is applied as a merge, naming the types
-  // it kept), what became of the write in each network it reached (R5-1), and the members that may refuse a key an earlier release does
-  // not know (R6-7), named only where this token may read networks.
+  const { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice, convertNotice } = await import('../../spaces/meta-update.js');
+  // What the write says beyond its outcome, as REST's body carries it (`networkWriteNotice` and `convertNotice`, the two spreads): the structured
+  // half is the notice itself and the text says the same in words (`metaUpdateNoticeText`) — the merge note (Q-61), what became of the write in
+  // each network it reached (R5-1), the members that may refuse a key an earlier release does not know (R6-7), named only where this token may
+  // read networks, and what became of the conversion run the save chose (`Q-746`).
   const caller = { ...(rights ? { rights } : {}) };
-  const noticeOf = (r: Parameters<typeof networkWriteNotice>[0]) => networkWriteNotice(r, caller);
-  const noticeText = (notice: Record<string, unknown>): string => {
-    const lines: string[] = [];
-    if (typeof notice['mergeNote'] === 'string') lines.push(notice['mergeNote']);
-    if (Array.isArray(notice['layers'])) {
-      lines.push('Per network: ' + (notice['layers'] as Array<{ networkLabel: string; outcome: string }>)
-        .map(l => `${l.networkLabel} ${l.outcome === 'applied' ? 'applied it' : 'is voting on it'}`).join('; ') + '.');
-    }
-    for (const w of Array.isArray(notice['warnings']) ? notice['warnings'] as Array<{ message?: string }> : []) {
-      if (typeof w.message === 'string') lines.push(`Warning: ${w.message}`);
-    }
-    return lines.length > 0 ? `\n\n${lines.join('\n\n')}` : '';
-  };
+  const noticeOf = (r: Parameters<typeof networkWriteNotice>[0]) => ({ ...networkWriteNotice(r, caller), ...convertNotice(r) });
+  const noticeText = metaUpdateNoticeText;
   const space = getConfig().spaces.find(s => s.id === spaceId);
 
   /*

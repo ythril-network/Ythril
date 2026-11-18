@@ -60,6 +60,8 @@ import type { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { spaceForWire } from './space-for-wire.js';
 import { lostSpaceAnswer } from './unknown-space.js';
+import { typesToConvert, type SchemaConvertType } from './schema-convert-run.js';
+import { startSchemaConvertInTurn, roundConvertStartOf, type SchemaConvertStarted } from '../sync/governance.js';
 // The trigger lives beside the sweep (bundle-30 `R5`): the effective-meta recompute fires it too.
 
 // The merge a write makes, and the base it is merged over, live with the rights check's copy of the same question (`meta-write-base.ts`).
@@ -165,6 +167,20 @@ export function networkWriteNotice(outcome: MetaUpdateOutcome, caller: WriteCall
     ...(outcome.layers ? { layers: outcome.layers } : {}),
     ...(rows.length ? { warnings: rows } : {}),
   };
+}
+
+/**
+ * What both doors add to the answer of a save that carried `convertRecords` (`Q-745`, `Q-746`, design 2.2): `convert`, spread beside
+ * {@link networkWriteNotice} at the same places on REST and MCP, so the two cannot say it apart. Nothing for a save that chose no conversion.
+ *
+ * - `started`: the run was started (or joined the run already going) on this instance, toward `toFp`;
+ * - `after_vote`: the save opened a vote that has not passed here; each member starts its run when the round passes there;
+ * - `nothing`: the save changed no type a run reaches, so there is nothing to convert;
+ * - `not_started`: the schema was saved and the run could not be started (`error` says why): the save is not undone.
+ */
+export function convertNotice(outcome: MetaUpdateOutcome): Record<string, unknown> {
+  if (outcome.outcome === 'not_found' || outcome.convertRun === undefined) return {};
+  return { convert: outcome.convertRun };
 }
 
 /** The `warnings` rows for the members a write may be refused by — see {@link networkWriteNotice} for who is named. */
@@ -499,9 +515,71 @@ export function planSpaceMetaUpdate(input: {
  * into "ok" would tell an agent its schema was written when it was not.
  */
 export type MetaUpdateOutcome =
-  | ({ outcome: 'applied'; space: SpaceConfig; keptTypes?: string[] } & NetworkedWrite & ConvertCarried)
-  | ({ outcome: 'vote_pending'; rounds: RoundAnswer[]; keptTypes?: string[] } & NetworkedWrite & ConvertCarried)
+  | ({ outcome: 'applied'; space: SpaceConfig; keptTypes?: string[] } & NetworkedWrite & ConvertCarried & ConvertStarted)
+  | ({ outcome: 'vote_pending'; rounds: RoundAnswer[]; keptTypes?: string[] } & NetworkedWrite & ConvertCarried & ConvertStarted)
   | { outcome: 'not_found' };
+
+/** What became of the run a save that carried `convertRecords` asked for, as both doors answer it ({@link convertNotice}). */
+export interface ConvertRunNotice {
+  state: 'started' | 'after_vote' | 'nothing' | 'not_started';
+  /** The types the save converts (`typesToConvert`), whatever else an unfinished run it joined still had to do. */
+  types: { kind: string; type: string }[];
+  /** The fingerprint the started run converts toward. */
+  toFp?: string;
+  /** Why the run was not started (`not_started`). */
+  error?: string;
+}
+
+/** The outcome's {@link ConvertRunNotice}: present only when the save carried `convertRecords`. */
+interface ConvertStarted { convertRun?: ConvertRunNotice }
+
+/** The types a save's run reaches, as `typesToConvert` names them. */
+function saveConvertTypes(plan: MetaUpdatePlan, inNetwork: boolean, rulesBefore: unknown, rulesAfter: unknown): SchemaConvertType[] {
+  return typesToConvert({
+    changedTypes: plan.changedTypes, droppedTypes: plan.droppedTypes, inNetwork, rulesBefore, rulesAfter, steps: plan.convertRecords?.steps ?? [],
+  });
+}
+
+/** A start's answer as the notice says it: started toward its fingerprint, nothing to convert, or not started and why. */
+function noticeOfStart(started: SchemaConvertStarted, reached: readonly SchemaConvertType[]): ConvertRunNotice {
+  const types = reached.map(t => ({ kind: t.kind, type: t.type }));
+  if (!started.ok) return { state: 'not_started', types, error: started.error };
+  if (started.run === null) return { state: 'nothing', types };
+  return { state: 'started', types, toFp: started.run.toFp };
+}
+
+/**
+ * The run of a save to a space in NO network (`Q-746`, design 2.2, 5.1): started once the schema is stored (`updated` is the space as the save
+ * left it), source `write`, the checked steps, the types `typesToConvert` names with the dropped types counted (nothing keeps a type a solo
+ * replace leaves out). A start that fails is said on the answer; the save stays.
+ */
+async function convertRunOfSave(plan: MetaUpdatePlan, before: SpaceMeta | undefined, updated: SpaceConfig): Promise<ConvertStarted> {
+  if (plan.convertRecords === undefined) return {};
+  const types = saveConvertTypes(plan, false, before?.rules, updated.meta?.rules);
+  const started = await startSchemaConvertInTurn({
+    spaceId: plan.spaceId, types, steps: [...(plan.convertRecords.steps ?? [])], source: { kind: 'write' }, before: resolvedForSteps(before),
+  });
+  return { convertRun: noticeOfStart(started, types) };
+}
+
+/**
+ * The run of a NETWORKED save (`Q-746`, design 4.1): a round that passed here on this instance's own yes started it, source `round`, when its stores
+ * were written (`passedMetaChange`), so the save reads what those starts answered (`roundConvertStartOf`) and starts no second run beside them. A
+ * save whose rounds are all open answers `after_vote`: each member starts its run when the round passes there.
+ */
+async function convertRunOfRounds(plan: MetaUpdatePlan, before: SpaceMeta | undefined, starts: readonly Promise<SchemaConvertStarted>[], allPassed: boolean): Promise<ConvertStarted> {
+  if (plan.convertRecords === undefined) return {};
+  const types = saveConvertTypes(plan, true, before?.rules, plan.mergedMeta?.rules);
+  if (starts.length === 0) {
+    const named = types.map(t => ({ kind: t.kind, type: t.type }));
+    return { convertRun: allPassed
+      ? { state: 'not_started', types: named, error: 'the round passed here and started no run: this instance could not read the schema it proposes' }
+      : { state: 'after_vote', types: named } };
+  }
+  const answers = await Promise.all(starts);
+  const started = answers.find(a => a.ok && a.run !== null) ?? answers.find(a => !a.ok) ?? answers[0]!;
+  return { convertRun: noticeOfStart(started, types) };
+}
 
 /**
  * What a save that chose a conversion hands on to the run that is started from it (`Q-745`): the steps it checked, the types the edit changed and the
@@ -564,6 +642,8 @@ function skewOf(plan: MetaUpdatePlan, reached: readonly NetworkConfig[]): Pick<N
 export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUpdateOutcome> {
   const { spaceId: id, space, data: patchData, mergedMeta, proposal } = plan;
   const cfg = getConfig();
+  // The effective schema before anything is written: what a run's split steps read their declared properties from, and its rules' before.
+  const metaBefore = space.meta;
 
   // Duplicate rules are local (never governed) — applied now, so they are not silently dropped when a meta change
   // on the same request opens a network vote below.
@@ -607,6 +687,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
     if (networkedIn.length > 0) {
       const rounds: RoundAnswer[] = [];
       const layers: LayerOutcome[] = [];
+      // The runs the rounds that passed at once started here, read while they are being made (`roundConvertStartOf`).
+      const convertStarts: Promise<SchemaConvertStarted>[] = [];
 
       for (const net of networkedIn) {
         /*
@@ -643,6 +725,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
         });
         const concluded = decided === 'passed';
         if (!concluded) rounds.push(answer);
+        const convertStart = concluded ? roundConvertStartOf(answer.roundId) : undefined;
+        if (convertStart) convertStarts.push(convertStart);
         layers.push({ networkId: net.id, networkLabel: net.label, outcome: concluded ? 'applied' : 'vote_pending' });
       }
       const kept = plan.droppedTypes.length ? { keptTypes: plan.droppedTypes } : {};
@@ -669,13 +753,14 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
       if (Object.keys(nonMetaUpdates).length > 0) updateSpace(id, nonMetaUpdates);
       else saveConfig(cfg);
 
-      if (rounds.length > 0) return { outcome: 'vote_pending', rounds, ...kept, ...reached, ...convertCarriedBy(plan) };
+      const convertRun = await convertRunOfRounds(plan, metaBefore, convertStarts, rounds.length === 0);
+      if (rounds.length > 0) return { outcome: 'vote_pending', rounds, ...kept, ...reached, ...convertCarriedBy(plan), ...convertRun };
 
       // Every round passed on the proposer's own vote, so the meta is already written by the conclusion — and swept by
       // it: the conclusion writes through `updateSpace`, which asks for the sweep (a second one here swept it twice).
       const applied = getConfig().spaces.find(s => s.id === id);
       if (!applied) return { outcome: 'not_found' };
-      return { outcome: 'applied', space: applied, ...kept, ...reached, ...convertCarriedBy(plan) };
+      return { outcome: 'applied', space: applied, ...kept, ...reached, ...convertCarriedBy(plan), ...convertRun };
     }
   }
 
@@ -701,7 +786,9 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   });
   // The stored vectors follow the flag, which is what the userguide has always said happens: `updateSpace` asks for
   // the sweep, not awaited — see `sweepAfterMetaWrite` for why a failure is logged rather than surfaced here.
-  return updated ? { outcome: 'applied', space: updated, ...convertCarriedBy(plan) } : { outcome: 'not_found' };
+  if (!updated) return { outcome: 'not_found' };
+  // `Q-746`: the run the save chose, started now that the schema it converts toward is the one stored, and never for a save that was refused.
+  return { outcome: 'applied', space: updated, ...convertCarriedBy(plan), ...(await convertRunOfSave(plan, metaBefore, updated)) };
 }
 
 /**
