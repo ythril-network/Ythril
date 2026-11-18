@@ -76,9 +76,13 @@ const EXEMPT_COLLECTIONS = new Map([
   ['media_jobs', 'the media derivation\'s work queue: re-derived from the file rows, and a job for a file an act removed finds nothing'],
   ['link_violations', 'the link checker\'s findings, derived from the records and re-derived after an act'],
   ['file_hashes', 'the content-hash index of the file rows, derived from the bytes; the files family it describes is COVERED'],
+  // Bundle-284 (Q-746, Q-919): the schema conversion run's local bookkeeping. A restore drops both and never loads them (`db/restore-act.ts`), so an act
+  // can neither be raced by them nor refill them; the record writes the run makes (quiet stamps, rewrites) go to COVERED collections and ask the gate.
+  ['schema_convert_run', 'the schema conversion run\'s own progress row: bookkeeping of a background pass, no record, local and never synced'],
+  ['schema_convert_items', 'the records a conversion could not convert, as review findings derived from the records: never landed or restored by an act, re-derived by the next run'],
 ]);
-/** The fewest exemption rows: the eight derived or bookkeeping collections of bundle-266. Fewer means a row was dropped, not that a collection became covered. */
-const EXEMPT_COLLECTIONS_FLOOR = 8;
+/** The fewest exemption rows: the eight derived or bookkeeping collections of bundle-266, and the two of the conversion run (bundle-284). Fewer means a row was dropped, not that a collection became covered. */
+const EXEMPT_COLLECTIONS_FLOOR = 10;
 
 /** The per-space collection suffixes, read from the registry the server builds every space collection name from. */
 const { SPACE_COLLECTIONS } = await import('../../server/dist/db/space-collection.js');
