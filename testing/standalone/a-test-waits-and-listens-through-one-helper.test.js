@@ -53,6 +53,17 @@
  * FUNCTION covers nothing inside it. A listener inside a `new Promise(...)` executor is exempt by a marker above
  * the statement holding the `new Promise`, as well as above its own statement.
  *
+ * ## A race timer is cleared, `unref()`ed or kept out of the source
+ *
+ * A `Promise.race` timeout is no fixed delay (above), but it has a cost of its own: the timer that LOSES the race is still
+ * armed, so the process stays alive for its whole length after the last test has ended. A test that races its answer against
+ * `new Promise(r => setTimeout(() => r('hung'), 20_000))` ends its case at once and the file's row in CI is the timer's
+ * length longer than its tests (bundle-348 found five such files from the timing records). `uncancelledRaceTimers` finds every global `setTimeout` inside a `Promise.race`
+ * (or inside the local promise it names) that is not `unref()`ed and whose handle is not passed to `clearTimeout` in the
+ * function around the race. The fix is `settleWithin` from `standalone/_write-faults.mjs` (bounded, clears its own timer), or
+ * the handle kept and cleared in a `finally`. Rows below plant each spelling; an independent count of `Promise.race` calls
+ * sets the tree reader against a plain reading of the text.
+ *
  * ## Why the instrument is exercised before it is trusted
  *
  * A gate whose scan is wrong reports success about nothing. So the truth table below runs the classifier over
@@ -79,7 +90,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { fixedDelays, listenerSites, awaitedSleeps, delayCalls } from '../_shared/timer-sites.mjs';
+import { fixedDelays, listenerSites, awaitedSleeps, delayCalls, uncancelledRaceTimers, promiseRaceCount } from '../_shared/timer-sites.mjs';
 import { elapse, DELAY_KINDS } from '../_shared/sleep.mjs';
 import { pollLoops } from '../_shared/poll-loops.mjs';
 
@@ -93,6 +104,9 @@ const LISTENER_HOMES = ['testing/_shared/local-server.mjs'];
 
 /** This file: it calls `elapse` with refused reasons on purpose, to see `elapse` refuse them. Named, so nothing else is. */
 const ELAPSE_REFUSAL_TESTS = ['testing/standalone/a-test-waits-and-listens-through-one-helper.test.js'];
+
+/** This file spells `Promise.race(` inside planted snippets (strings), which a plain reading counts and the tree does not. */
+const RACE_SNIPPET_TESTS = ['testing/standalone/a-test-waits-and-listens-through-one-helper.test.js'];
 
 describe('the classifier finds a fixed delay in every spelling it is written in', () => {
   const MUST_BE_FOUND = [
@@ -257,6 +271,94 @@ describe('the classifier leaves alone what is not a stand-alone fixed delay', ()
       assert.deepEqual(delays(text).map(f => f.line), [], `a fixed delay was found in:\n${text}`);
     });
   }
+});
+
+describe('the classifier finds a race timer that is left running, in every spelling it is written in', () => {
+  const races = (text) => uncancelledRaceTimers(text, 'testing/snippet.test.js');
+
+  const MUST_BE_FOUND = [
+    { name: 'a timer that resolves a verdict, inline in the race',
+      text: src('async function a(work) {', "  const r = await Promise.race([work(), new Promise(res => setTimeout(() => res('hung'), 20_000))]);", '}'), line: 2 },
+    { name: 'a timer that rejects, inline in the race',
+      text: src('async function a(work) {',
+        "  await Promise.race([work(), new Promise((_, reject) => setTimeout(() => reject(new Error('late')), 5000))]);", '}'), line: 2 },
+    { name: 'a timer in a race helper that is written once and called often',
+      text: src('const within = (p, what) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(what)), 5000))]);'), line: 1 },
+    { name: 'a timer in a local promise that the race names',
+      text: src('async function a(work) {', '  const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("late")), 2000));',
+        '  await Promise.race([work(), timeout]);', '}'), line: 2 },
+    { name: 'a timer whose handle is kept and never cleared',
+      text: src('async function a(work) {', '  let timer;',
+        '  await Promise.race([work(), new Promise((resolve) => { timer = setTimeout(() => resolve(null), 3000); })]);', '}'), line: 3 },
+    { name: 'a handle cleared by a different function than the one that races',
+      text: src('function stop(timer) { clearTimeout(timer); }', 'async function a(work) {', '  let timer;',
+        '  await Promise.race([work(), new Promise((resolve) => { timer = setTimeout(() => resolve(null), 3000); })]);', '}'), line: 4 },
+    { name: 'the global timer reached as globalThis.setTimeout',
+      text: src('async function a(work) {', '  await Promise.race([work(), new Promise(r => globalThis.setTimeout(r, 3000))]);', '}'), line: 2 },
+    { name: 'a timer whose unref() is on another timer',
+      text: src('async function a(work) {', '  setTimeout(() => {}, 1).unref();',
+        "  await Promise.race([work(), new Promise(res => setTimeout(() => res('hung'), 9000))]);", '}'), line: 3 },
+    { name: 'a timer in the loop body of a read with a deadline',
+      text: src('async function a(reader, deadline) {', '  for (;;) {',
+        '    const next = await Promise.race([reader.read(), new Promise(res => setTimeout(() => res(null), Math.max(1, deadline - Date.now())))]);',
+        '    if (!next) break;', '  }', '}'), line: 3 },
+  ];
+  for (const row of MUST_BE_FOUND) {
+    it(row.name, () => {
+      const found = races(row.text);
+      assert.deepEqual(found.map(f => f.line), [row.line], `expected exactly one race timer, on line ${row.line}, in:\n${row.text}`);
+      assert.equal(found[0].file, 'testing/snippet.test.js');
+    });
+  }
+
+  const MUST_NOT_BE_FOUND = {
+    'a timer that is unref()ed': src(
+      'const within = (p, ms) => Promise.race([p, new Promise((_, reject) => setTimeout(() => reject(new Error("late")), ms).unref())]);'),
+    'a handle cleared in a finally': src(
+      'async function a(work, ms) {', '  let timer;',
+      '  try { return await Promise.race([work(), new Promise((resolve) => { timer = setTimeout(() => resolve(null), ms); })]); } finally { clearTimeout(timer); }', '}'),
+    'a handle cleared once the race settles': src(
+      'function within(promise, ms) {', '  let timer;',
+      '  const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("late")), ms); });',
+      '  return Promise.race([promise, late]).finally(() => clearTimeout(timer));', '}'),
+    'a local promise whose handle the function clears': src(
+      'async function a(work) {', '  let timer;', '  const hung = new Promise(resolve => { timer = setTimeout(() => resolve("HUNG"), 500); });',
+      '  try { return await Promise.race([work(), hung]); } finally { clearTimeout(timer); }', '}'),
+    'a clear through a member (a scheduler)': src(
+      'async function a(work, clock) {', '  let timer;',
+      '  try { await Promise.race([work(), new Promise(r => { timer = setTimeout(r, 5); })]); } finally { clock.clearTimeout(timer); }', '}'),
+    'a bounded look through settleWithin, with no timer written': src(
+      "import { settleWithin } from './_write-faults.mjs';", 'async function a(run) { const r = await settleWithin(run, 20_000); return r.settled; }'),
+    'a race with no timer in it': src('async function a(x, y) { return Promise.race([x(), y()]); }'),
+    'a timer outside any race': src('const t = setTimeout(() => finish(), 100);', 'clearTimeout(t);', 'setTimeout(() => done(), 5);'),
+    'a race timeout through the shared elapse — a named kind of delay, judged by delayCalls': src(
+      "import { elapse } from '../_shared/sleep.mjs';",
+      "async function a(p) { await Promise.race([p, elapse(10, 'race timeout: the event never came').then(() => { throw new Error('x'); })]); }"),
+    'a timer in a string, a template and a comment': src(
+      "const a = 'await Promise.race([x, new Promise(r => setTimeout(r, 5))])';", 'const b = `Promise.race([x, setTimeout(r, 5)])`;',
+      '// await Promise.race([x, new Promise(r => setTimeout(r, 5))]);'),
+  };
+  for (const [name, text] of Object.entries(MUST_NOT_BE_FOUND)) {
+    it(name, () => {
+      assert.deepEqual(races(text).map(f => f.line), [], `a race timer was found in:\n${text}`);
+    });
+  }
+
+  it('two timers in two races are two findings, in line order', () => {
+    const found = races(src(
+      'async function a(x) {',
+      '  await Promise.race([x(), new Promise(r => setTimeout(r, 1))]);',
+      '  await Promise.race([x(), new Promise(r => setTimeout(r, 2))]);',
+      '}'));
+    assert.deepEqual(found.map(f => f.line), [2, 3]);
+  });
+
+  it('a race of a timer already named by another race is one finding, not two', () => {
+    const found = races(src(
+      'async function a(x) {', '  const late = new Promise(r => setTimeout(r, 1));',
+      '  await Promise.race([x(), late]);', '  await Promise.race([x(), late]);', '}'));
+    assert.deepEqual(found.map(f => f.line), [2]);
+  });
 });
 
 describe('the classifier finds a loopback server site in every spelling it is written in', () => {
@@ -776,6 +878,34 @@ describe('every tracked test and script', () => {
     const [{ text }] = readTrackedSources(['docs/testing-guide.md'], { ext: ['.md'], floor: 1 });
     const missing = DELAY_KINDS.filter(k => !text.includes(k));
     assert.deepEqual(missing, [], 'docs/testing-guide.md does not name these kinds of delay; the list lives in sleep.mjs and the guide follows it');
+  });
+
+  it('the race reader sees every Promise.race a plain reading of the text finds, and there are enough to mean something', () => {
+    // An independent count: the tree reader finds the calls through the syntax tree, this counts `Promise.race(` in the
+    // comment-stripped text. A file where the two differ holds a spelling the race rule does not see.
+    let judged = 0;
+    const disagree = [];
+    assert.ok(byFile.has(RACE_SNIPPET_TESTS[0]), 'the exempt file is not among the scanned sources: it was moved, and the exemption with it');
+    for (const s of sources.filter(x => !RACE_SNIPPET_TESTS.includes(x.file))) {
+      const plain = [...stripComments(s.text).matchAll(/\bPromise\s*\.\s*race\s*\(/g)].length;
+      const tree = promiseRaceCount(s.text, s.file);
+      judged += tree;
+      if (plain !== tree) disagree.push(`${s.file}: ${plain} by reading, ${tree} by the tree`);
+    }
+    assert.deepEqual(disagree, [], 'the tree reader and a plain reading disagree about how many times Promise.race is called');
+    assert.ok(judged >= 40, `only ${judged} Promise.race calls were read across the tree; the floor is 40 — the reader or the scan broke`);
+  });
+
+  it('none leaves the timer of a Promise.race running', () => {
+    const offenders = sources
+      .flatMap(s => uncancelledRaceTimers(s.text, s.file))
+      .map(f => `${f.file}:${f.line}  ${f.text}`);
+    assert.deepEqual(offenders, [],
+      'a Promise.race timer that is never cleared. The timer that loses the race keeps the process alive for its whole length after '
+      + 'the last test, so the file takes that much longer than its tests. Bound the wait with `settleWithin` from '
+      + 'testing/standalone/_write-faults.mjs (it clears its own timer and reports `settled: false`), or keep the handle '
+      + '(`let timer; ... timer = setTimeout(...)`) and `clearTimeout(timer)` in a `finally`, or `.unref()` a guard that only '
+      + 'rejects.');
   });
 
   it('none binds a test server itself, unless it says why it keeps its own', () => {
