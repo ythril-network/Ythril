@@ -32,6 +32,8 @@ const ENTRY = 'server/src/index.ts';
 /** The ports the conversion is wired through: the floor that proves the scan found its subjects. */
 const CONVERSION_PORTS = ['useSchemaConvertRuns', 'useSchemaConvertActs', 'useUnconvertedActs'];
 
+// The server's own tree, where a module is kept out of the cycle by a port. The schema package's `useSchemaLibrary` installs a library whose default
+// is none (an outside app may run without one), so it is not held to "throw when never wired".
 const sources = readTrackedSources('server/src', { specs: false }).map(({ file, text }) => ({ file, code: stripComments(text) }));
 const known = new Set(sources.map(s => s.file));
 const codeOf = new Map(sources.map(s => [s.file, s.code]));

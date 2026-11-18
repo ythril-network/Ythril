@@ -71,13 +71,21 @@ export const UNCONVERTED_REFUSAL_CODES = [
   'unconverted_bad_reason', 'unconverted_bad_expect', 'unconverted_changed', 'unconverted_too_many',
 ] as const;
 
+/** The statuses the acts answer: the contract both doors carry. */
+const OK = 200;
+const BAD_REQUEST = 400;
+const FORBIDDEN = 403;
+const NOT_FOUND = 404;
+const GONE = 410;
+const CONFLICT = 409;
+
 /**
  * What an act answers: a body, or a refusal with its status and code. A refusal may carry `detail`, whole numbers a door sends beside `error`
  * and `code` (`current` of a changed count, `max` of a call that names too many): both doors build their body from the one {@link refusalBody}.
  */
 export type UnconvertedActResult =
-  | { status: 200; body: Record<string, unknown> }
-  | { status: 400 | 403 | 404 | 410 | 409; error: string; code?: string; detail?: Readonly<Record<string, number>> };
+  | { status: typeof OK; body: Record<string, unknown> }
+  | { status: typeof BAD_REQUEST | typeof FORBIDDEN | typeof NOT_FOUND | typeof GONE | typeof CONFLICT; error: string; code?: string; detail?: Readonly<Record<string, number>> };
 
 /** The body a door sends for a refusal: `{ error, code?, ...detail }`. */
 export const refusalBody = (r: Extract<UnconvertedActResult, { error: string }>): Record<string, unknown> =>
