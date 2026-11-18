@@ -11,7 +11,7 @@
 follow how things connect, keep it in sync between your own machines, and let AI assistants use it over
 **MCP** and your own programs over a **REST API**. On your hardware, under your control.
 
-[![License: PolyForm SB](https://img.shields.io/badge/license-PolyForm%20Small%20Business-2b7bb9)](LICENSE)
+[![License: Ythril License](https://img.shields.io/badge/license-Ythril%20License-2b7bb9)](LICENSE)
 [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-native-9eec55?labelColor=0d1117)](https://modelcontextprotocol.io)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-docker%20compose%20up-0d1117)](#-quickstart)
 [![Runs offline](https://img.shields.io/badge/works-fully%20offline-6e7681)](#your-data-your-rules)
@@ -200,9 +200,10 @@ work completely offline.
 
 ## License
 
-Source-available under the [PolyForm Small Business License 1.0.0](LICENSE). **Free to use, modify and
-self-host** for individuals and small businesses (< 100 people, < $1M revenue). Larger organisations — or
-anyone offering Ythril as a paid managed or cloud service — need a commercial licence: `contact@ythril.net`.
+Source-available under the [Ythril License 1.0.0](LICENSE). **Free to self-host and change for your own use**,
+for individuals and companies under 50 people and USD 1M revenue. Passing on the source, changed versions or images is
+not allowed. Larger organisations — or anyone offering Ythril as a paid managed or cloud service — need a commercial
+licence: `contact@ythril.net`.
 
 The one exception is `schema/`, the `@ythril-network/schema` package an app installs to validate the schemas it writes: it is
 licensed under the [Apache License 2.0](schema/LICENSE), with its own [NOTICE](schema/NOTICE).

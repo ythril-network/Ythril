@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Licence:** releases from the next one on are under the Ythril License: passing on the source, changed versions or images is no longer licensed, and the free small-business tier is under 50 people. Releases already published keep their terms.
 - **Schema:** type rows in the schema tab show only the name: the property, rules, pattern, library and retention pills are gone; retention and the library link stay in the type's pane.
 - **Schema:** `older` no longer walks every stamped record; version texts are read in byte-bounded chunks; a pass past its deadline answers 503 `schema_versions_busy`; edges get a `{label: 1}` index, built in the background.
 - **Schema:** a record whose type field holds an array is matched by no type in `schemaVersion` filters and the History dialog; it is counted as unclassified.

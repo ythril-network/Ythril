@@ -1,7 +1,7 @@
 # Dependencies and Licensing Notes
 
 This document explains how Ythril uses its runtime dependencies, the licensing
-status of each, and why Ythril's PolyForm Small Business License obligations are not affected by them.
+status of each, and why Ythril's Ythril License obligations are not affected by them.
 
 ---
 
@@ -205,7 +205,7 @@ MongoDB source code. The `docker-compose.yml` file contains only a reference to
 the image name on Docker Hub. Docker pulls the image separately when a user runs
 `docker compose up`. Ythril is not the distributor.
 
-### PolyForm compliance
+### Ythril License compliance
 
 **No conflict.** Here is why:
 
@@ -226,7 +226,7 @@ the image name on Docker Hub. Docker pulls the image separately when a user runs
    runs as a separate process inside a separate container that Ythril never ships.
    No proprietary binary is incorporated into Ythril's source or distribution.
 
-**Summary:** Ythril's PolyForm source obligations apply only to Ythril's own code.
+**Summary:** Ythril's Ythril License source obligations apply only to Ythril's own code.
 They do not extend to `mongod`, `mongot`, or the `mongodb/mongodb-atlas-local` image.
 
 ### Honest disclosure
@@ -424,7 +424,7 @@ docker inspect ythril-ollama --format '{{.State.OOMKilled}}'   # true → raise 
 > heavier than the defaults (a 13B vision model, `large-v3` transcription), set the matching `*_MEM_LIMIT`
 > in `.env` **before** you `docker compose up -d` — otherwise the first job after the upgrade is OOM-killed.
 
-**Licensing impact — none on Ythril's PolyForm obligations.** All three are permissively
+**Licensing impact — none on Ythril's Ythril License obligations.** All three are permissively
 licensed (MIT / Apache 2.0), carry no copyleft, and run as independent network services
 rather than linked code — the same TCP-socket relationship analysed for MongoDB above.
 `unstructured-api` in particular ships under Apache 2.0, but because its tag can change,

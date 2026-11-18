@@ -1,7 +1,7 @@
 {
   "name": "@ythril/client",
   "version": "6.5.5",
-  "license": "PolyForm-Small-Business-1.0.0",
+  "license": "SEE LICENSE IN LICENSE",
   "private": true,
   "scripts": {
     "typecheck": "node ../scripts/tsc.mjs --noEmit -p tsconfig.app.json && node ../scripts/tsc.mjs --noEmit -p tsconfig.spec.json",

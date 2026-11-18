@@ -1,6 +1,6 @@
-﻿# PolyForm Small Business License 1.0.0
+﻿# Ythril License 1.0.0
 
-<https://polyformproject.org/licenses/small-business/1.0.0>
+Based on the PolyForm Small Business License 1.0.0 (https://polyformproject.org/licenses/small-business/1.0.0): its distribution grant is removed, distribution is excluded in the words of PolyForm Internal Use 1.0.0, and its employee limit is 50.
 
 ## Acceptance
 
@@ -13,17 +13,9 @@ licenses.
 The licensor grants you a copyright license for the software
 to do everything you might do with the software that would
 otherwise infringe the licensor's copyright in it for any
-permitted purpose.  However, you may only distribute the
-software according to [Distribution License](#distribution-license)
-and make changes or new works based on the software according to
-[Changes and New Works License](#changes-and-new-works-license).
-
-## Distribution License
-
-The licensor grants you an additional copyright license to
-distribute copies of the software.  Your license to distribute
-covers distributing the software with changes and new works
-permitted by [Changes and New Works
+permitted purpose.  However, you may not distribute the
+software, and you may only make changes or new works based on
+the software according to [Changes and New Works
 License](#changes-and-new-works-license).
 
 ## Notices
@@ -56,7 +48,7 @@ These terms do not limit them.
 ## Small Business
 
 Use of the software for the benefit of your company is use for
-a permitted purpose if your company has fewer than 100 total
+a permitted purpose if your company has fewer than 50 total
 individuals working as employees and independent contractors,
 and less than 1,000,000 USD (2019) total revenue in the prior
 tax year.  Adjust this revenue threshold for inflation according

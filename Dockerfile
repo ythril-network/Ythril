@@ -201,7 +201,7 @@ FROM node:22-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966
 
 LABEL org.opencontainers.image.source="https://github.com/ythril-network/Ythril"
 LABEL org.opencontainers.image.description="Ythril — self-hosted brain & knowledge management platform"
-LABEL org.opencontainers.image.licenses="PolyForm-Small-Business-1.0.0"
+LABEL org.opencontainers.image.licenses="LicenseRef-Ythril-1.0.0"
 
 # NO python3/make/g++ here any more — the toolchain lives in the `prod-deps` stage and the compiled addon is
 # copied in below. That removes a 755 MB layer from the shipped image, and with it a layer that changed digest
