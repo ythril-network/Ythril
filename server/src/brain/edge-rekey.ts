@@ -40,7 +40,7 @@
  * is the other caller — importing it from `edges.ts` would put the two biggest brain modules in a runtime
  * dependency for the sake of one function, where a leaf both can reach costs nothing.
  */
-import { col, asDoc } from '../db/mongo.js';
+import { col, asDoc, asFilter } from '../db/mongo.js';
 import type { ClientSession } from 'mongodb';
 import { versionsFor } from '../util/version-stamp.js';
 import { withLandingStamp, localRow } from '../sync/record-position-stream.js';
@@ -131,7 +131,10 @@ export function edgeIdentityTakenAnswer(err: unknown): { status: 409; body: { er
  *                   (`brain/write-plan/plan-edge.ts`), which this never derives: the key and the condition for having one live in
  *                   that one function. `undefined`: the row carries no guard (the old one is dropped whatever the caller says).
  *                   A caller that passes one moves a single edge, by label.
- * @returns `null` when the derived id is the one already stored — the caller does its ordinary update.
+ * @param atReadVersion see {@link rekeyEdges}: move only while the stored row still holds the version `existing` was read at.
+ * @returns `null` when the derived id is the one already stored — the caller does its ordinary update — and, with `atReadVersion`, when the
+ *          stored row moved past the read: nothing was deleted or inserted, and the caller's ordinary update, filtered by the same version,
+ *          answers it as moved.
  */
 export async function rekeyEdge(
   spaceId: string,
@@ -141,9 +144,22 @@ export async function rekeyEdge(
   alsoUnset: readonly string[] = [],
   session?: ClientSession,
   functionalGuard?: string,
+  { atReadVersion = false }: { atReadVersion?: boolean } = {},
 ): Promise<EdgeRekey | null> {
-  const [moved] = await rekeyEdges(spaceId, [{ existing, next }], alsoSet, alsoUnset, session, functionalGuard);
+  const [moved] = await rekeyEdges(spaceId, [{ existing, next }], alsoSet, alsoUnset, session, functionalGuard, { atReadVersion });
   return moved ?? null;
+}
+
+/**
+ * Thrown by a re-key at the read version (`atReadVersion`) when SOME of its rows moved past the version they were read at and others did not:
+ * the rows it did delete must not stay deleted, so the caller's transaction is aborted by this throw. A re-key whose rows ALL moved answers
+ * `null` for each instead, with nothing written.
+ */
+export class EdgeMovedSinceRead extends Error {
+  constructor(readonly ids: readonly string[]) {
+    super(`edge(s) ${ids.join(', ')} were written after they were read, so the re-key moved none of them`);
+    this.name = 'EdgeMovedSinceRead';
+  }
 }
 
 /** One edge a `rekeyEdges` call is asked to move: the stored document, and the identity to move it onto. */
@@ -164,6 +180,10 @@ export interface EdgeMove {
  *          deleted whoever authored the edge, so leaving the edge under the fork's id would leave it pointing at nothing, and the cost the rule
  *          below names — a peer that refuses this instance's tombstone keeps the old row beside the new one — is the cost of the fork's own
  *          tombstone, which a peer that authored the fork refuses in the same way.
+ * @param atReadVersion move each edge only while its stored row still holds the version (`seq`) its `existing` was read at: the version is in
+ *          the filter of the delete itself, so a write that landed after the read is never deleted with the row and replaced by the stale read
+ *          (a relabel with `If-Match`, the conversion run's relabel). When no row matches, nothing is written and every move answers `null`; when
+ *          only some do, {@link EdgeMovedSinceRead} is thrown so the caller's transaction undoes the part deleted.
  * @returns one entry per move, in order: the re-key, or `null` where the edge stays under its id — the derived id
  *          is the one it already has, or a PEER authored it (see below). The caller writes those in place.
  */
@@ -174,7 +194,7 @@ export async function rekeyEdges(
   alsoUnset: readonly string[] = [],
   session?: ClientSession,
   functionalGuard?: string,
-  { moveForeign = false }: { moveForeign?: boolean } = {},
+  { moveForeign = false, atReadVersion = false }: { moveForeign?: boolean; atReadVersion?: boolean } = {},
 ): Promise<Array<EdgeRekey | null>> {
   // Refused before the plan is read; the write below is admitted and counted again, at the instant it is made.
   assertSpaceTakesWrites(spaceId, 'edges');
@@ -250,8 +270,16 @@ export async function rekeyEdges(
   const tombAt = new Map(tombVersions.map(v => [v.id, v.version] as const));
   const insertVersions = await versionsFor(spaceId, moving.map(m => m.newId), { parts: ['edges'], known: tombAt, ...(session ? { session } : {}) });
   // The re-key (the old rows' removal, their tombstones and the inserts) is ONE admitted and counted unit, from its own check (`admitSpaceWrite`).
-  const written = await admitSpaceWrite(spaceId, 'edges', async () => {
+  const written = await admitSpaceWrite(spaceId, 'edges', async (): Promise<EdgeDoc[] | null> => {
     const opts = session ? { session } : {};
+
+    // At the read version: the old rows are deleted only where they still hold the version they were read at, in the delete's own filter, so
+    // a write that landed after the read keeps its row. None matched: nothing written, the moves answer null. Some: the throw undoes them.
+    if (atReadVersion) {
+      const gone = await coll.deleteMany(asFilter<EdgeDoc>({ $or: moving.map(m => ({ _id: m.existing._id, seq: m.existing.seq ?? null })) }), opts);
+      if (gone.deletedCount === 0) return null;
+      if (gone.deletedCount !== moving.length) throw new EdgeMovedSinceRead(moving.map(m => m.existing._id));
+    }
 
     // The old rows go, then their tombstones (`removeWithTombstones`), stamped and positioned before the inserts.
     await removeWithTombstones(spaceId, 'edges', tombstones, { session, versions: tombVersions });
@@ -290,6 +318,7 @@ export async function rekeyEdges(
    * returns straight back as its 200. `upsertEdge` leaked exactly this way, measured against the live stack,
    * and the fix was the same shape: strip at the return, not at the write.
    */
+  if (written === null) return planned.map(() => null);
   const byPrevious = new Map(moving.map((m, i) => [m.existing._id, { edge: withoutVector(written[i]!), previousId: m.existing._id }]));
   return planned.map(p => (p === null ? null : byPrevious.get(p.existing._id) ?? null));
 }
