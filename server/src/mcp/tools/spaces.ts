@@ -2,18 +2,15 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { refusalsForSpaceUpdate, describeFieldRequirement } from '../../auth/space-field-rights.js';
 import { BRAIN_COLLECTIONS, UNKNOWN_WRITE_FIELD_ANSWERS } from '../../config/types.js';
 import { getConfig } from '../../config/loader.js';
-import { col } from '../../db/mongo.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { readSpacesOfCall } from '../../spaces/read-scope.js';
-import { spaceMetaAnswer, META_RESOLVE_DEFAULT } from '../../spaces/space-meta-answer.js';
+import { spaceMetaAnswer, spaceStatsAnswer, META_RESOLVE_DEFAULT } from '../../spaces/space-meta-answer.js';
 import { deleteSpaceData, wipeToolResult } from '../../spaces/delete-space-data.js';
 import { spacePurpose, unknownWriteFieldsToReport, spaceActPendingField } from '../../spaces/spaces.js';
 import { SPACE_PURPOSE_MAX } from '../../spaces/_shared.js';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
-import { spaceCollection } from '../../db/space-collection.js';
-import { COUNTED_FILE_ROW } from '../../files/live-file-row.js';
-import { filesAwaitingBytes as awaitingBytesIn } from '../../files/absent-bytes-sweep.js';
+import { countRecords } from '../../spaces/space-counts.js';
 import { spaceForWire } from '../../spaces/space-for-wire.js';
 import { renameSpaceAct } from '../../spaces/rename.js';
 import { toResult } from './networks.js';
@@ -41,22 +38,7 @@ export const list_spacesTool: ToolHandler = {
     const usageBySpaceId = await measureSpaceUsage(accessibleSpaces.map(sp => sp.id));
     const spaceCountResults = await Promise.allSettled(
       accessibleSpaces.map(async s => {
-        const memberIds = readSpacesOfCall(ctx, s.id);
-        const perMember = await Promise.all(memberIds.map(async mid => ({
-          facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
-          entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
-          edges:    await col(spaceCollection(mid, 'edges')).countDocuments(),
-          chrono:   await col(spaceCollection(mid, 'chrono')).countDocuments(),
-        })));
-        return {
-          id: s.id,
-          counts: {
-            facts: perMember.reduce((n, c) => n + c.facts, 0),
-            entities: perMember.reduce((n, c) => n + c.entities, 0),
-            edges:    perMember.reduce((n, c) => n + c.edges, 0),
-            chrono:   perMember.reduce((n, c) => n + c.chrono, 0),
-          },
-        };
+        return { id: s.id, counts: await countRecords(readSpacesOfCall(ctx, s.id)) };
       }),
     );
     const countsBySpaceId: Record<string, { facts: number; entities: number; edges: number; chrono: number }> = {};
@@ -100,8 +82,9 @@ export const list_spacesTool: ToolHandler = {
 
 export const space_statsTool: ToolHandler = {
   name: 'space_stats',
-  description: 'Return counts of facts, entities, edges, chrono entries and files for one space — the cheapest call there is, and the right way to check whether a space holds anything before spending a recall on it.\n\n'
-    + 'These are TOTALS, not search coverage. A record retired from semantic ranking is counted here and cannot be reached by `recall`, and a record written seconds ago is counted before its embedding exists. So a count that exceeds what a search returns is normal and is not evidence of a broken index — `list_embed_jobs` is what answers "is anything still queued or failed".\n\n'
+  description: 'Return counts of facts, entities, edges, chrono entries and files for one space, and `embedQueue`, how much of the space is not searchable yet — the cheapest call there is, and the right way to check whether a space holds anything, or is ready to search, before spending a recall on it.\n\n'
+    + 'These are TOTALS, not search coverage. A record retired from semantic ranking is counted here and cannot be reached by `recall`, and a record written seconds ago is counted before its embedding exists. So a count that exceeds what a search returns is normal and is not evidence of a broken index.\n\n'
+    + '`embedQueue` is `{ pending, processing, failed }`: records queued for their embedding, in flight, and given up on after retrying. A record in it exists and is absent from `recall` until it is embedded. `pending` normally drains within moments; a `failed` that does not clear means recall is quietly returning less than the space holds, usually an unreachable embedding endpoint. `list_embed_jobs` lists the jobs themselves. REST stats answers the same `embedQueue`, from the same function.\n\n'
     + 'THE FILES NUMBER IS THE SPACE\'S FILES: not the passages a document was split into, not the record a deleted file leaves behind where the operator keeps one, and not a record whose bytes this instance lost. The REST stats route and a space\'s own shape answer that same number, so a count never depends on which door you asked. `filesAwaitingBytes` is how many records are left out because their bytes are gone from this instance: each waits out its window (a day, or longer for a record with no recorded hash or a restored space) for a peer to deliver the bytes back, and is then removed here only.\n\n'
     + 'Through a personal view (`space: "@name"`) the numbers are the members\' totals combined, so a per-member breakdown means asking each member by id.',
   spaceRequired: true,
@@ -115,28 +98,9 @@ export const space_statsTool: ToolHandler = {
         }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { callSpace  } = ctx;
-    const memberIds = readSpacesOfCall(ctx, callSpace);
-    const counts = await Promise.all(memberIds.map(async mid => ({
-      facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
-      entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
-      edges: await col(spaceCollection(mid, 'edges')).countDocuments(),
-      chrono: await col(spaceCollection(mid, 'chrono')).countDocuments(),
-      // LIVE files, as REST stats counts them (api/brain/search.ts): not the chunk rows a document is split into,
-      // and not the audit rows of deleted files. This door counted all three, so the same space answered two numbers
-      // depending on which door was asked.
-      // Not a record whose bytes this disk lost either (Q-337): answered as `filesAwaitingBytes`, as REST stats does.
-      files: await col(spaceCollection(mid, 'files')).countDocuments({ ...COUNTED_FILE_ROW }),
-      filesAwaitingBytes: await awaitingBytesIn(mid),
-    })));
-    const facts = counts.reduce((s, c) => s + c.facts, 0);
-    const entities = counts.reduce((s, c) => s + c.entities, 0);
-    const edges = counts.reduce((s, c) => s + c.edges, 0);
-    const chrono = counts.reduce((s, c) => s + c.chrono, 0);
-    const files = counts.reduce((s, c) => s + c.files, 0);
-    const filesAwaitingBytes = counts.reduce((s, c) => s + c.filesAwaitingBytes, 0);
-    // Built ONCE and carried in both halves. Two literals is two places for a field to be added to
-    // one of them, which is this whole file's defect with a smaller blast radius.
-    const stats = { spaceId: callSpace, facts, entities, edges, chrono, files, filesAwaitingBytes };
+    // Built ONCE, by the function REST stats sends the body of, and carried in both halves. Two literals is two places for a
+    // field to be added to one of them, which is this whole file's defect with a smaller blast radius.
+    const stats = await spaceStatsAnswer(callSpace, readSpacesOfCall(ctx, callSpace));
     return {
       content: [{
         type: 'text' as const,

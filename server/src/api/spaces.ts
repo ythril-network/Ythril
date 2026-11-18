@@ -24,7 +24,7 @@ import { checkMetaPrecondition, preconditionErrorBody } from '../spaces/meta-pre
 import { gatherCompletenessFacts, scoreCompleteness } from '../spaces/completeness.js';
 import { measureUsage, usageIsComplete } from '../quota/quota.js';
 import { measureSpaceUsage } from '../spaces/space-usage.js';
-import { col } from '../db/mongo.js';
+import { countRecords } from '../spaces/space-counts.js';
 import { readSpacesOfRequest } from '../spaces/read-scope.js';
 import { spaceMetaAnswer, META_RESOLVE_DEFAULT } from '../spaces/space-meta-answer.js';
 import { isNetworkSyncing } from '../sync/engine.js';
@@ -46,7 +46,6 @@ import { requireSettingsFields, singleTypeEditBody } from '../auth/require-setti
 import { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice } from '../spaces/meta-update.js';
 import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
-import { spaceCollection } from '../db/space-collection.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { sendCaughtFailure, sendStoreFailure, sendRetryAfter } from './send-failure.js';
 import { answeredUnknownSpace, sendLostSpace } from './write-target-answer.js';
@@ -163,24 +162,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
   let countsBySpaceId: Record<string, { facts: number; entities: number; edges: number; chrono: number }> = {};
   if (includeCounts) {
     const countResults = await Promise.allSettled(
-      visibleSpaces.map(async s => {
-        const memberIds = readSpacesOfRequest(req, s.id);
-        const perMember = await Promise.all(memberIds.map(async mid => ({
-          facts: await col(spaceCollection(mid, 'facts')).countDocuments(),
-          entities: await col(spaceCollection(mid, 'entities')).countDocuments(),
-          edges:    await col(spaceCollection(mid, 'edges')).countDocuments(),
-          chrono:   await col(spaceCollection(mid, 'chrono')).countDocuments(),
-        })));
-        return {
-          id: s.id,
-          counts: {
-            facts: perMember.reduce((n, c) => n + c.facts, 0),
-            entities: perMember.reduce((n, c) => n + c.entities, 0),
-            edges:    perMember.reduce((n, c) => n + c.edges, 0),
-            chrono:   perMember.reduce((n, c) => n + c.chrono, 0),
-          },
-        };
-      }),
+      visibleSpaces.map(async s => ({ id: s.id, counts: await countRecords(readSpacesOfRequest(req, s.id)) })),
     );
     for (const r of countResults) {
       if (r.status === 'fulfilled') countsBySpaceId[r.value.id] = r.value.counts;

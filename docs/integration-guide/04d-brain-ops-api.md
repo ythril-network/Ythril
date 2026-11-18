@@ -32,6 +32,8 @@ peer to deliver the bytes back, and is then removed on this instance only
 ([the rule and its waits](05-files-api.md#delete-a-file)). A count that stays above 0 for longer than the waits is held by
 one of the reasons `ythril_files_absent_bytes_held` names ([Setup API](11-setup-api.md)).
 
+**MCP `space_stats` answers this same body**, `embedQueue` included, from the same function ([MCP](16-mcp.md#example-space_stats)).
+
 **`embedQueue` — how much of this space is not searchable yet.** Writes do not wait for the embedding
 model; a background worker embeds each record moments later. Until it does, the record exists but is
 **absent from recall** rather than ranked lower, because both retrieval channels need the vector.

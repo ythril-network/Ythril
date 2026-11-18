@@ -26,6 +26,52 @@ import { withLibraryDefinitions } from './library-ref-expansion.js';
 import { actualSchemaOf, spaceStatsOf, type SpaceStats } from '../brain/space-shape.js';
 import { invalidRulesOf } from './schema-rules.js';
 import { schemaFingerprintOf } from './schema-stamp.js';
+import { countRecords, type RecordCounts } from './space-counts.js';
+import { col } from '../db/mongo.js';
+import { spaceCollection } from '../db/space-collection.js';
+import { getEmbedJobCounts } from '../brain/embed-queue.js';
+import { COUNTED_FILE_ROW } from '../files/live-file-row.js';
+import { filesAwaitingBytes as awaitingBytesIn } from '../files/absent-bytes-sweep.js';
+
+/** How much of a space is not searchable yet: records queued, in flight, and given up on. */
+export type EmbedQueueCounts = { pending: number; processing: number; failed: number };
+
+/** The body of a space's stats, as REST stats and MCP `space_stats` both send it (a type alias, so a tool can carry it as its structured answer). */
+export type SpaceStatsAnswer = RecordCounts & {
+  spaceId: string;
+  files: number;
+  filesAwaitingBytes: number;
+  embedQueue: EmbedQueueCounts;
+};
+
+/**
+ * The stats body of one named space, built once for both doors (Q-169): the four record counts (`spaces/space-counts.ts`), the files the space
+ * has and the records waiting for their bytes, and the embed queue, summed over `memberIds` (what the caller reads for the space it names).
+ *
+ * The files are the live-row count every count door agrees on (`COUNTED_FILE_ROW`: not a chunk, not the audit row a soft delete leaves, not a
+ * record whose bytes this disk lost), and `filesAwaitingBytes` counts the ones left out, so the lower number is explained. `embedQueue` is how
+ * much of the above is not searchable YET: writes do not wait for the embedding model, so a record can exist and be absent from recall for a
+ * moment, and a caller asking "is this space ready" could not tell that from "the model is down and nothing has embedded for an hour". A proxy
+ * space reports its members' backlog, never a zero that would read as "nothing pending". A count that fails throws.
+ */
+export async function spaceStatsAnswer(spaceId: string, memberIds: readonly string[]): Promise<SpaceStatsAnswer> {
+  const perMember = await Promise.all(memberIds.map(async mid => ({
+    files: await col(spaceCollection(mid, 'files')).countDocuments({ ...COUNTED_FILE_ROW }),
+    filesAwaitingBytes: await awaitingBytesIn(mid),
+    embedQueue: await getEmbedJobCounts(mid),
+  })));
+  return {
+    spaceId,
+    ...(await countRecords(memberIds)),
+    files: perMember.reduce((n, c) => n + c.files, 0),
+    filesAwaitingBytes: perMember.reduce((n, c) => n + c.filesAwaitingBytes, 0),
+    embedQueue: {
+      pending: perMember.reduce((n, c) => n + c.embedQueue.pending, 0),
+      processing: perMember.reduce((n, c) => n + c.embedQueue.processing, 0),
+      failed: perMember.reduce((n, c) => n + c.embedQueue.failed, 0),
+    },
+  };
+}
 
 /** What `resolve` is when the caller does not say — the same on both doors: library types carry their definition. */
 export const META_RESOLVE_DEFAULT = true;
