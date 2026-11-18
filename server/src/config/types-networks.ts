@@ -23,6 +23,7 @@
  * Re-exported from `types.ts`, so no importer changes.
  */
 import type { SpaceMeta } from './types-knowledge.js';
+import type { ConvertRecords } from '@ythril-network/schema';
 
 // ── Network types ──────────────────────────────────────────────────────────
 
@@ -245,6 +246,10 @@ export interface VoteCast {
   /** Base64 Ed25519 signature over the v2 message, which also binds the round's type and target (`Q-138`,
    *  `voteCastBoundMessage`). Required of a voter known to run 5.6.0 or later; absent from older casts. */
   bsig?: string;
+  /** Base64 Ed25519 signature over the v3 message, which binds the round's `convertRecords` to this cast (`Q-745`, `convertRecordsCastMessage`).
+   *  Present on the PROPOSER's cast of a round that carries `convertRecords` and on no other: an older member does not read it, and a member of
+   *  this release applies a round's steps only when it verifies (`convertRecordsSignedByProposer`). */
+  csig?: string;
 }
 
 export interface VoteRound {
@@ -307,6 +312,12 @@ export interface VoteRound {
    * judged by `baseMetaVersion` and the version history. See `sync/meta-round-merge.ts`.
    */
   metaBase?: SpaceMeta;
+  /**
+   * What the proposer chose to do with the records already stored when the schema lands (meta_change rounds, `Q-745`): conversion steps, or `{}`
+   * to stamp what conforms and rewrite nothing. Carried beside `changedTypes`; absent when the proposer chose nothing. Never stored in the space
+   * meta. A member applies the steps only when the proposer's cast carries a `csig` over them (`VoteCast.csig`).
+   */
+  convertRecords?: ConvertRecords;
   /**
    * A proposal for ONE network's layer rather than an edit of the proposer's own definitions (meta_change rounds,
    * `F-39.5`). Passed, it lands in that network's layer on every member — the proposer included, which is the only

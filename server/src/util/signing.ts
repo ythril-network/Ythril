@@ -22,6 +22,8 @@ import crypto from 'node:crypto';
 import { getConfig, saveConfig, getSecrets, saveSecrets } from '../config/loader.js';
 import { log, peerText } from '../util/log.js';
 import { peerRunsAtLeast } from '../sync/peer-floor.js';
+import { sha256Hex } from './sha256-hex.js';
+import { canonicalConvertRecordsText } from '@ythril-network/schema/internal';
 import type { NetworkConfig, NetworkMember, VoteRound, VoteCast } from '../config/types.js';
 
 export interface InstanceKeypair {
@@ -94,6 +96,29 @@ export function voteCastBoundMessage(params: {
 }
 
 /**
+ * The message a cast's `csig` signs (`Q-745`): the v2 bound message, then the hash of the canonical text of the round's `convertRecords`.
+ *
+ * **Why a third signature and not a field of `bsig`'s message.** A member of a release before this one builds the `bsig` message without
+ * `convertRecords` and verifies the cast as given, so a hash of the steps inside it would make that member refuse every cast of a round that
+ * carries steps, and the schema vote itself would fail on it. `csig` is added BESIDE `sig` and `bsig`, which stay what they were: an older member
+ * verifies what it always did and never reads `csig`.
+ *
+ * Throws for a `convertRecords` that is not one (`canonicalConvertRecordsText`): there is no text of it, so nothing can have been signed over it.
+ */
+export function convertRecordsCastMessage(params: {
+  networkId: string;
+  roundId: string;
+  subjectInstanceId: string;
+  instanceId: string;
+  vote: string;
+  round: Pick<VoteRound, 'type' | 'spaceId' | 'networkSpaceId' | 'wipeTypes'>;
+  convertRecords: unknown;
+}): string {
+  const { convertRecords, ...bound } = params;
+  return ['ythril-vote:v3-convert', voteCastBoundMessage(bound), sha256Hex(canonicalConvertRecordsText(convertRecords))].join('|');
+}
+
+/**
  * A cast as it crosses the wire, and back — ONE shape for the push, the relay route and the merge, so a signature
  * field added later cannot be dropped by one of three hand-written copies (it was three, and `bsig` would have been
  * lost by each).
@@ -101,7 +126,7 @@ export function voteCastBoundMessage(params: {
 export function castForWire(cast: VoteCast): VoteCast {
   return {
     instanceId: cast.instanceId, vote: cast.vote, castAt: cast.castAt,
-    ...(cast.sig ? { sig: cast.sig } : {}), ...(cast.bsig ? { bsig: cast.bsig } : {}),
+    ...(cast.sig ? { sig: cast.sig } : {}), ...(cast.bsig ? { bsig: cast.bsig } : {}), ...(cast.csig ? { csig: cast.csig } : {}),
   };
 }
 
@@ -115,6 +140,7 @@ export function castFromBody(body: unknown): VoteCast | null {
     castAt: typeof b['castAt'] === 'string' ? b['castAt'] : new Date().toISOString(),
     ...(typeof b['sig'] === 'string' && b['sig'] ? { sig: b['sig'] } : {}),
     ...(typeof b['bsig'] === 'string' && b['bsig'] ? { bsig: b['bsig'] } : {}),
+    ...(typeof b['csig'] === 'string' && b['csig'] ? { csig: b['csig'] } : {}),
   };
 }
 
@@ -220,7 +246,23 @@ export function makeSignedOwnCast(networkId: string, round: VoteRound, instanceI
   const sig = signOwnVoteCast(base);
   const kp = getInstanceKeypair();
   const bsig = kp ? signMessage(kp.privateKeyPem, voteCastBoundMessage({ ...base, round })) : '';
-  return { instanceId, vote, castAt: new Date().toISOString(), ...(sig ? { sig } : {}), ...(bsig ? { bsig } : {}) };
+  const csig = kp ? signConvertRecords(kp.privateKeyPem, base, round) : '';
+  return { instanceId, vote, castAt: new Date().toISOString(), ...(sig ? { sig } : {}), ...(bsig ? { bsig } : {}), ...(csig ? { csig } : {}) };
+}
+
+/**
+ * The `csig` of a cast: only the PROPOSER's cast of a round that carries `convertRecords` has one (`Q-745`) — a member that votes on a round it
+ * did not propose signs nothing over steps it did not choose. A `convertRecords` that is not one gets none rather than a throw: a member's own
+ * cast must still be made, and a round whose steps no one could sign is read by every member as unsigned, which applies the schema and no steps.
+ */
+function signConvertRecords(privateKeyPem: string, base: { networkId: string; roundId: string; subjectInstanceId: string; instanceId: string; vote: string }, round: VoteRound): string {
+  if (round.convertRecords === undefined || base.instanceId !== round.subjectInstanceId) return '';
+  try {
+    return signMessage(privateKeyPem, convertRecordsCastMessage({ ...base, round, convertRecords: round.convertRecords }));
+  } catch (err) {
+    log.warn(`round ${peerText(round.roundId)} carries convertRecords that cannot be signed, so its steps will read as unsigned: ${peerText(err)}`);
+    return '';
+  }
 }
 
 // ── Key rotation ─────────────────────────────────────────────────────────────
@@ -386,6 +428,31 @@ export function isVoteCastSignatureValid(net: NetworkConfig, round: VoteRound, c
   if (cast.bsig) return verifyMessage(pub, voteCastBoundMessage({ ...base, round }), cast.bsig);
   if (voterSignsBound(net, cast.instanceId)) return false;
   return verifyMessage(pub, voteCastMessage(base), cast.sig);
+}
+
+/**
+ * Whether the PROPOSER of `round` signed the `convertRecords` the round carries now (`Q-745`): the round's subject is its proposer
+ * (`subjectInstanceId`, the member whose yes opens it), and its cast must carry a `csig` that verifies, against the key pinned for it, over the
+ * steps as stored. `false` for a round with no `convertRecords` (nothing signed is carried), a cast with no `csig` (an older relayer drops what it
+ * does not know), a proposer with no pinned key, a `convertRecords` that is not one, and steps added, changed, removed or reordered since.
+ *
+ * It answers the question about the STEPS and nothing about the vote: a cast whose `csig` fails is still a valid yes (`isVoteCastSignatureValid`
+ * never reads it), so a relayer can at worst make a member apply the schema without the steps, never refuse the schema.
+ */
+export function convertRecordsSignedByProposer(net: Pick<NetworkConfig, 'id' | 'members'>, round: VoteRound): boolean {
+  if (round.convertRecords === undefined) return false;
+  const cast = round.votes.find(c => c.instanceId === round.subjectInstanceId);
+  if (!cast?.csig) return false;
+  const pub = voterPublicKey(net as NetworkConfig, cast.instanceId);
+  if (!pub) return false;
+  let message: string;
+  try {
+    message = convertRecordsCastMessage({ networkId: net.id, roundId: round.roundId, subjectInstanceId: round.subjectInstanceId,
+      instanceId: cast.instanceId, vote: cast.vote, round, convertRecords: round.convertRecords });
+  } catch {
+    return false;
+  }
+  return verifyMessage(pub, message, cast.csig);
 }
 
 /**
