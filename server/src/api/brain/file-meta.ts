@@ -36,7 +36,7 @@ import { getMediaJobCounts, FAILED_SAMPLE_LIMIT, FAILED_REASON_LIMIT, type Media
 import { reachesSpace } from '../../auth/space-reach.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
 import type { TokenRights } from '../../config/rights-shape.js';
-import { resolveTextWindow } from '../../files/markdown-window.js';
+import { resolveTextWindow, windowCeilingFields } from '../../files/markdown-window.js';
 import { readExtractListing } from '../../files/extract-listing.js';
 import { defaultBudgetChars } from '../../brain/result-budget.js';
 import { queryInt } from '../../brain/result-budget.js';
@@ -135,7 +135,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
   const convertedRecord = derived.find(d => parentOfSidecar(d.path)?.role === 'converted')
     ?? (parent.convertedFileId ? await getFileMeta(member, parent.convertedFileId) : null);
   let converted: { path: string; markdown: string; truncated: boolean; sizeBytes: number; unreadable?: string;
-    markdownSkip?: number; markdownChars?: number; markdownNextSkip?: number } | null = null;
+    markdownSkip?: number; markdownChars?: number; markdownNextSkip?: number; budgetBoundBy?: string[] } | null = null;
   if (convertedRecord) {
     try {
       // Only the window is held (`readFileWindow`, the function `read_file` reads with): `markdownChars` is counted while it streams.
@@ -149,6 +149,7 @@ fileMetaRouter.get('/spaces/:spaceId/files/extract', globalRateLimit, requireSpa
         markdownSkip: w.skip,
         markdownChars: w.totalChars,
         ...(w.nextSkip !== undefined ? { markdownNextSkip: w.nextSkip } : {}),
+        ...windowCeilingFields(w, textWindow.budget),
       };
     } catch (err) {
       // The record exists and the bytes do not. Worth reporting as its own state rather than as an

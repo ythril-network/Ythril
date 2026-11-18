@@ -14,7 +14,9 @@
  *
  * Read by BOTH doors that read a document's text: `GET …/files/extract` for the converted Markdown, and `read_file`.
  */
-import { resolveBudget, type BudgetRequest, type Pager, type ResolvedBudget } from '../brain/result-budget.js';
+import {
+  budgetBoundBy, resolveBudget, type BudgetParameter, type BudgetRequest, type CeilingRefusal, type Pager, type ResolvedBudget,
+} from '../brain/result-budget.js';
 
 /** The document pager: windows of whole paragraphs, the answer continues at `markdownNextSkip`, and a first paragraph over the ceiling is SPLIT at it (`Q-111`). */
 export const WINDOW_PAGER: Pager = { continuedBy: 'markdownNextSkip', firstUnit: 'split' };
@@ -31,6 +33,25 @@ export interface MarkdownWindow {
   truncated: boolean;
   /** The character offset the next window starts at, present exactly when `truncated`. */
   nextSkip?: number;
+  /**
+   * Which ceiling(s) stopped the window, present exactly when `truncated` (`Q-173`): the same two flags the admission meter keeps
+   * (`budgetMeter().refusedBy()`), counted here in the window's own units — characters and bytes of the text. Named to the caller by
+   * {@link windowCeilingFields}.
+   */
+  refusedBy?: CeilingRefusal;
+}
+
+/**
+ * The `budgetBoundBy` field of a window's answer: the size parameter(s) to raise when a ceiling cut the window, nothing when it was
+ * not cut (`Q-173`). Spread into the answer by BOTH doors that return a document's text (`read_file` and `GET …/files/extract`), so
+ * they name the same parameters from the same rule as every other budgeted answer (`budgetBoundBy` in `brain/result-budget.ts`: a
+ * character ceiling is `maxTokens` when its conversion was the lower, else `maxChars`; a byte ceiling is `maxBytes`).
+ *
+ * What it prevents: a window that said `truncated: true` and left the caller to guess which of three parameters to raise, and, with
+ * non-ASCII text, to raise `maxChars` while the byte ceiling was the one that bound.
+ */
+export function windowCeilingFields(w: MarkdownWindow, budget: ResolvedBudget): { budgetBoundBy?: BudgetParameter[] } {
+  return w.truncated && w.refusedBy ? { budgetBoundBy: budgetBoundBy(w.refusedBy, budget) } : {};
 }
 
 /**
@@ -64,16 +85,31 @@ export function markdownWindow(text: string, skip: number, maxChars: number, max
     && (maxBytes === null || Buffer.byteLength(text.slice(start, to), 'utf8') <= maxBytes);
   // Bytes of the paragraphs taken so far, kept as a running sum so a long window is not re-measured per paragraph.
   let bytes = 0;
+  let refusedBy: CeilingRefusal | undefined;
   while (end < text.length) {
     const m = para.exec(text);
     if (!m || m[0].length === 0) break;
     const next = end + m[0].length;
     const add = maxBytes === null ? 0 : Buffer.byteLength(m[0], 'utf8');
-    if (next - start > maxChars || (maxBytes !== null && bytes + add > maxBytes)) {
+    const overChars = next - start > maxChars;
+    const overBytes = maxBytes !== null && bytes + add > maxBytes;
+    if (overChars || overBytes) {
       // The FIRST paragraph alone is over the cap (`Q-111`). It used to be returned whole — readable, but a window
       // that ignores the budget it was given. It is split instead: at the last line break inside the cap, else at the
       // cap itself, so the window is bounded and the windows still join back into the document exactly.
-      if (parts === 0) end = splitPoint(text, start, next, fits);
+      if (parts === 0) {
+        const split = splitAt(text, start, next, fits);
+        end = split.cut;
+        // The ceiling that stopped the SPLIT is the one the next character would have passed, not the whole paragraph: with ü a
+        // 2 000-character paragraph can be over both ceilings while only the byte ceiling decides where the window ends.
+        const to = split.fit + 1;
+        refusedBy = {
+          chars: to - start > maxChars,
+          bytes: maxBytes !== null && Buffer.byteLength(text.slice(start, to), 'utf8') > maxBytes,
+        };
+      } else {
+        refusedBy = { chars: overChars, bytes: overBytes };
+      }
       break;
     }
     end = next;
@@ -85,6 +121,7 @@ export function markdownWindow(text: string, skip: number, maxChars: number, max
   return {
     markdown: text.slice(start, end), parts, skip: start, totalChars: text.length, truncated,
     ...(truncated ? { nextSkip: end } : {}),
+    ...(truncated && refusedBy ? { refusedBy } : {}),
   };
 }
 
@@ -101,6 +138,11 @@ export function isHighSurrogate(code: number): boolean {
  * reader's window are two questions that share one answer to "where may a text be cut").
  */
 export function splitPoint(text: string, start: number, paragraphEnd: number, fits: (to: number) => boolean): number {
+  return splitAt(text, start, paragraphEnd, fits).cut;
+}
+
+/** {@link splitPoint}'s cut, with `fit`: the furthest prefix the ceilings allow, before the cut moved back to a line break or off a surrogate pair. */
+function splitAt(text: string, start: number, paragraphEnd: number, fits: (to: number) => boolean): { cut: number; fit: number } {
   let lo = start + 1;
   let hi = paragraphEnd;
   // The furthest prefix that fits, by binary search — `fits` is monotone in the end offset.
@@ -112,5 +154,5 @@ export function splitPoint(text: string, start: number, paragraphEnd: number, fi
   const newline = text.lastIndexOf('\n', cut - 1);
   if (newline >= start) cut = newline + 1;
   if (isHighSurrogate(text.charCodeAt(cut - 1)) && cut < paragraphEnd) cut = cut > start + 1 ? cut - 1 : cut + 1;
-  return cut;
+  return { cut, fit: lo };
 }
