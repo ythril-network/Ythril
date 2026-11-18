@@ -29,23 +29,10 @@
 import { AUDIT_SCHEMA_SUMMARY } from './audit-schema-summary.js';
 import { BRAIN_COLLECTIONS } from '../config/types-knowledge.js';
 import type { ImportTotals } from '../sync/import-totals.js';
+import type { AuditChange } from './audit-change.js';
 
-/**
- * A single recorded field change.
- *
- * Two shapes, and a change is only ever one of them:
- *   - scalar: `from`/`to`, where absent means "was not set";
- *   - set: `added`/`removed`, for a list-valued field like `tags`.
- */
-export interface AuditChange {
-  field: string;
-  from?: string | number | boolean | null;
-  to?: string | number | boolean | null;
-  /** Members present after but not before. Only for allowlisted list fields. */
-  added?: (string | number | boolean)[];
-  /** Members present before but not after. */
-  removed?: (string | number | boolean)[];
-}
+/** A single recorded field change: the shape lives in `audit-change.ts`, which both audit modules read; re-exported for this module's readers. */
+export type { AuditChange };
 
 /** The fields of an import's totals (`importTotals`), which its own row and a queued import's completion row both carry: each a key of {@link ImportTotals}. */
 const IMPORT_TOTAL_LIST = ['inserted', 'updated', 'refused', 'deletedOnRestore', 'due', 'snapshotsLanded', 'snapshotsRefused', 'unreadArraysTotal'] as const satisfies readonly (keyof ImportTotals)[];
