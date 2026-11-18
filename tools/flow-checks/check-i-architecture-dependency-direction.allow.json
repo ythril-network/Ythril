@@ -92,8 +92,8 @@
   },
   {
     "id": "cycles:server/src:largest",
-    "max": 316,
-    "reason": "the largest cyclic set of server/src holds 316 modules (the brain, sync, spaces, files, config and db layers import each other); it may not grow while a design splits it",
+    "max": 313,
+    "reason": "the largest cyclic set of server/src holds 313 modules (the brain, sync, spaces, files, config and db layers import each other); it may not grow while a design splits it. Lowered from 316 by bundle-284: the import totals' shape moved to a leaf (sync/import-totals.ts), so the audit allowlist no longer reaches the importer, which freed 11 modules while the conversion's 8 joined",
     "reviewBy": "2027-02-18"
   },
   {
