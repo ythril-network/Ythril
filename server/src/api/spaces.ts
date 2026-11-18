@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { voteOnSchemaEditIfNetworked, type WriteCaller } from '../spaces/meta-update.js';
 import { commitOwnMetaEdit, withType, withoutType } from '../spaces/effective-meta.js';
 import { restartSchemaConvertInTurn, useSchemaConvertRuns } from '../sync/governance.js';
+import { schemaConvertPrice } from '../spaces/schema-convert-acts.js';
+import { schemaConvertCallerOf } from '../spaces/schema-convert-terms.js';
 import {
   startSchemaConvertRun, restartSchemaConvertRun, typesToConvert, schemaConvertStatus, wakeSchemaConvertWatcher,
 } from '../spaces/schema-convert-run.js';
@@ -343,6 +345,13 @@ spacesRouter.patch('/:id', globalRateLimit, requireSpaceAuthMfaScoped('id'), den
   const decision = planSpaceMetaUpdate({ spaceId: id, space, body: req.body, ifMatch: req.get('If-Match') });
   if (!decision.ok) {
     res.status(decision.refusal.status).json(decision.refusal.body);
+    return;
+  }
+  // A save that carries `convertRecords` starts the Convert act's mass rewrite, so it pays the act's price (`schemaConvertPrice`, the one function):
+  // asked after every other refusal and before anything is written.
+  const priced = decision.plan.convertRecords === undefined ? null : schemaConvertPrice(id, schemaConvertCallerOf(req));
+  if (priced) {
+    res.status(priced.status).json(priced.body);
     return;
   }
   // The audit middleware records this only on a <400 response, so a request the planner refused above logs no

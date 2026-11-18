@@ -243,7 +243,9 @@ PATCH /api/spaces/:id
 
 `convertRecords` is the choice made with a schema change, never part of the schema: `{}` stamps the records that already conform and
 rewrites nothing, and `steps` rename a property, map the values of an enum, rename a type or split a type by a condition. It goes with a
-`meta` (`400` `convert_needs_meta` without one) and needs `knowledge: admin`, because it can rewrite every record of a type. A step the
+`meta` (`400` `convert_needs_meta` without one) and pays the Convert act's price, because it starts the same rewrite of every record of a
+type ([the price](06e-converting-records.md#the-convert-act-and-the-status-of-a-run): `403` `space_admin_required`, `429`
+`schema_convert_rate_limited`). A step the
 schema cannot honour refuses the whole save with `400` `bad_conversion_step` and the index of the step as `step`; nothing is written. MCP:
 `convertRecords` on `schema_update`, same parameter, refusals and rights. **The steps, a worked example of each, what a run does to a
 record, the Convert act, the list of records that could not be converted and the network case are on

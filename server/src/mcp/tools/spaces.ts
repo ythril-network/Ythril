@@ -19,6 +19,7 @@ import { ToolRefusal } from '../../util/errors.js';
 import { lostSpaceAnswer } from '../../spaces/unknown-space.js';
 import { forwardedArgNames } from '../../contract/write-accepts.js';
 import { CONVERT_RECORDS_PARAMETER, refusedMetaUpdate, metaUpdateNoticeText } from './schema-update-parts.js';
+import { schemaConvertPrice } from '../../spaces/schema-convert-acts.js';
 
 /** The status a refused or failed space write names in its text, as the REST door answers the same outcome. */
 const SPACE_WRITE_STATUS = { notAllowed: 403, conflict: 409, retry: 503, failed: 500 } as const;
@@ -314,7 +315,7 @@ export const update_spaceTool: ToolHandler = {
     // this tool applied it immediately. So a directive change made over MCP skipped the vote in precisely the
     // spaces that had voted to govern directive changes — the same *two surfaces, one rule, one weaker* defect the
     // rest of this batch is about, one field over. Found while adding `schema_update` below.
-    return await runSpaceMetaUpdate(callSpace, updates, `Space '${callSpace}' updated.`, ctx.rights, ctx.recordChanges);
+    return await runSpaceMetaUpdate(callSpace, updates, `Space '${callSpace}' updated.`, ctx.rights, ctx.recordChanges, ctx.rateKey);
   },
 };
 
@@ -330,7 +331,8 @@ async function runSpaceMetaUpdate(
   body: Record<string, unknown>,
   okText: string,
   rights: TokenRights | undefined,
-  recordChanges?: ToolContext['recordChanges'],
+  recordChanges: ToolContext['recordChanges'] | undefined,
+  rateKey: string,
 ): Promise<ToolResult> {
   const { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice, convertNotice } = await import('../../spaces/meta-update.js');
   // What the write says beyond its outcome, as REST's body carries it (`networkWriteNotice` and `convertNotice`, the two spreads): the structured
@@ -364,6 +366,9 @@ async function runSpaceMetaUpdate(
     // The sentence, and the refusal's `code` and `step` as the REST body carries them (`schema-update-parts.ts`).
     return refusedMetaUpdate(decision.refusal);
   }
+  // A save with `convertRecords` pays the Convert act's price, the one function REST asks too, after every other refusal and before anything is written.
+  const priced = decision.plan.convertRecords === undefined ? null : schemaConvertPrice(spaceId, { rights, rateKey });
+  if (priced) return refusedMetaUpdate({ status: priced.status, body: priced.body as { error: string; code?: string } });
 
   // Q-50: the snapshot pair the REST route hands its audit entry, taken before anything is applied.
   recordChanges?.(decision.plan.audit.before, decision.plan.audit.after);
@@ -581,7 +586,7 @@ export const schema_updateTool: ToolHandler = {
     if (a['convertRecords'] !== undefined) body['convertRecords'] = a['convertRecords'];
 
     const wrote = Object.keys(meta).join(', ');
-    return await runSpaceMetaUpdate(callSpace, body, `Space '${callSpace}' schema updated (${wrote}).`, ctx.rights, ctx.recordChanges);
+    return await runSpaceMetaUpdate(callSpace, body, `Space '${callSpace}' schema updated (${wrote}).`, ctx.rights, ctx.recordChanges, ctx.rateKey);
   },
 };
 

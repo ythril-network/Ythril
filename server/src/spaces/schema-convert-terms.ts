@@ -44,6 +44,15 @@ export interface SchemaConvertCaller {
   readonly rateKey: string;
 }
 
+/**
+ * The {@link SchemaConvertCaller} of a REST request: the rights of the token the guards accepted, and its id (else the request's address) as the
+ * key, the key `callTool` gives a tool, so the routes and the tools spend one allowance. Read by the conversion routes and by a schema save's price.
+ */
+export function schemaConvertCallerOf(req: { authToken?: unknown; ip?: string }): SchemaConvertCaller {
+  const token = req.authToken as { id?: string; rights?: TokenRights } | undefined;
+  return { rights: token?.rights, rateKey: token?.id ?? req.ip ?? '' };
+}
+
 /** One named type: a knowledge kind and a type name (an edge's type is its label). The run's own whole-kind marker is not a type name. */
 export const ConvertTypeZ = z.object({
   kind: z.enum(KNOWLEDGE_TYPES)
