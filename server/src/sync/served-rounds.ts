@@ -13,6 +13,8 @@
  *   fields hold); one that does not parse is counted `malformed` and touches nothing - not even the evidence of a local twin.
  * - **The stamp at receipt.** A cast with no `castAt` (an older or unsigned cast, never refused for it) is stamped when it arrives, as the
  *   relay route stamps one (`castFromBody`), so no reader of the stored round meets a cast without a date.
+ * - **The proposer's `csig`, kept and gained.** A held cast is replaced by the served one when the served one brings a `csig` that verifies
+ *   and the held one has none, and never replaced by a copy of the same vote that lacks the `csig` it holds (`castReplaces`).
  * - **The clock line, once.** A round opened further ahead of this clock than the one tolerance the server names is ADOPTED (a proposer
  *   whose clock runs ahead is not an attacker), counted in `ythril_round_clock_ahead_total`, and said once per network and peer - never
  *   once per round, which a mixed fleet would raise every cycle.
@@ -21,7 +23,7 @@ import type { NetworkConfig, NetworkMember, VoteCast, VoteRound } from '../confi
 import { IncomingVoteRound } from '../networks/round-shape.js';
 import { adoptPeerRound, adoptionRefusal, roundOpenedAhead, type AdoptionRefusal } from '../networks/round-local-state.js';
 import { roundIsOpen } from '../networks/round-state.js';
-import { acceptVoteCast, castForWire } from '../util/signing.js';
+import { acceptVoteCast, castForWire, convertRecordsSignedByProposer } from '../util/signing.js';
 import { recordPeerConcluded } from './peer-concluded-evidence.js';
 import { roundClockAheadTotal } from '../metrics/registry.js';
 import { warnOnce } from '../util/warn-once.js';
@@ -32,6 +34,24 @@ const clockAheadSaid = warnOnce<string>({ max: 500 });
 /** `cast` with its `castAt` stamped at `now` when it arrived without one; any other cast as it came. */
 function stampedAtReceipt(cast: VoteCast, now: number): VoteCast {
   return typeof cast.castAt === 'string' && cast.castAt ? cast : { ...cast, castAt: new Date(now).toISOString() };
+}
+
+/** Does `cast`, as the stored round's cast of its voter, carry a `csig` that verifies over the round's steps? Only the proposer's can. */
+const csigHolds = (net: NetworkConfig, round: VoteRound, cast: VoteCast): boolean =>
+  cast.csig !== undefined && convertRecordsSignedByProposer(net, { ...round, votes: [cast] });
+
+/**
+ * Does a served cast replace the one `round` holds for the same voter (`had`)? When the vote, `sig` or `bsig` differs, and when the served cast
+ * brings a `csig` that verifies where the held one has none that does (`Q-745`): a cast that first came through an older relayer, which drops
+ * what it does not know, gains the proposer's signature over the steps when the full cast arrives. And never the other way round: a cast of
+ * the same vote that arrives WITHOUT a `csig` (or with one that does not verify) never replaces a held cast whose `csig` verifies, so a relayer
+ * cannot make a member read the steps as unsigned.
+ */
+function castReplaces(net: NetworkConfig, round: VoteRound, had: VoteCast, served: VoteCast): boolean {
+  const heldHolds = csigHolds(net, round, had);
+  if (heldHolds && had.vote === served.vote && !csigHolds(net, round, served)) return false;
+  if (had.vote !== served.vote || had.sig !== served.sig || had.bsig !== served.bsig) return true;
+  return !heldHolds && served.csig !== had.csig && csigHolds(net, round, served);
 }
 
 /** Count, and say once per network and peer, a round whose `openedAt` lies ahead of this clock past the tolerance. */
@@ -86,9 +106,8 @@ export function takeServedRounds(
       }
       const idx = local.votes.findIndex(v => v.instanceId === peerCast.instanceId);
       if (idx >= 0) {
-        // Replaced only when the cast changes the vote or its signatures; the signature that came with it is kept.
-        const had = local.votes[idx]!;
-        if (had.vote !== peerCast.vote || had.sig !== peerCast.sig || had.bsig !== peerCast.bsig) {
+        // Replaced only when the cast changes the vote or its signatures, `csig` included (`castReplaces`); the signature that came with it is kept.
+        if (castReplaces(net, local, local.votes[idx]!, peerCast)) {
           local.votes[idx] = castForWire(stampedAtReceipt(peerCast, now));
           changed = true;
         }
