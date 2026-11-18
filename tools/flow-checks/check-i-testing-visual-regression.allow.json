@@ -1,0 +1,3 @@
+[
+  { "id": "no visual-test config", "reason": "the repository holds no screenshot baseline and no image-comparing test: adding one needs a browser in the test stack and a baseline the owner accepts, which is a design call of its own (Q-918 builds the browser probe shape); until it exists this probe reports the gap", "reviewBy": "2027-02-17" }
+]

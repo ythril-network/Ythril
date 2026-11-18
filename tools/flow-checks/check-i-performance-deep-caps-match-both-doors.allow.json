@@ -1,0 +1,3 @@
+[
+  { "id": "unreadable", "max": 15, "reason": "routes whose tool states a cap and which validate by hand, as counted on 2026-11-18 (the brain write routes among them, resolved through the shared write judge); the ceiling only goes down: a new hand-validated route with a capped tool fails, and a route given a schema lowers it", "reviewBy": "2027-02-17" }
+]

@@ -88,6 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** the export round trip now covers fork marks on facts, entities, edges and chrono entries and a file row's expiry and sync base, and a gate fails when a record interface leaves out a field the store keeps.
 - **Testing:** two flow-check probes (`tools/flow-checks`) answer whether an operator can export their data and whether each documented error message still exists in the source, instead of "cannot answer".
 - **Testing:** 17 more flow-check probes (`tools/flow-checks`) decide the docs, security, deployment, interface, architecture and licence lens checks from the code, instead of "cannot answer".
+- **Testing:** a flow-check probe can run against its own booked scratch stack (`tools/flow-checks/_stack.mjs`, never the owner's instance); the readiness check is the first, and nine deep checks now decide from the code.
 - **Tooling:** `machine:free -Wipe` asks every refusal of the wipe (data guard, pending record, free space, registries) before it removes the test stack or prunes; the workstation guide names what the guard cannot see.
 - **Docs:** fixed: the integration guide's examples of the storage-limit and incomplete space-delete errors quote the messages the server sends.
 - **Docs:** fixed: the integration guide names every parameter and answer field the probes found missing, among them `skipTlsVerify`, `merkle`, `superseded`, `mediaCeilings` and `temporary`.
