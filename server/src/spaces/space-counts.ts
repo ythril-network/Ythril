@@ -30,6 +30,10 @@
 import { col } from '../db/mongo.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { log, peerList, peerText } from '../util/log.js';
+import { warnOnce, SAY_ONCE_WINDOW_MS } from '../util/warn-once.js';
+
+/** The sets of failed spaces whose count failure was logged in this window, so a listing repeated while a space stays broken logs it once. */
+const countFailureSaid = warnOnce<string>({ max: 64, every: SAY_ONCE_WINDOW_MS });
 
 /** The four knowledge collections' record counts of a space. */
 export type RecordCounts = { facts: number; entities: number; edges: number; chrono: number };
@@ -67,7 +71,8 @@ export type SpaceListCounts = { countsBySpaceId: Record<string, RecordCounts>; c
 /**
  * Count every space of a listing, one failed space not failing the others (`Promise.allSettled`).
  *
- * The failure is logged once for the listing, naming the spaces and the first reason, and the failed space is answered as failed:
+ * The failure is logged once for the listing, naming the spaces and the first reason (and once per window while the same spaces keep
+ * failing: a listing where every count succeeds starts the next failure as news), and the failed space is answered as failed:
  * REST and MCP both leave its `counts` out and list it in `countsIncomplete`. Before, REST left the counts out and said nothing,
  * and MCP answered `{ facts: 0, entities: 0, edges: 0, chrono: 0 }`, which is what an empty space answers, so an agent choosing
  * a space to recall from left a space full of records alone.
@@ -83,8 +88,15 @@ export async function countRecordsOfSpaces(spaces: readonly SpaceToCount[]): Pro
     if (countsIncomplete.length === 0) firstFailure = result.reason;
     countsIncomplete.push(id);
   });
-  if (countsIncomplete.length > 0) {
-    log.warn(`Counting records failed for ${peerList(countsIncomplete, ', ')}; listed without counts: ${peerText(firstFailure)}`);
+  if (countsIncomplete.length === 0) {
+    // Every count succeeded: the condition cleared, so the next failure is news again.
+    countFailureSaid.forgetAll();
+  } else {
+    // Said once per window for one set of failed spaces: an agent lists its spaces at the start of every task, and a space that
+    // stays broken would otherwise write this line on every call.
+    countFailureSaid([...countsIncomplete].sort().join(','), () => {
+      log.warn(`Counting records failed for ${peerList(countsIncomplete, ', ')}; listed without counts: ${peerText(firstFailure)}`);
+    });
   }
   return { countsBySpaceId, countsIncomplete };
 }

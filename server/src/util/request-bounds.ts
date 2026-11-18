@@ -149,8 +149,8 @@ export function sessionTurnsError(sessions: unknown, what = 'the sessions'): str
 
 /**
  * The first array of an `ingest` extraction that is not an array or is past its bound in `INGEST_EXTRACTION_BOUNDS`, as a refusal naming it
- * and the bound, else null. A property the caller left out is not checked: the validator judges what a format requires. Runs before the
- * space is looked at, so a refused extraction costs the instance a count and writes nothing.
+ * and the bound, else null. A property the caller left out is not checked: the validator judges what a format requires. Runs after the
+ * space and the caller's right to write are checked and before any record is read, so a refused extraction costs the instance a count and writes nothing.
  */
 export function extractionCountError(extraction: Record<string, unknown>): string | null {
   for (const [name, max] of Object.entries(INGEST_EXTRACTION_BOUNDS)) {
