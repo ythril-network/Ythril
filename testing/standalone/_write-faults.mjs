@@ -440,7 +440,10 @@ export async function withStalledReadsMany(db, specs, fn) {
       seeded.push(p);
     }
     const guarded = async () => {
-      await Promise.all(planned.map((p) => assertViewStalls(db, p.name, { ms: p.ms, filter: p.readerFilter })));
+      // Every guard ends before a refusal is raised, so no read of the list is still in flight when the views are put back.
+      const guards = await Promise.allSettled(planned.map((p) => assertViewStalls(db, p.name, { ms: p.ms, filter: p.readerFilter })));
+      const refused = guards.find((g) => g.status === 'rejected');
+      if (refused) throw refused.reason;
       return fn();
     };
     const nested = planned.reduceRight(
@@ -451,6 +454,43 @@ export async function withStalledReadsMany(db, specs, fn) {
   } finally {
     for (const p of seeded) await db.collection(p.viewOn).deleteMany({ _id: { $in: p.seed.map((d) => d._id) } });
   }
+}
+
+/** The stall of a read that HANGS for a test of the housekeeping bound: long enough for {@link hungReadLookMs}'s headroom (rule there). */
+export const HUNG_READ_STALL_MS = 8000;
+
+/** How much longer than the product's worst path to end a hung read a test's look must be allowed to run. */
+const HUNG_READ_HEADROOM_MS = 3000;
+
+/**
+ * How long a test looks at a pass over a hung read before it calls the read un-ended: `stallMs - 500`, THROWING when that leaves
+ * less than {@link HUNG_READ_HEADROOM_MS} over the product's worst path to end the read.
+ *
+ * ## What it prevents
+ *
+ * A case that sets the housekeeping bound to `boundMs`, stalls a read for `stallMs` and asks "did the pass end at the bound, not at the
+ * stall" looks for `stallMs - 500`. The product ends a hung read in `boundMs`, and when the server's own deadline does not answer, the
+ * client backstop ends it `SERVER_FIRST_MARGIN_MS` later and the kill takes at most `KILL_WAIT_MS` (`server/src/db/write-bound.ts`,
+ * both read from the build here, never copied). So the worst path is `boundMs + SERVER_FIRST_MARGIN_MS + KILL_WAIT_MS`, and the look
+ * must leave room for everything else the pass does after it: with `stallMs` 3000 and a 1000 ms bound the room was 600 ms, and four
+ * database files running at once used it up (a pass seen still waiting at 2501 ms of a 3000 ms stall; the same figure took the TTL
+ * sweep file to 8000, bundle-211). The stall is a real wait the guard sits through once per case, so the room is bought with the stall
+ * and not with a looser look: a look that is not shorter than the stall would pass a pass that waited the stall out.
+ * A caller cannot pick a stall too short for its bound: this throws, naming the figures.
+ *
+ * @param {{ boundMs: number, stallMs: number }} o `boundMs` is what the test sets (`housekeepingOpMs`), `stallMs` what the view stalls for
+ * @returns {Promise<number>} the look, ms
+ */
+export async function hungReadLookMs({ boundMs, stallMs }) {
+  assert.ok(Number.isFinite(boundMs) && boundMs > 0 && Number.isFinite(stallMs) && stallMs > 0,
+    `hungReadLookMs: boundMs and stallMs must be positive numbers, got ${boundMs} and ${stallMs}`);
+  const bound = await import('../../server/dist/db/write-bound.js');
+  const worstPathMs = boundMs + bound.SERVER_FIRST_MARGIN_MS + bound.KILL_WAIT_MS;
+  const lookMs = stallMs - 500;
+  assert.ok(lookMs - worstPathMs >= HUNG_READ_HEADROOM_MS,
+    `hungReadLookMs: a look of ${lookMs} ms over a pass whose hung read the product ends within ${worstPathMs} ms (the ${boundMs} ms bound + ${bound.SERVER_FIRST_MARGIN_MS} ms + `
+    + `${bound.KILL_WAIT_MS} ms) leaves ${lookMs - worstPathMs} ms for the rest of the pass, less than the ${HUNG_READ_HEADROOM_MS} ms a loaded host needs: stall the read longer (HUNG_READ_STALL_MS)`);
+  return lookMs;
 }
 
 // ── A write parked behind a gate ─────────────────────────────────────────────────────────────────────────────

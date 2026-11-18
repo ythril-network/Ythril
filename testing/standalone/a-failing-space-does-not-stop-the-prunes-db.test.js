@@ -38,7 +38,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { holdDocumentLock, setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads } from './_write-faults.mjs';
+import {
+  holdDocumentLock, setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads, HUNG_READ_STALL_MS, hungReadLookMs,
+} from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 
 const skip = await mongoSkipReason();
@@ -58,7 +60,8 @@ const OK = 'healthy';
 const ALL = [FAILING, LOOKUP, HUNG_CANDIDATES, LOCKED, GENERAL, OK];
 
 const BOUND_MS = 1000;
-const STALL_MS = 3000;
+/** How long the hung read stalls: the shared figure and the rule for its length are `HUNG_READ_STALL_MS` and `hungReadLookMs` in `_write-faults.mjs`. */
+const STALL_MS = HUNG_READ_STALL_MS;
 const CANDIDATE_STEP = 'Candidate prune';
 const TOMBSTONE_STEP = 'Tombstone prune';
 
@@ -158,11 +161,12 @@ describe('one space\'s trouble does not stop the prunes', { skip }, () => {
       const db = mongo.getDb();
       await mongo.col(`${OK}_dupe_candidates`).insertOne(orphan('ok-hung-d'));
       const restoreBound = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
+      const lookMs = await hungReadLookMs({ boundMs: BOUND_MS, stallMs: STALL_MS });
       let outcome, lines;
       try {
         // The reader's filter is empty (`coll.find({})` in `brain/candidate-prune.ts`), so every source document of the view reaches the stalling stage.
         await withStalledReads(db, `${HUNG_CANDIDATES}_dupe_candidates`, `${HUNG_CANDIDATES}_dupe_src`, { ms: STALL_MS, readerFilter: {} }, async () => {
-          ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(candidate.pruneAllSpaces(), STALL_MS - 200)));
+          ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(candidate.pruneAllSpaces(), lookMs)));
           if (!outcome.settled) await outcome.rest;   // the stall's own end is waited for before the view is put back
         });
       } finally {
@@ -228,10 +232,12 @@ describe('one space\'s trouble does not stop the prunes', { skip }, () => {
     it('a delete that HANGS behind another session\'s lock ends at the bound, is said once, and the space behind it is pruned', async () => {
       await seed(LOCKED); await seed(OK);
       const restoreBound = await setWriteBoundForTest({ housekeepingOpMs: BOUND_MS });
+      // The lock is held until the look ends, so there is no stall to wait out: the look is the same one as the stalled read's, and a case that passes spends none of it.
+      const lookMs = await hungReadLookMs({ boundMs: BOUND_MS, stallMs: STALL_MS });
       const lock = await holdDocumentLock(mongo, `${LOCKED}_tombstones`, { filter: { _id: `${LOCKED}-t1` } });
       let outcome, lines;
       try {
-        ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(tombstone.pruneAllTombstones(), 2_500)));
+        ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(tombstone.pruneAllTombstones(), lookMs)));
       } finally {
         await lock.release();   // drains the write the lock held, so nothing lands after the case
         await restoreBound();

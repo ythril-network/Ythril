@@ -92,6 +92,57 @@ describe('a stalled-read fixture stalls the reader\'s read, or throws', { skip }
     assert.ok(read.ms >= MS, `the read took ${read.ms} ms, less than the ${MS} ms stall`);
   });
 
+  it('several views stall together and each is guarded: the callback runs once, over every stall, and every seed is removed', async () => {
+    let runs = 0;
+    const reads = await faults.withStalledReadsMany(db, [
+      { name: 'sf_many_a', viewOn: 'sf_many_src_a', ms: MS, readerFilter: {} },
+      { name: 'sf_many_b', viewOn: 'sf_many_src_b', ms: MS, readerFilter: {} },
+    ], async () => { runs += 1; return Promise.all([timedFind('sf_many_a', {}), timedFind('sf_many_b', {})]); });
+    assert.equal(runs, 1);
+    for (const read of reads) assert.ok(read.ms >= MS, `a view of the list did not stall: its read took ${read.ms} ms, less than the ${MS} ms stall`);
+    assert.equal(await db.collection('sf_many_src_a').countDocuments({}) + await db.collection('sf_many_src_b').countDocuments({}), 0);
+    assert.equal(await kindOf('sf_many_a')(), 'collection', 'the first view was not put back');
+    assert.equal(await kindOf('sf_many_b')(), 'collection', 'the second view was not put back');
+  });
+
+  it('a list with one view that stalls nothing is refused naming it, the callback never runs, and nothing it seeded is left', async () => {
+    let ran = false;
+    await assert.rejects(
+      () => faults.withStalledReadsMany(db, [
+        { name: 'sf_many_c', viewOn: 'sf_many_src_c', ms: MS, readerFilter: {} },
+        // The default seeds with a reader that names one _id: the server applies the filter before the stall, so this view stalls nothing.
+        { name: 'sf_many_d', viewOn: 'sf_many_src_d', ms: MS, readerFilter: { _id: 'run' } },
+      ], async () => { ran = true; }),
+      /sf_many_d/);
+    assert.equal(ran, false, 'the callback ran over a list in which one view stalled nothing');
+    assert.equal(await db.collection('sf_many_src_c').countDocuments({}) + await db.collection('sf_many_src_d').countDocuments({}), 0, 'a seed of the list was left behind');
+    assert.equal(await kindOf('sf_many_c')(), 'collection');
+    assert.equal(await kindOf('sf_many_d')(), 'collection');
+  });
+
+  it('an empty list, two views over one source and two specs naming one view are each refused before anything is made', async () => {
+    await assert.rejects(() => faults.withStalledReadsMany(db, [], async () => {}), /at least one view/);
+    await assert.rejects(() => faults.withStalledReadsMany(db, [
+      { name: 'sf_many_e', viewOn: 'sf_many_src_e', ms: MS, readerFilter: {} },
+      { name: 'sf_many_f', viewOn: 'sf_many_src_e', ms: MS, readerFilter: {} },
+    ], async () => {}), /one source collection/);
+    await assert.rejects(() => faults.withStalledReadsMany(db, [
+      { name: 'sf_many_g', viewOn: 'sf_many_src_g', ms: MS, readerFilter: {} },
+      { name: 'sf_many_g', viewOn: 'sf_many_src_h', ms: MS, readerFilter: {} },
+    ], async () => {}), /one view/);
+    assert.equal(await db.collection('sf_many_src_e').countDocuments({}), 0);
+  });
+
+  it('a hung read\'s look is the stall less half a second, and a stall too short for the product\'s worst path to end the read is refused, naming the figures', async () => {
+    const bound = await import('../../server/dist/db/write-bound.js');
+    const worst = 1000 + bound.SERVER_FIRST_MARGIN_MS + bound.KILL_WAIT_MS;
+    assert.equal(await faults.hungReadLookMs({ boundMs: 1000, stallMs: faults.HUNG_READ_STALL_MS }), faults.HUNG_READ_STALL_MS - 500);
+    await assert.rejects(() => faults.hungReadLookMs({ boundMs: 1000, stallMs: 3000 }),
+      (err) => err.message.includes(`${worst} ms`) && /less than the 3000 ms/.test(err.message) && /HUNG_READ_STALL_MS/.test(err.message));
+    await assert.rejects(() => faults.hungReadLookMs({ boundMs: 1000, stallMs: 0 }), /positive numbers/);
+    await assert.rejects(() => faults.hungReadLookMs({ boundMs: undefined, stallMs: 8000 }), /positive numbers/);
+  });
+
   it('a call with NO readerFilter is refused, naming the collection it was for: the guard is not a thing a caller can leave out', async () => {
     let ran = false;
     await assert.rejects(

@@ -38,7 +38,9 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { stripComments } from './_strip-comments.mjs';
-import { failWrites, setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads } from './_write-faults.mjs';
+import {
+  failWrites, setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads, HUNG_READ_STALL_MS, hungReadLookMs,
+} from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
 import { elapse } from '../_shared/sleep.mjs';
@@ -188,12 +190,14 @@ describe('legacy read spills are swept from the space', { skip }, () => {
       // documents of that shape, or the stage is never reached.
       const { SPILL_DIR } = await import('../../server/dist/brain/spill-path.js');
       const readerFilter = { _id: { $regex: `^${SPILL_DIR}/` } };
-      const seed = Array.from({ length: 20 }, () => ({ _id: `_tmp/graph-${randomUUID()}.json` }));
+      // One source document costs a read one step (`withStalledReads`: 200 ms), so the seeds are as many as the stall has steps.
+      const seed = Array.from({ length: HUNG_READ_STALL_MS / 200 }, () => ({ _id: `_tmp/graph-${randomUUID()}.json` }));
       const restoreBound = await setWriteBoundForTest({ housekeepingOpMs: 1_000 });
+      const lookMs = await hungReadLookMs({ boundMs: 1_000, stallMs: HUNG_READ_STALL_MS });
       let outcome, lines;
       try {
-        await withStalledReads(db, `${HUNG}_files`, `${HUNG}_src`, { ms: 3_000, readerFilter, seed }, async () => {
-          ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(sweepMod.sweepLegacySpills(), 2_800)));
+        await withStalledReads(db, `${HUNG}_files`, `${HUNG}_src`, { ms: HUNG_READ_STALL_MS, readerFilter, seed }, async () => {
+          ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(sweepMod.sweepLegacySpills(), lookMs)));
           // Left unsettled, the stall's own end is waited for before the view is put back.
           if (!outcome.settled) await outcome.rest;
         });
@@ -201,7 +205,7 @@ describe('legacy read spills are swept from the space', { skip }, () => {
         restoreBound();
       }
 
-      assert.ok(outcome.settled, `the sweep was still waiting after ${outcome.elapsedMs}ms on a read that stalls for 4000ms: nothing ended it at the 1000ms bound`);
+      assert.ok(outcome.settled, `the sweep was still waiting after ${outcome.elapsedMs}ms on a read that stalls for ${HUNG_READ_STALL_MS}ms: nothing ended it at the 1000ms bound`);
       assert.equal(outcome.ok, true, `the sweep returns its result for a hung space: ${outcome.error}`);
       const res = outcome.value;
       assert.equal(res.removed, 3, `general sits after the hung space and was swept: ${JSON.stringify(res)}`);

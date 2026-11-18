@@ -43,12 +43,13 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor } from './_push-door.mjs';
-import { setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads } from './_write-faults.mjs';
+import { setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads, HUNG_READ_STALL_MS, hungReadLookMs } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 
 const skip = await mongoSkipReason();
 const BOUND_MS = 1000;
-const STALL_MS = 3000;
+/** How long the hung read stalls: the shared figure and the rule for its length are `HUNG_READ_STALL_MS` and `hungReadLookMs` in `_write-faults.mjs`. */
+const STALL_MS = HUNG_READ_STALL_MS;
 /** What `withStalledReads` costs one source document, ms (`_write-faults.mjs`). */
 const STALL_STEP_MS = 200;
 const SEEDS = 4;
@@ -163,9 +164,10 @@ describe('a failing or hung space does not stop the scanners', { skip }, () => {
         const readerFilter = positionKeysetFilters({ pos: 0 }, await settledPositionCap(recordPositions, space)).range;
         // Documents that filter lets through, so each one pays the sleep (the fixture's own default seeds carry no `spaceId`).
         const seed = Array.from({ length: Math.ceil(STALL_MS / STALL_STEP_MS) }, (_, i) => fact(space, i + 1));
+        const lookMs = await hungReadLookMs({ boundMs: BOUND_MS, stallMs: STALL_MS });
         let outcome; let lines;
         await withStalledReads(db, `${space}_facts`, `${space}_facts_src`, { ms: STALL_MS, readerFilter, seed }, async () => {
-          ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(run(), STALL_MS - 500)));
+          ({ lines, result: outcome } = await logLinesDuring(() => settleWithin(run(), lookMs)));
           if (!outcome.settled) await outcome.rest;   // the stall's own end is waited for before the view is put back
         });
         assert.ok(outcome.settled, `the pass was still waiting after ${outcome.elapsedMs} ms on a read that stalls for ${STALL_MS} ms: nothing ended it at the ${BOUND_MS} ms bound`);
