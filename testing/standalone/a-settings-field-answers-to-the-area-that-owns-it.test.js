@@ -69,6 +69,9 @@ const AGREED = {
   dupeMergeSurvivor:      'dataQuality:write',
   dupeRulesOnInsert:      'dataQuality:admin',
   recordTtlDays:          'knowledge:admin',
+  // Q-745 (bundle-284 design 2.2), not part of the 2026-09-08 agreement: a conversion can rewrite every record of a type, so it is priced as the
+  // other whole-space rewrite above is.
+  convertRecords:         'knowledge:admin',
   documentExtraction:     'files:write',
   imageAnalysis:          'files:write',
   audioAnalysis:          'files:write',

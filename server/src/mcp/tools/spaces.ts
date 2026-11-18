@@ -18,6 +18,9 @@ import { toolErrorResult } from '../tool-error-text.js';
 import { ToolRefusal } from '../../util/errors.js';
 import { lostSpaceAnswer } from '../../spaces/unknown-space.js';
 import { forwardedArgNames } from '../../contract/write-accepts.js';
+import { z } from 'zod';
+import { UpdateSpaceBody } from '../../spaces/body-schemas.js';
+import { CONVERSION_STEPS_MAX } from '@ythril-network/schema/internal';
 
 /** The status a refused or failed space write names in its text, as the REST door answers the same outcome. */
 const SPACE_WRITE_STATUS = { notAllowed: 403, conflict: 409, retry: 503, failed: 500 } as const;
@@ -371,7 +374,13 @@ async function runSpaceMetaUpdate(
   // that has not asked for one.
   const decision = planSpaceMetaUpdate({ spaceId, space, body, ifMatch: undefined });
   if (!decision.ok) {
-    return toolErrorResult(decision.refusal.body.error, decision.refusal.status);
+    // The refusal's `code` and `step` are carried as the REST body carries them (`bad_conversion_step` names the step's index): the text says the
+    // sentence, and a caller that branches reads the structured half.
+    const { body: refusedWith } = decision.refusal;
+    return {
+      ...toolErrorResult(refusedWith.error, decision.refusal.status),
+      ...(refusedWith.code !== undefined ? { structuredContent: { ...refusedWith } } : {}),
+    };
   }
 
   // Q-50: the snapshot pair the REST route hands its audit entry, taken before anything is applied.
@@ -425,7 +434,16 @@ async function runSpaceMetaUpdate(
  * derivation rather than a list, and the omission it replaces cannot recur: a field added to the schema is
  * forwarded by the same commit.
  */
-const NOT_META = new Set(['space', 'typeSchemasMode', 'targetNetwork']);
+const NOT_META = new Set(['space', 'typeSchemasMode', 'targetNetwork', 'convertRecords']);
+
+/**
+ * The input schema of `convertRecords`: the body's OWN shape (`UpdateSpaceBody`), written by zod's converter and not by hand, so the tool and the
+ * REST door cannot declare two shapes of one parameter. `$schema` is left out, as it is for every property of the tool.
+ */
+const CONVERT_RECORDS_SHAPE: Record<string, unknown> = (() => {
+  const { $schema: _draft, ...shape } = z.toJSONSchema(UpdateSpaceBody.shape.convertRecords, { io: 'input' }) as Record<string, unknown>;
+  return shape;
+})();
 
 /**
  * `save_space` declares `purpose`, which the create body still calls `description` — so it is translated
@@ -496,6 +514,20 @@ export const schema_updateTool: ToolHandler = {
           + 'editing this instance\'s own — how a clash between two networks is settled (`space_schema_layers` lists '
           + 'them). It merges over that network\'s layer, opens a vote there alone, and lands in its layer on every '
           + 'member once passed. Same as `targetNetwork` on `PATCH /api/spaces/:id`.',
+      },
+      convertRecords: {
+        ...CONVERT_RECORDS_SHAPE,
+        description: 'What to do with the records already stored when this schema change lands: `{}` stamps the records that already '
+          + `conform and rewrites nothing; \`steps\` (at most ${CONVERSION_STEPS_MAX}) rename a property, map an enum value, rename a type or split a type by a `
+          + 'condition. It goes with a schema change: it needs the `meta` of that change (`convert_needs_meta`) and the `knowledge` admin rung, because it can '
+          + 'rewrite every record of a type. Each step is held to the schema before and the schema after the change and the save is refused whole '
+          + '(400 `bad_conversion_step`, naming the step\'s index) if one cannot hold: nothing is written. The run rewrites every record of its '
+          + 'types that this instance holds and the steps change, whoever last wrote it; on a space in a network it first asks each peer for one '
+          + 'sync and waits for no peer that cannot be reached; a copy another member already converted arrives converted and is not rewritten '
+          + 'here; when two members rewrite the same record before either copy has travelled, both write the same converted record and the '
+          + 'later version wins. A rewrite moves the record\'s version and `updatedAt` and so reaches every peer. On a space in a network the '
+          + 'steps travel with the vote, signed by this instance, and a member applies them only if the signature and the round agree, else it '
+          + 'takes the schema without them. Same as `convertRecords` on `PATCH /api/spaces/:id`.',
       },
       validationMode: {
         type: 'string', enum: ['off', 'warn', 'strict'],
@@ -576,13 +608,16 @@ export const schema_updateTool: ToolHandler = {
     for (const k of declared) {
       if (a[k] !== undefined) meta[k] = a[k];
     }
-    if (Object.keys(meta).length === 0) {
+    // `convertRecords` alone names no meta, and the planner says so (`convert_needs_meta`) as REST does: an empty `meta` object sent in its place would
+    // read as "a meta with nothing in it", and the steps would be held to a schema change that is not there.
+    if (Object.keys(meta).length === 0 && a['convertRecords'] === undefined) {
       throw new Error(`At least one of ${declared.join(', ')} must be provided`);
     }
 
-    const body: Record<string, unknown> = { meta };
+    const body: Record<string, unknown> = Object.keys(meta).length > 0 ? { meta } : {};
     if (a['typeSchemasMode'] !== undefined) body['typeSchemasMode'] = a['typeSchemasMode'];
     if (a['targetNetwork'] !== undefined) body['targetNetwork'] = a['targetNetwork'];
+    if (a['convertRecords'] !== undefined) body['convertRecords'] = a['convertRecords'];
 
     const wrote = Object.keys(meta).join(', ');
     return await runSpaceMetaUpdate(callSpace, body, `Space '${callSpace}' schema updated (${wrote}).`, ctx.rights, ctx.recordChanges);

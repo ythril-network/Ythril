@@ -244,6 +244,7 @@ The reasons, the whole list (a reason added is a deliberate edit an app's switch
 | `SPACE_PURPOSE_MAX`, `SCHEMA_DESCRIPTION_MAX`, `PROPERTY_DESCRIPTION_MAX`, `MAX_RULE_LENGTH`, `MAX_MESSAGE_LENGTH`, `MAX_RULES_PER_TYPE`, `MAX_RULES_PER_SPACE`, `MAX_APPLICABLE_RULES`, `RULE_NAME_PATTERN`, `MAX_PATTERN_LENGTH`, `LONGEST_CHECKED_STRING` | the limits an editor shows a counter for |
 | `NAME_QUOTED`, `LOG_VALUE_MAX`, `REFUSAL_NAMES_MAX`, `MAX_UNKNOWN_NAMES` | how much of a caller's text, and how many names, a refusal shows before it cuts and counts the rest |
 | `SpaceMetaBody`, `TypeSchemasZ`, `TypeSchemaZ`, `InlineTypeSchemaZ`, `PropertySchemaZ`, `EndpointMemberZ`, `TypeRuleZ`, `SpaceRuleZ` | the zod bodies (zod 4) |
+| `ConvertRecordsZ`, `ConvertRecords` | the body a schema save's `convertRecords` takes (the conversion steps that go with a schema change) and its type |
 | `parseSpaceMeta`, `parseTypeSchema`, `parseInlineDefinition`, `validateSpaceMeta` | the parses |
 | `ParsedSpaceMeta`, `ParsedTypeSchema`, `MetaParse`, `MetaParseOptions`, `ValidateSpaceMetaOptions` | what the parses answer and the options they take |
 | `libraryRefRefusal`, `withSchemaLibrary`, `currentSchemaLibrary`, `libraryDefinitionOf`, `libraryEntryNameOf`, `takeBackLibraryDefinition`, `libraryDeletePathProblem` | the schema library: the `$ref` refusal, a scoped library and the one a parse reads now, an entry's definition, the entry a reference names, a round-tripped `$ref` taken back to its entry, why a `deleteFields` path names nothing |
