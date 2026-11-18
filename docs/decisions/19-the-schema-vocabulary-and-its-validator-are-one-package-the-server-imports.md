@@ -42,7 +42,7 @@ worded by `util/log.ts`, the logger itself.
 
 - **A change to a schema body, limit or rule check is a change to `schema/src`.** The server picks it up on its next
   build (`server` runs the package's own build, `npm run build -w @ythril-network/schema`, before itself); the Docker image builds and ships `schema/dist` beside
-  `server/dist`.
+  the server's build output.
 - **`@ythril-network/schema/internal` is not an app API.** It carries what the server shares beyond the schema (the text
   renderer, the bounded cache, the rule engine hook) and moves with the server.
 - **A gate that read a definition from a server source file reads it from the package now**; the re-exports keep every

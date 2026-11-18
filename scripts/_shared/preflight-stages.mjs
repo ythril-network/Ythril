@@ -55,6 +55,13 @@ export const SOURCE_GATES = Object.freeze([
   ['console-redaction-coverage', 'an error written straight to the console, bypassing the redaction log.* applies'],
 ].map(Object.freeze));
 
+/**
+ * The gate files of {@link SOURCE_GATES} as repo-relative test paths. The text stage leaves them out, because each runs in a stage of its own, with its
+ * own sentence and its own place in the cost order: the stage list owns which STAGE runs a gate file, and the split (`offlineRuns`) owns which KIND a
+ * file is, so neither knows the other's set and this is how the script asks the first.
+ */
+export const SOURCE_GATE_FILES = Object.freeze(new Set(SOURCE_GATES.map(([name]) => `testing/standalone/${name}.test.js`)));
+
 /** Gates that import from server/dist and therefore need a build. */
 export const BUILT_GATES = Object.freeze([
   ['audit-route-coverage', 'a mutating route with no audit rule leaves no trace of who changed what'],
@@ -70,15 +77,20 @@ const AFTER_FIRST = Object.freeze([FIRST_STAGE]);
  * build only a suite's run makes); a need on a stage the mode leaves out counts as met.
  *
  * The needs are what each stage's code reads, not a guess: `audit-route-coverage` and `surface-matrix-audit` import `server/dist`;
- * the standalone batches run pure files that import `server/dist` and read `client/dist` (the bundle-budget and
+ * the standalone batches of the test stage run the pure files that import `server/dist` and read `client/dist` (the bundle-budget and
  * no-external-assets gates); `bundle-budgets` reads the production build's chunk table. The client type-check, the production
  * build and the client unit tests read no build output.
+ *
+ * `text-only standalone tests` is a source stage that runs, after the gates, every standalone file that reads only tracked text
+ * (`testing/_shared/text-only-test.mjs`: computed from each file's imports, so it grows with the tree and needs no list), minus the gate files, which
+ * keep their own stages ({@link SOURCE_GATE_FILES}). Each file therefore runs once: the pure units of the test stage no longer hold them.
  */
 export const PREFLIGHT_STAGES = Object.freeze([
   { name: FIRST_STAGE, kind: 'source' },
   { name: 'check-changelog', kind: 'source', needs: AFTER_FIRST },
   { name: 'todo:check', kind: 'source', needs: AFTER_FIRST },
   ...SOURCE_GATES.map(([name]) => ({ name, kind: 'source', needs: AFTER_FIRST })),
+  { name: 'text-only standalone tests', kind: 'source', needs: AFTER_FIRST },
   { name: 'unrun-tests', kind: 'source', needs: AFTER_FIRST },
   { name: 'lint:docs', kind: 'source', needs: AFTER_FIRST },
   { name: 'test files parse', kind: 'source', needs: AFTER_FIRST },
