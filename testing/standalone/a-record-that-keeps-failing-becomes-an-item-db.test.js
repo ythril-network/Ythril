@@ -71,7 +71,10 @@ describe('a record that keeps failing becomes an item (real MongoDB)', { skip },
     };
     const done = await startOn('fails', onRewrite);
     assert.equal(done.state, 'complete', `the run was held by one failing record: ${JSON.stringify({ state: done.state, failures: done.failures, error: done.error })}`);
-    assert.equal(done.counts.rewritten, 4, JSON.stringify(done.counts));
+    // The records, not the counts: a page that failed rewrote the records before the failing one, and a failed page counts nothing.
+    const held = await door.coll('fails', 'entities').find({}).sort({ _id: 1 }).toArray();
+    assert.deepEqual(held.map(r => [r._id, Object.keys(r.properties)]), [['p-0', ['handle']], ['p-1', ['handle']], ['p-2', ['handle']], ['p-3', ['nick']], ['p-4', ['handle']]],
+      `every record but the failing one was converted: ${JSON.stringify(done.counts)}`);
     assert.equal(tries, run.SCHEMA_CONVERT_RECORD_FAILED_PASSES, `the failing record was tried ${tries} times`);
     const items = await door.itemRows('fails');
     assert.equal(items.length, 1, JSON.stringify(items));
