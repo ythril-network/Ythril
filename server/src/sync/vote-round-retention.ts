@@ -8,7 +8,7 @@
 
 import type { NetworkConfig, VoteRound } from '../config/types.js';
 import { getConfig } from '../config/loader.js';
-import { isSpaceActRound, roundPastDeadline } from '../networks/round-state.js';
+import { isSpaceActRound, roundConversionOwed, roundPastDeadline } from '../networks/round-state.js';
 import { recordRoundOutcome } from '../networks/round-outcomes.js';
 import { spaceActOfRound } from '../spaces/space-act-runner.js';
 
@@ -63,7 +63,9 @@ function actStandsForRound(net: NetworkConfig, round: VoteRound): boolean {
 export function pruneExpiredRounds(net: NetworkConfig, now: number = Date.now()): number {
   const rounds = net.pendingRounds;
   if (!rounds || rounds.length === 0) return 0;
-  const kept = rounds.filter(r => !isRoundPrunable(r, now) || actStandsForRound(net, r));
+  // Kept past its deadline while it is still owed here: a deletion's or wipe's act that stands, and a schema round's conversion run not yet
+  // started (`roundConversionOwed`, the predicate the owed-round sweep starts it by), or the owed start is given up with nothing said.
+  const kept = rounds.filter(r => !isRoundPrunable(r, now) || actStandsForRound(net, r) || roundConversionOwed(r));
   const removed = rounds.length - kept.length;
   if (removed > 0) {
     for (const r of rounds) if (!kept.includes(r)) recordRoundOutcome(net, r, now);

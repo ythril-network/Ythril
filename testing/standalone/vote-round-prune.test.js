@@ -93,3 +93,43 @@ describe('vote-round retention — pruneExpiredRounds', () => {
     assert.equal(pruneExpiredRounds({}, NOW), 0);
   });
 });
+
+/*
+ * A passed schema round that carries conversion steps owes this member a conversion run until the run is started and the round marked
+ * (`appliedHere`). Pruned at its deadline before that, the owed start would be given up with nothing said (`Q-746`, decision 12): the owed-round
+ * sweep reads the held rounds, and a pruned one is not among them. The prune keeps it by the sweep's own predicate (`roundConversionOwed`).
+ */
+describe('vote-round retention — a passed schema round whose conversion run is owed', () => {
+  before(async () => {
+    ({ isRoundPrunable, pruneExpiredRounds } = await import('../../server/dist/sync/vote-round-retention.js'));
+  });
+
+  const STEPS = { steps: [{ op: 'renameProperty', kind: 'entity', type: 'Person', from: 'fullName', to: 'name' }] };
+  const schemaRound = (over) => round({
+    type: 'meta_change', concluded: true, passed: true, deadline: past, votes: [{ instanceId: 's', vote: 'yes' }], convertRecords: STEPS, ...over,
+  });
+
+  it('an owed schema round past its deadline is kept', () => {
+    const net = { pendingRounds: [schemaRound({ roundId: 'owed' })] };
+    assert.equal(pruneExpiredRounds(net, NOW), 0, 'the round whose conversion run is still owed was pruned');
+    assert.deepEqual(net.pendingRounds.map(r => r.roundId), ['owed']);
+  });
+
+  it('once its run is started and the round marked, it is pruned as any concluded round', () => {
+    const net = { pendingRounds: [schemaRound({ roundId: 'started', appliedHere: true })] };
+    assert.equal(pruneExpiredRounds(net, NOW), 1);
+  });
+
+  it('a schema round that carries no steps is pruned as before', () => {
+    const net = { pendingRounds: [schemaRound({ roundId: 'no-steps', convertRecords: undefined })] };
+    assert.equal(pruneExpiredRounds(net, NOW), 1);
+  });
+
+  it('a schema round that did not pass, or was vetoed, owes nothing and is pruned', () => {
+    const net = { pendingRounds: [
+      schemaRound({ roundId: 'failed', passed: false }),
+      schemaRound({ roundId: 'vetoed', votes: [{ instanceId: 's', vote: 'veto' }] }),
+    ] };
+    assert.equal(pruneExpiredRounds(net, NOW), 2);
+  });
+});

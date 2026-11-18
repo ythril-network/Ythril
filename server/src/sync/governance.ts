@@ -30,7 +30,7 @@ import { settleSpaceAct } from '../spaces/apply-wipe-round.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { metaChangeNote, queueGeneratedNote } from './change-notes.js';
-import { isSpaceActRound, roundPassedUnvetoed, roundPastDeadline } from '../networks/round-state.js';
+import { isSpaceActRound, roundConversionOwed, roundPastDeadline } from '../networks/round-state.js';
 import { roundElectorate, votersOf } from '../networks/round-electorate.js';
 import { recordRoundOutcome } from '../networks/round-outcomes.js';
 
@@ -607,7 +607,7 @@ export function startOwedRoundConversions(): number {
   let settled = false;
   for (const net of cfg.networks ?? []) {
     for (const round of net.pendingRounds ?? []) {
-      if (round.type !== 'meta_change' || round.convertRecords === undefined || round.appliedHere === true || !roundPassedUnvetoed(round)) continue;
+      if (!roundConversionOwed(round)) continue;
       if (startingRounds.has(round.roundId)) { owed++; continue; }
       const plan = planPassedMetaChange(net, round);
       if (plan === null || !plan.ok) { settleSpaceAct(net, round, plan === null ? 'not-carried' : 'absent'); settled = true; continue; }
