@@ -76,6 +76,7 @@ import { readFileSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { scratchRoot as scratchRootOf } from '../../scripts/_shared/scratch-root.mjs';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 
 /** The project's scratch root, made to exist (it is outside the checkout, and a fresh machine may not have it yet). */
 const scratchRoot = () => { const d = scratchRootOf(); mkdirSync(d, { recursive: true }); return d; };
@@ -682,7 +683,7 @@ function secondCallInSameStage(src, stage) {
 
 /** A stage registration renamed to another stage's name: its code now sits in the wrong stage's body, and its own stage holds none. */
 function renameStage(src, from, to) {
-  const mutated = src.replace(new RegExp(`\\bstage\\(\\s*(['"\`])${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1`), (m, q) => `stage(${q}${to}${q}`);
+  const mutated = src.replace(new RegExp(`\\bstage\\(\\s*(['"\`])${escapeRegExp(from)}\\1`), (m, q) => `stage(${q}${to}${q}`);
   assert.notEqual(mutated, src, `the mutation found no stage('${from}', ...) to rename`);
   return mutated;
 }
