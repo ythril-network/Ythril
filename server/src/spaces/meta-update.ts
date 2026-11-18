@@ -60,8 +60,9 @@ import type { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { spaceForWire } from './space-for-wire.js';
 import { lostSpaceAnswer } from './unknown-space.js';
-import { typesToConvert, type SchemaConvertType } from './schema-convert-run.js';
-import { startSchemaConvertInTurn, roundConvertStartOf, type SchemaConvertStarted } from '../sync/governance.js';
+import {
+  startSchemaConvertInTurn, roundConvertStartOf, schemaConvertTypes, type SchemaConvertStarted, type SchemaConvertTypeRef,
+} from '../sync/governance.js';
 // The trigger lives beside the sweep (bundle-30 `R5`): the effective-meta recompute fires it too.
 
 // The merge a write makes, and the base it is merged over, live with the rights check's copy of the same question (`meta-write-base.ts`).
@@ -530,18 +531,25 @@ export interface ConvertRunNotice {
   error?: string;
 }
 
+/** The longest the words of a run not started are kept on the answer. */
+const NOT_STARTED_TEXT_MAX = 300;
+
 /** The outcome's {@link ConvertRunNotice}: present only when the save carried `convertRecords`. */
 interface ConvertStarted { convertRun?: ConvertRunNotice }
 
-/** The types a save's run reaches, as `typesToConvert` names them. */
-function saveConvertTypes(plan: MetaUpdatePlan, inNetwork: boolean, rulesBefore: unknown, rulesAfter: unknown): SchemaConvertType[] {
-  return typesToConvert({
-    changedTypes: plan.changedTypes, droppedTypes: plan.droppedTypes, inNetwork, rulesBefore, rulesAfter, steps: plan.convertRecords?.steps ?? [],
-  });
+/** The types a save's run reaches, as `typesToConvert` names them; a failure to ask (the run never wired) is said as a run not started. */
+function saveConvertTypes(plan: MetaUpdatePlan, inNetwork: boolean, rulesBefore: unknown, rulesAfter: unknown): SchemaConvertTypeRef[] | ConvertRunNotice {
+  try {
+    return schemaConvertTypes({
+      changedTypes: plan.changedTypes, droppedTypes: plan.droppedTypes, inNetwork, rulesBefore, rulesAfter, steps: plan.convertRecords?.steps ?? [],
+    });
+  } catch (err) {
+    return { state: 'not_started', types: [], error: peerText(err instanceof Error ? err.message : String(err), { max: NOT_STARTED_TEXT_MAX }) };
+  }
 }
 
 /** A start's answer as the notice says it: started toward its fingerprint, nothing to convert, or not started and why. */
-function noticeOfStart(started: SchemaConvertStarted, reached: readonly SchemaConvertType[]): ConvertRunNotice {
+function noticeOfStart(started: SchemaConvertStarted, reached: readonly SchemaConvertTypeRef[]): ConvertRunNotice {
   const types = reached.map(t => ({ kind: t.kind, type: t.type }));
   if (!started.ok) return { state: 'not_started', types, error: started.error };
   if (started.run === null) return { state: 'nothing', types };
@@ -556,6 +564,7 @@ function noticeOfStart(started: SchemaConvertStarted, reached: readonly SchemaCo
 async function convertRunOfSave(plan: MetaUpdatePlan, before: SpaceMeta | undefined, updated: SpaceConfig): Promise<ConvertStarted> {
   if (plan.convertRecords === undefined) return {};
   const types = saveConvertTypes(plan, false, before?.rules, updated.meta?.rules);
+  if (!Array.isArray(types)) return { convertRun: types };
   const started = await startSchemaConvertInTurn({
     spaceId: plan.spaceId, types, steps: [...(plan.convertRecords.steps ?? [])], source: { kind: 'write' }, before: resolvedForSteps(before),
   });
@@ -570,6 +579,7 @@ async function convertRunOfSave(plan: MetaUpdatePlan, before: SpaceMeta | undefi
 async function convertRunOfRounds(plan: MetaUpdatePlan, before: SpaceMeta | undefined, starts: readonly Promise<SchemaConvertStarted>[], allPassed: boolean): Promise<ConvertStarted> {
   if (plan.convertRecords === undefined) return {};
   const types = saveConvertTypes(plan, true, before?.rules, plan.mergedMeta?.rules);
+  if (!Array.isArray(types)) return { convertRun: types };
   if (starts.length === 0) {
     const named = types.map(t => ({ kind: t.kind, type: t.type }));
     return { convertRun: allPassed
