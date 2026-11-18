@@ -102,7 +102,7 @@ function rightsRefusal(spaceId: string, rights: TokenRights | null | undefined, 
   // before this price must not be refused by it (N20 made the save ask this function).
   if (rights.instanceAdmin === true) return null;
   if (!holdsRung(rights, spaceId, 'knowledge', needs)) return refusal(FORBIDDEN, rungRefusal(needs, 'knowledge', spaceId), KNOWLEDGE_RUNG);
-  if (needs === 'admin' && rights.instanceAdmin !== true && !isSpaceAdminFor(rights, spaceId)) {
+  if (needs === 'admin' && !isSpaceAdminFor(rights, spaceId)) {
     return refusal(FORBIDDEN, `Converting records rewrites them on every peer, so it needs the admin right of space '${spaceId}', not only 'admin' on knowledge`, SPACE_ADMIN_REQUIRED);
   }
   return null;
