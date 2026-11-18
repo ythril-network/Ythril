@@ -49,7 +49,7 @@ const VOLUME_LINES = [
   String.raw`{"Availability":"N/A","Driver":"local","Group":"N/A","Labels":"com.docker.compose.config-hash=0fe6d780da606f2357172d2f24f828c49f4ec577fae603891dc3c8866092c99c,com.docker.compose.project=ythril-test,com.docker.compose.version=5.4.0,com.docker.compose.volume=ythril-data-b","Links":"N/A","Mountpoint":"/var/lib/docker/volumes/ythril-test_ythril-data-b/_data","Name":"ythril-test_ythril-data-b","Scope":"local","Size":"N/A","Status":"N/A"}`,
 ];
 
-const scratch = mkdtempSync(join(tmpdir(), 'q922-offline-'));
+const scratch = mkdtempSync(join(tmpdir(), 'stackdown-offline-'));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 let dirCount = 0;
 

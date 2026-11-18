@@ -11,7 +11,7 @@
  * ## Why it cannot reach the real stack
  *
  * `stackDown` takes its projects as parameters; this file gives it one scratch project of its own, with names no stack of this repository has
- * (`ythril-q922-stackdown-<pid>-<time>`), and refuses to run when that name is `ythril-test` or `testing`, or when a container it would create carries
+ * (`ythril-scratch-stackdown-<pid>-<time>`), and refuses to run when that name is `ythril-test` or `testing`, or when a container it would create carries
  * a name the test stack's compose file pins. The two services run `sleep` on the Mongo image the repository already pins, so no image is added.
  * It cleans up in every case, and reads nothing from the real stack's holds directory: the holds are a scratch directory it writes.
  *
@@ -42,7 +42,7 @@ const REAL_CONTAINER_NAMES = [...COMPOSE_TEXT.matchAll(/^\s+container_name:\s*(\
 
 /** The names of one scratch stack: a project and its two containers, none of which the real stack can have. */
 export function scratchNames(stamp = `${process.pid}-${Date.now().toString(36)}`) {
-  const project = `ythril-q922-stackdown-${stamp}`;
+  const project = `ythril-scratch-stackdown-${stamp}`;
   return { project, keep: `${project}-keep`, go: `${project}-go` };
 }
 
@@ -65,7 +65,7 @@ describe('the Docker take-down test stays away from the real stack', () => {
     const a = scratchNames();
     assert.deepEqual(reachesRealStack(a), []);
     assert.notEqual(scratchNames('1-a').project, scratchNames('1-b').project);
-    assert.match(a.keep, /q922/);
+    assert.match(a.keep, /scratch/);
   });
 
   it('refuses the real project names and the real container names', () => {
@@ -94,7 +94,7 @@ const running = (name) => docker(['inspect', '-f', '{{.State.Running}}', name]).
 if (process.env[OPT_IN] === '1') {
   describe('live: a held container survives the take-down on real containers', () => {
     const names = scratchNames();
-    const work = mkdtempSync(join(tmpdir(), 'q922-stackdown-'));
+    const work = mkdtempSync(join(tmpdir(), 'scratch-stackdown-'));
     const composeFile = join(work, 'compose.yml');
     const holdsDir = join(work, 'holds');
     const emptyHolds = join(work, 'no-holds');
@@ -145,7 +145,7 @@ if (process.env[OPT_IN] === '1') {
         const wrote = docker(['exec', c, 'sh', '-c', 'echo written-by-the-test > /marker/file']);
         assert.equal(wrote.status, 0, `${c}: ${wrote.stderr}`);
       }
-      writeFileSync(holdFile, JSON.stringify({ id: 'q922', pid: process.pid, label: 'q922/docker-test', startedAt: Date.now(), expiresAt: Date.now() + 3_600_000, containers: [names.keep] }));
+      writeFileSync(holdFile, JSON.stringify({ id: 'scratch', pid: process.pid, label: 'scratch/docker-test', startedAt: Date.now(), expiresAt: Date.now() + 3_600_000, containers: [names.keep] }));
       resetConfigs();
     });
     after(() => { try { cleanUp(); } finally { rmSync(work, { recursive: true, force: true }); } });
@@ -153,7 +153,7 @@ if (process.env[OPT_IN] === '1') {
     it('a start is refused while one container is held: exit 1, the holder named, nothing removed, nothing wiped', { timeout: 300_000 }, () => {
       const r = takeDown(holdsDir, { forStart: true });
       assert.equal(r.code, 1, r.text);
-      assert.match(r.text, /q922\/docker-test/);
+      assert.match(r.text, /scratch\/docker-test/);
       assert.match(r.text, /test:down:all/);
       assert.ok(running(names.keep) && running(names.go), 'both containers still run');
       assert.ok(exists('volume', volumeOf('keep')) && exists('volume', volumeOf('go')), 'both volumes remain');
@@ -163,7 +163,7 @@ if (process.env[OPT_IN] === '1') {
     it('a take-down leaves the held container running with the file it wrote, and removes the other with its volume', { timeout: 300_000 }, () => {
       const r = takeDown(holdsDir);
       assert.equal(r.code, 0, r.text);
-      assert.match(r.text, new RegExp(`kept ${names.keep}.*q922/docker-test`));
+      assert.match(r.text, new RegExp(`kept ${names.keep}.*scratch/docker-test`));
       assert.ok(running(names.keep), 'the held container still runs');
       assert.equal(docker(['exec', names.keep, 'cat', '/marker/file']).stdout, 'written-by-the-test');
       assert.ok(exists('volume', volumeOf('keep')), 'its volume remains');
