@@ -34,14 +34,22 @@ import { peerText } from '../util/log.js';
 import { isPlainObject } from '../util/plain-object.js';
 
 /** Why a record was not converted. `could_not_evaluate` is a split condition the engine could not answer on the record (its own class). */
-export type UnconvertedReason =
-  | 'not_conforming' | 'no_case_matched' | 'both_set' | 'could_not_evaluate'
-  | 'relationship_exists' | 'functional_taken' | 'version_ceiling' | 'fork' | 'step_refused';
+export const UNCONVERTED_REASONS = [
+  'not_conforming', 'no_case_matched', 'both_set', 'could_not_evaluate',
+  'relationship_exists', 'functional_taken', 'version_ceiling', 'fork', 'step_refused',
+] as const;
+export type UnconvertedReason = typeof UNCONVERTED_REASONS[number];
 
 /** The most violations one item names. */
 export const UNCONVERTED_VIOLATIONS_MAX = 20;
 /** The most items one run writes; past it the run counts what it did not list (`unconvertedNotListed`). */
 export const UNCONVERTED_ITEMS_PER_RUN_MAX = 10_000;
+/**
+ * The most open items one bulk dismiss names. The call reads the ids it will dismiss once (one more than this, to know there are too many) and
+ * names them in one update, so its cost and the update's size are bounded by this; it is above what the Review page shows for one schema change
+ * of a thousand records, and a filter that matches more is narrowed by kind, type or reason, never cut.
+ */
+export const UNCONVERTED_DISMISS_MAX = 2_000;
 /** The most items one tick of the watcher judges in one space. */
 export const UNCONVERTED_SWEEP_PER_TICK = 500;
 /** The longest reason an item keeps for one violation. */
@@ -145,28 +153,50 @@ export async function recordUnconvertedItem(spaceId: string, input: UnconvertedI
   return 'written';
 }
 
+/** An item as a list gives it: the stored item and, when the caller's `enrich` found one, a part naming its record. */
+export type ListedUnconvertedItem = UnconvertedItem & { record?: { summary: string } };
+
 /** What a list of the items answers: the page, its fields, and how many rows are open and dismissed in the whole space. */
 export type UnconvertedList =
-  | { ok: true; items: UnconvertedItem[]; fields: Record<string, unknown>; open: number; dismissed: number }
+  | { ok: true; items: ListedUnconvertedItem[]; fields: Record<string, unknown>; open: number; dismissed: number }
   | { ok: false; error: string };
 
+/** What narrows a list of the items, and what a bulk dismiss takes: the one set of fields both read, so a count shown and a set dismissed are one question. */
+export interface UnconvertedFilter {
+  kind?: string;
+  type?: string;
+  reason?: UnconvertedReason;
+  status?: UnconvertedItem['status'];
+}
+
+/** The stored-item filter of `f`: a field not given, or given empty, narrows nothing. */
+const filterOf = (f: UnconvertedFilter): Record<string, unknown> => ({
+  ...(f.status !== undefined ? { status: f.status } : {}),
+  ...(typeof f.kind === 'string' && f.kind !== '' ? { kind: f.kind } : {}),
+  ...(typeof f.type === 'string' && f.type !== '' ? { type: f.type } : {}),
+  ...(f.reason !== undefined ? { reason: f.reason } : {}),
+});
+
 /**
- * The items of `spaceId`, newest first, narrowed by `kind`, `type` and `status` (all of them when none is given, so the filter is the caller's
- * to state: the door's act states `open` by default), paged by the one list rule (`skip`, `limit`, the byte budget). Writes
+ * The items of `spaceId`, newest first, narrowed by `kind`, `type`, `reason` and `status` (all of them when none is given, so the filter is the
+ * caller's to state: the door's act states `open` by default), paged by the one list rule (`skip`, `limit`, the byte budget). Writes
  * nothing: a stale item is listed until the watcher's tick removes it. `transport` names the door, whose budget default applies.
+ *
+ * `enrich` adds to the rows read for the page before the byte budget is applied, so what it adds is counted in the bytes the answer reports
+ * and in where the page is cut (the door's `record.summary`); it never changes which rows are listed, their order or the totals.
  */
 export async function listUnconvertedItems(
-  spaceId: string, req: ListPageRequest & { kind?: string; type?: string; status?: UnconvertedItem['status'] }, transport: 'rest' | 'mcp' = 'rest',
+  spaceId: string, req: ListPageRequest & UnconvertedFilter, transport: 'rest' | 'mcp' = 'rest',
+  enrich?: (rows: UnconvertedItem[]) => Promise<ListedUnconvertedItem[]>,
 ): Promise<UnconvertedList> {
-  const filter: Record<string, unknown> = {
-    ...(req.status !== undefined ? { status: req.status } : {}),
-    ...(typeof req.kind === 'string' && req.kind !== '' ? { kind: req.kind } : {}),
-    ...(typeof req.type === 'string' && req.type !== '' ? { type: req.type } : {}),
-  };
-  const page: ListPage<UnconvertedItem> = await pageMemberList<UnconvertedItem>({
+  const filter = filterOf(req);
+  const page: ListPage<ListedUnconvertedItem> = await pageMemberList<ListedUnconvertedItem>({
     members: [spaceId],
-    readMember: async (id, limit, skip) => await items(id).find(asFilter<UnconvertedItem>(filter))
-      .sort({ detectedAt: -1, _id: 1 }).skip(skip).limit(limit).toArray() as UnconvertedItem[],
+    readMember: async (id, limit, skip) => {
+      const rows = await items(id).find(asFilter<UnconvertedItem>(filter))
+        .sort({ detectedAt: -1, _id: 1 }).skip(skip).limit(limit).toArray() as UnconvertedItem[];
+      return enrich ? await enrich(rows) : rows;
+    },
     countMember: id => items(id).countDocuments(asFilter<UnconvertedItem>(filter)),
     compare: (a, b) => b.detectedAt.localeCompare(a.detectedAt) || a._id.localeCompare(b._id),
     req,
@@ -188,6 +218,34 @@ export async function dismissUnconvertedItem(spaceId: string, itemId: string): P
     asUpdate<UnconvertedItem>({ $set: { status: 'dismissed' } }),
     { returnDocument: 'after' },
   ) as UnconvertedItem | null;
+}
+
+/** What a bulk dismiss answers: how many items it dismissed, or why it did none (`changed`: the open items the filter matches are not `expect`; `too_many`: more than `max`). */
+export type DismissShownOutcome =
+  | { ok: true; dismissed: number }
+  | { ok: false; refusal: 'changed'; current: number }
+  | { ok: false; refusal: 'too_many'; max: number };
+
+/**
+ * Dismiss every OPEN item `filter` matches (its `status` is ignored: only open items are dismissed), when there are exactly `expect` of them and
+ * no more than `max`: the one question the list asks with `status: 'open'`, so a count a caller was shown and the set dismissed are the same
+ * rows. The ids are read once and named in one update that dismisses only those still open, so an item that arrives after the read is never
+ * dismissed by a count it was not part of; a refusal writes nothing. Answers how many the update dismissed (an item the sweep removed between
+ * the read and the update is not counted).
+ */
+export async function dismissOpenUnconvertedItems(
+  spaceId: string, filter: UnconvertedFilter, expect: number, max = UNCONVERTED_DISMISS_MAX,
+): Promise<DismissShownOutcome> {
+  const matching = { ...filterOf({ ...filter, status: 'open' }) };
+  const rows = await items(spaceId).find(asFilter<UnconvertedItem>(matching), { projection: { _id: 1 } }).limit(max + 1).toArray();
+  if (rows.length > max) return { ok: false, refusal: 'too_many', max };
+  if (rows.length !== expect) return { ok: false, refusal: 'changed', current: rows.length };
+  if (rows.length === 0) return { ok: true, dismissed: 0 };
+  const done = await items(spaceId).updateMany(
+    asFilter<UnconvertedItem>({ _id: { $in: rows.map(r => r._id) }, status: 'open' }),
+    asUpdate<UnconvertedItem>({ $set: { status: 'dismissed' } }),
+  );
+  return { ok: true, dismissed: done.modifiedCount };
 }
 
 /** Per space, the last item id a sweep judged when it stopped at its bound (in memory: a restart judges from the start). */

@@ -68,25 +68,28 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
   const acts = () => need('nothing lists or dismisses the items a conversion run wrote', 'acts', 'spaces/unconverted-acts.ts', 'listUnconvertedAct');
   const router = () => need('the unconverted-record routes have no router', 'router', 'api/spaces-unconverted.ts', 'spaceUnconvertedRouter').spaceUnconvertedRouter;
   const tools = () => need('the unconverted-record tools do not exist', 'tools', 'mcp/tools/unconverted.ts', 'list_unconvertedTool');
+  const shownAct = () => need('no act dismisses every open item a filter lists', 'acts', 'spaces/unconverted-acts.ts', 'dismissShownUnconvertedAct');
+  const shownTool = () => need('the bulk dismiss tool does not exist', 'tools', 'mcp/tools/unconverted.ts', 'dismiss_unconverted_shownTool').dismiss_unconverted_shownTool;
 
   /** One call through the act, as the door `transport` runs it. */
   async function viaAct(op, args, rights, transport) {
     const m = acts();
-    const r = op === 'list'
-      ? await m.listUnconvertedAct(args.space ?? S, Object.fromEntries(Object.entries(args).filter(([k]) => k !== 'space')), { rights, transport })
-      : await m.dismissUnconvertedAct(args.space ?? S, args.itemId, { rights, transport });
-    return 'error' in r ? { status: r.status, body: { error: r.error, ...(r.code ? { code: r.code } : {}) } } : { status: r.status, body: r.body };
+    const params = Object.fromEntries(Object.entries(args).filter(([k]) => k !== 'space'));
+    const r = op === 'list' ? await m.listUnconvertedAct(args.space ?? S, params, { rights, transport })
+      : op === 'shown' ? await shownAct().dismissShownUnconvertedAct(args.space ?? S, params, { rights, transport })
+        : await m.dismissUnconvertedAct(args.space ?? S, args.itemId, { rights, transport });
+    return 'error' in r ? { status: r.status, body: { error: r.error, ...(r.code ? { code: r.code } : {}), ...(r.detail ?? {}) } } : { status: r.status, body: r.body };
   }
 
   /** One call through the router's own handler, past the guards, with the query as a client sends it (strings). */
   async function viaRest(op, args, rights) {
-    const [method, route] = op === 'list'
-      ? ['get', '/:id/schema-convert/items'] : ['post', '/:id/schema-convert/items/:itemId/dismiss'];
+    const [method, route] = op === 'list' ? ['get', '/:id/schema-convert/items']
+      : op === 'shown' ? ['post', '/:id/schema-convert/items/dismiss'] : ['post', '/:id/schema-convert/items/:itemId/dismiss'];
     const layer = router().stack.find(l => l.route?.path === route && l.route.methods[method]);
     assert.ok(layer, `no ${method.toUpperCase()} ${route} on the unconverted router`);
     const { space, itemId, ...query } = args;
     const req = {
-      method: method.toUpperCase(), path: route, body: {}, headers: {}, get: () => undefined, authToken: rights ? { rights } : {},
+      method: method.toUpperCase(), path: route, body: op === 'shown' ? query : {}, headers: {}, get: () => undefined, authToken: rights ? { rights } : {},
       params: { id: space ?? S, ...(itemId !== undefined ? { itemId } : {}) },
       query: op === 'list' ? Object.fromEntries(Object.entries(query).map(([k, v]) => [k, String(v)])) : {},
     };
@@ -104,7 +107,7 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
   /** One call through the tool's handler, past the dispatcher; a refusal is the thrown `ToolRefusal`. */
   async function viaTool(op, args, rights) {
     const t = tools();
-    const tool = op === 'list' ? t.list_unconvertedTool : t.dismiss_unconvertedTool;
+    const tool = op === 'list' ? t.list_unconvertedTool : op === 'shown' ? shownTool() : t.dismiss_unconvertedTool;
     const space = args.space ?? S;
     const ctx = {
       args: { space, ...args }, callSpace: space, callSpaces: [space], name: tool.name, transport: 'mcp', cfg: getConfig(),
@@ -397,12 +400,154 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     assert.deepEqual(rows.o1.record, { summary: 'Acme (org)' });
   });
 
-  it('declares the same parameters on the tools as the routes read, says in words what an unconverted record is, and mounts two routes', () => {
+  // ---- slice 4b: the bulk dismiss, the reason filter, the summary in the budget ----
+  const itemsCol = (space) => door.mongo.col(door.spaceCollection(space, 'schemaConvertItems'));
+  const statusMap = async () => Object.fromEntries((await itemsCol(S).find({}).toArray()).map(r => [r.recordId, r.status]));
+  /** Put the named items of S into the named status (the fixture of one test: no door writes it). */
+  async function arrange(states) {
+    for (const [recordId, status] of Object.entries(states)) await itemsCol(S).updateOne({ _id: itemOf[recordId] }, { $set: { status } });
+  }
+  const ALL_OPEN = { p1: 'open', p2: 'open', o1: 'open', f1: 'open', c1: 'open' };
+
+  it('lists by reason: the same question the bulk dismiss asks, refused by its own code when it is not a reason class', async () => {
+    await itemsCol(S).updateOne({ _id: itemOf.f1 }, { $set: { reason: 'no_case_matched' } });
+    await arrange(ALL_OPEN);
+    assert.deepEqual(ids(await alike('list', { reason: 'no_case_matched' })), ['f1']);
+    assert.deepEqual(ids(await alike('list', { reason: 'not_conforming' })), ['c1', 'o1', 'p2', 'p1']);
+    assert.deepEqual(ids(await alike('list', { kind: 'entity', reason: 'no_case_matched' })), []);
+    assert.deepEqual(ids(await alike('list', { reason: '' })), ['c1', 'f1', 'o1', 'p2', 'p1'], 'an empty reason is no filter');
+    const bad = await alike('list', { reason: 'no_such_reason' });
+    assert.deepEqual([bad.status, bad.body.code], [400, 'unconverted_bad_reason']);
+    assert.match(bad.tool.text, /unconverted_bad_reason/);
+  });
+
+  it('dismisses exactly the open items its filter lists, through each door, and no other: a second type and a dismissed item are untouched', async () => {
+    await arrange({ ...ALL_OPEN, p1: 'dismissed' });
+    const shown = async (filter) => (await alike('list', filter)).body.total;
+
+    // The act: one type of one kind.
+    const one = await viaAct('shown', { kind: 'entity', type: 'org', expect: await shown({ kind: 'entity', type: 'org' }) }, WRITER, 'rest');
+    assert.deepEqual([one.status, one.body], [200, { dismissed: 1 }]);
+    assert.deepEqual(await statusMap(), { p1: 'dismissed', p2: 'open', o1: 'dismissed', f1: 'open', c1: 'open' });
+
+    // The router: one reason (another type's item, and the dismissed one, are not it).
+    const route = await viaRest('shown', { reason: 'no_case_matched', expect: await shown({ reason: 'no_case_matched' }) }, WRITER);
+    assert.deepEqual([route.status, route.body], [200, { dismissed: 1 }]);
+    assert.deepEqual(await statusMap(), { p1: 'dismissed', p2: 'open', o1: 'dismissed', f1: 'dismissed', c1: 'open' });
+
+    // The tool: one kind; the dismissed entity items are not counted in what it was shown.
+    const entities = await shown({ kind: 'entity' });
+    assert.equal(entities, 1, 'the list of a kind counts its open items only');
+    const tool = await viaTool('shown', { kind: 'entity', expect: entities }, WRITER);
+    assert.deepEqual([tool.status, tool.body], [200, { dismissed: 1 }]);
+    assert.match(tool.text, /1/);
+    assert.deepEqual(await statusMap(), { p1: 'dismissed', p2: 'dismissed', o1: 'dismissed', f1: 'dismissed', c1: 'open' });
+
+    // No filter: every open item is the set the list shows.
+    const every = await viaAct('shown', { expect: await shown({}) }, WRITER, 'mcp');
+    assert.deepEqual([every.status, every.body], [200, { dismissed: 1 }]);
+    assert.deepEqual(Object.values(await statusMap()), ['dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed']);
+    assert.deepEqual((await alike('list', { status: 'dismissed' })).body.counts, { open: 0, dismissed: 5 });
+    const nothing = await alike('shown', { expect: 0 });
+    assert.deepEqual([nothing.status, nothing.body], [200, { dismissed: 0 }], 'nothing open: nothing to dismiss, and it says so');
+  });
+
+  it('takes the set the list shows for a filter: the list\'s count and the bulk dismiss are one question', async () => {
+    await arrange(ALL_OPEN);
+    for (const filter of [{ reason: 'not_conforming' }, { kind: 'entity', reason: 'not_conforming' }, { type: 'person' }, { kind: 'chrono' }]) {
+      const listed = await alike('list', filter);
+      const refused = await alike('shown', { ...filter, expect: listed.body.total + 1 });
+      assert.deepEqual([refused.status, refused.body.code, refused.body.current], [409, 'unconverted_changed', listed.body.total], JSON.stringify(filter));
+    }
+    const before = await statusMap();
+    const filter = { reason: 'not_conforming' };
+    const listed = ids(await alike('list', filter));
+    const done = await viaAct('shown', { ...filter, expect: listed.length }, WRITER, 'rest');
+    assert.deepEqual([done.status, done.body.dismissed], [200, listed.length]);
+    const after = await statusMap();
+    for (const recordId of Object.keys(before)) {
+      assert.equal(after[recordId], listed.includes(recordId) ? 'dismissed' : before[recordId], `${recordId}: dismissed unless the list did not show it`);
+    }
+    assert.deepEqual(ids(await alike('list', { ...filter, status: 'dismissed' })).sort(), [...listed].sort());
+  });
+
+  it('refuses a wrong expect, writing nothing and answering the current number; expect is required', async () => {
+    await arrange(ALL_OPEN);
+    const state = JSON.stringify(await itemsCol(S).find({}).sort({ _id: 1 }).toArray());
+    for (const expect of [2, 4, 0]) {
+      const a = await alike('shown', { kind: 'entity', expect });
+      assert.deepEqual([a.status, a.body.code, a.body.current], [409, 'unconverted_changed', 3], `expect ${expect}`);
+      assert.match(a.body.error, /3/);
+      assert.match(a.tool.text, /unconverted_changed/);
+    }
+    for (const expect of [undefined, '3', -1, 1.5, null]) {
+      const a = await alike('shown', { kind: 'entity', ...(expect === undefined ? {} : { expect }) });
+      assert.deepEqual([a.status, a.body.code], [400, 'unconverted_bad_expect'], `expect ${JSON.stringify(expect)}: ${JSON.stringify(a.body)}`);
+    }
+    assert.deepEqual([(await alike('shown', { kind: 'file', expect: 0 })).body.code, (await alike('shown', { reason: 'nope', expect: 0 })).body.code,
+      (await alike('shown', { type: 'x'.repeat(201), expect: 0 })).body.code], ['unconverted_bad_kind', 'unconverted_bad_reason', 'unconverted_bad_type']);
+    const none = await alike('shown', { kind: 'edge', expect: 0 });
+    assert.deepEqual([none.status, none.body], [200, { dismissed: 0 }]);
+    assert.equal(JSON.stringify(await itemsCol(S).find({}).sort({ _id: 1 }).toArray()), state, 'a refused bulk dismiss wrote');
+  });
+
+  it('asks knowledge write inside the act for the bulk dismiss, before it judges the parameters', async () => {
+    await arrange(ALL_OPEN);
+    for (const [name, rights] of [['a read-only token', READER], ['a token with no knowledge rung', NO_KNOWLEDGE], ['a token with no matrix', null]]) {
+      const a = await alike('shown', { expect: 5 }, rights);
+      assert.deepEqual([a.status, a.body.code], [403, 'unconverted_rung'], `${name}: ${JSON.stringify(a.body)}`);
+      assert.deepEqual([(await alike('shown', {}, rights)).status], [403], `${name}: the rung is asked before expect`);
+    }
+    assert.deepEqual(Object.values(await statusMap()), ['open', 'open', 'open', 'open', 'open'], 'a refused call dismissed an item');
+    assert.equal((await alike('shown', { space: 'nosuch', expect: 0 })).status, 404);
+  });
+
+  it('refuses a filter that matches more than one call may dismiss, by a named code, and a narrowed filter then passes', async () => {
+    const { UNCONVERTED_DISMISS_MAX: MAX } = await import('../../server/dist/brain/schema-convert-items.js');
+    assert.ok(Number.isInteger(MAX) && MAX > 0, 'brain/schema-convert-items.ts does not export UNCONVERTED_DISMISS_MAX');
+    const docs = Array.from({ length: MAX + 1 }, (_, i) => ({
+      _id: `bulk${i}`, kind: 'entity', recordId: `bulk${i}`, type: i < 3 ? 'small' : 'bulk', seq: 1, fromFp: null, toFp: 'f'.repeat(64), typeDefinition: 't',
+      reason: 'not_conforming', violations: [], proposed: { set: [], unset: [] }, status: 'open', detectedAt: '2026-03-10T00:00:00.000Z',
+    }));
+    await itemsCol(OTHER).insertMany(docs);
+    try {
+      const over = await alike('shown', { space: OTHER, expect: MAX + 1 });
+      assert.deepEqual([over.status, over.body.code, over.body.max], [400, 'unconverted_too_many', MAX]);
+      assert.match(over.body.error, /narrow/i, 'the refusal says to narrow the filter');
+      assert.equal(await itemsCol(OTHER).countDocuments({ status: 'open' }), MAX + 1, 'a refused call dismissed an item');
+      const done = await viaAct('shown', { space: OTHER, type: 'small', expect: 3 }, ADMIN, 'rest');
+      assert.deepEqual([done.status, done.body], [200, { dismissed: 3 }]);
+      assert.equal(await itemsCol(OTHER).countDocuments({ status: 'dismissed' }), 3);
+    } finally {
+      await itemsCol(OTHER).deleteMany({});
+    }
+  });
+
+  it('counts the record summary in the byte budget it reports, on both doors', async () => {
+    await arrange(ALL_OPEN);
+    const before = await alike('list', { kind: 'fact' });
+    const short = before.body.items[0].record.summary;
+    const text = 'The sky is green because of a long and winding explanation that goes on. '.repeat(4);
+    await door.coll(S, 'facts').updateOne({ _id: 'f1' }, { $set: { fact: text } });
+    try {
+      const after = await alike('list', { kind: 'fact' });
+      const long = after.body.items[0].record.summary;
+      const added = long.length - short.length;
+      assert.ok(added >= 50, `the fixture must lengthen the summary (${short.length} to ${long.length} characters)`);
+      for (const key of ['charsReturned', 'bytesReturned']) {
+        assert.ok(after.body[key] - before.body[key] >= added, `${key} did not grow by the ${added} characters of summary the rows now carry (${before.body[key]} to ${after.body[key]})`);
+      }
+    } finally {
+      await door.coll(S, 'facts').updateOne({ _id: 'f1' }, { $set: { fact: 'The sky is green' } });
+    }
+  });
+
+  it('declares the same parameters on the tools as the routes read, says in words what an unconverted record is, and mounts three routes', () => {
     const schemas = { requiredSpace: { type: 'string' }, optionalSpace: { type: 'string' } };
     const list = tools().list_unconvertedTool;
     const dismiss = tools().dismiss_unconvertedTool;
     const listSchema = list.inputSchema(schemas);
-    assert.deepEqual(Object.keys(listSchema.properties).sort(), ['kind', 'limit', 'skip', 'space', 'status', 'type']);
+    assert.deepEqual(Object.keys(listSchema.properties).sort(), ['kind', 'limit', 'reason', 'skip', 'space', 'status', 'type']);
     assert.deepEqual(listSchema.required, ['space']);
     assert.equal(listSchema.additionalProperties, false);
     for (const p of ['kind', 'status']) assert.equal('enum' in listSchema.properties[p], false, `${p} declares an enum: the act refuses it by its own code on both doors`);
@@ -429,6 +574,19 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     }
 
     const routes = router().stack.filter(l => l.route).map(l => `${Object.keys(l.route.methods)[0].toUpperCase()} ${l.route.path}`).sort();
-    assert.deepEqual(routes, ['GET /:id/schema-convert/items', 'POST /:id/schema-convert/items/:itemId/dismiss']);
+    assert.deepEqual(routes, ['GET /:id/schema-convert/items', 'POST /:id/schema-convert/items/:itemId/dismiss', 'POST /:id/schema-convert/items/dismiss']);
+
+    const shownTool = tools().dismiss_unconverted_shownTool;
+    const shownSchema = shownTool.inputSchema(schemas);
+    assert.deepEqual(Object.keys(shownSchema.properties).sort(), ['expect', 'kind', 'reason', 'space', 'type']);
+    assert.deepEqual(shownSchema.required.sort(), ['expect', 'space']);
+    assert.equal(shownSchema.additionalProperties, false);
+    assert.equal(shownTool.mutating, true);
+    assert.equal(shownTool.name, 'dismiss_unconverted_shown');
+    assert.match(shownTool.description, /records (themselves )?are (not changed|unchanged)/i, 'does not say the records are not changed');
+    assert.match(shownTool.description, /stay listed|still listed|listed under dismissed/i, 'does not say the items stay listed as dismissed');
+    assert.match(shownTool.description, /expect/, 'does not say what expect is for');
+    assert.ok(typeof shownSchema.properties.expect.description === 'string' && shownSchema.properties.expect.description.length > 20);
+    assert.ok('reason' in listSchema.properties && listSchema.properties.reason.description.length > 20, 'list_unconverted declares no reason filter');
   });
 });
