@@ -339,7 +339,7 @@ export type RoundConvertDecision =
 export interface HeldForConvert { before?: ConversionMeta; after?: ConversionMeta }
 
 /** The types of `held` the round does not carry, laid under the types it does: the schema a member reads as "before". */
-function beforeOfRound(round: VoteRound, held: ConversionMeta | undefined): ConversionMeta {
+function beforeOfRound(round: Pick<VoteRound, 'metaBase'>, held: ConversionMeta | undefined): ConversionMeta {
   const carried = inlineResolvableRefs(round.metaBase ?? {}).typeSchemas as Record<string, Record<string, unknown> | undefined> | undefined;
   const have = (held?.typeSchemas ?? {}) as Record<string, Record<string, unknown> | undefined>;
   const typeSchemas: Record<string, Record<string, unknown>> = {};
@@ -388,28 +388,45 @@ export function decideRoundConvertRecords(net: Pick<NetworkConfig, 'id' | 'membe
   }
   const parsed = ConvertRecordsZ.safeParse(round.convertRecords);
   if (!parsed.success) return refuse('malformed_step', `the steps the round carries are not valid: ${refusalOfParse(parsed.error).error}`);
-  const steps = parsed.data.steps ?? [];
+  const issue = roundStepIssue(parsed.data.steps ?? [], round, held);
+  if (issue) return refuse(issue.code, `step ${issue.step}: ${issue.message}`, issue.step);
+  return { schema: 'apply', convert: { state: 'apply', convertRecords: parsed.data } };
+}
 
-  if (steps.length > 0) {
-    const issue = conversionStepIssues(steps, beforeOfRound(round, held.before), inlineResolvableRefs(round.pendingMeta ?? {}) as ConversionMeta)[0];
-    if (issue) return refuse(issue.code, `step ${issue.step}: ${issue.message}`, issue.step);
+/** What a round carries that its steps are held to: its before-schema, its after-schema (the proposal) and the types it changes. */
+export type RoundStepCarried = Pick<VoteRound, 'metaBase' | 'pendingMeta' | 'changedTypes'>;
 
-    const changed = new Set(round.changedTypes ?? []);
-    for (const [i, step] of steps.entries()) {
-      const missing = typeStepTargets(step).find(t => !changed.has(t));
-      if (missing !== undefined) {
-        return refuse('step_target_not_in_round', `step ${i}: the round does not change ${peerText(missing)}, the type this step moves records into`, i);
-      }
-    }
-    const heldAfter = held.after?.typeSchemas as Record<string, Record<string, { propertySchemas?: Record<string, unknown> } | undefined> | undefined> | undefined;
-    for (const [i, step] of steps.entries()) {
-      if (step.op === 'renameProperty' && heldAfter?.[step.kind]?.[step.type]?.propertySchemas?.[step.from] !== undefined) {
-        return refuse('property_still_declared_here', `step ${i}: this instance's own definitions still declare ${peerText(step.from)} on the ${step.kind} type `
-          + `${peerText(step.type)} once the round has landed, so records may still hold it`, i);
-      }
+/**
+ * THE check of conversion steps against a round (`Q-745`; lens sweep B1, S2, S3): the first reason the steps cannot be applied by an instance that
+ * holds `held` (its effective schema before the round lands and once it has), or `undefined`. One check and one pair of schemas, used by the
+ * networked save (the proposer, before it opens the round, with what the round will carry), by the round on every member, and by the proposer's
+ * own conclusion, so a step the save accepts is a step every member that holds what the proposer holds applies.
+ *
+ * - each step held to the round's before (`metaBase`, with what the instance holds filling in the types the round does not carry) and its after
+ *   (`pendingMeta`, the proposal alone), by `conversionStepIssues`;
+ * - each type step moves records into a type the round changes (`step_target_not_in_round`);
+ * - the instance's own effective schema once the round has landed no longer declares a renamed property's old name (`property_still_declared_here`).
+ */
+export function roundStepIssue(steps: readonly ConversionStep[], carried: RoundStepCarried, held: HeldForConvert = {}):
+  { code: RoundConvertRefusal; message: string; step: number } | undefined {
+  if (steps.length === 0) return undefined;
+  const issue = conversionStepIssues([...steps], beforeOfRound(carried, held.before), inlineResolvableRefs(carried.pendingMeta ?? {}) as ConversionMeta)[0];
+  if (issue) return { code: issue.code, message: issue.message, step: issue.step };
+  const changed = new Set(carried.changedTypes ?? []);
+  for (const [i, step] of steps.entries()) {
+    const missing = typeStepTargets(step).find(t => !changed.has(t));
+    if (missing !== undefined) {
+      return { code: 'step_target_not_in_round', message: `the round does not change ${peerText(missing)}, the type this step moves records into: send its definition with the change`, step: i };
     }
   }
-  return { schema: 'apply', convert: { state: 'apply', convertRecords: parsed.data } };
+  const heldAfter = held.after?.typeSchemas as Record<string, Record<string, { propertySchemas?: Record<string, unknown> } | undefined> | undefined> | undefined;
+  for (const [i, step] of steps.entries()) {
+    if (step.op === 'renameProperty' && heldAfter?.[step.kind]?.[step.type]?.propertySchemas?.[step.from] !== undefined) {
+      return { code: 'property_still_declared_here', message: `this instance's own definitions still declare ${peerText(step.from)} on the ${step.kind} `
+        + `type ${peerText(step.type)} once the round has landed, so records may still hold it`, step: i };
+    }
+  }
+  return undefined;
 }
 
 // ── The conversion run a schema change starts or restarts, one start at a time per space ──────────────────────────────
