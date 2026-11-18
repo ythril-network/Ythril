@@ -31,6 +31,7 @@ const EXEMPT = new Map([
   ['rules', { ticket: null, why: 'its value is a list of rule objects, and the allowlist records scalars and member lists only' }],
   ['suppressEmbeddings', { ticket: 'Q-504', why: 'a scalar the allowlist does not name yet; it stops embedding space-wide' }],
   ['recordTtlDays', { ticket: 'Q-504', why: 'a scalar the allowlist does not name yet; it deletes records on a clock' }],
+  ['convertRecords', { ticket: 'Q-745', why: 'a list of steps, and the allowlist records scalars and member lists only; the run it starts is audited as `schema.convert.run` (design 5.4), added with the wiring of the doors' }],
   ['faceDescriptorDims', { ticket: 'Q-504', why: 'a scalar the allowlist does not name yet; changing it invalidates stored descriptors' }],
 ]);
 

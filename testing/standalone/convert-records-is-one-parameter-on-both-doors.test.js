@@ -39,7 +39,7 @@ const { z } = createRequire(new URL('../../server/dist/spaces/body-schemas.js', 
 const { UpdateSpaceBody, PutSchemaBody, SpaceMetaBody } = await import('../../server/dist/spaces/body-schemas.js');
 const { SPACE_FIELD_RIGHTS, settingsFieldsIn, refusalsForSpaceUpdate } = await import('../../server/dist/auth/space-field-rights.js');
 const { schema_updateTool } = await import('../../server/dist/mcp/tools/spaces.js');
-const { CONVERSION_STEPS_MAX } = await import('@ythril-network/schema/internal');
+const { CONVERSION_STEPS_MAX } = await import('../../schema/dist/internal.js');
 
 const STEPS = { steps: [{ op: 'renameProperty', kind: 'entity', type: 'Person', from: 'fullName', to: 'name' }] };
 const META = { purpose: 'people' };
@@ -71,7 +71,12 @@ describe('the body takes convertRecords', () => {
 });
 
 describe('the tool declares the same parameter', () => {
-  const strip = ({ description: _d, $schema: _s, ...rest }) => rest;
+  /** The shape without its words: every `description` (the top one and a nested parameter's) and `$schema`, at any depth. */
+  const strip = (node) => {
+    if (Array.isArray(node)) return node.map(strip);
+    if (node === null || typeof node !== 'object') return node;
+    return Object.fromEntries(Object.entries(node).filter(([k]) => k !== 'description' && k !== '$schema').map(([k, v]) => [k, strip(v)]));
+  };
 
   it('with the body\'s own shape', () => {
     const declared = toolSchema().properties.convertRecords;
