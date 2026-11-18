@@ -61,8 +61,12 @@
  * length longer than its tests (bundle-348 found five such files from the timing records). `uncancelledRaceTimers` finds every global `setTimeout` inside a `Promise.race`
  * (or inside the local promise it names) that is not `unref()`ed and whose handle is not passed to `clearTimeout` in the
  * function around the race. The fix is `settleWithin` from `standalone/_write-faults.mjs` (bounded, clears its own timer), or
- * the handle kept and cleared in a `finally`. Rows below plant each spelling; an independent count of `Promise.race` calls
- * sets the tree reader against a plain reading of the text.
+ * the handle kept and cleared in a `finally`. The shared `elapse` and `node:timers/promises`' `setTimeout` hold the same timer
+ * with no handle to clear (a `timers/promises` one is cancellable only through a `signal` option or `ref: false`), so a race
+ * against either is a finding too, and the wait to write instead is `raceDeadline(work, ms, 'race timeout: <detail>', onLate)`
+ * from `sleep.mjs`, which clears its timer when `work` settles: its own cases are the `raceDeadline` describe below (the timer
+ * is gone after either side settles, the reason is refused before a timer is armed, `elapse` is unchanged). Rows below plant
+ * each spelling; an independent count of `Promise.race` calls sets the tree reader against a plain reading of the text.
  *
  * ## Why the instrument is exercised before it is trusted
  *
@@ -91,7 +95,7 @@ import assert from 'node:assert/strict';
 import { readTrackedSources } from './_sources.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { fixedDelays, listenerSites, awaitedSleeps, delayCalls, uncancelledRaceTimers, promiseRaceCount } from '../_shared/timer-sites.mjs';
-import { elapse, DELAY_KINDS } from '../_shared/sleep.mjs';
+import { elapse, raceDeadline, DELAY_KINDS } from '../_shared/sleep.mjs';
 import { pollLoops } from '../_shared/poll-loops.mjs';
 
 const src = (...lines) => lines.join('\n');
@@ -298,6 +302,22 @@ describe('the classifier finds a race timer that is left running, in every spell
     { name: 'a timer whose unref() is on another timer',
       text: src('async function a(work) {', '  setTimeout(() => {}, 1).unref();',
         "  await Promise.race([work(), new Promise(res => setTimeout(() => res('hung'), 9000))]);", '}'), line: 3 },
+    { name: 'the shared elapse as the losing side of a race, its verdict thrown from a then',
+      text: src("import { elapse } from '../_shared/sleep.mjs';", 'async function a(p) {',
+        "  await Promise.race([p, elapse(10_000, 'race timeout: the event never came').then(() => { throw new Error('x'); })]);", '}'), line: 3 },
+    { name: 'the shared elapse as the losing side of a race, its verdict a value, over several lines',
+      text: src("import { elapse } from '../_shared/sleep.mjs';", 'async function a(p) {', '  const v = await Promise.race([',
+        '    p,', "    elapse(20_000, 'race timeout: the wait is reported as still waiting').then(() => 'still waiting'),", '  ]);', '}'), line: 5 },
+    { name: 'the shared elapse under another import name',
+      text: src("import { elapse as hold } from '../_shared/sleep.mjs';", 'async function a(p) {',
+        "  await Promise.race([p, hold(5, 'race timeout: a b').then(() => false)]);", '}'), line: 3 },
+    { name: 'the shared elapse held in a local promise the race names',
+      text: src("import { elapse } from '../_shared/sleep.mjs';", 'async function a(p) {', "  const late = elapse(5, 'race timeout: a b');",
+        '  await Promise.race([p, late]);', '}'), line: 3 },
+    { name: 'a timers/promises timer in a race, named import',
+      text: src("import { setTimeout } from 'node:timers/promises';", 'async function a(p) { await Promise.race([p, setTimeout(50)]); }'), line: 2 },
+    { name: 'a timers/promises timer in a race, member of a namespace, with options that cancel nothing',
+      text: src("import * as timers from 'node:timers/promises';", 'async function a(p) { await Promise.race([p, timers.setTimeout(50, null, {})]); }'), line: 2 },
     { name: 'a timer in the loop body of a read with a deadline',
       text: src('async function a(reader, deadline) {', '  for (;;) {',
         '    const next = await Promise.race([reader.read(), new Promise(res => setTimeout(() => res(null), Math.max(1, deadline - Date.now())))]);',
@@ -331,9 +351,17 @@ describe('the classifier finds a race timer that is left running, in every spell
       "import { settleWithin } from './_write-faults.mjs';", 'async function a(run) { const r = await settleWithin(run, 20_000); return r.settled; }'),
     'a race with no timer in it': src('async function a(x, y) { return Promise.race([x(), y()]); }'),
     'a timer outside any race': src('const t = setTimeout(() => finish(), 100);', 'clearTimeout(t);', 'setTimeout(() => done(), 5);'),
-    'a race timeout through the shared elapse — a named kind of delay, judged by delayCalls': src(
-      "import { elapse } from '../_shared/sleep.mjs';",
-      "async function a(p) { await Promise.race([p, elapse(10, 'race timeout: the event never came').then(() => { throw new Error('x'); })]); }"),
+    'a race with the shared raceDeadline, which clears its own timer': src(
+      "import { raceDeadline } from '../_shared/sleep.mjs';",
+      "async function a(p) { return raceDeadline(p, 10, 'race timeout: the event never came', () => { throw new Error('x'); }); }"),
+    'the shared elapse awaited alone, outside any race': src(
+      "import { elapse } from '../_shared/sleep.mjs';", "async function a() { await elapse(10, 'pacing: one probe per tick'); }"),
+    'a timers/promises timer given a signal that cancels it': src(
+      "import { setTimeout as later } from 'node:timers/promises';",
+      'async function a(p, signal) { await Promise.race([p, later(10, null, { signal })]); }'),
+    'a timers/promises timer that is not ref()ed': src(
+      "import { setTimeout as later } from 'node:timers/promises';",
+      'async function a(p) { await Promise.race([p, later(10, null, { ref: false })]); }'),
     'a timer in a string, a template and a comment': src(
       "const a = 'await Promise.race([x, new Promise(r => setTimeout(r, 5))])';", 'const b = `Promise.race([x, setTimeout(r, 5)])`;',
       '// await Promise.race([x, new Promise(r => setTimeout(r, 5))]);'),
@@ -690,6 +718,69 @@ describe('elapse refuses a delay that does not say which kind of delay it is, be
   }
 });
 
+describe('raceDeadline answers a race against a deadline and leaves no timer running', () => {
+  const reason = 'race timeout: the answer has this long to arrive';
+  const timers = () => process.getActiveResourcesInfo().filter(r => r === 'Timeout').length;
+  const never = () => new Promise(() => {});
+
+  it('the work settling first answers its value, and the deadline timer is gone', async () => {
+    const before = timers();
+    assert.equal(await raceDeadline(Promise.resolve('answer'), 60_000, reason, () => 'late'), 'answer');
+    assert.equal(timers(), before, 'the deadline timer is still armed after the work settled: the process would wait it out');
+  });
+
+  it('the work failing first rejects with its error, and the deadline timer is gone', async () => {
+    const before = timers();
+    await assert.rejects(raceDeadline(Promise.reject(new Error('the work failed')), 60_000, reason, () => 'late'), /the work failed/);
+    assert.equal(timers(), before);
+  });
+
+  it('a deadline that passes first answers what onLate returns', async () => {
+    assert.equal(await raceDeadline(never(), 5, reason, () => 'still waiting'), 'still waiting');
+  });
+
+  it('a deadline that passes first rejects with what onLate throws', async () => {
+    await assert.rejects(raceDeadline(never(), 5, reason, () => { throw new Error('no event within the deadline'); }), /no event within the deadline/);
+  });
+
+  it('work that settles after the deadline changes nothing', async () => {
+    let finish;
+    const work = new Promise((r) => { finish = r; });
+    const late = raceDeadline(work, 5, reason, () => 'late');
+    assert.equal(await late, 'late');
+    finish('too late');
+    assert.equal(await late, 'late');
+  });
+
+  it('a value that is not a promise is the work as well', async () => {
+    assert.equal(await raceDeadline('plain', 60_000, reason, () => 'late'), 'plain');
+  });
+
+  for (const [name, bad] of [
+    ['no reason', undefined],
+    ['a reason with no kind', 'let it settle'],
+    ['a kind that is a delay but not a race timeout', 'pacing: one probe per tick'],
+    ['a race timeout with no detail', 'race timeout:'],
+  ]) {
+    it(`${name} throws synchronously, before any timer is armed`, () => {
+      const before = timers();
+      let returned;
+      assert.throws(() => { returned = raceDeadline(never(), 5, bad, () => 'late'); }, /kind|reason|race timeout/i);
+      assert.equal(returned, undefined);
+      assert.equal(timers(), before);
+    });
+  }
+
+  it('an onLate that is not a function throws synchronously: a deadline with no answer would pass for the wrong reason', () => {
+    assert.throws(() => raceDeadline(never(), 5, reason, undefined), /onLate/);
+  });
+
+  it('elapse itself still resolves after its time and still refuses a reason with no kind', async () => {
+    await elapse(5, 'pacing: one probe per tick');
+    assert.throws(() => elapse(5, 'let it settle'), /kind|reason/i);
+  });
+});
+
 describe('every call of the shared elapse names its kind in a literal, and every other sleep says why it waits differently', () => {
   const ELAPSE = "import { elapse } from '../_shared/sleep.mjs';";
   const calls = (text) => delayCalls(text, 'testing/snippet.test.js');
@@ -707,6 +798,12 @@ describe('every call of the shared elapse names its kind in a literal, and every
         "  await Promise.race([p, elapse(10, 'race timeout: the event never came').then(() => { throw new Error('x'); })]);", '}') },
     { name: 'not awaited, inside a local wrapper',
       text: src(ELAPSE, "const later = () => elapse(15, 'timestamps differ: the next write is later');", 'async function t() { await later(); }') },
+    { name: 'a raceDeadline with a race timeout reason',
+      text: src("import { raceDeadline } from '../_shared/sleep.mjs';", 'async function t(p) {',
+        "  return raceDeadline(p, 10, 'race timeout: the event never came', () => false);", '}') },
+    { name: 'a raceDeadline under another import name',
+      text: src("import { raceDeadline as within } from '../_shared/sleep.mjs';", 'async function t(p) {',
+        "  return within(p, 10, 'race timeout: the event never came', () => false);", '}') },
     { name: 'a browser page wait with the marker above it',
       text: src('async function t(page) {', '  // waits-differently: the chart animates in for a fixed time', '  await page.waitForTimeout(300);', '}') },
     { name: 'a sleep named helper imported from elsewhere, with the marker above it',
@@ -740,6 +837,15 @@ describe('every call of the shared elapse names its kind in a literal, and every
       text: src("import { elapse as e } from '../_shared/sleep.mjs';", 'async function t() {', '  await e(5);', '}') },
     { name: 'inside a Promise.race with a kind nobody listed', line: 3, problem: 'reason-not-a-kind',
       text: src(ELAPSE, 'async function t(p) {', "  await Promise.race([p, elapse(10, 'give up: after ten')]);", '}') },
+    { name: 'a raceDeadline whose kind is a delay but not a race timeout', line: 3, problem: 'reason-not-a-kind',
+      text: src("import { raceDeadline } from '../_shared/sleep.mjs';", 'async function t(p) {',
+        "  return raceDeadline(p, 10, 'pacing: one probe per tick', () => false);", '}') },
+    { name: 'a raceDeadline with no reason', line: 3, problem: 'reason-not-literal',
+      text: src("import { raceDeadline } from '../_shared/sleep.mjs';", 'async function t(p) {', '  return raceDeadline(p, 10);', '}') },
+    { name: 'a raceDeadline whose reason is held in a variable', line: 3, problem: 'reason-not-literal',
+      text: src("import { raceDeadline } from '../_shared/sleep.mjs';", 'async function t(p, why) {', '  return raceDeadline(p, 10, why, () => false);', '}') },
+    { name: 'raceDeadline handed on as a value', line: 2, problem: 'side-door',
+      text: src("import { raceDeadline } from '../_shared/sleep.mjs';", 'const within = raceDeadline;', "export const x = within(null, 1, 'race timeout: a b', () => 1);") },
     { name: 'a wrapper that passes its caller\'s reason through', line: 2, problem: 'reason-not-literal',
       text: src(ELAPSE, 'const later = (why) => elapse(15, why);', "async function t() { await later('pacing: a b'); }") },
     { name: 'not awaited, inside a .then', line: 3, problem: 'reason-not-a-kind',
@@ -893,7 +999,9 @@ describe('every tracked test and script', () => {
       if (plain !== tree) disagree.push(`${s.file}: ${plain} by reading, ${tree} by the tree`);
     }
     assert.deepEqual(disagree, [], 'the tree reader and a plain reading disagree about how many times Promise.race is called');
-    assert.ok(judged >= 40, `only ${judged} Promise.race calls were read across the tree; the floor is 40 — the reader or the scan broke`);
+    // A floor below what the tree holds today (the races that went through `raceDeadline` are gone from the count): it only has to be
+    // far above zero, so a reader that sees nothing cannot pass.
+    assert.ok(judged >= 25, `only ${judged} Promise.race calls were read across the tree; the floor is 25 — the reader or the scan broke`);
   });
 
   it('none leaves the timer of a Promise.race running', () => {
@@ -903,7 +1011,9 @@ describe('every tracked test and script', () => {
     assert.deepEqual(offenders, [],
       'a Promise.race timer that is never cleared. The timer that loses the race keeps the process alive for its whole length after '
       + 'the last test, so the file takes that much longer than its tests. Bound the wait with `settleWithin` from '
-      + 'testing/standalone/_write-faults.mjs (it clears its own timer and reports `settled: false`), or keep the handle '
+      + 'testing/standalone/_write-faults.mjs (it clears its own timer and reports `settled: false`), or, for a deadline that '
+      + 'answers a value or throws, `raceDeadline(work, ms, \'race timeout: <detail>\', onLate)` from testing/_shared/sleep.mjs (a race '
+      + 'against `elapse` or a `timers/promises` timer cannot clear its timer), or keep the handle '
       + '(`let timer; ... timer = setTimeout(...)`) and `clearTimeout(timer)` in a `finally`, or `.unref()` a guard that only '
       + 'rejects.');
   });

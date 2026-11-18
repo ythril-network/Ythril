@@ -11,7 +11,8 @@
  *   right interface, by a helper (`local-server.mjs`) or by an author who says why not.
  * - {@link awaitedSleeps}: which awaited calls are a sleep? The same question `poll-loops.mjs` asks of a loop body, so it
  *   takes its answer from {@link awaitsASleepIn} below, never from a name list of its own.
- * - {@link uncancelledRaceTimers}: where does a `Promise.race` hold a `setTimeout` that is never cleared or `unref()`ed? The
+ * - {@link uncancelledRaceTimers}: where does a `Promise.race` hold a `setTimeout`, an `elapse` or a `timers/promises` timer that is
+ *   never cleared, `unref()`ed or cancellable (`raceDeadline` is the wait that clears its own)? The
  *   timer that loses the race keeps the process alive after the file's last test, so the file outlives its tests by the
  *   timer's length. {@link promiseRaceCount} is the independent count a gate sets against it.
  * - {@link delayCalls}: does every fixed delay say which KIND of delay it is (`Q-401`)? Each call of the shared `elapse`
@@ -48,7 +49,7 @@
  * Syntax only — no type checker. Parsing, locating a node and walking a body are `syntax-tree.mjs`'s.
  */
 import { ts, parseSource, lineOf, unwrapExpression } from './syntax-tree.mjs';
-import { reasonProblem } from './sleep.mjs';
+import { reasonProblem, RACE_DEADLINE_KIND } from './sleep.mjs';
 
 /**
  * Names that are a sleep wherever they are imported from. A same-file function is judged by its body, never by this list;
@@ -60,7 +61,7 @@ const SLEEP_NAMES = /^(elapse|sleep|sleepMs|delay|pause|nap|snooze|wait|waitForT
 const SLEEP_MODULE = /(^|\/)sleep\.mjs$/;
 
 /** What a file may take from it by name. Anything else, and any other form of import or export, is a side door. */
-const SLEEP_MODULE_EXPORTS = new Set(['elapse', 'DELAY_KINDS', 'reasonProblem']);
+const SLEEP_MODULE_EXPORTS = new Set(['elapse', 'raceDeadline', 'DELAY_KINDS', 'RACE_DEADLINE_KIND', 'reasonProblem']);
 
 /** `<tag>: <reason>` — at least two words, so the reason says something. Built fresh per use (a global regex shares state). */
 const markerPattern = (tag) => new RegExp(`${tag}:[ \\t]*(\\S+[ \\t]+\\S.*)`);
@@ -144,6 +145,7 @@ function timersPromisesBindings(sf) {
   const named = new Set();
   const spaces = new Set();
   const elapse = new Set();
+  const race = new Set();
   for (const st of sf.statements) {
     if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier)) continue;
     const clause = st.importClause;
@@ -151,7 +153,11 @@ function timersPromisesBindings(sf) {
     const bound = clause.namedBindings;
     if (SLEEP_MODULE.test(st.moduleSpecifier.text)) {
       if (bound && ts.isNamedImports(bound)) {
-        for (const el of bound.elements) if ((el.propertyName ?? el.name).text === 'elapse') elapse.add(el.name.text);
+        for (const el of bound.elements) {
+          const imported = (el.propertyName ?? el.name).text;
+          if (imported === 'elapse') elapse.add(el.name.text);
+          if (imported === 'raceDeadline') race.add(el.name.text);
+        }
       }
       continue;
     }
@@ -162,11 +168,14 @@ function timersPromisesBindings(sf) {
       for (const el of bound.elements) if ((el.propertyName ?? el.name).text === 'setTimeout') named.add(el.name.text);
     }
   }
-  return { named, spaces, elapse };
+  return { named, spaces, elapse, race };
 }
 
 /** A call of the shared `elapse`, under whatever name this file imported it as. */
 const callsElapse = (call, bound) => ts.isIdentifier(call.expression) && bound.elapse.has(call.expression.text);
+
+/** A call of the shared `raceDeadline`, under whatever name this file imported it as: a wait that arms and clears its own timer. */
+const callsRaceDeadline = (call, bound) => ts.isIdentifier(call.expression) && bound.race.has(call.expression.text);
 
 /** `setTimeout(...)` or `globalThis.setTimeout(...)` — the global timer, unless this file imported another under that name. */
 function armsGlobalTimer(call, bound) {
@@ -191,7 +200,7 @@ function armsATimer(node, bound) {
   let hit = false;
   const visit = (n) => {
     if (hit) return;
-    if (ts.isCallExpression(n) && (armsGlobalTimer(n, bound) || callsTimersPromises(n, bound) || callsElapse(n, bound))) { hit = true; return; }
+    if (ts.isCallExpression(n) && (armsGlobalTimer(n, bound) || callsTimersPromises(n, bound) || callsElapse(n, bound) || callsRaceDeadline(n, bound))) { hit = true; return; }
     ts.forEachChild(n, visit);
   };
   visit(node);
@@ -271,7 +280,7 @@ export function awaitsASleepIn(sf) {
   const isSleepCall = (call) => {
     const e = call.expression;
     if (ts.isIdentifier(e) && locals.has(e.text)) return armsATimer(locals.get(e.text).body, bound);
-    if (callsTimersPromises(call, bound) || callsElapse(call, bound)) return true;
+    if (callsTimersPromises(call, bound) || callsElapse(call, bound) || callsRaceDeadline(call, bound)) return true;
     const name = ts.isIdentifier(e) ? e.text : ts.isPropertyAccessExpression(e) ? e.name.text : null;
     return name !== null && SLEEP_NAMES.test(name);
   };
@@ -360,11 +369,14 @@ function insideAwait(n) {
   return false;
 }
 
-/** The literal reason a call of `elapse` passes, judged by `sleep.mjs`' own reading: null, or what is wrong with it. */
-function elapseReasonProblem(call) {
-  const reason = call.arguments[1];
+/**
+ * The literal reason a call of `elapse` (argument 1) or `raceDeadline` (argument 2, and only the one kind) passes, judged by
+ * `sleep.mjs`' own reading: null, or what is wrong with it.
+ */
+function elapseReasonProblem(call, at = 1, only = undefined) {
+  const reason = call.arguments[at];
   if (!reason || !(ts.isStringLiteral(reason) || ts.isNoSubstitutionTemplateLiteral(reason))) return 'reason-not-literal';
-  return reasonProblem(reason.text) === null ? null : 'reason-not-a-kind';
+  return reasonProblem(reason.text, only) === null ? null : 'reason-not-a-kind';
 }
 
 /**
@@ -411,14 +423,16 @@ export function delayCalls(text, file = 'snippet.js') {
     // `elapse` handed on as a value (`const e = elapse`, `items.map(elapse)`) is called where no literal can be read.
     // `export { x } from '…/sleep.mjs'` names the module's export, not this file's binding; that door is reported above.
     const reExportsTheModule = () => ts.isExportSpecifier(n.parent) && Boolean(n.parent.parent?.parent?.moduleSpecifier);
-    if (ts.isIdentifier(n) && bound.elapse.has(n.text) && !ts.isImportSpecifier(n.parent) && !reExportsTheModule()
-      && !(ts.isCallExpression(n.parent) && n.parent.expression === n)) {
-      record(n, 'elapse as a value', 'side-door');
-    }
+    const handedOn = (names) => ts.isIdentifier(n) && names.has(n.text) && !ts.isImportSpecifier(n.parent) && !reExportsTheModule()
+      && !(ts.isCallExpression(n.parent) && n.parent.expression === n);
+    if (handedOn(bound.elapse)) record(n, 'elapse as a value', 'side-door');
+    if (handedOn(bound.race)) record(n, 'raceDeadline as a value', 'side-door');
     if (ts.isCallExpression(n)) {
       const e = n.expression;
       if (callsElapse(n, bound)) {
         record(n, 'elapse', elapseReasonProblem(n));
+      } else if (callsRaceDeadline(n, bound)) {
+        record(n, 'raceDeadline', elapseReasonProblem(n, 2, RACE_DEADLINE_KIND));
       } else if (!(ts.isIdentifier(e) && locals.has(e.text)) && !reachesSleepModule(e) && insideAwait(n)) {
         const name = ts.isIdentifier(e) ? e.text : ts.isPropertyAccessExpression(e) ? e.name.text : null;
         if (name !== null && SLEEP_NAMES.test(name) && !callsTimersPromises(n, bound)) {
@@ -489,8 +503,17 @@ function handleNameOf(call) {
   return null;
 }
 
+/** A `node:timers/promises` timer call whose options object carries a `signal` or `ref: false`: it can be cancelled or holds nothing alive. */
+function cancellableTimersPromises(call) {
+  const options = call.arguments[2];
+  if (!options || !ts.isObjectLiteralExpression(options)) return false;
+  return options.properties.some(p => (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && ts.isIdentifier(p.name)
+    && (p.name.text === 'signal' || (p.name.text === 'ref' && ts.isPropertyAssignment(p) && p.initializer.kind === ts.SyntaxKind.FalseKeyword)));
+}
+
 /**
- * Every global `setTimeout(...)` that sits in a `Promise.race(...)` and is neither cleared nor `unref()`ed, in line order.
+ * Every timer that sits in a `Promise.race(...)` and is neither cleared, `unref()`ed nor cancellable, in line order: a global
+ * `setTimeout(...)`, the shared `elapse`, and `node:timers/promises`' `setTimeout`.
  *
  * ## What it prevents
  *
@@ -505,9 +528,14 @@ function handleNameOf(call) {
  *   (`const hung = new Promise(...)` raced as `[work, hung]`): one level, in this file.
  * - It is settled when it is `setTimeout(...).unref()`, or its handle is kept in a variable that `clearTimeout` is called on
  *   in the function around the race (or around the variable's declaration). A timer that goes through `settleWithin`
- *   (`standalone/_write-faults.mjs`, which clears its own) is not written here at all.
- * - NOT judged, each another question: the shared `elapse(ms, 'race timeout: ...')` and `node:timers/promises`' `setTimeout`
- *   (a named kind of delay that `delayCalls` reads), and a timer the race does not hold.
+ *   (`standalone/_write-faults.mjs`, which clears its own) or `raceDeadline` (`_shared/sleep.mjs`, likewise) is not written here
+ *   at all.
+ * - The shared `elapse(ms, 'race timeout: ...')`, under any import name, is a timer with no handle: in a race it is always a
+ *   finding (`race-elapse`), and `raceDeadline` is the spelling that clears it.
+ * - `node:timers/promises`' `setTimeout`, under any import spelling, is a finding (`race-timers-promises`) unless its options
+ *   (the third argument, an object literal) carry a `signal` that can cancel it or `ref: false` (it keeps no process alive).
+ * - NOT judged: a timer the race does not hold. A timer that is no race's (`await elapse(...)` alone) is `delayCalls`' and
+ *   `fixedDelays`' to read.
  *
  * @param {string} text
  * @param {string} [file]
@@ -542,6 +570,13 @@ export function uncancelledRaceTimers(text, file = 'snippet.js') {
           const handle = handleNameOf(n);
           const cleared = handle !== null && (clearsTimerHeldIn(scope, handle) || clearsTimerHeldIn(scopeOf(race, sf), handle));
           if (!unrefed && !cleared) out.push(finding(sf, file, n, 'race-timer', null));
+        } else if (ts.isCallExpression(n) && callsElapse(n, bound) && !seen.has(n)) {
+          // `elapse` has no handle: its timer cannot be cleared, so a race against it is `raceDeadline`'s to make.
+          seen.add(n);
+          out.push(finding(sf, file, n, 'race-elapse', null));
+        } else if (ts.isCallExpression(n) && callsTimersPromises(n, bound) && !seen.has(n) && !cancellableTimersPromises(n)) {
+          seen.add(n);
+          out.push(finding(sf, file, n, 'race-timers-promises', null));
         }
         ts.forEachChild(n, visit);
       };

@@ -17,7 +17,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, del } from '../sync/helpers.js';
-import { elapse } from '../_shared/sleep.mjs';
+import { raceDeadline } from '../_shared/sleep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -79,7 +79,7 @@ describe('brain events SSE (F12)', () => {
       const w = await post(INSTANCES.a, tokenA, '/api/brain/spaces/general/facts', { fact: `sse-probe-${Date.now()}` });
       assert.equal(w.status, 201, JSON.stringify(w.body));
 
-      const ev = await Promise.race([eventP, elapse(10_000, 'race timeout: the SSE event has 10 s to arrive').then(() => { throw new Error('no SSE event within 10s'); })]);
+      const ev = await raceDeadline(eventP, 10_000, 'race timeout: the SSE event has 10 s to arrive', () => { throw new Error('no SSE event within 10s'); });
       assert.equal(ev.event, 'fact.created', `unexpected event: ${JSON.stringify(ev)}`);
       assert.equal(ev.id, w.body._id, 'event should carry the new record id');
 
