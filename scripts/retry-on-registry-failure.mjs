@@ -8,14 +8,15 @@
  * `Get https://registry-1.docker.io/v2/: context deadline exceeded` before any test ran, and the rerun passed the same step. Every
  * pull of a CI run (the BuildKit image, the stack's database image, the base images of a build) goes to Docker Hub, and one
  * answer that does not come fails the run for a reason that has nothing to do with the change. This wraps those commands:
- * a bounded number of attempts, a longer wait before each, and nothing else retried.
+ * a bounded number of attempts, a longer wait before each, and nothing else retried. The `npm ci` of every workflow goes through it
+ * too (run 44266883292: `npm error code ECONNRESET` in the database shard 0 job, before any test).
  *
  * ## What it prevents
  *
  * - A retry that hides a real failure. A failure is run again only when its output says the registry (or the way to it) did not
  *   answer: a timeout, a reset, a 5xx, a rate limit, a name that did not resolve. `manifest unknown`, `denied`, `unauthorized`
  *   and a failing build step are returned at once with the command's own exit status: a wrong digest must fail on the first
- *   attempt, not after three. This is not the retry the install steps decline (the CUDA download in `ci.yml`): that one hid a
+ *   attempt, not after three. This is not a retry of the CUDA download an install once made (now skipped, not retried): that one hid a
  *   dependency on a host nothing here could use, this one meets a host the run cannot do without.
  * - A retry with no end. The bound is `attempts` (default 3), the waits grow (`delay`, then four times it, ...) and add to well under
  *   five minutes for the defaults; a registry that is down stays a failure, with the last attempt's own output and status.
@@ -61,6 +62,10 @@ const TRANSIENT = [
   /server misbehaving/i,
   /temporary failure in name resolution/i,
   /net\/http: request canceled/i,
+  // npm's own wording for the same causes (run 44266883292: `npm error code ECONNRESET` in `npm ci`): the error code, and the
+  // `network` line npm prints for a failed request. A 404 or an ERESOLVE names neither.
+  /\bE(?:CONNRESET|TIMEDOUT|AI_AGAIN)\b/,
+  /\bnpm (?:error|ERR!) network\b/i,
 ];
 
 /** Does this output of a failed command say the registry did not answer? */

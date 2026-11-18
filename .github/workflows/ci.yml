@@ -83,7 +83,8 @@ concurrency:
 # GitHub release. On a runner with no nvcc the script logs "`nvcc` not found. Assuming CUDA 12" and downloads the GPU
 # tarball anyway, so every build depended on a GitHub release fetch succeeding, for binaries no runner here can use.
 # It failed twice in 35 minutes on 2026-08-12 with ECONNRESET / socket hang up, killing the job in ~37 seconds.
-# NOT a retry: a retry around a network fetch hides the non-hermeticity and still fails when the host is down.
+# The CUDA fetch is not retried: a retry around it hides the non-hermeticity and still fails when the host is down. (The
+# `npm ci` itself goes through the registry retry script, which reruns only a registry that did not answer.)
 # Held for every install in every workflow by `cuda-download-is-skipped-everywhere`.
 
 jobs:
@@ -175,7 +176,9 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --workspace=client --include-workspace-root
+        # Every `npm ci` of this file goes through the retry script (Full run 44266883292: `npm error code ECONNRESET` in the
+        # database shard 0 job's install, before any test ran): the registry not answering is run again, any other failure fails at once.
+        run: node scripts/retry-on-registry-failure.mjs -- npm ci --workspace=client --include-workspace-root
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
@@ -250,7 +253,7 @@ jobs:
         run: node testing/_init/run-standalone.mjs --only=text
 
       - name: Install dependencies
-        run: npm ci
+        run: node scripts/retry-on-registry-failure.mjs -- npm ci
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
@@ -308,7 +311,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --workspace=server --include-workspace-root
+        run: node scripts/retry-on-registry-failure.mjs -- npm ci --workspace=server --include-workspace-root
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
@@ -401,7 +404,7 @@ jobs:
       - name: Install dependencies
         # The ROOT project only (the docs linter). Nothing in this job runs the server or the client, and
         # every install script that runs here runs BEFORE the cache token below is exposed to the job.
-        run: npm ci --workspaces=false
+        run: node scripts/retry-on-registry-failure.mjs -- npm ci --workspaces=false
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
@@ -493,7 +496,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --workspace=server --include-workspace-root
+        run: node scripts/retry-on-registry-failure.mjs -- npm ci --workspace=server --include-workspace-root
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
@@ -569,7 +572,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --workspace=server --include-workspace-root
+        run: node scripts/retry-on-registry-failure.mjs -- npm ci --workspace=server --include-workspace-root
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
@@ -673,7 +676,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --workspace=server --include-workspace-root
+        run: node scripts/retry-on-registry-failure.mjs -- npm ci --workspace=server --include-workspace-root
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
@@ -746,7 +749,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci --workspace=server --include-workspace-root
+        run: node scripts/retry-on-registry-failure.mjs -- npm ci --workspace=server --include-workspace-root
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 

@@ -59,10 +59,11 @@ jobs:
       # seconds. Reading it as a test failure wastes the diagnosis; a job that dies that fast died before the
       # tests. `skip` is the flag the install script documents for exactly this.
       #
-      # NOT a retry. A retry around a network fetch hides the non-hermeticity and still fails when the release
-      # host is down; removing the fetch removes the dependency.
+      # The CUDA fetch is not retried: a retry around it hides the non-hermeticity and still fails when the release
+      # host is down; removing the fetch removes the dependency. The `npm ci` itself goes through the registry retry script,
+      # which reruns only a registry that did not answer.
       - name: Install
-        run: npm ci
+        run: node scripts/retry-on-registry-failure.mjs -- npm ci
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
@@ -73,7 +74,7 @@ jobs:
         run: npm run release:gate
 
       - name: Pull the BuildKit image (retried)
-        # Not the retry the install above declines: that one hid a download nothing here could use; this host the release cannot do
+        # Not a retry of the CUDA download (skipped above, not retried): that one hid a download nothing here could use; this host the release cannot do
         # without, and a timeout of it fails the run before the build starts (Q-145). Any other failure fails at once.
         run: node scripts/retry-on-registry-failure.mjs -- docker pull --quiet moby/buildkit:buildx-stable-1
 
@@ -305,7 +306,7 @@ jobs:
       # The package's own `prepack` builds `dist` when `npm pack` and `npm publish` run. ONNXRUNTIME_NODE_INSTALL_CUDA=skip is the
       # same hermeticity flag as the first job's install (the CUDA binaries are fetched from a GitHub release by a postinstall).
       - name: Install
-        run: npm ci --ignore-scripts --workspace=schema --include-workspace-root
+        run: node scripts/retry-on-registry-failure.mjs -- npm ci --ignore-scripts --workspace=schema --include-workspace-root
         env:
           ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
