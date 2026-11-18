@@ -108,7 +108,9 @@ describe('HelpComponent', () => {
 
   it('every offered guide resolves to a path inside assets/docs', () => {
     for (const d of HELP_DOCS) {
-      expect(d.file).toMatch(/^[a-z0-9-]+\.md$/);
+      // A guide, or the one document that is not under docs/: the repository's NOTICE, by its exact name (Q-916).
+      // Still a single segment with no separator and no dot path, so nothing here can leave `assets/docs`.
+      expect(d.file).toMatch(/^(?:[a-z0-9-]+\.md|NOTICE)$/);
       // A split guide's parts are built into the same path, so they need the same guarantee: no `..`,
       // no absolute path, nothing that could escape `assets/docs`.
       //

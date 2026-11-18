@@ -491,17 +491,26 @@ describe('check-i-legal-about-page-attribution', () => {
     assert.match(about.decide({ ...inputs, pkgs: planted }, real, TODAY).reason, /NOTICE does not name brand-new-dependency \(MIT\)/);
   });
 
-  it('is violated when the About page names none of them and carries no pointer (today\'s page), and the exception excuses exactly that', () => {
-    const open = about.findings(inputs.pkgs, inputs.aboutText, inputs.notice);
+  /** The About page as it was before it had a card for the notices (Q-916): identity, disk use and component health, and no pointer. */
+  const BARE_ABOUT = 'about.card.instance Instance. about.card.system System, runtime and storage. about.card.components Components, optional services and their status.';
+  /** The exception that excused that page, kept as a planted entry now that the real list is empty. */
+  const OLD_EXCEPTION = [{ id: 'about:unattributed', reason: 'the About page names no third party', reviewBy: '2099-01-01' }];
+
+  it('is violated when the About page names none of them and carries no pointer (the page before Q-916), and an exception excuses exactly that', () => {
+    const bare = { ...inputs, aboutText: BARE_ABOUT };
+    const open = about.findings(bare.pkgs, bare.aboutText, bare.notice);
     assert.deepEqual(open.map((f) => f.id), ['about:unattributed']);
-    assert.equal(about.decide(inputs, [], TODAY).holds, false);
+    assert.equal(about.decide(bare, [], TODAY).holds, false);
+    assert.equal(about.decide(bare, OLD_EXCEPTION, TODAY).holds, true);
   });
 
-  it('holds the About page that points to NOTICE or names every package, and the exception then excuses nothing', () => {
-    const pointing = { ...inputs, aboutText: `${inputs.aboutText}\nSee the third-party notices in NOTICE.` };
+  it('holds the About page that points to the notices or names every package, and an exception then excuses nothing', () => {
+    assert.deepEqual(about.findings(inputs.pkgs, inputs.aboutText, inputs.notice), [], 'the repository\'s own About page no longer points to the notices');
+    assert.equal(about.decide(inputs, real, TODAY).holds, true);
+    assert.match(about.decide(inputs, OLD_EXCEPTION, TODAY).reason, /about:unattributed excuses nothing any more/);
+    const pointing = { ...inputs, aboutText: `${BARE_ABOUT}\nSee the third-party notices in NOTICE.` };
     assert.deepEqual(about.findings(pointing.pkgs, pointing.aboutText, pointing.notice), []);
-    assert.match(about.decide(pointing, real, TODAY).reason, /about:unattributed excuses nothing any more/);
-    const naming = { ...inputs, aboutText: `${inputs.aboutText}\n${inputs.pkgs.map((p) => p.name).join(' ')}` };
+    const naming = { ...inputs, aboutText: `${BARE_ABOUT}\n${inputs.pkgs.map((p) => p.name).join(' ')}` };
     assert.deepEqual(about.findings(naming.pkgs, naming.aboutText, naming.notice), []);
   });
 
@@ -513,8 +522,10 @@ describe('check-i-legal-about-page-attribution', () => {
   });
 
   it('fails an exception with no reason or past its date', () => {
-    assert.match(about.decide(inputs, [{ ...real[0], reason: '' }], TODAY).reason, /reason/);
-    assert.match(about.decide(inputs, [{ ...real[0], reviewBy: '2026-01-01' }], TODAY).reason, /past its reviewBy/);
+    // The real list is empty since the page points to the notices, so the planted entry and the page it excused stand in.
+    const bare = { ...inputs, aboutText: BARE_ABOUT };
+    assert.match(about.decide(bare, [{ ...OLD_EXCEPTION[0], reason: '' }], TODAY).reason, /reason/);
+    assert.match(about.decide(bare, [{ ...OLD_EXCEPTION[0], reviewBy: '2026-01-01' }], TODAY).reason, /past its reviewBy/);
   });
 });
 

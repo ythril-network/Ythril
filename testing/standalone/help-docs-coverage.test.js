@@ -54,8 +54,22 @@ const ids = [...src.matchAll(/id:\s*'([^']+)',\s*file:/g)].map(m => m[1]);
 // `docs/*.md` does not descend; `docs/**/*.md` in git's pathspec does not mean what a shell glob means
 // either. Two explicit patterns, so a nested guide cannot hide from this the way the split parts would
 // have. (The repo has one level of nesting; a third pattern is cheaper than a wrong assumption.)
-const shipped = execFileSync('git', ['ls-files', 'docs/*.md', 'docs/*/*.md'], { encoding: 'utf8' })
+const shippedGuides = execFileSync('git', ['ls-files', 'docs/*.md', 'docs/*/*.md'], { encoding: 'utf8' })
   .split('\n').filter(Boolean).map(p => p.replace(/^docs\//, ''));
+
+/**
+ * The files the client build copies into `assets/docs` from the REPOSITORY ROOT, read from angular.json: an asset
+ * entry whose input is `..` and whose output is `assets/docs` names them by its glob. Today that is NOTICE, the
+ * third-party notices (`Q-916`): Markdown that lives beside the licence and not under `docs/`, so the `docs/` listing
+ * above cannot see it. Only a tracked file counts, for the same reason as above.
+ */
+const rootDocs = Object.values(JSON.parse(readFileSync('client/angular.json', 'utf8')).projects ?? {})
+  .flatMap(project => project?.architect?.build?.options?.assets ?? [])
+  .filter(a => typeof a === 'object' && a.input === '..' && a.output === 'assets/docs' && /^[A-Za-z0-9._-]+$/.test(a.glob ?? ''))
+  .map(a => a.glob)
+  .filter(name => execFileSync('git', ['ls-files', '--', name], { encoding: 'utf8' }).trim() === name);
+
+const shipped = [...shippedGuides, ...rootDocs];
 
 describe('Help page — the offered guides and the shipped ones are the same set', () => {
   it('offers every tracked markdown file in docs/', () => {
@@ -82,6 +96,39 @@ describe('Help page — the offered guides and the shipped ones are the same set
         assert.ok(dict[`help.doc.${id}`], `${locale}.json is missing help.doc.${id}`);
       }
     }
+  });
+});
+
+describe('Help page — the third-party notices are readable inside the instance (Q-916)', () => {
+  // NOTICE ships in the image, where a user of the web client never sees it. The About page points to it, and the
+  // pointer is only worth something if the document behind it is offered, copied by the build and copied into the
+  // stage that runs the build.
+  const NOTICES = 'NOTICE';
+
+  it('the Help page offers the notices file', () => {
+    assert.ok(listed.includes(NOTICES), `HELP_DOCS in ${HELP_COMPONENT} has no entry whose file is ${NOTICES}`);
+  });
+
+  it('angular.json copies the notices file from the repository root into assets/docs', () => {
+    assert.ok(rootDocs.includes(NOTICES),
+      `client/angular.json has no asset { "glob": "${NOTICES}", "input": "..", "output": "assets/docs" }: the Help entry would 404`);
+  });
+
+  it('the Dockerfile copies the notices file into the client build stage', () => {
+    const df = readFileSync('Dockerfile', 'utf8');
+    const clientStage = df.slice(0, df.indexOf('AS builder'));
+    const buildAt = clientStage.search(/RUN\s+npm run build:prod --workspace=client/);
+    const copyAt = clientStage.search(/^COPY\s+NOTICE\s+\.\/\s*$/m);
+    assert.ok(buildAt >= 0, 'the client stage no longer runs `npm run build:prod --workspace=client`: this case reads the wrong stage');
+    assert.ok(copyAt >= 0 && copyAt < buildAt,
+      'the client build stage must `COPY NOTICE ./` before the build: without it the asset glob matches nothing in the image and the page links to a document that is not there');
+  });
+
+  it('the About page links to it', () => {
+    const about = readFileSync('client/src/app/pages/settings/about.component.ts', 'utf8');
+    const id = [...src.matchAll(/id:\s*'([^']+)',\s*file:\s*'NOTICE'/g)].map(m => m[1])[0];
+    assert.ok(id, 'no Help id is declared for the notices file');
+    assert.ok(about.includes(`doc: '${id}'`), `about.component.ts has no link carrying the query parameter doc: '${id}'`);
   });
 });
 
