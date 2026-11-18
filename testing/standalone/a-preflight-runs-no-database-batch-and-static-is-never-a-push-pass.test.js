@@ -48,6 +48,11 @@
  * - every OTHER step call (`run`, `execSync`, `execFileSync`) is counted INSIDE a stage body, none is skipped by a guard on the flag,
  *   and none sits outside every stage (a step at the top level of the script runs before the plan and in no order the plan knows).
  *
+ * Since Q-870 two stages run units: the standalone stage (kind `pure`) and the source stage `text-only standalone tests` (kind `text`, the files that read only
+ * tracked text). Each holds exactly one `runTestUnits` call, handed `slowFirstUnits` over a `.filter` that selects exactly that stage's kind (`!== 'db'` is no
+ * longer a pure plan: it would keep the text files); a text call in the pure stage, a pure or db call in the text stage, a second call in a stage and a call
+ * in no stage are each named (`STAGE_KIND`, `swapKind`, `secondCallInSameStage`, `renameStage`).
+ *
  * Seen red by the RULE, and by mutation: `analyse()` is run over the real file with the flag neutralised, with an unguarded
  * copy of a region's call inserted at the top level, with a guard on the flag put inside a stage body, around a stage's registration,
  * with a stage renamed so a region sits in the wrong stage, with a probe put back, with the kind filter taken out (a db run put back
@@ -297,7 +302,14 @@ const REGIONS = {
 /** The three things `--static` leaves out: the client suite, the production build and the bundle budgets. */
 const SKIPPED_UNDER_STATIC = ['client-suite', 'client-build', 'bundle-budgets'];
 /** The stage whose body holds each region, written by hand: the stage list marks exactly these `static: false`, which is how a static run leaves them out. */
-const REGION_STAGE = { 'client-suite': 'client unit tests', 'client-build': 'build:prod', 'bundle-budgets': 'bundle-budgets', 'database-batch': 'test:standalone (offline subset)' };
+const REGION_STAGE = { 'client-suite': 'client unit tests', 'client-build': 'build:prod', 'bundle-budgets': 'bundle-budgets' };
+/**
+ * The two stages that run units (Q-870), each with the ONE kind of run it may be handed: the pure units in the standalone stage, and the text-only files in the
+ * source stage before the builds. Every `runTestUnits` call (region 'database-batch') sits in the body of one of them, once each, and is fed by
+ * `slowFirstUnits` over a `.filter` that selects exactly its stage's kind. A text call in the pure stage runs a text file twice; a pure call in the text stage
+ * runs a file that needs a build before the build; a third call is a pool no plan names.
+ */
+const STAGE_KIND = { 'test:standalone (offline subset)': 'pure', 'text-only standalone tests': 'text' };
 /** Regions that must not exist at all, each with what its presence means: the probe went with the database batches (Q-588); the hand-started batch with the pool (Q-863). */
 const GONE = {
   'database-probe': (at) => `database-probe (${at}) is back in ${PREFLIGHT_FILE}: local preflight runs no database test, so nothing local asks whether a database is up`,
@@ -348,7 +360,10 @@ function unitSources(call, decls) {
   return exprs;
 }
 
-/** `x.kind === 'pure'` / `x.kind !== 'db'` (what a plan keeps) and `x.kind === 'db'` / `x.kind !== 'pure'` (what it drops): a bare comparison, nothing else in it. */
+/**
+ * `x.kind === 'pure'` (a plan that keeps exactly one kind) or `x.kind !== 'db'` (one that drops a kind): a bare comparison, nothing else in it. `only` is the one kind
+ * the comparison keeps, or null when it only drops one: since Q-870 there are three kinds (text, pure, db), so `!== 'db'` keeps the text files too and is not a pure plan.
+ */
 const kindComparison = (e0) => {
   const e = unwrap(e0);
   if (!ts.isBinaryExpression(e)) return null;
@@ -356,8 +371,8 @@ const kindComparison = (e0) => {
   if (!eq && !NE.includes(e.operatorToken.kind)) return null;
   const sides = [e.left, e.right].map(unwrap);
   const lit = sides.find(isString);
-  if (!lit || !sides.some(x => !isString(x)) || !['pure', 'db'].includes(lit.text)) return null;
-  return { keepsPure: (lit.text === 'pure') === eq, node: e };
+  if (!lit || !sides.some(x => !isString(x)) || !['text', 'pure', 'db'].includes(lit.text)) return null;
+  return { only: eq ? lit.text : null, node: e };
 };
 
 /** The expression a `.filter(...)` callback returns (an arrow's body, or the one `return` of a block); null when `call` is not a filter. */
@@ -369,11 +384,18 @@ function filterPredicate(call) {
   return fn.body.statements.find(ts.isReturnStatement)?.expression ?? null;
 }
 
-/** Every `.filter(r => r.kind === 'pure')` in the units the runner call is handed: the predicate is that comparison and nothing else, so the flag is not in it. */
-function pureFilters(node, decls) {
+/**
+ * Every `.filter(r => r.kind === '<kind>')` in the units the runner call is handed (any one kind when `kind` is left out): the predicate is that comparison and
+ * nothing else, so the flag is not in it.
+ */
+function kindFilters(node, decls, kind) {
   const out = [];
   for (const x of unitSources(node, decls)) {
-    visit(x, (n) => { const p = filterPredicate(n); if (p && kindComparison(p)?.keepsPure) out.push({ call: n, predicate: p }); });
+    visit(x, (n) => {
+      const p = filterPredicate(n);
+      const only = p ? kindComparison(p)?.only : null;
+      if (only && (kind === undefined || only === kind)) out.push({ call: n, predicate: p });
+    });
   }
   return out;
 }
@@ -383,8 +405,8 @@ function pureFilters(node, decls) {
  * built from a `.filter` whose predicate is a bare `kind === 'pure'` (or `!== 'db'`) comparison. It may not read the flag: a plan that selects
  * by kind only under `--static` is the old plan, and runs the database half in the full mode.
  */
-function planHoldsOnlyPure(node, decls) {
-  return pureFilters(node, decls).length > 0;
+function planHoldsOnly(node, decls, kind) {
+  return kindFilters(node, decls, kind).length > 0;
 }
 
 /**
@@ -469,7 +491,7 @@ function analyse(src, { floor = STEP_FLOOR } = {}) {
   }
   // Where a region sits: in the body of its own stage, which the stage list leaves out of a static run, and under no guard on the flag.
   const holder = (n) => { const call = stageOf(n); return call ? (stageNameOf(call) ?? '(a stage with a computed name)') : null; };
-  for (const region of [...SKIPPED_UNDER_STATIC, 'database-batch']) {
+  for (const region of SKIPPED_UNDER_STATIC) {
     for (const n of regions[region]) {
       const at = `line ${lineOf(sf, n)}`;
       const inStage = holder(n);
@@ -480,17 +502,33 @@ function analyse(src, { floor = STEP_FLOOR } = {}) {
       if (!reachable(n, false, S)) say(region, `${region} (${at}) does not run in the full preflight`);
     }
   }
+  // The unit runner's calls (Q-870): one in each of the two stages that run units, each handed only the kind of run its stage is for, both modes, no third.
+  const perStage = new Map();
   for (const n of regions['database-batch']) {
     const at = `line ${lineOf(sf, n)}`;
-    if (!planHoldsOnlyPure(n, decls)) say('database-batch', `the unit runner call (${at}) can be handed a database unit: the list it is given is not built from a \`.filter\` that selects only kind 'pure' by a bare comparison the flag does not enter, so a db run is in the plan in at least one mode`);
-    // The units pass through the slow-first step, and what that step is given is the filtered pure runs (the filter comes BEFORE it, so its input holds no db run).
-    const slowFirst = slowFirstCalls(n, decls);
-    if (slowFirst.length === 0) say('slow-first', `the unit runner call (${at}) is not handed units built by slowFirstUnits(...): the slowest pure files do not run alone and first, and the plan is the batches in list order`);
+    const inStage = holder(n);
+    const kind = inStage === null ? undefined : STAGE_KIND[inStage];
+    if (!kind) {
+      say('database-batch', `the unit runner call (${at}) sits ${inStage === null ? 'outside every stage body' : `in the body of stage ${JSON.stringify(inStage)}`}, not in the body of ${Object.keys(STAGE_KIND).map(s => JSON.stringify(s)).join(' or ')}: a third pool is a run no plan names`);
+      continue;
+    }
+    perStage.set(inStage, (perStage.get(inStage) ?? 0) + 1);
+    if (!reachable(n, true, S)) say('database-batch', `the unit runner call (${at}) is skipped by a guard on ${STATIC_FLAG}: the stage list's static:false flag is the only way a static run leaves a stage out`);
+    if (!reachable(n, false, S)) say('database-batch', `the unit runner call (${at}) does not run in the full preflight`);
+    // Names are looked up in the stage's own body first: two stages may each call their run list `runs`.
+    const scoped = new Map([...decls, ...bindingsOf(stageOf(n).arguments[1])]);
+    if (!planHoldsOnly(n, scoped, kind)) say('database-batch', `the unit runner call (${at}) in stage ${JSON.stringify(inStage)} can be handed a run of another kind: the list it is given is not built from a \`.filter\` that selects only kind '${kind}' by a bare comparison the flag does not enter, so a db run, a pure file in the text stage or a text file in the pure stage is in the plan in at least one mode`);
+    // The units pass through the slow-first step, and what that step is given is the filtered runs (the filter comes BEFORE it, so its input holds no run of another kind).
+    const slowFirst = slowFirstCalls(n, scoped);
+    if (slowFirst.length === 0) say('slow-first', `the unit runner call (${at}) is not handed units built by slowFirstUnits(...): the slowest files do not run alone and first, and the plan is the batches in list order`);
     for (const c of slowFirst) {
-      if (!planHoldsOnlyPure({ arguments: [c.arguments[0]] }, decls)) {
-        say('slow-first', `slowFirstUnits (line ${lineOf(sf, c)}) is not given runs that a \`.filter\` selected as only kind 'pure' by a bare comparison: a db run could be handed to the slow-first step, and run uncapped in a unit of its own`);
+      if (!planHoldsOnly({ arguments: [c.arguments[0]] }, scoped, kind)) {
+        say('slow-first', `slowFirstUnits (line ${lineOf(sf, c)}) is not given runs that a \`.filter\` selected as only kind '${kind}' by a bare comparison: a run of another kind could be handed to the slow-first step, and run in a unit of its own`);
       }
     }
+  }
+  for (const stage of Object.keys(STAGE_KIND)) {
+    if ((perStage.get(stage) ?? 0) !== 1) say('database-batch', `stage ${JSON.stringify(stage)} holds ${perStage.get(stage) ?? 0} unit runner call(s), not exactly one: a stage with none runs nothing it claims to run, and a second is a pool of its own`);
   }
 
   // The runner called is the shared one: a local function of the same name would be a second pool with no time bound.
@@ -600,21 +638,60 @@ function insertUnguardedCopy(src, region) {
 }
 
 /** The plan's selection, as the source ranges a mutation may rewrite: each `.filter` call in the list the unit runner is handed (replaced by what it filters). */
-function planSelection(src, tag) {
+function planSelection(src, tag, stage = PURE_STAGE) {
   const sf = parsed(src, tag);
-  const decls = bindingsOf(sf);
-  const node = regionNodes(sf)['database-batch'][0];
-  assert.ok(node, "the mutation found no 'database-batch' (unit runner) call");
-  return { sf, node, filters: pureFilters(node, decls) };
+  const node = unitCallIn(sf, stage);
+  return { sf, node, filters: kindFilters(node, scopedBindings(sf, node)) };
+}
+
+/** The pure stage: the one the mutations below target unless they name the other. */
+const PURE_STAGE = 'test:standalone (offline subset)';
+const TEXT_STAGE = 'text-only standalone tests';
+
+/** Names looked up in the stage's own body first (two stages may each call their run list `runs`), then in the file. */
+const scopedBindings = (sf, call) => new Map([...bindingsOf(sf), ...(stageOf(call) ? bindingsOf(stageOf(call).arguments[1]) : [])]);
+
+/** The unit runner call in the body of `stage`; the case fails with a sentence when the file has none there. */
+function unitCallIn(sf, stage) {
+  const node = regionNodes(sf)['database-batch'].find(n => stageOf(n) && stageNameOf(stageOf(n)) === stage);
+  assert.ok(node, `the mutation found no unit runner call (runTestUnits) in the body of stage '${stage}'`);
+  return node;
+}
+
+/** `.filter(...)` predicates of one stage's unit list that keep only `from`, rewritten to keep only `to`: a text call in the pure stage, or a pure call in the text stage. */
+function swapKind(src, stage, from, to) {
+  const sf = parsed(src, `swap-${stage}-${from}-${to}`);
+  const node = unitCallIn(sf, stage);
+  const edits = [];
+  for (const { predicate } of kindFilters(node, scopedBindings(sf, node), from)) {
+    visit(predicate, (n) => { if (isString(n) && n.text === from) edits.push({ start: n.getStart(sf), end: n.getEnd(), text: `'${to}'` }); });
+  }
+  assert.ok(edits.length > 0, `the mutation found no kind '${from}' selection in the unit list of stage '${stage}'`);
+  return edit(src, edits);
+}
+
+/** The first unit runner call of `stage` copied as a statement at the top of the same stage body: the stage now holds two pools. */
+function secondCallInSameStage(src, stage) {
+  const sf = parsed(src, `second-${stage}`);
+  const node = unitCallIn(sf, stage);
+  const body = stageOf(node).arguments[1].body;
+  // An arrow whose body is the call itself becomes a block that makes the call twice.
+  if (!ts.isBlock(body)) return edit(src, [{ start: body.getStart(sf), end: body.getEnd(), text: `{ ${node.getText()}; return ${body.getText(sf)}; }` }]);
+  return edit(src, [{ start: body.getStart(sf) + 1, end: body.getStart(sf) + 1, text: `\n${node.getText()};\n` }]);
+}
+
+/** A stage registration renamed to another stage's name: its code now sits in the wrong stage's body, and its own stage holds none. */
+function renameStage(src, from, to) {
+  const mutated = src.replace(new RegExp(`\\bstage\\(\\s*(['"\`])${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1`), (m, q) => `stage(${q}${to}${q}`);
+  assert.notEqual(mutated, src, `the mutation found no stage('${from}', ...) to rename`);
+  return mutated;
 }
 
 /** The slow-first step taken out: each `slowFirstUnits(runs, ...)` call in the unit list becomes the runs it was given, so the units are the batches in list order. */
 function dropSlowFirstStep(src) {
   const sf = parsed(src, 'no-slow-first');
-  const decls = bindingsOf(sf);
-  const node = regionNodes(sf)['database-batch'][0];
-  assert.ok(node, "the mutation found no 'database-batch' (unit runner) call");
-  const calls = slowFirstCalls(node, decls);
+  const node = unitCallIn(sf, PURE_STAGE);
+  const calls = slowFirstCalls(node, scopedBindings(sf, node));
   assert.ok(calls.length > 0, 'the mutation found no slowFirstUnits step in the unit list to take out');
   return edit(src, calls.map(c => ({ start: c.getStart(sf), end: c.getEnd(), text: c.arguments[0].getText() })));
 }
@@ -814,6 +891,41 @@ describe('scripts/preflight.mjs: no database batch in either mode, and --static 
       assert.ok(v.some(x => x.region === 'database-batch'), 'a unit list holding every kind left the rule green');
     });
 
+    // The text stage (Q-870): each stage that runs units is handed only its own kind, once. Each row of the truth table is a wrong plan and must be named.
+    it('a text call in the pure stage (its kind selection swapped to text: a text-only file would run twice) is named', () => {
+      cleanBaseline();
+      assert.ok(analyse(swapKind(REAL, PURE_STAGE, 'pure', 'text')).some(x => x.region === 'database-batch'), 'a pure stage handed the text runs left the rule green');
+    });
+
+    it('a pure call in the text stage (its kind selection swapped to pure: a file that needs a build would run before it) is named', () => {
+      cleanBaseline();
+      assert.ok(analyse(swapKind(REAL, TEXT_STAGE, 'text', 'pure')).some(x => x.region === 'database-batch'), 'a text stage handed the pure runs left the rule green');
+    });
+
+    it('a db run in the text stage is named', () => {
+      cleanBaseline();
+      assert.ok(analyse(swapKind(REAL, TEXT_STAGE, 'text', 'db')).some(x => x.region === 'database-batch'), 'a text stage handed the db runs left the rule green');
+    });
+
+    for (const stage of [PURE_STAGE, TEXT_STAGE]) {
+      it(`a second unit runner call in the body of stage '${stage}' is named`, () => {
+        cleanBaseline();
+        assert.ok(analyse(secondCallInSameStage(REAL, stage)).some(x => x.region === 'database-batch' && /not exactly one/.test(x.message)), 'two pools in one stage left the rule green');
+      });
+    }
+
+    it('a third unit runner call at the top level, outside every stage body, is named', () => {
+      cleanBaseline();
+      assert.ok(analyse(insertUnguardedCopy(REAL, 'database-batch')).some(x => x.region === 'database-batch' && /outside every stage body/.test(x.message)), 'a pool outside every stage left the rule green');
+    });
+
+    it('the text stage renamed (its pool sits in another stage, and its own holds none) is named', () => {
+      cleanBaseline();
+      const v = analyse(renameStage(REAL, TEXT_STAGE, 'lint:docs'));
+      assert.ok(v.some(x => x.region === 'database-batch' && /lint:docs/.test(x.message)), 'a pool in the wrong stage left the rule green');
+      assert.ok(v.some(x => x.region === 'database-batch' && /text-only standalone tests/.test(x.message) && /not exactly one/.test(x.message)), 'a text stage with no pool left the rule green');
+    });
+
     it('the slow-first step taken out of the unit list (the units are the batches in list order again) is named', () => {
       cleanBaseline();
       const v = analyse(dropSlowFirstStep(REAL));
@@ -880,6 +992,15 @@ const failures = [];
 const bodies = new Map();
 for (const g of ['a', 'b']) gate(g);
 stage('build:server', async () => { run('npm run build:server'); });
+stage('text-only standalone tests', async () => {
+  const runs = offlineRuns(split).filter(r => r.kind === 'text');
+  const planned = slowFirstUnits(runs, times, { maxSlow: 6 });
+  const units = planned.map((r, i) => ({ files: r.files, flags: timingReporterFlags({ suite: 'preflight', batch: 'text-' + (i + 1), scope: STATIC ? 'static' : 'subset' }) }));
+  const { failed } = await runTestUnits(units.map(u => u.files), {
+    width: 3, args: (files, i) => units[i].flags.args, envOf: (files, i) => units[i].flags.env, labelOf: (files, i) => 'text-' + (i + 1), header: (info) => info.label,
+  });
+  if (failed > 0) failures.push('text-only standalone tests');
+});
 stage('test:standalone (offline subset)', async () => {
   const runs = offlineRuns(split).filter(r => r.kind === 'pure');
   const planned = slowFirstUnits(runs, times, { maxSlow: 6 });
@@ -924,7 +1045,11 @@ const bodies = new Map();
 function gate(name) { stage(name, () => { run('node --test ' + name); }); }
 for (const g of ['a', 'b']) gate(g);
 stage('build:server', () => run('npm run build:server'));
-stage('test:standalone (offline subset)', () => runTestUnits(slowFirstUnits(offlineRuns(split).filter(function (r) { return r.kind !== 'db'; }), null, { maxSlow: 6 }).map(u => u.files), {
+stage('text-only standalone tests', () => runTestUnits(slowFirstUnits(offlineRuns(split).filter(function (r) { return r.kind === 'text'; }), null, { maxSlow: 6 }).map(u => u.files), {
+  width: 3, args: () => [], labelOf: (files, i) => 'text-' + i,
+  envOf: () => timingReporterFlags({ scope: process.argv.includes('--static') ? 'static' : 'subset' }).env,
+}));
+stage('test:standalone (offline subset)', () => runTestUnits(slowFirstUnits(offlineRuns(split).filter(function (r) { return r.kind === 'pure'; }), null, { maxSlow: 6 }).map(u => u.files), {
   width: 3, args: () => [], labelOf: (files, i) => 'pure-' + i,
   envOf: () => timingReporterFlags({ scope: process.argv.includes('--static') ? 'static' : 'subset' }).env,
 }));
@@ -987,6 +1112,19 @@ describe('the preflight rules, over literal samples', () => {
         assert.ok(analyse(putHandBatchBack(sample)).some(x => x.region === 'hand-batch'));
       });
 
+      it('goes red when the pure stage is handed the text runs, or the text stage the pure or the db runs', () => {
+        assert.ok(analyse(swapKind(sample, PURE_STAGE, 'pure', 'text')).some(x => x.region === 'database-batch'));
+        assert.ok(analyse(swapKind(sample, TEXT_STAGE, 'text', 'pure')).some(x => x.region === 'database-batch'));
+        assert.ok(analyse(swapKind(sample, TEXT_STAGE, 'text', 'db')).some(x => x.region === 'database-batch'));
+      });
+
+      it('goes red when a stage holds a second pool, when a third pool sits outside every stage, and when the text stage holds none', () => {
+        assert.ok(analyse(secondCallInSameStage(sample, PURE_STAGE)).some(x => x.region === 'database-batch' && /not exactly one/.test(x.message)));
+        assert.ok(analyse(secondCallInSameStage(sample, TEXT_STAGE)).some(x => x.region === 'database-batch' && /not exactly one/.test(x.message)));
+        assert.ok(analyse(insertUnguardedCopy(sample, 'database-batch')).some(x => x.region === 'database-batch' && /outside every stage body/.test(x.message)));
+        assert.ok(analyse(renameStage(sample, TEXT_STAGE, 'lint:docs')).some(x => x.region === 'database-batch' && /text-only standalone tests/.test(x.message)));
+      });
+
       it('goes red when the unit runner is not the shared one (no import of runTestUnits from run-test-units.mjs)', () => {
         const local = sample.replace(/import \{ runTestUnits \} from '[^']*run-test-units\.mjs';\n/, 'const runTestUnits = async () => ({ failed: 0 });\n');
         assert.notEqual(local, sample);
@@ -1015,8 +1153,8 @@ describe('the preflight rules, over literal samples', () => {
 
   it('a slow-first step fed the runs BEFORE the kind filter (the filter applied to its units after it) is named: a db run would be offered to it', () => {
     const late = SAMPLE_CONTINUE.replace(
-      "slowFirstUnits(offlineRuns(split).filter(function (r) { return r.kind !== 'db'; }), null, { maxSlow: 6 }).map(u => u.files)",
-      "slowFirstUnits(offlineRuns(split), null, { maxSlow: 6 }).filter(function (u) { return u.kind !== 'db'; }).map(u => u.files)");
+      "slowFirstUnits(offlineRuns(split).filter(function (r) { return r.kind === 'pure'; }), null, { maxSlow: 6 }).map(u => u.files)",
+      "slowFirstUnits(offlineRuns(split), null, { maxSlow: 6 }).filter(function (u) { return u.kind === 'pure'; }).map(u => u.files)");
     assert.notEqual(late, SAMPLE_CONTINUE, 'the sample no longer holds the call this case rewrites');
     const v = analyse(late);
     assert.ok(v.some(x => x.region === 'slow-first' && /not given runs/.test(x.message)), `the filter after the step was not named:\n${v.map(x => `[${x.region}] ${x.message}`).join('\n')}`);

@@ -20,6 +20,9 @@
  * - A stage whose code runs a file that reads `server/dist` or `client/dist` declares the matching need. Derived from the files, not
  *   from the list: the standalone stage from the pure files it runs (`testing/standalone/*.test.js`, the ones preflight runs), the
  *   built gates and the surface audit from their own files, and the source gates must read neither.
+ * - Since Q-870 the source stages include `text-only standalone tests`, listed after the gates: the standalone files that read only tracked text
+ *   (`testing/_shared/text-only-test.mjs`), minus the gate files. Every file a source stage runs must pass that classifier, and the dist rule
+ *   (`readsDist`) is the classifier module's, not a copy here.
  * - `scripts/preflight.mjs` registers a body for every listed stage (read as text, comments stripped, the gate loops expanded from
  *   the gate tables) and runs them through `runStages(planStages(...))`; no `begin(...)` call is left in it.
  * - The runner stops at the first failure: with an injected list a failing `source` stage ends the run before the `test` stage's
@@ -44,6 +47,7 @@ import { stripComments } from './_strip-comments.mjs';
 import { scratchRoot as scratchRootOf } from '../../scripts/_shared/scratch-root.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
 import { offlineRuns, splitStandalone } from '../_shared/standalone-split.mjs';
+import { importOrFail } from '../_shared/import-or-fail.mjs';
 
 const STAGES_MODULE = pathToFileURL(join(REPO_ROOT, 'scripts/_shared/preflight-stages.mjs')).href;
 const PREFLIGHT = join(REPO_ROOT, 'scripts/preflight.mjs');
@@ -193,16 +197,17 @@ describe('every plan keeps the order the stages need: kinds never descend, a sta
   });
 });
 
-/** True when `src` (comments stripped) names the output dir of `which` ('server' | 'client') as a path or as joined segments. */
-function readsDist(src, which) {
-  const code = stripComments(src);
-  return new RegExp(`\\b${which}/dist\\b`).test(code) || new RegExp(`['"\`]${which}['"\`]\\s*,\\s*['"\`]dist['"\`]`).test(code);
-}
+/**
+ * The dist rule and the text-only classifier are one module (`testing/_shared/text-only-test.mjs`, Q-870): the stage test used to hold its own
+ * `readsDist`, the second spelling of a rule the classifier needs. Imported inside each case, so a base without the module fails each case by name.
+ */
+const textOnlyModule = () => importOrFail('testing/_shared/text-only-test.mjs', 'readsDist and the text-only classification');
 
 describe('a stage whose code runs a file that reads a build declares the need (derived from the files, not from the list)', () => {
   const read = (p) => readFileSync(join(REPO_ROOT, p), 'utf8');
 
   it('test:standalone declares build:server for a pure file that reads server/dist and build:prod for one that reads client/dist', async () => {
+    const { readsDist } = await textOnlyModule();
     const { PREFLIGHT_STAGES } = await stagesModule();
     const standalone = PREFLIGHT_STAGES.find(s => s.name === 'test:standalone (offline subset)');
     const pure = offlineRuns(splitStandalone({ root: REPO_ROOT }), { ciOnly: false }).filter(r => r.kind === 'pure').flatMap(r => r.files);
@@ -215,6 +220,7 @@ describe('a stage whose code runs a file that reads a build declares the need (d
   });
 
   it('each built gate, and the surface audit, reads server/dist and declares build:server', async () => {
+    const { readsDist } = await textOnlyModule();
     const { PREFLIGHT_STAGES, BUILT_GATES } = await stagesModule();
     const files = new Map([...BUILT_GATES.map(([n]) => [n, `testing/standalone/${n}.test.js`]), ['surface-matrix-audit', 'scripts/surface-matrix-audit.mjs']]);
     assert.ok(files.size >= 2);
@@ -232,6 +238,7 @@ describe('a stage whose code runs a file that reads a build declares the need (d
   });
 
   it('no source stage reads a build: each source gate and each source script reads neither server/dist nor client/dist (so an empty need is honest)', async () => {
+    const { readsDist } = await textOnlyModule();
     const { PREFLIGHT_STAGES, SOURCE_GATES } = await stagesModule();
     const sourceFiles = [
       ...SOURCE_GATES.map(([n]) => `testing/standalone/${n}.test.js`),
@@ -240,6 +247,36 @@ describe('a stage whose code runs a file that reads a build declares the need (d
     assert.ok(PREFLIGHT_STAGES.filter(s => s.kind === 'source').length >= sourceFiles.length - 3);
     for (const file of sourceFiles) {
       for (const which of ['server', 'client']) assert.equal(readsDist(read(file), which), false, `${file} reads ${which}/dist but runs in a source stage that needs no build`);
+    }
+  });
+
+  it('every file a source stage runs, the gate files and the text stage\'s computed files alike, reads only tracked text (the classifier, not only the dist rule)', async () => {
+    const { readsOnlyTrackedText, textOnlyFiles } = await textOnlyModule();
+    const { SOURCE_GATE_FILES } = await stagesModule();
+    assert.ok(SOURCE_GATE_FILES instanceof Set && SOURCE_GATE_FILES.size >= 11, 'SOURCE_GATE_FILES is not the gate table as a set of test paths');
+    const textStageFiles = textOnlyFiles(splitStandalone({ root: REPO_ROOT }), { root: REPO_ROOT }).filter(f => !SOURCE_GATE_FILES.has(f));
+    assert.ok(textStageFiles.length >= 150, `the text stage would run only ${textStageFiles.length} file(s) besides the gates`);
+    const refused = [...SOURCE_GATE_FILES, ...textStageFiles]
+      .map(f => [f, readsOnlyTrackedText(f, { root: REPO_ROOT })]).filter(([, a]) => !a.textOnly).map(([f, a]) => `${f}: ${a.reason}`);
+    assert.deepEqual(refused, [], 'these files run in a source stage, which needs no build and no install, and read more than tracked text');
+  });
+});
+
+describe('the text stage is listed after the gates, as a source stage with the first stage as its one need', () => {
+  it('is a source stage named text-only standalone tests, after every gate stage, needing only unregistered-local-files', async () => {
+    const { PREFLIGHT_STAGES, SOURCE_GATES } = await stagesModule();
+    const at = (n) => PREFLIGHT_STAGES.findIndex(s => s.name === n);
+    const text = PREFLIGHT_STAGES.find(s => s.name === 'text-only standalone tests');
+    assert.ok(text, 'the stage list has no stage named text-only standalone tests');
+    assert.equal(text.kind, 'source', 'the text stage reads no build and must be a source stage');
+    assert.deepEqual([...(text.needs ?? [])], ['unregistered-local-files']);
+    for (const [gate] of SOURCE_GATES) assert.ok(at('text-only standalone tests') > at(gate), `the text stage is listed before the gate ${gate}: the gates keep their place in the cost order`);
+  });
+
+  it('is in every plan, before the server build, in both modes', async () => {
+    for (const { label, plan } of await everyPlan()) {
+      const where = names(plan).indexOf('text-only standalone tests');
+      assert.ok(where >= 0 && where < names(plan).indexOf('build:server'), `${label}: the text stage is missing or runs after the server build`);
     }
   });
 });
@@ -401,7 +438,7 @@ describe('the real preflight (end to end, in a scratch folder)', () => {
       assert.match(r.out, verdict, r.out.slice(-1500));
       assert.match(r.out, /check-changelog\n\s+a file that changes what ships/, 'the failing stage is not named with its reason');
       const notRun = r.out.match(/Not run[^\n]*/)?.[0] ?? '';
-      for (const stage of ['todo:check', 'build:server', 'surface-matrix-audit', 'test:standalone (offline subset)']) {
+      for (const stage of ['todo:check', 'text-only standalone tests', 'build:server', 'surface-matrix-audit', 'test:standalone (offline subset)']) {
         assert.ok(notRun.includes(stage), `the summary does not list ${stage} as not run:\n${r.out.slice(-1500)}`);
       }
       assert.equal(notRun.includes('build:prod') || notRun.includes('client unit tests') || notRun.includes('bundle-budgets'), label === 'full',
