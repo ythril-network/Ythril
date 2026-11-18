@@ -212,10 +212,10 @@ That leaves one thing the model cannot tell you: whether the library still imple
 ### Standalone tests (mostly no Docker)
 
 ```bash
-npm run build:server && npm run test:standalone:pure
+npm run test:standalone:text && npm run build:server && npm run test:standalone:pure
 ```
 
-`testing/standalone` holds unit tests, source-reading gates and the tests that open the test database or drive a running instance. `npm run test:standalone` runs all of it (it needs the test stack, below); `test:standalone:pure`, `test:standalone:db` and `test:standalone:instance` run one kind each, and the testing guide says which file is which kind and why. Every file in the folder is a test: a new one needs no registration, only to be tracked by git.
+`testing/standalone` holds unit tests, source-reading gates and the tests that open the test database or drive a running instance. `npm run test:standalone` runs all of it, each file once (it needs the test stack, below); `test:standalone:text`, `test:standalone:pure`, `test:standalone:db` and `test:standalone:instance` run one kind each (the text kind is the pure files that read only tracked text, which need no build, and the pure kind is the other pure files, so both are needed to run every pure file), and the testing guide says which file is which kind and why. Every file in the folder is a test: a new one needs no registration, only to be tracked by git.
 
 ### Integration tests (single Docker instance)
 

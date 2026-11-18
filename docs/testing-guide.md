@@ -27,7 +27,8 @@ the test files its diff reaches.
 |---|---|---|
 | Client unit tests (Vitest + jsdom) | nothing | `npm run test:client` (it writes no report: preflight's client step runs ci.yml's command and does), and `npm run build:client` (it catches template errors in components that have no spec) |
 | Standalone, all of it | `server/dist`, a test MongoDB, the test stack | `npm run build:server`, `npm run test:up`, `npm run test:standalone` |
-| Standalone, the pure third | `server/dist`, and a built client for the one case that reads it (CI's job builds both; locally that case skips without one) | `npm run test:standalone:pure` |
+| Standalone, the text-only kind (pure files that read only tracked text) | nothing: no build, no install of its own | `npm run test:standalone:text` |
+| Standalone, the pure third without the text-only files | `server/dist`, and a built client for the one case that reads it (CI's job builds both; locally that case skips without one) | `npm run test:standalone:pure` (run the text kind too, or `npm run test:standalone`, to run every pure file) |
 | Standalone, the database third | `server/dist`, the test MongoDB | `npm run test:standalone:db` |
 | Standalone, the instance third | `server/dist`, the instances it drives | `npm run test:standalone:instance` |
 | Integration | the test stack | `npm run test:up`, `npm run test:integration` |
@@ -63,7 +64,7 @@ A pure file may also declare `@ci-only` in its header comment (anchored to a hea
 
 A pure file whose imports reach nothing a build or an install writes (no `server/`, `client/` or `schema/` import, no `dist` or `node_modules` path, no package, no `fetch`, no process but git) is **text-only**, and `testing/_shared/text-only-test.mjs` decides that by computation, never by a list. The preflight runs those files in a source stage, `text-only standalone tests`, before it builds anything, and the pure units after the builds leave them out, so each file runs once. CI's `standalone-pure` job runs them as its first step, before `npm ci` and the builds (`node testing/_init/run-standalone.mjs --only=text`), which is the guard for what a static rule cannot see, a build path that lives in a document or a data file: a test the classifier wrongly calls text-only fails there for want of what it needs, while on a developer machine a stale `server/dist` can let it pass until CI runs it. `a-ci-only-test-runs-in-a-ci-job` holds that every `@ci-only` file is a pure file that a CI job runs, so the marker can never mean "runs nowhere".
 
-You do not choose the kind: write the file and the split reads it. `npm run test:standalone` refuses to start when
+You do not choose the kind: write the file and the split reads it. `npm run test:standalone` (and every kind of it but the text kind, which reads no build) refuses to start when
 `server/dist` is older than the server source (`--allow-stale` overrides it when you know the build is what you meant),
 because a test run against the build from two branches ago has cost real debugging time.
 
