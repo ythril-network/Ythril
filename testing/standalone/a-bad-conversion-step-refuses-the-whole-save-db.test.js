@@ -180,7 +180,7 @@ describe('a bad conversion step refuses the whole save', { skip }, () => {
     const viaDispatcher = async (convertRecords) => {
       const { callTool } = await import('../../server/dist/mcp/call-tool.js');
       const out = await callTool({ name: 'schema_update', args: { space: SPACE, ...EDIT, convertRecords },
-        caller: { rights: RIGHTS, ip: '127.0.0.1', authMethod: 'pat', oidcSubject: null, transport: 'mcp', tokenId: 'b284-s5', tokenLabel: 'b284-s5' } });
+        caller: { rights: { ...RIGHTS, floor: {}, spaceAdmin: { floor: true, spaces: [] } }, ip: '127.0.0.1', authMethod: 'pat', oidcSubject: null, transport: 'mcp', tokenId: 'b284-s5', tokenLabel: 'b284-s5' } });
       return { status: out.status, structured: out.result?.structuredContent, text: (out.result?.content ?? []).map(c => c.text ?? '').join('\n') };
     };
 
