@@ -19,6 +19,9 @@ import { ToolRefusal } from '../../util/errors.js';
 import { lostSpaceAnswer } from '../../spaces/unknown-space.js';
 import { forwardedArgNames } from '../../contract/write-accepts.js';
 
+/** The status a refused or failed space write names in its text, as the REST door answers the same outcome. */
+const SPACE_WRITE_STATUS = { notAllowed: 403, conflict: 409, retry: 503, failed: 500 } as const;
+
 export const list_spacesTool: ToolHandler = {
   name: 'list_spaces',
   description: 'List every space this token can reach, with ids, labels, purposes and entry counts. CALL THIS FIRST in an unfamiliar instance: every other tool takes a space id, and the ids are not guessable from the labels.\n\n'
@@ -360,7 +363,7 @@ async function runSpaceMetaUpdate(
    */
   const refused = refusalsForSpaceUpdate(body, spaceId, !!rights?.instanceAdmin, rights);
   if (refused.length) {
-    return toolErrorResult(`Not allowed to change ${refused.map(describeFieldRequirement).join(', ')}.`, 403);
+    return toolErrorResult(`Not allowed to change ${refused.map(describeFieldRequirement).join(', ')}.`, SPACE_WRITE_STATUS.notAllowed);
   }
 
   // No `If-Match`: MCP has no header to carry one, and absence means "no precondition asked for" — the same
@@ -695,14 +698,14 @@ export const save_spaceTool: ToolHandler = {
     if (result.outcome === 'conflict') {
       // 409, and reported as its own thing rather than as a generic failure: the id being taken is often a successful
       // retry of a request whose response was lost, and an agent that can tell the two apart stops retrying.
-      return { ...toolErrorResult(result.error, 409), structuredContent: { outcome: 'conflict' } };
+      return { ...toolErrorResult(result.error, SPACE_WRITE_STATUS.conflict), structuredContent: { outcome: 'conflict' } };
     }
     if (result.outcome === 'retry') {
       // 503 on REST with `Retry-After`: MCP has no header, so `retryable` rides beside the code in the structured content.
-      return { ...toolErrorResult(result.error, 503), structuredContent: { outcome: 'retry', code: result.code, retryable: true } };
+      return { ...toolErrorResult(result.error, SPACE_WRITE_STATUS.retry), structuredContent: { outcome: 'retry', code: result.code, retryable: true } };
     }
     if (result.outcome === 'failed') {
-      return toolErrorResult(result.error, 500);
+      return toolErrorResult(result.error, SPACE_WRITE_STATUS.failed);
     }
 
     const s = result.space;

@@ -20,7 +20,6 @@
   { "id": "route GET /api/sync/links/:id", "reason": "no test under testing/ names this route: a contract test is owed (reported by the Q-876 probe)", "reviewBy": "2027-02-17" },
   { "id": "route POST /api/sync/networks/:networkId/pair/confirm", "reason": "no test under testing/ names this route: a contract test is owed (reported by the Q-876 probe)", "reviewBy": "2027-02-17" },
   { "id": "route GET /api/admin/views/migration", "reason": "no test under testing/ names this route: a contract test is owed (reported by the Q-876 probe)", "reviewBy": "2027-02-17" },
-  { "id": "tool delete_link", "reason": "no test under testing/ names this tool: a contract test is owed (reported by the Q-876 probe)", "reviewBy": "2027-02-17" },
   { "id": "tool network_change_notes", "reason": "no test under testing/ names this tool: a contract test is owed (reported by the Q-876 probe)", "reviewBy": "2027-02-17" },
   { "id": "tool view_get", "reason": "no test under testing/ names this tool: a contract test is owed (reported by the Q-876 probe)", "reviewBy": "2027-02-17" },
   { "id": "tool view_migration", "reason": "no test under testing/ names this tool: a contract test is owed (reported by the Q-876 probe)", "reviewBy": "2027-02-17" }
