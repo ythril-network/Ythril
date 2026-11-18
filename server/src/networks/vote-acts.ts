@@ -51,6 +51,10 @@ const NOT_FOR_AN_OPERATOR = ['pendingMeta', 'metaBase', 'pendingMember', 'invite
  * What the operator is not handed: the proposal body (`pendingMeta`, which can be large), a candidate's credential record
  * (`pendingMember`) and the invite key's hash — the same join round the list shows without them must not come back from a cast
  * with them. A proposal is shown by `summary` instead, a sentence a voter reads without opening a schema.
+ *
+ * What a voter IS handed beside it: a schema round's `convertRecords` (`Q-745`), as the round holds it. A yes on such a round is also a yes to
+ * rewriting the records of the named types on every member that applies the steps, so the steps are read before the cast, never kept back
+ * with the proposal body. `a-voter-sees-the-steps-of-the-round.test.js` holds it on both doors.
  * `a-round-answered-to-an-operator-carries-no-credential.test.js` drives every door that answers a round.
  */
 export function roundForOperator(net: NetworkConfig, round: VoteRound): OperatorRound {
