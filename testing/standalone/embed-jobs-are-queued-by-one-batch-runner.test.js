@@ -52,7 +52,9 @@ const COMPUTED_BULK_WRITES = {
   'server/src/sync/resolved-elsewhere.ts:writeResolvedElsewhere': 'the decision mark on fork rows (Q-624 §9a): the collection is a forking family\'s, one local-only field on rows held; queues no job',
   'server/src/sync/arrivals.ts:writeArrivals': 'sync push, pull and import store brain documents a peer or a restore '
     + 'sent; the collection is a replicated family\'s, and embed jobs are local and never replicated',
-  'server/src/brain/write-plan/commit.ts:writeStage': 'the write commit\'s record stage: the collection is a record kind\'s '
+  'server/src/brain/schema-convert-record.ts:stampQuietly': 'a schema conversion run\'s quiet stamps: the collection is a knowledge kind\'s (`COLLECTION_SUFFIX`), '
+    + 'one $set of the schema stamp on rows held; queues no job',
+  'server/src/brain/write-plan/commit.ts:writeStage':'the write commit\'s record stage: the collection is a record kind\'s '
     + '(`PLAN_KINDS`), never the jobs collection — the commit queues its jobs through the runner, which the last case holds',
 };
 

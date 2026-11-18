@@ -60,6 +60,8 @@ const WRITERS = {
     { marker: 'drop', why: 'a relink moves from/to: the re-key drops the marker and the in-place relink only $unsets it, so a merge or a fork resolve never fails on it' },
   'server/src/brain/retyped-entity-edges.ts:unstampEdgesOfRetypedEntity':
     { marker: 'none-by-design', why: 'it only $unsets the schema stamp of the edges that name a re-typed entity: from and label are unchanged, so the marker stays right' },
+  'server/src/brain/schema-convert-record.ts:stampQuietly':
+    { marker: 'none-by-design', why: 'a schema conversion run $sets the schema stamp alone on edges that conform: from and label are unchanged, so the marker stays right (a relabel goes through updateEdgeById)' },
   'server/src/sync/arrivals.ts:writeArrivals':
     { marker: 'carry-if-unchanged', why: 'a peer arrival never brings a marker; the replacement keeps this instance\'s own only while from and label are the stored ones' },
 

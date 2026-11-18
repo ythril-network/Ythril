@@ -25,7 +25,7 @@ import { readStoredById } from '../db/read-by-id.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { COLLECTION_SUFFIX } from '../config/types-knowledge.js';
 import type { KnowledgeType, SpaceMeta } from '../config/types.js';
-import { readMetaForWrite } from '../spaces/schema-stamp.js';
+import { readMetaForWrite, carriedStampOf, SCHEMA_FINGERPRINT_FIELD } from '../spaces/schema-stamp.js';
 import { TYPE_FIELD } from './ttl.js';
 import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 import { pageMemberList, type ListPage, type ListPageRequest } from './list-page.js';
@@ -105,7 +105,7 @@ export function typeDefinitionOf(meta: SpaceMeta | undefined, kind: KnowledgeTyp
 }
 
 const recordSeq = (record: { seq?: unknown }): number | null => (typeof record.seq === 'number' ? record.seq : null);
-const recordStamp = (record: Record<string, unknown>): string | null => (typeof record['schemaFingerprint'] === 'string' ? record['schemaFingerprint'] : null);
+const recordStamp = (record: Record<string, unknown>): string | null => carriedStampOf(record) ?? null;
 const recordType = (kind: KnowledgeType, record: Record<string, unknown>): string => String(record[TYPE_FIELD[kind]] ?? '');
 
 /**
@@ -218,7 +218,7 @@ export async function sweepStaleUnconvertedItems(spaceId: string, limit = UNCONV
   for (const item of page) (byKind.get(item.kind) ?? byKind.set(item.kind, []).get(item.kind)!).push(item);
   for (const [kind, kindItems] of byKind) {
     const byId = await readStoredById<Record<string, unknown>>(spaceCollection(spaceId, COLLECTION_SUFFIX[kind]), kindItems.map(i => i.recordId),
-      { _id: 1, seq: 1, schemaFingerprint: 1 }, { filter: CHOSEN_VERSION_ROWS });   // an item names a record, never a fork row of one
+      { _id: 1, seq: 1, [SCHEMA_FINGERPRINT_FIELD]: 1 }, { filter: CHOSEN_VERSION_ROWS });   // an item names a record, never a fork row of one
     for (const item of kindItems) {
       const record = byId.get(item.recordId);
       const key = `${kind}\u0000${item.type}`;

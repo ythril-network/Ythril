@@ -139,9 +139,14 @@ describe('the doors reach the WRITER, and the writer holds the rule', () => {
      * Q-624 slice I4: `brain/fork-keep.ts` is a writer too, and the third: Review's keep writes a stored version's whole body onto its parent, and judges
      * it by the family's own classifier BEFORE it writes (design §9). It is one module with one caller (`resolveFork`), reachable from no door, so it is the
      * place the rule lives for that write, not a door's copy of it.
+     *
+     * Bundle-284 (Q-746): `brain/schema-convert-record.ts` is the fourth writer. A schema conversion run's quiet stamp writes the stamp of a stored
+     * chrono entry only when the family's own classifier finds nothing, and judges a rewrite before it hands it to `updateChrono` (whose check still
+     * runs). It is reached from the run module, never from a door.
      */
     const OWNS_IT = [
       'server/src/brain/write-validation.ts', 'server/src/brain/chrono.ts', 'server/src/brain/write-plan/plan-chrono.ts', 'server/src/brain/fork-keep.ts',
+      'server/src/brain/schema-convert-record.ts',
     ];
     const files = trackedSources(SERVER_CODE_ROOTS, { exclude: OWNS_IT });
 

@@ -31,6 +31,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './_strip-comments.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import * as pkg from '../../schema/dist/internal.js';
 
 const { conditionIssues, conversionStepIssues, typeRuleIssues } = pkg;
@@ -196,15 +197,10 @@ describe('the one judge, in the source', () => {
     assert.match(body, /\bprogramFor\(/, 'evaluateCondition compiles through programFor, the cache every rule evaluation shares');
     assert.match(body, /\bengineSelf\(/, 'and reads the record through engineSelf, as evaluateRules does');
     assert.doesNotMatch(body, /\bcompileRule\(|\bcel\.(parse|plan)\(/, 'it compiles nothing by hand');
-    const sites = [];
-    const walk = (dir) => {
-      for (const e of readdirSync(dir, { withFileTypes: true })) {
-        const p = join(dir, e.name);
-        if (e.isDirectory()) walk(p);
-        else if (p.endsWith('.ts')) for (const m of stripComments(readFileSync(p, 'utf8')).matchAll(/\bcompileRule\(/g)) sites.push(p.replace(/\\/g, '/'));
-      }
-    };
-    walk('server/src');
+    // Every server code root; the package's `rules.ts` is where `compileRule` is defined and is the save-time half, so it is set aside.
+    const sites = readTrackedSources(SERVER_CODE_ROOTS)
+      .filter(s => s.file !== 'schema/src/rules.ts')
+      .flatMap(s => [...stripComments(s.text).matchAll(/\bcompileRule\(/g)].map(() => s.file));
     assert.deepEqual(sites, ['server/src/spaces/schema-rules.ts'], 'the server compiles a rule in one place');
     const insideProgramFor = bodyOfFunction(rulesSrc, 'programFor');
     assert.match(insideProgramFor, /\bcompileRule\(/, 'and that place is programFor');

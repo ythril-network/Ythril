@@ -418,6 +418,7 @@ const SITES = [
   { file: 'server/src/db/restore.ts', sites: 2, kind: 'own-client', reason: 'a backup\'s records, 500 at a time, into a collection emptied for them: on its own MongoClient for the whole-database copy, and under the held space\'s act for a restore act' },
   { file: 'server/src/brain/write-plan/commit.ts', sites: 2, kind: 'request-capped', reason: 'one write plan: the items of one request (BULK_MAX_PER_TYPE per array, a 10 MiB body)' },
   { file: 'server/src/brain/read-spill-store.ts', sites: 1, kind: 'request-capped', reason: 'the pages of one spilled answer, which is cut at a stated size before it is stored' },
+  { file: 'server/src/brain/schema-convert-record.ts', sites: 1, kind: 'request-capped', reason: 'the quiet stamps of one page of a schema conversion run (SCHEMA_CONVERT_PAGE_SIZE records, or EDGES_PER_PAGE edges of one re-typed entity): each op is an id, a version, a stamp and one $set of the stamp' },
   { file: 'server/src/sync/linkage-check.ts', sites: 1, kind: 'request-capped', reason: 'one row of about 300 bytes per dangling end of ONE accepted page, a page being counted' },
   { file: 'server/src/sync/positions-owed.ts', sites: 1, kind: 'sliced', reason: 'the repair\'s positions of one chunk of rows: a space\'s count is the store\'s, so the write is sliced to one command each (`writeInOneCommands`)' },
   // The edges and links of the absorbed record moved out of the merge into the relink the fork resolve shares (`brain/relink-references.ts`): one site each, the

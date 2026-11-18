@@ -131,6 +131,12 @@ const UNBOUNDED_CALL_EXEMPTIONS = [
       + 'its own `maxTimeMS` (3 s) and an abort `signal`, and is never inside a scope; it writes nothing.',
   },
   {
+    methods: ['command'], files: ['server/src/quota/quota.ts'],
+    why: 'The storage measurement a file sync asks before it lands bytes, reached because the schema conversion watcher kicks a run whose first pass asks '
+      + 'one sync of each peer (bundle-284, design 5.3 step 0). The walk unit only kicks the run: `runInBackground` leaves the unit\'s scope '
+      + '(`outsideWriteBound`) and the sync leaves the pass\'s, so the measurement runs as it does in every sync cycle, never inside a walk\'s bound.',
+  },
+  {
     methods: ['command'], files: ['server/src/db/write-bound.ts'],
     why: 'The bound\'s own mechanism: after the backstop it finds the database\'s operation by its comment and kills it. It is how a bound ends, so '
       + 'it cannot be inside one.',

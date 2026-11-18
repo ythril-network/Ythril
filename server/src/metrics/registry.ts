@@ -1230,28 +1230,6 @@ export const reindexInProgress = new Gauge({
   registers: [register],
 });
 
-/**
- * What schema conversion runs did to each record they read (Q-746, `spaces/schema-convert-run.ts`): `stamped` (a conforming copy given the
- * run's fingerprint, quietly), `rewritten` (the steps changed it), `unconverted` (an item written), `moved` (another write landed first),
- * `edge_restamped` (an edge of a re-typed entity stamped again).
- */
-export const schemaConvertRecordsTotal = new Counter({
-  name: 'ythril_schema_convert_records_total',
-  help: 'Records a schema conversion run read, by what it did with each',
-  labelNames: ['outcome'] as const,
-  registers: [register],
-});
-/** The outcomes of {@link schemaConvertRecordsTotal}, the one list: each series starts at zero, and the run counts only a member of it. */
-export const SCHEMA_CONVERT_OUTCOMES = ['stamped', 'rewritten', 'unconverted', 'moved', 'edge_restamped'] as const;
-for (const outcome of SCHEMA_CONVERT_OUTCOMES) schemaConvertRecordsTotal.labels({ outcome }).inc(0);
-
-/** How many spaces have a schema conversion run that is not finished (0 when none). Set by the run module's watcher and starts. */
-export const schemaConvertRunsInProgress = new Gauge({
-  name: 'ythril_schema_convert_runs_in_progress',
-  help: 'Number of spaces with a schema conversion run going (0 when none)',
-  registers: [register],
-});
-
 // ── Storage (collected at scrape time) ──────────────────────────────────────
 
 /**
