@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A `merkle: true` network reports divergence while a member runs below 6.6.0 or was rolled back to 6.5: 6.5 hashes a stored `schemaFingerprint` | Upgrade or roll back every member together |
 | Records written before this release carry no `schemaFingerprint`; nothing backfills it | None; a record is stamped on its next write that conforms |
 | An importer below 6.6.0 skips the `schemaSnapshots` of a 6.6 export: the records land without their schema versions, which are then fetched from members or stay unheld | Import a 6.6 export into 6.6.0 or later to keep the versions |
+| A member below 6.6.0 keeps a schema vote's conversion steps, takes the schema and converts nothing | After it upgrades, run `POST /api/spaces/:id/schema-convert` on the types the change reached |
 
 ### Added
 
@@ -28,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Schema:** `GET /api/spaces/:id/schema-versions` and MCP `space_schema_versions` list a space's schema versions with record counts, read one (`fp`), or say what changed per type from one to another (`fp` and `against`); a peer-bound token sees only what the sync door would serve it.
 - **Schema:** `against: stamp` on `POST /api/spaces/:id/validate-schema` and MCP `schema_validate` judges each stored record by the version it carries, counting those it cannot in `skipped` (`unversioned`, `notHeld`, `unread`); `against` is echoed in every answer.
 - **Schema:** a type's history on the schema versions door and tool (`kind`, `type`, `fps`), `sameAs:<fp>` on the filter, the History dialog, a clock mark on types with records on an older definition, the drawer's Type definition row and the Brain chips and column.
+- **Schema:** `convertRecords` on `PATCH /api/spaces/:id` and MCP `schema_update` declares steps that convert stored records: rename a property, map an enum, rename or split a type. Each is checked against the schema before and after; a bad one refuses the save (`bad_conversion_step`).
+- **Schema:** after such a save each instance stamps the copies that already fit the new schema in place (no new version, nothing replicated) and rewrites the ones a step changes, in the background; a rewrite moves the record to the top of lists by change date and replicates it.
+- **Schema:** `POST` and `GET /api/spaces/:id/schema-convert` and MCP `space_schema_convert` and `space_schema_conversion` start a conversion toward the current schema (`knowledge: admin` and the space's admin right) and read how it went.
+- **Schema:** `GET /api/spaces/:id/schema-convert/items`, the one and bulk dismissals under it, and MCP `list_unconverted`, `dismiss_unconverted` and `dismiss_unconverted_shown` list and dismiss the records a conversion could not convert, naming fields and never values.
+- **Schema:** metrics `ythril_schema_convert_records_total` and `ythril_schema_convert_runs_in_progress`; audit events `schema.convert.start`, `schema.convert.run`, `unconverted.list`, `unconverted.dismiss` and `unconverted.dismiss_shown`.
 - **Import/export:** an admin space export carries `schemaSnapshots`, `{ fp, text, links }` for each schema version its records use and each one those link; one too large for an importer is left out, counted `schemaSnapshotsOmitted`.
 - **Import/export:** an import keeps each verified schema version as fetched, after its records, and skips one that is not; it answers `schemaSnapshots: { landed, held, refused }`, and its audit row counts `snapshotsLanded`, `snapshotsRefused` and `unreadArraysTotal`.
 - **Records:** a record carries `schemaFingerprint`, the schema it conformed to when it was written here or when it arrived: a conforming write stamps it, and its answer shows it; a non-conforming update, a redaction, a relink or a change of an edge end's type removes it. Recall hits omit it.
@@ -36,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sync:** `GET /api/sync/schema-snapshot`: a member fetches a schema version it lacks from the member that sent the stamped record; one built from a network the asker is not in answers `409 not_shared`.
 - **Sync:** metric `ythril_schema_snapshot_total`, with outcomes `removed` (the sweep), `imported` and `import_refused` (an admin import) beside the fetch's; audit event `file.retired_schema_file.sweep`.
 - **Sync:** a schema version every member that may hold it answered `unknown_fingerprint` for six rounds in a row is no longer asked for, said once in a warn line, until a record carrying it arrives from another member.
+- **Sync:** a schema vote carries its conversion steps, signed by the proposer, and shows them on the vote list before the cast; a member applies them only when the signature and the round agree, else it takes the schema and converts nothing.
+- **Sync:** a conversion a save or a vote started asks each peer it pulls from for one sync first; a copy another member already converted arrives converted and is not rewritten again.
 - **Files:** the file change feed, `GET /api/files/:spaceId/changes` and the MCP tool `file_changes`: the changes to a space's files after a cursor, in order; with no cursor it lists every file. An expired cursor answers `410 cursor_expired`.
 - **Files:** `filesAwaitingBytes` on REST stats and MCP `space_stats`: records whose bytes are missing here, which file counts leave out. The change feed gains reason `bytes_lost` and the audit log `file.absent_bytes.sweep`.
 - **Files:** the Brain page's Files tab, a view's Overview and the Danger zone show "+N awaiting bytes" beside the file count when some records wait for their bytes.
@@ -102,6 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Docs:** fixed: the integration guide names every parameter and answer field the probes found missing, among them `skipTlsVerify`, `merkle`, `superseded`, `mediaCeilings` and `temporary`.
 - **Docs:** changed: the contribution guide is replaced by a short dev guide (setup, building, tests); the README says Ythril takes no outside code and welcomes issues; Settings → Help lists the dev guide.
 - **Docs:** changed: the upgrading guide names the removal of records whose file bytes are gone, its timings and holds, and putting lost bytes back before upgrading.
+- **Docs:** added: the integration guide's Converting Records page (the steps, what a run does to a record, the Convert act, the unconverted list, the network case) and the upgrading note for members below 6.6.0.
 - **Build:** the build stops with one line naming the package and `run npm ci` when the install differs from package-lock.json or lacks a package the build needs, instead of failing with misleading type errors.
 - **Build:** the OIDC settings types moved out of `config/types.ts` into `config/types-oidc.ts`, which brings that file back under its size limit; no behaviour changes.
 - **Repository:** the contributor licence agreement, its signing workflow and the pull-request template are removed, and a standalone test fails if a guide, agreement or template for outside code returns.
@@ -111,6 +120,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web:** a document-processing setting an environment variable pins is shown locked on the Media processing page, and a save no longer sends it. Before, one pinned setting made every save on the page fail with no reason shown.
 - **Web:** a screen reader reads the token hint on the login page, and the password hint and mismatch message on the setup page, with their fields.
 - **Records:** `entityName`, `fromName` and `toName` on `POST /api/filter` and MCP `filter` narrow the caller's `filter` instead of replacing its `_id`, `$or`, `from` or `to`; the web client's fact list by ids and an entity name now answers their intersection.
+- **Records:** an edge update that changes its label no longer deletes a write that landed after the edge was read: it answers `412`, as a moved version does elsewhere. Before, the newer write was lost with a `200`.
 - **Spaces:** a search-index readiness check stops within a second when its database connection closes, instead of asking the closed connection for up to a minute.
 - **Spaces:** MCP `space_stats` answers `embedQueue` (`pending`, `processing`, `failed`: records not searchable yet) as REST stats does; the doors that count a space's records read one function and answer one number.
 - **Spaces:** `update_space` refused for a face width the space's stored descriptors rule out answers 409 and `Error: <sentence>` on MCP and `POST /api/update_space`, as `PATCH /api/spaces/:id` does; it read `Error: Error (409): …` with status 400.

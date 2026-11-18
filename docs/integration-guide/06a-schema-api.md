@@ -242,16 +242,12 @@ PATCH /api/spaces/:id
 ```
 
 `convertRecords` is the choice made with a schema change, never part of the schema: `{}` stamps the records that already conform and
-rewrites nothing, and `steps` (at most 50) rename a property (`renameProperty`), map the values of an enum (`mapEnum`), rename a type
-(`renameType`) or split a type by a condition (`splitType`). Each step names one `kind` and one type. It goes with a `meta`
-(`400` `convert_needs_meta` without one) and needs `knowledge: admin`, because it can rewrite every record of a type.
-
-Every step is held to the schema before the change and the schema after it, and a step the schema cannot honour refuses the whole
-save with `400` `bad_conversion_step` and the index of the step as `step`; nothing is written and the meta version is what it was. A
-renamed property's old name must be gone from the schema after the change. A step that is not a step, or more steps than the bound, is
-refused with the same code. On a space in a network the steps travel on the vote round beside the schema, signed by the proposer, and a
-member applies them only when that signature and the round's own change agree, else it takes the schema without them. MCP:
-`convertRecords` on `schema_update`, same parameter, refusals and rights.
+rewrites nothing, and `steps` rename a property, map the values of an enum, rename a type or split a type by a condition. It goes with a
+`meta` (`400` `convert_needs_meta` without one) and needs `knowledge: admin`, because it can rewrite every record of a type. A step the
+schema cannot honour refuses the whole save with `400` `bad_conversion_step` and the index of the step as `step`; nothing is written. MCP:
+`convertRecords` on `schema_update`, same parameter, refusals and rights. **The steps, a worked example of each, what a run does to a
+record, the Convert act, the list of records that could not be converted and the network case are on
+[Converting Records](06e-converting-records.md).**
 
 #### What a schema write answers on a space in more than one network
 
