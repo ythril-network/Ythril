@@ -8,7 +8,7 @@
  * Round state is config (`network.pendingRounds`), persisted via saveConfig — not in-memory — which
  * is why both the HTTP surfaces and the sync engine can safely drive conclusion.
  */
-import { getConfig } from '../config/loader.js';
+import { getConfig, saveConfig } from '../config/loader.js';
 import { revokePeerCredentialsIfOrphaned } from '../auth/tokens.js';
 import { log, peerList, peerText, refusalOfParse } from '../util/log.js';
 import { convertRecordsSignedByProposer } from '../util/signing.js';
@@ -30,7 +30,7 @@ import { settleSpaceAct } from '../spaces/apply-wipe-round.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { metaChangeNote, queueGeneratedNote } from './change-notes.js';
-import { isSpaceActRound, roundPastDeadline } from '../networks/round-state.js';
+import { isSpaceActRound, roundPassedUnvetoed, roundPastDeadline } from '../networks/round-state.js';
 import { roundElectorate, votersOf } from '../networks/round-electorate.js';
 import { recordRoundOutcome } from '../networks/round-outcomes.js';
 
@@ -444,9 +444,9 @@ export type SchemaConvertStarted =
   | { ok: false; status: number; code: string; error: string };
 
 /**
- * The three functions of the conversion run module this one calls, handed in by the module that loads both (`spaces/meta-update.ts`, which every
- * schema door loads): the run module reaches this one through the sync engine, so this one naming it, statically, dynamically or by a type, would
- * put the run module into the server's largest import cycle, whose size is held to a ceiling. Method syntax, so the run module's own narrower
+ * The functions of the conversion run module this one calls, handed in by a module the server always loads and no member of the large import cycle
+ * reaches (`api/spaces.ts`): the run module reaches this one through the sync engine, so this one naming it, statically, dynamically or by a type,
+ * would put the run module into the server's largest import cycle, whose size is held to a ceiling. Method syntax, so the run module's own narrower
  * parameter types are accepted as they are.
  */
 export interface SchemaConvertRuns {
@@ -455,6 +455,10 @@ export interface SchemaConvertRuns {
   typesToConvert(input: {
     changedTypes: readonly string[]; droppedTypes: readonly string[]; inNetwork: boolean; rulesBefore?: unknown; rulesAfter?: unknown; steps?: readonly ConversionStep[];
   }): SchemaConvertTypeRef[];
+  /** The run of a space as it stands (its sources name the rounds it was started for), or null when it never had one. Writes nothing. */
+  status(spaceId: string): Promise<{ toFp: string; sources: readonly { roundId?: string }[] } | null>;
+  /** Arm the watcher, whose tick starts every round's run still owed: after a start that failed, so it is tried again. */
+  wake(): void;
 }
 
 let convertRuns: SchemaConvertRuns | undefined;
@@ -478,7 +482,7 @@ const failureText = (err: unknown): string => peerText(err instanceof Error ? er
 
 /** A start that threw, reported through the shared reporter and said as an answer. */
 function notStarted(spaceId: string, err: unknown): SchemaConvertStarted {
-  reportSpaceFailure(SCHEMA_CONVERT_START_STEP, spaceId, err, { when: 'with the next schema save or passed round' });
+  reportSpaceFailure(SCHEMA_CONVERT_START_STEP, spaceId, err, { when: 'next tick for a passed round, with the next save for a save' });
   return { ok: false, status: NOT_STARTED_STATUS, code: 'schema_convert_not_started', error: failureText(err) };
 }
 
@@ -538,35 +542,82 @@ const resolvedMeta = (meta: Partial<SpaceMeta> | undefined): ConversionMeta | un
  *   reach Review, and this member rewrites nothing;
  * - `none`: no run; an unfinished one is restarted toward the schema the round left, as any door that takes no steps does.
  *
- * **Once per round on this member**, by the mark a passed act is made idempotent with (`appliedHere`, local state never taken from or sent to a peer),
- * written by its one writer (`settleSpaceAct`) when the run is started and saved with the conclusion, so a round concluded again, here or after a
- * restart, starts nothing more.
+ * **Owed from the moment the round passes here, and started exactly once** (decision 12: an act a vote passed is the instance's to finish). The round
+ * is marked done (`appliedHere`, by its one writer `settleSpaceAct`, saved) only AFTER its run document exists; until then it is owed, and the boot
+ * resume and the watcher's tick start every round still owed ({@link startOwedRoundConversions}). Each start first asks whether the run already
+ * names the round, in the space's turn, so a crash after the run document and before the mark settles the round and starts nothing more. A start
+ * that fails is reported and wakes the watcher, which tries it again. While one is in flight, a second conclusion or a tick does not start another.
  */
 function startRoundConversion(net: NetworkConfig, round: VoteRound, plan: Extract<MetaRoundPlan, { ok: true }>, before: SpaceMeta | undefined): void {
-  if (round.appliedHere === true) return;
+  if (round.appliedHere === true || startingRounds.has(round.roundId)) return;
   const after = getConfig().spaces.find(s => s.id === plan.localSpace)?.meta;
   const held: HeldForConvert = { before: resolvedMeta(before), after: resolvedMeta(after) };
   const decision = decideRoundConvertRecords(net, round, plan, held);
   if (decision.schema !== 'apply') return;
   if (decision.convert.state === 'none') { void restartSchemaConvertInTurn([plan.localSpace]); return; }
-  settleSpaceAct(net, round, 'completed');
   const steps = decision.convert.state === 'apply' ? [...(decision.convert.convertRecords.steps ?? [])] : [];
   const stepsRefused = decision.convert.state === 'refused' ? [{ step: null, reason: decision.convert.reason }] : [];
-  let types: SchemaConvertTypeRef[];
-  try {
-    types = runsOrThrow().typesToConvert({
-      changedTypes: round.changedTypes ?? [], droppedTypes: [], inNetwork: true, rulesBefore: before?.rules, rulesAfter: after?.rules, steps,
-    });
-  } catch (err) {
-    notStarted(plan.localSpace, err);
-    return;
+  const { roundId } = round;
+  const spaceId = plan.localSpace;
+  startingRounds.add(roundId);
+  const started = convertTurns.run(spaceId, async (): Promise<SchemaConvertStarted> => {
+    try {
+      const runs = runsOrThrow();
+      // Started already (a crash after the run document and before the round was marked): settle the round, start nothing more.
+      const existing = await runs.status(spaceId);
+      if (existing?.sources.some(s => s.roundId === roundId)) return { ok: true, state: 'started', run: { toFp: existing.toFp } };
+      const types = runs.typesToConvert({
+        changedTypes: round.changedTypes ?? [], droppedTypes: [], inNetwork: true, rulesBefore: before?.rules, rulesAfter: after?.rules, steps,
+      });
+      return await runs.start({
+        spaceId, types, steps, ...(stepsRefused.length > 0 ? { stepsRefused } : {}), source: { kind: 'round', roundId }, before: beforeOfRound(round, held.before),
+      });
+    } catch (err) {
+      return notStarted(spaceId, err);
+    }
+  }).then((out) => {
+    if (out.ok) markRoundConverted(net.id, roundId);
+    else convertRuns?.wake();
+    return out;
+  }).finally(() => { startingRounds.delete(roundId); roundConvertStarts.delete(roundId); });
+  roundConvertStarts.set(roundId, started);
+}
+
+/** The rounds whose run start is in flight here: neither a second conclusion nor a tick starts another while one is. */
+const startingRounds = new Set<string>();
+
+/** Mark the round `roundId` of network `netId` done here, in the live config, and save it: its run document exists. */
+function markRoundConverted(netId: string, roundId: string): void {
+  const cfg = getConfig();
+  const net = cfg.networks.find(n => n.id === netId);
+  const round = net?.pendingRounds.find(r => r.roundId === roundId);
+  if (!net || !round || round.appliedHere === true) return;
+  settleSpaceAct(net, round, 'completed');
+  saveConfig(cfg);
+}
+
+/**
+ * Start the run of every passed `meta_change` round that carries steps and is still owed here (not marked done, no start in flight): what the boot
+ * resume and the watcher's tick ask, so a round whose start crashed or failed is started at the next boot or tick. A round this member cannot apply
+ * (not carried here, or a schema it cannot read) owes nothing and is settled. Answers how many runs are owed (started now or in flight).
+ */
+export function startOwedRoundConversions(): number {
+  const cfg = getConfig();
+  let owed = 0;
+  let settled = false;
+  for (const net of cfg.networks ?? []) {
+    for (const round of net.pendingRounds ?? []) {
+      if (round.type !== 'meta_change' || round.convertRecords === undefined || round.appliedHere === true || !roundPassedUnvetoed(round)) continue;
+      if (startingRounds.has(round.roundId)) { owed++; continue; }
+      const plan = planPassedMetaChange(net, round);
+      if (plan === null || !plan.ok) { settleSpaceAct(net, round, plan === null ? 'not-carried' : 'absent'); settled = true; continue; }
+      // The schema before the round landed is not kept; the meta now stands in for it (it holds every type the round left alone).
+      startRoundConversion(net, round, plan, cfg.spaces.find(s => s.id === plan.localSpace)?.meta);
+      if (startingRounds.has(round.roundId)) owed++;
+    }
   }
-  const started = startSchemaConvertInTurn({
-    spaceId: plan.localSpace, types, steps, ...(stepsRefused.length > 0 ? { stepsRefused } : {}),
-    source: { kind: 'round', roundId: round.roundId }, before: beforeOfRound(round, held.before),
-  });
-  roundConvertStarts.set(round.roundId, started);
-  void started.then(() => { roundConvertStarts.delete(round.roundId); });
+  if (settled) saveConfig(cfg);
+  return owed;
 }
 
 // ── Notify ejected member after a remove vote passes ──────────────────────
