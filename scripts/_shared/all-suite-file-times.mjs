@@ -4,7 +4,8 @@
  *
  * ## What it prevents
  *
- * The slow-file check names every test file over the time budget from a `{ files: { path: ms } }` snapshot. That snapshot was the pure job's
+ * A slow-file check, run after a merge by the development flow and not held in this repository, names every test file over the time
+ * budget from a `{ files: { path: ms } }` snapshot. That snapshot was the pure job's
  * alone, so the database, instance, integration, sync, red-team and client files, which are 14 of the 15 slowest, were never named. Built
  * for every job, the ways it goes wrong are closed here, none left to the caller:
  *

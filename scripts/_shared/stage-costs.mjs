@@ -40,7 +40,8 @@ export const FILE_TIMES_FILE = 'file-times.json';
 
 /**
  * The every-suite file-times snapshot's name in the results folder: the same shape as {@link FILE_TIMES_FILE}, for EVERY test job. The
- * preflight does not read it (it starts its pure files by the pure snapshot); the slow-test-file check does
+ * preflight does not read it (it starts its pure files by the pure snapshot), and nothing in this repository does: it is written for a
+ * check that reads a `{ files: { path: ms } }` snapshot and that the development flow runs after a merge
  * (`scripts/_shared/all-suite-file-times.mjs` says what it holds).
  */
 export const FILE_TIMES_ALL_FILE = 'file-times-all.json';
