@@ -75,15 +75,32 @@ const FIXTURE = {
   // a file that is text-only and says @ci-only: the set never holds it
   'testing/standalone/ci-only.test.js': "/**\n * @ci-only\n */\nimport { join } from 'node:path';\nvoid join;\n",
   // fixture text that holds import lines inside a template literal: data, not edges
+  // sweep F2: a process that is visibly git and nothing else is text; every other way a module can start one is not
+  'testing/standalone/git-shell.test.js': "import { execSync } from 'node:child_process';\nvoid execSync('git ls-files');\n",
+  'testing/standalone/spawn-alias.test.js': "import { spawnSync as run } from 'node:child_process';\nvoid run(process.execPath, ['x.js']);\n",
+  'testing/standalone/spawn-computed.test.js': "import cp from 'node:child_process';\nconst name = 'spawn' + 'Sync';\nvoid cp[name](process.execPath, []);\n",
+  'testing/standalone/spawn-never-called.test.js': "import { execFileSync } from 'node:child_process';\nvoid execFileSync.name;\n",
+  'testing/standalone/git-then-node.test.js': "import { execSync } from 'node:child_process';\nvoid execSync('git status && node build.mjs');\n",
+  'testing/standalone/spawn-destructured.test.js': "const { spawn: s } = await import('node:child_process');\nvoid s(process.execPath);\n",
+  // sweep F3: a build path assembled from parts, and a walk that can reach a build or an install, are not text; a listing of a docs folder is
+  'testing/standalone/join-dist.test.js': "import { join } from 'node:path';\nconst CLIENT = join(process.cwd(), 'client');\nconst DIST = join(CLIENT, 'dist');\nvoid DIST;\n",
+  'testing/standalone/walk-recursive.test.js': "import { readdirSync } from 'node:fs';\nvoid readdirSync('anywhere', { recursive: true });\n",
+  'testing/standalone/walk-client.test.js': "import { readdirSync } from 'node:fs';\nimport { join } from 'node:path';\nvoid readdirSync(join(process.cwd(), 'client'));\n",
+  'testing/standalone/docs-listing.test.js': "import { readdirSync } from 'node:fs';\nimport { join } from 'node:path';\nvoid [readdirSync('docs'), join('docs', 'decisions', 'x.md')];\n",
+  // sweep F4: every import statement is read, not one per line
+  'testing/standalone/two-imports.test.js': "import { x } from './_helper.mjs'; import { MongoClient } from 'mongodb';\nvoid [x, MongoClient];\n",
+  'testing/standalone/two-imports-text.test.js': "import { x } from './_helper.mjs'; import { join } from 'node:path';\nvoid [x, join];\n",
   'testing/standalone/template.test.js': "const fixture = `\nimport { spaceCollection } from './x.js';\nimport y from '../../server/src/z.ts';\n`;\nvoid fixture;\n",
 };
 
 /** What is text-only among them, and what is not, with the word the reason must carry where the rule names one. */
-const TEXT = ['text', 'chain', 'comment', 'tracked-js', 'git'];
+const TEXT = ['text', 'chain', 'comment', 'tracked-js', 'git', 'git-shell', 'docs-listing', 'two-imports-text'];
 const NOT_TEXT = {
   'dist-import': /server|dist/, 'src-import': /server/, 'named-server': /dist/, 'named-client': /dist/, 'named-schema': /dist/,
   'named-modules': /node_modules/, package: /typescript|package/, require: /./, 'spawn-node': /./, 'git-and-node': /./,
   fetch: /fetch/, dynamic: /./, deep: /dist/, unresolved: /no-such-file/, db: /./, instance: /./,
+  'spawn-alias': /process/, 'spawn-computed': /process/, 'spawn-never-called': /process/, 'git-then-node': /process/, 'spawn-destructured': /process/,
+  'join-dist': /dist/, 'walk-recursive': /recursive/, 'walk-client': /client/, 'two-imports': /mongodb|package/,
 };
 
 describe('the classifier, on a scratch git repository (one row per rule)', () => {
