@@ -35,6 +35,7 @@ const { SPACE_FIELD_RIGHTS } = await import('../../server/dist/auth/space-field-
 const WRITE_ONLY = new Map([
   ['typeSchemasMode', 'applied while the type map is written and not stored as a setting: the stored map is read through `meta`'],
   ['targetNetwork', 'an instruction to send a definition to a network, not a stored setting'],
+  ['convertRecords', 'the choice made with a schema change (Q-745): carried by a network round and handed to the run, stored in no space and in no meta; the run it starts is read through its own status'],
 ]);
 
 /** Settings the REST projection reports and `list_spaces` does not, until a ticket gives `list_spaces` them. */
