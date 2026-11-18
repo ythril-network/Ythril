@@ -267,9 +267,9 @@ const REPORTS_THE_STORE = new Map([
   // `sync/trigger.ts`'s catch — answers through `sendCaughtFailure` like every route catch.
   ['POST /api/networks/:id/sync?wait=true', 'a waited sync trigger reports the cycle: a member that failed on the store is counted in `errors`'],
   ['POST /api/networks/peers/:peerId/sync?wait=true', 'a waited peer sync reports the cycle: a member that failed on the store is counted in `errors`'],
-  // The listing is the Brain overview's load; `counts` is an optional extra per space (`Promise.allSettled`), so a
-  // space whose count failed is listed without one rather than failing the whole listing.
-  ['GET /api/spaces?counts=true', 'the space listing with optional counts: a space whose count failed is listed without them'],
+  // The listing is the Brain overview's load; `counts` is an optional extra per space, so a space whose count failed is listed without one
+  // and named in `countsIncomplete` (bundle-38, Q-332) rather than failing the whole listing. `REPORTS_ITS_FAILURE` below holds it to saying so.
+  ['GET /api/spaces?counts=true', 'the space listing with optional counts: a space whose count failed is listed without them and named in `countsIncomplete`'],
   // Asked since the probes find a stored file (bundle-30 I14): an empty directory never reached the store.
   // The listing REPORTS the failure: it answers 200 with the entries and names the metadata read that failed in `metadataIncomplete`
   // (a closed vocabulary of reasons, never the driver's text), as `usageIncomplete` does for a space's usage (bundle-70, Q-341).
@@ -283,6 +283,17 @@ const REPORTS_THE_STORE = new Map([
  * reports and whose check is missing here is the same slip as a door that answers around the store with no reason.
  */
 const REPORTS_ITS_FAILURE = new Map([
+  ['GET /api/spaces?counts=true', (a) => {
+    let body; try { body = JSON.parse(a.raw); } catch { return `not JSON: ${a.raw.slice(0, 80)}`; }
+    if (a.status !== 200) return `status ${a.status}, not the listing`;
+    const failed = body?.countsIncomplete;
+    if (!Array.isArray(failed) || failed.length === 0) return `the listing answered 200 and does not say its counts failed (countsIncomplete ${JSON.stringify(failed)})`;
+    const listed = new Set((body.spaces ?? []).map(s => s.id));
+    const notListed = failed.filter(id => !listed.has(id));
+    if (notListed.length) return `countsIncomplete names spaces the listing does not hold: ${JSON.stringify(notListed)}`;
+    const counted = (body.spaces ?? []).filter(s => failed.includes(s.id) && Object.hasOwn(s, 'counts')).map(s => s.id);
+    return counted.length ? `spaces named in countsIncomplete carry counts: ${JSON.stringify(counted)}` : null;
+  }],
   ['GET /api/files/:spaceId', (a) => {
     let body; try { body = JSON.parse(a.raw); } catch { return `not JSON: ${a.raw.slice(0, 80)}`; }
     if (a.status !== 200) return `status ${a.status}, not the listing`;

@@ -24,7 +24,7 @@ import { checkMetaPrecondition, preconditionErrorBody } from '../spaces/meta-pre
 import { gatherCompletenessFacts, scoreCompleteness } from '../spaces/completeness.js';
 import { measureUsage, usageIsComplete } from '../quota/quota.js';
 import { measureSpaceUsage } from '../spaces/space-usage.js';
-import { countRecords } from '../spaces/space-counts.js';
+import { countRecordsOfSpaces } from '../spaces/space-counts.js';
 import { readSpacesOfRequest } from '../spaces/read-scope.js';
 import { spaceMetaAnswer, META_RESOLVE_DEFAULT } from '../spaces/space-meta-answer.js';
 import { isNetworkSyncing } from '../sync/engine.js';
@@ -159,15 +159,11 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
 
   // Optional per-space entity/fact/edge/chrono counts (?counts=true)
   const includeCounts = req.query['counts'] === 'true';
-  let countsBySpaceId: Record<string, { facts: number; entities: number; edges: number; chrono: number }> = {};
-  if (includeCounts) {
-    const countResults = await Promise.allSettled(
-      visibleSpaces.map(async s => ({ id: s.id, counts: await countRecords(readSpacesOfRequest(req, s.id)) })),
-    );
-    for (const r of countResults) {
-      if (r.status === 'fulfilled') countsBySpaceId[r.value.id] = r.value.counts;
-    }
-  }
+  // A space whose count failed is listed with no `counts` and named in `countsIncomplete` beside the list (Q-332): never
+  // answered as an empty space, and never failing the listing. MCP `list_spaces` answers the same through the same function.
+  const counted = includeCounts
+    ? await countRecordsOfSpaces(visibleSpaces.map(s => ({ id: s.id, memberIds: readSpacesOfRequest(req, s.id) })))
+    : undefined;
 
   // Read once per request; applied per space below, inside the per-token visible-spaces map, so a scoped token is
   // told about its own spaces only. Derived, never stored and never replicated: it would be stale the moment
@@ -209,7 +205,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
     ...(videoAnalysis ? { videoAnalysis } : {}),
     ...(textAnalysis ? { textAnalysis } : {}),
     ...(unknownWriteFields ? { unknownWriteFields } : {}),
-    ...(includeCounts && countsBySpaceId[id] ? { counts: countsBySpaceId[id] } : {}),
+    ...(counted?.countsBySpaceId[id] ? { counts: counted.countsBySpaceId[id] } : {}),
     };
   });
   // Include storage usage summary when quota is configured
@@ -253,7 +249,7 @@ spacesRouter.get('/', globalRateLimit, requireAuth, async (req, res) => {
   };
   // The ids a pre-6.0 proxy reserved: told to an instance admin only (a create or join dialog checks a chosen id against them before it submits).
   const retiredSpaceIds = isInstanceAdmin(req.authToken ?? {}) ? [...(cfg.retiredSpaceIds ?? [])] : undefined;
-  res.json({ spaces, docExtractionCeiling, mediaCeilings, ...(storage ? { storage } : {}), ...(retiredSpaceIds ? { retiredSpaceIds } : {}) });
+  res.json({ spaces, ...(counted && counted.countsIncomplete.length > 0 ? { countsIncomplete: counted.countsIncomplete } : {}), docExtractionCeiling, mediaCeilings, ...(storage ? { storage } : {}), ...(retiredSpaceIds ? { retiredSpaceIds } : {}) });
 });
 
 // POST /api/spaces
