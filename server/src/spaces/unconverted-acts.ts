@@ -44,10 +44,17 @@ import { readStoredById } from '../db/read-by-id.js';
 import { NAME_QUOTED, peerText, refusalOfParse } from '../util/log.js';
 import { unknownSpaceAnswer } from './unknown-space.js';
 
+/** The statuses the acts answer: the contract both doors carry. */
+const OK = 200;
+const BAD_REQUEST = 400;
+const FORBIDDEN = 403;
+const NOT_FOUND = 404;
+const GONE = 410;
+
 /** What an act answers: a body, or a refusal with its status and code. */
 export type UnconvertedActResult =
-  | { status: 200; body: Record<string, unknown> }
-  | { status: 400 | 403 | 404 | 410; error: string; code?: string };
+  | { status: typeof OK; body: Record<string, unknown> }
+  | { status: typeof BAD_REQUEST | typeof FORBIDDEN | typeof NOT_FOUND | typeof GONE; error: string; code?: string };
 
 /** Who is asking: the rights the rung is judged from (`null` or absent: no matrix, no rung) and the door, whose byte-budget default applies. */
 export interface UnconvertedCaller {
@@ -125,7 +132,7 @@ function refusedBefore(spaceId: string, caller: UnconvertedCaller, needs: 'read'
   const unknown = unknownSpaceAnswer(null, spaceId);
   if (unknown) return { status: unknown.status, error: unknown.body.error, ...(unknown.body.code ? { code: unknown.body.code } : {}) };
   if (!caller.rights || !holdsRung(caller.rights, spaceId, 'knowledge', needs)) {
-    return { status: 403, error: caller.rights ? rungRefusal(needs, 'knowledge', spaceId) : rungRefusal(needs, 'knowledge'), code: RUNG };
+    return { status: FORBIDDEN, error: caller.rights ? rungRefusal(needs, 'knowledge', spaceId) : rungRefusal(needs, 'knowledge'), code: RUNG };
   }
   return null;
 }
@@ -144,17 +151,17 @@ export async function listUnconvertedAct(spaceId: string, params: Record<string,
   if (!parsed.success) {
     const refusal = refusalOfParse(parsed.error);
     const field = String(refusal.issues[0]?.path[0] ?? '');
-    return { status: 400, error: refusal.error, code: FILTER_CODES[field] ?? BAD_KIND };
+    return { status: BAD_REQUEST, error: refusal.error, code: FILTER_CODES[field] ?? BAD_KIND };
   }
   const { kind, type, status } = parsed.data;
   const listed = await listUnconvertedItems(spaceId, {
     skip: params['skip'], limit: params['limit'], maxChars: params['maxChars'], maxBytes: params['maxBytes'], maxTokens: params['maxTokens'],
     status: status ?? 'open', ...(kind !== undefined ? { kind } : {}), ...(type !== undefined ? { type } : {}),
   }, caller.transport);
-  if (!listed.ok) return { status: 400, error: listed.error, code: BAD_PAGING };
+  if (!listed.ok) return { status: BAD_REQUEST, error: listed.error, code: BAD_PAGING };
   const summaries = await summariesOf(spaceId, listed.items);
   return {
-    status: 200,
+    status: OK,
     body: {
       items: listed.items.map(item => rowOf(item, summaries.get(`${item.kind}\u0000${item.recordId}`))),
       ...listed.fields,
@@ -172,11 +179,11 @@ export async function dismissUnconvertedAct(spaceId: string, itemId: unknown, ca
   const before = refusedBefore(spaceId, caller, 'write');
   if (before) return before;
   if (typeof itemId !== 'string' || itemId === '' || itemId.length > ITEM_ID_MAX) {
-    return { status: 400, error: `itemId must be the id of an unconverted item: a text of at most ${ITEM_ID_MAX} characters, as \`list_unconverted\` lists it`, code: BAD_ITEM_ID };
+    return { status: BAD_REQUEST, error: `itemId must be the id of an unconverted item: a text of at most ${ITEM_ID_MAX} characters, as \`list_unconverted\` lists it`, code: BAD_ITEM_ID };
   }
   const item = await dismissUnconvertedItem(spaceId, itemId);
   if (!item) {
-    return { status: 404, error: `Space '${spaceSentence(spaceId)}' holds no unconverted item '${peerText(itemId, { max: NAME_QUOTED })}'`, code: ITEM_NOT_FOUND };
+    return { status: NOT_FOUND, error: `Space '${spaceSentence(spaceId)}' holds no unconverted item '${peerText(itemId, { max: NAME_QUOTED })}'`, code: ITEM_NOT_FOUND };
   }
-  return { status: 200, body: { item: rowOf(item) } };
+  return { status: OK, body: { item: rowOf(item) } };
 }
