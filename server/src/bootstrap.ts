@@ -228,4 +228,9 @@ export async function startConfiguredInstanceServices(): Promise<void> {
   // every configured start runs this function — a first run included — where the database phase can be skipped.
   const { resumeReindexRuns } = await import('./brain/reindex.js');
   void resumeReindexRuns().catch(err => log.warn('Reindex: could not resume runs:', err));
+
+  // Schema conversion runs a restart cut short (Q-746): here, beside the reindex resume, for the same reason. Each space is its own unit of the
+  // walk inside, so a space that cannot be read is reported there and retried by the watcher's tick; nothing it does is awaited by the boot.
+  const { resumeSchemaConvertRuns } = await import('./spaces/schema-convert-run.js');
+  void resumeSchemaConvertRuns().catch(err => log.warn('Schema conversion: could not resume runs:', err));
 }
