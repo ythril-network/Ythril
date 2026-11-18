@@ -33,7 +33,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { clearActEntries, resetRunnerForTest, untilRunnerIdle } from './_space-act-harness.mjs';
-import { restoreModules, takeBackup, restoreAsActs, restoreEntries, startRestoreActs, settleRestoreActs } from './_restore-act.mjs';
+import { restoreModules, takeBackup, restoreAsActs, restoreEntries, startRestoreActs, settleRestoreActs, servingOnly } from './_restore-act.mjs';
 import {
   loadSpaceIndexDeclaration, requireSpaceIndexDeclaration, indexesOfSpace, buildReferenceSpace, specDifference, indexId,
 } from './_space-index-declaration.mjs';
@@ -63,12 +63,14 @@ async function seed(space) {
 }
 
 let restoredOnce;
-/** One restore of every space from one backup, run to its end; memoised, so two cases read one restore. */
-function restoreEverySpace() {
+/** One restore of the space the first two cases read (`restored`) from one backup, run to its end; memoised, so two cases read one restore. */
+function restoreTheReadSpace() {
   restoredOnce ??= (async () => {
     const backup = await takeBackup(SUITE, `all-${Date.now()}`);
-    await restoreAsActs(mods, { backupId: backup.id });
-    for (const r of await settleRestoreActs(mods.runner, mods.loader)) assert.equal(r.ok, true, `a restore act did not complete: ${JSON.stringify(r)}`);
+    await servingOnly(mods.loader, ['restored'], async (leaveOut) => {
+      await restoreAsActs(mods, { backupId: backup.id, leaveOut });
+      for (const r of await settleRestoreActs(mods.runner, mods.loader)) assert.equal(r.ok, true, `a restore act did not complete: ${JSON.stringify(r)}`);
+    });
     return indexesOfSpace(db, 'restored');
   })();
   return restoredOnce;
@@ -104,7 +106,7 @@ describe('every declared space index stands after a restore, and a unique one th
 
   it('a restored space carries every index its builders put on a fresh space, the TTL indexes included, and every declared one', T, async () => {
     assert.ok(reference.size >= DECLARED_FLOOR, `the reference space carries ${reference.size} indexes: the builders read as not having run`);
-    const restored = await restoreEverySpace();
+    const restored = await restoreTheReadSpace();
     const missing = differencesAgainst(reference, restored, { optional: [OPTIONAL] });
     assert.deepEqual(missing, [], `a restore left the space without indexes its builders put on a fresh one: ${missing.join('; ')}`);
     const declared = await requireSpaceIndexDeclaration(assert);
@@ -113,7 +115,7 @@ describe('every declared space index stands after a restore, and a unique one th
   });
 
   it('a fresh initSpace plus the background pass, a restored space and the declaration hold the same indexes', T, async () => {
-    const restored = await restoreEverySpace();
+    const restored = await restoreTheReadSpace();
     const collections = new Set([...passOnly.values()].map(i => i.suffix));
     assert.ok(collections.size >= COLLECTION_FLOOR, `the fresh space has indexes on ${collections.size} collections: the read is broken`);
     const declaration = await loadSpaceIndexDeclaration();
@@ -139,31 +141,35 @@ describe('every declared space index stands after a restore, and a unique one th
     const fault = failIndexBuild(Object.getPrototypeOf(db.collection('x')));
     const findings = [];
     try {
-      for (const [id, { suffix, spec }] of unique) {
-        resetRunnerForTest(mods.runner); clearActEntries(mods.loader);
-        const coll = `broken_${suffix}`;
-        const backup = await takeBackup(SUITE, `unique-${suffix}-${spec.name}-${Date.now()}`);
-        fault.fail(coll, spec.name, refusal);
-        await restoreAsActs(mods, { backupId: backup.id });
-        const results = await Promise.all(startRestoreActs(mods.runner, mods.loader));
-        const fired = fault.fired();
-        fault.clear();
-        const mine = results.find(r => r.localId === 'broken');
-        const entry = restoreEntries(mods.loader).find(e => e.localId === 'broken');
-        if (fired === 0) { findings.push(`${id}: the restore never built it`); continue; }
-        if (mine?.ok !== false) { findings.push(`${id}: the restore completed with its build refused`); continue; }
-        if (entry?.state !== 'owed' || !entry.retryAt || entry.needsAbandon) findings.push(`${id}: the failed act is not owed with a retry clock (${JSON.stringify(entry)})`);
-        const words = `${mine.error ?? ''} ${mine.cause?.message ?? ''}`;
-        if (!words.includes(spec.name)) findings.push(`${id}: the failure does not name the index (${words.trim().slice(0, 200)})`);
-        const write = await writers.fact.saveFact('broken', 'while owed', [], [], undefined, undefined, 'note').then(() => 'taken', () => 'refused');
-        if (write !== 'refused') findings.push(`${id}: the space took a local write while its restore is owed`);
-        const at = Date.parse(entry?.retryAt ?? new Date().toISOString()) + 1000;
-        await mods.runner.retryOwedSpaceActs(at);
-        await untilRunnerIdle(mods.runner, mods.loader, { now: at });
-        if (restoreEntries(mods.loader).some(e => e.localId === 'broken')) findings.push(`${id}: the retry did not complete the restore`);
-        const now = (await indexesOfSpace(db, 'broken')).get(indexId(suffix, spec.name));
-        if (!now || specDifference(spec, now.spec).length) findings.push(`${id}: after the retry the index is ${now ? `different (${JSON.stringify(now.spec)})` : 'missing'}`);
-      }
+      // Only `broken` is read, so only `broken` is restored, from one backup: each restore puts `broken` back to that backup (the retry
+      // below completes it), so every index starts from the same space.
+      await servingOnly(mods.loader, ['broken'], async (leaveOut) => {
+        const backup = await takeBackup(SUITE, `unique-${Date.now()}`);
+        for (const [id, { suffix, spec }] of unique) {
+          resetRunnerForTest(mods.runner); clearActEntries(mods.loader);
+          const coll = `broken_${suffix}`;
+          fault.fail(coll, spec.name, refusal);
+          await restoreAsActs(mods, { backupId: backup.id, leaveOut });
+          const results = await Promise.all(startRestoreActs(mods.runner, mods.loader));
+          const fired = fault.fired();
+          fault.clear();
+          const mine = results.find(r => r.localId === 'broken');
+          const entry = restoreEntries(mods.loader).find(e => e.localId === 'broken');
+          if (fired === 0) { findings.push(`${id}: the restore never built it`); continue; }
+          if (mine?.ok !== false) { findings.push(`${id}: the restore completed with its build refused`); continue; }
+          if (entry?.state !== 'owed' || !entry.retryAt || entry.needsAbandon) findings.push(`${id}: the failed act is not owed with a retry clock (${JSON.stringify(entry)})`);
+          const words = `${mine.error ?? ''} ${mine.cause?.message ?? ''}`;
+          if (!words.includes(spec.name)) findings.push(`${id}: the failure does not name the index (${words.trim().slice(0, 200)})`);
+          const write = await writers.fact.saveFact('broken', 'while owed', [], [], undefined, undefined, 'note').then(() => 'taken', () => 'refused');
+          if (write !== 'refused') findings.push(`${id}: the space took a local write while its restore is owed`);
+          const at = Date.parse(entry?.retryAt ?? new Date().toISOString()) + 1000;
+          await mods.runner.retryOwedSpaceActs(at);
+          await untilRunnerIdle(mods.runner, mods.loader, { now: at });
+          if (restoreEntries(mods.loader).some(e => e.localId === 'broken')) findings.push(`${id}: the retry did not complete the restore`);
+          const now = (await indexesOfSpace(db, 'broken')).get(indexId(suffix, spec.name));
+          if (!now || specDifference(spec, now.spec).length) findings.push(`${id}: after the retry the index is ${now ? `different (${JSON.stringify(now.spec)})` : 'missing'}`);
+        }
+      });
     } finally {
       fault.restore();
     }
@@ -184,22 +190,26 @@ describe('every declared space index stands after a restore, and a unique one th
     const fault = failIndexBuild(Object.getPrototypeOf(db.collection('x')));
     const findings = [];
     try {
-      for (const ix of SWEEP_INDEXES) {
-        resetRunnerForTest(mods.runner); clearActEntries(mods.loader);
-        const suffix = SPACE_COLLECTIONS[ix.part];
-        const name = spaceIndexName(ix);
-        const backup = await takeBackup(SUITE, `sweep-${suffix}-${name}-${Date.now()}`);
-        fault.fail(`broken_${suffix}`, name, refusal);
-        await restoreAsActs(mods, { backupId: backup.id });
-        const results = await settleRestoreActs(mods.runner, mods.loader);
-        const fired = fault.fired();
-        fault.clear();
-        if (fired === 0) { findings.push(`${suffix}:${name}: the restore never built it`); continue; }
-        if (results.some(r => r.ok !== true)) { findings.push(`${suffix}:${name}: the restore did not complete over a refused sweep index`); continue; }
-        if ((await indexesOfSpace(db, 'broken')).has(indexId(suffix, name))) { findings.push(`${suffix}:${name}: standing although its build was refused`); continue; }
-        await ensureSweepIndexes();
-        if (!(await indexesOfSpace(db, 'broken')).has(indexId(suffix, name))) findings.push(`${suffix}:${name}: the next sweep tick did not rebuild it`);
-      }
+      // Only `broken` is read, so only `broken` is restored, from one backup: each restore puts `broken` back to that backup (the sweep
+      // tick below rebuilds what the refusal left out), so every index starts from the same space.
+      await servingOnly(mods.loader, ['broken'], async (leaveOut) => {
+        const backup = await takeBackup(SUITE, `sweep-${Date.now()}`);
+        for (const ix of SWEEP_INDEXES) {
+          resetRunnerForTest(mods.runner); clearActEntries(mods.loader);
+          const suffix = SPACE_COLLECTIONS[ix.part];
+          const name = spaceIndexName(ix);
+          fault.fail(`broken_${suffix}`, name, refusal);
+          await restoreAsActs(mods, { backupId: backup.id, leaveOut });
+          const results = await settleRestoreActs(mods.runner, mods.loader);
+          const fired = fault.fired();
+          fault.clear();
+          if (fired === 0) { findings.push(`${suffix}:${name}: the restore never built it`); continue; }
+          if (results.some(r => r.ok !== true)) { findings.push(`${suffix}:${name}: the restore did not complete over a refused sweep index`); continue; }
+          if ((await indexesOfSpace(db, 'broken')).has(indexId(suffix, name))) { findings.push(`${suffix}:${name}: standing although its build was refused`); continue; }
+          await ensureSweepIndexes();
+          if (!(await indexesOfSpace(db, 'broken')).has(indexId(suffix, name))) findings.push(`${suffix}:${name}: the next sweep tick did not rebuild it`);
+        }
+      });
     } finally {
       fault.restore();
     }

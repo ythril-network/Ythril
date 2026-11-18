@@ -13,6 +13,9 @@
  * - {@link restoreEntries} / {@link startRestoreActs} - the standing acts of kind `restore` and their runs. The route may already have
  *   started them; `runSpaceAct` of a running entry joins its run, so starting them again here is never a second body.
  *
+ * - {@link servingOnly} - *"a restore of the spaces this case reads, and no others"*: `leaveOut` names only spaces the instance does not
+ *   serve, so a served space is restored whatever the request says, and a case that reads one space pays one rebuild of every space.
+ *
  * ## What it does not do
  *
  * It does not replace a body, a hook or a knob: those are the runner's `setSpaceActHooksForTest` / `setSpaceActKnobsForTest`, which a
@@ -138,9 +141,41 @@ export async function restoreReportBody(router) {
 /** The space rows of a restore report, by space id. */
 export const spaceRowsOfReport = (body) => Object.fromEntries((body?.spaces ?? []).map(s => [s.id, s]));
 
-/** Restore `backupId` through the acts, run them to their end, and answer the report the operator would then read. */
-export async function restoreThenReport(modules, backupId) {
-  await restoreAsActs(modules, { backupId });
+/**
+ * *"a restore of the spaces a case reads, and no others"*. `POST /restore` restores EVERY space the instance serves
+ * (`planRestore`): each one is dropped and built again (`initSpace`) whether or not the case reads it. `leaveOut` cannot narrow that, because it
+ * names only spaces the backup holds that the instance does NOT serve; so a case that reads one space of a backup of several, and names the
+ * others in `leaveOut` while they are served, gets the 202 and restores them all anyway.
+ *
+ * This stops serving every space but `keep` while `fn` runs, hands `fn` the ids it stopped serving (the `leaveOut` of the restore), and
+ * serves them again, entry and order as they were, whatever `fn` did. A `keep` naming a space the instance does not serve throws: the case
+ * would then read a space nothing restored.
+ */
+export async function servingOnly(loader, keep, fn) {
+  let order = [];
+  let stopped = [];
+  loader.mutateConfig(cfg => {
+    order = cfg.spaces.map(s => s.id);
+    const unknown = keep.filter(id => !order.includes(id));
+    assert.deepEqual(unknown, [], `servingOnly keeps space(s) this instance does not serve: ${unknown.join(', ')}`);
+    stopped = cfg.spaces.filter(s => !keep.includes(s.id));
+    cfg.spaces = cfg.spaces.filter(s => keep.includes(s.id));
+  });
+  try {
+    return await fn(stopped.map(s => s.id));
+  } finally {
+    loader.mutateConfig(cfg => {
+      cfg.spaces = [...cfg.spaces, ...stopped].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+    });
+  }
+}
+
+/**
+ * Restore `backupId` through the acts, run them to their end, and answer the report the operator would then read. `leaveOut` is the route's
+ * own: the spaces the backup holds that this instance does not serve (see {@link servingOnly}).
+ */
+export async function restoreThenReport(modules, backupId, { leaveOut } = {}) {
+  await restoreAsActs(modules, { backupId, ...(leaveOut ? { leaveOut } : {}) });
   await settleRestoreActs(modules.runner, modules.loader);
   return restoreReportBody(modules.dataRouter);
 }

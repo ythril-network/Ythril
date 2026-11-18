@@ -52,7 +52,7 @@ import { build } from './_push-door.mjs';
 import { bare } from './_bare.mjs';
 import { clearActEntries, deferred, resetRunnerForTest } from './_space-act-harness.mjs';
 import {
-  restoreModules, takeBackup, restoreThenReport, spaceRowsOfReport, classOf, reportedPaths, FILE_CLASSES, REPORT_PATHS_PER_CLASS,
+  restoreModules, takeBackup, restoreThenReport, servingOnly, spaceRowsOfReport, classOf, reportedPaths, FILE_CLASSES, REPORT_PATHS_PER_CLASS,
 } from './_restore-act.mjs';
 
 const skip = await mongoSkipReason();
@@ -111,7 +111,9 @@ async function withLog(fn) {
 }
 
 /** The moment of the backup, then what happens after it, then the restore: the report the operator reads. */
-async function scenario(atBackup, afterBackup, { hooks, knobs } = {}) {
+async function scenario(atBackup, afterBackup, { reads, hooks, knobs } = {}) {
+  // Every served space is dropped and built again by a restore, so a case restores the spaces it reads and no others (`servingOnly`).
+  assert.ok(Array.isArray(reads) && reads.length > 0 && reads.every(s => SPACES.includes(s)), `a scenario names the spaces it reads, from ${SPACES.join(', ')}: ${JSON.stringify(reads)}`);
   await clean();
   await atBackup();
   // Letters and digits in one word: a total read out of the completion line can never match a piece of the backup's id.
@@ -120,7 +122,7 @@ async function scenario(atBackup, afterBackup, { hooks, knobs } = {}) {
   const disk = Object.fromEntries(SPACES.map(s => [s, bytesOf(s)]));
   if (hooks) mods.runner.setSpaceActHooksForTest(hooks);
   if (knobs) mods.runner.setSpaceActKnobsForTest(knobs);
-  const out = await withLog(() => restoreThenReport(mods, backup.id));
+  const out = await servingOnly(mods.loader, reads, (leaveOut) => withLog(() => restoreThenReport(mods, backup.id, { leaveOut })));
   return { body: out.value, lines: out.lines, rows: spaceRowsOfReport(out.value), backup, disk };
 }
 
@@ -180,7 +182,7 @@ describe('a restore reports which files no longer match their records (real Mong
         unlinkSync(join(dirOf(S), 'gone.json'));
         bytes(S, 'new.json', '{"written":"after the backup"}');
         bytes(S, 'resoft.json', '{"uploaded":"again"}');
-      });
+      }, { reads: ['rf-a'] });
     });
 
     it('control: the restore itself landed (the rows are the backup\'s) and every space is done', T, async () => {
@@ -263,6 +265,8 @@ describe('a restore reports which files no longer match their records (real Mong
       const N = 12;
       const long = `${'d'.repeat(90)}/${'e'.repeat(90)}/${'f'.repeat(90)}/${'g'.repeat(90)}.json`;   // 363 characters
       const escaping = 'x\u001b[2J\nFORGED restore line.json';
+      // Every space of the harness is restored: a space's share of the report's total cap is the cap divided by the spaces of the restore
+      // set (`REPORT_PATHS_PER_RESTORE`), so the cap binds on these spaces only in a set as large as this suite's.
       const out = await scenario(async () => {
         for (const S of CAP_SPACES) {
           for (let i = 0; i < N; i++) {
@@ -282,7 +286,7 @@ describe('a restore reports which files no longer match their records (real Mong
             bytes(S, `soft-${i}.json`, `again ${S} ${i}`);           // soft_deleted_with_bytes
           }
         }
-      });
+      }, { reads: SPACES });
       let allPaths = 0;
       for (const S of CAP_SPACES) {
         const f = filesOf(out.rows, S);
@@ -318,7 +322,7 @@ describe('a restore reports which files no longer match their records (real Mong
         await row(S, nfc('café-same.json'), '{"same":true}');                   // row id NFC (toDocId)
       }, async () => {
         bytes(S, nfd('café-new.json'), '{"after":"backup"}');
-      });
+      }, { reads: [S] });
       const onDisk = readdirSync(dirOf(S));
       assert.ok(onDisk.includes(nfd('café-same.json')), `the filesystem here does not keep NFD names (${onDisk.join(', ')}): the premise this case needs is absent`);
       const f = filesOf(out.rows, S);
@@ -337,6 +341,7 @@ describe('a restore reports which files no longer match their records (real Mong
 
     it('a throw inside the file-tree step is files.checked false with our reason (no driver text), for that space only; the restore is done (not owed for a retry that would drop and reload the space again)', T, async () => {
       const out = await scenario(atBackup, afterBackup, {
+        reads: ['rf-a', 'rf-b'],
         hooks: { atFileTree: (id) => { if (id === 'rf-a') throw new Error('EIO: mongodb://admin:hunter2@db.internal:27017 unreadable'); } },
       });
       assert.equal(out.rows['rf-a'].state, 'done', `a classifier failure failed the restore: ${JSON.stringify(out.rows['rf-a'])}`);
@@ -357,6 +362,7 @@ describe('a restore reports which files no longer match their records (real Mong
       let out;
       try {
         out = await scenario(atBackup, afterBackup, {
+          reads: ['rf-a', 'rf-b'],
           hooks: { atFileTree: (id) => (id === 'rf-a' ? park.promise : undefined) },
           // The parked hook is what outlasts the bound; at the floor, rf-b's real walk finishes well inside it.
           knobs: { SPACE_ACT_FS_MS: 1000 },
@@ -372,7 +378,7 @@ describe('a restore reports which files no longer match their records (real Mong
     });
 
     it('"not checked" is warned once per restore however many spaces were not checked, and the totals line still comes once', T, async () => {
-      const out = await scenario(atBackup, afterBackup, { hooks: { atFileTree: () => { throw new Error('the mount is gone'); } } });
+      const out = await scenario(atBackup, afterBackup, { reads: ['rf-a', 'rf-b'], hooks: { atFileTree: () => { throw new Error('the mount is gone'); } } });
       for (const S of ['rf-a', 'rf-b']) assert.equal(filesOf(out.rows, S).checked, false, `${S} was checked`);
       const warned = out.lines.filter(l => /\[WARN/.test(l) && /not checked/i.test(l));
       assert.equal(warned.length, 1, `warned ${warned.length} times: ${warned.join(' | ')}`);
