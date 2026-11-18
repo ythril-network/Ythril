@@ -222,6 +222,12 @@ export interface ToolHandler {
    * answered in the validator's words and without the code on one door only.
    */
   skipSchemaValidation?: boolean;
+  /**
+   * The arguments the tool's shared act judges itself, with the coded refusals its REST twin answers (`schema_update`'s `convertRecords`: `400
+   * bad_conversion_step` with the step): the dispatcher validates every OTHER argument against the input schema and leaves these to the act, so a
+   * malformed one is answered alike on both doors and never in the validator's words on one (lens sweep S5). Still listed in `tools/list`.
+   */
+  argumentsJudgedByTheAct?: readonly string[];
   inputSchema(s: ToolSchemas): Record<string, unknown>;
   handle(ctx: ToolContext): Promise<ToolResult>;
 }

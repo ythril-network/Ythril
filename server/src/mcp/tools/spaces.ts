@@ -426,6 +426,7 @@ const NOT_BODY = new Set(['purpose']);
 
 export const schema_updateTool: ToolHandler = {
   name: 'schema_update',
+  argumentsJudgedByTheAct: ['convertRecords'],
   description: 'Write a space\'s type schemas (and its other meta fields). Needs EITHER instance-admin rights OR '
     + 'the `admin` rung on the `schema` area of the space named in `space` — holding it on a different space does '
     + 'not grant this one. '

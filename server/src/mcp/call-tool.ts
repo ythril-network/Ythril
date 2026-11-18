@@ -577,7 +577,10 @@ async function dispatchTool(req: ToolCallRequest, admitted: (() => void)[], fact
     // (save_bulk), which report per-item errors in the result rather than rejecting the whole call. A judged tool's TOP level is
     // tolerated (its unknown arguments were answered above); everything nested is still held to the closed schema.
     if (!tool.skipSchemaValidation) {
-      const argErr = validatorFor(accessibleSpaceIds, ownViewIds).validate(tool, a, { tolerateTopLevel: judgedOperation !== null });
+      // The arguments the act judges itself are left out of the check (`argumentsJudgedByTheAct`): the handler hands them to it as sent.
+      const judgedByTheAct = tool.argumentsJudgedByTheAct ?? [];
+      const checked = judgedByTheAct.length === 0 ? a : Object.fromEntries(Object.entries(a).filter(([k]) => !judgedByTheAct.includes(k)));
+      const argErr = validatorFor(accessibleSpaceIds, ownViewIds).validate(tool, checked, { tolerateTopLevel: judgedOperation !== null });
       if (argErr) return withUnknownFieldRows(refuse(400, toolErrorText(argErr), callSpace), rows);
     }
     /*
