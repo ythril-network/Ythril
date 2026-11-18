@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import { voteOnSchemaEditIfNetworked, type WriteCaller } from '../spaces/meta-update.js';
 import { commitOwnMetaEdit, withType, withoutType } from '../spaces/effective-meta.js';
-import { restartSchemaConvertInTurn } from '../sync/governance.js';
+import { restartSchemaConvertInTurn, useSchemaConvertRuns } from '../sync/governance.js';
+import { startSchemaConvertRun, restartSchemaConvertRun, typesToConvert } from '../spaces/schema-convert-run.js';
+
+// `Q-746`: the conversion run, handed to the module every schema save and passed round starts it through. Wired HERE, by a module the server always
+// loads and no member of the large import cycle reaches: the run module reaches governance through the sync engine, so wiring it from inside that
+// cycle (governance, the planner) would draw the run module into it (`SchemaConvertRuns`).
+useSchemaConvertRuns({ start: startSchemaConvertRun, restart: restartSchemaConvertRun, typesToConvert });
 import { registerReembedRoute } from './spaces-reembed.js';
 import { registerActivityResetRoute } from './spaces-activity.js';
 import { registerFileStampReportRoute } from './spaces-file-stamp-report.js';
