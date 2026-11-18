@@ -5,23 +5,8 @@
     "reviewBy": "2027-02-18"
   },
   {
-    "id": "docker-compose.yml#ythril#cap_drop",
-    "reason": "the application is the trust boundary and compose-sidecar-hardening.test.js exempts it; it keeps its default capabilities today, so this is a gap to close, not a design",
-    "reviewBy": "2027-02-18"
-  },
-  {
-    "id": "docker-compose.yml#ythril#read_only",
-    "reason": "the app writes under /config and /data (volumes) and a read-only root has not been measured against it; compose-sidecar-hardening.test.js exempts the app",
-    "reviewBy": "2027-02-18"
-  },
-  {
-    "id": "docker-compose.yml#ythril#no-new-privileges",
-    "reason": "the app is exempt from the sidecar hardening test; nothing needs a privilege gain, so setting it is a gap to close",
-    "reviewBy": "2027-02-18"
-  },
-  {
     "id": "docker-compose.yml#ythril#limits",
-    "reason": "the app has a memory ceiling (YTHRIL_MEM_LIMIT) but no cpus or pids_limit; an infra deployment sets its own pod limits",
+    "reason": "the app has a memory ceiling (YTHRIL_MEM_LIMIT) and a process ceiling (YTHRIL_PIDS_LIMIT) but no cpus: Docker refuses a ceiling above the host's cores (measured: --cpus 64 on a 16-core engine answers 'range of CPUs is from 0.01 to 16.00'), so a default would stop the stack on a smaller host or throttle embedding on a larger one",
     "reviewBy": "2027-02-18"
   },
   {

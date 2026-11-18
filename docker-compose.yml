@@ -9,6 +9,28 @@
     # not one each. Raise YTHRIL_MEM_LIMIT in .env for very large ingests or document batches; an infra
     # deployment sets its own pod limit instead.
     mem_limit: ${YTHRIL_MEM_LIMIT:-4g}
+    # Confined like the sidecars behind it. It holds every token and reaches the database, so what a flaw in it
+    # can do to its own container matters most here. Each control is measured against a running instance, not
+    # assumed: the process runs as uid 1000 with no capability in use, and after twenty hours of real use the only
+    # path it had written outside its two volumes was its home folder (the local connector's token and log).
+    # So a read-only root needs two scratch mounts and nothing else: /tmp, and the home folder, which is in memory
+    # now and empty after every restart (the connector's token is made again; it never outlived a recreate).
+    # A model that is not the bundled one (HF_HUB_OFFLINE=0) cannot download into the image's read-only cache:
+    # point MODEL_CACHE_DIR at a folder under /data for it.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+      - /home/node:size=16m,uid=1000,gid=1000,mode=0700
+    # A ceiling on processes and threads (`pids_limit` counts both), so a runaway spawn cannot exhaust the host.
+    # The server sits at about a dozen threads at rest; the embedding child, image work and the connector add to it.
+    # NO `cpus` default, on purpose: Docker refuses a ceiling above the host's cores ("range of CPUs is from 0.01
+    # to 16.00" on a 16-core engine), so a fixed figure would stop the stack on a smaller host or throttle
+    # embedding on a larger one.
+    pids_limit: ${YTHRIL_PIDS_LIMIT:-1024}
     ports:
       - "${YTHRIL_PORT:-3200}:3200"
     volumes:

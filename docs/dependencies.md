@@ -332,6 +332,11 @@ the isolated `ythril-convert` network. Its own caps: `NLP_MAX_TEXTS` (256 texts 
 
 ### Sandboxing and resource ceilings
 
+The application's own container is confined too, in Compose as in Kubernetes: no privilege escalation, all
+capabilities dropped, a read-only root filesystem with two in-memory scratch mounts (`/tmp` and its home folder),
+and memory and process ceilings (`YTHRIL_MEM_LIMIT`, `YTHRIL_PIDS_LIMIT`). It has no default CPU ceiling in
+Compose, because Docker refuses one above the host's core count.
+
 Every one of these sidecars exists to parse **untrusted user-supplied input** — uploaded images, audio,
 PDFs — which makes them the highest-risk processes in the deployment. They are therefore confined the
 same way in Compose and in Kubernetes:
@@ -341,7 +346,7 @@ same way in Compose and in Kubernetes:
 | No privilege escalation | `security_opt: [no-new-privileges:true]` | `allowPrivilegeEscalation: false` |
 | All Linux capabilities dropped | `cap_drop: [ALL]` | `capabilities.drop: [ALL]` |
 | Read-only root filesystem | `read_only: true` + a `/tmp` tmpfs | `readOnlyRootFilesystem: true` + an `emptyDir` |
-| Fact / CPU ceiling | `mem_limit` / `cpus` | `resources.limits.fact` / `.cpu` |
+| Memory / CPU ceiling | `mem_limit` / `cpus` | `resources.limits.memory` / `.cpu` |
 | Process (thread) ceiling | `pids_limit` | pod-level (`podPidsLimit` on the kubelet) |
 | Network isolation | separate bridge networks (`ythril-media`, internal `ythril-convert`) | `media-netpol.yaml` egress rules |
 
@@ -384,6 +389,7 @@ scans, raise the relevant ceiling in `.env` rather than editing `docker-compose.
 
 ```bash
 YTHRIL_MEM_LIMIT=8g        # default 4g  — the app itself, and its embedding process (one ceiling for both)
+YTHRIL_PIDS_LIMIT=2048     # default 1024 — the app's ceiling on processes and threads
 YTHRIL_MONGO_MEM_LIMIT=8g  # default 4g  — MongoDB and vector search; the database cache is sized from it
 YTHRIL_MONGOT_HEAP_PERCENT=25  # default 25 — the vector search heap, as a share of YTHRIL_MONGO_MEM_LIMIT (sensible range 1-90)
 OLLAMA_MEM_LIMIT=16g       # default 8g  / OLLAMA_PIDS_LIMIT 2048       / OLLAMA_CPUS 8.0
