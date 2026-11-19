@@ -20,11 +20,8 @@
 import { Router } from 'express';
 import { toDocId } from '../util/paths.js';
 import fs from 'fs/promises';
-import path from 'path';
 import { requireSpaceAuth, denyReadOnly } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
-import { log } from '../util/log.js';
-import { openStoredRead, statStored } from '../files/stored-bytes.js';
 import { type FileEntry } from '../files/files.js';
 import { listAcrossMembers } from '../files/list-across-members.js';
 import { fileReadFaultOf } from '../files/read-fault.js';
@@ -40,10 +37,9 @@ import { NotFoundError, RequestRefusal } from '../util/errors.js';
 import { moveFileCascade } from '../files/move-cascade.js';
 import { deletePath } from '../files/delete-cascade.js';
 import { readSpacesOfRequest } from '../spaces/read-scope.js';
-import { contentTypeForDownload } from '../files/mime.js';
-import { contentDispositionOf } from '../util/content-disposition.js';
 import { hideDerivedTrees } from '../files/derived-trees.js';
 import { LIVE_FILE_ROW } from '../files/live-file-row.js';
+import { sendStoredDownload } from './files-download.js';
 import { registerUploadRoute } from './files-upload.js';
 import { registerMkdirRoute } from './files-mkdir.js';
 import { webhookToken, requireWritePath, requireWriteTarget } from './files-request.js';
@@ -289,39 +285,9 @@ fileStoreRouter.get('/:spaceId', globalRateLimit, requireSpaceAuth, async (req, 
     return;
   }
 
-  // File download — serve from the first member that has it
+  // File download — serve from the first member that has it. Headers, then bytes; a HEAD gets the headers alone (`files-download.ts`).
   try {
-    // STREAMED through the stored-bytes door (F-43): a file of any size, decrypted a chunk at a time when it is
-    // encrypted at rest. The length is the PLAINTEXT size, read from the ciphertext length without decrypting.
-    const abs = heldAbs ?? await resolveSafePathChecked(foundMid, normalised);
-    const { size } = await statStored(abs);
-    const body = await openStoredRead(abs);
-    const ext = path.extname(normalised).toLowerCase();
-    const contentType = contentTypeForDownload(normalised);
-    // Stored XSS guard: user-uploaded HTML/SVG/XML rendered inline would run
-    // script in this origin (token theft from the web UI). Active-content
-    // types are forced to download and get a sandbox CSP so nothing executes
-    // even if a browser renders them anyway. Passive types (images, pdf,
-    // plain text) stay inline so previews keep working.
-    const isActive = ACTIVE_CONTENT_EXTS.has(ext);
-    res
-      .status(200)
-      .setHeader('Content-Type', contentType)
-      .setHeader('Content-Length', size)
-      .setHeader('X-Content-Type-Options', 'nosniff')
-      .setHeader('Content-Disposition', contentDispositionOf(isActive ? 'attachment' : 'inline', path.basename(abs)));
-    if (isActive) {
-      res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
-    }
-    /*
-     * A chunk that fails its integrity check AFTER bytes were sent must ABORT the response. Ending it normally would
-     * hand the client a truncated file that looks complete; destroying it makes the client see a failed transfer.
-     */
-    body.on('error', err => {
-      log.warn(`download of ${foundMid}/${normalised} failed mid-stream: ${err instanceof Error ? err.message : String(err)}`);
-      res.destroy(err instanceof Error ? err : undefined);
-    });
-    body.pipe(res);
+    await sendStoredDownload(req, res, heldAbs ?? await resolveSafePathChecked(foundMid, normalised), normalised, `${foundMid}/${normalised}`);
   } catch (err) {
     // A stored file that cannot be read is answered by what it is inside `sendCaughtFailure` (500, its base name and "cannot be read",
     // reported there), the same words as the tool doors.
@@ -463,12 +429,8 @@ fileStoreRouter.patch('/:spaceId', globalRateLimit, requireSpaceAuth, denyReadOn
   }
 });
 
-
-// Extensions whose content can execute script when rendered inline by a
-// browser — always served as attachments (stored-XSS guard).
-const ACTIVE_CONTENT_EXTS = new Set(['.html', '.htm', '.svg', '.xml', '.xhtml']);
-
-// MIME lookup for downloads now comes from the shared table in `files/mime.ts` — see
+// The active-content extensions (served as attachments, the stored-XSS guard) moved to `files-download.ts` with the download answer.
+// MIME lookup for downloads comes from the shared table in `files/mime.ts` — see
 // `contentTypeForDownload`. The local copy that used to live here listed a different set of
 // extensions than the processing path did, which is the drift that let a `.png` be served correctly
 // while being *processed* as `application/octet-stream`.

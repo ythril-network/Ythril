@@ -42,13 +42,22 @@ export interface EventStreamOptions {
   heartbeatMs?: number;
 }
 
+/** The headers every stream opens with, and the ones a HEAD of a stream is answered. */
+const STREAM_HEADERS = {
+  'Content-Type': 'text/event-stream',
+  'Cache-Control': 'no-cache',
+  Connection: 'keep-alive',
+  'X-Accel-Buffering': 'no',
+} as const;
+
 /** How many streams of `pool` are open — for tests and for a status readout. */
 export function openStreams(pool: string): number {
   return open.get(pool) ?? 0;
 }
 
 /**
- * Open a stream on `res`, or refuse it with `503` and return null when `pool` is full.
+ * Open a stream on `res`, or refuse it with `503` and return null when `pool` is full. A HEAD is answered the stream's headers and
+ * null, with no slot taken: the caller returns on null either way.
  */
 export function openEventStream(req: Request, res: Response, opts: EventStreamOptions): EventStream | null {
   const max = opts.maxConnections ?? MAX_SSE_CONNECTIONS;
@@ -59,14 +68,19 @@ export function openEventStream(req: Request, res: Response, opts: EventStreamOp
     res.status(503).json({ error: `at most ${max} live event streams of this kind may be open at once; try again shortly` });
     return null;
   }
+  /*
+   * A HEAD is answered the stream's headers and ENDED, and takes no slot. Express runs this GET route for a HEAD, and a HEAD response
+   * carries no body, so the `:` that opens the stream was never sent and with it went the headers: the request waited with no answer
+   * while it held one of the pool's slots, for as long as its connection stayed open.
+   */
+  if (req.method === 'HEAD') {
+    res.writeHead(200, STREAM_HEADERS);
+    res.end();
+    return null;
+  }
   open.set(opts.pool, count + 1);
 
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
+  res.writeHead(200, STREAM_HEADERS);
   res.write(':\n\n'); // open the stream
 
   const cleanups: (() => void)[] = [];
