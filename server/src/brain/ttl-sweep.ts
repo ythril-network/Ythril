@@ -37,7 +37,7 @@ import { LIVE_FILE_ROW } from '../files/live-file-row.js';
 import { NotFoundError } from '../util/errors.js';
 import { log, peerList, peerText } from '../util/log.js';
 import { defaultSpaceFailureReporter, walkVerdict, type SpaceFailureReporter } from '../util/space-failure.js';
-import type { WebhookActor } from '../webhooks/dispatcher.js';
+import type { WebhookActor } from '../webhooks/webhook-actor.js';
 import { TTL_COLLECTIONS } from './ttl.js';
 import { ensureTtlIndexes } from '../spaces/space-indexes.js';
 import { warnOnce } from '../util/warn-once.js';

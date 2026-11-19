@@ -20,7 +20,8 @@ import { LINK_CLASSES, assertLinkRecords, linksPointingAt, docsFromCollection, t
 import type { RefKind } from '../config/types-knowledge.js';
 import { type SimilarMatch } from './recall.js';
 import type { DupeCheckOpts } from './write-options.js';
-import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
+import { emitWebhookEvent } from '../webhooks/dispatcher.js';
+import type { WebhookActor } from '../webhooks/webhook-actor.js';
 import { log, peerText } from '../util/log.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc } from '../config/types.js';
 import { listReadMaxMs, textContains } from './tag-filter.js';

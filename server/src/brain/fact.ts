@@ -19,7 +19,8 @@ import { classifyFactUpsertAgainst, recordAfterPatch, SchemaViolationError, type
 import { applyDeleteFields } from './delete-fields.js';
 import { mergePropertiesOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
-import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
+import { emitWebhookEvent } from '../webhooks/dispatcher.js';
+import type { WebhookActor } from '../webhooks/webhook-actor.js';
 import type { FactDoc } from '../config/types.js';
 import { removeRecords } from './record-removal.js';
 import { refuseForkEdit } from './forks.js';

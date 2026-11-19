@@ -43,7 +43,7 @@ import { createHash } from 'node:crypto';
 import { entityDeleteBlockers } from './entity-delete-guard.js';
 import { deleteEntity } from './entities.js';
 import type { BacklinkEntry } from './entities.js';
-import type { WebhookActor } from '../webhooks/dispatcher.js';
+import type { WebhookActor } from '../webhooks/webhook-actor.js';
 import { removeRecords } from './record-removal.js';
 import { countForksOf } from './forks.js';
 

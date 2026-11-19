@@ -69,7 +69,8 @@ import { actUnderPendingTombstones, pendingAmong, settlePendingFileTombstones, w
 import { forgetFinishedMove, moveIsOwed, movesBegunInto, type MoveMarker } from './move-markers.js';
 import { invalidateUsageCache } from '../quota/quota.js';
 import { unlessTheStoreFailed } from '../brain/store-failure.js';
-import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
+import { emitWebhookEvent } from '../webhooks/dispatcher.js';
+import type { WebhookActor } from '../webhooks/webhook-actor.js';
 import { adoptLegacyRowsUnder } from './legacy-file-keys.js';
 
 /** The refusal of a path with nothing to delete, in one sentence for every way a delete reaches it (`404` on REST, an error result in MCP). */

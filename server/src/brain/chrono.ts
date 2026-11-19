@@ -22,7 +22,8 @@ import { classifyChronoUpsertAgainst, recordAfterPatch, SchemaViolationError, ty
 import { mergePropertiesOrKeep } from './merge-fields.js';
 import { applyDeleteFields } from './delete-fields.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
-import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
+import { emitWebhookEvent } from '../webhooks/dispatcher.js';
+import type { WebhookActor } from '../webhooks/webhook-actor.js';
 import type { ChronoEntry } from '../config/types.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';

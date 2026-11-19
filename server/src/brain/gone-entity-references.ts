@@ -53,7 +53,7 @@ import { removeWithTombstones } from './tombstones.js';
 import { edgeEndpointKind, missingRefs } from './entity-refs.js';
 import { edgeEndsAt, type EdgeEnds } from './edge-ends-of-record.js';
 import { EndpointRemoved } from '../util/errors.js';
-import type { WebhookActor } from '../webhooks/dispatcher.js';
+import type { WebhookActor } from '../webhooks/webhook-actor.js';
 import type { EdgeDoc } from '../config/types.js';
 import type { UpdateValidation } from './write-validation.js';
 import { schemaViolation, type SchemaViolation } from '../spaces/schema-violation-codes.js';

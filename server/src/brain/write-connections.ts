@@ -64,7 +64,7 @@ import { linkTargetRemovedWarnings } from './gone-entity-references.js';
 import { ConnectionsNotWritten, writtenRecord } from './connections-not-written.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
 import type { AuthorRef } from '../config/types.js';
-import type { WebhookActor } from '../webhooks/dispatcher.js';
+import type { WebhookActor } from '../webhooks/webhook-actor.js';
 import type { EdgeInput as EdgeWriteInput } from './write-plan/plan-edge.js';
 import { MAX_TAGS, MAX_LINKS_PER_KIND, MAX_INLINE_EDGES, countError, tagsError } from '../util/request-bounds.js';
 

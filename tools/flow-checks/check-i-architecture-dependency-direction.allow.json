@@ -92,8 +92,8 @@
   },
   {
     "id": "cycles:server/src:largest",
-    "max": 313,
-    "reason": "the largest cyclic set of server/src holds 313 modules (the brain, sync, spaces, files, config and db layers import each other); it may not grow while a design splits it. Lowered from 316 by bundle-284: the import totals' shape moved to a leaf (sync/import-totals.ts), so the audit allowlist no longer reaches the importer, which freed 11 modules while the conversion's 8 joined",
+    "max": 312,
+    "reason": "the largest cyclic set of server/src holds 312 modules (the brain, sync, spaces, files, config and db layers import each other); it may not grow while a design splits it. Lowered from 316 by bundle-284: the import totals' shape moved to a leaf (sync/import-totals.ts), so the audit allowlist no longer reaches the importer, which freed 11 modules while the conversion's 8 joined. Lowered from 313 by bundle-269 slice D: the WebhookActor type moved to a leaf (webhooks/webhook-actor.ts), cutting the edge mcp/tools/types.ts -> webhooks/dispatcher.ts that pulled the tool context into the set by a type alone, so the RDF tools joined nothing",
     "reviewBy": "2027-02-18"
   },
   {

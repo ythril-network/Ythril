@@ -37,6 +37,7 @@ import { detachedWrite } from '../db/write-bound.js';
 import { readRowsById } from '../db/read-by-id.js';
 import { dropReplacedOnceListed } from '../db/index-names.js';
 import { retryRowsStored, type RetryRowVerdict } from './retry-rows-stored.js';
+import type { WebhookActor } from './webhook-actor.js';
 
 /** Retry schedule in milliseconds: 10s, 30s, 1m, 5m, 30m, 1h */
 const RETRY_DELAYS_MS = [10_000, 30_000, 60_000, 300_000, 1_800_000, 3_600_000];
@@ -497,22 +498,7 @@ function sayDeliveryFailureOnce(kind: string, webhookId: string, say: () => void
 
 // ── Public emit API ─────────────────────────────────────────────────────────
 
-/**
- * Identifies the token that caused a mutation, for webhook attribution. Threaded from the
- * request/MCP surface down into the shared writer functions, which own the emit: a
- * shared mutating function emits when (and only when) it is given an actor — `if (actor)
- * emitWebhookEvent(...)` — so user-facing surfaces (REST, MCP) pass one and emit, while
- * internal callers (sync, import, bulk, a file's byte arrival) pass none and stay silent.
- * That is ONE rule for the brain records and the file family alike, and it governs both
- * halves of {@link emitWebhookEvent}: no actor means no webhook delivery AND no live-view
- * (SSE) event, because the one function does both. An actor may carry no fields at all
- * (`{}`, an unauthenticated session): it is still an actor, and the act is still a user's.
- * Centralises both the emit call AND its attribution in one place.
- */
-export interface WebhookActor {
-  tokenId?: string;
-  tokenLabel?: string;
-}
+// `WebhookActor`, who caused a mutation, lives in the leaf `webhook-actor.ts`: a module that only names an actor must not import this one.
 
 export interface EmitWebhookEventOptions {
   event: WebhookEventType;
