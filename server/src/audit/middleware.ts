@@ -15,6 +15,7 @@ import { classifyOperation, recordSpaceCall } from '../metrics/space-activity.js
 import { currentRequestId } from '../util/log.js';
 import { isOidc } from '../auth/oidc-caller.js';
 import { requestAddress } from './request-address.js';
+import { governedMethod } from '../http/governed-method.js';
 // `req.recallOutcome` below is declared by `auth/middleware.ts` (a global `Express.Request` augmentation). This file reads it, so it names
 // the file that declares it: a program that reaches this module without reaching that one (the metric registry reads `MCP_TOOL_OPERATIONS`
 // through `audit-map`, which imports this) must still compile. Type-only, so nothing is imported at run time.
@@ -362,8 +363,13 @@ const RULES_BY_METHOD: ReadonlyMap<string, readonly RouteRule[]> = (() => {
   return map;
 })();
 
+/**
+ * The rule a request falls under. A `HEAD` falls under its `GET`'s rule (`governedMethod`): Express runs the GET route for it, so it
+ * is the same read and leaves the same row, with `method: 'HEAD'` recorded as sent. Keyed by the method as sent, a HEAD matched no rule
+ * and left no row at all, allowed or refused.
+ */
 export function resolveOperation(method: string, path: string): { operation: string; spaceId: string | null; entryId: string | null; read: boolean; writtenWhenCutOff: boolean } | null {
-  const rules = RULES_BY_METHOD.get(method);
+  const rules = RULES_BY_METHOD.get(governedMethod(method));
   if (!rules) return null;
   for (const rule of rules) {
     const m = rule.pattern.exec(path);
