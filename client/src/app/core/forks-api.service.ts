@@ -2,7 +2,8 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { FORK_KINDS, type ForkCounts, type ForkKind, type ForkKindsFields, type ForkMarkedCounts, type ForkPage, type ForkResolveRequest, type ForkRow } from './forks.types';
+import { isPlainObject } from './plain-object';
+import { FORK_KINDS,type ForkCounts, type ForkKind, type ForkKindsFields, type ForkMarkedCounts, type ForkPage, type ForkResolveRequest, type ForkRow } from './forks.types';
 
 /**
  * The forks of a space and their resolution: `GET /api/brain/spaces/:id/forks?kind=&skip=&limit=` (paged by `skip` and `limit` like the other brain
@@ -32,11 +33,9 @@ export class ForksApi {
   }
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-
 /** The per-kind counts an answer carries: every kind a number, or none at all (an answer that does not say, says nothing). */
 function countsOf(value: unknown): ForkCounts | undefined {
-  if (!isRecord(value)) return undefined;
+  if (!isPlainObject(value)) return undefined;
   const out = {} as ForkCounts;
   for (const kind of FORK_KINDS) {
     const n = value[kind];
@@ -48,8 +47,8 @@ function countsOf(value: unknown): ForkCounts | undefined {
 
 /** The per-kind counts of forks another instance already decided: `counts.resolvedElsewhere`, or the answer's own `resolvedElsewhere`. */
 function markedOf(counts: unknown, answer: Record<string, unknown>): ForkMarkedCounts | undefined {
-  const source = isRecord(counts) && isRecord(counts['resolvedElsewhere']) ? counts['resolvedElsewhere'] : answer['resolvedElsewhere'];
-  if (!isRecord(source)) return undefined;
+  const source = isPlainObject(counts) && isPlainObject(counts['resolvedElsewhere']) ? counts['resolvedElsewhere'] : answer['resolvedElsewhere'];
+  if (!isPlainObject(source)) return undefined;
   const out: ForkMarkedCounts = {};
   for (const kind of FORK_KINDS) if (typeof source[kind] === 'number') out[kind] = source[kind] as number;
   return Object.keys(out).length ? out : undefined;
@@ -57,11 +56,11 @@ function markedOf(counts: unknown, answer: Record<string, unknown>): ForkMarkedC
 
 /** The fields each kind compares, as the answer states them; a kind with no usable entry makes the whole answer say nothing, never half. */
 function kindsOf(value: unknown): ForkKindsFields | undefined {
-  if (!isRecord(value)) return undefined;
+  if (!isPlainObject(value)) return undefined;
   const out = {} as ForkKindsFields;
   for (const kind of FORK_KINDS) {
     const entry = value[kind];
-    if (!isRecord(entry) || !Array.isArray(entry['fields']) || typeof entry['mainField'] !== 'string') return undefined;
+    if (!isPlainObject(entry) || !Array.isArray(entry['fields']) || typeof entry['mainField'] !== 'string') return undefined;
     out[kind] = { fields: (entry['fields'] as unknown[]).filter((f): f is string => typeof f === 'string'), mainField: entry['mainField'] };
   }
   return out;
@@ -69,7 +68,7 @@ function kindsOf(value: unknown): ForkKindsFields | undefined {
 
 /** The page a list answer holds: its rows, and the total, counts, kinds, skip and limit when it says them. */
 export function pageOf(body: unknown, skip: number, limit: number): ForkPage {
-  const record = (isRecord(body) ? body : {}) as Record<string, unknown>;
+  const record = (isPlainObject(body) ? body : {}) as Record<string, unknown>;
   const rows = Array.isArray(body) ? body : Array.isArray(record['forks']) ? record['forks'] : Object.values(record).find(Array.isArray) ?? [];
   const total = record['total'];
   const counts = countsOf(record['counts']);

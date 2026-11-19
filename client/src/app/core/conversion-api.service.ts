@@ -3,6 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, forkJoin, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { filterCall } from './filter-call';
+import { isPlainObject } from './plain-object';
 import { retryAfterSecondsOf } from './retry-after';
 import type { RefusalSource } from './refusal-text';
 import type { TypedKind } from './type-field';
@@ -33,8 +34,6 @@ import {
 
 const base = (spaceId: string): string => `/api/spaces/${encodeURIComponent(spaceId)}/schema-convert`;
 
-const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-
 /** The longest server sentence a refusal carries along: a refusal quotes peer-chosen names, and a page shows it as text. */
 const SENTENCE_MAX = 600;
 /** The answer to a write whose `If-Match` no longer holds: the schema changed since the page read it. */
@@ -46,11 +45,11 @@ const HTTP_PRECONDITION_FAILED = 412;
  * is `other` with the server's own sentence and the code: the page shows what the server said, never a number made up.
  */
 export function conversionRefusalOf(err: unknown): ConversionRefusal {
-  const source: RefusalSource = isRecord(err) ? err as RefusalSource : {};
+  const source: RefusalSource = isPlainObject(err) ? err as RefusalSource : {};
   const status = typeof source.status === 'number' ? source.status : 0;
   // What the body is at run time, not what the type says: a proxy's page is a string, and a network failure's is a ProgressEvent.
   const raw: unknown = source.error;
-  const body = isRecord(raw) ? raw : null;
+  const body = isPlainObject(raw) ? raw : null;
   const code = typeof body?.['code'] === 'string' ? body['code'] : undefined;
   const sentence = typeof body?.['error'] === 'string' ? body['error']
     : typeof raw === 'string' ? raw
@@ -93,12 +92,12 @@ const NOTICE_STATES: readonly ConvertNoticeState[] = ['started', 'after_vote', '
  * the page then says nothing about a run rather than guess one.
  */
 export function convertNoticeOf(answer: unknown): ConvertRunNotice | null {
-  const convert = isRecord(answer) ? answer['convert'] : undefined;
-  if (!isRecord(convert) || !Array.isArray(convert['types'])) return null;
+  const convert = isPlainObject(answer) ? answer['convert'] : undefined;
+  if (!isPlainObject(convert) || !Array.isArray(convert['types'])) return null;
   const state = NOTICE_STATES.find(s => s === convert['state']);
   if (state === undefined) return null;
   const types = convert['types'].filter((t): t is ConvertTypeRef =>
-    isRecord(t) && typeof t['kind'] === 'string' && Object.hasOwn(COLLECTION_OF_KIND, t['kind']) && typeof t['type'] === 'string');
+    isPlainObject(t) && typeof t['kind'] === 'string' && Object.hasOwn(COLLECTION_OF_KIND, t['kind']) && typeof t['type'] === 'string');
   return {
     state,
     types,

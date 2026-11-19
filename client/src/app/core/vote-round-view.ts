@@ -1,5 +1,6 @@
 import { COLLECTION_OF_KIND, type ConvertBlock } from './conversion-counts';
 import type { ConversionStep } from './conversion.types';
+import { isPlainObject } from './plain-object';
 
 /**
  * A vote round as the server sends it (`GET /api/networks/:id/votes`), turned into the `VoteRound` the pages read.
@@ -97,7 +98,6 @@ export const outcomeKey = (outcome: string | undefined): string => `networks.dec
 
 // ── The conversion a round carries ──────────────────────────────────────────────────────────────────────────────────────────
 
-const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const isName = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 
 /**
@@ -105,7 +105,7 @@ const isName = (v: unknown): v is string => typeof v === 'string' && v.length > 
  * that is not a list gives none, and an entry that is not an object is skipped rather than thrown over: a voter must still read the others.
  */
 function stepsOf(steps: unknown): ConversionStep[] {
-  return Array.isArray(steps) ? steps.filter((s): s is ConversionStep => isRecord(s) && typeof s['op'] === 'string') : [];
+  return Array.isArray(steps) ? steps.filter((s): s is ConversionStep => isPlainObject(s) && typeof s['op'] === 'string') : [];
 }
 
 /** The order the server applies the steps in (docs 06e): the type steps, then the property renames, then the value maps; any other op last. */
@@ -127,9 +127,9 @@ function countable(step: ConversionStep): boolean {
   switch (s['op']) {
     case 'renameProperty': return isName(s['type']) && isName(s['from']) && isName(s['to']);
     case 'renameType': return isName(s['from']) && isName(s['to']);
-    case 'mapEnum': return isName(s['type']) && isName(s['property']) && isRecord(s['values']);
+    case 'mapEnum': return isName(s['type']) && isName(s['property']) && isPlainObject(s['values']);
     case 'splitType':
-      return isName(s['from']) && Array.isArray(s['cases']) && s['cases'].every(c => isRecord(c) && isName(c['when']) && isName(c['to']))
+      return isName(s['from']) && Array.isArray(s['cases']) && s['cases'].every(c => isPlainObject(c) && isName(c['when']) && isName(c['to']))
         && (s['otherwise'] === undefined || isName(s['otherwise']));
     default: return false;
   }

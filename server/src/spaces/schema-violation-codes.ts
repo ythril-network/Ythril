@@ -35,7 +35,7 @@
  * a client's contract spec (which reads this file as source text) may all read it.
  */
 import { REDOS_REFUSAL } from '@ythril-network/schema';
-import { peerList, peerText, boundedNames } from '@ythril-network/schema/internal';
+import { isPlainObject, peerList, peerText, boundedNames } from '@ythril-network/schema/internal';
 import { LINK_TARGET_REMOVED } from '../util/errors.js';
 import type { RefKind } from '../config/types-knowledge.js';
 
@@ -238,8 +238,8 @@ export function schemaViolation<C extends SchemaViolationCode>(code: C, params: 
  */
 export function boundedViolationParams(params: unknown): ViolationParams {
   const out: Record<string, string | number | boolean | readonly string[]> = {};
-  if (params === null || typeof params !== 'object' || Array.isArray(params)) return out;
-  for (const [k, v] of Object.entries(params as Record<string, unknown>)) {
+  if (!isPlainObject(params)) return out;
+  for (const [k, v] of Object.entries(params)) {
     if (typeof v === 'string') out[k] = peerText(v);
     else if (typeof v === 'number' || typeof v === 'boolean') out[k] = v;
     else if (Array.isArray(v)) out[k] = boundedNames(v.map(x => String(x)));
