@@ -1,8 +1,8 @@
 [
   {
     "id": "unnamed-literals:server/src",
-    "max": 2242,
-    "reason": "the server carries 2242 number literals other than 0 and 1 outside a named declaration (status codes, byte sizes, retry counts); naming them is its own large change, so the count may not grow while it is done",
+    "max": 2241,
+    "reason": "the server carries 2241 number literals other than 0 and 1 outside a named declaration (status codes, byte sizes, retry counts); naming them is its own large change, so the count may not grow while it is done",
     "reviewBy": "2027-02-18"
   },
   {

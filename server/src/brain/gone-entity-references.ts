@@ -240,7 +240,7 @@ export async function takeBackLinksToGoneEntities(
  * Empty for no entities, so a caller adds it unconditionally.
  */
 export function linkTargetRemovedWarnings(entityIds: readonly string[]): SchemaViolation[] {
-  return entityIds.map(id => schemaViolation('link_target_removed', { entityId: id }, 'linkEntities', id));
+  return entityIds.map(id => schemaViolation('link_target_removed', { entityId: id }, { field: 'linkEntities', value: id }));
 }
 
 /**

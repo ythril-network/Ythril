@@ -141,7 +141,7 @@ const CASES = [
   { name: 'an edge end that names no record (strictLinkage)', rows: () => writeValidation.danglingReferenceCheck('s1', 'from', 'entity', 'id-1').all,
     want: { field: 'from', code: 'reference_not_found', params: { refField: 'from', refKind: 'entity', space: 's1', ids: ['id-1'] },
       reason: '`from` references 1 entity ID that does not exist in space \'s1\': "id-1". Create the record first, then link it — the write was refused rather than stored with a dead link.' } },
-  { name: 'a record a conversion could not rewrite', rows: () => (codes.schemaViolation ? [codes.schemaViolation('conversion_error', { errorKind: 'TypeError' }, '', undefined)] : []),
+  { name: 'a record a conversion could not rewrite', rows: () => (codes.schemaViolation ? [codes.schemaViolation('conversion_error', { errorKind: 'TypeError' }, { field: '', value: undefined })] : []),
     want: { field: '', code: 'conversion_error', params: { errorKind: 'TypeError' }, reason: 'TypeError' } },
 ];
 

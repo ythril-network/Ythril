@@ -365,7 +365,7 @@ export class EdgeSchemaViolation extends SchemaViolationError {
  * (`missingReferencesText`, which `missingRefsRefusal` says too).
  */
 export function danglingReferenceCheck(spaceId: string, field: string, kind: RefKind, id: string): UpdateValidation {
-  const violation = schemaViolation('reference_not_found', { refField: field, refKind: kind, space: spaceId, ids: [id] }, field, id);
+  const violation = schemaViolation('reference_not_found', { refField: field, refKind: kind, space: spaceId, ids: [id] }, { field, value: id });
   return { blocked: true, introduced: [violation], preExisting: [], all: [violation], warnings: [violation], message: violation.reason };
 }
 

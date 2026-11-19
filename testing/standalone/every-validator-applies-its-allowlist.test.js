@@ -114,7 +114,8 @@ describe('the memory allowlist is applied in one place', () => {
      * to the validator, which every write path already reaches.
      */
     const src = stripComments(readFileSync('server/src/spaces/schema-validation.ts', 'utf8'));
-    assert.match(bodyOf(src, 'validateFact'), /memoryTypes allowlist/, 'the branch must be in the validator');
+    // Q-943: the row is built from its code and params (`allowlist: 'memoryTypes'`); the sentence is worded in schema-violation-codes.ts.
+    assert.match(bodyOf(src, 'validateFact'), /allowlist: 'memoryTypes'/, 'the branch must be in the validator');
     for (const door of ['server/src/api/brain/facts.ts', 'server/src/mcp/tools/fact.ts']) {
       assert.doesNotMatch(
         stripComments(readFileSync(door, 'utf8')), /getAllowedFactTypes/,

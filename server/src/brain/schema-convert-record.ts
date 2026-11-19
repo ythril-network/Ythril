@@ -329,7 +329,7 @@ export async function convertRecordsPage(
       const failed = run.recordFailure;
       const passes = (failed?.kind === kind && failed.id === record._id ? failed.passes : 0) + 1;
       if (passes < SCHEMA_CONVERT_RECORD_FAILED_PASSES) throw new RecordConversionFailed(kind, record._id, passes, err);
-      out[i] = unconverted('conversion_failed', [schemaViolation('conversion_error', { errorKind: errorKindOf(err) }, '', undefined)], change);
+      out[i] = unconverted('conversion_failed', [schemaViolation('conversion_error', { errorKind: errorKindOf(err) }, { field: '', value: undefined })], change);
     }
   }
 
