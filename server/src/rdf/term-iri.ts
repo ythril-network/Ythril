@@ -147,6 +147,9 @@ export interface TermClash {
   message: string;
 }
 
+/** A term's owner as a language-neutral name a client words itself: `kind:type`, or `kind:type.property`. */
+export const termOwnerName = (o: TermOwner): string => (o.prop === undefined ? `${o.kind}:${o.type}` : `${o.kind}:${o.type}.${o.prop}`);
+
 const ownerText = (o: TermOwner): string => (o.prop === undefined ? `${o.kind} type '${o.type}'` : `property '${o.prop}' of ${o.kind} type '${o.type}'`);
 
 /**

@@ -108,6 +108,7 @@ describe('a library group namespace names its entries\' terms', { skip }, () => 
     assert.equal(first.code, 409, `setting a namespace renames the terms of an RDF-enabled space that links the group: ${said(first)}`);
     assert.match(said(first), /rdf_term_rename/);
     assert.match(said(first), /linked/, 'the refusal names the space');
+    assert.deepEqual(first.body.spaces, ['linked'], 'the spaces are named in a field a client words itself');
     assert.equal((await put('acme', { prefix: 'acme', iri: NS, rebase: true })).code, 200);
     const moved = await put('acme', { prefix: 'acme', iri: 'https://acme.example/v2/' });
     assert.equal(moved.code, 409, said(moved));
@@ -137,6 +138,9 @@ describe('a library group namespace names its entries\' terms', { skip }, () => 
     assert.equal(clash.code, 409, said(clash));
     assert.match(said(clash), /rdf_term_clash/);
     assert.match(said(clash), /human/);
+    assert.deepEqual([...clash.body.terms].sort(), ['entity:human', 'entity:person'], 'both terms are named in a field a client words itself');
+    assert.equal(clash.body.space, 'linked');
+    assert.equal(clash.body.iri, `${NS}entity/person`);
     assert.equal(inst.loader.getConfig().schemaLibraryNamespaces?.acme, undefined, 'a refused write stored nothing');
   });
 });
