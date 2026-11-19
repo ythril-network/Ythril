@@ -50,6 +50,7 @@ import * as measure from '../../tools/flow-checks/check-i-observability-measurem
 import * as params from '../../tools/flow-checks/check-i-integration-deep-parameters-match-both-doors.mjs';
 import * as caps from '../../tools/flow-checks/check-i-performance-deep-caps-match-both-doors.mjs';
 import * as guards from '../../tools/flow-checks/check-i-security-deep-guards-fail-closed.mjs';
+import * as doorPairs from '../../tools/flow-checks/_door-pairs.mjs';
 import { attributeFindings, keyFindings, CAP_KEYS, FLOOR_KEYS } from '../../tools/flow-checks/_door-pairs.mjs';
 
 const TODAY = '2026-11-18';
@@ -598,6 +599,18 @@ describe('the door-parity probes (parameters and caps)', () => {
     const r = attributeFindings([delegating], CAP_KEYS, cInput.boundByField);
     assert.deepEqual(r.findings, []);
     assert.equal(r.delegating, 1);
+  });
+
+  it('a scalar schema a helper deep in the call graph parses with is no route\'s body schema; an object schema is (bundle-269)', () => {
+    assert.equal(typeof doorPairs.bodySchemasIn, 'function', '_door-pairs.mjs exports no bodySchemasIn: what a route\'s schema is has no one reading');
+    const zods = new Map([
+      ['PlantedBodyZ', { name: 'PlantedBodyZ', schema: { type: 'object', properties: { limit: { type: 'integer', maximum: 10 } } } }],
+      ['PlantedPrefixZ', { name: 'PlantedPrefixZ', schema: { type: 'string', maxLength: 50 } }],
+    ]);
+    const handler = 'const parsed = PlantedBodyZ.safeParse(req.body);';
+    const helper = 'if (!PlantedPrefixZ.safeParse(cfg.prefix).success) return undefined;';
+    assert.deepEqual(doorPairs.bodySchemasIn([helper], zods), [], 'a helper validating a config value made the route read as validated by schema');
+    assert.deepEqual(doorPairs.bodySchemasIn([handler, helper], zods).map(s => s.name), ['PlantedBodyZ']);
   });
 
   it('caps: a hand-validated route whose tool states a cap raises the unreadable count, and past its ceiling is violated', () => {

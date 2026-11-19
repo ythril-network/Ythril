@@ -233,6 +233,24 @@ export function keyFindings(pairs) {
 }
 
 /**
+ * `[{ name, schema }]`: the exported zod schemas that function bodies `texts` parse with (`X.safeParse(` / `X.parse(`) and that describe an
+ * OBJECT, the only shape a request body or a tool's arguments have. A scalar schema a helper deep in the call graph applies to some other value
+ * (an address, a prefix read from the config) is no route's body schema: counted as one, it made every route that reaches the helper read as
+ * "compared" with no parameter to compare, and hid it from the hand-validated count (bundle-269: `PrefixZ` and `NamespaceIriZ`, reached
+ * through the effective library entries from every write).
+ */
+export function bodySchemasIn(texts, zods) {
+  const names = new Set();
+  for (const text of texts) {
+    for (const m of text.matchAll(/\b([A-Za-z_$][\w$]*)\s*\.\s*(?:safeParse|parse)\s*\(/g)) {
+      const z = zods.get(m[1]);
+      if (z && z.schema && typeof z.schema === 'object' && z.schema.properties && typeof z.schema.properties === 'object') names.add(m[1]);
+    }
+  }
+  return [...names].map((name) => ({ name, schema: zods.get(name).schema }));
+}
+
+/**
  * `[{ tool, key, route, delegation, schemas, toolSchema }]` for each capability-map row (`route` the mounted route with its source): `schemas` are `{ name, schema }` of the exported zod schemas the route's handler
  * reaches through the call graph, `delegation` what `delegationOf` says of a route that hands its body to a tool.
  */
@@ -246,9 +264,7 @@ export function capabilityPairs(world) {
     let schemas = [];
     if (!delegation) {
       const { seen } = world.graph.walkFrom(world.index, world.graph.routeHandlerRoots(world.index, route), { closures: true });
-      const names = new Set();
-      for (const k of seen) for (const m of world.index.bodies.get(k).body.matchAll(/\b([A-Za-z_$][\w$]*)\s*\.\s*(?:safeParse|parse)\s*\(/g)) if (world.zods.has(m[1])) names.add(m[1]);
-      schemas = [...names].map((name) => ({ name, schema: world.zods.get(name).schema }));
+      schemas = bodySchemasIn([...seen].map((k) => world.index.bodies.get(k).body), world.zods);
     }
     return { tool, key, route, delegation, schemas, toolSchema: entry.schema };
   });
