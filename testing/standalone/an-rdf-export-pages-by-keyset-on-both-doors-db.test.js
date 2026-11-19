@@ -35,8 +35,10 @@ describe('an RDF export pages by keyset on both doors', { skip }, () => {
   });
   after(async () => { await d?.close(); });
 
+  // The records' own subjects: an entity or a fact address (an agent node is stated again on each page that names it).
+  const record = new RegExp(`^${baseOf(SPACE).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:entity|fact)/[^/#]+$`);
   const subjectsOf = async (format, text) => (await parseRdf(format, text))
-    .filter(q => q.predicate.value === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' && q.subject.value.startsWith(baseOf(SPACE)))
+    .filter(q => q.predicate.value === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' && record.test(q.subject.value))
     .map(q => q.subject.value);
   const nextOf = (link) => {
     const m = /^<([^>]*)>;\s*rel="next"$/.exec(String(link ?? ''));

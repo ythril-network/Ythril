@@ -90,6 +90,7 @@ describe('an RDF export reads a view', { skip }, () => {
     const wide = await view(t.key, 'wide', [A, B]);
     const narrow = await view(t.key, 'narrow', [A]);
     await d.setRights(t.id, r => { delete r.perSpace[B]; });
+    const started = new Date().toISOString();
     for (const format of ['turtle', 'trig', 'nquads', 'jsonld']) {
       const w = await d.exportRest(t.key, wide, { format, maxChars: BIG });
       const n = await d.exportRest(t.key, narrow, { format, maxChars: BIG });
@@ -106,8 +107,10 @@ describe('an RDF export reads a view', { skip }, () => {
     assert.equal(mw.document, mn.document);
     assert.equal(withoutName(JSON.stringify(mw.structured), wide), withoutName(JSON.stringify(mn.structured), narrow));
     assert.ok(!JSON.stringify(mw.structured).includes(B));
-    const rows = await d.col('audit_log').find({ operation: 'rdf.export', spaceId: wide }).toArray();
-    assert.ok(rows.length >= 1, 'the export of the wide view is audited');
+    // A view's row names no space (a view is not one, as on every view read) and carries the members exported: the rows of this case's
+    // exports are those written since it began.
+    const rows = await d.col('audit_log').find({ operation: 'rdf.export', timestamp: { $gte: started } }).toArray();
+    assert.ok(rows.length >= 10, `the exports are audited: ${rows.length}`);
     assert.ok(rows.every(row => !JSON.stringify(row).includes(B)), 'the audit row names only what the caller read');
   });
 

@@ -563,7 +563,7 @@ export const schema_updateTool: ToolHandler = {
         properties: {
           enabled: { type: 'boolean', description: 'Switch the space\'s RDF names on or off; off keeps the base for when it is switched on again.' },
           base: { type: 'string', maxLength: IRI_MAX, description: 'The records\' address prefix: an absolute IRI ending in "/" with no "#". Set once.' },
-          vocab: { type: 'string', maxLength: IRI_MAX, description: 'The namespace of the space\'s own type and property names (ends in "/" or "#"); `<base>vocab/` when absent. Moves only with the base.' },
+          vocab: { type: 'string', maxLength: IRI_MAX, description: 'The namespace of the space\'s own type and property names: an absolute IRI ending in "/" with no "#"; `<base>vocab/` when absent. Moves only with the base.' },
           baseEpoch: { type: 'integer', minimum: 0, maximum: RDF_BASE_EPOCH_MAX, description: 'How many times the base was changed; the server keeps its own count and ignores yours.' },
           rebase: { type: 'boolean', enum: [true], description: 'Change the base on purpose (see above). Never stored.' },
         },
