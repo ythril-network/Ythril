@@ -29,10 +29,15 @@ export const SPACE_ACT_COMPLETED_OPERATION = 'space.act_completed';
 export const ROUND_EXPIRED_OPERATION = 'network.round.expired';
 /** A passed `space_rebase` round landing here at its deadline (Q-748): the space's RDF base moved, one entry per member that lands it. */
 export const SPACE_RDF_REBASE_OPERATION = 'space.rdf_rebase';
+/**
+ * A passed `space_rebase` round concluded here WITHOUT landing because another one for the same epoch lands instead (the earlier deadline, then
+ * the lower round id), or the space already holds that epoch: the base did not move by it.
+ */
+export const SPACE_RDF_REBASE_SUPERSEDED_OPERATION = 'space.rdf_rebase_superseded';
 
 export type RoundEffectOperation =
   | typeof ROUND_ADDITION_RETIRED_OPERATION | typeof ROUND_SPACE_ACT_OPERATION | typeof ROUND_MEMBER_ADMITTED_OPERATION
-  | typeof ROUND_EXPIRED_OPERATION | typeof SPACE_RDF_REBASE_OPERATION;
+  | typeof ROUND_EXPIRED_OPERATION | typeof SPACE_RDF_REBASE_OPERATION | typeof SPACE_RDF_REBASE_SUPERSEDED_OPERATION;
 
 /**
  * The path prefix of each operation's entry, which names the network and the round after it. The expiry's is the one the integration guide
@@ -45,6 +50,7 @@ const PATH_PREFIX: Readonly<Record<RoundEffectOperation, string>> = {
   [ROUND_MEMBER_ADMITTED_OPERATION]: 'internal:round',
   [ROUND_EXPIRED_OPERATION]: 'internal:round-expiry',
   [SPACE_RDF_REBASE_OPERATION]: 'internal:round',
+  [SPACE_RDF_REBASE_SUPERSEDED_OPERATION]: 'internal:round',
 };
 
 const saidOnce = warnOnce<string>({ max: 10, every: SAY_ONCE_WINDOW_MS });

@@ -28,7 +28,7 @@ import { BaseIriZ, RDF_BASE_EPOCH_MAX, type RdfBaseConflict, type RdfSetting } f
 import type { NetworkConfig, SpaceConfig, VoteRound } from '../config/types.js';
 import { defaultBaseFor, defaultVocabFor } from '../rdf/term-iri.js';
 import { localToRemote, remoteToLocal } from '../sync/space-map.js';
-import { rebaseRoundUnapplied } from '../networks/round-state.js';
+import { rebaseRoundHeld, rebaseRoundUnapplied } from '../networks/round-state.js';
 
 /** Who is writing the setting. */
 export type RdfSource = 'local' | 'settings-round' | 'layer' | 'rebase-round';
@@ -105,6 +105,14 @@ export function heldRebaseEpochs(cfg: { networks: readonly NetworkConfig[] }, lo
     }
   }
   return out;
+}
+
+/**
+ * Every `space_rebase` round for `localSpaceId` held here at `now` (open, or passed and still to land), over every network, whoever proposed it
+ * (`rebaseRoundHeld`). A door refuses another rebase of the space while one is held (`rdf_rebase_pending`).
+ */
+export function heldRebaseRounds(cfg: { networks: readonly NetworkConfig[] }, localSpaceId: string, now: number): VoteRound[] {
+  return cfg.networks.flatMap(net => (net.pendingRounds ?? []).filter(r => rebaseRoundHeld(r, now) && rebaseRoundSpaceOf(net, r) === localSpaceId));
 }
 
 /**

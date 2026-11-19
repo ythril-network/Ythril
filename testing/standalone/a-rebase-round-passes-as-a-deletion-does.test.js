@@ -87,6 +87,16 @@ describe('pub/sub: the publisher clause covers a rebase', () => {
     assert.equal(roundVerdict(publishing, roundOf('space_rebase', { votes, proposedHere: true })), 'passed');
     assert.equal(roundVerdict(publishing, roundOf('space_deletion', { votes, proposedHere: true })), 'passed');
   });
+  // Review finding 12 (slice A-fix): the publisher refused to hold a subscriber's deletion, but adopted its rebase and served it open to
+  // every other subscriber until its deadline.
+  it('the publisher holds no subscriber\'s rebase round, as it holds no subscriber\'s deletion', async () => {
+    const { adoptionRefusal } = await import('../../server/dist/networks/round-local-state.js');
+    const now = Date.now();
+    const deletion = adoptionRefusal(publishing, roundOf('space_deletion', { subjectInstanceId: PEER }), now);
+    assert.equal(deletion, 'proposed by a subscriber');
+    assert.equal(adoptionRefusal(publishing, roundOf('space_rebase', { subjectInstanceId: PEER }), now), deletion,
+      'the publisher adopted a subscriber\'s rebase round');
+  });
   it('a meta_change is counted as it always was: the clause is the delete family\'s alone', () => {
     const votes = [cast(PEER)];
     assert.equal(roundVerdict(publishing, roundOf('meta_change', { subjectInstanceId: PEER, votes })), 'passed');

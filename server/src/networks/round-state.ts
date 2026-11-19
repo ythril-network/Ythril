@@ -160,6 +160,30 @@ export function rebaseRoundOwed(r: PassedRoundReadable & Pick<RoundDatable, 'dea
 }
 
 /**
+ * A rebase round HELD here at `now`: open, or passed and still to land ({@link rebaseRoundUnapplied}), whoever proposed it. While one is held
+ * for a space, a door refuses another rebase of it (`rdf_rebase_pending`, review finding 1 of slice A): two rounds opened from one base would
+ * both take its epoch plus one, and only one of them can land.
+ */
+export function rebaseRoundHeld(r: PassedRoundReadable & RoundDatable, now: number): boolean {
+  return r.type === 'space_rebase' && (roundIsOpen(r, now) || rebaseRoundUnapplied(r));
+}
+
+/**
+ * The order rebase rounds for one space land in: the earlier deadline first, then the lower round id. Read from the rounds alone, so every
+ * member that holds the same rounds lands the same one first, whatever order it received them in; a round with an undatable deadline sorts
+ * last.
+ */
+export function rebaseLandingOrder(a: { deadline?: string | null; roundId: string }, b: { deadline?: string | null; roundId: string }): number {
+  const at = (r: { deadline?: string | null }): number => {
+    const ms = typeof r.deadline === 'string' ? Date.parse(r.deadline) : Number.NaN;
+    return Number.isNaN(ms) ? Number.POSITIVE_INFINITY : ms;
+  };
+  const byDeadline = at(a) - at(b);
+  if (byDeadline !== 0 && !Number.isNaN(byDeadline)) return byDeadline;
+  return a.roundId < b.roundId ? -1 : a.roundId > b.roundId ? 1 : 0;
+}
+
+/**
  * The round types a peer still needs after they end: a round whose effect every member applies is served after it passes, because its
  * proposer may have decided it at open (design v5 §3.1). `join` and `remove` stay out.
  */
