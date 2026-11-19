@@ -54,6 +54,11 @@ export interface PropertySchema {
   required?: boolean;
   /** Default value applied on write when the property is absent. */
   default?: string | number | boolean;
+  /**
+   * The property's web address in an RDF export (Q-748), e.g. `https://schema.org/email`. Absent: the space's vocab names it. Part of the
+   * schema, so changing it changes the schema fingerprint.
+   */
+  iri?: string;
 }
 
 /** Schema definition for a single entity type, edge label, fact type, or chrono type. */
@@ -66,6 +71,11 @@ export interface TypeSchema {
    * will act on it.
    */
   description?: string;
+  /**
+   * The type's web address in an RDF export (Q-748): the class of an entity, fact or chrono type, the property of an edge label. Absent:
+   * the space's vocab names it. Part of the schema, so changing it changes the schema fingerprint.
+   */
+  iri?: string;
   /**
    * Reference to an instance-level schema library entry.
    * Format: `"library:<name>"` (e.g. `"library:service-v1"`).
@@ -202,6 +212,26 @@ export type DatePassedPolicy = 'overdue' | 'nothing';
  */
 export const DATE_PASSED_VALUES = ['overdue', 'nothing'] as const satisfies readonly DatePassedPolicy[];
 
+/**
+ * A space's RDF setting (Q-748). Absent or `enabled: false`: no RDF door answers and nothing else changes. The base is set once and moves
+ * only by a deliberate rebase (a solo space's admin act, a shared space's `space_rebase` round); `baseEpoch` counts those moves.
+ */
+export interface RdfSetting {
+  enabled: boolean;
+  /** Every record address is `<base><kind>/<id>`. Ends in `/`, holds no `#`. */
+  base?: string;
+  /** The namespace of the space's own type and property names; `<base>vocab/` unless set. Moves only with the base. */
+  vocab?: string;
+  /** How many times the base was deliberately changed. */
+  baseEpoch?: number;
+}
+
+/** Two bases offered for one space that no round explains (Q-748): the RDF doors answer 409 `rdf_base_conflict` while it stands. */
+export interface RdfBaseConflict {
+  held: { base: string; epoch: number };
+  offered: { networkId?: string; base: string; epoch: number }[];
+}
+
 /** Structured schema and metadata for a space — all fields optional. */
 export interface SpaceMeta {
   /** Version counter — auto-incremented on every meta change. */
@@ -259,6 +289,10 @@ export interface SpaceMeta {
    * A top-level field replaced whole by every merge (`spaces/meta-fields.ts`): send the map without a rule to delete it.
    */
   rules?: Record<string, SpaceSchemaRule>;
+  /** Q-748: the space's RDF names. A whole object to every merge, settled by one rule on the server (`spaces/rdf-settle.ts`). */
+  rdf?: RdfSetting;
+  /** Q-748, server-owned: a base a network offered that no round explains; never set by a caller. */
+  rdfBaseConflict?: RdfBaseConflict;
   /** ISO8601 timestamp of the last meta update. */
   updatedAt?: string;
   /** History of previous meta versions (most recent first, capped). */

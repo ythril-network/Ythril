@@ -15,6 +15,8 @@ export {
   META_FIELD_KINDS, metaFieldKind, PER_TYPE_META_FIELD, unknownMetaFields, MAX_UNKNOWN_NAMES, type MetaFieldKind,
 } from './meta-fields.js';
 export * from './library-ref-name.js';
+// Q-748: the address validators and the one segment encoder.
+export { IRI_MAX, IriZ, NamespaceIriZ, BaseIriZ, PrefixZ, RESERVED_PREFIXES, iriSegment } from './iri.js';
 export {
   withSchemaLibrary, currentSchemaLibrary, libraryDefinitionOf, takeBackLibraryDefinition,
   type SchemaLibraryEntryLike, type SchemaLibrarySource,

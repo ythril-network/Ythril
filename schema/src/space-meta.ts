@@ -31,6 +31,7 @@ import { META_FIELD_KINDS, MAX_UNKNOWN_NAMES, PER_TYPE_META_FIELD, boundedNames 
 import { isPlainObject, setOwn } from './plain-object.js';
 import { libraryEntryNameOf } from './library-ref-name.js';
 import { SCHEMA_FINGERPRINT_FIELD } from './schema-fingerprint.js';
+import { IriZ, BaseIriZ, NamespaceIriZ } from './iri.js';
 import {
   TypeRuleZ, SpaceRuleZ, MAX_RULES_PER_TYPE, MAX_RULES_PER_SPACE, ruleMapIssues, typeRuleIssues, spaceRuleIssues, applicableRuleIssues,
   readingStoredRules, type RuleIssue,
@@ -72,6 +73,8 @@ export const PropertySchemaZ = z.object({
   mergeFn: z.enum(MERGE_FNS).optional(),
   required: z.boolean().optional(),
   default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  // Q-748: the property's address in an RDF export; absent, the space's vocab names it.
+  iri: IriZ.optional(),
 }).strict().refine(data => {
   if (!data.mergeFn) return true;
   const numericFns = new Set(['avg', 'min', 'max', 'sum']);
@@ -217,6 +220,8 @@ export const TypeSchemaZ = z.preprocess(takeBackLibraryDefinition, z.union([
     functional: z.boolean().optional(),
     // F-46: the type's own CEL rules, by name. Part of the type, so replaced with it; what each may be is judged in TypeSchemasZ.
     rules: rulesMapOf(TypeRuleZ, MAX_RULES_PER_TYPE).optional(),
+    // Q-748: the type's address in an RDF export (a class, or an edge label's property); absent, the space's vocab names it.
+    iri: IriZ.optional(),
   }).strict(),
 ]));
 
@@ -487,6 +492,17 @@ export const SpaceMetaBody = z.object({
   }).strict().optional(),
   // F-46: the CEL rules every record of the space is held to, beside each type's own. Replaced whole by every merge.
   rules: rulesMapOf(SpaceRuleZ, MAX_RULES_PER_SPACE).optional(),
+  /*
+   * Q-748: the space's RDF names. `baseEpoch` is what a peer sends (a local door overwrites it with the stored one); `rebase: true` is
+   * write-only and never stored: it is how a caller asks for a different base. Every writer settles it by one rule (`spaces/rdf-settle.ts`).
+   */
+  rdf: z.object({
+    enabled: z.boolean(),
+    base: BaseIriZ.optional(),
+    vocab: NamespaceIriZ.optional(),
+    baseEpoch: z.number().int().min(0).max(1_000_000).optional(),
+    rebase: z.literal(true).optional(),
+  }).strict().optional(),
 }).strict().superRefine((meta, ctx) => {
   // F-46: each space rule is one this instance can apply to every kind it names, and what APPLIES to one record (a type's own rules
   // and the space's for its kind) is at most MAX_APPLICABLE_RULES and within the cost budget — refused here, never truncated at write.
@@ -551,8 +567,11 @@ for (const key of Object.keys(SpaceMetaBody.shape)) {
  *
  * `schemaFingerprint` joined in Q-734 (bundle-265): the fingerprint of the schema the space's records are checked and stamped against,
  * derived from the schema itself, so a caller-set value would name a schema that is not the one in force.
+ *
+ * `rdfBaseConflict` joined in Q-748 (bundle-269): a base a network offered that no round explains, recorded by the server and read by the
+ * RDF doors; a caller cannot settle it by writing it, only by a rebase.
  */
-export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema', 'invalidRules', 'unknownWriteFields', SCHEMA_FINGERPRINT_FIELD] as const;
+export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema', 'invalidRules', 'unknownWriteFields', SCHEMA_FINGERPRINT_FIELD, 'rdfBaseConflict'] as const;
 
 /** Drop the server-owned housekeeping fields from an incoming `meta`, leaving everything else to Zod. */
 export function stripServerOwnedMeta(meta: unknown): unknown {

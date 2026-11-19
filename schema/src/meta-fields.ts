@@ -16,7 +16,7 @@
  * | kind | keys | what a merge does |
  * |---|---|---|
  * | `scalar` | purpose, usageNotes, validationMode, strictLinkage, suppressEmbeddings, whenDuePasses | the incoming value replaces; a `false` is a value |
- * | `object-replaced-whole` | stampSkew | the incoming object replaces; a property the old one had and the new one lacks is gone |
+ * | `object-replaced-whole` | stampSkew, rdf | the incoming object replaces; a property the old one had and the new one lacks is gone |
  * | `per-type` | typeSchemas | a type not named is untouched; a type named is merged by the rule of the DOOR (the caller says how) |
  * | `replaced-whole` | rules | the incoming map replaces; a rule absent from it is deleted (R6-5: send the map without it) |
  *
@@ -53,6 +53,8 @@ export const META_FIELD_KINDS: Readonly<Record<string, MetaFieldKind>> = Object.
   suppressEmbeddings: 'scalar',
   whenDuePasses: 'scalar',
   stampSkew: 'object-replaced-whole',
+  // Q-748: replaced whole by a merge, and made safe by the server's one rule (`spaces/rdf-settle.ts`), which every writer of it calls.
+  rdf: 'object-replaced-whole',
   typeSchemas: 'per-type',
   rules: 'replaced-whole',
 });
