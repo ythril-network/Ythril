@@ -353,11 +353,11 @@ export class ConvertRecordsDialogComponent {
     const here = this.network() !== null;
     if (c.total === 0) return markedPieces(this.say, 'spaces.schema.convert.noRecords', { type: block.was ?? block.type });
     if (c.casesCountedAsItRuns) {
-      return piecesOf(this.plural.text(here ? 'spaces.schema.convert.splitHere' : 'spaces.schema.convert.split', c.total, { type: markName(block.type) }));
+      const type = markName(block.type);
+      return piecesOf(here ? this.plural.text('spaces.schema.convert.splitHere', c.total, { type }) : this.plural.text('spaces.schema.convert.split', c.total, { type }));
     }
-    return piecesOf(this.plural.text(here ? 'spaces.schema.convert.countsHere' : 'spaces.schema.convert.counts', c.total, {
-      type: markName(block.was ?? block.type), stamped: c.stamped, rewritten: c.rewritten,
-    }));
+    const params = { type: markName(block.was ?? block.type), stamped: c.stamped, rewritten: c.rewritten };
+    return piecesOf(here ? this.plural.text('spaces.schema.convert.countsHere', c.total, params) : this.plural.text('spaces.schema.convert.counts', c.total, params));
   }));
 
   protected showUnfit(i: number): boolean {
