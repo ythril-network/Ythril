@@ -238,7 +238,7 @@ let seq = 0;
               @let footer = runFooter();
               @if (footer.kind === 'hint') {
                 <span class="sch-hint" style="margin-right: auto;" data-testid="cv-foot-hint">{{ footer.key | transloco }}</span>
-              } @else {
+              } @else if (footer.kind !== 'none') {
                 <button type="button" class="btn btn-sm" data-testid="cv-open-review" [class.btn-primary]="footer.kind === 'review'" [class.btn-secondary]="footer.kind === 'reviewSoFar'" (click)="openReview.emit()">
                   {{ (footer.kind === 'review' ? 'spaces.schema.convert.run.openReview' : 'spaces.schema.convert.run.openReviewSoFar') | transloco: { n: footer.n } }}
                 </button>
