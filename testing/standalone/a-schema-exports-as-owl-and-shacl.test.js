@@ -161,14 +161,13 @@ describe('a property: its axioms and its shape, field by field', () => {
   const owned = (extra) => ({ 'rdf:type': [I('owl:DatatypeProperty'), I('owl:FunctionalProperty')], 'rdfs:isDefinedBy': [I(ONTOLOGY)], 'rdfs:domain': [I(termAt('entity', 'person'))], ...extra });
   const shape = (prop, extra) => ({ 'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I(termAt('entity', 'person', prop))], 'sh:name': [L(prop)], 'sh:maxCount': [INT(1)], ...extra });
 
-  it('a required, patterned string: minimum count and length one, a guarded pattern, a pattern facet on its range', () => {
+  it('a required, patterned string: minimum count and length one, a guarded pattern and its own text, no pattern facet on its range', () => {
     assert.deepEqual(P('name'), norm(owned({
-      'rdfs:label': [L('name')], 'rdfs:comment': [L('The full name')],
-      'rdfs:range': [{ 'rdf:type': [I('rdfs:Datatype')], 'owl:onDatatype': [I('xsd:string')], 'owl:withRestrictions': [LIST({ 'xsd:pattern': [L('^[A-Za-z ]+$')] })] }],
+      'rdfs:label': [L('name')], 'rdfs:comment': [L('The full name')], 'rdfs:range': [I('xsd:string')],
     })));
     assert.deepEqual(S('name'), norm(shape('name', {
       'sh:description': [L('The full name')], 'sh:datatype': [I('xsd:string')], 'sh:minCount': [INT(1)], 'sh:minLength': [INT(1)],
-      'sh:or': [LIST(DT('xsd:decimal'), DT('xsd:boolean'), { 'sh:pattern': [L('^[A-Za-z ]+$')] })],
+      'sh:or': [LIST(DT('xsd:decimal'), DT('xsd:boolean'), { 'sh:pattern': [L('^[A-Za-z ]+$')] })], 'ythril:pattern': [L('^[A-Za-z ]+$')],
     })));
   });
 
@@ -207,7 +206,7 @@ describe('a property: its axioms and its shape, field by field', () => {
   it('a range or a pattern with no declared type is a guard only: no datatype, and no restriction the server does not apply to every value', () => {
     assert.deepEqual(S('loose'), norm(shape('loose', { 'sh:or': [LIST(NOT_DECIMAL, { 'sh:minInclusive': [DEC(5)] })] })));
     assert.equal(P('loose')['rdfs:range'], undefined);
-    assert.deepEqual(S('code'), norm(shape('code', { 'sh:or': [LIST(DT('xsd:decimal'), DT('xsd:boolean'), { 'sh:pattern': [L('^A')] })] })));
+    assert.deepEqual(S('code'), norm(shape('code', { 'sh:or': [LIST(DT('xsd:decimal'), DT('xsd:boolean'), { 'sh:pattern': [L('^A')] })], 'ythril:pattern': [L('^A')] })));
     assert.equal(P('code')['rdfs:range'], undefined);
   });
 
@@ -400,7 +399,7 @@ describe('every shape is named, whatever a name holds', () => {
 describe('every text is a plain literal; every ythril: term is declared', () => {
   const { quads } = graph();
   it('a label, a comment, a name, a description and a pattern are plain literals', () => {
-    const textual = ['rdfs:label', 'rdfs:comment', 'sh:name', 'sh:description', 'sh:pattern', 'ythril:namingPattern', 'ythril:mergeFn', 'owl:versionInfo'].map(iriOf);
+    const textual = ['rdfs:label', 'rdfs:comment', 'sh:name', 'sh:description', 'sh:pattern', 'ythril:pattern', 'ythril:namingPattern', 'ythril:mergeFn', 'owl:versionInfo'].map(iriOf);
     const found = quads.filter(q => textual.includes(q.predicate.value));
     assert.ok(found.length > 20, 'the fixture states many texts');
     for (const q of found) assert.deepEqual(q.object, { kind: 'literal', value: q.object.value }, `${q.predicate.value} of ${q.subject.value ?? 'a blank node'} is a plain literal`);

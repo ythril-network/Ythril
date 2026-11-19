@@ -159,6 +159,8 @@ describe('one failing record per kind of constraint, reported for the right shap
     ['a number below its minimum', (d) => withValue(d, alice('age'), lit('-1', 'decimal')), [{ focus: entityIri('alice'), shape: at('entity', 'person', 'age'), component: comp('Or') }]],
     ['a number above its maximum', (d) => withValue(d, alice('age'), lit('151', 'decimal')), [{ focus: entityIri('alice'), shape: at('entity', 'person', 'age'), component: comp('Or') }]],
     ['a string that does not match its pattern', (d) => withValue(d, alice('name'), lit('Alice 2')), [{ focus: entityIri('alice'), shape: PERSON_NAME, component: comp('Or') }]],
+    // Slice S: the pattern `^[A-Za-z ]+$` lies in the subset both regex dialects read alike, so SHACL checks it as the server does.
+    ['a string with a character outside its pattern\'s class (in the shared subset)', (d) => withValue(d, alice('name'), lit('Alice_Smith')), [{ focus: entityIri('alice'), shape: PERSON_NAME, component: comp('Or') }]],
     ['a string outside its enumeration', (d) => withValue(d, alice('status'), lit('gone')), [{ focus: entityIri('alice'), shape: at('entity', 'person', 'status'), component: comp('In') }]],
     ['a number outside its enumeration', (d) => withValue(d, alice('level'), lit('4', 'decimal')), [{ focus: entityIri('alice'), shape: at('entity', 'person', 'level'), component: comp('In') }]],
     ['a second value for one property', (d) => addValue(d, alice('age'), lit('31', 'decimal')), [{ focus: entityIri('alice'), shape: at('entity', 'person', 'age'), component: comp('MaxCount') }]],
@@ -203,5 +205,9 @@ describe('a shape never refuses what the server accepts', () => {
     for (const needle of [lit('abc'), lit('7', 'decimal'), lit('5', 'decimal'), lit('Axe'), lit('next tuesday'), lit('2026-02-30')]) {
       assert.ok(data.some(q => q.object.kind === 'literal' && q.object.value === needle.value && q.object.datatype === needle.datatype), `the fixture writes ${needle.value}`);
     }
+  });
+  it('a value the server accepts for a pattern in the shared subset is accepted by the shape too (slice S)', async () => {
+    const name = prop('entity', 'alice', 'person', 'name');
+    assert.deepEqual(await validate(withValue(DATA(), name, lit('A B'))), [], 'one letter, a space and one letter match ^[A-Za-z ]+$ in both dialects');
   });
 });
