@@ -48,6 +48,9 @@ const TYPE_FIELDS = {
   endpoints: { class: 'reported', sample: { from: ['person'] }, kind: 'edge' },
   functional: { class: 'reported', sample: true, kind: 'edge' },
   rules: { class: 'reported', sample: { named: { rule: 'true', message: 'always' } } },
+  // Q-748: the type's RDF address. TypeScript has no place for it, so the converter reports it as it reports every type field it does not
+  // carry (design r4 §4.3 said "irrelevant"; the converter classifies type fields by the shape, and reporting is what it promises).
+  iri: { class: 'reported', sample: 'https://schema.org/Thing' },
 };
 
 /** A property's fields, each with the property it sits on. All are translated: as the member type, or as documentation. */
@@ -61,6 +64,8 @@ const PROPERTY_FIELDS = {
   mergeFn: { class: 'translated', sample: { type: 'number', mergeFn: 'sum' }, doc: 'sum' },
   required: { class: 'translated', sample: { type: 'string', required: true } },
   default: { class: 'translated', sample: { type: 'string', default: 'DEFAULTMARK' }, doc: 'DEFAULTMARK' },
+  // Q-748: the property's RDF address says nothing about its TypeScript type: no entry, and the member type is the declared one.
+  iri: { class: 'irrelevant', sample: { type: 'string', iri: 'https://schema.org/email' } },
 };
 
 /** The property type enum: each option and the member type it becomes (held by the property-types test). */
@@ -77,6 +82,9 @@ const SPACE_FIELDS = {
   strictLinkage: { class: 'irrelevant', sample: true },
   suppressEmbeddings: { class: 'irrelevant', sample: true },
   whenDuePasses: { class: 'irrelevant', sample: 'nothing' },
+  // Q-748: the space's RDF names. Not a property type, and reported because the converter reports every space field it does not list as
+  // irrelevant (design r4 §4.3 said "irrelevant"; that list is `schema/src/typescript.ts`'s, outside this slice).
+  rdf: { class: 'reported', sample: { enabled: true, base: 'https://example.org/ld/s/' } },
 };
 
 /** The keys `actual` has that `table` does not classify, and the rows `table` has for keys `actual` lacks. */

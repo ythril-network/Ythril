@@ -17,7 +17,7 @@
  * | kind | keys | what a merge does |
  * |---|---|---|
  * | scalar | purpose, usageNotes, validationMode, strictLinkage, suppressEmbeddings, whenDuePasses | the incoming value replaces; a `false` is a value |
- * | object, replaced whole | stampSkew | the incoming object replaces; a property the old one had and the new one lacks is gone |
+ * | object, replaced whole | stampSkew, rdf | the incoming object replaces; a property the old one had and the new one lacks is gone |
  * | per type | typeSchemas | a type not named is untouched; a type named is merged by the rule of the door (below) |
  * | replaced whole (F-46) | rules | the incoming map replaces; a rule absent from it is deleted |
  *
@@ -52,6 +52,9 @@ const TABLE = [
   // Replaced whole: `properties` was on the old object and is not on the new, so it must be gone.
   { key: 'stampSkew', kind: 'object-replaced-whole', old: { warnMinutes: 5, properties: ['stampedAt'] }, next: { warnMinutes: 10 } },
   { key: 'typeSchemas', kind: 'per-type', old: { entity: { Kept: { namingPattern: '^k' } } }, next: { entity: { Added: { namingPattern: '^a' } } } },
+  // Q-748: replaced whole, from a meta holding no base yet (the first set). What a merge does once a base is held is the settle's rule, held by
+  // `a-space-rdf-setting-is-settled-by-one-rule` (a stored base is never moved by a merge).
+  { key: 'rdf', kind: 'object-replaced-whole', old: { enabled: false }, next: { enabled: true, base: 'https://x.example.org/ld/s/', vocab: 'https://x.example.org/ld/s/vocab/', baseEpoch: 0 } },
   { key: 'rules', kind: 'replaced-whole', until: 'F-46', old: { a: { rule: 'true', message: 'a' } }, next: { b: { rule: 'true', message: 'b' } } },
 ];
 

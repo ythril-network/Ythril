@@ -45,6 +45,8 @@ const SAMPLES = {
   typeSchemas: { entity: { Door: { namingPattern: '^[A-Z]' } } },
   // F-46: added with the key (SpaceMeta.rules), as this table asks of every key added to SpaceMeta.
   rules: { door: { rule: "self.description != 'forbidden'", message: 'not that description' } },
+  // Q-748: added with the key (SpaceMeta.rdf). Sent whole, as the door stores it settled: vocab and epoch are what the first set gives.
+  rdf: { enabled: true, base: 'https://door.example.org/ld/sch/', vocab: 'https://door.example.org/ld/sch/vocab/', baseEpoch: 0 },
 };
 
 /** The doors, and the keys each does not carry by design (with the reason). */
