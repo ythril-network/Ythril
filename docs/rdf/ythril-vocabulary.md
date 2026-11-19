@@ -23,7 +23,7 @@ This page and `ythril.ttl` are generated from one table in the server (`server/s
 
 | Term | Meaning |
 |---|---|
-| `ythril:complete` | Whether nothing of the export's scope is left after this page: true on its last page. |
+| `ythril:complete` | Whether this document is whole: false only on an export that could not finish. A page with more after it is whole and states ythril:nextAfter. |
 | `ythril:confidence` | A chrono record's confidence. |
 | `ythril:contentRedacted` | The record's content was removed by a retention schedule. |
 | `ythril:edgeType` | An edge's type, stated on its reifier. |

@@ -30,7 +30,9 @@ export const space_schema_rdfTool: ToolHandler = {
     + 'version, fingerprint, what was left out). Needs `schema: read`; a personal view has no schema of its own and is refused. The space '
     + `needs RDF switched on and a settled base. Same as GET /api/spaces/:id/schema-rdf. Refusals carry a code: ${RDF_SCHEMA_REFUSAL_CODES.join(', ')}.`,
   mutating: false,
-  skipSchemaValidation: true,
+  // The act judges `format` with the coded refusal the route answers (`rdf_bad_format`); every other argument, an unknown one included, is
+  // held to the input schema as on every tool (bundle-269 drive, finding 12: `foo` went through silently).
+  argumentsJudgedByTheAct: ['format'],
   spaceRequired: true,
   outputSchema: RDF_SCHEMA_OUTPUT_SCHEMA,
   inputSchema: (s: ToolSchemas) => ({

@@ -40,7 +40,7 @@ import { closeIfStalled, pacedWriter, type ReaderPace } from '../../export/expor
 import { answeredUnknownSpace } from '../write-target-answer.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import type { TokenRights } from '../../config/rights-shape.js';
-import { EXPORT_OK } from '../../export/export-statuses.js';
+import { EXPORT_OK, EXPORT_VARY } from '../../export/export-statuses.js';
 import { schemaFingerprintOf } from '../../spaces/schema-stamp.js';
 
 export const rdfExportRouter = Router();
@@ -69,7 +69,9 @@ rdfExportRouter.get('/spaces/:spaceId/export/rdf', globalRateLimit, headAskedAsG
   const spaceId = req.params['spaceId'] as string;
   if (answeredUnknownSpace(req, res, spaceId)) return;
   const token = req.authToken as { id?: string; admin?: boolean; rights?: TokenRights | null } | undefined;
-  res.setHeader('Vary', 'Accept');
+  // Alike for all four formats: the compression layer adds Accept-Encoding only for the types it compresses (Turtle, JSON-LD), so a cache
+  // would key TriG and N-Quads differently (bundle-269 drive, finding 12).
+  res.setHeader('Vary', EXPORT_VARY);
   res.setHeader('Access-Control-Expose-Headers', EXPOSED);
   const input = {
     spaceId, viewMembers: viewReadOfRequest(req, spaceId), accept: req.headers['accept'],
