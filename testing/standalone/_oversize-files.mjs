@@ -479,7 +479,10 @@ export const FROZEN = {
   // the destination guard it gained did not grow this file; a file act's refusals are answered once in send-failure.ts.
   // 394 -> 316 (bundle-44, Q-438): the delete route's own decision — stat, directory or not, `confirm`, the root — became
   // `deletePath` in `files/delete-cascade.ts`, the one function all three delete doors call.
-  'server/src/api/files.ts': 316,
+  // 316 -> 292 (6.5.6, bundle-362 backport): the download answer (headers, the active-content guard, the stream) moved to
+  // `api/files-download.ts` when a HEAD learned to stop after its headers there, so the stop did not grow this file; it took 24 code
+  // lines out (306 -> 282), and the ceiling drops by the same 24.
+  'server/src/api/files.ts': 292,
   // 645 -> 660: the data-model panel’s mount and its card header. The panel ITSELF is a separate
   // component (er-model-panel) and its geometry a separate module (er-layout) — which is what this
   // ratchet asks for. What landed here is the 13 lines that place it in the grid, plus the two inputs
