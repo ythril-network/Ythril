@@ -9,6 +9,43 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
  */
 const TYPE_RENAME_ERRORS = 'spaces.schema.renameError.';
 
+/** The width below which the settings popup is a phone (the Schema tab's master and detail stack at the same width, `schema-styles.ts`). */
+const PHONE_MAX_WIDTH = 760;
+
+/**
+ * The control's own rules. `.sch-hint` and `.sch-msg` are the tab's classes, and the tab's styles do not reach into a child's template: the note,
+ * the refusal and the head's name (`.dt`, mono in the accent as drawn) are styled here, from the same tokens, so both themes read them.
+ *
+ * At phone width (bundle-285 slice S10, drive D7) the name shrinks with an ellipsis and keeps its pencil beside it (its full text is the
+ * title and the text read aloud), and the "was" note takes a line of its own, so a renamed property's row is no wider than an untouched one.
+ */
+export const SCHEMA_TYPE_NAME_STYLES = `
+    :host { display:inline-flex; align-items:center; min-width:0; max-width:100%; }
+    .nm-text { flex:0 1 auto; min-width:0; max-width:calc(100% - 28px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .dt { font-family:var(--font-mono); font-size:15px; color:var(--accent); font-weight:600; }
+    .icon-btn { flex-shrink:0; }
+    .sch-hint { font-size:11px; font-weight:400; color:var(--text-muted); margin-inline-start:6px; white-space:nowrap; }
+    .sch-msg { font-size:12px; }
+    .sch-msg.err { color:var(--error); }
+    @media (max-width: ${PHONE_MAX_WIDTH}px) {
+      :host { flex-wrap:wrap; }
+      .sch-hint { flex-basis:100%; margin-inline-start:0; }
+    }
+`;
+
+/**
+ * The type head of the Schema tab (`.sch-detail-head`: the name, then History, Convert records, export, library and remove), which the tab lists in
+ * its `styles` beside the shared ones. The name takes the room left and may shrink; at phone width the head wraps and so do its buttons, so a
+ * long name never pushes a button off screen or makes the pane scroll sideways (bundle-285 slice S10, drive D7).
+ */
+export const TYPE_HEAD_STYLES = `
+    .sch-detail-head app-schema-type-name { flex:1 1 auto; min-width:0; }
+    @media (max-width: ${PHONE_MAX_WIDTH}px) {
+      .sch-detail-head { flex-wrap:wrap; row-gap:6px; }
+      .sch-detail-head .acts { flex-wrap:wrap; flex-shrink:1; min-width:0; margin-inline-start:auto; }
+    }
+`;
+
 /**
  * A declared type's NAME, or a property's KEY, and the affordance to change it.
  *
@@ -54,21 +91,14 @@ const TYPE_RENAME_ERRORS = 'spaces.schema.renameError.';
   standalone: true,
   imports: [TranslocoPipe, PhIconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // `.sch-hint` and `.sch-msg` are the tab's classes, and the tab's styles do not reach into a child's template: the note and the
-  // refusal are styled here, from the same tokens, so both themes read them.
-  styles: [`
-    .nm-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .sch-hint { font-size:11px; font-weight:400; color:var(--text-muted); margin-inline-start:6px; white-space:nowrap; }
-    .sch-msg { font-size:12px; }
-    .sch-msg.err { color:var(--error); }
-  `],
+  styles: [SCHEMA_TYPE_NAME_STYLES],
   template: `
     @if (editing()) {
       <input #field class="dt-edit" type="text" [value]="draft" (input)="draft = $any($event.target).value"
         (keydown.enter)="onEnter()" (keydown.escape)="onEscape($event)" (blur)="commit()" (click)="$event.stopPropagation()"
         [attr.aria-label]="labelKey() | transloco: labelParams()" />
     } @else {
-      <span class="nm-text" [class]="nameClass()">{{ name() }}</span>
+      <span class="nm-text" [class]="nameClass()" [attr.title]="name()">{{ name() }}</span>
       <button #pencil class="icon-btn" type="button" (click)="$event.stopPropagation(); start()"
         [attr.title]="titleKey() | transloco" [attr.aria-label]="labelKey() | transloco: labelParams()"><ph-icon name="pencil-simple" [size]="13"/></button>
     }
