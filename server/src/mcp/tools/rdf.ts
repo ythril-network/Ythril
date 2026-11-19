@@ -54,7 +54,9 @@ export const export_rdfTool: ToolHandler = {
     + '`structuredContent` hold the summary (records, `complete`, `nextAfter`, what was left out). Same as GET /api/brain/spaces/:spaceId/export/rdf.\n\n'
     + 'PAGES: a page ends at `limit` records or at the size ceiling (the first record always whole). While records are left the answer carries '
     + '`nextAfter`: pass it as `after` for the next page. A record written while you page is either wholly in or wholly out, and none comes twice. '
-    + 'Cost: one call per page; raise `maxChars` for bigger pages.\n\n'
+    + 'Cost: one call per page; raise `maxChars` for bigger pages. For the whole space in ONE request, without paging, use the REST route '
+    + 'with no `limit`, `after` or size ceiling: it streams the complete export (what an RDF tool such as Jena, RDF4J or rdflib reads); this '
+    + 'tool always pages, because a tool answer must stay bounded.\n\n'
     + 'WHAT IS IN IT: every entity, fact, chrono, edge, link and file of the space under its RDF addresses. A property value that is not one plain '
     + 'value (a list or an object a direct database write left) is left out, counted and named in `skippedValues` and in the document, never '
     + 'silently dropped. File statements need `files: read` on their space: without it they are left out and `fileTriplesWithheld` says so. '
@@ -94,6 +96,7 @@ export const export_rdfTool: ToolHandler = {
       });
     }
     r.slot.release();
+    if (r.kind !== 'page') throw new Error('export_rdf answers one bounded page: the whole stream is the REST route\'s');
     ctx.recordAuditChanges?.(r.auditChanges);
     return {
       content: [{ type: 'text' as const, text: r.chunks.join('') }, { type: 'text' as const, text: JSON.stringify(r.summary) }],

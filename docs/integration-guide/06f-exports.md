@@ -11,12 +11,14 @@ A space must have RDF switched on (`meta.rdf`, see [Space Schemas and Validation
 `GET /api/brain/spaces/:spaceId/export/rdf` and MCP `export_rdf` give the records of a space as **Turtle**, **TriG**, **N-Quads** or **JSON-LD**: every entity, fact, chrono entry, edge, link and file under its RDF address, built from standard vocabularies (Dublin Core, PROV, schema.org, OWL-Time) and the [Ythril vocabulary](../rdf/ythril-vocabulary.md).
 
 ```bash
-# The default for one space: Turtle
-curl -H "Authorization: Bearer $TOKEN" https://ythril.example/api/brain/spaces/research/export/rdf
+# The whole space in one request (Turtle, the default for one space)
+curl -H "Authorization: Bearer $TOKEN" https://ythril.example/api/brain/spaces/research/export/rdf > research.ttl
 
 # The same, chosen by the Accept header
-curl -H "Authorization: Bearer $TOKEN" -H "Accept: application/n-quads" https://ythril.example/api/brain/spaces/research/export/rdf
+curl -H "Authorization: Bearer $TOKEN" -H "Accept: application/n-quads" https://ythril.example/api/brain/spaces/research/export/rdf > research.nq
 ```
+
+A request that names no `limit`, `after` or size ceiling gets the **whole** export of the space or view in one answer, streamed a store page at a time: Jena, RDF4J, rdflib and curl read it as it is. There is no `Link` on it, because there is no next page. The largest export this serves has no fixed size: the stream holds only one store page in memory and keeps no database cursor open, and what bounds it is time. The reader must take each page within the idle bound (60 seconds), each store page must be read within 30 seconds, and only two exports run on the instance at once.
 
 ### Parameters
 
@@ -26,14 +28,20 @@ curl -H "Authorization: Bearer $TOKEN" -H "Accept: application/n-quads" https://
 | `Accept` | header | none | Read when no `format` is given, with its q-values: `text/turtle`, `application/trig`, `application/n-quads`, `application/ld+json`. `*/*` or none takes the default |
 | `edgeDetails` | query | argument | `rdf12` (the default for the text formats) states an edge's own details on an RDF 1.2 reifier; `reification` uses the classic `rdf:Statement` form, which every reader takes and the only form JSON-LD carries |
 | `after` | query | argument | The `nextAfter` of the previous page |
-| `limit` | query | argument | The most records in a page, 1 to 10 000 |
-| `maxChars`, `maxBytes`, `maxTokens` | query | argument | The size ceiling of a page. The default is the one the doors differ on: 50 000 characters on REST, 25 000 on MCP. Raise `maxChars` (up to 5 000 000) for bigger pages |
+| `limit` | query | argument | The most records in a page, 1 to 10 000. Naming it asks for a page |
+| `maxChars`, `maxBytes`, `maxTokens` | query | argument | The size ceiling of a page; naming one asks for a page. On MCP the default is 25 000 characters; a REST page named by `limit` or `after` alone takes 50 000. Raise `maxChars` (up to 5 000 000) for bigger pages |
 
 Over a view of several spaces Turtle cannot hold the graphs: an `Accept` that prefers it gets the best format that fits (TriG, then N-Quads, then JSON-LD), and `format=turtle` is `406 rdf_format_not_acceptable`, which lists the formats that fit. So does an `Accept` naming none of them.
 
-### What a page holds and how it ends
+### Paging, and how an answer ends
 
-A page ends at `limit` records or at the size ceiling, whichever comes first; the first record is always whole. Pages follow each other by a keyset: a record written while you page is either wholly in or wholly out, and none comes twice.
+Naming `limit`, `after` or a size ceiling asks for one bounded page instead, and MCP `export_rdf` always pages (a tool answer must stay bounded). A page ends at `limit` records or at the size ceiling, whichever comes first; the first record is always whole. Pages follow each other by a keyset: a record written while you page is either wholly in or wholly out, and none comes twice.
+
+A whole export that cannot finish is never mistaken for a whole file. None of the four formats defines an end-of-document mark or a checksum, so Ythril makes the end impossible to misread:
+
+- **Store failure after the first byte.** Turtle, TriG and N-Quads end with a last line no grammar allows (`!ythril-export-incomplete`), after a comment saying why. Every parser then refuses the file. TriG and N-Quads still carry the report node with `ythril:complete false`. A JSON-LD document is left unterminated, which no JSON parser accepts. The trailer `Ythril-Export-Complete` says `false`, and the audit row says `complete: false`.
+- **Reader gone or idle.** The answer is cut: its chunked body lacks the final chunk (RFC 9112 §7.1), which every HTTP client reports as a broken transfer.
+- **Store failure before the first byte.** A clean `503 rdf_export_incomplete`.
 
 - **REST** says what is left before the body: `Link: </api/brain/spaces/research/export/rdf?format=turtle&after=...>; rel="next"` while records are left, and no `Link` on the last page. The budget used is in `Ythril-Budget-Chars` (and `Ythril-Budget-Bytes` when you stated one).
 - **MCP** answers the document once, in the first text block. The second text block and `structuredContent` hold the summary: `members`, `format`, `mediaType`, `edgeDetails`, `version`, `records`, `counts` per kind, `complete`, `nextAfter`, `skippedValues`, `fileTriplesWithheld` and the budget fields. The tool declares this shape as its `outputSchema`.

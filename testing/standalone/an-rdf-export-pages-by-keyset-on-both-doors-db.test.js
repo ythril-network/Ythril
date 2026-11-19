@@ -110,8 +110,11 @@ describe('an RDF export pages by keyset on both doors', { skip }, () => {
     assert.ok(nextOf(r.headers['link']), 'a cut page links the next');
     const defaults = await d.exportMcp(admin.key, { space: SPACE, format: 'nquads' });
     assert.equal(defaults.structured.budgetChars, 25000, 'the MCP default');
+    // A REST caller that names no page is given the whole scope, streamed: no budget, no next page.
     const restDefault = await d.exportRest(admin.key, SPACE, { format: 'nquads' });
-    assert.equal(restDefault.headers['ythril-budget-chars'], '50000', 'the REST default');
+    assert.equal(restDefault.headers['ythril-budget-chars'], undefined, 'the whole export has no budget');
+    assert.equal(restDefault.headers['link'], undefined, 'and no next page');
+    assert.equal(restDefault.trailers['ythril-export-complete'], 'true');
   });
 
   it('a bad after, limit or edge form is refused by its own code on both doors', async () => {

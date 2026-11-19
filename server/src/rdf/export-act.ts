@@ -142,6 +142,7 @@ export interface RdfExportSummary {
 /** A finished page: its text in pieces, its summary, what each door puts on its wire, and the slot to release when it is sent. */
 export interface RdfExportPage {
   status: typeof EXPORT_OK;
+  kind: 'page';
   chunks: string[];
   summary: RdfExportSummary;
   contentType: string;
@@ -163,7 +164,28 @@ export interface RdfExportRefusal {
   retryAfterSeconds?: number;
 }
 
-export type RdfExportOutcome = RdfExportPage | RdfExportRefusal;
+/**
+ * The whole scope as one stream (REST with no `limit`, `after` or size ceiling): the text a store page at a time, the slot to release when
+ * it ends, and how it stands. A stream that cannot finish ends so that no reader takes it for a whole file (`INCOMPLETE_LINE`).
+ */
+export interface RdfExportStream {
+  status: typeof EXPORT_OK;
+  kind: 'stream';
+  contentType: string;
+  disposition: string;
+  viewMembers?: string[];
+  /** Some member's file statements are left out (no `files: read` there): known before the first record. */
+  fileTriplesWithheld: boolean;
+  slot: ExportSlot;
+  /** The first chunk (the start of the document and the first store page), or the refusal of a store that failed before any byte. */
+  begin(): Promise<{ ok: true; first: string } | RdfExportRefusal>;
+  /** The chunks after the first, a store page each, then the ending. */
+  rest(): AsyncGenerator<string, void, undefined>;
+  /** How the stream stands now: `complete` only once the last chunk was handed out; the audit row's changes; the trailers' parts. */
+  state(): { complete: boolean; incomplete?: string; auditChanges: RdfExportPage['auditChanges']; skippedCount: number; skippedRecords: string[] };
+}
+
+export type RdfExportOutcome = RdfExportPage | RdfExportStream | RdfExportRefusal;
 
 export interface RdfExportInput {
   /** The space or the caller's own view the call names. */
@@ -181,6 +203,11 @@ export interface RdfExportInput {
   transport: 'mcp' | 'rest';
   /** The door's `schemaFingerprintOf` (`rdf-space-state.ts` says why it is handed in). */
   fingerprintOf: FingerprintOf;
+  /**
+   * The whole scope in one answer, streamed (the REST route when the caller names no `limit`, `after` or size ceiling: what a standard RDF
+   * tool, which follows no `Link`, is given). Absent: one bounded page.
+   */
+  whole?: boolean;
 }
 
 /** A position in the walk: a member space, a kind, the last `_id` read. Opaque to the caller. */
@@ -274,22 +301,29 @@ export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutc
       error: 'An export is already running for this token, or as many exports as the instance runs at once: try again when it ends',
     };
   }
+  const p: PageInput = {
+    input, exported, withoutRdf, inConflict, format, edgeDetails, cursor, budget: resolved, limit: parsed.data.limit,
+    after: parsed.data.after, files: (m) => mayRead(rights, m, 'files'), slot, view,
+  };
+  if (input.whole === true) return streamWhole(p);
   try {
-    return await buildPage({
-      input, exported, withoutRdf, inConflict, format, edgeDetails, cursor, budget: resolved, limit: parsed.data.limit,
-      after: parsed.data.after, files: (m) => mayRead(rights, m, 'files'), slot, view,
-    });
+    return await buildPage(p);
   } catch (err) {
     slot.release();
-    const store = storeFailureAnswer(err, `export_rdf '${spaceId}'`);
-    if (store && store.status === EXPORT_UNAVAILABLE) {
-      return {
-        status: EXPORT_UNAVAILABLE, code: RDF_EXPORT_INCOMPLETE, retryAfterSeconds: store.retryAfterSeconds ?? EXPORT_RETRY_AFTER_SECONDS,
-        error: 'The store did not answer a page of this export in time, so nothing of the page was sent: try again (from the same after)',
-      };
-    }
-    throw err;
+    return refusalOfStore(err, spaceId);
   }
+}
+
+/** The 503 of a store that did not answer before any byte of an answer was sent; any other fault is thrown to the door. */
+function refusalOfStore(err: unknown, spaceId: string): RdfExportRefusal {
+  const store = storeFailureAnswer(err, `export_rdf '${spaceId}'`);
+  if (store && store.status === EXPORT_UNAVAILABLE) {
+    return {
+      status: EXPORT_UNAVAILABLE, code: RDF_EXPORT_INCOMPLETE, retryAfterSeconds: store.retryAfterSeconds ?? EXPORT_RETRY_AFTER_SECONDS,
+      error: 'The store did not answer a page of this export in time, so nothing of it was sent: try again (from the same after)',
+    };
+  }
+  throw err;
 }
 
 interface PageInput {
@@ -328,142 +362,278 @@ async function anyAfter(p: PageInput, from: Cursor): Promise<boolean> {
 const filterOf = (kind: RdfRecordKind): Record<string, unknown> => (kind === 'file' ? { ...LIVE_FILE_ROW, ...NOT_A_FEED_MARKER } : {});
 const projectionOf = (kind: RdfRecordKind): Record<string, 1> => Object.fromEntries(RDF_READ_FIELDS[kind].map(f => [f, 1 as const]));
 
-async function buildPage(p: PageInput): Promise<RdfExportPage> {
-  const cfg = getConfig();
-  const namespaces = Object.values(cfg.schemaLibraryNamespaces ?? {});
-  const prefixes: Record<string, string> = {};
-  for (const e of p.exported) for (const [name, ns] of Object.entries(prefixesFor(e.meta, namespaces))) if (!Object.hasOwn(prefixes, name)) prefixes[name] = ns;
-  const writer = createRdfWriter(p.format, { prefixes, edgeDetails: p.edgeDetails });
-  const head = writer.open();
-  const body: string[] = [];
-  let chars = head.length;
-  let bytes = Buffer.byteLength(head, 'utf8');
-  let records = 0;
-  const counts = Object.fromEntries(WALK.map(w => [w.kind, 0])) as Record<RdfRecordKind, number>;
-  const skipped = createSkippedLog();
-  const named: NamedSkippedValue[] = [];
-  const agentsSeen = new Set<string>();
-  const graphsOnPage: { space: string; meta: SpaceMeta; fingerprint: string }[] = [];
-  let withheld = false;
-  let next: Cursor | undefined;
-  let refused: { chars: boolean; bytes: boolean } | null = null;
-  let stoppedAt: Cursor | undefined;
+/** One member of the scope, with the names its records are built from. */
+type Member = { space: string; meta: SpaceMeta; fingerprint: string };
 
-  const m0 = p.cursor ? p.exported.findIndex(e => e.space === p.cursor!.space) : 0;
-  walk: for (let m = m0; m < p.exported.length; m++) {
-    const member = p.exported[m]!;
-    const graph = p.format === 'turtle' ? undefined : graphIri(member.meta);
-    const k0 = p.cursor && m === m0 ? WALK.findIndex(w => w.kind === p.cursor!.kind) : 0;
-    for (let k = k0; k < WALK.length; k++) {
-      const { kind, collection } = WALK[k]!;
-      if (kind === 'file' && !p.files(member.space)) { withheld = true; continue; }
-      let afterId = p.cursor && m === m0 && k === k0 ? p.cursor.last : undefined;
-      let previous = afterId ?? '';
-      for (;;) {
-        const page = await readPage({ collection: spaceCollection(member.space, collection), filter: filterOf(kind), projection: projectionOf(kind), size: READ_PAGE, maxTimeMS: PAGE_READ_MS }, afterId);
-        for (const doc of page.rows) {
-          const id = String(doc._id);
-          const form = recordTriples(member.meta, kind, doc, { edgeDetails: p.edgeDetails, agentsSeen });
-          if (form.leftOut !== undefined || form.quads.length === 0) { previous = id; continue; }
-          const text = writer.write({ ...(graph ? { graph } : {}), quads: form.quads });
-          const addBytes = Buffer.byteLength(text, 'utf8');
-          const overChars = chars + text.length > p.budget.chars;
-          const overBytes = p.budget.bytes !== null && bytes + addBytes > p.budget.bytes;
-          // The record that does not fit is not this page's: the next page starts at it. The first record is always admitted whole.
-          if (records > 0 && (overChars || overBytes)) {
-            refused = { chars: overChars, bytes: overBytes };
-            next = { space: member.space, kind, last: previous };
-            break walk;
+/** One step of the walk: a record's text (not yet counted), or the end of a store page. */
+type WalkStep =
+  | { type: 'record'; member: Member; kind: RdfRecordKind; id: string; previous: string; text: string; skipped: SkippedValue[] }
+  | { type: 'page' };
+
+/**
+ * The last line of an export that could not finish, in Turtle, TriG and N-Quads: no grammar of the three lets a statement start with `!`, so
+ * every parser refuses the file instead of taking a short one for whole (none of the four formats defines an end-of-document mark or a
+ * checksum to use instead). A JSON-LD document that could not finish is left unterminated, which no JSON parser accepts.
+ */
+export const INCOMPLETE_LINE = '!ythril-export-incomplete\n';
+
+/**
+ * What one answer has read and written, and the writer that spells it: the one walk the bounded page and the whole stream share, so the two
+ * cannot read, count, name or end differently.
+ */
+class ExportWalk {
+  readonly writer: ReturnType<typeof createRdfWriter>;
+  readonly head: string;
+  records = 0;
+  chars: number;
+  bytes: number;
+  readonly counts = Object.fromEntries(WALK.map(w => [w.kind, 0])) as Record<RdfRecordKind, number>;
+  readonly skipped = createSkippedLog();
+  readonly named: NamedSkippedValue[] = [];
+  readonly graphs: Member[] = [];
+  withheld = false;
+  private readonly agentsSeen = new Set<string>();
+  private readonly hash = createHash('sha256');
+
+  constructor(readonly p: PageInput) {
+    const namespaces = Object.values(getConfig().schemaLibraryNamespaces ?? {});
+    const prefixes: Record<string, string> = {};
+    for (const e of p.exported) for (const [name, ns] of Object.entries(prefixesFor(e.meta, namespaces))) if (!Object.hasOwn(prefixes, name)) prefixes[name] = ns;
+    this.writer = createRdfWriter(p.format, { prefixes, edgeDetails: p.edgeDetails });
+    this.head = this.writer.open();
+    this.chars = this.head.length;
+    this.bytes = Buffer.byteLength(this.head, 'utf8');
+    this.hash.update(this.head);
+  }
+
+  /** Every record after `from` in walk order (member, kind, `_id`), its text written but not counted, one store page at a time. */
+  async *steps(from: Cursor | null): AsyncGenerator<WalkStep, void, undefined> {
+    const { p } = this;
+    const m0 = from ? p.exported.findIndex(e => e.space === from.space) : 0;
+    for (let m = m0; m < p.exported.length; m++) {
+      const member = p.exported[m]!;
+      const graph = p.format === 'turtle' ? undefined : graphIri(member.meta);
+      const k0 = from && m === m0 ? WALK.findIndex(w => w.kind === from.kind) : 0;
+      for (let k = k0; k < WALK.length; k++) {
+        const { kind, collection } = WALK[k]!;
+        if (kind === 'file' && !p.files(member.space)) { this.withheld = true; continue; }
+        let afterId = from && m === m0 && k === k0 ? from.last : undefined;
+        let previous = afterId ?? '';
+        for (;;) {
+          const page = await readPage({ collection: spaceCollection(member.space, collection), filter: filterOf(kind), projection: projectionOf(kind), size: READ_PAGE, maxTimeMS: PAGE_READ_MS }, afterId);
+          for (const doc of page.rows) {
+            const id = String(doc._id);
+            const form = recordTriples(member.meta, kind, doc, { edgeDetails: p.edgeDetails, agentsSeen: this.agentsSeen });
+            if (form.leftOut !== undefined || form.quads.length === 0) { previous = id; continue; }
+            const text = this.writer.write({ ...(graph ? { graph } : {}), quads: form.quads });
+            yield { type: 'record', member, kind, id, previous, text, skipped: form.counts.skippedValues };
+            previous = id;
           }
-          body.push(text);
-          chars += text.length;
-          bytes += addBytes;
-          records++;
-          counts[kind]++;
-          if (!graphsOnPage.includes(member)) graphsOnPage.push(member);
-          skipped.add(form.counts.skippedValues);
-          for (const v of form.counts.skippedValues) if (named.length < SKIPPED_VALUES_NAMED_MAX) named.push({ ...v, space: member.space });
-          previous = id;
-          if (p.limit !== undefined && records >= p.limit) { stoppedAt = { space: member.space, kind, last: id }; break walk; }
+          yield { type: 'page' };
+          await yieldToEventLoop();
+          if (page.end || page.last === undefined) break;
+          afterId = page.last;
         }
-        await yieldToEventLoop();
-        if (page.end || page.last === undefined) break;
-        afterId = page.last;
       }
     }
   }
+
+  /** Count a record this answer carries. */
+  take(s: Extract<WalkStep, { type: 'record' }>): void {
+    this.hash.update(s.text);
+    this.chars += s.text.length;
+    this.bytes += Buffer.byteLength(s.text, 'utf8');
+    this.records++;
+    this.counts[s.kind]++;
+    if (!this.graphs.includes(s.member)) this.graphs.push(s.member);
+    this.skipped.add(s.skipped);
+    for (const v of s.skipped) if (this.named.length < SKIPPED_VALUES_NAMED_MAX) this.named.push({ ...v, space: s.member.space });
+  }
+
+  /** The values left out so far: their count, the first named, the words of each. */
+  leftOut(): { count: number; unnamed: number; named: NamedSkippedValue[]; words: string[] } {
+    const s = this.skipped.summary();
+    const named = this.named.slice(0, s.named.length);
+    const words = named.map(v => `${v.recordId} (${v.key}: ${REASON_WORDS[v.reason]})`);
+    if (s.unnamed > 0) words.push(`and ${s.unnamed} more`);
+    return { count: s.count, unnamed: s.unnamed, named, words };
+  }
+
+  /**
+   * The end of the document: the description graph (TriG, N-Quads, JSON-LD) and the closing comment of a complete answer, or of one that
+   * could not finish (`incomplete`, the reason in words): then the report says `complete false` where it can still be written validly (TriG,
+   * N-Quads), the comment says why, and {@link INCOMPLETE_LINE} makes every parser refuse the file; a JSON-LD document is left unterminated.
+   */
+  ending(o: { complete: boolean; whole: boolean; nextAfter?: string | undefined; incomplete?: string }): string {
+    const { p } = this;
+    const left = this.leftOut();
+    if (o.incomplete !== undefined && p.format === 'jsonld') return '';
+    const reportId = `urn:ythril:export-report:${this.hash.update('\u0000').update(p.after ?? '').digest('hex')}`;
+    const report = iri(reportId);
+    const quads: Quad[] = [quad(report, stdIri('rdf', 'type'), iri(ythrilIri('ExportReport')))];
+    quads.push(quad(report, iri(ythrilIri('recordCount')), typed(String(this.records), xsd('integer'))));
+    quads.push(quad(report, iri(ythrilIri('complete')), typed(String(o.complete), xsd('boolean'))));
+    if (o.nextAfter) quads.push(quad(report, iri(ythrilIri('nextAfter')), plain(o.nextAfter)));
+    quads.push(quad(report, iri(ythrilIri('leftOutCount')), typed(String(left.count), xsd('integer'))));
+    if (this.withheld) quads.push(quad(report, iri(ythrilIri('fileTriplesWithheld')), typed('true', xsd('boolean'))));
+    left.named.forEach((v, i) => {
+      const node = blank(`left-out-${i}`);
+      quads.push(quad(report, iri(ythrilIri('leftOutValue')), node));
+      const member = p.exported.find(e => e.space === v.space)!;
+      if (v.kind !== 'link' && recordAddressable(v.kind, v.recordId)) quads.push(quad(node, iri(ythrilIri('leftOutRecord')), iri(recordIri(member.meta, v.kind, v.recordId))));
+      quads.push(quad(node, iri(ythrilIri('leftOutKey')), plain(v.key)));
+      quads.push(quad(node, iri(ythrilIri('leftOutReason')), plain(REASON_WORDS[v.reason])));
+    });
+    const shapes: string[] = [];
+    for (const g of this.graphs) {
+      const graphName = iri(graphIri(g.meta));
+      const shapesAt = versionIri(g.meta, g.fingerprint);
+      shapes.push(shapesAt);
+      quads.push(quad(report, stdIri('dcterms', 'hasPart'), graphName));
+      quads.push(quad(graphName, stdIri('dcterms', 'isPartOf'), report));
+      quads.push(quad(graphName, stdIri('sh', 'shapesGraph'), iri(shapesAt)));
+    }
+    const tail = p.format === 'turtle' ? '' : this.writer.write({ graph: reportId, quads });
+    const how = o.incomplete !== undefined ? `INCOMPLETE, the export could not finish: ${o.incomplete}`
+      : o.complete ? 'complete, nothing is left' : `more after this page (after=${o.nextAfter})`;
+    const comment = [
+      `ythril-export: ${this.records} records${o.whole ? '' : ' on this page'}`, how,
+      `${left.count} property values left out${left.words.length > 0 ? `: ${left.words.join(', ')}` : ''}`,
+      ...(this.withheld ? ['file statements withheld (files: read is needed)'] : []),
+      ...(shapes.length > 0 ? [`shapes: ${shapes.map(s => `<${s}>`).join(' ')}`] : []),
+    ].join('; ');
+    if (o.incomplete !== undefined) return `${tail}# ${comment.replace(/[\r\n]/g, ' ')}\n${INCOMPLETE_LINE}`;
+    return tail + this.writer.close(comment);
+  }
+
+  /** The audit row's changes as the answer stands. */
+  auditChanges(complete: boolean, nextAfter?: string): RdfExportPage['auditChanges'] {
+    const { p } = this;
+    const left = this.leftOut();
+    const named = left.words.join(', ');
+    return [
+      { field: 'format', to: p.format }, { field: 'edgeDetails', to: p.edgeDetails }, { field: 'members', to: p.exported.map(e => e.space).join(',') },
+      { field: 'records', to: this.records }, { field: 'complete', to: complete }, { field: 'skippedValues', to: left.count },
+      ...(named ? [{ field: 'skippedNamed', to: named.length > AUDIT_NAMED_MAX ? `${named.slice(0, AUDIT_NAMED_MAX)}...` : named }] : []),
+      { field: 'fileTriplesWithheld', to: this.withheld },
+      ...(p.after ? [{ field: 'after', to: p.after }] : []),
+      ...(nextAfter ? [{ field: 'nextAfter', to: nextAfter }] : []),
+    ];
+  }
+}
+
+/** One bounded page: `limit` records or the byte budget, whichever ends it first, and whether records are left after it. */
+async function buildPage(p: PageInput): Promise<RdfExportPage> {
+  const w = new ExportWalk(p);
+  const body: string[] = [];
+  let next: Cursor | undefined;
+  let refused: { chars: boolean; bytes: boolean } | null = null;
+  let stoppedAt: Cursor | undefined;
+  for await (const s of w.steps(p.cursor)) {
+    if (s.type !== 'record') continue;
+    const overChars = w.chars + s.text.length > p.budget.chars;
+    const overBytes = p.budget.bytes !== null && w.bytes + Buffer.byteLength(s.text, 'utf8') > p.budget.bytes;
+    // The record that does not fit is not this page's: the next page starts at it. The first record is always admitted whole.
+    if (w.records > 0 && (overChars || overBytes)) {
+      refused = { chars: overChars, bytes: overBytes };
+      next = { space: s.member.space, kind: s.kind, last: s.previous };
+      break;
+    }
+    body.push(s.text);
+    w.take(s);
+    if (p.limit !== undefined && w.records >= p.limit) { stoppedAt = { space: s.member.space, kind: s.kind, last: s.id }; break; }
+  }
   if (stoppedAt && await anyAfter(p, stoppedAt)) next = stoppedAt;
-  // A view whose later members were not reached still withholds their file statements on the pages that reach them; this page says only
-  // what it read.
   const complete = next === undefined;
   const nextAfter = next ? encodeCursor(next) : undefined;
-  const summaryOfSkipped = skipped.summary();
-  const namedFirst = named.slice(0, summaryOfSkipped.named.length);
-
-  // The description graph and the closing comment: what this file holds, how the page ended.
-  const reportId = `urn:ythril:export-report:${createHash('sha256').update(head).update(body.join('')).update('\u0000').update(p.after ?? '').digest('hex')}`;
-  const report = iri(reportId);
-  const quads: Quad[] = [quad(report, stdIri('rdf', 'type'), iri(ythrilIri('ExportReport')))];
-  quads.push(quad(report, iri(ythrilIri('recordCount')), typed(String(records), xsd('integer'))));
-  quads.push(quad(report, iri(ythrilIri('complete')), typed(String(complete), xsd('boolean'))));
-  if (nextAfter) quads.push(quad(report, iri(ythrilIri('nextAfter')), plain(nextAfter)));
-  quads.push(quad(report, iri(ythrilIri('leftOutCount')), typed(String(summaryOfSkipped.count), xsd('integer'))));
-  if (withheld) quads.push(quad(report, iri(ythrilIri('fileTriplesWithheld')), typed('true', xsd('boolean'))));
-  namedFirst.forEach((v, i) => {
-    const node = blank(`left-out-${i}`);
-    quads.push(quad(report, iri(ythrilIri('leftOutValue')), node));
-    const member = p.exported.find(e => e.space === v.space)!;
-    if (v.kind !== 'link' && recordAddressable(v.kind, v.recordId)) quads.push(quad(node, iri(ythrilIri('leftOutRecord')), iri(recordIri(member.meta, v.kind, v.recordId))));
-    quads.push(quad(node, iri(ythrilIri('leftOutKey')), plain(v.key)));
-    quads.push(quad(node, iri(ythrilIri('leftOutReason')), plain(REASON_WORDS[v.reason])));
-  });
-  const shapes: string[] = [];
-  for (const g of graphsOnPage) {
-    const graphName = iri(graphIri(g.meta));
-    const shapesAt = versionIri(g.meta, g.fingerprint);
-    shapes.push(shapesAt);
-    quads.push(quad(report, stdIri('dcterms', 'hasPart'), graphName));
-    quads.push(quad(graphName, stdIri('dcterms', 'isPartOf'), report));
-    quads.push(quad(graphName, stdIri('sh', 'shapesGraph'), iri(shapesAt)));
-  }
-  const tail = p.format === 'turtle' ? '' : writer.write({ graph: reportId, quads });
-  const names = namedFirst.map(v => `${v.recordId} (${v.key}: ${REASON_WORDS[v.reason]})`);
-  if (summaryOfSkipped.unnamed > 0) names.push(`and ${summaryOfSkipped.unnamed} more`);
-  const comment = [
-    `ythril-export: ${records} records on this page`,
-    complete ? 'complete, nothing is left' : `more after this page (after=${nextAfter})`,
-    `${summaryOfSkipped.count} property values left out${names.length > 0 ? `: ${names.join(', ')}` : ''}`,
-    ...(withheld ? ['file statements withheld (files: read is needed)'] : []),
-    ...(shapes.length > 0 ? [`shapes: ${shapes.map(s => `<${s}>`).join(' ')}`] : []),
-  ].join('; ');
-  const chunks = [head, ...body, tail, writer.close(comment)];
-
+  const chunks = [w.head, ...body, w.ending({ complete, whole: false, nextAfter })];
+  const left = w.leftOut();
   const budgetChars = p.budget.stated?.chars ?? p.budget.chars;
   const budgetBytes = p.budget.stated ? p.budget.stated.bytes : p.budget.bytes;
   const summary: RdfExportSummary = {
     space: p.input.spaceId, members: p.exported.map(e => e.space),
     ...(p.withoutRdf.length > 0 ? { membersWithoutRdf: [...p.withoutRdf] } : {}),
     ...(p.inConflict.length > 0 ? { membersInConflict: [...p.inConflict] } : {}),
-    format: p.format, mediaType: RDF_MEDIA_TYPES[p.format], edgeDetails: p.edgeDetails, version: writer.version ?? null,
-    records, counts, complete, ...(nextAfter ? { nextAfter } : {}),
-    skippedValues: { count: summaryOfSkipped.count, named: namedFirst, unnamed: summaryOfSkipped.unnamed },
-    fileTriplesWithheld: withheld, truncated: refused !== null, budgetChars, budgetBytes, charsReturned: chars, bytesReturned: bytes,
+    format: p.format, mediaType: RDF_MEDIA_TYPES[p.format], edgeDetails: p.edgeDetails, version: w.writer.version ?? null,
+    records: w.records, counts: w.counts, complete, ...(nextAfter ? { nextAfter } : {}),
+    skippedValues: { count: left.count, named: left.named, unnamed: left.unnamed },
+    fileTriplesWithheld: w.withheld, truncated: refused !== null, budgetChars, budgetBytes, charsReturned: w.chars, bytesReturned: w.bytes,
     ...(refused ? { budgetBoundBy: budgetBoundBy(refused, p.budget) } : {}),
   };
-  const auditNamed = names.join(', ');
   return {
-    status: EXPORT_OK, chunks, summary, slot: p.slot,
-    contentType: rdfContentType(p.format, writer.version),
+    status: EXPORT_OK, kind: 'page', chunks, summary, slot: p.slot,
+    contentType: rdfContentType(p.format, w.writer.version),
     disposition: rdfContentDisposition(p.input.spaceId, p.format),
-    skippedRecords: [...new Set(namedFirst.map(v => v.recordId))],
-    auditChanges: [
-      { field: 'format', to: p.format }, { field: 'edgeDetails', to: p.edgeDetails }, { field: 'members', to: summary.members.join(',') },
-      { field: 'records', to: records }, { field: 'complete', to: complete }, { field: 'skippedValues', to: summaryOfSkipped.count },
-      ...(auditNamed ? [{ field: 'skippedNamed', to: auditNamed.length > AUDIT_NAMED_MAX ? `${auditNamed.slice(0, AUDIT_NAMED_MAX)}...` : auditNamed }] : []),
-      { field: 'fileTriplesWithheld', to: withheld },
-      ...(p.after ? [{ field: 'after', to: p.after }] : []),
-      ...(nextAfter ? [{ field: 'nextAfter', to: nextAfter }] : []),
-    ],
+    skippedRecords: [...new Set(left.named.map(v => v.recordId))],
+    auditChanges: w.auditChanges(complete, nextAfter),
     ...(p.view ? { viewMembers: summary.members } : {}),
+  };
+}
+
+let chunkObserver: ((chars: number) => void) | null = null;
+/** Watch the size of each chunk a whole export hands out (a test that pins the stream to one store page at a time); `null` stops. */
+export function setRdfExportChunkObserverForTest(observer: ((chars: number) => void) | null): void { chunkObserver = observer; }
+
+/**
+ * The whole scope as one stream, a store page per chunk: nothing holds more than one page of records, the slot is the door's to release
+ * when the stream ends, and a stream that cannot finish ends with {@link ExportWalk.ending}'s incomplete form.
+ */
+function streamWhole(p: PageInput): RdfExportStream {
+  const w = new ExportWalk(p);
+  const steps = w.steps(null);
+  let complete = false;
+  let incomplete: string | undefined;
+  let buffered = w.head;
+  /** The text up to the end of the next store page, or `null` when the walk is over. */
+  const nextChunk = async (): Promise<string | null> => {
+    for (;;) {
+      const s = await steps.next();
+      if (s.done) return null;
+      if (s.value.type === 'record') { w.take(s.value); buffered += s.value.text; continue; }
+      if (buffered === '') continue;
+      const out = buffered;
+      buffered = '';
+      return out;
+    }
+  };
+  const hand = (text: string): string => { chunkObserver?.(text.length); return text; };
+  async function* rest(): AsyncGenerator<string, void, undefined> {
+    try {
+      for (;;) {
+        const chunk = await nextChunk();
+        if (chunk === null) break;
+        yield hand(chunk);
+      }
+    } catch (err) {
+      // Mid-stream: the status line is sent, so the document itself must say it is not whole.
+      incomplete = storeFailureAnswer(err, `export_rdf '${p.input.spaceId}'`)?.status === EXPORT_UNAVAILABLE
+        ? 'the store did not answer a page in time' : 'a fault of the server while reading';
+      yield hand(buffered + w.ending({ complete: false, whole: true, incomplete }));
+      return;
+    }
+    const end = buffered + w.ending({ complete: true, whole: true });
+    complete = true;
+    yield hand(end);
+  }
+  const files = p.exported.some(e => !p.files(e.space));
+  return {
+    status: EXPORT_OK, kind: 'stream', slot: p.slot, fileTriplesWithheld: files,
+    contentType: rdfContentType(p.format, w.writer.version),
+    disposition: rdfContentDisposition(p.input.spaceId, p.format),
+    ...(p.view ? { viewMembers: p.exported.map(e => e.space) } : {}),
+    async begin() {
+      try {
+        const first = await nextChunk();
+        return { ok: true, first: hand(first ?? '') };
+      } catch (err) {
+        p.slot.release();
+        return refusalOfStore(err, p.input.spaceId);
+      }
+    },
+    rest,
+    state: () => ({
+      complete, ...(incomplete !== undefined ? { incomplete } : {}), auditChanges: w.auditChanges(complete),
+      skippedCount: w.leftOut().count, skippedRecords: [...new Set(w.leftOut().named.map(v => v.recordId))],
+    }),
   };
 }
