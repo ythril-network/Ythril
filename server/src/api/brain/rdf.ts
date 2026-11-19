@@ -34,6 +34,7 @@ import {
 } from '../../rdf/export-act.js';
 import { trailersFor } from '../../export/export-trailers.js';
 import { headAskedAsGet } from '../../export/export-head.js';
+import { closeIfStalled, pacedWriter, type ReaderPace } from '../../export/export-reader-pace.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import type { TokenRights } from '../../config/rights-shape.js';
@@ -124,10 +125,12 @@ function answerHead(res: Response, input: Parameters<typeof rdfExportHeadAct>[0]
 const PAGE_PARAMETERS = ['limit', 'after', 'maxChars', 'maxBytes', 'maxTokens'] as const;
 
 /**
- * The whole scope, a store page per chunk, with backpressure: the slot is released exactly once, when the stream ends, when the reader goes
- * or when it takes nothing for the idle bound (then the response is cut: its chunked body lacks the final chunk, RFC 9112 §7.1, which every
- * HTTP client reports as a broken transfer). A store that fails before the first byte is the clean 503; after it, the document ends in the
- * act's incomplete form and the trailer `Ythril-Export-Complete: false` says so. The audit row is kept current and written when it ends.
+ * The whole scope, a store page per chunk, written at the reader's pace (`export/export-reader-pace.ts`): the slot is released exactly once,
+ * when the stream ends, when the reader goes, when it is judged too slow (then the incomplete ending is written behind what its connection
+ * holds, and the connection is kept only while the reader still takes something), or when it takes nothing for the idle bound (then the
+ * response is cut: its chunked body lacks the final chunk, RFC 9112 §7.1, which every HTTP client reports as a broken transfer). A store that
+ * fails before the first byte is the clean 503; after it, the document ends in the act's incomplete form and the trailer
+ * `Ythril-Export-Complete: false` says so. The audit row is kept current and written when it ends.
  */
 async function sendStream(req: Request, res: Response, stream: RdfExportStream): Promise<void> {
   const begun = await stream.begin();
@@ -148,24 +151,26 @@ async function sendStream(req: Request, res: Response, stream: RdfExportStream):
   const trailers = trailersFor(req, res, STREAM_TRAILERS);
   if (stream.viewMembers) res.setHeader('Ythril-View-Members', stream.viewMembers.map(encodeURIComponent).join(', '));
   if (stream.fileTriplesWithheld) res.setHeader('Ythril-File-Triples', 'withheld');
-  const started = Date.now();
-  let sent = 0;
+  const pace = (): ReaderPace => ({ ...rdfExportRate(), idleMs: rdfExportIdleMs() });
+  const writer = pacedWriter(res, pace);
   try {
     let chunk: string | undefined = begun.first;
     while (chunk !== undefined) {
-      if (chunk !== '' && !res.write(chunk) && !(await drainedWithin(res, rdfExportIdleMs()))) {
+      const how = chunk === '' ? 'taken' : await writer.put(chunk);
+      audit();
+      if (how === 'gone') return;
+      if (how === 'idle') {
         res.destroy();
         return;
       }
-      sent += Buffer.byteLength(chunk, 'utf8');
-      audit();
-      // Too slow on average once the grace is over (a trickling reader): the incomplete ending is written while the socket still takes it,
-      // so the reader is told, and the slot is freed.
-      const { graceMs, minBytesPerSecond } = rdfExportRate();
-      const elapsed = Math.max(Date.now() - started, 1);
-      if (elapsed >= graceMs && (sent * MS_PER_SECOND) / elapsed < minBytesPerSecond) {
+      if (how === 'slow') {
+        // Told, not cut off: the ending follows what the connection holds, the slot is free now, and the connection stays only while the
+        // reader still takes something.
         await rest.return();
-        res.write(stream.abandon(`the reader took the export too slowly (under ${minBytesPerSecond} bytes a second after ${graceMs} ms)`));
+        const { windowMs, minBytesPerSecond, idleMs } = pace();
+        res.write(stream.abandon(`the reader took the export too slowly (under ${minBytesPerSecond} bytes a second over ${windowMs} ms of waiting on it)`));
+        release();
+        closeIfStalled(res, idleMs);
         break;
       }
       const next = await rest.next();
@@ -183,8 +188,6 @@ async function sendStream(req: Request, res: Response, stream: RdfExportStream):
     if (res.writableEnded || res.destroyed) release();
   }
 }
-
-const MS_PER_SECOND = 1_000;
 
 /** The trailers a whole export declares up front. */
 const STREAM_TRAILERS = ['Ythril-Export-Complete', 'Ythril-Skipped-Values', 'Ythril-Skipped-Records'] as const;
@@ -218,11 +221,14 @@ async function sendPage(req: Request, res: Response, page: RdfExportPage): Promi
   if (summary.nextAfter) res.setHeader('Link', nextLink(req, summary.format, summary.nextAfter));
   if (page.viewMembers) res.setHeader('Ythril-View-Members', page.viewMembers.map(encodeURIComponent).join(', '));
   if (summary.fileTriplesWithheld) res.setHeader('Ythril-File-Triples', 'withheld');
+  // A page is bounded (at most the largest budget) and built before its first byte: only the idle bound applies to its reader, no rate.
+  const writer = pacedWriter(res, () => ({ windowMs: rdfExportIdleMs(), minBytesPerSecond: 0, idleMs: rdfExportIdleMs() }));
   try {
     for (const chunk of page.chunks) {
       if (chunk === '') continue;
-      if (res.write(chunk)) continue;
-      if (!(await drainedWithin(res, rdfExportIdleMs()))) {
+      const how = await writer.put(chunk);
+      if (how === 'gone') return;
+      if (how !== 'taken') {
         res.destroy();
         return;
       }
@@ -232,21 +238,4 @@ async function sendPage(req: Request, res: Response, page: RdfExportPage): Promi
   } finally {
     if (res.writableEnded || res.destroyed) release();
   }
-}
-
-/** Whether `res` drained before `ms` passed and before it closed; every listener and the timer are removed either way. */
-function drainedWithin(res: Response, ms: number): Promise<boolean> {
-  return new Promise(resolve => {
-    const settle = (drained: boolean): void => {
-      clearTimeout(timer);
-      res.off('drain', onDrain);
-      res.off('close', onClose);
-      resolve(drained);
-    };
-    const onDrain = (): void => settle(true);
-    const onClose = (): void => settle(false);
-    const timer = setTimeout(() => settle(false), ms);
-    res.once('drain', onDrain);
-    res.once('close', onClose);
-  });
 }
