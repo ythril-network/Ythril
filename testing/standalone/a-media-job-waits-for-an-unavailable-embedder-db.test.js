@@ -46,6 +46,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { metricSeries } from './_metric-series.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -86,6 +87,8 @@ let mongo, loader, stored, worker, queue, dispatch, metaMod, sandbox, lifecycle,
 let embedServer, embedLocal, visionServer, visionLocal, sttServer, sttLocal, closedUrl;
 /** How the live embed endpoint answers one input: a status number, or nothing for a vector. */
 let embedAnswer;
+/** How long the live endpoint holds a vector answer to call number `n`, ms. */
+let embedDelayMs;
 let embedCalls;
 let transcribeOf, sttCalls;
 let providers;
@@ -151,11 +154,13 @@ describe('a media job waits for an unavailable embedder (real MongoDB, model end
     embedServer = http.createServer((req, res) => {
       let body = '';
       req.on('data', c => { body += c; });
-      req.on('end', () => {
-        embedCalls++;
+      req.on('end', async () => {
+        const call = ++embedCalls;
         const input = String(JSON.parse(body).input);
-        const status = embedAnswer(input);
+        const status = embedAnswer(input, call);
         if (status) { res.writeHead(status, { 'Content-Type': 'text/plain' }); res.end(`status ${status}`); return; }
+        const delay = embedDelayMs(call);
+        if (delay > 0) await elapse(delay, 'simulated latency: a vector still in flight when the run has stopped calling a dead embedder');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ data: [{ embedding: Array.from({ length: DIMS }, (_, i) => ((input.length + i) % 10) / 10 + 0.05) }] }));
       });
@@ -219,6 +224,7 @@ describe('a media job waits for an unavailable embedder (real MongoDB, model end
     await files().deleteMany({});
     await jobs().deleteMany({});
     embedAnswer = () => undefined;
+    embedDelayMs = () => 0;
     embedCalls = 0;
     transcribeOf = () => ({ text: 'welcome to the call', segments: [] });
     sttCalls = 0;
@@ -316,13 +322,37 @@ describe('a media job waits for an unavailable embedder (real MongoDB, model end
       const rel = 'docs/long.md';
       const passages = 40;
       await upload(rel, Buffer.from(document(passages)), 'text/markdown');
+      const unembedded = () => metricSeries('ythril_conversion_chunks_unembedded_total').then(s => s.reduce((n, x) => n + x.value, 0));
+      const countedBefore = await unembedded();
       const job = await runOnce(rel);
+      assert.equal(await unembedded() - countedBefore, embedCalls,
+        'ythril_conversion_chunks_unembedded_total counted passages that were never sent to the embedder: every hand-back of an outage would add them all again');
       assertWaiting(job, 1, 'a 522 for every passage');
       const stored = await files().countDocuments({ parentFileId: rel });
       const concurrency = concurrencyMod.embedConcurrency(loader.getEmbeddingConfig());
       assert.ok(stored > 2 * concurrency, `fixture check: ${stored} passage(s) is not more than twice the concurrency ${concurrency}`);
       assert.ok(embedCalls < 2 * concurrency,
         `${embedCalls} embed calls for ${stored} passages: the run kept calling a dead embedder past ${concurrency} unavailable failures`);
+    });
+
+    it('a run that stopped calling and then got a vector for a call still in flight is handed back, never completed partial with passages it never sent', async () => {
+      useLiveEmbedder();
+      const concurrency = concurrencyMod.embedConcurrency(loader.getEmbeddingConfig());
+      // The first requests (as many as the run sends at once) meet an unavailable endpoint at once; every later one is answered with a vector,
+      // slowly, so it is still in flight when the run has met as many unavailable failures as its concurrency and skips the rest.
+      embedAnswer = (_input, call) => (call <= concurrency ? 522 : undefined);
+      embedDelayMs = () => 300;
+      const rel = 'docs/cut-short.md';
+      await upload(rel, Buffer.from(document(40)), 'text/markdown');
+      const counted = await handedBack('text');
+      const job = await runOnce(rel);
+      const stored = await files().find({ parentFileId: rel }).toArray();
+      assert.ok(stored.length > 2 * concurrency, `fixture check: ${stored.length} passage(s) is not clearly more than the concurrency ${concurrency}`);
+      assert.ok(stored.some(r => 'embedding' in r), 'fixture check: no call in flight came back with a vector, so the run was not cut short with something embedded');
+      assert.notEqual(job.status, 'complete', `a run cut short by an unavailable embedder ended complete (file ${(await rowOf(rel)).embeddingStatus}) with ${stored.filter(r => !('embedding' in r)).length} of ${stored.length} passages never sent`);
+      assertWaiting(job, 1, 'a run cut short');
+      assert.equal((await rowOf(rel)).embeddingStatus, 'processing');
+      assert.equal(await handedBack('text'), counted + 1);
     });
 
     it('a hand-back write that fails for another reason than a lost claim falls through to the failure path', async () => {

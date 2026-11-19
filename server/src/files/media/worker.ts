@@ -42,7 +42,7 @@ import { cancelMediaJob } from './job-queue.js';
 import { storedAbsOf } from '../held-spelling.js';
 import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob, holdJobsForMove, deferJob, mayDeferAgain, handBackJob } from './job-queue.js';
 import { mediaClaimGate } from './embedder-outage-gate.js';
-import { EmbedderUnavailableThroughout, waitsForEmbedder } from './embedder-unavailable.js';
+import { EmbedderUnavailableForRun, waitsForEmbedder } from './embedder-unavailable.js';
 import { mediaJobsHandedBackTotal } from '../../metrics/media-outage-metrics.js';
 import { moveCarriesRecordsAt } from '../move-markers.js';
 import { embedImage } from './image-embedder.js';
@@ -582,13 +582,22 @@ async function processJob(
           },
         );
         if (chunks.length > 0 || extractedImages.length > 0) {
-          const { chunkCount, convertedFileId, embedFailures, unavailableFailures } = await storeConversionResults(
+          const { chunkCount, convertedFileId, embedFailures, unavailableFailures, skippedEmbeds } = await storeConversionResults(
             spaceId, filePath, chunks, convertedMarkdown, extractedImages,
             // Embedding is the longest phase and reported nothing, so a document with more than
             // `stalledJobTimeoutMs` of chunks in it was recovered mid-flight every time. `claim` fences the
             // commit itself: a claim a move took away while this ran leaves nothing written under the old path.
             { claim, onProgress: heartbeat, shouldStop: () => leaseLost },
           );
+          // The embedder was unavailable for every passage, or the run skipped passages because it already looked dead: the job is handed back
+          // to wait for the embedder without spending an attempt (`embedder-unavailable.ts`), before the describe call is paid for. A run that
+          // skipped any passage is handed back whatever a call still in flight brought back: ended `partial`, the passages it never sent would
+          // stay without a vector and nothing would retry them.
+          if (chunkCount > 0 && (unavailableFailures === chunkCount || skippedEmbeds > 0)) {
+            throw new EmbedderUnavailableForRun(skippedEmbeds > 0
+              ? `${unavailableFailures} of the ${chunkCount} passage(s), ${skippedEmbeds} of them not sent`
+              : `every one of the ${chunkCount} passage(s)`, 'see the chunk embed warnings in the log');
+          }
           const processed: FileProcessingState = { chunkCount };
           if (convertedFileId) processed.convertedFileId = convertedFileId;
           // Give the PARENT record a summary, through the SAME path images already use.
@@ -629,13 +638,9 @@ async function processJob(
               + `description, excerpt and source from this run are lost and will not be recomputed: ${err}`);
           });
 
-          // Embedding outcome drives the job result (B3). Every passage met an unavailable embedder: the run throws that, and the job is handed
-          // back to wait for the embedder without spending an attempt (`embedder-unavailable.ts`). Every passage failed and at least one for
+          // Embedding outcome drives the job result (B3); the unavailable embedder is decided above. Every passage failed and at least one for
           // another reason (a refusal of the request, the record's own failure): a failed attempt, retried behind the queue's backoff until its
           // attempts are spent. A partial failure is recorded but not retried (the embedded chunks are useful and a retry re-embeds everything).
-          if (chunkCount > 0 && unavailableFailures === chunkCount) {
-            throw new EmbedderUnavailableThroughout(`every one of the ${chunkCount} passage(s)`, 'see the chunk embed warnings in the log');
-          }
           if (chunkCount > 0 && embedFailures === chunkCount) {
             throw new Error(`All ${chunkCount} chunk(s) failed to embed`);
           }

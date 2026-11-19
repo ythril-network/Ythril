@@ -53,7 +53,9 @@ import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js'
 import { RECORD_TYPES } from '../config/types.js';
 import { spaceCollection } from '../db/space-collection.js';
 
-// The words rule and the message derivation live with the verdict (`embed-errors.ts`, which imports nothing); re-exported for the callers that always took them from here.
+// The words rule and the message derivation live with the verdict (`embed-errors.ts`, which imports nothing). No server module imports them from
+// here; the re-export is for the tests that read them from this compiled file (`local-inference-host`, `local-pipeline-loader`,
+// `embed-outage-does-not-spend-the-budget`, and the verdict tests that check both paths are one function).
 export { isTransientEmbedError, embedFailureMessage } from './embed-errors.js';
 
 /** Attempts before a job is left `failed` for an operator (or a rewrite) to deal with. */

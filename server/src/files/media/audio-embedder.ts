@@ -26,7 +26,7 @@ import { AUDIO_STEPS, type MediaRunOpts } from './progress.js';
 import { isAbandonment, stopIfLeaseLost } from './lease.js';
 import { upsertDerivedFileRow } from '../derived-fields.js';
 import { assertSpaceTakesWrites } from '../../spaces/space-write-gate.js';
-import { EmbedderUnavailableThroughout, newEmbedTally, tallyEmbed, unavailableThroughout } from './embedder-unavailable.js';
+import { EmbedderUnavailableForRun, newEmbedTally, tallyEmbed, unavailableThroughout } from './embedder-unavailable.js';
 
 // ── ffmpeg helpers ────────────────────────────────────────────────────────
 
@@ -360,7 +360,7 @@ export async function embedAudio(
     // Every embed this run attempted met an unavailable embedder (and the loop stopped before paying for the next transcription): the job waits
     // for the embedder instead of spending an attempt. Decided here, at the end of the run, and never in the per-chunk catch.
     if (unavailableThroughout(embeds)) {
-      throw new EmbedderUnavailableThroughout(`every one of the ${embeds.attempted} audio chunk(s) it was asked to embed`, embeds.lastCause);
+      throw new EmbedderUnavailableForRun(`every one of the ${embeds.attempted} audio chunk(s) it was asked to embed`, embeds.lastCause);
     }
 
     // Every chunk failed. That is not a partial result, it is a failed job, and reporting success over an

@@ -125,7 +125,7 @@ describe('storeConversionResults writes exactly what it writes today (real Mongo
 
     const result = await store(OPEN, 'docs/report.txt', [chunk(0, 'revenue grew in every region', 'Results'), chunk(1, 'costs fell in the second half')], null, [], { claim });
 
-    assert.deepEqual(result, { chunkCount: 2, convertedFileId: null, embedFailures: 0, unavailableFailures: 0 });
+    assert.deepEqual(result, { chunkCount: 2, convertedFileId: null, embedFailures: 0, unavailableFailures: 0, skippedEmbeds: 0 });
     const rows = await files().find({ parentFileId: 'docs/report.txt' }).sort({ chunkIndex: 1 }).toArray();
     assert.deepEqual(rows.map(r => r._id), ['docs/report.txt#chunk0', 'docs/report.txt#chunk1']);
     for (const r of rows) {
@@ -217,7 +217,7 @@ describe('storeConversionResults writes exactly what it writes today (real Mongo
     const result = await store(OPEN, 'docs/report.txt', [chunk(0, 'fine'), chunk(1, `${REFUSED} here`)], null, [], { claim });
 
     // A refusal (a 400) is the record's own failure, not an unavailable embedder: the run would spend an attempt, never wait.
-    assert.deepEqual(result, { chunkCount: 2, convertedFileId: null, embedFailures: 1, unavailableFailures: 0 });
+    assert.deepEqual(result, { chunkCount: 2, convertedFileId: null, embedFailures: 1, unavailableFailures: 0, skippedEmbeds: 0 });
     const [ok, bad] = await files().find({ parentFileId: 'docs/report.txt' }).sort({ chunkIndex: 1 }).toArray();
     assert.equal(ok.embedding.length, DIMS);
     assert.deepEqual(keysOf(bad), CHUNK_KEYS.filter(k => k !== 'matchedText').sort(), 'a failed chunk keeps its text and has no vector, model or matchedText');
@@ -228,7 +228,7 @@ describe('storeConversionResults writes exactly what it writes today (real Mongo
     await seedParent('docs/report.txt', {}, QUIET);
     const claim = await claimFor(QUIET, 'docs/report.txt');
     const result = await store(QUIET, 'docs/report.txt', [chunk(0, 'revenue', 'Results')], null, [], { claim });
-    assert.deepEqual(result, { chunkCount: 1, convertedFileId: null, embedFailures: 0, unavailableFailures: 0 });
+    assert.deepEqual(result, { chunkCount: 1, convertedFileId: null, embedFailures: 0, unavailableFailures: 0, skippedEmbeds: 0 });
     const row = await files(QUIET).findOne({ _id: 'docs/report.txt#chunk0' });
     assert.deepEqual(keysOf(row), CHUNK_KEYS.sort());
     assert.equal(row.matchedText, embedText.chunkEmbedText('Results', 'revenue'));
@@ -248,7 +248,7 @@ describe('storeConversionResults writes exactly what it writes today (real Mongo
   it('a file with NO row stores NOTHING, counts zero, and is not a failure', async () => {
     const claim = await claimFor(OPEN, 'docs/ghost.txt');
     const result = await store(OPEN, 'docs/ghost.txt', [chunk(0, 'text')], null, [], { claim });
-    assert.deepEqual(result, { chunkCount: 0, convertedFileId: null, embedFailures: 0, unavailableFailures: 0 });
+    assert.deepEqual(result, { chunkCount: 0, convertedFileId: null, embedFailures: 0, unavailableFailures: 0, skippedEmbeds: 0 });
     assert.equal(await files().countDocuments({ parentFileId: 'docs/ghost.txt' }), 0,
       'a passage was stored for a file that is not there');
     assert.deepEqual(seen, [], 'the embedder was called for a file that is not there');
@@ -266,7 +266,7 @@ describe('storeConversionResults writes exactly what it writes today (real Mongo
   it('nothing to store: no rows, no job, a zero count', async () => {
     await seedParent('docs/empty.txt');
     const claim = await claimFor(OPEN, 'docs/empty.txt');
-    assert.deepEqual(await store(OPEN, 'docs/empty.txt', [], null, [], { claim }), { chunkCount: 0, convertedFileId: null, embedFailures: 0, unavailableFailures: 0 });
+    assert.deepEqual(await store(OPEN, 'docs/empty.txt', [], null, [], { claim }), { chunkCount: 0, convertedFileId: null, embedFailures: 0, unavailableFailures: 0, skippedEmbeds: 0 });
     assert.equal(await files().countDocuments({ parentFileId: 'docs/empty.txt' }), 0);
     assert.equal(await jobs().countDocuments({ _id: { $ne: 'docs/empty.txt' } }), 0, 'a job was queued');
   });

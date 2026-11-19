@@ -7,9 +7,9 @@
  * on how often (`a-media-job-waits-for-an-unavailable-embedder-db.test.js`). Without a gate in front of the claim, every queued file
  * would be claimed in turn during an outage, and each claim pays for its vision, speech-to-text or conversion work before it meets
  * the embedder again. So a hand-back starts a pause of the media worker's OWN; while it runs nothing is claimed and nothing is probed;
- * when it has run out the claim first probes the embedder with one short call: an answer (a vector, or a refusal that is the
- * request's or the record's: a verdict of `record` or `ends`) ends the outage and the claim goes on; a failure whose verdict is an
- * `outage` or `lost` starts the next, longer pause, and nothing is claimed.
+ * when it has run out the claim first probes the embedder with one short call. The release mirrors the entry: only a PROVEN outage
+ * (`isEmbedderUnavailable`) starts the next, longer pause and claims nothing; every other outcome (a vector, a refusal, an outage by
+ * words alone, the request a lost process was holding) ends the pause and the claim goes on.
  *
  * The pause is not the embed worker's: that one's ending is pinned by its own gate, and a media run that never called the embedder
  * must not end it, nor stopping the media worker cancel it. The claim also waits out a restart of the inference process, as the embed
@@ -126,20 +126,25 @@ describe('after a hand-back', () => {
     assert.ok(h.pause.remainingMs() > second, 'the pause did not grow again');
   });
 
-  /** Each failure a probe can meet, and whether the embedder ANSWERED: only success, `record` or `ends` is an answer. */
+  /**
+   * Each failure a probe can meet, and whether it ends the pause. The release is the mirror of the entry: only a PROVEN outage
+   * (`isEmbedderUnavailable`) keeps the pause, as only a proven outage starts one. An outage by words (a bundled model that cannot load
+   * rejects with a plain error saying "fetch failed") or the request a lost process held would otherwise hold every claim for ever.
+   */
   const VERDICTS = [
     ['an unreachable endpoint (outage, proven)', () => new errors.EmbedUnreachableError('Could not reach embedding endpoint'), false],
     ['a 503 (outage, proven)', () => new errors.EmbeddingHttpError(503, 'service unavailable', null), false],
     ['a 522 from a proxy (outage, proven)', () => new errors.EmbeddingHttpError(522, 'origin did not answer', null), false],
     ['a request the lost process was never sent (outage, proven)', () => new errors.LostChildError('code=1', { inFlight: false }), false],
-    ['the request the lost process held (lost)', () => new errors.LostChildError('code=139', { inFlight: true }), false],
-    ['a child\'s text that reads like a timeout (outage, by words)', () => new Error('timeout waiting for the model'), false],
+    ['the request the lost process held (lost)', () => new errors.LostChildError('code=139', { inFlight: true }), true],
+    ['a child\'s text that reads like a timeout (outage, by words)', () => new Error('timeout waiting for the model'), true],
+    ['a bundled model that cannot load (outage, by words)', () => new Error('fetch failed'), true],
     ['a 401 (record: the embedder spoke)', () => new errors.EmbeddingHttpError(401, 'bad key', null), true],
     ['a 400 (record)', () => new errors.EmbeddingHttpError(400, 'bad input', null), true],
     ['a 413 (ends: the embedder spoke)', () => new errors.EmbeddingHttpError(413, 'too large', null), true],
   ];
   for (const [what, failure, answered] of VERDICTS) {
-    it(`a probe that fails with ${what} ${answered ? 'is an answer: the claim goes on' : 'is no answer: nothing is claimed'}`, async () => {
+    it(`a probe that fails with ${what} ${answered ? 'ends the pause: the claim goes on' : 'keeps the pause: nothing is claimed'}`, async () => {
       const h = harness({ probeAnswer: failure });
       h.gate.noteHandBack();
       h.runOut();

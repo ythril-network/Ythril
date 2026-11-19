@@ -322,14 +322,16 @@ async function refuseConvertedPathHeldByOthers(spaceId: string, originalId: stri
 
 /**
  * What {@link storeConversionResults} stored: its passages, the converted copy, how many passages are stored without a vector (`embedFailures`),
- * and how many of those met an UNAVAILABLE embedder (`unavailableFailures`, called or not): when that is every passage the run waits for the
- * embedder instead of spending an attempt (`files/media/embedder-unavailable.ts`).
+ * how many of those met an UNAVAILABLE embedder (`unavailableFailures`, called or not), and how many were not sent at all because the embedder
+ * already looked dead (`skippedEmbeds`). The run waits for the embedder instead of spending an attempt when every passage was unavailable or
+ * any was skipped (`files/media/embedder-unavailable.ts`): a run cut short never ends `partial` with passages it never sent.
  */
 export interface ConversionStoreResult {
   chunkCount: number;
   convertedFileId: string | null;
   embedFailures: number;
   unavailableFailures: number;
+  skippedEmbeds: number;
 }
 
 /**
@@ -384,7 +386,7 @@ export async function storeConversionResults(
   const now = new Date().toISOString();
   let embedFailures = 0;
   // The run's embed calls (`embedder-unavailable.ts`), and the passages not called because the embedder already looked dead: together, the
-  // passages that met an unavailable embedder, which the worker hands the job back for when they are all of them.
+  // passages that met an unavailable embedder. The worker hands the job back when they are all of them, or when any passage was skipped.
   const tally = newEmbedTally();
   let skippedCalls = 0;
   // Every record this run derives, committed together at the end — see the fence in the docblock.
@@ -518,10 +520,10 @@ export async function storeConversionResults(
     let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText?: string } = {};
     if (embedderLooksDead(tally, EMBED_CONCURRENCY)) {
       // A dead embedder is not called once per passage, each a timeout: past as many unavailable failures as there are calls in flight, with
-      // nothing embedded, the rest are stored without a vector and counted as unavailable, without a call. Said once, at the end.
+      // nothing embedded, the rest are stored without a vector and without a call, said once at the end. A run that skipped one is handed back
+      // whatever a call still in flight brought back (`skippedEmbeds`), so its rows do not last; they are not counted as refused passages either.
       embedFailures++;
       skippedCalls++;
-      conversionChunksUnembeddedTotal.inc();
     } else {
       try {
         embeddingFields = { ...(await vectors.fieldsFor(embedText)), matchedText: embedText };
@@ -619,7 +621,7 @@ export async function storeConversionResults(
       await sidecarsOwnedBy(spaceId, originalId, 'file').then(owned => removeSidecarBytes(spaceId, owned)).catch(cleanupErr =>
         log.warn(`Could not remove the sidecars of ${peerText(spaceId)}/${peerText(originalId)}: ${peerText(cleanupErr)}`));
     }
-    return { chunkCount: 0, convertedFileId: null, embedFailures, unavailableFailures };
+    return { chunkCount: 0, convertedFileId: null, embedFailures, unavailableFailures, skippedEmbeds: skippedCalls };
   }
 
   for (const job of imageJobs) {
@@ -628,7 +630,7 @@ export async function storeConversionResults(
     );
   }
 
-  return { chunkCount: chunks.length, convertedFileId, embedFailures, unavailableFailures };
+  return { chunkCount: chunks.length, convertedFileId, embedFailures, unavailableFailures, skippedEmbeds: skippedCalls };
 }
 
 /** Best-effort recursive delete of a space-relative path. Never throws (missing = success). */

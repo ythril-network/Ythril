@@ -10,11 +10,14 @@
  * the claim goes on; an unavailable embedder starts the next, longer pause, and nothing is claimed. For the whole of an outage the cost is one
  * small embed call per pause step.
  *
- * ## What counts as an answer
+ * ## What ends the pause
  *
- * A vector, or a failure whose verdict (`classifyEmbedFailure`) is `record` or `ends`: the embedder spoke, and what it said is the request's or
- * the record's business. An `outage` (proven or by words) or a `lost` verdict is no answer: a probe lost with the inference process says nothing
- * about the next call.
+ * The mirror of what starts it. Only a PROVEN outage (`isEmbedderUnavailable`: the endpoint could not be reached, a status of the wait set, a
+ * request never sent to a lost inference process) hands a run back, and only a proven outage keeps the pause. Every other outcome ends it and the
+ * claim goes on: a vector; a refusal of the request or the record; an outage by words alone (a bundled model that cannot load rejects with a plain
+ * error saying "fetch failed" or "timed out"); the request a lost process was holding. Those runs then take the failure path and spend their
+ * budget, as before this gate existed. A release that asked for more than the entry would keep the worker from claiming any file in any space for
+ * as long as such a failure lasts.
  *
  * ## Its own pause
  *
@@ -25,7 +28,7 @@
  * During a known outage no media job is claimed, also one whose file takes no vector: the claim cannot know. It starts at the first answered
  * probe, at most one pause step after the embedder is back.
  */
-import { classifyEmbedFailure, embedFailureMessage } from '../../brain/embed-errors.js';
+import { embedFailureMessage, isEmbedderUnavailable } from '../../brain/embed-errors.js';
 import { createEmbedderOutagePause, type EmbedderOutagePause } from '../../brain/embedder-outage-pause.js';
 import { embed } from '../../brain/embedding.js';
 import { waitOutLocalInferenceBackoff } from '../../brain/local-inference.js';
@@ -62,22 +65,16 @@ export interface MediaClaimGate {
   cancel(): void;
 }
 
-/** Was the embedder heard from? A vector, or a failure that is the request's or the record's (`record`, `ends`). */
-function answeredBy(failure: unknown): boolean {
-  const verdict = classifyEmbedFailure(failure);
-  return verdict.kind === 'record' || verdict.kind === 'ends';
-}
-
 /** One gate. The worker has one (`mediaClaimGate`); a test makes its own with a pause on a fake clock and a fake probe. */
 export function createMediaClaimGate(deps: MediaClaimGateDeps): MediaClaimGate {
   let outageKnown = false;
 
-  /** Probe once: true when the embedder answered (the outage is over), false when the next pause has started. */
+  /** Probe once: true when it found no proven outage (the pause is over), false when the next pause has started. */
   const probeAnswered = async (): Promise<boolean> => {
     try {
       await deps.probe();
     } catch (err) {
-      if (!answeredBy(err)) {
+      if (isEmbedderUnavailable(err)) {
         const owedMs = deps.pause.noteUnreachable();
         mediaEmbedderProbesTotal.labels({ outcome: 'unavailable' }).inc();
         log.warn(`Media worker: the embedder is still unavailable (${peerText(embedFailureMessage(err))}); nothing is claimed for ${inSeconds(owedMs)} s, then it is probed again`);
@@ -87,7 +84,7 @@ export function createMediaClaimGate(deps: MediaClaimGateDeps): MediaClaimGate {
     outageKnown = false;
     deps.pause.noteEmbedded();
     mediaEmbedderProbesTotal.labels({ outcome: 'answered' }).inc();
-    log.info('Media worker: the embedder answered; media jobs are claimed again');
+    log.info('Media worker: the embedder probe found no outage; media jobs are claimed again');
     return true;
   };
 
