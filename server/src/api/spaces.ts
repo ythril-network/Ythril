@@ -481,6 +481,9 @@ spacesRouter.get('/:id/completeness', globalRateLimit, requireSpaceAuthScoped('i
     sendLostSpace(req, res, id);
     return;
   }
+  // A HEAD's status is decided above, and the walk below only builds the body it never sends: its headers end here (RFC 9110 §9.3.2
+  // lets a HEAD leave out what only generating the content would decide, here Content-Length and ETag).
+  if (req.method === 'HEAD') { res.type('json').end(); return; }
   const facts = await gatherCompletenessFacts(readSpacesOfRequest(req, id));
   res.json(scoreCompleteness(id, space.meta ?? {}, facts));
 });
