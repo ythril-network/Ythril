@@ -18,6 +18,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { waitForValue } from '../_shared/wait-for.mjs';
 import { openRdfExportDoors, rdfMeta, baseOf, parseRdf, reportGraphs } from './_rdf-export-doors.mjs';
 
 const skip = await mongoSkipReason();
@@ -88,12 +89,11 @@ describe('a planted list value is exported without it and named', { skip }, () =
     await col('audit_log').deleteMany({ operation: 'rdf.export' });
     await d.exportRest(admin.key, SPACE, { format: 'nquads', maxChars: BIG });
     await d.exportMcp(admin.key, { space: SPACE, maxChars: BIG });
-    // The REST entry is written when the response finishes: give it a moment.
-    let rows = [];
-    for (let i = 0; i < 50 && rows.length < 2; i++) {
-      rows = await col('audit_log').find({ operation: 'rdf.export' }).toArray();
-      if (rows.length < 2) await new Promise(res => setTimeout(res, 100));
-    }
+    // The REST entry is written when the response finishes, a moment after the client read it.
+    const rows = await waitForValue(async () => {
+      const found = await col('audit_log').find({ operation: 'rdf.export' }).toArray();
+      return found.length >= 2 ? found : undefined;
+    }, 10_000, 100, () => 'two rdf.export rows were not written');
     assert.equal(rows.length, 2, JSON.stringify(rows.map(r => r.operation)));
     for (const row of rows) {
       const changes = Object.fromEntries((row.changes ?? []).map(c => [c.field, c.to]));

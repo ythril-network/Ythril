@@ -99,10 +99,15 @@ before(async () => {
   const { SCHEMA_CONVERT_REFUSAL_CODES, SCHEMA_CONVERT_VIEW_STATE } = await import('../../server/dist/spaces/schema-convert-acts.js');
   assert.equal(typeof SCHEMA_CONVERT_VIEW_STATE, 'string', 'the per-member conversion state was not read');
   const { UNCONVERTED_REFUSAL_CODES } = await import('../../server/dist/spaces/unconverted-acts.js');
+  // And the codes the RDF exports refuse with (`export_rdf`, `space_schema_rdf` and help() name them, bundle-269), each from the act's own list.
+  const { RDF_EXPORT_REFUSAL_CODES } = await import('../../server/dist/rdf/export-act.js');
+  const { RDF_SCHEMA_REFUSAL_CODES } = await import('../../server/dist/rdf/schema-export-act.js');
+  assert.ok(RDF_EXPORT_REFUSAL_CODES?.length >= 5 && RDF_SCHEMA_REFUSAL_CODES?.length >= 3, 'the RDF export refusal codes were not read');
   const { UNCONVERTED_REASONS } = await import('../../server/dist/brain/schema-convert-items.js');
   assert.ok(SCHEMA_CONVERT_REFUSAL_CODES?.length >= 5 && UNCONVERTED_REFUSAL_CODES?.length >= 5 && UNCONVERTED_REASONS?.length >= 5, 'the conversion refusal codes and reason classes were not read');
   ANSWER_VALUES = [SCHEMA_CONVERT_VIEW_STATE, ...SCHEMA_CONVERT_REFUSAL_CODES,...UNCONVERTED_REFUSAL_CODES, ...UNCONVERTED_REASONS, ...DEGRADED_REASONS, ...FILE_CHANGES_REFUSAL_CODES, ...SCHEMA_VERSION_REFUSAL_CODES,...INCOMPLETE_ROW_REASONS, ...WALK_STOPS, ...NETWORK_REFUSAL_CODES, ...MERGE_REFUSAL_CODES, ...Object.keys(fileActAnswerCounts()),
-    ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, SPACE_STILL_BEING_REMOVED, ...SYNC_ANSWER_CODES];
+    ...actCodes, RECORD_VERSION_AT_CEILING, ...FORK_REFUSAL_CODES, ENDPOINT_REMOVED, LINK_TARGET_REMOVED, SPACE_STILL_BEING_REMOVED, ...SYNC_ANSWER_CODES,
+    ...RDF_EXPORT_REFUSAL_CODES, ...RDF_SCHEMA_REFUSAL_CODES];
   assert.ok(ANSWER_VALUES.length >= 2, 'the answer values were not read');
 });
 

@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openRdfExportDoors, rdfMeta } from './_rdf-export-doors.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'rdfslots';
@@ -24,11 +25,12 @@ const BIG = 5_000_000;
 const LONG = 'x'.repeat(2_000);
 
 describe('an RDF export frees its slot when the reader leaves', { skip, timeout: 180_000 }, () => {
-  let d, act, t1, t2, t3;
+  let d, act, idKeysetPage, t1, t2, t3;
   before(async () => {
     d = await openRdfExportDoors({ suite: 'rdf_export_slots', spaces: [{ id: SPACE, meta: rdfMeta(SPACE) }] });
     await d.seed(SPACE, 'entity', Array.from({ length: 3_500 }, (_, i) => ({ _id: `s${String(i).padStart(5, '0')}`, name: `Slot ${i}`, description: LONG })));
     act = await import('../../server/dist/rdf/export-act.js');
+    ({ idKeysetPage } = await import('../../server/dist/db/id-keyset-page.js'));
     t1 = await d.mint('t1', { [SPACE]: d.row({ knowledge: 'read' }) });
     t2 = await d.mint('t2', { [SPACE]: d.row({ knowledge: 'read' }) });
     t3 = await d.mint('t3', { [SPACE]: d.row({ knowledge: 'read' }) });
@@ -50,39 +52,49 @@ describe('an RDF export frees its slot when the reader leaves', { skip, timeout:
   it('one per token, two on the instance, 429 with Retry-After; a reader that leaves frees its slot', async () => {
     assert.equal(typeof act.setRdfExportIdleMsForTest, 'function', 'export-act.ts exports setRdfExportIdleMsForTest');
     act.setRdfExportIdleMsForTest(60_000);
-    const first = await holdOpen(t1.key);
+    // A planted reader holds every page read until released, so an export provably holds its slot while the others are asked.
+    let entered = 0;
+    let release;
+    const gate = new Promise(r => { release = r; });
+    act.setRdfExportPageReaderForTest(async (spec, after) => { entered++; await gate; return idKeysetPage(spec, after); });
+    let first, second;
+    try {
+      const firstP = holdOpen(t1.key);
+      await waitFor(() => entered >= 1, 15_000, 50, () => 'the first export never began to read');
+      const again = await d.exportRest(t1.key, SPACE, { format: 'nquads' });
+      assert.equal(again.status, 429, again.text.slice(0, 200));
+      assert.equal(again.body?.code, 'rdf_export_busy');
+      assert.ok(Number(again.headers['retry-after']) > 0);
+      const mcp = await d.exportMcp(t1.key, { space: SPACE });
+      assert.equal(mcp.isError, true);
+      assert.match(mcp.text, /rdf_export_busy/);
+      const secondP = holdOpen(t2.key);
+      await waitFor(() => entered >= 2, 15_000, 50, () => 'another token was not given its own slot');
+      const third = await d.exportRest(t3.key, SPACE, { format: 'nquads' });
+      assert.equal(third.status, 429, 'two on the instance');
+      release();
+      [first, second] = await Promise.all([firstP, secondP]);
+    } finally {
+      release();
+      act.setRdfExportPageReaderForTest(null);
+    }
     assert.equal(first.status, 200);
-    const again = await d.exportRest(t1.key, SPACE, { format: 'nquads' });
-    assert.equal(again.status, 429, again.text.slice(0, 200));
-    assert.equal(again.body?.code, 'rdf_export_busy');
-    assert.ok(Number(again.headers['retry-after']) > 0);
-    const mcp = await d.exportMcp(t1.key, { space: SPACE });
-    assert.equal(mcp.isError, true);
-    assert.match(mcp.text, /rdf_export_busy/);
-    const second = await holdOpen(t2.key);
-    assert.equal(second.status, 200, 'another token has its own slot');
-    const third = await d.exportRest(t3.key, SPACE, { format: 'nquads' });
-    assert.equal(third.status, 429, 'two on the instance');
+    assert.equal(second.status, 200);
     first.req.destroy();
     second.req.destroy();
     await Promise.all([first.closed, second.closed]);
-    await new Promise(r => setTimeout(r, 200));
-    const after = await d.exportRest(t3.key, SPACE, { format: 'nquads', limit: 5 });
-    assert.equal(after.status, 200, 'the slots were freed when their readers left');
+    // The server sees each close on its own socket a moment later: the slot is free once it has.
+    await waitFor(async () => (await d.exportRest(t3.key, SPACE, { format: 'nquads', limit: 5 })).status === 200, 15_000, 200,
+      () => 'the slots of the readers that left were not freed');
   });
 
   it('a reader that stops reading is cut after the idle bound, and its slot is freed', async () => {
-    act.setRdfExportIdleMsForTest(300);
+    act.setRdfExportIdleMsForTest(1_000);
     const stalled = await holdOpen(t1.key);
     assert.equal(stalled.status, 200);
     // The reader takes nothing; within the bound (and a margin for the page to be built) its slot is free again.
-    let next;
-    for (let i = 0; i < 50; i++) {
-      next = await d.exportRest(t1.key, SPACE, { format: 'nquads', limit: 5 });
-      if (next.status !== 429) break;
-      await new Promise(r => setTimeout(r, 200));
-    }
-    assert.equal(next.status, 200, 'the idle reader no longer holds the token\'s slot');
+    await waitFor(async () => (await d.exportRest(t1.key, SPACE, { format: 'nquads', limit: 5 })).status === 200, 15_000, 200,
+      () => 'the idle reader still holds the token\'s slot');
     stalled.req.destroy();
     act.setRdfExportIdleMsForTest(null);
   });

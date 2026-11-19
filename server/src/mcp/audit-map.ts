@@ -87,6 +87,8 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   // `logReads` does not gate). It is kept out of this map because a non-mutating tool recorded here is a read (`mcp-audit-coverage`),
   // and a report that spends this instance's credentials on every peer is not one.
   file_stamp_report: null,
+  // Audited as the act `rdf.export` through `MCP_ACT_OPERATIONS`, every call: a space's records leaving the instance are not a read.
+  export_rdf: null,
   write_file: 'file.create',
   move_file: 'file.update',
   delete_file: 'file.delete',

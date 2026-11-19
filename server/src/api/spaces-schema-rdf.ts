@@ -12,6 +12,8 @@ import { requireSpaceAuthScoped } from '../auth/middleware.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { rdfSchemaExportAct } from '../rdf/schema-export-act.js';
 import type { TokenRights } from '../config/rights-shape.js';
+import { EXPORT_OK } from '../export/export-statuses.js';
+import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
 import { sendCaughtFailure } from './send-failure.js';
 
 export const spaceSchemaRdfRouter = Router();
@@ -24,14 +26,14 @@ spaceSchemaRdfRouter.get('/:id/schema-rdf', globalRateLimit, requireSpaceAuthSco
   try {
     const r = rdfSchemaExportAct({
       spaceId, format: req.query['format'], accept: req.headers['accept'],
-      caller: req.authToken as { admin?: boolean; rights?: TokenRights | null } | undefined,
+      caller: req.authToken as { admin?: boolean; rights?: TokenRights | null } | undefined, fingerprintOf: schemaFingerprintOf,
     });
-    if (r.status !== 200) {
+    if (r.status !== EXPORT_OK) {
       res.status(r.status).json({ error: r.error, code: r.code, ...(r.detail ?? {}) });
       return;
     }
     req.auditChangesExplicit = r.auditChanges;
-    res.status(200).setHeader('Content-Type', r.contentType);
+    res.status(EXPORT_OK).setHeader('Content-Type', r.contentType);
     res.setHeader('Content-Disposition', r.disposition);
     // `end`, not `send`: `send` would add a charset parameter the registered media types do not take.
     res.end(r.text);
