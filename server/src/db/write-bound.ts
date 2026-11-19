@@ -116,6 +116,7 @@ import { BATCH_FETCH_TIMEOUT_MS } from '../sync/peer-timeouts.js';
 import { log, peerText } from '../util/log.js';
 import { narrowedFigures } from '../util/figure-narrowing.js';
 import { StoreTimeout, isWriteTimeout } from './write-timeout.js';
+import { isMaxTimeExpired } from './max-time.js';
 import { parseSpaceCollection } from './space-collection.js';
 import { uriQueryOptions } from './client-options.js';
 
@@ -538,6 +539,30 @@ const isPlainWrite = (method: string, target: BoundTarget): boolean =>
 /** The collection or database the target names, for the backstop's warning. */
 const placeOf = (target: BoundTarget): string => (isDatabaseTarget(target) ? target.database : target.collection);
 
+/**
+ * The driver errors that are the server's time-limit end of a transaction's statement sent with the scope deadline's remainder:
+ * the bound's end, whatever this process's clock reads when the answer is back (`Q-935`).
+ *
+ * ## What it prevents
+ *
+ * The server counts a statement's `maxTimeMS` on its own clock from when the statement arrives, and its MaxTimeMSExpired was back
+ * while ours still read short of the deadline, so the transaction's loop (`db/bounded-transaction.ts`), asking the clock, threw the
+ * raw driver error instead of the bound's `StoreTimeout`. Only where the limit is chosen is it known whether it was the remainder,
+ * so it is marked there. A mark in a `WeakSet`, not on the error: the error a statement of a transaction answers stays the driver's
+ * own object, its labels (how the loop knows to retry) untouched, and nothing of the mark reaches a door's answer.
+ */
+const endedAtTheDeadline = new WeakSet<object>();
+
+/** Mark `err` when it is the server's time-limit end of a statement whose limit was the scope deadline's remainder. */
+export function markIfEndedAtTheDeadline(err: unknown, sentTheRemainder: boolean): void {
+  if (sentTheRemainder && typeof err === 'object' && err !== null && isMaxTimeExpired(err)) endedAtTheDeadline.add(err);
+}
+
+/** Is `err` marked by {@link markIfEndedAtTheDeadline}: the bound's end, not a failure of the store's own? */
+export function endedAtTheScopeDeadline(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && endedAtTheDeadline.has(err);
+}
+
 /** The bounded call: its arguments, and the time its client backstop is armed for. */
 interface BoundedCall {
   args: unknown[];
@@ -548,6 +573,8 @@ interface BoundedCall {
   endsServerOperation: boolean;
   /** The bound is ours alone: the caller set no deadline of its own, so the server's answer to it is `StoreTimeout`. */
   ourDeadline?: boolean;
+  /** A statement of an open transaction whose limit was the scope deadline's remainder: its time-limit end is marked (`markIfEndedAtTheDeadline`). */
+  sentTheRemainder?: boolean;
   /** The `comment` the plain write carries, which is how the backstop finds its operation in `$currentOp`. */
   comment?: string;
 }
@@ -592,7 +619,11 @@ function planBound(method: string, args: unknown[], target: BoundTarget): Bounde
   // A statement of an open transaction answers with the driver's own error, never re-dressed as `StoreTimeout`: its labels
   // (`TransientTransactionError` on a write conflict) are how the transaction's loop knows to run it again
   // (`db/bounded-transaction.ts`), and a write conflict is one `isWriteTimeout` counts as a bound's end.
-  return { args: out, options: amended, at, backstopMs, endsServerOperation: false, ourDeadline: carried.length === 0 && !inOpenTransaction(options) };
+  const inTransaction = inOpenTransaction(options);
+  return {
+    args: out, options: amended, at, backstopMs, endsServerOperation: false, ourDeadline: carried.length === 0 && !inTransaction,
+    sentTheRemainder: inTransaction && serverMs === left,
+  };
 }
 
 /**
@@ -675,7 +706,12 @@ export function callBounded(
       (value) => { clearTimeout(timer); if (!backstopped) resolve(value); },
       // The server answering first is the bound ending the write, as the backstop is: one error for both, so a caller
       // never has to know which clock won. The driver's own error stays reachable as the cause.
-      (err: unknown) => { clearTimeout(timer); if (!backstopped) reject(plan.ourDeadline && isWriteTimeout(err) ? new StoreTimeout(undefined, { cause: err }) : err); },
+      (err: unknown) => {
+        clearTimeout(timer);
+        if (backstopped) return;
+        markIfEndedAtTheDeadline(err, plan.sentTheRemainder === true);
+        reject(plan.ourDeadline && isWriteTimeout(err) ? new StoreTimeout(undefined, { cause: err }) : err);
+      },
     );
   });
 }
