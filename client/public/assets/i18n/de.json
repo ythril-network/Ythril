@@ -3528,5 +3528,9 @@
   "spaces.schema.convert.incomplete": "Einige Schritte sind nicht fertig: Füllen Sie jeden Namen aus und wählen Sie, was aus jedem alten Wert wird, oder entfernen Sie den Schritt.",
   "spaces.schema.convert.warn.rule": "Die Regel {{rule}} von {{type}} liest noch {{property}}, das jetzt {{to}} heißt. Eine Umbenennung schreibt Regeln nicht um: Passen Sie die Regel an, damit sie {{to}} liest.",
   "spaces.schema.convert.run.pollFailed": "Der Fortschritt der Konvertierung konnte nicht gelesen werden. Es wird erneut versucht.",
-  "spaces.schema.convert.saveFirst": "Speichern Sie zuerst das Schema: Das Konvertieren arbeitet mit dem Schema, wie es gespeichert ist."
+  "spaces.schema.convert.saveFirst": "Speichern Sie zuerst das Schema: Das Konvertieren arbeitet mit dem Schema, wie es gespeichert ist.",
+  "brain.tab.reviewUnconverted.one": "{{count}} nicht konvertierter Datensatz zur Prüfung",
+  "brain.tab.reviewUnconverted.few": "{{count}} nicht konvertierte Datensätze zur Prüfung",
+  "brain.tab.reviewUnconverted.many": "{{count}} nicht konvertierte Datensätze zur Prüfung",
+  "brain.tab.reviewUnconverted.other": "{{count}} nicht konvertierte Datensätze zur Prüfung"
 }

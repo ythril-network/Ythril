@@ -3528,5 +3528,9 @@
   "spaces.schema.convert.incomplete": "Some steps are not finished: fill in every name and choose what each old value becomes, or remove the step.",
   "spaces.schema.convert.warn.rule": "The rule {{rule}} of {{type}} still reads {{property}}, which is now called {{to}}. A rename does not rewrite rules: edit the rule so it reads {{to}}.",
   "spaces.schema.convert.run.pollFailed": "The progress of the conversion could not be read. Trying again.",
-  "spaces.schema.convert.saveFirst": "Save the schema first: converting works on the schema as it is stored."
+  "spaces.schema.convert.saveFirst": "Save the schema first: converting works on the schema as it is stored.",
+  "brain.tab.reviewUnconverted.one": "{{count}} unconverted record to review",
+  "brain.tab.reviewUnconverted.few": "{{count}} unconverted records to review",
+  "brain.tab.reviewUnconverted.many": "{{count}} unconverted records to review",
+  "brain.tab.reviewUnconverted.other": "{{count}} unconverted records to review"
 }
