@@ -18,6 +18,9 @@ import { Component, ChangeDetectionStrategy, DestroyRef, Injector, inject, signa
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SchemaTypeNameComponent } from './schema-type-name.component';
+import { TypeConvertBarComponent } from './type-convert-bar.component';
+import { holdsSchemaAdmin } from '../../core/token-capability';
+import type { TokenRights } from './rights-glyph.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
@@ -57,7 +60,7 @@ const suggestedAddAsName = (name: string): string => name + '-2';
 @Component({
   selector: 'app-space-schema-tab',
   standalone: true,
-  imports: [SchemaTypeEditorComponent, RuleRowsComponent, SchemaTypeNameComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent, StatusPillComponent, SchemaTypeHistoryComponent, HelpToggleComponent],
+  imports: [SchemaTypeEditorComponent, RuleRowsComponent, SchemaTypeNameComponent, TypeConvertBarComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent, StatusPillComponent, SchemaTypeHistoryComponent, HelpToggleComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SPACE_DIALOG_STYLES, SCHEMA_MD_STYLES],
   template: `
@@ -326,9 +329,10 @@ const suggestedAddAsName = (name: string): string => name + '-2';
       } @else if (selectedTypeName(kt); as name) {
         <div class="sch-detail-head">
           <!-- The name and its rename are one question, in their own component (B-18). -->
-          <app-schema-type-name [name]="name" [rename]="renamerFor(kt, name)" />
+          <app-schema-type-name [name]="name" [rename]="renamerFor(kt, name)" [was]="state.typeWas(kt, name)" />
           <span class="acts">
             <ng-container *ngTemplateOutlet="historyButton; context: { kt: kt, name: name }"></ng-container>
+            <ng-container *ngTemplateOutlet="convertBar.button() ?? null"></ng-container>
             <button class="btn btn-ghost btn-sm" type="button" (click)="exportTypeSchema(kt,name)"
               style="padding:2px 6px;" [attr.title]="'spaces.schema.exportTypeTitle' | transloco"
               [attr.aria-label]="'spaces.schema.exportTypeTitle' | transloco"><ph-icon name="upload" [size]="13"/></button>
@@ -341,6 +345,8 @@ const suggestedAddAsName = (name: string): string => name + '-2';
               [attr.aria-label]="'common.remove' | transloco"><ph-icon name="x" [size]="14"/></button>
           </span>
         </div>
+        <app-type-convert-bar #convertBar [kind]="kt" [type]="name" [was]="state.typeWas(kt, name)" [saved]="state.typeState(kt, name)._stored === true"
+          [older]="olderMark(kt, name)" [rights]="tokenRights()" />
 
         <!-- The editor body is a shared component: the Brain Overview opens the SAME one in a dialog, so a
              one-field schema change no longer means a trip to Space Settings and back. The header above
@@ -618,6 +624,8 @@ export class SpaceSchemaTabComponent implements OnInit {
   // ── rights: the rules are a constraint on every write, so changing them needs schema admin
   /** Whether this token may change rules. Unknown (still loading, or no rights to read) counts as yes: the server decides, this only explains. */
   private readonly schemaAdmin = signal(true);
+  /** The token's rights as read, for the Convert records lock: `null` until they are read (or when they cannot be), which allows. */
+  protected readonly tokenRights = signal<TokenRights | null>(null);
   readonly canEditRules = computed(() => this.schemaAdmin());
   /**
    * The "This instance" control is charged to the same area as the rules (`schema` admin on REST), so it follows the same signal; it
@@ -767,10 +775,8 @@ export class SpaceSchemaTabComponent implements OnInit {
       next: (me) => {
         const rights = me.rights;
         if (!rights) return;
-        const id = this.state.settingsSpace()?.id ?? '';
-        const admin = rights.instanceAdmin || rights.spaceAdmin?.floor === true || rights.spaceAdmin?.spaces.includes(id) === true
-          || rights.perSpace?.[id]?.['schema'] === 'admin' || (!rights.perSpace?.[id] && rights.floor?.['schema'] === 'admin');
-        this.schemaAdmin.set(!!admin);
+        this.tokenRights.set(rights);
+        this.schemaAdmin.set(holdsSchemaAdmin(rights, this.state.settingsSpace()?.id ?? ''));
       },
       error: () => { /* the server decides */ },
     });
