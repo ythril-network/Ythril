@@ -421,7 +421,8 @@ function voterSignsBound(net: NetworkConfig, voterInstanceId: string): boolean {
  * A cast with `bsig` must verify it against THIS round's type and target — a relayed round re-aimed at another space
  * fails here although its v1 `sig` still verifies (`Q-138`). A cast without `bsig` is refused from a voter known to sign
  * one, so stripping it is not a downgrade; from an older or unknown voter the v1 check stands. A cast a voter made
- * before it upgraded is therefore accepted only by a peer that does not yet know it upgraded — the transition.
+ * before it upgraded is therefore accepted only by a peer that does not yet know it upgraded — the transition. A round type
+ * newer than the bound signature (`space_rebase`) has no such transition: its casts need `bsig`.
  */
 export function isVoteCastSignatureValid(net: NetworkConfig, round: VoteRound, cast: VoteCast): boolean {
   if (!cast.sig) return false;
@@ -430,6 +431,9 @@ export function isVoteCastSignatureValid(net: NetworkConfig, round: VoteRound, c
   const base = { networkId: net.id, roundId: round.roundId, subjectInstanceId: round.subjectInstanceId,
     instanceId: cast.instanceId, vote: cast.vote };
   if (cast.bsig) return verifyMessage(pub, voteCastBoundMessage({ ...base, round }), cast.bsig);
+  // A round type that postdates the bound signature has no transition to bridge (review finding 4 of slice A): every voter on a
+  // `space_rebase` round runs a release that signs `bsig`, so a cast without one is refused, never read by the v1 `sig`, which binds no target.
+  if (round.type === 'space_rebase') return false;
   if (voterSignsBound(net, cast.instanceId)) return false;
   return verifyMessage(pub, voteCastMessage(base), cast.sig);
 }
@@ -480,6 +484,9 @@ export function acceptVoteCast(
   reportingInstanceId: string | undefined,
 ): { accept: boolean; reason?: string } {
   if (isVoteCastSignatureValid(net, round, cast)) return { accept: true };
+  // A SIGNED `space_rebase` cast whose bound signature does not verify was made over another base (review finding 4): the compatibility
+  // mode below exists for voters that sign nothing, and must not count, even from its own voter, a yes signed for something else.
+  if (round.type === 'space_rebase' && (cast.sig || cast.bsig)) return { accept: false, reason: 'a space_rebase cast whose bound signature (bsig) does not verify' };
   if (net.requireSignedVotes) {
     return { accept: false, reason: 'unsigned or invalid signature (network requires signed votes)' };
   }
