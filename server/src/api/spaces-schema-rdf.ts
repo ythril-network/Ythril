@@ -15,11 +15,13 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { EXPORT_OK } from '../export/export-statuses.js';
 import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
 import { sendCaughtFailure } from './send-failure.js';
+import { headAskedAsGet } from '../export/export-head.js';
 
 export const spaceSchemaRdfRouter = Router();
 
-// GET /api/spaces/:id/schema-rdf[?format=turtle|jsonld] - the schema of the space as an OWL ontology and SHACL shapes.
-spaceSchemaRdfRouter.get('/:id/schema-rdf', globalRateLimit, requireSpaceAuthScoped('id'), (req, res) => {
+// GET (and HEAD) /api/spaces/:id/schema-rdf[?format=turtle|jsonld] - the schema of the space as an OWL ontology and SHACL shapes. A HEAD is
+// asked the GET's rights (`headAskedAsGet`: the inventory keys on the method and has no HEAD row) and answered with its headers, unaudited.
+spaceSchemaRdfRouter.get('/:id/schema-rdf', globalRateLimit, headAskedAsGet(requireSpaceAuthScoped('id')), (req, res) => {
   const spaceId = req.params['id'] as string;
   res.setHeader('Vary', 'Accept');
   res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
@@ -32,11 +34,13 @@ spaceSchemaRdfRouter.get('/:id/schema-rdf', globalRateLimit, requireSpaceAuthSco
       res.status(r.status).json({ error: r.error, code: r.code, ...(r.detail ?? {}) });
       return;
     }
-    req.auditChangesExplicit = r.auditChanges;
+    const head = req.method === 'HEAD';
+    if (!head) req.auditChangesExplicit = r.auditChanges;
     res.status(EXPORT_OK).setHeader('Content-Type', r.contentType);
     res.setHeader('Content-Disposition', r.disposition);
-    // `end`, not `send`: `send` would add a charset parameter the registered media types do not take.
-    res.end(r.text);
+    // `end`, not `send`: `send` would add a charset parameter the registered media types do not take. A HEAD answer has no content.
+    if (head) res.end();
+    else res.end(r.text);
   } catch (err) {
     sendCaughtFailure(res, 'GET /api/spaces/:id/schema-rdf', err);
   }
