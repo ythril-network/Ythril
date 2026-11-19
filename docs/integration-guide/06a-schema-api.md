@@ -373,7 +373,7 @@ A one-record check, trying a rule before saving it:
 }
 ```
 
-answers one record with `{ "field": "rules.adult", "reason": "A person must be an adult (rule 3f9a1c02)" }`.
+answers one record with `{ "field": "rules.adult", "reason": "A person must be an adult (rule 3f9a1c02)", "code": "rule", "params": { "rule": "adult", "message": "A person must be an adult", "hash": "3f9a1c02" } }`.
 
 **Response** `200`:
 
@@ -394,7 +394,8 @@ answers one record with `{ "field": "rules.adult", "reason": "A person must be a
       "collection": "entities",
       "_id": "550e8400-e29b-41d4-a716-446655440000",
       "violations": [
-        { "field": "type", "value": "concept", "reason": "not in entityTypes allowlist: Person, Service" }
+        { "field": "type", "value": "concept", "reason": "not in entityTypes allowlist: service, person",
+          "code": "type_not_allowed", "params": { "allowlist": "entityTypes", "allowedValues": ["service", "person"] } }
       ]
     }
   ],
@@ -731,7 +732,8 @@ property key outside it is judged by the space's mode: `strict` refuses it, `war
 
 ```json
 { "field": "properties.statuz", "value": "x",
-  "reason": "property 'statuz' is not declared on this type", "declared": ["owner", "status"] }
+  "reason": "property 'statuz' is not declared on this type", "declared": ["owner", "status"],
+  "code": "additional_properties", "params": { "additionalProperty": "statuz" } }
 ```
 
 `declared` is sorted and bounded (at most 50 names, each cut at 256 characters). The rule is the same on every door:

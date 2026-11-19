@@ -547,7 +547,8 @@ already uses:
 // any single-record route — the violations themselves, beside the status
 { "status": "inserted",
   "schemaViolations": [
-    { "field": "properties.severity", "value": "catastrophic", "reason": "must be one of: low, medium, high" }
+    { "field": "properties.severity", "value": "catastrophic", "reason": "must be one of: low, medium, high",
+      "code": "enum", "params": { "allowedValues": ["low", "medium", "high"] } }
   ] }
 ```
 
