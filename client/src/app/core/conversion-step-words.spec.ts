@@ -40,7 +40,7 @@ function translator(calls: Call[] = []) {
   };
 }
 
-const sentence = (step: ConversionStep): string => stepSentence(translator(), 'en', step);
+const sentence = (step: ConversionStep): string => stepSentence(translator(), step);
 
 describe('a sentence per op', () => {
   it('rename the type', () => {
@@ -76,17 +76,17 @@ describe('names a peer wrote are parameters, never markup and never part of a ke
   it('every key asked for is on the closed list, whatever the names say', () => {
     for (const name of hostile) {
       const t = translator();
-      stepSentence(t, 'en', { op: 'renameType', kind: 'entity', from: name, to: `${name}2` });
-      stepSentence(t, 'en', { op: 'renameProperty', kind: 'entity', type: name, from: name, to: `${name}2` });
-      stepSentence(t, 'en', { op: 'mapEnum', kind: 'entity', type: 'p', property: name, values: { [name]: 'x' } });
-      stepSentence(t, 'en', { op: 'splitType', kind: 'entity', from: name, cases: [{ when: name, to: name }], otherwise: name });
+      stepSentence(t,{ op: 'renameType', kind: 'entity', from: name, to: `${name}2` });
+      stepSentence(t,{ op: 'renameProperty', kind: 'entity', type: name, from: name, to: `${name}2` });
+      stepSentence(t,{ op: 'mapEnum', kind: 'entity', type: 'p', property: name, values: { [name]: 'x' } });
+      stepSentence(t,{ op: 'splitType', kind: 'entity', from: name, cases: [{ when: name, to: name }], otherwise: name });
       for (const call of t.calls) expect(CONVERSION_STEP_KEYS, `a key built from "${name}"`).toContain(call.key);
     }
   });
 
   it('the name reaches the translator whole, as a parameter, and comes out as text exactly as written', () => {
     const t = translator();
-    const out = stepSentence(t, 'en', { op: 'renameType', kind: 'entity', from: '<img src=x onerror=alert(1)>', to: '{{from}}' });
+    const out = stepSentence(t,{ op: 'renameType', kind: 'entity', from: '<img src=x onerror=alert(1)>', to: '{{from}}' });
     expect(out).toBe('Rename the type <img src=x onerror=alert(1)> to {{from}}');
     expect(t.calls[0]!.params).toEqual({ from: '<img src=x onerror=alert(1)>', to: '{{from}}' });
   });
