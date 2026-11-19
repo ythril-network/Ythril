@@ -4,7 +4,7 @@ import { forkJoin, of, type Subscription } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { ConversionApi } from '../../core/conversion-api.service';
 import type { BlockCounts, ConvertBlock } from '../../core/conversion-counts';
-import type { ConversionRefusal, ConvertRunNotice, ConvertStatus, ConvertStatusAnswer } from '../../core/conversion.types';
+import type { ConversionRefusal, ConvertRunNotice, ConvertSource, ConvertStatus, ConvertStatusAnswer } from '../../core/conversion.types';
 import { NetworksApi } from '../../core/networks-api.service';
 import { pageTranslator } from '../../core/page-translator';
 import { pollUntil, type PollHandle } from '../../core/poll-until';
@@ -53,6 +53,13 @@ let seq = 0;
 
 /** Who shows a run the Convert act started, as it shows the run a converting Save started. */
 export interface ConvertRunHost { showRun(notice: ConvertRunNotice): void }
+
+/** The strong lead of a run's note while it runs (null: none) and when it finished, by what started the run. */
+const RUN_LEADS: Record<ConvertSource['kind'], { running: string | null; finished: string }> = {
+  write: { running: 'spaces.schema.convert.note.saved', finished: 'spaces.schema.convert.note.finished' },
+  round: { running: 'spaces.schema.convert.note.byVote', finished: 'spaces.schema.convert.note.finishedByVote' },
+  act: { running: null, finished: 'spaces.schema.convert.note.actFinished' },
+};
 
 /** Provided by the settings popup for the bars inside it; a bar with no host shows its note only. */
 export const CONVERT_RUN_HOST = new InjectionToken<ConvertRunHost>('CONVERT_RUN_HOST');
@@ -181,18 +188,19 @@ export class TypeConvertBarComponent {
     const entry = run?.types.find(t => t.kind === this.kind() && t.type === this.type());
     if (run && entry) {
       const done = run.counts.stamped + run.counts.rewritten + run.counts.unconverted + run.counts.moved;
-      // The Convert act saves no schema: a run only the act started (every source the server lists is `act`) says nothing of one.
-      const actOnly = run.sources.length > 0 && run.sources.every(s => s.kind === 'act');
+      // The lead says what changed the schema, by the run's MOST RECENT source (the server appends them): a Save "Schema saved.", a passed vote
+      // "Schema changed by the vote." (this member saved nothing), the Convert act nothing (it changes no schema). A run no source names is a Save's.
+      const words = RUN_LEADS[run.sources[run.sources.length - 1]?.kind ?? 'write'];
       if (run.state === 'running' && !entry.done) {
         if (run.left === null) return plain(`${this.say('spaces.schema.convert.run.converting')} (${this.say('spaces.schema.convert.run.counting')})`);
         const text = this.plural.text('spaces.schema.convert.note.running', done + run.left, { done });
-        return actOnly ? plain(text) : { lead: saved, text };
+        return words.running === null ? plain(text) : { lead: this.say(words.running), text };
       }
       // A Save that found nothing started no run: a finished run still on the books for the type is an old one, not the Save's.
       const awaited = this.awaitedRound !== null && run.sources.some(s => s.kind === 'round' && s.roundId === this.awaitedRound);
       if (this.sawRun() || awaited || (!this.savedNothing() && this.state.schemaEpoch() > this.openedAt)) {
         if (run.state === 'failed') return plain(this.say('spaces.schema.convert.run.failed', { error: run.error ?? '' }));
-        const finished = this.say(actOnly ? 'spaces.schema.convert.note.actFinished' : 'spaces.schema.convert.note.finished');
+        const finished = this.say(words.finished);
         return { lead: finished, text: run.counts.unconverted > 0 ? this.plural.text('spaces.schema.convert.note.finishedSome', run.counts.unconverted) : '' };
       }
     }

@@ -3315,6 +3315,8 @@
   "spaces.schema.convert.act.run": "Datensätze konvertieren",
   "spaces.schema.convert.dialog.unfitHint": "Datensätze, die nicht zum neuen Schema passen, werden stattdessen in der Prüfung aufgelistet.",
   "spaces.schema.convert.note.saved": "Schema gespeichert.",
+  "spaces.schema.convert.note.byVote": "Schema durch die Abstimmung geändert.",
+  "spaces.schema.convert.note.finishedByVote": "Schema durch die Abstimmung geändert. Konvertierung abgeschlossen.",
   "spaces.schema.convert.note.running.one": "Die Datensätze dieses Typs werden konvertiert: {{done}} von {{count}} geprüft.",
   "spaces.schema.convert.note.running.few": "Die Datensätze dieses Typs werden konvertiert: {{done}} von {{count}} geprüft.",
   "spaces.schema.convert.note.running.many": "Die Datensätze dieses Typs werden konvertiert: {{done}} von {{count}} geprüft.",
