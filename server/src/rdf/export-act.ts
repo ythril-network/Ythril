@@ -47,7 +47,7 @@ import {
 import { blank, iri, plain, quad, stdIri, typed, xsd, type Quad, type EdgeDetails, type LeftOutReason } from './literals.js';
 import { RDF_READ_FIELDS, SKIPPED_VALUES_NAMED_MAX, recordTriples, createSkippedLog, type RdfRecordKind, type SkippedValue } from './record-triples.js';
 import { graphIri, prefixesFor, recordAddressable, recordIri, versionIri } from './term-iri.js';
-import { createRdfWriter, RdfWriteError, type RdfFormat } from './serialize.js';
+import { createRdfWriter, rdfVersionOf, RdfWriteError, type RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES, RDF_BAD_FORMAT } from './export-format.js';
 import {
   rdfSpaceState, RDF_NOT_ENABLED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
@@ -288,8 +288,57 @@ function paramsOf(raw: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
+/** What an export is, judged before any slot is taken or any record read: the scope, the format and the bounds, or the refusal. */
+type PreparedExport = Omit<PageInput, 'slot' | 'input'>;
+
+/**
+ * The headers a `GET` of the export would answer, for a REST `HEAD` (RFC 9110 §9.3.2): the same parameters, scope, format and refusals,
+ * decided without taking a slot, reading a record or writing an audit row. The headers that only the walk can know (`Link`, the budget
+ * used, the trailers) are left out, as the RFC allows for a value determined while the content is generated.
+ */
+export function rdfExportHeadAct(input: Omit<RdfExportInput, 'whole'>):
+  | { status: typeof EXPORT_OK; contentType: string; disposition: string; viewMembers?: string[]; fileTriplesWithheld: boolean }
+  | RdfExportRefusal {
+  const prepared = prepareExport(input);
+  if ('error' in prepared) return prepared;
+  return {
+    status: EXPORT_OK,
+    contentType: rdfContentType(prepared.format, rdfVersionOf(prepared.format, prepared.edgeDetails)),
+    disposition: rdfContentDisposition(input.spaceId, prepared.format),
+    ...(prepared.view ? { viewMembers: prepared.exported.map(e => e.space) } : {}),
+    fileTriplesWithheld: prepared.exported.some(e => !prepared.files(e.space)),
+  };
+}
+
 /** Run the export of one page. Never throws for a caller's mistake; a fault that is not the store's is thrown to the door. */
 export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutcome> {
+  const prepared = prepareExport(input);
+  if ('error' in prepared) return prepared;
+  const slot = takeExportSlot(input.callerKey);
+  if (!slot) {
+    return {
+      status: EXPORT_BUSY, code: RDF_EXPORT_BUSY, retryAfterSeconds: EXPORT_RETRY_AFTER_SECONDS,
+      error: 'An export is already running for this token, or as many exports as the instance runs at once: try again when it ends',
+    };
+  }
+  const p: PageInput = { ...prepared, input, slot };
+  // The slot is the door's from the moment an answer is handed over, and released here on EVERY other exit: a throw of the walk's
+  // constructor, of a page, of anything before the hand-over (bundle-269 review, finding 1: a stream that failed to start held its slot for
+  // good).
+  let handedOver = false;
+  try {
+    const answer = input.whole === true ? streamWhole(p) : await buildPage(p);
+    handedOver = true;
+    return answer;
+  } catch (err) {
+    return refusalOfStore(err, input.spaceId);
+  } finally {
+    if (!handedOver) slot.release();
+  }
+}
+
+/** The parameters, the scope's members, the format and the bounds of an export, or the refusal a caller gets for them. */
+function prepareExport(input: Omit<RdfExportInput, 'whole'>): PreparedExport | RdfExportRefusal {
   const { spaceId, caller, transport } = input;
   const rights = caller?.rights ?? undefined;
   const parsed = RdfExportParams.safeParse(paramsOf(input.params));
@@ -329,31 +378,10 @@ export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutc
   }
   const resolved = resolveBudget(parsed.data, defaultBudgetChars(transport), 1);
   if (!resolved.ok) return { status: EXPORT_BAD_REQUEST, error: resolved.error, code: RDF_BAD_BUDGET };
-
-  const slot = takeExportSlot(input.callerKey);
-  if (!slot) {
-    return {
-      status: EXPORT_BUSY, code: RDF_EXPORT_BUSY, retryAfterSeconds: EXPORT_RETRY_AFTER_SECONDS,
-      error: 'An export is already running for this token, or as many exports as the instance runs at once: try again when it ends',
-    };
-  }
-  const p: PageInput = {
-    input, exported, withoutRdf, inConflict, format, edgeDetails, cursor, budget: resolved, limit: parsed.data.limit,
-    after: parsed.data.after, files: (m) => mayRead(rights, m, 'files'), slot, view,
+  return {
+    exported, withoutRdf, inConflict, format, edgeDetails, cursor, budget: resolved, limit: parsed.data.limit,
+    after: parsed.data.after, files: (m) => mayRead(rights, m, 'files'), view,
   };
-  // The slot is the door's from the moment an answer is handed over, and released here on EVERY other exit: a throw of the walk's
-  // constructor, of a page, of anything before the hand-over (bundle-269 review, finding 1: a stream that failed to start held its slot for
-  // good).
-  let handedOver = false;
-  try {
-    const answer = input.whole === true ? streamWhole(p) : await buildPage(p);
-    handedOver = true;
-    return answer;
-  } catch (err) {
-    return refusalOfStore(err, spaceId);
-  } finally {
-    if (!handedOver) slot.release();
-  }
 }
 
 /**
