@@ -510,7 +510,7 @@ export function planSpaceMetaUpdate(input: {
   // out, so it is held to the term-clash rule on the meta it leaves, as any other base move (review finding 7).
   if (acceptRdf !== undefined) {
     audit.after['rdf'] = acceptRdf;
-    const clashes = termClashes(inlineResolvableRefs({ ...(space.meta ?? {}), rdf: acceptRdf } as SpaceMeta));
+    const clashes = termClashes(inlineResolvableRefs({ ...(space.meta ?? {}), rdf: acceptRdf } as SpaceMeta), Object.values(getConfig().schemaLibraryNamespaces ?? {}));
     if (clashes.length > 0) {
       return { ok: false, refusal: { status: TERM_CLASH_STATUS, body: { error: `accepting this base would give two terms of this space one RDF address: ${clashes.map(c => c.message).join('; ')}`, code: 'rdf_term_clash' } } };
     }
@@ -594,7 +594,7 @@ export function planSpaceMetaUpdate(input: {
       })
       : undefined;
     if (runs?.rdf?.enabled === true && runs.rdf.base) {
-      const clashes = termClashes(inlineResolvableRefs(runs));
+      const clashes = termClashes(inlineResolvableRefs(runs), Object.values(getConfig().schemaLibraryNamespaces ?? {}));
       if (clashes.length > 0) {
         return { ok: false, refusal: { status: TERM_CLASH_STATUS, body: { error: `two terms of this space would have one RDF address: ${clashes.map(c => c.message).join('; ')}`, code: 'rdf_term_clash' } } };
       }
