@@ -30,7 +30,6 @@ import type { ConversionStep, ConvertRunNotice, ConvertStatus, ConvertStatusAnsw
 import { declaredNearest } from '../../testing/declared-style';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { ConvertRunBlockComponent, runFooterOf, stepPieces } from './convert-run-block.component';
-import { piecesOf } from './vote-conversion-block.component';
 
 const REFUSED = 'REF-HEAD k={{k}} n={{count}}';
 const WORDS: Record<string, string> = {
@@ -351,10 +350,6 @@ describe('the run block', () => {
       const pieces = stepPieces(say, { op: 'renameProperty', kind: 'entity', type: 'person', from: 'a\u0002b', to: 'c' });
       expect(pieces.filter(p => p.name).map(p => p.text)).toEqual(['ab', 'c']);
       expect(pieces.map(p => p.text).join('')).toBe('RENAME-PROP ab => c');
-    });
-
-    it('uses the cut of the vote row: the same private markers, so a name is a name in both', () => {
-      expect(piecesOf('x \u0001name\u0002 y')).toEqual([{ text: 'x ', name: false }, { text: 'name', name: true }, { text: ' y', name: false }]);
     });
   });
 

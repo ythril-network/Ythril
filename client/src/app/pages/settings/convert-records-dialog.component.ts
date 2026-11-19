@@ -8,17 +8,17 @@ import { ActiveLanguage } from '../../core/active-language';
 import { pageTranslator } from '../../core/page-translator';
 import { formatCount } from '../../core/plural-text';
 import { PluralText } from '../../core/plural-text.service';
+import { markName, markStrong, markedPieces, piecesOf, strongFirst, type SentencePiece } from '../../core/sentence-marks';
 import { mayConvertRecords } from '../../core/token-capability';
 import { ModalDirective } from '../../shared/modal.directive';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { CONVERSION_LIMITS } from '../../shared/conversion-limits';
 import { STACK } from '../../shared/stacking';
-import { ConvertRunBlockComponent, markName, markedPieces, runFooterOf, stepPieces } from './convert-run-block.component';
+import { ConvertRunBlockComponent, runFooterOf, stepPieces } from './convert-run-block.component';
 import { ConvertStepEditorComponent } from './convert-step-editor.component';
 import { editOf, locateStep, offerStep, sortEdits, stepsOfEdits, withAddedTypes, type AddedType, type ConvertBlockPlan, type ConvertSchemas, type EditStep } from './convert-steps';
 import { DIALOG_STYLES } from './dialog.styles';
 import type { TokenRights } from './rights-glyph.component';
-import { markStrong, piecesOf, strongFirst, type SentencePiece } from './vote-conversion-block.component';
 
 /**
  * The dialog that offers converting records at Save, and its other faces (bundle-285 slice S5, Q-747; plan sections 3.1 item 4, 4, 5 rows D,

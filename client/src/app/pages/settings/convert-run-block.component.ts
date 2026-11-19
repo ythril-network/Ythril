@@ -7,7 +7,7 @@ import type { ConversionStep, ConvertRunNotice, ConvertStatus, ConvertStatusAnsw
 import { pageTranslator, type PageTranslator } from '../../core/page-translator';
 import { formatCount } from '../../core/plural-text';
 import { PluralText } from '../../core/plural-text.service';
-import { piecesOf, type SentencePiece } from './vote-conversion-block.component';
+import { markedParams, piecesOf, stripMarks, type MarkHow, type SentencePiece } from '../../core/sentence-marks';
 
 /**
  * The run block: a conversion running and finished, as the green-lit drawing has it (bundle-285 slice S5, Q-747; plan sections 3.1 item 8 and
@@ -28,42 +28,17 @@ import { piecesOf, type SentencePiece } from './vote-conversion-block.component'
  *   out when that could not be read), and what to do; a vote refused whole has its own sentence.
  * - **A blank block.** A run that never was (an empty type, a space with no run, a save that started nothing), a save that did not start
  *   the run and a run that stopped each say so in words, with the error the server gave.
- * - **A name taken for markup.** Every type and property name in a sentence is bound as text, cut out of the sentence by the vote row's own
- *   private markers (`piecesOf`) so it is set in the code face; a name cannot carry a marker of its own.
+ * - **A name taken for markup.** Every type and property name in a sentence is bound as text, cut out of the sentence by the private markers
+ *   of `core/sentence-marks.ts` (`piecesOf`) so it is set in the code face; a name cannot carry a marker of its own.
  */
 
 // ── Names in sentences ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The private marker characters of the vote row's `piecesOf`: control characters, so no real name holds one. */
 /** The bar's whole width, as a percentage. */
 const PERCENT_FULL = 100;
 
-const OPEN = '\u0001';
-const CLOSE = '\u0002';
-const stripMarkers = (s: string): string => s.split(OPEN).join('').split(CLOSE).join('');
-const mark = (name: string): string => `${OPEN}${stripMarkers(name)}${CLOSE}`;
-
-/** How a sentence's text parameters are treated: a name is marked; `plain` text has its markers taken out; `trusted` text is a sentence already made here. */
-export interface Params { plain?: readonly string[]; trusted?: readonly string[] }
-
-function markedParams(params: Record<string, unknown> | undefined, how: Params): Record<string, unknown> | undefined {
-  if (!params) return params;
-  return Object.fromEntries(Object.entries(params).map(([key, value]) => {
-    if (typeof value !== 'string' || how.trusted?.includes(key)) return [key, value];
-    return [key, how.plain?.includes(key) ? stripMarkers(value) : mark(value)];
-  }));
-}
-
-/** A name wrapped in the private markers, for a counted sentence (`PluralText`) that sets it in the code face; read back with `piecesOf`. */
-export const markName = mark;
-
-/** The pieces of any sentence whose text parameters are names (marked) unless `how` says they are plain text or a sentence already made here. */
-export function markedPieces(say: PageTranslator, key: string, params: Record<string, unknown>, how: Params = {}): SentencePiece[] {
-  return piecesOf(say(key, markedParams(params, how)));
-}
-
 /** Parameters of a step's sentence that are sentences already made (a map's pairs, a split's cases) or an operation name: not names. */
-const STEP_PARAMS: Params = { trusted: ['pairs', 'cases'], plain: ['op'] };
+const STEP_PARAMS: MarkHow = { trusted: ['pairs', 'cases'], plain: ['op'] };
 
 /** A step's sentence with each name wrapped in the private markers, for a sentence that embeds it. */
 function markedStepSentence(say: PageTranslator, step: ConversionStep): string {
@@ -330,9 +305,9 @@ export class ConvertRunBlockComponent {
       head: named.length > 0 ? this.plural.text('spaces.schema.convert.refused.head', Math.max(run.steps.length, named.length), { k: named.length }) : '',
       listed: listed !== null && listed > 0 ? this.plural.text('spaces.schema.convert.refused.listed', listed) : '',
       items: named.map(r => piecesOf(this.say('spaces.schema.convert.refused.item', {
-        step: markedStepSentence(this.say, r.step), reason: stripMarkers(reasonText(r.reason)),
+        step: markedStepSentence(this.say, r.step), reason: stripMarks(reasonText(r.reason)),
       }))),
-      all: run.stepsRefused.filter(r => r.step === null).map(r => piecesOf(this.say('spaces.schema.convert.refused.all', { reason: stripMarkers(reasonText(r.reason)) }))),
+      all: run.stepsRefused.filter(r => r.step === null).map(r => piecesOf(this.say('spaces.schema.convert.refused.all', { reason: stripMarks(reasonText(r.reason)) }))),
     };
   });
 

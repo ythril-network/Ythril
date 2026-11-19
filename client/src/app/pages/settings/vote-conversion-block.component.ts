@@ -9,6 +9,7 @@ import { stepSentence } from '../../core/conversion-step-words';
 import type { ConversionStep } from '../../core/conversion.types';
 import { pageTranslator, type PageTranslator } from '../../core/page-translator';
 import { PluralText } from '../../core/plural-text.service';
+import { markName, piecesOf, type SentencePiece } from '../../core/sentence-marks';
 import { knowledgeAllowed } from '../../core/token-capability';
 import { convertBlocksOfRound, orderedConversionSteps } from '../../core/vote-round-view';
 
@@ -27,7 +28,7 @@ import { convertBlocksOfRound, orderedConversionSteps } from '../../core/vote-ro
  * - **Peer text taken for markup.** Every type, property and condition in a step was written by another member. A sentence is made by the
  *   translation layer from the closed set of `conversion.step.*` keys with the names as parameters, wrapped in two private marker characters
  *   so the block can draw each name in its own span, and the pieces are bound by interpolation, which escapes. Nothing here is bound as HTML,
- *   and a name cannot forge a marker: the markers are stripped from every name first.
+ *   and a name cannot forge a marker: the markers are stripped from every name first (`core/sentence-marks.ts`, which holds the markers).
  * - **A number that was not counted, or is not this instance's.** The counts are asked of the round's `localSpaceId` (the name THIS instance
  *   holds the space under, never the network's id for it), only when the token may read that space's records, and a count that failed or
  *   could not be asked shows no number at all (never a zero). Without a local space the block shows the steps alone and asks nothing.
@@ -51,69 +52,8 @@ type CountsView =
   | { state: 'failed' }
   | { state: 'ready'; rows: { block: ConvertBlock; counts: BlockCounts }[]; complete: boolean };
 
-/** A piece of a sentence: some words, one name the drawing sets in the code face, or (`strong`) a number it sets in strong text. */
-export interface SentencePiece { text: string; name: boolean; strong?: true }
-
-/** Private marker characters a name is wrapped in on its way through the translation layer. They are control characters, so no real name holds one. */
-const OPEN = '\u0001';
-const CLOSE = '\u0002';
-/** The same for a number the drawing sets in strong text (the counts of the Save dialog): a second pair, so a strong piece is never a name. */
-const STRONG_OPEN = '\u0003';
-const STRONG_CLOSE = '\u0004';
-const stripMarkers = (s: string): string => s.split(OPEN).join('').split(CLOSE).join('');
-const stripStrong = (s: string): string => s.split(STRONG_OPEN).join('').split(STRONG_CLOSE).join('');
-const mark = (name: string): string => `${OPEN}${stripStrong(stripMarkers(name))}${CLOSE}`;
-
-/** A text (a formatted number) wrapped in the strong markers, for a sentence read back with `piecesOf`. */
-export const markStrong = (text: string): string => `${STRONG_OPEN}${stripStrong(stripMarkers(text))}${STRONG_CLOSE}`;
-
-/**
- * The sentence with the first occurrence of `text` that is not already inside a marked piece wrapped in the strong markers: the count of a counted
- * sentence, which the plural mechanism formats and puts in itself (`{{count}}`), so it cannot be handed in marked. Unchanged when it is not there.
- */
-export function strongFirst(sentence: string, text: string): string {
-  if (!text) return sentence;
-  let depth = 0;
-  for (let i = 0; i <= sentence.length - text.length; i++) {
-    const c = sentence[i];
-    if (c === OPEN || c === STRONG_OPEN) depth++;
-    else if ((c === CLOSE || c === STRONG_CLOSE) && depth > 0) depth--;
-    else if (depth === 0 && sentence.startsWith(text, i)) return `${sentence.slice(0, i)}${markStrong(text)}${sentence.slice(i + text.length)}`;
-  }
-  return sentence;
-}
-
-/** A plain piece cut at its strong markers. An unpaired strong marker is dropped, never shown. */
-function strongPieces(text: string): SentencePiece[] {
-  const parts = text.split(STRONG_CLOSE);
-  const pieces: SentencePiece[] = [];
-  parts.forEach((part, i) => {
-    const open = i < parts.length - 1 ? part.indexOf(STRONG_OPEN) : -1;
-    const plain = stripStrong(open < 0 ? part : part.slice(0, open));
-    if (plain) pieces.push({ text: plain, name: false });
-    if (open >= 0) { const strong = stripStrong(part.slice(open + 1)); if (strong) pieces.push({ text: strong, name: false, strong: true }); }
-  });
-  return pieces;
-}
-
-/** A sentence with its marked names (and strong numbers) cut out as pieces, in order. A marker the translation left unpaired is dropped, never shown. */
-export function piecesOf(sentence: string): SentencePiece[] {
-  const parts = sentence.split(CLOSE);
-  const pieces: SentencePiece[] = [];
-  parts.forEach((part, i) => {
-    const open = i < parts.length - 1 ? part.indexOf(OPEN) : -1;
-    if (open < 0) {
-      pieces.push(...strongPieces(stripMarkers(part)));
-      return;
-    }
-    pieces.push(...strongPieces(stripMarkers(part.slice(0, open))));
-    pieces.push({ text: stripStrong(stripMarkers(part.slice(open + 1))), name: true });
-  });
-  return pieces;
-}
-
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const markText = (v: unknown): unknown => (typeof v === 'string' ? mark(v) : v);
+const markText = (v: unknown): unknown => (typeof v === 'string' ? markName(v) : v);
 
 /**
  * The step with every name in it marked, so the sentence made of it can be cut at the names. A peer wrote the step, so a field that is
@@ -129,7 +69,7 @@ function markedStep(step: ConversionStep): ConversionStep {
     case 'mapEnum':
       return {
         ...s, property: markText(s['property']),
-        values: isRecord(s['values']) ? Object.fromEntries(Object.entries(s['values']).map(([from, to]) => [mark(from), markText(to)])) : s['values'],
+        values: isRecord(s['values']) ? Object.fromEntries(Object.entries(s['values']).map(([from, to]) => [markName(from), markText(to)])) : s['values'],
       } as unknown as ConversionStep;
     case 'splitType':
       return {
@@ -231,7 +171,7 @@ export class VoteConversionBlockComponent {
     const view = this.counts();
     if (view.state !== 'ready') return [];
     return view.rows.map(({ block, counts }) => {
-      const type = mark(block.was ?? block.type);
+      const type = markName(block.was ?? block.type);
       const sentence = counts.total === 0
         ? this.say('networks.network.votes.convert.none', { type })
         : this.plural.text('networks.network.votes.convert.counts', counts.total, { type, stamped: counts.stamped, rewritten: counts.rewritten });
