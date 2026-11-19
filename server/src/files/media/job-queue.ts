@@ -86,6 +86,13 @@ export type MediaJobDeferral = Pick<MediaJobDoc, 'deferredSince' | 'facesOnly'>;
 export const DEFERRAL_MARKS: Readonly<Record<keyof MediaJobDeferral, ''>> = { deferredSince: '', facesOnly: '' };
 
 /**
+ * The `$unset` of everything a run's waits leave on its job: the deferral's marks and the count of hand-backs to an unavailable embedder
+ * (`outageFailures`, {@link handBackJob}). Ended in one place, by the job's end ({@link endJob}) and by a whole new run ({@link RUN_RESET_UNSET}),
+ * so no writer can end the one and forget the other: a new run that inherited a count would reach {@link MEDIA_OUTAGE_HAND_BACKS_MAX} early.
+ */
+export const RUN_MARKS: Readonly<Record<keyof MediaJobDeferral | 'outageFailures', ''>> = { ...DEFERRAL_MARKS, outageFailures: '' };
+
+/**
  * What returning a job to `pending` as a WHOLE NEW RUN sets, as a `$set` spread: the run state and nothing else (no attempt spent, no
  * error, no claim). Every writer that does it spreads this and its {@link RUN_RESET_UNSET}, so a seventh cannot spell a reset that
  * forgets a field (`every-write-returning-a-media-job-to-pending-goes-through-run-reset` reads job-queue.ts for it).
@@ -103,8 +110,8 @@ export const RUN_RESET = {
   claimToken: null,
 } as const;
 
-/** The `$unset` that goes with {@link RUN_RESET}: the step report of the run that was (`progress`) and the deferral's marks. */
-export const RUN_RESET_UNSET: Readonly<Record<string, ''>> = { progress: '', ...DEFERRAL_MARKS };
+/** The `$unset` that goes with {@link RUN_RESET}: the step report of the run that was (`progress`) and the marks of its waits ({@link RUN_MARKS}). */
+export const RUN_RESET_UNSET: Readonly<Record<string, ''>> = { progress: '', ...RUN_MARKS };
 
 /**
  * How long the write door and a manual retry keep a job unclaimable after they write it, in ms.
@@ -128,6 +135,15 @@ function nextClaimableAfter(nextAttempt: number): string {
   // Jittered: twenty files failing together while a sidecar restarts would otherwise all become
   // claimable on the same tick and hit it again in one burst, at the moment it is least able to cope.
   return new Date(Date.now() + withJitter(delay)).toISOString();
+}
+
+/**
+ * Every step of the schedule above as a claim time from now, the first wait to the longest (the one past the table), each jittered: what a write
+ * that picks its step in the database from a count it does not read ({@link handBackJob}) chooses from.
+ */
+function scheduleSteps(): string[] {
+  const steps = Object.keys(RETRY_BACKOFF_MS).length + 1;
+  return Array.from({ length: steps }, (_, i) => nextClaimableAfter(i + 1));
 }
 
 function jobCollection(spaceId: string) {
@@ -597,9 +613,9 @@ async function endJob(
     await setFileProcessingState(spaceId, claim.jobId, row, { session });
     await jobCollection(spaceId).updateOne(
       asFilter<MediaJobDoc>({ _id: claim.jobId }),
-      // A deferral's marks end with the job ({@link DEFERRAL_MARKS}): a manual retry or a re-upload of the path starts a whole run
-      // ({@link RUN_RESET} takes them off too), caption included.
-      asUpdate<MediaJobDoc>({ $set: { ...job, claimedAt: null, updatedAt: new Date().toISOString() }, $unset: { ...DEFERRAL_MARKS } }),
+      // The marks of the run's waits end with the job ({@link RUN_MARKS}): a manual retry or a re-upload of the path starts a whole run
+      // ({@link RUN_RESET} takes them off too), caption included, with no hand-back counted.
+      asUpdate<MediaJobDoc>({ $set: { ...job, claimedAt: null, updatedAt: new Date().toISOString() }, $unset: { ...RUN_MARKS } }),
       { session },
     );
   });
@@ -858,6 +874,73 @@ export async function deferJob(spaceId: string, jobId: string, claimToken: strin
   markSpaceMayHaveWork(spaceId);
   log.info(`Media job ${peerText(spaceId)}/${peerText(jobId)} deferred for ${DEFERRAL_WAIT_MS / 1000} s, no attempt spent: ${peerText(reason)}`);
   return 'deferred';
+}
+
+/**
+ * How many times one run of a job may be handed back to an unavailable embedder ({@link handBackJob}); past it the failure path takes the job.
+ *
+ * During a real outage a job is handed back about once: nothing is claimed while the media worker's pause runs (`embedder-outage-gate.ts`). A job
+ * handed back again and again is one whose real calls fail although the probe is answered (a proxy that times out on large requests, a rate
+ * limit on a big document), and without a limit it would re-run its conversion at every step of the schedule for ever, with nothing failed.
+ */
+export const MEDIA_OUTAGE_HAND_BACKS_MAX = 5;
+
+/** What {@link handBackJob} did: `'handed_back'` the job waits; `'past_limit'` the limit is spent and the failure path takes it; `'lost'` the claim is gone. */
+export type HandBackOutcome = 'handed_back' | 'past_limit' | 'lost';
+
+/**
+ * Give a claimed job back WITHOUT spending an attempt, because its run found the embedder unavailable for the whole of it (`embedder-unavailable.ts`).
+ *
+ * ## Why it is not `failJob`
+ *
+ * `failJob` keeps the attempt the claim counted, and three of them (30 s, then 2 minutes) end the job `failed` before a container restart or an
+ * upgrade of the embedder is over: every file uploaded in that window stayed `failed`. Nothing about the file was wrong.
+ *
+ * ## What the one write does
+ *
+ * Under the run's claim, in ONE conditional pipeline write, as {@link deferJob} makes: the job goes back to `pending`; the claim's attempt is
+ * refunded, never below zero; `outageFailures` is raised by one in the database (no count is read and written back); `lastError` is the reason
+ * through {@link sanitiseError}, as `failJob` stores it (an embed message names the operator's endpoint); the step report of the dead run
+ * (`progress`) goes, so the file's page shows no bar that stands still; and `claimableAfter` is the media queue's own schedule at the step the
+ * count reaches, so a file waits at most the schedule's longest step. The worker's pause (`embedder-outage-gate.ts`) is what spaces a long outage.
+ *
+ * ## What it refuses
+ *
+ * A job already handed back {@link MEDIA_OUTAGE_HAND_BACKS_MAX} times is not handed back again: it stays claimed and this answers `'past_limit'`,
+ * and the run takes the failure path. A holder that lost its claim writes nothing and gets `'lost'`. The two are told apart by one read under the
+ * same claim, as {@link deferJob} does. `outageFailures` ends with the job and with a whole new run ({@link RUN_MARKS}).
+ */
+export async function handBackJob(spaceId: string, claim: JobClaim, reason: string): Promise<HandBackOutcome> {
+  if (!claim.claimToken) return 'lost';
+  const now = new Date().toISOString();
+  const steps = scheduleSteps().map(at => ({ $literal: at }));
+  const handedBackBefore = { $ifNull: ['$outageFailures', 0] };
+  const res = await jobCollection(spaceId).updateOne(
+    asFilter<MediaJobDoc>({
+      _id: claim.jobId,
+      status: 'processing',
+      claimToken: claim.claimToken,
+      $or: [{ outageFailures: { $exists: false } }, { outageFailures: null }, { outageFailures: { $lt: MEDIA_OUTAGE_HAND_BACKS_MAX } }],
+    }),
+    [
+      { $set: {
+        status: 'pending', claimedAt: null, claimToken: null, updatedAt: now,
+        lastError: { $literal: sanitiseError(reason) },
+        claimableAfter: { $arrayElemAt: [steps, { $min: [steps.length - 1, handedBackBefore] }] },
+        outageFailures: { $add: [handedBackBefore, 1] },
+        attempts: { $max: [0, { $subtract: ['$attempts', 1] }] },
+      } },
+      { $unset: ['progress'] },
+    ],
+  );
+  if (res.matchedCount === 0) {
+    const stillHeld = await jobCollection(spaceId).findOne(
+      asFilter<MediaJobDoc>({ _id: claim.jobId, status: 'processing', claimToken: claim.claimToken }), { projection: { _id: 1 } });
+    return stillHeld ? 'past_limit' : 'lost';
+  }
+  markSpaceMayHaveWork(spaceId);
+  log.info(`Media job ${peerText(spaceId)}/${peerText(claim.jobId)} handed back without spending an attempt: the embedder was unavailable for its whole run (${peerText(reason)})`);
+  return 'handed_back';
 }
 
 export async function resetStalledJobs(

@@ -47,6 +47,12 @@ export interface MediaJobDoc {
    */
   deferredSince?: string | null;
   facesOnly?: boolean;
+  /**
+   * How many times this run of the job was handed back because the embedder was unavailable for the whole run (`job-queue.ts:handBackJob`),
+   * without spending an attempt. Raised in the database by each hand-back; past `MEDIA_OUTAGE_HAND_BACKS_MAX` the failure path takes the job.
+   * Goes (`RUN_MARKS`) when the job ends and with a whole new run. Absent reads as 0. Local to this instance: the media job collection is not synced.
+   */
+  outageFailures?: number;
   status: 'pending' | 'processing' | 'complete' | 'failed';
   attempts: number;
   maxAttempts: number;

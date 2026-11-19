@@ -167,7 +167,8 @@ export const retry_embed_mediaTool: ToolHandler = {
   name: 'retry_embed_media',
   description: 'Re-queue EVERY failed MEDIA job in a space at once — image captioning, audio and video '
     + 'transcription, document extraction — so the worker picks them all up again. The recovery path after an '
-    + 'extractor or model outage.\n\n'
+    + 'extractor, vision or speech model outage. A file whose run found the EMBEDDER unavailable is not failed: it '
+    + 'waits, spending no attempt, and is analysed again once the embedder answers, so it needs no retry.\n\n'
     + 'MEDIA, NOT THE BRAIN QUEUE, and the name now says so. It was `retry_failed_embeddings` until 3.1, which '
     + 'sat beside `list_embed_jobs` and read as its remedy while acting on a different queue entirely. It does '
     + 'NOT touch the brain embed jobs that `list_embed_jobs` reports; for one of those use '

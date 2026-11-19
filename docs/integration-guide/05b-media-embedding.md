@@ -87,9 +87,31 @@ While processing, the filemeta record on the file reflects the current status. R
 | Status | Meaning |
 |---|---|
 | `"pending"` | Waiting in queue |
-| `"processing"` | Currently being processed by the worker |
+| `"processing"` | Currently being processed by the worker, or waiting for an embedder that was unavailable (below) |
 | `"complete"` | Embedding finished successfully |
 | `"failed"` | All retry attempts exhausted; see `mediaJobError` field for details |
+
+#### When the embedder is unavailable
+
+A run whose every embed found the embedder **unavailable** is not a failure of the file, and spends none of its attempts. Unavailable
+means the call could not reach the embedder, the embedder answered a status of the wait set (`408`, `429`, `502` to `504`, `520` to
+`524`, `529`, `530`), or the bundled embedding process was lost before the request was sent. For a document that is every passage;
+for audio, every chunk whose transcript was sent to the embedder (a silent chunk, or one that failed to transcribe, is not counted:
+a run whose every chunk failed to transcribe spends an attempt as before); for an image, its one embed. One busy answer among a
+document's passages is not that: the other passages are stored and the file ends `"partial"`.
+
+Such a job goes back to the queue, its attempt refunded, behind the media queue's own schedule (30 s, then 2 minutes, then 5
+minutes), and the file reads `"processing"` while it waits, never `"failed"`. The job counts its hand-backs (`outageFailures` on
+the job; no door returns it, nor the waiting job's `lastError`); a whole new run (a retry, new bytes) and the job's end clear it. A
+run handed back again and again past a small limit (an embedder that answers the probe below but not the run's own calls, such as a
+proxy that times out on large requests) takes the failure path and spends its attempt.
+
+While the embedder is known to be down, the media worker claims **no** file at all, also one whose file takes no vector: before
+each claim it waits out a pause (5 seconds, doubling to 60) and then probes the embedder with one short embed call. An answer (a
+vector, or a refusal of the request itself) ends the outage; anything else starts the next pause. Files start again at most one
+pause step after the embedder is back. The server log says so at each hand-back and each pause, and
+`ythril_media_embedder_probes_total{outcome="unavailable"}` keeps rising for as long as it lasts: alert on that, since
+`ythril_media_jobs_failed_total` does not move and `ythril_media_jobs_handed_back_total` stops once the worker holds its claims.
 
 #### Recall Results
 
