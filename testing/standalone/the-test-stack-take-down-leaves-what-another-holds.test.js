@@ -23,7 +23,7 @@
  *
  * Run: node --test testing/standalone/the-test-stack-take-down-leaves-what-another-holds.test.js
  */
-import { describe, it, before, after } from 'node:test';
+import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
@@ -32,13 +32,16 @@ import { join } from 'node:path';
 import { REPO_ROOT } from './_sources.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
 import {
-  DEFAULT_PROJECTS, DEFAULT_COMPOSE_FILE, HOLDS_DIR_VARIABLE, liveHolds, parseContainers, parseVolumes, stackDownPlan, stackDown, parseArgs,
+  HOLDS_DIR_VARIABLE, liveHolds, parseContainers, parseVolumes, stackDownPlan, stackDown, parseArgs,
 } from '../_init/stack-down.mjs';
 
 const NOW = 1795030000000;
 
 /** A booking file exactly as the machine's booking tool writes it (copied from a real one, `ythril/harness-mongo-a`). */
 const BOOKING = { id: '1795020301757-35428', pid: 35428, mem: 3, label: 'ythril/harness-mongo-a', startedAt: 1795020301757, expiresAt: 1795063501757, containers: ['ythril-mongo-a'] };
+
+/** A booking of memory for one test run, as the same tool writes it (copied from a real one): no `containers`, no `project`. */
+const RUN_BOOKING = { id: '1795043616654-37452', pid: 37452, mem: 7, label: 'Ythril/b348-db-weights', startedAt: 1795043616654, expiresAt: 1795050816654 };
 
 /** One line of `docker ps -a --no-trunc --format '{{json .}}'` for the harness database, captured from the running stack. */
 const PS_LINE = String.raw`{"Command":"\"/usr/local/bin/runner server\"","CreatedAt":"2026-11-18 17:45:01 +0100 CET","HealthStatus":"healthy","ID":"f6b405eeda56ca5050083308c87d2179fdd1759c0bf2277be8312ea08b905ed9","Image":"mongodb/mongodb-atlas-local:latest@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa","Labels":"architecture=x86_64,build-date=2025-05-13T04:42:10,com.docker.compose.config-hash=4f6e64f4ae70c52abb3da3667c42df9c4ff610b265cb46bb4081a493cb0c9f8b,com.docker.compose.container-number=1,com.docker.compose.depends_on=,com.docker.compose.image=sha256:092b295b93def153e6532bee8eb0f9f3aae932fd710102cc8c27ed218250b551,com.docker.compose.oneoff=False,com.docker.compose.project.config_files=E:\\TMP\\Ythril\\data\\wt-b284\\testing\\docker-compose.test.yml,com.docker.compose.project.working_dir=E:\\TMP\\Ythril\\data\\wt-b284\\testing,com.docker.compose.project=ythril-test,com.docker.compose.service=ythril-mongo-a,com.docker.compose.version=5.4.0,com.redhat.component=ubi9-minimal-container,com.redhat.license_terms=https://www.redhat.com/en/about/red-hat-end-user-license-agreements#UBI,description=Container configured with a single node replicaset instance of MongoDB and Atlas Search,desktop.docker.io/ports.scheme=v2,desktop.docker.io/ports/27017/tcp=127.0.0.1:27117,distribution-scope=public,io.buildah.version=1.39.0-dev,io.k8s.description=The Universal Base Image Minimal is a stripped down image that uses microdnf as a package manager. This base image is freely redistributable, but Red Hat only supports Red Hat technologies through subscriptions for Red Hat products. This image is maintained by Red Hat and updated regularly.,io.k8s.display-name=Red Hat Universal Base Image 9 Minimal,io.openshift.expose-services=,io.openshift.tags=minimal rhel9,maintainer=support@mongodb.com,mongodb-atlas-local=container,mongodb-type=community,mongot-edition=localDev,mongot-version=1.71.0-1-g9cf3495129,name=MongoDB Atlas Local,release=1747111267,summary=MongoDB Atlas Local Container,url=https://www.redhat.com,vcs-ref=7575d7eb45eb7f545fef31ba067dfe3d8e52c4eb,vcs-type=git,vendor=MongoDB,version=8.3.4","LocalVolumes":"2","Mounts":"ythril-test_ythril-mongo-a-configdb,ythril-test_ythril-mongo-a-data","Names":"ythril-mongo-a","Networks":"ythril-test_ythril-test","Platform":{"architecture":"amd64","os":"linux"},"Ports":"127.0.0.1:27117-\u003e27017/tcp","RunningFor":"7 hours ago","Size":"68.1MB (virtual 1.49GB)","State":"running","Status":"Up 7 hours (healthy)"}`;
@@ -126,15 +129,21 @@ describe('liveHolds: when a hold file keeps what it names', () => {
 describe('liveHolds: a hold that cannot be understood keeps everything (fail closed)', () => {
   const live = (body) => liveHolds({ dir: holdsDir({ 'odd.json': body }), running: [running('ythril-mongo-a')], now: NOW });
 
-  it('a file with neither containers nor project holds everything, and says so', () => {
-    const [h] = live({ label: 'no keys', expiresAt: null });
-    assert.equal(h.all, true);
-    assert.match(h.note, /odd\.json/);
-    assert.match(h.note, /containers|project/);
+  it('a booking that names no container and no project books memory only and holds nothing of the stack', () => {
+    // The shape the booking tool writes for every test RUN (copied from a real one): read as a hold on everything, it refused every start
+    // on the machine while any session ran any test.
+    assert.deepEqual(live(RUN_BOOKING), []);
+    assert.deepEqual(live({ label: 'no keys', expiresAt: null }), []);
+    assert.deepEqual(live({ label: 'nulls', containers: null, project: null, expiresAt: null }), []);
   });
 
-  it('an empty containers list with no project is no key either', () => {
-    assert.equal(live({ label: 'empty', containers: [], expiresAt: null })[0].all, true);
+  it('an empty containers list with no project names nothing either', () => {
+    assert.deepEqual(live({ label: 'empty', containers: [], expiresAt: null }), []);
+  });
+
+  it('a memory booking beside a container hold leaves the container hold alone', () => {
+    const holds = liveHolds({ dir: holdsDir({ 'a-run.json': RUN_BOOKING, 'b-hold.json': BOOKING }), running: [running('ythril-mongo-a')], now: NOW });
+    assert.deepEqual(holds.map((h) => [h.label, h.all]), [['ythril/harness-mongo-a', false]]);
   });
 
   it('an expiresAt that is not null, absent or a finite number holds everything: text, a boolean, an object, and a number JSON reads as infinite', () => {
@@ -153,7 +162,7 @@ describe('liveHolds: a hold that cannot be understood keeps everything (fail clo
   });
 
   it('is live even when nothing it could name runs, so the plan decides what that keeps', () => {
-    const dir = holdsDir({ 'odd.json': { label: 'x', expiresAt: null } });
+    const dir = holdsDir({ 'odd.json': { label: 'x', expiresAt: null, containers: 'not-a-list' } });
     assert.equal(liveHolds({ dir, running: [], now: NOW }).length, 1);
   });
 
@@ -264,13 +273,14 @@ describe('stackDownPlan: what goes, what stays, what is wiped, and when a start 
     assert.equal(p.refusal, null);
   });
 
-  it('keeps the held container and its volumes; removes every other container and every other volume of the projects', () => {
+  it('keeps the held container and its volumes; removes every other container and the volumes those containers mounted', () => {
     const p = plan({ holds: [hold('ythril/harness-mongo-a', ['ythril-mongo-a'])] });
     assert.equal(p.mode, 'selective');
     assert.deepEqual(p.kept.map((k) => [k.name, k.holders]), [['ythril-mongo-a', ['ythril/harness-mongo-a']]]);
     assert.deepEqual(p.removeContainers.sort(), ['ythril-a', 'ythril-b', 'ythril-c']);
     assert.deepEqual(p.keptVolumes.sort(), ['ythril-test_ythril-mongo-a-configdb', 'ythril-test_ythril-mongo-a-data']);
-    assert.deepEqual(p.removeVolumes.sort(), ['testing_ythril-data-c', 'testing_ythril-data-orphan', 'ythril-test_ythril-data-a', 'ythril-test_ythril-data-b']);
+    // The volume nothing mounts stays: it only carries the project's label, and may be another checkout's project of the same name.
+    assert.deepEqual(p.removeVolumes.sort(), ['testing_ythril-data-c', 'ythril-test_ythril-data-a', 'ythril-test_ythril-data-b']);
   });
 
   it('wipes the config of an instance whose container went and keeps the config of one that is kept', () => {
@@ -292,7 +302,7 @@ describe('stackDownPlan: what goes, what stays, what is wiped, and when a start 
     const p = plan({ holds: [hold('odd', [], { all: true })] });
     assert.equal(p.kept.length, 4);
     assert.deepEqual(p.removeContainers, []);
-    assert.deepEqual(p.removeVolumes, ['testing_ythril-data-orphan'], 'only a volume no kept container mounts');
+    assert.deepEqual(p.removeVolumes, [], 'no container goes, so no volume does');
     assert.deepEqual(p.wipeInstances, ['d']);
   });
 
@@ -359,11 +369,6 @@ describe('parseArgs', () => {
     assert.match(r.stderr, /--for-strat/);
   });
 
-  it('the real project names are the command line\'s defaults, with the default project named explicitly', () => {
-    assert.deepEqual(DEFAULT_PROJECTS, ['ythril-test', 'testing']);
-    assert.equal(DEFAULT_COMPOSE_FILE, 'testing/docker-compose.test.yml');
-    assert.equal(HOLDS_DIR_VARIABLE, 'YTHRIL_TEST_STACK_HOLDS_DIR');
-  });
 });
 
 /**
@@ -425,11 +430,11 @@ describe('stackDown: the act, over a stubbed Docker', () => {
     assert.deepEqual(r.wiped(), ['a', 'b', 'c', 'd']);
   });
 
-  it('with a live hold on the database: removes the other container and the volumes no kept container mounts, never the held ones, and names the holder', () => {
+  it('with a live hold on the database: removes the other container and the volume it mounted, never the held ones or a volume nothing mounts, and names the holder', () => {
     const dir = holdsDir({ 'b.json': BOOKING });
     const r = run({ args: { holdsDir: dir } });
     assert.equal(r.code, 0, r.text);
-    assert.deepEqual(r.world.removals(), [['rm', '-f', '-v', 'ythril-a'], ['volume', 'rm', 'ythril-test_data-a'], ['volume', 'rm', 'testing_stray']]);
+    assert.deepEqual(r.world.removals(), [['rm', '-f', '-v', 'ythril-a'], ['volume', 'rm', 'ythril-test_data-a']]);
     assert.match(r.text, /kept ythril-mongo-a.*ythril\/harness-mongo-a/);
     assert.deepEqual(r.wiped(), ['a', 'b', 'c', 'd'], 'ythril-a went, so its config goes; no instance is kept');
   });
@@ -543,5 +548,16 @@ describe('stackDown: the act, over a stubbed Docker', () => {
     const r = run({ args: { configsDir: join(scratch, 'no-configs-here') } });
     assert.equal(r.code, 0, r.text);
     assert.ok(!existsSync(join(scratch, 'no-configs-here')));
+  });
+
+  it('a config entry that cannot be removed is named and ends with 1, after the stack went', () => {
+    // A folder where a config file is expected: removing it as a file fails on every platform.
+    const configsDir = join(scratch, `configs-stuck-${++dirCount}`);
+    mkdirSync(join(configsDir, 'a', 'stuck'), { recursive: true });
+    const r = run({ args: { configsDir } });
+    assert.equal(r.code, 1, r.text);
+    assert.match(r.text, /could not remove .*stuck/);
+    assert.ok(r.world.removals().some((a) => a[0] === 'compose'), 'the take-down itself ran before the wipe was tried');
+    assert.ok(existsSync(join(configsDir, 'a', 'stuck')));
   });
 });

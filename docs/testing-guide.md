@@ -60,8 +60,10 @@ live while it has not expired and one of its keys is the name or the compose pro
 matched against both), and it keeps those containers. A hold written a moment before its container runs does not count yet.
 Unset or empty, no hold is read and the take-down removes everything of the stack, which is what CI and a machine with no
 booking tool get; the module prints one line saying so. A set variable whose directory is missing or unreadable ends the run
-(exit 1) naming it, and so does a hold file that cannot be read, after one more try. A hold with neither `containers` nor
-`project`, or whose `expiresAt` is not `null`, absent or a finite number, is read as a hold on everything and is printed. Docker that
+(exit 1) naming it, and so does a hold file that cannot be read, after one more try. A file with neither `containers` nor
+`project` books memory for a run and holds nothing of the stack. A hold whose `containers`, `project` or `expiresAt` has the wrong
+shape is read as a hold on everything and is printed. With something held, the volumes that go are those the removed containers
+mounted; a leftover volume nothing mounts goes with the next take-down that finds nothing held. Docker that
 fails to list, or does not answer within its time, ends the run with exit 1 and the reason before anything is removed; a removal that
 fails is named, the others are still tried, and the run ends with exit 1.
 

@@ -19,8 +19,8 @@
  *   prints something that is not JSON lines ends the run with exit 1 and the reason BEFORE anything is removed: it is never read as an empty
  *   stack. A removal that fails is collected, named, and the run exits 1 after the others were tried; the configs are then left as they are.
  * - **A hold that cannot be read taken as no hold.** A variable that is set but names a missing or unreadable directory exits 1 naming it; a file that
- *   cannot be read is tried once more, then refused naming the file; a file with neither `containers` nor `project`, or with an `expiresAt`
- *   that is not null, absent or a finite number, counts as a hold on everything and is printed. Only an UNSET or empty variable means no holds
+ *   cannot be read is tried once more, then refused naming the file; a file whose `containers`, `project` or `expiresAt` has the wrong shape
+ *   counts as a hold on everything and is printed. A file that names neither a container nor a project books memory only and holds nothing. Only an UNSET or empty variable means no holds
  *   (CI and every machine without a booking tool, where the take-down is exactly `down -v --remove-orphans` of both projects).
  * - **The default project named by the environment.** The default project is named with `-p testing`, so a `COMPOSE_PROJECT_NAME` can never aim the
  *   take-down at another instance. Its volumes go too.
@@ -68,8 +68,9 @@ const printable = (text) => String(text).replace(/\p{Cc}/gu, '');
  * and/or `project`. It is live when it has not expired and one of its keys is the name OR the compose project of a running container, every key
  * matched both ways, as the booking tool matches them. A hold written a moment before its container runs does not count yet.
  *
- * What a hold file can say that is not understood keeps everything, because an unreadable hold must never read as no hold: it is returned with
- * `all: true` and a `note` to print. A file that cannot be read twice, or a directory that cannot be listed, throws naming it.
+ * A file that names neither is a booking of memory for a run (the booking tool writes one per test run) and holds nothing of the stack.
+ * A key that is present with the wrong shape keeps everything, because a hold that cannot be understood must never read as no hold: it is
+ * returned with `all: true` and a `note` to print. A file that cannot be read twice, or a directory that cannot be listed, throws naming it.
  *
  * @param {object}   args
  * @param {string}   [args.dir]      the holds directory; unset or empty gives no holds
@@ -85,7 +86,7 @@ export function liveHolds({ dir, running, now = Date.now(), readFile = readFileS
   try {
     names = readdirSync(dir);
   } catch (e) {
-    throw new Error(`the holds directory ${dir} (${HOLDS_DIR_VARIABLE}) cannot be read: ${e.message}`);
+    throw new Error(`the holds directory ${printable(dir)} (${HOLDS_DIR_VARIABLE}) cannot be read: ${printable(e.message)}`);
   }
   const alive = running.filter((c) => RUNNING_STATES.has(c.state));
   const known = new Set(alive.flatMap((c) => [c.name, c.project]).filter(Boolean));
@@ -108,12 +109,15 @@ function readHoldFile(file, readFile) {
       last = e;
     }
   }
-  throw new Error(`the hold file ${file} cannot be read: ${last.message}`);
+  throw new Error(`the hold file ${printable(file)} cannot be read: ${printable(last.message)}`);
 }
 
-/** A parsed hold as `{ file, label, keys, all }`, or null when it has expired. What it cannot make sense of is a hold on everything. */
+/**
+ * A parsed hold as `{ file, label, keys, all }`, or null when it has expired or names nothing (no `containers`, no `project`: a booking of
+ * memory, not of a container). A key that is present with the wrong shape, and anything else it cannot make sense of, is a hold on everything.
+ */
 function interpretHold(value, file, now) {
-  const everything = (why) => ({ file, label: labelOf(value, file), keys: [], all: true, note: `the hold file ${file} ${why}: it counts as a hold on everything` });
+  const everything = (why) => ({ file, label: labelOf(value, file), keys: [], all: true, note: `the hold file ${printable(file)} ${why}: it counts as a hold on everything` });
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return everything('is not a JSON object');
   const expiresAt = value.expiresAt;
   if (expiresAt !== null && expiresAt !== undefined) {
@@ -130,7 +134,9 @@ function interpretHold(value, file, now) {
     if (typeof project !== 'string' || project === '') return everything('has a project that is not a name');
     keys.push(project);
   }
-  if (keys.length === 0) return everything('names neither containers nor a project');
+  // A booking that names no container and no project books memory for a run and holds nothing of the stack: the booking tool writes one for
+  // every test run. Read as a hold on everything, any session's running test would refuse every start on the machine.
+  if (keys.length === 0) return null;
   return { file, label: labelOf(value, file), keys, all: false };
 }
 
@@ -185,7 +191,7 @@ export function parseVolumes(text) {
  * What a take-down does, from what Docker listed and what is held. Pure.
  *
  * `mode` is `down-all` when nothing is kept (the projects' own `down -v --remove-orphans`), `selective` when something is (remove each container not
- * held by name, then each volume no kept container mounts), `refused` when a start meets a held container (nothing is removed or wiped).
+ * held by name, then each volume a removed container mounted and no kept container mounts), `refused` when a start meets a held container (nothing is removed or wiped).
  *
  * @param {object} args
  * @param {{name: string, project: string, mounts: string[]}[]} args.containers  every container of the stack's projects
@@ -211,12 +217,15 @@ export function stackDownPlan({ containers, volumes, holds, forStart = false, ig
   }
   const keptNames = new Set(kept.map((k) => k.name));
   const keptMounts = new Set(containers.filter((c) => keptNames.has(c.name)).flatMap((c) => c.mounts));
+  // Only the volumes of the containers that go: a volume that merely carries a project's label (another checkout's project of the same name,
+  // a leftover nothing mounts) stays until a take-down with nothing held, where compose removes what the file declares.
+  const goneMounts = new Set(containers.filter((c) => !keptNames.has(c.name)).flatMap((c) => c.mounts));
   return {
     mode: 'selective',
     kept,
     removeContainers: containers.filter((c) => !keptNames.has(c.name)).map((c) => c.name),
     keptVolumes: volumes.filter((v) => keptMounts.has(v.name)).map((v) => v.name),
-    removeVolumes: volumes.filter((v) => !keptMounts.has(v.name)).map((v) => v.name),
+    removeVolumes: volumes.filter((v) => goneMounts.has(v.name) && !keptMounts.has(v.name)).map((v) => v.name),
     wipeInstances: instances.filter((i) => !keptNames.has(i.container)).map((i) => i.id),
     refusal: null,
   };
