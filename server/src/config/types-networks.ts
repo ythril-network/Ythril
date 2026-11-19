@@ -358,7 +358,8 @@ export interface VoteRound {
    * LOCAL: why THIS instance did not read the schema this `meta_change` round carries (R6-6) — the failing types and what is wrong
    * with each, bounded. Set when the member refused to cast yes on it, or when it passed and the member applied NONE of it: a
    * round whose changed parts a member cannot parse is applied whole or not at all, and an operator is shown which. Never taken
-   * from or served to a peer.
+   * from or served to a peer. On a `space_rebase` round (Q-748): why the passed round FAILED here (its moved setting could not be
+   * stored); such a round is concluded, never owed again (`rebaseRoundUnapplied`).
    */
   refusedHere?: string;
   /**

@@ -71,6 +71,7 @@ interface PassedRoundReadable {
   concluded?: boolean;
   passed?: boolean;
   appliedHere?: boolean;
+  refusedHere?: string;
   votes?: readonly { vote?: string }[];
 }
 
@@ -147,7 +148,8 @@ export function isDeleteVoteRound(type: unknown): boolean {
  * {@link spaceActOwed} on the same veto ({@link roundPassedUnvetoed}).
  */
 export function rebaseRoundUnapplied(r: PassedRoundReadable): boolean {
-  return r.type === 'space_rebase' && roundPassedUnvetoed(r) && r.appliedHere !== true;
+  // A round that FAILED here (`refusedHere`: its moved setting cannot be stored) is concluded too: never owed again, so never retried each tick.
+  return r.type === 'space_rebase' && roundPassedUnvetoed(r) && r.appliedHere !== true && r.refusedHere === undefined;
 }
 
 /**
