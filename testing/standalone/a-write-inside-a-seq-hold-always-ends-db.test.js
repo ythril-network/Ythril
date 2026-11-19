@@ -116,6 +116,10 @@ async function stalled(space, c) {
   try {
     let done = false;
     const op = Promise.resolve().then(run).finally(() => { done = true; });
+    // Handled from the moment it exists: `settleWithin` below reads the outcome, but only once the hold is seen, and a run that ends first (a
+    // write the 2 s bound ended before its hold was observed) was a rejection with no handler that node:test charged to the running case
+    // (main run 44427408708). The outcome is still read from `op` by `settleWithin`; this handler only marks it handled.
+    op.catch(() => {});
     // Which instance of the hold the case is about: the file tombstones' position (`positionHold`), or the record stream's.
     const lowest = c.positionHold ? () => mods.fileTombstones.lowestUncommittedPosition(space) : () => lowestHeldRecordPositionNow(space);
     const entered = await eventually(() => done || lowest() !== undefined, ENTER_MS);
@@ -160,6 +164,26 @@ describe('a write inside a record-position hold always ends', { skip }, () => {
 
   it('the write bound has a test seam (db/write-bound.ts setWriteBoundForTest)', () => {
     assert.equal(seamError, null, seamError?.message);
+  });
+
+  // The fixture's own order (main run 44427408708): a run that ends, here by rejecting, while `stalled` is still waiting to see its hold is
+  // read by `stalled` and reported, never left a rejection with no handler that node:test charges to whichever case is running.
+  it('the fixture: a run that rejects before its hold is seen is read and reported, not left unhandled', async () => {
+    const unhandled = [];
+    const onUnhandled = (reason) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    let r;
+    try {
+      const ended = new Error('the run ended before its hold was seen');
+      r = await stalled(S, { lock: async () => ({ release: async () => {} }), run: async () => { throw ended; } });
+      // One more turn of the loop, so a rejection the fixture left unhandled has been reported by now.
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(r.res.error, ended, `the fixture did not report the run's own rejection: ${JSON.stringify(r.res)}`);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+    assert.deepEqual(unhandled.map(e => e?.message ?? String(e)), [], 'the fixture left the run\'s rejection without a handler while it waited for the hold');
+    assert.equal(r.entered, false, 'a run that never held a position is reported as not entered');
   });
 
   for (const [holder, cases] of Object.entries(CASES)) {
