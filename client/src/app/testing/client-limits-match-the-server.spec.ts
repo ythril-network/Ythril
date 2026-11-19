@@ -73,10 +73,10 @@ function patternSource(literal: string): string {
   return str ? str[2]!.replace(/\\\\/g, '\\') : literal;
 }
 
-/** `RULE_LIMITS = { key: value, ... }` as literal text per key. */
-function clientLimits(src: string): Record<string, string> {
-  const m = /export\s+const\s+RULE_LIMITS\b[^=]*=\s*\{/.exec(src);
-  if (!m) throw new Error(`no \`export const RULE_LIMITS = { ... }\` found in ${CLIENT_LIMITS}`);
+/** `<name> = { key: value, ... }` (RULE_LIMITS by default) as literal text per key. */
+function clientLimits(src: string, name = 'RULE_LIMITS', where = CLIENT_LIMITS): Record<string, string> {
+  const m = new RegExp(`export\\s+const\\s+${name}\\b[^=]*=\\s*\\{`).exec(src);
+  if (!m) throw new Error(`no \`export const ${name} = { ... }\` found in ${where}`);
   // The object's end is found by scanning with string literals skipped: a pattern value holds a brace quantifier itself.
   let i = m.index + m[0].length;
   const from = i;
@@ -286,5 +286,70 @@ describe('the other limits and questions the editor copies from the server (G1, 
     const client = returnedExpression(readClientSource(CLIENT_LIMITS), 'isReservedRuleName', CLIENT_LIMITS);
     expect(server).toMatch(/Object\.prototype/);
     expect(client).toBe(server);
+  });
+});
+
+// ── the conversion steps' bounds (bundle-285): shared/conversion-limits.ts ─────────────────────────────────────────────
+
+const SERVER_STEPS = 'schema/src/conversion-steps.ts';
+const CLIENT_CONVERSION_LIMITS = 'src/app/shared/conversion-limits.ts';
+
+/**
+ * Which server constant each client conversion limit answers. A step editor that offered a thirtieth case against a server that stops at
+ * twenty, or a sixtieth step against fifty, tells the user a step fits and then refuses the save (400 `bad_conversion_step`).
+ * `conditionMax` is the rule limit by definition (a split's `when` is judged as a rule), so it must be the one `RULE_LIMITS.ruleMax`.
+ */
+const CONVERSION_PAIRS: ReadonlyArray<readonly [client: string, server: string, file: string]> = [
+  ['stepsMax', 'CONVERSION_STEPS_MAX', SERVER_STEPS],
+  ['valuesMax', 'CONVERSION_VALUES_MAX', SERVER_STEPS],
+  ['casesMax', 'CONVERSION_CASES_MAX', SERVER_STEPS],
+  ['typeNameMax', 'TYPE_NAME_MAX', SERVER_BODIES],
+];
+
+/** The numeric value of `export const NAME = <number | OTHER_NAME>` where it is declared, following a name through the server files that declare it. */
+function serverNumber(name: string, file: string, followIn: readonly string[], depth = 0): number {
+  const m = new RegExp(`export\\s+const\\s+${name}\\s*(?::[^=]+)?=\\s*([^;\\n]+);`).exec(serverSource(file));
+  if (!m) throw new Error(`${file} exports no \`${name}\``);
+  const value = m[1]!.trim();
+  if (/^[\d_]+$/.test(value)) return asNumber(value);
+  if (depth > 3 || !/^[A-Z_]+$/.test(value)) throw new Error(`${file}: ${name} is \`${value}\`, which is neither a number nor the name of another constant`);
+  for (const other of followIn) {
+    if (new RegExp(`export\\s+const\\s+${value}\\b`).test(serverSource(other))) return serverNumber(value, other, followIn, depth + 1);
+  }
+  throw new Error(`${name} is \`${value}\`, which none of ${followIn.join(', ')} declares`);
+}
+
+describe('CONVERSION_LIMITS (client/src/app/shared/conversion-limits.ts) equals the server constants', () => {
+  const FOLLOW = [SERVER_RULES, SERVER_BODIES, SERVER_STEPS];
+
+  it('the client module exists and CONVERSION_LIMITS declares every key the step editor reads', () => {
+    expect(exists(`client/${CLIENT_CONVERSION_LIMITS}`), `client/${CLIENT_CONVERSION_LIMITS} does not exist`).toBe(true);
+    const limits = clientLimits(readClientSource(CLIENT_CONVERSION_LIMITS), 'CONVERSION_LIMITS', CLIENT_CONVERSION_LIMITS);
+    for (const key of [...CONVERSION_PAIRS.map(p => p[0]), 'conditionMax']) {
+      expect(limits[key], `CONVERSION_LIMITS.${key} is not declared`).toBeDefined();
+    }
+  });
+
+  it('every CONVERSION_*_MAX the schema package exports has a client twin — a fourth bound is not left out of the editor', () => {
+    const exported = [...serverSource(SERVER_STEPS).matchAll(/export\s+const\s+(CONVERSION_\w+_MAX)\b/g)].map(m => m[1]!);
+    expect(exported.length, 'no CONVERSION_*_MAX found: re-anchor this gate').toBeGreaterThanOrEqual(3);
+    const paired = new Set(CONVERSION_PAIRS.map(p => p[1]));
+    const unpaired = exported.filter(n => !paired.has(n));
+    expect(unpaired, `these server bounds have no CONVERSION_LIMITS counterpart: ${unpaired.join(', ')}`).toEqual([]);
+  });
+
+  it.each(CONVERSION_PAIRS)('CONVERSION_LIMITS.%s is the server\'s %s', (clientKey, serverName, file) => {
+    const client = clientLimits(readClientSource(CLIENT_CONVERSION_LIMITS), 'CONVERSION_LIMITS', CLIENT_CONVERSION_LIMITS);
+    expect(client[clientKey], `CONVERSION_LIMITS.${clientKey} not found on the client`).toBeDefined();
+    const n = serverNumber(serverName, file, FOLLOW);
+    expect(Number.isFinite(n) && n > 0, `${serverName} resolved to ${n}`).toBe(true);
+    expect(asNumber(client[clientKey]!)).toBe(n);
+  });
+
+  it('conditionMax is the rule limit, not a second copy of it', () => {
+    const client = clientLimits(readClientSource(CLIENT_CONVERSION_LIMITS), 'CONVERSION_LIMITS', CLIENT_CONVERSION_LIMITS);
+    const rules = clientLimits(readClientSource(CLIENT_LIMITS));
+    expect(client['conditionMax']).toBe('RULE_LIMITS.ruleMax');
+    expect(asNumber(rules['ruleMax']!)).toBe(serverNumber('MAX_RULE_LENGTH', SERVER_RULES, FOLLOW));
   });
 });

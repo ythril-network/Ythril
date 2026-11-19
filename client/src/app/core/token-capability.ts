@@ -87,3 +87,68 @@ export function withInstanceFlag(rights: TokenRights, key: 'instanceAdmin' | 'cr
   }
   return next;
 }
+
+// ── What a token may do in ONE space: the questions the conversion controls ask (bundle-285, Q-747) ─────────────────
+
+type Rung = (typeof RUNGS)[number];
+type Area = (typeof AREAS)[number];
+
+/**
+ * The rung this token holds for `area` in `spaceId`: the client's mirror of the server's `effectiveRung` (`auth/mint-cap.ts`), and the one
+ * place the client resolves a rung in a space, so the Schema tab, the conversion dialog and Review ask one rule. Administering the space
+ * (`spaceAdmin`, named or the floor) is the top of every area in it; otherwise the HIGHER of the space's own row and the floor, which is
+ * how the server resolves it (a row lower than the floor lowers nothing). An area the matrix does not name is `none`.
+ */
+function rungIn(rights: TokenRights, spaceId: string, area: Area): Rung {
+  if (isSpaceAdmin(rights, spaceId)) return 'admin';
+  const rank = (r: string | undefined): number => Math.max(0, RUNGS.indexOf((r ?? 'none') as Rung));
+  const own = rights.perSpace?.[spaceId]?.[area];
+  const floor = rights.floor?.[area];
+  return RUNGS[Math.max(rank(own), rank(floor))] ?? 'none';
+}
+
+/**
+ * Does the token hold at least `rung` on the knowledge area of `spaceId`? Strict, as the server is: no matrix holds nothing. An instance
+ * administrator holds every rung. For a control that must stay silent while the rights are unknown, ask {@link knowledgeAllowed}.
+ */
+export function holdsKnowledge(rights: TokenRights | null | undefined, spaceId: string, rung: Rung): boolean {
+  // A rung name off the ladder is held by nobody: `satisfies` ranks it -1 and would answer yes.
+  if (!rights || !RUNGS.includes(rung)) return false;
+  return rights.instanceAdmin || satisfies(rungIn(rights, spaceId, 'knowledge'), rung);
+}
+
+/**
+ * {@link holdsKnowledge} as a DISPLAY hint: unknown rights (still loading, or a token that may not read its own matrix) count as allowed, the
+ * Schema tab's own rule, because a lock drawn on a guess would refuse what the server allows. The server decides every act either way.
+ */
+export function knowledgeAllowed(rights: TokenRights | null | undefined, spaceId: string, rung: Rung): boolean {
+  return !rights || holdsKnowledge(rights, spaceId, rung);
+}
+
+/** Does the token administer the space (the `spaceAdmin` grant, named or the floor)? The grant alone: the server's `isSpaceAdminFor`. */
+export function isSpaceAdmin(rights: TokenRights | null | undefined, spaceId: string): boolean {
+  const grant = rights?.spaceAdmin;
+  return !!grant && (grant.floor === true || (grant.spaces ?? []).includes(spaceId));
+}
+
+/**
+ * Does the token hold admin on the schema area of `spaceId`? The check the Schema tab computes for its rules and its instance setting,
+ * pulled out so the tab and the conversion read one rule. An instance administrator holds it; so does a space administrator and a token
+ * whose row or floor says `schema: admin`. Strict like {@link holdsKnowledge}; the tab keeps its own "unknown counts as yes".
+ */
+export function holdsSchemaAdmin(rights: TokenRights | null | undefined, spaceId: string): boolean {
+  if (!rights) return false;
+  return rights.instanceAdmin || rungIn(rights, spaceId, 'schema') === 'admin';
+}
+
+/**
+ * May this token start a conversion of the records of `spaceId`? A conversion rewrites records on every peer, so the server prices it
+ * (`schemaConvertPrice`, `spaces/schema-convert-acts.ts`): an instance administrator always may; anyone else needs the knowledge admin rung
+ * in the space AND to administer the space. Unknown rights count as allowed. A DISPLAY hint (the lock on the Convert records button, the
+ * dialog's "Convert the records now" and Review's Convert again), never the decision: the server answers 403 `knowledge_rung` or
+ * `space_admin_required` to what the token may not do.
+ */
+export function mayConvertRecords(rights: TokenRights | null | undefined, spaceId: string): boolean {
+  if (!rights) return true;
+  return rights.instanceAdmin || (holdsKnowledge(rights, spaceId, 'admin') && isSpaceAdmin(rights, spaceId));
+}
