@@ -60,7 +60,7 @@ const ADDED_BY_THE_LIST = ['localSpaceId', 'summary'];
 describe('the client reads the vote round the server serves', () => {
   const serverKeys = interfaceKeys(readRepoSource('server/src/config/types-networks.ts'), 'VoteRound');
   const clientKeys = interfaceKeys(readClientSource('src/app/core/vote-round-view.ts'), 'ServerVoteRound');
-  const viewKeys = interfaceKeys(readClientSource('src/app/core/api.types.ts'), 'VoteRound');
+  const viewKeys = interfaceKeys(readClientSource('src/app/core/vote-round-view.ts'), 'VoteRound');
 
   it('derives its key sets (a floor: an empty set passes every loop written over it)', () => {
     expect(serverKeys.length, `server VoteRound keys: ${serverKeys.join(', ')}`).toBeGreaterThan(15);
@@ -115,8 +115,20 @@ describe('the client reads the vote round the server serves', () => {
       const source = stripComments(readClientSource(file));
       // A declaration or a literal of a step carries `op: '<name>'`; reading one (`step.op === ...`, a `case`) does not.
       expect(source, `${file} spells a conversion step out instead of using ConversionStep`).not.toMatch(/\bop\s*:\s*['"]/);
-      expect(source, `${file} does not take ConversionStep from core/conversion.types`)
-        .toMatch(/import type \{[^}]*\bConversionStep\b[^}]*\} from '\.\/conversion\.types'/);
     }
+    expect(stripComments(readClientSource('src/app/core/vote-round-view.ts')), 'vote-round-view.ts does not take ConversionStep from core/conversion.types')
+      .toMatch(/import type \{[^}]*\bConversionStep\b[^}]*\} from '\.\/conversion\.types'/);
+  });
+
+  /**
+   * `api.types.ts` is frozen (`no-new-god-files`: a frozen file grows only after a concern moves out along a real seam). The view of a round
+   * lives beside the server's shape and the translation between them, in `vote-round-view.ts`; `api.types.ts` re-exports it, so the pages that
+   * import `VoteRound` from there keep working and the type is declared once.
+   */
+  it('VoteRound is declared beside ServerVoteRound and api.types re-exports it, declaring none of its own', () => {
+    expect(viewKeys.length, 'vote-round-view.ts declares no `VoteRound`').toBeGreaterThan(6);
+    const types = stripComments(readClientSource('src/app/core/api.types.ts'));
+    expect(types, 'api.types.ts declares a second VoteRound').not.toMatch(/interface VoteRound\b/);
+    expect(types, 'api.types.ts does not re-export VoteRound from vote-round-view').toMatch(/export type \{[^}]*\bVoteRound\b[^}]*\} from '\.\/vote-round-view'/);
   });
 });
