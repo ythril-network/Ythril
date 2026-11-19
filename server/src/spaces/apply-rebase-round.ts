@@ -17,18 +17,15 @@
  * stays out of the server's largest import cycle.
  */
 import type { Config, NetworkConfig } from '../config/types.js';
-import { logInternalAudit } from '../audit/audit.js';
+import { auditRoundEffect, SPACE_RDF_REBASE_OPERATION } from '../networks/round-audit.js';
 import { log, peerText } from '../util/log.js';
 import { rebaseRoundOwed } from '../networks/round-state.js';
 import { rebaseRoundSpaceOf, settleRdf } from './rdf-settle.js';
 import { storeMovedRdf } from './rdf-store.js';
 import { settleSpaceAct } from './apply-wipe-round.js';
 
-/** The audit operation of one landing of a passed rebase round: one row per member that lands it. */
-export const SPACE_RDF_REBASE_OPERATION = 'space.rdf_rebase';
-
-/** The longest part of a network or round id an audit path carries, as the round-effect entries bound it. */
-const AUDIT_PATH_PART_MAX = 80;
+/** The audit operation of one landing (declared with the other round effects, `networks/round-audit.ts`, which the audit table gate reads). */
+export { SPACE_RDF_REBASE_OPERATION };
 
 /**
  * Land every rebase round of `net` owed at `now` (passed, unvetoed, its deadline come, not applied here): set the space's base, vocab and
@@ -49,15 +46,8 @@ export function applyOwedRebaseRounds(net: NetworkConfig, cfg: Config, now: numb
     if (!storeMovedRdf(cfg, space, settled.rdf)) continue;
     log.info(`space '${peerText(space.id)}': RDF base moved from ${peerText(settled.rebased.from)} to ${peerText(settled.rebased.to)} `
       + `(epoch ${settled.rebased.epoch}) by round ${peerText(round.roundId)} of network ${peerText(net.id)}`);
-    try {
-      logInternalAudit({
-        method: 'SYNC',
-        path: `internal:round:${String(net.id).slice(0, AUDIT_PATH_PART_MAX)}:${String(round.roundId).slice(0, AUDIT_PATH_PART_MAX)}`,
-        operation: SPACE_RDF_REBASE_OPERATION, spaceId: space.id,
-      });
-    } catch (err) {
-      log.warn(`the audit entry ${SPACE_RDF_REBASE_OPERATION} for round ${peerText(round.roundId)} was not written: ${peerText(err)}`);
-    }
+    // Through the one writer of a round's effects, which never throws and names the network and the round in the path.
+    auditRoundEffect(SPACE_RDF_REBASE_OPERATION, net.id, round.roundId, space.id);
   }
   return wrote;
 }

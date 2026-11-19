@@ -650,6 +650,7 @@ export const SPACE_ALIAS_HEAL_OPERATION = 'network.space_alias.heal';
  */
 export {
   ROUND_ADDITION_RETIRED_OPERATION, ROUND_SPACE_ACT_OPERATION, ROUND_MEMBER_ADMITTED_OPERATION, ROUND_EXPIRED_OPERATION, SPACE_ACT_COMPLETED_OPERATION,
+  SPACE_RDF_REBASE_OPERATION,
 } from '../networks/round-audit.js';
 
 /** What a restore or a migrate came to when its act set ended (bundle-157, R4.3): declared beside nothing that imports either, re-exported here. */
