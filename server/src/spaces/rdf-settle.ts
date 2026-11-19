@@ -178,8 +178,11 @@ export function takeServedRdfBases(net: NetworkConfig, spaces: readonly SpaceCon
     if (recorded && recorded.offered.every(o => o.epoch <= heldEpoch)) { delete conflicts[local]; changed = true; }
     const key = localToRemote(net, local);
     const raw = key.length <= SERVED_SPACE_KEY_MAX ? entries.find(([k]) => k === key)?.[1] : undefined;
-    const offer = raw === undefined ? undefined : ServedRdfBaseZ.safeParse(raw);
-    if (!offer?.success || offer.data.baseEpoch <= heldEpoch || offer.data.base === held.base) continue;
+    if (raw === undefined) continue;
+    // A value no door would accept is left out, unsaid: an older or a hostile peer's text is never quoted back.
+    const offer = ServedRdfBaseZ.safeParse(raw);
+    if (!offer.success) continue;
+    if (offer.data.baseEpoch <= heldEpoch || offer.data.base === held.base) continue;
     const next: RdfBaseConflict = { held: { base: held.base, epoch: heldEpoch }, offered: [{ networkId: net.id, base: offer.data.base, epoch: offer.data.baseEpoch }] };
     if (JSON.stringify(conflicts[local]) === JSON.stringify(next)) continue;
     conflicts[local] = next;
