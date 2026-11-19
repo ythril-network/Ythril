@@ -44,16 +44,18 @@
  * ## Repeated, at the bound's minimum
  *
  * Each lane is run `reps` times with the bound at its 1000 ms minimum (`setWriteBoundForTest`). Every repetition is its
- * own result; a lane is green only when none of them landed anything. `reps` is the module's floor (`minReps`): the defect this
- * file exists for, the client-first bound, landed in nearly every repetition of every lane when it was seen red (86caea3a), so a
- * lane that holds at the floor is not a lucky draw.
+ * own result; a lane is green only when none of them landed anything. The defect this file was first seen red with, the
+ * client-first bound, landed in nearly every repetition of every lane (86caea3a), and would show at a handful. The repetitions are
+ * for the rarer one: a landing in a fraction p of one lane's repetitions is caught in a run with probability 1 - (1 - p)^reps, and
+ * catching a rare landing is this file's job, so `reps` stays high and the time is bought back by cutting the lanes into parts.
  *
  * ## Cut into parts
  *
  * The whole table does not fit in the time a file may take, so the lanes are cut into part files, each its own process with its
- * own door: this file is part 1 and `a-write-the-bound-ended-never-lands-part-2-db.test.js` the next. A part file says only which
- * part it is; the cut is `_landing-parts.mjs`'s, and that the parts run every lane exactly once is
- * `the-parts-of-a-split-landing-experiment-run-every-lane-once.test.js`'s.
+ * own door: this file is part 1 and `a-write-the-bound-ended-never-lands-part-<n>-db.test.js` the others. A part file says only which
+ * part it is; the cut and the count of parts are `_landing-parts.mjs`'s, and that the parts run every lane exactly once, with the same
+ * options, is `the-parts-of-a-split-landing-experiment-run-every-lane-once.test.js`'s. A part cannot go under the time one lane's
+ * repetitions take one after another: each waits out the one before it's settle window (`runAll`, `Q-380`).
  *
  * ## And on a client whose URI names a timeoutMS
  *
@@ -91,7 +93,7 @@ const x = landingExperiment({
   title: `a write the bound ended never lands afterwards (part ${PART + 1})`,
   suite: 'boundlands',
   query: '',
-  reps: 5,
+  reps: 20,
   part: partOf('a-write-the-bound-ended-never-lands', PART),
 });
 describe(x.title, { skip: x.skip }, () => {
