@@ -61,6 +61,17 @@ describe('a clash is named with both owners', () => {
     assert.equal(list.length, 1, JSON.stringify(list));
     assert.ok(named(list, 'person', `${BASE}vocab/`));
   });
+  // Review finding 11 (slice A-fix): an iri under the base but outside the vocab could equal a record's address (`<base>entity/<id>`).
+  it('an explicit iri under the space base, outside its vocab, is refused under-base, naming the value', () => {
+    for (const iri of [`${BASE}entity/Person`, `${BASE}agent/x`, `${BASE}schema`, `${BASE}anything`]) {
+      const list = clashes(withTypes({ entity: { person: { iri } } }));
+      assert.equal(list.length, 1, `${iri} could name a record and went unrefused: ${JSON.stringify(list)}`);
+      assert.equal(list[0].reason, 'under-base');
+      assert.ok(named(list, 'person', iri), JSON.stringify(list));
+    }
+    const vocabOutside = { rdf: { enabled: true, base: BASE, vocab: 'https://v.example/terms#', baseEpoch: 0 }, typeSchemas: { entity: { p: { propertySchemas: { q: { type: 'string', iri: `${BASE}fact/q` } } } } } };
+    assert.equal(clashes(vocabOutside)[0]?.reason, 'under-base', 'a property iri under the base is refused when the vocab lies elsewhere');
+  });
   it('an explicit iri equal to a predicate the mapper writes', () => {
     assert.ok(Array.isArray(vocabulary.RDF_RESERVED_PREDICATES), 'RDF_RESERVED_PREDICATES is exported by server/src/rdf/ythril-vocabulary.ts');
     const LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';

@@ -64,7 +64,7 @@ import {
 } from '../sync/governance.js';
 import { parseMetaRound, type MetaRoundProposal } from '../sync/meta-round-merge.js';
 import type { ConversionStep } from '@ythril-network/schema/internal';
-import { rdfBaseConflictOf, settleRdf, type RebaseProposal, type RdfRefusalStatus } from './rdf-settle.js';
+import { heldRebaseRounds, rdfBaseConflictOf, RDF_BASE_STANDS_STATUS, settleRdf, type RebaseProposal, type RdfRefusalStatus } from './rdf-settle.js';
 import { storeMovedRdf } from './rdf-store.js';
 import type { RdfSetting } from '@ythril-network/schema';
 import { termClashes } from '../rdf/term-iri.js';
@@ -267,6 +267,16 @@ function settleRdfOfWrite(space: SpaceConfig, data: z.infer<typeof UpdateSpaceBo
     spaceId: space.id, networked, offeredBases, ...(publicBaseUrlIsFallback() ? {} : { publicBaseUrl: getPublicBaseUrl() }),
   });
   if (!settled.ok) return { ok: false, refusal: { status: settled.status, body: { error: settled.error, code: settled.code } } };
+  // One rebase at a time (review finding 1): a round opened while another is held would take the same epoch, and only one can land. The
+  // identical repeat of this instance's own proposal is not a second rebase: the apply answers the round in progress.
+  const next = settled.proposeRebase;
+  const pending = next && heldRebaseRounds(cfg, space.id, Date.now())
+    .find(r => !(r.proposedHere === true && r.rebase?.base === next.base && r.rebase?.vocab === next.vocab));
+  if (pending) {
+    return { ok: false, refusal: { status: RDF_BASE_STANDS_STATUS, body: { code: 'rdf_rebase_pending',
+      error: `a rebase of this space to ${pending.rebase?.base ?? 'another base'} is already held (round ${pending.roundId}, deadline ${pending.deadline}): `
+        + 'one rebase at a time; send this one after that round has landed, been vetoed or expired' } } };
+  }
   if (settled.proposeRebase || settled.acceptedOffer) {
     const others = [...Object.keys(meta).filter(k => k !== 'rdf'), ...Object.keys(data).filter(k => k !== 'meta' && (data as Record<string, unknown>)[k] !== undefined)];
     if (others.length > 0) {

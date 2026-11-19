@@ -6,7 +6,8 @@
  *   (`schemaLibraryNamespaces`); `GET /groups` shows it; `DELETE …/namespace` removes it.
  * - An entry of the group is EFFECTIVE with `iri = <ns><kind>/<seg(type)>` and each property `<ns><kind>/<seg(type)>/<seg(prop)>`, unless
  *   the entry sets one: the space's resolved meta carries it, so the one resolver names the term by it, the round trip of a `$ref` type keeps
- *   working, and the schema fingerprint of a linking space changes with it.
+ *   working, and the schema fingerprint of an RDF-enabled linking space changes with it. A linking space with RDF off is untouched: the
+ *   same fingerprint and the same payload to its peers (RDF is inert when off).
  * - Refusals: a prefix another group holds (409 `namespace_prefix_taken`), a reserved prefix or a bad IRI (400), a group with no entries (404).
  * - The rename guard: when an RDF-enabled space links the group, a namespace change or removal and an entry edit that renames a term
  *   (`typeName`, `knowledgeType`, `schemaGroup`, `iri`) are 409 `rdf_term_rename` without `rebase`, and go through with it.
@@ -81,14 +82,29 @@ describe('a library group namespace names its entries\' terms', { skip }, () => 
     assert.equal(prefixes.acme, NS, 'a group prefix the space uses is declared');
   });
 
-  it('the round trip of a $ref type still writes back, and the fingerprint follows the namespace', async () => {
+  it('the round trip of a $ref type still writes back', async () => {
     const shown = inst.heldMeta('plain');
     const back = await inst.doors['space-patch']('plain', { typeSchemas: shown.typeSchemas });
     assert.equal(back.refused, false, back.text.slice(0, 300));
-    const withNs = internal.schemaFingerprintTextOf(resolved('plain'));
+  });
+
+  // Review finding 5 (slice A-fix): this case used to assert that a namespace changes the schema of EVERY space linking its group. A space
+  // with RDF off then carried `iri` to its peers (which a member before 6.6 refuses whole) and changed its fingerprint: RDF was not inert.
+  it('a namespace changes the schema of an RDF-enabled linking space only: one with RDF off keeps its fingerprint and its peer payload', async () => {
+    const { schemaFingerprintOf } = await import('../../server/dist/spaces/schema-stamp.js');
+    const { roundForPeer } = await import('../../server/dist/networks/round-local-state.js');
+    const spaceOf = (id) => inst.loader.getConfig().spaces.find(s => s.id === id);
+    const peerPayload = (id) => JSON.stringify(roundForPeer({ type: 'meta_change', spaceId: id, pendingMeta: inst.heldMeta(id) }, spaceOf(id).meta?.rdf).pendingMeta);
+    const seen = (id) => ({ fp: schemaFingerprintOf(spaceOf(id)), peer: peerPayload(id), served: JSON.stringify(resolved(id)) });
     reset();
-    const withoutNs = internal.schemaFingerprintTextOf(resolved('plain'));
-    assert.notEqual(withNs, withoutNs, 'a namespace changes the schema of every space linking its group');
+    const plainBefore = seen('plain');
+    const linkedBefore = seen('linked');
+    assert.equal((await put('acme', { prefix: 'acme', iri: NS, rebase: true })).code, 200);
+    assert.deepEqual(seen('plain'), plainBefore, 'a namespace changed what a space with RDF off sends its peers or its fingerprint');
+    assert.ok(!seen('plain').peer.includes(NS), 'a space with RDF off sent a namespace address to its peers');
+    const linkedAfter = seen('linked');
+    assert.notEqual(linkedAfter.fp, linkedBefore.fp, 'a namespace changes the schema of an RDF-enabled space linking its group');
+    assert.ok(linkedAfter.peer.includes(`${NS}entity/person`), 'an RDF-enabled space sends its namespace addresses to its peers');
   });
 
   it('a prefix another group holds is 409; a reserved prefix and a bad IRI are 400', async () => {

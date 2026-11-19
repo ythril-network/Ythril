@@ -119,6 +119,41 @@ describe('a passed rebase lands at its deadline', { skip }, () => {
     assert.equal(rdfOf().base, NEW_BASE);
   });
 
+  // Review finding 13 (slice A-fix): the round was marked landed BEFORE its store, so a store that failed left the base unmoved for good.
+  it('a store that fails leaves the round owed, and the next tick lands it', async () => {
+    const round = await propose();
+    const deadline = Date.parse(round.deadline);
+    const space = inst.loader.getConfig().spaces.find(s => s.id === SPACE);
+    space.ownMeta = { rdf: OLD };
+    let real = space.meta;
+    let faults = 1;
+    Object.defineProperty(space, 'meta', {
+      configurable: true, enumerable: true,
+      get() { if (faults > 0) { faults -= 1; throw new Error('a store fault'); } return real; },
+      set(v) { real = v; },
+    });
+    expiry.runRoundExpiryTick(deadline + 1);
+    assert.notEqual(rebaseRound()?.appliedHere, true, 'a failed store marked the round landed');
+    assert.equal(rdfOf().base, OLD.base);
+    expiry.runRoundExpiryTick(deadline + 2);
+    Object.defineProperty(space, 'meta', { configurable: true, enumerable: true, writable: true, value: real });
+    assert.equal(rdfOf().base, NEW_BASE, 'the owed round was not landed by the next tick');
+    assert.equal((await auditRows()).length, 1);
+  });
+
+  it('a store that can never succeed concludes the round as failed, audited, never as landed', async () => {
+    const round = await propose();
+    const deadline = Date.parse(round.deadline);
+    // A base no stored meta can hold (a space in it): the parse of the moved setting fails, now and on every later tick.
+    round.rebase = { ...round.rebase, base: 'https://new.example.org/ld/sh ared/' };
+    expiry.runRoundExpiryTick(deadline + 1);
+    assert.deepEqual(rdfOf(), OLD);
+    assert.equal((await auditRows()).length, 0, 'a failed landing was audited as a landing');
+    const failed = await mongo.getDb().collection('audit_log').find({ operation: 'space.rdf_rebase_failed' }).toArray();
+    assert.equal(failed.length, 1, `the failed landing was not audited: ${JSON.stringify(failed)}`);
+    assert.ok(String(failed[0].path).includes(round.roundId), failed[0].path);
+  });
+
   it('a round for a space this instance no longer carries is marked applied and moves nothing', async () => {
     const round = await propose();
     const deadline = Date.parse(round.deadline);

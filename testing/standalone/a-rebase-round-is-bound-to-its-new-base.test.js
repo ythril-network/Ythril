@@ -43,6 +43,39 @@ describe('a space_rebase cast binds base, vocab and epoch', () => {
   });
 });
 
+// Review finding 4 (slice A-fix): a cast without `bsig` fell back to the v1 `sig`, which binds no target, whenever this member did not know
+// the voter's version. Every voter on a `space_rebase` round runs a release that signs `bsig`, so that fallback is closed for this type.
+describe('a space_rebase cast must carry the bound signature', () => {
+  const proposer = signing.generateInstanceKeypair();
+  const network = { id: NET, type: 'club', requireSignedVotes: false, pendingRounds: [], spaces: [],
+    // No reported version: the member is not KNOWN to sign `bsig`, which is what opened the fallback.
+    members: [{ instanceId: 'proposer', label: 'p', url: 'https://p.example', signingPublicKey: proposer.publicKeyPem }] };
+  const signed = (round) => {
+    const base = { networkId: NET, roundId: 'r1', subjectInstanceId: 'proposer', instanceId: 'proposer', vote: 'yes' };
+    const sig = sign(null, Buffer.from(signing.voteCastMessage(base), 'utf8'), proposer.privateKeyPem).toString('base64');
+    const bsig = sign(null, Buffer.from(signing.voteCastBoundMessage({ ...base, round }), 'utf8'), proposer.privateKeyPem).toString('base64');
+    return { instanceId: 'proposer', vote: 'yes', castAt: new Date().toISOString(), sig, bsig };
+  };
+  const roundOf = (rebase) => ({ roundId: 'r1', type: 'space_rebase', spaceId: 'net-space-1', subjectInstanceId: 'proposer', rebase, votes: [] });
+
+  it('a relayer that swaps the base and strips bsig is refused', () => {
+    const cast = signed(roundOf(REBASE));
+    const { bsig: _stripped, ...stripped } = cast;
+    const swapped = roundOf({ ...REBASE, base: 'https://relayer.example.org/ld/s1/' });
+    assert.equal(signing.isVoteCastSignatureValid(network, swapped, stripped), false, 'the v1 signature carried a yes for a base nobody voted on');
+    assert.equal(signing.acceptVoteCast(network, swapped, stripped, 'relayer').accept, false);
+  });
+  it('the proposer\'s bound cast over the round as voted still verifies', () => {
+    const round = roundOf(REBASE);
+    assert.equal(signing.isVoteCastSignatureValid(network, round, signed(round)), true);
+  });
+  it('another round type keeps its v1 fallback for a voter of unknown version', () => {
+    const round = { roundId: 'r1', type: 'space_deletion', spaceId: 'l', networkSpaceId: 'n', subjectInstanceId: 'proposer', votes: [] };
+    const { bsig: _stripped, ...v1 } = signed(round);
+    assert.equal(signing.isVoteCastSignatureValid(network, round, v1), true, 'an existing round type lost its transition fallback');
+  });
+});
+
 describe('every other round type signs what it always did, byte for byte', () => {
   const fixtures = [
     [{ type: 'space_deletion', spaceId: 'local-1', networkSpaceId: 'net-1' },

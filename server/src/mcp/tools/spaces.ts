@@ -557,7 +557,8 @@ export const schema_updateTool: ToolHandler = {
           + '`rdf_base_needed` when the instance has no public URL and you send none). The base is then FROZEN: a write that omits a field '
           + 'keeps it, a different `base` or `vocab` is refused with `rdf_base_frozen`. `rebase: true` with a new base changes it on purpose, '
           + 'which changes every address the space gave out: on a space in no network at once; on a shared space it opens a `space_rebase` '
-          + 'vote counted like a deletion and lands at the vote\'s deadline (send it alone). Same as `meta.rdf` on `PATCH /api/spaces/:id`; '
+          + 'vote counted like a deletion and lands at the vote\'s deadline (send it alone; one at a time: while one is held, another is '
+          + 'refused with `rdf_rebase_pending`). Same as `meta.rdf` on `PATCH /api/spaces/:id`; '
           + 'needs the schema `admin` rung.',
         properties: {
           enabled: { type: 'boolean', description: 'Switch the space\'s RDF names on or off; off keeps the base for when it is switched on again.' },

@@ -8,7 +8,9 @@
  *
  * - a peer offering a HIGHER epoch with another base records a conflict beside that network (`NetworkConfig.rdfBaseConflicts`), naming it;
  *   the member's own base does not move;
- * - a peer offering a lower or equal epoch changes nothing, and an older build that serves no `rdfBases` causes no conflict and no error;
+ * - a peer offering another base at an EQUAL epoch is a conflict too (two members that enabled RDF apart), and so is a settings round
+ *   carrying one: its conflict is handed back to record, never dropped;
+ * - a peer offering a lower epoch changes nothing, and an older build that serves no `rdfBases` causes no conflict and no error;
  * - what a peer serves is read by the setting's own validators and bounded before anything is stored: a value no door would accept is left out;
  * - a space this member does not carry, or carries with RDF off, is not touched;
  * - a recorded conflict clears once the member's own epoch reaches the offered one (an accepted base, a landed round);
@@ -40,11 +42,25 @@ describe('a voted-network member compares the bases its peers serve', () => {
       assert.deepEqual(s[0].meta.rdf, OLD);
     });
   }
-  it('a lower or equal epoch changes nothing', () => {
+  it('a lower epoch changes nothing', () => {
     const n = net();
     assert.equal(take(n, spaces({ ...OLD, baseEpoch: 2 }), { notes: { base: NEW_BASE, baseEpoch: 1 } }), false);
-    assert.equal(take(n, spaces(), { notes: { base: NEW_BASE, baseEpoch: 0 } }), false);
     assert.equal(n.rdfBaseConflicts, undefined);
+  });
+  // Review finding 2 (slice A-fix): this case used to assert that an equal epoch changes nothing. Two members that each enabled RDF before
+  // seeing the other (each instance's default base is its own) hold different bases at epoch 0, and nobody was ever told.
+  it('another base at an EQUAL epoch is a conflict, never dropped', () => {
+    const n = net();
+    assert.equal(take(n, spaces(), { notes: { base: NEW_BASE, baseEpoch: 0 } }), true, 'two bases at one epoch went untold');
+    assert.equal(n.rdfBaseConflicts?.notes?.offered?.[0]?.base, NEW_BASE);
+    assert.equal(n.rdfBaseConflicts.notes.offered[0].epoch, 0);
+  });
+  it('a settings round carrying another base at the same epoch keeps the stored one and hands the conflict back to record', async () => {
+    const { parseMetaRound } = await import('../../server/dist/sync/meta-round-merge.js');
+    const parsed = parseMetaRound({ rdf: OLD }, { pendingMeta: { rdf: { enabled: true, base: NEW_BASE, vocab: `${NEW_BASE}vocab/`, baseEpoch: 0 } }, baseMetaVersion: 0, metaChangedFields: ['rdf'] });
+    assert.equal(parsed.ok, true, parsed.reason);
+    assert.equal(parsed.meta.rdf.base, OLD.base, 'a settings round moved the base');
+    assert.equal(parsed.rdfConflict?.offered?.[0]?.base, NEW_BASE, `the conflict the settle computed was dropped: ${JSON.stringify(parsed)}`);
   });
   it('an older build that serves no rdfBases causes no conflict and no error', () => {
     const n = net();
