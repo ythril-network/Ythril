@@ -251,7 +251,7 @@ A record a run could not convert is left as it is and listed. An item is local t
 GET /api/spaces/:id/schema-convert/items?kind=&type=&reason=&status=&skip=&limit=
 ```
 
-MCP `list_unconverted` (`knowledge: read`) takes the same parameters. The list is newest first; `status` is `open` unless you ask for `dismissed`. It is paged as the Brain's other lists are (`total`, `count`, `skip`, `limit`, `truncated`, and `nextSkip` when a page was cut) and carries `counts: { open, dismissed }` for the whole space whatever the filters. A row:
+MCP `list_unconverted` (`knowledge: read`) takes the same parameters. The list is newest first; `status` is `open` unless you ask for `dismissed`. It is paged as the Brain's other lists are (`total`, `count`, `skip`, `limit`, `truncated`, and `nextSkip` when a page was cut) and carries `counts: { open, dismissed, openBy }` for the whole space whatever the filters (see [Counting the open items](#counting-the-open-items)). A row:
 
 ```json
 { "itemId": "…", "space": "qa", "kind": "entity", "recordId": "…", "type": "person", "seq": 105, "fromFp": "…", "toFp": "…",
@@ -262,6 +262,12 @@ MCP `list_unconverted` (`knowledge: read`) takes the same parameters. The list i
 `space` is the space the item lives in, the one a dismissal names. **Through a personal view** the list reads every member the view reads for you and merges their items newest first, each row naming its member, with `counts` summed over them; past `skip + limit` of the merge's bound the page is refused (`unconverted_bad_paging`): page a member directly.
 
 `reason` says why: `not_conforming` (the converted record would still not conform, or a record that needed no step does not conform), `no_case_matched`, `both_set`, `could_not_evaluate`, `relationship_exists` (an edge relabel onto a relationship that already exists), `functional_taken` (a relabel onto a subject the label's functional rule already holds), `version_ceiling`, `fork`, `step_refused` and `conversion_failed` (the rewrite failed for a reason no other class names, on three passes of the run in a row; its one violation names the kind of error, never its words, and the run went on without it). `violations` names fields and reasons, **never a stored value**. `proposed` is what the steps would have made of it. `record.summary` is the record's own name or text, and is absent when the record is gone.
+
+**One reason or several.** `reason` takes one reason, or a list of them to list the items of any: `reason=not_conforming,fork` or `reason=not_conforming&reason=fork` on REST, an array (or the same comma text) on MCP. `total` counts the items of all of them, and the other filters and `status` still narrow the list. A list names at most as many reasons as there are, each once; a blank piece (`reason=fork,`) is ignored, and nothing but blank pieces is no filter. An unknown reason anywhere in the list, or a longer list, is `400` `unconverted_bad_reason`, and the message names the value. One reason answers exactly as it always did.
+
+### Counting the open items
+
+`counts.openBy` groups the **open** items of the whole space by what they are: `[{ "kind": "entity", "type": "person", "reason": "not_conforming", "n": 3 }, …]`, ordered by kind, then type, then reason. It ignores `kind`, `type`, `reason`, `status`, `skip` and `limit` (it is the space's, as `open` and `dismissed` are), leaves out dismissed items, and its `n` add up to `counts.open`. Through a personal view the members' groups are added: a group two members hold is one group with the sum. It holds at most 500 groups; past that it holds the first 500 in that order and `counts.openByCut` is `true`, and the groups then add up to less than `open`. With no open item it is an empty list. A page that lists one class of reasons and shows a count beside each class reads these groups, not the `total` of the list it asked for.
 
 **An item is settled by editing the record** (a later write is checked against the schema and stamped, and the item goes stale), **by converting again with other steps**, or **by dismissing it**. A stale item (its record is gone, was written since, carries the space's stamp now, or its type is defined differently now) is removed by the instance's own sweep a little later and is listed until then: a read never writes.
 
@@ -278,7 +284,7 @@ The first dismisses one item (MCP `dismiss_unconverted`, `{ space, itemId }`) an
 { "kind": "entity", "type": "person", "reason": "both_set", "expect": 7 }
 ```
 
-It answers `{ "dismissed": 7 }`. If the number of open items for that filter is not `expect`, nothing is dismissed and the answer is `409` `unconverted_changed` with `current`; list again and confirm the new number. A filter that matches more open items than one call may dismiss is `400` `unconverted_too_many` with `max`, the most one call takes: narrow it by kind, type or reason. Both need `knowledge: write`.
+`reason` is one reason, or a list of them (`"reason": ["not_conforming", "fork"]`, or one text with commas), read as the list reads it: the call dismisses the open items of any of them, `expect` counts over all of them, and it is the `total` the list answers for the same filter. It answers `{ "dismissed": 7 }`. If the number of open items for that filter is not `expect`, nothing is dismissed and the answer is `409` `unconverted_changed` with `current`; list again and confirm the new number. A filter that matches more open items than one call may dismiss is `400` `unconverted_too_many` with `max`, the most one call takes: narrow it by kind, type or reason. Both need `knowledge: write`.
 
 A dismissal changes no record: the item stays, marked `dismissed`, and a run that meets the same version of the record toward the same schema does not list it again. A new version of the record, or another schema, can.
 
@@ -322,7 +328,7 @@ Every refusal carries a `code`; the same code is on both doors.
 | `schema_convert_running` | `409` | the act | Read the status and start again when the run is no longer `running`. |
 | `schema_convert_rate_limited` | `429` | the act, a save with `convertRecords` | Wait and start again: see the price above. |
 | `unconverted_rung` | `403` | the lists and dismissals | The token needs `knowledge: read` to list and `knowledge: write` to dismiss. |
-| `unconverted_bad_kind`, `unconverted_bad_type`, `unconverted_bad_status`, `unconverted_bad_reason` | `400` | the lists and dismissals | Send a filter from the lists above. |
+| `unconverted_bad_kind`, `unconverted_bad_type`, `unconverted_bad_status`, `unconverted_bad_reason` | `400` | the lists and dismissals | Send a filter from the lists above. For `reason`: every reason in a list must be one that exists, and a list names at most as many as there are. |
 | `unconverted_bad_paging` | `400` | the list | Send `skip` and `limit` as whole numbers. |
 | `unconverted_bad_item_id` | `400` | the dismissal | Send an `itemId` a list returned. |
 | `unconverted_item_not_found` | `404` | the dismissal | List again: the item may have been removed as stale. |
