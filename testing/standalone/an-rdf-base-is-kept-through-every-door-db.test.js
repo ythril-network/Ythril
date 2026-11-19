@@ -6,6 +6,8 @@
  * - The first enable takes `<public url>/ld/<space>/`; with only the fallback URL it is 400 `rdf_base_needed`; a base sent with it is
  *   taken as it is.
  * - Switching off keeps the base; switching on again reuses it; a write that omits `rdf` keeps it.
+ * - A write of `rdf` names `enabled` on both doors (400 without it); a `base` or `vocab` it leaves out keeps the stored one, and the guide
+ *   says exactly that (bundle-269 drive, finding 4).
  * - A different base is 409 `rdf_base_frozen` naming both; with `rebase: true` on a space in no network the epoch goes up by one.
  * - A meta write leaving two terms with one address is 422 `rdf_term_clash` naming both.
  * - On a networked space `rebase: true` opens a `space_rebase` round carrying `{ base, vocab, epoch }` and answers `vote_pending`; the
@@ -15,6 +17,7 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { tempInstanceDir } from './_vote-round-instance.mjs';
 import { bootSchemaInstance } from './_schema-doors.mjs';
@@ -138,6 +141,20 @@ describe('an RDF base is kept through every door', { skip }, () => {
         assert.equal(again.refused, false, again.text.slice(0, 300));
         assert.equal(net.pendingRounds.filter(r => r.type === 'space_rebase').length, 1, 'a repeat answers the round in progress and opens no second one');
       });
+      // Bundle-269 drive, finding 4: the guide said "a write that leaves a field out keeps the stored value", and a rebase without `enabled`
+      // was 400. The door is the rule (`enabled` is required, as the other object setting, `stampSkew`, keeps nothing it is not sent); a
+      // `base` or `vocab` left out keeps the stored one.
+      it('a write of rdf names enabled (400 without it, the drive\'s rebase); a base or vocab it leaves out keeps the stored one', async () => {
+        inst.reset();
+        await write(door, SOLO, { rdf: { enabled: true, base: OLD } });
+        const held = rdfOf(SOLO);
+        const noEnabled = await write(door, SOLO, { rdf: { base: NEW, rebase: true } });
+        assert.equal(noEnabled.status, 400, noEnabled.text.slice(0, 300));
+        assert.match(said(noEnabled), /enabled/);
+        assert.deepEqual(rdfOf(SOLO), held, 'nothing was stored');
+        assert.equal((await write(door, SOLO, { rdf: { enabled: true } })).refused, false);
+        assert.deepEqual(rdfOf(SOLO), held, 'base and vocab left out are kept');
+      });
       it('on a networked space a different base without rebase is frozen too', async () => {
         inst.reset();
         const answer = await write(door, SHARED, { rdf: { enabled: true, base: 'https://new.example.org/ld/shared/' } });
@@ -145,4 +162,11 @@ describe('an RDF base is kept through every door', { skip }, () => {
       });
     });
   }
+
+  it('the guide says what both doors do with a partial write: enabled is named every time, a base or vocab left out is kept', () => {
+    const guide = readFileSync('docs/integration-guide/06a-schema-api.md', 'utf8');
+    assert.doesNotMatch(guide, /A write that leaves a field out keeps the stored value/, 'the drive showed this false for enabled');
+    assert.match(guide, /names `enabled`/, 'the guide says a write of meta.rdf names enabled');
+    assert.match(guide, /`base` or `vocab` it leaves out keeps the stored one/);
+  });
 });

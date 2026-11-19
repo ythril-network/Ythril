@@ -554,8 +554,8 @@ export const schema_updateTool: ToolHandler = {
         type: 'object',
         description: 'The space\'s RDF names. OFF until `enabled: true`; nothing changes for the space before. The first enable gives every '
           + 'record the address `<base><kind>/<id>`, `base` being yours or one under the instance\'s public URL named for the space (refused with '
-          + '`rdf_base_needed` when the instance has no public URL and you send none). The base is then FROZEN: a write that omits a field '
-          + 'keeps it, a different `base` or `vocab` is refused with `rdf_base_frozen`. `rebase: true` with a new base changes it on purpose, '
+          + '`rdf_base_needed` when the instance has no public URL and you send none). Every write names `enabled`. The base is then FROZEN: a '
+          + 'write that omits `base` or `vocab` keeps it, a different `base` or `vocab` is refused with `rdf_base_frozen`. `rebase: true` with a new base changes it on purpose, '
           + 'which changes every address the space gave out: on a space in no network at once; on a shared space it opens a `space_rebase` '
           + 'vote counted like a deletion and lands at the vote\'s deadline (send it alone; one at a time: while one is held, another is '
           + 'refused with `rdf_rebase_pending`). Same as `meta.rdf` on `PATCH /api/spaces/:id`; '
