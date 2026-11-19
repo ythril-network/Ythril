@@ -148,7 +148,7 @@ const checkedOf = (s: ConvertStatus): number => s.counts.stamped + s.counts.rewr
             @else if (heads().length > 1) { <span data-testid="run-types">{{ typesText() }}</span> }
             <span class="badge badge-gray" data-testid="run-badge">{{ 'spaces.schema.convert.run.nothing' | transloco }}</span>
           </div>
-          <p class="cv-run-line" data-testid="run-line">{{ 'spaces.schema.convert.run.noneHere' | transloco }}</p>
+          <p class="cv-run-line" data-testid="run-line">{{ noneText() }}</p>
         </div>
       }
       @case ('run') {
@@ -206,6 +206,8 @@ export class ConvertRunBlockComponent {
   readonly status = input<ConvertStatusAnswer | null>(null);
   /** What the save that started the run answered (`nothing`, `not_started`, or none). */
   readonly notice = input<ConvertRunNotice | null>(null);
+  /** What led to the dialog: a Save, the type's Convert records (`act`), or the type's note (`note`, a run of any source, a vote's included). */
+  readonly from = input<'save' | 'act' | 'note'>('save');
 
   private readonly say = pageTranslator();
   private readonly plural = inject(PluralText);
@@ -227,6 +229,21 @@ export class ConvertRunBlockComponent {
 
   /** The run being shown, or null. */
   protected readonly running = computed(() => { const v = this.view(); return v.kind === 'run' ? v.status : null; });
+
+  /** The records of the one type a "nothing to convert" run is about, for a run no Save started: null until read, `unknown` when it could not be. */
+  private readonly typeTotal = signal<number | 'unknown' | null>(null);
+
+  /**
+   * Why there was nothing to convert, in what is true for how the dialog was reached (drive round 5): after a Save that found no records, the
+   * schema is saved and there were none ("noneHere"); from the type's button or note no schema was saved, so it is either that every record is
+   * already on the current schema or that the type has none, read from the type's own count. Empty while that count is read.
+   */
+  protected readonly noneText = computed(() => {
+    if (this.from() === 'save') return this.say('spaces.schema.convert.run.noneHere');
+    const total = this.typeTotal();
+    if (total === null) return '';
+    return this.say(total === 0 ? 'spaces.schema.convert.run.noneEmpty' : 'spaces.schema.convert.run.noneCurrent');
+  });
 
   private number(n: number): string { return formatCount(this.active.language() || 'en', n); }
 
@@ -334,6 +351,20 @@ export class ConvertRunBlockComponent {
       const subscription = this.conversion.refusedCount(space).subscribe({
         next: n => this.refusedListed.set(n),
         error: () => this.refusedListed.set(null),
+      });
+      onCleanup(() => subscription.unsubscribe());
+    });
+    // A "nothing to convert" run no Save started: one count of the type's records says which of the two sentences is true.
+    effect(onCleanup => {
+      const v = this.view();
+      const space = this.spaceId();
+      const one = v.kind === 'nothing' && v.types.length === 1 ? v.types[0]! : null;
+      this.typeTotal.set(null);
+      if (this.from() === 'save' || v.kind !== 'nothing') return;
+      if (!one) { this.typeTotal.set('unknown'); return; }
+      const subscription = this.conversion.countsFor(space, { kind: one.kind, type: one.type, steps: [] }).subscribe({
+        next: answer => this.typeTotal.set(answer.ok ? answer.counts.total : 'unknown'),
+        error: () => this.typeTotal.set('unknown'),
       });
       onCleanup(() => subscription.unsubscribe());
     });

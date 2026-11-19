@@ -3414,6 +3414,8 @@
   "spaces.schema.convert.run.line.left": "zostało {{left}}",
   "spaces.schema.convert.run.retrying": "Niektórych rekordów nie udało się jeszcze zapisać. Zostaną ponowione próby, a konwersja trwa dalej.",
   "spaces.schema.convert.run.noneHere": "Schemat jest zapisany. Nie było rekordów tego typu.",
+  "spaces.schema.convert.run.noneCurrent": "Nie ma czego konwertować: każdy rekord tego typu jest już na aktualnym schemacie.",
+  "spaces.schema.convert.run.noneEmpty": "Nie ma rekordów tego typu.",
   "spaces.schema.convert.run.notStarted": "Schemat jest zapisany, ale konwersja się nie rozpoczęła: {{error}}. Naciśnij „Konwertuj rekordy” przy typie, aby ją uruchomić.",
   "spaces.schema.convert.run.failed": "Konwersja się zatrzymała: {{error}}. Naciśnij „Konwertuj rekordy” przy typie, aby uruchomić ją ponownie.",
   "spaces.schema.convert.run.openReview": "Otwórz Przegląd ({{n}})",

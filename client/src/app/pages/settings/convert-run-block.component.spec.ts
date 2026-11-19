@@ -48,6 +48,8 @@ const WORDS: Record<string, string> = {
   'spaces.schema.convert.run.line.left': 'LEFT={{left}}',
   'spaces.schema.convert.run.retrying': 'RUN-RETRY',
   'spaces.schema.convert.run.noneHere': 'RUN-NONE-HERE',
+  'spaces.schema.convert.run.noneCurrent': 'RUN-NONE-CURRENT',
+  'spaces.schema.convert.run.noneEmpty': 'RUN-NONE-EMPTY',
   'spaces.schema.convert.run.notStarted': 'RUN-NOT-STARTED {{error}}',
   'spaces.schema.convert.run.failed': 'RUN-FAILED {{error}}',
   'spaces.schema.convert.run.types.one': 'RUN-TYPES {{count}}',
@@ -92,14 +94,16 @@ const status = (over: Partial<ConvertStatus> = {}): ConvertStatus => ({
 
 describe('the run block', () => {
   let refusedCount: ReturnType<typeof vi.fn>;
+  let countsFor: ReturnType<typeof vi.fn>;
   let fixture: ComponentFixture<ConvertRunBlockComponent>;
 
   beforeEach(() => {
     refusedCount = vi.fn(() => of(23));
+    countsFor = vi.fn(() => of({ ok: false }));
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       imports: [ConvertRunBlockComponent, getTranslocoModule({ translation: { en: WORDS } })],
-      providers: [{ provide: ConversionApi, useValue: { refusedCount } }],
+      providers: [{ provide: ConversionApi, useValue: { refusedCount, countsFor } }],
     });
   });
 
@@ -111,8 +115,17 @@ describe('the run block', () => {
     fixture.detectChanges();
     return fixture.nativeElement as HTMLElement;
   }
+  /** The block as the dialog shows it for a run reached from the type's button (`act`), its note (`note`) or a Save (`save`). */
+  function mountFrom(run: ConvertStatusAnswer | null, from: 'save' | 'act' | 'note'): HTMLElement {
+    fixture = TestBed.createComponent(ConvertRunBlockComponent);
+    fixture.componentRef.setInput('spaceId', 'customers');
+    fixture.componentRef.setInput('status', run);
+    fixture.componentRef.setInput('from', from);
+    fixture.detectChanges();
+    return fixture.nativeElement as HTMLElement;
+  }
   const text = (host: HTMLElement, id: string): string => host.querySelector(`[data-testid="${id}"]`)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-  const bar = (host: HTMLElement): HTMLElement | null => host.querySelector('[role="progressbar"]');
+  const bar =(host: HTMLElement): HTMLElement | null => host.querySelector('[role="progressbar"]');
 
   describe('running (R3, R4, R5)', () => {
     it('names the type in the code face, says Converting, and shows checked of total with the percentage as the bar\'s value', () => {
@@ -218,6 +231,18 @@ describe('the run block', () => {
       expect(text(host, 'run-badge')).toBe('RUN-NOTHING');
       expect(text(host, 'run-line')).toBe('RUN-NONE-HERE');
       expect(bar(host)).toBeNull();
+    });
+
+    it('from the type\'s button or note, a run with nothing to do says the records are current, or that the type has none, never a saved schema (drive round 5)', () => {
+      const nothing = status({ state: 'complete', left: 0, counts: { stamped: 0, rewritten: 0, unconverted: 0, moved: 0, edgesRestamped: 0 } });
+      for (const from of ['act', 'note'] as const) {
+        countsFor.mockReturnValue(of({ ok: true, counts: { total: 150, rewritten: 0, stamped: 150, casesCountedAsItRuns: false, wholeType: true } }));
+        expect(text(mountFrom(nothing, from), 'run-line'), from).toBe('RUN-NONE-CURRENT');
+        countsFor.mockReturnValue(of({ ok: true, counts: { total: 0, rewritten: 0, stamped: 0, casesCountedAsItRuns: false, wholeType: true } }));
+        expect(text(mountFrom(nothing, from), 'run-line'), from).toBe('RUN-NONE-EMPTY');
+      }
+      expect(countsFor).toHaveBeenCalledWith('customers', { kind: 'entity', type: 'person', steps: [] });
+      expect(text(mountFrom(nothing, 'save'), 'run-line'), 'a Save keeps its sentence').toBe('RUN-NONE-HERE');
     });
 
     it('a space that never had a run, a view that holds several, and a save that started nothing say the same', () => {

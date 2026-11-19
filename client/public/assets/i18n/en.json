@@ -3414,6 +3414,8 @@
   "spaces.schema.convert.run.line.left": "{{left}} left",
   "spaces.schema.convert.run.retrying": "Some records could not be written yet. They will be tried again, and the conversion keeps going.",
   "spaces.schema.convert.run.noneHere": "The schema is saved. There were no records of this type.",
+  "spaces.schema.convert.run.noneCurrent": "Nothing to convert: every record of this type is already on the current schema.",
+  "spaces.schema.convert.run.noneEmpty": "There are no records of this type.",
   "spaces.schema.convert.run.notStarted": "The schema is saved, but the conversion did not start: {{error}}. Press Convert records on the type to start it.",
   "spaces.schema.convert.run.failed": "The conversion stopped: {{error}}. Press Convert records on the type to start it again.",
   "spaces.schema.convert.run.openReview": "Open Review ({{n}})",
