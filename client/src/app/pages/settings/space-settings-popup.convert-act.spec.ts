@@ -72,6 +72,22 @@ describe('closing the run\'s dialog with its X (drive D5)', () => {
     await vi.waitFor(() => expect(document.activeElement).toBe(h.q('convert-records')), { timeout: 2_000, interval: 20 });
   });
 
+  it('scrolls the type head with its note into view, so the run\'s note is what the page shows (bundle-285 S10)', async () => {
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
+    try {
+      const h = mountPopup({ statuses: [okStatus(runningStatus({ sources: ACT, left: 500 }))] });
+      document.body.appendChild(h.root);
+      await actFromHead(h);
+      scrolled.length = 0;
+      h.click('cv-close');
+      await vi.waitFor(() => expect(scrolled.some(e => e.classList.contains('sch-detail-head'))).toBe(true), { timeout: 2_000, interval: 20 });
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it('after Save and convert, puts focus on the footer button that took Save\'s place (Done), never on the page body', async () => {
     const h = mountPopup({ update: () => of({ space: customers(), convert: STARTED }), statuses: [okStatus(runningStatus({ left: 500 }))] });
     document.body.appendChild(h.root);

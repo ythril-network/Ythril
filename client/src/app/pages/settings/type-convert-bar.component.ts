@@ -66,7 +66,8 @@ export const CONVERT_RUN_HOST = new InjectionToken<ConvertRunHost>('CONVERT_RUN_
     :host { display: block; }
     .cv-btn { gap: 5px; }
     .cv-btn[disabled] { cursor: not-allowed; }
-    .cv-btn-attn { color: var(--accent); background: var(--accent-dim); }
+    /* Records wait: the theme's "ready" green, outlined, as drawn (the accent fill is violet in the dark theme). */
+    .cv-btn-attn { color: var(--accent); background: var(--success-dim); box-shadow: inset 0 0 0 1px var(--success-border); }
     .cv-reason { margin: 6px 0 0; }
     .cv-note { margin: 8px 0 0; font-size: 13px; }
     .cv-bar-hint { font-size: 11px; font-weight: 400; color: var(--text-muted); }

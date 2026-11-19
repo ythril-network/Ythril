@@ -587,10 +587,12 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
    */
   private backToWhereTheRunBegan(byAct: boolean): void {
     const host = this.host.nativeElement as HTMLElement;
+    // The type head and the note under it are what the run is told by now: scrolled into view (the pane kept the scroll it had behind the dialog).
+    host.querySelector<HTMLElement>('.sch-detail-head')?.scrollIntoView?.({ block: 'start' });
     const to = byAct
       ? host.querySelector<HTMLElement>('[data-testid="convert-records"]')
       : host.querySelector<HTMLElement>('[data-testid="settings-done"], [data-testid="settings-save"]');
-    to?.focus();
+    to?.focus({ preventScroll: true });
   }
 
   /** Open Review on the Unconverted section, asking first when the popup holds an edit the move would lose. */

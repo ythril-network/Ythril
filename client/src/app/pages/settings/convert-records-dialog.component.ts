@@ -4,7 +4,9 @@ import type { Subscription } from 'rxjs';
 import { ConversionApi } from '../../core/conversion-api.service';
 import { SEVERAL, rewriteScopeOf, type BlockCounts, type ConvertBlock } from '../../core/conversion-counts';
 import type { ConversionRefusal, ConversionStep, ConvertRunNotice, ConvertStatusAnswer, ConvertTypeRef } from '../../core/conversion.types';
+import { ActiveLanguage } from '../../core/active-language';
 import { pageTranslator } from '../../core/page-translator';
+import { formatCount } from '../../core/plural-text';
 import { PluralText } from '../../core/plural-text.service';
 import { mayConvertRecords } from '../../core/token-capability';
 import { ModalDirective } from '../../shared/modal.directive';
@@ -16,7 +18,7 @@ import { ConvertStepEditorComponent } from './convert-step-editor.component';
 import { editOf, locateStep, offerStep, sortEdits, stepsOfEdits, withAddedTypes, type AddedType, type ConvertBlockPlan, type ConvertSchemas, type EditStep } from './convert-steps';
 import { DIALOG_STYLES } from './dialog.styles';
 import type { TokenRights } from './rights-glyph.component';
-import { piecesOf, type SentencePiece } from './vote-conversion-block.component';
+import { markStrong, piecesOf, strongFirst, type SentencePiece } from './vote-conversion-block.component';
 
 /**
  * The dialog that offers converting records at Save, and its other faces (bundle-285 slice S5, Q-747; plan sections 3.1 item 4, 4, 5 rows D,
@@ -174,7 +176,7 @@ let seq = 0;
                       <div class="alert alert-warning cv-warn-line" role="status" data-testid="cv-warning">@for (p of w; track $index) {<span [class.cv-tn]="p.name">{{ p.text }}</span>}</div>
                     }
                     <p class="cv-preview" data-testid="cv-counts">
-                      @if (countLines()[i]; as line) { @for (p of line; track $index) {<span [class.cv-tn]="p.name">{{ p.text }}</span>} }
+                      @if (countLines()[i]; as line) { @for (p of line; track $index) {@if (p.strong) {<strong>{{ p.text }}</strong>} @else {<span [class.cv-tn]="p.name">{{ p.text }}</span>}} }
                       @else if (countState(i).state === 'failed') { {{ 'spaces.schema.convert.countFailed' | transloco }} }
                       @else { <span class="spinner" style="width: 11px; height: 11px; border-width: 2px;"></span> {{ 'spaces.schema.convert.counting' | transloco }} }
                     </p>
@@ -229,7 +231,7 @@ let seq = 0;
 
         <div class="cv-dfoot" data-testid="cv-foot">
           @if (refusalText(); as refused) { <p class="cv-foot-msg cv-err" role="alert" data-testid="cv-refusal">{{ refused }}</p> }
-          @if (showIncomplete()) { <p class="cv-foot-msg" role="status" data-testid="cv-incomplete">{{ 'spaces.schema.convert.incomplete' | transloco }}</p> }
+          @if (showIncomplete()) { <p class="cv-foot-msg" role="status" data-testid="cv-incomplete">{{ incompleteText() }}</p> }
           @if (footInfo(); as info) {
             <div class="alert alert-info cv-foot-info" role="status" data-testid="cv-foot-info">@for (p of info; track $index) {<span [class.cv-tn]="p.name">{{ p.text }}</span>}</div>
           }
@@ -293,6 +295,7 @@ export class ConvertRecordsDialogComponent {
 
   private readonly conversion = inject(ConversionApi);
   private readonly plural = inject(PluralText);
+  private readonly language = inject(ActiveLanguage).language;
   private readonly say = pageTranslator();
   private readonly toggle = viewChild<ElementRef<HTMLButtonElement>>('toggle');
 
@@ -343,22 +346,29 @@ export class ConvertRecordsDialogComponent {
   /** Offer only: no record of any changed type, so there is nothing to convert and the one act is Save. */
   protected readonly allEmpty = computed(() => this.mode() === 'offer' && this.noRecordsAnywhere());
 
-  /** The sentence of each block's counts, or null while they are being read or when they failed. Names are in the code face. */
+  /**
+   * The sentence of each block's counts, or null while they are being read or when they failed. Names are in the code face and the numbers in
+   * strong text, as drawn: the stamped and rewritten numbers are handed in marked (formatted here, as the plural mechanism would), the total is
+   * marked where the mechanism put it (`strongFirst`).
+   */
   protected readonly countLines = computed<(SentencePiece[] | null)[]>(() => this.blocks().map((block, i) => {
     const view = this.countState(i);
     if (view.state !== 'ready') return null;
     const c = view.counts;
+    const language = this.language() || 'en';
+    const strong = (sentence: string): SentencePiece[] => piecesOf(strongFirst(sentence, formatCount(language, c.total)));
     if (this.mode() === 'act') {
-      return c.total === 0 ? markedPieces(this.say, 'spaces.schema.convert.act.noneToCheck', {}) : piecesOf(this.plural.text('spaces.schema.convert.act.checked', c.total));
+      return c.total === 0 ? markedPieces(this.say, 'spaces.schema.convert.act.noneToCheck', {}) : strong(this.plural.text('spaces.schema.convert.act.checked', c.total));
     }
     const here = this.network() !== null;
     if (c.total === 0) return markedPieces(this.say, 'spaces.schema.convert.noRecords', { type: block.was ?? block.type });
     if (c.casesCountedAsItRuns) {
       const type = markName(block.type);
-      return piecesOf(here ? this.plural.text('spaces.schema.convert.splitHere', c.total, { type }) : this.plural.text('spaces.schema.convert.split', c.total, { type }));
+      return strong(here ? this.plural.text('spaces.schema.convert.splitHere', c.total, { type }) : this.plural.text('spaces.schema.convert.split', c.total, { type }));
     }
-    const params = { type: markName(block.was ?? block.type), stamped: c.stamped, rewritten: c.rewritten };
-    return piecesOf(here ? this.plural.text('spaces.schema.convert.countsHere', c.total, params) : this.plural.text('spaces.schema.convert.counts', c.total, params));
+    const number = (n: number): string => markStrong(formatCount(language, n));
+    const params = { type: markName(block.was ?? block.type), stamped: number(c.stamped), rewritten: number(c.rewritten) };
+    return strong(here ? this.plural.text('spaces.schema.convert.countsHere', c.total, params) : this.plural.text('spaces.schema.convert.counts', c.total, params));
   }));
 
   protected showUnfit(i: number): boolean {
@@ -473,6 +483,15 @@ export class ConvertRecordsDialogComponent {
   // ── The choice ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   protected readonly showIncomplete = computed(() => this.hasIncomplete() && (this.mode() === 'act' || (this.mode() === 'offer' && this.effectiveOutcome() === 'convert' && !this.allEmpty())));
+
+  /** Old values of a map that have no new value yet, over every block: the maps offered for removed enum values start with none. */
+  private readonly targetsMissing = computed(() => this.rows().flat().reduce((n, r) => n + (r.op === 'mapEnum' ? r.pairs.filter(p => p.to === '').length : 0), 0));
+
+  /** Why the primary waits: how many values still need a new value when that is what is missing, else the general sentence. */
+  protected readonly incompleteText = computed(() => {
+    const missing = this.targetsMissing();
+    return missing > 0 ? this.plural.text('spaces.schema.convert.incompleteValues', missing) : this.say('spaces.schema.convert.incomplete');
+  });
 
   protected readonly primaryDisabled = computed(() => {
     if (this.busy()) return true;
