@@ -171,6 +171,17 @@ export async function servingOnly(loader, keep, fn) {
 }
 
 /**
+ * *"the restore covered the spaces the case asked for, no more and no fewer"*, for a restore through {@link servingOnly}: the route's 202
+ * names exactly `keep` as its spaces, and exactly one act ran for each of them (`results` are the settled acts, in any order). A restore that
+ * completes while leaving a space out leaves that space as it was, and a case that reads it then passes on what was never restored; an
+ * assertion that every settled act is ok passes for an empty list.
+ */
+export function assertRestoreCovers(answer, results, keep) {
+  assert.deepEqual([...(answer.body?.spaces ?? [])].sort(), [...keep].sort(), `the restore names other spaces than the case restores: ${JSON.stringify(answer.body)}`);
+  assert.deepEqual(results.map(r => r.localId).sort(), [...keep].sort(), `the restore ran other acts than one per space the case restores: ${JSON.stringify(results.map(r => r.localId))}`);
+}
+
+/**
  * Restore `backupId` through the acts, run them to their end, and answer the report the operator would then read. `leaveOut` is the route's
  * own: the spaces the backup holds that this instance does not serve (see {@link servingOnly}).
  */

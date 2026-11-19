@@ -28,12 +28,12 @@
  * Run: a Mongo the harness accepts, then `node --test testing/standalone/every-declared-space-index-stands-after-a-restore-db.test.js`
  * (a prior `npm run build` in server/).
  */
-import { describe, it, before, after, beforeEach } from 'node:test';
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { clearActEntries, resetRunnerForTest, untilRunnerIdle } from './_space-act-harness.mjs';
-import { restoreModules, takeBackup, restoreAsActs, restoreEntries, startRestoreActs, settleRestoreActs, servingOnly } from './_restore-act.mjs';
+import { restoreModules, takeBackup, restoreAsActs, restoreEntries, startRestoreActs, settleRestoreActs, servingOnly, assertRestoreCovers } from './_restore-act.mjs';
 import {
   loadSpaceIndexDeclaration, requireSpaceIndexDeclaration, indexesOfSpace, buildReferenceSpace, specDifference, indexId,
 } from './_space-index-declaration.mjs';
@@ -67,10 +67,17 @@ let restoredOnce;
 function restoreTheReadSpace() {
   restoredOnce ??= (async () => {
     const backup = await takeBackup(SUITE, `all-${Date.now()}`);
+    // A record written after the backup: a restore that completes and leaves the space as it was leaves this behind, and the space still
+    // carries the indexes it was built with, so the index cases alone could not tell it from a restore.
+    await door.coll('restored', 'facts').insertOne({ _id: 'restored-after-backup', spaceId: 'restored', fact: 'written after the backup', tags: [], seq: 9 });
     await servingOnly(mods.loader, ['restored'], async (leaveOut) => {
-      await restoreAsActs(mods, { backupId: backup.id, leaveOut });
-      for (const r of await settleRestoreActs(mods.runner, mods.loader)) assert.equal(r.ok, true, `a restore act did not complete: ${JSON.stringify(r)}`);
+      const answer = await restoreAsActs(mods, { backupId: backup.id, leaveOut });
+      const results = await settleRestoreActs(mods.runner, mods.loader);
+      assertRestoreCovers(answer, results, ['restored']);
+      for (const r of results) assert.equal(r.ok, true, `a restore act did not complete: ${JSON.stringify(r)}`);
     });
+    assert.equal(await door.coll('restored', 'facts').countDocuments({ _id: 'restored-after-backup' }), 0, 'the restore left the space as it was: a record written after the backup is still there');
+    assert.equal(await door.coll('restored', 'facts').countDocuments({ _id: 'restored-f1' }), 1, 'the restore did not put the backup\'s records back');
     return indexesOfSpace(db, 'restored');
   })();
   return restoredOnce;
@@ -149,8 +156,9 @@ describe('every declared space index stands after a restore, and a unique one th
           resetRunnerForTest(mods.runner); clearActEntries(mods.loader);
           const coll = `broken_${suffix}`;
           fault.fail(coll, spec.name, refusal);
-          await restoreAsActs(mods, { backupId: backup.id, leaveOut });
+          const answer = await restoreAsActs(mods, { backupId: backup.id, leaveOut });
           const results = await Promise.all(startRestoreActs(mods.runner, mods.loader));
+          assertRestoreCovers(answer, results, ['broken']);
           const fired = fault.fired();
           fault.clear();
           const mine = results.find(r => r.localId === 'broken');
@@ -199,8 +207,9 @@ describe('every declared space index stands after a restore, and a unique one th
           const suffix = SPACE_COLLECTIONS[ix.part];
           const name = spaceIndexName(ix);
           fault.fail(`broken_${suffix}`, name, refusal);
-          await restoreAsActs(mods, { backupId: backup.id, leaveOut });
+          const answer = await restoreAsActs(mods, { backupId: backup.id, leaveOut });
           const results = await settleRestoreActs(mods.runner, mods.loader);
+          assertRestoreCovers(answer, results, ['broken']);
           const fired = fault.fired();
           fault.clear();
           if (fired === 0) { findings.push(`${suffix}:${name}: the restore never built it`); continue; }
@@ -214,5 +223,46 @@ describe('every declared space index stands after a restore, and a unique one th
       fault.restore();
     }
     assert.deepEqual(findings, [], `a sweep index a restore left unbuilt: ${findings.join('; ')}`);
+  });
+
+  // A file that leaves spaces unserved breaks the next file on the same instance, and a restore that throws is a case this gate's helper
+  // meets on the first wrong backup id: the spaces are served again, in their order, whichever way the body ended.
+  describe('servingOnly serves every space again, whichever way its body ended', () => {
+    const served = () => mods.loader.getConfig().spaces.map(s => s.id);
+    /** The fixture's spaces as configured, put back after each case: a helper that left spaces unserved is red in ITS case, not in the next one's. */
+    let configured;
+    before(() => { configured = structuredClone(mods.loader.getConfig().spaces); });
+    afterEach(() => { mods.loader.mutateConfig(cfg => { cfg.spaces = structuredClone(configured); }); });
+    const OTHERS = SPACES.filter(s => s !== 'broken');
+    /** Every space of the fixture, served: the state each case must start from, so one that left spaces unserved is not the next one's `before`. */
+    const servedAtStart = () => {
+      const before = served();
+      assert.ok(SPACES.every(s => before.includes(s)), `the fixture serves ${before.join(', ')}`);
+      return before;
+    };
+
+    it('after its body threw', T, async () => {
+      const before = servedAtStart();
+      await assert.rejects(servingOnly(mods.loader, ['broken'], async (leaveOut) => {
+        assert.deepEqual(served(), ['broken'], 'the other spaces are still served inside the body');
+        assert.deepEqual(OTHERS.filter(s => !leaveOut.includes(s)), [], `the body is not told every space it stopped serving: ${leaveOut.join(', ')}`);
+        throw new Error('the body failed');
+      }), /the body failed/);
+      assert.deepEqual(served(), before, 'the spaces were not served again after the body threw');
+    });
+
+    it('after the restore itself threw', T, async () => {
+      const before = servedAtStart();
+      await assert.rejects(servingOnly(mods.loader, ['broken'], (leaveOut) => restoreAsActs(mods, { backupId: 'b348-no-such-backup', leaveOut })),
+        /404|not 202|not found/i, 'the restore of a backup that is not there did not throw');
+      assert.deepEqual(served(), before, 'the spaces were not served again after the restore threw');
+      assert.deepEqual(restoreEntries(mods.loader), [], 'a restore that was refused left an act registered');
+    });
+
+    it('a space to keep that is not served is refused before any space stops being served', T, async () => {
+      const before = servedAtStart();
+      await assert.rejects(servingOnly(mods.loader, ['broken', 'no-such-space'], async () => { throw new Error('the body ran'); }), /does not serve: no-such-space/);
+      assert.deepEqual(served(), before);
+    });
   });
 });
