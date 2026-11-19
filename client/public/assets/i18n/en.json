@@ -3315,6 +3315,8 @@
   "spaces.schema.convert.act.run": "Convert records",
   "spaces.schema.convert.dialog.unfitHint": "Records that do not fit the new schema are listed in Review instead.",
   "spaces.schema.convert.note.saved": "Schema saved.",
+  "spaces.schema.convert.note.byVote": "Schema changed by the vote.",
+  "spaces.schema.convert.note.finishedByVote": "Schema changed by the vote. Conversion finished.",
   "spaces.schema.convert.note.running.one": "Converting the records of this type: {{done}} of {{count}} checked.",
   "spaces.schema.convert.note.running.few": "Converting the records of this type: {{done}} of {{count}} checked.",
   "spaces.schema.convert.note.running.many": "Converting the records of this type: {{done}} of {{count}} checked.",

@@ -3315,6 +3315,8 @@
   "spaces.schema.convert.act.run": "Konwertuj rekordy",
   "spaces.schema.convert.dialog.unfitHint": "Rekordy, które nie pasują do nowego schematu, są zamiast tego wymienione w Przeglądzie.",
   "spaces.schema.convert.note.saved": "Schemat zapisany.",
+  "spaces.schema.convert.note.byVote": "Schemat zmieniony w głosowaniu.",
+  "spaces.schema.convert.note.finishedByVote": "Schemat zmieniony w głosowaniu. Konwersja zakończona.",
   "spaces.schema.convert.note.running.one": "Trwa konwersja rekordów tego typu: sprawdzono {{done}} z {{count}}.",
   "spaces.schema.convert.note.running.few": "Trwa konwersja rekordów tego typu: sprawdzono {{done}} z {{count}}.",
   "spaces.schema.convert.note.running.many": "Trwa konwersja rekordów tego typu: sprawdzono {{done}} z {{count}}.",

@@ -412,7 +412,7 @@ describe('the note while a vote waits', () => {
     m.settle();
     vi.advanceTimersByTime(1);
     m.settle();
-    expect(m.text('convert-note')).toContain(english('spaces.schema.convert.note.finished'));
+    expect(m.text('convert-note')).toContain(english('spaces.schema.convert.note.finishedByVote'));
   });
 
   it('reads the votes again only while a vote is waited on, and stops when the bar goes', () => {
@@ -604,6 +604,30 @@ describe('the note after a Save that converted nothing, and the strong lead of t
     expect(strong(finished)).toBe(english('spaces.schema.convert.note.actFinished'));
     expect(finished.text('convert-note')).toBe(`${english('spaces.schema.convert.note.actFinished')} 4 records could not be converted.`);
     expect(finished.text('convert-note')).not.toContain(SAVED);
+  });
+
+  it('says "Schema changed by the vote." for a run a passed vote started: this member saved nothing (drive round 3)', () => {
+    const round = [{ kind: 'round' as const, roundId: 'r1', at: '2026-11-19T10:00:00.000Z' }];
+    const running = mount({ statuses: [okStatus(runningStatus({ sources: round, left: 240 }))] });
+    running.settle(); vi.advanceTimersByTime(0); running.settle();
+    expect(strong(running)).toBe(english('spaces.schema.convert.note.byVote'));
+    expect(running.text('convert-note')).not.toContain(SAVED);
+    const finished = mount({ statuses: [okStatus(runningStatus({ sources: round })), okStatus(doneStatus({ sources: round }))] });
+    finished.settle(); vi.advanceTimersByTime(CONVERT_POLL_MS); finished.settle();
+    expect(strong(finished)).toBe(english('spaces.schema.convert.note.finishedByVote'));
+    expect(finished.text('convert-note')).not.toContain(SAVED);
+  });
+
+  it('words a run of mixed sources by its most recent one, as the server appends them: what changed the schema last is what the person meets', () => {
+    const at = (kind: 'write' | 'round' | 'act', minute: number) => ({ kind, ...(kind === 'round' ? { roundId: 'r1' } : {}), at: `2026-11-19T10:0${minute}:00.000Z` });
+    const lead = (sources: ReturnType<typeof at>[]): string | undefined => {
+      const m = mount({ statuses: [okStatus(runningStatus({ sources, left: 240 }))] });
+      m.settle(); vi.advanceTimersByTime(0); m.settle();
+      return strong(m);
+    };
+    expect(lead([at('write', 0), at('round', 1)])).toBe(english('spaces.schema.convert.note.byVote'));
+    expect(lead([at('round', 0), at('write', 1)])).toBe(SAVED);
+    expect(lead([at('round', 0), at('act', 1)])).toBeUndefined();
   });
 
   it('keeps "Schema saved." for a run a Save joined, though the act started it', () => {
