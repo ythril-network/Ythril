@@ -370,6 +370,34 @@ The instance that opens a round other than a join or a removal is one of its vot
 from the moment the round opens, and the round's `subjectInstanceId` is informational on those types. A peer cannot
 make another member the proposer by naming it there.
 
+### The rebase vote (`space_rebase`)
+
+Changing the RDF base of a shared space is a vote of its own ([RDF names](06a-schema-api.md#rdf-names-metardf-and-iri)).
+`PATCH /api/spaces/:id` (or MCP `schema_update`) with `meta.rdf.rebase: true` and a new `base` opens one `space_rebase`
+round on every network carrying the space and answers `202 vote_pending`. A repeat while that round is open or still to
+land answers the same round and opens no second one. Proposing needs the schema `admin` rung on the space; voting needs
+what every vote needs.
+
+- **It is counted as a deletion is.** The same pass rule for each network type, and a single veto stops it. On pub/sub a
+  rebase round passes on the publisher only when the publisher opened it, so a subscriber cannot rebase the publisher's
+  space.
+- **It carries the new names.** The round holds `rebase: { base, vocab, epoch }`, `spaceId` is the network's id for the
+  space, and every cast's `bsig` binds the three, so a relaying member cannot change what the network voted for.
+- **It lands at the round's deadline, never at the pass.** On every member still in the network, the first expiry pass
+  after the deadline sets the base, the vocab and the epoch, and writes one `space.rdf_rebase` audit entry naming the
+  round. Every member, the proposer included, moves at the same time. A restart before the deadline loses nothing: the
+  round stays in the network until it has landed.
+- **A member that leaves before the deadline keeps its base.** Leaving removes the network and its rounds from that
+  member, so the change never lands there; its records keep the addresses they had.
+- **Nothing else moves the base.** A settings vote, a network's schema layer and a precedence swap leave it as it is. A
+  layer that offers another base which no held round explains is recorded on the space as `rdfBaseConflict`
+  (server-owned); a rebase vote to one of the bases settles it.
+- **Members on an earlier release** do not know the round type: they neither vote on nor apply it. On closed and
+  braintree networks the round cannot pass until they upgrade; on democratic networks their missing yes counts against
+  the majority.
+
+Its members are woken at their next sync, not by a notice of their own: the round is still before its deadline then.
+
 ---
 
 ### List Open Vote Rounds
@@ -474,7 +502,7 @@ afterwards; this is where the answer to *"what happened to that vote?"* stays. `
 
 | field | meaning |
 |---|---|
-| `type` | the round's type (`join`, `remove`, `space_deletion`, `space_wipe`, `meta_change`, `space_addition`) |
+| `type` | the round's type (`join`, `remove`, `space_deletion`, `space_wipe`, `meta_change`, `space_addition`, `space_rebase`) |
 | `space` | the space as THIS instance calls it; absent for a round that is not about a space |
 | `subjectLabel` | the member or space the vote was about, as the round named it |
 | `outcome` | `passed`, `vetoed`, `expired` (the deadline came with no veto and not enough yes), or `ended` (a round that concluded before this log existed: the reason was not recorded, and there is no `concludedAt`) |

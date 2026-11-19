@@ -280,6 +280,50 @@ not told by the sync. So the write itself says it:
 `networks: read` on the networks that carry the space; any other caller gets `keys`, `memberCount` and no names. The
 write is applied regardless. Upgrade every instance of the network ([Upgrading](02b-upgrading.md)).
 
+### RDF names: `meta.rdf` and `iri`
+
+A space can give its records and its schema terms web addresses (IRIs) for an RDF export. It is off until switched on:
+a space with no `meta.rdf`, or with `enabled: false`, names nothing and behaves as before.
+
+```http
+PATCH /api/spaces/:id
+Authorization: Bearer <token with schema:admin on the space>
+
+{ "meta": { "rdf": { "enabled": true } } }
+```
+
+| field | meaning |
+|---|---|
+| `enabled` | switch the space's names on or off; off keeps the base for when it is switched on again |
+| `base` | every record's address is `<base><kind>/<id>`; an absolute IRI ending in `/` with no `#` |
+| `vocab` | the namespace of the space's own type and property names; `<base>vocab/` when absent; it moves only with the base |
+| `baseEpoch` | how many times the base was changed; a door keeps its own count and ignores a sent one |
+| `rebase` | `true` to change the base on purpose; never stored |
+
+The base is set once. The first enable takes the base you send, or `<public URL>/ld/<space id>/` from the instance's
+`publicUrl` (or `PUBLIC_BASE_URL`). With neither it answers `400 rdf_base_needed`. A write that leaves a field out keeps
+the stored value. A different `base` or `vocab` answers `409 rdf_base_frozen`, naming both. To change the base, send the
+new one with `rebase: true`:
+
+- on a space in no network, the base changes at once and `baseEpoch` goes up by one;
+- on a space in a network, the write opens a `space_rebase` vote on every network carrying the space and answers
+  `202 vote_pending`; nothing changes until the vote's deadline ([Networks: the rebase vote](08-networks-api.md#the-rebase-vote-space_rebase)).
+  Send `rdf` alone in such a write (`400 rdf_rebase_alone` otherwise).
+
+Changing the base changes every address the space has given out. A settings vote, a network's layer and a precedence
+swap never change it. `rdf` is the space's own setting and is refused with `targetNetwork` (`400 rdf_not_a_layer_field`).
+
+A type and a property may name their own address with `iri`, for instance `https://schema.org/Person` and
+`https://schema.org/email`. Without one, the vocab names them: `<vocab><kind>/<type>` and `<vocab><kind>/<type>/<property>`,
+each name percent-encoded where IRI syntax needs it. `iri` is part of the schema, so changing it changes the schema
+fingerprint, and a schema-version diff shows it as a change of shape.
+
+On a space with RDF on, a write that leaves two terms with one address answers `422 rdf_term_clash`, naming both: two
+types with one `iri`, a type and a property with one, two properties with one and different declared types (agreeing
+types may share one), an `iri` under the space's own vocab, or an `iri` the export writes on its own account (such as
+`rdfs:label` or `dcterms:created`). MCP `schema_update` takes `rdf` with the same rules and refusals; the refusal's
+`code` is in its structured content.
+
 ### Schema versions
 
 ```http
