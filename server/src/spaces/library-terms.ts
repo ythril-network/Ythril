@@ -8,7 +8,8 @@
  * definition a `$ref` round trip shows, what a peer is sent and the schema fingerprint would all lack it, and two readers of one space would
  * disagree on a term's address. So the address is put INTO the entry here, once, and the library is installed through this module
  * (`library-ref-expansion.ts`, `schema-validation.ts`): every reader sees the same effective entry, and a namespace change changes the
- * fingerprint of every space linking the group, as a library edit does.
+ * fingerprint of every space with RDF ON linking the group, as a library edit does. A space with RDF off names nothing: what it sends its
+ * peers and fingerprints is resolved from the entries as stored (`inlineResolvableRefs`, review finding 5), so RDF stays inert when off.
  *
  * ## The rules, inside
  *

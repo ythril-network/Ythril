@@ -17,7 +17,7 @@ import { sendCaughtFailure } from '../send-failure.js';
 import { requireNetworkStanding } from '../../auth/network-standing.js';
 import { memberView } from '../../networks/member-view.js';
 import { castReplaces } from '../../sync/served-rounds.js';
-import { servedRdfBasesOf } from '../../spaces/rdf-settle.js';
+import { roundSpaceRdf, servedRdfBasesOf } from '../../spaces/rdf-settle.js';
 
 export const syncVotesRouter = Router();
 
@@ -45,7 +45,7 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, re
       .map(r => {
         // Strip sensitive key material before sending to a peer instance
         // This instance's own state never leaves (S-7, S-9).
-        const { inviteKeyHash: _ikh, ...safeRound } = roundForPeer(r);
+        const { inviteKeyHash: _ikh, ...safeRound } = roundForPeer(r, roundSpaceRdf(net, cfg.spaces, r));
         if (safeRound.pendingMember) safeRound.pendingMember = memberView(safeRound.pendingMember, 'pending') as unknown as typeof safeRound.pendingMember;
         return safeRound;
       });

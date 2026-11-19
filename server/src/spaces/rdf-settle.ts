@@ -99,6 +99,15 @@ export function rebaseRoundSpaceOf(net: Pick<NetworkConfig, 'spaces' | 'spaceMap
 }
 
 /**
+ * The RDF setting of the local space a round of `net` is about (the round names it by the NETWORK's id), or `undefined`: what decides whether
+ * a group namespace names the terms the round carries to a peer (`roundForPeer`, review finding 5).
+ */
+export function roundSpaceRdf(net: Pick<NetworkConfig, 'spaces' | 'spaceMap'>, spaces: readonly SpaceConfig[], round: Pick<VoteRound, 'spaceId'>): RdfSetting | undefined {
+  const local = rebaseRoundSpaceOf(net, round);
+  return local === undefined ? undefined : spaces.find(s => s.id === local)?.meta?.rdf;
+}
+
+/**
  * The epochs of the passed rebase rounds held for `localSpaceId` and not yet applied here ({@link RdfSettleContext.heldRebaseEpochs}): a layer
  * that already carries one of them is early, not a conflict. Read from the networks handed in, nothing else.
  */
