@@ -314,6 +314,24 @@ describe('the classifier finds a race timer that is left running, in every spell
     { name: 'the shared elapse held in a local promise the race names',
       text: src("import { elapse } from '../_shared/sleep.mjs';", 'async function a(p) {', "  const late = elapse(5, 'race timeout: a b');",
         '  await Promise.race([p, late]);', '}'), line: 3 },
+    { name: 'a timer made by a same-file arrow helper called inside the race',
+      text: src("const late = (ms) => new Promise(r => setTimeout(() => r('hung'), ms));", 'async function a(work) {',
+        '  await Promise.race([work(), late(20_000)]);', '}'), line: 1 },
+    { name: 'a timer made by a same-file function declaration called inside the race',
+      text: src('function late(ms) {', "  return new Promise((_, rej) => setTimeout(() => rej(new Error('late')), ms));", '}', 'async function a(work) {',
+        '  await Promise.race([work(), late(20_000)]);', '}'), line: 2 },
+    { name: 'a helper called inside the race through a then',
+      text: src('const late = (ms) => new Promise(r => setTimeout(r, ms));', 'async function a(work) {',
+        "  await Promise.race([work(), late(5).then(() => 'hung')]);", '}'), line: 1 },
+    { name: 'a helper that calls another helper that holds the timer',
+      text: src('const tick = (ms) => new Promise(r => setTimeout(r, ms));', 'const late = (ms) => tick(ms);', 'async function a(work) {',
+        '  await Promise.race([work(), late(5)]);', '}'), line: 1 },
+    { name: 'a helper that calls itself, its timer found once and the walk ending',
+      text: src('const late = (ms, n) => (n > 0 ? late(ms, n - 1) : new Promise(r => setTimeout(r, ms)));', 'async function a(work) {',
+        '  await Promise.race([work(), late(5, 3)]);', '}'), line: 1 },
+    { name: 'a helper called in a local promise the race names',
+      text: src('const late = (ms) => new Promise(r => setTimeout(r, ms));', 'async function a(work) {', '  const hung = late(5);',
+        '  await Promise.race([work(), hung]);', '}'), line: 1 },
     { name: 'a timers/promises timer in a race, named import',
       text: src("import { setTimeout } from 'node:timers/promises';", 'async function a(p) { await Promise.race([p, setTimeout(50)]); }'), line: 2 },
     { name: 'a timers/promises timer in a race, member of a namespace, with options that cancel nothing',
@@ -349,6 +367,19 @@ describe('the classifier finds a race timer that is left running, in every spell
       '  try { await Promise.race([work(), new Promise(r => { timer = setTimeout(r, 5); })]); } finally { clock.clearTimeout(timer); }', '}'),
     'a bounded look through settleWithin, with no timer written': src(
       "import { settleWithin } from './_write-faults.mjs';", 'async function a(run) { const r = await settleWithin(run, 20_000); return r.settled; }'),
+    'a same-file helper whose timer is unref()ed': src(
+      'const late = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error("late")), ms).unref());',
+      'async function a(work) { await Promise.race([work(), late(5)]); }'),
+    'a same-file helper that clears its own timer': src(
+      'function late(work, ms) {', '  let timer;', '  const cut = new Promise(r => { timer = setTimeout(r, ms); });',
+      '  return Promise.race([work, cut]).finally(() => clearTimeout(timer));', '}',
+      'async function a(x, y) { await Promise.race([x(), late(y, 5)]); }'),
+    'a same-file helper with a timer, called outside any race': src(
+      'const late = (ms) => new Promise(r => setTimeout(r, ms));', 'async function a(work) { await work(); await late(5); }'),
+    'a same-file helper with no timer, called inside a race': src(
+      'const quick = (x) => Promise.resolve(x);', 'async function a(work) { await Promise.race([work(), quick(1)]); }'),
+    'a call of a function that is not in this file': src(
+      "import { late } from './_helpers.mjs';", 'async function a(work) { await Promise.race([work(), late(5)]); }'),
     'a race with no timer in it': src('async function a(x, y) { return Promise.race([x(), y()]); }'),
     'a timer outside any race': src('const t = setTimeout(() => finish(), 100);', 'clearTimeout(t);', 'setTimeout(() => done(), 5);'),
     'a race with the shared raceDeadline, which clears its own timer': src(
@@ -770,6 +801,20 @@ describe('raceDeadline answers a race against a deadline and leaves no timer run
       assert.equal(timers(), before);
     });
   }
+
+  for (const [name, bad] of [['NaN', NaN], ['Infinity', Infinity], ['a negative number', -1], ['a string', '10'], ['undefined', undefined]]) {
+    it(`a deadline of ${name} throws synchronously, before any timer is armed`, () => {
+      const before = timers();
+      let returned;
+      assert.throws(() => { returned = raceDeadline(never(), bad, reason, () => 'late'); }, /ms must be/);
+      assert.equal(returned, undefined);
+      assert.equal(timers(), before);
+    });
+  }
+
+  it('a deadline of 0 is a deadline: onLate answers once the timer fires', async () => {
+    assert.equal(await raceDeadline(never(), 0, reason, () => 'at once'), 'at once');
+  });
 
   it('an onLate that is not a function throws synchronously: a deadline with no answer would pass for the wrong reason', () => {
     assert.throws(() => raceDeadline(never(), 5, reason, undefined), /onLate/);

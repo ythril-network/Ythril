@@ -83,8 +83,9 @@ export function elapse(ms, reason) {
  * for the rest of `ms` after the last test has ended, so the file takes that long longer than its tests (`a-test-waits-and-listens-
  * through-one-helper` refuses that spelling, for `elapse` and for `node:timers/promises` alike). Here the timer is held in the one
  * place that can clear it, so no caller can forget to. Its reason is read as `elapse` reads one, and must name the kind
- * `race timeout`, so the deadline says what it bounds. A refused reason and an `onLate` that is no function throw before any
- * timer is armed: a deadline that answers nothing would pass for the wrong reason.
+ * `race timeout`, so the deadline says what it bounds. A refused reason, an `ms` that is not a finite number of at least
+ * 0 (NaN would be armed as 1 ms, Infinity never) and an `onLate` that is no function throw before any timer is armed: a deadline that
+ * answers nothing would pass for the wrong reason.
  *
  * `work` is awaited as a promise (`Promise.resolve`); a rejection of it rejects here, and an `onLate` that throws rejects here.
  * Once the deadline has answered, `work` settling later changes nothing.
@@ -99,6 +100,7 @@ export function elapse(ms, reason) {
 export function raceDeadline(work, ms, reason, onLate) {
   const problem = reasonProblem(reason, RACE_DEADLINE_KIND);
   if (problem) throw new TypeError(`raceDeadline(${ms}): ${problem}`);
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) throw new TypeError(`raceDeadline: ms must be a finite number of at least 0, got ${String(ms)}: a deadline that is not one would be armed as 1 ms or never`);
   if (typeof onLate !== 'function') throw new TypeError(`raceDeadline(${ms}): onLate must be a function: it answers, or throws, when the deadline passes first`);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {

@@ -550,37 +550,45 @@ export function uncancelledRaceTimers(text, file = 'snippet.js') {
     ts.forEachChild(n, index);
   };
   index(sf);
+  const locals = localFunctions(sf);
   const seen = new Set();
+  const resolved = new Set();
   const out = [];
+  // Looks at `node` for a timer the race holds. A call of a function this file defines is looked into as well: its body makes the
+  // promise the race holds (once each, so a helper that calls itself ends the walk). `scope` is where a handle's clear is looked for.
+  const look = (node, scope, raceScope) => {
+    const visit = (n) => {
+      if (ts.isCallExpression(n) && armsGlobalTimer(n, bound) && !seen.has(n)) {
+        seen.add(n);
+        const unrefed = ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n && n.parent.name.text === 'unref';
+        const handle = handleNameOf(n);
+        const cleared = handle !== null && (clearsTimerHeldIn(scope, handle) || clearsTimerHeldIn(raceScope, handle));
+        if (!unrefed && !cleared) out.push(finding(sf, file, n, 'race-timer', null));
+      } else if (ts.isCallExpression(n) && callsElapse(n, bound) && !seen.has(n)) {
+        // `elapse` has no handle: its timer cannot be cleared, so a race against it is `raceDeadline`'s to make.
+        seen.add(n);
+        out.push(finding(sf, file, n, 'race-elapse', null));
+      } else if (ts.isCallExpression(n) && callsTimersPromises(n, bound) && !seen.has(n) && !cancellableTimersPromises(n)) {
+        seen.add(n);
+        out.push(finding(sf, file, n, 'race-timers-promises', null));
+      } else if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && locals.has(n.expression.text) && !resolved.has(locals.get(n.expression.text))) {
+        const fn = locals.get(n.expression.text);
+        resolved.add(fn);
+        look(fn, fn, raceScope);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(node);
+  };
   for (const race of raceCalls(sf)) {
-    const roots = [];
+    const raceScope = scopeOf(race, sf);
     for (const arg of race.arguments) {
-      roots.push({ node: arg, scope: scopeOf(race, sf) });
+      look(arg, raceScope, raceScope);
       const members = ts.isArrayLiteralExpression(arg) ? arg.elements : [arg];
       for (const m of members) {
         const decl = ts.isIdentifier(m) ? declared.get(m.text) : null;
-        if (decl) roots.push({ node: decl.initializer, scope: scopeOf(decl, sf) });
+        if (decl) look(decl.initializer, scopeOf(decl, sf), raceScope);
       }
-    }
-    for (const { node, scope } of roots) {
-      const visit = (n) => {
-        if (ts.isCallExpression(n) && armsGlobalTimer(n, bound) && !seen.has(n)) {
-          seen.add(n);
-          const unrefed = ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n && n.parent.name.text === 'unref';
-          const handle = handleNameOf(n);
-          const cleared = handle !== null && (clearsTimerHeldIn(scope, handle) || clearsTimerHeldIn(scopeOf(race, sf), handle));
-          if (!unrefed && !cleared) out.push(finding(sf, file, n, 'race-timer', null));
-        } else if (ts.isCallExpression(n) && callsElapse(n, bound) && !seen.has(n)) {
-          // `elapse` has no handle: its timer cannot be cleared, so a race against it is `raceDeadline`'s to make.
-          seen.add(n);
-          out.push(finding(sf, file, n, 'race-elapse', null));
-        } else if (ts.isCallExpression(n) && callsTimersPromises(n, bound) && !seen.has(n) && !cancellableTimersPromises(n)) {
-          seen.add(n);
-          out.push(finding(sf, file, n, 'race-timers-promises', null));
-        }
-        ts.forEachChild(n, visit);
-      };
-      visit(node);
     }
   }
   return out.sort((a, b) => a.line - b.line);
