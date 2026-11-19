@@ -29,6 +29,7 @@ import { OverviewDataService } from './overview-data.service';
 import { SpaceSettingsPopupComponent } from '../settings/space-settings-popup.component';
 import { SpacesStore } from '../settings/spaces-store.service';
 import { SpaceSettingsState } from '../settings/space-settings-state.service';
+import { brainSchemaLinks } from './brain-schema-links';
 import { BrainApi } from '../../core/brain-api.service';
 import { UnsavedEdits, holdUnsavedEdits } from '../../core/unsaved-edits';
 import { AdminApi } from '../../core/admin-api.service';
@@ -269,7 +270,7 @@ interface SpaceView {
              other whole-space views rather than after Files — it is a workflow, not a record collection. -->
         @if (!isView()) {
           <button class="tab" type="button" role="tab" [class.active]="activeTab() === 'review'" [attr.aria-selected]="activeTab() === 'review'" (click)="setTab('review')">
-            <ph-icon name="copy" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.tab.review' | transloco }}
+            <ph-icon name="copy" [size]="15" style="display:inline-flex;vertical-align:middle;margin-right:4px;"/> {{ 'brain.tab.review' | transloco }}@if (links.unconvertedOpen(); as n) {<span class="tab-count" data-testid="review-unconverted-open" [attr.title]="n | plural:'brain.tab.reviewUnconverted'">{{ n }}</span>}
           </button>
         }
         <span class="tab-spacer"></span>
@@ -375,7 +376,7 @@ interface SpaceView {
               [openVotes]="ov.overviewVotes()" [tokenAccess]="ov.tokenAccess()" [completeness]="ov.completeness()" [activity]="ov.spaceActivity()"
               [pending]="ov.overviewPending()"
               (reindex)="runReindex()" (retryFailed)="runRetryFailedEmbeddings()"
-              (openTab)="setTab($event)"
+              (openTab)="setTab($event)" [canEditSchema]="links.canEditSchema()" (editSchemaType)="links.editType(sp, $event)"
               [resettingUsage]="ov.resettingUsage()" [usageResetResult]="ov.usageResetResult()"
               (resetUsage)="resetSpaceUsage()" />
           }
@@ -477,6 +478,8 @@ export class BrainComponent implements OnInit, OnDestroy {
   private readonly viewsStore = inject(ViewsStore);
   /** THE flag: the open id is one of the caller's personal views. Every write control on the page asks it (a view never writes). */
   readonly isView = computed(() => this.viewsStore.isView(this.activeSpaceId()));
+  /** What this page does with the schema and the conversion: the settings pop-up on a space or a type, the Review tab's count, the data model's pencil. */
+  readonly links = brainSchemaLinks(this.spaceSettings, this.activeSpaceId, this.isView);
   /** The open view with what it reads now, or undefined while a space is open. */
   readonly activeView = computed(() => this.viewsStore.byId(this.activeSpaceId()));
   /** The spaces the caller reads, as the create dialog's member picker offers them (a view is never a member). */
@@ -496,10 +499,7 @@ export class BrainComponent implements OnInit, OnDestroy {
    * the admin table, and coming back — three navigations to change the label of a space that was already
    * on screen.
    */
-  openSpaceSettings(): void {
-    const space = this.activeSpace();
-    if (space) this.spaceSettings.openSettings(space);
-  }
+  openSpaceSettings(): void { this.links.openSettings(this.activeSpace()); }
 
   /**
    * Patch the one row this page renders from, after a save the dialog APPLIED.
@@ -507,10 +507,11 @@ export class BrainComponent implements OnInit, OnDestroy {
    * The dialog patches `SpacesStore`, but that instance is provided per host — the one here is empty and
    * nothing reads it. Refetching the list instead would also discard the per-space stats hanging off each
    * row, which cost one request each. So the record is merged in place and the stats are left alone: a
-   * label or quota edit does not change any count.
+   * label or quota edit does not change any count. The Review tab's count of unconverted records is read again, because a
+   * save that converted records has started a run (the second statement; it shares the line to keep this frozen file's size).
    */
   onSpaceSaved(space: Space): void {
-    this.spaces.update(list => list.map(sv => sv.space.id === space.id ? { ...sv, space } : sv));
+    this.spaces.update(list => list.map(sv => sv.space.id === space.id ? { ...sv, space } : sv)); this.links.refresh();
   }
 
   /** The chip's record count and network tooltip are `space-chip.ts`'s. */
