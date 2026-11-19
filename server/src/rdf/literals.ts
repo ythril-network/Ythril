@@ -137,8 +137,11 @@ export function literalForInteger(n: number): LiteralTerm | null {
 /** An `xsd:boolean` literal. */
 export const literalForBoolean = (b: boolean): LiteralTerm => typed(b ? 'true' : 'false', xsd('boolean'));
 
-/** Why a value was left out: it is no plain value (a list, an object), or it does not fit the type its property declares (or is no decimal). */
-export type LeftOutReason = 'not-a-plain-value' | 'does-not-fit-its-declared-type';
+/**
+ * Why a value was left out: it is no plain value (a list, an object), it does not fit the type its property declares (or is no decimal), or
+ * its property key is empty, and an empty name has no address (only a direct database write can leave one).
+ */
+export type LeftOutReason = 'not-a-plain-value' | 'does-not-fit-its-declared-type' | 'key-has-no-address';
 
 /** What a stored property value becomes. */
 export type ValueOutcome =

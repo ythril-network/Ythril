@@ -5,20 +5,24 @@
  *
  * A second builder. The record mapper, the schema export and the export doors (slices B to D) all need names; one that wrote
  * `base + 'entity/' + id` would break on the first id holding a space, a `/` or a `>`, and two builders would give one record two addresses.
- * So this module is the ONLY one that joins a base or a vocab to a segment, and it encodes every segment through the schema package's
- * one encoder (`iriSegment`). `a-term-iri-is-one-rule-for-every-type-and-property.test.js` refuses any other module that does either.
+ * So this module is the ONLY one that joins a base or a vocab to a name, and it encodes every name through the schema package's two
+ * encoders (`iriSegment` for a path segment, `iriFragment` for a fragment). `a-term-iri-is-one-rule-for-every-type-and-property.test.js`
+ * refuses any other module that does either.
  *
  * ## The rules, inside, so no caller can drop them
  *
  * - **RDF is off until switched on.** Every function throws {@link RdfNotEnabled} for a meta with no `rdf`, `enabled: false` or no base:
  *   nothing is named for a space that did not ask to be.
- * - **An explicit `iri` wins** (a type's or a property's), else `<vocab><kind>/<seg(type)>[/<seg(prop)>]`. An untyped entity is the class
- *   `ythril:Untyped` and its properties sit under the empty type segment (`entity/%00/`); a file has no type: `<vocab>file/<seg(prop)>`.
+ * - **An explicit `iri` wins** (a type's or a property's), else the W3C Direct Mapping's shape (owner, 2026-11-19): a type is the document
+ *   `<vocab><kind>/<seg(type)>` and its property the fragment `<vocab><kind>/<seg(type)>#<frag(prop)>`. An untyped entity is the class
+ *   `ythril:Untyped` and its properties are fragments of the kind's own document (`<vocab>entity#<frag(prop)>`); a file has no type:
+ *   `<vocab>file#<frag(prop)>`. A library group's namespace names a type `<ns><seg(type)>` and its property `<ns><seg(type)>#<frag(prop)>`;
+ *   a shape is `<base>schema/shape/<kind>/<seg(type)>[#<frag(prop)>]`. An empty name has no address: the encoders throw.
  * - The meta handed in is the RESOLVED one (library `$ref`s inlined), as the fingerprint reads it, so an entry's `iri` is seen.
  *
  * Pure: it reads only what it is handed.
  */
-import { iriSegment, type KnowledgeType, type SpaceMeta } from '@ythril-network/schema';
+import { KNOWLEDGE_TYPES, RESERVED_PREFIXES, iriFragment, iriSegment, type KnowledgeType, type SpaceMeta } from '@ythril-network/schema';
 import { RDF_RESERVED_PREDICATES, STANDARD_PREFIXES, YTHRIL_NS } from './ythril-vocabulary.js';
 
 /** Thrown when a space has RDF off: nothing of it may be named. `code` is the refusal every RDF door answers with (409). */
@@ -69,22 +73,36 @@ function typeDefOf(meta: SpaceMeta, kind: string, type: string): TypeDef | undef
 export function resolveTermIri(meta: SpaceMeta, kind: TermKind, type: string | null, prop?: string): string {
   const { vocab } = namesOf(meta);
   const def = kind !== 'file' && type !== null ? typeDefOf(meta, kind, type) : undefined;
+  const document = kind === 'file' || type === null ? vocab.concat(kind) : [vocab.concat(kind), iriSegment(type)].join('/');
   if (prop === undefined) {
     if (typeof def?.iri === 'string') return def.iri;
     if (type === null) return YTHRIL_NS.concat('Untyped');
-    return [vocab.concat(kind), iriSegment(type)].join('/');
+    return document;
   }
   const own = def?.propertySchemas && Object.hasOwn(def.propertySchemas, prop) ? def.propertySchemas[prop] : undefined;
   if (typeof own?.iri === 'string') return own.iri;
-  if (kind === 'file') return [vocab.concat('file'), iriSegment(prop)].join('/');
-  return [vocab.concat(kind), iriSegment(type ?? ''), iriSegment(prop)].join('/');
+  return [document, iriFragment(prop)].join('#');
 }
 
-/** A record's address: `<base><kind>/<seg(id)>`; a file's path is encoded segment by segment and joined by `/`. */
+/** A record's address: `<base><kind>/<seg(id)>`; a file's path is encoded segment by segment and joined by `/`. Throws for an id {@link recordAddressable} refuses. */
 export function recordIri(meta: SpaceMeta, kind: RecordKind, id: string): string {
   const { base } = namesOf(meta);
   const tail = kind === 'file' ? id.split('/').map(iriSegment).join('/') : iriSegment(id);
   return [base.concat(kind), tail].join('/');
+}
+
+/**
+ * Can a record of `kind` with `id` be given an address? Not when the id is empty, nor a file path with an empty segment (`a//b`, a leading or
+ * trailing `/`): an empty name has no address. The record mapper asks this before {@link recordIri}, so a stored value never makes it throw.
+ */
+export function recordAddressable(kind: RecordKind, id: string): boolean {
+  return kind === 'file' ? id.split('/').every(s => s !== '') : id !== '';
+}
+
+/** The SHACL shape of a type (no `prop`) or of a property of it: `<base>schema/shape/<kind>/<seg(type)>[#<frag(prop)>]`. */
+export function shapeIri(meta: SpaceMeta, kind: KnowledgeType, type: string, prop?: string): string {
+  const node = [ontologyIri(meta).concat('/shape/', kind), iriSegment(type)].join('/');
+  return prop === undefined ? node : [node, iriFragment(prop)].join('#');
 }
 
 /** The address of the instance that wrote a record: `<base>agent/<seg(instanceId)>`. */
@@ -108,30 +126,79 @@ export function versionIri(meta: SpaceMeta, fingerprint: string): string {
 }
 
 /**
- * The address a schema-library group's namespace gives one of its entries' terms (design r4 §4.2): `<ns><kind>/<seg(type)>`, and
- * `/<seg(prop)>` for a property. Needs no space: the namespace is the instance's, so every space linking the entry names it alike.
+ * The address a schema-library group's namespace gives one of its entries' terms (design r4 §4.2, in the Direct Mapping's shape): the type
+ * `<ns><seg(type)>`, a property `<ns><seg(type)>#<frag(prop)>`. Needs no space: the namespace is the instance's, so every space linking the
+ * entry names it alike. The kind is not part of it, as in any published vocabulary (`ex:Person`, `ex:knows`): an entity and an edge type
+ * of one name in one group share an address, which the term-clash rule refuses in a space that links both.
  */
-export function libraryTermIri(namespace: string, kind: KnowledgeType, type: string, prop?: string): string {
-  const typeIri = [namespace.concat(kind), iriSegment(type)].join('/');
-  return prop === undefined ? typeIri : [typeIri, iriSegment(prop)].join('/');
+export function libraryTermIri(namespace: string, type: string, prop?: string): string {
+  const typeIri = namespace.concat(iriSegment(type));
+  return prop === undefined ? typeIri : [typeIri, iriFragment(prop)].join('#');
+}
+
+const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+/** The longest start of a type-named prefix: room for `-<kind>-<n>` within the 50 characters a prefix may have (`PrefixZ`). */
+const PREFIX_STEM_MAX = 36;
+const FIRST_NUMBERED_PREFIX = 2;
+
+/**
+ * The prefix name a type's property document gets (`person:` for `.../Person#`): the type's name, every character a prefix cannot hold an
+ * `_`, its first letter lower-case, `t-` before it when it does not start with a letter; if that name is taken, `<name>-<kind>`, then
+ * `<name>-<kind>-2`, `-3`, ... A name is taken when it is a standard, reserved or already-declared prefix.
+ */
+function typePrefixName(type: string, kind: string, taken: ReadonlySet<string>): string {
+  let stem = type.replace(/[^A-Za-z0-9_-]/g, '_');
+  stem = stem.charAt(0).toLowerCase().concat(stem.slice(1));
+  if (!/^[A-Za-z]/.test(stem)) stem = 't-'.concat(stem);
+  stem = stem.slice(0, PREFIX_STEM_MAX);
+  if (!taken.has(stem)) return stem;
+  const withKind = `${stem}-${kind}`;
+  let name = withKind;
+  for (let n = FIRST_NUMBERED_PREFIX; taken.has(name); n++) name = `${withKind}-${n}`;
+  return name;
 }
 
 /**
- * The prefixes a writer declares for a space: the standard ones, the space's own `vocab`, and the prefix of each library group namespace one
- * of the space's resolved terms lies under (`namespaces`, the instance's `schemaLibraryNamespaces` values).
+ * The prefixes a writer declares for a space, so its own terms read as prefixed names: the standard ones; the space's own `vocab`; a prefix
+ * per kind whose types the vocab names (`entity:` for `<vocab>entity/`, so `entity:Person`); the prefix of each library group namespace one
+ * of the space's resolved terms lies under (`namespaces`, the instance's `schemaLibraryNamespaces` values); and a prefix per type whose
+ * properties are fragments of a document the space owns (`person:` for `<vocab>entity/Person#`, so `person:name`), named by
+ * {@link typePrefixName}. Types are visited kind by kind (`KNOWLEDGE_TYPES`), then by name in code-unit order, so one schema gives the same
+ * prefixes on every member whatever order its keys were written in.
  */
 export function prefixesFor(meta: SpaceMeta, namespaces: readonly { prefix: string; iri: string }[] = []): Record<string, string> {
-  const out: Record<string, string> = { ...STANDARD_PREFIXES, vocab: namesOf(meta).vocab };
-  if (namespaces.length === 0) return out;
+  const { vocab } = namesOf(meta);
+  const out: Record<string, string> = { ...STANDARD_PREFIXES, vocab };
+  const kinds = (meta.typeSchemas ?? {}) as Record<string, Record<string, unknown> | undefined>;
   const used: string[] = [];
-  for (const [kind, map] of Object.entries((meta.typeSchemas ?? {}) as Record<string, Record<string, unknown> | undefined>)) {
-    for (const [type, raw] of Object.entries(map ?? {})) {
+  const documents: { document: string; kind: string; type: string }[] = [];
+  for (const kind of KNOWLEDGE_TYPES) {
+    const map = Object.hasOwn(kinds, kind) ? kinds[kind] ?? {} : {};
+    for (const type of Object.keys(map).sort(byCode)) {
+      const raw = map[type];
       const def = raw && typeof raw === 'object' ? raw as TypeDef : {};
-      used.push(resolveTermIri(meta, kind as KnowledgeType, type));
-      for (const prop of Object.keys(def.propertySchemas ?? {})) used.push(resolveTermIri(meta, kind as KnowledgeType, type, prop));
+      const typeIri = resolveTermIri(meta, kind, type);
+      used.push(typeIri);
+      if (typeIri.startsWith(vocab.concat(kind, '/')) && !Object.hasOwn(out, kind)) out[kind] = vocab.concat(kind, '/');
+      for (const prop of Object.keys(def.propertySchemas ?? {}).sort(byCode)) {
+        const propIri = resolveTermIri(meta, kind, type, prop);
+        used.push(propIri);
+        const hash = propIri.indexOf('#');
+        if (hash > 0) documents.push({ document: propIri.slice(0, hash + 1), kind, type });
+      }
     }
   }
   for (const ns of namespaces) if (!Object.hasOwn(out, ns.prefix) && used.some(iri => iri.startsWith(ns.iri))) out[ns.prefix] = ns.iri;
+  const owned = [vocab, ...namespaces.map(ns => ns.iri)];
+  const taken = new Set([...Object.keys(out), ...RESERVED_PREFIXES]);
+  const declared = new Set(Object.values(out));
+  for (const { document, kind, type } of documents) {
+    if (declared.has(document) || !owned.some(ns => document.startsWith(ns))) continue;
+    const name = typePrefixName(type, kind, taken);
+    out[name] = document;
+    taken.add(name);
+    declared.add(document);
+  }
   return out;
 }
 

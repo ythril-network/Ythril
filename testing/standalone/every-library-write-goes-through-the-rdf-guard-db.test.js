@@ -50,13 +50,13 @@ describe('every library write goes through the RDF guard', { skip }, () => {
   it('export-space: a rename of a linked entry is refused 409 rdf_term_rename, and the cached library is untouched', async () => {
     inst.reset();
     const before = inst.heldEntries();
-    assert.equal(personIri(), `${NS}entity/person`);
+    assert.equal(personIri(), `${NS}person`);
     // The export's entry name lands on the linked entry and moves it to another group, so its namespace no longer names it.
     const answer = await inst.library.exportSpace({ spaceId: 'source', groupName: 'other', namePrefix: 'acme' });
     assert.equal(answer.status, 409, `the export renamed a linked RDF term unrefused: ${answer.text.slice(0, 300)}`);
     assert.match(answer.text, /rdf_term_rename/);
     assert.deepEqual(inst.heldEntries(), before, 'a refused export stayed live in the cached library');
-    assert.equal(personIri(), `${NS}entity/person`, 'a refused export moved a term address');
+    assert.equal(personIri(), `${NS}person`, 'a refused export moved a term address');
   });
 
   // Review finding 9: the term-clash rule ran on PATCH and on the library's entry writes only; a space created with a clash, or a group
@@ -86,7 +86,7 @@ describe('every library write goes through the RDF guard', { skip }, () => {
     assert.equal((await apply('inline', { rebase: true })).status, 200);
     // An own type already named by the address the group's entry takes.
     cfg.spaces.push({ id: 'taken', label: 'Taken', folders: [], meta: { rdf: { ...RDF, base: 'https://ythril.example.org/ld/taken/', vocab: 'https://ythril.example.org/ld/taken/vocab/' },
-      typeSchemas: { entity: { human: { iri: `${NS}entity/person` } } } } });
+      typeSchemas: { entity: { human: { iri: `${NS}person` } } } } });
     const clash = await apply('taken', { rebase: true });
     assert.equal(clash.status, 409, `a group apply stored a clash: ${clash.text.slice(0, 300)}`);
     assert.match(clash.text, /rdf_term_clash/);

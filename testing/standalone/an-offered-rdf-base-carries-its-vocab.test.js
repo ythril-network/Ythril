@@ -19,7 +19,7 @@ const settle = await import('../../server/dist/spaces/rdf-settle.js');
 
 const OLD = { enabled: true, base: 'https://old.example.org/ld/notes/', vocab: 'https://old.example.org/ld/notes/vocab/', baseEpoch: 0 };
 const NEW_BASE = 'https://new.example.org/ld/notes/';
-const CUSTOM = 'https://v.example/terms#';
+const CUSTOM = 'https://v.example/terms/';
 const net = (over = {}) => ({ id: 'net-1', type: 'closed', spaces: ['notes'], members: [{ instanceId: 'p1' }], pendingRounds: [], ...over });
 const spaces = (rdf = OLD) => [{ id: 'notes', label: 'Notes', meta: { rdf } }];
 

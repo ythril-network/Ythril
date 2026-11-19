@@ -33,7 +33,7 @@
  * An edge type is a PROPERTY, never a class: its node shape targets the subjects of the label, its endpoints are `sh:or` of `sh:class` (the
  * subject side on the node shape, the object side on a property shape of the label), a functional label is `sh:maxCount 1`, and the plain
  * properties of an edge have shapes of their own aimed at the reifier (`sh:targetSubjectsOf` the property): a required one has no Core target,
- * so it is `ythril:requiredEdgeProperty` on the node shape. Shape addresses are `<base>schema/shape/<kind>/<seg(type)>[/<seg(prop)>]`.
+ * so it is `ythril:requiredEdgeProperty` on the node shape. Shape addresses are `<base>schema/shape/<kind>/<seg(type)>[#<frag(prop)>]`.
  *
  * Pure: it reads only what it is handed (the RESOLVED meta, `inlineResolvableRefs`, and the fingerprint of that schema). It sets no graph;
  * the stream names it. Quads are written by `serialize.ts`.
@@ -44,7 +44,7 @@ import {
   blank, iri, list, literalForBoolean, literalForInteger, literalForValue, plain, quad, stdIri, xsd,
   type BlankTerm, type DeclaredType, type IriTerm, type LeftOutReason, type LiteralTerm, type Quad, type Term,
 } from './literals.js';
-import { libraryTermIri, ontologyIri, prefixesFor, resolveTermIri, termOwnerName, versionIri } from './term-iri.js';
+import { ontologyIri, prefixesFor, resolveTermIri, shapeIri, termOwnerName, versionIri } from './term-iri.js';
 import { ythrilIri } from './ythril-vocabulary.js';
 
 /** A schema-library group's namespace, as the instance holds it (`schemaLibraryNamespaces`): the terms under it are the instance's own. */
@@ -235,10 +235,8 @@ class Out {
 /** Everything an export reads about the space: its names, its own terms, the shape addresses. */
 class Space {
   readonly vocab: string;
-  readonly shapeBase: string;
   constructor(readonly meta: SpaceMeta, readonly ontology: string, private readonly namespaces: readonly SchemaNamespace[]) {
     this.vocab = prefixesFor(meta, namespaces)['vocab']!;
-    this.shapeBase = `${ontology}/shape/`;
   }
 
   /** Is `address` the space's own: under its vocab or under an instance group namespace? */
@@ -249,13 +247,9 @@ class Space {
   term(kind: KnowledgeType, type: string, prop?: string): IriTerm {
     return iri(resolveTermIri(this.meta, kind, type, prop));
   }
-  /**
-   * The shape of a type or property: `<base>schema/shape/<kind>/<seg(type)>[/<seg(prop)>]`. The resolver (`term-iri.ts`) is the only module that
-   * encodes a segment, and its `libraryTermIri` builds exactly `<namespace><kind>/<seg(type)>[/<seg(prop)>]` for any namespace, so the shape
-   * space is handed to it as one.
-   */
+  /** The shape of a type or property: `<base>schema/shape/<kind>/<seg(type)>[#<frag(prop)>]`, from the resolver (`shapeIri`). */
   shape(kind: KnowledgeType, type: string, prop?: string): IriTerm {
-    return iri(libraryTermIri(this.shapeBase, kind, type, prop));
+    return iri(shapeIri(this.meta, kind, type, prop));
   }
 }
 

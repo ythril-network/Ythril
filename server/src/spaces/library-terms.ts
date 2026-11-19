@@ -3,7 +3,7 @@
  *
  * ## What it prevents
  *
- * A group namespace (`config.json` `schemaLibraryNamespaces`) names an entry's type `<ns><kind>/<seg(type)>` and its properties under it.
+ * A group namespace (`config.json` `schemaLibraryNamespaces`) names an entry's type `<ns><seg(type)>` and its properties as fragments of it.
  * If that address were computed where a term is NAMED (the export, slices B to D), the resolved meta a space validates against, the
  * definition a `$ref` round trip shows, what a peer is sent and the schema fingerprint would all lack it, and two readers of one space would
  * disagree on a term's address. So the address is put INTO the entry here, once, and the library is installed through this module
@@ -45,7 +45,7 @@ function unusableReason(ns: unknown): string | undefined {
   const n = ns as Partial<LibraryNamespace> | null;
   if (!n || typeof n !== 'object') return 'not an object';
   if (!PrefixZ.safeParse(n.prefix).success) return `the prefix ${peerText(String(n.prefix))} is not one a namespace may take`;
-  if (!NamespaceIriZ.safeParse(n.iri).success) return `${peerText(String(n.iri))} is not a namespace IRI (absolute, ending in "/" or "#")`;
+  if (!NamespaceIriZ.safeParse(n.iri).success) return `${peerText(String(n.iri))} is not a namespace IRI (absolute, ending in "/", holding no "#")`;
   return undefined;
 }
 
@@ -70,14 +70,13 @@ export function unusableNamespaces(): { group: string; reason: string }[] {
 
 /** `entry` with the addresses `namespace` gives it, where the entry sets none. A new object; the stored entry is untouched. */
 export function entryWithNamespace(entry: ParsedLibraryEntry, namespace: string): ParsedLibraryEntry {
-  const kind = entry.knowledgeType as KnowledgeType;
   const schema = entry.schema as ParsedLibraryEntry['schema'] & { iri?: string; propertySchemas?: Record<string, { iri?: string }> };
   const props = schema.propertySchemas
-    ? Object.fromEntries(Object.entries(schema.propertySchemas).map(([p, ps]) => [p, { ...ps, iri: ps.iri ?? libraryTermIri(namespace, kind, entry.typeName, p) }]))
+    ? Object.fromEntries(Object.entries(schema.propertySchemas).map(([p, ps]) => [p, { ...ps, iri: ps.iri ?? libraryTermIri(namespace, entry.typeName, p) }]))
     : undefined;
   return {
     ...entry,
-    schema: { ...schema, iri: schema.iri ?? libraryTermIri(namespace, kind, entry.typeName), ...(props ? { propertySchemas: props } : {}) } as ParsedLibraryEntry['schema'],
+    schema: { ...schema, iri: schema.iri ?? libraryTermIri(namespace, entry.typeName), ...(props ? { propertySchemas: props } : {}) } as ParsedLibraryEntry['schema'],
   };
 }
 

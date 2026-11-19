@@ -4,7 +4,8 @@
  *
  * - `PUT /api/schema-library/groups/:group/namespace` `{ prefix, iri, rebase? }` stores `{ prefix, iri }` in `config.json`
  *   (`schemaLibraryNamespaces`); `GET /groups` shows it; `DELETE …/namespace` removes it.
- * - An entry of the group is EFFECTIVE with `iri = <ns><kind>/<seg(type)>` and each property `<ns><kind>/<seg(type)>/<seg(prop)>`, unless
+ * - An entry of the group is EFFECTIVE with `iri = <ns><seg(type)>` and each property `<ns><seg(type)>#<frag(prop)>` (the Direct Mapping's
+ *   shape, slice S: no kind, as in any published vocabulary; an entity and an edge type of one name in one group clash), unless
  *   the entry sets one: the space's resolved meta carries it, so the one resolver names the term by it, the round trip of a `$ref` type keeps
  *   working, and the schema fingerprint of an RDF-enabled linking space changes with it. A linking space with RDF off is untouched: the
  *   same fingerprint and the same payload to its peers (RDF is inert when off).
@@ -29,7 +30,7 @@ const BASE = 'https://ythril.example.org/ld/linked/';
 const AUTH = { rights: { instanceAdmin: true, perSpace: {} } };
 const LIBRARY = [
   { name: 'acme-person', knowledgeType: 'entity', typeName: 'person', schemaGroup: 'acme', schema: { propertySchemas: { email: { type: 'string' }, 'nick name': { type: 'string' } } } },
-  { name: 'acme-knows', knowledgeType: 'edge', typeName: 'person', schemaGroup: 'acme', schema: {} },
+  { name: 'acme-knows', knowledgeType: 'edge', typeName: 'knows', schemaGroup: 'acme', schema: {} },
   { name: 'beta-thing', knowledgeType: 'entity', typeName: 'thing', schemaGroup: 'beta', schema: {} },
 ];
 const SPACES = [
@@ -73,13 +74,16 @@ describe('a library group namespace names its entries\' terms', { skip }, () => 
     assert.equal(none.code, 404, said(none));
   });
 
-  it('the group\'s entries carry iri = <ns><kind>/<type>[/<prop>], and the resolver names the terms by it', () => {
+  it('the group\'s entries carry iri = <ns><type>[#<prop>], and the resolver names the terms by it', () => {
     const meta = resolved('linked');
-    assert.equal(termIri.resolveTermIri(meta, 'entity', 'person'), `${NS}entity/person`);
-    assert.equal(termIri.resolveTermIri(meta, 'entity', 'person', 'nick name'), `${NS}entity/person/nick%20name`);
-    assert.equal(termIri.resolveTermIri(meta, 'edge', 'person'), `${NS}edge/person`, 'one type name in two kinds has two addresses');
+    assert.equal(termIri.resolveTermIri(meta, 'entity', 'person'), `${NS}person`);
+    assert.equal(termIri.resolveTermIri(meta, 'entity', 'person', 'nick name'), `${NS}person#nick%20name`);
+    assert.equal(termIri.resolveTermIri(meta, 'edge', 'person'), `${NS}knows`, 'the entry\'s own type name, not the space\'s key, names the term');
     const prefixes = termIri.prefixesFor(meta, Object.values(inst.loader.getConfig().schemaLibraryNamespaces));
     assert.equal(prefixes.acme, NS, 'a group prefix the space uses is declared');
+    assert.equal(prefixes.person, `${NS}person#`, 'the type\'s property document has a prefix of its own: person:email');
+    const sameName = { ...meta, typeSchemas: { entity: { a: { iri: `${NS}person` } }, edge: { b: { iri: `${NS}person` } } } };
+    assert.deepEqual(termIri.termClashes(sameName).map(c => c.reason), ['same-iri'], 'an entity and an edge type of one name in one group are refused, never merged');
   });
 
   it('the round trip of a $ref type still writes back', async () => {
@@ -104,7 +108,7 @@ describe('a library group namespace names its entries\' terms', { skip }, () => 
     assert.ok(!seen('plain').peer.includes(NS), 'a space with RDF off sent a namespace address to its peers');
     const linkedAfter = seen('linked');
     assert.notEqual(linkedAfter.fp, linkedBefore.fp, 'a namespace changes the schema of an RDF-enabled space linking its group');
-    assert.ok(linkedAfter.peer.includes(`${NS}entity/person`), 'an RDF-enabled space sends its namespace addresses to its peers');
+    assert.ok(linkedAfter.peer.includes(`${NS}person`), 'an RDF-enabled space sends its namespace addresses to its peers');
   });
 
   it('a prefix another group holds is 409; a reserved prefix and a bad IRI are 400', async () => {
@@ -148,7 +152,7 @@ describe('a library group namespace names its entries\' terms', { skip }, () => 
   it('the clash guard: a library write that gives two terms of a linking space one address is 409 rdf_term_clash', async () => {
     reset();
     const meta = inst.heldMeta('linked');
-    const own = { ...meta, typeSchemas: { ...meta.typeSchemas, entity: { ...meta.typeSchemas.entity, human: { iri: `${NS}entity/person` } } } };
+    const own = { ...meta, typeSchemas: { ...meta.typeSchemas, entity: { ...meta.typeSchemas.entity, human: { iri: `${NS}person` } } } };
     inst.loader.getConfig().spaces.find(s => s.id === 'linked').meta = own;
     const clash = await put('acme', { prefix: 'acme', iri: NS, rebase: true });
     assert.equal(clash.code, 409, said(clash));
@@ -156,7 +160,7 @@ describe('a library group namespace names its entries\' terms', { skip }, () => 
     assert.match(said(clash), /human/);
     assert.deepEqual([...clash.body.terms].sort(), ['entity:human', 'entity:person'], 'both terms are named in a field a client words itself');
     assert.equal(clash.body.space, 'linked');
-    assert.equal(clash.body.iri, `${NS}entity/person`);
+    assert.equal(clash.body.iri, `${NS}person`);
     assert.equal(inst.loader.getConfig().schemaLibraryNamespaces?.acme, undefined, 'a refused write stored nothing');
   });
 });

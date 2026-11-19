@@ -8,8 +8,8 @@
  * give one record two addresses. So the resolver is the only builder, and a source gate below refuses a second one:
  *
  * - `resolveTermIri(meta, kind, type, prop?)`: an explicit `iri` on the type or property wins; else `<vocab><kind>/<seg(type)>`, and
- *   `/<seg(prop)>` for a property. An untyped entity is the class `ythril:Untyped` and its properties sit under `entity/%00/`; a file
- *   has no type, so its properties are `<vocab>file/<seg(prop)>`.
+ *   `#<frag(prop)>` for a property (the Direct Mapping's shape, slice S). An untyped entity is the class `ythril:Untyped` and its
+ *   properties are `<vocab>entity#<frag(prop)>`; a file has no type, so its properties are `<vocab>file#<frag(prop)>`.
  * - `recordIri(meta, kind, id)`: `<base><kind>/<seg(id)>`; a file's path is encoded segment by segment and joined by `/`.
  * - `agentIri`, `graphIri`, `ontologyIri`, `versionIri(fp)`.
  * - RDF is off by default: every function throws `rdf_not_enabled` for a meta with no `rdf`, or with `rdf.enabled: false`.
@@ -54,23 +54,23 @@ describe('the resolver: one rule for every type and property', () => {
     assert.equal(fn('resolveTermIri')(META, 'entity', 'person'), 'https://schema.org/Person');
     assert.equal(fn('resolveTermIri')(META, 'entity', 'person', 'email'), 'https://schema.org/email');
   });
-  it('without one, a term sits under the vocab as <kind>/<type>[/<prop>], every segment encoded, "/" the separator', () => {
-    assert.equal(fn('resolveTermIri')(META, 'entity', 'person', 'nick name'), `${VOCAB}entity/person/nick%20name`);
+  it('without one, a type is the document <vocab><kind>/<type> and its property the fragment #<prop>, every name encoded', () => {
+    assert.equal(fn('resolveTermIri')(META, 'entity', 'person', 'nick name'), `${VOCAB}entity/person#nick%20name`);
     assert.equal(fn('resolveTermIri')(META, 'entity', 'odd/type'), `${VOCAB}entity/odd%2Ftype`);
-    assert.equal(fn('resolveTermIri')(META, 'entity', 'odd/type', 'a#b'), `${VOCAB}entity/odd%2Ftype/a%23b`);
+    assert.equal(fn('resolveTermIri')(META, 'entity', 'odd/type', 'a#b'), `${VOCAB}entity/odd%2Ftype#a%23b`);
     assert.equal(fn('resolveTermIri')(META, 'edge', 'knows'), `${VOCAB}edge/knows`);
-    assert.equal(fn('resolveTermIri')(META, 'edge', 'knows', 'since'), `${VOCAB}edge/knows/since`);
+    assert.equal(fn('resolveTermIri')(META, 'edge', 'knows', 'since'), `${VOCAB}edge/knows#since`);
     assert.equal(fn('resolveTermIri')(META, 'fact', 'note'), `${VOCAB}fact/note`);
     assert.equal(fn('resolveTermIri')(META, 'chrono', 'event'), `${VOCAB}chrono/event`);
   });
   it('a type the schema does not declare is still named by the vocab rule', () => {
     assert.equal(fn('resolveTermIri')(META, 'entity', 'robot'), `${VOCAB}entity/robot`);
   });
-  it('an untyped entity is ythril:Untyped, its properties under entity/%00/; a file property is file/<prop>', () => {
+  it('an untyped entity is ythril:Untyped, its properties fragments of entity; a file property is file#<prop>', () => {
     assert.equal(typeof vocabulary.YTHRIL_NS, 'string', 'YTHRIL_NS is exported by server/src/rdf/ythril-vocabulary.ts');
     assert.equal(fn('resolveTermIri')(META, 'entity', null), `${vocabulary.YTHRIL_NS}Untyped`);
-    assert.equal(fn('resolveTermIri')(META, 'entity', null, 'colour'), `${VOCAB}entity/%00/colour`);
-    assert.equal(fn('resolveTermIri')(META, 'file', null, 'camera model'), `${VOCAB}file/camera%20model`);
+    assert.equal(fn('resolveTermIri')(META, 'entity', null, 'colour'), `${VOCAB}entity#colour`);
+    assert.equal(fn('resolveTermIri')(META, 'file', null, 'camera model'), `${VOCAB}file#camera%20model`);
   });
   it('a record, a file, an agent, the graph, the ontology and a version each have one address', () => {
     assert.equal(fn('recordIri')(META, 'entity', 'x y>z'), `${BASE}entity/x%20y%3Ez`);
@@ -130,7 +130,7 @@ function handBuiltIriSites(file, text) {
   lines.forEach((line, i) => {
     const at = `${file}:${i + 1}`;
     if (/^\s*export\s*\{[^}]*\}\s*from\s/.test(line)) return;
-    if (/\biriSegment\b/.test(line)) sites.push(`${at} uses iriSegment (only the resolver encodes a segment)`);
+    if (/\biri(?:Segment|Fragment)\b/.test(line)) sites.push(`${at} uses an address encoder (only the resolver encodes a name)`);
     if (/['"`][^'"`]*\/ld\//.test(line)) sites.push(`${at} writes the /ld/ path of a base (only the resolver does)`);
     if (file !== VOCABULARY && /\bYTHRIL_NS\s*\+|\$\{\s*YTHRIL_NS\s*\}/.test(line)) sites.push(`${at} concatenates onto YTHRIL_NS`);
     if (/\brdf\??\.(?:base|vocab)\s*\+|\$\{[^}]*\brdf\??\.(?:base|vocab)\s*\}/.test(line)) sites.push(`${at} concatenates onto a space's rdf base or vocab`);
@@ -143,12 +143,13 @@ describe('the source gate', () => {
   it('is proven on a planted module: each way of building an address by hand is named', () => {
     const planted = [
       "import { iriSegment } from 'the-schema-package';",
+      "const f = iriFragment(prop);",
       "const base = `${url}/ld/${id}/`;",
       "const t = YTHRIL_NS + 'Entity';",
       "const r = meta.rdf.base + 'entity/' + id;",
       'const s = `${meta.rdf?.vocab}x`;',
     ].join('\n');
-    assert.equal(handBuiltIriSites('server/src/api/planted.ts', planted).length, 5);
+    assert.equal(handBuiltIriSites('server/src/api/planted.ts', planted).length, 6);
     assert.equal(handBuiltIriSites('server/src/rdf/planted.ts', 'const x = encodeURIComponent(id);').length, 1);
     assert.deepEqual(handBuiltIriSites(RESOLVER, planted), [], 'the resolver itself is the one builder');
   });

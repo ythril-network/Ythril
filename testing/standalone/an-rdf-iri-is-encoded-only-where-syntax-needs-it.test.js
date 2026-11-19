@@ -8,12 +8,13 @@
  * injects (`a> <p> "x" . <b` writes extra triples). An encoder that encodes too much (`é`, `~`) gives an address no human reads, and
  * two encoders that disagree give two members two addresses for one term. So one function, `iriSegment` in the schema package:
  *
- * - every code point outside RFC 3987 `iunreserved` is percent-encoded as uppercase-hex UTF-8;
+ * - every code point `isegment` (RFC 3987) disallows, and `/`, `?`, `#`, `%`, is percent-encoded as uppercase-hex UTF-8 (owner,
+ *   2026-11-19; the sub-delims, `:` and `@` stay);
  * - a segment that is `.` or `..` is encoded (a resolver would otherwise collapse it);
- * - the empty segment is `%00` (an untyped entity's type segment);
+ * - the empty segment is refused: it has no address;
  * - a lone surrogate is encoded as U+FFFD.
  *
- * The validators beside it: a base ends in `/` and holds no `#`; a namespace ends in `/` or `#`; a prefix is a short name and not a
+ * The validators beside it: a base ends in `/` and holds no `#`; a namespace ends in `/` and holds no `#`; a prefix is a short name and not a
  * reserved one (the standard vocabularies and the URI schemes).
  *
  * Run: node --test testing/standalone/an-rdf-iri-is-encoded-only-where-syntax-needs-it.test.js (after `npm run build -w schema`)
@@ -45,18 +46,20 @@ describe('iriSegment encodes only what IRI syntax needs', () => {
     ['tilde is kept', 'a~b', 'a~b'],
     ['underscore and hyphen are kept', 'a_b-c', 'a_b-c'],
     ['a letter outside ASCII is kept', 'café', 'café'],
-    ['colon', 'kind:Type', 'kind%3AType'],
+    ['a colon is a path character and stays (owner, 2026-11-19: only what isegment disallows is encoded)', 'kind:Type', 'kind:Type'],
     ['a control character, in upper-case hex', '\u007f', '%7F'],
     ['a curly brace, in upper-case hex', '{', '%7B'],
     ['a segment that is one dot', '.', '%2E'],
     ['a segment that is two dots', '..', '%2E%2E'],
-    ['the empty segment', '', '%00'],
     ['a lone surrogate', 'a\uD800b', 'a%EF%BF%BDb'],
     ['a non-character outside ucschar is encoded', 'a￿b', 'a%EF%BF%BFb'],
   ];
   for (const [what, input, want] of rows) {
     it(`${what}: ${JSON.stringify(input)} -> ${want}`, () => assert.equal(fn('iriSegment')(input), want));
   }
+  it('the empty segment has no address: it is refused, never written as some stand-in', () => {
+    assert.throws(() => fn('iriSegment')(''), TypeError);
+  });
   it('two calls on one input give one address (the same IRI on every member)', () => {
     const s = 'Über / Größe #1';
     assert.equal(fn('iriSegment')(s), fn('iriSegment')(s));
@@ -74,10 +77,10 @@ describe('the address validators', () => {
     assert.ok(!BaseIriZ.safeParse('not an iri/').success, 'a base with no scheme is refused');
     assert.ok(!BaseIriZ.safeParse('https://example.org/a b/').success, 'a base with a space is refused');
   });
-  it('a namespace ends in "/" or "#"', () => {
+  it('a namespace ends in "/" and holds no "#" (a type is a document under it, its property a fragment)', () => {
     const NamespaceIriZ = zod('NamespaceIriZ');
     assert.ok(NamespaceIriZ.safeParse('https://example.org/vocab/').success);
-    assert.ok(NamespaceIriZ.safeParse('https://example.org/vocab#').success);
+    assert.ok(!NamespaceIriZ.safeParse('https://example.org/vocab#').success, 'a namespace ending in "#" would put a type in a fragment');
     assert.ok(!NamespaceIriZ.safeParse('https://example.org/vocab').success);
   });
   it('an IRI is absolute, has no character IRIREF forbids, and is bounded', () => {
@@ -96,7 +99,7 @@ describe('the address validators', () => {
     const reserved = schema.RESERVED_PREFIXES;
     assert.ok(Array.isArray(reserved), 'RESERVED_PREFIXES is exported');
     for (const name of ['rdf', 'rdfs', 'owl', 'xsd', 'sh', 'schema', 'time', 'dcterms', 'prov', 'ythril', 'vocab', 'urn', 'http', 'https',
-      'mailto', 'tag', 'did', 'file', 'data']) {
+      'mailto', 'tag', 'did', 'file', 'data', 'entity', 'fact', 'chrono', 'edge']) {
       assert.ok(reserved.includes(name), `${name} is reserved`);
       assert.ok(!PrefixZ.safeParse(name).success, `the reserved prefix ${name} is refused`);
     }

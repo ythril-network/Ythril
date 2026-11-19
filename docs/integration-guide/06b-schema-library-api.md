@@ -261,15 +261,15 @@ Authorization: Bearer <admin-token>
 ```
 
 The namespace is stored in `config.json` (`schemaLibraryNamespaces`) and `GET /groups` shows it as `namespace: { prefix, iri }`. Every entry
-of the group then carries `iri = <iri><kind>/<typeName>` and each property `<iri><kind>/<typeName>/<property>`, each name percent-encoded
-where IRI syntax needs it, unless the entry sets its own `iri`. That is part of the definition a linking space with RDF on runs on, so the
+of the group then carries `iri = <iri><typeName>` and each property `<iri><typeName>#<property>`, each name percent-encoded only where IRI
+syntax needs it, unless the entry sets its own `iri`; the kind is no part of it, so an entity and an edge type of one name clash. That is part of the definition a linking space with RDF on runs on, so the
 schema fingerprint of every such space changes with the namespace, and each keeps the new schema version. A linking space with RDF off
 names nothing: the namespace changes neither its fingerprint nor what it sends its peers.
 
 | answer | when |
 |---|---|
 | `200 { group, namespace }` / `200 { group, removed: true }` | stored / removed |
-| `400` | a prefix that is reserved (`rdf`, `schema`, `ythril`, `vocab`, a URI scheme, …) or malformed, or an IRI that is not a namespace (absolute, ending in `/` or `#`) |
+| `400` | a prefix that is reserved (`rdf`, `schema`, `ythril`, `vocab`, a URI scheme, …) or malformed, or an IRI that is not a namespace (absolute, ending in `/`, holding no `#`: a type is a document under it and its property a fragment) |
 | `404 group_not_found` / `404 namespace_not_found` | the group has no entries / no namespace to remove |
 | `409 namespace_prefix_taken` | another group holds the prefix |
 | `409 rdf_term_rename` | an RDF-enabled space links the group and the change renames its terms; send `rebase: true` (or `?rebase=true`) to make it on purpose |
