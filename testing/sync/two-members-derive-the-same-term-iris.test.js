@@ -81,7 +81,7 @@ describe('two members derive the same term IRIs', () => {
       assert.equal(termIri.resolveTermIri(b, kind, type, prop), termIri.resolveTermIri(a, kind, type, prop), `${kind}/${type}/${prop ?? ''}`);
     }
     assert.equal(termIri.resolveTermIri(a, 'entity', 'person'), 'https://schema.org/Person');
-    assert.equal(termIri.resolveTermIri(a, 'entity', 'person', 'nick name'), `${BASE}vocab/entity/person/nick%20name`);
+    assert.equal(termIri.resolveTermIri(a, 'entity', 'person', 'nick name'), `${BASE}vocab/entity/person#nick%20name`);
     assert.equal(termIri.recordIri(b, 'entity', 'x y'), termIri.recordIri(a, 'entity', 'x y'));
   });
 

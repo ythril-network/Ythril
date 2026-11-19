@@ -98,29 +98,29 @@ describe('the entity form', () => {
     assert.deepEqual(only(quads, agent, `${NS.rdfs}label`), lit('Home'));
   });
   it('every property is ONE literal typed by its declared type, on the term the schema names', () => {
-    assert.deepEqual(only(quads, S, `${VOCAB}entity/person/age`), lit('36', xsd('decimal')));
-    assert.deepEqual(only(quads, S, `${VOCAB}entity/person/nick`), lit('ada'));
-    assert.deepEqual(only(quads, S, `${VOCAB}entity/person/born`), lit('1815-12-10', xsd('date')));
-    assert.deepEqual(only(quads, S, `${VOCAB}entity/person/active`), lit('true', xsd('boolean')));
+    assert.deepEqual(only(quads, S, `${VOCAB}entity/person#age`), lit('36', xsd('decimal')));
+    assert.deepEqual(only(quads, S, `${VOCAB}entity/person#nick`), lit('ada'));
+    assert.deepEqual(only(quads, S, `${VOCAB}entity/person#born`), lit('1815-12-10', xsd('date')));
+    assert.deepEqual(only(quads, S, `${VOCAB}entity/person#active`), lit('true', xsd('boolean')));
     assert.deepEqual(only(quads, S, `${NS.schema}email`), lit('ada@example.org'), 'an explicit iri names the property');
   });
   it('a property value is never an IRI or a node, whatever the string looks like: a record id and a URL stay strings', () => {
-    assert.deepEqual(only(quads, S, `${VOCAB}entity/person/ref`), lit('e2'));
-    assert.deepEqual(only(quads, S, `${VOCAB}entity/person/link`), lit('https://example.org/a'));
+    assert.deepEqual(only(quads, S, `${VOCAB}entity/person#ref`), lit('e2'));
+    assert.deepEqual(only(quads, S, `${VOCAB}entity/person#link`), lit('https://example.org/a'));
     for (const q of quads) {
-      if (q.predicate.value.startsWith(`${VOCAB}entity/person/`)) assert.equal(q.object.kind, 'literal', `${q.predicate.value} holds a literal`);
+      if (q.predicate.value.startsWith(`${VOCAB}entity/person#`)) assert.equal(q.object.kind, 'literal', `${q.predicate.value} holds a literal`);
     }
   });
   it('counts nothing left out', () => {
     assert.deepEqual(counts.skippedValues, []);
     assert.equal(counts.untypedTemporals, 0);
   });
-  it('an untyped entity is ythril:Untyped, its properties under the empty type segment', () => {
+  it('an untyped entity is ythril:Untyped, its properties fragments of the kind\'s own document', () => {
     const { quads: q } = run('entity', { _id: 'e2', name: 'Anon', tags: [], properties: { colour: 'red' }, ...SHARED });
     const s = `${BASE}entity/e2`;
     assert.ok(has(q, s, `${NS.rdf}type`, iri(`${YT()}Entity`)));
     assert.ok(has(q, s, `${NS.rdf}type`, iri(`${YT()}Untyped`)));
-    assert.deepEqual(only(q, s, `${VOCAB}entity/%00/colour`), lit('red'));
+    assert.deepEqual(only(q, s, `${VOCAB}entity#colour`), lit('red'));
   });
   it('an id with a space, a slash and a ">" is encoded in the subject', () => {
     const { quads: q } = run('entity', { _id: 'a b/c>d', name: 'x', type: 'person', tags: [], properties: {}, ...SHARED });
@@ -135,8 +135,8 @@ describe('the fact form', () => {
     assert.ok(has(quads, S, `${NS.rdf}type`, iri(`${YT()}Fact`)));
     assert.ok(has(quads, S, `${NS.rdf}type`, iri(`${VOCAB}fact/note`)));
     assert.deepEqual(only(quads, S, `${NS.schema}text`), lit('Ada knew Babbage.'));
-    assert.deepEqual(only(quads, S, `${VOCAB}fact/note/weight`), lit('2.5', xsd('decimal')));
-    assert.deepEqual(only(quads, S, `${VOCAB}fact/note/mood`), lit('dry'));
+    assert.deepEqual(only(quads, S, `${VOCAB}fact/note#weight`), lit('2.5', xsd('decimal')));
+    assert.deepEqual(only(quads, S, `${VOCAB}fact/note#mood`), lit('dry'));
   });
   it('an untyped fact is ythril:Fact alone (there is no Untyped class for facts)', () => {
     const { quads } = run('fact', { _id: 'f2', fact: 'x', tags: [], ...SHARED });
@@ -172,7 +172,7 @@ describe('the chrono form', () => {
     assert.deepEqual(only(quads, S, `${YT()}recurrenceFreq`), lit('weekly'));
     assert.deepEqual(only(quads, S, `${YT()}recurrenceInterval`), lit('2', xsd('integer')));
     assert.deepEqual(only(quads, S, `${YT()}recurrenceUntil`), lit('2026-12-31', xsd('date')));
-    assert.deepEqual(only(quads, S, `${VOCAB}chrono/event/room`), lit('A1'));
+    assert.deepEqual(only(quads, S, `${VOCAB}chrono/event#room`), lit('A1'));
   });
   it('without an end the record is itself the instant; a date-only start is typed xsd:date', () => {
     const { quads } = run('chrono', { _id: 'c2', title: 'Due', type: 'deadline', startsAt: '2026-04-05', status: 'active', tags: [], ...SHARED });
@@ -213,8 +213,8 @@ describe('the edge, link and file forms', () => {
     assert.deepEqual(reifies, { kind: 'triple', subject: iri(from), predicate: iri(`${VOCAB}edge/knows`), object: iri(to) });
     assert.deepEqual(only(quads, r, `${YT()}weight`), lit('0.5', xsd('decimal')));
     assert.deepEqual(only(quads, r, `${YT()}edgeType`), lit('friendship'));
-    assert.deepEqual(only(quads, r, `${VOCAB}edge/knows/since`), lit('2001-09-01', xsd('date')));
-    assert.deepEqual(only(quads, r, `${VOCAB}edge/knows/strength`), lit('3', xsd('decimal')));
+    assert.deepEqual(only(quads, r, `${VOCAB}edge/knows#since`), lit('2001-09-01', xsd('date')));
+    assert.deepEqual(only(quads, r, `${VOCAB}edge/knows#strength`), lit('3', xsd('decimal')));
     assert.deepEqual(only(quads, r, `${NS.schema}description`), lit('met at school'));
     assert.deepEqual(only(quads, r, `${NS.dcterms}created`), lit('2026-01-01T10:00:00Z', xsd('dateTimeStamp')));
   });
@@ -248,8 +248,8 @@ describe('the edge, link and file forms', () => {
     assert.deepEqual(only(quads, S, `${NS.schema}sha256`), lit('ab'.repeat(32)));
     assert.deepEqual(only(quads, S, `${NS.schema}description`), lit('A scan.'));
     assert.deepEqual(objects(quads, S, `${NS.schema}keywords`), [lit('scan')]);
-    assert.deepEqual(only(quads, S, `${VOCAB}file/pages`), lit('4', xsd('decimal')));
-    assert.deepEqual(only(quads, S, `${VOCAB}file/owner`), lit('ada'));
+    assert.deepEqual(only(quads, S, `${VOCAB}file#pages`), lit('4', xsd('decimal')));
+    assert.deepEqual(only(quads, S, `${VOCAB}file#owner`), lit('ada'));
     assert.deepEqual(only(quads, S, `${NS.dcterms}created`), lit('2026-01-01T10:00:00Z', xsd('dateTimeStamp')));
   });
 });
@@ -291,7 +291,7 @@ describe('what the form leaves out of a record, and names', () => {
   });
   it('a value that does not fit its declared type is left out and named like a list', () => {
     const { quads, counts } = run('entity', entity({ age: 'thirty', active: 'yes', nick: 7, born: 20150101 }));
-    for (const p of ['age', 'active', 'nick', 'born']) assert.ok(!quads.some((q) => q.predicate.value === `${VOCAB}entity/person/${p}`), `${p}: no triple`);
+    for (const p of ['age', 'active', 'nick', 'born']) assert.ok(!quads.some((q) => q.predicate.value === `${VOCAB}entity/person#${p}`), `${p}: no triple`);
     assert.deepEqual(counts.skippedValues.map((s) => s.key).sort(), ['active', 'age', 'born', 'nick']);
   });
   it('a number that is no decimal (NaN, Infinity) is left out and named, never written as a guess', () => {
@@ -301,20 +301,29 @@ describe('what the form leaves out of a record, and names', () => {
   });
   it('a date-typed string that is no calendar date stays a plain string and is counted as untyped', () => {
     const { quads, counts } = run('entity', entity({ born: 'last spring' }));
-    assert.deepEqual(only(quads, `${BASE}entity/e9`, `${VOCAB}entity/person/born`), lit('last spring'));
+    assert.deepEqual(only(quads, `${BASE}entity/e9`, `${VOCAB}entity/person#born`), lit('last spring'));
     assert.equal(counts.untypedTemporals, 1);
   });
   it('a property of no declared type is typed by what it is: string, decimal or boolean', () => {
     const { quads } = run('entity', entity({ s: 'x', n: -12.5, b: false }));
     const S = `${BASE}entity/e9`;
-    assert.deepEqual(only(quads, S, `${VOCAB}entity/person/s`), lit('x'));
-    assert.deepEqual(only(quads, S, `${VOCAB}entity/person/n`), lit('-12.5', xsd('decimal')));
-    assert.deepEqual(only(quads, S, `${VOCAB}entity/person/b`), lit('false', xsd('boolean')));
+    assert.deepEqual(only(quads, S, `${VOCAB}entity/person#s`), lit('x'));
+    assert.deepEqual(only(quads, S, `${VOCAB}entity/person#n`), lit('-12.5', xsd('decimal')));
+    assert.deepEqual(only(quads, S, `${VOCAB}entity/person#b`), lit('false', xsd('boolean')));
   });
   it('a record the form cannot address (an edge with no ends) gives no triples and says so; it never throws', () => {
     const r = run('edge', { _id: 'bad', from: 7, to: null, label: 'knows', tags: [], ...SHARED });
     assert.deepEqual(r.quads, []);
     assert.equal(typeof r.leftOut, 'string');
+  });
+  it('an empty name has no address (slice S): an empty property key is left out and named, a file path or an edge end with an empty segment is unaddressable; nothing throws', () => {
+    const r = run('entity', { _id: 'e8', name: 'x', type: 'person', tags: [], properties: { '': 'v', nick: 'n' }, ...SHARED });
+    assert.deepEqual(r.counts.skippedValues, [{ recordId: 'e8', kind: 'entity', key: '', reason: 'key-has-no-address' }]);
+    assert.ok(r.quads.some(q => q.predicate.value === `${VOCAB}entity/person#nick`), 'the rest of the record is exported');
+    for (const path of ['a//b', '/a', 'a/']) {
+      assert.equal(run('file', { _id: path, path, tags: [], createdAt: SHARED.createdAt, updatedAt: SHARED.updatedAt }).leftOut, 'unaddressable', path);
+      assert.equal(run('edge', { _id: 'k9', from: 'e1', to: path, toKind: 'file', label: 'knows', tags: [], ...SHARED }).leftOut, 'unaddressable', path);
+    }
   });
   it('a fork row and a file that is no live file are left out whole', () => {
     assert.deepEqual(run('entity', { ...entity({}), forkOf: 'e1' }).quads, []);
@@ -333,8 +342,8 @@ describe('what the form leaves out of a record, and names', () => {
     const properties = JSON.parse('{"constructor":"c","__proto__":"p","toString":"t"}');
     const { quads } = run('entity', entity(properties));
     const S = `${BASE}entity/e9`;
-    assert.deepEqual(only(quads, S, `${VOCAB}entity/person/constructor`), lit('c'));
-    assert.deepEqual(only(quads, S, `${VOCAB}entity/person/toString`), lit('t'));
+    assert.deepEqual(only(quads, S, `${VOCAB}entity/person#constructor`), lit('c'));
+    assert.deepEqual(only(quads, S, `${VOCAB}entity/person#toString`), lit('t'));
   });
 });
 

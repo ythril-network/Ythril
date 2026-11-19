@@ -45,7 +45,7 @@ describe('the namespaces survive an unreadable config', { skip }, () => {
     await inst.loader.flushConfig();
     inst.loader.reloadConfig();
     assert.deepEqual(inst.loader.getConfig().schemaLibraryNamespaces, { acme: { prefix: 'acme', iri: NS } });
-    assert.equal(entryIri(), `${NS}entity/person`);
+    assert.equal(entryIri(), `${NS}person`);
   });
 
   it('a reload of an unreadable config.json keeps the namespaces, and the entry keeps its address', async () => {
@@ -54,7 +54,7 @@ describe('the namespaces survive an unreadable config', { skip }, () => {
       fs.writeFileSync(cfgPath(), '{ "this is": not json', { mode: 0o600 });
       assert.throws(() => inst.loader.reloadConfig(), 'a reload of an unreadable file refuses');
       assert.deepEqual(inst.loader.getConfig().schemaLibraryNamespaces, { acme: { prefix: 'acme', iri: NS } }, 'the namespaces were read as absent');
-      assert.equal(entryIri(), `${NS}entity/person`);
+      assert.equal(entryIri(), `${NS}person`);
     } finally {
       fs.writeFileSync(cfgPath(), good, { mode: 0o600 });
       inst.loader.reloadConfig();

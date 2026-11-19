@@ -108,10 +108,10 @@ export const subjectsOf = (quads) => [...new Set(quads.filter(q => q.subject.kin
 
 // -- the shape addresses of the design (§6) ----------------------------------------------------------------------------------------------
 const seg = (s) => encodeURIComponent(s).replace(/[!'()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-/** A node shape `<base>schema/shape/<kind>/<seg(type)>`, a property shape that plus `/<seg(prop)>`. */
-export const shapeAt = (kind, type, prop) => [`${BASE}schema/shape/${kind}`, seg(type), ...(prop === undefined ? [] : [seg(prop)])].join('/');
-/** The address a type or property has when the space's vocab names it. */
-export const termAt = (kind, type, prop) => [`${VOCAB}${kind}`, seg(type), ...(prop === undefined ? [] : [seg(prop)])].join('/');
+/** A node shape `<base>schema/shape/<kind>/<seg(type)>`, a property shape that plus `#<frag(prop)>` (the fixture's names need no encoding beyond `seg`). */
+export const shapeAt = (kind, type, prop) => `${BASE}schema/shape/${kind}/${seg(type)}${prop === undefined ? '' : `#${seg(prop)}`}`;
+/** The address a type or property has when the space's vocab names it: the type's document, the property a fragment of it. */
+export const termAt = (kind, type, prop) => `${VOCAB}${kind}/${seg(type)}${prop === undefined ? '' : `#${seg(prop)}`}`;
 
 /** The fixture space: every kind of type, every property field, an outside type and property, and an explicit address. */
 export const META = {

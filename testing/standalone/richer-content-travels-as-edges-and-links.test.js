@@ -97,7 +97,7 @@ describe('a reference is a relation to the other record address', () => {
   });
   it('a string property that holds a record id stays a string and states no relation', () => {
     const quads = all([['entity', { _id: 'ada', name: 'Ada', type: 'person', tags: [], properties: { friend: 'bob' }, ...SHARED }]]);
-    const prop = quads.find((q) => q.predicate.value === `${VOCAB}entity/person/friend`);
+    const prop = quads.find((q) => q.predicate.value === `${VOCAB}entity/person#friend`);
     assert.deepEqual(prop.object, { kind: 'literal', value: 'bob' });
     assert.ok(!quads.some((q) => q.object.kind === 'iri' && q.object.value === `${BASE}entity/bob`), 'no relation to bob');
   });
@@ -112,8 +112,8 @@ describe('a nested thing is its own subject, reached by the edge predicate', () 
     ]);
     const reached = quads.find((q) => q.subject.value === `${BASE}entity/ada` && q.predicate.value === `${VOCAB}edge/livesAt`);
     assert.equal(reached.object.value, `${BASE}entity/home`);
-    const city = quads.find((q) => q.subject.value === reached.object.value && q.predicate.value === `${VOCAB}entity/address/city`);
+    const city = quads.find((q) => q.subject.value === reached.object.value && q.predicate.value === `${VOCAB}entity/address#city`);
     assert.deepEqual(city.object, { kind: 'literal', value: 'London' });
-    assert.ok(!quads.some((q) => q.subject.value === `${BASE}entity/ada` && q.predicate.value.startsWith(`${VOCAB}entity/address/`)), 'the address properties are not on the person');
+    assert.ok(!quads.some((q) => q.subject.value === `${BASE}entity/ada` && q.predicate.value.startsWith(`${VOCAB}entity/address#`)), 'the address properties are not on the person');
   });
 });

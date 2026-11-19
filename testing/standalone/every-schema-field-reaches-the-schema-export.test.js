@@ -194,7 +194,7 @@ describe('a mapped property field reaches the terms its row names', () => {
     const quads = graphOf(metaOf('entity', propHost({ type: 'string', iri: 'https://schema.org/email' }))).quads;
     const path = quads.filter(q => q.predicate.value === termIri('sh:path')).map(q => q.object.value);
     assert.ok(path.includes('https://schema.org/email'), 'sh:path is the explicit iri');
-    assert.ok(!quads.some(q => [q.subject, q.predicate, q.object].some(t => t.kind === 'iri' && t.value === `${VOCAB}entity/t/p`)), 'the derived address is not used');
+    assert.ok(!quads.some(q => [q.subject, q.predicate, q.object].some(t => t.kind === 'iri' && t.value === `${VOCAB}entity/t#p`)), 'the derived address is not used');
     assert.ok(!quads.some(q => q.subject.kind === 'iri' && q.subject.value === 'https://schema.org/email'), 'an outside term is never the subject of a statement');
   });
 

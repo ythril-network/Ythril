@@ -1,12 +1,14 @@
 /**
- * Web addresses (IRIs) in a space schema: the validators of an address a caller writes, and the ONE encoder of a path segment (Q-748).
+ * Web addresses (IRIs) in a space schema: the validators of an address a caller writes, and the ONE encoder of a path segment and the ONE
+ * encoder of a fragment (Q-748; the Direct Mapping shape, owner 2026-11-19).
  *
  * ## What it prevents
  *
  * A type name, a property name and a record id may hold any character. An RDF address built from one by hand either breaks (a space or a
  * `>` ends an IRI, and a writer that meets one throws mid-export) or injects (`a> <p> "x" . <b` writes triples of its own). An encoder that
  * encodes too much (`é`, `~`) gives addresses nobody reads, and two encoders that disagree give two members two addresses for one term. So
- * {@link iriSegment} is the only encoder, and the server's resolver (`server/src/rdf/term-iri.ts`) is its only caller; a source gate
+ * {@link iriSegment} (a type, a label, a record id) and {@link iriFragment} (a property, after its type's `#`) are the only encoders, and
+ * the server's resolver (`server/src/rdf/term-iri.ts`) is their only caller; a source gate
  * (`a-term-iri-is-one-rule-for-every-type-and-property.test.js`) refuses a second one.
  *
  * A leaf: it imports only zod.
@@ -28,8 +30,12 @@ export const IriZ = z.string().max(IRI_MAX).refine(
   { message: 'an IRI is absolute (it starts with a scheme such as https:) and holds no space and none of < > " { } | ^ ` \\' },
 );
 
-/** A namespace: an IRI ending in `/` or `#`, so a name appended to it is a path segment or a fragment. */
-export const NamespaceIriZ = IriZ.refine(s => s.endsWith('/') || s.endsWith('#'), { message: 'a namespace IRI ends in "/" or "#"' });
+/**
+ * A namespace (a space's `vocab`, a library group's namespace): an IRI ending in `/` and holding no `#`. A type is a document under it
+ * (`<ns><type>`) and its property a fragment of that document (`<ns><type>#<prop>`, the W3C Direct Mapping's shape); a namespace holding
+ * a `#` would put the type inside a fragment, and the property after a second `#` is no IRI.
+ */
+export const NamespaceIriZ = IriZ.refine(s => s.endsWith('/') && !s.includes('#'), { message: 'a namespace IRI ends in "/" and holds no "#"' });
 
 /**
  * A space's base: an IRI ending in `/` and holding no `#`. Every record address is `<base><kind>/<id>`, so a base ending in `#` would put
@@ -43,6 +49,8 @@ export const BaseIriZ = IriZ.refine(s => s.endsWith('/') && !s.includes('#'), { 
  */
 export const RESERVED_PREFIXES: readonly string[] = Object.freeze([
   'rdf', 'rdfs', 'owl', 'xsd', 'sh', 'schema', 'time', 'dcterms', 'prov', 'ythril', 'vocab',
+  // The prefixes an export declares for the space vocab's kind documents (`<vocab>entity/`, ...).
+  'entity', 'fact', 'chrono', 'edge',
   'urn', 'http', 'https', 'mailto', 'tag', 'did', 'file', 'data',
 ]);
 
@@ -52,6 +60,10 @@ export const PrefixZ = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,49}$/, 'a pref
 
 /** RFC 3987 `iunreserved` in ASCII: ALPHA / DIGIT / "-" / "." / "_" / "~". */
 const ASCII_UNRESERVED = /^[A-Za-z0-9._~-]$/;
+/** What `isegment` allows beside `iunreserved` (RFC 3987 `ipchar`): the sub-delims, `:` and `@`. Never `/`, `?`, `#` or a bare `%`. */
+const SEGMENT_KEPT = /^[!$&'()*+,;=:@]$/;
+/** What `ifragment` allows beside `iunreserved`: `ipchar`'s sub-delims, `:` and `@`, plus `/` and `?`. Never `#` or a bare `%`. */
+const FRAGMENT_KEPT = /^[!$&'()*+,;=:@/?]$/;
 /** The `ucschar` ranges inside the Basic Multilingual Plane (RFC 3987 §2.2). */
 const BMP_UCSCHAR: readonly (readonly [number, number])[] = [[0xa0, 0xd7ff], [0xf900, 0xfdcf], [0xfdf0, 0xffef]];
 /** `ucschar` above the BMP: planes 1 to 14, each but its last two code points (U+xFFFE, U+xFFFF). */
@@ -75,21 +87,35 @@ function isIunreserved(ch: string, cp: number): boolean {
 /** The replacement character's UTF-8, for a lone surrogate (which no UTF-8 encodes). */
 const REPLACEMENT = '%EF%BF%BD';
 
-/**
- * One path segment of an address, encoded only where IRI syntax needs it: every code point outside `iunreserved` becomes its UTF-8 bytes
- * in upper-case `%XX`; a segment that is `.` or `..` is encoded (a resolver would collapse it); the empty segment is `%00` (an untyped
- * entity's type segment, which must stay a segment); a lone surrogate is encoded as U+FFFD. A pure function: one input, one address, on
- * every member.
- */
-export function iriSegment(s: string): string {
-  if (s === '') return '%00';
-  if (s === '.') return '%2E';
-  if (s === '..') return '%2E%2E';
+/** `s` with every code point that is neither `iunreserved` nor `kept` written as its UTF-8 bytes in upper-case `%XX`; an empty `s` throws. */
+function encodeOutside(s: string, kept: RegExp, what: string): string {
+  if (s === '') throw new TypeError(`an empty ${what} has no address`);
   let out = '';
   for (const ch of s) {
     if (LONE_SURROGATE.test(ch)) { out += REPLACEMENT; continue; }
-    if (isIunreserved(ch, ch.codePointAt(0)!)) { out += ch; continue; }
+    if (isIunreserved(ch, ch.codePointAt(0)!) || kept.test(ch)) { out += ch; continue; }
     for (const byte of new TextEncoder().encode(ch)) out += `%${byte.toString(HEX_RADIX).toUpperCase().padStart(HEX_BYTE_WIDTH, '0')}`;
   }
   return out;
+}
+
+/**
+ * One path segment of an address (a type, an edge label, a record id), encoded only where IRI syntax needs it (owner, 2026-11-19): every
+ * character `isegment` disallows, and `/`, `?`, `#`, `%`, becomes its UTF-8 bytes in upper-case `%XX`; a segment that is exactly `.` or `..`
+ * is `%2E` / `%2E%2E` (a resolver would collapse it); a lone surrogate is encoded as U+FFFD; no unreserved character is ever encoded, so
+ * the address is already normalised. An empty name throws: it has no address. A pure function: one input, one address, on every member.
+ */
+export function iriSegment(s: string): string {
+  if (s === '.') return '%2E';
+  if (s === '..') return '%2E%2E';
+  return encodeOutside(s, SEGMENT_KEPT, 'name');
+}
+
+/**
+ * One fragment of an address (a property, after its type's `#`), encoded only where IRI syntax needs it (owner, 2026-11-19): `#`, `%`,
+ * spaces, control characters and every other character `ifragment` disallows become UTF-8 `%XX`; `/`, `?` and dots stay (a fragment is no
+ * path). An empty key throws: it has no address.
+ */
+export function iriFragment(s: string): string {
+  return encodeOutside(s, FRAGMENT_KEPT, 'key');
 }

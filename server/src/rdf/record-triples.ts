@@ -28,7 +28,7 @@ import {
   iri, literalForBoolean, literalForDecimal, literalForInteger, literalForTemporal, literalForValue, plain, stdIri, temporalKind, triple,
   type DeclaredType, type IriTerm, type LeftOutReason, type LiteralTerm, type Quad, type Term, type TemporalKind,
 } from './literals.js';
-import { agentIri, graphIri, recordIri, resolveTermIri, versionIri, type TermKind } from './term-iri.js';
+import { agentIri, graphIri, recordAddressable, recordIri, resolveTermIri, versionIri, type TermKind } from './term-iri.js';
 import { ythrilIri } from './ythril-vocabulary.js';
 
 /** The record kinds this module gives a form: the four knowledge types, a link and a file. */
@@ -205,6 +205,7 @@ class Form {
     outcomes.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
     for (const { key, outcome } of outcomes) {
       if (outcome.kind === 'nothing') continue;
+      if (key === '') { this.skip(key, 'key-has-no-address'); continue; }
       if (outcome.kind === 'left-out') { this.skip(key, outcome.reason); continue; }
       if (outcome.untypedTemporal) this.untypedTemporals++;
       this.add(subject, iri(resolveTermIri(this.meta, termKind, type, key)), outcome.literal);
@@ -288,6 +289,7 @@ function endsOf(meta: SpaceMeta, d: Record<string, unknown>, defaultKind: RefKin
   const fromKind = d['fromKind'] ?? defaultKind;
   const toKind = d['toKind'] ?? defaultKind;
   if (!isText(d['from']) || !isText(d['to']) || !isRefKind(fromKind) || !isRefKind(toKind)) return null;
+  if (!recordAddressable(fromKind, d['from']) || !recordAddressable(toKind, d['to'])) return null;
   return { from: iri(recordIri(meta, fromKind, d['from'])), to: iri(recordIri(meta, toKind, d['to'])) };
 }
 
@@ -331,7 +333,7 @@ export function recordTriples(meta: SpaceMeta, kind: RdfRecordKind, doc: unknown
   const d = (doc !== null && typeof doc === 'object' ? doc : {}) as Record<string, unknown>;
   const none = (leftOut: LeftOutRecord): RecordTriplesResult => ({ quads: [], counts: { skippedValues: [], untypedTemporals: 0 }, leftOut });
   const idField = kind === 'file' ? d['path'] ?? d['_id'] : d['_id'];
-  if (!isText(idField)) return none('unaddressable');
+  if (!isText(idField) || (kind !== 'link' && !recordAddressable(kind, idField))) return none('unaddressable');
   if (kind !== 'link' && kind !== 'file' && d['forkOf'] !== undefined && d['forkOf'] !== null) return none('fork');
   if (kind === 'file' && [d['parentFileId'], d['deletedAt'], d['feedMarker']].some(v => v !== undefined && v !== null)) return none('not-live');
   const f = new Form(meta, kind, idField, opts);

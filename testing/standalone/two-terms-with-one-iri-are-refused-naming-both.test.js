@@ -60,6 +60,11 @@ describe('a clash is named with both owners', () => {
     const list = clashes(withTypes({ entity: { person: { iri: `${BASE}vocab/entity/human` } } }));
     assert.equal(list.length, 1, JSON.stringify(list));
     assert.ok(named(list, 'person', `${BASE}vocab/`));
+    // The Direct Mapping shape (slice S): a property's derived address is a fragment of its type's document; taking one by hand is refused too.
+    const taken = clashes(withTypes({ entity: { card: { propertySchemas: { owner: { type: 'string', iri: `${BASE}vocab/entity/person#name` } } } } }));
+    assert.equal(taken.length, 1, JSON.stringify(taken));
+    assert.equal(taken[0].reason, 'under-vocab');
+    assert.ok(named(taken, 'owner', `${BASE}vocab/entity/person#name`), JSON.stringify(taken));
   });
   // Review finding 11 (slice A-fix): an iri under the base but outside the vocab could equal a record's address (`<base>entity/<id>`).
   it('an explicit iri under the space base, outside its vocab, is refused under-base, naming the value', () => {
@@ -69,7 +74,7 @@ describe('a clash is named with both owners', () => {
       assert.equal(list[0].reason, 'under-base');
       assert.ok(named(list, 'person', iri), JSON.stringify(list));
     }
-    const vocabOutside = { rdf: { enabled: true, base: BASE, vocab: 'https://v.example/terms#', baseEpoch: 0 }, typeSchemas: { entity: { p: { propertySchemas: { q: { type: 'string', iri: `${BASE}fact/q` } } } } } };
+    const vocabOutside = { rdf: { enabled: true, base: BASE, vocab: 'https://v.example/terms/', baseEpoch: 0 }, typeSchemas: { entity: { p: { propertySchemas: { q: { type: 'string', iri: `${BASE}fact/q` } } } } } };
     assert.equal(clashes(vocabOutside)[0]?.reason, 'under-base', 'a property iri under the base is refused when the vocab lies elsewhere');
   });
   it('an explicit iri equal to a predicate the mapper writes', () => {
@@ -83,8 +88,12 @@ describe('a clash is named with both owners', () => {
   });
   it('a schema with derived names only never clashes, whatever its names hold', () => {
     assert.deepEqual(clashes(withTypes({
-      entity: { 'a/b': { propertySchemas: { 'c d': { type: 'string' } } }, 'a': { propertySchemas: { 'b/c d': { type: 'number' } } } },
+      entity: { 'a/b': { propertySchemas: { 'c d': { type: 'string' } } }, 'a': { propertySchemas: { 'b/c d': { type: 'number' }, b: { type: 'boolean' } } } },
       edge: { 'a/b': {} },
+    })), []);
+    // The collision pairs of the Direct Mapping shape: a type `a.b` or `a#b` is never the property `b` of type `a`.
+    assert.deepEqual(clashes(withTypes({
+      entity: { 'a.b': {}, 'a#b': { propertySchemas: { c: { type: 'string' } } }, a: { propertySchemas: { b: { type: 'number' }, 'b#c': { type: 'boolean' } } } },
     })), []);
   });
 });

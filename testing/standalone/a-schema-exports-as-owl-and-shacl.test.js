@@ -387,7 +387,9 @@ describe('every shape is named, whatever a name holds', () => {
     const { quads, prefixes } = graph(withTypes('entity', { [type]: { propertySchemas: { [prop]: { type: 'string' } } } }));
     const shape = quads.find(q => q.predicate.value === iriOf('sh:path') && q.object.kind === 'iri' && q.object.value.startsWith(`${VOCAB}entity/`));
     assert.ok(shape, 'the property shape names the property term');
-    assert.ok(!/[ "#]/.test(shape.object.value.slice(VOCAB.length)), 'no character an address cannot hold is written raw');
+    const [document, fragment, ...more] = shape.object.value.slice(VOCAB.length).split('#');
+    assert.deepEqual(more, [], 'one "#": the property is a fragment of its type\'s document');
+    assert.ok(!/[ "#]/.test(document) && !/[ "#]/.test(fragment), 'no character an address cannot hold is written raw');
     assert.deepEqual(treeAt(quads, shape.subject.value)['sh:name'], [L(prop)]);
     assert.deepEqual(treeAt(quads, shape.object.value)['rdfs:label'], [L(prop)]);
     let out = '';
