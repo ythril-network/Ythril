@@ -14,6 +14,10 @@
  *   `partOf('<its stem>', PART)`, the name agrees with the index, the indexes are 0 to count-1 one file each, and no part file hands
  *   in a lane list of its own (`partProblems`). The lanes themselves are cut inside `landingExperiment` from the table it derives, so
  *   files that pass this run the whole table between them;
+ * - the parts of one experiment run with the same options: the same experiment function, and every option of the object literal
+ *   each part file hands it equal (repetitions, their floor, the stalls in flight, the bound, the hold, the lateness, the client), read
+ *   from the files, with only `title`, `suite` and `part` free to differ. A part quietly run at fewer repetitions would otherwise hold
+ *   its lanes to a weaker claim than its siblings, and every file would be green;
  * - a planted set of files proves each of those problems is named.
  *
  * Run: node --test testing/standalone/the-parts-of-a-split-landing-experiment-run-every-lane-once.test.js
@@ -67,6 +71,25 @@ describe('the parts of a split landing experiment run every lane once', () => {
   it('the real part files are each split experiment\'s parts 0 to count-1, one file each, each cut by partOf', () => {
     const files = readTrackedSources('testing/standalone', { ext: ['.test.js'], floor: 100 }).map(({ file, text }) => ({ file, text: stripComments(text) }));
     assert.deepEqual(partProblems(files), []);
+  });
+
+  it('names a part that runs with other options than the first part: fewer repetitions, another floor, more stalls, another bound, another experiment (a planted set)', () => {
+    const split = { 'x-exp': 2 };
+    const file = (name, index, options, call = 'landingExperiment') => ({
+      file: `testing/standalone/${name}`,
+      text: `const PART = ${index};\nconst x = ${call}({\n  title: \`t (part \${PART + 1})\`,\n  suite: 'xexp${index}',\n  ${options}\n  part: partOf('x-exp', PART),\n});\n`,
+    });
+    const first = file('x-exp-db.test.js', 0, "query: '', reps: 20,");
+    // Same options, spelled with other spacing and in another order, and another title and suite: one experiment.
+    assert.deepEqual(partProblems([first, file('x-exp-part-2-db.test.js', 1, "reps:20, query:'',")], split), []);
+    const problems = (options, call) => partProblems([first, file('x-exp-part-2-db.test.js', 1, options, call)], split).join('\n');
+    assert.match(problems("query: '', reps: 5,"), /x-exp-part-2-db\.test\.js runs part 1 with reps: 5, where testing\/standalone\/x-exp-db\.test\.js runs part 0 with reps: 20/);
+    assert.match(problems("query: '', reps: 20, minReps: 1,"), /with minReps: 1, where .* with minReps: \(not given\)/);
+    assert.match(problems("query: '', reps: 20, workers: 8,"), /with workers: 8/);
+    assert.match(problems("query: '', reps: 20, boundMs: 3000, holdMs: 6000,"), /with boundMs: 3000[\s\S]*with holdMs: 6000/);
+    assert.match(problems("query: '', reps: 20,", 'lateCommandExperiment'), /runs part 1 through lateCommandExperiment, where .* runs part 0 through landingExperiment/);
+    assert.match(partProblems([first, { file: 'testing/standalone/x-exp-part-2-db.test.js', text: "const PART = 1;\nconst x = landingExperiment(OPTIONS, partOf('x-exp', PART));\n" }], split).join('\n'),
+      /does not hand its experiment one object literal/);
   });
 
   it('names a missing part, a part run twice, a name that disagrees, a lane list of its own and a file that does not ask partOf (a planted set)', () => {
