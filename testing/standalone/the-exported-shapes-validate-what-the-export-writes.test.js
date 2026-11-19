@@ -155,7 +155,8 @@ describe('one failing record per kind of constraint, reported for the right shap
       { focus: entityIri('alice'), shape: PERSON_NAME, component: comp('MinLength') },
       { focus: entityIri('alice'), shape: PERSON_NAME, component: comp('Or') }, // the pattern, which "" does not match either
     ]],
-    ['a wrong datatype (a text where the property is a number)', (d) => withValue(d, alice('age'), lit('thirty')), [{ focus: entityIri('alice'), shape: at('entity', 'person', 'age'), component: comp('Datatype') }]],
+    // A number is `sh:or` of xsd:decimal and xsd:integer (slice S, row 14), so a text there fails the Or, not a single Datatype.
+    ['a wrong datatype (a text where the property is a number)', (d) => withValue(d, alice('age'), lit('thirty')), [{ focus: entityIri('alice'), shape: at('entity', 'person', 'age'), component: comp('Or') }]],
     ['a number below its minimum', (d) => withValue(d, alice('age'), lit('-1', 'decimal')), [{ focus: entityIri('alice'), shape: at('entity', 'person', 'age'), component: comp('Or') }]],
     ['a number above its maximum', (d) => withValue(d, alice('age'), lit('151', 'decimal')), [{ focus: entityIri('alice'), shape: at('entity', 'person', 'age'), component: comp('Or') }]],
     ['a string that does not match its pattern', (d) => withValue(d, alice('name'), lit('Alice 2')), [{ focus: entityIri('alice'), shape: PERSON_NAME, component: comp('Or') }]],
@@ -181,7 +182,7 @@ describe('one failing record per kind of constraint, reported for the right shap
     ['a plain property of an edge above its maximum', (d) => withValue(d, { subject: iri(`${BASE}edge/e1`), predicate: iri(termAt('edge', 'knows', 'strength')) }, lit('2', 'decimal')),
       [{ focus: 'edge/e1', shape: at('edge', 'knows', 'strength'), component: comp('Or') }]],
     ['a required property of an edge, empty', (d) => withValue(d, { subject: iri(`${BASE}edge/e1`), predicate: iri(termAt('edge', 'knows', 'strength')) }, lit('')),
-      [{ focus: 'edge/e1', shape: at('edge', 'knows', 'strength'), component: comp('MinLength') }, { focus: 'edge/e1', shape: at('edge', 'knows', 'strength'), component: comp('Datatype') }]],
+      [{ focus: 'edge/e1', shape: at('edge', 'knows', 'strength'), component: comp('MinLength') }, { focus: 'edge/e1', shape: at('edge', 'knows', 'strength'), component: comp('Or') }]],
   ];
   const key = (r) => `${r.focus} ${r.shape} ${r.component}`;
   for (const [what, mutate, expected] of cases) {
@@ -205,6 +206,24 @@ describe('a shape never refuses what the server accepts', () => {
     for (const needle of [lit('abc'), lit('7', 'decimal'), lit('5', 'decimal'), lit('Axe'), lit('next tuesday'), lit('2026-02-30')]) {
       assert.ok(data.some(q => q.object.kind === 'literal' && q.object.value === needle.value && q.object.datatype === needle.datatype), `the fixture writes ${needle.value}`);
     }
+  });
+  // Slice S, standards review row 14: the export writes a number as xsd:decimal, but outside data that says `30` (xsd:integer) is the same
+  // number, and the shapes must not refuse it, nor let an integer slip past a range or an enumeration.
+  it('outside data that writes a number as an xsd:integer conforms: a plain number, a ranged one, an enumerated one, an edge\'s', async () => {
+    const alice = (name) => prop('entity', 'alice', 'person', name);
+    let data = withValue(DATA(), alice('age'), lit('30', 'integer'));
+    data = withValue(data, alice('level'), lit('2', 'integer'));
+    data = withValue(data, alice('score'), lit('4', 'integer'));
+    data = withValue(data, { subject: iri(`${BASE}edge/e3`), predicate: iri(termAt('edge', 'knows', 'strength')) }, lit('1', 'integer'));
+    assert.deepEqual(await validate(data), []);
+  });
+  it('an integer is still held to its range and its enumeration', async () => {
+    const alice = (name) => prop('entity', 'alice', 'person', name);
+    const key = (r) => `${r.focus} ${r.shape} ${r.component}`;
+    const above = await validate(withValue(DATA(), alice('age'), lit('151', 'integer')));
+    assert.deepEqual(above.map(key), [key({ focus: entityIri('alice'), shape: at('entity', 'person', 'age'), component: comp('Or') })]);
+    const outside = await validate(withValue(DATA(), alice('level'), lit('4', 'integer')));
+    assert.deepEqual(outside.map(key), [key({ focus: entityIri('alice'), shape: at('entity', 'person', 'level'), component: comp('In') })]);
   });
   it('a value the server accepts for a pattern in the shared subset is accepted by the shape too (slice S)', async () => {
     const name = prop('entity', 'alice', 'person', 'name');
