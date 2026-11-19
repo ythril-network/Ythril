@@ -56,7 +56,7 @@ import { log, peerText, peerList, refusalOfParse, NAME_QUOTED } from '../util/lo
 import { notFoundSentence } from '../util/errors.js';
 import { sendLostSpace } from './write-target-answer.js';
 import { restartSchemaConvertInTurn } from '../sync/governance.js';
-import { currentLibraryState, libraryNamespaces, libraryRdfGuard } from '../spaces/library-terms.js';
+import { currentLibraryState, libraryNamespaces, libraryRdfGuard, spaceEditRdfGuard } from '../spaces/library-terms.js';
 import { deleteNamespace, putNamespace } from './schema-library-namespaces.js';
 
 export const schemaLibraryRouter = Router();
@@ -362,7 +362,9 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
     .replace(/^[^a-z0-9]+/, '')
     .slice(0, 100);
 
-  const library = getSchemaLibrary();
+  // A COPY (review finding 6): the export pushes and replaces entries, and the cached array is what the guard compares against and every
+  // reader validates by until a save; a refused export must leave it as it was. Entries are replaced by new objects, never changed in place.
+  const library = [...getSchemaLibrary()];
   const now = new Date().toISOString();
   const kts = KNOWLEDGE_TYPES;
   const resultEntries: ParsedLibraryEntry[] = [];
@@ -450,6 +452,8 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
 
 export const ApplyGroupBodyZ = z.object({
   spaceId: z.string().min(1).max(200),
+  /** Q-748: rename the RDF terms of the space on purpose (the apply is refused 409 `rdf_term_rename` without it). */
+  rebase: z.literal(true).optional(),
 });
 
 schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMfa, async (req, res) => {
@@ -487,6 +491,9 @@ schemaLibraryRouter.post('/groups/:group/apply', globalRateLimit, requireAdminMf
     typeSchemas[kt] = ktMap;
     applied.push({ knowledgeType: kt, typeName: entry.typeName, entryName: entry.name });
   }
+  // Review finding 9: the term-clash rule and the rename guard, as every library write that renames a linked term runs them.
+  const rdfRefused = spaceEditRdfGuard(spaceId, existingMeta, { ...existingMeta, typeSchemas }, parsed.data.rebase === true);
+  if (rdfRefused) { res.status(rdfRefused.status).json(rdfRefused.body); return; }
 
   // Through the own definitions (F-39.2): the group's references land in what this instance defines, so a space
   // whose meta is rebuilt from network layers keeps them.
@@ -567,7 +574,8 @@ schemaLibraryRouter.post('/', globalRateLimit, requireAdminMfa, (req, res) => {
     updatedAt: now,
   };
 
-  saveSchemaLibrary([...library, entry]);
+  // A new entry can resolve a linked `$ref` that named nothing until now (POST carries no `rebase`: such a write goes by PUT with it).
+  if (!savedUnlessRdfRefuses([...library, entry], false, res)) return;
   afterLibraryEdit([entry.name]);
   res.status(201).json({ entry });
 });
@@ -628,7 +636,8 @@ schemaLibraryRouter.put('/:name', globalRateLimit, requireAdminMfa, (req, res) =
       createdAt: now,
       updatedAt: now,
     };
-    saveSchemaLibrary([...library, newEntry]);
+    // Guarded too: a new entry can resolve a linked `$ref` that named nothing until now, and so rename that space's term.
+    if (!savedUnlessRdfRefuses([...library, newEntry], parsed.data.rebase === true, res)) return;
     afterLibraryEdit([name]);
     res.status(201).json({ entry: newEntry });
   } else {
@@ -807,7 +816,8 @@ schemaLibraryRouter.delete('/:name', globalRateLimit, requireAdminMfa, (req, res
     return;
   }
 
-  saveSchemaLibrary(library.filter(e => e.name !== name));
+  // Through the guard (review finding 10): a linked namespaced entry's terms fall back to the space's vocab when it goes.
+  if (!savedUnlessRdfRefuses(library.filter(e => e.name !== name), req.query['rebase'] === 'true', res)) return;
   afterLibraryEdit([name]);
   res.status(204).end();
 });

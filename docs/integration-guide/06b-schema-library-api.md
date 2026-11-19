@@ -277,7 +277,10 @@ names nothing: the namespace changes neither its fingerprint nor what it sends i
 
 The same two guards hold every library write that changes an entry linked by an RDF-enabled space: a `PUT` or `PATCH` of an entry that
 renames a term (its `typeName`, `knowledgeType`, `schemaGroup` or `iri`) answers `409 rdf_term_rename` unless the body carries
-`rebase: true`, and a write that would make two terms of such a space share an address answers `409 rdf_term_clash`. A namespace in
+`rebase: true`, and a write that would make two terms of such a space share an address answers `409 rdf_term_clash`. So do `export-space`
+(nothing of a refused export is kept), a `DELETE` of a linked entry (`?rebase=true` to make it on purpose), a new entry that resolves a
+linked `$ref` which named nothing before (by `PUT` with `rebase: true`; a `POST` carries no `rebase`), and a group apply that replaces a
+type of an RDF-enabled space (`rebase: true` in its body). A namespace in
 `config.json` that no door would accept (a hand edit) names nothing and is said once in the log. Requires an admin token (and MFA when
 enabled).
 
