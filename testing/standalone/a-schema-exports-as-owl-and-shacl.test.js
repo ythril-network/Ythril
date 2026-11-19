@@ -192,9 +192,8 @@ describe('a property: its axioms and its shape, field by field', () => {
     assert.deepEqual(P('level')['rdfs:range'], norm([{ 'rdf:type': [I('rdfs:Datatype')], 'owl:oneOf': [LIST(DEC(1), DEC(2), DEC(3))] }]));
   });
 
-  it('a date is the union of the four types a date is written as; a boolean is xsd:boolean with its typed default', () => {
-    const union = LIST(I('xsd:dateTimeStamp'), I('xsd:dateTime'), I('xsd:date'), I('xsd:string'));
-    assert.deepEqual(P('born')['rdfs:range'], norm([{ 'rdf:type': [I('rdfs:Datatype')], 'owl:unionOf': [union] }]));
+  it('a date is rdfs:Literal in OWL (xsd:date is outside OWL 2 DL) and the four types it is written as in SHACL; a boolean is xsd:boolean with its typed default', () => {
+    assert.deepEqual(P('born')['rdfs:range'], [I('rdfs:Literal')]);
     assert.deepEqual(S('born'), norm(shape('born', { 'sh:or': [LIST(DT('xsd:dateTimeStamp'), DT('xsd:dateTime'), DT('xsd:date'), DT('xsd:string'))] })));
     assert.deepEqual(P('active')['rdfs:range'], [I('xsd:boolean')]);
     assert.deepEqual(S('active'), norm(shape('active', { 'sh:datatype': [I('xsd:boolean')], 'sh:defaultValue': [BOOL(true)] })));
@@ -335,7 +334,7 @@ describe('an edge type: a property, never a class', () => {
 
   it('the properties of an edge are on their own shapes, aimed at the reifier, and a required one has no count (nothing to target)', () => {
     const own = (prop) => ({ 'rdf:type': [I('owl:DatatypeProperty'), I('owl:FunctionalProperty')], 'rdfs:isDefinedBy': [I(ONTOLOGY)], 'rdfs:label': [L(prop)] });
-    assert.deepEqual(treeAt(quads, termAt('edge', 'knows', 'since')), norm({ ...own('since'), 'rdfs:range': [{ 'rdf:type': [I('rdfs:Datatype')], 'owl:unionOf': [LIST(I('xsd:dateTimeStamp'), I('xsd:dateTime'), I('xsd:date'), I('xsd:string'))] }] }));
+    assert.deepEqual(treeAt(quads, termAt('edge', 'knows', 'since')), norm({ ...own('since'), 'rdfs:range': [I('rdfs:Literal')] }));
     assert.deepEqual(treeAt(quads, shapeAt('edge', 'knows', 'since')), norm({
       'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I(termAt('edge', 'knows', 'since'))], 'sh:name': [L('since')], 'sh:targetSubjectsOf': [I(termAt('edge', 'knows', 'since'))],
       'sh:maxCount': [INT(1)], 'sh:or': [LIST({ 'sh:datatype': [I('xsd:dateTimeStamp')] }, { 'sh:datatype': [I('xsd:dateTime')] }, { 'sh:datatype': [I('xsd:date')] }, { 'sh:datatype': [I('xsd:string')] })],

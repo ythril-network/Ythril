@@ -255,17 +255,17 @@ class Space {
 
 // -- properties ---------------------------------------------------------------------------------------------------------------------------
 
-/** The datatype a declared type is: a number is a decimal, as the record form writes it. A date is a union (see {@link dateUnion}). */
+/** The datatype a declared type is: a number is a decimal, as the record form writes it. A date has no one datatype (see {@link DATE_RANGE}). */
 const DATATYPE_OF: Readonly<Record<Exclude<DeclaredType, 'date'>, string>> = Object.freeze({
   string: xsd('string'), number: xsd('decimal'), boolean: xsd('boolean'),
 });
 
-function dateUnion(out: Out): BlankTerm {
-  const n = out.node();
-  out.add(n, RDF_TYPE, RDFS('Datatype'));
-  out.add(n, OWL('unionOf'), list(DATE_DATATYPES));
-  return n;
-}
+/**
+ * The OWL range of a date property: `rdfs:Literal`. A date is written as one of {@link DATE_DATATYPES}, but `xsd:date` is not in the OWL 2
+ * datatype map (OWL 2 Structural Specification §4), and a union naming it would take the ontology out of OWL 2 DL; the exact four-member
+ * check stays in the property's SHACL shape.
+ */
+const DATE_RANGE = RDFS('Literal');
 
 /** What a property's own fields say, read once: the values are typed here, so the axiom and the shape cannot disagree. */
 interface PropertyFacts {
@@ -331,7 +331,7 @@ function rangeOf(out: Out, facts: PropertyFacts): Term | undefined {
   if (numeric.length > 0) parts.push(restriction(out, DATATYPE_OF.number, numeric));
   if (facts.declared === 'string' && facts.pattern !== undefined) parts.push(restriction(out, DATATYPE_OF.string, [[XSD('pattern'), plain(facts.pattern)]]));
   if (parts.length === 0 && facts.declared !== undefined && facts.members === undefined) {
-    return facts.declared === 'date' ? dateUnion(out) : iri(DATATYPE_OF[facts.declared]);
+    return facts.declared === 'date' ? DATE_RANGE : iri(DATATYPE_OF[facts.declared]);
   }
   if (parts.length <= COUNT_ONE) return parts[0];
   const both = out.node();
