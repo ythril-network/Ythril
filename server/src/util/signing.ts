@@ -75,8 +75,12 @@ export const BOUND_CASTS_SINCE = '5.6.0';
  * `wipeTypes` is sorted and deduplicated, because neither its order nor a repeat is content: adoption stores the list canonical
  * (bundle-106, X11), and a cast signed over the list as an older proposer sent it must verify against what is stored.
  */
-function roundTargetFields(round: Pick<VoteRound, 'type' | 'spaceId' | 'networkSpaceId' | 'wipeTypes'>): string[] {
-  return [round.type, round.spaceId ?? '', round.networkSpaceId ?? '', [...new Set(round.wipeTypes ?? [])].sort().join(',')];
+function roundTargetFields(round: Pick<VoteRound, 'type' | 'spaceId' | 'networkSpaceId' | 'wipeTypes' | 'rebase'>): string[] {
+  const fields = [round.type, round.spaceId ?? '', round.networkSpaceId ?? '', [...new Set(round.wipeTypes ?? [])].sort().join(',')];
+  // Q-748: a `space_rebase` round's target is also the base it moves to, so a relayer cannot change it. Appended for that type ONLY: every
+  // other type's message stays byte-identical, and a member of an earlier release verifies every cast it verified before.
+  if (round.type !== 'space_rebase') return fields;
+  return [...fields, round.rebase?.base ?? '', round.rebase?.vocab ?? '', String(round.rebase?.epoch ?? '')];
 }
 
 /**
@@ -89,7 +93,7 @@ export function voteCastBoundMessage(params: {
   subjectInstanceId: string;
   instanceId: string;
   vote: string;
-  round: Pick<VoteRound, 'type' | 'spaceId' | 'networkSpaceId' | 'wipeTypes'>;
+  round: Pick<VoteRound, 'type' | 'spaceId' | 'networkSpaceId' | 'wipeTypes' | 'rebase'>;
 }): string {
   return ['ythril-vote:v2', params.networkId, params.roundId, params.subjectInstanceId, params.instanceId, params.vote,
     ...roundTargetFields(params.round)].join('|');
@@ -111,7 +115,7 @@ export function convertRecordsCastMessage(params: {
   subjectInstanceId: string;
   instanceId: string;
   vote: string;
-  round: Pick<VoteRound, 'type' | 'spaceId' | 'networkSpaceId' | 'wipeTypes'>;
+  round: Pick<VoteRound, 'type' | 'spaceId' | 'networkSpaceId' | 'wipeTypes' | 'rebase'>;
   convertRecords: unknown;
 }): string {
   const { convertRecords, ...bound } = params;

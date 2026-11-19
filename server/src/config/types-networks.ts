@@ -30,7 +30,8 @@ import type { ConvertRecords } from '@ythril-network/schema';
 export type NetworkType = 'closed' | 'democratic' | 'club' | 'braintree' | 'pubsub';
 export type SyncDirection = 'both' | 'push' | 'pull';
 export type VoteValue = 'yes' | 'veto';
-export type VoteRoundType = 'join' | 'remove' | 'space_deletion' | 'space_wipe' | 'meta_change' | 'space_addition';
+/** `space_rebase` (Q-748): a shared space's change of RDF base, counted like a deletion and applied at its deadline. */
+export type VoteRoundType = 'join' | 'remove' | 'space_deletion' | 'space_wipe' | 'meta_change' | 'space_addition' | 'space_rebase';
 
 export interface NetworkMember {
   instanceId: string;
@@ -324,6 +325,11 @@ export interface VoteRound {
    * instance it changes anything for: everyone else stores a passed meta_change as the network's layer anyway.
    */
   proposesLayer?: boolean;
+  /**
+   * The new RDF names a `space_rebase` round proposes (Q-748): bound by every cast's `bsig` for this round type only, so a relayer cannot
+   * change what the network voted for, and every member that applies it at the deadline takes the same base. `spaceId` is the NETWORK's id.
+   */
+  rebase?: { base: string; vocab: string; epoch: number };
   /**
    * LOCAL: this instance has already applied this concluded space round (`S-9`), so gossip handing it the same round
    * again does nothing. Never taken from a peer: adopting a round and serving one both strip it.

@@ -12,7 +12,8 @@
  * It reads the config, settles every round past its deadline through `settleRounds` (never by setting fields: what concluding does —
  * revoking a failed join's credentials, recording the outcome — is written once, in `concludeRoundIfReady`, and what a conclusion does
  * here once, in the settle), hands each network's owed space rounds back to the settle (`'retry'`: a round with nothing to do here is
- * settled there, one this instance must act on registers or joins its act), prunes what is prunable (recording it first), and saves
+ * settled there, one this instance must act on registers or joins its act), lands every passed `space_rebase` round whose deadline has
+ * come (`applyOwedRebaseRounds`, Q-748: a rebase lands at its deadline, never at its pass), prunes what is prunable (recording it first), and saves
  * ONCE if anything changed. Then it starts every owed space act whose `retryAt` has passed — the runner's retry clock. There is no
  * `await` between the read and the save: a config reload landing between them would be overwritten by a snapshot older than it. So
  * the tick returns nothing to await, and the walk is `eachNetwork`, which is synchronous too (config work has no database operation
@@ -44,6 +45,7 @@ import { log, peerText } from '../util/log.js';
 import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
 import { warnOnce } from '../util/warn-once.js';
 import { settleRounds } from './round-conclusion.js';
+import { applyOwedRebaseRounds } from '../spaces/apply-rebase-round.js';
 import { roundPastDeadline, spaceActOwed } from './round-state.js';
 
 /** The label of the job: the `job` of `ythril_interval_tick_skipped_total` and the head of its failure lines. Kept equal to the one literal `intervalJob` is registered under, below. */
@@ -114,6 +116,8 @@ export function runRoundExpiryTick(now: number = Date.now()): void {
       log.info(`Vote rounds past their deadline on network '${peerText(net.label)}' concluded: ${
         Object.entries(byType).map(([type, n]) => `${n} ${peerText(type)}`).join(', ')}`);
     }
+    // Q-748: every passed rebase round whose deadline has come lands now, on this tick's one save, before the prune may see it applied.
+    if (applyOwedRebaseRounds(net, cfg, now)) dirty = true;
     if (pruneExpiredRounds(net, now) > 0) dirty = true;
   });
   failures += walked.failed.length;

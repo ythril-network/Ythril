@@ -65,6 +65,10 @@ import {
 } from '../sync/governance.js';
 import { parseMetaRound, type MetaRoundProposal } from '../sync/meta-round-merge.js';
 import type { ConversionStep } from '@ythril-network/schema/internal';
+import { settleRdf, type RebaseProposal } from './rdf-settle.js';
+import { termClashes } from '../rdf/term-iri.js';
+import { getPublicBaseUrl, publicBaseUrlIsFallback } from '../config/public-url.js';
+import { openRebaseRounds } from './apply-rebase-round.js';
 // The trigger lives beside the sweep (bundle-30 `R5`): the effective-meta recompute fires it too.
 
 // The merge a write makes, and the base it is merged over, live with the rights check's copy of the same question (`meta-write-base.ts`).
@@ -215,7 +219,7 @@ function memberSkewWarnings(skew: readonly MemberSkew[], caller: WriteCaller): R
  * tool maps these to its own error shape; it does not decide them.
  */
 export type MetaUpdateRefusal = {
-  status: 400 | 404 | 410 | 412 | 422;
+  status: 400 | 404 | 409 | 410 | 412 | 422;
   /** `step` is the index of the conversion step a `bad_conversion_step` refusal names (`Q-745`). */
   body: { error: string; code?: string; expectedVersion?: number; currentVersion?: number; step?: number };
 };
@@ -237,6 +241,36 @@ function badConversionStepRefusal(refusal: { error: string; issues: readonly { p
   const [, member, index] = issues[0]!.path;
   const at = member !== 'steps' ? NaN : index === undefined ? CONVERSION_STEPS_MAX : Number(index);
   return { status: BAD_BODY, body: { ...refusal, code: 'bad_conversion_step', ...(Number.isInteger(at) ? { step: at } : {}) } };
+}
+
+/**
+ * The RDF setting of a door's write, settled by the one rule (`rdf-settle.ts`, Q-748), written back into `data.meta` so the merge stores the
+ * settled value and never the sent one. A networked rebase leaves `data.meta` without `rdf` (nothing moves here; the round carries it) and
+ * must be the request's only change: a rebase lands at its round's deadline, and a write that carried it with other edits would answer one
+ * outcome for two acts that land at different times.
+ */
+function settleRdfOfWrite(space: SpaceConfig, data: z.infer<typeof UpdateSpaceBody>):
+  { ok: true; proposeRebase?: RebaseProposal } | { ok: false; refusal: MetaUpdateRefusal } {
+  const meta = data.meta as (Partial<SpaceMeta> & { rdf?: SpaceMeta['rdf'] & { rebase?: true } }) | undefined;
+  if (meta?.rdf === undefined) return { ok: true };
+  if (data.targetNetwork !== undefined) {
+    return { ok: false, refusal: { status: BAD_BODY, body: { error: 'rdf is this space\'s own setting and is not proposed to one network\'s layer: send it without targetNetwork', code: 'rdf_not_a_layer_field' } } };
+  }
+  const networked = getConfig().networks.some(n => n.spaces.includes(space.id));
+  const settled = settleRdf(space.meta?.rdf, meta.rdf, 'local', {
+    spaceId: space.id, networked, ...(publicBaseUrlIsFallback() ? {} : { publicBaseUrl: getPublicBaseUrl() }),
+  });
+  if (!settled.ok) return { ok: false, refusal: { status: settled.status, body: { error: settled.error, code: settled.code } } };
+  if (settled.proposeRebase) {
+    const others = [...Object.keys(meta).filter(k => k !== 'rdf'), ...Object.keys(data).filter(k => k !== 'meta' && (data as Record<string, unknown>)[k] !== undefined)];
+    if (others.length > 0) {
+      return { ok: false, refusal: { status: BAD_BODY, body: { error: `a rebase of a shared space is voted on alone and lands at its round's deadline: send rdf by itself, and ${others.join(', ')} in another write`, code: 'rdf_rebase_alone' } } };
+    }
+    delete data.meta;
+    return { ok: true, proposeRebase: settled.proposeRebase };
+  }
+  if (settled.rdf === undefined) delete meta.rdf; else meta.rdf = settled.rdf;
+  return { ok: true };
 }
 
 /**
@@ -355,6 +389,8 @@ export type MetaUpdatePlan = {
    * and the outcome hands it on ({@link ConvertCarried}).
    */
   convertRecords?: ConvertRecords;
+  /** Q-748: a networked space's rebase, opened as a `space_rebase` round on every network carrying the space; nothing else is in the write. */
+  rebaseProposal?: RebaseProposal;
 };
 
 export type MetaUpdateDecision =
@@ -416,6 +452,12 @@ export function planSpaceMetaUpdate(input: {
       code: 'convert_needs_meta',
     } } };
   }
+
+  // Q-748: the RDF setting is settled by its one rule before anything is merged — an omission keeps the stored value, the base is frozen,
+  // and on a networked space a rebase is a `space_rebase` round of its own, never a field of a settings round.
+  const rdfSettled = settleRdfOfWrite(space, parsed.data);
+  if (!rdfSettled.ok) return { ok: false, refusal: rdfSettled.refusal };
+  const rebaseProposal = rdfSettled.proposeRebase;
 
   // Validate any $ref values in the incoming meta against the instance schema library: an entry that does not exist, or one of ANOTHER
   // kind, whose endpoints and functional would never apply (`Q-215`). Checked here, at the save of the reference, against this
@@ -503,6 +545,14 @@ export function planSpaceMetaUpdate(input: {
     const minted = parseSpaceMeta(mergeSpaceMeta(base, parsed.data.meta, parsed.data.typeSchemasMode ?? 'merge'), { against: base });
     if (!minted.ok) return { ok: false, refusal: { status: 400, body: { error: minted.message } } };
     mergedMeta = minted.meta;
+    // Q-748 rule 5: on a space with RDF on, two terms with one address are refused, both named. Asked of the resolved schema, as the
+    // resolver names it; a space with RDF off names nothing, so nothing is asked.
+    if (mergedMeta.rdf?.enabled === true && mergedMeta.rdf.base) {
+      const clashes = termClashes(inlineResolvableRefs(mergedMeta) as SpaceMeta);
+      if (clashes.length > 0) {
+        return { ok: false, refusal: { status: 422, body: { error: `two terms of this space would have one RDF address: ${clashes.map(c => c.message).join('; ')}`, code: 'rdf_term_clash' } } };
+      }
+    }
   }
   /*
    * What the audit log says about the schema (R6-13): the types, properties and rules as the edit LEAVES them against what it was merged
@@ -568,6 +618,7 @@ export function planSpaceMetaUpdate(input: {
       droppedTypes: typesAReplaceWouldDrop(base, parsed.data.meta as Partial<SpaceMeta> | undefined, parsed.data.typeSchemasMode ?? 'merge'),
       changedTypes,
       ...(convertRecords !== undefined ? { convertRecords } : {}),
+      ...(rebaseProposal !== undefined ? { rebaseProposal } : {}),
     },
   };
 }
@@ -752,6 +803,13 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
   // Already capped to the instance ceiling by the planner.
   if (plan.hasDocExtraction) {
     updateSpace(id, { documentExtraction: plan.documentExtraction });
+  }
+
+  // Q-748: a shared space's rebase is a `space_rebase` round on every network carrying it, applied at its deadline; nothing moves now.
+  if (plan.rebaseProposal !== undefined) {
+    const rounds = openRebaseRounds(cfg, id, plan.rebaseProposal);
+    saveConfig(cfg);
+    return { outcome: 'vote_pending', rounds };
   }
 
   // Network voting: a networked space PROPOSES a meta change rather than applying it.

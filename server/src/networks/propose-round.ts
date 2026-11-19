@@ -70,8 +70,8 @@ export function proposeRound(net: NetworkConfig, cfg: Config, proposal: RoundPro
     votes: [],
   };
   // 0. Who to tell, before anything acts: a deletion takes the space out of the network, and its removal drops the label.
-  // An addition and a schema change name the space by the NETWORK's id; a deletion and a wipe by this instance's own.
-  const namesNetworkId = round.type === 'space_addition' || round.type === 'meta_change';
+  // An addition, a schema change and a rebase name the space by the NETWORK's id; a deletion and a wipe by this instance's own.
+  const namesNetworkId = round.type === 'space_addition' || round.type === 'meta_change' || round.type === 'space_rebase';
   const spaceKey = namesNetworkId ? round.spaceId : networkSpaceKey(net, round) ?? undefined;
   const localSpace = round.spaceId === undefined ? undefined : namesNetworkId ? remoteToLocal(net, round.spaceId) : round.spaceId;
   const snapshot: RoundNoticeSnapshot = {

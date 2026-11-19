@@ -56,6 +56,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { SpaceMeta } from '../config/types.js';
 import { parseSpaceMeta, type ParsedSpaceMeta } from '../spaces/body-schemas.js';
 import { boundedNames, metaFieldKind, PER_TYPE_META_FIELD } from '../spaces/meta-fields.js';
+import { settleRdf } from '../spaces/rdf-settle.js';
 
 /** The parts of a `VoteRound` this module reads. Kept structural so it is testable without a full round. */
 export interface MetaRoundProposal {
@@ -124,8 +125,11 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
   // an unknown changed-set would mean applying nothing, so a carried motion would silently do nothing.
   if (round.baseMetaVersion === undefined || fields === undefined) {
     const whole = strip(round.pendingMeta) as Record<string, unknown>;
-    const known = Object.fromEntries(Object.entries(whole).filter(([k]) => metaFieldKind(k) !== undefined));
+    const known: Record<string, unknown> = Object.fromEntries(Object.entries(whole).filter(([k]) => metaFieldKind(k) !== undefined));
     const unknown = Object.keys(whole).filter(k => metaFieldKind(k) === undefined);
+    // Q-748: a wholesale round from a peer that knows no `rdf` would erase the base; the setting is settled, never replaced.
+    const rdf = settledRoundRdf(current?.rdf, whole['rdf'] as SpaceMeta['rdf']);
+    if (rdf === undefined) delete known['rdf']; else known['rdf'] = rdf;
     return { meta: known as Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'>, conflicts: [], wholesale: true, unknownFields: boundedNames(unknown) };
   }
 
@@ -202,7 +206,8 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
       continue;
     }
 
-    const incoming = proposed[field];
+    // Q-748: the RDF setting is settled by its one rule, so a settings round never moves the stored base, whatever it carries.
+    const incoming = field === 'rdf' ? settledRoundRdf(base.rdf, proposed[field] as SpaceMeta['rdf']) : proposed[field];
     if (contested(field, merged[field], incoming)) conflicts.push(field);
     // `undefined` is a real proposal: it is how a scalar is cleared. Deleting the key rather than assigning
     // it keeps the stored object free of explicit-undefined properties, which JSON round-trips away anyway.
@@ -216,6 +221,12 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
     wholesale: false,
     unknownFields: boundedNames(unknownFields),
   };
+}
+
+/** The RDF setting a passed settings round leaves (`spaces/rdf-settle.ts`, source `settings-round`): the stored base is never moved by one. */
+function settledRoundRdf(stored: SpaceMeta['rdf'], incoming: SpaceMeta['rdf']): SpaceMeta['rdf'] {
+  const settled = settleRdf(stored, incoming, 'settings-round');
+  return settled.ok ? settled.rdf : stored;
 }
 
 /** What {@link parseMetaRound} answers: the meta a store may take, or why this member cannot read the round. */

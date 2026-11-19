@@ -107,6 +107,9 @@ export const SPACE_FIELD_RIGHTS: Readonly<Record<string, FieldRight>> = {
   // `validationMode`, which is what decides whether a violation refuses at all (R6-12). A TYPE's rules are priced by this row too
   // (`typeRuleEditsIn`): `meta.typeSchemas` alone is the write rung, and a rule refuses writes at either level.
   'meta.rules': area('schema', 'admin'),
+  // Q-748: the space's RDF names. Its base is every address the space gives out, set once and moved only deliberately (a rebase, which on a
+  // shared space opens a `space_rebase` round): the schema area's `admin`, the rung of the other settings whose change reaches every caller.
+  'meta.rdf': area('schema', 'admin'),
 
   // ENFORCEMENT rather than shape: flipping either makes writes that used to succeed start failing, for
   // every caller in the space, without anything having changed about their data.

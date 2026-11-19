@@ -128,10 +128,42 @@ export function roundConversionOwed(r: PassedRoundReadable & { convertRecords?: 
 }
 
 /**
+ * The DELETE-VOTE FAMILY: the round types counted as a deletion is (Q-748; owner, 2026-11-18: a base change on a shared space is counted like
+ * a deletion). The space acts and `space_rebase`. What it decides: the pub/sub publisher clause of the verdict (`roundVerdict`) — on a network
+ * where this instance publishes, such a round passes only when it opened it, so a subscriber can neither delete, wipe nor rebase the
+ * publisher's space. It is NOT the space-act set: a rebase registers no act, holds no write and closes no exchange.
+ */
+export const DELETE_VOTE_ROUND_TYPES: ReadonlySet<string> = new Set([...SPACE_ACT_ROUND_TYPES, 'space_rebase']);
+
+/** Is a round of this type counted as a deletion is ({@link DELETE_VOTE_ROUND_TYPES})? */
+export function isDeleteVoteRound(type: unknown): boolean {
+  return typeof type === 'string' && DELETE_VOTE_ROUND_TYPES.has(type);
+}
+
+/**
+ * A passed, unvetoed `space_rebase` round this instance has not applied (Q-748). THE predicate of "a rebase still to land here", whatever the
+ * clock says: read by the prune, which keeps such a round past its deadline until it is applied (`sync/vote-round-retention.ts`), and by the
+ * settle of an arriving layer, which reads a layer that already carries its epoch as early and not as a conflict. A sibling of
+ * {@link spaceActOwed} on the same veto ({@link roundPassedUnvetoed}).
+ */
+export function rebaseRoundUnapplied(r: PassedRoundReadable): boolean {
+  return r.type === 'space_rebase' && roundPassedUnvetoed(r) && r.appliedHere !== true;
+}
+
+/**
+ * A rebase round OWED here at `now`: still to land ({@link rebaseRoundUnapplied}) and its deadline come. It lands at the deadline and never at
+ * the pass, so every member, the proposer included, moves at the same instant and a member had the whole voting period to leave
+ * (`spaces/apply-rebase-round.ts`, read by the expiry tick).
+ */
+export function rebaseRoundOwed(r: PassedRoundReadable & Pick<RoundDatable, 'deadline'>, now: number): boolean {
+  return rebaseRoundUnapplied(r) && roundPastDeadline(r, now);
+}
+
+/**
  * The round types a peer still needs after they end: a round whose effect every member applies is served after it passes, because its
  * proposer may have decided it at open (design v5 §3.1). `join` and `remove` stay out.
  */
-export const SERVED_ONCE_PASSED: ReadonlySet<string> = new Set(['space_addition', 'meta_change', ...SPACE_ACT_ROUND_TYPES]);
+export const SERVED_ONCE_PASSED: ReadonlySet<string> = new Set(['space_addition', 'meta_change', 'space_rebase', ...SPACE_ACT_ROUND_TYPES]);
 
 /** The part of a join round {@link joinRoundOf} reads. */
 interface JoinRoundReadable extends RoundDatable {

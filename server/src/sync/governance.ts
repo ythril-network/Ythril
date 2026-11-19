@@ -30,7 +30,7 @@ import { settleSpaceAct } from '../spaces/apply-wipe-round.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
 import { declareStep } from '../util/housekeeping-signals.js';
 import { metaChangeNote, queueGeneratedNote } from './change-notes.js';
-import { isSpaceActRound, roundConversionOwed, roundPastDeadline } from '../networks/round-state.js';
+import { isDeleteVoteRound, roundConversionOwed, roundPastDeadline } from '../networks/round-state.js';
 import { roundElectorate, votersOf } from '../networks/round-electorate.js';
 import { recordRoundOutcome } from '../networks/round-outcomes.js';
 
@@ -225,8 +225,9 @@ export function roundVerdict(
       // publisher passes only when it opened the round (D-40, X10). Every other such round there is a subscriber's, whose deletion or
       // wipe is its own local act; one an older publisher adopted before the upgrade would otherwise pass at the next gossip or relay
       // and empty the publisher's space for every subscriber. Decided from the local role and a local field, never a wire field.
+      // A rebase is of the delete family (Q-748): a subscriber cannot rebase the publisher's space either.
       passed = yesCount >= 1 && vetoCount === 0
-        && !(isSpaceActRound(round.type) && publishesOn(net) && round.proposedHere !== true);
+        && !(isDeleteVoteRound(round.type) && publishesOn(net) && round.proposedHere !== true);
       break;
   }
   return passed ? 'passed' : null;

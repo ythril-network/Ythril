@@ -549,6 +549,25 @@ export const schema_updateTool: ToolHandler = {
           + 'Try one on a record first with `schema_validate`. Same as `meta.rules` on `PATCH /api/spaces/:id`; needs the schema '
           + '`admin` rung, as `validationMode` does.',
       },
+      rdf: {
+        type: 'object',
+        description: 'The space\'s RDF names. OFF until `enabled: true`; nothing changes for the space before. The first enable gives every '
+          + 'record the address `<base><kind>/<id>`, `base` being yours or one under the instance\'s public URL named for the space (refused with '
+          + '`rdf_base_needed` when the instance has no public URL and you send none). The base is then FROZEN: a write that omits a field '
+          + 'keeps it, a different `base` or `vocab` is refused with `rdf_base_frozen`. `rebase: true` with a new base changes it on purpose, '
+          + 'which changes every address the space gave out: on a space in no network at once; on a shared space it opens a `space_rebase` '
+          + 'vote counted like a deletion and lands at the vote\'s deadline (send it alone). Same as `meta.rdf` on `PATCH /api/spaces/:id`; '
+          + 'needs the schema `admin` rung.',
+        properties: {
+          enabled: { type: 'boolean', description: 'Switch the space\'s RDF names on or off; off keeps the base for when it is switched on again.' },
+          base: { type: 'string', maxLength: 2000, description: 'The records\' address prefix: an absolute IRI ending in "/" with no "#". Set once.' },
+          vocab: { type: 'string', maxLength: 2000, description: 'The namespace of the space\'s own type and property names (ends in "/" or "#"); `<base>vocab/` when absent. Moves only with the base.' },
+          baseEpoch: { type: 'integer', minimum: 0, description: 'How many times the base was changed; the server keeps its own count and ignores yours.' },
+          rebase: { type: 'boolean', enum: [true], description: 'Change the base on purpose (see above). Never stored.' },
+        },
+        required: ['enabled'],
+        additionalProperties: false,
+      },
     },
     required: ['space'],
     additionalProperties: false,

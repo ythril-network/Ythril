@@ -49,10 +49,12 @@ export const SCHEMA_DIFF_CLASSES: Readonly<Record<string, Readonly<Record<string
   type: {
     description: 'wording', namingPattern: 'structural', propertySchemas: 'nested', retention: 'nested', suppressEmbeddings: 'lifecycle',
     whenDuePasses: 'lifecycle', endpoints: 'nested', functional: 'structural', rules: 'nested',
+    // Q-748: the type's RDF address; changing it renames the term in every export, so it is shown as a change of shape.
+    iri: 'structural',
   },
   'type.propertySchemas.*': {
     description: 'wording', type: 'structural', enum: 'structural', minimum: 'structural', maximum: 'structural', pattern: 'structural',
-    mergeFn: 'write', required: 'structural', default: 'write',
+    mergeFn: 'write', required: 'structural', default: 'write', iri: 'structural',
   },
   'type.retention': { days: 'lifecycle', contentDays: 'lifecycle' },
   'type.endpoints': { from: 'structural', to: 'structural' },
