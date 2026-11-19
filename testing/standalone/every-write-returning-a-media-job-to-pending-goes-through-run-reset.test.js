@@ -8,8 +8,8 @@
  * `retryJob` and `retryFailedJobs` forgot the deferral marks (S8: a retried job skipped the caption it was retried for), the text
  * enqueue reset the job without them either, the media enqueue unset them and the text one did not, and the one place that did NOT
  * forget anything was the one written last. A reset is one thing, a whole new run, and one spread says what it is: `RUN_RESET` (`RUN_RESET`:
- * status `pending`, attempts 0, `lastError`, `claimedAt` and `claimToken` null; `RUN_RESET_UNSET`: `progress` and the deferral marks
- * unset; `updatedAt` and `claimableAfter` are each writer's own). A seventh writer that spells its own `$set` is the next S8.
+ * status `pending`, attempts 0, `lastError`, `claimedAt` and `claimToken` null; `RUN_RESET_UNSET`: `progress` and the marks of the run's
+ * waits unset, `RUN_MARKS`: the deferral's and the outage count; `updatedAt` and `claimableAfter` are each writer's own). A seventh writer that spells its own `$set` is the next S8.
  *
  * The other half is what the spread must NOT carry. The job's identity (`mimeType`, `mediaType`, `arrival`, `sha256`) is set only by the
  * write door and by the enqueue: a reset that also set `arrival` would turn a peer's arrived image into one written here on every retry
@@ -54,6 +54,7 @@ export const BY_HAND = {
   resetStalledJobs: 'stall recovery re-queues the run that stopped reporting, with the attempt it spent: the same run, not a new one',
   holdJobsForMove: 'holds a job for a move: not claimable, nothing about the run changes, and the move re-keys it',
   deferJob: 'a deferral: the same run goes on behind a wait, and the marks it sets are the point of it (`DEFERRAL_MARKS` are set here, unset by a reset)',
+  handBackJob: 'a hand-back while the embedder is unavailable: the same run waits with its attempt refunded, and the count it raises is the point of it (`outageFailures`, one of `RUN_MARKS`, unset by a reset)',
 };
 
 /** What the gate says about `src`: `names` (by-hand writers not listed), `stale` (listed rows no by-hand writer matches). */

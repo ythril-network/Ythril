@@ -40,7 +40,10 @@ import { createMediaProviders } from './providers.js';
 import type { MediaProviderBundle } from './providers.js';
 import { cancelMediaJob } from './job-queue.js';
 import { storedAbsOf } from '../held-spelling.js';
-import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob, holdJobsForMove, deferJob, mayDeferAgain } from './job-queue.js';
+import { claimNextJob, completeJob, failJob, resetStalledJobs, currentWorkEpoch, waitForWork, wakeWorkers, touchJobProgress , releaseClaimedJob, holdJobsForMove, deferJob, mayDeferAgain, handBackJob } from './job-queue.js';
+import { mediaClaimGate } from './embedder-outage-gate.js';
+import { EmbedderUnavailableThroughout, waitsForEmbedder } from './embedder-unavailable.js';
+import { mediaJobsHandedBackTotal } from '../../metrics/media-outage-metrics.js';
 import { moveCarriesRecordsAt } from '../move-markers.js';
 import { embedImage } from './image-embedder.js';
 import { embedAudio } from './audio-embedder.js';
@@ -220,6 +223,8 @@ export function stopMediaEmbeddingWorker(): void {
   // The idle wait is interruptible, so wake it: otherwise a worker parked on a 30s backoff
   // would keep the process alive for up to that long after a stop request.
   wakeWorkers();
+  // And a claim held by an embedder outage: the worker's OWN pause, never the embed worker's (`embedder-outage-gate.ts`).
+  mediaClaimGate.cancel();
   log.info('Media embedding worker: stop requested');
 }
 
@@ -361,11 +366,12 @@ async function workerLoop(): Promise<void> {
       };
     },
     // Re-read the space list on each claim (handles dynamic space creation/removal). No spaces is an empty
-    // claim, which the pool answers with its idle backoff.
-    claim: (): Promise<MediaJobDoc | null> => {
+    // claim, which the pool answers with its idle backoff. Through the outage gate: while the embedder is known to be unavailable nothing is
+    // claimed, and a restarting inference process is waited out, so no run pays for its vision or conversion work and then meets it.
+    claim: (): Promise<MediaJobDoc | null> => mediaClaimGate.claim(() => {
       const activeSpaceIds = configuredSpaceIds();
       return activeSpaceIds.length === 0 ? Promise.resolve(null) : claimNextJob(activeSpaceIds);
-    },
+    }, () => running && generation === myGeneration),
     onClaimError: err => log.warn(`Media worker: claim error: ${err instanceof Error ? err.message : String(err)}`),
     // Track what this process holds, so a planned shutdown can hand the claims back instead of leaving them to
     // time out. Synchronous with the claim: the pool calls this with nothing in between.
@@ -381,7 +387,7 @@ async function workerLoop(): Promise<void> {
       const jobProviders = activeProviders ?? buildProviders(getMediaEmbeddingConfig());
       // Removed in a `finally` per job: a leaked entry would make shutdown try to release a job that has already
       // completed, which the token guard would refuse anyway, but noisily.
-      return processJob(job, jobProviders).finally(() => dropHeld(job));
+      return runOneMediaJob(job, jobProviders).finally(() => dropHeld(job));
     },
     // A claim that resolved after stop: pending again now, rather than after a stall timeout.
     release: job => {
@@ -406,6 +412,15 @@ function abandonLostClaim(spaceId: string, fileId: string, mediaType: MediaJobDo
     + ` any, now belongs to wherever the file went), or stall recovery re-queued it because it was slower`
     + ` than stalledJobTimeoutMs — in that case see the re-queue warning above for how long it was silent.`);
   mediaJobsRetriedTotal.labels({ space: spaceId, media_type: mediaType }).inc();
+}
+
+/**
+ * Run ONE claimed media job to its end against `providers`: the seam the worker's pool calls for every job, and the one a test drives one run
+ * at a time (as `runOneEmbedJob` is for the embed worker), so no test has to race the background loop or wait through its pauses. The claim is
+ * the caller's (`claimNextJob`, through the outage gate in the loop); the run writes only under it.
+ */
+export function runOneMediaJob(job: MediaJobDoc, providers: MediaProviderBundle): Promise<void> {
+  return processJob(job, providers);
 }
 
 async function processJob(
@@ -567,7 +582,7 @@ async function processJob(
           },
         );
         if (chunks.length > 0 || extractedImages.length > 0) {
-          const { chunkCount, convertedFileId, embedFailures } = await storeConversionResults(
+          const { chunkCount, convertedFileId, embedFailures, unavailableFailures } = await storeConversionResults(
             spaceId, filePath, chunks, convertedMarkdown, extractedImages,
             // Embedding is the longest phase and reported nothing, so a document with more than
             // `stalledJobTimeoutMs` of chunks in it was recovered mid-flight every time. `claim` fences the
@@ -614,10 +629,13 @@ async function processJob(
               + `description, excerpt and source from this run are lost and will not be recomputed: ${err}`);
           });
 
-          // Embedding outcome drives the job result (B3): a total failure throws so
-          // the existing failJob → backoff → retry path handles a transient embedder
-          // outage; a partial failure is recorded but not retried (the embedded chunks
-          // are useful and a retry re-embeds everything).
+          // Embedding outcome drives the job result (B3). Every passage met an unavailable embedder: the run throws that, and the job is handed
+          // back to wait for the embedder without spending an attempt (`embedder-unavailable.ts`). Every passage failed and at least one for
+          // another reason (a refusal of the request, the record's own failure): a failed attempt, retried behind the queue's backoff until its
+          // attempts are spent. A partial failure is recorded but not retried (the embedded chunks are useful and a retry re-embeds everything).
+          if (chunkCount > 0 && unavailableFailures === chunkCount) {
+            throw new EmbedderUnavailableThroughout(`every one of the ${chunkCount} passage(s)`, 'see the chunk embed warnings in the log');
+          }
           if (chunkCount > 0 && embedFailures === chunkCount) {
             throw new Error(`All ${chunkCount} chunk(s) failed to embed`);
           }
@@ -714,6 +732,26 @@ async function processJob(
       });
       if (deferred === 'deferred') return;
       if (deferred === 'lost') {
+        abandonLostClaim(spaceId, fileId, mediaType);
+        return;
+      }
+    }
+    // The embedder was unavailable for the WHOLE run (`embedder-unavailable.ts`): not the file's failure, so the job is handed back with no attempt
+    // spent, and the worker claims nothing until a probe finds the embedder answering (`embedder-outage-gate.ts`). `handBackJob` says why it did
+    // not: `'lost'` ends the run as abandoned, as above; `'past_limit'` (handed back too often for one run) and a write that failed for another
+    // reason take the failure path below, which spends the attempt.
+    if (waitsForEmbedder(err)) {
+      const handed = await handBackJob(spaceId, claim, message).catch((innerErr: unknown) => {
+        if (isAbandonment(innerErr)) return 'lost' as const;
+        log.warn(`Media worker: handBackJob error for ${peerText(spaceId)}/${peerText(fileId)}: ${peerText(innerErr)}`);
+        return 'error' as const;
+      });
+      if (handed === 'handed_back') {
+        mediaJobsHandedBackTotal.labels({ space: spaceId, media_type: mediaType }).inc();
+        mediaClaimGate.noteHandBack();
+        return;
+      }
+      if (handed === 'lost') {
         abandonLostClaim(spaceId, fileId, mediaType);
         return;
       }

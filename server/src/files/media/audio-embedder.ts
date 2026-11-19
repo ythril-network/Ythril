@@ -26,6 +26,7 @@ import { AUDIO_STEPS, type MediaRunOpts } from './progress.js';
 import { isAbandonment, stopIfLeaseLost } from './lease.js';
 import { upsertDerivedFileRow } from '../derived-fields.js';
 import { assertSpaceTakesWrites } from '../../spaces/space-write-gate.js';
+import { EmbedderUnavailableThroughout, newEmbedTally, tallyEmbed, unavailableThroughout } from './embedder-unavailable.js';
 
 // ── ffmpeg helpers ────────────────────────────────────────────────────────
 
@@ -261,6 +262,9 @@ export async function embedAudio(
     const results: AudioChunkRecord[] = [];
     let failed = 0;
     let lastError = '';
+    // The run's ATTEMPTED embeds (`embedder-unavailable.ts`): a silent chunk is skipped before its embed and a failed transcription never reaches
+    // one, so neither can make a dead embedder look like a partial result, nor a speech-to-text failure look like an outage.
+    const embeds = newEmbedTally();
     const now = new Date().toISOString();
 
     // One `stt.transcribe` per chunk, and a hop budget bounds ONE of them: an hour of speech is dozens of
@@ -275,6 +279,8 @@ export async function embedAudio(
       // the recovering run is about to overwrite. It THROWS the lost lease, so the worker ends the run as abandoned: returning what
       // was transcribed so far would report a partial result for a file that is another run's now.
       stopIfLeaseLost(spaceId, opts);
+      // Every embed so far met an unavailable embedder: the next speech-to-text call would be paid for a chunk that cannot be stored either.
+      if (unavailableThroughout(embeds)) break;
       const { startMs, endMs } = chunks[i]!;
       const startS = startMs / 1000;
       const endS = endMs / 1000;
@@ -300,7 +306,10 @@ export async function embedAudio(
         // What is embedded is the ONE builder's text (the beginning of a transcript over the embedder's ceiling), and `matchedText` is
         // exactly that: a rebuild of this chunk embeds the same string. `content` keeps the whole transcript.
         const embedded = embedTextForProducer(null, transcript, 'media');
-        const vectorFields = await vectors.fieldsFor(embedded);
+        const vectorFields = await vectors.fieldsFor(embedded).then(
+          fields => { tallyEmbed(embeds); return fields; },
+          (err: unknown) => { tallyEmbed(embeds, err); throw err; },
+        );
         const chunkId = `${fileId}#media-chunk${i}`;
 
         const chunkDoc: FileMetaDoc = {
@@ -348,9 +357,15 @@ export async function embedAudio(
       }
     }
 
+    // Every embed this run attempted met an unavailable embedder (and the loop stopped before paying for the next transcription): the job waits
+    // for the embedder instead of spending an attempt. Decided here, at the end of the run, and never in the per-chunk catch.
+    if (unavailableThroughout(embeds)) {
+      throw new EmbedderUnavailableThroughout(`every one of the ${embeds.attempted} audio chunk(s) it was asked to embed`, embeds.lastCause);
+    }
+
     // Every chunk failed. That is not a partial result, it is a failed job, and reporting success over an
     // empty transcript hides it forever. Throwing puts it back on the queue's retry/backoff path — which
-    // matters most when the cause is systemic (an unreachable provider, a rejected request shape) and
+    // matters for a cause that is the run's own (a rejected request shape, a speech-to-text provider that refuses) and
     // will clear once the operator fixes it.
     if (chunks.length > 0 && failed === chunks.length) {
       throw new Error(`every audio chunk failed to transcribe (${chunks.length}/${chunks.length}); last error: ${lastError}`);

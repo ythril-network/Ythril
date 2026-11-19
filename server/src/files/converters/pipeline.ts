@@ -41,6 +41,7 @@ import { retireFileMetaMany } from '../file-meta.js';
 import { READ_CHUNK, readStoredById } from '../../db/read-by-id.js';
 import { NOT_A_FLAGGED_ROW } from '../live-file-row.js';
 import { embedConcurrency } from './embed-concurrency.js';
+import { embedderLooksDead, newEmbedTally, tallyEmbed } from '../media/embedder-unavailable.js';
 import { isLeaseLost, shouldHeartbeat, stopIfLeaseLost, fenceOnClaim, writeUnderClaim, type JobClaim } from '../media/lease.js';
 import { embedChunksTotal, conversionChunksUnembeddedTotal } from '../../metrics/registry.js';
 import { spaceCollection } from '../../db/space-collection.js';
@@ -320,6 +321,18 @@ async function refuseConvertedPathHeldByOthers(spaceId: string, originalId: stri
 }
 
 /**
+ * What {@link storeConversionResults} stored: its passages, the converted copy, how many passages are stored without a vector (`embedFailures`),
+ * and how many of those met an UNAVAILABLE embedder (`unavailableFailures`, called or not): when that is every passage the run waits for the
+ * embedder instead of spending an attempt (`files/media/embedder-unavailable.ts`).
+ */
+export interface ConversionStoreResult {
+  chunkCount: number;
+  convertedFileId: string | null;
+  embedFailures: number;
+  unavailableFailures: number;
+}
+
+/**
  * Store a converted file's chunk records in the {spaceId}_files collection.
  * Each chunk gets its own record with a per-chunk embedding.
  * Extracted images (from hi_res PDF/DOCX/EPUB conversion) are written as
@@ -331,7 +344,7 @@ async function refuseConvertedPathHeldByOthers(spaceId: string, originalId: stri
  * @param chunks            Chunk array from the pipeline
  * @param convertedMarkdown If not null, write to _converted/<originalFileId>.md and return its path
  * @param extractedImages   Embedded images extracted during hi_res conversion
- * @returns object with chunkCount and optional convertedFileId
+ * @returns what it stored ({@link ConversionStoreResult})
  *
  * Every record this writes lands in ONE commit at the end, fenced on the job's claim (`writeUnderClaim`). They used
  * to be inserted as they were produced, unconditionally — so a conversion that finished after its file was moved
@@ -362,7 +375,7 @@ export async function storeConversionResults(
     /** Checked between chunks; true means the claim is gone and this run throws `JobLeaseLostError`. */
     shouldStop?: () => boolean;
   },
-): Promise<{ chunkCount: number; convertedFileId: string | null; embedFailures: number }> {
+): Promise<ConversionStoreResult> {
   const originalId = toDocId(originalFilePath);
   // Asked ONCE for the job, before anything is embedded: `suppressEmbeddings` is the absence of a vector, so a
   // suppressed file's passages are stored below with their text and no vector, and the embedder is asked nothing
@@ -370,6 +383,10 @@ export async function storeConversionResults(
   const vectors = await chunkVectorsFor(spaceId, originalId);
   const now = new Date().toISOString();
   let embedFailures = 0;
+  // The run's embed calls (`embedder-unavailable.ts`), and the passages not called because the embedder already looked dead: together, the
+  // passages that met an unavailable embedder, which the worker hands the job back for when they are all of them.
+  const tally = newEmbedTally();
+  let skippedCalls = 0;
   // Every record this run derives, committed together at the end — see the fence in the docblock.
   const derivedDocs: FileMetaDoc[] = [];
   const imageJobs: Array<{ path: string; mimeType: string }> = [];
@@ -499,14 +516,26 @@ export async function storeConversionResults(
     // A suppressed file keeps the text the lexical channel searches (`matchedText`, the queue path's rule, Q-94) and
     // holds no vector: the model is not called and nothing is counted as failed.
     let embeddingFields: { embedding?: number[]; embeddingModel?: string; matchedText?: string } = {};
-    try {
-      embeddingFields = { ...(await vectors.fieldsFor(embedText)), matchedText: embedText };
-    } catch (err) {
+    if (embedderLooksDead(tally, EMBED_CONCURRENCY)) {
+      // A dead embedder is not called once per passage, each a timeout: past as many unavailable failures as there are calls in flight, with
+      // nothing embedded, the rest are stored without a vector and counted as unavailable, without a call. Said once, at the end.
       embedFailures++;
-      // Counted, because a passage stored without a vector surfaces nowhere unless EVERY passage failed; and the message is the
-      // embedder's (an HTTP body can echo the document's own text), so it is peer text.
+      skippedCalls++;
       conversionChunksUnembeddedTotal.inc();
-      log.warn(`Chunk embed failed for ${peerText(spaceId)}/${peerText(chunkId)}: ${peerText(err)}`);
+    } else {
+      try {
+        embeddingFields = { ...(await vectors.fieldsFor(embedText)), matchedText: embedText };
+        tallyEmbed(tally);
+      } catch (err) {
+        embedFailures++;
+        // Per passage, and isolated: one busy answer for one passage of a long document stores the others and ends the file `partial`. The
+        // tally counts apart a failure whose embedder was unavailable, so the run waits for it only when that was the case for every passage.
+        tallyEmbed(tally, err);
+        // Counted, because a passage stored without a vector surfaces nowhere unless EVERY passage failed; and the message is the
+        // embedder's (an HTTP body can echo the document's own text), so it is peer text.
+        conversionChunksUnembeddedTotal.inc();
+        log.warn(`Chunk embed failed for ${peerText(spaceId)}/${peerText(chunkId)}: ${peerText(err)}`);
+      }
     }
 
     // There used to be a `setImmediate` yield here, to hand the event loop a turn between chunks. It existed because
@@ -542,6 +571,11 @@ export async function storeConversionResults(
   });
 
   derivedDocs.push(...chunkDocs.filter(Boolean));
+  if (skippedCalls > 0) {
+    log.warn(`Chunk embeds of ${peerText(spaceId)}/${peerText(originalId)}: the embedder was unavailable for the first ${tally.unavailable} with none embedded, `
+      + `so ${skippedCalls} more were stored without a vector and without a call`);
+  }
+  const unavailableFailures = tally.unavailable + skippedCalls;
 
   // The commit, through the one writer of a file's derived rows: it holds the claim and reads the PARENT in the same transaction, so
   // a conversion that finishes after the file was deleted or moved stores nothing rather than leaving passages under a path that is
@@ -585,7 +619,7 @@ export async function storeConversionResults(
       await sidecarsOwnedBy(spaceId, originalId, 'file').then(owned => removeSidecarBytes(spaceId, owned)).catch(cleanupErr =>
         log.warn(`Could not remove the sidecars of ${peerText(spaceId)}/${peerText(originalId)}: ${peerText(cleanupErr)}`));
     }
-    return { chunkCount: 0, convertedFileId: null, embedFailures };
+    return { chunkCount: 0, convertedFileId: null, embedFailures, unavailableFailures };
   }
 
   for (const job of imageJobs) {
@@ -594,7 +628,7 @@ export async function storeConversionResults(
     );
   }
 
-  return { chunkCount: chunks.length, convertedFileId, embedFailures };
+  return { chunkCount: chunks.length, convertedFileId, embedFailures, unavailableFailures };
 }
 
 /** Best-effort recursive delete of a space-relative path. Never throws (missing = success). */

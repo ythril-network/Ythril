@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A `merkle: true` network reports divergence while a member runs below 6.6.0 or was rolled back to 6.5: 6.5 hashes a stored `schemaFingerprint` | Upgrade or roll back every member together |
 | Records written before this release carry no `schemaFingerprint`; nothing backfills it | None; a record is stamped on its next write that conforms |
 | An embedder that cannot be reached no longer ends embed jobs `failed`: they wait (`pending`, `transientFailures` rising) | None; alert on `ythril_embed_jobs_handed_back_total` as well as on failed jobs |
+| A file whose run finds the embedder unavailable no longer ends `failed`: it reads `processing` while its job waits; an alert on failed media jobs stays quiet during an outage | None; alert on `ythril_media_embedder_probes_total{outcome="unavailable"}` as well |
 | An importer below 6.6.0 skips the `schemaSnapshots` of a 6.6 export: the records land without their schema versions, which are then fetched from members or stay unheld | Import a 6.6 export into 6.6.0 or later to keep the versions |
 | A member below 6.6.0 keeps a schema vote's conversion steps, takes the schema and converts nothing | After it upgrades, run `POST /api/spaces/:id/schema-convert` on the types the change reached |
 
@@ -129,6 +130,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Spaces:** MCP `space_stats` answers `embedQueue` (`pending`, `processing`, `failed`: records not searchable yet) as REST stats does; the doors that count a space's records read one function and answer one number.
 - **Spaces:** `update_space` refused for a face width the space's stored descriptors rule out answers 409 and `Error: <sentence>` on MCP and `POST /api/update_space`, as `PATCH /api/spaces/:id` does; it read `Error: Error (409): …` with status 400.
 - **Housekeeping:** a space set aside after a slow answer is checked again once its pause ends, even when its last check found it still building its positions. Before, no background task, the media queue included, checked that space again until a restart.
+- **Media:** a file whose run found the embedder unavailable throughout waits without spending an attempt, and no file is started until a probe finds the embedder back; counted by `ythril_media_jobs_handed_back_total` and `ythril_media_embedder_probes_total`.
 - **Media:** a file whose analysis becomes due at the moment the queue is looking is picked up at once. Before, a replaced or retried file could wait up to 30 seconds for the queue's next full look, and an embedding job the same way.
 - **Embeddings:** an embed job whose call could not reach its HTTP endpoint keeps its attempts and waits with back-off, and the worker pauses until the embedder answers; `ythril_embed_jobs_handed_back_total` counts each hand-back.
 - **Embeddings:** an embed job's fate is decided by the failure's class and its HTTP status, not by words in an embedder's error body; statuses 408, 429, 502 to 504, 520 to 524, 529 and 530 wait.

@@ -59,6 +59,7 @@ const ROW_ALREADY_RIGHT = {
   enqueueMediaJob: 'makes sure a file has a job (the lazy repair of a pulled file, an extracted image): the row reads what its own run left, and a terminal job reset here is one whose row is already terminal; the write door that marks the row pending is `replaceContent`',
   failJob: 'a retry: the row already reads `processing` and stays so until the job ends; the row is not told anything until then',
   deferJob: 'a deferral while the face gallery cannot answer: the row already reads `processing` and stays so until the job ends, as for a failJob retry',
+  handBackJob: 'a hand-back while the embedder is unavailable: the row already reads `processing` and stays so while the job waits, as for a failJob retry; the file is not failed',
   releaseClaimedJob: 'hands a claimed job back at shutdown: the row already reads `processing`, and the next claim writes it again',
   resetStalledJobs: 'stall recovery re-queues a job that stopped reporting: the row already reads `processing`',
   holdJobsForMove: 'the job is held (not claimable) for a move; the move rewrites the row itself',
