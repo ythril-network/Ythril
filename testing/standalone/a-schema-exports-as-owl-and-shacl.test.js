@@ -297,12 +297,12 @@ describe('an edge type: a property, never a class', () => {
   const label = termAt('edge', 'knows');
   const isEntity = { 'sh:not': [{ 'sh:class': [I('ythril:Entity')] }] };
 
-  it('the label is an object property with no domain and no range', () => {
+  it('the label is an object property with no domain and no range, and (punned) the class of its reifiers', () => {
     assert.deepEqual(treeAt(quads, label), norm({
-      'rdf:type': [I('owl:ObjectProperty')], 'rdfs:label': [L('knows')], 'rdfs:comment': [L('One person knows another')], 'rdfs:isDefinedBy': [I(ONTOLOGY)],
+      'rdf:type': [I('owl:ObjectProperty'), I('owl:Class')], 'rdfs:label': [L('knows')], 'rdfs:comment': [L('One person knows another')], 'rdfs:isDefinedBy': [I(ONTOLOGY)],
     }));
-    assert.deepEqual(treeAt(quads, termAt('edge', 'reports_to'))['rdf:type'], norm([I('owl:ObjectProperty'), I('owl:FunctionalProperty')]));
-    assert.ok(!quads.some(q => q.predicate.value === iriOf('sh:targetClass') && q.subject.value === shapeAt('edge', 'knows')), 'an edge label has no class');
+    assert.deepEqual(treeAt(quads, termAt('edge', 'reports_to'))['rdf:type'], norm([I('owl:ObjectProperty'), I('owl:FunctionalProperty'), I('owl:Class')]));
+    assert.ok(!quads.some(q => q.predicate.value === iriOf('sh:targetClass') && q.subject.value === shapeAt('edge', 'knows')), 'the label\'s node shape targets the subjects of the label, not a class');
   });
 
   it('endpoints are sh:or of sh:class, a record that is no entity passing; "UNTYPED" is the untyped class and an entity type of that name', () => {
@@ -331,24 +331,26 @@ describe('an edge type: a property, never a class', () => {
     }));
   });
 
-  it('the properties of an edge are on their own shapes, aimed at the reifier, and a required one has no count (nothing to target)', () => {
+  it('the properties of an edge are on their own shapes, aimed at the reifiers of their label (its class), and a required one is a count', () => {
     const own = (prop) => ({ 'rdf:type': [I('owl:DatatypeProperty'), I('owl:FunctionalProperty')], 'rdfs:isDefinedBy': [I(ONTOLOGY)], 'rdfs:label': [L(prop)] });
     assert.deepEqual(treeAt(quads, termAt('edge', 'knows', 'since')), norm({ ...own('since'), 'rdfs:range': [I('rdfs:Literal')] }));
     assert.deepEqual(treeAt(quads, shapeAt('edge', 'knows', 'since')), norm({
-      'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I(termAt('edge', 'knows', 'since'))], 'sh:name': [L('since')], 'sh:targetSubjectsOf': [I(termAt('edge', 'knows', 'since'))],
+      'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I(termAt('edge', 'knows', 'since'))], 'sh:name': [L('since')], 'sh:targetClass': [I(label)],
       'sh:maxCount': [INT(1)], 'sh:or': [LIST({ 'sh:datatype': [I('xsd:dateTimeStamp')] }, { 'sh:datatype': [I('xsd:dateTime')] }, { 'sh:datatype': [I('xsd:date')] }, { 'sh:datatype': [I('xsd:string')] })],
     }));
     const strength = treeAt(quads, shapeAt('edge', 'knows', 'strength'));
-    assert.equal(strength['sh:minCount'], undefined);
+    assert.deepEqual(strength['sh:minCount'], [INT(1)]);
     assert.deepEqual(strength['sh:minLength'], [INT(1)]);
-    assert.deepEqual(strength['sh:targetSubjectsOf'], [I(termAt('edge', 'knows', 'strength'))]);
+    assert.deepEqual(strength['sh:targetClass'], [I(label)]);
+    assert.equal(strength['sh:targetSubjectsOf'], undefined);
   });
 
-  it('an outside edge label is the target and the path and never a subject', () => {
+  it('an outside edge label is the target and the path and never a subject; its reifiers get the space\'s own class', () => {
     const q = graph(withTypes('edge', { friend: { iri: 'http://schema.org/knows', functional: true, description: 'Mapped' } })).quads;
     assert.deepEqual(subjectsOf(q).filter(s => s.startsWith('http://schema.org/')), []);
     assert.deepEqual(treeAt(q, shapeAt('edge', 'friend'))['sh:targetSubjectsOf'], [I('http://schema.org/knows')]);
     assert.deepEqual(treeAt(q, shapeAt('edge', 'friend'))['sh:description'], [L('Mapped')]);
+    assert.deepEqual(treeAt(q, termAt('edge', 'friend')), norm({ 'rdf:type': [I('owl:Class')], 'rdfs:isDefinedBy': [I(ONTOLOGY)], 'rdfs:label': [L('friend')] }));
   });
 });
 

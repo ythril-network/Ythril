@@ -32,8 +32,9 @@
  * and `owl:FunctionalProperty` (a property holds one plain value: decision record 23) and a property shape hung on its type's node shape.
  * An edge type is a PROPERTY, never a class: its node shape targets the subjects of the label, its endpoints are `sh:or` of `sh:class` (the
  * subject side on the node shape, the object side on a property shape of the label), a functional label is `sh:maxCount 1`, and the plain
- * properties of an edge have shapes of their own aimed at the reifier (`sh:targetSubjectsOf` the property): a required one has no Core target,
- * so it is `ythril:requiredEdgeProperty` on the node shape. Shape addresses are `<base>schema/shape/<kind>/<seg(type)>[#<frag(prop)>]`.
+ * properties of an edge have shapes of their own aimed at the reifiers of that label (`sh:targetClass` the label's reifier class, which the
+ * record form states on every reifier; standards review row 13), a required one a count there too and also `ythril:requiredEdgeProperty` on
+ * the node shape. Shape addresses are `<base>schema/shape/<kind>/<seg(type)>[#<frag(prop)>]`.
  *
  * Pure: it reads only what it is handed (the RESOLVED meta, `inlineResolvableRefs`, and the fingerprint of that schema). It sets no graph;
  * the stream names it. Quads are written by `serialize.ts`.
@@ -45,7 +46,7 @@ import {
   type BlankTerm, type DeclaredType, type IriTerm, type LeftOutReason, type LiteralTerm, type Quad, type Term,
 } from './literals.js';
 import { patternReadsAlike } from './portable-pattern.js';
-import { ontologyIri, prefixesFor, resolveTermIri, shapeIri, termOwnerName, versionIri } from './term-iri.js';
+import { edgeClassIri, ontologyIri, prefixesFor, resolveTermIri, shapeIri, termOwnerName, versionIri } from './term-iri.js';
 import { ythrilIri } from './ythril-vocabulary.js';
 
 /** A schema-library group's namespace, as the instance holds it (`schemaLibraryNamespaces`): the terms under it are the instance's own. */
@@ -371,13 +372,14 @@ function guards(out: Out, shape: Subject, facts: PropertyFacts): void {
 }
 
 /**
- * The shape of one property. `edgeProperty` is true for a property of an edge type: its value sits on the edge's reifier, so the shape aims
- * itself at the subjects of the property, and a required one cannot be a count (nothing targets a reifier that lacks the property).
+ * The shape of one property. `edgeClass` is the class of the reifiers of an edge type (`edgeClassIri`) for a property of that type: its value
+ * sits on the edge's reifier, so the shape targets the reifiers of its own label, and no subject of the same property address under another
+ * label (standards review row 13); a required one is a count there as anywhere.
  */
-function propertyShape(out: Out, shape: IriTerm, path: IriTerm, key: string, def: Bag, facts: PropertyFacts, edgeProperty: boolean): void {
+function propertyShape(out: Out, shape: IriTerm, path: IriTerm, key: string, def: Bag, facts: PropertyFacts, edgeClass: IriTerm | undefined): void {
   out.add(shape, RDF_TYPE, SH('PropertyShape'));
   out.add(shape, SH('path'), path);
-  if (edgeProperty) out.add(shape, SH('targetSubjectsOf'), path);
+  if (edgeClass !== undefined) out.add(shape, SH('targetClass'), edgeClass);
   out.add(shape, SH('name'), plain(key));
   out.say(shape, SH('description'), own(def, 'description'));
   out.add(shape, SH('maxCount'), integer(COUNT_ONE));
@@ -386,7 +388,7 @@ function propertyShape(out: Out, shape: IriTerm, path: IriTerm, key: string, def
   if (facts.members !== undefined) out.add(shape, SH('in'), list(facts.members));
   guards(out, shape, facts);
   if (facts.required) {
-    if (!edgeProperty) out.add(shape, SH('minCount'), integer(COUNT_ONE));
+    out.add(shape, SH('minCount'), integer(COUNT_ONE));
     out.add(shape, SH('minLength'), integer(COUNT_ONE));
   }
   if (facts.default !== undefined) out.add(shape, SH('defaultValue'), facts.default);
@@ -436,7 +438,7 @@ function endpointOr(out: Out, classes: readonly IriTerm[]): Term {
   return list(members);
 }
 
-interface TypeFacts { node: IriTerm; term: IriTerm; requiredEdgeProperties: IriTerm[] }
+interface TypeFacts { node: IriTerm; term: IriTerm; requiredEdgeProperties: IriTerm[]; edgeClass: IriTerm | undefined }
 
 /** The class (or, for an edge, the property) the type is, as the space's own term. */
 function typeAxioms(out: Out, space: Space, kind: KnowledgeType, type: string, def: Bag, term: IriTerm): void {
@@ -446,6 +448,17 @@ function typeAxioms(out: Out, space: Space, kind: KnowledgeType, type: string, d
   out.add(term, RDFS('isDefinedBy'), iri(space.ontology));
   out.add(term, RDFS('label'), plain(type));
   out.say(term, RDFS('comment'), own(def, 'description'));
+}
+
+/**
+ * The class of an edge type's reifiers, always the space's own (`edgeClassIri`): declared an `owl:Class`, and, when the label is mapped to
+ * an outside property so the class is no own term already, defined by the ontology and labelled with the type's name.
+ */
+function reifierClass(out: Out, space: Space, cls: IriTerm, term: IriTerm, type: string): void {
+  out.add(cls, RDF_TYPE, OWL('Class'));
+  if (cls.value === term.value && space.isOwn(term.value)) return;
+  out.add(cls, RDFS('isDefinedBy'), iri(space.ontology));
+  out.add(cls, RDFS('label'), plain(type));
 }
 
 /** The annotations of a node shape that no standard term carries: naming pattern, retention, suppression, the due policy, rules. */
@@ -497,7 +510,7 @@ function typeProperties(out: Out, space: Space, kind: KnowledgeType, type: strin
     const term = space.term(kind, type, key);
     if (space.isOwn(term.value)) propertyAxioms(out, term, space.ontology, key, pdef, f, edge ? undefined : facts.term);
     const shape = space.shape(kind, type, key);
-    propertyShape(out, shape, term, key, pdef, f, edge);
+    propertyShape(out, shape, term, key, pdef, f, facts.edgeClass);
     if (!edge) out.add(facts.node, SH('property'), shape);
     else if (f.required) facts.requiredEdgeProperties.push(term);
   }
@@ -516,7 +529,9 @@ function exportType(out: Out, space: Space, kind: KnowledgeType, type: string, r
   const unresolved = unresolvedRefOf(def);
   if (unresolved !== undefined) out.add(node, YTHRIL('unresolvedRef'), plain(unresolved));
   typeAnnotations(out, node, def, termOwnerName({ kind, type }));
-  const facts: TypeFacts = { node, term, requiredEdgeProperties: [] };
+  const edgeClass = edge ? iri(edgeClassIri(space.meta, type)) : undefined;
+  if (edgeClass !== undefined) reifierClass(out, space, edgeClass, term, type);
+  const facts: TypeFacts = { node, term, requiredEdgeProperties: [], edgeClass };
   typeProperties(out, space, kind, type, def, facts);
   if (edge) edgeConstraints(out, space, node, term, type, def);
   for (const p of facts.requiredEdgeProperties) out.add(node, YTHRIL('requiredEdgeProperty'), p);

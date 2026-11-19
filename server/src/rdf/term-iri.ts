@@ -99,6 +99,16 @@ export function recordAddressable(kind: RecordKind, id: string): boolean {
   return kind === 'file' ? id.split('/').every(s => s !== '') : id !== '';
 }
 
+/**
+ * The class of an edge label's reifiers: the label's own document in the space vocab, `<vocab>edge/<seg(label)>`, whose fragments are the
+ * label's derived properties (the Direct Mapping's table and its columns). It ignores an explicit `iri` on the label, so a label mapped to an
+ * outside property (`schema:knows`) still gets the space's own class, never a statement about the outside term; for a derived label it is the
+ * label's predicate too (OWL 2 punning of a class and an object property). The shapes of the label's own properties target it.
+ */
+export function edgeClassIri(meta: SpaceMeta, label: string): string {
+  return [namesOf(meta).vocab.concat('edge'), iriSegment(label)].join('/');
+}
+
 /** The SHACL shape of a type (no `prop`) or of a property of it: `<base>schema/shape/<kind>/<seg(type)>[#<frag(prop)>]`. */
 export function shapeIri(meta: SpaceMeta, kind: KnowledgeType, type: string, prop?: string): string {
   const node = [ontologyIri(meta).concat('/shape/', kind), iriSegment(type)].join('/');
