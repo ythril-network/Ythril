@@ -478,7 +478,6 @@ class ExportWalk {
   readonly graphs: Member[] = [];
   withheld = false;
   private readonly agentsSeen = new Set<string>();
-  private readonly hash = createHash('sha256');
 
   constructor(readonly p: PageInput) {
     const namespaces = Object.values(getConfig().schemaLibraryNamespaces ?? {});
@@ -494,7 +493,6 @@ class ExportWalk {
     }
     this.chars = this.head.length;
     this.bytes = Buffer.byteLength(this.head, 'utf8');
-    this.hash.update(this.head);
   }
 
   /** Every record after `from` in walk order (member, kind, `_id`), its text written but not counted, one store page at a time. */
@@ -537,7 +535,6 @@ class ExportWalk {
 
   /** Count a record this answer carries. */
   take(s: Extract<WalkStep, { type: 'record' }>): void {
-    this.hash.update(s.text);
     this.chars += s.text.length;
     this.bytes += Buffer.byteLength(s.text, 'utf8');
     this.records++;
@@ -557,27 +554,33 @@ class ExportWalk {
     return { count: s.count, unnamed, named, words };
   }
 
-  private reportId: string | undefined;
-  /** The report's address: a digest of what the answer carries, taken once (an ending may be rendered again with fewer values named). */
-  private report(): string {
-    this.reportId ??= `urn:ythril:export-report:${this.hash.update('\u0000').update(this.p.after ?? '').digest('hex')}`;
-    return this.reportId;
+  /**
+   * The report's address: a digest of what the document is (the scope, each member's schema version, where in the walk it starts and where
+   * it ends), never of its bytes, so one page answered in all four formats has one report address (bundle-269 drive, finding 12).
+   */
+  private report(nextAfter: string | undefined): string {
+    const { p } = this;
+    const what = JSON.stringify([p.input.spaceId, p.exported.map(e => [e.space, e.fingerprint]), p.after ?? '', nextAfter ?? '']);
+    return `urn:ythril:export-report:${createHash('sha256').update(what).digest('hex')}`;
   }
 
   /**
-   * The end of the document: the description graph (TriG, N-Quads, JSON-LD) and the closing comment of a complete answer, or of one that
-   * could not finish (`incomplete`, the reason in words): then the report says `complete false` where it can still be written validly (TriG,
+   * The end of the document: the description graph (TriG, N-Quads, JSON-LD) and the closing comment of a whole answer, or of one that could
+   * not finish (`incomplete`, the reason in words): then the report says `complete false` where it can still be written validly (TriG,
    * N-Quads), the comment says why, and {@link INCOMPLETE_LINE} makes every parser refuse the file; a JSON-LD document is left unterminated.
+   * `ythril:complete` says the DOCUMENT is whole: a page with more after it is whole as a page and says `complete true` with its
+   * `ythril:nextAfter` (drive, finding 12: `complete false` on such a page read as a broken file); `complete` (the summary's word) is
+   * whether anything of the scope is left.
    */
   ending(o: { complete: boolean; whole: boolean; nextAfter?: string | undefined; incomplete?: string; namedLimit?: number }): string {
     const { p } = this;
     const left = this.leftOut(o.namedLimit);
     if (o.incomplete !== undefined && p.format === 'jsonld') return '';
-    const reportId = this.report();
+    const reportId = this.report(o.nextAfter);
     const report = iri(reportId);
     const quads: Quad[] = [quad(report, stdIri('rdf', 'type'), iri(ythrilIri('ExportReport')))];
     quads.push(quad(report, iri(ythrilIri('recordCount')), typed(String(this.records), xsd('integer'))));
-    quads.push(quad(report, iri(ythrilIri('complete')), typed(String(o.complete), xsd('boolean'))));
+    quads.push(quad(report, iri(ythrilIri('complete')), typed(String(o.incomplete === undefined), xsd('boolean'))));
     if (o.nextAfter) quads.push(quad(report, iri(ythrilIri('nextAfter')), plain(o.nextAfter)));
     quads.push(quad(report, iri(ythrilIri('leftOutCount')), typed(String(left.count), xsd('integer'))));
     if (this.withheld) quads.push(quad(report, iri(ythrilIri('fileTriplesWithheld')), typed('true', xsd('boolean'))));

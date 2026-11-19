@@ -10,3 +10,10 @@ export const EXPORT_NOT_ACCEPTABLE = 406;
 export const EXPORT_CONFLICT = 409;
 export const EXPORT_BUSY = 429;
 export const EXPORT_UNAVAILABLE = 503;
+
+/**
+ * The `Vary` of every export answer, the same whatever the format: the answer is chosen by `Accept` and may be compressed by
+ * `Accept-Encoding`. The compression layer adds `Accept-Encoding` only for the media types it compresses, so without this a cache would key
+ * a TriG or N-Quads answer differently from a Turtle one (bundle-269 drive, finding 12).
+ */
+export const EXPORT_VARY = 'Accept, Accept-Encoding';

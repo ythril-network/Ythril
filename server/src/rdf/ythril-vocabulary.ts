@@ -83,7 +83,7 @@ export const YTHRIL_TERMS: readonly YthrilTerm[] = Object.freeze([
   // terms (dcterms:hasPart, dcterms:isPartOf, sh:shapesGraph), and these name only what no standard term carries: how a page of one export ended.
   { name: 'ExportReport', kind: 'class', comment: 'One page of an RDF export of Ythril records: how many records it holds, whether it is the last, and what it left out.' },
   { name: 'recordCount', kind: 'property', comment: 'How many records a page of an export holds.' },
-  { name: 'complete', kind: 'property', comment: 'Whether nothing of the export\'s scope is left after this page: true on its last page.' },
+  { name: 'complete', kind: 'property', comment: 'Whether this document is whole: false only on an export that could not finish. A page with more after it is whole and states ythril:nextAfter.' },
   { name: 'nextAfter', kind: 'property', comment: 'The cursor that continues an export after this page, passed back as its after parameter.' },
   { name: 'leftOutCount', kind: 'property', comment: 'How many property values a page of an export left out because none is one plain value that fits its property.' },
   { name: 'leftOutValue', kind: 'property', comment: 'A property value a page of an export left out, as a node naming its record, its key and why.' },

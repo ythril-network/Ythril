@@ -5,8 +5,8 @@
  * ## What it prevents
  *
  * Both doors run `rdf/export-act.ts`, which owns the parameters, the bounds, the pages, the rights and every refusal's sentence and code;
- * the dispatcher's own check is skipped (`skipSchemaValidation`) so a wrong value is answered by the act's code (`rdf_bad_limit`...) as on
- * REST. This module only shapes the answer (MCP 2025-06-18, standards review row 15): the document once, in the first text block; the
+ * the dispatcher leaves those arguments to it (`argumentsJudgedByTheAct`) so a wrong value is answered by the act's code (`rdf_bad_limit`)
+ * as on REST, and refuses an argument the tool does not take as every tool does. This module only shapes the answer (MCP 2025-06-18, standards review row 15): the document once, in the first text block; the
  * summary as JSON in a second block for a client that does not read `structuredContent`; the summary alone in `structuredContent`,
  * declared by `outputSchema`. The export slot is released as soon as the page is built: nothing is left to send.
  *
@@ -66,8 +66,9 @@ export const export_rdfTool: ToolHandler = {
     + `${EXPORT_SLOTS_INSTANCE} exports run at once on the instance and ${EXPORT_SLOTS_PER_CALLER} per token; another is refused (429, \`rdf_export_busy\`): try again shortly. `
     + `The space needs RDF switched on and a settled base. Refusals carry a code: ${RDF_EXPORT_REFUSAL_CODES.join(', ')}.`,
   mutating: false,
-  // The act judges every parameter with the coded refusal the route answers (`rdf_bad_limit`, `rdf_bad_format`...).
-  skipSchemaValidation: true,
+  // The act judges every parameter with the coded refusal the route answers (`rdf_bad_limit`, `rdf_bad_format`...); any other argument, an
+  // unknown one included, is held to the input schema as on every tool (bundle-269 drive, finding 12: `foo` went through silently).
+  argumentsJudgedByTheAct: ['format', 'edgeDetails', 'after', 'limit', 'maxChars', 'maxBytes', 'maxTokens'],
   spaceRequired: true,
   outputSchema: RDF_EXPORT_OUTPUT_SCHEMA,
   inputSchema: (s: ToolSchemas) => ({

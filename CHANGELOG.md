@@ -63,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** `meta.rdf` (`enabled`, `base`, `vocab`) gives a space's records and terms web addresses, at the schema admin rung; the base moves only by `rdf.rebase`, on a shared space by a vote counted like a deletion.
 - **RDF:** a type or property may name an outside term (`iri`); two terms with one address are refused (`rdf_term_clash`); a library group can declare a namespace for its entries.
 - **RDF:** `GET /api/brain/spaces/:spaceId/export/rdf` and MCP `export_rdf` export a space, or a personal view, as Turtle, TriG, N-Quads or JSON-LD, page by page ([Exports](docs/integration-guide/06f-exports.md)).
-- **RDF:** an export names the values it left out and the shapes of each graph, and gives file statements only with `files: read`.
+- **RDF:** an export names the values it left out and the shapes of each graph, and gives file statements only with `files: read`; a base two spaces of one instance hold is refused (`rdf_base_shared`).
 - **RDF:** `GET /api/spaces/:id/schema-rdf` and MCP `space_schema_rdf` export a space's schema as OWL and SHACL in Turtle or JSON-LD, every description included.
 - **RDF:** the Ythril vocabulary is published under `docs/rdf/`, with decision record 23: a property holds one plain value; structure is an edge or a link.
 - **MCP:** a tool may declare an `outputSchema` in `tools/list`; `export_rdf` and `space_schema_rdf` do.

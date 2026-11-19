@@ -34,7 +34,7 @@ ythril:Untyped
 
 ythril:complete
     a rdf:Property ;
-    rdfs:comment "Whether nothing of the export's scope is left after this page: true on its last page." ;
+    rdfs:comment "Whether this document is whole: false only on an export that could not finish. A page with more after it is whole and states ythril:nextAfter." ;
     rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
     rdfs:label "complete" .
 
