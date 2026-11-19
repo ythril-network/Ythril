@@ -76,7 +76,8 @@ export function takeServedRounds(
 ): { changed: boolean; refused: Map<AdoptionRefusal, number> } {
   const refused = new Map<AdoptionRefusal, number>();
   const count = (why: AdoptionRefusal): void => { refused.set(why, (refused.get(why) ?? 0) + 1); };
-  let changed = beside.spaces ? takeServedRdfBases(net, beside.spaces, beside.rdfBases) : false;
+  // The offers are kept per member (review finding 8): what this member serves replaces what it offered before.
+  let changed = beside.spaces ? takeServedRdfBases(net, beside.spaces, beside.rdfBases, member.instanceId) : false;
   for (const raw of served) {
     const read = IncomingVoteRound.safeParse(raw);
     if (!read.success) { count('malformed'); continue; }

@@ -83,7 +83,7 @@ describe('a voted network records and clears a higher RDF base', { skip }, () =>
     const { runSyncForPeer } = await import('../../server/dist/sync/engine.js');
     await runSyncForPeer(P1);
     const conflict = await settled(() => receiver().rdfBaseConflicts ?? null);
-    assert.deepEqual(conflict, { notes: { held: { base: OLD.base, vocab: OLD.vocab, epoch: 0 }, offered: [{ networkId: 'receiver', base: NEW.base, vocab: NEW.vocab, epoch: 1 }] } });
+    assert.deepEqual(conflict, { notes: { held: { base: OLD.base, vocab: OLD.vocab, epoch: 0 }, offered: [{ networkId: 'receiver', memberId: P1, base: NEW.base, vocab: NEW.vocab, epoch: 1 }] } });
     assert.deepEqual(rdfOf(), OLD, 'nothing lands by itself');
   });
 
