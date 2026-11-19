@@ -19,10 +19,13 @@
  * ## Why one lane, once (bundle-348, Q-923)
  *
  * This file ran the whole table again, every lane repeated: the base experiment on a client the driver configures exactly like the
- * harness's own. Each defect those repetitions could catch is caught elsewhere:
+ * harness's own. The rule that the URI's `timeoutMS` cannot end a bounded write first is held by exactly two things in this file:
+ * the case "the driver set no clock from it" (`options.timeoutMS` of the server's client is undefined, though the URI the client was
+ * opened with names the option) and the one door lane kept (no answer before the server's deadline). Each defect the cut
+ * repetitions could catch is caught by one of them or elsewhere:
  *
- * - a driver that honours the URI `timeoutMS`: the case "the driver set no clock from it" here (`options.timeoutMS` of the server's
- *   client), and `mongo-client-options.test.js` (the URI's `timeoutMS` is not handed to the client);
+ * - a driver that honours the URI `timeoutMS`: the case "the driver set no clock from it" here (the URI string itself reaches the
+ *   client, so that case, not the options the server builds, is what sees it);
  * - a product write that carries `timeoutMS`: `every-bounded-call-carries-the-server-deadline-and-no-client-timeout.test.js` and
  *   `no-server-code-uses-the-drivers-client-timeout.test.js`, and every lane of the base experiment;
  * - an answer before the server's deadline on this client: the one door lane kept here.
