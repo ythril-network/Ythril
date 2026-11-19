@@ -23,7 +23,7 @@
  * Re-exported from `types.ts`, so no importer changes.
  */
 import type { SpaceMeta } from './types-knowledge.js';
-import type { ConvertRecords } from '@ythril-network/schema';
+import type { ConvertRecords, RdfBaseConflict } from '@ythril-network/schema';
 
 // ── Network types ──────────────────────────────────────────────────────────
 
@@ -466,6 +466,12 @@ export interface NetworkConfig {
    * sent to a peer, and it follows its layer: a rename moves it, leaving the network removes it.
    */
   schemaLayerUnread?: Record<string, string[]>;
+  /**
+   * Q-748: per LOCAL space id, a base this network's layer offers that no held `space_rebase` round explains. Local state, written by the
+   * effective-meta recompute and cleared when a rebase lands or the layer agrees; the RDF doors answer 409 `rdf_base_conflict` while one
+   * stands. Leaving the network removes it with the network.
+   */
+  rdfBaseConflicts?: Record<string, RdfBaseConflict>;
   votingDeadlineHours: number;
   merkle?: boolean;
   /** When true, governance vote casts must carry a valid Ed25519 signature from

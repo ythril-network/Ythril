@@ -40,11 +40,14 @@ import { peerRunsAtLeast } from './peer-floor.js';
 export const NEW_META_KEYS: Readonly<Record<string, string>> = Object.freeze({
   stampSkew: '5.7.0',
   rules: '5.7.0',
+  // Q-748: the next minor above the published 6.5.x, the release that ships the RDF names.
+  rdf: '6.6.0',
 });
 
 /** The same for a type's own fields (`typeSchemas.<kind>.<type>.<field>`): the first release that reads each the previous one refuses. */
 export const NEW_TYPE_FIELDS: Readonly<Record<string, string>> = Object.freeze({
   rules: '5.7.0',
+  iri: '6.6.0',
 });
 
 /** One group of new keys a write sets, and the members that may refuse them. */

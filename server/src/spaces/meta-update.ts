@@ -45,7 +45,6 @@ import { proposedMetaFields } from '../sync/meta-round-merge.js';
 import { membersBehindNewKeys, type MemberSkew } from '../sync/meta-skew.js';
 import { visibleNetworks } from '../auth/network-rights.js';
 import { proposeRound } from '../networks/propose-round.js';
-import type { RoundAnswer } from '../networks/vote-acts.js';
 import { log, NAME_QUOTED, peerList, peerText, refusalOfParse } from '../util/log.js';
 import { capDocExtractionMode } from '../files/converters/extraction-level.js';
 import { checkMetaPrecondition, preconditionErrorBody } from './meta-precondition.js';
@@ -65,10 +64,11 @@ import {
 } from '../sync/governance.js';
 import { parseMetaRound, type MetaRoundProposal } from '../sync/meta-round-merge.js';
 import type { ConversionStep } from '@ythril-network/schema/internal';
-import { settleRdf, type RebaseProposal } from './rdf-settle.js';
+import { settleRdf, type RebaseProposal, type RdfRefusalStatus } from './rdf-settle.js';
 import { termClashes } from '../rdf/term-iri.js';
 import { getPublicBaseUrl, publicBaseUrlIsFallback } from '../config/public-url.js';
-import { openRebaseRounds } from './apply-rebase-round.js';
+import { rebaseRoundUnapplied, roundIsOpen } from '../networks/round-state.js';
+import { roundAnswer, roundDecided, type RoundAnswer } from '../networks/vote-acts.js';
 // The trigger lives beside the sweep (bundle-30 `R5`): the effective-meta recompute fires it too.
 
 // The merge a write makes, and the base it is merged over, live with the rights check's copy of the same question (`meta-write-base.ts`).
@@ -219,13 +219,15 @@ function memberSkewWarnings(skew: readonly MemberSkew[], caller: WriteCaller): R
  * tool maps these to its own error shape; it does not decide them.
  */
 export type MetaUpdateRefusal = {
-  status: 400 | 404 | 409 | 410 | 412 | 422;
+  status: 400 | 404 | 410 | 412 | 422 | RdfRefusalStatus;
   /** `step` is the index of the conversion step a `bad_conversion_step` refusal names (`Q-745`). */
   body: { error: string; code?: string; expectedVersion?: number; currentVersion?: number; step?: number };
 };
 
 /** The status of a body the planner refuses for what it says, a conversion step's refusals among them. */
 const BAD_BODY = 400 as const;
+/** The status of a schema whose terms would share one RDF address (Q-748): understood, and not storable. */
+const TERM_CLASH_STATUS = 422 as const;
 
 /**
  * The refusal of a body whose `convertRecords` does not parse, said as `bad_conversion_step` with the index of the step (`Q-745`), or `undefined` when
@@ -550,7 +552,7 @@ export function planSpaceMetaUpdate(input: {
     if (mergedMeta.rdf?.enabled === true && mergedMeta.rdf.base) {
       const clashes = termClashes(inlineResolvableRefs(mergedMeta) as SpaceMeta);
       if (clashes.length > 0) {
-        return { ok: false, refusal: { status: 422, body: { error: `two terms of this space would have one RDF address: ${clashes.map(c => c.message).join('; ')}`, code: 'rdf_term_clash' } } };
+        return { ok: false, refusal: { status: TERM_CLASH_STATUS, body: { error: `two terms of this space would have one RDF address: ${clashes.map(c => c.message).join('; ')}`, code: 'rdf_term_clash' } } };
       }
     }
   }
@@ -805,9 +807,22 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
     updateSpace(id, { documentExtraction: plan.documentExtraction });
   }
 
-  // Q-748: a shared space's rebase is a `space_rebase` round on every network carrying it, applied at its deadline; nothing moves now.
+  // Q-748: a shared space's rebase is a `space_rebase` round on every network carrying it, carrying the new `{ base, vocab, epoch }` (bound
+  // by every cast's `bsig`), landed at its deadline by the expiry tick (`applyOwedRebaseRounds`); nothing moves now. A round of this
+  // instance's own for the same space and base that is open or still to land is answered again, so a repeated request opens no duplicate.
   if (plan.rebaseProposal !== undefined) {
-    const rounds = openRebaseRounds(cfg, id, plan.rebaseProposal);
+    const rebase = plan.rebaseProposal;
+    const now = Date.now();
+    const rounds: RoundAnswer[] = [];
+    for (const net of cfg.networks.filter(n => n.spaces.includes(id))) {
+      const spaceId = localToRemote(net, id);
+      const held = net.pendingRounds.find(r => r.proposedHere === true && r.type === 'space_rebase' && r.spaceId === spaceId
+        && r.rebase?.base === rebase.base && (roundIsOpen(r, now) || rebaseRoundUnapplied(r)));
+      if (held) { rounds.push(roundAnswer(net, held, roundDecided(held))); continue; }
+      rounds.push(proposeRound(net, cfg, {
+        type: 'space_rebase', subjectInstanceId: cfg.instanceId, subjectLabel: cfg.instanceLabel, subjectUrl: '', spaceId, rebase: { ...rebase },
+      }, { now }).answer);
+    }
     saveConfig(cfg);
     return { outcome: 'vote_pending', rounds };
   }

@@ -55,7 +55,9 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // The dotted path keeps this scalars-only: the property NAMES beside it are not recorded.
   // `unknownWriteFields` (Q-320): the setting that makes writes which succeeded start failing is an admin's act and has to leave a trace.
   // Its snapshot is built through `unknownWriteFieldsMode` (`spaces/meta-update.ts`), so the value here is always `warn` or `refuse`.
-  'space.update': ['label', 'purpose', 'validationMode', 'strictLinkage', 'dupeRulesOnInsert', 'dupeMergeSurvivor', 'stampSkew.warnMinutes', 'unknownWriteFields'],
+  // Q-748: the RDF base and its epoch, so a solo rebase (every address the space gave out) is recorded from and to; `enabled` beside them.
+  'space.update': ['label', 'purpose', 'validationMode', 'strictLinkage', 'dupeRulesOnInsert', 'dupeMergeSurvivor', 'stampSkew.warnMinutes', 'unknownWriteFields',
+    'rdf.enabled', 'rdf.base', 'rdf.baseEpoch'],
   'space.rename': ['id'],
   // Token metadata ONLY, and only what this route can actually change: `PATCH /api/tokens/:id` edits the name, rights, second-factor exemption and request quota.
   // Never `hash` or `prefix`; `token.create` and `token.regenerate` are absent entirely, because the

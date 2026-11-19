@@ -20,7 +20,7 @@
  * recomputes. A passed `meta_change` is such an edit.
  */
 import { isDeepStrictEqual } from 'node:util';
-import type { SpaceConfig, SpaceMeta } from '../config/types.js';
+import type { Config, SpaceConfig, SpaceMeta } from '../config/types.js';
 import { getConfig, saveConfig } from '../config/loader.js';
 import { effectiveMeta, replicatedMetaOf } from '../sync/replicated-meta.js';
 import { PER_TYPE_META_FIELD } from './meta-fields.js';
@@ -28,7 +28,7 @@ import { derivedFromStored, type ParsedSpaceMeta, type ParsedTypeSchema } from '
 import { updateSpace } from './spaces.js';
 import { layersFor } from './network-layers.js';
 import { keepLayerSnapshot } from './schema-snapshot-store.js';
-import { heldRebaseEpochs } from './rdf-settle.js';
+import { heldRebaseEpochs, layerRdfConflict } from './rdf-settle.js';
 
 export { layersFor };
 
@@ -49,12 +49,12 @@ export function recomputeEffectiveMeta(spaceId: string, persist = false): boolea
   // Without the server's own counters: the version and history belong to `meta`, which `updateSpace` keeps.
   const setApart = !space.ownMeta;
   if (setApart) space.ownMeta = replicatedMetaOf(space.meta) as SpaceMeta;
-  const next = effectiveMeta(space.ownMeta!, layers, heldRebaseEpochs(cfg, spaceId));
+  const next = effectiveMeta(space.ownMeta!, layers);
   // Q-748: a base adopted from a network (nothing was stored here) becomes this instance's own, so it outlives the layer: a member that
   // leaves keeps the base it took. One the own definitions already hold is never replaced (the settle kept it).
   if (next.rdf?.base && !space.ownMeta!.rdf?.base) { space.ownMeta = { ...space.ownMeta!, rdf: next.rdf }; persist = true; }
-  const conflictMoved = !isDeepStrictEqual(next.rdfBaseConflict, space.meta?.rdfBaseConflict);
-  if (!conflictMoved && isDeepStrictEqual(replicatedMetaOf(next), replicatedMetaOf(space.meta))) {
+  if (recordRdfConflicts(cfg, spaceId, next.rdf)) persist = true;
+  if (isDeepStrictEqual(replicatedMetaOf(next), replicatedMetaOf(space.meta))) {
     if (setApart || persist) saveConfig(cfg);
     return false;
   }
@@ -66,6 +66,25 @@ export function recomputeEffectiveMeta(spaceId: string, persist = false): boolea
   // (`derivedFromStored`, the named trusted source). Nothing arrives here from outside.
   updateSpace(spaceId, { meta: derivedFromStored(next) });
   return true;
+}
+
+/**
+ * Q-748: record, beside each network carrying `spaceId`, a base its layer offers that no held rebase round explains, and clear one that no
+ * longer stands. @returns whether any network changed.
+ */
+function recordRdfConflicts(cfg: Config, spaceId: string, held: SpaceMeta['rdf']): boolean {
+  const epochs = heldRebaseEpochs(cfg, spaceId);
+  let changed = false;
+  for (const net of cfg.networks) {
+    const layer = net.schemaLayers?.[spaceId];
+    const conflict = layer === undefined ? undefined : layerRdfConflict(held, layer, { networkId: net.id, heldRebaseEpochs: epochs });
+    if (isDeepStrictEqual(conflict, net.rdfBaseConflicts?.[spaceId])) continue;
+    const kept = { ...(net.rdfBaseConflicts ?? {}) };
+    if (conflict) kept[spaceId] = conflict; else delete kept[spaceId];
+    net.rdfBaseConflicts = Object.keys(kept).length > 0 ? kept : undefined;
+    changed = true;
+  }
+  return changed;
 }
 
 /**

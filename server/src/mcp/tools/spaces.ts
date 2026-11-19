@@ -9,6 +9,7 @@ import { spaceMetaAnswer, spaceStatsAnswer, META_RESOLVE_DEFAULT } from '../../s
 import { deleteSpaceData, wipeToolResult } from '../../spaces/delete-space-data.js';
 import { spacePurpose, unknownWriteFieldsToReport, spaceActPendingField } from '../../spaces/spaces.js';
 import { SPACE_PURPOSE_MAX } from '../../spaces/_shared.js';
+import { IRI_MAX, RDF_BASE_EPOCH_MAX } from '@ythril-network/schema';
 import { measureSpaceUsage } from '../../spaces/space-usage.js';
 import { countRecordsOfSpaces } from '../../spaces/space-counts.js';
 import { spaceForWire } from '../../spaces/space-for-wire.js';
@@ -560,9 +561,9 @@ export const schema_updateTool: ToolHandler = {
           + 'needs the schema `admin` rung.',
         properties: {
           enabled: { type: 'boolean', description: 'Switch the space\'s RDF names on or off; off keeps the base for when it is switched on again.' },
-          base: { type: 'string', maxLength: 2000, description: 'The records\' address prefix: an absolute IRI ending in "/" with no "#". Set once.' },
-          vocab: { type: 'string', maxLength: 2000, description: 'The namespace of the space\'s own type and property names (ends in "/" or "#"); `<base>vocab/` when absent. Moves only with the base.' },
-          baseEpoch: { type: 'integer', minimum: 0, description: 'How many times the base was changed; the server keeps its own count and ignores yours.' },
+          base: { type: 'string', maxLength: IRI_MAX, description: 'The records\' address prefix: an absolute IRI ending in "/" with no "#". Set once.' },
+          vocab: { type: 'string', maxLength: IRI_MAX, description: 'The namespace of the space\'s own type and property names (ends in "/" or "#"); `<base>vocab/` when absent. Moves only with the base.' },
+          baseEpoch: { type: 'integer', minimum: 0, maximum: RDF_BASE_EPOCH_MAX, description: 'How many times the base was changed; the server keeps its own count and ignores yours.' },
           rebase: { type: 'boolean', enum: [true], description: 'Change the base on purpose (see above). Never stored.' },
         },
         required: ['enabled'],
@@ -674,7 +675,7 @@ export const save_spaceTool: ToolHandler = {
       meta: {
         type: 'object',
         description: 'Initial meta: typeSchemas, validationMode, strictLinkage, usageNotes, suppressEmbeddings, whenDuePasses, '
-          + 'stampSkew and rules (the keys `schema_update` takes). An explicit value here wins over the seeded strict defaults.',
+          + 'stampSkew, rules and rdf (the keys `schema_update` takes). An explicit value here wins over the seeded strict defaults.',
       },
     },
     required: ['label'],

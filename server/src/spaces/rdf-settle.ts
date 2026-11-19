@@ -64,7 +64,12 @@ export type RdfSettled =
     /** A base offered that no round explains. */
     conflict?: RdfBaseConflict;
   }
-  | { ok: false; status: 400 | 409; code: 'rdf_base_needed' | 'rdf_base_frozen' | 'rdf_base_unchanged'; error: string };
+  | { ok: false; status: RdfRefusalStatus; code: 'rdf_base_needed' | 'rdf_base_frozen' | 'rdf_base_unchanged'; error: string };
+
+/** The statuses of the setting's refusals: a base that cannot be made is a request the caller fixes; a base that stands is a conflict. */
+export const RDF_BASE_NEEDED_STATUS = 400 as const;
+export const RDF_BASE_STANDS_STATUS = 409 as const;
+export type RdfRefusalStatus = typeof RDF_BASE_NEEDED_STATUS | typeof RDF_BASE_STANDS_STATUS;
 
 /** The setting as stored, with no write-only flag and no undefined keys. */
 function clean(r: { enabled?: boolean; base?: string; vocab?: string; baseEpoch?: number }): RdfSetting {
@@ -97,6 +102,27 @@ export function heldRebaseEpochs(cfg: { networks: readonly NetworkConfig[] }, lo
   return out;
 }
 
+/**
+ * The conflict a network's layer makes with the base a space holds, or `undefined`: the settle of the layer's `rdf` (source `layer`) over
+ * `held`, with the network named and the epochs of the rebase rounds held for the space. Pure.
+ */
+export function layerRdfConflict(held: RdfSetting | undefined, layer: unknown, ctx: Pick<RdfSettleContext, 'networkId' | 'heldRebaseEpochs'>): RdfBaseConflict | undefined {
+  const offered = layer && typeof layer === 'object' ? (layer as { rdf?: unknown }).rdf : undefined;
+  if (!offered || typeof offered !== 'object') return undefined;
+  const settled = settleRdf(held, offered as RdfSetting, 'layer', ctx);
+  return settled.ok ? settled.conflict : undefined;
+}
+
+/**
+ * The base conflict that stands for `localSpaceId`, merged over every network holding one, or `undefined`. THE reading the RDF doors ask
+ * (409 `rdf_base_conflict`, slice D); written only by the effective-meta recompute and cleared by a landed rebase.
+ */
+export function rdfBaseConflictOf(cfg: { networks: readonly NetworkConfig[] }, localSpaceId: string): RdfBaseConflict | undefined {
+  const all = cfg.networks.map(n => n.rdfBaseConflicts?.[localSpaceId]).filter((c): c is RdfBaseConflict => c !== undefined);
+  if (all.length === 0) return undefined;
+  return { held: all[0]!.held, offered: all.flatMap(c => c.offered) };
+}
+
 /** Settle `incoming` against `stored` for `source`. Never throws. */
 export function settleRdf(stored: RdfSetting | undefined, incoming: RdfIncoming | undefined, source: RdfSource, ctx: RdfSettleContext = {}): RdfSettled {
   if (incoming === undefined) return { ok: true, rdf: stored };
@@ -118,7 +144,7 @@ function settleLocal(stored: RdfSetting | undefined, sent: Partial<RdfSetting> &
     let base = sent.base;
     if (base === undefined && enabled) {
       if (!ctx.publicBaseUrl || ctx.spaceId === undefined) {
-        return { ok: false, status: 400, code: 'rdf_base_needed', error: 'RDF needs a base address for this space, and this instance has no public URL: '
+        return { ok: false, status: RDF_BASE_NEEDED_STATUS, code: 'rdf_base_needed', error: 'RDF needs a base address for this space, and this instance has no public URL: '
           + 'set the instance\'s publicUrl (or PUBLIC_BASE_URL), or send meta.rdf.base with the address the space\'s records should have (ending in "/")' };
       }
       base = defaultBaseFor(ctx.publicBaseUrl, ctx.spaceId);
@@ -132,14 +158,14 @@ function settleLocal(stored: RdfSetting | undefined, sent: Partial<RdfSetting> &
   const vocabMoves = sent.vocab !== undefined && sent.vocab !== heldVocab;
   if (!baseMoves && !vocabMoves) {
     if (sent.rebase === true) {
-      return { ok: false, status: 409, code: 'rdf_base_unchanged', error: `rdf.rebase asks for a new base, and ${sent.base ?? stored.base} is the base this space already has: send a different rdf.base` };
+      return { ok: false, status: RDF_BASE_STANDS_STATUS, code: 'rdf_base_unchanged', error: `rdf.rebase asks for a new base, and ${sent.base ?? stored.base} is the base this space already has: send a different rdf.base` };
     }
     return { ok: true, rdf: clean({ ...stored, enabled }) };
   }
   if (sent.rebase !== true || !baseMoves) {
     const offered = baseMoves ? sent.base! : sent.vocab!;
     const held = baseMoves ? stored.base : heldVocab;
-    return { ok: false, status: 409, code: 'rdf_base_frozen', error: `this space's RDF ${baseMoves ? 'base' : 'vocab'} is ${held} and is not changed by an ordinary write (${offered} was sent): `
+    return { ok: false, status: RDF_BASE_STANDS_STATUS, code: 'rdf_base_frozen', error: `this space's RDF ${baseMoves ? 'base' : 'vocab'} is ${held} and is not changed by an ordinary write (${offered} was sent): `
       + (baseMoves ? 'send rdf.rebase: true with the new base to change it deliberately; every address the space gave out changes with it' : 'the vocab moves only with the base: send a new rdf.base with rdf.rebase: true') };
   }
   const next: RebaseProposal = { base: sent.base!, vocab: sent.vocab ?? defaultVocabFor(sent.base!), epoch: epoch + 1 };

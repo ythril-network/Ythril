@@ -45,8 +45,8 @@ import { log, peerText } from '../util/log.js';
 import { SKIP_WARNING_WINDOW_MS } from '../util/single-flight.js';
 import { warnOnce } from '../util/warn-once.js';
 import { settleRounds } from './round-conclusion.js';
-import { applyOwedRebaseRounds } from '../spaces/apply-rebase-round.js';
 import { roundPastDeadline, spaceActOwed } from './round-state.js';
+import { applyOwedRebaseRounds } from '../spaces/apply-rebase-round.js';
 
 /** The label of the job: the `job` of `ythril_interval_tick_skipped_total` and the head of its failure lines. Kept equal to the one literal `intervalJob` is registered under, below. */
 const LABEL = 'Vote round expiry';

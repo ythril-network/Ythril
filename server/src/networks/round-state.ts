@@ -153,7 +153,7 @@ export function rebaseRoundUnapplied(r: PassedRoundReadable): boolean {
 /**
  * A rebase round OWED here at `now`: still to land ({@link rebaseRoundUnapplied}) and its deadline come. It lands at the deadline and never at
  * the pass, so every member, the proposer included, moves at the same instant and a member had the whole voting period to leave
- * (`spaces/apply-rebase-round.ts`, read by the expiry tick).
+ * (`spaces/apply-rebase-round.ts`, called by the expiry tick).
  */
 export function rebaseRoundOwed(r: PassedRoundReadable & Pick<RoundDatable, 'deadline'>, now: number): boolean {
   return rebaseRoundUnapplied(r) && roundPastDeadline(r, now);

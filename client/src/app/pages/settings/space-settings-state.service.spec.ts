@@ -36,6 +36,32 @@ function make(statsFails = false) {
   return TestBed.inject(SpaceSettingsState);
 }
 
+describe('space-settings-state keeps a type\'s iri', () => {
+  /*
+   * Q-748 (design r4 B2): a type's and a property's RDF address (`iri`) is set through the API and has no control in the editor. The
+   * serialiser rebuilds a type from scratch, so a field the state does not hold is DELETED by the next save of any type: an operator who
+   * edits one description would rename the type in every RDF export. Both directions against one fixture, as the edge-ends case below.
+   */
+  const mapped = space({
+    id: 'work',
+    meta: { typeSchemas: { entity: {
+      person: { iri: 'https://schema.org/Person', description: 'a human', propertySchemas: { email: { type: 'string', iri: 'https://schema.org/email' } } },
+      plain: {},
+    } } },
+  } as Partial<Space>);
+
+  it('loads the iri and writes it back after another field of the type is edited', () => {
+    const c = make();
+    c.openSettings(mapped);
+    expect(c.typeState('entity', 'person').iri).toBe('https://schema.org/Person');
+    c.typeState('entity', 'person').description = 'a person, edited';
+    const out = c.buildMeta().typeSchemas!.entity!;
+    expect(out['person']).toMatchObject({ iri: 'https://schema.org/Person', description: 'a person, edited' });
+    expect(out['person'].propertySchemas!['email']).toMatchObject({ iri: 'https://schema.org/email' });
+    expect(out['plain'].iri).toBeUndefined();
+  });
+});
+
 describe('an edge label\'s ends and cardinality survive being opened', () => {
   /*
    * The bug this pins, and how it was found.
