@@ -10,8 +10,9 @@ caller can read at that moment and merges the answer.
 
 ### What you can rely on
 
-- **A view is never a space.** It has no records, no files, no index and no network. No network, sync, export or
-  token-rights row can name it, and a space id is still `^[a-z0-9-]+$`.
+- **A view is never a space.** It has no records, no files, no index and no network. No network, sync, backup export or
+  token-rights row can name it, and a space id is still `^[a-z0-9-]+$`. The [RDF records export](06f-exports.md#several-spaces-at-once-a-personal-view)
+  is a read and takes a view: one named graph per member it reads.
 - **A view reads and never writes.** Every write door and every configuration door answers a view id as a missing
   space. To write, name one of the view's members.
 - **A view never reads more than its caller could read by naming the member.** The members are judged per call, in
