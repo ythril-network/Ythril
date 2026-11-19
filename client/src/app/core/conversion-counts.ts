@@ -23,7 +23,13 @@ import type { ConversionStep } from './conversion.types';
  * unconverted in the run (plan section 11, decision 2); the finished view reports the true numbers.
  */
 
-/** The collection each knowledge kind lives in, as the `filter` tool names it. */
+/** "Two or more": the number at which the dialogs speak of several steps or several types, not of one. */
+export const SEVERAL = 2;
+
+/**
+ * The collection each knowledge kind lives in, as the `filter` tool names it. NOT ALL BRAIN COLLECTIONS: only the four kinds a type can name
+ * (files and links have no types to convert), and `BRAIN_COLLECTIONS` lives in `api.types`, which this module must not import (a cycle).
+ */
 export const COLLECTION_OF_KIND: Readonly<Record<TypedKind, 'entities' | 'facts' | 'edges' | 'chrono'>> = {
   entity: 'entities', fact: 'facts', edge: 'edges', chrono: 'chrono',
 };
@@ -108,6 +114,6 @@ export function blockCounts(block: ConvertBlock, read: { total: number; rewritte
     rewritten,
     stamped: read.total - rewritten,
     casesCountedAsItRuns: scope.scope === 'all' && scope.split,
-    wholeType: block.steps.filter(s => belongs(block, s)).length >= 2,
+    wholeType: block.steps.filter(s => belongs(block, s)).length >= SEVERAL,
   };
 }

@@ -3,7 +3,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, e
 import { TranslocoPipe } from '@jsverse/transloco';
 import type { Subscription } from 'rxjs';
 import { ConversionApi } from '../../core/conversion-api.service';
-import { rewriteScopeOf, type BlockCounts, type ConvertBlock } from '../../core/conversion-counts';
+import { SEVERAL, rewriteScopeOf, type BlockCounts, type ConvertBlock } from '../../core/conversion-counts';
 import type { ConversionRefusal, ConversionStep, ConvertRunNotice, ConvertStatusAnswer, ConvertTypeRef } from '../../core/conversion.types';
 import { pageTranslator } from '../../core/page-translator';
 import { PluralText } from '../../core/plural-text.service';
@@ -367,7 +367,7 @@ export class ConvertRecordsDialogComponent {
 
   protected showWhole(i: number): boolean {
     const view = this.countState(i);
-    return this.mode() !== 'act' && view.state === 'ready' && view.counts.total > 0 && (this.liveBlocks()[i]?.steps.length ?? 0) >= 2;
+    return this.mode() !== 'act' && view.state === 'ready' && view.counts.total > 0 && (this.liveBlocks()[i]?.steps.length ?? 0) >= SEVERAL;
   }
 
   // ── Words ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -390,7 +390,7 @@ export class ConvertRecordsDialogComponent {
     switch (this.mode()) {
       case 'offer': {
         const lead = this.network() ? this.say('spaces.schema.convert.leadNet', { network: this.network() }) : this.say('spaces.schema.convert.lead');
-        return this.blocks().length >= 2 ? `${this.say('spaces.schema.convert.twoTypes')} ${lead}` : lead;
+        return this.blocks().length >= SEVERAL ?`${this.say('spaces.schema.convert.twoTypes')} ${lead}` : lead;
       }
       case 'act': return this.say('spaces.schema.convert.act.lead');
       case 'submitted': return this.say('spaces.schema.convert.submitted.lead', { network: this.network() ?? '' });
@@ -421,7 +421,7 @@ export class ConvertRecordsDialogComponent {
     const name = blocks[0] ? (blocks[0].was ?? blocks[0].type) : '';
     const net = this.network();
     if (net !== null && net !== '') return markedPieces(this.say, 'spaces.schema.convert.noRecordsNet', { network: net, type: name }, { plain: ['network'] });
-    if (blocks.length >= 2) return markedPieces(this.say, 'spaces.schema.convert.noRecordsTwo', {});
+    if (blocks.length >= SEVERAL) return markedPieces(this.say, 'spaces.schema.convert.noRecordsTwo', {});
     return markedPieces(this.say, 'spaces.schema.convert.noRecordsShort', { type: name });
   });
 

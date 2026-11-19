@@ -33,11 +33,19 @@ import { instanceAdminRights, runningStatus } from './review-unconverted-fixture
 /** The English as the shipped file has it, flat: a key a component asks for and the file lacks renders as the key itself. */
 export const EN: Record<string, string> = dictionary('en');
 
+const QUOTA_GIB = 10;
+/** The meta version of `customers`: what the save's If-Match carries. */
+const META_VERSION = 3;
+/** What the stats read answers: one count per kind of record. */
+const SPACE_STATS = { facts: 1, entities: 2, edges: 3, chrono: 4, files: 5 };
+/** What a finished run counted, and the figures the specs read back. */
+const DONE_COUNTS = { stamped: 41, rewritten: 599, unconverted: 4, moved: 0, edgesRestamped: 0 };
+
 /** `customers` with two entity types; `person` has the property the specs rename. Its meta version is what the save's If-Match carries. */
 export const customers = (over: Partial<Space> = {}): Space => ({
-  id: 'customers', label: 'Customers', maxGiB: 10, networks: [],
+  id: 'customers', label: 'Customers', maxGiB: QUOTA_GIB, networks: [],
   meta: {
-    version: 3,
+    version: META_VERSION,
     typeSchemas: {
       entity: {
         person: { propertySchemas: { company: { type: 'string' }, email: { type: 'string' }, status: { type: 'string', enum: ['active', 'lead'] } } },
@@ -70,7 +78,7 @@ export interface HarnessOptions {
 
 export const okStatus = (value: ConvertStatusAnswer): ConversionResult<ConvertStatusAnswer> => ({ ok: true, value });
 export const doneStatus = (over: Record<string, unknown> = {}): ConvertStatusAnswer => ({
-  ...runningStatus({ left: 0, counts: { stamped: 41, rewritten: 599, unconverted: 4, moved: 0, edgesRestamped: 0 } }),
+  ...runningStatus({ left: 0, counts: { ...DONE_COUNTS } }),
   state: 'complete', types: [{ kind: 'entity', type: 'person', done: true }], finishedAt: '2026-11-19T10:05:00.000Z', ...over,
 }) as ConvertStatusAnswer;
 
@@ -98,7 +106,7 @@ export function mountPopup(options: HarnessOptions = {}) {
     listSpaces: () => of({ spaces: [space] }), list: () => of({ spaces: [space] }), getActivity: () => of({ spaces: [] }),
     updateSpace, getSchema: () => of({ meta: {} }), listEntries: () => of({ entries: [] }), listSchemaLibrary: () => of({ entries: [] }),
     getSchemaLayers: () => of({ spaceId: space.id, own: {}, layers: [], precedence: [], clashes: [] }),
-    getSpaceStats: () => of({ spaceId: space.id, facts: 1, entities: 2, edges: 3, chrono: 4, files: 5 }),
+    getSpaceStats: () => of({ spaceId: space.id, ...SPACE_STATS }),
     listVotes: () => of({ rounds: [] }),
   };
   TestBed.resetTestingModule();

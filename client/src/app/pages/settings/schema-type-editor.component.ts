@@ -333,7 +333,7 @@ export interface LayerMark {
                 <!-- The key, its pencil and, after a rename that is not saved yet, "was <old name>": one control, the one the type name uses. -->
                 <app-schema-type-name class="prop-rename" nameClass="prop-name-key" [name]="p.key" [rename]="renamerFor(p.key)" [was]="p._was ?? null"
                   labelKey="spaces.schema.renamePropAria" [labelParams]="{ key: p.key }" titleKey="spaces.schema.renameProp"
-                  errorKeyPrefix="spaces.schema.renamePropError" />
+                  errorKeyPrefix="spaces.schema.renamePropError." />
                 @if (layerMarks()[p.key]; as mark) {
                   <!-- A network layer supplies this property's definition (a clash it wins): said by name, and the other networks can be
                        offered it as a proposal - a vote there, never a direct write. Siblings of each other, not nested in the row's

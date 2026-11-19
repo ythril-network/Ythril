@@ -7,7 +7,7 @@ import { holdUnsavedEdits } from '../../core/unsaved-edits';
  * Where a type rename's own error sentences live (`.empty`, `.exists`, `.missing`): a prefix, not a key, the key is built from it.
  * Not named for "refusal": `data-acts-have-words.spec.ts` reads every `*REFUSAL*` constant as a prefix the server's refusal codes are looked up under.
  */
-const TYPE_RENAME_ERRORS = 'spaces.schema.renameError';
+const TYPE_RENAME_ERRORS = 'spaces.schema.renameError.';
 
 /**
  * A declared type's NAME, or a property's KEY, and the affordance to change it.
@@ -144,7 +144,10 @@ export class SchemaTypeNameComponent {
     if (this.draft === this.name()) { this.cancel(); return true; }
     const err = this.rename()(this.draft);
     if (err) {
-      this.error.set(this.transloco.translate(`${this.errorKeyPrefix()}.${err}`));
+      // A prefix is written with its closing dot where it is given (`'spaces.schema.renameError.'`), so the check for keys no source quotes
+      // sees the family it names; one given without it is completed.
+      const prefix = this.errorKeyPrefix();
+      this.error.set(this.transloco.translate(`${prefix}${prefix.endsWith('.') ? '' : '.'}${err}`));
       return false;
     }
     this.error.set('');

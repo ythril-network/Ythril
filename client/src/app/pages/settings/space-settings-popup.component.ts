@@ -46,6 +46,7 @@ import { SpacesApi } from '../../core/spaces-api.service';
 import type { Space } from '../../core/api.types';
 import { AuthApi } from '../../core/auth-api.service';
 import { ConversionApi, conversionRefusalOf, convertNoticeOf } from '../../core/conversion-api.service';
+import { SEVERAL } from '../../core/conversion-counts';
 import type { ConversionRefusal, ConvertRunNotice, ConvertStatusAnswer } from '../../core/conversion.types';
 import type { PollHandle } from '../../core/poll-until';
 import { pageTranslator } from '../../core/page-translator';
@@ -282,7 +283,7 @@ export class SpaceSettingsPopupComponent {
     const first = h.types[0]!;
     const network = this.governedBy();
     if (network) return this.say('spaces.schema.convert.noRecordsNet', { network, type: first.was ?? first.type });
-    if (h.types.length >= 2) return this.say('spaces.schema.convert.noRecordsTwo');
+    if (h.types.length >= SEVERAL) return this.say('spaces.schema.convert.noRecordsTwo');
     return first.was !== undefined ? this.say('spaces.schema.convert.noRecordsShort', { type: first.was }) : this.say('spaces.schema.convert.noRecords', { type: first.type });
   });
 

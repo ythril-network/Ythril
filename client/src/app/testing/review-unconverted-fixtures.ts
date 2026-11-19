@@ -7,6 +7,7 @@ import { ConfirmDialogService } from '../core/confirm-dialog.service';
 import { ConversionApi } from '../core/conversion-api.service';
 import type { ConvertStatus, ConversionResult, UnconvertedListAnswer, UnconvertedOpenGroup, UnconvertedRow } from '../core/conversion.types';
 import { RecordDrawerState } from '../pages/brain/record-drawer-state.service';
+import { UNCONVERTED_PAGE_SIZE } from '../pages/brain/review-unconverted-state';
 import type { TokenRights } from '../pages/settings/rights-glyph.component';
 import { dictionary } from './i18n-dictionary';
 
@@ -59,17 +60,21 @@ export const openGroup = (type: string, reason: string, n: number, kind: Unconve
 /** A list answer: the rows given, the groups given (`counts.open` is their sum unless `counts` says otherwise), the page the rows are. */
 export function listAnswer(items: UnconvertedRow[], openBy: UnconvertedOpenGroup[], over: Partial<UnconvertedListAnswer> = {}): UnconvertedListAnswer {
   const open = openBy.reduce((sum, g) => sum + g.n, 0);
-  return { items, count: items.length, total: items.length, limit: 25, skip: 0, truncated: false, counts: { open, dismissed: 0, openBy }, ...over };
+  return { items, count: items.length, total: items.length, limit: UNCONVERTED_PAGE_SIZE, skip: 0, truncated: false, counts: { open, dismissed: 0, openBy }, ...over };
 }
 
 export const okResult = <T>(value: T): ConversionResult<T> => ({ ok: true, value });
 export const refused = <T = never>(refusal: Extract<ConversionResult<T>, { ok: false }>['refusal']): ConversionResult<T> => ({ ok: false, refusal });
 
+/** What a run in progress has done so far, and how many records it has still to read. */
+const RUNNING_COUNTS = { stamped: 100, rewritten: 80, unconverted: 4, moved: 0, edgesRestamped: 0 };
+const RUNNING_LEFT = 816;
+
 /** A run in progress: `done` records checked, `left` still to read (null: not counted in time), `unconverted` of them listed so far. */
 export function runningStatus(over: Partial<ConvertStatus> = {}): ConvertStatus {
   return {
     state: 'running', types: [{ kind: 'entity', type: 'person', done: false }], steps: [], stepsRefused: [], sources: [{ kind: 'write', at: '2026-11-17T10:00:00.000Z' }],
-    startedAt: '2026-11-17T10:00:00.000Z', counts: { stamped: 100, rewritten: 80, unconverted: 4, moved: 0, edgesRestamped: 0 }, left: 816, failures: 0, ...over,
+    startedAt: '2026-11-17T10:00:00.000Z', counts: { ...RUNNING_COUNTS }, left: RUNNING_LEFT, failures: 0, ...over,
   };
 }
 

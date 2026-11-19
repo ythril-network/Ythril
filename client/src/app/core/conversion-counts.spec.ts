@@ -12,7 +12,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  blockRecordsFilter, rewriteScopeOf, rewrittenFilter, blockCounts, COLLECTION_OF_KIND, type ConvertBlock,
+  blockRecordsFilter, rewriteScopeOf, rewrittenFilter, blockCounts, type ConvertBlock,
 } from './conversion-counts';
 import type { ConversionStep } from './conversion.types';
 
@@ -35,9 +35,7 @@ describe('the records a block counts', () => {
       .toEqual({ label: { $eq: 'works_at', $not: { $type: 'array' } }, forkOf: null });
   });
 
-  it('each kind is read from its own collection', () => {
-    expect(COLLECTION_OF_KIND).toEqual({ entity: 'entities', fact: 'facts', edge: 'edges', chrono: 'chrono' });
-  });
+  // Each kind's collection is driven through `countsFor` (conversion-api.service.spec.ts), where it decides the request: a table here would only restate the constant.
 });
 
 describe('which records the steps rewrite', () => {

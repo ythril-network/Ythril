@@ -13,10 +13,15 @@ import { RULE_LIMITS } from './rule-limits';
  * holds, `typeNameMax` the longest type name a step may name, and `conditionMax` the longest condition: a split's `when` is judged as a
  * rule, so it is the rule limit itself, not a number of its own.
  */
+const STEPS_MAX = 50;
+const VALUES_MAX = 200;
+const CASES_MAX = 20;
+const TYPE_NAME_MAX = 200;
+
 export const CONVERSION_LIMITS = {
-  stepsMax: 50,
-  valuesMax: 200,
-  casesMax: 20,
-  typeNameMax: 200,
+  stepsMax: STEPS_MAX,
+  valuesMax: VALUES_MAX,
+  casesMax: CASES_MAX,
+  typeNameMax: TYPE_NAME_MAX,
   conditionMax: RULE_LIMITS.ruleMax,
 } as const;

@@ -37,6 +37,8 @@ const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v =
 
 /** The longest server sentence a refusal carries along: a refusal quotes peer-chosen names, and a page shows it as text. */
 const SENTENCE_MAX = 600;
+/** The answer to a write whose `If-Match` no longer holds: the schema changed since the page read it. */
+const HTTP_PRECONDITION_FAILED = 412;
 
 /**
  * What a refused conversion request is, as a page words it. `err` is an `HttpErrorResponse` or anything thrown; a request that never
@@ -56,7 +58,7 @@ export function conversionRefusalOf(err: unknown): ConversionRefusal {
   const error = sentence.length > SENTENCE_MAX ? `${sentence.slice(0, SENTENCE_MAX - 1)}…` : sentence;
   const other: ConversionRefusal = { kind: 'other', status, ...(code !== undefined ? { code } : {}), error };
 
-  if (status === 412) return { kind: 'stale' };
+  if (status === HTTP_PRECONDITION_FAILED) return { kind: 'stale' };
   const kind = code !== undefined && Object.hasOwn(CONVERSION_REFUSAL_KIND, code) ? CONVERSION_REFUSAL_KIND[code] : undefined;
   const whole = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0;
   switch (kind) {
