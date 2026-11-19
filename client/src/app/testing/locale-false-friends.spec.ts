@@ -154,6 +154,112 @@ describe('product terms are translated as the product noun, not the everyday wor
     expect(checked).toBeGreaterThan(100);
     expect(wrong, `these values use the everyday word for a product noun:\n  ${wrong.join('\n  ')}`).toEqual([]);
   });
+
+  // The gate is its patterns: each row is shown the wrong word it was written for, and the right word it must leave alone (Q-747).
+  it('the property, convert and dismiss rows refuse their wrong words and leave the product words alone', () => {
+    const row = (sample: string) => PRODUCT_TERMS.find(t => t.en.test(sample))!.wrong;
+    expect(row('property').pl.test('+ Dodaj nieruchomość')).toBe(true);
+    expect(row('property').pl.test('Schematy własności')).toBe(true);
+    expect(row('property').pl.test('Co oznacza ta wlasciwosc')).toBe(true);
+    expect(row('property').pl.test('Dodaj właściwość')).toBe(false);
+    expect(row('property').de.test('Eigentum')).toBe(true);
+    expect(row('property').de.test('Neuer Immobilienname')).toBe(true);
+    expect(row('property').de.test('Eigenschaft hinzufügen')).toBe(false);
+    expect(row('converted').de.test('Die Datensätze werden bekehrt')).toBe(true);
+    expect(row('converted').de.test('Die Datensätze werden konvertiert')).toBe(false);
+    expect(row('converted').pl.test('Przelicz rekordy')).toBe(true);
+    expect(row('converted').pl.test('Konwertuj rekordy')).toBe(false);
+    expect(row('dismissed').de.test('Der Eintrag wird entlassen')).toBe(true);
+    expect(row('dismissed').de.test('Der Eintrag wird verworfen')).toBe(false);
+    expect(row('dismissed').pl.test('Odrzuć wpis; zwolnij go')).toBe(false);
+  });
+});
+
+/**
+ * ## One term per concept of record conversion (Q-747, bundle-285)
+ *
+ * The conversion feature brings nine words that each had two or three translations to choose from: a step ("Schritt", never "Stufe" or
+ * "Maßnahme"; "krok", never "etap"), to convert ("konvertieren" / "konwertować", while the files also say "umwandeln" and "przekształcić" for
+ * other things), stamped and rewritten (the two outcomes of a record, the words the dialog defines), to dismiss ("verwerfen" /
+ * "odrzucić", as the Duplicates card says), Review ("Prüfung" / "Przegląd"), a record, a property, the vote and the network. Each sentence is
+ * right on its own page, so no per-key check sees that two sentences say "Stufe" and "Schritt" for the one thing: it is the SET that a reader
+ * compares, as with `RECORD_TERMS`.
+ *
+ * Derived from en, over the keys of the feature only (`CONVERSION_KEYS`): every value whose en value names a concept carries the pinned stem in
+ * de and pl. The pins are the plan's section 8 ("Terms the translators keep"), each already in use in the files where the concept existed
+ * before. A feature key that is the English sentence copied across is refused too: a missing translation is not a wrong one, and falls back to
+ * English without a sound.
+ */
+const CONVERSION_KEYS = /^(?:spaces\.schema\.(?:convert\.|renameProp|was$)|conversion\.|brain\.review\.unconverted\.|networks\.network\.votes\.convert\.)/;
+
+interface ConversionTerm { concept: string; en: RegExp; de: RegExp; pl: RegExp }
+const CONVERSION_TERMS: readonly ConversionTerm[] = [
+  { concept: 'step', en: /\bsteps?\b/i, de: /schritt/i, pl: /krok/i },
+  { concept: 'convert', en: /\bconver(?:t|ts|ted|ting|sions?)\b/i, de: /konvertier/i, pl: /konwer/i },
+  { concept: 'stamped', en: /\bstamped\b/i, de: /gestempelt|stempel/i, pl: /ostempl|stempl/i },
+  { concept: 'rewritten', en: /\brewritten\b/i, de: /umgeschrieben/i, pl: /przepis/i },
+  { concept: 'dismiss', en: /\bdismiss(?:es|ed|ing)?\b/i, de: /verwerf|verworf/i, pl: /odrzu/i },
+  { concept: 'Review (the Brain tab)', en: /\bReview\b/, de: /prüfung/i, pl: /przegl/i },
+  { concept: 'record', en: /\brecords?\b/i, de: /datensatz|datensätz/i, pl: /rekord/i },
+  { concept: 'property', en: /\bpropert(?:y|ies)\b/i, de: /eigenschaft/i, pl: /właściwo/i },
+  { concept: 'vote', en: /\bvot(?:e|es|ed|ing)\b/i, de: /abstimm/i, pl: /głosowa|głosuj/i },
+  { concept: 'network', en: /\bnetworks?\b/i, de: /netzwerk/i, pl: /sieć|sieci/i },
+];
+
+describe('one term per concept of record conversion in every locale (Q-747)', () => {
+  const en = dictionary('en');
+  const others = { de: dictionary('de'), pl: dictionary('pl') };
+  const keys = Object.keys(en).filter(key => typeof en[key] === 'string' && CONVERSION_KEYS.test(key));
+  /** The en value with the placeholders blanked, so `{{type}}` is not read as a word the translation must carry. */
+  const words = (value: string): string => value.replace(/\{\{[^}]*\}\}/g, ' ');
+
+  it('finds the feature\'s keys (a floor, so a changed prefix cannot pass by finding none)', () => {
+    expect(keys.length).toBeGreaterThanOrEqual(200);
+  });
+
+  for (const term of CONVERSION_TERMS) {
+    for (const loc of ['de', 'pl'] as const) {
+      it(`${loc}: every feature value whose en value names "${term.concept}" says it with the pinned word`, () => {
+        const named = keys.filter(key => term.en.test(words(en[key]!)));
+        expect(named.length, `no feature key names "${term.concept}": the marker or the prefix changed`).toBeGreaterThan(0);
+        const missing = named
+          .filter(key => !term[loc].test(others[loc][key] ?? ''))
+          .map(key => `${key} = ${JSON.stringify(others[loc][key])}  (en ${JSON.stringify(en[key])})`);
+        expect(missing, `${loc}: ${missing.length} values name "${term.concept}" without ${term[loc]}:\n  ${missing.join('\n  ')}`).toEqual([]);
+      });
+    }
+  }
+
+  it('no feature value is the English sentence copied into de or pl', () => {
+    const copied: string[] = [];
+    for (const key of keys) {
+      // A value with no word of its own (`{{step}}: {{reason}}.`, "{{from}} to {{to}}" aside) reads the same in every language.
+      if (!/[A-Za-z]{4,}/.test(words(en[key]!))) continue;
+      for (const loc of ['de', 'pl'] as const) {
+        if (others[loc][key] === en[key]) copied.push(`${loc}: ${key} = ${JSON.stringify(en[key])}`);
+      }
+    }
+    expect(copied, `${copied.length} feature values are still English:\n  ${copied.join('\n  ')}`).toEqual([]);
+  });
+
+  it('the patterns accept the pinned words and refuse the near ones', () => {
+    const term = (concept: string): ConversionTerm => CONVERSION_TERMS.find(t => t.concept === concept)!;
+    expect(term('step').de.test('Schritte')).toBe(true);
+    expect(term('step').de.test('Stufen')).toBe(false);
+    expect(term('step').pl.test('kroków')).toBe(true);
+    expect(term('step').pl.test('etapy')).toBe(false);
+    expect(term('convert').de.test('nicht konvertiert')).toBe(true);
+    expect(term('convert').pl.test('Nieskonwertowane')).toBe(true);
+    expect(term('convert').pl.test('Konwersja')).toBe(true);
+    expect(term('convert').de.test('umgewandelt')).toBe(false);
+    expect(term('dismiss').de.test('Verworfen')).toBe(true);
+    expect(term('dismiss').pl.test('Odrzucone')).toBe(true);
+    expect(term('Review (the Brain tab)').en.test('Open Review (4)')).toBe(true);
+    expect(term('Review (the Brain tab)').en.test('review the list')).toBe(false);
+    expect(term('record').pl.test('rekordów')).toBe(true);
+    expect(term('vote').en.test('The vote passes')).toBe(true);
+    expect(term('network').en.test('Settings, Networks')).toBe(true);
+  });
 });
 
 /**
