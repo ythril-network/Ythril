@@ -56,6 +56,13 @@ const TRANSLATION: Record<string, string> = {
   'networks.decisions.outcome.ended': LABEL.ended,
   'networks.roundType.space_addition': 'ROUNDTYPE-ADD-SPACE',
   'networks.roundType.join': 'ROUNDTYPE-JOIN',
+  // The conversion block of a row that carries one (S8): markers, so no assertion reads an English sentence.
+  'networks.network.votes.convert.head': 'CONV-HEAD',
+  'networks.network.votes.convert.counts.one': 'CONV-COUNTS n={{count}} type={{type}} stamped={{stamped}} rewritten={{rewritten}}',
+  'networks.network.votes.convert.counts.other': 'CONV-COUNTS n={{count}} type={{type}} stamped={{stamped}} rewritten={{rewritten}}',
+  'networks.network.votes.convert.none': 'CONV-NONE type={{type}}',
+  'brain.review.unconverted.rung': 'CONV-NO-READ-RIGHT',
+  'conversion.step.renameProperty': 'RENAME-PROP {{from}} => {{to}}',
 };
 
 const NET = { id: 'n1', label: 'Braintree', type: 'closed', members: [], spaces: [] };
@@ -177,6 +184,119 @@ describe('the vote slice of the Networks page', () => {
       vetoOf(rowOf(f)).click();
       await vi.waitFor(() => expect(confirm).toHaveBeenCalled());
       expect(JSON.stringify(confirm.mock.calls[0][0]), 'the veto confirmation does not name the round').toContain(SUBJECT);
+    });
+  });
+
+  /**
+   * A schema round that carries a conversion (bundle-285 S8, Q-940, drawing moment 4c): the member who votes reads the steps and this
+   * instance's own counts under the proposer's summary. The round goes through the REAL `NetworksApi`, so the row only sees what
+   * `voteRoundFromServer` copies: a field the translation drops would leave the row as it is today and every test of the block green.
+   */
+  describe('a round that carries a conversion', () => {
+    const STEP = { op: 'renameProperty', kind: 'entity', type: 'person', from: 'company', to: 'employer' };
+    const CONVERT_ROUND = {
+      roundId: 'r2', type: 'meta_change', subjectInstanceId: 'i-2', subjectLabel: 'member-b', spaceId: 'notes-in-the-network',
+      localSpaceId: 'team-notes', openedAt: '2026-10-08T10:00:00.000Z', deadline: '2026-10-09T10:00:00.000Z',
+      votes: [{ instanceId: 'i-1', vote: 'yes' }], summary: 'Changes to the type person.', changedTypes: ['entity:person'],
+      convertRecords: { steps: [STEP] },
+    };
+    const ADMIN = { id: 't', name: 't', rights: { instanceAdmin: true, createSpaces: true, floor: null, perSpace: {} } };
+    const filterBody = (r: TestRequest) => r.request.body as { space: string; filter: Record<string, unknown> };
+    const blockOf = (f: ComponentFixture<NetworksComponent>): HTMLElement | null =>
+      f.nativeElement.querySelector('app-vote-conversion-block');
+    /** The rights read, then the counts: the type's records and the ones the rename rewrites. */
+    function answerCounts(total: number, rewritten: number): TestRequest[] {
+      http.expectOne('/api/tokens/me').flush(ADMIN);
+      const asked = http.match('/api/filter');
+      for (const r of asked) {
+        const n = '$or' in filterBody(r).filter ? rewritten : total;
+        r.flush({ ok: true, data: { results: [], total: n, limit: 1, skip: 0, truncated: n > 1 } });
+      }
+      return asked;
+    }
+
+    it('shows the steps and this instance\'s counts under the summary, counted in the space this instance calls it', () => {
+      const f = boot([CONVERT_ROUND]);
+      const asked = answerCounts(640, 599);
+      f.detectChanges();
+      const row = rowOf(f);
+      const block = blockOf(f);
+      expect(block, 'no conversion block in the row').not.toBeNull();
+      expect(row.contains(block!), 'the block is outside the vote row').toBe(true);
+      const summary = row.querySelector('.vote-summary') as HTMLElement;
+      expect(summary.compareDocumentPosition(block!) & Node.DOCUMENT_POSITION_FOLLOWING, 'the block is not under the summary').toBeTruthy();
+      expect(block!.textContent).toContain('CONV-HEAD');
+      expect(block!.textContent).toContain('RENAME-PROP company => employer');
+      expect(block!.textContent).toContain('CONV-COUNTS n=640 type=person stamped=41 rewritten=599');
+      expect(asked.length).toBe(2);
+      expect(asked.every(r => filterBody(r).space === 'team-notes'), 'counted in the network\'s id for the space, not the local one').toBe(true);
+    });
+
+    it('keeps everything the row shows today: the title, both times, the tally, the summary, Yes and Veto', () => {
+      const f = boot([CONVERT_ROUND]);
+      answerCounts(2, 1);
+      f.detectChanges();
+      const row = rowOf(f);
+      expect(row.textContent).toContain('Change space settings');
+      expect(row.textContent).toContain('team-notes (member-b)');
+      expect(row.querySelector(`time[datetime="${CONVERT_ROUND.openedAt}"]`)).not.toBeNull();
+      expect(row.querySelector(`time[datetime="${CONVERT_ROUND.deadline}"]`)).not.toBeNull();
+      expect(row.querySelector('.vote-summary')!.textContent).toContain('Changes to the type person.');
+      expect(yesOf(row)).not.toBeNull();
+      expect(vetoOf(row)).not.toBeNull();
+      expect(yesOf(row).disabled).toBe(false);
+    });
+
+    it('a round with no conversion renders exactly as today: no block, and no request for rights or counts', () => {
+      const f = boot([SERVER_ROUND]);
+      expect(blockOf(f), 'a block appeared in a row that carries no conversion').toBeNull();
+      http.expectNone('/api/tokens/me');
+      http.expectNone('/api/filter');
+      expect(rowOf(f).textContent).not.toContain('CONV-');
+    });
+
+    it('a round whose conversion holds no steps shows no block (a stamp-only conversion has nothing to read)', () => {
+      const f = boot([{ ...CONVERT_ROUND, convertRecords: {} }]);
+      expect(blockOf(f)).toBeNull();
+      http.expectNone('/api/tokens/me');
+      http.expectNone('/api/filter');
+    });
+
+    it('a round that names no local space shows the steps and asks no count', () => {
+      const { localSpaceId: _dropped, ...older } = CONVERT_ROUND;
+      const f = boot([older]);
+      http.expectNone('/api/tokens/me');
+      http.expectNone('/api/filter');
+      expect(blockOf(f)!.textContent).toContain('RENAME-PROP company => employer');
+      expect(blockOf(f)!.textContent).not.toContain('CONV-COUNTS');
+    });
+
+    it('reads a peer\'s step names as text: markup in them is shown, never parsed', () => {
+      const evil = '<img src=x onerror="alert(1)">';
+      const f = boot([{ ...CONVERT_ROUND, convertRecords: { steps: [{ ...STEP, type: evil, to: evil }] } }]);
+      answerCounts(2, 1);
+      f.detectChanges();
+      expect(rowOf(f).querySelector('img'), 'a step name was parsed as HTML').toBeNull();
+      expect(blockOf(f)!.textContent).toContain(evil);
+    });
+
+    it('two rounds: the one with a conversion has a block, the other none', () => {
+      const f = boot([SERVER_ROUND, CONVERT_ROUND]);
+      answerCounts(2, 1);
+      f.detectChanges();
+      const rows = Array.from(f.nativeElement.querySelectorAll('.vote-row')) as HTMLElement[];
+      expect(rows.length).toBe(2);
+      expect(rows.filter(r => r.querySelector('app-vote-conversion-block')).length).toBe(1);
+    });
+
+    it('casting from a row that carries a conversion still posts the cast for that round', () => {
+      const f = boot([CONVERT_ROUND]);
+      answerCounts(2, 1);
+      f.detectChanges();
+      yesOf(rowOf(f)).click();
+      f.detectChanges();
+      const req = http.expectOne(r => r.method === 'POST' && r.url === '/api/networks/n1/votes/r2');
+      expect(req.request.body).toEqual({ vote: 'yes' });
     });
   });
 

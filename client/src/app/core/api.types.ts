@@ -9,6 +9,7 @@ import type { RecallGraphReport } from './recall-graph-report';
 import type { ResultSpillLink, SpillReport } from './read-spill';
 import type { RecallHit } from './recall-hit';
 import type { ActEntryView, OwedSpaceAct } from './space-act-outcome';
+import type { ConversionStep } from './conversion.types';
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -944,6 +945,10 @@ export interface VoteRound {
   keptTypes?: string[];
   proposesLayer?: boolean;
   summary?: string;
+  /** What THIS instance calls the round's space: the space whose records the conversion below would rewrite here. Absent when the space is not carried here. */
+  localSpaceId?: string;
+  /** The conversion that rides with a schema round: the steps a voter approves with the schema (bundle-285). Absent when the round carries none. */
+  convertRecords?: { steps?: ConversionStep[] };
 }
 
 /** How a round ended, as this instance read it. `ended` is the client's own word for a round recorded without a reason. */
