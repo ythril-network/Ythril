@@ -29,6 +29,12 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { join } from 'node:path';
+import { REPO_ROOT } from './_sources.mjs';
+import { testChildEnv } from '../_shared/test-child-env.mjs';
 import * as stack from '../_init/db-shard-stack.mjs';
 import { DEFAULT_PROJECTS } from '../_init/stack-down.mjs';
 import { TEST_STACK_PROJECT } from '../_init/container-state.mjs';
@@ -41,6 +47,14 @@ const HEX = '0123abcd';
 /** The limit a case gives a call it means to see stopped: short, so the case is quick. */
 const SHORT_LIMIT_MS = 30;
 const SHORT_LIMITS = { list: SHORT_LIMIT_MS, up: SHORT_LIMIT_MS, port: SHORT_LIMIT_MS, down: SHORT_LIMIT_MS, ask: SHORT_LIMIT_MS };
+/** The limit a case gives a call it stops by hand: long enough never to fire first, short enough that a failing case does not hold the process for minutes. */
+const LONG_SAFETY_LIMIT_MS = 5_000;
+
+/** Wait, a turn of the event loop at a time, until `condition` holds; throws when it never does, so a case fails instead of hanging. */
+async function until(condition) {
+  for (let i = 0; i < 500 && !condition(); i++) await new Promise(r => setImmediate(r));
+  assert.ok(condition(), 'the condition the case waits for never held');
+}
 
 /** One line of `docker ps -a --format '{{json .}}'`, as Docker prints it for a compose container. */
 function psLine({ project, state = 'running', status = 'Up 3 minutes (healthy)', port = 32774, service = SERVICE, id = project }) {
@@ -65,7 +79,10 @@ const listingOf = (names) => names.map(n => psLine({ project: ownProject(n) })).
  */
 function fakeDocker(answers = {}) {
   const calls = [];
+  /** The verb of every call, in order, with the markers a case's own answers push (`events.push('up settled')`). */
+  const events = [];
   const verbOf = (argv) => {
+    if (argv[0] === 'network') return { compose: false, verb: 'network', project: undefined };
     if (argv[0] !== 'compose') return { compose: false, verb: argv.includes('--format') ? 'list' : argv[0] === 'ps' ? 'ask-ps' : argv[0], project: undefined };
     let project;
     let i = 1;
@@ -77,6 +94,7 @@ function fakeDocker(answers = {}) {
   };
   const defaults = {
     list: '',
+    network: '',
     'ask-ps': 'container-id\n',
     inspect: 'name false 0 \n',
     port: '127.0.0.1:32774\n',
@@ -85,8 +103,9 @@ function fakeDocker(answers = {}) {
   };
   const run = async (argv, options = {}) => {
     const { compose, verb, project } = verbOf(argv);
-    const call = { argv, env: options.env, verb, project, compose, aborted: () => options.signal?.aborted === true };
+    const call = { argv, env: options.env, verb, project, compose, signal: options.signal, aborted: () => options.signal?.aborted === true };
     calls.push(call);
+    events.push(verb);
     let answer = answers[verb] ?? defaults[verb] ?? '';
     if (typeof answer === 'function') answer = answer(call);
     if (answer === 'hang') return new Promise(() => {});
@@ -96,7 +115,21 @@ function fakeDocker(answers = {}) {
   };
   const composeCalls = () => calls.filter(c => c.compose);
   const of = (verb) => calls.filter(c => c.verb === verb);
-  return { run, calls, composeCalls, of };
+  return { run, calls, events, composeCalls, of };
+}
+
+/**
+ * An `up` that settles only after it is stopped (as a real compose does when its child is killed), a little later, and
+ * that a case can also release by hand: `pending.release()` rejects every `up` still waiting, so a failing assertion never
+ * leaves a call that holds the file's process.
+ */
+function stoppableUp(docker) {
+  const waiting = [];
+  const answer = (call) => new Promise((_, reject) => {
+    waiting.push(reject);
+    call.signal.addEventListener('abort', () => setTimeout(() => { docker.events.push('up settled'); reject(new Error('compose up was killed')); }, 20), { once: true });
+  });
+  return { answer, release: () => { for (const reject of waiting.splice(0)) reject(new Error('released by the case')); } };
 }
 
 /** `{ onSignal, handlers, disposed }`: the signal hook a test hands the start, recording what it registers. */
@@ -116,7 +149,7 @@ function lines() {
 /** `startOwnDb` against the fake, with a fake signal hook (the real one would register handlers on this process) and a fixed random part. */
 const start = (docker, label = 'q', extra = {}) => {
   const l = lines();
-  return stack.startOwnDb({ label }, { run: docker.run, print: l.print, printError: l.printError, onSignal: fakeSignals().onSignal, random: () => HEX, ...extra });
+  return stack.startOwnDb({ label }, { run: docker.run, printError: l.printError, onSignal: fakeSignals().onSignal, random: () => HEX, ...extra });
 };
 
 /** Every compose call carries the port variable (0 for an own database) and names exactly `project`. */
@@ -295,7 +328,7 @@ describe('starting an own database', () => {
     const sig = fakeSignals();
     const l = lines();
     await assert.rejects(
-      stack.startOwnDb({ label: 'q' }, { run: docker.run, onSignal: sig.onSignal, print: l.print, printError: l.printError, random: () => HEX }),
+      stack.startOwnDb({ label: 'q' }, { run: docker.run, onSignal: sig.onSignal, printError: l.printError, random: () => HEX }),
       (e) => /Ports are not available/.test(e.message) && !/own-down/.test(e.message));
     const order = docker.calls.map(c => c.verb);
     const down = order.indexOf('down');
@@ -321,32 +354,88 @@ describe('starting an own database', () => {
 
   it('a start that never ends its `up` is stopped at the limit and removes its project', async () => {
     const docker = fakeDocker({ up: 'hang' });
-    await assert.rejects(start(docker, 'q', { limits: SHORT_LIMITS }), /no answer|did not|limit/i);
+    await assert.rejects(start(docker, 'q', { limits: SHORT_LIMITS }), (e) => {
+      assert.match(e.message, /no answer|did not|limit/i);
+      assert.match(e.message, new RegExp(`own-down q-${HEX}`), 'a stopped `up` does not name the command that removes the database by hand');
+      assert.match(e.message, /may still come up/, 'a stopped `up` does not say the database may still come up');
+      return true;
+    });
     assert.equal(docker.of('up')[0].aborted(), true, 'the hung `up` was not stopped');
     assert.equal(docker.of('down').length, 1);
     assert.equal(docker.of('down')[0].project, ownProject(`q-${HEX}`));
   });
 
-  it('an interrupt during the start removes the project it made, once, with the state asked first', async () => {
-    let release;
-    const hung = new Promise((_, reject) => { release = () => reject(new Error('killed by the interrupt')); });
-    const docker = fakeDocker({ up: () => hung });
+  it('an `up` that failed by itself, with the removal done, does not claim the database may still come up', async () => {
+    const docker = fakeDocker({ up: new Error('exited 1\nno such image') });
+    await assert.rejects(start(docker), (e) => !/may still come up|own-down/.test(e.message));
+  });
+
+  it('an interrupt stops the `up` in flight, and the project is removed only AFTER the `up` has settled, once', async () => {
+    const docker = fakeDocker({ up: (c) => up.answer(c) });
+    const up = stoppableUp(docker);
     const sig = fakeSignals();
     const l = lines();
-    const started = stack.startOwnDb({ label: 'q' }, { run: docker.run, onSignal: sig.onSignal, print: l.print, printError: l.printError, random: () => HEX });
-    for (let i = 0; i < 200 && docker.of('up').length === 0; i++) await new Promise(r => setImmediate(r));
-    assert.equal(docker.of('up').length, 1, 'the start never reached its `up`');
-    assert.equal(sig.handlers.length, 1, 'the start registered no interrupt handler');
-    await sig.handlers[0]('SIGINT');
-    assert.equal(docker.of('down').length, 1, 'the interrupt did not remove the project');
-    assert.equal(docker.of('down')[0].project, ownProject(`q-${HEX}`));
-    const order = docker.calls.map(c => c.verb);
-    assert.ok(order.indexOf('ask-ps') >= 0 && order.indexOf('ask-ps') < order.indexOf('down'), `the state is not asked before the down: ${order.join(', ')}`);
-    release();
-    await assert.rejects(started);
-    assert.equal(docker.of('down').length, 1, 'the failed `up` removed the project a second time');
-    assert.equal(sig.disposed, 1, 'the interrupt handler was left registered');
-    assertEveryComposeCall(docker, ownProject(`q-${HEX}`));
+    const started = stack.startOwnDb({ label: 'q' }, { run: docker.run, onSignal: sig.onSignal, printError: l.printError, random: () => HEX, limits: { ...SHORT_LIMITS, up: LONG_SAFETY_LIMIT_MS } });
+    const outcome = started.then(() => 'started', (e) => e);
+    try {
+      await until(() => docker.of('up').length === 1);
+      assert.equal(sig.handlers.length, 1, 'the start registered no interrupt handler');
+      await sig.handlers[0]('SIGINT');
+      assert.equal(docker.of('up')[0].aborted(), true, 'the interrupt did not stop the `up` in flight: it would go on and bring the database up after the removal');
+      const upSettled = docker.events.indexOf('up settled');
+      const down = docker.events.indexOf('down');
+      assert.ok(upSettled >= 0 && down >= 0, `events: ${docker.events.join(', ')}`);
+      assert.ok(upSettled < down, `the project was removed before the \`up\` had settled: ${docker.events.join(', ')}`);
+      assert.equal(docker.of('down').length, 1, 'the interrupt did not remove the project exactly once');
+      assert.equal(docker.of('down')[0].project, ownProject(`q-${HEX}`));
+      const error = await outcome;
+      assert.ok(error instanceof Error, 'the interrupted start resolved');
+      assert.match(error.message, new RegExp(`own-down q-${HEX}`));
+      assert.match(error.message, /may still come up/);
+      assert.equal(docker.of('down').length, 1, 'the failed `up` removed the project a second time');
+      assert.equal(sig.disposed, 1, 'the interrupt handler was left registered');
+      assertEveryComposeCall(docker, ownProject(`q-${HEX}`));
+    } finally {
+      up.release();
+      await outcome;
+    }
+  });
+
+  it('on an interrupt the first line names the hand command, and the container-state report is skipped', async () => {
+    const docker = fakeDocker({ up: (c) => up.answer(c) });
+    const up = stoppableUp(docker);
+    const sig = fakeSignals();
+    const l = lines();
+    const outcome = stack.startOwnDb({ label: 'q' }, { run: docker.run, onSignal: sig.onSignal, printError: l.printError, random: () => HEX, limits: { ...SHORT_LIMITS, up: LONG_SAFETY_LIMIT_MS } })
+      .then(() => 'started', (e) => e);
+    try {
+      await until(() => docker.of('up').length === 1);
+      await sig.handlers[0]('SIGHUP');
+      assert.match(l.err[0], new RegExp(`own-down q-${HEX}`), `the first line printed is ${JSON.stringify(l.err[0])}`);
+      assert.equal(docker.of('ask-ps').length + docker.of('inspect').length, 0, 'the removal on an interrupt was held up by the state report');
+      assert.equal(docker.of('down').length, 1);
+    } finally {
+      up.release();
+      await outcome;
+    }
+  });
+
+  it('an interrupt that arrives after the `up` has finished, during the port read, stops that call and removes the project', async () => {
+    const docker = fakeDocker({ port: (c) => up.answer(c) });
+    const up = stoppableUp(docker);
+    const sig = fakeSignals();
+    const outcome = stack.startOwnDb({ label: 'q' }, { run: docker.run, onSignal: sig.onSignal, printError: () => {}, random: () => HEX, limits: { ...SHORT_LIMITS, port: LONG_SAFETY_LIMIT_MS } })
+      .then(() => 'started', (e) => e);
+    try {
+      await until(() => docker.of('port').length === 1);
+      await sig.handlers[0]('SIGTERM');
+      assert.equal(docker.of('port')[0].aborted(), true);
+      assert.equal(docker.of('down').length, 1);
+      assert.ok((await outcome) instanceof Error);
+    } finally {
+      up.release();
+      await outcome;
+    }
   });
 
   it('a successful start leaves its interrupt handler unregistered and removes nothing', async () => {
@@ -594,5 +683,227 @@ describe('the shards', () => {
     await assert.rejects(stack.startDbShards(2, { run: docker.run }), /shard one is broken/);
     const downs = new Set(docker.of('down').map(c => c.project));
     assert.ok(downs.has(stack.dbShardProject(0)) && downs.has(stack.dbShardProject(1)), 'a shard was left running');
+  });
+});
+
+describe('the projects the listing counts and shows', () => {
+  const lookAlikes = [
+    psLine({ project: `${OWN_PREFIX}foo` }),
+    psLine({ project: `${OWN_PREFIX}q-0123abcd-extra` }),
+    psLine({ project: `${OWN_PREFIX}Q-0123abcd` }),
+    psLine({ project: OWN_PREFIX }),
+  ].join('\n');
+
+  it('a project that only begins with the prefix is neither listed nor counted', async () => {
+    const docker = fakeDocker({ list: `${listingOf([ownName(1)])}\n${lookAlikes}` });
+    assert.deepEqual((await stack.listOwnDbs({ run: docker.run })).map(d => d.name), [ownName(1)]);
+    const nearlyFull = fakeDocker({ list: `${listingOf(Array.from({ length: stack.DB_OWN_MAX - 1 }, (_, i) => ownName(i)))}\n${lookAlikes}` });
+    const started = await start(nearlyFull);
+    assert.equal(started.name, `q-${HEX}`, 'look-alike projects were counted against the limit');
+  });
+
+  it('a project with two containers is one line, the running one', async () => {
+    const project = ownProject('a-11111111');
+    const docker = fakeDocker({
+      list: [
+        psLine({ project, id: 'old', state: 'exited', status: 'Exited (0) 2 hours ago', port: null }),
+        psLine({ project, id: 'new', state: 'running', status: 'Up 1 minute', port: 32001 }),
+      ].join('\n'),
+    });
+    const dbs = await stack.listOwnDbs({ run: docker.run });
+    assert.equal(dbs.length, 1);
+    assert.equal(dbs[0].state, 'running');
+    assert.equal(dbs[0].port, 32001);
+    const full = fakeDocker({ list: `${listingOf(Array.from({ length: stack.DB_OWN_MAX - 1 }, (_, i) => ownName(i)))}\n${psLine({ project: ownProject(ownName(0)), id: 'second' })}` });
+    assert.equal((await start(full)).name, `q-${HEX}`, 'a second container of one project was counted as a second database');
+  });
+});
+
+describe('removing a database whose container is gone', () => {
+  const name = `q-${HEX}`;
+  const networkLine = JSON.stringify({ ID: 'net-id', Name: `${OWN_PREFIX}${name}_default` });
+
+  it('a project with no container but a network is still taken down', async () => {
+    const docker = fakeDocker({ list: '', network: networkLine });
+    await stack.stopOwnDb(name, { run: docker.run, printError: () => {} });
+    assert.equal(docker.of('down').length, 1);
+    assertEveryComposeCall(docker, ownProject(name));
+    assert.ok(docker.of('network')[0].argv.join(' ').includes(`com.docker.compose.project=${ownProject(name)}`), 'the networks of another project were asked for');
+  });
+
+  it('no container and no network is still "no own database", and no `down` is called', async () => {
+    const docker = fakeDocker({ list: '', network: '' });
+    await assert.rejects(stack.stopOwnDb(name, { run: docker.run, printError: () => {} }), /own-list/);
+    assert.deepEqual(docker.of('down'), []);
+  });
+
+  it('a network listing that fails or cannot be read is a refusal, not "no network"', async () => {
+    for (const network of [new Error('daemon is gone'), 'not json', '[1]']) {
+      const docker = fakeDocker({ list: '', network });
+      await assert.rejects(stack.stopOwnDb(name, { run: docker.run, printError: () => {} }));
+      assert.deepEqual(docker.of('down'), [], `a network listing of ${network instanceof Error ? network.message : network} reached a down`);
+    }
+  });
+
+  it('a container found means the networks are not asked for', async () => {
+    const docker = fakeDocker({ list: listingOf([name]) });
+    await stack.stopOwnDb(name, { run: docker.run, printError: () => {} });
+    assert.deepEqual(docker.of('network'), []);
+  });
+});
+
+/** A `process` that only emits signals and records how it was asked to end. */
+function fakeProcess() {
+  const proc = new EventEmitter();
+  proc.exits = [];
+  proc.exit = (code) => { proc.exits.push(code); };
+  return proc;
+}
+
+describe('the interrupt hook of the real process', () => {
+  const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+  /** Exit codes a shell reports for each of them: 128 plus the signal's number. */
+  const EXIT_CODE = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
+
+  it('registers all three signals, runs the handler once per signal, and ends the process with the signal\'s code afterwards', async () => {
+    for (const signal of SIGNALS) {
+      const proc = fakeProcess();
+      const seen = [];
+      stack.onProcessSignal(async (s) => { seen.push(s); }, proc);
+      for (const s of SIGNALS) assert.equal(proc.listenerCount(s), 1, `${s} has no listener`);
+      proc.emit(signal);
+      await until(() => proc.exits.length === 1);
+      assert.deepEqual(seen, [signal]);
+      assert.deepEqual(proc.exits, [EXIT_CODE[signal]]);
+    }
+  });
+
+  it('keeps the listeners while the handler runs, and a second signal neither runs it again nor ends the process', async () => {
+    const proc = fakeProcess();
+    let finish;
+    const seen = [];
+    stack.onProcessSignal((s) => { seen.push(s); return new Promise((resolve) => { finish = resolve; }); }, proc);
+    proc.emit('SIGINT');
+    for (const s of SIGNALS) assert.equal(proc.listenerCount(s), 1, `${s} lost its listener while the removal runs: the next signal would kill it halfway`);
+    proc.emit('SIGINT');
+    proc.emit('SIGTERM');
+    await new Promise(r => setImmediate(r));
+    assert.deepEqual(seen, ['SIGINT'], 'a second signal ran the handler again');
+    assert.deepEqual(proc.exits, [], 'a second signal ended the process before the removal finished');
+    finish();
+    await until(() => proc.exits.length === 1);
+    assert.deepEqual(proc.exits, [130]);
+  });
+
+  it('a handler that throws still ends the process', async () => {
+    const proc = fakeProcess();
+    stack.onProcessSignal(async () => { throw new Error('removal failed'); }, proc);
+    proc.emit('SIGTERM');
+    await until(() => proc.exits.length === 1);
+    assert.deepEqual(proc.exits, [143]);
+  });
+
+  it('the function it returns removes every listener', () => {
+    const proc = fakeProcess();
+    const dispose = stack.onProcessSignal(async () => {}, proc);
+    dispose();
+    for (const s of SIGNALS) assert.equal(proc.listenerCount(s), 0, `${s} keeps a listener`);
+  });
+});
+
+describe('the real docker run', () => {
+  /** A child process that records what was done to it. */
+  function fakeChild() {
+    const child = new EventEmitter();
+    child.destroyed = [];
+    for (const name of ['stdout', 'stderr']) {
+      child[name] = new EventEmitter();
+      child[name].destroy = () => { child.destroyed.push(name); };
+    }
+    return child;
+  }
+  const spawnerOf = (child) => { const seen = []; return { seen, spawn: (command, argv, options) => { seen.push({ command, argv, options }); return child; } }; };
+
+  it('on abort destroys the child\'s output pipes, so a compose plugin that outlives docker cannot hold the process open', async () => {
+    const child = fakeChild();
+    const spawner = spawnerOf(child);
+    const controller = new AbortController();
+    const run = stack.dockerRun(['compose', 'up'], { env: {}, signal: controller.signal }, spawner.spawn);
+    assert.equal(spawner.seen[0].options.signal, controller.signal, 'the signal is not handed to spawn, which kills the child on abort');
+    assert.deepEqual(child.destroyed, []);
+    controller.abort();
+    assert.deepEqual([...child.destroyed].sort(), ['stderr', 'stdout']);
+    child.emit('error', Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+    await assert.rejects(run, /aborted/);
+  });
+
+  it('with the signal already aborted destroys the pipes at once', () => {
+    const child = fakeChild();
+    const controller = new AbortController();
+    controller.abort();
+    const run = stack.dockerRun(['ps'], { signal: controller.signal }, spawnerOf(child).spawn);
+    run.catch(() => {});
+    assert.deepEqual([...child.destroyed].sort(), ['stderr', 'stdout']);
+  });
+
+  it('resolves with the output of a call that exits 0, and rejects with it when it exits non-zero', async () => {
+    const ok = fakeChild();
+    const good = stack.dockerRun(['ps'], {}, spawnerOf(ok).spawn);
+    ok.stdout.emit('data', 'out ');
+    ok.stderr.emit('data', 'err');
+    ok.emit('close', 0);
+    assert.equal(await good, 'out err');
+    const bad = fakeChild();
+    const failed = stack.dockerRun(['ps'], {}, spawnerOf(bad).spawn);
+    bad.stderr.emit('data', 'no such container\n');
+    bad.emit('close', 3);
+    await assert.rejects(failed, /exited 3[^]*no such container/);
+    assert.deepEqual(ok.destroyed.concat(bad.destroyed), [], 'a call that was not aborted had its pipes destroyed');
+  });
+});
+
+describe('the guide\'s recipes stop when `own-up` fails', () => {
+  const guide = readFileSync(join(REPO_ROOT, 'docs', 'testing-guide.md'), 'utf8').replace(/\r\n/g, '\n');
+  const recipe = (lang) => [...guide.matchAll(new RegExp('```' + lang + '\\n([^]*?)```', 'g'))].map(m => m[1]).find(b => b.includes('own-up'));
+
+  it('there is a recipe in each shell, and it removes the database whatever the run did', () => {
+    for (const lang of ['bash', 'powershell']) {
+      const text = recipe(lang);
+      assert.ok(text, `the guide has no ${lang} recipe that starts an own database`);
+      assert.match(text, /own-down/);
+      assert.match(text, /YTHRIL_TEST_MONGO_PORT/);
+    }
+  });
+
+  it('bash: a failed `own-up` or an empty or non-numeric port ends the recipe before the file runs', () => {
+    const text = recipe('bash');
+    assert.match(text, /pipefail/, 'a failing own-up inside a pipe is read as the exit status of `tail`');
+    assert.match(text, /\^\[0-9\]\+\$/, 'the port is not checked to be a number');
+    assert.match(text, /exit 1/);
+    assert.ok(text.indexOf('exit 1') < text.indexOf('node --test'), 'the check comes after the file runs');
+    assert.match(text, /trap .*own-down.* EXIT/, 'the database is not removed when the run fails');
+  });
+
+  it('PowerShell: a failed `own-up` or an empty or non-numeric port throws before the file runs, and the removal is in a finally', () => {
+    const text = recipe('powershell');
+    assert.match(text, /\$LASTEXITCODE/, 'a failed own-up is not noticed');
+    assert.match(text, /\\d\+/, 'the port is not checked to be a number');
+    assert.match(text, /throw/);
+    assert.ok(text.indexOf('throw') < text.indexOf('node --test'), 'the check comes after the file runs');
+    assert.match(text, /finally\s*\{[^}]*own-down/, 'the database is not removed when the run fails');
+  });
+});
+
+describe('the command line as a process', () => {
+  const entry = join(REPO_ROOT, 'testing', '_init', 'db-shard-stack.mjs');
+  const runEntry = (...args) => spawnSync(process.execPath, [entry, ...args], { encoding: 'utf8', timeout: 30_000, windowsHide: true, env: testChildEnv() });
+
+  it('a usage error ends the process with 1 and says the usage on stderr, with nothing on stdout', () => {
+    for (const args of [['frobnicate'], ['own-up'], ['own-down'], []]) {
+      const r = runEntry(...args);
+      assert.equal(r.status, 1, `${args.join(' ')} ended ${r.status}: ${r.stderr}`);
+      assert.match(r.stderr, /own-up <label>/);
+      assert.equal(r.stdout, '');
+    }
   });
 });

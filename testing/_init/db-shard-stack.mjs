@@ -70,8 +70,11 @@ const SELF = 'node testing/_init/db-shard-stack.mjs';
 const WAIT_TIMEOUT_SECONDS = 420;
 /** Seconds `down` gives a Mongo to stop before it is killed: nothing in it is worth waiting for. */
 const STOP_GRACE_SECONDS = 5;
-/** Milliseconds `up` has on top of its own wait window, for compose to pull its answer together. */
-const UP_MARGIN_MS = 60_000;
+/**
+ * Milliseconds `up` has on top of its own wait window. The wait window starts when the container does; the image is pulled
+ * BEFORE that (the first sharded run after an image bump pulls it), and a pull of the Mongo image over a slow link takes minutes.
+ */
+const UP_MARGIN_MS = 600_000;
 
 /**
  * Milliseconds each kind of Docker call has before it is stopped. `up` has the wait window and a margin; the rest are
@@ -86,7 +89,7 @@ export const DOCKER_LIMITS = Object.freeze({
 });
 
 /** Milliseconds `docker info` has to tell the Docker VM's size. */
-const INFO_LIMIT_MS = 10_000;
+const INFO_LIMIT_MS = 30_000;
 
 /**
  * How many shards, and how many files at a time on each. `YTHRIL_TEST_DB_SHARDS` (1 to the plan's maximum; 1 is the one
@@ -177,7 +180,10 @@ function dockerVm() {
 /** The compose project of shard `index`: one per shard, so each has its own volumes and network and `down -v` removes exactly its own. */
 export const dbShardProject = (index) => `ythril-db-shard-${index}`;
 
-/** The most own databases there can be at once: as many Mongos as a full sharded run, which is what the Docker VM was sized for. */
+/**
+ * The most own databases there can be at once: as many Mongos as a full sharded run, which is what the Docker VM was sized for.
+ * Checked when a start begins, by one listing: two starts begun at the same moment can both pass it.
+ */
 export const DB_OWN_MAX = DB_SHARDS_MAX;
 /** The compose project of an own database begins with this, which is neither a shard's (`ythril-db-shard-`) nor the stack's. */
 const OWN_PROJECT_PREFIX = 'ythril-db-own-';
@@ -188,6 +194,8 @@ const OWN_PLACEHOLDER_PORT = 0;
 
 const OWN_LABEL = new RegExp(`^[a-z0-9](?:[a-z0-9-]{0,${OWN_LABEL_MAX - 2}}[a-z0-9])?$`);
 const RANDOM_PART = /^[0-9a-f]{8}$/;
+/** Eight random hex characters: the part of a name that no two starts share. */
+const randomPart = () => randomBytes(4).toString('hex');
 const OWN_NAME = new RegExp(`^([a-z0-9](?:[a-z0-9-]{0,${OWN_LABEL_MAX - 2}}[a-z0-9])?)-[0-9a-f]{8}$`);
 
 /**
@@ -195,7 +203,7 @@ const OWN_NAME = new RegExp(`^([a-z0-9](?:[a-z0-9-]{0,${OWN_LABEL_MAX - 2}}[a-z0
  * characters, starting and ending with a letter or digit; anything else throws. The random part is made here, so no caller
  * can reuse one.
  */
-export function ownDbName(label, random = randomBytes(4).toString('hex')) {
+export function ownDbName(label, random = randomPart()) {
   if (typeof label !== 'string' || !OWN_LABEL.test(label)) {
     throw new Error(`the label ${JSON.stringify(label)} is not usable: lower-case letters, digits and hyphens, 1 to ${OWN_LABEL_MAX} characters, beginning and ending with a letter or digit`);
   }
@@ -218,15 +226,22 @@ const ownTarget = (name) => ({ project: dbOwnProject(name), port: OWN_PLACEHOLDE
 /** `argv` as a line to read: the compose files and a format string are left out. */
 const commandText = (argv) => argv.filter((a, i) => a !== '-f' && argv[i - 1] !== '-f').join(' ');
 
-/** Run `docker <argv>` for real; resolves with its output, rejects with it when it exits non-zero, and is killed when `signal` aborts. */
-function dockerRun(argv, { env, signal } = {}) {
+/**
+ * Run `docker <argv>` for real; resolves with its output, rejects with it when it exits non-zero, and is killed when `signal`
+ * aborts. Only `docker` itself is killed: a compose plugin it started can outlive it and hold the output pipes open, which
+ * would keep this process alive, so on abort the pipes are destroyed as well. `spawnChild` is injectable.
+ */
+export function dockerRun(argv, { env, signal } = {}, spawnChild = spawn) {
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', argv, { env, signal, killSignal: 'SIGKILL', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawnChild('docker', argv, { env, signal, killSignal: 'SIGKILL', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     child.stdout.on('data', d => { out += d; });
     child.stderr.on('data', d => { out += d; });
     child.on('error', reject);
     child.on('close', code => (code === 0 ? resolve(out) : reject(new Error(`exited ${code}\n${out.trim()}`))));
+    const release = () => { child.stdout.destroy(); child.stderr.destroy(); };
+    if (signal?.aborted) release();
+    else signal?.addEventListener('abort', release, { once: true });
   });
 }
 
@@ -234,28 +249,41 @@ function dockerRun(argv, { env, signal } = {}) {
  * `docker <argv>` with a time limit, which no call can leave out: a call that does not answer in `timeoutMs` is stopped
  * (`run` is handed a signal that aborts) and rejects. A failure carries the command and Docker's own output.
  *
+ * `signal` is the caller's own way to stop the call (an interrupt): when it aborts, `run`'s signal aborts, and the call
+ * settles when `run` does, never before, so a caller that waits for it knows the child is gone. A call given an aborted
+ * signal is not made. The error of a call that was stopped, by the limit or by `signal`, has `stopped: true`: what it was
+ * starting may still have happened.
+ *
  * @param {string[]} argv
  * @param {object} o
  * @param {(argv: string[], o: { env: object, signal: AbortSignal }) => Promise<string>} [o.run] docker, injectable
  * @param {object} [o.env]
  * @param {number} o.timeoutMs
+ * @param {AbortSignal} [o.signal]
  * @returns {Promise<string>} the output
  */
-export async function callDocker(argv, { run = dockerRun, env = process.env, timeoutMs } = {}) {
+export async function callDocker(argv, { run = dockerRun, env = process.env, timeoutMs, signal } = {}) {
   if (!(timeoutMs > 0)) throw new Error(`docker ${commandText(argv)}: no time limit was given, so the call was not made`);
+  if (signal?.aborted) throw Object.assign(new Error(`docker ${commandText(argv)}: not made, the run was interrupted`), { stopped: true });
   const controller = new AbortController();
+  const forward = () => controller.abort();
+  signal?.addEventListener('abort', forward, { once: true });
+  let ranToTheEnd = false;
   try {
-    return await within(Promise.resolve().then(() => run(argv, { env, signal: controller.signal })), timeoutMs);
+    const answer = Promise.resolve().then(() => run(argv, { env, signal: controller.signal })).finally(() => { ranToTheEnd = true; });
+    return await within(answer, timeoutMs);
   } catch (e) {
     controller.abort();
-    throw new Error(`docker ${commandText(argv)}: ${e.message}`, { cause: e });
+    throw Object.assign(new Error(`docker ${commandText(argv)}: ${e.message}`, { cause: e }), { stopped: !ranToTheEnd || signal?.aborted === true });
+  } finally {
+    signal?.removeEventListener('abort', forward);
   }
 }
 
 /** `docker compose` for one target (its project and port); resolves with its output, rejects with it when it fails or is not answered in time. */
-function compose({ project, port }, args, { run, timeoutMs }) {
+function compose({ project, port }, args, { run, timeoutMs, signal }) {
   const argv = ['compose', '-p', project, ...COMPOSE_FILES.flatMap(f => ['-f', f]), ...args];
-  return callDocker(argv, { run, env: { ...process.env, [PORT_VARIABLE]: String(port) }, timeoutMs });
+  return callDocker(argv, { run, env: { ...process.env, [PORT_VARIABLE]: String(port) }, timeoutMs, signal });
 }
 
 /** The `up` of the one service, as the shards and an own database both start it: detached, waiting for healthy, building nothing. */
@@ -293,6 +321,8 @@ export async function stopDbShards(shards, { run = dockerRun, limits = DOCKER_LI
  * here, so no two clocks are compared) and the published loopback port (`null` when the container has none).
  * ONE `docker ps -a` by the service's label, read with the take-down's reader of Docker's JSON lines, which throws on what it
  * cannot read: a listing that fails, times out or prints something else is a refusal, never "none".
+ * A project counts only when what follows the prefix has an own database's whole shape (`<label>-<8 hex>`): `own-down` would
+ * refuse any other, so it is neither listed nor counted. A project with two containers is one line, the running one.
  * @returns {Promise<Array<{ name: string, project: string, state: string, status: string, port: number|null }>>}
  */
 export async function listOwnDbs({ run = dockerRun, limits = DOCKER_LIMITS } = {}) {
@@ -302,13 +332,29 @@ export async function listOwnDbs({ run = dockerRun, limits = DOCKER_LIMITS } = {
   // `parseContainers` has read every line, so these cannot throw; it keeps neither the status text nor the ports.
   const raw = new Map(text.split(/\r?\n/).filter(l => l.trim() !== '').map(l => JSON.parse(l)).map(o => [o.ID, o]));
   const published = new RegExp(`(?:127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::\\]):(\\d+)->${CONTAINER_PORT}/tcp`);
-  return containers
-    .filter(c => c.service === SERVICE && c.project.startsWith(OWN_PROJECT_PREFIX))
-    .map((c) => {
-      const o = raw.get(c.id);
-      const port = published.exec(String(o?.Ports ?? ''))?.[1];
-      return { name: c.project.slice(OWN_PROJECT_PREFIX.length), project: c.project, state: c.state, status: String(o?.Status ?? ''), port: port === undefined ? null : Number(port) };
-    });
+  const byProject = new Map();
+  for (const c of containers) {
+    const name = c.project.startsWith(OWN_PROJECT_PREFIX) ? c.project.slice(OWN_PROJECT_PREFIX.length) : '';
+    if (c.service !== SERVICE || !OWN_NAME.test(name)) continue;
+    const o = raw.get(c.id);
+    const port = published.exec(String(o?.Ports ?? ''))?.[1];
+    const row = { name, project: c.project, state: c.state, status: String(o?.Status ?? ''), port: port === undefined ? null : Number(port) };
+    const seen = byProject.get(c.project);
+    if (seen === undefined || (seen.state !== 'running' && row.state === 'running')) byProject.set(c.project, row);
+  }
+  return [...byProject.values()];
+}
+
+/** Does `project` have a network? (A project whose container is gone can still have one, and `down` removes it.) Throws on a listing that fails or cannot be read. */
+async function hasNetwork(project, { run, limits }) {
+  const text = await callDocker(['network', 'ls', '--filter', `label=${PROJECT_LABEL}=${project}`, '--format', '{{json .}}'], { run, timeoutMs: limits.list });
+  const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+  for (const line of lines) {
+    let value;
+    try { value = JSON.parse(line); } catch { throw new Error(`docker network ls printed a line that is not JSON: ${line.slice(0, 160)}`); }
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`docker network ls printed a line that is not a JSON object: ${line.slice(0, 160)}`);
+  }
+  return lines.length > 0;
 }
 
 /** The loopback port `docker compose port` printed: exactly one `address:port` line, or a throw. */
@@ -321,78 +367,114 @@ function publishedPort(text) {
   return port;
 }
 
-/** Print why the target's container stopped, if it has, and then remove its project with its volumes. Throws when Docker fails to remove. */
-async function removeOwn(target, { run, limits, printError }) {
-  await reportContainerState({
-    projects: [target.project], print: printError, timeoutMs: limits.ask,
-    ask: (argv, timeoutMs) => callDocker(argv, { run, timeoutMs }),
-  });
+/**
+ * Print the state of the target's container (why it stopped, when it has), then remove its project with its volumes. Throws
+ * when Docker fails to remove. `report: false` skips the print: an interrupted start has only the few seconds a closing
+ * console leaves, and the removal must not spend them on a report.
+ */
+async function removeOwn(target, { run, limits, printError }, { report = true } = {}) {
+  if (report) {
+    await reportContainerState({
+      projects: [target.project], print: printError, timeoutMs: limits.ask,
+      ask: (argv, timeoutMs) => callDocker(argv, { run, timeoutMs }),
+    });
+  }
   await compose(target, DOWN_ARGS, { run, timeoutMs: limits.down });
 }
 
-/** Signals a start removes what it made on, and the exit code each ends the process with. */
+/** The signals an interrupted start removes what it made on; the process then ends with 128 plus the signal's number, as a shell reports it. */
 const INTERRUPTS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
-/** Register `handler` for the interrupts; it runs to its end and then the process exits as the signal would end it. Returns the function that unregisters. */
-function onProcessSignal(handler) {
+/**
+ * Register `handler` for the interrupts; it runs to its end and then the process exits with the signal's code. The listeners
+ * stay registered while it runs, and a signal that arrives meanwhile does nothing: a second Ctrl+C would otherwise kill the
+ * removal halfway. Returns the function that unregisters. `proc` is injectable (anything with `on`, `removeListener`, `exit`).
+ */
+export function onProcessSignal(handler, proc = process) {
+  let handling = false;
   const registered = INTERRUPTS.map((signal) => {
     const listener = () => {
-      Promise.resolve(handler(signal)).catch(() => {}).finally(() => process.exit(128 + osConstants.signals[signal]));
+      if (handling) return;
+      handling = true;
+      Promise.resolve().then(() => handler(signal)).catch(() => {}).finally(() => proc.exit(128 + osConstants.signals[signal]));
     };
-    process.once(signal, listener);
+    proc.on(signal, listener);
     return { signal, listener };
   });
-  return () => { for (const { signal, listener } of registered) process.removeListener(signal, listener); };
+  return () => { for (const { signal, listener } of registered) proc.removeListener(signal, listener); };
 }
 
 /**
  * Start ONE harness Mongo of the caller's own and wait until it is healthy. The START makes the project name (the label and
  * eight random hex characters), so two starts never name one project and nothing has to be claimed or refused for a label in
- * use; Docker picks the port. A start that fails after the name is made, or is interrupted (`onSignal`), prints why the
- * container stopped and removes the project it made, and names a removal that failed too with the command that does it by hand.
+ * use; Docker picks the port. The limit of `DB_OWN_MAX` is checked here, when the start begins.
+ *
+ * A start that fails after the name is made prints the container's state and removes the project it made, and names a
+ * removal that failed too with the command that does it by hand. An interrupt (`onSignal`) first stops the call in flight
+ * and waits until it has settled, so the project is removed after the `up` is gone and not while it is still bringing the
+ * database up; it skips the state print. When a call was stopped, by its limit or by an interrupt, the removal is tried and
+ * the error ALWAYS names the hand command and says the database may still come up (a compose plugin outlives the docker it
+ * was started by).
  *
  * @param {{ label: string }} o
- * @param {object} [deps] `run` docker, `limits` the time limits, `printError` where the container's state goes, `onSignal` the interrupt hook, `random` the random part
+ * @param {object} [deps] `run` docker, `limits` the time limits, `printError` where the container's state and the interrupt notice go, `onSignal` the interrupt hook, `random` the random part
  * @returns {Promise<{ name: string, project: string, port: number }>}
  */
-export async function startOwnDb({ label }, { run = dockerRun, limits = DOCKER_LIMITS, printError = (l) => console.error(l), onSignal = onProcessSignal, random = () => undefined } = {}) {
+export async function startOwnDb({ label }, { run = dockerRun, limits = DOCKER_LIMITS, printError = (l) => console.error(l), onSignal = onProcessSignal, random = randomPart } = {}) {
   const name = ownDbName(label, random());
   const existing = await listOwnDbs({ run, limits });
   if (existing.length >= DB_OWN_MAX) {
-    throw new Error(`${existing.length} own databases exist and ${DB_OWN_MAX} is the most: \`${SELF} own-list\` shows them, \`${SELF} own-down <name>\` removes one`);
+    throw new Error(`${existing.length} own databases exist and ${DB_OWN_MAX} is the most when a start begins: \`${SELF} own-list\` shows them, \`${SELF} own-down <name>\` removes one`);
   }
   const target = ownTarget(name);
+  const handCommand = `${SELF} own-down ${name}`;
+  const interrupt = new AbortController();
+  let interrupted = false;
+  let inFlight = Promise.resolve();
+  /** One of this start's compose calls, stoppable by an interrupt; remembers when it has settled. */
+  const step = (args, timeoutMs) => {
+    const call = compose(target, args, { run, timeoutMs, signal: interrupt.signal });
+    inFlight = call.then(() => {}, () => {});
+    return call;
+  };
   let removal;
-  const remove = () => (removal ??= removeOwn(target, { run, limits, printError }));
+  const remove = () => (removal ??= removeOwn(target, { run, limits, printError }, { report: !interrupted }));
   const dispose = onSignal(async (signal) => {
-    printError(`db-shard-stack: ${signal} during the start of ${name}: removing it`);
-    try { await remove(); } catch (e) { printError(`db-shard-stack: ${e.message}\nRemove it by hand: ${SELF} own-down ${name}`); }
+    interrupted = true;
+    printError(`db-shard-stack: ${signal} during the start of ${name}: stopping it and removing it. If this is cut short, remove it by hand: ${handCommand}`);
+    interrupt.abort();
+    await inFlight;
+    try { await remove(); } catch (e) { printError(`db-shard-stack: removing ${name} failed: ${e.message}`); }
   });
   try {
-    await compose(target, UP_ARGS, { run, timeoutMs: limits.up });
-    const port = publishedPort(await compose(target, ['port', SERVICE, String(CONTAINER_PORT)], { run, timeoutMs: limits.port }));
+    await step(UP_ARGS, limits.up);
+    const port = publishedPort(await step(['port', SERVICE, String(CONTAINER_PORT)], limits.port));
     return { name, project: target.project, port };
   } catch (failure) {
+    const unsure = failure.stopped === true || interrupted;
+    const maybe = unsure ? `\nThe database may still come up: remove it by hand with ${handCommand}` : '';
     try {
       await remove();
     } catch (cleanup) {
-      throw new Error(`${failure.message}\nand removing ${target.project} failed too: ${cleanup.message}\nRemove it by hand: ${SELF} own-down ${name}`, { cause: failure });
+      throw new Error(`${failure.message}\nand removing ${target.project} failed too: ${cleanup.message}${unsure ? maybe : `\nRemove it by hand: ${handCommand}`}`, { cause: failure });
     }
-    throw failure;
+    if (!unsure) throw failure;
+    throw new Error(`${failure.message}${maybe}`, { cause: failure });
   } finally {
     dispose();
   }
 }
 
 /**
- * Remove the own database `name` (the full name the start printed): its container's state is printed if it has stopped, then
- * exactly its project goes, with its volumes. Throws on a name that is not an own database's, on one with no container, on a
- * listing that fails, and when Docker fails to remove it.
+ * Remove the own database `name` (the full name the start printed): its container's state is printed before the removal, then
+ * exactly its project goes, with its volumes. A project whose container is gone but whose network remains is taken down too.
+ * Throws on a name that is not an own database's, on a project with neither container nor network, on a listing that fails or
+ * cannot be read, and when Docker fails to remove it.
  */
 export async function stopOwnDb(name, { run = dockerRun, limits = DOCKER_LIMITS, printError = (l) => console.error(l) } = {}) {
   const target = ownTarget(name);
   const there = await listOwnDbs({ run, limits });
-  if (!there.some(d => d.name === name)) {
+  if (!there.some(d => d.name === name) && !(await hasNetwork(target.project, { run, limits }))) {
     throw new Error(`there is no own database ${name}: \`${SELF} own-list\` shows the ones there are`);
   }
   await removeOwn(target, { run, limits, printError });
@@ -453,5 +535,10 @@ export async function cli(argv, {
 }
 
 if (isEntryPoint(import.meta.url)) {
-  cli(process.argv.slice(2)).then((code) => { process.exitCode = code; });
+  // The process ends here, once its output is written: a compose plugin that outlived a stopped `docker` can hold a pipe open and would otherwise keep it alive.
+  const flushed = (stream) => new Promise((resolve) => { stream.write('', resolve); });
+  cli(process.argv.slice(2)).then(async (code) => {
+    await Promise.all([flushed(process.stdout), flushed(process.stderr)]);
+    process.exit(code);
+  });
 }
