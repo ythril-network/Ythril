@@ -95,6 +95,8 @@ const WORDS: Record<string, string> = {
   'spaces.schema.convert.retryIn': 'DLG-RETRY {{seconds}}',
   'spaces.schema.convert.running409': 'DLG-RUNNING',
   'spaces.schema.convert.incomplete': 'DLG-INCOMPLETE',
+  'spaces.schema.convert.incompleteValues.one': 'DLG-INCOMPLETE-VALUES {{count}}',
+  'spaces.schema.convert.incompleteValues.other': 'DLG-INCOMPLETE-VALUES {{count}}',
   'spaces.schema.convert.warn.rule': 'DLG-WARN-RULE rule={{rule}} type={{type}} old={{property}} new={{to}}',
   'spaces.schema.convert.submitted.title': 'DLG-SUBMITTED',
   'spaces.schema.convert.submitted.lead': 'DLG-SUBMITTED-LEAD {{network}}',
@@ -362,6 +364,18 @@ describe('the convert records dialog', () => {
       ]);
       expect(countsFor).toHaveBeenCalledWith('customers', expect.objectContaining({ kind: 'entity', type: 'person', steps: [renameProp] }));
       expect(countsFor).toHaveBeenCalledWith('customers', expect.objectContaining({ type: 'customer', was: 'client' }));
+    });
+
+    it('sets the numbers in strong text as drawn, the total, the stamped and the rewritten, and nothing else (bundle-285 S10)', () => {
+      const host = mount('offer', { blocks: [person, customer, contact] });
+      const strongs = qa(host, 'cv-counts').map(e => Array.from(e.querySelectorAll('strong')).map(s => s.textContent));
+      expect(strongs).toEqual([['640', '41', '599'], ['212', '0', '212'], ['318']]);
+      expect(qa(host, 'cv-counts')[0]!.textContent!.replace(/\s+/g, ' ').trim(), 'the sentence reads as before').toBe('DLG-COUNTS n=640 type=person stamped=41 rewritten=599');
+    });
+
+    it('sets the number of records the act checks in strong text', () => {
+      const host = mount('act', { blocks: [{ kind: 'entity', type: 'person', steps: [], offers: [], warnings: [] }] });
+      expect(Array.from(q(host, 'cv-counts')!.querySelectorAll('strong')).map(s => s.textContent)).toEqual(['640']);
     });
 
     it('under the counts sits the hint that records which do not fit are listed in Review instead', () => {
@@ -665,10 +679,26 @@ describe('the convert records dialog', () => {
       expect(q(host, 'cv-edit-toggle')!.getAttribute('aria-expanded')).toBe('true');
       expect(host.querySelectorAll('li[data-op="mapEnum"]')).toHaveLength(1);
       expect(primary(host).disabled).toBe(true);
-      expect(text(host, 'cv-incomplete')).toBe('DLG-INCOMPLETE');
+      expect(text(host, 'cv-incomplete'), 'the dimmed primary\'s sentence says how many values still need a target (bundle-285 S10)').toBe('DLG-INCOMPLETE-VALUES 2');
       click(radios(host)[1]!);
       expect(primary(host).disabled).toBe(false);
       expect(q(host, 'cv-incomplete')).toBeNull();
+    });
+
+    it('starts with focus on the first empty target: the dialog\'s focus trap takes the element marked cdkFocusInitial (bundle-285 S10)', () => {
+      const host = mount('offer', { blocks: [withOffer] });
+      const pickers = Array.from(host.querySelectorAll<HTMLSelectElement>('select[aria-label="ED-NEW-VALUE"]'));
+      expect(pickers.map(p => p.hasAttribute('cdkFocusInitial'))).toEqual([true, false]);
+      expect(host.querySelectorAll('[cdkFocusInitial]'), 'one initial focus in the dialog').toHaveLength(1);
+    });
+
+    it('counts down the values that still need a target', () => {
+      const host = mount('offer', { blocks: [withOffer] });
+      const picker = host.querySelector<HTMLSelectElement>('select[aria-label="ED-NEW-VALUE"]')!;
+      picker.selectedIndex = Array.from(picker.options).findIndex(o => o.textContent?.trim() === 'current');
+      picker.dispatchEvent(new Event('change', { bubbles: true }));
+      fixture.detectChanges();
+      expect(text(host, 'cv-incomplete')).toBe('DLG-INCOMPLETE-VALUES 1');
     });
 
     it('choosing a target for each value makes it a step, which Save and convert then sends', () => {

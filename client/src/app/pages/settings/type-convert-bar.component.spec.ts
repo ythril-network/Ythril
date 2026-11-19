@@ -458,6 +458,14 @@ describe('the note about records on an older version', () => {
     expect(m.q('convert-note')).toBeNull();
   });
 
+  it('draws the button\'s accent in the theme\'s "ready" green, outlined, as drawn: not the violet accent fill (bundle-285 S10)', () => {
+    mount({ older: 412 }, { type: 'invoice', older: true }).settle();
+    const rule = Array.from(document.styleSheets).flatMap(s => Array.from(s.cssRules)).map(r => r.cssText).find(t => /\.cv-btn-attn/.test(t)) ?? '';
+    expect(rule).toMatch(/var\(--success-dim\)/);
+    expect(rule).toMatch(/var\(--success-border\)/);
+    expect(rule).not.toMatch(/--accent-dim/);
+  });
+
   it('draws its note in the theme\'s tokens: no colour of its own', () => {
     mount({ older: 412 }, { type: 'invoice', older: true }).settle();
     const rules = Array.from(document.styleSheets).flatMap(s => Array.from(s.cssRules)).map(r => r.cssText).filter(t => /\.cv-(bar|note|reason)/.test(t));

@@ -307,6 +307,23 @@ describe('the vote slice of the Networks page', () => {
       expect(rows.filter(r => r.querySelector('app-vote-conversion-block')).length).toBe(1);
     });
 
+    it('Yes on a row with the block is enabled, named "Vote yes on …", the same element before and after the counts land, and posts (drive D9)', () => {
+      // The drive looked for `getByRole('button', { name: /Yes/ })` and timed out: the accessible name is the aria-label, which says "yes" in
+      // lower case, so a case-sensitive /Yes/ matches no button. Nothing covers, disables or re-renders it: the block counts once and does not poll.
+      const f = boot([CONVERT_ROUND]);
+      const before = yesOf(rowOf(f));
+      expect(before.disabled, 'enabled while the counts are read').toBe(false);
+      expect(before.getAttribute('aria-label')).toBe('Vote yes on Change space settings: team-notes (member-b)');
+      expect(before.getAttribute('aria-label')).not.toMatch(/Yes/);
+      answerCounts(640, 599);
+      f.detectChanges();
+      expect(yesOf(rowOf(f)), 'the button was not re-created when the counts arrived').toBe(before);
+      expect(blockOf(f)!.contains(before), 'the block does not hold the button').toBe(false);
+      before.click();
+      f.detectChanges();
+      expect(http.expectOne(r => r.method === 'POST' && r.url === '/api/networks/n1/votes/r2').request.body).toEqual({ vote: 'yes' });
+    });
+
     it('casting from a row that carries a conversion still posts the cast for that round', () => {
       const f = boot([CONVERT_ROUND]);
       answerCounts(2, 1);

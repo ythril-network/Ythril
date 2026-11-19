@@ -106,7 +106,7 @@ const widthOf = (value: string): number => Math.min(Math.max(value.length + 6, 1
                   @for (p of m.pairs; track $index; let k = $index) {
                     <input type="text" [attr.aria-label]="'conversion.editor.oldValue' | transloco" [value]="p.from" [style.width.ch]="widthOf(p.from)" (change)="setPair(i, k, 'from', $event)">
                     <span class="w">{{ 'conversion.editor.becomes' | transloco }}</span>
-                    <select [attr.aria-label]="'conversion.editor.newValue' | transloco" (change)="setPair(i, k, 'to', $event)">
+                    <select [attr.aria-label]="'conversion.editor.newValue' | transloco" [attr.cdkFocusInitial]="isFirstEmptyTarget(i, k) ? '' : null" (change)="setPair(i, k, 'to', $event)">
                       @if (p.to === '') { <option value="" selected></option> }
                       @for (v of valueOptions(m, p.to); track v) { <option [value]="v" [selected]="v === p.to">{{ v }}</option> }
                     </select>
@@ -219,6 +219,21 @@ export class ConvertStepEditorComponent implements AfterViewChecked {
   protected renameProp(s: EditStep): Row<'renameProperty'> | null { return s.op === 'renameProperty' ? s : null; }
   protected renameType(s: EditStep): Row<'renameType'> | null { return s.op === 'renameType' ? s : null; }
   protected mapEnum(s: EditStep): Row<'mapEnum'> | null { return s.op === 'mapEnum' ? s : null; }
+
+  /**
+   * The first value of this editor's maps with no new value yet: marked `cdkFocusInitial`, so the dialog's focus trap starts there when the dialog
+   * opens on an offered map (a removed enum value needs a choice before Convert is possible, and the drawing's editor opens on it).
+   */
+  protected isFirstEmptyTarget(row: number, pair: number): boolean {
+    const steps = this.steps();
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i]!;
+      if (s.op !== 'mapEnum') continue;
+      const k = s.pairs.findIndex(p => p.to === '');
+      if (k >= 0) return i === row && k === pair;
+    }
+    return false;
+  }
   protected splitType(s: EditStep): Row<'splitType'> | null { return s.op === 'splitType' ? s : null; }
 
   // ── What the pickers list ────────────────────────────────────────────────────────────────────────────────────────────
