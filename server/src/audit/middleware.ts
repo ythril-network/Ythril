@@ -16,6 +16,7 @@ import { currentRequestId } from '../util/log.js';
 import { isOidc } from '../auth/oidc-caller.js';
 import { requestAddress } from './request-address.js';
 import { governedMethod } from '../http/governed-method.js';
+import { caseBlind, routeSpelling, trimTrailingSlashes } from '../http/path-spelling.js';
 // `req.recallOutcome` below is declared by `auth/middleware.ts` (a global `Express.Request` augmentation). This file reads it, so it names
 // the file that declares it: a program that reaches this module without reaching that one (the metric registry reads `MCP_TOOL_OPERATIONS`
 // through `audit-map`, which imports this) must still compile. Type-only, so nothing is imported at run time.
@@ -352,13 +353,14 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/about\/logs\/ticket$/,                      operation: 'about.logs.ticket', read: true },
 ];
 
-// Pre-group rules by HTTP method for O(1) method lookup instead of linear scan.
+// Pre-group rules by HTTP method for O(1) method lookup instead of linear scan. Each pattern ignores case: the rules are written in one
+// spelling and Express answers every casing of a literal segment (`http/path-spelling.ts`); the captures keep the casing that was sent.
 const RULES_BY_METHOD: ReadonlyMap<string, readonly RouteRule[]> = (() => {
   const map = new Map<string, RouteRule[]>();
   for (const rule of ROUTE_RULES) {
     let bucket = map.get(rule.method);
     if (!bucket) { bucket = []; map.set(rule.method, bucket); }
-    bucket.push(rule);
+    bucket.push({ ...rule, pattern: caseBlind(rule.pattern) });
   }
   return map;
 })();
@@ -366,11 +368,13 @@ const RULES_BY_METHOD: ReadonlyMap<string, readonly RouteRule[]> = (() => {
 /**
  * The rule a request falls under. A `HEAD` falls under its `GET`'s rule (`governedMethod`): Express runs the GET route for it, so it
  * is the same read and leaves the same row, with `method: 'HEAD'` recorded as sent. Keyed by the method as sent, a HEAD matched no rule
- * and left no row at all, allowed or refused.
+ * and left no row at all, allowed or refused. The path is read as Express reads it: any casing, a trailing slash left off
+ * (`http/path-spelling.ts`); `spaceId` and `entryId` come back as sent.
  */
-export function resolveOperation(method: string, path: string): { operation: string; spaceId: string | null; entryId: string | null; read: boolean; writtenWhenCutOff: boolean } | null {
+export function resolveOperation(method: string, sentPath: string): { operation: string; spaceId: string | null; entryId: string | null; read: boolean; writtenWhenCutOff: boolean } | null {
   const rules = RULES_BY_METHOD.get(governedMethod(method));
   if (!rules) return null;
+  const path = trimTrailingSlashes(sentPath);
   for (const rule of rules) {
     const m = rule.pattern.exec(path);
     if (!m) continue;
@@ -442,8 +446,11 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
     // router context.
     const fullPath = requestPath(req);
 
+    // Every prefix test below reads the path as the rule table does (`routeSpelling`: any casing, no trailing slash), never as typed:
+    // Express answers `/API/...` and `/x/`, and a test on the typed spelling skipped the row for a request that was answered.
+    const spelled = routeSpelling(fullPath);
     // Skip paths that are not API calls or are audit-log reads themselves
-    if (!fullPath.startsWith('/api/') && !fullPath.startsWith('/mcp')) return;
+    if (!spelled.startsWith('/api/') && !spelled.startsWith('/mcp')) return;
     // Reading the log must not write to the log — one entry per page of every scroll is noise that would
     // eventually crowd out the record it is describing.
     //
@@ -452,9 +459,9 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
     // tracks does first; exempting it by prefix meant the single most sensitive read of the audit log was the one
     // read it never recorded. A prefix skip also silently swallows any future sub-route added here, so it is now
     // an exact match on the paged endpoint.
-    if (fullPath === '/api/admin/audit-log' || fullPath === '/api/admin/audit-log/') return;
+    if (spelled === '/api/admin/audit-log') return;
     // Skip health / ready / metrics / theme / setup
-    if (fullPath.startsWith('/api/theme') || fullPath.startsWith('/api/setup')) return;
+    if (spelled.startsWith('/api/theme') || spelled.startsWith('/api/setup')) return;
 
     const matched = resolveOperation(req.method, fullPath);
     if (!matched) return; // not an operation we track

@@ -46,6 +46,7 @@ import type { ScopeShape } from './space-rights.js';
 import { ROUTE_RIGHTS, NOT_AREA_SCOPED_PATHS, type SpaceArea } from './space-rights.js';
 import type { Rung } from '../config/rights-shape.js';
 import { governedMethod } from '../http/governed-method.js';
+import { routeSpelling } from '../http/path-spelling.js';
 
 export interface RungRequirement {
   area: SpaceArea;
@@ -79,7 +80,7 @@ function key(method: string, routePath: string): string {
 
 /** Trailing slashes normalised the same way, so the two lists cannot disagree on `/x` versus `/x/`; case-blind like `key`. */
 function path(routePath: string): string {
-  return routePath.replace(/\/+$/, '').toLowerCase() || '/';
+  return routeSpelling(routePath);
 }
 
 const BY_KEY: ReadonlyMap<string, RungRequirement> = new Map(
