@@ -332,7 +332,8 @@ export class SpaceSettingsPopupComponent {
   }
 
   private countHint(space: string, key: string, blocks: readonly ConvertBlockPlan[]): void {
-    const api = this.injector.get(ConversionApi);
+    let api: ConversionApi;
+    try { api = this.injector.get(ConversionApi); } catch { return; }   // a host with no HTTP client counts nothing: the dialog asks, as it does for an unknown count
     this.hintRead = forkJoin(blocks.map(b => api.countsFor(space, { kind: b.kind, type: b.type, ...(b.was !== undefined ? { was: b.was } : {}), steps: [] }))).subscribe(answers => {
       if (this.hintKey !== key) return;
       const state = answers.some(a => a.ok && a.counts.total > 0) ? 'records' : answers.every(a => a.ok) ? 'empty' : 'unknown';

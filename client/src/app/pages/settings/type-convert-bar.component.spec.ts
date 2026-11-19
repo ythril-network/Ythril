@@ -398,6 +398,13 @@ describe('the note about records on an older version', () => {
     m.settle();
     expect(m.text('convert-note')).toBe(fill('spaces.schema.convert.note.older.other', { count: '412', type: 'invoice' }));
     expect(m.olderCount).toHaveBeenCalledWith('customers', 'entity', 'invoice');
+    expect(m.q('convert-records')!.classList.contains('cv-btn-attn'), 'the button the note points at stands out, as drawn').toBe(true);
+  });
+
+  it('leaves the button plain when no record waits on an older version', () => {
+    const m = mount({ older: 0 }, { type: 'invoice', older: true });
+    m.settle();
+    expect(m.q('convert-records')!.classList.contains('cv-btn-attn')).toBe(false);
   });
 
   it('asks nothing when the type list does not mark the type older', () => {

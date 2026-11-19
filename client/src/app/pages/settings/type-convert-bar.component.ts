@@ -57,13 +57,14 @@ let seq = 0;
     :host { display: block; }
     .cv-btn { gap: 5px; }
     .cv-btn[disabled] { cursor: not-allowed; }
+    .cv-btn-attn { color: var(--accent); background: var(--accent-dim); }
     .cv-reason { margin: 6px 0 0; }
     .cv-note { margin: 8px 0 0; font-size: 13px; }
     .cv-bar-hint { font-size: 11px; font-weight: 400; color: var(--text-muted); }
   `],
   template: `
     <ng-template #button>
-      <button class="btn btn-ghost btn-sm cv-btn" type="button" data-testid="convert-records" style="padding:2px 6px;"
+      <button class="btn btn-ghost btn-sm cv-btn" type="button" data-testid="convert-records" style="padding:2px 6px;" [class.cv-btn-attn]="attention()"
         [disabled]="reason() !== null" [attr.title]="reason()" [attr.aria-describedby]="reason() !== null ? reasonId : null" (click)="open()">
         <ph-icon name="arrows-clockwise" [size]="13"/>{{ 'spaces.schema.convert.button' | transloco }}
       </button>
@@ -128,6 +129,9 @@ export class TypeConvertBarComponent {
   private watch: PollHandle | null = null;
   private reads: Subscription[] = [];
   private startRead: Subscription | undefined;
+
+  /** The button is drawn in the accent while records wait on an older version (drawing 6): the note points at it, so it should be findable. */
+  protected readonly attention = computed(() => this.older() && (this.olderCount() ?? 0) > 0);
 
   /** The one note, or none: waiting for a vote, the run, its finish, records on an older version. */
   protected readonly note = computed<string | null>(() => {
