@@ -24,7 +24,7 @@ import { NamespaceIriZ, PrefixZ, libraryEntryNameOf, type KnowledgeType } from '
 import { getConfig, getSchemaLibrary } from '../config/loader.js';
 import type { SpaceConfig, SpaceMeta, TypeSchema } from '../config/types.js';
 import type { ParsedLibraryEntry } from './body-schemas.js';
-import { libraryTermIri, resolveTermIri, termClashes } from '../rdf/term-iri.js';
+import { libraryTermIri, resolveTermIri, termClashes, termOwnerName } from '../rdf/term-iri.js';
 import { RDF_BASE_STANDS_STATUS } from './rdf-settle.js';
 import { log, peerText } from '../util/log.js';
 import { warnOnce } from '../util/warn-once.js';
@@ -84,7 +84,10 @@ export function entryWithNamespace(entry: ParsedLibraryEntry, namespace: string)
 export interface LibraryState { library: readonly ParsedLibraryEntry[]; namespaces: Record<string, LibraryNamespace> }
 
 /** A refusal of a library write that would rename or clash an RDF-enabled space's terms (design r4 §4.2). */
-export interface LibraryRdfRefusal { status: typeof RDF_BASE_STANDS_STATUS; body: { error: string; code: 'rdf_term_rename' | 'rdf_term_clash' } }
+export interface LibraryRdfRefusal {
+  status: typeof RDF_BASE_STANDS_STATUS;
+  body: { error: string; code: 'rdf_term_rename' | 'rdf_term_clash'; spaces?: string[]; space?: string; terms?: string[]; iri?: string };
+}
 
 /** `meta` with each `$ref` type replaced by its entry in `state`, namespaces applied: the meta the resolver names the space by in that state. */
 function resolvedUnder(meta: SpaceMeta, state: LibraryState): SpaceMeta {
@@ -127,14 +130,18 @@ export function libraryRdfGuard(spaces: readonly SpaceConfig[], before: LibraryS
     const next = resolvedUnder(meta, after);
     const clashes = termClashes(next);
     if (clashes.length > 0) {
-      return { status: RDF_BASE_STANDS_STATUS, body: { code: 'rdf_term_clash', error: `in space ${peerText(space.id)}, this library change would give two terms one RDF address: ${clashes.map(c => c.message).join('; ')}` } };
+      return { status: RDF_BASE_STANDS_STATUS, body: {
+        code: 'rdf_term_clash', error: `in space ${peerText(space.id)}, this library change would give two terms one RDF address: ${clashes.map(c => c.message).join('; ')}`,
+        // Structured for a client that words the refusal in its own language: the space, the first clash's terms and the address.
+        space: space.id, terms: clashes[0]!.owners.map(termOwnerName), iri: clashes[0]!.iri,
+      } };
     }
     const was = termAddresses(resolvedUnder(meta, before));
     const now = termAddresses(next);
     if ([...now].some(([k, iri]) => was.has(k) && was.get(k) !== iri)) renamed.push(space.id);
   }
   if (renamed.length === 0 || rebase) return null;
-  return { status: RDF_BASE_STANDS_STATUS, body: { code: 'rdf_term_rename', error: `this library change renames RDF terms of ${renamed.map(id => `space ${peerText(id)}`).join(', ')}, whose records' exports would name them differently from then on: send rebase: true to make the change on purpose` } };
+  return { status: RDF_BASE_STANDS_STATUS, body: { code: 'rdf_term_rename', spaces: renamed, error: `this library change renames RDF terms of ${renamed.map(id => `space ${peerText(id)}`).join(', ')}, whose records' exports would name them differently from then on: send rebase: true to make the change on purpose` } };
 }
 
 /** Does `meta` reference one of `library`'s entries by `$ref`? */
