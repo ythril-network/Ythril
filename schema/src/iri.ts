@@ -21,13 +21,29 @@ export const IRI_MAX = 2000;
 /** The highest `baseEpoch` a setting or a rebase round may carry: far above any number of deliberate base changes, and a bound on a peer's value. */
 export const RDF_BASE_EPOCH_MAX = 1_000_000;
 
-/** A character IRIREF forbids (RDF 1.1 Turtle §6.4): controls and space, and `<>"{}|^`\`. */
-const IRIREF_FORBIDDEN = /[\u0000- <>"{}|^`\\]/;
+/**
+ * A character no address may hold: what IRIREF forbids (RDF 1.1 Turtle §6.4: the C0 controls, space, `<>"{}|^`\`) and what RFC 3987 leaves
+ * out of every IRI (U+007F and the C1 controls U+0080 to U+009F are neither `iunreserved` nor `ucschar`).
+ */
+const IRI_FORBIDDEN_CHARACTER = /[\u0000- <>"{}|^`\\\u007f-\u009f]/;
+/** A UTF-16 surrogate with no partner: no encoding of an IRI can carry it. */
+const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+/** A scheme and its colon, the start of an absolute IRI. */
+const SCHEME_START = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 
-/** An absolute IRI: a scheme, then anything IRIREF allows, bounded. */
+/**
+ * Whether `s` is an absolute IRI every RDF writer can spell: a scheme, and no character of {@link IRI_FORBIDDEN_CHARACTER} and no lone
+ * surrogate. THE one rule: the schema validator {@link IriZ} and the server's writer (`server/src/rdf/serialize.ts`) both ask it, so an
+ * address a door stores is an address an export can write (bundle-269 review, finding 1).
+ */
+export function isWritableIri(s: string): boolean {
+  return SCHEME_START.test(s) && !IRI_FORBIDDEN_CHARACTER.test(s) && !UNPAIRED_SURROGATE.test(s);
+}
+
+/** An absolute IRI: a scheme, then only what every RDF writer can spell ({@link isWritableIri}), bounded. */
 export const IriZ = z.string().max(IRI_MAX).refine(
-  s => /^[A-Za-z][A-Za-z0-9+.-]*:/.test(s) && !IRIREF_FORBIDDEN.test(s),
-  { message: 'an IRI is absolute (it starts with a scheme such as https:) and holds no space and none of < > " { } | ^ ` \\' },
+  isWritableIri,
+  { message: 'an IRI is absolute (it starts with a scheme such as https:) and holds no space, no control character, no unpaired surrogate and none of < > " { } | ^ ` \\' },
 );
 
 /**

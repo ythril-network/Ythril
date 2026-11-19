@@ -32,6 +32,7 @@
  * Pure apart from the writer's own counters.
  */
 import type { BlankTerm, EdgeDetails, IriTerm, Quad, Term } from './literals.js';
+import { isWritableIri } from '@ythril-network/schema/internal';
 import { STANDARD_PREFIXES } from './ythril-vocabulary.js';
 
 export type RdfFormat = 'turtle' | 'trig' | 'nquads' | 'jsonld';
@@ -66,7 +67,8 @@ export interface WriterOptions {
 /** What a writer refuses to write; `code` names it. */
 export class RdfWriteError extends Error {
   readonly code = 'rdf_unwritable';
-  constructor(message: string) {
+  /** The value the writer could not spell (an IRI), when the refusal is about one. */
+  constructor(message: string, readonly value?: string) {
     super(message);
     this.name = 'RdfWriteError';
   }
@@ -92,8 +94,8 @@ const RDF_FIRST = RDF_NS.concat('first');
 const RDF_REST = RDF_NS.concat('rest');
 const RDF_NIL = RDF_NS.concat('nil');
 
-const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
-const IRI_FORBIDDEN = /[\u0000- <>"{}|^`\\\u007f]/;
+/** The most characters of a refused IRI a refusal repeats. */
+const IRI_SHOWN = 200;
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 const SAFE_LOCAL = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 const SAFE_PREFIX = /^[A-Za-z][A-Za-z0-9_-]*$/;
@@ -149,11 +151,9 @@ function groupBatch(batch: QuadBatch): GraphGroup[] {
   }));
 }
 
-/** The last check of an IRI: a scheme, and no character an IRI cannot hold. */
+/** The last check of an IRI: the schema package's one rule ({@link isWritableIri}), the one a door's `IriZ` stores by. */
 function checkIri(value: string): string {
-  if (!SCHEME.test(value) || IRI_FORBIDDEN.test(value) || new RegExp(LONE_SURROGATE.source).test(value)) {
-    throw new RdfWriteError(`not a writable IRI: ${JSON.stringify(value.length > 200 ? `${value.slice(0, 200)}...` : value)}`);
-  }
+  if (!isWritableIri(value)) throw new RdfWriteError(`not a writable IRI: ${JSON.stringify(value.length > IRI_SHOWN ? `${value.slice(0, IRI_SHOWN)}...` : value)}`, value);
   return value;
 }
 

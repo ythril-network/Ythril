@@ -13,6 +13,7 @@ export {
   readPeerMeta, readStoredMeta, withTypeSchemas, derivedFromStored, placeUnder, TYPE_NAME_MAX, isDeclarableTypeName,
 } from './space-meta.js';
 export { mergeMetaFields, mergeTypeDefinition, eachTypeDefinition, boundedNames } from './meta-fields.js';
+export { isWritableIri } from './iri.js';
 export { useSchemaLibrary } from './library.js';
 export { LruMap, type LruWeight } from './lru-map.js';
 export { isPlainObject, ownValue } from './plain-object.js';
