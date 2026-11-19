@@ -54,6 +54,7 @@
  */
 import { isDeepStrictEqual } from 'node:util';
 import type { SpaceMeta } from '../config/types.js';
+import type { RdfBaseConflict } from '@ythril-network/schema';
 import { parseSpaceMeta, type ParsedSpaceMeta } from '../spaces/body-schemas.js';
 import { boundedNames, metaFieldKind, PER_TYPE_META_FIELD } from '../spaces/meta-fields.js';
 import { settleRdf } from '../spaces/rdf-settle.js';
@@ -100,6 +101,8 @@ export interface MetaRoundApplication {
    * knows and reports the rest here; it never stores one, so a newer peer's new key is not a reason to refuse the round.
    */
   unknownFields: string[];
+  /** Q-748: another RDF base the round carries, which the settle kept out of the meta: for the caller to record beside the network. */
+  rdfConflict?: RdfBaseConflict;
 }
 
 /**
@@ -128,15 +131,17 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
     const known: Record<string, unknown> = Object.fromEntries(Object.entries(whole).filter(([k]) => metaFieldKind(k) !== undefined));
     const unknown = Object.keys(whole).filter(k => metaFieldKind(k) === undefined);
     // Q-748: a wholesale round from a peer that knows no `rdf` would erase the base; the setting is settled, never replaced.
-    const rdf = settledRoundRdf(current?.rdf, whole['rdf'] as SpaceMeta['rdf']);
+    const { rdf, rdfConflict } = settledRoundRdf(current?.rdf, whole['rdf'] as SpaceMeta['rdf']);
     if (rdf === undefined) delete known['rdf']; else known['rdf'] = rdf;
-    return { meta: known as Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'>, conflicts: [], wholesale: true, unknownFields: boundedNames(unknown) };
+    return { meta: known as Omit<SpaceMeta, 'version' | 'updatedAt' | 'previousVersions'>, conflicts: [], wholesale: true, unknownFields: boundedNames(unknown),
+      ...(rdfConflict ? { rdfConflict } : {}) };
   }
 
   const base = current ? strip(current) : {};
   const merged: Record<string, unknown> = { ...base };
   const proposed = strip(round.pendingMeta) as Record<string, unknown>;
   const unknownFields: string[] = [];
+  let rdfConflict: RdfBaseConflict | undefined;
   const differs = (a: unknown, b: unknown) => !isDeepStrictEqual(a, b);
 
   /**
@@ -207,7 +212,12 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
     }
 
     // Q-748: the RDF setting is settled by its one rule, so a settings round never moves the stored base, whatever it carries.
-    const incoming = field === 'rdf' ? settledRoundRdf(base.rdf, proposed[field] as SpaceMeta['rdf']) : proposed[field];
+    let incoming = proposed[field];
+    if (field === 'rdf') {
+      const settled = settledRoundRdf(base.rdf, proposed[field] as SpaceMeta['rdf']);
+      incoming = settled.rdf;
+      rdfConflict = settled.rdfConflict;
+    }
     if (contested(field, merged[field], incoming)) conflicts.push(field);
     // `undefined` is a real proposal: it is how a scalar is cleared. Deleting the key rather than assigning
     // it keeps the stored object free of explicit-undefined properties, which JSON round-trips away anyway.
@@ -220,18 +230,23 @@ export function applyMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
     conflicts,
     wholesale: false,
     unknownFields: boundedNames(unknownFields),
+    ...(rdfConflict ? { rdfConflict } : {}),
   };
 }
 
-/** The RDF setting a passed settings round leaves (`spaces/rdf-settle.ts`, source `settings-round`): the stored base is never moved by one. */
-function settledRoundRdf(stored: SpaceMeta['rdf'], incoming: SpaceMeta['rdf']): SpaceMeta['rdf'] {
+/**
+ * The RDF setting a passed settings round leaves (`spaces/rdf-settle.ts`, source `settings-round`): the stored base is never moved by one. A
+ * different base the round carries is handed back as `rdfConflict` for the caller to record, never dropped (review finding 2).
+ */
+function settledRoundRdf(stored: SpaceMeta['rdf'], incoming: SpaceMeta['rdf']): { rdf: SpaceMeta['rdf']; rdfConflict?: RdfBaseConflict } {
   const settled = settleRdf(stored, incoming, 'settings-round');
-  return settled.ok ? settled.rdf : stored;
+  if (!settled.ok) return { rdf: stored };
+  return { rdf: settled.rdf, ...(settled.conflict ? { rdfConflict: settled.conflict } : {}) };
 }
 
 /** What {@link parseMetaRound} answers: the meta a store may take, or why this member cannot read the round. */
 export type MetaRoundParse =
-  | { ok: true; meta: ParsedSpaceMeta; conflicts: string[]; wholesale: boolean; unknownFields: string[] }
+  | { ok: true; meta: ParsedSpaceMeta; conflicts: string[]; wholesale: boolean; unknownFields: string[]; rdfConflict?: RdfBaseConflict }
   | { ok: false; reason: string };
 
 /**
@@ -252,7 +267,8 @@ export function parseMetaRound(current: SpaceMeta | undefined, round: MetaRoundP
   const parsed = parseSpaceMeta(applied.meta, { against: current ?? {}, tolerant: true });
   if (!parsed.ok) return { ok: false, reason: parsed.failed.join('; ') };
   const unknownFields = parsed.unknown.length > 0 ? [...new Set([...applied.unknownFields, ...parsed.unknown])] : applied.unknownFields;
-  return { ok: true, meta: parsed.meta, conflicts: applied.conflicts, wholesale: applied.wholesale, unknownFields };
+  return { ok: true, meta: parsed.meta, conflicts: applied.conflicts, wholesale: applied.wholesale, unknownFields,
+    ...(applied.rdfConflict ? { rdfConflict: applied.rdfConflict } : {}) };
 }
 
 /**

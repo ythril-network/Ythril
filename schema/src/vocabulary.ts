@@ -232,7 +232,8 @@ export interface RdfSetting {
  */
 export interface RdfBaseConflict {
   held: { base: string; epoch: number };
-  offered: { networkId?: string; base: string; epoch: number }[];
+  /** Each offer names the member that makes it (`memberId`) where one does: a member's offer is replaced by what it offers next. */
+  offered: { networkId?: string; memberId?: string; base: string; epoch: number }[];
 }
 
 /** Structured schema and metadata for a space — all fields optional. */
