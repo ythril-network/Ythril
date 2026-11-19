@@ -180,6 +180,9 @@ const TICKET_PATH_PATTERNS: RegExp[] = [
   /^\/api\/brain\/spaces\/[^/]+\/events$/, // live brain-change stream (F12, EventSource)
 ];
 
+/** The status a request the rights inventory does not resolve is refused with (`enforceAreaRung`): forbidden, as a missing rung is. */
+const UNCLASSIFIED_REFUSED = 403;
+
 /** Request path without query string or trailing slash (`/` when empty). */
 function pathOf(req: Request): string {
   const pathOnly = (req.originalUrl.split('?')[0] ?? '').replace(/\/+$/, '');
@@ -416,7 +419,7 @@ function enforceAreaRung(
     log.warn(`Space rights: no inventory entry for '${peerText(req.method)} ${peerText(routePath)}' — refused. `
       + 'Add it to ROUTE_RIGHTS with its area and lowest rung, or to NOT_AREA_SCOPED with the reason it is not '
       + 'a view of the space\'s data.');
-    res.status(403).json({
+    res.status(UNCLASSIFIED_REFUSED).json({
       error: `No rights row decides '${peerText(req.method)} ${peerText(routePath)}', so it is refused`,
       code: 'route_unclassified',
     });

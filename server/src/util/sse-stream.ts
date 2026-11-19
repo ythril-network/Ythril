@@ -73,14 +73,13 @@ export function openEventStream(req: Request, res: Response, opts: EventStreamOp
    * carries no body, so the `:` that opens the stream was never sent and with it went the headers: the request waited with no answer
    * while it held one of the pool's slots, for as long as its connection stayed open.
    */
-  if (req.method === 'HEAD') {
-    res.writeHead(200, STREAM_HEADERS);
+  const head = req.method === 'HEAD';
+  if (!head) open.set(opts.pool, count + 1);
+  res.writeHead(200, STREAM_HEADERS);
+  if (head) {
     res.end();
     return null;
   }
-  open.set(opts.pool, count + 1);
-
-  res.writeHead(200, STREAM_HEADERS);
   res.write(':\n\n'); // open the stream
 
   const cleanups: (() => void)[] = [];
