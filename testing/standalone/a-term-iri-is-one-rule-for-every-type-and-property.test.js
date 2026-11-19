@@ -25,6 +25,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readTrackedSources } from './_sources.mjs';
+import { blankComments } from './_strip-comments.mjs';
 
 const termIri = await import('../../server/dist/rdf/term-iri.js').catch(() => ({}));
 const vocabulary = await import('../../server/dist/rdf/ythril-vocabulary.js').catch(() => ({}));
@@ -121,13 +122,14 @@ const RESOLVER = 'server/src/rdf/term-iri.ts';
 const ENCODER = 'schema/src/iri.ts';
 const VOCABULARY = 'server/src/rdf/ythril-vocabulary.ts';
 
-/** The places `text` (the source of `file`) builds an RDF address by hand. */
+/** The places `text` (the source of `file`) builds an RDF address by hand. Comments are blanked (line numbers kept); a re-export is no use. */
 function handBuiltIriSites(file, text) {
   if (file === RESOLVER || file === ENCODER) return [];
   const sites = [];
-  const lines = text.split('\n');
+  const lines = blankComments(text).split('\n');
   lines.forEach((line, i) => {
     const at = `${file}:${i + 1}`;
+    if (/^\s*export\s*\{[^}]*\}\s*from\s/.test(line)) return;
     if (/\biriSegment\b/.test(line)) sites.push(`${at} uses iriSegment (only the resolver encodes a segment)`);
     if (/['"`][^'"`]*\/ld\//.test(line)) sites.push(`${at} writes the /ld/ path of a base (only the resolver does)`);
     if (file !== VOCABULARY && /\bYTHRIL_NS\s*\+|\$\{\s*YTHRIL_NS\s*\}/.test(line)) sites.push(`${at} concatenates onto YTHRIL_NS`);

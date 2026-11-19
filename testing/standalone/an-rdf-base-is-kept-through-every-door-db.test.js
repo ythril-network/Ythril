@@ -56,6 +56,8 @@ describe('an RDF base is kept through every door', { skip }, () => {
 
   const write = (door, spaceId, meta) => inst.doors[door](spaceId, structuredClone(meta));
   const rdfOf = (spaceId) => inst.heldMeta(spaceId).rdf;
+  // REST carries a refusal's code in the body; MCP in the structured half beside its text (`refusedMetaUpdate`).
+  const said = (answer) => `${answer.text} ${JSON.stringify(answer.body ?? null)}`;
 
   for (const door of DOORS) {
     describe(door, () => {
@@ -70,7 +72,7 @@ describe('an RDF base is kept through every door', { skip }, () => {
         delete process.env['PUBLIC_BASE_URL'];
         const answer = await write(door, SOLO, { rdf: { enabled: true } });
         assert.equal(answer.status, 400, answer.text.slice(0, 300));
-        assert.match(answer.text, /rdf_base_needed/);
+        assert.match(said(answer), /rdf_base_needed/);
         assert.equal(rdfOf(SOLO), undefined, 'nothing was stored');
       });
       it('the first enable takes <public url>/ld/<space>/', async () => {
@@ -99,7 +101,7 @@ describe('an RDF base is kept through every door', { skip }, () => {
         await write(door, SOLO, { rdf: { enabled: true, base: OLD } });
         const frozen = await write(door, SOLO, { rdf: { enabled: true, base: NEW } });
         assert.equal(frozen.status, 409, frozen.text.slice(0, 300));
-        assert.match(frozen.text, /rdf_base_frozen/);
+        assert.match(said(frozen), /rdf_base_frozen/);
         assert.ok(frozen.text.includes(OLD) && frozen.text.includes(NEW), frozen.text.slice(0, 300));
         assert.equal(rdfOf(SOLO).base, OLD);
         const rebased = await write(door, SOLO, { rdf: { enabled: true, base: NEW, rebase: true } });
@@ -112,7 +114,7 @@ describe('an RDF base is kept through every door', { skip }, () => {
         const answer = await write(door, SOLO, { typeSchemas: { entity: {
           person: { iri: 'https://schema.org/Person' }, human: { iri: 'https://schema.org/Person' } } } });
         assert.equal(answer.status, 422, answer.text.slice(0, 300));
-        assert.match(answer.text, /rdf_term_clash/);
+        assert.match(said(answer), /rdf_term_clash/);
         assert.ok(answer.text.includes('person') && answer.text.includes('human'), answer.text.slice(0, 300));
       });
       it('the same clash on a space with RDF off is no clash: nothing changes until it is switched on', async () => {
@@ -127,7 +129,7 @@ describe('an RDF base is kept through every door', { skip }, () => {
         net.pendingRounds = [];
         const answer = await write(door, SHARED, { rdf: { enabled: true, base: 'https://new.example.org/ld/shared/', rebase: true } });
         assert.equal(answer.refused, false, answer.text.slice(0, 300));
-        assert.match(answer.text, /vote_pending|vote pending|network vote/i, answer.text.slice(0, 300));
+        assert.match(said(answer), /vote_pending|vote round|NOT yet applied/i, answer.text.slice(0, 300));
         assert.deepEqual(rdfOf(SHARED), SHARED_RDF, 'the base moves at the round\'s deadline, never at the door');
         const rounds = net.pendingRounds.filter(r => r.type === 'space_rebase');
         assert.equal(rounds.length, 1, JSON.stringify(net.pendingRounds));
