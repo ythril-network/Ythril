@@ -1,5 +1,6 @@
 import type { KeyTranslator } from './translated-text';
 import type { ConversionStep } from './conversion.types';
+import { isPlainObject } from './plain-object';
 
 /**
  * The words of a conversion step, and of a step the run refused (bundle-285, Q-747, plan sections 5 D8 and 8).
@@ -35,30 +36,29 @@ const PAIRS_SEPARATOR = ', ';
 const CASES_SEPARATOR = '; ';
 
 const isText = (v: unknown): v is string => typeof v === 'string';
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /**
  * The operation name a step with no words is said by: the name as given, cut short and with its control characters taken out (the vote row
  * wraps names in two of them to set them in the code face, so a name must not carry its own); `?` where there is no text to show.
  */
 function opShown(step: unknown): string {
-  const op = isRecord(step) ? step['op'] : undefined;
+  const op = isPlainObject(step) ? step['op'] : undefined;
   const shown = isText(op) ? Array.from(op).filter(ch => ch.charCodeAt(0) > 0x1f && ch !== '\u007f').slice(0, OP_SHOWN_MAX).join('') : '';
   return shown || '?';
 }
 
 /** True when every field the sentence of this step reads is there and is text (or the list of text it should be). */
 function isSayable(step: unknown): step is ConversionStep {
-  if (!isRecord(step)) return false;
+  if (!isPlainObject(step)) return false;
   switch (step['op']) {
     case 'renameType':
     case 'renameProperty':
       return isText(step['from']) && isText(step['to']);
     case 'mapEnum':
-      return isText(step['property']) && isRecord(step['values']) && Object.values(step['values']).every(isText);
+      return isText(step['property']) && isPlainObject(step['values']) && Object.values(step['values']).every(isText);
     case 'splitType':
       return isText(step['from']) && Array.isArray(step['cases'])
-        && step['cases'].every(c => isRecord(c) && isText(c['when']) && isText(c['to']))
+        && step['cases'].every(c => isPlainObject(c) && isText(c['when']) && isText(c['to']))
         && (step['otherwise'] === undefined || isText(step['otherwise']));
     default:
       return false;

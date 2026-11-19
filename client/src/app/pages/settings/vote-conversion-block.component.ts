@@ -8,6 +8,7 @@ import { ConversionApi } from '../../core/conversion-api.service';
 import { stepSentence } from '../../core/conversion-step-words';
 import type { ConversionStep } from '../../core/conversion.types';
 import { pageTranslator, type PageTranslator } from '../../core/page-translator';
+import { isPlainObject } from '../../core/plain-object';
 import { PluralText } from '../../core/plural-text.service';
 import { markName, piecesOf, type SentencePiece } from '../../core/sentence-marks';
 import { knowledgeAllowed } from '../../core/token-capability';
@@ -52,7 +53,6 @@ type CountsView =
   | { state: 'failed' }
   | { state: 'ready'; rows: { block: ConvertBlock; counts: BlockCounts }[]; complete: boolean };
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const markText = (v: unknown): unknown => (typeof v === 'string' ? markName(v) : v);
 
 /**
@@ -61,7 +61,7 @@ const markText = (v: unknown): unknown => (typeof v === 'string' ? markName(v) :
  * (it answers the unknown-step sentence), and a name marked in a step it then refuses is never shown.
  */
 function markedStep(step: ConversionStep): ConversionStep {
-  const s: Record<string, unknown> = isRecord(step) ? step : {};
+  const s: Record<string, unknown> = isPlainObject(step) ? step : {};
   switch (s['op']) {
     case 'renameType':
     case 'renameProperty':
@@ -69,12 +69,12 @@ function markedStep(step: ConversionStep): ConversionStep {
     case 'mapEnum':
       return {
         ...s, property: markText(s['property']),
-        values: isRecord(s['values']) ? Object.fromEntries(Object.entries(s['values']).map(([from, to]) => [markName(from), markText(to)])) : s['values'],
+        values: isPlainObject(s['values']) ? Object.fromEntries(Object.entries(s['values']).map(([from, to]) => [markName(from), markText(to)])) : s['values'],
       } as unknown as ConversionStep;
     case 'splitType':
       return {
         ...s, from: markText(s['from']),
-        cases: Array.isArray(s['cases']) ? s['cases'].map(c => (isRecord(c) ? { ...c, when: markText(c['when']), to: markText(c['to']) } : c)) : s['cases'],
+        cases: Array.isArray(s['cases']) ? s['cases'].map(c => (isPlainObject(c) ? { ...c, when: markText(c['when']), to: markText(c['to']) } : c)) : s['cases'],
         ...(s['otherwise'] !== undefined ? { otherwise: markText(s['otherwise']) } : {}),
       } as unknown as ConversionStep;
     default:

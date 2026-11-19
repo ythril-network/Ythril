@@ -12,6 +12,7 @@
  * A value this module has no words for is shown as compact JSON, never dropped: a definition property with a facet that is itself an
  * object stays whole, because words for half of it would hide the rest.
  */
+import { isPlainObject } from './plain-object';
 
 /** A translator: a key and its parameters to the text. */
 export type Say = (key: string, params?: Record<string, string>) => string;
@@ -61,8 +62,6 @@ export function changePlaceWords(place: string, say: Say): string {
 
 const isPlain = (v: unknown): v is string | number | boolean => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean';
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-
 /** A plain value: yes / no for a boolean, a string or number as it is. */
 function plainWords(v: string | number | boolean, say: Say): string {
   if (typeof v === 'boolean') return say(v ? 'common.yes' : 'common.no').toLocaleLowerCase();
@@ -105,7 +104,7 @@ export function changeValueWords(v: unknown, place: string, say: Say): string {
   if (v === undefined) return say('propertiesEditor.notDeclared');
   if (isPlain(v)) return plainWords(v, say);
   if (Array.isArray(v) && v.length > 0 && v.every(isPlain)) return v.map(x => plainWords(x, say)).join(', ');
-  if (isRecord(v) && isPropertyPlace(place)) {
+  if (isPlainObject(v) && isPropertyPlace(place)) {
     const w = propertyWords(v, say);
     if (w !== null) return w;
   }

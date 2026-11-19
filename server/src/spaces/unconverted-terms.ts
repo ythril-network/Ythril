@@ -7,12 +7,13 @@
  *
  * **Two statements of one bound, or of one item.** The acts parse the filters with {@link UnconvertedFilterParams} and the MCP tools declare the
  * same kinds, reasons, statuses and name length from the same constants, so the bounds gate (`a-tool-and-its-route-agree-on-bounds`) compares real
- * bounds; the item store writes the {@link UnconvertedItem} the acts list. A leaf (it imports no module of the server but the knowledge kinds, the
- * rights' type and the violation codes' leaf), so the store, the acts, the routes and the tools may all read it. A term moved here is re-exported by the module it came from, for
+ * bounds; the item store writes the {@link UnconvertedItem} the acts list. Near a leaf: of the server it imports only other leaves (the names
+ * lister, the knowledge kinds, the rights' type and the violation codes), never a store, an act or a route, so the store, the acts, the routes and
+ * the tools may all read it. A term moved here is re-exported by the module it came from, for
  * that module's own readers.
  */
 import { z } from 'zod';
-import { TYPE_NAME_MAX, NAME_QUOTED, peerText, type ParseIssueLike, type ParseRefusalOptions } from '@ythril-network/schema/internal';
+import { TYPE_NAME_MAX, NAME_QUOTED, isPlainObject, peerText, type ParseIssueLike, type ParseRefusalOptions } from '@ythril-network/schema/internal';
 import { listedNames } from '../util/listed-names.js';
 import { KNOWLEDGE_TYPES, type KnowledgeType } from '../config/types-knowledge.js';
 import type { TokenRights } from '../config/rights-shape.js';
@@ -76,10 +77,8 @@ export const UNCONVERTED_REASON_MAX = 300;
  */
 export function unconvertedViolationOf(v: { field: string; reason: string; code?: string; params?: unknown }): UnconvertedViolation {
   const row: UnconvertedViolation = { field: peerText(v.field, { max: UNCONVERTED_REASON_MAX }), reason: peerText(v.reason, { max: UNCONVERTED_REASON_MAX }) };
-  return typeof v.code === 'string' && isPlainParams(v.params) ? { ...row, code: v.code, params: boundedViolationParams(v.params) } : row;
+  return typeof v.code === 'string' && isPlainObject(v.params) ? { ...row, code: v.code, params: boundedViolationParams(v.params) } : row;
 }
-
-const isPlainParams = (p: unknown): p is Record<string, unknown> => p !== null && typeof p === 'object' && !Array.isArray(p);
 
 /**
  * The violations of a STORED item as every list and dismiss answers them. Tolerant by rule (stored data is read, never rewritten at boot):
@@ -89,10 +88,10 @@ const isPlainParams = (p: unknown): p is Record<string, unknown> => p !== null &
 export function listedUnconvertedViolations(stored: unknown): UnconvertedViolation[] {
   if (!Array.isArray(stored)) return [];
   return stored.flatMap((v): UnconvertedViolation[] => {
-    if (v === null || typeof v !== 'object' || Array.isArray(v)) return [];
-    const r = v as Record<string, unknown>;
+    if (!isPlainObject(v)) return [];
+    const r = v;
     const row: UnconvertedViolation = { field: typeof r['field'] === 'string' ? r['field'] : '', reason: typeof r['reason'] === 'string' ? r['reason'] : '' };
-    return [typeof r['code'] === 'string' && isPlainParams(r['params']) ? { ...row, code: r['code'], params: r['params'] as ViolationParams } : row];
+    return [typeof r['code'] === 'string' && isPlainObject(r['params']) ? { ...row, code: r['code'], params: r['params'] as ViolationParams } : row];
   });
 }
 
