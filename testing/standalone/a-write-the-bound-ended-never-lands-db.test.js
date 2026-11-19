@@ -47,15 +47,18 @@
  * own result; a lane is green only when none of them landed anything. The defect this file was first seen red with, the
  * client-first bound, landed in nearly every repetition of every lane (86caea3a), and would show at a handful. The repetitions are
  * for the rarer one: a landing in a fraction p of one lane's repetitions is caught in a run with probability 1 - (1 - p)^reps, and
- * catching a rare landing is this file's job, so `reps` stays high and the time is bought back by cutting the lanes into parts.
+ * catching a rare landing is this file's job, so `reps` stays high.
  *
- * ## Cut into parts
+ * ## One file, over the budget
  *
- * The whole table does not fit in the time a file may take, so the lanes are cut into part files, each its own process with its
- * own door: this file is part 1 and `a-write-the-bound-ended-never-lands-part-<n>-db.test.js` the others. A part file says only which
- * part it is; the cut and the count of parts are `_landing-parts.mjs`'s, and that the parts run every lane exactly once, with the same
- * options, is `the-parts-of-a-split-landing-experiment-run-every-lane-once.test.js`'s. A part cannot go under the time one lane's
- * repetitions take one after another: each waits out the one before it's settle window (`runAll`, `Q-380`).
+ * This file takes longer than the 60 s a file may, on purpose (bundle-348). A lane's repetitions run one after another, each waiting
+ * out the settle window of the one before it (`runAll`; a repetition that seeded under an open window reported its own seed as a
+ * landing, `Q-380`), so one lane's `reps` repetitions — each the bound, its backstop, the read and `SETTLE_MS` — are the floor of any
+ * file that holds that lane. With enough stalls in flight (`workers`) the whole table finishes inside that chain, so the file waits
+ * for one chain and one door. Cutting the lanes into part files does not shorten the chain any part waits for, and every part pays a
+ * door of its own: measured, the parts together took longer than this one file, and the database groups wait for the sum of their
+ * files. To bring it under the budget the RULE would have to change: fewer repetitions (less power against a rare landing, see
+ * above), or a shorter settle window than the `SETTLE_MS` floor the experiment asserts (less time for a late landing to show).
  *
  * ## And on a client whose URI names a timeoutMS
  *
@@ -85,16 +88,16 @@
  */
 import { describe, it, before, after } from 'node:test';
 import { landingExperiment } from './_write-landing-experiment.mjs';
-import { partOf } from './_landing-parts.mjs';
 
-const PART = 0;
 // Declared HERE, not in the helper: node records a test against the file that calls `it`.
 const x = landingExperiment({
-  title: `a write the bound ended never lands afterwards (part ${PART + 1})`,
+  title: 'a write the bound ended never lands afterwards',
   suite: 'boundlands',
   query: '',
   reps: 20,
-  part: partOf('a-write-the-bound-ended-never-lands', PART),
+  // The fewest stalls in flight at which the file waits only for one lane's repetitions in a row (see "One file, over the budget"):
+  // more were measured no faster, fewer leave the lanes' work longer than that chain.
+  workers: 8,
 });
 describe(x.title, { skip: x.skip }, () => {
   before(x.before, { timeout: x.timeout });
