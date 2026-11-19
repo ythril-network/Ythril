@@ -396,7 +396,7 @@ interface SpaceView {
              pair only ever means something inside one space, so it belongs beside the space's data. -->
         @if (activeTab() === 'review') {
           @defer (on immediate) {
-            <app-review-tab [spaceId]="activeSpaceId()" [isView]="isView()" (openTab)="setTab($event)" />
+            <app-review-tab [spaceId]="activeSpaceId()" [isView]="isView()" (openTab)="setTab($event)" (unconvertedOpen)="links.seen($event)" />
           } @loading (minimum 200ms) {
             <div class="loading-overlay loading-overlay--float" data-tab-defer="review"><span class="spinner"></span></div>
           }
@@ -507,11 +507,11 @@ export class BrainComponent implements OnInit, OnDestroy {
    * The dialog patches `SpacesStore`, but that instance is provided per host — the one here is empty and
    * nothing reads it. Refetching the list instead would also discard the per-space stats hanging off each
    * row, which cost one request each. So the record is merged in place and the stats are left alone: a
-   * label or quota edit does not change any count. The Review tab's count of unconverted records is read again, because a
-   * save that converted records has started a run (the second statement; it shares the line to keep this frozen file's size).
+   * label or quota edit does not change any count. The Review tab's count of unconverted records is read again when the pop-up
+   * closes (`brain-schema-links.ts`), after the run a converting save started has had its chance to finish.
    */
   onSpaceSaved(space: Space): void {
-    this.spaces.update(list => list.map(sv => sv.space.id === space.id ? { ...sv, space } : sv)); this.links.refresh();
+    this.spaces.update(list => list.map(sv => sv.space.id === space.id ? { ...sv, space } : sv));
   }
 
   /** The chip's record count and network tooltip are `space-chip.ts`'s. */

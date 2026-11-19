@@ -15,14 +15,30 @@
  * One read per space (`GET .../schema-convert/items?limit=1`, its `counts.open`), shown on the tab as the other tabs show their counts, absent while it
  * is unknown, when it failed, when nothing is open, and on a personal view (which has no Review tab). Leaving a tab does not read it again.
  *
+ * ## The count follows every act, and the pencil lands on the type (bundle-285 slice S12, Q-939, Q-747; the fifth browser drive)
+ *
+ * The page's own read is the count only until the Review tab's Unconverted section has read one: from then on the tab shows the number the
+ * section's state holds after its every list read (a load, a dismiss, a bulk dismiss, a Convert again's run). The settings pop-up closing reads it
+ * again (a conversion may have run in it). A switch of space shows that space's number, and an answer about the last space is dropped. The pencil
+ * opens the pop-up with the type's head scrolled into view and focus on the type's name control (its rename button), and closing the pop-up
+ * gives focus back to the pencil.
+ *
  * ## Seen red
  *
- * Red at 0897912a9: the pencil is not drawn (the input is unbound) and nothing in the page reads the count.
+ * Red at 0897912a9: the pencil is not drawn (the input is unbound) and nothing in the page reads the count. The S12 rows, red at bf7cd078a: after a
+ * dismiss the tab still says 7, and the pop-up opens on the Schema tab with nothing scrolled and focus on its close button.
  */
-import { TestBed } from '@angular/core/testing';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { DeferBlockBehavior, TestBed } from '@angular/core/testing';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EMPTY, of } from 'rxjs';
 import { ActivatedRoute } from '@angular/router';
+import { ConfirmDialogService } from '../../core/confirm-dialog.service';
+import { ContradictionsApi } from '../../core/contradictions-api.service';
+import { DuplicatesApi } from '../../core/duplicates-api.service';
+import { ForksApi } from '../../core/forks-api.service';
+import { SchemaApi } from '../../core/schema-api.service';
+import { ToastService } from '../../core/toast.service';
+import { NO_TYPE_READS } from '../../testing/schema-type-reads';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { FilesApi } from '../../core/files-api.service';
@@ -33,7 +49,7 @@ import { AuthApi } from '../../core/auth-api.service';
 import { ConversionApi } from '../../core/conversion-api.service';
 import { dictionary } from '../../testing/i18n-dictionary';
 import { getTranslocoModule } from '../../testing/transloco-testing';
-import { instanceAdminRights, listAnswer, okResult, openGroup, refused, rightsWith } from '../../testing/review-unconverted-fixtures';
+import { instanceAdminRights, listAnswer, okResult, openGroup, refused, rightsWith, unconvertedRow } from '../../testing/review-unconverted-fixtures';
 import type { TokenRights } from '../settings/rights-glyph.component';
 import { BrainComponent } from './brain.component';
 
@@ -63,18 +79,40 @@ function api(spaces: readonly object[] = [WORK]) {
     getEntitiesByIds: () => of({ entities: [] }),
     mintEventsTicket: () => of({ ticket: 't', expiresInMs: 60000 }),
     getErModel: () => of(MODEL),
-    getAbout: () => of(null), getEmbeddingQueue: () => of(null), getTokenAccess: () => of({ tokens: [] }), getCompleteness: () => of(null),
+    getAbout: () => of(null), getEmbeddingQueue: () => of(null), getTokenAccess: () => of({ tokens: [] }),
+    getCompleteness: () => of({ spaceId: 'work', score: null, checks: [], truncated: false }),
     getSpaceActivity: () => of({ spaceId: 'work', hours: 168, spaces: [] }),
     listVotes: () => of({ rounds: [] }),
+    // What the settings pop-up's Schema tab reads (S12: the pencil's rows render it).
+    getSchemaLayers: () => of({ spaceId: 'work', own: {}, layers: [], precedence: [], clashes: [] }),
+    getSchema: () => of({ meta: {} }), listEntries: () => of({ entries: [] }), listSchemaLibrary: () => of({ entries: [] }),
   } as never;
 }
 
-interface Setup { rights?: TokenRights | null; open?: number | 'refused' | 'none'; spaces?: readonly object[] }
+/** What the server holds open per space, changed by a spec between acts: every list read answers it, rows and `counts.open` alike. */
+type Served = Record<string, number>;
+
+interface Setup { rights?: TokenRights | null; open?: number | 'refused' | 'none'; spaces?: readonly object[]; served?: Served }
+
+/** The page of a space that holds `n` open records of `person`, as the list door answers it. */
+const servedPage = (space: string, n: number) =>
+  okResult(listAnswer(Array.from({ length: Math.min(n, 25) }, (_, i) => unconvertedRow(i + 1, { space })), n > 0 ? [openGroup('person', 'not_conforming', n)] : []));
 
 function mount(over: Setup = {}) {
-  const listUnconverted = vi.fn((_space: string, _query?: object) => of(over.open === 'refused'
+  const served = over.served;
+  const listUnconverted = vi.fn((space: string, _query?: object) => of(served ? servedPage(space, served[space] ?? 0) : over.open === 'refused'
     ? refused({ kind: 'no_right', code: 'unconverted_rung', error: 'no' })
     : okResult(listAnswer([], over.open === undefined || over.open === 'none' || over.open === 0 ? [] : [openGroup('person', 'not_conforming', over.open)]))));
+  // A dismiss takes one record off the space's open list; "Dismiss all N shown" takes the N.
+  const dismissOne = vi.fn((space: string) => { if (served) served[space] = Math.max(0, (served[space] ?? 0) - 1); return of(okResult({ item: unconvertedRow(1, { status: 'dismissed' }) })); });
+  const dismissShown = vi.fn((space: string, body: { expect: number }) => {
+    if (served) served[space] = Math.max(0, (served[space] ?? 0) - body.expect);
+    return of(okResult({ dismissed: body.expect }));
+  });
+  const conversion = {
+    listUnconverted, dismissOne, dismissShown,
+    status: () => of(okResult({ state: 'none' })), start: () => EMPTY, countsFor: () => EMPTY, olderCount: () => of(0), refusedCount: () => of(0),
+  };
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     imports: [BrainComponent, getTranslocoModule({ translation: { en: EN } })],
@@ -84,11 +122,19 @@ function mount(over: Setup = {}) {
       { provide: FilesApi, useValue: api(over.spaces) },
       { provide: AdminApi, useValue: api(over.spaces) },
       { provide: NetworksApi, useValue: api(over.spaces) },
+      { provide: SchemaApi, useValue: { ...(api(over.spaces) as object), ...NO_TYPE_READS } },
       { provide: AuthService, useValue: { token: () => '' } },
       { provide: AuthApi, useValue: { verifyToken: () => of({ id: 't', name: 't', rights: over.rights === undefined ? instanceAdminRights() : over.rights }) } },
-      { provide: ConversionApi, useValue: { listUnconverted } },
+      { provide: ConversionApi, useValue: conversion },
       { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: { get: () => '' } }, queryParamMap: EMPTY } },
+      // The Review tab's other sections, read when it opens (S12's rows open it).
+      { provide: DuplicatesApi, useValue: { listDuplicates: () => of({ duplicates: [] }) } },
+      { provide: ContradictionsApi, useValue: { listContradictions: () => of({ contradictions: [] }) } },
+      { provide: ForksApi, useValue: { listForks: () => of({ forks: [], skip: 0, limit: 25 }) } },
+      { provide: ToastService, useValue: { error: () => {}, success: () => {}, info: () => {}, show: () => {} } },
+      { provide: ConfirmDialogService, useValue: { confirm: () => Promise.resolve(true) } },
     ],
+    deferBlockBehavior: DeferBlockBehavior.Playthrough,
   });
   const fixture = TestBed.createComponent(BrainComponent);
   fixture.detectChanges();
@@ -97,7 +143,7 @@ function mount(over: Setup = {}) {
   const pen = (type: string): SVGGElement | null =>
     Array.from(el.querySelectorAll<SVGGElement>('g.card')).find(g => g.querySelector('.box-name')?.textContent?.trim() === type)?.querySelector('g.pen') ?? null;
   const reviewCount = (): HTMLElement | null => el.querySelector<HTMLElement>('[data-testid="review-unconverted-open"]');
-  return { fixture, c: fixture.componentInstance, el, listUnconverted, pen, reviewCount };
+  return { fixture, c: fixture.componentInstance, el, listUnconverted, dismissOne, dismissShown, pen, reviewCount };
 }
 
 beforeEach(() => TestBed.resetTestingModule());
@@ -174,5 +220,79 @@ describe('the Review tab\'s count of open unconverted records', () => {
     m.fixture.detectChanges();
     expect(m.listUnconverted).toHaveBeenCalledTimes(2);
     expect(m.listUnconverted.mock.calls[1]![0]).toBe('other');
+  });
+});
+
+type Mounted = ReturnType<typeof mount>;
+
+/** Render until `ready` holds: the Review tab and the pop-up's Schema tab sit in deferred blocks with a minimum loading time (real time). */
+async function until(m: Mounted, ready: () => boolean, what: string): Promise<void> {
+  await vi.waitFor(async () => {
+    m.fixture.detectChanges();
+    await m.fixture.whenStable();
+    m.fixture.detectChanges();
+    if (!ready()) throw new Error(`never rendered: ${what}`);
+  }, { timeout: 5_000, interval: 50 });
+}
+
+const countText = (m: Mounted): string | null => m.reviewCount()?.textContent?.trim() ?? null;
+const cards = (m: Mounted): HTMLElement[] => [...m.el.querySelectorAll<HTMLElement>('[data-testid="unconverted-card"]')];
+
+/** Open Review on its Unconverted section, as a person does, and wait for its cards. */
+async function openUnconverted(m: Mounted): Promise<void> {
+  await m.c.setTab('review');
+  await until(m, () => !!m.el.querySelector('#review-tab-unconverted'), 'the Review tab');
+  m.el.querySelector<HTMLButtonElement>('#review-tab-unconverted')!.click();
+  await until(m, () => cards(m).length > 0, 'the Unconverted cards');
+}
+
+/** Press Dismiss on the first card (the confirm says yes), and let the list be read again. */
+async function dismissFirst(m: Mounted): Promise<void> {
+  const before = cards(m).length;
+  const button = [...cards(m)[0]!.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.trim() === EN['brain.review.unconverted.dismiss'])!;
+  button.click();
+  await until(m, () => m.dismissOne.mock.calls.length > 0 && cards(m).length < before, 'the list after the dismiss');
+}
+
+describe('the Review tab\'s count follows every act that changes it (S12, Q-939: the fifth drive saw 7 beside six cards)', () => {
+  afterEach(() => { document.body.innerHTML = ''; });
+
+  it('after a dismiss the server answers with 6 open, the tab reads 6; after "Dismiss all" took the rest, there is no count', async () => {
+    const served: Served = { work: 7 };
+    const m = mount({ served });
+    expect(countText(m), 'the page\'s own read, before Review opened').toBe('7');
+    await openUnconverted(m);
+    await dismissFirst(m);
+    expect(served['work']).toBe(6);
+    expect(countText(m), 'the count the section read after the dismiss').toBe('6');
+    const all = m.el.querySelector<HTMLButtonElement>('[data-testid="dismiss-all"]')!;
+    all.click();
+    await until(m, () => m.dismissShown.mock.calls.length > 0 && cards(m).length === 0, 'the empty list after "Dismiss all"');
+    expect(served['work']).toBe(0);
+    expect(m.reviewCount(), 'a count of 0 is no count').toBeNull();
+  });
+
+  it('a space switch shows that space\'s number; an answer about the last space is dropped', async () => {
+    const served: Served = { work: 7, other: 2 };
+    const m = mount({ served, spaces: [WORK, { ...WORK, id: 'other', label: 'other' }] });
+    await openUnconverted(m);
+    await dismissFirst(m);
+    expect(countText(m)).toBe('6');
+    await m.c.selectSpace('other');
+    await until(m, () => countText(m) === '2', 'the other space\'s count');
+    // The section of the space just left answers late: the tab stays on the space it shows.
+    m.c.links.seen({ space: 'work', open: 6 });
+    m.fixture.detectChanges();
+    expect(countText(m)).toBe('2');
+  });
+
+  it('reads the count again when the settings pop-up closes: a conversion may have run in it', async () => {
+    const served: Served = { work: 7 };
+    const m = mount({ served });
+    m.c.openSpaceSettings();
+    m.fixture.detectChanges();
+    served['work'] = 3;
+    m.c.spaceSettings.closeSettings();
+    await until(m, () => countText(m) === '3', 'the count read after the pop-up closed');
   });
 });

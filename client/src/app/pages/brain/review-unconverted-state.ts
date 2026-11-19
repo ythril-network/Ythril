@@ -117,6 +117,15 @@ export class ReviewUnconvertedState {
 
   /** How many records the space holds open, all types and reasons, or null before the first answer: the badge on the tab. */
   readonly badge = computed(() => this.counts()?.open ?? null);
+  /**
+   * The open count with the space it is of, a new value after EVERY list answer (a load, the read after a dismiss or a bulk dismiss, the reads a
+   * run's progress causes), null until the space's first answer: what the Brain page's own Review tab shows from then on (S12, Q-939). A new object
+   * per answer, so an equal number still reaches a reader that showed another one in between.
+   */
+  readonly openRead = computed<{ space: string; open: number } | null>(() => {
+    const counts = this.counts();
+    return counts ? { space: this.space(), open: counts.open } : null;
+  });
   /** The space holds no unconverted record of any status: the empty screen that says what makes one appear, as against a filter that matches none. */
   readonly spaceEmpty = computed(() => {
     const counts = this.counts();
