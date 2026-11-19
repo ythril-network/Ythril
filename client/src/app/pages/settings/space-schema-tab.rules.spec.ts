@@ -90,7 +90,7 @@ const NO_LAYERS = { spaceId: 'work', own: {}, layers: [], precedence: [], clashe
 
 // ── harness ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-interface MountOptions { schemaRights?: 'admin' | 'write'; layers?: unknown; library?: unknown[] }
+interface MountOptions { schemaRights?: 'admin' | 'write'; layers?: unknown; library?: unknown[]; translation?: Record<string, string> }
 
 /** The pop-up over the fake backend, from the shared harness (`testing/schema-tab-harness.ts`; this spec was its first site). */
 async function mount(opts: MountOptions = {}) {
@@ -104,6 +104,7 @@ async function mount(opts: MountOptions = {}) {
     translation: {
       'validate.progress.one': 'validate.progress', 'validate.progress.other': 'validate.progress',
       'validate.progressOpen.one': 'validate.progressOpen', 'validate.progressOpen.other': 'validate.progressOpen',
+      ...opts.translation,
     },
   });
 }
@@ -597,6 +598,24 @@ describe('Validate runs the live check, in sample mode and in stored-data mode',
       expect(!!$(h.el, '[data-testid="validate-all-good"]'), label).toBe(allGood);
       document.body.innerHTML = '';
     }
+  });
+
+  // Q-943: a found violation is worded from its code (`core/violation-wording.ts`), and the server's own sentence is the row's title.
+  it('a violation the check found is worded from its code, with the server\'s sentence as the row\'s title; a row without a code keeps its text and has none', async () => {
+    const h = await mount({ translation: {
+      'refusal.row.violated.introduced': '{{field}}: {{reason}}', 'violation.code.type': 'must be {{type}}, not {{got}}',
+      'violation.valueType.number': 'a number', 'violation.valueType.string': 'text',
+    } });
+    await chooseMode(h, 'sample');
+    type($(h.el, '[data-testid="validate-sample"]') as HTMLTextAreaElement, '{"kind":"entity","type":"person","properties":{}}');
+    await h.settle();
+    button(h)!.click();
+    const coded = { field: 'properties.age', reason: "expected type 'number', got 'string'", code: 'type', params: { type: 'number', got: 'string' } };
+    post(h).flush(answer({ violations: [{ collection: 'entities', violations: [coded, { field: 'properties.size', reason: 'must be a number' }] }] }));
+    await h.settle();
+    const rows = $$(h.el, '.val-violations .val-row');
+    expect(rows.map(r => r.textContent?.replace(/\s+/g, ' ').trim())).toEqual([expect.stringContaining('age: must be a number, not text'), expect.stringContaining('size: must be a number')]);
+    expect(rows.map(r => r.getAttribute('title'))).toEqual([coded.reason, null]);
   });
 
   it('stored-data mode pages: the second request carries the cursor the first answer gave, until it is complete', async () => {

@@ -315,10 +315,16 @@ describe('the client reads the unconverted row the server lists', () => {
     expect(/record\??\s*:\s*\{([^}]*)\}/.exec(aliasText(TERMS, 'UnconvertedRow'))?.[1]).toMatch(/summary/);
   });
 
-  it('a violation is a field and a reason', () => {
-    const body = /violations\s*:\s*\{([^}]*)\}\[\]/.exec(interfaceBody(TERMS, 'UnconvertedItem'))?.[1] ?? '';
-    expect(sorted(ownKeys(body))).toEqual(['field', 'reason']);
-    expect(sorted(interfaceKeys(TYPES, 'UnconvertedViolation'))).toEqual(['field', 'reason']);
+  // Q-943: an item's violation carries its code and params beside field and reason; an item stored before that has field and reason only,
+  // so the two are optional on both sides, and the client words the row from them (`core/violation-wording.ts`).
+  it('a violation is a field and a reason, and the code and params an item stored after Q-943 carries', () => {
+    expect(/violations\s*:\s*UnconvertedViolation\[\]/.test(interfaceBody(TERMS, 'UnconvertedItem'))).toBe(true);
+    expect(sorted(interfaceKeys(TERMS, 'UnconvertedViolation'))).toEqual(['code', 'field', 'params', 'reason']);
+    expect(sorted(interfaceKeys(TYPES, 'UnconvertedViolation'))).toEqual(['code', 'field', 'params', 'reason']);
+    for (const key of ['code', 'params']) {
+      expect(new RegExp(`\\b${key}\\?\\s*:`).test(interfaceBody(TERMS, 'UnconvertedViolation')), `server ${key} optional`).toBe(true);
+      expect(new RegExp(`\\b${key}\\?\\s*:`).test(interfaceBody(TYPES, 'UnconvertedViolation')), `client ${key} optional`).toBe(true);
+    }
   });
 
   it('the list answer carries items and counts { open, dismissed }', () => {
