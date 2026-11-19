@@ -24,12 +24,11 @@ import {
   factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText, chunkEmbedText, boundedEmbedText, embedTextFor, embedInputCeiling,
 } from './embed-text.js';
 import { noteInputCut } from './embed-ceiling.js';
-import { overCeilingMessage } from './embed-errors.js';
+import { OverCeilingError, classifyEmbedFailure } from './embed-errors.js';
 import { utf8Bytes } from '../util/bounded-text.js';
 import { resolveEdgeEndpointNames, resolveEndpointNames } from './edge-endpoint-names.js';
 import { edgeEndpointKind } from './entity-refs.js';
 import { recordSuppressedMany } from './suppress-embeddings.js';
-import { isTransientEmbedFailure } from './embed-queue.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { atReadSeq, readSeqOf } from '../db/at-read-seq.js';
 import { UNSET_DERIVED, UNSET_VECTOR, isDerivedFileRow } from '../sync/local-only-fields.js';
@@ -469,9 +468,9 @@ export async function embedStoredRecord(
   let result: Awaited<ReturnType<typeof embed>>;
   try {
     // A passage a chunker made before the ceiling existed, over it: not embedded cut (it would end `complete` with most of its text
-    // unfindable by meaning). The failure path below stores its text and ends the job at once (`failEmbedJob`, by these words).
+    // unfindable by meaning). The failure path below stores its text and ends the job at once (`failEmbedJob`, by the error's class).
     if (recordType === 'file' && passageOverCeiling(doc)) {
-      throw new Error(overCeilingMessage(utf8Bytes(toEmbed), embedInputCeiling()));
+      throw new OverCeilingError(utf8Bytes(toEmbed), embedInputCeiling());
     }
     // A text that has no chunker (a media chunk, a whole document) is embedded cut: counted, as its producer counts it.
     if (recordType === 'file' && isDerived(doc) && typeof doc['content'] === 'string') {
@@ -485,7 +484,8 @@ export async function embedStoredRecord(
     // the space until it is done. Unsetting here would strip a whole space's vectors at claim rate for as long as
     // an outage lasts, and the job retries under the rebuild either way. Any other failure is the record's own,
     // and takes the path below.
-    if (opts.rebuild && isTransientEmbedFailure(err)) throw err;
+    const verdict = classifyEmbedFailure(err);
+    if (opts.rebuild && (verdict.kind === 'outage' || verdict.kind === 'lost')) throw err;
     // The failed path, and the one retries and a dead letter end on (`Q-94`). The current text is written so the
     // lexical channel stops matching what the record no longer says, and the vector is DROPPED with it: that vector
     // is of text that is gone, and `matchedText` doubles as the "unchanged" fingerprint above — written beside a

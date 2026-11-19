@@ -89,28 +89,8 @@ describe('what stays the record\'s own fault', () => {
 });
 
 describe('the two counters answer different questions', () => {
-  it('the source spends `attempts` only on a permanent failure', async () => {
-    // Read from source rather than exercised against Mongo: the write shape is the claim, and the
-    // integration suite covers the queue end to end. What matters here is that the transient branch gives
-    // the attempt back and never sets `failed`.
-    const { readFileSync } = await import('node:fs');
-    const src = readFileSync('server/src/brain/embed-queue.ts', 'utf8')
-      .replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-
-    const asked = src.indexOf('isTransientEmbedFailure(failure)');
-    assert.ok(asked >= 0, 'failEmbedJob no longer asks isTransientEmbedFailure(failure): re-point this gate at the transient branch');
-    const branch = src.slice(asked);
-    const untilNextBranch = branch.slice(0, branch.indexOf('if (attempts < MAX_EMBED_ATTEMPTS)'));
-
-    assert.match(untilNextBranch, /attempts: Math\.max\(0, attempts - 1\)/,
-      'a transient failure must hand the attempt back — it was spent at claim time');
-    assert.match(untilNextBranch, /transientFailures: failures/,
-      'the wait needs its own counter, or the backoff pins at its first step');
-    assert.doesNotMatch(untilNextBranch, /status: 'failed'/,
-      'a transient failure must never go terminal — that is the whole point');
-    assert.match(untilNextBranch, /claimableAfter: nextClaimableAfter\(failures\)/,
-      'the backoff must climb with the transient count, not with the held attempts');
-  });
+  // What the transient branch of `failEmbedJob` writes (it hands the attempt back, climbs the wait with the transient count and never goes
+  // terminal) is held by behaviour, on a real job: `an-error-body-cannot-decide-an-embed-jobs-fate-db.test.js`.
 
   it('every place that resets `attempts` resets `transientFailures` too', async () => {
     // A new write is new content and must not inherit a half-hour backoff earned by an outage that has since

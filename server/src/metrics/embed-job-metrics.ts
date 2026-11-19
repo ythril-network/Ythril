@@ -15,7 +15,7 @@
  *   payload-too-large), `over_ceiling` (a stored passage is larger than the embedder accepts and needs its file re-converted), `budget` (the attempts ran
  *   out), `lost_child` (the inference process was lost too often).
  * - `ythril_embed_jobs_handed_back_total`: attempts handed back to a job that waits instead of spending one (counted through `embed-job-handed-back-count.ts`):
- *   the embedder could not be reached, answered a 429 or a 5xx, or the inference process was lost. A waiting job is not `failed`, so this is the series an outage
+ *   the embedder could not be reached, answered a status of the wait set (408, 429, 502, 503, 504, 520 to 524, 529, 530), or the inference process was lost. A waiting job is not `failed`, so this is the series an outage
  *   shows on, where the first does not move.
  */
 import { Counter, type Registry } from 'prom-client';
@@ -39,7 +39,7 @@ export function declareEmbedJobMetrics(register: Registry) {
 
   const embedJobsHandedBackCounter = new Counter({
     name: 'ythril_embed_jobs_handed_back_total',
-    help: 'Attempts handed back to embed jobs that wait (embedder unreachable, a 429 or 5xx, an inference process lost)',
+    help: 'Attempts handed back to embed jobs that wait (embedder unreachable, an HTTP status that means busy or not available, an inference process lost)',
     registers: [register],
   });
   setEmbedJobHandedBackSink(() => embedJobsHandedBackCounter.inc());

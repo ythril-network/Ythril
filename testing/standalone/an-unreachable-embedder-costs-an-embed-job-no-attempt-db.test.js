@@ -5,7 +5,7 @@
  *
  * During an embedder outage on 18 Nov 2026 every queued job spent its five attempts and ended `failed`, and every record behind them was left
  * out of semantic search. The embed call threw `Could not reach embedding endpoint at <url>`, and the queue read an outage from the WORDS of a
- * failure (`isTransientEmbedError`: "fetch failed", "econnrefused", ...), none of which that sentence holds. A job whose embed call could not
+ * failure (`isTransientEmbedError`, which now only judges a failure of no class the server built: "fetch failed", "econnrefused", ...), none of which that sentence holds. A job whose embed call could not
  * reach its endpoint is the embedder's failure, not the record's: the error OBJECT now says so (`EmbedUnreachableError`, thrown where the
  * connection failure is known), and the queue hands the attempt back, with back-off, as it does for a 503.
  *
@@ -17,7 +17,7 @@
  *  - a rebuild job in the same state keeps the record's stored vector (an outage must not strip a space of its vectors);
  *  - a write that needs the vector (`waitForEmbedding`) is still answered `400` on the tool door, in today's sentence;
  *  - what is NOT an outage keeps its budget: a header value the runtime refuses and the address guard's refusal end `failed` on `budget`;
- *  - the caught value reaches `failEmbedJob`, but the text rules still read the message: an `EmbeddingHttpError` of status 413 ends the job at once
+ *  - the caught value reaches `failEmbedJob` and is decided by its class and status: an `EmbeddingHttpError` of status 413 ends the job at once
  *    (`refused_413`) and its `lastError` is the endpoint's own text, never prefixed with a class name;
  *  - the running worker's loop claims nothing for a pause after one unreachable failure.
  *

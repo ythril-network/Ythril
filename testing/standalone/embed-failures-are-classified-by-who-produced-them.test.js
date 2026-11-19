@@ -3,17 +3,17 @@
  *
  * ## The rule (Q-99 part 1)
  *
- * `failEmbedJob` and `isTransientEmbedError` decide a job's fate from a string: the error crossed a process
- * boundary, then a queue, and only text survives. A crashed inference process is the embedder's fault, not the
- * record's, so it is TRANSIENT (retried with backoff, the record's attempt handed back). But "the embedder's fault"
- * is exactly how an input that KILLS the runtime looks, so a lost child is also CAPPED per record
- * (`lostChildFailures`, three, then terminal `failed` naming the crash — `embed-queue-lost-child-db.test.js`).
+ * `failEmbedJob` decides a job's fate by `classifyEmbedFailure` (Q-931), which reads a failure of no class the server built from its
+ * text, through `isTransientEmbedError`: the error crossed a process boundary, then a queue, and only text survives. A crashed inference
+ * process is the embedder's fault, not the record's, so it is TRANSIENT (retried with backoff, the record's attempt handed back). But
+ * "the embedder's fault" is exactly how an input that KILLS the runtime looks, so a lost child is also CAPPED per record, by the CLASS of
+ * the host's error (`lostChildFailures`, three, then terminal `failed` naming the crash — `embed-queue-lost-child-db.test.js`).
  *
- * Both halves rest on recognising a lost child from text, which raises two questions this file pins:
+ * Both halves rest on recognising a lost child, which raises two questions this file pins:
  *
- *  1. **One source for the marker.** `embed-errors.ts` owns the text `embedding process lost`, and the queue's
- *     needle list is built from that export. A second copy of the literal is a second place to be wrong: rename
- *     the message and the queue silently stops retrying crashes.
+ *  1. **One source for the marker.** `embed-errors.ts` owns the text `embedding process lost`, and the words rule is built from
+ *     that export. A second copy of the literal is a second place to be wrong: rename the message and the wait silently stops
+ *     recognising crashes.
  *  2. **Only the host can produce it.** The child supplies error strings too (a tokenizer failure, an input it
  *     refuses). One of those containing the marker, or a needle such as `timeout`, must not make a record look
  *     crash-capped or an input look transient because of what the CHILD said. `isLostChildError` answers for
@@ -51,7 +51,7 @@ describe('the marker', () => {
     assert.equal(isTransientEmbedError(`${errors.LOST_MARKER} (code=null signal=SIGKILL)`), true);
   });
 
-  it('has exactly one definition in the server sources, and the queue takes it from there', () => {
+  it('has exactly one definition in the server sources, and the queue takes the verdict from there', () => {
     const files = trackedSources(SERVER_CODE_ROOTS, { floor: 100, untracked: true });
     const holding = files.filter(f => stripComments(readFileSync(join(REPO_ROOT, f), 'utf8')).includes('embedding process lost'));
     assert.deepEqual(holding, ['server/src/brain/embed-errors.ts'],
@@ -61,8 +61,10 @@ describe('the marker', () => {
       'the not-sent marker text is written in more than one place');
 
     const queueSrc = stripComments(readFileSync(join(REPO_ROOT, 'server/src/brain/embed-queue.ts'), 'utf8'));
-    assert.match(queueSrc, /from\s+['"]\.\/embed-errors\.js['"]/, 'embed-queue.ts does not import the marker module');
-    assert.match(queueSrc, /LOST_MARKER/, 'embed-queue.ts imports the module but does not use the marker');
+    assert.match(queueSrc, /from\s+['"]\.\/embed-errors\.js['"]/, 'embed-queue.ts does not import the verdict module');
+    assert.match(queueSrc, /\bclassifyEmbedFailure\b/, 'embed-queue.ts imports the module but does not ask the verdict');
+    const errorsSrc = stripComments(readFileSync(join(REPO_ROOT, 'server/src/brain/embed-errors.ts'), 'utf8'));
+    assert.match(errorsSrc, /\[\s*LOST_MARKER\s*,/, 'the words rule is not built from the marker export');
   });
 });
 
@@ -119,13 +121,14 @@ describe('isLostChildError: only what the host produced', () => {
  * The embed call knows why it failed at the one place it catches the fetch: the connection never landed. An outage on 18 Nov 2026 ended every queued
  * job `failed` because the queue read that fact from the words of the sentence the call throws (`Could not reach embedding endpoint at <url>`),
  * which holds none of the needles `isTransientEmbedError` reads. `EmbedUnreachableError` carries the fact (`isEmbedUnreachableError` is by `instanceof`
- * alone, as `isLostChildError` is), and `isTransientEmbedFailure` is the one question the queue and the rebuild guard both ask of the caught value.
+ * alone, as `isLostChildError` is), and `classifyEmbedFailure` is the one question the queue and the rebuild guard both ask of the caught value.
  * A plain `Error` or a string with the same sentence is not the class: an endpoint's body or a child's text cannot forge it.
  */
-describe('isTransientEmbedFailure: the object is the proof, the sentence is not', () => {
+describe('classifyEmbedFailure: the object is the proof, the sentence is not', () => {
   const SENTENCE = 'Could not reach embedding endpoint at http://x. Make sure an embedding server (e.g. Ollama) is running and configured.';
   let fresh;
   before(async () => { fresh = await import('../../server/dist/brain/embed-errors.js'); });
+  const outage = (failure) => fresh.classifyEmbedFailure(failure).kind === 'outage';
 
   it('the typed error is transient, and carries today\'s sentence word for word, no code and no cause', () => {
     const err = new fresh.EmbedUnreachableError(SENTENCE);
@@ -134,25 +137,25 @@ describe('isTransientEmbedFailure: the object is the proof, the sentence is not'
     assert.equal(err.message, SENTENCE);
     assert.equal(err.code, undefined, 'a code would send a write that needs the vector to a different answer than today\'s');
     assert.equal('cause' in err, false, 'a cause would do the same, through the error chain');
-    assert.equal(queue.isTransientEmbedFailure(err), true);
+    assert.equal(outage(err), true);
   });
 
-  it('a plain Error and a string with the same sentence are not the class, and are not transient', () => {
+  it('a plain Error and a string with the same sentence are not the class, and are not an outage', () => {
     assert.equal(fresh.isEmbedUnreachableError(new Error(SENTENCE)), false);
     assert.equal(fresh.isEmbedUnreachableError(SENTENCE), false);
     assert.equal(fresh.isEmbedUnreachableError({ name: 'EmbedUnreachableError', message: SENTENCE }), false);
-    assert.equal(queue.isTransientEmbedFailure(new Error(SENTENCE)), false);
-    assert.equal(queue.isTransientEmbedFailure(SENTENCE), false);
+    assert.equal(outage(new Error(SENTENCE)), false);
+    assert.equal(outage(SENTENCE), false);
   });
 
-  it('anything else is asked of its message exactly as isTransientEmbedError asks it, for an Error and for a string', () => {
+  it('a failure of no class the server built is asked of its message exactly as isTransientEmbedError asks it, for an Error and for a string', () => {
     for (const message of ['connect ECONNREFUSED 127.0.0.1:11434', 'Embedding request failed (HTTP 503): down', 'Embedding request failed (HTTP 400): bad', 'unsupported input shape', '']) {
-      assert.equal(queue.isTransientEmbedFailure(new Error(message)), isTransientEmbedError(message), `Error: ${message}`);
-      assert.equal(queue.isTransientEmbedFailure(message), isTransientEmbedError(message), `string: ${message}`);
+      assert.equal(outage(new Error(message)), isTransientEmbedError(message), `Error: ${message}`);
+      assert.equal(outage(message), isTransientEmbedError(message), `string: ${message}`);
     }
-    assert.equal(queue.isTransientEmbedFailure(new fresh.LostChildError('code=139 signal=null')), true, 'the lost process is still read by its marker');
-    assert.equal(queue.isTransientEmbedFailure(undefined), false);
-    assert.equal(queue.isTransientEmbedFailure(null), false);
+    assert.equal(fresh.classifyEmbedFailure(new fresh.LostChildError('code=139 signal=null')).kind, 'lost', 'the lost process is read by its class');
+    assert.equal(outage(undefined), false);
+    assert.equal(outage(null), false);
   });
 });
 
@@ -344,7 +347,7 @@ describe('the real embed(): what it throws, and what it says once', () => {
       await assert.rejects(() => emb.embed('hello'), (err) => {
         assert.equal(fresh.isEmbedUnreachableError(err), false, 'a refused header value is configuration: waiting does not cure it');
         assert.equal(err.message, SENT(port));
-        assert.equal(queue.isTransientEmbedFailure(err), false);
+        assert.equal(fresh.classifyEmbedFailure(err).kind, 'record');
         return true;
       });
     }
@@ -357,7 +360,7 @@ describe('the real embed(): what it throws, and what it says once', () => {
     await assert.rejects(() => emb.embed('hello'), (err) => {
       assert.equal(fresh.isEmbedUnreachableError(err), false, 'a refused address is configuration, not an outage');
       assert.match(err.message, /^Could not reach embedding endpoint at /);
-      assert.equal(queue.isTransientEmbedFailure(err), false);
+      assert.equal(fresh.classifyEmbedFailure(err).kind, 'record');
       return true;
     });
   });
@@ -389,7 +392,7 @@ describe('the real embed(): what it throws, and what it says once', () => {
  *
  * The defect was a rule that read another module's sentence. The guard is over the whole server tree (derived from git, not listed): in code with its
  * comments removed, a string or a pattern holding the unreachable sentence's words may only be BUILT (the one throw site), never tested; and the
- * words-based question `isTransientEmbedError` is asked in `embed-queue.ts` alone, where `isTransientEmbedFailure` puts the object first.
+ * words-based question `isTransientEmbedError` is asked in `embed-errors.ts` alone, where `classifyEmbedFailure` puts the object first.
  */
 describe('the source: the sentence is built in one place and never read', () => {
   const SENTENCE_WORDS = /could\s+not\s+reach\s+embedding/i;
@@ -408,8 +411,8 @@ describe('the source: the sentence is built in one place and never read', () => 
     assert.deepEqual(files.filter(f => decidesByTheSentence(f.code)).map(f => f.file), []);
   });
 
-  it('isTransientEmbedError, which reads words, is asked in embed-queue.ts alone', () => {
-    assert.deepEqual(sources().filter(f => callsTheWordsQuestion(f.code)).map(f => f.file), ['server/src/brain/embed-queue.ts']);
+  it('isTransientEmbedError, which reads words, is asked in embed-errors.ts alone, by the verdict', () => {
+    assert.deepEqual(sources().filter(f => callsTheWordsQuestion(f.code)).map(f => f.file), ['server/src/brain/embed-errors.ts']);
   });
 
   it('seen red on planted copies: a test of the words anywhere, and the words question asked from the rebuild guard', () => {
@@ -421,8 +424,8 @@ describe('the source: the sentence is built in one place and never read', () => 
     ]) assert.equal(decidesByTheSentence(planted), true, `the gate did not see: ${planted.split('\n').at(-1)}`);
     assert.equal(decidesByTheSentence(embedding), false, 'the throw site itself builds the sentence and tests nothing');
     const guard = sources().find(f => f.file === 'server/src/brain/embed-record.ts').code;
-    const planted = guard.replace(/isTransientEmbedFailure\s*\(\s*err\s*\)/, 'isTransientEmbedError(err instanceof Error ? err.message : String(err))');
-    assert.notEqual(planted, guard, 'the rebuild guard no longer asks isTransientEmbedFailure(err): re-point this gate');
+    const planted = guard.replace(/classifyEmbedFailure\s*\(\s*err\s*\)/, 'isTransientEmbedError(err instanceof Error ? err.message : String(err))');
+    assert.notEqual(planted, guard, 'the rebuild guard no longer asks classifyEmbedFailure(err): re-point this gate');
     assert.equal(callsTheWordsQuestion(planted), true);
     assert.equal(callsTheWordsQuestion(guard), false);
   });

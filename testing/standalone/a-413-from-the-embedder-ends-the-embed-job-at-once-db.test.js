@@ -5,7 +5,7 @@
  * ## The rule, end to end
  *
  * The queue's worker claims a job, builds the record's text, asks the real `embed()` (over a real local stub endpoint standing in for
- * the operator's HTTP embedder), and on a throw hands the message to `failEmbedJob`:
+ * the operator's HTTP embedder), and on a throw hands the caught `EmbeddingHttpError` to `failEmbedJob`, which decides by its status:
  *
  *  - HTTP 413 (payload too large): the job is `failed` AT ONCE with `attempts` at the maximum and the endpoint's message in `lastError`,
  *    where it used to go pending five times over twelve minutes;
@@ -164,7 +164,7 @@ describe('the embed queue and an embedder that refuses a request (real MongoDB, 
   it('a lost inference process ended too often is counted as lost_child', async () => {
     const before = await failedCount('lost_child');
     const doc = await fact.saveFact(SPACE, 'a fact that kills the runtime', [], []);
-    await queue.failEmbedJob(SPACE, 'fact', doc._id, 1, `${errors.LOST_MARKER} (code=139 signal=null)`, 0,
+    await queue.failEmbedJob(SPACE, 'fact', doc._id, 1, new errors.LostChildError('code=139 signal=null'), 0,
       { lostChildFailures: queue.MAX_LOST_CHILD_FAILURES - 1 });
     assert.equal((await only()).status, 'failed');
     assert.equal(await failedCount('lost_child'), before + 1);
