@@ -63,6 +63,8 @@ function create() {
   const schemaApi = {
     listSchemaLibrary: vi.fn(() => of({ entries: [ENTRY] })),
     getSchemaLibraryUsages: vi.fn(() => of({ usages: [] })),
+    // Q-748: the groups' namespace view the page hosts when an entry has a group.
+    getSchemaLibraryGroups: vi.fn(() => of({ groups: [] })),
   };
   TestBed.configureTestingModule({
     imports: [SchemaLibraryComponent, getTranslocoModule()],

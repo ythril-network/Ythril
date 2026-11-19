@@ -36,6 +36,7 @@ import { emptyTypeSchemaState, typeSchemaFromState, typeStateFromSchema, type Ty
 import { RuleRowsComponent } from '../../shared/rule-rows.component';
 import { RULE_LIMITS } from '../../shared/rule-limits';
 import { PluralText } from '../../core/plural-text.service';
+import { SchemaLibraryNamespaceComponent } from './schema-library-namespace.component';
 
 // ── Local form state ────────────────────────────────────────────────────────
 
@@ -123,7 +124,7 @@ export function entriesFromTypeSchemas(
 @Component({
   selector: 'app-schema-library',
   standalone: true,
-  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, PropSchemaTableComponent, RuleRowsComponent, ErrorStateComponent, ModalDirective],
+  imports: [CommonModule, InstantComponent, FormsModule, TranslocoPipe, PhIconComponent, PropSchemaTableComponent, RuleRowsComponent, ErrorStateComponent, ModalDirective, SchemaLibraryNamespaceComponent],
   styles: [CHIP_STYLES, `
     /* chip inputs — same as spaces.component.ts */
     /* create / edit dialog */
@@ -236,6 +237,8 @@ export function entriesFromTypeSchemas(
 
     <!-- ── MY LIBRARY TAB ─────────────────────────────────────────────────── -->
     @if (pageTab() === 'library') {
+      <!-- Q-748: the groups' RDF namespaces, in a component of their own (this page is at its size ceiling). -->
+      @if (availableGroups().length) { <app-schema-library-namespace /> }
       @if (loading()) {
         <div class="empty-state"><span class="spinner"></span></div>
       } @else if (loadError() !== null) {

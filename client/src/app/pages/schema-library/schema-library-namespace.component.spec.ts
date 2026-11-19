@@ -71,8 +71,7 @@ describe('the schema groups\' RDF namespaces', () => {
     const setGroupNamespace = vi.fn(() => of({ group: 'beta', namespace: { prefix: 'beta', iri: 'https://beta.example/ns/' } }));
     const { fixture, c, el, toast } = mount({ setGroupNamespace });
     c.open(GROUPS[1]!);
-    c.draft()!.prefix = 'beta';
-    c.draft()!.iri = 'https://beta.example/ns/';
+    c.patch({ prefix: 'beta', iri: 'https://beta.example/ns/' });
     c.save();
     fixture.detectChanges();
     expect(setGroupNamespace).toHaveBeenCalledWith('beta', { prefix: 'beta', iri: 'https://beta.example/ns/' });
@@ -86,7 +85,7 @@ describe('the schema groups\' RDF namespaces', () => {
       .mockReturnValueOnce(of({ group: 'acme', namespace: { prefix: 'acme', iri: 'https://acme.example/v2/' } }));
     const { fixture, c, el } = mount({ setGroupNamespace });
     c.open(GROUPS[0]!);
-    c.draft()!.iri = 'https://acme.example/v2/';
+    c.patch({ iri: 'https://acme.example/v2/' });
     c.save();
     fixture.detectChanges();
     expect(setGroupNamespace).toHaveBeenCalledTimes(1);
@@ -96,8 +95,9 @@ describe('the schema groups\' RDF namespaces', () => {
     const submit = el.querySelector('button[type=submit]') as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     expect(el.querySelector('input[type=checkbox]')).not.toBeNull();
-    c.draft()!.rebase = true;
+    c.patch({ rebase: true });
     fixture.detectChanges();
+    expect((el.querySelector('button[type=submit]') as HTMLButtonElement).disabled).toBe(false);
     c.save();
     expect(setGroupNamespace).toHaveBeenLastCalledWith('acme', { prefix: 'acme', iri: 'https://acme.example/v2/', rebase: true });
   });
@@ -106,8 +106,7 @@ describe('the schema groups\' RDF namespaces', () => {
     const setGroupNamespace = vi.fn(() => refused({ code: 'rdf_term_clash', space: 'linked', terms: ['entity:person', 'entity:human'], iri: 'https://acme.example/ns/entity/person', error: 'clash' }));
     const { c } = mount({ setGroupNamespace });
     c.open(GROUPS[1]!);
-    c.draft()!.prefix = 'beta';
-    c.draft()!.iri = 'https://acme.example/ns/';
+    c.patch({ prefix: 'beta', iri: 'https://acme.example/ns/' });
     c.save();
     const said = c.draft()!.error;
     expect(said).toContain('CLASH linked');

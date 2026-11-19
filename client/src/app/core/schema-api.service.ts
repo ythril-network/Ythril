@@ -11,6 +11,12 @@ import { answerErrorField } from './refusal-text';
 
 /** Where a type of the list is defined: by the space (`own`), only by a network layer (`layer`), or by nothing current (`none`). */
 export type TypeDeclared = 'own' | 'layer' | 'none';
+
+/** A schema group's RDF namespace (Q-748): its entries' terms are named `<iri><kind>/<type>[/<property>]`. */
+export interface GroupNamespace { prefix: string; iri: string }
+
+/** One schema group as `GET /api/schema-library/groups` lists it. */
+export interface SchemaLibraryGroup { name: string; count: number; namespace?: GroupNamespace }
 /** How one version stands for a type against the current one; anything else the server answers is read as `unclassified`. */
 export type TypeStanding = 'current' | 'older' | 'notHeld' | 'unclassified';
 
@@ -241,6 +247,21 @@ export class SchemaApi {
   /** Export a space's full typeSchemas into the library as a named group. */
   exportSpaceSchemaToLibrary(body: { spaceId: string; groupName: string; namePrefix?: string }): Observable<{ created: number; updated: number; entries: SchemaLibraryEntry[] }> {
     return this.http.post<{ created: number; updated: number; entries: SchemaLibraryEntry[] }>('/api/schema-library/export-space', body);
+  }
+
+  /** Every schema group with its entry count and, when it has one, its RDF namespace (Q-748). */
+  getSchemaLibraryGroups(): Observable<{ groups: SchemaLibraryGroup[] }> {
+    return this.http.get<{ groups: SchemaLibraryGroup[] }>('/api/schema-library/groups');
+  }
+
+  /** Set a group's RDF namespace; `rebase` renames the terms of RDF-enabled spaces linking the group on purpose (refused without it). */
+  setGroupNamespace(group: string, body: { prefix: string; iri: string; rebase?: true }): Observable<{ group: string; namespace: GroupNamespace }> {
+    return this.http.put<{ group: string; namespace: GroupNamespace }>(`/api/schema-library/groups/${encodeURIComponent(group)}/namespace`, body);
+  }
+
+  /** Remove a group's RDF namespace; `rebase` as on {@link setGroupNamespace}. */
+  removeGroupNamespace(group: string, rebase = false): Observable<{ group: string; removed: true }> {
+    return this.http.delete<{ group: string; removed: true }>(`/api/schema-library/groups/${encodeURIComponent(group)}/namespace${rebase ? '?rebase=true' : ''}`);
   }
 
   /** Apply all library entries belonging to a group to a space as $ref links. */

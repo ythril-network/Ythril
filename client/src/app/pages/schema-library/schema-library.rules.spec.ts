@@ -58,6 +58,8 @@ function create(entries: SchemaLibraryEntry[]) {
   const schemaApi = {
     listSchemaLibrary: vi.fn(() => of({ entries })),
     getSchemaLibraryUsages: vi.fn(() => of({ usages: [] })),
+    // Q-748: the groups' namespace view the page hosts when an entry has a group.
+    getSchemaLibraryGroups: vi.fn(() => of({ groups: [] })),
     upsertSchemaLibraryEntry: upsert,
     createSchemaLibraryEntry: createEntry,
     deleteSchemaLibraryEntry: vi.fn(() => of(undefined)),

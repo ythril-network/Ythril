@@ -151,6 +151,14 @@ export function answerErrorField(err: unknown): string {
 }
 
 /**
+ * The body's `code` member, or '' when it has none: for the caller that offers a different control on one refusal (Q-748: the rename a
+ * schema group's namespace would make, which the operator may choose to make on purpose). The words are still `refusalText`'s.
+ */
+export function answerCode(err: unknown): string {
+  return nonEmpty(bodyOf(err)?.['code']);
+}
+
+/**
  * The `issues` a refused request body lists (a zod-body refusal: `{ error, issues: [{ code, path, keys? }] }`), or [] when it lists none.
  * For the caller that follows an issue's path to the control it is about; the words for the refusal as a whole are `refusalText`'s.
  */
@@ -333,9 +341,11 @@ export function describeRefusal(
     if (sentence) return plain(sentence);
   }
   if (code) {
-    const members = Array.isArray(body?.['members']) ? (body!['members'] as unknown[]).filter((m): m is string => typeof m === 'string') : [];
+    const names = (field: string): string[] => (Array.isArray(body?.[field]) ? (body![field] as unknown[]).filter((m): m is string => typeof m === 'string') : []);
     const sentence = translatedOrEmpty(transloco, `${keyPrefix}.${code}`, {
-      path: nonEmpty(body?.['path']), heldBy: nonEmpty(body?.['heldBy']), id: nonEmpty(body?.['id']), members: formatList(members, lang),
+      path: nonEmpty(body?.['path']), heldBy: nonEmpty(body?.['heldBy']), id: nonEmpty(body?.['id']), members: formatList(names('members'), lang),
+      // Q-748: a library RDF refusal names the spaces it would rename, or the space, both terms and the address of a clash.
+      spaces: formatList(names('spaces'), lang), space: nonEmpty(body?.['space']), terms: formatList(names('terms'), lang), iri: nonEmpty(body?.['iri']),
     });
     if (sentence) return plain(withRequestId(sentence, err));
   }

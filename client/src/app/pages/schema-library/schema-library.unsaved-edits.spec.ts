@@ -41,6 +41,8 @@ function mount() {
   const schemaApi = {
     listSchemaLibrary: vi.fn(() => of({ entries: [ENTRY] })),
     getSchemaLibraryUsages: vi.fn(() => of({ usages: [] })),
+    // Q-748: the groups' namespace view the page hosts when an entry has a group.
+    getSchemaLibraryGroups: vi.fn(() => of({ groups: [] })),
     createSchemaLibraryEntry: vi.fn(() => of({ entry: { ...ENTRY, name: 'new-one' } })),
     upsertSchemaLibraryEntry: vi.fn(() => of({ entry: ENTRY })),
     addSchemaCatalog: vi.fn(() => of({ catalog: { name: 'c', url: 'https://x/api/schema-library' } })),
