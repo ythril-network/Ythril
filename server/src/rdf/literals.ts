@@ -6,7 +6,8 @@
  * - **A literal typed twice, two ways.** A number written as `xsd:decimal` by the record mapper and as `xsd:integer` by the schema export
  *   would make one value two statements. {@link literalForValue} is the only function that turns a property value into a literal, typed by the
  *   property's DECLARED type (`string`, `number`, `boolean`, `date`), with the lexical form the datatype requires: a decimal has no exponent, a
- *   boolean is `true` or `false`, a date or time keeps its stored text and is typed only when it IS a calendar date or time.
+ *   boolean is `true` or `false`, a date or time keeps its stored text and is typed only when it IS a calendar date or time (a property's
+ *   `date` value that is not is left out and named; a record's own time field that is not stays a plain string, {@link literalForTemporal}).
  * - **A guess.** A value that is a list or an object (only a direct database write can leave one; owner, 2026-11-18, decision record 23), a
  *   number that is no decimal (NaN, Infinity) and a value that does not fit its declared type are never written: the outcome says they are LEFT
  *   OUT and why, so the caller can name them. `null` states nothing and is no outcome to name. `rdf:JSON` is used nowhere.
@@ -150,15 +151,15 @@ export type LeftOutReason = 'not-a-plain-value' | 'does-not-fit-its-declared-typ
 
 /** What a stored property value becomes. */
 export type ValueOutcome =
-  | { kind: 'literal'; literal: LiteralTerm; untypedTemporal: boolean }
+  | { kind: 'literal'; literal: LiteralTerm }
   | { kind: 'nothing' }
   | { kind: 'left-out'; reason: LeftOutReason };
 
 /**
  * The literal of one stored property value, typed by the property's declared type (`undefined`: by what the value is). `null` and `undefined`
- * state nothing. A list, an object or anything else that is no string, number or boolean is left out as not a plain value; so is a value
- * of another type than its declared one, and a number that is no decimal. `untypedTemporal` marks a `date`-typed string that is no calendar
- * date or time and so stays a plain string.
+ * state nothing. A list, an object or anything else that is no string, number or boolean is left out as not a plain value. A value that
+ * does not fit its declared type is left out as `does-not-fit-its-declared-type`, for every declared type alike: another JS type than the
+ * declared one, a number that is no decimal, a `date` string in none of the temporal grammars ({@link temporalKind}).
  */
 export function literalForValue(value: unknown, declared?: DeclaredType | string): ValueOutcome {
   if (value === null || value === undefined) return { kind: 'nothing' };
@@ -168,14 +169,16 @@ export function literalForValue(value: unknown, declared?: DeclaredType | string
   const misfit: ValueOutcome = { kind: 'left-out', reason: known ? 'does-not-fit-its-declared-type' : 'not-a-plain-value' };
   if (known && (declared === 'number' || declared === 'boolean' || declared === 'string') && t !== declared) return misfit;
   if (declared === 'date' && t !== 'string') return misfit;
-  if (t === 'boolean') return { kind: 'literal', literal: literalForBoolean(value as boolean), untypedTemporal: false };
+  if (t === 'boolean') return { kind: 'literal', literal: literalForBoolean(value as boolean) };
   if (t === 'number') {
     const literal = literalForDecimal(value as number);
-    return literal === null ? misfit : { kind: 'literal', literal, untypedTemporal: false };
+    return literal === null ? misfit : { kind: 'literal', literal };
   }
   if (declared === 'date') {
+    // A date property's value in none of the three temporal grammars does not fit its declared type: left out and named, never a plain
+    // string in the date's place (owner's rule; bundle-269 drive, finding 6: `born: "yesterday"` was exported as a string and not counted).
     const literal = literalForTemporal(value as string);
-    return { kind: 'literal', literal, untypedTemporal: literal.datatype === undefined };
+    return literal.datatype === undefined ? misfit : { kind: 'literal', literal };
   }
-  return { kind: 'literal', literal: plain(value as string), untypedTemporal: false };
+  return { kind: 'literal', literal: plain(value as string) };
 }

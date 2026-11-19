@@ -207,7 +207,6 @@ class Form {
       if (outcome.kind === 'nothing') continue;
       if (key === '') { this.skip(key, 'key-has-no-address'); continue; }
       if (outcome.kind === 'left-out') { this.skip(key, outcome.reason); continue; }
-      if (outcome.untypedTemporal) this.untypedTemporals++;
       this.add(subject, iri(resolveTermIri(this.meta, termKind, type, key)), outcome.literal);
     }
   }
