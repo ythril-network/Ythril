@@ -266,7 +266,10 @@ describe('every reason a record is left unconverted for has a class the page wor
   it('the list statuses are the server\'s: the stored two and `all` (the list takes it, the bulk dismiss refuses it)', () => {
     // `UNCONVERTED_LIST_STATUSES = [...UNCONVERTED_STATUSES, 'all']`: the spread is not a literal, so the stored two are added here.
     const server = [...constLiterals(TERMS, 'UNCONVERTED_STATUSES'), ...constLiterals(TERMS, 'UNCONVERTED_LIST_STATUSES')];
-    expect(sorted(aliasLiterals(TYPES, 'UnconvertedListStatus'))).toEqual(sorted(server));
+    // The client's alias is `UnconvertedStatus | 'all'` (the same spread, spelled as a union): the stored two it names, and its own literal.
+    expect(TYPES).toMatch(/type\s+UnconvertedListStatus\s*=\s*UnconvertedStatus\s*\|/);
+    const client = [...aliasLiterals(TYPES, 'UnconvertedStatus'), ...aliasLiterals(TYPES, 'UnconvertedListStatus')];
+    expect(sorted(client)).toEqual(sorted(server));
   });
 });
 
