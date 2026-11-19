@@ -1,5 +1,5 @@
 [
   { "id": "untranslated:de", "max": 147, "reason": "keys the German file holds in English wording, as counted on 2026-11-18; many are names that read alike (Token, Webhooks) and some are real gaps: the owner sorts them, and the ceiling only goes down", "reviewBy": "2027-02-17" },
   { "id": "untranslated:pl", "max": 92, "reason": "keys the Polish file holds in English wording, as counted on 2026-11-18; same mix of shared names and real gaps as the German list, and the ceiling only goes down", "reviewBy": "2027-02-17" },
-  { "id": "unused:en", "max": 261, "reason": "English keys no client source quotes or builds a prefix for, as counted on 2026-11-18: retired pages' strings and keys reached through a computed name the reader cannot see; each removal lowers the ceiling", "reviewBy": "2027-02-17" }
+  { "id": "unused:en", "max": 229, "reason": "English keys no client source quotes or builds a prefix for, as counted on 2026-11-18 and lowered on 2026-11-19 when the schema-history words were given readable prefixes (bundle-269): retired pages' strings and keys reached through a computed name the reader cannot see; each removal lowers the ceiling", "reviewBy": "2027-02-17" }
 ]

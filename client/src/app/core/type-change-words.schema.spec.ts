@@ -43,6 +43,7 @@ const TYPE_PLACES = [...TYPE_KEYS, ...NESTED.retention.map(k => `retention.${k}`
 /** A value of the right shape for each facet; a facet the schema gains has none here, which the first test names. */
 const SAMPLES: Record<string, unknown> = {
   description: 'x', type: 'string', enum: ['a', 'b'], minimum: 3, maximum: 9, pattern: 'p', mergeFn: 'avg', required: true, default: 1,
+  iri: 'https://schema.org/email',
 };
 
 /** Echoes the key and its parameters, so what was asked is what is compared. */
