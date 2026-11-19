@@ -62,6 +62,9 @@ function docker(args, timeout = 120_000) {
 /** The containers of one compose project, in any state. */
 const containersOf = (project) => docker(['ps', '-a', '--filter', `label=com.docker.compose.project=${project}`, '--format', '{{.Names}}']).stdout.split('\n').filter(Boolean);
 
+/** The networks of one compose project: `down` removes them with the containers, and a project left with one is a leftover. */
+const networksOf = (project) => docker(['network', 'ls', '--filter', `label=com.docker.compose.project=${project}`, '--format', '{{.Name}}']).stdout.split('\n').filter(Boolean);
+
 /** Does `port` on loopback accept a connection within `timeoutMs`? */
 const accepts = (port, timeoutMs = 10_000) => new Promise((resolve) => {
   const socket = net.connect(port, '127.0.0.1');
@@ -116,11 +119,17 @@ if (process.env[OPT_IN] === '1') {
     it('each `own-down` removes exactly its own, and nothing of the two is left', { timeout: 300_000 }, async () => {
       const [first, second] = started;
       await stopOwnDb(first.name);
+      assert.ok(networksOf(first.project).length > 0 && networksOf(second.project).length > 0, 'a started database has no network of its project');
       assert.deepEqual(containersOf(first.project), [], 'the first database is still there');
+      assert.deepEqual(networksOf(first.project), [], 'the first database left its network');
+      assert.ok(networksOf(second.project).length > 0, 'removing the first removed the second\'s network');
       assert.ok(containersOf(second.project).length > 0, 'removing the first removed the second');
       assert.ok(await accepts(second.port), 'the second database stopped answering');
       await stopOwnDb(second.name);
-      for (const s of started) assert.deepEqual(containersOf(s.project), [], `${s.name} is still there`);
+      for (const s of started) {
+        assert.deepEqual(containersOf(s.project), [], `${s.name} is still there`);
+        assert.deepEqual(networksOf(s.project), [], `${s.name} left its network`);
+      }
       const left = (await listOwnDbs()).filter(d => started.some(s => s.name === d.name));
       assert.deepEqual(left, []);
     });

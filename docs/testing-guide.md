@@ -123,29 +123,47 @@ stack: nobody else can start it or take it down while the file runs. `db-shard-s
 instead, in a compose project of its own that no other run names, and Docker picks its loopback port. Use it from a shell:
 
 ```bash
-read -r name port < <(node testing/_init/db-shard-stack.mjs own-up myfile | tail -n 1)
-YTHRIL_TEST_MONGO_PORT="$port" node --test testing/standalone/<file>-db.test.js
-node testing/_init/db-shard-stack.mjs own-down "$name"
+(
+  set -euo pipefail
+  out=$(node testing/_init/db-shard-stack.mjs own-up myfile | tail -n 1)
+  read -r name port <<< "$out"
+  [[ "${port:-}" =~ ^[0-9]+$ ]] || { echo "own-up printed no port: '$out'" >&2; exit 1; }
+  trap 'node testing/_init/db-shard-stack.mjs own-down "$name"' EXIT
+  YTHRIL_TEST_MONGO_PORT="$port" node --test testing/standalone/<file>-db.test.js
+)
 ```
 
 ```powershell
-$name, $port = @(node testing/_init/db-shard-stack.mjs own-up myfile)[-1] -split ' '
-$env:YTHRIL_TEST_MONGO_PORT = $port
-node --test testing/standalone/<file>-db.test.js
-Remove-Item Env:YTHRIL_TEST_MONGO_PORT
-node testing/_init/db-shard-stack.mjs own-down $name
+& {
+  $ErrorActionPreference = 'Stop'
+  $last = @(node testing/_init/db-shard-stack.mjs own-up myfile)[-1]
+  if ($LASTEXITCODE -ne 0) { throw 'own-up failed' }
+  $name, $port = "$last" -split ' '
+  if ($port -notmatch '^\d+$') { throw "own-up printed no port: '$last'" }
+  $env:YTHRIL_TEST_MONGO_PORT = $port
+  try { node --test testing/standalone/<file>-db.test.js }
+  finally { Remove-Item Env:YTHRIL_TEST_MONGO_PORT -ErrorAction SilentlyContinue; node testing/_init/db-shard-stack.mjs own-down $name }
+}
 ```
+
+Both stop before the file runs when `own-up` fails or prints no port: without a port the file would run against the stack's
+database (PowerShell: assigning `$null` to the variable removes it, and the harness falls back to 27117) or skip every test
+(bash). Both remove the database when the run fails, too.
 
 `own-up <label>` prints `<name> <port>` alone on its last line; the name is the label and eight random hex characters, so two
 starts of one label are two databases. A label is lower-case letters, digits and hyphens, 1 to 40 characters, beginning and
 ending with a letter or digit. Port 27117 belongs to whoever runs the stack; an own database never uses it. An own database is
 one session's: two runs of the same file at once on one database drop each other's data, so give each run its own start. A start
-that fails, or is interrupted by Ctrl+C, prints why the container stopped and removes what it made. `own-list` shows every own
-database with its state, its port and the command that removes it, and `own-down <name>` removes exactly that one, after
-printing why its container stopped if it has. Nothing removes a database nobody removed: `npm run test:down` takes down the
+that fails prints its container's state and removes what it made; one interrupted by Ctrl+C stops the `up` in flight, waits
+for it to end, and then removes the project without printing the state, so the removal is not held up. When a start was stopped
+by its time limit or by an interrupt, the database may still come up, and the error names the `own-down` command that removes
+it. `own-list` shows every own database with its state, its port and the command that removes it, and `own-down <name>`
+removes exactly that one (a project whose container is gone but whose network remains too), after printing its container's
+state. Nothing removes a database nobody removed: `npm run test:down` takes down the
 stack's projects only and never one of these, and `npm run machine:free` prunes after removing the stack, which leaves a
 running own database alone and removes a stopped one, and ends by restarting Docker, which stops them all (their data is not
-kept). At most 8 exist at once; a ninth start is refused, naming `own-list`.
+kept). The most is 8, checked when a start begins: a start that finds 8 is refused, naming `own-list`, and two starts begun
+at the same moment can both pass the check.
 
 **CI runs the database third as one job per shard, not as one job.** A runner has room for one MongoDB, so
 `Standalone (database, shard <i>)` is a matrix: each job starts the one `ythril-mongo-a` and runs
