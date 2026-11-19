@@ -18,7 +18,7 @@ import { findFirstAcrossMembers } from '../../spaces/across-members.js';
 import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { resolveMetaRefs, getSpaceMeta } from '../../spaces/schema-validation.js';
 import { type UpdateValidation } from '../../brain/write-validation.js';
-import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE, VIOLATION_ROW_RULE } from '../schema-warnings.js';
 import { TTL_DAYS_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, SUPERSEDED_SCHEMA, ttlDaysFromArgs, unitScoreSchema, uuidSchema, waitForEmbeddingSchema, DELETION_REACH, FORKS_GO_WITH_THEIR_SUBJECT, FORK_ROWS_ARE_READ_ONLY } from './shared.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
@@ -33,6 +33,7 @@ export const save_factTool: ToolHandler = {
     + 'WITH an `id` that already names a record it CONVERGES instead of duplicating — that is the retry-safety contract, and it is why a repeated call after a timeout is safe. Convergence MERGES, the same way `save_entity` does: tags are unioned and properties shallow-merged over what is stored, so a partial payload does not erase the rest. An id that names nothing is ignored rather than adopted; identity is server-generated.\n\n'
     + 'Embedding is ASYNCHRONOUS. The write returns as soon as the record is stored and a queued job computes the vector. `recall` covers the second half of that gap for you — it always scans the newest records straight from the collection, so a record the vector index has not ingested yet is still found, with no parameter and nothing to wait for. What it cannot cover is a record whose embedding job has NOT RUN yet: the scan compares vectors, so there has to be one. `list_embed_jobs` says whether the queue is behind.\n\n'
     + 'IF THE SPACE VALIDATES, a refusal names WHOSE FAULT it is: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.\n\n'
+    + VIOLATION_ROW_RULE + '\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
@@ -228,6 +229,7 @@ export const update_factTool: ToolHandler = {
     + 'RESPONSE: one line with the fact\'s id and its new `seq` — the fact\'s version, which a peer compares to know '
     + 'whether this copy is newer. A fact whose next version would pass the ceiling is refused (`409` `record_version_at_ceiling`, nothing '
     + 'written). An id that does not exist is an error, not a silent no-op.\n\n'
+    + VIOLATION_ROW_RULE + '\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,

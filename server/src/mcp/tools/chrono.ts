@@ -6,7 +6,7 @@ import { createChrono, deleteChrono, getChronoById, updateChrono, parseRecurrenc
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The API layer's write gate, imported rather than reimplemented — see the note in memory.ts.
 import type { UpdateValidation } from '../../brain/write-validation.js';
-import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE, VIOLATION_ROW_RULE } from '../schema-warnings.js';
 
 /**
  * What a passed due moment means — ONE sentence, quoted everywhere that used to state it.
@@ -45,6 +45,7 @@ export const save_chronoTool: ToolHandler = {
     + 'THIS IS THE RECORD FOR ANYTHING DATED, and the reason the distinction matters: a fact saying "the migration is planned for March" is a fact whose truth expires, while a chrono entry carries `startsAt`/`endsAt` and a `status`, so it can be listed by date, found by `filter` in a window, and closed rather than contradicted. If it has a date, it belongs here.\n\n'
     + 'Link it with `linkEntities` — that is what lets `graph_traverse` reach it from the entity it is about (with `includeChrono`, on by default). `entityIds` was the 4.x spelling and is REFUSED in 5.0. Those links are NOT edges, so a chrono entry left unlinked is reachable only by search or by date, never from the thing it concerns.\n\n'
     + 'An INSERT — unless `id` names an existing entry, when it CONVERGES onto it (the retry-safety contract, as on `save_fact`); use `update_chrono` for a partial change, including to move its `status`. IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.\n\n'
+    + VIOLATION_ROW_RULE + '\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
@@ -270,6 +271,7 @@ export const update_chronoTool: ToolHandler = {
     + 'RESPONSE: one line with the entry\'s id and its new `seq` — the entry\'s version, which a peer compares to know '
     + 'whether this copy is newer. An entry whose next version would pass the ceiling is refused (`409` `record_version_at_ceiling`, nothing '
     + 'written). An id that does not exist is an error, not a silent no-op.\n\n'
+    + VIOLATION_ROW_RULE + '\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,

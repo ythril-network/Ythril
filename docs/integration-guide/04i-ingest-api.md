@@ -45,7 +45,7 @@ writes its claims twice; only the transcripts, which live at a derived path, are
 | `phase` | `queued`, `extracting`, `writing`, `done` or `failed` |
 | `error` | why a `failed` run failed |
 | `written` | counts per step: `entities`, `claims`, `chrono`, `edges`, `transcripts` |
-| `writeErrors` | records the write refused, each with its step, key and reason — nothing was sent pointing at them |
+| `writeErrors` | records the write refused, each with its step, key and reason, and the batch row's `violation` or `warning` when it had one (rows with `code` and `params`) — nothing was sent pointing at them |
 | `dropped` | claims that could not be written true to their turns, and why |
 | `uncovered` | turns no claim covers |
 | `backends` | which models answered (`jev` or `assist`) |
