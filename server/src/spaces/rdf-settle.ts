@@ -24,7 +24,7 @@
  * Pure: the public URL, whether the space is networked and the epochs of the held rounds are handed in.
  */
 import { z } from 'zod';
-import { BaseIriZ, RDF_BASE_EPOCH_MAX, type RdfBaseConflict, type RdfSetting } from '@ythril-network/schema';
+import { BaseIriZ, NamespaceIriZ, RDF_BASE_EPOCH_MAX, type RdfBaseConflict, type RdfSetting } from '@ythril-network/schema';
 import type { NetworkConfig, SpaceConfig, VoteRound } from '../config/types.js';
 import { defaultBaseFor, defaultVocabFor } from '../rdf/term-iri.js';
 import { localToRemote, remoteToLocal } from '../sync/space-map.js';
@@ -48,8 +48,11 @@ export interface RdfSettleContext {
   heldRebaseEpochs?: ReadonlySet<number>;
   /** The network a layer or round came from, named in a conflict. */
   networkId?: string;
-  /** The bases peers offer at a higher epoch (the recorded conflicts of the space): a networked rebase to one of them accepts it. */
-  offeredBases?: readonly { base: string; epoch: number }[];
+  /**
+   * The names peers offer at the same or a higher epoch (the recorded conflicts of the space, as `rdfBaseConflictOf` reads them): a networked
+   * rebase to one of them accepts it, with its vocab.
+   */
+  offeredBases?: readonly { base: string; vocab?: string; epoch: number }[];
 }
 
 /** A rebase a networked door proposes as a `space_rebase` round. */
@@ -140,8 +143,13 @@ export function rdfBaseConflictOf(cfg: { networks: readonly NetworkConfig[] }, l
  * Does an offered base still stand against what the space `held` holds: another base at the same or a higher epoch. A lower epoch is a stale
  * copy, and the same base agrees.
  */
-function offerStands(o: { base: string; epoch: number }, held: RdfSetting): boolean {
-  return o.epoch >= (held.baseEpoch ?? 0) && o.base !== held.base;
+function offerStands(o: { base: string; vocab?: string; epoch: number }, held: RdfSetting): boolean {
+  return o.epoch >= (held.baseEpoch ?? 0) && (o.base !== held.base || vocabOf(o) !== vocabOf(held));
+}
+
+/** The vocab of a setting or an offer: its own, or the default under its base (the vocab travels with the base, review finding 3). */
+function vocabOf(r: { base?: string; vocab?: string }): string | undefined {
+  return r.vocab ?? (r.base ? defaultVocabFor(r.base) : undefined);
 }
 
 /**
@@ -166,21 +174,22 @@ export const SERVED_RDF_BASES_MAX = 1_000;
 const SERVED_SPACE_KEY_MAX = 200;
 
 /** One space's base as a member serves it beside its vote list: read by the setting's own validators, never taken as it came. */
-const ServedRdfBaseZ = z.object({ base: BaseIriZ, baseEpoch: z.number().int().min(0).max(RDF_BASE_EPOCH_MAX) }).strip();
+const ServedRdfBaseZ = z.object({ base: BaseIriZ, vocab: NamespaceIriZ.optional(), baseEpoch: z.number().int().min(0).max(RDF_BASE_EPOCH_MAX) }).strip();
 
 /** The network types whose members exchange `rdfBases`: the voted ones, which pull no schema layer (pub/sub and braintree have the layer). */
 const VOTED_NETWORK_TYPES: ReadonlySet<string> = new Set(['closed', 'club', 'democratic']);
 
 /**
  * What this member serves a peer of `net` beside its vote list (Q-748; owner, 2026-11-19, "tell it, do not move it"): each space `net` carries
- * here with RDF on, under the NETWORK's id for it, as `{ base, baseEpoch }`. Nothing for a space with RDF off.
+ * here with RDF on, under the NETWORK's id for it, as `{ base, vocab, baseEpoch }`: the vocab travels with the base. Nothing for a space with
+ * RDF off.
  */
-export function servedRdfBasesOf(net: Pick<NetworkConfig, 'spaces' | 'spaceMap'>, spaces: readonly SpaceConfig[]): Record<string, { base: string; baseEpoch: number }> {
-  const out: Record<string, { base: string; baseEpoch: number }> = {};
+export function servedRdfBasesOf(net: Pick<NetworkConfig, 'spaces' | 'spaceMap'>, spaces: readonly SpaceConfig[]): Record<string, { base: string; vocab: string; baseEpoch: number }> {
+  const out: Record<string, { base: string; vocab: string; baseEpoch: number }> = {};
   for (const local of net.spaces) {
     const rdf = spaces.find(s => s.id === local)?.meta?.rdf;
     if (rdf?.enabled !== true || !rdf.base) continue;
-    out[localToRemote(net as NetworkConfig, local)] = { base: rdf.base, baseEpoch: rdf.baseEpoch ?? 0 };
+    out[localToRemote(net as NetworkConfig, local)] = { base: rdf.base, vocab: vocabOf(rdf)!, baseEpoch: rdf.baseEpoch ?? 0 };
   }
   return out;
 }
@@ -216,8 +225,10 @@ export function takeServedRdfBases(net: NetworkConfig, spaces: readonly SpaceCon
     if (!offer.success) continue;
     // A lower epoch is a stale copy; the same base agrees. Another base at the SAME epoch is a conflict too (review finding 2): two
     // members that enabled RDF apart each hold their own instance's default base at epoch 0.
-    if (offer.data.baseEpoch < heldEpoch || offer.data.base === held.base) continue;
-    const next: RdfBaseConflict = { held: { base: held.base, epoch: heldEpoch }, offered: [{ networkId: net.id, base: offer.data.base, epoch: offer.data.baseEpoch }] };
+    // The vocab travels with the base (review finding 3): the same base with another vocab is a conflict as well.
+    const offered = { base: offer.data.base, vocab: vocabOf(offer.data)!, epoch: offer.data.baseEpoch };
+    if (!offerStands(offered, held)) continue;
+    const next: RdfBaseConflict = { held: { base: held.base, vocab: vocabOf(held)!, epoch: heldEpoch }, offered: [{ networkId: net.id, ...offered }] };
     if (JSON.stringify(conflicts[local]) === JSON.stringify(next)) continue;
     conflicts[local] = next;
     changed = true;
@@ -259,6 +270,21 @@ function settleLocal(stored: RdfSetting | undefined, sent: Partial<RdfSetting> &
   const heldVocab = stored.vocab ?? defaultVocabFor(stored.base);
   const baseMoves = sent.base !== undefined && sent.base !== stored.base;
   const vocabMoves = sent.vocab !== undefined && sent.vocab !== heldVocab;
+  // The names a peer of a voted network offers at the same or a higher epoch (a recorded conflict) are ACCEPTED here, at their epoch and with
+  // THEIR vocab, with no round: the network already moved (or the two members enabled RDF apart), and this member's admin takes them over
+  // (owner, 2026-11-19: "tell it, do not move it"). A vocab the admin sends must be the offered one; the offered vocab is never replaced by
+  // the default under the base (review finding 3).
+  const offer = sent.rebase === true && ctx.networked && sent.base !== undefined
+    ? ctx.offeredBases?.find(o => o.base === sent.base && o.epoch >= epoch && (sent.vocab === undefined || sent.vocab === vocabOf(o))
+      && (o.base !== stored.base || vocabOf(o) !== heldVocab))
+    : undefined;
+  if (offer) {
+    return {
+      ok: true, acceptedOffer: true,
+      rdf: clean({ enabled, base: offer.base, vocab: vocabOf(offer), baseEpoch: offer.epoch }),
+      rebased: { from: stored.base, to: offer.base, epoch: offer.epoch },
+    };
+  }
   if (!baseMoves && !vocabMoves) {
     if (sent.rebase === true) {
       return { ok: false, status: RDF_BASE_STANDS_STATUS, code: 'rdf_base_unchanged', error: `rdf.rebase asks for a new base, and ${sent.base ?? stored.base} is the base this space already has: send a different rdf.base` };
@@ -272,16 +298,6 @@ function settleLocal(stored: RdfSetting | undefined, sent: Partial<RdfSetting> &
       + (baseMoves ? 'send rdf.rebase: true with the new base to change it deliberately; every address the space gave out changes with it' : 'the vocab moves only with the base: send a new rdf.base with rdf.rebase: true') };
   }
   const next: RebaseProposal = { base: sent.base!, vocab: sent.vocab ?? defaultVocabFor(sent.base!), epoch: epoch + 1 };
-  // A base a peer of a voted network offers at a higher epoch (a recorded conflict) is ACCEPTED here, at its epoch, with no round: the network
-  // already moved, this member missed it, and its admin is taking it over (owner, 2026-11-19: "tell it, do not move it").
-  const offer = ctx.networked ? ctx.offeredBases?.find(o => o.base === next.base && o.epoch > epoch) : undefined;
-  if (offer) {
-    return {
-      ok: true, acceptedOffer: true,
-      rdf: clean({ enabled, base: next.base, vocab: next.vocab, baseEpoch: offer.epoch }),
-      rebased: { from: stored.base, to: next.base, epoch: offer.epoch },
-    };
-  }
   if (ctx.networked) return { ok: true, rdf: clean({ ...stored, enabled }), proposeRebase: next };
   return {
     ok: true,
@@ -293,13 +309,17 @@ function settleLocal(stored: RdfSetting | undefined, sent: Partial<RdfSetting> &
 function settleArriving(stored: RdfSetting | undefined, sent: Partial<RdfSetting>, ctx: RdfSettleContext): RdfSettled {
   if (!stored?.base) return { ok: true, rdf: clean({ ...sent, enabled: sent.enabled ?? stored?.enabled ?? false }) };
   const kept = clean({ ...stored, enabled: sent.enabled ?? stored.enabled });
-  if (sent.base === undefined || sent.base === stored.base) return { ok: true, rdf: kept };
+  // The vocab travels with the base (review finding 3): the same base with another vocab differs too.
+  if (sent.base === undefined || (sent.base === stored.base && vocabOf(sent) === vocabOf(stored))) return { ok: true, rdf: kept };
   const heldEpoch = stored.baseEpoch ?? 0;
   const offeredEpoch = sent.baseEpoch ?? 0;
   if (offeredEpoch < heldEpoch) return { ok: true, rdf: kept };
   if (offeredEpoch > heldEpoch && ctx.heldRebaseEpochs?.has(offeredEpoch)) return { ok: true, rdf: kept };
   return {
     ok: true, rdf: kept,
-    conflict: { held: { base: stored.base, epoch: heldEpoch }, offered: [{ ...(ctx.networkId ? { networkId: ctx.networkId } : {}), base: sent.base, epoch: offeredEpoch }] },
+    conflict: {
+      held: { base: stored.base, vocab: vocabOf(stored)!, epoch: heldEpoch },
+      offered: [{ ...(ctx.networkId ? { networkId: ctx.networkId } : {}), base: sent.base, vocab: vocabOf(sent)!, epoch: offeredEpoch }],
+    },
   };
 }

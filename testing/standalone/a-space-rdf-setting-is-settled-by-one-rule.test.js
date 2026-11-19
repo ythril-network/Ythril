@@ -96,7 +96,7 @@ for (const source of ['settings-round', 'layer']) {
     it('another base at the same epoch never moves it, and is a named conflict', () => {
       const out = settle(STORED, { enabled: true, base: NEW, vocab: `${NEW}vocab/`, baseEpoch: 0 }, source, { networkId: 'n1' });
       assert.deepEqual(out.rdf, STORED);
-      assert.deepEqual(out.conflict, { held: { base: OLD, epoch: 0 }, offered: [{ networkId: 'n1', base: NEW, epoch: 0 }] });
+      assert.deepEqual(out.conflict, { held: { base: OLD, vocab: `${OLD}vocab/`, epoch: 0 }, offered: [{ networkId: 'n1', base: NEW, vocab: `${NEW}vocab/`, epoch: 0 }] });
     });
     it('another base at a higher epoch never moves it either; with no round held for it, it is a conflict', () => {
       const out = settle(STORED, { enabled: true, base: NEW, baseEpoch: 1 }, source, {});

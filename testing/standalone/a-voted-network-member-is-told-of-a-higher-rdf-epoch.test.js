@@ -38,7 +38,7 @@ describe('a voted-network member compares the bases its peers serve', () => {
       const n = net(type);
       const s = spaces();
       assert.equal(take(n, s, { notes: { base: NEW_BASE, baseEpoch: 1 } }), true);
-      assert.deepEqual(n.rdfBaseConflicts, { notes: { held: { base: OLD.base, epoch: 0 }, offered: [{ networkId: 'net-1', base: NEW_BASE, epoch: 1 }] } });
+      assert.deepEqual(n.rdfBaseConflicts, { notes: { held: { base: OLD.base, vocab: OLD.vocab, epoch: 0 }, offered: [{ networkId: 'net-1', base: NEW_BASE, vocab: `${NEW_BASE}vocab/`, epoch: 1 }] } });
       assert.deepEqual(s[0].meta.rdf, OLD);
     });
   }
