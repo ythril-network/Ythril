@@ -58,7 +58,7 @@ describe('space-settings-state keeps a type\'s iri', () => {
     const out = c.buildMeta().typeSchemas!.entity!;
     expect(out['person']).toMatchObject({ iri: 'https://schema.org/Person', description: 'a person, edited' });
     expect(out['person'].propertySchemas!['email']).toMatchObject({ iri: 'https://schema.org/email' });
-    expect(out['plain'].iri).toBeUndefined();
+    expect(out['plain']).not.toHaveProperty('iri');
   });
 });
 
