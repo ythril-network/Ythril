@@ -10,6 +10,9 @@
  *   there and it keeps its base, its epoch and every name it gave out.
  * - **A landing lost to a restart.** What is owed is the round itself, kept in the network config by the prune until it has landed
  *   (`rebaseRoundUnapplied`); the expiry tick lands every owed one through {@link applyOwedRebaseRounds}; nothing is held in memory.
+ * - **A landing marked before its store** (review finding 13 of slice A). The round is marked only after the store succeeded: a store that
+ *   throws leaves it owed for the next tick, said once per window; a moved setting no stored meta can hold concludes the round as FAILED
+ *   (`refusedHere`, a log line, `space.rdf_rebase_failed`), never as landed.
  * - **A landing twice.** The round is marked through `settleSpaceAct`, and the setting refuses an epoch it already holds (`settleRdf`,
  *   `rebase-round`).
  * - **Two members on two bases at one epoch** (review finding 1 of slice A). A door refuses a rebase while one is held, but two members can
@@ -22,15 +25,21 @@
  * stays out of the server's largest import cycle.
  */
 import type { Config, NetworkConfig, VoteRound } from '../config/types.js';
-import { auditRoundEffect, SPACE_RDF_REBASE_OPERATION, SPACE_RDF_REBASE_SUPERSEDED_OPERATION } from '../networks/round-audit.js';
+import {
+  auditRoundEffect, SPACE_RDF_REBASE_FAILED_OPERATION, SPACE_RDF_REBASE_OPERATION, SPACE_RDF_REBASE_SUPERSEDED_OPERATION,
+} from '../networks/round-audit.js';
 import { log, peerText } from '../util/log.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 import { rebaseLandingOrder, rebaseRoundOwed, roundPassedUnvetoed } from '../networks/round-state.js';
 import { rebaseRoundSpaceOf, settleRdf } from './rdf-settle.js';
 import { storeMovedRdf } from './rdf-store.js';
 import { settleSpaceAct } from './apply-wipe-round.js';
 
 /** The audit operations of a landing (declared with the other round effects, `networks/round-audit.ts`, which the audit table gate reads). */
-export { SPACE_RDF_REBASE_OPERATION, SPACE_RDF_REBASE_SUPERSEDED_OPERATION };
+export { SPACE_RDF_REBASE_OPERATION, SPACE_RDF_REBASE_SUPERSEDED_OPERATION, SPACE_RDF_REBASE_FAILED_OPERATION };
+
+/** A store that threw: said once per round per window, so a fault that lasts does not write a line every tick. */
+const storeFault = warnOnce<string>({ max: 10, every: SAY_ONCE_WINDOW_MS });
 
 /** The round that lands `epoch` of `localSpaceId`: the first by landing order of every passed rebase round held for it, over every network. */
 function winnerOf(cfg: Config, localSpaceId: string, epoch: number): VoteRound | undefined {
@@ -74,9 +83,24 @@ export function applyOwedRebaseRounds(net: NetworkConfig, cfg: Config, now: numb
       continue;
     }
     const settled = settleRdf(stored, round.rebase, 'rebase-round');
+    if (!settled.ok || !settled.rebased || !settled.rdf) { settleSpaceAct(net, round, 'completed'); continue; }
+    // Marked only once the store succeeded (review finding 13): a store that throws leaves the round owed, landed by the next tick.
+    let storedHere: boolean;
+    try {
+      storedHere = storeMovedRdf(cfg, space, settled.rdf);
+    } catch (err) {
+      storeFault(round.roundId, () => log.warn(`space '${peerText(space.id)}': rebase round ${peerText(round.roundId)} could not be stored now, `
+        + `and is tried again at the next tick: ${peerText(err)}`));
+      continue;
+    }
+    if (!storedHere) {
+      // A moved setting no stored meta can hold never stores: concluded as FAILED here, said on the round and audited, never as landed.
+      round.refusedHere = `the moved RDF setting (${peerText(round.rebase.base)}) could not be stored in this space's meta, so the base did not move here`;
+      log.warn(`space '${peerText(space.id)}': rebase round ${peerText(round.roundId)} of network ${peerText(net.id)} failed here: ${round.refusedHere}`);
+      auditRoundEffect(SPACE_RDF_REBASE_FAILED_OPERATION, net.id, round.roundId, space.id);
+      continue;
+    }
     settleSpaceAct(net, round, 'completed');
-    if (!settled.ok || !settled.rebased || !settled.rdf) continue;
-    if (!storeMovedRdf(cfg, space, settled.rdf)) continue;
     log.info(`space '${peerText(space.id)}': RDF base moved from ${peerText(settled.rebased.from)} to ${peerText(settled.rebased.to)} `
       + `(epoch ${settled.rebased.epoch}) by round ${peerText(round.roundId)} of network ${peerText(net.id)}`);
     // Through the one writer of a round's effects, which never throws and names the network and the round in the path.
