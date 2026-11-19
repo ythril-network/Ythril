@@ -11,6 +11,7 @@ import { UNCONVERTED_CLASSES, reasonClassOf, type OpenTypeRef, type UnconvertedC
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { rovingIndex } from '../../shared/roving-focus';
+import { REVIEW_CARD_STYLES, REVIEW_SEGMENTED_STYLES, reviewSegmentedPhone } from './review-panel.styles';
 import { UNCONVERTED_PAGE_SIZE, type RunLine, type ReviewUnconvertedState, type UnconvertedClassChoice } from './review-unconverted-state';
 
 /** The fields of a record's properties are listed as the server names them (`properties.age`); the card names the property. */
@@ -57,8 +58,8 @@ interface CardView {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [NgTemplateOutlet, TranslocoPipe, ErrorStateComponent, PhIconComponent],
-  styles: [`
-    :host { display: block; }
+  styles: [REVIEW_SEGMENTED_STYLES, reviewSegmentedPhone(760), REVIEW_CARD_STYLES, `
+    :host { display: block; --rv-grid-top: 12px; }
     .intro { color: var(--text-muted); font-size: 13px; margin: 0 0 16px; }
     .refusal { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; margin: 8px 0 12px; font-size: 13px; }
     .refusal-body { flex: 1 1 220px; min-width: 0; }
@@ -83,24 +84,8 @@ interface CardView {
 
     /* The class switch: one radio group, one cell per class with its count; a 2 x 2 grid on a phone. */
     .sw { margin: 12px 0 0; }
-    .sg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; background: var(--bg-surface); }
-    .sg-opt { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 7px 16px; min-height: 36px; font: inherit; font-size: 13px; font-weight: 500; color: var(--text-secondary); background: transparent; border: none; border-left: 1px solid var(--border); cursor: pointer; white-space: nowrap; }
-    .sg-opt:first-child { border-left: none; }
-    .sg-opt:hover { color: var(--text-primary); background: var(--bg-elevated); }
-    .sg-opt[aria-checked="true"] { color: var(--text-primary); background: var(--bg-overlay); box-shadow: inset 0 -2px 0 var(--accent); }
-    .sg-n { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-muted); }
-    .sg-opt[aria-checked="true"] .sg-n { color: var(--text-secondary); }
-
-    /* The cards are the Duplicates cards' (the drawing reuses them), so the same queue does not look like two products. */
-    .dup-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; margin-top: 12px; }
-    .dup-card { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-    .dup-card-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
-    .dup-type { color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; overflow-wrap: anywhere; }
-    .dup-when { color: var(--text-muted); font-size: 11px; margin-left: auto; }
+    /* The switch and the cards are the shared Review style (review-panel.styles.ts): the same queue does not look like two products. */
     .dup-when time { font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .dup-rec { border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 9px; background: var(--bg-primary); min-width: 0; }
-    .dup-rec-l { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
-    .dup-rec-txt { font-size: 12px; white-space: pre-wrap; word-break: break-word; color: var(--text-primary); }
     .gone { color: var(--text-muted); font-style: italic; }
     .cv-rid { margin-top: 4px; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); }
     .sug-why { margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.45; }
@@ -111,14 +96,9 @@ interface CardView {
     .pagination { margin-top: 16px; }
 
     /* The app has no global focus ring, so these controls draw their own. */
-    .sg-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
     .refusal-close:focus-visible, .filters-d summary:focus-visible, .type-filter select:focus-visible, .dup-actions button:focus-visible, .acts button:focus-visible, .pagination button:focus-visible, .empty-state button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     @media (max-width: 760px) {
-      .sg { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
-      .sg-opt { border-left: none; border-top: 1px solid var(--border); justify-content: space-between; }
-      .sg-opt:nth-child(-n+2) { border-top: none; }
-      .sg-opt:nth-child(even) { border-left: 1px solid var(--border); }
       .dup-grid { grid-template-columns: minmax(0, 1fr); }
       .dup-actions .btn { flex: 1 1 40%; justify-content: center; }
     }
