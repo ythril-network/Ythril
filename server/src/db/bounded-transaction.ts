@@ -204,6 +204,14 @@ class Retry extends Error {
   constructor(readonly failure: unknown) { super('retry'); }
 }
 
+/**
+ * The server ended a statement this module sent with the deadline's remainder as its time limit: the bound's end, answered as
+ * the bound's `StoreTimeout` by `inBoundedTransaction`, which alone knows the failure an earlier attempt retried on.
+ */
+class EndedAtTheDeadline extends Error {
+  constructor(readonly failure: unknown) { super('ended at the deadline'); }
+}
+
 /** Abort the open transaction, waiting at most `SEAL_MS`. NEVER throws: the driver itself ignores an abort's failure. */
 async function abortWithin(session: ClientSession): Promise<void> {
   if (!session.inTransaction()) return;
@@ -237,11 +245,25 @@ async function commitWithin(session: ClientSession, ms: number): Promise<void> {
  * number". A merge, a relink and a fork re-mint failed that way on every call. This read starts it alone; everything `fn` sends
  * then joins a transaction already open, which is how those statements ran for years. It reads one `_id` of the seal's
  * collection, which holds nothing, bounded like any statement: the server's deadline and a signal.
+ *
+ * ## Its end at the deadline is decided by the limit it was sent with (`Q-935`)
+ *
+ * When the deadline's remainder is no more than the scope's per-operation figure, the read carries that remainder, and the
+ * server's time-limit end of it is the bound's end: THROWS `EndedAtTheDeadline`. Not decided by this process's clock: the server
+ * counts the limit on its own clock from when the read arrives, and its answer was back while ours still read short of the
+ * deadline, so a clock comparison let the driver's raw error through. A read that carried the shorter per-operation figure is
+ * thrown as it came.
  */
 async function openOnTheServer(session: ClientSession, left: number): Promise<void> {
-  const ms = Math.max(1, Math.min(left, boundOperationMs() ?? left));
-  await getMongo().db(getDb().databaseName).collection(SEAL_COLLECTION)
-    .findOne({ _id: '__transaction_opens__' as unknown as never }, { session, maxTimeMS: ms, signal: ownSignal(ms) });
+  const perOp = boundOperationMs() ?? left;
+  const ms = Math.max(1, Math.min(left, perOp));
+  try {
+    await getMongo().db(getDb().databaseName).collection(SEAL_COLLECTION)
+      .findOne({ _id: '__transaction_opens__' as unknown as never }, { session, maxTimeMS: ms, signal: ownSignal(ms) });
+  } catch (err) {
+    if (left <= perOp && isMaxTimeExpired(err)) throw new EndedAtTheDeadline(err);
+    throw err;
+  }
 }
 
 /** One attempt: start, run `fn`, commit (again while the outcome is unknown and time is left). THROWS `Retry` for a transient failure. */
@@ -297,13 +319,16 @@ export async function inBoundedTransaction<T>(
         return await attempt(session, fn, deadline, commitCap, done);
       } catch (err) {
         if (!(err instanceof Retry)) {
+          // The server ending the attempt's opening read at the deadline, by the limit it was sent with (`openOnTheServer`).
+          if (err instanceof EndedAtTheDeadline) throw new StoreTimeout('the transaction', { cause: lastFailure ?? err.failure });
           // The bound ending a later attempt (its early-deadline throw, the commit's race, the write-bound scope) says no cause of its own.
           if (err instanceof StoreTimeout && err.cause === undefined && lastFailure !== undefined) {
             throw new StoreTimeout('the transaction', { cause: lastFailure });
           }
           // The server ending a statement because the transaction's deadline passed: an attempt begun with a few ms left sends
           // that few ms as its `maxTimeMS`, and MaxTimeMSExpired is the bound's end, not a failure of the store's own. A statement's
-          // time limit that ends it BEFORE the deadline is not the bound's, and is thrown as it came.
+          // time limit that ends it BEFORE the deadline is not the bound's, and is thrown as it came. A statement of `fn` is decided by
+          // the clock: its limit is set where it is sent (`db/write-bound.ts`, `planBound`) and is not known here.
           if (!(err instanceof StoreTimeout) && isMaxTimeExpired(err) && Date.now() >= deadline) {
             throw new StoreTimeout('the transaction', { cause: lastFailure ?? err });
           }
