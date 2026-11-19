@@ -9,8 +9,8 @@
  * - **The server's order.** The type step first, then the property steps (a property step names the type by its NEW name).
  * - **Nothing the ledger does not hold is a step.** A removed enum value is an OFFER of a map, never a step, and its target is never
  *   invented: the offered row has an empty target and is not a step until a person chooses one.
- * - **A rule or a naming pattern that still names a renamed property's old name is a warning**, naming the rule: a rename does not
- *   rewrite them.
+ * - **A rule that still names a renamed property's old name is a warning**, naming the rule: a rename does not rewrite rules. A naming
+ *   pattern is none: it checks a record's name and cannot name a property (S6 dropped the warning S5 built for it).
  * - **The editor's rows are strings throughout**, so a half-typed row is representable and is not a step (and so is never sent).
  *
  * ## Seen red
@@ -160,7 +160,7 @@ describe('a removed enum value is an offer, never a step', () => {
   });
 });
 
-describe('a rule or a naming pattern that still names the old name of a renamed property is a warning', () => {
+describe('a rule that still names the old name of a renamed property is a warning, a naming pattern is not', () => {
   const ledger: RenameLedger = { types: [], props: [{ kind: 'entity', type: 'person', wasType: 'person', from: 'company', to: 'employer' }] };
   const original: ConvertSchemas = { entity: { person: person({ company: { type: 'string' } }) } };
   const stagedWith = (more: Partial<TypeSchema>): ConvertSchemas => ({ entity: { person: person({ employer: { type: 'string' } }, more) } });
@@ -188,10 +188,13 @@ describe('a rule or a naming pattern that still names the old name of a renamed 
     expect(block!.warnings).toEqual([]);
   });
 
-  it('warns about the naming pattern when it holds the old name as a whole word', () => {
-    const [block] = convertBlocks(original, stagedWith({ namingPattern: '^company-[a-z]+$' }), ledger);
-    expect(block!.warnings).toEqual([{ kind: 'namingPattern', type: 'person', property: 'company', to: 'employer' }]);
+  it('never warns about a naming pattern, even one holding the old property name as a whole word: a pattern checks a record\'s NAME and cannot name a property', () => {
+    expect(convertBlocks(original, stagedWith({ namingPattern: '^company-[a-z]+$' }), ledger)[0]!.warnings).toEqual([]);
+    expect(convertBlocks(original, stagedWith({ namingPattern: 'company' }), ledger)[0]!.warnings).toEqual([]);
     expect(convertBlocks(original, stagedWith({ namingPattern: '^companyX-[a-z]+$' }), ledger)[0]!.warnings).toEqual([]);
+    // a rule beside the pattern still warns, so the pattern is the only thing dropped
+    const both = convertBlocks(original, stagedWith({ namingPattern: 'company', rules: { r: { rule: 'self.properties.company != ""', message: 'm' } } }), ledger)[0]!;
+    expect(both.warnings.map(w => w.kind)).toEqual(['rule']);
   });
 
   it('warns only for a renamed property: a rule naming a property that was not renamed is none of the ledger\'s business', () => {

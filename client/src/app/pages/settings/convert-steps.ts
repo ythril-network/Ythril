@@ -14,9 +14,9 @@
  * - **A step the ledger does not hold.** A removed enum value cannot say what it becomes, so it is an {@link MapOffer}: the editor shows
  *   a map row with every old value and NO target ({@link offerStep}), and the row is not a step until a person chose each one
  *   ({@link stepOf} is `null` for it). The page never sends a target it made up.
- * - **A rename that leaves a rule behind.** A rename rewrites no rule and no naming pattern, so a rule that still reads the old property
- *   name keeps reading nothing. {@link convertBlocks} finds each such rule (and a naming pattern that holds the old name) and says which,
- *   in `warnings` of the block of its type; the page words it as a line on the block.
+ * - **A rename that leaves a rule behind.** A rename rewrites no rule, so a rule that still reads the old property name keeps reading
+ *   nothing. {@link convertBlocks} finds each such rule and says which, in `warnings` of the block of its type; the page words it as a
+ *   line on the block. A naming pattern is not looked at: it checks a record's name and cannot name a property.
  * - **A step the server would refuse on its face.** An editor row is strings throughout (a half-typed row must be representable), and
  *   {@link stepOf} is `null` for a row that is not yet a step: an empty name, an unchanged name, a map with an empty target or a value named
  *   twice, a split with no case or a case with no condition or target. Only complete rows are sent ({@link stepsOfEdits}); the index
@@ -42,10 +42,8 @@ export type ConvertSchemas = Partial<Record<TypedKind, Record<string, TypeSchema
 /** A property whose stored enum had values the staged one lacks: the values, as text. The editor offers a map for them; none is a step. */
 export interface MapOffer { kind: TypedKind; type: string; property: string; removed: string[] }
 
-/** A rule, or the naming pattern, of a type that still names the old name of a renamed property. `property` is the old name, `to` the new one. */
-export type ConvertWarning =
-  | { kind: 'rule'; type: string; rule: string; property: string; to: string }
-  | { kind: 'namingPattern'; type: string; property: string; to: string };
+/** A rule of a type that still names the old name of a renamed property. `property` is the old name, `to` the new one. */
+export type ConvertWarning = { kind: 'rule'; type: string; rule: string; property: string; to: string };
 
 /** One changed type: S2's block (`was` is the stored name of a renamed type) with what the dialog also says about it. */
 export interface ConvertBlockPlan extends ConvertBlock { offers: MapOffer[]; warnings: ConvertWarning[] }
@@ -109,12 +107,7 @@ function ruleReads(rule: string, name: string): boolean {
   return dotted.test(rule) || bracketed.test(rule);
 }
 
-/** Does the text hold `name` as a whole word (not inside a longer identifier)? */
-function holdsWord(text: string, name: string): boolean {
-  return new RegExp(`(^|[^${IDENT}])${escaped(name)}(?![${IDENT}])`).test(text);
-}
-
-/** The rules and the naming pattern of the staged type that still name the old name of a property this block renamed. */
+/** The rules of the staged type that still name the old name of a property this block renamed (a naming pattern checks a record's name and cannot name a property, so it is not looked at). */
 function warningsOf(kind: TypedKind, type: string, now: TypeSchema, ledger: RenameLedger): ConvertWarning[] {
   const out: ConvertWarning[] = [];
   for (const rename of ledger.props) {
@@ -123,9 +116,6 @@ function warningsOf(kind: TypedKind, type: string, now: TypeSchema, ledger: Rena
     if (own(now.propertySchemas, rename.from)) continue;
     for (const [rule, body] of Object.entries(now.rules ?? {})) {
       if (typeof body?.rule === 'string' && ruleReads(body.rule, rename.from)) out.push({ kind: 'rule', type, rule, property: rename.from, to: rename.to });
-    }
-    if (typeof now.namingPattern === 'string' && holdsWord(now.namingPattern, rename.from)) {
-      out.push({ kind: 'namingPattern', type, property: rename.from, to: rename.to });
     }
   }
   return out;

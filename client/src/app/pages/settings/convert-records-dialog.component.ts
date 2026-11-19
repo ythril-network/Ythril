@@ -52,8 +52,8 @@ import { piecesOf, type SentencePiece } from './vote-conversion-block.component'
  *   on it and focus on its sentence.
  * - **Nothing to convert, said as a choice.** With no records of any type the choice is not offered: the footer says there is nothing to
  *   convert and the one act is Save.
- * - **A rule left behind.** A rename rewrites no rule: a rule or naming pattern that still names a renamed property's old name is a warning
- *   line on the block of its type.
+ * - **A rule left behind.** A rename rewrites no rule: a rule that still names a renamed property's old name is a warning line on the
+ *   block of its type (a naming pattern checks a record's name and cannot name a property, so it gives none).
  * - **Escape closing too much.** Escape closes the innermost layer: a new type's name, then the step editor, then the dialog. Focus stays
  *   inside (the modal directive's trap) and returns to the Edit steps button when the editor closes.
  * - **A name taken for markup.** Every type, property and rule name is bound as text, cut out of its sentence by the vote row's markers
@@ -411,9 +411,8 @@ export class ConvertRecordsDialogComponent {
 
   protected readonly sentences = computed<SentencePiece[][][]>(() => this.liveBlocks().map(b => b.steps.map(step => stepPieces(this.say, step))));
 
-  protected readonly warnings = computed<SentencePiece[][][]>(() => this.blocks().map(b => b.warnings.map(w => (w.kind === 'rule'
-    ? markedPieces(this.say, 'spaces.schema.convert.warn.rule', { rule: w.rule, type: w.type, property: w.property, to: w.to })
-    : markedPieces(this.say, 'spaces.schema.convert.warn.namingPattern', { type: w.type, property: w.property, to: w.to })))));
+  protected readonly warnings = computed<SentencePiece[][][]>(() => this.blocks().map(b => b.warnings.map(w =>
+    markedPieces(this.say, 'spaces.schema.convert.warn.rule', { rule: w.rule, type: w.type, property: w.property, to: w.to }))));
 
   /** With no records anywhere: the footer says there is nothing to convert. */
   protected readonly footInfo = computed<SentencePiece[] | null>(() => {
