@@ -44,7 +44,7 @@ import { getTranslocoModule } from '../../testing/transloco-testing';
 import { CONVERT_POLL_FAILURES_MAX, CONVERT_POLL_MS } from './convert-status-watch';
 import type { TokenRights } from './rights-glyph.component';
 import { SpaceSettingsState } from './space-settings-state.service';
-import { CONVERT_RUN_HOST, TypeConvertBarComponent } from './type-convert-bar.component';
+import { CONVERT_RUN_HOST, TypeConvertBarComponent, VOTE_WATCH_MS } from './type-convert-bar.component';
 
 const english = (key: string): string => { expect(EN[key], `${key} exists in en.json`).toBeTypeOf('string'); return EN[key]!; };
 const fill = (key: string, params: Record<string, string | number>): string =>
@@ -396,7 +396,7 @@ describe('the note while a vote waits', () => {
     m.settle();
     expect(m.text('convert-note')).toContain(fill('spaces.schema.convert.note.waiting', { network: 'Acme team' }));
     m.listVotes.mockReturnValue(of({ rounds: [] }));
-    vi.advanceTimersByTime(CONVERT_POLL_MS);
+    vi.advanceTimersByTime(VOTE_WATCH_MS);
     m.settle();
     vi.advanceTimersByTime(1);   // the run's first read, scheduled inside the round's tick, is due a moment later
     m.settle();
@@ -410,7 +410,7 @@ describe('the note while a vote waits', () => {
     vi.advanceTimersByTime(0);
     m.settle();
     m.listVotes.mockReturnValue(of({ rounds: [{ ...round([RENAME_PROP]), id: 'r1', status: 'concluded' } as never] }));
-    vi.advanceTimersByTime(CONVERT_POLL_MS);
+    vi.advanceTimersByTime(VOTE_WATCH_MS);
     m.settle();
     vi.advanceTimersByTime(1);
     m.settle();
@@ -419,14 +419,14 @@ describe('the note while a vote waits', () => {
 
   it('reads the votes again only while a vote is waited on, and stops when the bar goes', () => {
     const idle = mount({ rounds: [] });
-    vi.advanceTimersByTime(CONVERT_POLL_MS * 5);
+    vi.advanceTimersByTime(VOTE_WATCH_MS * 5);
     expect(idle.listVotes).toHaveBeenCalledTimes(1);
     const m = mount({ rounds: [round([RENAME_PROP])] });
-    vi.advanceTimersByTime(CONVERT_POLL_MS * 2);
+    vi.advanceTimersByTime(VOTE_WATCH_MS * 2);
     const reads = m.listVotes.mock.calls.length;
     expect(reads, 'the round is read again on the bound while it waits').toBeGreaterThan(1);
     m.fixture.destroy();
-    vi.advanceTimersByTime(CONVERT_POLL_MS * 10);
+    vi.advanceTimersByTime(VOTE_WATCH_MS * 10);
     expect(m.listVotes).toHaveBeenCalledTimes(reads);
   });
 
@@ -437,6 +437,90 @@ describe('the note while a vote waits', () => {
     m.state.markPristine();
     m.settle();
     expect(m.listVotes).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * The pace of the vote watch (S13, lens finding 2). A vote lasts hours or days, so it is not watched at a run's pace: one scan of the networks per
+ * popup opening (or save), shared by every type; while a type waits, a read of its network every `VOTE_WATCH_MS` the tab is visible, and one at once
+ * when the tab becomes visible again or the reader returns to the type. Red at 877a5d3c5: the bar read the votes every `CONVERT_POLL_MS` (201 reads in
+ * ten minutes) and scanned every network on every type selection.
+ */
+describe('the vote watch\'s pace', () => {
+  beforeEach(() => { vi.useFakeTimers(); setHidden(false); });
+  afterEach(() => { setHidden(false); vi.useRealTimers(); });
+
+  const round = (): Partial<VoteRound> => ({ convertRecords: { steps: [RENAME_PROP] as never }, changedTypes: ['entity:person'] });
+  const waiting = fill('spaces.schema.convert.note.waiting', { network: 'Acme team' });
+  function setHidden(hidden: boolean): void {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: hidden });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: hidden ? 'hidden' : 'visible' });
+  }
+
+  it('asks at most 21 times in ten minutes with an open round and the tab visible: one scan, then one read per VOTE_WATCH_MS', () => {
+    const m = mount({ rounds: [round()] });
+    vi.advanceTimersByTime(0);
+    m.settle();
+    expect(m.text('convert-note')).toContain(waiting);
+    vi.advanceTimersByTime(10 * 60_000);
+    // 1 + 600,000 / 30,000
+    expect(m.listVotes.mock.calls.length).toBeLessThanOrEqual(21);
+    expect(m.listVotes.mock.calls.length, 'it is still watched').toBeGreaterThan(1);
+  });
+
+  it('the waiting note gives way within one interval after the round closes', () => {
+    const m = mount({ rounds: [round()] });
+    vi.advanceTimersByTime(0);
+    m.settle();
+    m.listVotes.mockReturnValue(of({ rounds: [] }));
+    vi.advanceTimersByTime(VOTE_WATCH_MS);
+    m.settle();
+    vi.advanceTimersByTime(1);
+    m.settle();
+    expect(m.text('convert-note')).not.toContain(waiting);
+  });
+
+  it('scans the networks once per popup opening and reuses the answer for every type selected', () => {
+    const m = mount({ rounds: [] });
+    m.host.type = 'client';
+    m.settle();
+    m.host.type = 'invoice';
+    m.settle();
+    vi.advanceTimersByTime(0);
+    expect(m.listVotes).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the waited round\'s network at once when the reader returns to the type', () => {
+    const m = mount({ rounds: [round()] });
+    vi.advanceTimersByTime(0);
+    m.settle();
+    m.host.type = 'client';
+    m.settle();
+    vi.advanceTimersByTime(0);
+    expect(m.listVotes).toHaveBeenCalledTimes(1);
+    m.host.type = 'person';
+    m.settle();
+    vi.advanceTimersByTime(0);
+    m.settle();
+    expect(m.listVotes).toHaveBeenCalledTimes(2);
+    expect(m.text('convert-note')).toContain(waiting);
+  });
+
+  it('reads at once when the tab becomes visible again, and nothing while it is hidden', () => {
+    const m = mount({ rounds: [round()] });
+    vi.advanceTimersByTime(0);
+    m.settle();
+    const before = m.listVotes.mock.calls.length;
+    setHidden(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    vi.advanceTimersByTime(5 * 60_000);
+    expect(m.listVotes.mock.calls.length).toBe(before);
+    setHidden(false);
+    document.dispatchEvent(new Event('visibilitychange'));
+    vi.advanceTimersByTime(0);
+    expect(m.listVotes.mock.calls.length).toBe(before + 1);
+    vi.advanceTimersByTime(VOTE_WATCH_MS - 1);
+    expect(m.listVotes.mock.calls.length).toBe(before + 1);
   });
 });
 
