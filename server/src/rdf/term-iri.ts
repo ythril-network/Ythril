@@ -107,9 +107,32 @@ export function versionIri(meta: SpaceMeta, fingerprint: string): string {
   return [ontologyIri(meta), iriSegment(fingerprint)].join('/');
 }
 
-/** The prefixes a writer declares for a space: the standard ones and the space's own `vocab`. */
-export function prefixesFor(meta: SpaceMeta): Record<string, string> {
-  return { ...STANDARD_PREFIXES, vocab: namesOf(meta).vocab };
+/**
+ * The address a schema-library group's namespace gives one of its entries' terms (design r4 §4.2): `<ns><kind>/<seg(type)>`, and
+ * `/<seg(prop)>` for a property. Needs no space: the namespace is the instance's, so every space linking the entry names it alike.
+ */
+export function libraryTermIri(namespace: string, kind: KnowledgeType, type: string, prop?: string): string {
+  const typeIri = [namespace.concat(kind), iriSegment(type)].join('/');
+  return prop === undefined ? typeIri : [typeIri, iriSegment(prop)].join('/');
+}
+
+/**
+ * The prefixes a writer declares for a space: the standard ones, the space's own `vocab`, and the prefix of each library group namespace one
+ * of the space's resolved terms lies under (`namespaces`, the instance's `schemaLibraryNamespaces` values).
+ */
+export function prefixesFor(meta: SpaceMeta, namespaces: readonly { prefix: string; iri: string }[] = []): Record<string, string> {
+  const out: Record<string, string> = { ...STANDARD_PREFIXES, vocab: namesOf(meta).vocab };
+  if (namespaces.length === 0) return out;
+  const used: string[] = [];
+  for (const [kind, map] of Object.entries((meta.typeSchemas ?? {}) as Record<string, Record<string, unknown> | undefined>)) {
+    for (const [type, raw] of Object.entries(map ?? {})) {
+      const def = raw && typeof raw === 'object' ? raw as TypeDef : {};
+      used.push(resolveTermIri(meta, kind as KnowledgeType, type));
+      for (const prop of Object.keys(def.propertySchemas ?? {})) used.push(resolveTermIri(meta, kind as KnowledgeType, type, prop));
+    }
+  }
+  for (const ns of namespaces) if (!Object.hasOwn(out, ns.prefix) && used.some(iri => iri.startsWith(ns.iri))) out[ns.prefix] = ns.iri;
+  return out;
 }
 
 /** Who holds an address: a type, or a property of one. */

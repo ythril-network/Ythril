@@ -304,6 +304,9 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/schema-library\/catalogs$/,                 operation: 'schema_library.catalog.add' },
   { method: 'DELETE', pattern: /^\/api\/schema-library\/catalogs\/([^/]+)$/,        operation: 'schema_library.catalog.remove' },
   { method: 'POST',   pattern: /^\/api\/schema-library\/groups\/([^/]+)\/apply$/,   operation: 'schema_library.group.apply' },
+  // Q-748: a group's namespace names the RDF terms of every space linking its entries.
+  { method: 'PUT',    pattern: /^\/api\/schema-library\/groups\/([^/]+)\/namespace$/, operation: 'schema_library.group.namespace.set' },
+  { method: 'DELETE', pattern: /^\/api\/schema-library\/groups\/([^/]+)\/namespace$/, operation: 'schema_library.group.namespace.remove' },
   { method: 'POST',   pattern: /^\/api\/schema-library\/export-space$/,             operation: 'schema_library.export', read: true },
 
   // ── Config / admin ───────────────────────────────────────────────────────

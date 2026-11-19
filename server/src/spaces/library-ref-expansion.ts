@@ -35,7 +35,7 @@
  */
 import { libraryDefinitionOf } from '@ythril-network/schema';
 import { useSchemaLibrary } from '@ythril-network/schema/internal';
-import { getSchemaLibrary } from '../config/loader.js';
+import { effectiveLibraryEntries } from './library-terms.js';
 import type { SpaceMeta, TypeSchema } from '../config/types.js';
 
 /*
@@ -43,7 +43,8 @@ import type { SpaceMeta, TypeSchema } from '../config/types.js';
  * handed to it. This is where the instance hands over its own — read at the moment of each parse, so a library edit reaches the next
  * write. `body-schemas.ts` imports this module for that, so no parse can run before the library is installed.
  */
-useSchemaLibrary(getSchemaLibrary);
+// Q-748: the EFFECTIVE entries, so a group namespace's addresses are part of every definition a parse, a round trip and a fingerprint read.
+useSchemaLibrary(effectiveLibraryEntries);
 
 /** The take-back of a round-tripped `{ $ref, ...definition }` is the body's preprocess, defined with it in `@ythril-network/schema`. */
 export { takeBackLibraryDefinition } from '@ythril-network/schema';
