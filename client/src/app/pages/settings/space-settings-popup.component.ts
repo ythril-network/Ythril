@@ -35,7 +35,7 @@
  * to drift.
  */
 import { SpaceSchemaLayersComponent } from './space-schema-layers.component';
-import { ChangeDetectionStrategy, Component, DestroyRef, Injector, afterEveryRender, computed, effect, inject, output, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, Injector, afterEveryRender, computed, effect, forwardRef, inject, output, signal, untracked } from '@angular/core';
 import { Router } from '@angular/router';
 import { forkJoin, type Subscription } from 'rxjs';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
@@ -56,6 +56,7 @@ import { watchConvertRun } from './convert-status-watch';
 import type { TokenRights } from './rights-glyph.component';
 import { SpaceSettingsState, typeStateFromSchema } from './space-settings-state.service';
 import { SpacesStore } from './spaces-store.service';
+import { CONVERT_RUN_HOST, type ConvertRunHost } from './type-convert-bar.component';
 import { SpaceSettingsTabComponent } from './space-settings-tab.component';
 import { SpaceSchemaTabComponent } from './space-schema-tab.component';
 import { SpaceDuplicatesTabComponent } from './space-duplicates-tab.component';
@@ -83,6 +84,8 @@ const planKey = (blocks: readonly ConvertBlockPlan[]): string => JSON.stringify(
     SpaceSettingsTabComponent, SpaceSchemaTabComponent, SpaceDuplicatesTabComponent, SpaceDangerTabComponent, ConvertRecordsDialogComponent,
   ],
   styles: [SPACE_DIALOG_STYLES],
+  // The type bars inside show a run their Convert act started through this popup's own progress dialog (`showRun`).
+  providers: [{ provide: CONVERT_RUN_HOST, useExisting: forwardRef(() => SpaceSettingsPopupComponent) }],
   template: `
     <!-- SETTINGS POPUP -->
     @if (state.settingsSpace()) {
@@ -195,7 +198,7 @@ const planKey = (blocks: readonly ConvertBlockPlan[]): string => JSON.stringify(
           [network]="governedBy()" [rights]="rights()" [refusal]="refusal()" [busy]="state.settingsSaving()" (choice)="onChoice($event)" />
       }
       @if (progress(); as p) {
-        <app-convert-records-dialog mode="progress" [spaceId]="state.settingsSpace()!.id" [status]="p.status" [notice]="p.notice"
+        <app-convert-records-dialog mode="progress" [spaceId]="state.settingsSpace()!.id" [status]="p.status" [notice]="p.notice" [byAct]="p.byAct"
           (closed)="closeProgress()" (openReview)="openReview()" />
       }
       @if (submitted(); as s) {
@@ -205,7 +208,7 @@ const planKey = (blocks: readonly ConvertBlockPlan[]): string => JSON.stringify(
     }
   `,
 })
-export class SpaceSettingsPopupComponent {
+export class SpaceSettingsPopupComponent implements ConvertRunHost {
   readonly state = inject(SpaceSettingsState);
   private spacesApi = inject(SpacesApi);
   private transloco = inject(TranslocoService);
@@ -252,7 +255,7 @@ export class SpaceSettingsPopupComponent {
 
   /** The dialog the Save opens (`offer`), the run it leaves open (`progress`) and the vote it went to (`submitted`): at most one of each. */
   protected readonly offer = signal<{ blocks: ConvertBlockPlan[]; staged: ConvertSchemas } | null>(null);
-  protected readonly progress = signal<{ notice: ConvertRunNotice | null; status: ConvertStatusAnswer | null } | null>(null);
+  protected readonly progress = signal<{ notice: ConvertRunNotice | null; status: ConvertStatusAnswer | null; byAct: boolean } | null>(null);
   protected readonly submitted = signal<{ blocks: ConvertBlockPlan[]; network: string } | null>(null);
   /** What the last converting Save answered, kept after its dialog is closed: the Schema tab's type pane says from it that nothing was converted. */
   protected readonly savedNotice = signal<ConvertRunNotice | null>(null);
@@ -543,10 +546,19 @@ export class SpaceSettingsPopupComponent {
     }
     const notice = convertNoticeOf(result) ?? { state: 'nothing' as const, types: [] };
     this.convertSpace = target.id;
-    this.progress.set({ notice, status: null });
+    this.progress.set({ notice, status: null, byAct: false });
     // An answer that lists no types is about the types this Save converted.
     this.savedNotice.set(notice.types.length > 0 ? notice : { ...notice, types: choice.types });
     if (notice.state === 'started') this.watchRun(target.id);
+  }
+
+  /** A type's Convert act started a run: show it as a converting Save's run is shown, in the same dialog, on the same watch. */
+  showRun(notice: ConvertRunNotice): void {
+    const space = this.state.settingsSpace();
+    if (!space) return;
+    this.convertSpace = space.id;
+    this.progress.set({ notice, status: null, byAct: true });
+    this.watchRun(space.id);
   }
 
   /** Read the run on the bound `watchConvertRun` keeps; a failed read says so in the footer and the next good answer takes the sentence away. */
