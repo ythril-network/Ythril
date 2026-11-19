@@ -189,6 +189,8 @@ const ENTITY_PREFIX = 'entity:';
 /** The member of an `endpoints` list that means an entity with no type (`spaces/schema-validation.ts`: a type of `null` is read as this). */
 const UNTYPED_MEMBER = 'UNTYPED';
 const COUNT_ONE = 1;
+/** What the shape of a naming pattern is called: an entity's name is its `rdfs:label`. */
+const NAME_OF_AN_ENTITY = 'name';
 
 function integer(n: number): LiteralTerm {
   const literal = literalForInteger(n);
@@ -465,7 +467,7 @@ function typeAnnotations(out: Out, node: IriTerm, def: Bag, where: string): void
 }
 
 /** An edge's endpoints and its functional mark: on the node shape (the subject side) and a property shape of the label (the object side). */
-function edgeConstraints(out: Out, space: Space, node: IriTerm, label: IriTerm, def: Bag): void {
+function edgeConstraints(out: Out, space: Space, node: IriTerm, label: IriTerm, name: string, def: Bag): void {
   const endpoints = bagAt(def, 'endpoints');
   const from = endpointSide(space, own(endpoints, 'from'));
   const to = endpointSide(space, own(endpoints, 'to'));
@@ -480,6 +482,7 @@ function edgeConstraints(out: Out, space: Space, node: IriTerm, label: IriTerm, 
   out.add(node, SH('property'), shape);
   out.add(shape, RDF_TYPE, SH('PropertyShape'));
   out.add(shape, SH('path'), label);
+  out.add(shape, SH('name'), plain(name));
   if (to.length > 0) out.add(shape, SH('or'), endpointOr(out, to));
   if (functional) out.add(shape, SH('maxCount'), integer(COUNT_ONE));
 }
@@ -516,7 +519,7 @@ function exportType(out: Out, space: Space, kind: KnowledgeType, type: string, r
   typeAnnotations(out, node, def, termOwnerName({ kind, type }));
   const facts: TypeFacts = { node, term, requiredEdgeProperties: [] };
   typeProperties(out, space, kind, type, def, facts);
-  if (edge) edgeConstraints(out, space, node, term, def);
+  if (edge) edgeConstraints(out, space, node, term, type, def);
   for (const p of facts.requiredEdgeProperties) out.add(node, YTHRIL('requiredEdgeProperty'), p);
   const pattern = textOf(own(def, 'namingPattern'));
   if (kind === 'entity' && pattern !== undefined) {
@@ -524,6 +527,7 @@ function exportType(out: Out, space: Space, kind: KnowledgeType, type: string, r
     out.add(node, SH('property'), label);
     out.add(label, RDF_TYPE, SH('PropertyShape'));
     out.add(label, SH('path'), RDFS('label'));
+    out.add(label, SH('name'), plain(NAME_OF_AN_ENTITY));
     out.add(label, SH('pattern'), plain(pattern));
   }
 }
