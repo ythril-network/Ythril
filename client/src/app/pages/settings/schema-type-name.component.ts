@@ -16,12 +16,16 @@ const PHONE_MAX_WIDTH = 760;
  * The control's own rules. `.sch-hint` and `.sch-msg` are the tab's classes, and the tab's styles do not reach into a child's template: the note,
  * the refusal and the head's name (`.dt`, mono in the accent as drawn) are styled here, from the same tokens, so both themes read them.
  *
- * At phone width (bundle-285 slice S10, drive D7) the name shrinks with an ellipsis and keeps its pencil beside it (its full text is the
- * title and the text read aloud), and the "was" note takes a line of its own, so a renamed property's row is no wider than an untouched one.
+ * Only a use that asks for it (`truncate`, the type head) shrinks with an ellipsis, keeping its pencil beside it (its full text is the title
+ * and the text read aloud): a property key in the table sizes its column to the key, as it always did (bundle-285 slice S10, drive round 2 cut
+ * every key to a stub when the shrink applied to every use). At phone width the "was" note takes a line of its own, so a renamed property's
+ * row is no wider than an untouched one.
  */
 export const SCHEMA_TYPE_NAME_STYLES = `
-    :host { display:inline-flex; align-items:center; min-width:0; max-width:100%; }
-    .nm-text { flex:0 1 auto; min-width:0; max-width:calc(100% - 28px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    :host { display:inline-flex; align-items:center; }
+    .nm-text { white-space:nowrap; }
+    :host(.truncate) { min-width:0; max-width:100%; }
+    :host(.truncate) .nm-text { flex:0 1 auto; min-width:0; max-width:calc(100% - 28px); overflow:hidden; text-overflow:ellipsis; }
     .dt { font-family:var(--font-mono); font-size:15px; color:var(--accent); font-weight:600; }
     .icon-btn { flex-shrink:0; }
     .sch-hint { font-size:11px; font-weight:400; color:var(--text-muted); margin-inline-start:6px; white-space:nowrap; }
@@ -92,6 +96,7 @@ export const TYPE_HEAD_STYLES = `
   imports: [TranslocoPipe, PhIconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SCHEMA_TYPE_NAME_STYLES],
+  host: { '[class.truncate]': 'truncate()' },
   template: `
     @if (editing()) {
       <input #field class="dt-edit" type="text" [value]="draft" (input)="draft = $any($event.target).value"
@@ -128,6 +133,8 @@ export class SchemaTypeNameComponent {
   readonly errorKeyPrefix = input<string>(TYPE_RENAME_ERRORS);
   /** The class of the name beside the pencil. */
   readonly nameClass = input<string>('dt');
+  /** The name may be cut with an ellipsis to fit its row (the type head); off by default, so a property key is always whole. */
+  readonly truncate = input(false);
 
   /** Fired on a successful rename, so a host can follow the selection or mark itself dirty. */
   readonly renamed = output<string>();
