@@ -50,6 +50,9 @@ export const UNCONVERTED_DISMISS_MAX = 2_000;
 /** The statuses an item holds, and the one the list shows unless another is asked. */
 export const UNCONVERTED_STATUSES = ['open', 'dismissed'] as const;
 
+/** The statuses a LIST takes: the two an item holds, and `all` for both together (no item holds it). */
+export const UNCONVERTED_LIST_STATUSES = [...UNCONVERTED_STATUSES, 'all'] as const;
+
 /** One record a conversion could not convert, as stored. */
 export interface UnconvertedItem {
   _id: string;
@@ -186,12 +189,24 @@ export function dismissAuditGiven(given: Record<string, unknown>): Record<string
   return parsed.data === undefined ? rest : { ...rest, reason: parsed.data.join(',') };
 }
 
-/** The list's parameters: the filter the bulk dismiss shares, and the `status` only a list chooses. */
+/**
+ * The list's parameters: the filter the bulk dismiss shares, and the `status` only a list chooses: `open` (the default), `dismissed`, or `all` (both,
+ * in the one newest-first order). An unknown status is refused naming the value.
+ */
 export const UnconvertedListParams = UnconvertedFilterParams.extend({
-  status: optionalFilter(z.enum(UNCONVERTED_STATUSES)),
+  status: optionalFilter(z.enum(UNCONVERTED_LIST_STATUSES, {
+    error: issue => `'${peerText(issue.input, { max: NAME_QUOTED })}' is not a status: it is one of ${UNCONVERTED_LIST_STATUSES.join(', ')}`,
+  })),
 });
 
-/** The bulk dismiss's parameters: the same filter, and `expect`, the number of open items the caller was shown (required, a whole number). */
+/**
+ * The bulk dismiss's parameters: the same filter, and `expect`, the number of open items the caller was shown (required, a whole number). It
+ * dismisses OPEN items only, so the one `status` it takes is `open` (or none): `all` and `dismissed` are a list's, and are refused by the bad-status
+ * code naming the value, so a page that asks for the items it shows with `status=all` cannot dismiss them by sending the same filter.
+ */
 export const UnconvertedDismissShownParams = UnconvertedFilterParams.extend({
+  status: optionalFilter(z.enum(['open'], {
+    error: issue => `'${peerText(issue.input, { max: NAME_QUOTED })}' is not a status the bulk dismissal takes: it dismisses open items only`,
+  })),
   expect: z.number().int().min(0),
 });

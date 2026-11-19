@@ -251,7 +251,7 @@ A record a run could not convert is left as it is and listed. An item is local t
 GET /api/spaces/:id/schema-convert/items?kind=&type=&reason=&status=&skip=&limit=
 ```
 
-MCP `list_unconverted` (`knowledge: read`) takes the same parameters. The list is newest first; `status` is `open` unless you ask for `dismissed`. It is paged as the Brain's other lists are (`total`, `count`, `skip`, `limit`, `truncated`, and `nextSkip` when a page was cut) and carries `counts: { open, dismissed, openBy }` for the whole space whatever the filters (see [Counting the open items](#counting-the-open-items)). A row:
+MCP `list_unconverted` (`knowledge: read`) takes the same parameters. The list is newest first; `status` is `open` unless you ask for `dismissed` or for `all`, which lists the open and the dismissed items together in the same newest-first order (each row says its `status`, `total` counts both, and `skip`, `limit` and `nextSkip` page the one list, so a page may hold both kinds); any other status is `400` `unconverted_bad_status`, and the message names it. It is paged as the Brain's other lists are (`total`, `count`, `skip`, `limit`, `truncated`, and `nextSkip` when a page was cut) and carries `counts: { open, dismissed, openBy }` for the whole space whatever the filters (see [Counting the open items](#counting-the-open-items)). A row:
 
 ```json
 { "itemId": "…", "space": "qa", "kind": "entity", "recordId": "…", "type": "person", "seq": 105, "fromFp": "…", "toFp": "…",
@@ -284,7 +284,7 @@ The first dismisses one item (MCP `dismiss_unconverted`, `{ space, itemId }`) an
 { "kind": "entity", "type": "person", "reason": "both_set", "expect": 7 }
 ```
 
-`reason` is one reason, or a list of them (`"reason": ["not_conforming", "fork"]`, or one text with commas), read as the list reads it: the call dismisses the open items of any of them, `expect` counts over all of them, and it is the `total` the list answers for the same filter. It answers `{ "dismissed": 7 }`. If the number of open items for that filter is not `expect`, nothing is dismissed and the answer is `409` `unconverted_changed` with `current`; list again and confirm the new number. A filter that matches more open items than one call may dismiss is `400` `unconverted_too_many` with `max`, the most one call takes: narrow it by kind, type or reason. Both need `knowledge: write`.
+`reason` is one reason, or a list of them (`"reason": ["not_conforming", "fork"]`, or one text with commas), read as the list reads it: the call dismisses the open items of any of them, `expect` counts over all of them, and it is the `total` the list answers for the same filter (a list with `status=all` counts dismissed items too, so ask with the default status to get the number to confirm). The call dismisses open items only: a `status` of `all`, `dismissed` or anything but `open` is `400` `unconverted_bad_status`, naming the value. It answers `{ "dismissed": 7 }`. If the number of open items for that filter is not `expect`, nothing is dismissed and the answer is `409` `unconverted_changed` with `current`; list again and confirm the new number. A filter that matches more open items than one call may dismiss is `400` `unconverted_too_many` with `max`, the most one call takes: narrow it by kind, type or reason. Both need `knowledge: write`.
 
 A dismissal changes no record: the item stays, marked `dismissed`, and a run that meets the same version of the record toward the same schema does not list it again. A new version of the record, or another schema, can.
 
