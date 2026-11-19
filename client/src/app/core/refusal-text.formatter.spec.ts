@@ -208,3 +208,42 @@ describe('describeRefusal - every runtime key it builds exists', () => {
     });
   }
 });
+
+/**
+ * Q-943: a row that carries its `code` and `params` says its reason in the reader's language (`core/violation-wording.ts`), and keeps the
+ * server's own sentence as `serverText` for the title a developer reads; a row without a code reads exactly as before, with no `serverText`.
+ */
+describe('describeRefusal and describeWarnings - a row with a code is worded in the reader\'s language (Q-943)', () => {
+  const coded = { field: 'properties.age', value: 'x', reason: "expected type 'number', got 'string'", code: 'type', params: { type: 'number', got: 'string' } };
+  const WORDED: Record<Lang, string> = { en: 'must be a number, not text', de: 'muss eine Zahl sein (ist ein Text)', pl: 'musi być liczbą (jest tekstem)' };
+  type CodedRow = { field: string; text: string; serverText: string };
+
+  for (const lang of LANGS) {
+    it(`${lang}: a refused write's row says the field and the worded reason, and keeps the server's sentence beside it`, () => {
+      const row = describe_(lang, refused({ introduced: [coded] })).view.rows[0] as unknown as CodedRow;
+      expect(row.text).toContain('age');
+      expect(row.text).toContain(WORDED[lang]);
+      expect(row.text).not.toContain('expected type');
+      expect(row.serverText).toBe(coded.reason);
+    });
+
+    it(`${lang}: a stored write's warning reads the same way`, () => {
+      const rows = refusal.describeWarnings(translocoFor(lang), lang, [coded]) as unknown as CodedRow[];
+      expect(rows[0]!.text).toContain(WORDED[lang]);
+      expect(rows[0]!.serverText).toBe(coded.reason);
+    });
+  }
+
+  it('a row without a code says the server\'s reason as before, and has no second sentence to show', () => {
+    const row = describe_('de', refused({ introduced: [{ field: 'properties.age', value: 'x', reason: 'must be a number' }] })).view.rows[0] as unknown as CodedRow;
+    expect(row.text).toBe('age: must be a number');
+    expect(row.serverText).toBe('');
+  });
+
+  it('a rule\'s row says the rule\'s own message, without the hash the server appends', () => {
+    const rule = { field: 'rules.adult', value: 'x', reason: 'Age must be 18 or more (rule a1b2c3)', code: 'rule', params: { rule: 'adult', message: 'Age must be 18 or more', hash: 'a1b2c3' } };
+    const row = describe_('en', refused({ introduced: [rule] })).view.rows[0] as unknown as CodedRow;
+    expect(row.text).toBe('Age must be 18 or more');
+    expect(row.serverText).toBe(rule.reason);
+  });
+});

@@ -28,11 +28,13 @@ const PREFIXES = [
   'spaces.schema.convert.locked', 'spaces.schema.convert.rateLimited', 'spaces.schema.convert.retryIn', 'spaces.schema.convert.running409',
   'spaces.schema.convert.run.counting', 'spaces.schema.convert.run.converting', 'spaces.schema.convert.run.types',
   'common.prev', 'common.next', 'common.cancel', 'common.loadFailed', 'common.retry', 'common.close',
+  // The words of a violation's chip (Q-943): `core/violation-wording.ts` reads them.
+  'violation.',
 ];
 
-/** The English words of the section as the tree `getTranslocoModule` takes. */
-export function unconvertedWords(): Record<string, unknown> {
-  const shipped = dictionary('en');
+/** The words of the section, in `locale` (English unless said), as the tree `getTranslocoModule` takes. */
+export function unconvertedWords(locale: 'en' | 'de' | 'pl' = 'en'): Record<string, unknown> {
+  const shipped = dictionary(locale);
   const flat: Record<string, string> = {};
   for (const [key, value] of Object.entries(shipped)) if (PREFIXES.some(p => key.startsWith(p))) flat[key] = value;
   const tree: Record<string, any> = {};
@@ -49,7 +51,7 @@ export function unconvertedWords(): Record<string, unknown> {
 export function unconvertedRow(n: number, over: Partial<UnconvertedRow> = {}): UnconvertedRow {
   return {
     itemId: `item-${n}`, space: 'customers', kind: 'entity', recordId: `7f3a91c2-${String(n).padStart(4, '0')}-4000-8000-000000000000`, type: 'person',
-    reason: 'not_conforming', violations: [{ field: 'properties.age', reason: 'must be a number' }], status: 'open',
+    reason: 'not_conforming', violations: [{ field: 'properties.age', reason: "expected type 'number', got 'string'", code: 'type', params: { type: 'number', got: 'string' } }], status: 'open',
     detectedAt: '2026-11-17T10:00:00.000Z', record: { summary: `Person ${n}` }, ...over,
   };
 }

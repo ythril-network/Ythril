@@ -131,7 +131,7 @@ describe('the Unconverted panel: a card', () => {
     expect(box.lastElementChild?.textContent?.trim()).toBe('7f3a91c2');
     expect(box.textContent!.indexOf('Dana Whitfield')).toBeLessThan(box.textContent!.indexOf('7f3a91c2'));
     expect(first.textContent).toContain('After the change this record would break the schema, so it was left as it is.');
-    expect(first.querySelector('ul[aria-label="Properties that do not fit"]')?.textContent).toContain('age: must be a number');
+    expect(first.querySelector('ul[aria-label="Properties that do not fit"]')?.textContent).toContain('age: must be a number, not text');
     expect(first.textContent).toContain('To fix it: give the record the properties named below, then use Convert again.');
   });
 
@@ -475,5 +475,75 @@ describe('the Unconverted panel: a run that is going, and the pager', () => {
   it('shows no pager for a list that fits one page', () => {
     const { el } = mount({ listUnconverted: typical() });
     expect(el.querySelector('.pagination')).toBeNull();
+  });
+});
+
+/**
+ * Q-943: a chip says what is wrong in the reader's language, from the violation's code and params (`core/violation-wording.ts`), as moment 5
+ * draws it: the field as the server names it, then the worded reason. The server's own sentence is the chip's title, where a developer reads
+ * it; a row stored before codes existed shows its text, in a chip, with no title. Many violations wrap, and past the bound one chip counts
+ * the rest.
+ */
+describe('the Unconverted panel: the chips of a card are worded in the reader\'s language (Q-943)', () => {
+  const chipsOf = (card: HTMLElement) => [...card.querySelectorAll<HTMLElement>('ul[aria-label] li')];
+  const answer = (rows: UnconvertedRow[]) => vi.fn(() => of(okResult(listAnswer(rows, [openGroup('person', 'not_conforming', rows.length)]))));
+  const TYPE_ROW = { field: 'properties.age', reason: "expected type 'number', got 'string'", code: 'type', params: { type: 'number', got: 'string' } };
+
+  function mountIn(locale: 'de' | 'pl', rows: UnconvertedRow[]) {
+    const h = unconvertedProviders({ listUnconverted: answer(rows) }, {});
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [ReviewUnconvertedPanelComponent, getTranslocoModule({ langs: { [locale]: unconvertedWords(locale) }, translocoConfig: { availableLangs: [locale], defaultLang: locale } })],
+      providers: [ReviewUnconvertedState, ...h.providers],
+    });
+    const state = TestBed.inject(ReviewUnconvertedState);
+    state.open('customers');
+    const f = TestBed.createComponent(ReviewUnconvertedPanelComponent);
+    f.componentRef.setInput('spaceId', 'customers');
+    f.componentRef.setInput('state', state);
+    f.detectChanges();
+    return [...(f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('[data-testid="unconverted-card"]')];
+  }
+
+  it('one chip per violation: the field without `properties.`, then the reason worded from its code', () => {
+    const rows = [unconvertedRow(1, { violations: [TYPE_ROW, { field: 'properties.text', reason: "required property 'text' is missing or empty", code: 'required', params: { missingProperty: 'text' } }] })];
+    const { cards } = mount({ listUnconverted: answer(rows) });
+    expect(chipsOf(cards()[0]!).map(li => li.textContent?.trim())).toEqual(['age: must be a number, not text', 'text: required, missing']);
+  });
+
+  it('the server\'s own sentence is the chip\'s title, where a developer reads it', () => {
+    const { cards } = mount({ listUnconverted: answer([unconvertedRow(1, { violations: [TYPE_ROW] })]) });
+    expect(chipsOf(cards()[0]!)[0]!.getAttribute('title')).toBe("expected type 'number', got 'string'");
+  });
+
+  it('German and Polish readers read their own language', () => {
+    const rows = [unconvertedRow(1, { violations: [TYPE_ROW] })];
+    expect(chipsOf(mountIn('de', rows)[0]!)[0]!.textContent?.trim()).toBe('age: muss eine Zahl sein (ist ein Text)');
+    expect(chipsOf(mountIn('pl', rows)[0]!)[0]!.textContent?.trim()).toBe('age: musi być liczbą (jest tekstem)');
+  });
+
+  it('a row stored before codes existed, or with a code this client does not know, shows the server\'s text in a chip, without a title and without error', () => {
+    const rows = [unconvertedRow(1, { violations: [{ field: 'properties.status', reason: 'not an allowed value' }, { field: 'properties.mood', reason: 'something new', code: 'brand_new', params: {} } as UnconvertedRow['violations'][number]] })];
+    const { cards } = mount({ listUnconverted: answer(rows) });
+    const chips = chipsOf(cards()[0]!);
+    expect(chips.map(li => li.textContent?.trim())).toEqual(['status: not an allowed value', 'mood: something new']);
+    expect(chips.map(li => li.getAttribute('title'))).toEqual([null, null]);
+  });
+
+  it(`past ${6} violations one chip counts the rest, and every chip still names its field`, () => {
+    const many = Array.from({ length: 9 }, (_, i) => ({ field: `properties.p${i + 1}`, reason: `required property 'p${i + 1}' is missing or empty`, code: 'required', params: { missingProperty: `p${i + 1}` } }));
+    const { cards } = mount({ listUnconverted: answer([unconvertedRow(1, { violations: many })]) });
+    const chips = chipsOf(cards()[0]!);
+    expect(chips).toHaveLength(7);
+    expect(chips.slice(0, 6).map(li => li.textContent?.trim())).toEqual(many.slice(0, 6).map((_, i) => `p${i + 1}: required, missing`));
+    expect(chips[6]!.getAttribute('data-testid')).toBe('violations-more');
+    expect(chips[6]!.textContent?.trim()).toBe('+3 more');
+  });
+
+  it('markup in a param is shown as characters, never run', () => {
+    const rows = [unconvertedRow(1, { violations: [{ field: 'properties.email', reason: 'does not match pattern: <img src=x onerror="window.__pwned=1">', code: 'pattern', params: { pattern: '<img src=x onerror="window.__pwned=1">' } }] })];
+    const { el, cards } = mount({ listUnconverted: answer(rows) });
+    expect(el.querySelector('img')).toBeNull();
+    expect(chipsOf(cards()[0]!)[0]!.textContent?.trim()).toBe('email: does not match the pattern <img src=x onerror="window.__pwned=1">');
   });
 });
