@@ -50,7 +50,7 @@ import { RuleRowsComponent, type RuleRowRefusal } from '../../shared/rule-rows.c
 import { RULE_LIMITS } from '../../shared/rule-limits';
 import { SchemaTypeNameComponent } from './schema-type-name.component';
 import {
-  addProp, removeProp, renameProp, addEnumVal, removeEnumVal,
+  addProp, removeProp, renameProp, addEnumVal, removeEnumVal, removedEnumVals, restoreEnumVal,
   toggleEndpoint, endpointsFor, isAnyEnd, endpointPairs, endNamesFor, isStaleEndName, UNTYPED_END, type EndpointSide,
 } from './type-schema-edits';
 import { SCHEMA_MD_STYLES } from './schema-styles';
@@ -84,7 +84,8 @@ export interface LayerMark {
   //
   // The key cell is the name control (`app-schema-type-name`), whose text sits in the child's template where this component's styles do not
   // reach: the host element carries the key's look (mono, small, primary colour) and the child's text inherits it.
-  styles: [SCHEMA_MD_STYLES, CHIP_STYLES, PROP_TABLE_STYLES, '.prop-rename { display:inline-flex; align-items:center; min-width:0; font-family:var(--font-mono); font-size:12px; color:var(--text-primary); }'],
+  styles: [SCHEMA_MD_STYLES, CHIP_STYLES, PROP_TABLE_STYLES, '.prop-rename { display:inline-flex; align-items:center; min-width:0; font-family:var(--font-mono); font-size:12px; color:var(--text-primary); }',
+    '.chip-gone { opacity:.75; border-style:dashed; } .chip-gone s { color:var(--text-muted); }'],
   template: `
 @if (libRef(); as libRef) {
   <!-- Linked library schema — editable only after unlinking; shown read-only meanwhile. -->
@@ -430,6 +431,9 @@ export interface LayerMark {
                           @for (ev of (p.s.enum??[]); track ev) {
                             <span class="chip">{{ ev }}<button type="button" class="chip-rm" (click)="onRemoveEnum(p.key,ev)" [attr.aria-label]="'spaces.schema.propDetail.removeEnumValue' | transloco: { value: ev }"><ph-icon name="x" [size]="12"/></button></span>
                           }
+                          @for (gone of removedEnum(p); track gone) {
+                            <span class="chip chip-gone"><s>{{ gone }}</s><span class="sr-only">{{ 'spaces.schema.propDetail.enumValueRemoved' | transloco }}</span><button type="button" class="chip-rm" (click)="onRestoreEnum(p.key, gone)" [attr.aria-label]="'spaces.schema.propDetail.restoreEnumValue' | transloco: { value: gone }"><ph-icon name="plus" [size]="12"/></button></span>
+                          }
                           <input type="text" class="chip-field" [(ngModel)]="p._enumInput"
                             [placeholder]="'spaces.schema.propDetail.enumPlaceholder' | transloco" (keydown)="onEnumKey($event,p.key)" />
                         </div>
@@ -659,6 +663,9 @@ export class SchemaTypeEditorComponent {
 
   onAddEnum(key: string): void { addEnumVal(this.draft(), key); }
   onRemoveEnum(key: string, val: string | number | boolean): void { removeEnumVal(this.draft(), key, val); }
+  /** The stored values this sitting removed, shown struck until Save (drawing 1c, 2b): the view only, the staged values do not hold them. */
+  protected removedEnum(p: TypeSchemaState['propertySchemas'][number]): (string | number | boolean)[] { return removedEnumVals(p); }
+  onRestoreEnum(key: string, val: string | number | boolean): void { restoreEnumVal(this.draft(), key, val); }
   onEnumKey(e: KeyboardEvent, key: string): void {
     if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); this.onAddEnum(key); }
   }
