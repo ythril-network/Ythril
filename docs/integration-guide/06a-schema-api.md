@@ -282,47 +282,9 @@ write is applied regardless. Upgrade every instance of the network ([Upgrading](
 
 ### RDF names: `meta.rdf` and `iri`
 
-A space can give its records and its schema terms web addresses (IRIs) for an RDF export. It is off until switched on:
-a space with no `meta.rdf`, or with `enabled: false`, names nothing and behaves as before.
+`meta.rdf` gives a space's records and schema terms web addresses (IRIs) for an RDF export: `{ "enabled": true, "base": "<IRI ending in />", "vocab": "<namespace>", "baseEpoch": <n> }`, set by `PATCH /api/spaces/:id` or MCP `schema_update` (`rdf`) at the schema `admin` rung. It is off until `enabled: true`; a space without it names nothing and behaves as before. Every record's address is `<base><kind>/<id>`; `vocab` (default `<base>vocab/`) names the space's own types and properties, and moves only with the base. The first enable takes the base you send, or `<public URL>/ld/<space id>/` from the instance's `publicUrl` (or `PUBLIC_BASE_URL`); with neither it answers `400 rdf_base_needed`. A write that leaves a field out keeps the stored value, and `baseEpoch` is the server's own count of base changes.
 
-```http
-PATCH /api/spaces/:id
-Authorization: Bearer <token with schema:admin on the space>
-
-{ "meta": { "rdf": { "enabled": true } } }
-```
-
-| field | meaning |
-|---|---|
-| `enabled` | switch the space's names on or off; off keeps the base for when it is switched on again |
-| `base` | every record's address is `<base><kind>/<id>`; an absolute IRI ending in `/` with no `#` |
-| `vocab` | the namespace of the space's own type and property names; `<base>vocab/` when absent; it moves only with the base |
-| `baseEpoch` | how many times the base was changed; a door keeps its own count and ignores a sent one |
-| `rebase` | `true` to change the base on purpose; never stored |
-
-The base is set once. The first enable takes the base you send, or `<public URL>/ld/<space id>/` from the instance's
-`publicUrl` (or `PUBLIC_BASE_URL`). With neither it answers `400 rdf_base_needed`. A write that leaves a field out keeps
-the stored value. A different `base` or `vocab` answers `409 rdf_base_frozen`, naming both. To change the base, send the
-new one with `rebase: true`:
-
-- on a space in no network, the base changes at once and `baseEpoch` goes up by one;
-- on a space in a network, the write opens a `space_rebase` vote on every network carrying the space and answers
-  `202 vote_pending`; nothing changes until the vote's deadline ([Networks: the rebase vote](08-networks-api.md#the-rebase-vote-space_rebase)).
-  Send `rdf` alone in such a write (`400 rdf_rebase_alone` otherwise).
-
-Changing the base changes every address the space has given out. A settings vote, a network's layer and a precedence
-swap never change it. `rdf` is the space's own setting and is refused with `targetNetwork` (`400 rdf_not_a_layer_field`).
-
-A type and a property may name their own address with `iri`, for instance `https://schema.org/Person` and
-`https://schema.org/email`. Without one, the vocab names them: `<vocab><kind>/<type>` and `<vocab><kind>/<type>/<property>`,
-each name percent-encoded where IRI syntax needs it. `iri` is part of the schema, so changing it changes the schema
-fingerprint, and a schema-version diff shows it as a change of shape.
-
-On a space with RDF on, a write that leaves two terms with one address answers `422 rdf_term_clash`, naming both: two
-types with one `iri`, a type and a property with one, two properties with one and different declared types (agreeing
-types may share one), an `iri` under the space's own vocab, or an `iri` the export writes on its own account (such as
-`rdfs:label` or `dcterms:created`). MCP `schema_update` takes `rdf` with the same rules and refusals; the refusal's
-`code` is in its structured content.
+The base is set once: a different `base` or `vocab` answers `409 rdf_base_frozen`, naming both. Send the new base with `rebase: true` (never stored) to change it on purpose, which changes every address the space gave out: on a space in no network at once, with `baseEpoch` one higher; on a space in a network it opens a `space_rebase` vote, answers `202 vote_pending` and lands at the vote's deadline ([the rebase vote](08-networks-api.md#the-rebase-vote-space_rebase)); send `rdf` alone then (`400 rdf_rebase_alone`). A settings vote, a network's layer and a precedence swap never change the base; a base a network offers that no held vote explains is recorded on this instance beside that network, as a base conflict a rebase vote settles. `rdf` is refused with `targetNetwork` (`400 rdf_not_a_layer_field`). On MCP a refusal's `code` is in the structured content. A type and a property may name their own address with `iri` (`https://schema.org/Person`, `https://schema.org/email`); without one the vocab names them, `<vocab><kind>/<type>[/<property>]`, each name percent-encoded where IRI syntax needs it. `iri` is part of the schema: changing it changes the schema fingerprint and shows in a version diff as a change of shape. On a space with RDF on, a write that leaves two terms with one address answers `422 rdf_term_clash`, naming both: two types, or a type and a property, with one `iri`; two properties with one and different declared types (agreeing types may share one); an `iri` under the space's own vocab; or one the export writes itself (such as `rdfs:label`, `dcterms:created`).
 
 ### Schema versions
 
@@ -672,6 +634,7 @@ interface TypeSchema {
                                                   //   text, never parsed, max 4000. An assistant reads
                                                   //   it; nothing validates against it. See 06-spaces-api.md.
   namingPattern?: string;                         // entity only — regex for name validation
+  iri?: string;                                   // the type's RDF address; see RDF names above
   retention?: { days?: number; contentDays?: number };  // per-type retention, the middle tier of
                                                   //   record > schema > space. `contentDays` is chrono-only
                                                   //   and is rejected elsewhere. See 04-brain-api.md.
@@ -703,6 +666,7 @@ interface PropertySchema {
   mergeFn?: 'avg' | 'min' | 'max' | 'sum' | 'and' | 'or' | 'xor';  // entity merge hint
   required?: boolean;  // if true, property must be present on every write
   default?: string | number | boolean;  // value inserted when property is absent
+  iri?: string;        // the property's RDF address; see RDF names above
 }
 ```
 

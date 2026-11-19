@@ -71,7 +71,11 @@ const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 // gate would have been green while its INTENT, that an operator can SET the field, stayed unmet for two
 // releases. Taking that pass would have been the "shape gate passes on a wrong rule" failure this repo keeps
 // paying for. An entry here says what is true instead, and its absence now says something stronger.
-const NO_CONTROL = {};
+const NO_CONTROL = {
+  // Q-748 (bundle-269 slice A): written by typeSchemaFromState so a UI save keeps it, and set through the API and MCP only until a
+  // control for a type's RDF address is built beside the library-namespace screen.
+  iri: 'the RDF address of a type is carried through every save and set through PATCH /api/spaces/:id or schema_update; no control yet',
+};
 
 /** The keys of the inline (non-$ref) branch of `TypeSchemaZ` in the spaces API. */
 function apiTypeSchemaKeys() {

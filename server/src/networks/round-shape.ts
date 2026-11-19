@@ -17,7 +17,7 @@
  *   accepted (counted and warned by the caller, never refused: a skewed clock is not an attack).
  */
 import { z } from 'zod';
-import { BaseIriZ, NamespaceIriZ } from '@ythril-network/schema';
+import { BaseIriZ, NamespaceIriZ, RDF_BASE_EPOCH_MAX } from '@ythril-network/schema';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types-knowledge.js';
 
 const VOTE_ROUND_TYPES = ['join', 'remove', 'space_deletion', 'space_wipe', 'meta_change', 'space_addition', 'space_rebase'] as const;
@@ -51,7 +51,7 @@ export const IncomingVoteRound = z.object({
   requiredVoters: z.array(z.string()).max(MAX_ROUND_VOTERS).optional(),
   // Q-748: what a `space_rebase` round moves the base to. Read as the setting's own validators read an address, so a served round cannot
   // carry a base no door would accept; the casts bind it (`bsig`).
-  rebase: z.object({ base: BaseIriZ, vocab: NamespaceIriZ, epoch: z.number().int().min(1).max(1_000_000) }).optional(),
+  rebase: z.object({ base: BaseIriZ, vocab: NamespaceIriZ, epoch: z.number().int().min(1).max(RDF_BASE_EPOCH_MAX) }).optional(),
 }).passthrough().refine(r => r.type !== 'space_rebase' || (r.rebase !== undefined && typeof r.spaceId === 'string'), {
   message: 'a space_rebase round names its space and carries the new base',
 });

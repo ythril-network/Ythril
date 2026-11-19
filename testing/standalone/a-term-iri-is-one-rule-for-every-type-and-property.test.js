@@ -24,7 +24,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 import { blankComments } from './_strip-comments.mjs';
 
 const termIri = await import('../../server/dist/rdf/term-iri.js').catch(() => ({}));
@@ -142,7 +142,7 @@ function handBuiltIriSites(file, text) {
 describe('the source gate', () => {
   it('is proven on a planted module: each way of building an address by hand is named', () => {
     const planted = [
-      "import { iriSegment } from '@ythril-network/schema';",
+      "import { iriSegment } from 'the-schema-package';",
       "const base = `${url}/ld/${id}/`;",
       "const t = YTHRIL_NS + 'Entity';",
       "const r = meta.rdf.base + 'entity/' + id;",
@@ -153,7 +153,7 @@ describe('the source gate', () => {
     assert.deepEqual(handBuiltIriSites(RESOLVER, planted), [], 'the resolver itself is the one builder');
   });
   it('no module of the server or the schema package builds an RDF address but the resolver', () => {
-    const sources = readTrackedSources(['server/src', 'schema/src'], { untracked: true });
+    const sources = readTrackedSources([...SERVER_CODE_ROOTS], { untracked: true });
     const sites = sources.flatMap(({ file, text }) => handBuiltIriSites(file, text));
     assert.deepEqual(sites, [], 'ask server/src/rdf/term-iri.ts for the address instead');
     assert.ok(sources.some(s => s.file === RESOLVER), 'the resolver is in the scan');

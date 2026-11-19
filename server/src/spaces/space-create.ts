@@ -29,6 +29,8 @@ import {
   CreateSpaceBody, TypeSchemasZ, libraryRefRefusal, parseSpaceMeta, stripServerOwnedSpace,
 } from './body-schemas.js';
 import { refuseRemovedDescription } from './spaces.js';
+import { RDF_BASE_NEEDED_STATUS, settleRdf } from './rdf-settle.js';
+import { getPublicBaseUrl, publicBaseUrlIsFallback } from '../config/public-url.js';
 import { retiredSpaceFieldError } from '../brain/retired-write-fields.js';
 import { ReservedSpaceIdError } from './unknown-space.js';
 import { refusalText } from '../brain/store-failure.js';
@@ -38,7 +40,7 @@ import { SpaceStillBeingRemoved, SPACE_STILL_BEING_REMOVED, SPACE_STILL_BEING_RE
 /** A refusal, carrying the status the contract suite pins. */
 export type SpaceCreateRefusal = {
   status: 400 | 422;
-  body: { error: string };
+  body: { error: string; code?: string };
 };
 
 /** Exactly the arguments `createSpace()` takes, with the id resolved and the meta seeded. */
@@ -99,6 +101,14 @@ export function planSpaceCreate(body: unknown): SpaceCreateDecision {
   // records on ingest. With no typeSchemas yet defined, 'strict' still accepts every type/label, so this never blocks
   // a brand-new empty space.
   const seededMeta: SpaceMeta = { validationMode: 'strict', strictLinkage: true, ...(requestMeta ?? {}) };
+  // Q-748: a new space's RDF setting is its first set, settled by the one rule (`rdf-settle.ts`): the base filled from the public URL or
+  // refused, the write-only `rebase` never stored.
+  if (seededMeta.rdf !== undefined) {
+    const rdf = settleRdf(undefined, seededMeta.rdf, 'local', { spaceId: id, ...(publicBaseUrlIsFallback() ? {} : { publicBaseUrl: getPublicBaseUrl() }) });
+    // Nothing is stored yet, so the only refusal is the first set's (`rdf_base_needed`, 400).
+    if (!rdf.ok) return { ok: false, refusal: { status: RDF_BASE_NEEDED_STATUS, body: { error: rdf.error, code: rdf.code } } };
+    if (rdf.rdf === undefined) delete seededMeta.rdf; else seededMeta.rdf = rdf.rdf;
+  }
 
   // What `createSpace` stores is parsed: the seeded meta is the caller's parsed meta with two defaults laid under it, and it
   // goes through the one parse again so the plan carries the brand a store takes (`Q-216`).

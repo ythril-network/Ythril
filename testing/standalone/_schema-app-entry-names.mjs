@@ -25,6 +25,8 @@ export const APP_VALUES = [
   'peerText', 'readingStoredRules', 'refusalOfParse', 'ruleMapIssues', 'spaceRuleIssues', 'stripServerOwnedMeta',
   'takeBackLibraryDefinition', 'typeRuleIssues', 'typesOfSpaceMeta', 'unknownMetaFields', 'unrecognizedKeysIssue', 'validateSpaceMeta',
   'withSchemaLibrary',
+  // Q-748 (bundle-269 slice A): the RDF names.
+  'IriZ', 'NamespaceIriZ', 'BaseIriZ', 'PrefixZ', 'RESERVED_PREFIXES', 'IRI_MAX', 'RDF_BASE_EPOCH_MAX', 'iriSegment',
 ];
 
 /**
@@ -45,4 +47,6 @@ export const APP_TYPES = [
   'ParsedTypeSchema', 'PropertySchema', 'RuleIssue', 'SchemaLibraryEntryLike', 'SchemaLibrarySource', 'SchemaRule', 'SpaceMeta',
   'SpaceSchemaRule', 'TypeSchema', 'TypeScriptOptions', 'TypeScriptSource', 'Untranslated', 'ValidateSpaceMetaOptions', 'ValidationMode',
   'ViewField', 'ViewKind', 'WrongKindLibraryRef',
+  // Q-748 (bundle-269 slice A).
+  'RdfSetting', 'RdfBaseConflict',
 ];

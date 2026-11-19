@@ -16,6 +16,9 @@ import { z } from 'zod';
 /** The longest address a schema or a setting may carry: far above any real one, and a bound on what a caller can make the server store. */
 export const IRI_MAX = 2000;
 
+/** The highest `baseEpoch` a setting or a rebase round may carry: far above any number of deliberate base changes, and a bound on a peer's value. */
+export const RDF_BASE_EPOCH_MAX = 1_000_000;
+
 /** A character IRIREF forbids (RDF 1.1 Turtle §6.4): controls and space, and `<>"{}|^`\`. */
 const IRIREF_FORBIDDEN = /[\u0000- <>"{}|^`\\]/;
 
@@ -47,14 +50,26 @@ export const RESERVED_PREFIXES: readonly string[] = Object.freeze([
 export const PrefixZ = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,49}$/, 'a prefix is a letter, then letters, digits, "_" or "-", at most 50 characters')
   .refine(p => !RESERVED_PREFIXES.includes(p), { message: `a prefix may not be one of ${RESERVED_PREFIXES.join(', ')}` });
 
-/** Is `cp` in RFC 3987 `iunreserved`: ALPHA / DIGIT / "-" / "." / "_" / "~" / ucschar? */
-function isIunreserved(cp: number): boolean {
-  if ((cp >= 0x41 && cp <= 0x5a) || (cp >= 0x61 && cp <= 0x7a) || (cp >= 0x30 && cp <= 0x39)) return true;
-  if (cp === 0x2d || cp === 0x2e || cp === 0x5f || cp === 0x7e) return true;
-  if ((cp >= 0xa0 && cp <= 0xd7ff) || (cp >= 0xf900 && cp <= 0xfdcf) || (cp >= 0xfdf0 && cp <= 0xffef)) return true;
-  // ucschar above the BMP: each plane but its last two code points (U+xFFFE, U+xFFFF), up to plane 14.
-  if (cp >= 0x10000 && cp <= 0xeffff) return (cp & 0xffff) <= 0xfffd;
-  return false;
+/** RFC 3987 `iunreserved` in ASCII: ALPHA / DIGIT / "-" / "." / "_" / "~". */
+const ASCII_UNRESERVED = /^[A-Za-z0-9._~-]$/;
+/** The `ucschar` ranges inside the Basic Multilingual Plane (RFC 3987 §2.2). */
+const BMP_UCSCHAR: readonly (readonly [number, number])[] = [[0xa0, 0xd7ff], [0xf900, 0xfdcf], [0xfdf0, 0xffef]];
+/** `ucschar` above the BMP: planes 1 to 14, each but its last two code points (U+xFFFE, U+xFFFF). */
+const ASTRAL_FIRST = 0x10000;
+const ASTRAL_LAST = 0xeffff;
+const PLANE_MASK = 0xffff;
+const PLANE_LAST_UCSCHAR = 0xfffd;
+/** A surrogate code point on its own: what iterating a string by code point yields for an unpaired half. */
+const LONE_SURROGATE = /^[\u{D800}-\u{DFFF}]$/u;
+/** `%XX`: a byte in upper-case hex, two digits. */
+const HEX_RADIX = 16;
+const HEX_BYTE_WIDTH = 2;
+
+/** Is the code point `cp` (the character `ch`) in RFC 3987 `iunreserved`? */
+function isIunreserved(ch: string, cp: number): boolean {
+  if (ASCII_UNRESERVED.test(ch)) return true;
+  if (BMP_UCSCHAR.some(([lo, hi]) => cp >= lo && cp <= hi)) return true;
+  return cp >= ASTRAL_FIRST && cp <= ASTRAL_LAST && (cp & PLANE_MASK) <= PLANE_LAST_UCSCHAR;
 }
 
 /** The replacement character's UTF-8, for a lone surrogate (which no UTF-8 encodes). */
@@ -71,16 +86,10 @@ export function iriSegment(s: string): string {
   if (s === '.') return '%2E';
   if (s === '..') return '%2E%2E';
   let out = '';
-  for (let i = 0; i < s.length; i++) {
-    const unit = s.charCodeAt(i);
-    let cp = unit;
-    if (unit >= 0xd800 && unit <= 0xdbff) {
-      const next = s.charCodeAt(i + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) { cp = 0x10000 + ((unit - 0xd800) << 10) + (next - 0xdc00); i++; } else { out += REPLACEMENT; continue; }
-    } else if (unit >= 0xdc00 && unit <= 0xdfff) { out += REPLACEMENT; continue; }
-    const ch = String.fromCodePoint(cp);
-    if (isIunreserved(cp)) { out += ch; continue; }
-    for (const byte of new TextEncoder().encode(ch)) out += `%${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+  for (const ch of s) {
+    if (LONE_SURROGATE.test(ch)) { out += REPLACEMENT; continue; }
+    if (isIunreserved(ch, ch.codePointAt(0)!)) { out += ch; continue; }
+    for (const byte of new TextEncoder().encode(ch)) out += `%${byte.toString(HEX_RADIX).toUpperCase().padStart(HEX_BYTE_WIDTH, '0')}`;
   }
   return out;
 }

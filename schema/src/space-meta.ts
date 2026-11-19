@@ -31,7 +31,7 @@ import { META_FIELD_KINDS, MAX_UNKNOWN_NAMES, PER_TYPE_META_FIELD, boundedNames 
 import { isPlainObject, setOwn } from './plain-object.js';
 import { libraryEntryNameOf } from './library-ref-name.js';
 import { SCHEMA_FINGERPRINT_FIELD } from './schema-fingerprint.js';
-import { IriZ, BaseIriZ, NamespaceIriZ } from './iri.js';
+import { IriZ, BaseIriZ, NamespaceIriZ, RDF_BASE_EPOCH_MAX } from './iri.js';
 import {
   TypeRuleZ, SpaceRuleZ, MAX_RULES_PER_TYPE, MAX_RULES_PER_SPACE, ruleMapIssues, typeRuleIssues, spaceRuleIssues, applicableRuleIssues,
   readingStoredRules, type RuleIssue,
@@ -500,7 +500,7 @@ export const SpaceMetaBody = z.object({
     enabled: z.boolean(),
     base: BaseIriZ.optional(),
     vocab: NamespaceIriZ.optional(),
-    baseEpoch: z.number().int().min(0).max(1_000_000).optional(),
+    baseEpoch: z.number().int().min(0).max(RDF_BASE_EPOCH_MAX).optional(),
     rebase: z.literal(true).optional(),
   }).strict().optional(),
 }).strict().superRefine((meta, ctx) => {
@@ -567,11 +567,8 @@ for (const key of Object.keys(SpaceMetaBody.shape)) {
  *
  * `schemaFingerprint` joined in Q-734 (bundle-265): the fingerprint of the schema the space's records are checked and stamped against,
  * derived from the schema itself, so a caller-set value would name a schema that is not the one in force.
- *
- * `rdfBaseConflict` joined in Q-748 (bundle-269): a base a network offered that no round explains, recorded by the server and read by the
- * RDF doors; a caller cannot settle it by writing it, only by a rebase.
  */
-export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema', 'invalidRules', 'unknownWriteFields', SCHEMA_FINGERPRINT_FIELD, 'rdfBaseConflict'] as const;
+export const SERVER_OWNED_META_FIELDS = ['version', 'updatedAt', 'previousVersions', 'needsReindex', 'reindexRun', 'actualSchema', 'invalidRules', 'unknownWriteFields', SCHEMA_FINGERPRINT_FIELD] as const;
 
 /** Drop the server-owned housekeeping fields from an incoming `meta`, leaving everything else to Zod. */
 export function stripServerOwnedMeta(meta: unknown): unknown {

@@ -226,7 +226,10 @@ export interface RdfSetting {
   baseEpoch?: number;
 }
 
-/** Two bases offered for one space that no round explains (Q-748): the RDF doors answer 409 `rdf_base_conflict` while it stands. */
+/**
+ * Two bases offered for one space that no round explains (Q-748): the RDF doors answer 409 `rdf_base_conflict` while it stands. Held by
+ * the server beside the network that offered it (`NetworkConfig.rdfBaseConflicts`), never in the meta, so no caller can set or echo it.
+ */
 export interface RdfBaseConflict {
   held: { base: string; epoch: number };
   offered: { networkId?: string; base: string; epoch: number }[];
@@ -291,8 +294,6 @@ export interface SpaceMeta {
   rules?: Record<string, SpaceSchemaRule>;
   /** Q-748: the space's RDF names. A whole object to every merge, settled by one rule on the server (`spaces/rdf-settle.ts`). */
   rdf?: RdfSetting;
-  /** Q-748, server-owned: a base a network offered that no round explains; never set by a caller. */
-  rdfBaseConflict?: RdfBaseConflict;
   /** ISO8601 timestamp of the last meta update. */
   updatedAt?: string;
   /** History of previous meta versions (most recent first, capped). */

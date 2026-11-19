@@ -37,8 +37,7 @@ import type { SpaceMeta } from '../config/types.js';
 import { readPeerMeta, readStoredMeta, stripServerOwnedMeta } from '../spaces/body-schemas.js';
 import { eachTypeDefinition, mergeMetaFields, mergeTypeDefinition, PER_TYPE_META_FIELD } from '../spaces/meta-fields.js';
 import { isPlainObject, ownValue } from '../util/plain-object.js';
-import { settleRdf, type RdfSettleContext } from '../spaces/rdf-settle.js';
-import type { RdfBaseConflict } from '@ythril-network/schema';
+import { settleRdf } from '../spaces/rdf-settle.js';
 
 type Obj = Record<string, unknown>;
 
@@ -85,7 +84,7 @@ export function mergeReplicatedMeta(
 
   const next = mergeMetaFields(base, { ...read.meta } as Obj, mergeTypesAdditively);
   // Q-748: a network's copy never moves this space's stored base; it is settled, never replaced.
-  keepSettledRdf(next, local?.rdf, read.meta['rdf'], {});
+  keepSettledRdf(next, local?.rdf, read.meta['rdf']);
   const comparable = (m: Obj) => replicatedMetaOf(m as SpaceMeta);
   return {
     meta: next as SpaceMeta,
@@ -104,10 +103,9 @@ export interface MetaLayer { networkId: string; meta: unknown }
  * first so the network first in `layers` wins an exact type-and-property clash. Owner decision 2026-09-25, option A:
  * default precedence is the order the networks were joined, and the operator may reorder it.
  */
-export function effectiveMeta(own: SpaceMeta | undefined, layers: readonly MetaLayer[], heldRebaseEpochs?: ReadonlySet<number>): SpaceMeta {
+export function effectiveMeta(own: SpaceMeta | undefined, layers: readonly MetaLayer[]): SpaceMeta {
   let meta: SpaceMeta = { ...(own ?? {}) };
-  delete meta.rdfBaseConflict;
-  for (const layer of [...layers].reverse()) meta = layOverStored(meta, layer.meta, { networkId: layer.networkId, ...(heldRebaseEpochs ? { heldRebaseEpochs } : {}) });
+  for (const layer of [...layers].reverse()) meta = layOverStored(meta, layer.meta);
   return meta;
 }
 
@@ -117,29 +115,25 @@ export function effectiveMeta(own: SpaceMeta | undefined, layers: readonly MetaL
  * was stored, so this is no gate, and parsing it whole and dropping it for one stale type (the pattern rule is newer than the layer)
  * is how a member held a layer it did not run (`Q-216`). What ARRIVES goes through `mergeReplicatedMeta`, which parses.
  *
- * The RDF setting is settled, never replaced (Q-748): the base `base` holds stays, whatever the layer and its precedence, and a base the
- * layer offers that no held round explains is recorded as `rdfBaseConflict`.
+ * The RDF setting is settled, never replaced (Q-748): the base `base` holds stays, whatever the layer and its precedence. A base the layer
+ * offers that no held round explains is the recompute's to record (`layerRdfConflict`, `spaces/effective-meta.ts`).
  */
-function layOverStored(base: SpaceMeta, stored: unknown, ctx: RdfSettleContext = {}): SpaceMeta {
+function layOverStored(base: SpaceMeta, stored: unknown): SpaceMeta {
   const layer = readStoredMeta(stored).meta;
   const next = mergeMetaFields({ ...base }, layer, mergeTypesAdditively);
-  keepSettledRdf(next, base.rdf, layer['rdf'], ctx);
+  keepSettledRdf(next, base.rdf, layer['rdf']);
   return next as SpaceMeta;
 }
 
 /**
- * Write into `next` the RDF setting a layer leaves (`spaces/rdf-settle.ts`, source `layer`) over `stored`, and the conflict it finds, if any,
- * beside what `next` already records. The one place the two layer merges settle it, so neither can replace the base whole.
+ * Write into `next` the RDF setting a layer leaves (`spaces/rdf-settle.ts`, source `layer`) over `stored`. The one place the two layer
+ * merges settle it, so neither can replace the base whole.
  */
-function keepSettledRdf(next: Obj, stored: SpaceMeta['rdf'], offered: unknown, ctx: RdfSettleContext): void {
+function keepSettledRdf(next: Obj, stored: SpaceMeta['rdf'], offered: unknown): void {
   // Both were parsed where they were stored or read (`readStoredMeta`, `readPeerMeta`), so the object is the body's shape.
-  const settled = settleRdf(stored, isPlainObject(offered) ? offered as unknown as SpaceMeta['rdf'] : undefined, 'layer', ctx);
+  const settled = settleRdf(stored, isPlainObject(offered) ? offered as unknown as SpaceMeta['rdf'] : undefined, 'layer');
   const rdf = settled.ok ? settled.rdf : stored;
   if (rdf === undefined) delete next['rdf']; else next['rdf'] = rdf;
-  if (settled.ok && settled.conflict) {
-    const held = isPlainObject(next['rdfBaseConflict']) ? next['rdfBaseConflict'] as unknown as RdfBaseConflict : undefined;
-    next['rdfBaseConflict'] = held ? { ...held, offered: [...held.offered, ...settled.conflict.offered] } : settled.conflict;
-  }
 }
 
 /**

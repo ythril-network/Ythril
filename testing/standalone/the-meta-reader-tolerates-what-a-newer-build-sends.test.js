@@ -82,7 +82,8 @@ describe(`the meta reader against the previous release (${PREDECESSOR_TAG})`, { 
       assert.ok(newKeys.length >= 1, 'this build adds no meta key since the predecessor: stampSkew (Q-217) is the first, so SpaceMetaBody must now accept it');
       assert.ok(newKeys.includes('stampSkew'), `the keys new since ${PREDECESSOR_TAG} are ${JSON.stringify(newKeys)}; stampSkew is missing`);
       for (const key of newKeys) {
-        const sample = key === 'stampSkew' ? { warnMinutes: 5 } : key === 'rules' ? { r: { rule: 'true', message: 'm' } } : null;
+        const sample = key === 'stampSkew' ? { warnMinutes: 5 } : key === 'rules' ? { r: { rule: 'true', message: 'm' } }
+          : key === 'rdf' ? { enabled: true, base: 'https://x.example.org/ld/s/' } : null;
         assert.ok(sample !== null, `no sample for the new meta key ${key}: add one here`);
         const result = oldMerge({}, { purpose: 'known', [key]: sample });
         assert.ok(result.invalid, `the previous release accepted the new key ${key}`);
