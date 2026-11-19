@@ -217,6 +217,17 @@ describe('an unreachable embedder and the embed queue (real MongoDB, real embed(
     assert.equal(await handedBack(), handedBefore + 1);
   });
 
+  it('a hand-back under a claim another worker took over writes nothing and is not counted', async () => {
+    const errors = await import('../../server/dist/brain/embed-errors.js');
+    const doc = await fact.saveFact(SPACE, 'a fact whose claim was taken over', [], []);
+    const before = await only();
+    const handedBefore = await handedBack();
+    await queue.failEmbedJob(SPACE, 'fact', doc._id, 3, new errors.EmbedUnreachableError(SENTENCE()), 0, { claimToken: 'a-claim-nobody-holds' });
+    const job = await only();
+    assert.equal(job.transientFailures ?? 0, before.transientFailures ?? 0, 'a stale claim wrote the job');
+    assert.equal(await handedBack(), handedBefore, 'a hand-back that matched no job was counted');
+  });
+
   it('the running worker claims nothing for a pause after one unreachable failure', async () => {
     for (const text of ['one', 'two', 'three']) await fact.saveFact(SPACE, `a fact written ${text}`, [], []);
     // Tried: a job a worker took and failed, whether it handed the attempt back (`transientFailures`) or spent it (`attempts`).
