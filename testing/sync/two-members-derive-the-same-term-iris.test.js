@@ -22,7 +22,7 @@ const CONFIGS = path.join(__dirname, 'configs');
 const SPACE = `rdf-names-${Date.now()}`;
 const BASE = `https://names.example.org/ld/${SPACE}/`;
 const SCHEMA = {
-  entity: { person: { iri: 'https://schema.org/Person', propertySchemas: { email: { type: 'string', iri: 'https://schema.org/email' }, 'nick name': { type: 'string' } } } },
+  entity: { person: { iri: 'http://schema.org/Person', propertySchemas: { email: { type: 'string', iri: 'http://schema.org/email' }, 'nick name': { type: 'string' } } } },
   edge: { knows: { propertySchemas: { since: { type: 'date' } } } },
 };
 let tokenA, tokenB, net, termIri;
@@ -80,7 +80,7 @@ describe('two members derive the same term IRIs', () => {
     for (const [kind, type, prop] of terms) {
       assert.equal(termIri.resolveTermIri(b, kind, type, prop), termIri.resolveTermIri(a, kind, type, prop), `${kind}/${type}/${prop ?? ''}`);
     }
-    assert.equal(termIri.resolveTermIri(a, 'entity', 'person'), 'https://schema.org/Person');
+    assert.equal(termIri.resolveTermIri(a, 'entity', 'person'), 'http://schema.org/Person');
     assert.equal(termIri.resolveTermIri(a, 'entity', 'person', 'nick name'), `${BASE}vocab/entity/person#nick%20name`);
     assert.equal(termIri.recordIri(b, 'entity', 'x y'), termIri.recordIri(a, 'entity', 'x y'));
   });

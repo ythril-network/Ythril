@@ -74,7 +74,7 @@ const PROPERTY_SAMPLES = {
   mergeFn: { type: 'number', mergeFn: 'sum' },
   required: { type: 'string', required: true },
   default: { type: 'string', default: 'dflt' },
-  iri: { type: 'string', iri: 'https://schema.org/email' },
+  iri: { type: 'string', iri: 'http://schema.org/email' },
 };
 const TYPE_SAMPLES = {
   description: { value: 'what this type is', kinds: KINDS },
@@ -86,7 +86,7 @@ const TYPE_SAMPLES = {
   endpoints: { value: { from: ['person'], to: ['person'] }, kinds: ['edge'] },
   functional: { value: true, kinds: ['edge'] },
   rules: { value: { named: { rule: 'true', message: 'always' } }, kinds: KINDS },
-  iri: { value: 'https://schema.org/Thing', kinds: KINDS },
+  iri: { value: 'http://schema.org/Thing', kinds: KINDS },
 };
 const SPACE_SAMPLES = {
   purpose: 'a purpose',
@@ -191,11 +191,11 @@ describe('a mapped property field reaches the terms its row names', () => {
   }
 
   it('property iri: the explicit address is the property term itself and the sh:path of its shape; the space vocab no longer names it', () => {
-    const quads = graphOf(metaOf('entity', propHost({ type: 'string', iri: 'https://schema.org/email' }))).quads;
+    const quads = graphOf(metaOf('entity', propHost({ type: 'string', iri: 'http://schema.org/email' }))).quads;
     const path = quads.filter(q => q.predicate.value === termIri('sh:path')).map(q => q.object.value);
-    assert.ok(path.includes('https://schema.org/email'), 'sh:path is the explicit iri');
+    assert.ok(path.includes('http://schema.org/email'), 'sh:path is the explicit iri');
     assert.ok(!quads.some(q => [q.subject, q.predicate, q.object].some(t => t.kind === 'iri' && t.value === `${VOCAB}entity/t#p`)), 'the derived address is not used');
-    assert.ok(!quads.some(q => q.subject.kind === 'iri' && q.subject.value === 'https://schema.org/email'), 'an outside term is never the subject of a statement');
+    assert.ok(!quads.some(q => q.subject.kind === 'iri' && q.subject.value === 'http://schema.org/email'), 'an outside term is never the subject of a statement');
   });
 
   it('every property field of the schema has a fixture here', () => {
@@ -240,11 +240,11 @@ describe('a mapped type field reaches the terms its row names', () => {
   }
 
   it('type iri: the explicit address is the class, the sh:targetClass; an edge label is the sh:targetSubjectsOf', () => {
-    const entity = graphOf(metaOf('entity', { iri: 'https://schema.org/Person' })).quads;
-    assert.ok(entity.some(q => q.predicate.value === termIri('sh:targetClass') && q.object.value === 'https://schema.org/Person'));
-    const edge = graphOf(metaOf('edge', { iri: 'https://schema.org/knows' })).quads;
-    assert.ok(edge.some(q => q.predicate.value === termIri('sh:targetSubjectsOf') && q.object.value === 'https://schema.org/knows'));
-    assert.ok(![...entity, ...edge].some(q => q.subject.kind === 'iri' && q.subject.value.startsWith('https://schema.org/')), 'an outside term is never the subject of a statement');
+    const entity = graphOf(metaOf('entity', { iri: 'http://schema.org/Person' })).quads;
+    assert.ok(entity.some(q => q.predicate.value === termIri('sh:targetClass') && q.object.value === 'http://schema.org/Person'));
+    const edge = graphOf(metaOf('edge', { iri: 'http://schema.org/knows' })).quads;
+    assert.ok(edge.some(q => q.predicate.value === termIri('sh:targetSubjectsOf') && q.object.value === 'http://schema.org/knows'));
+    assert.ok(![...entity, ...edge].some(q => q.subject.kind === 'iri' && q.subject.value.startsWith('http://schema.org/')), 'an outside term is never the subject of a statement');
   });
 
   it('every type field of the schema has a fixture here', () => {

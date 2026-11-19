@@ -26,7 +26,7 @@ const clashes = (meta) => {
 
 const BASE = 'https://ythril.example.org/ld/s/';
 const withTypes = (typeSchemas) => ({ rdf: { enabled: true, base: BASE, vocab: `${BASE}vocab/`, baseEpoch: 0 }, typeSchemas });
-const PERSON = 'https://schema.org/Person';
+const PERSON = 'http://schema.org/Person';
 
 const named = (list, ...words) => list.some(c => words.every(w => c.message.includes(w)));
 
@@ -43,7 +43,7 @@ describe('a clash is named with both owners', () => {
     assert.ok(named(list, 'person', 'owner', PERSON));
   });
   it('two properties with one IRI and differing types; agreeing types share it', () => {
-    const EMAIL = 'https://schema.org/email';
+    const EMAIL = 'http://schema.org/email';
     const differ = clashes(withTypes({ entity: {
       a: { propertySchemas: { mail: { type: 'string', iri: EMAIL } } },
       b: { propertySchemas: { contact: { type: 'number', iri: EMAIL } } },

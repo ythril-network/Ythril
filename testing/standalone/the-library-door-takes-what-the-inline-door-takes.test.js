@@ -55,7 +55,7 @@ const SAMPLES = {
   // F-46: added with the key (TypeSchema.rules); a rule that reads no property, so the sample needs no propertySchemas beside it.
   rules: { kind: 'entity', value: { titled: { rule: "self.title != ''", message: 'needs a title' } } },
   // Q-748: added with the key (TypeSchema.iri).
-  iri: { kind: 'entity', value: 'https://schema.org/Thing' },
+  iri: { kind: 'entity', value: 'http://schema.org/Thing' },
 };
 
 /** The members of `interface TypeSchema`, read from the source. */

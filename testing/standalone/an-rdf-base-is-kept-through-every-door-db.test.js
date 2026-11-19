@@ -112,7 +112,7 @@ describe('an RDF base is kept through every door', { skip }, () => {
         inst.reset();
         await write(door, SOLO, { rdf: { enabled: true, base: OLD } });
         const answer = await write(door, SOLO, { typeSchemas: { entity: {
-          person: { iri: 'https://schema.org/Person' }, human: { iri: 'https://schema.org/Person' } } } });
+          person: { iri: 'http://schema.org/Person' }, human: { iri: 'http://schema.org/Person' } } } });
         assert.equal(answer.status, 422, answer.text.slice(0, 300));
         assert.match(said(answer), /rdf_term_clash/);
         assert.ok(answer.text.includes('person') && answer.text.includes('human'), answer.text.slice(0, 300));
@@ -120,7 +120,7 @@ describe('an RDF base is kept through every door', { skip }, () => {
       it('the same clash on a space with RDF off is no clash: nothing changes until it is switched on', async () => {
         inst.reset();
         const answer = await write(door, SOLO, { typeSchemas: { entity: {
-          person: { iri: 'https://schema.org/Person' }, human: { iri: 'https://schema.org/Person' } } } });
+          person: { iri: 'http://schema.org/Person' }, human: { iri: 'http://schema.org/Person' } } } });
         assert.equal(answer.refused, false, answer.text.slice(0, 300));
       });
       it('on a networked space rebase opens a space_rebase round and the base is unchanged', async () => {

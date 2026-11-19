@@ -40,7 +40,7 @@ const META = {
   rdf: { enabled: true, base: BASE, vocab: VOCAB, baseEpoch: 0 },
   typeSchemas: {
     entity: {
-      person: { iri: 'https://schema.org/Person', propertySchemas: { email: { type: 'string', iri: 'https://schema.org/email' }, 'nick name': { type: 'string' } } },
+      person: { iri: 'http://schema.org/Person', propertySchemas: { email: { type: 'string', iri: 'http://schema.org/email' }, 'nick name': { type: 'string' } } },
       'odd/type': { propertySchemas: { 'a#b': { type: 'number' } } },
     },
     edge: { knows: { propertySchemas: { since: { type: 'date' } } } },
@@ -51,8 +51,8 @@ const META = {
 
 describe('the resolver: one rule for every type and property', () => {
   it('an explicit iri on a type and on a property wins', () => {
-    assert.equal(fn('resolveTermIri')(META, 'entity', 'person'), 'https://schema.org/Person');
-    assert.equal(fn('resolveTermIri')(META, 'entity', 'person', 'email'), 'https://schema.org/email');
+    assert.equal(fn('resolveTermIri')(META, 'entity', 'person'), 'http://schema.org/Person');
+    assert.equal(fn('resolveTermIri')(META, 'entity', 'person', 'email'), 'http://schema.org/email');
   });
   it('without one, a type is the document <vocab><kind>/<type> and its property the fragment #<prop>, every name encoded', () => {
     assert.equal(fn('resolveTermIri')(META, 'entity', 'person', 'nick name'), `${VOCAB}entity/person#nick%20name`);
@@ -94,12 +94,12 @@ describe('an explicit iri is part of the schema', () => {
   it('a type and a property take an iri, and changing one changes the schema fingerprint', async () => {
     const pkg = await import('../../schema/dist/index.js');
     const internal = await import('../../schema/dist/internal.js');
-    const typed = pkg.parseTypeSchema('entity', 'person', { iri: 'https://schema.org/Person', propertySchemas: { email: { type: 'string', iri: 'https://schema.org/email' } } });
+    const typed = pkg.parseTypeSchema('entity', 'person', { iri: 'http://schema.org/Person', propertySchemas: { email: { type: 'string', iri: 'http://schema.org/email' } } });
     assert.ok(typed.ok, `the type body refuses iri: ${JSON.stringify(typed.refusal ?? typed)}`);
     const bad = pkg.parseTypeSchema('entity', 'person', { iri: 'Person' });
     assert.ok(!bad.ok, 'a relative iri is refused');
     const fp = (iri) => internal.schemaFingerprintTextOf({ typeSchemas: { entity: { person: { iri } } } });
-    assert.notEqual(fp('https://schema.org/Person'), fp('https://example.org/Person'), 'an iri change changes the fingerprint');
+    assert.notEqual(fp('http://schema.org/Person'), fp('https://example.org/Person'), 'an iri change changes the fingerprint');
   });
 });
 

@@ -50,7 +50,7 @@ const TYPE_FIELDS = {
   rules: { class: 'reported', sample: { named: { rule: 'true', message: 'always' } } },
   // Q-748: the type's RDF address. TypeScript has no place for it, so the converter reports it as it reports every type field it does not
   // carry (design r4 §4.3 said "irrelevant"; the converter classifies type fields by the shape, and reporting is what it promises).
-  iri: { class: 'reported', sample: 'https://schema.org/Thing' },
+  iri: { class: 'reported', sample: 'http://schema.org/Thing' },
 };
 
 /** A property's fields, each with the property it sits on. All are translated: as the member type, or as documentation. */
@@ -65,7 +65,7 @@ const PROPERTY_FIELDS = {
   required: { class: 'translated', sample: { type: 'string', required: true } },
   default: { class: 'translated', sample: { type: 'string', default: 'DEFAULTMARK' }, doc: 'DEFAULTMARK' },
   // Q-748: the property's RDF address says nothing about its TypeScript type: no entry, and the member type is the declared one.
-  iri: { class: 'irrelevant', sample: { type: 'string', iri: 'https://schema.org/email' } },
+  iri: { class: 'irrelevant', sample: { type: 'string', iri: 'http://schema.org/email' } },
 };
 
 /** The property type enum: each option and the member type it becomes (held by the property-types test). */

@@ -85,7 +85,7 @@ describe('the address validators', () => {
   });
   it('an IRI is absolute, has no character IRIREF forbids, and is bounded', () => {
     const IriZ = zod('IriZ');
-    assert.ok(IriZ.safeParse('https://schema.org/Person').success);
+    assert.ok(IriZ.safeParse('http://schema.org/Person').success);
     assert.ok(IriZ.safeParse('urn:isbn:0451450523').success);
     for (const bad of ['Person', 'https://x.org/a>b', 'https://x.org/a"b', 'https://x.org/{a}', `https://x.org/${'a'.repeat(2001)}`]) {
       assert.ok(!IriZ.safeParse(bad).success, `${JSON.stringify(bad.slice(0, 40))} is refused`);
