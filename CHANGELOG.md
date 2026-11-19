@@ -165,6 +165,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Security:** a not-found answer (a record id, an entry id, a file path, a backup or library name) quotes what the caller sent cut at 256 characters with the count of what was cut, on REST and MCP; a 100 000-character id is no longer echoed whole.
 - **Rights:** since 2.6.0 a `HEAD` skipped a space's area rung on path-scoped reads: a token reaching the space read an area's statuses and headers (file size, name, type), unaudited. `HEAD` is now checked and audited as `GET`; a request no rights row decides is refused `403 route_unclassified`.
+- **Audit:** a request is now audited whatever the casing of its path or a trailing slash (a write under `/API` left no entry); a `HEAD` of an export reads nothing and counts no documents as sent.
 
 ## [6.5.5] — 2026-11-08
 
