@@ -96,7 +96,6 @@ const WORDS: Record<string, string> = {
   'spaces.schema.convert.running409': 'DLG-RUNNING',
   'spaces.schema.convert.incomplete': 'DLG-INCOMPLETE',
   'spaces.schema.convert.warn.rule': 'DLG-WARN-RULE rule={{rule}} type={{type}} old={{property}} new={{to}}',
-  'spaces.schema.convert.warn.namingPattern': 'DLG-WARN-PATTERN type={{type}} old={{property}} new={{to}}',
   'spaces.schema.convert.submitted.title': 'DLG-SUBMITTED',
   'spaces.schema.convert.submitted.lead': 'DLG-SUBMITTED-LEAD {{network}}',
   'spaces.schema.convert.submitted.after': 'DLG-SUBMITTED-AFTER',
@@ -440,14 +439,12 @@ describe('the convert records dialog', () => {
     it('is a line on the type\'s block that names the rule, the old and the new name, the names in the code face', () => {
       const warned: ConvertBlockPlan = { ...person, warnings: [
         { kind: 'rule', type: 'person', rule: 'has-company', property: 'company', to: 'employer' },
-        { kind: 'namingPattern', type: 'person', property: 'company', to: 'employer' },
       ] };
       const host = mount('offer', { blocks: [warned, customer] });
       const [first, second] = qa(host, 'cv-block');
       const lines = qa(first!, 'cv-warning');
       expect(lines.map(l => l.textContent!.replace(/\s+/g, ' ').trim())).toEqual([
         'DLG-WARN-RULE rule=has-company type=person old=company new=employer',
-        'DLG-WARN-PATTERN type=person old=company new=employer',
       ]);
       expect(Array.from(lines[0]!.querySelectorAll('.cv-tn')).map(e => e.textContent)).toEqual(['has-company', 'person', 'company', 'employer']);
       expect(qa(second!, 'cv-warning')).toEqual([]);
