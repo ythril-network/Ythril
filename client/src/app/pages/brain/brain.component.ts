@@ -363,8 +363,8 @@ interface SpaceView {
         <!-- Edges -->
         @if (activeTab() === 'edges') { <app-edges-tab [spaceId]="activeSpaceId()" (mutated)="loadStats(activeSpaceId())" (viewInGraph)="viewInGraph($event)" /> }
 
-        <!-- Chrono -->
-        @if (activeTab() === 'chrono') { <app-chrono-tab [spaceId]="activeSpaceId()" /> }
+        <!-- Chrono: deferred like Query and Review, not the landing tab (bundle-285: this chunk was 230 kB against its 215 kB budget). -->
+        @if (activeTab() === 'chrono') { @defer (on immediate) { <app-chrono-tab [spaceId]="activeSpaceId()" /> } @loading (minimum 200ms) { <div class="loading-overlay loading-overlay--float" data-tab-defer="chrono"><span class="spinner"></span></div> } }
 
         <!-- Query -->
         @if (activeTab() === 'overview') {
