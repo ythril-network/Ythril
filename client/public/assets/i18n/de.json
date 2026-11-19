@@ -3236,6 +3236,9 @@
   "jsonTree.key.other": "{{count}} Schlüssel",
   "spaces.schema.renameProp": "Diese Eigenschaft umbenennen",
   "spaces.schema.renamePropAria": "Eigenschaft {{key}} umbenennen",
+  "spaces.schema.renamePropError.empty": "Eine Eigenschaft braucht einen Namen.",
+  "spaces.schema.renamePropError.exists": "Dieser Typ hat bereits eine Eigenschaft mit diesem Namen.",
+  "spaces.schema.renamePropError.missing": "Diese Eigenschaft ist nicht mehr vorhanden: Öffnen Sie den Tab erneut.",
   "spaces.schema.was": "war {{name}}",
   "spaces.schema.convert.button": "Datensätze konvertieren",
   "spaces.schema.convert.locked": "Das Konvertieren schreibt Datensätze auf jedem Peer um und braucht deshalb das Administratorrecht für diesen Space.",
@@ -3377,6 +3380,7 @@
   "conversion.step.splitType": "{{type}} nach einer Bedingung aufteilen: {{cases}}; alle übrigen werden zu {{otherwise}}",
   "conversion.step.splitTypeOpen": "{{type}} nach einer Bedingung aufteilen: {{cases}}",
   "conversion.step.splitCase": "Datensätze, bei denen {{when}}, werden zu {{to}}",
+  "conversion.step.unknown": "Diesen Schritt kann diese Version der App nicht beschreiben ({{op}}).",
   "conversion.editor.renameProperty": "Eigenschaft umbenennen",
   "conversion.editor.renameType": "Typ umbenennen",
   "conversion.editor.mapEnum": "Wert abbilden",
@@ -3503,5 +3507,7 @@
   "networks.network.votes.convert.counts.few": "Wird dies angenommen, konvertiert diese Instanz die {{count}} Datensätze des Typs {{type}}, die sie hält (nur gestempelt: {{stamped}}, umgeschrieben: {{rewritten}}), nach einer Synchronisation mit ihren Peers. Bei einem Veto ändert sich nichts.",
   "networks.network.votes.convert.counts.many": "Wird dies angenommen, konvertiert diese Instanz die {{count}} Datensätze des Typs {{type}}, die sie hält (nur gestempelt: {{stamped}}, umgeschrieben: {{rewritten}}), nach einer Synchronisation mit ihren Peers. Bei einem Veto ändert sich nichts.",
   "networks.network.votes.convert.counts.other": "Wird dies angenommen, konvertiert diese Instanz die {{count}} Datensätze des Typs {{type}}, die sie hält (nur gestempelt: {{stamped}}, umgeschrieben: {{rewritten}}), nach einer Synchronisation mit ihren Peers. Bei einem Veto ändert sich nichts.",
-  "networks.network.votes.convert.none": "Hier gibt es keine Datensätze des Typs {{type}}, daher würde auf dieser Instanz nichts konvertiert."
+  "networks.network.votes.convert.none": "Hier gibt es keine Datensätze des Typs {{type}}, daher würde auf dieser Instanz nichts konvertiert.",
+  "networks.network.votes.convert.countFailed": "Die Datensatzzahlen dieser Instanz konnten nicht gelesen werden.",
+  "networks.network.votes.convert.noSpace": "Dieser Space ist nicht auf dieser Instanz, daher werden hier keine Datensätze gezählt."
 }

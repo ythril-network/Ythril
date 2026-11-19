@@ -24,6 +24,7 @@ const ENGLISH: Record<string, string> = {
   'conversion.step.splitType': 'Split {{type}} by a condition: {{cases}}; all others become {{otherwise}}',
   'conversion.step.splitTypeOpen': 'Split {{type}} by a condition: {{cases}}',
   'conversion.step.splitCase': 'records where {{when}} become {{to}}',
+  'conversion.step.unknown': 'A step this version of the app cannot describe ({{op}}).',
 };
 
 interface Call { key: string; params: Record<string, unknown> }
@@ -101,8 +102,110 @@ describe('names a peer wrote are parameters, never markup and never part of a ke
     expect(out).not.toMatch(/<(span|strong|em|code)/);
   });
 
-  it('the closed list of keys is the six the plan names and the one it needs for a split without `otherwise`', () => {
+  it('the closed list of keys is the six the plan names, the one a split without `otherwise` needs and the one for a step with no words', () => {
     expect([...CONVERSION_STEP_KEYS].sort()).toEqual(Object.keys(ENGLISH).sort());
+  });
+});
+
+/**
+ * A step the client has no words for (bundle-285 slice S8b, Q-940). A vote carries steps a PEER wrote, and a newer member may send an
+ * operation this version does not know, or a known one with a field missing or of the wrong kind. The sentence of every step is made in this
+ * one function, so the dialog, the type pane and the vote row get the same answer without each having to guard: it never returns undefined
+ * and never throws.
+ *
+ * ## Seen red
+ *
+ * Red on the bundle branch at 653766f53: an unknown op returned `undefined`, a map without `values` threw, and `conversion.step.unknown`
+ * was not on the closed list.
+ */
+describe('a step with no words, or one a peer shaped wrongly, is still a sentence', () => {
+  const UNKNOWN = 'conversion.step.unknown';
+  const wrong = (step: unknown) => step as ConversionStep;
+  const run = (step: unknown) => {
+    const t = translator();
+    const out = stepSentence(t, wrong(step));
+    return { out, calls: t.calls };
+  };
+
+  it('an op this client does not know is the unknown sentence with the op as a parameter', () => {
+    const { out, calls } = run({ op: 'dropProperty', kind: 'entity', type: 'person', property: 'x' });
+    expect(out).toBe('A step this version of the app cannot describe (dropProperty).');
+    expect(calls).toEqual([{ key: UNKNOWN, params: { op: 'dropProperty' } }]);
+  });
+
+  it('an op that names something on the object prototype is unknown, not a case of the switch', () => {
+    for (const op of ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'renametype', 'RenameType', '']) {
+      const { out, calls } = run({ op });
+      expect(typeof out, `op ${JSON.stringify(op)}`).toBe('string');
+      expect(calls.map(c => c.key), `op ${JSON.stringify(op)}`).toEqual([UNKNOWN]);
+    }
+  });
+
+  it('a known op with a field missing or of the wrong kind is the unknown sentence naming that op, and asks for nothing else', () => {
+    const bad: Record<string, unknown>[] = [
+      { op: 'renameType', kind: 'entity', from: 'a' },
+      { op: 'renameType', kind: 'entity', to: 'b' },
+      { op: 'renameType', kind: 'entity', from: 1, to: 'b' },
+      { op: 'renameType', kind: 'entity', from: 'a', to: null },
+      { op: 'renameProperty', kind: 'entity', type: 't', from: 'a' },
+      { op: 'renameProperty', kind: 'entity', type: 't', from: {}, to: 'b' },
+      { op: 'mapEnum', kind: 'entity', type: 't', property: 'p' },
+      { op: 'mapEnum', kind: 'entity', type: 't', values: { a: 'b' } },
+      { op: 'mapEnum', kind: 'entity', type: 't', property: 'p', values: null },
+      { op: 'mapEnum', kind: 'entity', type: 't', property: 'p', values: ['a', 'b'] },
+      { op: 'mapEnum', kind: 'entity', type: 't', property: 'p', values: 'a' },
+      { op: 'mapEnum', kind: 'entity', type: 't', property: 'p', values: { a: 1 } },
+      { op: 'mapEnum', kind: 'entity', type: 't', property: 'p', values: { a: 'b', c: null } },
+      { op: 'splitType', kind: 'entity', from: 'a' },
+      { op: 'splitType', kind: 'entity', cases: [{ when: 'w', to: 't' }] },
+      { op: 'splitType', kind: 'entity', from: 'a', cases: 'x' },
+      { op: 'splitType', kind: 'entity', from: 'a', cases: { when: 'w', to: 't' } },
+      { op: 'splitType', kind: 'entity', from: 'a', cases: [null] },
+      { op: 'splitType', kind: 'entity', from: 'a', cases: [{ when: 'w' }] },
+      { op: 'splitType', kind: 'entity', from: 'a', cases: [{ when: 'w', to: 't' }, { to: 't' }] },
+      { op: 'splitType', kind: 'entity', from: 'a', cases: [{ when: 'w', to: 't' }], otherwise: null },
+      { op: 'splitType', kind: 'entity', from: 'a', cases: [{ when: 'w', to: 't' }], otherwise: 7 },
+    ];
+    for (const step of bad) {
+      const { out, calls } = run(step);
+      expect(out, JSON.stringify(step)).toBe(`A step this version of the app cannot describe (${String(step['op'])}).`);
+      expect(calls.map(c => c.key), `no half-built sentence for ${JSON.stringify(step)}`).toEqual([UNKNOWN]);
+    }
+  });
+
+  it('a step that is not an object, or has no op of its own, is the unknown sentence and does not throw', () => {
+    for (const step of [null, undefined, 'x', 7, true, [], {}, { op: 7 }, { op: null }, { op: {} }, { op: ['renameType'] }]) {
+      const { out, calls } = run(step);
+      expect(out.length, JSON.stringify(step)).toBeGreaterThan(0);
+      expect(calls.map(c => c.key), JSON.stringify(step)).toEqual([UNKNOWN]);
+    }
+    expect(run({ op: 7 }).calls[0]!.params).toEqual({ op: '?' });
+    expect(run(null).calls[0]!.params).toEqual({ op: '?' });
+  });
+
+  it('a split with no `otherwise` and a map with no pairs are still known steps, not unknown ones', () => {
+    expect(run({ op: 'splitType', kind: 'entity', from: 'a', cases: [{ when: 'w', to: 't' }] }).calls.map(c => c.key)).not.toContain(UNKNOWN);
+    expect(run({ op: 'mapEnum', kind: 'entity', type: 't', property: 'p', values: {} }).calls.map(c => c.key)).not.toContain(UNKNOWN);
+  });
+
+  it('the op is bound as text and bounded in length: a long one is cut, markup in it is shown as written', () => {
+    const long = run({ op: 'x'.repeat(5000) });
+    expect((long.calls[0]!.params['op'] as string).length).toBeLessThanOrEqual(60);
+    expect(long.out.length).toBeLessThan(200);
+    const markup = run({ op: '<img src=x onerror=alert(1)>' });
+    expect(markup.out).toBe('A step this version of the app cannot describe (<img src=x onerror=alert(1)>).');
+    expect(markup.calls[0]!.params).toEqual({ op: '<img src=x onerror=alert(1)>' });
+  });
+
+  it('control characters in the op do not reach the sentence (the callers use two of them as markers)', () => {
+    const { calls } = run({ op: 'a\u0001b\u0002c\u0000d' });
+    expect(calls[0]!.params).toEqual({ op: 'abcd' });
+  });
+
+  it('every key asked for, whatever the step is, is on the closed list', () => {
+    const t = translator();
+    for (const step of [null, { op: 'x' }, { op: 'mapEnum' }, { op: 'splitType', from: 'a', cases: [null] }, { op: 'renameType', from: 'a', to: 'b' }]) stepSentence(t, wrong(step));
+    for (const call of t.calls) expect(CONVERSION_STEP_KEYS).toContain(call.key);
   });
 });
 
