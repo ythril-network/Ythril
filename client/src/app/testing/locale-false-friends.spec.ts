@@ -440,3 +440,88 @@ describe('one word per record kind in every locale (Q-573)', () => {
     expect(stemFor(term('chrono'), 'Also return chrono entries', 'de').test('Chrono')).toBe(false);
   });
 });
+
+/**
+ * Polish written without its diacritics (bundle-285, Q-747; found in `brain.filter.statusLabel`, "Filtruj wedlug statusu").
+ *
+ * A value like that is a real-looking word in the right language, so no other lint reads it: the keys exist, the test harness echoes keys, and only
+ * a Polish reader sees "wedlug" for "według". It arrives when text is typed or pasted through a tool that drops ą ć ę ł ń ó ś ź ż, and a whole
+ * sentence of it (the face-recognition confirmation read "Wyslac wyciecia twarzy do uslugi zewnetrznej?") shipped for months. The rule is a denylist
+ * of the spellings that are not words in Polish, each with the word it should be: an ASCII spelling that IS another Polish word ("zadanie",
+ * "kopie", "sie") is not on it, so a listed entry never flags correct text. A wrongly stripped word that is not on the list still passes: add it
+ * when one is found, with the correction, and the next one is caught.
+ *
+ * The second rule is the neighbour fault, a Latin word with one Cyrillic look-alike letter ("Uslugа" with a Cyrillic "а"): it looks right, and no
+ * search for the word finds it.
+ */
+const STRIPPED_POLISH: Record<string, string> = {
+  wedlug: 'według', zrodlo: 'źródło', zrodla: 'źródła', zrodle: 'źródle', polaczenie: 'połączenie', polaczenia: 'połączenia', polaczyc: 'połączyć',
+  polaczono: 'połączono', usun: 'usuń', usunac: 'usunąć', usunieto: 'usunięto', usuniety: 'usunięty', blad: 'błąd', bledy: 'błędy', bledu: 'błędu',
+  wlasciwosc: 'właściwość', wlasciwosci: 'właściwości', przestrzen: 'przestrzeń', uzytkownik: 'użytkownik', uzytkownika: 'użytkownika',
+  uzytkownicy: 'użytkownicy', nastepny: 'następny', nastepna: 'następna', wiecej: 'więcej', zostal: 'został', zostala: 'została', zostalo: 'zostało',
+  zostana: 'zostaną', wartosc: 'wartość', wartosci: 'wartości', wiadomosc: 'wiadomość', wiadomosci: 'wiadomości', zawartosc: 'zawartość',
+  tresc: 'treść', tresci: 'treści', dostep: 'dostęp', sciezka: 'ścieżka', sciezki: 'ścieżki', rowniez: 'również', takze: 'także', ktory: 'który',
+  ktora: 'która', ktore: 'które', jesli: 'jeśli', poniewaz: 'ponieważ', wiec: 'więc', juz: 'już', wlacz: 'włącz', wylacz: 'wyłącz',
+  otworz: 'otwórz', zakladke: 'zakładkę', powiazane: 'powiązane', wynikow: 'wyników', grupe: 'grupę', sluzy: 'służy', asystentow: 'asystentów',
+  bylo: 'było', ponowien: 'ponowień', wyslij: 'wyślij', wyslac: 'wysłać', wyslane: 'wysłane', wysylane: 'wysyłane', wysylka: 'wysyłka',
+  usluga: 'usługa', uslugi: 'usługi', zewnetrzny: 'zewnętrzny', zewnetrznej: 'zewnętrznej', moga: 'mogą', byc: 'być', zachowac: 'zachować',
+  nieosiagalny: 'nieosiągalny', uzyciem: 'użyciem', wyciecia: 'wycięcia', sa: 'są',
+};
+
+/** The value with what is not Polish prose blanked: placeholders, brace blocks (JSON examples), and words joined to code by . - _ / or $. */
+const polishProse = (value: string): string => {
+  let v = value.replace(/\{\{[^}]*\}\}/g, ' ');
+  for (let i = 0; i < 4; i++) v = v.replace(/\{[^{}]*\}/g, ' ');
+  return v;
+};
+
+/** The stripped spellings in a value, as `stripped -> correct`. A word glued to an identifier (`moj-tag`, `a.b`, `$sa`) is not prose. */
+function strippedPolish(value: string): string[] {
+  const found: string[] = [];
+  for (const m of polishProse(value).matchAll(/(?<![\p{L}\p{N}_\-./$])\p{L}+(?![\p{L}\p{N}_\-./])/gu)) {
+    const word = m[0].toLowerCase();
+    if (Object.hasOwn(STRIPPED_POLISH, word)) found.push(`${m[0]} -> ${STRIPPED_POLISH[word]}`);
+  }
+  return found;
+}
+
+/** A word that mixes Latin and Cyrillic letters. */
+const MIXED_SCRIPT = /(?=\p{L}*\p{Script=Latin})(?=\p{L}*\p{Script=Cyrillic})\p{L}+/u;
+
+describe('Polish keeps its diacritics, and no word mixes scripts (Q-747)', () => {
+  const pl = dictionary('pl');
+
+  it('every denylist entry is its correction without the diacritics', () => {
+    for (const [stripped, correct] of Object.entries(STRIPPED_POLISH)) {
+      expect(stripped, `${stripped}: an ASCII spelling`).toMatch(/^[a-z]+$/);
+      expect(correct, `${stripped}: the correction carries a diacritic`).toMatch(/[ąćęłńóśźż]/);
+      expect(correct.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l'), `${stripped}: the correction is this word with its diacritics`).toBe(stripped);
+    }
+  });
+
+  it('no Polish value spells a word without its diacritics (the denylist)', () => {
+    const bad = Object.keys(pl).flatMap(key => (typeof pl[key] === 'string' ? strippedPolish(pl[key]!).map(f => `${key}: ${f}  in ${JSON.stringify(pl[key])}`) : []));
+    expect(bad, `${bad.length} values spell Polish without its diacritics:\n  ${bad.join('\n  ')}`).toEqual([]);
+  });
+
+  it('no value of any language mixes Latin and Cyrillic letters in one word', () => {
+    const bad = (['en', 'de', 'pl'] as const).flatMap(loc => {
+      const d = dictionary(loc);
+      return Object.keys(d).filter(key => typeof d[key] === 'string' && MIXED_SCRIPT.test(d[key]!)).map(key => `${loc} ${key} = ${JSON.stringify(d[key])}`);
+    });
+    expect(bad, `${bad.length} values hold a word that mixes scripts:\n  ${bad.join('\n  ')}`).toEqual([]);
+  });
+
+  // The gate is its pattern. It must flag the stripped word, pass the right one, and leave code and placeholders alone.
+  it('the patterns flag wedlug, pass według, and read prose rather than code', () => {
+    expect(strippedPolish('Filtruj wedlug statusu')).toEqual(['wedlug -> według']);
+    expect(strippedPolish('Wyslac wyciecia twarzy do uslugi zewnetrznej?')).toHaveLength(4);
+    expect(strippedPolish('Filtruj według statusu')).toEqual([]);
+    expect(strippedPolish('Zostaną wysłane, jeśli są potrzebne. Zadanie, kopie, sie.')).toEqual([]);
+    expect(strippedPolish('{"tags": {"$in": ["moj-tag"]}} lub sa-token, a.sa, $sa, sa_x')).toEqual([]);
+    expect(strippedPolish('{{wedlug}} i {wedlug}')).toEqual([]);
+    expect(strippedPolish('WEDLUG i Juz')).toHaveLength(2);
+    expect(MIXED_SCRIPT.test(`Uslug${String.fromCharCode(0x430)}`)).toBe(true);
+    expect(MIXED_SCRIPT.test('Usługa Служба')).toBe(false);
+  });
+});
