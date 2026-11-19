@@ -142,7 +142,7 @@ export interface TermOwner { kind: TermKind; type: string | null; prop?: string 
 export interface TermClash {
   iri: string;
   owners: TermOwner[];
-  reason: 'same-iri' | 'property-types-differ' | 'under-vocab' | 'reserved-predicate';
+  reason: 'same-iri' | 'property-types-differ' | 'under-vocab' | 'under-base' | 'reserved-predicate';
   /** One sentence naming both owners and the address. */
   message: string;
 }
@@ -154,11 +154,11 @@ const ownerText = (o: TermOwner): string => (o.prop === undefined ? `${o.kind} t
 
 /**
  * Every clash in `meta` (resolved): two types, or a type and a property, with one address; two properties with one address and differing
- * declared types (agreeing types may share one); an explicit `iri` under the space's own vocab, where the derived names live; an explicit
- * `iri` equal to a predicate the mapper writes. Empty when there is none. Throws {@link RdfNotEnabled} for a space with RDF off.
+ * declared types (agreeing types may share one); an explicit `iri` under the space's own vocab, where the derived names live, or under its
+ * base, where its records' addresses live; an explicit `iri` equal to a predicate the mapper writes. Empty when there is none. Throws {@link RdfNotEnabled} for a space with RDF off.
  */
 export function termClashes(meta: SpaceMeta): TermClash[] {
-  const { vocab } = namesOf(meta);
+  const names = namesOf(meta);
   const out: TermClash[] = [];
   const types: { iri: string; owner: TermOwner }[] = [];
   const props: { iri: string; owner: TermOwner; declared: unknown }[] = [];
@@ -166,10 +166,10 @@ export function termClashes(meta: SpaceMeta): TermClash[] {
     for (const [type, raw] of Object.entries(map ?? {})) {
       const def = raw && typeof raw === 'object' ? raw as TypeDef : {};
       const k = kind as KnowledgeType;
-      if (typeof def.iri === 'string') explicitChecks(out, def.iri, { kind: k, type }, vocab);
+      if (typeof def.iri === 'string') explicitChecks(out, def.iri, { kind: k, type }, names);
       types.push({ iri: resolveTermIri(meta, k, type), owner: { kind: k, type } });
       for (const [prop, p] of Object.entries(def.propertySchemas ?? {})) {
-        if (typeof p?.iri === 'string') explicitChecks(out, p.iri, { kind: k, type, prop }, vocab);
+        if (typeof p?.iri === 'string') explicitChecks(out, p.iri, { kind: k, type, prop }, names);
         props.push({ iri: resolveTermIri(meta, k, type, prop), owner: { kind: k, type, prop }, declared: p?.type });
       }
     }
@@ -189,10 +189,17 @@ export function termClashes(meta: SpaceMeta): TermClash[] {
   return out;
 }
 
-/** The two checks of an explicit address: not under the space's own vocab, and not a predicate the mapper writes. */
-function explicitChecks(out: TermClash[], iri: string, owner: TermOwner, vocab: string): void {
+/**
+ * The checks of an explicit address: not under the space's own vocab, where the derived names live; not under its base, where every record,
+ * agent and schema address lives (review finding 11: `<base>entity/Person` would be the address of the record with id `Person`); and not a
+ * predicate the mapper writes.
+ */
+function explicitChecks(out: TermClash[], iri: string, owner: TermOwner, names: { base: string; vocab: string }): void {
+  const { base, vocab } = names;
   if (iri.startsWith(vocab)) {
     out.push({ iri, owners: [owner], reason: 'under-vocab', message: `${ownerText(owner)} sets the iri ${iri}, which lies under the space's own vocab ${vocab}, where the derived names live: choose an address outside it, or remove the iri` });
+  } else if (iri.startsWith(base)) {
+    out.push({ iri, owners: [owner], reason: 'under-base', message: `${ownerText(owner)} sets the iri ${iri}, which lies under the space's base ${base}, where its records' own addresses live: choose an address outside it, or remove the iri` });
   }
   if (RDF_RESERVED_PREDICATES.includes(iri)) {
     out.push({ iri, owners: [owner], reason: 'reserved-predicate', message: `${ownerText(owner)} sets the iri ${iri}, which the record mapper writes on its own account on every record: choose another address` });
