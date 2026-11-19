@@ -330,7 +330,7 @@ const suggestedAddAsName = (name: string): string => name + '-2';
       } @else if (selectedTypeName(kt); as name) {
         <div class="sch-detail-head">
           <!-- The name and its rename are one question, in their own component (B-18). -->
-          <app-schema-type-name [name]="name" [rename]="renamerFor(kt, name)" [was]="state.typeWas(kt, name)" />
+          <app-schema-type-name [truncate]="true" [name]="name" [rename]="renamerFor(kt, name)" [was]="state.typeWas(kt, name)" />
           <span class="acts">
             <ng-container *ngTemplateOutlet="historyButton; context: { kt: kt, name: name }"></ng-container>
             <ng-container *ngTemplateOutlet="convertBar.button() ?? null"></ng-container>

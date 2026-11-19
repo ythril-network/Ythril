@@ -224,10 +224,32 @@ describe('a long name at phone width', () => {
     expect(name.textContent!.trim()).toBe(long);
   });
 
-  it('lets the name shrink in its row and puts the "was" note on a line of its own at phone width', () => {
+  it('lets the name shrink only when asked to (`truncate`), and puts the "was" note on a line of its own at phone width', () => {
     const rules = rulesOf(SCHEMA_TYPE_NAME_STYLES);
-    expect(rules.some(r => r.media === null && /:host/.test(r.text) && /min-width:\s*0/.test(r.text)), 'the control can shrink below its text').toBe(true);
+    expect(rules.some(r => r.media === null && /:host\(\.truncate\)/.test(r.text) && /min-width:\s*0/.test(r.text)), 'the truncating control can shrink below its text').toBe(true);
     expect(rules.some(r => phone(r) && /\.sch-hint/.test(r.text) && /flex-basis:\s*100%/.test(r.text)), 'the note takes its own line on a phone').toBe(true);
+  });
+
+  /**
+   * Round 2 of the drive: at 1440 px the property keys in the table were cut to stubs ("a…", "stat…"), because the shrink meant for the type head's
+   * long name reached every use of the control. Every rule that clips (overflow, an ellipsis, a max width, a zero min width) belongs to the
+   * truncating use only, and only the type head asks for it.
+   */
+  it('clips nothing by default: every clipping rule is scoped to the truncating use (drive round 2)', () => {
+    const clipping = rulesOf(SCHEMA_TYPE_NAME_STYLES).filter(r => /overflow:\s*hidden|text-overflow|max-width|min-width:\s*0/.test(r.text));
+    expect(clipping.length, 'the truncating rules exist').toBeGreaterThan(0);
+    expect(clipping.filter(r => !/\.truncate/.test(r.text)).map(r => r.text)).toEqual([]);
+  });
+
+  it('marks its host as truncating only when the input says so; the property key in the table does not, the type head does', () => {
+    expect(mount().el.classList.contains('truncate'), 'not by default').toBe(false);
+    expect(mount({ truncate: true }).el.classList.contains('truncate')).toBe(true);
+    const tab = readFileSync(resolve(CLIENT_ROOT, 'src/app/pages/settings/space-schema-tab.component.ts'), 'utf8');
+    expect(tab).toMatch(/<app-schema-type-name\b[^>]*\[truncate\]="true"/);
+    const editor = readFileSync(resolve(CLIENT_ROOT, 'src/app/pages/settings/schema-type-editor.component.ts'), 'utf8');
+    const keyUse = /<app-schema-type-name\b[^>]*nameClass="prop-name-key"[^>]*>/.exec(editor)?.[0] ?? '';
+    expect(keyUse, 'the property key use is found').not.toBe('');
+    expect(keyUse).not.toMatch(/truncate/);
   });
 
   it('the type head lets its name shrink and folds its buttons onto another line at phone width, and the Schema tab draws with it', () => {
