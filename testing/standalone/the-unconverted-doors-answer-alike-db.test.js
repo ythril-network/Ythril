@@ -248,7 +248,8 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
       assert.match(a.tool.text, new RegExp(code), 'the tool names the code in its text');
     };
     await refused({ kind: 'file' }, 'unconverted_bad_kind');
-    await refused({ status: 'all' }, 'unconverted_bad_status');
+    await refused({ status: 'everything' }, 'unconverted_bad_status');
+    await refused({ status: 'ALL' }, 'unconverted_bad_status');
     await refused({ type: 'x'.repeat(201) }, 'unconverted_bad_type');
     for (const skip of [-1, 'abc']) await refused({ skip }, 'unconverted_bad_paging');
     for (const limit of [0, 'abc']) await refused({ limit }, 'unconverted_bad_paging');
@@ -371,6 +372,13 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     assert.deepEqual(ids(gone), ['o1', 'p2', 'p1'], 'the dismissed list is newest first too');
     assert.deepEqual(gone.body.items.map(r => r.status), ['dismissed', 'dismissed', 'dismissed']);
     assert.deepEqual(openAndDismissed(gone.body.counts), { open: 2, dismissed: 3 });
+    // `status: 'all'` (bundle-285 S1): open and dismissed together, newest first, each row saying its status, `total` counting both, `counts` as for any status.
+    const everyone = await alike('list', { status: 'all' });
+    assert.equal(everyone.status, 200, `status=all was refused: ${JSON.stringify(everyone.body)}`);
+    assert.deepEqual(ids(everyone), ['c1', 'f1', 'o1', 'p2', 'p1'], 'status=all lists the open and the dismissed items in one newest-first order');
+    assert.deepEqual(everyone.body.items.map(r => r.status), ['open', 'open', 'dismissed', 'dismissed', 'dismissed']);
+    assert.equal(everyone.body.total, 5, 'total counts both statuses');
+    assert.deepEqual(everyone.body.counts, open.body.counts, 'counts do not move with the status asked for');
     const again = await alike('dismiss', { itemId: itemOf.p1 }, WRITER);
     assert.deepEqual([again.status, again.body.item.status], [200, 'dismissed'], 'dismissing a dismissed item leaves it dismissed');
   });
@@ -576,7 +584,7 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     // the refusal to the act: the dispatcher's own check is skipped, so a wrong value answers the act's code on both doors (asserted on the refusals above).
     const { KNOWLEDGE_TYPES } = await import('../../server/dist/config/types-knowledge.js');
     assert.deepEqual(listSchema.properties.kind.enum, [...KNOWLEDGE_TYPES], 'kind does not declare the knowledge kinds the act parses with');
-    assert.deepEqual(listSchema.properties.status.enum, ['open', 'dismissed'], 'status does not declare the statuses the act parses with');
+    assert.deepEqual(listSchema.properties.status.enum, ['open', 'dismissed', 'all'], 'status does not declare the statuses the act parses with');
     for (const t of [list, dismiss, tools().dismiss_unconverted_shownTool]) {
       assert.equal(t.skipSchemaValidation, true, `${t.name}: the dispatcher would refuse a declared bound in its own words, before the act's code`);
     }
@@ -607,7 +615,7 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
 
     const shownTool = tools().dismiss_unconverted_shownTool;
     const shownSchema = shownTool.inputSchema(schemas);
-    assert.deepEqual(Object.keys(shownSchema.properties).sort(), ['expect', 'kind', 'reason', 'space', 'type']);
+    assert.deepEqual(Object.keys(shownSchema.properties).sort(), ['expect', 'kind', 'reason', 'space', 'status', 'type']);
     assert.deepEqual(shownSchema.required.sort(), ['expect', 'space']);
     assert.equal(shownSchema.additionalProperties, false);
     assert.equal(shownTool.mutating, true);
@@ -675,7 +683,7 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     });
 
     it('refuses a malformed list by its own code on the mounted route and the tool, and a token without the rung by 403', async () => {
-      for (const [args, code] of [[{ kind: 'file' }, 'unconverted_bad_kind'], [{ status: 'all' }, 'unconverted_bad_status'], [{ reason: 'nope' }, 'unconverted_bad_reason'],
+      for (const [args, code] of [[{ kind: 'file' }, 'unconverted_bad_kind'], [{ status: 'everything' }, 'unconverted_bad_status'], [{ reason: 'nope' }, 'unconverted_bad_reason'],
         [{ skip: -1 }, 'unconverted_bad_paging'], [{ skip: 'abc' }, 'unconverted_bad_paging'], [{ limit: 0 }, 'unconverted_bad_paging'],
         [{ limit: 'abc' }, 'unconverted_bad_paging']]) {
         const expected = await viaAct('list', args, who.reader.rights, 'rest');

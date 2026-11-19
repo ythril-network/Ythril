@@ -6,8 +6,8 @@
  * ## What each answers
  *
  * - {@link listUnconvertedAct}: `{ items, count, total, limit, skip, truncated, nextSkip?, ...the budget figures, counts: { open, dismissed, openBy,
- *   openByCut? } }`, newest first, narrowed by `kind`, `type`, `reason` (one, or a list: the items of any) and `status` (`open` unless `dismissed` is
- *   asked). `counts` are those of the whole space, whatever the filters; `openBy` groups the open items by kind, type and reason (`{ kind, type,
+ *   openByCut? } }`, newest first, narrowed by `kind`, `type`, `reason` (one, or a list: the items of any) and `status` (`open` unless `dismissed` or `all`,
+ *   both together in the one newest-first order, is asked). `counts` are those of the whole space, whatever the filters; `openBy` groups the open items by kind, type and reason (`{ kind, type,
  *   reason, n }`, in that order, at most `UNCONVERTED_OPEN_BY_MAX`, `openByCut: true` when there were more). A row is the stored item (`itemId` for its id; its internal staleness hash is not served) and, when the record is still stored,
  *   `record: { summary }`: the record's own name or summary, the one line the duplicate list gives for it ({@link summariseRecall}), read for
  *   the page's rows only. A read never writes: a row whose record was written, deleted or converted since is left to the watcher's tick
@@ -148,7 +148,8 @@ export async function listUnconvertedAct(
   };
   const listed = await listUnconvertedItems(spaces, {
     skip: params['skip'], limit: params['limit'], maxChars: params['maxChars'], maxBytes: params['maxBytes'], maxTokens: params['maxTokens'],
-    status: status ?? 'open', ...(kind !== undefined ? { kind } : {}), ...(type !== undefined ? { type } : {}), ...(reason !== undefined ? { reason } : {}),
+    // `all` is no filter on the stored status: the one query, sort and cursor serve both statuses, so the page is one page and not a merge of two reads.
+    ...(status === 'all' ? {} : { status: status ?? 'open' }), ...(kind !== undefined ? { kind } : {}), ...(type !== undefined ? { type } : {}), ...(reason !== undefined ? { reason } : {}),
   }, caller.transport, withSummaries);
   if (!listed.ok) return { status: BAD_REQUEST, error: listed.error, code: BAD_PAGING };
   return {
@@ -191,7 +192,7 @@ export async function dismissUnconvertedAct(spaceId: string, itemId: unknown, ca
 export async function dismissShownUnconvertedAct(spaceId: string, params: Record<string, unknown>, caller: UnconvertedCaller): Promise<UnconvertedActResult> {
   const before = refusedBefore(spaceId, caller, 'write');
   if (before) return before;
-  const parsed = UnconvertedDismissShownParams.safeParse({ kind: params['kind'], type: params['type'], reason: params['reason'], expect: params['expect'] });
+  const parsed = UnconvertedDismissShownParams.safeParse({ kind: params['kind'], type: params['type'], reason: params['reason'], status: params['status'], expect: params['expect'] });
   if (!parsed.success) return parseRefusal(refusalOfParse(parsed.error, UNCONVERTED_REFUSAL_OPTIONS), BAD_EXPECT);
   const { expect, kind, type, reason } = parsed.data;
   const done = await dismissOpenUnconvertedItems(spaceId, { ...(kind !== undefined ? { kind } : {}), ...(type !== undefined ? { type } : {}), ...(reason !== undefined ? { reason } : {}) }, expect);

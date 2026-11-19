@@ -31,6 +31,7 @@ import { itemRow, plant, ADMIN } from './_unconverted-fixture.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'unconv-reasons';
+const S2 = 'unconv-reasons-b';
 
 /** The page fields that state the door's own byte budget: the one thing the two transports answer differently. */
 const BUDGET_KEYS = ['budgetChars', 'budgetBytes', 'charsReturned', 'bytesReturned'];
@@ -59,7 +60,7 @@ describe('the unconverted list takes one reason or a list of reasons (real Mongo
   };
 
   before(async () => {
-    door = await openConvertDoor({ name: 'b285s1reasons', spaces: [S] });
+    door = await openConvertDoor({ name: 'b285s1reasons', spaces: [S, S2] });
     acts = await import('../../server/dist/spaces/unconverted-acts.js');
     mounted = await openMountedDoor();
     admin = await mounted.mint('reasons-admin', 'admin');
@@ -182,10 +183,88 @@ describe('the unconverted list takes one reason or a list of reasons (real Mongo
     assert.deepEqual([flood.status, flood.body?.code], [400, 'unconverted_bad_reason'], 'a thousand pieces are no list');
   });
 
+  // ---- status=all (bundle-285 S1, the Review page's Open / Dismissed / All) ----
+
+  it('status=all lists the open and the dismissed items together, newest first, each row saying its status, total counting both, counts and openBy unchanged', async () => {
+    const newestFirst = ['c-nc', 'f-fork-dismissed', 'f-case', 'p-fork', 'o-nc', 'p-nc'];
+    const open = await rest('');
+    for (const [name, a] of [['REST', await rest('?status=all')], ['MCP', await tool({ status: 'all' })], ['act', await viaAct({ status: 'all' })]]) {
+      assert.equal(a.status ?? 200, 200, `${name}: ${JSON.stringify(a.body)}`);
+      assert.equal(a.isError ?? false, false, `${name}: ${a.text}`);
+      assert.deepEqual(ids(a.body), newestFirst, `${name}: one newest-first order across both statuses`);
+      assert.deepEqual(a.body.items.map(r => r.status), ['open', 'dismissed', 'open', 'open', 'open', 'open'], `${name}: each row says its status`);
+      assert.equal(a.body.total, 6, `${name}: total counts both statuses`);
+      assert.deepEqual(a.body.counts, open.body.counts, `${name}: counts are those of the whole space, whatever the status asked for`);
+    }
+    assert.deepEqual(withoutBudget((await tool({ status: 'all' })).body), withoutBudget((await rest('?status=all')).body), 'the doors answered different bodies');
+    assert.deepEqual(open.body.items.map(r => r.recordId), ['c-nc', 'f-case', 'p-fork', 'o-nc', 'p-nc'], 'an absent status stays open');
+    assert.deepEqual(ids((await rest('?status=')).body), ids(open.body), 'a blank status is no status: open');
+    assert.deepEqual(ids((await rest('?status=dismissed')).body), ['f-fork-dismissed']);
+    assert.deepEqual(ids((await rest('?status=all&reason=fork,no_case_matched')).body), ['f-fork-dismissed', 'f-case', 'p-fork'], 'all composes with the reasons');
+    assert.deepEqual(ids((await rest('?status=all&kind=fact')).body), ['f-fork-dismissed', 'f-case']);
+  });
+
+  it('pages across the boundary between an open and a dismissed item without skipping or repeating, by the one cursor paging', async () => {
+    const whole = ids((await rest('?status=all')).body);
+    assert.equal(whole.length, 6);
+    for (const limit of [1, 2, 4, 5]) {
+      const seen = [];
+      let skip = 0;
+      for (let guard = 0; guard < 10; guard += 1) {
+        const page = (await rest(`?status=all&limit=${limit}&skip=${skip}`)).body;
+        assert.equal(page.total, 6, `limit ${limit}: total is the whole list's on every page`);
+        seen.push(...ids(page));
+        if (!page.truncated) { assert.equal('nextSkip' in page, false); break; }
+        assert.equal(page.nextSkip, skip + page.count, `limit ${limit}: the cursor is where the page ended`);
+        skip = page.nextSkip;
+      }
+      assert.deepEqual(seen, whole, `limit ${limit}: the pages together are the list, none twice, none missing`);
+    }
+    const edge = (await rest('?status=all&limit=2')).body;
+    assert.deepEqual([ids(edge), edge.items.map(r => r.status)], [['c-nc', 'f-fork-dismissed'], ['open', 'dismissed']], 'the first page ends on the dismissed item');
+    assert.deepEqual(ids((await rest(`?status=all&limit=2&skip=${edge.nextSkip}`)).body), ['f-case', 'p-fork'], 'the next page starts on the open item after it');
+  });
+
+  it('through a personal view status=all merges both statuses of every member newest first, total and counts summed as for the other statuses', async () => {
+    await plant(door, S2, [
+      itemRow(10, { recordId: 'b-open', type: 'org', reason: 'fork' }),
+      itemRow(11, { recordId: 'b-dismissed', type: 'org', reason: 'fork', status: 'dismissed' }),
+    ]);
+    const view = async (params) => {
+      const r = await acts.listUnconvertedAct(S, params, { rights: ADMIN, transport: 'rest' }, [S, S2]);
+      assert.equal(r.status, 200, JSON.stringify(r));
+      return r.body;
+    };
+    const all = await view({ status: 'all' });
+    assert.deepEqual(ids(all), ['b-dismissed', 'b-open', 'c-nc', 'f-fork-dismissed', 'f-case', 'p-fork', 'o-nc', 'p-nc']);
+    assert.equal(all.total, 8);
+    assert.deepEqual(all.items.slice(0, 2).map(r => r.space), [S2, S2]);
+    const open = await view({});
+    assert.equal(open.total, 6);
+    assert.deepEqual(all.counts, open.counts, 'counts are the members\' summed whatever the status');
+    assert.deepEqual([open.counts.open, open.counts.dismissed], [6, 2]);
+    assert.deepEqual(ids(await view({ status: 'dismissed' })), ['b-dismissed', 'f-fork-dismissed']);
+    await plant(door, S2, []);
+  });
+
+  it('an unknown status is still refused by its own code, on both doors, naming the value', async () => {
+    for (const status of ['everything', 'ALL', 'All', 'open,dismissed', 'none']) {
+      const a = await rest(`?status=${encodeURIComponent(status)}`);
+      assert.deepEqual([a.status, a.body.code], [400, 'unconverted_bad_status'], `${status}: ${JSON.stringify(a.body)}`);
+      assert.ok(a.body.error.includes(`'${status}'`), `${status}: the refusal does not name the value: ${a.body.error}`);
+      const t = await tool({ status });
+      assert.deepEqual([t.isError, t.body?.code], [true, 'unconverted_bad_status'], `MCP ${status}: ${t.text}`);
+      assert.equal(t.body.error, a.body.error, 'the two doors word one refusal twice');
+    }
+  });
+
   it('the tool and the route state the list form in one schema: the tool takes a reason or an array of reasons, bounded, from the act\'s own reasons', async () => {
     const { UNCONVERTED_REASONS } = await import('../../server/dist/spaces/unconverted-terms.js');
     const { list_unconvertedTool, dismiss_unconverted_shownTool } = await import('../../server/dist/mcp/tools/unconverted.js');
     const schemas = { requiredSpace: { type: 'string' }, optionalSpace: { type: 'string' } };
+    const listStatus = list_unconvertedTool.inputSchema(schemas).properties.status;
+    assert.deepEqual(listStatus.enum, ['open', 'dismissed', 'all'], 'the list declares the three statuses it takes');
+    assert.match(listStatus.description, /all/, 'the status description says what all is');
     for (const t of [list_unconvertedTool, dismiss_unconverted_shownTool]) {
       const node = t.inputSchema(schemas).properties.reason;
       const branches = node.anyOf ?? node.oneOf;

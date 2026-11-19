@@ -172,6 +172,27 @@ describe('the bulk dismiss takes one reason or a list of reasons (real MongoDB)'
     await plant(door, BIG, []);
   });
 
+  it('refuses a status other than open with the bad-status code, naming the value: the bulk dismiss dismisses open items only, and `all` is a list\'s status', async () => {
+    const before = await statuses();
+    for (const status of ['all', 'dismissed', 'everything']) {
+      const a = await bulkRest({ reason: ['fork'], status, expect: 2 });
+      assert.deepEqual([a.status, a.body.code], [400, 'unconverted_bad_status'], `${status}: ${JSON.stringify(a.body)}`);
+      assert.ok(a.body.error.includes(`'${status}'`), `the refusal does not name the value: ${a.body.error}`);
+      const t = await bulkTool({ reason: ['fork'], status, expect: 2 });
+      assert.deepEqual([t.isError, t.body?.code], [true, 'unconverted_bad_status'], `MCP ${status}: ${t.text}`);
+      assert.equal(t.body.error, a.body.error, 'the two doors word one refusal twice');
+    }
+    assert.deepEqual(await statuses(), before, 'a refused call dismissed an item');
+    for (const status of ['open', '']) {
+      await plant(door, S, ROWS());
+      const ok = await bulkRest({ reason: ['fork'], status, expect: 2 });
+      assert.deepEqual([ok.status, ok.body], [200, { dismissed: 2 }], `status ${JSON.stringify(status)}: ${JSON.stringify(ok.body)}`);
+    }
+    const { dismiss_unconverted_shownTool } = await import('../../server/dist/mcp/tools/unconverted.js');
+    const declared = dismiss_unconverted_shownTool.inputSchema({ requiredSpace: { type: 'string' }, optionalSpace: { type: 'string' } }).properties.status;
+    assert.deepEqual(declared?.enum, ['open'], 'the tool declares the one status the bulk dismiss takes');
+  });
+
   it('asks the rung inside the act before it reads the list: a reader is refused, a list or not', async () => {
     const READER = { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { [S]: { knowledge: 'read', files: 'none', schema: 'none', dataQuality: 'none', networks: 'none' } } };
     const a = await acts.dismissShownUnconvertedAct(S, { reason: ['fork', 'nopeNope'], expect: 2 }, { rights: READER, transport: 'rest' });

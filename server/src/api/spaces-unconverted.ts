@@ -40,7 +40,7 @@ const callerOf = (req: { authToken?: unknown }): UnconvertedCaller =>
   ({ rights: (req.authToken as { rights?: TokenRights } | undefined)?.rights, transport: 'rest' });
 
 // GET /api/spaces/:id/schema-convert/items?kind=&type=&reason=&status=&skip=&limit= - one page of the unconverted items, newest first; `status` is `open`
-// (the default) or `dismissed`; `reason` is one reason or several (`reason=a,b` or `reason=a&reason=b`). Filters are parsed by `UnconvertedListParams`
+// (the default), `dismissed` or `all` (both, one order); `reason` is one reason or several (`reason=a,b` or `reason=a&reason=b`). Filters are parsed by `UnconvertedListParams`
 // inside the act.
 spaceUnconvertedRouter.get('/:id/schema-convert/items', globalRateLimit, requireSpaceAuthScoped('id'), async (req, res) => {
   const spaceId = req.params['id'] as string;
@@ -73,7 +73,7 @@ spaceUnconvertedRouter.post('/:id/schema-convert/items/dismiss', globalRateLimit
   const spaceId = req.params['id'] as string;
   const body = (req.body ?? {}) as Record<string, unknown>;
   try {
-    const given = { kind: body['kind'], type: body['type'], reason: body['reason'], expect: body['expect'] };
+    const given = { kind: body['kind'], type: body['type'], reason: body['reason'], status: body['status'], expect: body['expect'] };
     const answer = await dismissShownUnconvertedAct(spaceId, given, callerOf(req));
     if (!('error' in answer)) req.auditChangesExplicit = dismissShownChanges(dismissAuditGiven(given), (answer.body as { dismissed: number }).dismissed);
     sendAnswer(res, answer);

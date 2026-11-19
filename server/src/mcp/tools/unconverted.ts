@@ -17,7 +17,7 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { listUnconvertedAct, dismissUnconvertedAct, dismissShownUnconvertedAct } from '../../spaces/unconverted-acts.js';
 import {
   refusalBody, dismissAuditGiven, UNCONVERTED_REFUSAL_CODES, UNCONVERTED_DISMISS_MAX, UNCONVERTED_REASONS, UNCONVERTED_REASONS_MAX, UNCONVERTED_OPEN_BY_MAX,
-  UNCONVERTED_STATUSES, type UnconvertedRow,
+  UNCONVERTED_LIST_STATUSES, type UnconvertedRow,
 } from '../../spaces/unconverted-terms.js';
 import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
 import { TYPE_NAME_MAX } from '@ythril-network/schema/internal';
@@ -79,7 +79,7 @@ export const list_unconvertedTool: ToolHandler = {
       kind: { ...KIND_FILTER, description: 'Only the items of records of this kind: `entity`, `fact`, `edge` or `chrono`. Omit for every kind. Anything else is refused (`unconverted_bad_kind`).' },
       type: { ...TYPE_FILTER, description: 'Only the items of records of this type (a relationship\'s label for an edge), as a row\'s `type` says. Omit for every type. A name no schema could declare is refused (`unconverted_bad_type`).' },
       reason: { ...REASON_FILTER, description: `Only the items with this reason class (a row's \`reason\`, for example \`not_conforming\` or \`no_case_matched\`), or with any of a list of them: send an array of at most ${UNCONVERTED_REASONS_MAX} reasons (as many as there are, each once; a comma text such as \`fork,not_conforming\` is the same list). \`total\` counts the items of all of them. Omit for every reason. The same filter the bulk dismissal takes, so the number you are shown is the number it dismisses. An unknown reason anywhere in the list, or a longer list, is refused (\`unconverted_bad_reason\`).` },
-      status: { type: 'string', enum: [...UNCONVERTED_STATUSES], description: '`open` (the default) lists the records still to settle, `dismissed` the ones that were dismissed. One status per call: `counts` carries both numbers. Anything else is refused (`unconverted_bad_status`).' },
+      status: { type: 'string', enum: [...UNCONVERTED_LIST_STATUSES], description: '`open` (the default) lists the records still to settle, `dismissed` the ones that were dismissed, `all` both together in one newest-first order (each row says its `status`, `total` counts both, and the paging is the one paging). `counts` carries both numbers whatever the status. Anything else is refused, naming the value (`unconverted_bad_status`).' },
       skip: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: 'Rows to skip before the page, newest first: the `nextSkip` of the previous page. The server reads past them, so a deep skip costs a deep read.' },
       limit: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: 'Rows in the page. A limit above the largest page is held to it and the answer\'s `limit` says what applied; the page also stops at the byte budget, and `truncated` and `nextSkip` say so.' },
     },
@@ -139,7 +139,7 @@ export const dismiss_unconverted_shownTool: ToolHandler = {
     + 'it is refused (409, `unconverted_changed`, with `current`), and if the filter matches more than one call may dismiss '
     + `(${UNCONVERTED_DISMISS_MAX} open items) it is refused (400, \`unconverted_too_many\`, with \`max\`): narrow the filter by kind, type or reason. `
     + 'Answers `{ dismissed }`. Needs `knowledge: write`. Other refusals: `unconverted_bad_kind`, `unconverted_bad_type`, `unconverted_bad_reason`, '
-    + '`unconverted_bad_expect` (missing, or not a whole number), `unconverted_rung`.',
+    + '`unconverted_bad_status` (a `status` other than `open`), `unconverted_bad_expect` (missing, or not a whole number), `unconverted_rung`.',
   // The act judges `expect` and the filter with their own codes, as the route does; see `list_unconvertedTool`.
   skipSchemaValidation: true,
   mutating: true,
@@ -151,14 +151,15 @@ export const dismiss_unconverted_shownTool: ToolHandler = {
       kind: { ...KIND_FILTER, description: 'Only the items of records of this kind: `entity`, `fact`, `edge` or `chrono`. Omit for every kind. Anything else is refused (`unconverted_bad_kind`). The same filter `list_unconverted` takes.' },
       type: { ...TYPE_FILTER, description: 'Only the items of records of this type (a relationship\'s label for an edge). Omit for every type. A name no schema could declare is refused (`unconverted_bad_type`).' },
       reason: { ...REASON_FILTER, description: `Only the items with this reason class (a \`list_unconverted\` row's \`reason\`), or with any of a list of them: send an array of at most ${UNCONVERTED_REASONS_MAX} reasons (as many as there are, each once). \`expect\` then counts the open items of all of them. Omit for every reason. An unknown reason anywhere in the list, or a longer list, is refused (\`unconverted_bad_reason\`).` },
+      status: { type: 'string', enum: ['open'], description: 'Leave out, or send `open`: this call dismisses open items only. `all` and `dismissed` are a list\'s statuses and are refused, naming the value (`unconverted_bad_status`), so a list shown with `status: "all"` is never dismissed by sending the same filter.' },
       expect: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: 'REQUIRED: the number of open items `list_unconverted` told you this filter lists (`total` with `status: "open"`). If the number now differs, nothing is dismissed and the call is refused (409, `unconverted_changed`, with the `current` number), so a confirmation of one number never dismisses another. Cost: list again and confirm when it moved.' },
     },
     required: ['space', 'expect'],
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const { kind, type, reason, expect } = ctx.args;
-    const r = await dismissShownUnconvertedAct(ctx.callSpace, { kind, type, reason, expect }, { rights: ctx.rights, transport: ctx.transport });
+    const { kind, type, reason, status, expect } = ctx.args;
+    const r = await dismissShownUnconvertedAct(ctx.callSpace, { kind, type, reason, status, expect }, { rights: ctx.rights, transport: ctx.transport });
     if ('error' in r) throw toolRefusalOfAct(r.status, r.error, refusalBody(r));
     ctx.recordAuditChanges?.(dismissShownChanges(dismissAuditGiven({ kind, type, reason, expect }), (r.body as { dismissed: number }).dismissed));
     const text = `Dismissed ${(r.body as { dismissed: number }).dismissed} open unconverted item(s) in '${ctx.callSpace}': they stay listed under status "dismissed", and the records themselves are unchanged.`;
