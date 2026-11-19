@@ -102,6 +102,8 @@ would understate what you hold.
 
 `none` reaches nothing, and no route is ever listed with `needs: "none"`.
 
+**A `HEAD` is checked, answered and audited as the `GET` row of its route**, and a request that no row and no `notAreaScoped` entry decides is refused `403` with `code: "route_unclassified"`.
+
 **Through a personal view** a token reads, at call time, the members it reaches where it holds the read rung the door's
 area needs; a member it does not read drops out of that call. A view never writes, so no write rung is judged against
 one, and **no rights row can name a view**: rights name spaces, and the view's members are judged against them each
