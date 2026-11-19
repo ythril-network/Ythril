@@ -1,11 +1,17 @@
 /**
- * Start and remove the shard Mongos of a sharded `-db` run (Q-623): one fresh `ythril-mongo-a` per shard, in a compose
- * project of its own, gone when the run ends.
+ * Start and remove the harness Mongos of a `-db` run: one fresh `ythril-mongo-a` per shard of a sharded run (Q-623), and one
+ * of its own for a session that runs a single database file (Q-932), each in a compose project of its own, gone when the
+ * run ends.
  *
  * ## What it answers
  *
- * One question: *give me N healthy harness Mongos, and take them away again.* Which file runs where is
- * `_shared/db-shard-plan.mjs`'s; how the files are run is the runner's.
+ * Two questions, both about a Mongo that belongs to one run and to nobody else:
+ *
+ *  - *give me N healthy harness Mongos, and take them away again* (`startDbShards`, `stopDbShards`; `up`, `down`);
+ *  - *give me ONE harness Mongo of my own, tell me its name and where it listens, and take exactly it away*
+ *    (`startOwnDb`, `stopOwnDb`, `listOwnDbs`; `own-up`, `own-down`, `own-list`).
+ *
+ * Which file runs where is `_shared/db-shard-plan.mjs`'s; how the files are run is the runner's.
  *
  * ## What it prevents
  *
@@ -21,20 +27,66 @@
  *  - **A second definition of the Mongo.** The container is `ythril-mongo-a` from `docker-compose.test.yml` with the
  *    two settings of `docker-compose.db-shard.yml` changed (its name and its published port); the image pin, the
  *    healthcheck, the credentials and the memory and CPU ceilings stay the base file's.
+ *  - **A single file that holds the stack's database.** A session running one `-db` file against the stack's Mongo (port
+ *    27117) kept everyone else from starting or taking down the stack, and two sessions on it dropped each other's data.
+ *    An own database is a compose project of its own, named by the START (the caller's label and eight random hex
+ *    characters), so two starts never share a project whatever label they pass; nothing is claimed and nothing is refused
+ *    for a label already in use. Docker picks its port, so no port can be taken by another run.
+ *  - **A Docker call that never ends.** Every call here has a time limit and is stopped past it (`callDocker`, which takes
+ *    no call without one), the shards' calls too.
+ *  - **A listing that fails read as "nothing there".** The own databases are listed by `listOwnDbs`, which reads Docker's
+ *    JSON lines with the take-down's reader and throws on what it cannot read; a start whose listing failed starts nothing,
+ *    and a take-down whose listing failed removes nothing.
+ *  - **A failed or interrupted start that leaves its Mongo behind.** It prints why the container stopped (`reportContainerState`),
+ *    then removes only the project it made, and a removal that fails too is named with the command that removes it by hand.
+ *  - **A compose call without the port variable.** `docker-compose.db-shard.yml` refuses to run without
+ *    `YTHRIL_TEST_DB_SHARD_PORT`, take-down included; the project and its port travel together in one target, so a caller
+ *    cannot name a project and forget the port.
  */
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import net from 'node:net';
+import { constants as osConstants } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntryPoint } from '../../scripts/_shared/script-cli.mjs';
 import { dbShardPort, defaultDbShardCount, DB_SHARDS_MAX } from '../_shared/db-shard-plan.mjs';
+import { reportContainerState, within } from './container-state.mjs';
+import { parseContainers } from './stack-down.mjs';
 
 const TESTING = join(dirname(fileURLToPath(import.meta.url)), '..');
 const COMPOSE_FILES = ['docker-compose.test.yml', 'docker-compose.db-shard.yml'].map(f => join(TESTING, f));
 const SERVICE = 'ythril-mongo-a';
+/** The port the Mongo listens on inside its container. */
+const CONTAINER_PORT = 27017;
+/** The variable `docker-compose.db-shard.yml` publishes the Mongo's loopback port from; the file refuses to run without it. */
+const PORT_VARIABLE = 'YTHRIL_TEST_DB_SHARD_PORT';
+/** The label compose puts on a container with its project and its service. */
+const PROJECT_LABEL = 'com.docker.compose.project';
+const SERVICE_LABEL = 'com.docker.compose.service';
+const SELF = 'node testing/_init/db-shard-stack.mjs';
 
 /** Seconds `up --wait` gives a shard to become healthy: the base file's own healthcheck window, with room for several booting at once. */
 const WAIT_TIMEOUT_SECONDS = 420;
+/** Seconds `down` gives a Mongo to stop before it is killed: nothing in it is worth waiting for. */
+const STOP_GRACE_SECONDS = 5;
+/** Milliseconds `up` has on top of its own wait window, for compose to pull its answer together. */
+const UP_MARGIN_MS = 60_000;
+
+/**
+ * Milliseconds each kind of Docker call has before it is stopped. `up` has the wait window and a margin; the rest are
+ * answers Docker gives at once or not at all.
+ */
+export const DOCKER_LIMITS = Object.freeze({
+  list: 30_000,
+  ask: 10_000,
+  port: 30_000,
+  down: 120_000,
+  up: WAIT_TIMEOUT_SECONDS * 1000 + UP_MARGIN_MS,
+});
+
+/** Milliseconds `docker info` has to tell the Docker VM's size. */
+const INFO_LIMIT_MS = 10_000;
 
 /**
  * How many shards, and how many files at a time on each. `YTHRIL_TEST_DB_SHARDS` (1 to the plan's maximum; 1 is the one
@@ -109,7 +161,9 @@ export async function attachDbShards(count, { portOf = dbShardPort, host = '127.
 function dockerVm() {
   return new Promise((resolve) => {
     const none = { ncpu: 0, memBytes: 0 };
-    const child = spawn('docker', ['info', '--format', '{{.NCPU}} {{.MemTotal}}'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const child = spawn('docker', ['info', '--format', '{{.NCPU}} {{.MemTotal}}'], {
+      stdio: ['ignore', 'pipe', 'ignore'], timeout: INFO_LIMIT_MS, killSignal: 'SIGKILL', windowsHide: true,
+    });
     let out = '';
     child.stdout.on('data', d => { out += d; });
     child.on('error', () => resolve(none));
@@ -123,72 +177,281 @@ function dockerVm() {
 /** The compose project of shard `index`: one per shard, so each has its own volumes and network and `down -v` removes exactly its own. */
 export const dbShardProject = (index) => `ythril-db-shard-${index}`;
 
-/** Run `docker compose` for one shard; resolves with its output, rejects with it when it exits non-zero. */
-function compose(index, args) {
-  const env = { ...process.env, YTHRIL_TEST_DB_SHARD_PORT: String(dbShardPort(index)) };
-  const argv = ['compose', '-p', dbShardProject(index), ...COMPOSE_FILES.flatMap(f => ['-f', f]), ...args];
+/** The most own databases there can be at once: as many Mongos as a full sharded run, which is what the Docker VM was sized for. */
+export const DB_OWN_MAX = DB_SHARDS_MAX;
+/** The compose project of an own database begins with this, which is neither a shard's (`ythril-db-shard-`) nor the stack's. */
+const OWN_PROJECT_PREFIX = 'ythril-db-own-';
+/** The most characters a label has. */
+const OWN_LABEL_MAX = 40;
+/** The port variable of an own database: 0 makes Docker pick the loopback port, which `compose port` then reports. */
+const OWN_PLACEHOLDER_PORT = 0;
+
+const OWN_LABEL = new RegExp(`^[a-z0-9](?:[a-z0-9-]{0,${OWN_LABEL_MAX - 2}}[a-z0-9])?$`);
+const RANDOM_PART = /^[0-9a-f]{8}$/;
+const OWN_NAME = new RegExp(`^([a-z0-9](?:[a-z0-9-]{0,${OWN_LABEL_MAX - 2}}[a-z0-9])?)-[0-9a-f]{8}$`);
+
+/**
+ * The name of an own database: `<label>-<8 hex>`. The label is lower-case letters, digits and hyphens, 1 to 40
+ * characters, starting and ending with a letter or digit; anything else throws. The random part is made here, so no caller
+ * can reuse one.
+ */
+export function ownDbName(label, random = randomBytes(4).toString('hex')) {
+  if (typeof label !== 'string' || !OWN_LABEL.test(label)) {
+    throw new Error(`the label ${JSON.stringify(label)} is not usable: lower-case letters, digits and hyphens, 1 to ${OWN_LABEL_MAX} characters, beginning and ending with a letter or digit`);
+  }
+  if (!RANDOM_PART.test(random)) throw new Error(`the random part ${JSON.stringify(random)} is not eight hex characters`);
+  return `${label}-${random}`;
+}
+
+/** The compose project of the own database `name`; throws on a name that is not one's shape, so a project of the stack is never named from here. */
+export function dbOwnProject(name) {
+  if (typeof name !== 'string' || !OWN_NAME.test(name)) {
+    throw new Error(`${JSON.stringify(name)} is not an own database's name (<label>-<8 hex>); \`${SELF} own-list\` shows them`);
+  }
+  return `${OWN_PROJECT_PREFIX}${name}`;
+}
+
+/** A compose project with the port its Mongo is published on: the two travel together, so no call names one without the other. */
+const shardTarget = (index) => ({ project: dbShardProject(index), port: dbShardPort(index) });
+const ownTarget = (name) => ({ project: dbOwnProject(name), port: OWN_PLACEHOLDER_PORT });
+
+/** `argv` as a line to read: the compose files and a format string are left out. */
+const commandText = (argv) => argv.filter((a, i) => a !== '-f' && argv[i - 1] !== '-f').join(' ');
+
+/** Run `docker <argv>` for real; resolves with its output, rejects with it when it exits non-zero, and is killed when `signal` aborts. */
+function dockerRun(argv, { env, signal } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', argv, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('docker', argv, { env, signal, killSignal: 'SIGKILL', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     child.stdout.on('data', d => { out += d; });
     child.stderr.on('data', d => { out += d; });
     child.on('error', reject);
-    child.on('close', code => (code === 0 ? resolve(out)
-      : reject(new Error(`docker ${argv.slice(0, 4).join(' ')} … ${args.join(' ')} exited ${code}\n${out.trim()}`))));
+    child.on('close', code => (code === 0 ? resolve(out) : reject(new Error(`exited ${code}\n${out.trim()}`))));
   });
 }
 
+/**
+ * `docker <argv>` with a time limit, which no call can leave out: a call that does not answer in `timeoutMs` is stopped
+ * (`run` is handed a signal that aborts) and rejects. A failure carries the command and Docker's own output.
+ *
+ * @param {string[]} argv
+ * @param {object} o
+ * @param {(argv: string[], o: { env: object, signal: AbortSignal }) => Promise<string>} [o.run] docker, injectable
+ * @param {object} [o.env]
+ * @param {number} o.timeoutMs
+ * @returns {Promise<string>} the output
+ */
+export async function callDocker(argv, { run = dockerRun, env = process.env, timeoutMs } = {}) {
+  if (!(timeoutMs > 0)) throw new Error(`docker ${commandText(argv)}: no time limit was given, so the call was not made`);
+  const controller = new AbortController();
+  try {
+    return await within(Promise.resolve().then(() => run(argv, { env, signal: controller.signal })), timeoutMs);
+  } catch (e) {
+    controller.abort();
+    throw new Error(`docker ${commandText(argv)}: ${e.message}`, { cause: e });
+  }
+}
+
+/** `docker compose` for one target (its project and port); resolves with its output, rejects with it when it fails or is not answered in time. */
+function compose({ project, port }, args, { run, timeoutMs }) {
+  const argv = ['compose', '-p', project, ...COMPOSE_FILES.flatMap(f => ['-f', f]), ...args];
+  return callDocker(argv, { run, env: { ...process.env, [PORT_VARIABLE]: String(port) }, timeoutMs });
+}
+
+/** The `up` of the one service, as the shards and an own database both start it: detached, waiting for healthy, building nothing. */
+const UP_ARGS = ['up', '--detach', '--wait', '--wait-timeout', String(WAIT_TIMEOUT_SECONDS), '--no-build', SERVICE];
+const DOWN_ARGS = ['down', '--volumes', '--remove-orphans', '--timeout', String(STOP_GRACE_SECONDS)];
+
 /** Remove shard `index`'s container and volumes. Never throws: there may be nothing to remove, and cleanup must not hide a run's own failure. */
-async function removeShard(index) {
-  try { await compose(index, ['down', '--volumes', '--remove-orphans', '--timeout', '5']); } catch { /* nothing there, or already gone */ }
+async function removeShard(index, { run, limits }) {
+  try { await compose(shardTarget(index), DOWN_ARGS, { run, timeoutMs: limits.down }); } catch { /* nothing there, or already gone */ }
 }
 
 /**
  * Start `count` shard Mongos together and wait until every one is healthy.
  * @returns {Promise<Array<{ index: number, port: number }>>}
  */
-export async function startDbShards(count) {
+export async function startDbShards(count, { run = dockerRun, limits = DOCKER_LIMITS } = {}) {
   const indexes = Array.from({ length: count }, (_, i) => i);
-  await Promise.all(indexes.map(removeShard));
-  const started = await Promise.allSettled(indexes.map(i =>
-    compose(i, ['up', '--detach', '--wait', '--wait-timeout', String(WAIT_TIMEOUT_SECONDS), '--no-build', SERVICE])));
+  await Promise.all(indexes.map(i => removeShard(i, { run, limits })));
+  const started = await Promise.allSettled(indexes.map(i => compose(shardTarget(i), UP_ARGS, { run, timeoutMs: limits.up })));
   const failed = started.map((r, i) => ({ r, i })).filter(({ r }) => r.status === 'rejected');
   if (failed.length > 0) {
-    await stopDbShards(indexes.map(index => ({ index })));
+    await stopDbShards(indexes.map(index => ({ index })), { run, limits });
     throw new Error(`db shard(s) ${failed.map(f => f.i).join(', ')} did not start:\n${failed.map(f => f.r.reason.message).join('\n')}`);
   }
   return indexes.map(index => ({ index, port: dbShardPort(index) }));
 }
 
 /** Remove every shard in `shards` (containers and volumes). Safe to call twice, and with shards that never started. */
-export async function stopDbShards(shards) {
-  await Promise.all(shards.map(s => removeShard(s.index)));
+export async function stopDbShards(shards, { run = dockerRun, limits = DOCKER_LIMITS } = {}) {
+  await Promise.all(shards.map(s => removeShard(s.index, { run, limits })));
 }
 
 /**
- * From the command line, for a runner whose test processes cannot reach Docker (a container): the host starts the shards,
- * the run attaches to them (`YTHRIL_TEST_DB_SHARDS_STARTED=1`), the host removes them.
- *
- *   node testing/_init/db-shard-stack.mjs up [n]   start n shards (default: what the Docker VM has room for); prints n alone on its last line
- *   node testing/_init/db-shard-stack.mjs down n   remove shards 0 to n-1 with their volumes
+ * The own databases there are: name, compose project, state, Docker's own status text ("Up 3 minutes"; no age is computed
+ * here, so no two clocks are compared) and the published loopback port (`null` when the container has none).
+ * ONE `docker ps -a` by the service's label, read with the take-down's reader of Docker's JSON lines, which throws on what it
+ * cannot read: a listing that fails, times out or prints something else is a refusal, never "none".
+ * @returns {Promise<Array<{ name: string, project: string, state: string, status: string, port: number|null }>>}
  */
-async function cli([command, n]) {
+export async function listOwnDbs({ run = dockerRun, limits = DOCKER_LIMITS } = {}) {
+  const text = await callDocker(['ps', '-a', '--no-trunc', '--filter', `label=${SERVICE_LABEL}=${SERVICE}`, '--format', '{{json .}}'],
+    { run, timeoutMs: limits.list });
+  const containers = parseContainers(text);
+  // `parseContainers` has read every line, so these cannot throw; it keeps neither the status text nor the ports.
+  const raw = new Map(text.split(/\r?\n/).filter(l => l.trim() !== '').map(l => JSON.parse(l)).map(o => [o.ID, o]));
+  const published = new RegExp(`(?:127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::\\]):(\\d+)->${CONTAINER_PORT}/tcp`);
+  return containers
+    .filter(c => c.service === SERVICE && c.project.startsWith(OWN_PROJECT_PREFIX))
+    .map((c) => {
+      const o = raw.get(c.id);
+      const port = published.exec(String(o?.Ports ?? ''))?.[1];
+      return { name: c.project.slice(OWN_PROJECT_PREFIX.length), project: c.project, state: c.state, status: String(o?.Status ?? ''), port: port === undefined ? null : Number(port) };
+    });
+}
+
+/** The loopback port `docker compose port` printed: exactly one `address:port` line, or a throw. */
+function publishedPort(text) {
+  const lines = String(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length !== 1) throw new Error(`docker compose port printed ${lines.length} lines, expected one address: ${JSON.stringify(String(text).trim()).slice(0, 160)}`);
+  const match = /^(?:\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-fA-F:]+\]):(\d{1,5})$/.exec(lines[0]);
+  const port = match ? Number(match[1]) : NaN;
+  if (!(port >= 1 && port <= 65535)) throw new Error(`docker compose port printed ${JSON.stringify(lines[0])}, which is not an address with a port`);
+  return port;
+}
+
+/** Print why the target's container stopped, if it has, and then remove its project with its volumes. Throws when Docker fails to remove. */
+async function removeOwn(target, { run, limits, printError }) {
+  await reportContainerState({
+    projects: [target.project], print: printError, timeoutMs: limits.ask,
+    ask: (argv, timeoutMs) => callDocker(argv, { run, timeoutMs }),
+  });
+  await compose(target, DOWN_ARGS, { run, timeoutMs: limits.down });
+}
+
+/** Signals a start removes what it made on, and the exit code each ends the process with. */
+const INTERRUPTS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+
+/** Register `handler` for the interrupts; it runs to its end and then the process exits as the signal would end it. Returns the function that unregisters. */
+function onProcessSignal(handler) {
+  const registered = INTERRUPTS.map((signal) => {
+    const listener = () => {
+      Promise.resolve(handler(signal)).catch(() => {}).finally(() => process.exit(128 + osConstants.signals[signal]));
+    };
+    process.once(signal, listener);
+    return { signal, listener };
+  });
+  return () => { for (const { signal, listener } of registered) process.removeListener(signal, listener); };
+}
+
+/**
+ * Start ONE harness Mongo of the caller's own and wait until it is healthy. The START makes the project name (the label and
+ * eight random hex characters), so two starts never name one project and nothing has to be claimed or refused for a label in
+ * use; Docker picks the port. A start that fails after the name is made, or is interrupted (`onSignal`), prints why the
+ * container stopped and removes the project it made, and names a removal that failed too with the command that does it by hand.
+ *
+ * @param {{ label: string }} o
+ * @param {object} [deps] `run` docker, `limits` the time limits, `printError` where the container's state goes, `onSignal` the interrupt hook, `random` the random part
+ * @returns {Promise<{ name: string, project: string, port: number }>}
+ */
+export async function startOwnDb({ label }, { run = dockerRun, limits = DOCKER_LIMITS, printError = (l) => console.error(l), onSignal = onProcessSignal, random = () => undefined } = {}) {
+  const name = ownDbName(label, random());
+  const existing = await listOwnDbs({ run, limits });
+  if (existing.length >= DB_OWN_MAX) {
+    throw new Error(`${existing.length} own databases exist and ${DB_OWN_MAX} is the most: \`${SELF} own-list\` shows them, \`${SELF} own-down <name>\` removes one`);
+  }
+  const target = ownTarget(name);
+  let removal;
+  const remove = () => (removal ??= removeOwn(target, { run, limits, printError }));
+  const dispose = onSignal(async (signal) => {
+    printError(`db-shard-stack: ${signal} during the start of ${name}: removing it`);
+    try { await remove(); } catch (e) { printError(`db-shard-stack: ${e.message}\nRemove it by hand: ${SELF} own-down ${name}`); }
+  });
+  try {
+    await compose(target, UP_ARGS, { run, timeoutMs: limits.up });
+    const port = publishedPort(await compose(target, ['port', SERVICE, String(CONTAINER_PORT)], { run, timeoutMs: limits.port }));
+    return { name, project: target.project, port };
+  } catch (failure) {
+    try {
+      await remove();
+    } catch (cleanup) {
+      throw new Error(`${failure.message}\nand removing ${target.project} failed too: ${cleanup.message}\nRemove it by hand: ${SELF} own-down ${name}`, { cause: failure });
+    }
+    throw failure;
+  } finally {
+    dispose();
+  }
+}
+
+/**
+ * Remove the own database `name` (the full name the start printed): its container's state is printed if it has stopped, then
+ * exactly its project goes, with its volumes. Throws on a name that is not an own database's, on one with no container, on a
+ * listing that fails, and when Docker fails to remove it.
+ */
+export async function stopOwnDb(name, { run = dockerRun, limits = DOCKER_LIMITS, printError = (l) => console.error(l) } = {}) {
+  const target = ownTarget(name);
+  const there = await listOwnDbs({ run, limits });
+  if (!there.some(d => d.name === name)) {
+    throw new Error(`there is no own database ${name}: \`${SELF} own-list\` shows the ones there are`);
+  }
+  await removeOwn(target, { run, limits, printError });
+}
+
+const USAGE = `db-shard-stack: usage: up [n] | down n | own-up <label> | own-down <name> | own-list`;
+
+/**
+ * From the command line, for a runner whose test processes cannot reach Docker (a container): the host starts the Mongos,
+ * the run attaches to them, the host removes them. Resolves with the exit code (0, or 1 for any failure, usage included);
+ * what it prints goes through `print` (stdout) and `printError` (stderr).
+ *
+ *   node testing/_init/db-shard-stack.mjs up [n]        start n shards (default: what the Docker VM has room for); prints n alone on its last line
+ *   node testing/_init/db-shard-stack.mjs down n        remove shards 0 to n-1 with their volumes
+ *   node testing/_init/db-shard-stack.mjs own-up <label>  start one Mongo of your own; prints `<name> <port>` alone on its last line, and
+ *                                                       removes what it made on SIGINT, SIGTERM or SIGHUP during the start
+ *   node testing/_init/db-shard-stack.mjs own-down <name>  remove exactly that Mongo (the name `own-up` printed)
+ *   node testing/_init/db-shard-stack.mjs own-list      one line per own Mongo, with the command that removes it; `none` for none
+ */
+export async function cli(argv, {
+  print = (l) => console.log(l), printError = (l) => console.error(l), run = dockerRun, limits = DOCKER_LIMITS,
+  onSignal = onProcessSignal, random, askVm = dockerVm,
+} = {}) {
+  const [command, arg] = argv;
   const count = (raw) => {
     const c = Number(raw);
     if (!Number.isInteger(c) || c < 1 || c > DB_SHARDS_MAX) throw new Error(`db-shard-stack: ${raw} is not a shard count from 1 to ${DB_SHARDS_MAX}`);
     return c;
   };
-  if (command === 'up') {
-    const want = n === undefined ? (await resolveDbShardConfig({ defaultWidth: 1, shards: '', width: '', started: '' })).count : count(n);
-    await startDbShards(want);
-    console.log(want);
-  } else if (command === 'down') {
-    await stopDbShards(Array.from({ length: count(n) }, (_, index) => ({ index })));
-  } else {
-    throw new Error('db-shard-stack: usage: up [n] | down n');
+  const needs = (value, what) => {
+    if (value === undefined || value === '') throw new Error(`db-shard-stack: ${command} needs ${what}\n${USAGE}`);
+    return value;
+  };
+  try {
+    if (command === 'up') {
+      const want = arg === undefined ? (await resolveDbShardConfig({ defaultWidth: 1, shards: '', width: '', started: '', askVm })).count : count(arg);
+      await startDbShards(want, { run, limits });
+      print(want);
+    } else if (command === 'down') {
+      await stopDbShards(Array.from({ length: count(arg) }, (_, index) => ({ index })), { run, limits });
+    } else if (command === 'own-up') {
+      const started = await startOwnDb({ label: needs(arg, 'a label') }, { run, limits, printError, onSignal, random });
+      print(`${started.name} ${started.port}`);
+    } else if (command === 'own-down') {
+      await stopOwnDb(needs(arg, 'the name `own-up` printed'), { run, limits, printError });
+    } else if (command === 'own-list') {
+      const dbs = await listOwnDbs({ run, limits });
+      if (dbs.length === 0) print('none');
+      for (const d of dbs) print(`${d.name} ${d.state} (${d.status}) port ${d.port ?? 'none'}: ${SELF} own-down ${d.name}`);
+    } else {
+      throw new Error(USAGE);
+    }
+    return 0;
+  } catch (e) {
+    printError(e.message);
+    return 1;
   }
 }
 
 if (isEntryPoint(import.meta.url)) {
-  cli(process.argv.slice(2)).catch((e) => { console.error(e.message); process.exit(1); });
+  cli(process.argv.slice(2)).then((code) => { process.exitCode = code; });
 }

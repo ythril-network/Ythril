@@ -118,6 +118,35 @@ the first run's shards. A file's process also ends 10 s after
 its database is closed (`closeTestMongo`), because a restore leaves a server-side poll running that held twelve files for 60 s
 each after their tests had passed.
 
+**One database file, against a MongoDB of your own.** A single `-db` file run against the stack's MongoDB (port 27117) holds the
+stack: nobody else can start it or take it down while the file runs. `db-shard-stack.mjs` starts one fresh MongoDB for you
+instead, in a compose project of its own that no other run names, and Docker picks its loopback port. Use it from a shell:
+
+```bash
+read -r name port < <(node testing/_init/db-shard-stack.mjs own-up myfile | tail -n 1)
+YTHRIL_TEST_MONGO_PORT="$port" node --test testing/standalone/<file>-db.test.js
+node testing/_init/db-shard-stack.mjs own-down "$name"
+```
+
+```powershell
+$name, $port = @(node testing/_init/db-shard-stack.mjs own-up myfile)[-1] -split ' '
+$env:YTHRIL_TEST_MONGO_PORT = $port
+node --test testing/standalone/<file>-db.test.js
+Remove-Item Env:YTHRIL_TEST_MONGO_PORT
+node testing/_init/db-shard-stack.mjs own-down $name
+```
+
+`own-up <label>` prints `<name> <port>` alone on its last line; the name is the label and eight random hex characters, so two
+starts of one label are two databases. A label is lower-case letters, digits and hyphens, 1 to 40 characters, beginning and
+ending with a letter or digit. Port 27117 belongs to whoever runs the stack; an own database never uses it. An own database is
+one session's: two runs of the same file at once on one database drop each other's data, so give each run its own start. A start
+that fails, or is interrupted by Ctrl+C, prints why the container stopped and removes what it made. `own-list` shows every own
+database with its state, its port and the command that removes it, and `own-down <name>` removes exactly that one, after
+printing why its container stopped if it has. Nothing removes a database nobody removed: `npm run test:down` takes down the
+stack's projects only and never one of these, and `npm run machine:free` prunes after removing the stack, which leaves a
+running own database alone and removes a stopped one, and ends by restarting Docker, which stops them all (their data is not
+kept). At most 8 exist at once; a ninth start is refused, naming `own-list`.
+
 **CI runs the database third as one job per shard, not as one job.** A runner has room for one MongoDB, so
 `Standalone (database, shard <i>)` is a matrix: each job starts the one `ythril-mongo-a` and runs
 `YTHRIL_TEST_DB_SHARDS=<count> YTHRIL_TEST_DB_SHARD_INDEX=<i> npm run test:standalone:db`, which runs exactly shard `<i>` of
@@ -702,7 +731,8 @@ Every variable the scripts and runners in `scripts/` and `testing/_init/` read i
 | `YTHRIL_TEST_DB_SHARDS`, `YTHRIL_TEST_DB_SHARD_WIDTH` | `testing/_init/db-shard-stack.mjs` | How many fresh MongoDBs the database third is spread over (1 is the one at `YTHRIL_TEST_MONGO_PORT`; default from the Docker VM, at most 4; up to 8) and how many files run at once on each (default 4). |
 | `YTHRIL_TEST_DB_SHARDS_STARTED` | `testing/_init/db-shard-stack.mjs` | `1`: the shard MongoDBs were started outside this run (`db-shard-stack.mjs up`), so the run checks each answers, uses them and does not remove them. Needs `YTHRIL_TEST_DB_SHARDS` of 2 or more; any other value is refused. |
 | `YTHRIL_TEST_DB_SHARD_INDEX` | `testing/_shared/db-shard-plan.mjs` (`dbFilesThisProcessRuns`) | With `YTHRIL_TEST_DB_SHARDS`, run exactly one shard of the database third (the files of `planDbShards(files, count)[index]`) against the MongoDB at `YTHRIL_TEST_MONGO_PORT`, starting none; CI sets it from its matrix. An index with no count, or outside 0 to the count minus one, is refused (non-zero). Only with `--only=db`. |
-| `YTHRIL_TEST_DB_SHARD_PORT` | `testing/docker-compose.db-shard.yml` | The loopback port of one shard's MongoDB. Set by the runner for each shard; never by hand. |
+| `YTHRIL_TEST_DB_SHARD_PORT` | `testing/docker-compose.db-shard.yml` | The loopback port of one MongoDB started by `db-shard-stack.mjs`: a shard's own port, or 0 for an own database (Docker picks it). Set by `db-shard-stack.mjs` on every compose call, take-down included; never by hand. |
+| `YTHRIL_TEST_OWN_DB_DOCKER` | `testing/standalone/an-own-database-starts-and-goes-docker.test.js` | `1` registers the test that starts two own databases of one scratch label on real containers, connects to both ports, lists them and removes each (about 6 GB of Docker memory, several minutes). Absent, the test is not registered, so no run reports it skipped. |
 | `YTHRIL_TEST_RUNS_URL`, `YTHRIL_TEST_RUNS_TOKEN` | `scripts/test-times.mjs`, `scripts/trade.mjs` | The recorder's instance and token (trade: `--record` and `--history`). See [recording](#recording-runs-to-a-ythril-instance-optional). Stripped from every test's environment. |
 | `GH_TOKEN`, `GITHUB_API_URL` | `scripts/test-times.mjs` | Read access to this repository's Actions runs, and the API base. |
 | `CLIENT_TEST_OUTCOME` | `scripts/mask-client-report.mjs` | The client test command's own result (`success`, `failure`, `cancelled` or `skipped`), which CI's mask step passes and which is written into the masked report as `runnerOutcome`; the recorder reads a failed runner with no failure counted as an incomplete run. Unset: nothing is stamped. |

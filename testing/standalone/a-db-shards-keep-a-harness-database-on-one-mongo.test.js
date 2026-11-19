@@ -34,6 +34,7 @@ import {
   DB_SHARD_BASE_PORT, DB_SHARDS_MAX, FAST_UNIT_FILES, dbShardOf, dbShardPort, defaultDbShardCount,
   heaviestFirst, loadDbFileWeights, planDbShards, unitsOf,
 } from '../_shared/db-shard-plan.mjs';
+import { STACK_MONGO_PORT } from '../_shared/test-mongo-address.mjs';
 import { harnessDatabaseClaims } from './_harness-names.mjs';
 import { stripComments } from './_strip-comments.mjs';
 
@@ -114,7 +115,7 @@ describe('the -db shards keep a harness database on one Mongo', () => {
   it('every shard has its own port, none of them the stack\'s', () => {
     const ports = counts.map((_, i) => dbShardPort(i));
     assert.equal(new Set(ports).size, ports.length, 'two shards share a port');
-    assert.ok(ports.every(p => p >= DB_SHARD_BASE_PORT && p <= 65535 && p !== 27117), 'a shard port is out of range or is ythril-mongo-a\'s');
+    assert.ok(ports.every(p => p >= DB_SHARD_BASE_PORT && p <= 65535 && p !== STACK_MONGO_PORT), 'a shard port is out of range or is ythril-mongo-a\'s');
     assert.throws(() => dbShardPort(DB_SHARDS_MAX), /not between/);
   });
 

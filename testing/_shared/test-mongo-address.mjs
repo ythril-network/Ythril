@@ -6,6 +6,11 @@
  * (`testing/_shared/standalone-split.mjs`, `DB_HARNESS`), and the database job installs only what database files
  * need: a compose-reading gate that took the port from the harness ran there and failed to load `js-yaml`
  * (bundle-53, PR #1489 CI).
+ *
+ * `STACK_MONGO_PORT` is the port the test stack publishes its Mongo on, whatever `YTHRIL_TEST_MONGO_PORT` says: a session
+ * that runs one database file against a Mongo of its own sets that variable to the port its own Mongo printed, and a gate
+ * that reads the stack's compose file must still look for the stack's port, not for that one.
  */
 export const TEST_MONGO_HOST = process.env['YTHRIL_TEST_MONGO_HOST'] ?? '127.0.0.1';
-export const TEST_MONGO_PORT = Number(process.env['YTHRIL_TEST_MONGO_PORT'] ?? 27117);
+export const STACK_MONGO_PORT = 27117;
+export const TEST_MONGO_PORT = Number(process.env['YTHRIL_TEST_MONGO_PORT'] ?? STACK_MONGO_PORT);
