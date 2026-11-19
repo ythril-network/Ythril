@@ -15,6 +15,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { interfaceKeys, readClientSource, readRepoSource } from './server-source';
+import { stripComments } from './strip-comments';
 
 /**
  * Server round keys the client deliberately does not read, each with why. Not a list of the shape — a list of
@@ -37,7 +38,6 @@ const NOT_READ: Record<string, string> = {
   concludedAt: 'LOCAL; an open round has none — the decisions list carries it',
   actLocalId: 'LOCAL: the local space id a deletion or wipe acts on here (bundle-106); the owed act is shown from `owedSpaceActs`, not the vote row',
   peersConcluded: 'LOCAL: which peers say they concluded the round, the evidence the exchange hold reads (bundle-106); machinery, not what a voter is asked about',
-  convertRecords: 'the conversion steps a schema round carries (bundle-284); a voter must read them, and the vote row does not show them yet: the row declares the key when the converting UI is built, and this entry then fails as stale',
   convertOwed: 'LOCAL: this instance concluded the round and still owes its conversion run (bundle-284); machinery for the run, shown by the conversion status, not the vote row',
 };
 
@@ -50,7 +50,6 @@ const FOLDED: Record<string, string> = {
   subjectLabel: 'part of `subject`',
   subjectInstanceId: 'part of `subject`',
   spaceId: 'part of `subject`',
-  localSpaceId: 'part of `subject`',
   concluded: 'becomes `status`',
   passed: 'becomes `status`',
 };
@@ -99,5 +98,25 @@ describe('the client reads the vote round the server serves', () => {
   it('every ServerVoteRound key reaches the VoteRound the pages read, or is folded into one that does', () => {
     const lost = clientKeys.filter(k => !viewKeys.includes(k) && !(k in FOLDED));
     expect(lost, `the translation drops these — the page can never show them:\n  ${lost.join('\n  ')}`).toEqual([]);
+  });
+
+  /**
+   * The conversion a round carries is what a voter approves beside the schema change (bundle-285, Q-940): the row must read it, so the
+   * key is neither ignored above nor folded away, and the step is the ONE the conversion types declare. A second declaration of a step
+   * in the vote types would be a third copy of the schema package's four ops, silent when the server adds a field.
+   */
+  it('the conversion a round carries reaches the row: declared by both types, the step being the conversion types\' own', () => {
+    expect(clientKeys, '`ServerVoteRound` does not declare `convertRecords`').toContain('convertRecords');
+    expect(viewKeys, '`VoteRound` does not declare `convertRecords`: the row cannot show the steps').toContain('convertRecords');
+    // The count of the records is THIS instance's, in the space it names: the view keeps that name, not only a sentence made from it.
+    expect(viewKeys, '`VoteRound` does not keep `localSpaceId`: the row cannot count this instance\'s records').toContain('localSpaceId');
+
+    for (const file of ['src/app/core/api.types.ts', 'src/app/core/vote-round-view.ts']) {
+      const source = stripComments(readClientSource(file));
+      // A declaration or a literal of a step carries `op: '<name>'`; reading one (`step.op === ...`, a `case`) does not.
+      expect(source, `${file} spells a conversion step out instead of using ConversionStep`).not.toMatch(/\bop\s*:\s*['"]/);
+      expect(source, `${file} does not take ConversionStep from core/conversion.types`)
+        .toMatch(/import type \{[^}]*\bConversionStep\b[^}]*\} from '\.\/conversion\.types'/);
+    }
   });
 });
