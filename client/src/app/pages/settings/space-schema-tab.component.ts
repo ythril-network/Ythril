@@ -17,7 +17,7 @@
 import { Component, ChangeDetectionStrategy, DestroyRef, Injector, inject, input, signal, ElementRef, ViewChild, OnInit, computed, effect, untracked } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { SchemaTypeNameComponent } from './schema-type-name.component';
+import { SchemaTypeNameComponent, TYPE_HEAD_STYLES } from './schema-type-name.component';
 import { TypeConvertBarComponent } from './type-convert-bar.component';
 import { holdsSchemaAdmin } from '../../core/token-capability';
 import type { ConvertRunNotice } from '../../core/conversion.types';
@@ -63,7 +63,7 @@ const suggestedAddAsName = (name: string): string => name + '-2';
   standalone: true,
   imports: [SchemaTypeEditorComponent, RuleRowsComponent, SchemaTypeNameComponent, TypeConvertBarComponent, CommonModule, FormsModule, TranslocoPipe, PhIconComponent, ModalDirective, ErrorStateComponent, StatusPillComponent, SchemaTypeHistoryComponent, HelpToggleComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  styles: [SPACE_DIALOG_STYLES, SCHEMA_MD_STYLES],
+  styles: [SPACE_DIALOG_STYLES, SCHEMA_MD_STYLES, TYPE_HEAD_STYLES],
   template: `
 <!-- space-wide schema validation (governs every type in this space, not one collection) -->
 <div class="sch-validation-bar">

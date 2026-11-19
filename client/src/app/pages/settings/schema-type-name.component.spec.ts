@@ -11,7 +11,15 @@ import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, afterEach } from 'vitest';
 import { getTranslocoModule } from '../../testing/transloco-testing';
 import { dictionary } from '../../testing/i18n-dictionary';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { CLIENT_ROOT } from '../../testing/tracked-sources';
+import * as nameModule from './schema-type-name.component';
 import { SchemaTypeNameComponent } from './schema-type-name.component';
+
+/** Read through the module so the spec runs (red) before the constants exist. */
+const SCHEMA_TYPE_NAME_STYLES = (nameModule as Record<string, unknown>)['SCHEMA_TYPE_NAME_STYLES'] as string ?? '';
+const TYPE_HEAD_STYLES = (nameModule as Record<string, unknown>)['TYPE_HEAD_STYLES'] as string ?? '';
 
 const EN = dictionary('en');
 const PROP_ERRORS = {
@@ -184,5 +192,50 @@ describe('by keyboard', () => {
     fixture.detectChanges();
     input()!.click();
     expect(reached).toBe(0);
+  });
+});
+
+/**
+ * At 390 px a long type name pushed the head's buttons off screen and the pane scrolled sideways, and a "was" note made a property row wider
+ * than its table (the browser drive's D7, bundle-285 slice S10). A spec cannot lay out a page; it pins the structure the fold rests on, and the
+ * re-drive at 390 px shows the rest.
+ */
+describe('a long name at phone width', () => {
+  /** The rules a style text holds, as the browser parses them: each `@media` block's condition with its rules' text, and the top-level rules. */
+  function rulesOf(css: string): { media: string | null; text: string }[] {
+    const style = document.createElement('style');
+    style.textContent = css;
+    document.head.appendChild(style);
+    const out: { media: string | null; text: string }[] = [];
+    for (const rule of Array.from(style.sheet!.cssRules)) {
+      if (rule instanceof CSSMediaRule) for (const inner of Array.from(rule.cssRules)) out.push({ media: rule.conditionText, text: inner.cssText });
+      else out.push({ media: null, text: rule.cssText });
+    }
+    style.remove();
+    return out;
+  }
+  const phone = (r: { media: string | null }): boolean => /max-width:\s*760px/.test(r.media ?? '');
+
+  it('keeps the whole name reachable when it is cut: as the title, and as the text a screen reader reads', () => {
+    const long = 'customer-support-conversation-transcript-segment';
+    const { el } = mount({ name: long });
+    const name = el.querySelector<HTMLElement>('.nm-text')!;
+    expect(name.getAttribute('title')).toBe(long);
+    expect(name.textContent!.trim()).toBe(long);
+  });
+
+  it('lets the name shrink in its row and puts the "was" note on a line of its own at phone width', () => {
+    const rules = rulesOf(SCHEMA_TYPE_NAME_STYLES);
+    expect(rules.some(r => r.media === null && /:host/.test(r.text) && /min-width:\s*0/.test(r.text)), 'the control can shrink below its text').toBe(true);
+    expect(rules.some(r => phone(r) && /\.sch-hint/.test(r.text) && /flex-basis:\s*100%/.test(r.text)), 'the note takes its own line on a phone').toBe(true);
+  });
+
+  it('the type head lets its name shrink and folds its buttons onto another line at phone width, and the Schema tab draws with it', () => {
+    const rules = rulesOf(TYPE_HEAD_STYLES);
+    expect(rules.some(r => r.media === null && /\.sch-detail-head app-schema-type-name/.test(r.text) && /min-width:\s*0/.test(r.text))).toBe(true);
+    expect(rules.some(r => phone(r) && /^\.sch-detail-head\s*\{/.test(r.text) && /flex-wrap:\s*wrap/.test(r.text)), 'the head wraps').toBe(true);
+    expect(rules.some(r => phone(r) && /\.sch-detail-head \.acts/.test(r.text) && /flex-wrap:\s*wrap/.test(r.text)), 'the buttons wrap').toBe(true);
+    const tab = readFileSync(resolve(CLIENT_ROOT, 'src/app/pages/settings/space-schema-tab.component.ts'), 'utf8');
+    expect(tab).toMatch(/styles:\s*\[[^\]]*\bTYPE_HEAD_STYLES\b/);
   });
 });
