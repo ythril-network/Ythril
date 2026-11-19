@@ -37,10 +37,10 @@ const lit = (value, datatype) => (datatype === undefined ? { kind: 'literal', va
 const q = (s, p, o, g) => ({ subject: typeof s === 'string' ? iri(s) : s, predicate: iri(p), object: typeof o === 'string' ? iri(o) : o, ...(g ? { graph: iri(g) } : {}) });
 const PREFIXES = () => ({ rdf: RDF, rdfs: 'http://www.w3.org/2000/01/rdf-schema#', xsd: XSD, schema: 'http://schema.org/', time: 'http://www.w3.org/2006/time#', dcterms: 'http://purl.org/dc/terms/', prov: 'http://www.w3.org/ns/prov#', ythril: vocab.YTHRIL_NS });
 
-async function write(format, batches) {
+async function write(format, batches, edgeDetails = 'reification') {
   assert.equal(typeof ser.serializeRdf, 'function', 'serializeRdf is not exported by server/src/rdf/serialize.ts: there is no writer');
   let out = '';
-  for await (const chunk of ser.serializeRdf(format, batches, { prefixes: PREFIXES() })) out += chunk;
+  for await (const chunk of ser.serializeRdf(format, batches, { prefixes: PREFIXES(), edgeDetails })) out += chunk;
   return out;
 }
 
@@ -143,7 +143,7 @@ describe('a space export of every record kind is read back as the same triples',
       const edgeDetails = format === 'jsonld' ? 'reification' : 'rdf12';
       const batches = DOCS.map(([kind, doc]) => ({ graph: format === 'turtle' ? undefined : BASE, quads: mapper.recordTriples(META, kind, doc, { edgeDetails, agentsSeen }).quads }));
       assert.ok(batches.reduce((n, b) => n + b.quads.length, 0) > 60, 'a real export');
-      const text = await write(format, batches);
+      const text = await write(format, batches, edgeDetails);
       const back = parsedSet(await readBack(format, text));
       const expected = modelSet(batches);
       assert.deepEqual([...back].sort(), [...expected].sort());

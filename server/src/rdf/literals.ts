@@ -137,6 +137,9 @@ export function literalForInteger(n: number): LiteralTerm | null {
 /** An `xsd:boolean` literal. */
 export const literalForBoolean = (b: boolean): LiteralTerm => typed(b ? 'true' : 'false', xsd('boolean'));
 
+/** How an edge's own details are stated: RDF 1.2 `rdf:reifies` of a triple term, or the classic `rdf:Statement`. */
+export type EdgeDetails = 'rdf12' | 'reification';
+
 /**
  * Why a value was left out: it is no plain value (a list, an object), it does not fit the type its property declares (or is no decimal), or
  * its property key is empty, and an empty name has no address (only a direct database write can leave one).

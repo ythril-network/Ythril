@@ -21,6 +21,9 @@
  *   same bytes on every run, so two members' exports of one space compare equal.
  * - **Collections and triple terms.** A list is `( ... )` in Turtle and TriG, an `rdf:first`/`rdf:rest` chain in N-Quads, `@list` in JSON-LD;
  *   a triple term (the object of `rdf:reifies`) is `<<( s p o )>>` in the three text formats and refused in JSON-LD 1.1, which has none.
+ * - **An RDF 1.2 document says so** (owner, 2026-11-19). A writer opened with `edgeDetails: 'rdf12'` starts with `VERSION "1.2"` (RDF 1.2
+ *   Turtle, TriG and N-Quads) and reports it in `version` for the Content-Type ({@link rdfVersionOf}); any other writer refuses a triple
+ *   term, so an unlabelled document never holds one.
  * - **Streaming.** {@link createRdfWriter} gives a string per batch and {@link serializeRdf} a chunk per batch pulled from an (async) iterator
  *   as it is read; nothing holds the whole document, and a reader that stops closes the source.
  * - **One closing comment line.** {@link closingComment} and the writer's `close` put whatever ids a count names on ONE comment line, so a
@@ -28,11 +31,24 @@
  *
  * Pure apart from the writer's own counters.
  */
-import type { BlankTerm, IriTerm, Quad, Term } from './literals.js';
+import type { BlankTerm, EdgeDetails, IriTerm, Quad, Term } from './literals.js';
 import { STANDARD_PREFIXES } from './ythril-vocabulary.js';
 
 export type RdfFormat = 'turtle' | 'trig' | 'nquads' | 'jsonld';
 export const RDF_FORMATS: readonly RdfFormat[] = Object.freeze(['turtle', 'trig', 'nquads', 'jsonld']);
+
+/** The version label of RDF 1.2 (RDF 1.2 Concepts, "Version Labels"): what `VERSION` and the media type's `version` parameter carry. */
+export const RDF_12_VERSION = '1.2';
+
+/**
+ * The version an output announces (owner, 2026-11-19, standards review row 1): {@link RDF_12_VERSION} for Turtle, TriG and N-Quads in the RDF
+ * 1.2 edge form, whose three grammars each define `VERSION "1.2"` and whose media types take `; version=1.2`; `undefined` for the classic
+ * reification form (plain RDF 1.1) and for JSON-LD, which has no triple term. The door puts it on the Content-Type; the writer opened with
+ * the same `edgeDetails` writes the directive.
+ */
+export function rdfVersionOf(format: RdfFormat, edgeDetails: EdgeDetails): string | undefined {
+  return edgeDetails === 'rdf12' && format !== 'jsonld' ? RDF_12_VERSION : undefined;
+}
 
 /** One piece of the document: usually one record's quads. `graph` is the graph of every quad that names none of its own. */
 export interface QuadBatch { graph?: string; quads: readonly Quad[] }
@@ -40,6 +56,11 @@ export interface QuadBatch { graph?: string; quads: readonly Quad[] }
 export interface WriterOptions {
   /** The prefixes a Turtle or TriG document declares, JSON-LD puts in its context, and compact names are written with. */
   prefixes?: Readonly<Record<string, string>>;
+  /**
+   * The edge form of what the document holds. `rdf12` (a text format) opens it with `VERSION "1.2"` and lets it hold triple terms; omitted
+   * or `reification`, a triple term is refused, so no document holds RDF 1.2 without saying so.
+   */
+  edgeDetails?: EdgeDetails;
 }
 
 /** What a writer refuses to write; `code` names it. */
@@ -55,6 +76,8 @@ export interface RdfWriter {
   readonly format: RdfFormat;
   /** Lone surrogates written as U+FFFD so far. */
   readonly replacedCharacters: number;
+  /** The version the document announces ({@link rdfVersionOf}), or `undefined` for none. */
+  readonly version: string | undefined;
   /** The start of the document (prefixes, or the JSON-LD context). */
   open(): string;
   /** One batch. */
@@ -170,7 +193,12 @@ class Writer implements RdfWriter {
   /** The prefixes compact names are tried with: longest namespace first, then by name. */
   private readonly byLength: { name: string; ns: string }[];
 
-  constructor(readonly format: RdfFormat, prefixes: Readonly<Record<string, string>>) {
+  readonly version: string | undefined;
+  private readonly tripleTerms: boolean;
+
+  constructor(readonly format: RdfFormat, prefixes: Readonly<Record<string, string>>, edgeDetails: EdgeDetails) {
+    this.version = rdfVersionOf(format, edgeDetails);
+    this.tripleTerms = this.version !== undefined;
     const all = prefixTable(prefixes);
     // JSON-LD reads a prefix only when its namespace ends in a delimiter; the others are left out of its context and its compact names.
     this.table = format === 'jsonld' ? all.filter(p => /[/#]$/.test(p.ns)) : all;
@@ -178,13 +206,14 @@ class Writer implements RdfWriter {
   }
 
   open(): string {
-    if (this.format === 'nquads') return '';
     if (this.format === 'jsonld') {
       const context = Object.fromEntries(this.table.map(p => [p.name, p.ns]));
       return `{\n  "@context": ${JSON.stringify(context)},\n  "@graph": [`;
     }
-    if (this.table.length === 0) return '';
-    return `${this.table.map(p => `@prefix ${p.name}: <${p.ns}> .`).join('\n')}\n\n`;
+    // The directive is spelled alike in the three grammars: uppercase (N-Quads' keyword is case-sensitive) and a double-quoted label.
+    const version = this.version === undefined ? '' : `VERSION "${this.version}"\n`;
+    if (this.format === 'nquads' || this.table.length === 0) return version;
+    return `${version}${this.table.map(p => `@prefix ${p.name}: <${p.ns}> .`).join('\n')}\n\n`;
   }
 
   close(comment?: string): string {
@@ -211,6 +240,11 @@ class Writer implements RdfWriter {
     }
   }
 
+  /** A triple term is RDF 1.2: only a document that announced the version may hold one. */
+  private mayWriteTripleTerm(): void {
+    if (!this.tripleTerms) throw new RdfWriteError('a triple term is RDF 1.2: open the writer with edgeDetails "rdf12", which announces the version, or write the classic reification form');
+  }
+
   private text(s: string): string {
     return withoutLoneSurrogates(s, () => { this.replacedCharacters++; });
   }
@@ -234,7 +268,7 @@ class Writer implements RdfWriter {
       case 'blank': return `_:${label(t.id)}`;
       case 'literal': return `"${escapeString(this.text(t.value))}"${t.datatype === undefined ? '' : `^^${this.name(t.datatype)}`}`;
       case 'list': return t.items.length === 0 ? '()' : `( ${t.items.map(i => this.turtleTerm(i, label)).join(' ')} )`;
-      case 'triple': return `<<( ${this.turtleTerm(t.subject, label)} ${this.turtleTerm(t.predicate, label)} ${this.turtleTerm(t.object, label)} )>>`;
+      case 'triple': this.mayWriteTripleTerm(); return `<<( ${this.turtleTerm(t.subject, label)} ${this.turtleTerm(t.predicate, label)} ${this.turtleTerm(t.object, label)} )>>`;
     }
   }
 
@@ -252,7 +286,7 @@ class Writer implements RdfWriter {
       case 'iri': return `<${checkIri(t.value)}>`;
       case 'blank': return `_:${label(t.id)}`;
       case 'literal': return `"${escapeString(this.text(t.value))}"${t.datatype === undefined ? '' : `^^<${checkIri(t.datatype)}>`}`;
-      case 'triple': return `<<( ${this.nquadsTerm(t.subject, label, extra, tail)} ${this.nquadsTerm(t.predicate, label, extra, tail)} ${this.nquadsTerm(t.object, label, extra, tail)} )>>`;
+      case 'triple': this.mayWriteTripleTerm(); return `<<( ${this.nquadsTerm(t.subject, label, extra, tail)} ${this.nquadsTerm(t.predicate, label, extra, tail)} ${this.nquadsTerm(t.object, label, extra, tail)} )>>`;
       case 'list': {
         if (t.items.length === 0) return `<${RDF_NIL}>`;
         const nodes = t.items.map(() => `_:b${this.blanks++}`);
@@ -336,7 +370,7 @@ class Writer implements RdfWriter {
 
 /** A writer for `format`, with the document's prefixes (default: none). */
 export function createRdfWriter(format: RdfFormat, opts: WriterOptions = {}): RdfWriter {
-  return new Writer(format, opts.prefixes ?? {});
+  return new Writer(format, opts.prefixes ?? {}, opts.edgeDetails ?? 'reification');
 }
 
 /**

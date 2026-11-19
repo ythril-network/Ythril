@@ -26,7 +26,7 @@ import { SCHEMA_FINGERPRINT_FIELD } from '@ythril-network/schema/internal';
 import { isRefKind, type RefKind } from '../config/types-knowledge.js';
 import {
   iri, literalForBoolean, literalForDecimal, literalForInteger, literalForTemporal, literalForValue, plain, stdIri, temporalKind, triple,
-  type DeclaredType, type IriTerm, type LeftOutReason, type LiteralTerm, type Quad, type Term, type TemporalKind,
+  type DeclaredType, type EdgeDetails, type IriTerm, type LeftOutReason, type LiteralTerm, type Quad, type Term, type TemporalKind,
 } from './literals.js';
 import { agentIri, graphIri, recordAddressable, recordIri, resolveTermIri, versionIri, type TermKind } from './term-iri.js';
 import { ythrilIri } from './ythril-vocabulary.js';
@@ -34,8 +34,7 @@ import { ythrilIri } from './ythril-vocabulary.js';
 /** The record kinds this module gives a form: the four knowledge types, a link and a file. */
 export type RdfRecordKind = KnowledgeType | 'link' | 'file';
 
-/** How an edge's own details are stated: RDF 1.2 `rdf:reifies` of a triple term, or the classic `rdf:Statement`. */
-export type EdgeDetails = 'rdf12' | 'reification';
+export type { EdgeDetails } from './literals.js';
 
 export interface RecordTriplesOptions {
   edgeDetails: EdgeDetails;

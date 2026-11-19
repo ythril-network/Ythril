@@ -208,7 +208,7 @@ describe('blank nodes and collections', () => {
   it('a triple term is <<( s p o )>> in Turtle, TriG and N-Quads', async () => {
     const batch = { quads: [q(`${E}r`, `${RDF}reifies`, triple(iri(`${E}s`), iri(`${E}p`), lit('v')))] };
     for (const format of ['turtle', 'trig', 'nquads']) {
-      assert.ok((await document(format, [batch])).includes(`<<( <${E}s> <${E}p> "v" )>>`), format);
+      assert.ok((await document(format, [batch], { prefixes: PREFIXES(), edgeDetails: 'rdf12' })).includes(`<<( <${E}s> <${E}p> "v" )>>`), format);
     }
   });
 });
