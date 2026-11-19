@@ -2143,6 +2143,7 @@
   "networks.roundType.space_wipe": "Wyczyszczenie przestrzeni",
   "networks.roundType.meta_change": "Zmiana ustawień przestrzeni",
   "networks.roundType.space_addition": "Dodanie przestrzeni",
+  "networks.roundType.space_rebase": "Zmiana adresu bazowego RDF",
   "networks.decisions.outcome.passed": "Przyjęte",
   "networks.decisions.outcome.vetoed": "Zawetowane",
   "networks.decisions.outcome.expired": "Wygasłe",

@@ -39,6 +39,7 @@ const NOT_READ: Record<string, string> = {
   actLocalId: 'LOCAL: the local space id a deletion or wipe acts on here (bundle-106); the owed act is shown from `owedSpaceActs`, not the vote row',
   peersConcluded: 'LOCAL: which peers say they concluded the round, the evidence the exchange hold reads (bundle-106); machinery, not what a voter is asked about',
   convertOwed: 'LOCAL: this instance concluded the round and still owes its conversion run (bundle-284); machinery for the run, shown by the conversion status, not the vote row',
+  rebase: 'the new RDF base a space_rebase round carries (bundle-269); a voter must read it, and the vote row does not show it yet: the row declares the key when the RDF settings UI is built, and this entry then fails as stale',
 };
 
 /**
