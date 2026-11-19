@@ -118,8 +118,9 @@ if (process.env[OPT_IN] === '1') {
 
     it('each `own-down` removes exactly its own, and nothing of the two is left', { timeout: 300_000 }, async () => {
       const [first, second] = started;
-      await stopOwnDb(first.name);
+      // Asked BEFORE the first take-down: a lookup that finds no network of a running database would make "its network is gone" below pass about nothing.
       assert.ok(networksOf(first.project).length > 0 && networksOf(second.project).length > 0, 'a started database has no network of its project');
+      await stopOwnDb(first.name);
       assert.deepEqual(containersOf(first.project), [], 'the first database is still there');
       assert.deepEqual(networksOf(first.project), [], 'the first database left its network');
       assert.ok(networksOf(second.project).length > 0, 'removing the first removed the second\'s network');
