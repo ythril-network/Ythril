@@ -20,11 +20,11 @@ POST /api/notify
 }
 ```
 
-Events: `vote_pending`, `member_departed`, `member_removed`, `space_deletion_pending`, `space_wipe_pending`, `meta_change_pending`, `sync_available`, `ping`.
+Events: `vote_pending`, `member_departed`, `member_removed`, `space_deletion_pending`, `space_wipe_pending`, `space_rebase_pending`, `meta_change_pending`, `sync_available`, `ping`.
 
 | Event | What a receiver does |
 |---|---|
-| `sync_available`, `space_deletion_pending`, `space_wipe_pending` | Triggers a sync with the sender at once, rather than at its next scheduled cycle. A pending deletion or wipe is picked up on that pull. |
+| `sync_available`, `space_deletion_pending`, `space_wipe_pending`, `space_rebase_pending` | Triggers a sync with the sender at once, rather than at its next scheduled cycle. A pending deletion, wipe or RDF rebase is picked up on that pull. |
 | `meta_change_pending`, `member_departed`, `member_removed`, `vote_pending`, `ping` | Recorded only; no sync is triggered. A schema change or membership change reaches the receiver at its next scheduled cycle. |
 
 A `change_note` webhook fires once per space the note concerns, and only for a space this instance still carries. A note that names spaces none of which this instance carries fires no webhook. A note about the whole network fires once for each space the network carries here.

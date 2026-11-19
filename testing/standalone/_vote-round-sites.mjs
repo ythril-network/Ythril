@@ -29,7 +29,9 @@ export const P2 = 'aaaaaaaa-0000-4000-8000-0000000000a2';
 export const JOINER = 'aaaaaaaa-0000-4000-8000-0000000000b1';
 
 export const NET_TYPES = ['closed', 'democratic', 'club', 'braintree', 'pubsub'];
-export const ROUND_TYPES = ['join', 'remove', 'space_deletion', 'space_wipe', 'meta_change', 'space_addition'];
+export const ROUND_TYPES = ['join', 'remove', 'space_deletion', 'space_wipe', 'meta_change', 'space_addition', 'space_rebase'];
+/** What a `space_rebase` round of these scenarios moves the base of `notes` to (Q-748): the new names, as the round carries them. */
+export const REBASE_SCENARIO = Object.freeze({ base: 'https://new.example.org/ld/notes/', vocab: 'https://new.example.org/ld/notes/vocab/', epoch: 1 });
 export const SITES = ['cast', 'relay', 'gossip'];
 export const NET_ID = 'net-1';
 export const ROUND_ID = 'round-1';
@@ -58,7 +60,8 @@ export function scenario(roundType, netType, site, peerUrl) {
     subjectLabel: 'Subject', subjectUrl: roundType === 'remove' ? peerUrl : '', openedAt: '2026-10-09T10:00:00.000Z',
     deadline: '2099-01-01T00:00:00.000Z', votes: all.filter(c => c.instanceId !== decider), concluded: false,
     ...(roundType === 'join' ? { pendingMember: member(JOINER) } : {}),
-    ...(['space_deletion', 'space_wipe', 'meta_change'].includes(roundType) ? { spaceId: 'notes' } : {}),
+    ...(['space_deletion', 'space_wipe', 'meta_change', 'space_rebase'].includes(roundType) ? { spaceId: 'notes' } : {}),
+    ...(roundType === 'space_rebase' ? { rebase: { ...REBASE_SCENARIO } } : {}),
     ...(roundType === 'space_addition' ? { spaceId: 'fresh' } : {}),
     ...(roundType === 'meta_change' ? { pendingMeta: { purpose: 'a purpose the network chose' }, metaChangedFields: ['purpose'], baseMetaVersion: 0 } : {}),
     ...(netType === 'braintree' && (roundType === 'join' || roundType === 'remove') ? { requiredVoters: [P1] } : {}),

@@ -32,6 +32,8 @@ export const NotifyBody = z.object({
     'member_removed',           // sent to the ejected instance after a remove vote passes
     'space_deletion_pending',
     'space_wipe_pending',       // a wipe round is open — pull it now rather than at the next scheduled sync
+    'space_rebase_pending',     // a space_rebase round is open (Q-748): the voting period is the time to veto or leave
+
     // A schema-change round is open. `spaces/meta-update.ts` has sent this since the schema vote shipped and it was
     // never in this list, so every peer refused it with a 400 that the sender's fire-and-forget never read (`Q-108`).
     'meta_change_pending',
@@ -46,7 +48,7 @@ export const NotifyBody = z.object({
  * which notices wake a receiver; `every-round-is-opened-and-settled-by-one-function` holds the two to the same set, so a notice cannot
  * be sent as a wake-up that the receiver only records. `meta_change_pending` is recorded and wakes nothing (W19).
  */
-export const SYNC_TRIGGER_EVENTS = ['sync_available', 'space_deletion_pending', 'space_wipe_pending'] as const;
+export const SYNC_TRIGGER_EVENTS = ['sync_available', 'space_deletion_pending', 'space_wipe_pending', 'space_rebase_pending'] as const;
 
 // In-memory event log (not persistent — restart clears it)
 // Production deployments would store this in MongoDB.
@@ -164,8 +166,8 @@ notifyRouter.post('/', notifyRateLimit, requireAuth, (req, res) => {
 
   log.info(`Notify: [${event}] from ${instanceId} in network ${networkId}`);
 
-  // The events that wake a sync cycle here. `sync_available`: the sender has new data. A pending space_deletion or space_wipe: both
-  // are irreversible and space-scoped, so the round wants to be in front of an operator now rather than at the next scheduled cycle —
+  // The events that wake a sync cycle here. `sync_available`: the sender has new data. A pending space_deletion, space_wipe or
+  // space_rebase (Q-748, which renames every address of a space): each is irreversible and space-scoped, so the round wants to be in front of an operator now rather than at the next scheduled cycle —
   // a deadline that expires unseen is a vote nobody got to cast.
   if ((SYNC_TRIGGER_EVENTS as readonly string[]).includes(event)) {
     import('../sync/engine.js').then(({ runSyncForNetwork }) => {
