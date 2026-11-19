@@ -3236,6 +3236,9 @@
   "jsonTree.key.other": "{{count}} kluczy",
   "spaces.schema.renameProp": "Zmień nazwę tej właściwości",
   "spaces.schema.renamePropAria": "Zmień nazwę właściwości {{key}}",
+  "spaces.schema.renamePropError.empty": "Właściwość musi mieć nazwę.",
+  "spaces.schema.renamePropError.exists": "Ten typ ma już właściwość o takiej nazwie.",
+  "spaces.schema.renamePropError.missing": "Tej właściwości już tu nie ma: otwórz kartę ponownie.",
   "spaces.schema.was": "wcześniej: {{name}}",
   "spaces.schema.convert.button": "Konwertuj rekordy",
   "spaces.schema.convert.locked": "Konwersja przepisuje rekordy w każdym węźle sieci, więc wymaga uprawnień administratora tej przestrzeni.",
@@ -3377,6 +3380,7 @@
   "conversion.step.splitType": "Podziel {{type}} według warunku: {{cases}}; wszystkie pozostałe stają się {{otherwise}}",
   "conversion.step.splitTypeOpen": "Podziel {{type}} według warunku: {{cases}}",
   "conversion.step.splitCase": "rekordy, w których {{when}}, stają się {{to}}",
+  "conversion.step.unknown": "Ta wersja aplikacji nie potrafi opisać tego kroku ({{op}}).",
   "conversion.editor.renameProperty": "Zmień nazwę właściwości",
   "conversion.editor.renameType": "Zmień nazwę typu",
   "conversion.editor.mapEnum": "Zamapuj wartość",
@@ -3503,5 +3507,7 @@
   "networks.network.votes.convert.counts.few": "Jeśli to przejdzie, ta instancja skonwertuje {{count}} rekordy typu {{type}}, które posiada (tylko ostemplowane: {{stamped}}, przepisane: {{rewritten}}), po jednej synchronizacji z innymi węzłami sieci. Jeśli zawetujesz, nic się nie zmieni.",
   "networks.network.votes.convert.counts.many": "Jeśli to przejdzie, ta instancja skonwertuje {{count}} rekordów typu {{type}}, które posiada (tylko ostemplowane: {{stamped}}, przepisane: {{rewritten}}), po jednej synchronizacji z innymi węzłami sieci. Jeśli zawetujesz, nic się nie zmieni.",
   "networks.network.votes.convert.counts.other": "Jeśli to przejdzie, ta instancja skonwertuje {{count}} rekordów typu {{type}}, które posiada (tylko ostemplowane: {{stamped}}, przepisane: {{rewritten}}), po jednej synchronizacji z innymi węzłami sieci. Jeśli zawetujesz, nic się nie zmieni.",
-  "networks.network.votes.convert.none": "Nie ma tu rekordów typu {{type}}, więc na tej instancji nic nie zostałoby skonwertowane."
+  "networks.network.votes.convert.none": "Nie ma tu rekordów typu {{type}}, więc na tej instancji nic nie zostałoby skonwertowane.",
+  "networks.network.votes.convert.countFailed": "Nie udało się odczytać liczby rekordów na tej instancji.",
+  "networks.network.votes.convert.noSpace": "Tej przestrzeni nie ma na tej instancji, więc nie są tu liczone żadne rekordy."
 }

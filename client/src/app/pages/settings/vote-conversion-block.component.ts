@@ -32,7 +32,11 @@ import { convertBlocksOfRound, orderedConversionSteps } from '../../core/vote-ro
  *   holds the space under, never the network's id for it), only when the token may read that space's records, and a count that failed or
  *   could not be asked shows no number at all (never a zero). Without a local space the block shows the steps alone and asks nothing.
  * - **A blank line.** A step this client has no words for (an operation a newer member added) or one whose shape a peer got wrong is a line
- *   that names its operation, never an empty bullet and never an error that takes the other steps with it.
+ *   too: `stepSentence` answers the unknown-step sentence for it, so this block holds no guard of its own for that (the dialog and the type
+ *   pane get the same answer from the same function), and no error takes the other steps with it.
+ * - **A silence that reads as "nothing to convert".** Counts that cannot be shown say why in words under the steps: the count failed (nothing
+ *   to click, the row's own reload asks again) or the round's space is not on this instance. A round whose space is here but names nothing
+ *   countable says neither.
  * - **A count for a stale space.** The counting restarts when the round or its space changes and a request in flight is cancelled with it.
  *
  * `data-counts` on the block says where the counting stands (`off`, `loading`, `ready`, `noright`, `failed`) for a verify drive and for the
@@ -74,37 +78,39 @@ export function piecesOf(sentence: string): SentencePiece[] {
   return pieces;
 }
 
-/** The step with every name in it marked, so the sentence made of it can be cut at the names. Shapes a peer got wrong throw here: the caller catches. */
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const markText = (v: unknown): unknown => (typeof v === 'string' ? mark(v) : v);
+
+/**
+ * The step with every name in it marked, so the sentence made of it can be cut at the names. A peer wrote the step, so a field that is
+ * missing or not text is left as it is, never an error: `stepSentence` is the one place that decides such a step has no sentence of its own
+ * (it answers the unknown-step sentence), and a name marked in a step it then refuses is never shown.
+ */
 function markedStep(step: ConversionStep): ConversionStep {
-  switch (step.op) {
+  const s: Record<string, unknown> = isRecord(step) ? step : {};
+  switch (s['op']) {
     case 'renameType':
     case 'renameProperty':
-      return { ...step, from: mark(step.from), to: mark(step.to) };
+      return { ...s, from: markText(s['from']), to: markText(s['to']) } as unknown as ConversionStep;
     case 'mapEnum':
       return {
-        ...step, property: mark(step.property),
-        values: Object.fromEntries(Object.entries(step.values).map(([from, to]) => [mark(from), mark(to)])),
-      };
+        ...s, property: markText(s['property']),
+        values: isRecord(s['values']) ? Object.fromEntries(Object.entries(s['values']).map(([from, to]) => [mark(from), markText(to)])) : s['values'],
+      } as unknown as ConversionStep;
     case 'splitType':
       return {
-        ...step, from: mark(step.from), cases: step.cases.map(c => ({ when: mark(c.when), to: mark(c.to) })),
-        ...(step.otherwise !== undefined ? { otherwise: mark(step.otherwise) } : {}),
-      };
+        ...s, from: markText(s['from']),
+        cases: Array.isArray(s['cases']) ? s['cases'].map(c => (isRecord(c) ? { ...c, when: markText(c['when']), to: markText(c['to']) } : c)) : s['cases'],
+        ...(s['otherwise'] !== undefined ? { otherwise: markText(s['otherwise']) } : {}),
+      } as unknown as ConversionStep;
     default:
       return step;
   }
 }
 
-/** The longest an operation name a peer sent is shown: it is the only thing said of a step this client has no words for. */
-const OP_SHOWN_MAX = 60;
-
-/** One step as pieces: its sentence, or, for a step with no words or a wrong shape, the name of its operation. Never empty, never thrown. */
+/** One step as pieces: its sentence, which `stepSentence` makes for any step, however a peer shaped it. */
 function linePieces(say: PageTranslator, step: ConversionStep): SentencePiece[] {
-  try {
-    const sentence = stepSentence({ translate: say }, markedStep(step));
-    if (typeof sentence === 'string' && sentence.trim() !== '') return piecesOf(sentence);
-  } catch { /* a step a peer shaped wrongly: said by its operation below */ }
-  return [{ text: stripMarkers(String(step.op)).slice(0, OP_SHOWN_MAX) || '?', name: true }];
+  return piecesOf(stepSentence({ translate: say }, markedStep(step)));
 }
 
 const OFF: CountsView = { state: 'off' };
@@ -147,6 +153,14 @@ let seq = 0;
               }
               @case ('noright') {
                 <p class="cv-run-line">{{ 'brain.review.unconverted.rung' | transloco }}</p>
+              }
+              @case ('failed') {
+                <p class="cv-run-line">{{ 'networks.network.votes.convert.countFailed' | transloco }}</p>
+              }
+              @case ('off') {
+                @if (!localSpaceId()) {
+                  <p class="cv-run-line">{{ 'networks.network.votes.convert.noSpace' | transloco }}</p>
+                }
               }
               @case ('ready') {
                 @for (line of countLines(); track $index) {

@@ -24,32 +24,73 @@ export const CONVERSION_STEP_KEYS = [
   'conversion.step.splitType',
   'conversion.step.splitTypeOpen',
   'conversion.step.splitCase',
+  'conversion.step.unknown',
 ] as const;
+
+/** The longest an operation name is shown in the sentence of a step this client has no words for: a peer chose it. */
+const OP_SHOWN_MAX = 60;
 
 /** The separator between the pairs of a map and between the cases of a split: as the drawing writes them ("change a to b, c to d"). */
 const PAIRS_SEPARATOR = ', ';
 const CASES_SEPARATOR = '; ';
 
+const isText = (v: unknown): v is string => typeof v === 'string';
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * The operation name a step with no words is said by: the name as given, cut short and with its control characters taken out (the vote row
+ * wraps names in two of them to set them in the code face, so a name must not carry its own); `?` where there is no text to show.
+ */
+function opShown(step: unknown): string {
+  const op = isRecord(step) ? step['op'] : undefined;
+  const shown = isText(op) ? Array.from(op).filter(ch => ch.charCodeAt(0) > 0x1f && ch !== '\u007f').slice(0, OP_SHOWN_MAX).join('') : '';
+  return shown || '?';
+}
+
+/** True when every field the sentence of this step reads is there and is text (or the list of text it should be). */
+function isSayable(step: unknown): step is ConversionStep {
+  if (!isRecord(step)) return false;
+  switch (step['op']) {
+    case 'renameType':
+    case 'renameProperty':
+      return isText(step['from']) && isText(step['to']);
+    case 'mapEnum':
+      return isText(step['property']) && isRecord(step['values']) && Object.values(step['values']).every(isText);
+    case 'splitType':
+      return isText(step['from']) && Array.isArray(step['cases'])
+        && step['cases'].every(c => isRecord(c) && isText(c['when']) && isText(c['to']))
+        && (step['otherwise'] === undefined || isText(step['otherwise']));
+    default:
+      return false;
+  }
+}
+
 /**
  * One step as a sentence in the translator's active language, names interpolated as given. A split with no `otherwise` does not say where
  * the others go (the server leaves such a record unconverted), so it does not make a destination up.
+ *
+ * It always answers a sentence and never throws: a step this client has no words for (an operation a newer member added), one with a field
+ * missing or of the wrong kind (a peer wrote it), or no object at all is `conversion.step.unknown` with the operation as given (see
+ * {@link opShown}), so the page that words a step needs no guard of its own and no caller can drop it.
  */
 export function stepSentence(transloco: KeyTranslator, step: ConversionStep): string {
   const t = (key: (typeof CONVERSION_STEP_KEYS)[number], params: Record<string, string>): string => transloco.translate(key, params);
-  switch (step.op) {
+  const said = step as unknown;
+  if (!isSayable(said)) return t('conversion.step.unknown', { op: opShown(said) });
+  switch (said.op) {
     case 'renameType':
-      return t('conversion.step.renameType', { from: step.from, to: step.to });
+      return t('conversion.step.renameType', { from: said.from, to: said.to });
     case 'renameProperty':
-      return t('conversion.step.renameProperty', { from: step.from, to: step.to });
+      return t('conversion.step.renameProperty', { from: said.from, to: said.to });
     case 'mapEnum': {
-      const pairs = Object.entries(step.values).map(([from, to]) => t('conversion.step.mapPair', { from, to })).join(PAIRS_SEPARATOR);
-      return t('conversion.step.mapEnum', { property: step.property, pairs });
+      const pairs = Object.entries(said.values).map(([from, to]) => t('conversion.step.mapPair', { from, to })).join(PAIRS_SEPARATOR);
+      return t('conversion.step.mapEnum', { property: said.property, pairs });
     }
     case 'splitType': {
-      const cases = step.cases.map(c => t('conversion.step.splitCase', { when: c.when, to: c.to })).join(CASES_SEPARATOR);
-      return step.otherwise === undefined
-        ? t('conversion.step.splitTypeOpen', { type: step.from, cases })
-        : t('conversion.step.splitType', { type: step.from, cases, otherwise: step.otherwise });
+      const cases = said.cases.map(c => t('conversion.step.splitCase', { when: c.when, to: c.to })).join(CASES_SEPARATOR);
+      return said.otherwise === undefined
+        ? t('conversion.step.splitTypeOpen', { type: said.from, cases })
+        : t('conversion.step.splitType', { type: said.from, cases, otherwise: said.otherwise });
     }
   }
 }

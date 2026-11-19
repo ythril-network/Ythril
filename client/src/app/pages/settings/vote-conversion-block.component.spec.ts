@@ -18,6 +18,11 @@
  *
  * Red on the bundle branch at 34ed9538b: `vote-conversion-block.component.ts` does not exist, and `convertBlocksOfRound` and
  * `orderedConversionSteps` are not exported by `core/vote-round-view.ts`.
+ *
+ * Slice S8b (Q-940) changed the two places that were the block's own guard: a step with no words, or a wrong shape, is now said by
+ * `stepSentence` itself (the unknown-step sentence, no longer the bare operation name), and a count that failed, or a round with no space
+ * here, now says so in words. Red on the bundle branch at 653766f53: those lines were the operation name alone and the two sentences did
+ * not exist.
  */
 import { TestBed, ComponentFixture } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
@@ -44,6 +49,9 @@ const WORDS: Record<string, string> = {
   'conversion.step.splitType': 'SPLIT {{type}} {{cases}} ELSE {{otherwise}}',
   'conversion.step.splitTypeOpen': 'SPLIT {{type}} {{cases}}',
   'conversion.step.splitCase': 'WHEN {{when}} TO {{to}}',
+  'conversion.step.unknown': 'UNKNOWN-STEP {{op}}',
+  'networks.network.votes.convert.countFailed': 'CONV-COUNT-FAILED',
+  'networks.network.votes.convert.noSpace': 'CONV-NO-SPACE',
 };
 
 const renameProp: ConversionStep = { op: 'renameProperty', kind: 'entity', type: 'person', from: 'company', to: 'employer' };
@@ -286,6 +294,64 @@ describe('the conversion block of a vote row', () => {
     expect(items(f)).toEqual(['RENAME-PROP company => employer']);
   });
 
+  it('a count that failed says so in words, under the steps, and offers nothing to click (the row\'s own reload reads it again)', () => {
+    const f = mount([renameProp]);
+    rightsAre(ADMIN);
+    http.match('/api/filter')[0]!.flush({ error: 'x' }, { status: 500, statusText: 'Server Error' });
+    f.detectChanges();
+    expect(text(f)).toContain('CONV-COUNT-FAILED');
+    expect(text(f)).not.toContain('CONV-NO-SPACE');
+    expect(text(f)).not.toMatch(/\d/);
+    expect(items(f)).toEqual(['RENAME-PROP company => employer']);
+    expect((f.nativeElement as HTMLElement).querySelectorAll('button, a, [role="button"], input').length, 'a failed count offers a control').toBe(0);
+    const live = (f.nativeElement as HTMLElement).querySelector('[aria-live="polite"]');
+    expect(live?.textContent, 'the failure is not in the live region').toContain('CONV-COUNT-FAILED');
+  });
+
+  it('a count that answers says neither that it failed nor that there is no space', () => {
+    const f = mount([renameProp]);
+    rightsAre(ADMIN);
+    countsAre(640, 599);
+    f.detectChanges();
+    expect(state(f)).toBe('ready');
+    expect(text(f)).not.toContain('CONV-COUNT-FAILED');
+    expect(text(f)).not.toContain('CONV-NO-SPACE');
+  });
+
+  it('while counting, and where the token cannot read, neither of the two sentences is said', () => {
+    const loading = mount([renameProp]);
+    expect(state(loading)).toBe('loading');
+    expect(text(loading)).not.toContain('CONV-COUNT-FAILED');
+    expect(text(loading)).not.toContain('CONV-NO-SPACE');
+    rightsAre(NO_READ);
+    loading.detectChanges();
+    expect(state(loading)).toBe('noright');
+    expect(text(loading)).not.toContain('CONV-COUNT-FAILED');
+    expect(text(loading)).not.toContain('CONV-NO-SPACE');
+  });
+
+  it('a round whose space is not on this instance says so under the steps, and asks nothing', () => {
+    const f = mount([renameProp], null);
+    f.detectChanges();
+    http.expectNone('/api/tokens/me');
+    http.expectNone('/api/filter');
+    expect(state(f)).toBe('off');
+    expect(text(f)).toContain('CONV-NO-SPACE');
+    expect(text(f)).not.toContain('CONV-COUNT-FAILED');
+    expect(items(f)).toEqual(['RENAME-PROP company => employer']);
+    expect((f.nativeElement as HTMLElement).querySelectorAll('button, a, [role="button"], input').length).toBe(0);
+  });
+
+  it('a space that is here but has no step to count says neither: nothing failed and the space is not missing', () => {
+    const f = mount([{ op: 'dropProperty', kind: 'entity', type: 'person', property: 'x' }]);
+    f.detectChanges();
+    http.expectNone('/api/filter');
+    expect(state(f)).toBe('off');
+    expect(items(f)).toEqual(['UNKNOWN-STEP dropProperty']);
+    expect(text(f)).not.toContain('CONV-NO-SPACE');
+    expect(text(f)).not.toContain('CONV-COUNT-FAILED');
+  });
+
   it('binds a peer\'s names as text: markup in a type, a property or a condition is shown, never parsed', () => {
     const evil = '<img src=x onerror="alert(1)">';
     const f = mount([
@@ -320,16 +386,17 @@ describe('the conversion block of a vote row', () => {
     const lines = items(f);
     expect(lines.length).toBe(2);
     expect(lines.every(l => l.length > 0), 'a step rendered as a blank line').toBe(true);
-    expect(lines.some(l => l.includes('dropProperty')), 'the unknown step does not name its operation').toBe(true);
+    expect(lines, 'the unknown step is not said in the unknown-step sentence').toContain('UNKNOWN-STEP dropProperty');
     expect(lines).toContain('RENAME-PROP company => employer');
   });
 
-  it('a known step with a shape a peer got wrong does not throw and is not blank', () => {
+  it('a known step with a shape a peer got wrong does not throw and is said in the unknown-step sentence', () => {
     const f = mount([{ op: 'mapEnum', kind: 'entity', type: 'person', property: 'status' }, { op: 'splitType', kind: 'entity', from: 'a' }]);
     f.detectChanges();
     const lines = items(f);
     expect(lines.length).toBe(2);
     expect(lines.every(l => l.length > 0), 'a malformed step rendered as a blank line').toBe(true);
+    expect([...lines].sort(), 'a malformed step is not said in the unknown-step sentence').toEqual(['UNKNOWN-STEP mapEnum', 'UNKNOWN-STEP splitType']);
     // Neither names records it can count, so nothing is asked.
     http.expectNone('/api/tokens/me');
     http.expectNone('/api/filter');
