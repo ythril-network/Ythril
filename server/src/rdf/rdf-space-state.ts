@@ -10,8 +10,9 @@
  *   only to a caller who may read that network through its own doors (`visibleNetworks`: `networks: read` on every space it carries, or
  *   administering them all); anyone else is told the base is in conflict and who can settle it.
  * - **One address, two meanings.** A base another space of this instance holds too is `409 rdf_base_shared` (the other space named only to
- *   a caller who may read its schema): `<base>schema` would name two ontologies (bundle-269 drive, finding 10). The save doors do not yet
- *   refuse such a base; until they do, the exports refuse to give it out.
+ *   a caller who may read its schema): `<base>schema` would name two ontologies (bundle-269 drive, finding 10). The save doors refuse to make
+ *   such a pair (slice F, by the same comparison, `otherHoldersOfRdfBase`); a pair that already exists (a peer's round, a stored config) is
+ *   refused here.
  * - **A refusal that blames the wrong holder.** A stored address no document can carry (the base, the vocab, an explicit `iri`, a library
  *   namespace) is `409 rdf_unwritable` naming what holds it, before any record is read (drive, finding 9).
  * - **A second spelling of the space's names.** The meta handed back is the resolved one (`inlineResolvableRefs`), which the record form and
@@ -20,12 +21,11 @@
 import type { SpaceMeta } from '@ythril-network/schema';
 import type { Config, SpaceConfig } from '../config/types.js';
 import type { TokenRights } from '../config/rights-shape.js';
-import { rdfBaseConflictOf } from '../spaces/rdf-settle.js';
+import { rdfBaseConflictOf, otherHoldersOfRdfBase, RDF_BASE_SHARED } from '../spaces/rdf-settle.js';
 import { inlineResolvableRefs } from '../spaces/schema-validation.js';
 import { isWritableIri } from '@ythril-network/schema/internal';
 import { prefixesFor, termClashes } from './term-iri.js';
 import { visibleNetworks } from '../auth/network-rights.js';
-import { holdsRung } from '../auth/reachable-spaces.js';
 import { peerText, NAME_QUOTED } from '../util/log.js';
 import { EXPORT_CONFLICT } from '../export/export-statuses.js';
 
@@ -65,8 +65,9 @@ export function unwritableRefusal(err: RdfUnwritable): { status: typeof EXPORT_C
 /** Who asks: what decides which networks a refusal may name. */
 export interface RdfCaller { admin?: boolean; rights?: TokenRights | null }
 
-/** The code of a space whose base another space of this instance holds too. */
-export const RDF_BASE_SHARED = 'rdf_base_shared';
+// `RDF_BASE_SHARED` (the code of a space whose base another space of this instance holds too) is the save doors' code as well: it lives with
+// the one comparison in `spaces/rdf-settle.ts` and is re-exported here for the exports.
+export { RDF_BASE_SHARED };
 
 export type RdfSpaceState =
   | { ok: true; meta: SpaceMeta; fingerprint: string }
@@ -150,15 +151,13 @@ export function rdfSpaceState(cfg: Config, spaceId: string, caller: RdfCaller | 
   }
   // Two spaces of this instance with one base give one address two meanings (`<base>schema` would name two ontologies; bundle-269 drive,
   // finding 10). The other space is named only to a caller who may read its schema: a refusal reveals nothing the other doors would not.
-  const sharing = cfg.spaces.filter(s => s.id !== spaceId && s.meta?.rdf?.enabled === true && s.meta.rdf.base === rdf.base);
-  if (sharing.length > 0) {
-    const rights = caller?.rights;
-    const told = sharing.filter(s => !!rights && (rights.instanceAdmin === true || holdsRung(rights, s.id, 'schema', 'read')));
+  const sharing = otherHoldersOfRdfBase(cfg, spaceId, rdf.base, caller?.rights);
+  if (sharing.holders.length > 0) {
     return {
       ok: false, status: EXPORT_CONFLICT, code: RDF_BASE_SHARED,
       error: `Space '${peerText(spaceId, { max: NAME_QUOTED })}' holds the RDF base ${peerText(rdf.base, { max: UNWRITABLE_SHOWN })}, which another space of this `
         + `instance holds too, so its addresses are not its own and nothing is exported. An administrator gives one of them another base `
-        + `(PATCH /api/spaces/:id with rdf.rebase).${told.length > 0 ? ` Holding it too: ${told.map(s => `'${peerText(s.id, { max: NAME_QUOTED })}'`).join(', ')}.` : ''}`,
+        + `(PATCH /api/spaces/:id with rdf.rebase).${sharing.named.length > 0 ? ` Holding it too: ${sharing.named.map(id => `'${peerText(id, { max: NAME_QUOTED })}'`).join(', ')}.` : ''}`,
     };
   }
   const meta = inlineResolvableRefs(space.meta as SpaceMeta);

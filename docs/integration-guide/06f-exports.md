@@ -102,7 +102,7 @@ At most two exports run at once on the instance, one per token; another answers 
 | 406 | `rdf_format_not_acceptable` | Turtle over several spaces, or an `Accept` naming nothing that fits |
 | 409 | `rdf_not_enabled` | The space has RDF off |
 | 409 | `rdf_unwritable` | A stored address no RDF document can carry (an older value with a control character or an unpaired surrogate): the refusal names what holds it (the base or vocab of the RDF setting, a type or property, a library namespace), before any byte is sent |
-| 409 | `rdf_base_shared` | Another space of this instance holds the same base, so the addresses are not the space's own (`<base>schema` would name two ontologies): one of them needs another base. The other space is named only to a caller who may read its schema |
+| 409 | `rdf_base_shared` | Another space of this instance holds the same base, so the addresses are not the space's own (`<base>schema` would name two ontologies): one of them needs another base. The other space is named only to a caller who may read its schema. The save doors refuse to make such a pair with the same code ([06a](06a-schema-api.md#rdf-names-metardf-and-iri)); a pair that already exists is refused here |
 | 409 | `rdf_base_conflict` | A network the space is shared in contests its base. The network, member and offered base are named only to a caller who may read that network |
 | 429 | `rdf_export_busy` | Two exports run, or one of yours |
 | 503 | `rdf_export_incomplete` | The store did not answer a page |

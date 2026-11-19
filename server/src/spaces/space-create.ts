@@ -29,7 +29,9 @@ import {
   CreateSpaceBody, TypeSchemasZ, libraryRefRefusal, parseSpaceMeta, stripServerOwnedSpace,
 } from './body-schemas.js';
 import { refuseRemovedDescription } from './spaces.js';
-import { RDF_BASE_NEEDED_STATUS, settleRdf } from './rdf-settle.js';
+import { RDF_BASE_NEEDED_STATUS, settleRdf, sharedRdfBaseRefusal } from './rdf-settle.js';
+import { getConfig } from '../config/loader.js';
+import type { TokenRights } from '../config/rights-shape.js';
 import { getPublicBaseUrl, publicBaseUrlIsFallback } from '../config/public-url.js';
 import { termClashes } from '../rdf/term-iri.js';
 import { inlineResolvableRefs } from './schema-validation.js';
@@ -44,7 +46,7 @@ const TERM_CLASH_STATUS = 422 as const;
 
 /** A refusal, carrying the status the contract suite pins. */
 export type SpaceCreateRefusal = {
-  status: 400 | 422;
+  status: 400 | 409 | 422;
   body: { error: string; code?: string };
 };
 
@@ -63,7 +65,7 @@ export type SpaceCreateDecision =
  * Reads config (the space list, the schema library) and writes nothing, so the refusal chain is reachable without a
  * request and testable without standing up Docker.
  */
-export function planSpaceCreate(body: unknown): SpaceCreateDecision {
+export function planSpaceCreate(body: unknown, caller?: { rights?: TokenRights | null }): SpaceCreateDecision {
   const removed = refuseRemovedDescription(body);
   if (removed) return { ok: false, refusal: removed };
   // `proxyFor` is retired (6.0): a proxy is a personal view now, made with `POST /api/views` / `view_create`. Refused BY NAME before the
@@ -113,6 +115,10 @@ export function planSpaceCreate(body: unknown): SpaceCreateDecision {
     // Nothing is stored yet, so the only refusal is the first set's (`rdf_base_needed`, 400).
     if (!rdf.ok) return { ok: false, refusal: { status: RDF_BASE_NEEDED_STATUS, body: { error: rdf.error, code: rdf.code } } };
     if (rdf.rdf === undefined) delete seededMeta.rdf; else seededMeta.rdf = rdf.rdf;
+    // A base another space of this instance holds with RDF on is refused at the save (bundle-269 slice F), as on PATCH: the new space holds
+    // nothing yet, so whatever base it takes is a move. The refusal leaves no space behind.
+    const shared = sharedRdfBaseRefusal(getConfig(), id, undefined, seededMeta.rdf, caller?.rights);
+    if (shared) return { ok: false, refusal: { status: shared.status, body: { error: shared.error, code: shared.code } } };
     // Q-748 rule 5 at create too (review finding 9): a space stored with two terms of one address would answer rdf_term_clash to every
     // later library write that touches it. Asked of the resolved schema, as on PATCH.
     const clashes = seededMeta.rdf?.enabled === true && seededMeta.rdf.base ? termClashes(inlineResolvableRefs(seededMeta)) : [];
