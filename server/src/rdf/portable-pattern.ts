@@ -19,6 +19,11 @@
  * ranges, a literal `-` only first or last, and no `[` inside. `.` differs only on U+2028 and U+2029, which ECMAScript's `.` does not match
  * and XPath's does: accepted, as a pattern meant to match them would spell them out.
  *
+ * `$` stays in the subset (bundle-269 review, suspicion d). SPARQL 1.1 §17.4.3.14 defines `REGEX` as `fn:matches`, and XPath and XQuery
+ * Functions and Operators 3.1 §5.6.1 says that without the `m` flag `$` matches at the end of the entire string only, as ECMAScript's `$`
+ * does without its own `m` flag. So `^a$` refuses `"a\n"` in both. A processor built on `java.util.regex` (Jena) lets `$` match before a final
+ * line break as well. That is a departure from the SPARQL definition the shape cites, and an export cannot correct it.
+ *
  * Pure.
  */
 
