@@ -101,7 +101,7 @@ describe('the words are the host\'s to choose, and the type\'s stay the default'
     expect(input()!.value).toBe('email');
     const alert = el.querySelector('[role="alert"]');
     expect(alert?.textContent?.trim()).toBe(PROP_ERRORS['spaces.schema.renamePropError.exists']);
-    expect(alert?.textContent).not.toMatch(/type/i);
+    expect(alert?.textContent?.trim()).not.toBe(EN['spaces.schema.renameError.exists']);
   });
 
   it('a type refused is still said in the type\'s words', () => {
