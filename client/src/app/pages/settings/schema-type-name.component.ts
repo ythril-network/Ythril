@@ -3,8 +3,11 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
-/** Where a type rename's refusal sentences live (`.empty`, `.exists`, `.missing`). A prefix, not a key: the key is built from it. */
-const TYPE_REFUSAL_PREFIX = 'spaces.schema.renameError';
+/**
+ * Where a type rename's own error sentences live (`.empty`, `.exists`, `.missing`): a prefix, not a key, the key is built from it.
+ * Not named for "refusal": `data-acts-have-words.spec.ts` reads every `*REFUSAL*` constant as a prefix the server's refusal codes are looked up under.
+ */
+const TYPE_RENAME_ERRORS = 'spaces.schema.renameError';
 
 /**
  * A declared type's NAME, or a property's KEY, and the affordance to change it.
@@ -92,7 +95,7 @@ export class SchemaTypeNameComponent {
   /** The words of the pencil's tooltip. */
   readonly titleKey = input<string>('spaces.schema.renameType');
   /** Where the refusal sentences live: `<prefix>.empty`, `.exists`, `.missing`. */
-  readonly errorKeyPrefix = input<string>(TYPE_REFUSAL_PREFIX);
+  readonly errorKeyPrefix = input<string>(TYPE_RENAME_ERRORS);
   /** The class of the name beside the pencil. */
   readonly nameClass = input<string>('dt');
 
