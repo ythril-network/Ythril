@@ -209,7 +209,7 @@ export const ROUTE_RULES: RouteRule[] = [
   // counts and left-out values (never the data), through `req.auditChangesExplicit`; MCP `export_rdf` records the same act (`MCP_ACT_OPERATIONS`).
   { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/export\/rdf$/,        operation: 'rdf.export', spaceGroup: 1, writtenWhenCutOff: true },
   // Q-751: the schema as OWL and SHACL is a read of the schema, like the library's export of one (`schema_library.export`).
-  { method: 'GET',    pattern: /^\/api\/spaces\/([^/]+)\/schema-rdf$/,                operation: 'schema.rdf_export', spaceGroup: 1, read: true },
+  { method: 'GET',    pattern: /^\/api\/spaces\/([^/]+)\/schema-rdf$/,                operation: 'schema.rdf.export', spaceGroup: 1, read: true },
   // A restore writes every record family of the space from a body, so it is audited with its counts like the wipe beside it.
   { method: 'POST',   pattern: /^\/api\/admin\/spaces\/([^/]+)\/import$/,             operation: SPACE_IMPORT_OPERATION, spaceGroup: 1 },
   // Every peer verifies this instance's signatures against its published key, so replacing it changes what the network trusts of this instance.
