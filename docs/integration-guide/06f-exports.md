@@ -18,7 +18,9 @@ curl -H "Authorization: Bearer $TOKEN" https://ythril.example/api/brain/spaces/r
 curl -H "Authorization: Bearer $TOKEN" -H "Accept: application/n-quads" https://ythril.example/api/brain/spaces/research/export/rdf > research.nq
 ```
 
-A request that names no `limit`, `after` or size ceiling gets the **whole** export of the space or view in one answer, streamed a store page at a time: Jena, RDF4J, rdflib and curl read it as it is. There is no `Link` on it, because there is no next page. The largest export this serves has no fixed size: the stream holds only one store page in memory and keeps no database cursor open, and what bounds it is time. The reader must take each page within the idle bound (60 seconds), each store page must be read within 30 seconds, and only two exports run on the instance at once.
+A request that names no `limit`, `after` or size ceiling gets the **whole** export of the space or view in one answer, streamed a store page at a time: Jena, RDF4J, rdflib and curl read it as it is. There is no `Link` on it, because there is no next page. The largest export this serves has no fixed size: the stream holds only one store page in memory and keeps no database cursor open, and what bounds it is time. The reader must take each page within the idle bound (60 seconds), and after the first minute the stream must average at least 16 KiB a second, or it ends in the incomplete form below; each store page must be read within 30 seconds, and only two exports run on the instance at once.
+
+A whole export is not a snapshot. A record written while it runs is either wholly in or wholly out, but the walk goes kind by kind, entities before edges, so an edge written after the entity pass can name an entity the file does not hold. The edge's object is that entity's address, which is enough to find it in a later export.
 
 ### Parameters
 
@@ -40,7 +42,8 @@ Naming `limit`, `after` or a size ceiling asks for one bounded page instead, and
 A whole export that cannot finish is never mistaken for a whole file. None of the four formats defines an end-of-document mark or a checksum, so Ythril makes the end impossible to misread:
 
 - **Store failure after the first byte.** Turtle, TriG and N-Quads end with a last line no grammar allows (`!ythril-export-incomplete`), after a comment saying why. Every parser then refuses the file. TriG and N-Quads still carry the report node with `ythril:complete false`. A JSON-LD document is left unterminated, which no JSON parser accepts. The trailer `Ythril-Export-Complete` says `false`, and the audit row says `complete: false`.
-- **Reader gone or idle.** The answer is cut: its chunked body lacks the final chunk (RFC 9112 §7.1), which every HTTP client reports as a broken transfer.
+- **Reader too slow.** The same ending as a store failure, written while the socket still takes it: `INCOMPLETE ... too slowly`, then the line no parser accepts.
+- **Reader gone or idle.** No ending can be written to a socket that takes nothing. The answer is cut: its chunked body lacks the final chunk (RFC 9112 §7.1), which every HTTP client reports as a broken transfer. An HTTP/1.0 client, or a proxy that removes the chunking, cannot see that. If the cut falls between two store pages, a Turtle or N-Quads file can then look whole, so such a reader should check that the file ends with the `# ythril-export:` comment line.
 - **Store failure before the first byte.** A clean `503 rdf_export_incomplete`.
 
 - **REST** says what is left before the body: `Link: </api/brain/spaces/research/export/rdf?format=turtle&after=...>; rel="next"` while records are left, and no `Link` on the last page. The budget used is in `Ythril-Budget-Chars` (and `Ythril-Budget-Bytes` when you stated one).
@@ -90,9 +93,10 @@ At most two exports run at once on the instance, one per token; another answers 
 | 400 | `rdf_bad_edge_details` | Another `edgeDetails`, or `rdf12` with JSON-LD |
 | 400 | `rdf_bad_after` | An `after` this export did not give |
 | 400 | `rdf_bad_limit`, `rdf_bad_budget` | A `limit` or a size ceiling out of its range |
-| 403 | `rdf_export_rung` | No `knowledge: read` on the space |
+| 403 | (the rights guard's) | No `knowledge: read` on the space |
 | 406 | `rdf_format_not_acceptable` | Turtle over several spaces, or an `Accept` naming nothing that fits |
 | 409 | `rdf_not_enabled` | The space has RDF off |
+| 409 | `rdf_unwritable` | A stored address no RDF document can carry (an older value with a control character or an unpaired surrogate): the refusal names what holds it (a record and its term, a type or property, or the RDF setting). Met after a whole stream began, the document ends in the incomplete form with that reason |
 | 409 | `rdf_base_conflict` | A network the space is shared in contests its base. The network, member and offered base are named only to a caller who may read that network |
 | 429 | `rdf_export_busy` | Two exports run, or one of yours |
 | 503 | `rdf_export_incomplete` | The store did not answer a page |
@@ -108,7 +112,7 @@ curl -H "Authorization: Bearer $TOKEN" -H "Accept: application/ld+json" https://
 
 The ontology is `<base>schema` with `owl:versionIRI <base>schema/<fingerprint>`: the address each records export names as its shapes graph, so a consumer fetches the shapes here and validates the export with any SHACL validator. Everything the schema says about a type or a property reaches the export: descriptions as `sh:description` (and `rdfs:comment` on the space's own terms), names as `sh:name`, value rules as SHACL constraints, the rest as `ythril:` annotations; the space's purpose is the ontology's `rdfs:comment`. Every text is a plain literal with no language tag. A type or property mapped to an outside vocabulary (`schema:Person`) gets no statement of its own; the space's words about it sit on its shape. A library namespace no term of the space uses is not mentioned.
 
-MCP answers the document in its first text block and the summary (`ontology`, `version`, `fingerprint`, `leftOut`) in the second and in `structuredContent`. The export needs `schema: read`; a personal view has no schema and is answered as every schema door answers a view. It refuses `rdf_bad_format`, `rdf_format_not_acceptable`, `rdf_schema_rung` (403), `rdf_not_enabled` and `rdf_base_conflict` (409), and is audited as `schema.rdf.export` when reads are logged.
+MCP answers the document in its first text block and the summary (`ontology`, `version`, `fingerprint`, `leftOut`) in the second and in `structuredContent`. The export needs `schema: read`; a personal view has no schema and is answered as every schema door answers a view. It refuses `rdf_bad_format`, `rdf_format_not_acceptable`, `rdf_not_enabled`, `rdf_base_conflict` and `rdf_unwritable` (409, naming the type or property whose stored address cannot be written), the rights guard's 403 without `schema: read`, and is audited as `schema.rdf.export` when reads are logged.
 
 ## Record addresses
 

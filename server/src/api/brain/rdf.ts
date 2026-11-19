@@ -26,7 +26,7 @@ import { Router, type Request, type Response } from 'express';
 import { requireSpaceAuth } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { viewReadOfRequest } from '../../spaces/read-scope.js';
-import { rdfExportAct, rdfExportIdleMs, type RdfExportPage, type RdfExportStream } from '../../rdf/export-act.js';
+import { rdfExportAct, rdfExportIdleMs, rdfExportRate, type RdfExportPage, type RdfExportStream } from '../../rdf/export-act.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import type { TokenRights } from '../../config/rights-shape.js';
@@ -99,6 +99,8 @@ async function sendStream(req: Request, res: Response, stream: RdfExportStream):
   res.setHeader('Trailer', STREAM_TRAILERS.join(', '));
   if (stream.viewMembers) res.setHeader('Ythril-View-Members', stream.viewMembers.map(encodeURIComponent).join(', '));
   if (stream.fileTriplesWithheld) res.setHeader('Ythril-File-Triples', 'withheld');
+  const started = Date.now();
+  let sent = 0;
   try {
     let chunk: string | undefined = begun.first;
     while (chunk !== undefined) {
@@ -106,7 +108,17 @@ async function sendStream(req: Request, res: Response, stream: RdfExportStream):
         res.destroy();
         return;
       }
+      sent += Buffer.byteLength(chunk, 'utf8');
       audit();
+      // Too slow on average once the grace is over (a trickling reader): the incomplete ending is written while the socket still takes it,
+      // so the reader is told, and the slot is freed.
+      const { graceMs, minBytesPerSecond } = rdfExportRate();
+      const elapsed = Math.max(Date.now() - started, 1);
+      if (elapsed >= graceMs && (sent * MS_PER_SECOND) / elapsed < minBytesPerSecond) {
+        await rest.return();
+        res.write(stream.abandon(`the reader took the export too slowly (under ${minBytesPerSecond} bytes a second after ${graceMs} ms)`));
+        break;
+      }
       const next = await rest.next();
       chunk = next.done ? undefined : next.value;
     }
@@ -122,6 +134,8 @@ async function sendStream(req: Request, res: Response, stream: RdfExportStream):
     if (res.writableEnded || res.destroyed) release();
   }
 }
+
+const MS_PER_SECOND = 1_000;
 
 /** The trailers a whole export declares up front. */
 const STREAM_TRAILERS = ['Ythril-Export-Complete', 'Ythril-Skipped-Values', 'Ythril-Skipped-Records'] as const;

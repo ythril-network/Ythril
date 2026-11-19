@@ -104,12 +104,14 @@ describe('a planted list value is exported without it and named', { skip }, () =
     }
   });
 
-  it('over 100 planted values: 100 named, the rest counted', async () => {
+  it('over 100 planted values: the document names 100 and counts the rest; the summary names its first few and counts the rest', async () => {
     const r = await d.exportMcp(admin.key, { space: MANY, maxChars: BIG });
     assert.equal(r.isError, false, r.text.slice(0, 300));
     assert.equal(r.structured.skippedValues.count, 105);
-    assert.equal(r.structured.skippedValues.named.length, 100);
-    assert.equal(r.structured.skippedValues.unnamed, 5);
+    const { SUMMARY_NAMED_MAX } = await import('../../server/dist/rdf/export-act.js');
+    assert.equal(r.structured.skippedValues.named.length, SUMMARY_NAMED_MAX);
+    assert.equal(r.structured.skippedValues.unnamed, 105 - SUMMARY_NAMED_MAX);
+    assert.match(r.document, /and 5 more/);
     const rest = await d.exportRest(admin.key, MANY, { format: 'turtle', maxChars: BIG });
     assert.equal(rest.trailers['ythril-skipped-values'], '105');
     assert.match(rest.text.trimEnd().split('\n').at(-1), /and 5 more/);

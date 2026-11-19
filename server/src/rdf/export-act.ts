@@ -38,7 +38,7 @@ import type { BrainCollection } from '../config/types-knowledge.js';
 import { LIVE_FILE_ROW, NOT_A_FEED_MARKER } from '../files/live-file-row.js';
 import { budgetCeilingZ, defaultBudgetChars, queryInt, resolveBudget, budgetBoundBy, type ResolvedBudget } from '../brain/result-budget.js';
 import { storeFailureAnswer } from '../brain/store-failure.js';
-import { refusalOfParse } from '../util/log.js';
+import { refusalOfParse, peerText, NAME_QUOTED } from '../util/log.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 import { takeExportSlot, EXPORT_RETRY_AFTER_SECONDS, type ExportSlot } from '../export/export-slots.js';
 import {
@@ -47,10 +47,11 @@ import {
 import { blank, iri, plain, quad, stdIri, typed, xsd, type Quad, type EdgeDetails, type LeftOutReason } from './literals.js';
 import { RDF_READ_FIELDS, SKIPPED_VALUES_NAMED_MAX, recordTriples, createSkippedLog, type RdfRecordKind, type SkippedValue } from './record-triples.js';
 import { graphIri, prefixesFor, recordAddressable, recordIri, versionIri } from './term-iri.js';
-import { createRdfWriter, type RdfFormat } from './serialize.js';
+import { createRdfWriter, RdfWriteError, type RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES, RDF_BAD_FORMAT } from './export-format.js';
-import { rdfSpaceState, RDF_NOT_ENABLED, type RdfCaller, type FingerprintOf } from './rdf-space-state.js';
-import { ythrilIri } from './ythril-vocabulary.js';
+import {
+  rdfSpaceState, RDF_NOT_ENABLED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
+} from './rdf-space-state.js';import { ythrilIri } from './ythril-vocabulary.js';
 
 /** The most records one page holds. */
 export const RDF_EXPORT_LIMIT_MAX = 10_000;
@@ -62,19 +63,34 @@ const READ_PAGE = 200;
 const PAGE_READ_MS = 30_000;
 /** The longest list of named values the audit row keeps, in characters. */
 const AUDIT_NAMED_MAX = 2_000;
+/** The most left-out values the summary names one by one (the document names as many as its budget leaves room for); the rest are counted. */
+export const SUMMARY_NAMED_MAX = 10;
+/** The longest record id or key the summary repeats, in characters. */
+const SUMMARY_TEXT_MAX = 100;
+/** What a summary may take, in characters, with its named values held to {@link SUMMARY_NAMED_MAX} and {@link SUMMARY_TEXT_MAX}. */
+const SUMMARY_RESERVE_CHARS = 2_500;
+/** MCP carries the summary twice: its second text block and `structuredContent`. */
+const SUMMARY_CARRIAGES = 2;
+/** The smallest document a page holds whatever the budget: the first record is always whole. */
+const MIN_DOCUMENT_CHARS = 1_000;
+/** The share of a page's budget kept for its ending (the report node and the closing comment): one part in this many. */
+const ENDING_SHARE = 4;
+/** The least kept for the ending, in characters: a report node without named values and its comment. */
+const ENDING_RESERVE_MIN = 3_000;
+/** How much the named list of an ending that does not fit shrinks per try: halved. */
+const ENDING_SHRINK = 2;
 
 export const RDF_BAD_EDGE_DETAILS = 'rdf_bad_edge_details';
 export const RDF_BAD_AFTER = 'rdf_bad_after';
 export const RDF_BAD_LIMIT = 'rdf_bad_limit';
 export const RDF_BAD_BUDGET = 'rdf_bad_budget';
-export const RDF_EXPORT_RUNG = 'rdf_export_rung';
 export const RDF_EXPORT_BUSY = 'rdf_export_busy';
 export const RDF_EXPORT_INCOMPLETE = 'rdf_export_incomplete';
 
 /** Every refusal code the records export answers, for the tool's description and the guide. */
 export const RDF_EXPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
-  RDF_BAD_FORMAT, 'rdf_format_not_acceptable', RDF_BAD_EDGE_DETAILS, RDF_BAD_AFTER, RDF_BAD_LIMIT, RDF_BAD_BUDGET, RDF_EXPORT_RUNG,
-  RDF_NOT_ENABLED, 'rdf_base_conflict', RDF_EXPORT_BUSY, RDF_EXPORT_INCOMPLETE,
+  RDF_BAD_FORMAT, 'rdf_format_not_acceptable', RDF_BAD_EDGE_DETAILS, RDF_BAD_AFTER, RDF_BAD_LIMIT, RDF_BAD_BUDGET,
+  RDF_NOT_ENABLED, 'rdf_base_conflict', 'rdf_term_clash', RDF_UNWRITABLE, RDF_EXPORT_BUSY, RDF_EXPORT_INCOMPLETE,
 ]);
 
 /** The edge forms, by their parameter value. */
@@ -181,6 +197,8 @@ export interface RdfExportStream {
   begin(): Promise<{ ok: true; first: string } | RdfExportRefusal>;
   /** The chunks after the first, a store page each, then the ending. */
   rest(): AsyncGenerator<string, void, undefined>;
+  /** End the stream now, for `reason`: the incomplete ending to write last (the door stops asking `rest`). */
+  abandon(reason: string): string;
   /** How the stream stands now: `complete` only once the last chunk was handed out; the audit row's changes; the trailers' parts. */
   state(): { complete: boolean; incomplete?: string; auditChanges: RdfExportPage['auditChanges']; skippedCount: number; skippedRecords: string[] };
 }
@@ -233,6 +251,23 @@ let readPage: PageReader = defaultReader;
 /** Replace how a page of records is read (a test plants a store that times out); `null` restores the store. */
 export function setRdfExportPageReaderForTest(reader: PageReader | null): void { readPage = reader ?? defaultReader; }
 
+/**
+ * The least rate a whole export must keep, averaged from its start, once its grace period is over (bundle-269 review, finding 9): a reader
+ * taking a little at a time meets the idle bound for ever, and two such readers held the instance's two slots. The product's other long
+ * downloads (the audit-log export, the space backup) have no such bound because an administrator alone reaches them and nothing caps how
+ * many run; this one any reader of a space reaches, and two run at once.
+ */
+export const RDF_EXPORT_MIN_BYTES_PER_SECOND = 16_384;
+/** How long a whole export runs before {@link RDF_EXPORT_MIN_BYTES_PER_SECOND} is asked, in milliseconds. */
+export const RDF_EXPORT_RATE_GRACE_MS = 60_000;
+let rate = { graceMs: RDF_EXPORT_RATE_GRACE_MS, minBytesPerSecond: RDF_EXPORT_MIN_BYTES_PER_SECOND };
+/** The rate rule the REST door applies now. */
+export const rdfExportRate = (): Readonly<typeof rate> => rate;
+/** Replace the rate rule (a test that needs it to bind at once); `null` restores it. */
+export function setRdfExportRateForTest(r: { graceMs: number; minBytesPerSecond: number } | null): void {
+  rate = r ?? { graceMs: RDF_EXPORT_RATE_GRACE_MS, minBytesPerSecond: RDF_EXPORT_MIN_BYTES_PER_SECOND };
+}
+
 /** How long a REST reader may take nothing before its export is cut and its slot freed, in milliseconds. */
 const IDLE_MS_DEFAULT = 60_000;
 let idleMs = IDLE_MS_DEFAULT;
@@ -262,10 +297,10 @@ export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutc
     const field = String(refusal.issues[0]?.path[0] ?? '');
     return { status: EXPORT_BAD_REQUEST, error: refusal.error, code: FIELD_CODES[field] ?? RDF_BAD_LIMIT };
   }
+  // The rung (`knowledge: read`) is asked before this act on every door: the route's guard (`ROUTE_RIGHTS`) and the dispatcher (`TOOL_RIGHTS`)
+  // answer a token without it with their 403, which is the refusal a caller gets (bundle-269 review, suspicion a: a code of this act's own
+  // there was never reached).
   const view = input.viewMembers !== undefined;
-  if (!view && !mayRead(rights, spaceId, 'knowledge')) {
-    return { status: EXPORT_FORBIDDEN, error: `Exporting the records of a space needs knowledge: read on it, which this token does not hold on '${spaceId}'`, code: RDF_EXPORT_RUNG };
-  }
   const cfg = getConfig();
   const members = view ? [...input.viewMembers!] : [spaceId];
   const exported: { space: string; meta: SpaceMeta; fingerprint: string }[] = [];
@@ -305,17 +340,28 @@ export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutc
     input, exported, withoutRdf, inConflict, format, edgeDetails, cursor, budget: resolved, limit: parsed.data.limit,
     after: parsed.data.after, files: (m) => mayRead(rights, m, 'files'), slot, view,
   };
-  if (input.whole === true) return streamWhole(p);
+  // The slot is the door's from the moment an answer is handed over, and released here on EVERY other exit: a throw of the walk's
+  // constructor, of a page, of anything before the hand-over (bundle-269 review, finding 1: a stream that failed to start held its slot for
+  // good).
+  let handedOver = false;
   try {
-    return await buildPage(p);
+    const answer = input.whole === true ? streamWhole(p) : await buildPage(p);
+    handedOver = true;
+    return answer;
   } catch (err) {
-    slot.release();
     return refusalOfStore(err, spaceId);
+  } finally {
+    if (!handedOver) slot.release();
   }
 }
 
-/** The 503 of a store that did not answer before any byte of an answer was sent; any other fault is thrown to the door. */
+/**
+ * The refusal of a fault met before any byte of an answer was sent: a stored address no document can carry is `409 rdf_unwritable` naming
+ * what holds it; a store that did not answer is the 503; any other fault is thrown to the door.
+ */
 function refusalOfStore(err: unknown, spaceId: string): RdfExportRefusal {
+  if (err instanceof RdfUnwritable) return unwritableRefusal(err);
+  if (err instanceof RdfWriteError) return unwritableRefusal(new RdfUnwritable(`The export of '${spaceId}'`, err.value));
   const store = storeFailureAnswer(err, `export_rdf '${spaceId}'`);
   if (store && store.status === EXPORT_UNAVAILABLE) {
     return {
@@ -342,21 +388,19 @@ interface PageInput {
   view: boolean;
 }
 
-/** Whether any record is left after `from` (the rest of its kind, then the kinds and members after it): one key read per collection at most. */
+/**
+ * Whether a record of the export is left after `from`: asked of the walk itself, so a row the walk leaves out (a fork row, an edge or a link
+ * with no addressable end) never makes a page promise a next page that holds nothing (bundle-269 review, finding 4). It stops at the first
+ * record it would export; reading past rows that are left out costs what the next page would have cost.
+ */
 async function anyAfter(p: PageInput, from: Cursor): Promise<boolean> {
-  const m0 = p.exported.findIndex(e => e.space === from.space);
-  for (let m = m0; m < p.exported.length; m++) {
-    const space = p.exported[m]!.space;
-    const k0 = m === m0 ? WALK.findIndex(w => w.kind === from.kind) : 0;
-    for (let k = k0; k < WALK.length; k++) {
-      const { kind, collection } = WALK[k]!;
-      if (kind === 'file' && !p.files(space)) continue;
-      const page = await readPage({ collection: spaceCollection(space, collection), filter: filterOf(kind), projection: { _id: 1 }, size: 1, maxTimeMS: PAGE_READ_MS },
-        m === m0 && k === k0 ? from.last : undefined);
-      if (page.rows.length > 0) return true;
-    }
+  const steps = new ExportWalk(p).steps(from);
+  try {
+    for await (const s of steps) if (s.type === 'record') return true;
+    return false;
+  } finally {
+    await steps.return();
   }
-  return false;
 }
 
 const filterOf = (kind: RdfRecordKind): Record<string, unknown> => (kind === 'file' ? { ...LIVE_FILE_ROW, ...NOT_A_FEED_MARKER } : {});
@@ -399,8 +443,14 @@ class ExportWalk {
     const namespaces = Object.values(getConfig().schemaLibraryNamespaces ?? {});
     const prefixes: Record<string, string> = {};
     for (const e of p.exported) for (const [name, ns] of Object.entries(prefixesFor(e.meta, namespaces))) if (!Object.hasOwn(prefixes, name)) prefixes[name] = ns;
-    this.writer = createRdfWriter(p.format, { prefixes, edgeDetails: p.edgeDetails });
-    this.head = this.writer.open();
+    try {
+      this.writer = createRdfWriter(p.format, { prefixes, edgeDetails: p.edgeDetails });
+      this.head = this.writer.open();
+    } catch (err) {
+      // The prefixes are the base, the vocab and the library namespaces the space's terms use: one of them holds the address.
+      if (err instanceof RdfWriteError) throw new RdfUnwritable('The RDF setting of the space (meta.rdf.base or meta.rdf.vocab) or a library namespace its terms use', err.value);
+      throw err;
+    }
     this.chars = this.head.length;
     this.bytes = Buffer.byteLength(this.head, 'utf8');
     this.hash.update(this.head);
@@ -425,7 +475,13 @@ class ExportWalk {
             const id = String(doc._id);
             const form = recordTriples(member.meta, kind, doc, { edgeDetails: p.edgeDetails, agentsSeen: this.agentsSeen });
             if (form.leftOut !== undefined || form.quads.length === 0) { previous = id; continue; }
-            const text = this.writer.write({ ...(graph ? { graph } : {}), quads: form.quads });
+            let text: string;
+            try {
+              text = this.writer.write({ ...(graph ? { graph } : {}), quads: form.quads });
+            } catch (err) {
+              if (err instanceof RdfWriteError) throw new RdfUnwritable(`The ${kind} '${peerText(id, { max: NAME_QUOTED })}' of space '${member.space}' (or a term of its type)`, err.value);
+              throw err;
+            }
             yield { type: 'record', member, kind, id, previous, text, skipped: form.counts.skippedValues };
             previous = id;
           }
@@ -450,13 +506,21 @@ class ExportWalk {
     for (const v of s.skipped) if (this.named.length < SKIPPED_VALUES_NAMED_MAX) this.named.push({ ...v, space: s.member.space });
   }
 
-  /** The values left out so far: their count, the first named, the words of each. */
-  leftOut(): { count: number; unnamed: number; named: NamedSkippedValue[]; words: string[] } {
+  /** The values left out so far: their count, the first named (at most `limit`), the words of each. */
+  leftOut(limit = SKIPPED_VALUES_NAMED_MAX): { count: number; unnamed: number; named: NamedSkippedValue[]; words: string[] } {
     const s = this.skipped.summary();
-    const named = this.named.slice(0, s.named.length);
+    const named = this.named.slice(0, Math.min(s.named.length, limit));
+    const unnamed = s.count - named.length;
     const words = named.map(v => `${v.recordId} (${v.key}: ${REASON_WORDS[v.reason]})`);
-    if (s.unnamed > 0) words.push(`and ${s.unnamed} more`);
-    return { count: s.count, unnamed: s.unnamed, named, words };
+    if (unnamed > 0) words.push(`and ${unnamed} more`);
+    return { count: s.count, unnamed, named, words };
+  }
+
+  private reportId: string | undefined;
+  /** The report's address: a digest of what the answer carries, taken once (an ending may be rendered again with fewer values named). */
+  private report(): string {
+    this.reportId ??= `urn:ythril:export-report:${this.hash.update('\u0000').update(this.p.after ?? '').digest('hex')}`;
+    return this.reportId;
   }
 
   /**
@@ -464,11 +528,11 @@ class ExportWalk {
    * could not finish (`incomplete`, the reason in words): then the report says `complete false` where it can still be written validly (TriG,
    * N-Quads), the comment says why, and {@link INCOMPLETE_LINE} makes every parser refuse the file; a JSON-LD document is left unterminated.
    */
-  ending(o: { complete: boolean; whole: boolean; nextAfter?: string | undefined; incomplete?: string }): string {
+  ending(o: { complete: boolean; whole: boolean; nextAfter?: string | undefined; incomplete?: string; namedLimit?: number }): string {
     const { p } = this;
-    const left = this.leftOut();
+    const left = this.leftOut(o.namedLimit);
     if (o.incomplete !== undefined && p.format === 'jsonld') return '';
-    const reportId = `urn:ythril:export-report:${this.hash.update('\u0000').update(p.after ?? '').digest('hex')}`;
+    const reportId = this.report();
     const report = iri(reportId);
     const quads: Quad[] = [quad(report, stdIri('rdf', 'type'), iri(ythrilIri('ExportReport')))];
     quads.push(quad(report, iri(ythrilIri('recordCount')), typed(String(this.records), xsd('integer'))));
@@ -529,10 +593,15 @@ async function buildPage(p: PageInput): Promise<RdfExportPage> {
   let next: Cursor | undefined;
   let refused: { chars: boolean; bytes: boolean } | null = null;
   let stoppedAt: Cursor | undefined;
+  // What the document may hold (on MCP the summary rides twice beside it, so its bounded size is set aside), and the part of that kept for
+  // the ending, so the records never leave the report and the closing comment outside the budget (bundle-269 review, finding 3).
+  const carried = p.input.transport === 'mcp' ? SUMMARY_CARRIAGES * SUMMARY_RESERVE_CHARS : 0;
+  const doc = { chars: Math.max(MIN_DOCUMENT_CHARS, p.budget.chars - carried), bytes: p.budget.bytes === null ? null : Math.max(MIN_DOCUMENT_CHARS, p.budget.bytes - carried) };
+  const reserve = (n: number): number => Math.max(Math.floor(n / ENDING_SHARE), ENDING_RESERVE_MIN);
   for await (const s of w.steps(p.cursor)) {
     if (s.type !== 'record') continue;
-    const overChars = w.chars + s.text.length > p.budget.chars;
-    const overBytes = p.budget.bytes !== null && w.bytes + Buffer.byteLength(s.text, 'utf8') > p.budget.bytes;
+    const overChars = w.chars + s.text.length > doc.chars - reserve(doc.chars);
+    const overBytes = doc.bytes !== null && w.bytes + Buffer.byteLength(s.text, 'utf8') > doc.bytes - reserve(doc.bytes);
     // The record that does not fit is not this page's: the next page starts at it. The first record is always admitted whole.
     if (w.records > 0 && (overChars || overBytes)) {
       refused = { chars: overChars, bytes: overBytes };
@@ -546,8 +615,19 @@ async function buildPage(p: PageInput): Promise<RdfExportPage> {
   if (stoppedAt && await anyAfter(p, stoppedAt)) next = stoppedAt;
   const complete = next === undefined;
   const nextAfter = next ? encodeCursor(next) : undefined;
-  const chunks = [w.head, ...body, w.ending({ complete, whole: false, nextAfter })];
-  const left = w.leftOut();
+  // The ending names as many left-out values as fit what is left of the budget; the rest are counted ("and N more").
+  let namedLimit = SKIPPED_VALUES_NAMED_MAX;
+  let ending = w.ending({ complete, whole: false, nextAfter, namedLimit });
+  const fits = (text: string): boolean => w.chars + text.length <= doc.chars && (doc.bytes === null || w.bytes + Buffer.byteLength(text, 'utf8') <= doc.bytes);
+  while (!fits(ending) && namedLimit > 0) {
+    namedLimit = Math.floor(namedLimit / ENDING_SHRINK);
+    ending = w.ending({ complete, whole: false, nextAfter, namedLimit });
+  }
+  const chunks = [w.head, ...body, ending];
+  const sentChars = chunks.reduce((n, c) => n + c.length, 0);
+  const sentBytes = chunks.reduce((n, c) => n + Buffer.byteLength(c, 'utf8'), 0);
+  const left = w.leftOut(namedLimit);
+  const summaryNamed = left.named.slice(0, SUMMARY_NAMED_MAX).map(v => ({ ...v, recordId: v.recordId.slice(0, SUMMARY_TEXT_MAX), key: v.key.slice(0, SUMMARY_TEXT_MAX) }));
   const budgetChars = p.budget.stated?.chars ?? p.budget.chars;
   const budgetBytes = p.budget.stated ? p.budget.stated.bytes : p.budget.bytes;
   const summary: RdfExportSummary = {
@@ -556,8 +636,8 @@ async function buildPage(p: PageInput): Promise<RdfExportPage> {
     ...(p.inConflict.length > 0 ? { membersInConflict: [...p.inConflict] } : {}),
     format: p.format, mediaType: RDF_MEDIA_TYPES[p.format], edgeDetails: p.edgeDetails, version: w.writer.version ?? null,
     records: w.records, counts: w.counts, complete, ...(nextAfter ? { nextAfter } : {}),
-    skippedValues: { count: left.count, named: left.named, unnamed: left.unnamed },
-    fileTriplesWithheld: w.withheld, truncated: refused !== null, budgetChars, budgetBytes, charsReturned: w.chars, bytesReturned: w.bytes,
+    skippedValues: { count: left.count, named: summaryNamed, unnamed: left.count - summaryNamed.length },
+    fileTriplesWithheld: w.withheld, truncated: refused !== null, budgetChars, budgetBytes, charsReturned: sentChars, bytesReturned: sentBytes,
     ...(refused ? { budgetBoundBy: budgetBoundBy(refused, p.budget) } : {}),
   };
   return {
@@ -606,8 +686,9 @@ function streamWhole(p: PageInput): RdfExportStream {
       }
     } catch (err) {
       // Mid-stream: the status line is sent, so the document itself must say it is not whole.
-      incomplete = storeFailureAnswer(err, `export_rdf '${p.input.spaceId}'`)?.status === EXPORT_UNAVAILABLE
-        ? 'the store did not answer a page in time' : 'a fault of the server while reading';
+      incomplete = err instanceof RdfUnwritable ? `${RDF_UNWRITABLE}: ${unwritableRefusal(err).error}`
+        : storeFailureAnswer(err, `export_rdf '${p.input.spaceId}'`)?.status === EXPORT_UNAVAILABLE
+          ? 'the store did not answer a page in time' : 'a fault of the server while reading';
       yield hand(buffered + w.ending({ complete: false, whole: true, incomplete }));
       return;
     }
@@ -631,6 +712,11 @@ function streamWhole(p: PageInput): RdfExportStream {
       }
     },
     rest,
+    abandon(reason: string) {
+      // Whatever page was half read is not sent: the ending says the export could not finish, and why.
+      incomplete = reason;
+      return hand(w.ending({ complete: false, whole: true, incomplete: reason }));
+    },
     state: () => ({
       complete, ...(incomplete !== undefined ? { incomplete } : {}), auditChanges: w.auditChanges(complete),
       skippedCount: w.leftOut().count, skippedRecords: [...new Set(w.leftOut().named.map(v => v.recordId))],
