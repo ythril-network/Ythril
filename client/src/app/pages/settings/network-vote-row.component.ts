@@ -1,8 +1,10 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import type { VoteRound } from '../../core/api.types';
-import { roundTypeKey, voteTally } from '../../core/vote-round-view';
+import type { ConversionStep } from '../../core/conversion.types';
+import { orderedConversionSteps, roundTypeKey, voteTally } from '../../core/vote-round-view';
 import { InstantComponent } from '../../shared/instant.component';
+import { VoteConversionBlockComponent } from './vote-conversion-block.component';
 
 /**
  * One open vote round on a network card: what it is, when it opened and closes, where the count stands, what it
@@ -20,12 +22,18 @@ import { InstantComponent } from '../../shared/instant.component';
  * say. Both are shown by interpolation, which escapes — never as markup. The summary keeps its line breaks
  * (`pre-line`), breaks inside a long unbroken word (`overflow-wrap: anywhere`) and is never cut off: a voter who
  * cannot read the whole proposal cannot meaningfully approve it.
+ *
+ * ## The conversion that rides with a schema round
+ *
+ * A round can carry the steps of a record conversion (`convertRecords`), and a yes is a yes to them. When it carries some, the row shows
+ * them under the summary through `app-vote-conversion-block`, with this instance's own record counts for the round's local space. A round
+ * with no steps renders exactly as it did before conversions: no block, no request.
  */
 @Component({
   selector: 'app-network-vote-row',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [TranslocoPipe, InstantComponent],
+  imports: [TranslocoPipe, InstantComponent, VoteConversionBlockComponent],
   styles: [`
     .vote-row {
       display: flex;
@@ -66,6 +74,9 @@ import { InstantComponent } from '../../shared/instant.component';
       @if (round().summary) {
         <div class="vote-summary">{{ round().summary }}</div>
       }
+      @if (conversionSteps(); as steps) {
+        <app-vote-conversion-block [steps]="steps" [localSpaceId]="round().localSpaceId" />
+      }
     </div>
   `,
 })
@@ -78,4 +89,9 @@ export class NetworkVoteRowComponent {
 
   protected typeKey = () => roundTypeKey(this.round().type);
   protected tally = () => voteTally(this.round());
+  /** The steps of the conversion the round carries, or null when it carries none a voter can read: the row is then as it was before conversions. */
+  protected conversionSteps = (): readonly ConversionStep[] | null => {
+    const steps = this.round().convertRecords?.steps;
+    return steps && orderedConversionSteps(steps).length > 0 ? steps : null;
+  };
 }
