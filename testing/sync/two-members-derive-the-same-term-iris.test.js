@@ -5,7 +5,8 @@
  * On a closed network of A and B, A switches RDF on for a shared space with a base and a schema whose types carry and omit an `iri`. Once B
  * has the meta, the two members hold one base, and the one resolver (`server/src/rdf/term-iri.ts`, pure) gives the same address for each type
  * and property from each member's own meta. Then a settings round from A carrying ANOTHER base changes nothing on either member: the base
- * moves only by a `space_rebase` round.
+ * moves only by a `space_rebase` round. Last, A holds a higher epoch B missed (written into A's config, as a landing writes it): B is told
+ * through the `rdfBases` A serves beside its vote list, keeps its base until its admin accepts the offered one, and the conflict clears.
  *
  * Run: node --test testing/sync/two-members-derive-the-same-term-iris.test.js (the sync stack up, built from this branch)
  */
@@ -14,7 +15,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { INSTANCES, get, patch, post, waitFor, mirroredNetwork, delWithBody } from './helpers.js';
+import { INSTANCES, get, patch, post, waitFor, mirroredNetwork, delWithBody, dockerExec, readContainerConfig, reloadConfig } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, 'configs');
@@ -93,5 +94,25 @@ describe('two members derive the same term IRIs', () => {
     assert.equal(a.rdf?.base, BASE);
     assert.equal(b.rdf?.base, BASE);
     assert.equal(b.rdfBaseConflict, undefined, 'no conflict is recorded where the members agree');
+  });
+
+  it('a member that missed a rebase is told through the served rdfBases, and its admin accepts the base (owner, 2026-11-19)', async () => {
+    // What a landed rebase B missed leaves on A: the new base at epoch 1, written into A's own config as the landing writes it.
+    const NEXT = `https://next.example.org/ld/${SPACE}/`;
+    const script = `const fs=require('fs');const p='/config/config.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));`
+      + `for(const s of c.spaces){if(s.id===${JSON.stringify(SPACE)}){const r={enabled:true,base:${JSON.stringify(NEXT)},vocab:${JSON.stringify(`${NEXT}vocab/`)},baseEpoch:1};`
+      + `s.meta={...s.meta,rdf:r};if(s.ownMeta)s.ownMeta={...s.ownMeta,rdf:r};}}fs.writeFileSync(p,JSON.stringify(c,null,2),{mode:0o600});`;
+    dockerExec(`docker exec ythril-a node -e "${script.replace(/"/g, '\\"')}"`);
+    await reloadConfig(INSTANCES.a, tokenA);
+    await waitFor(async () => {
+      await syncBoth();
+      const cfg = readContainerConfig('ythril-b');
+      return cfg.networks?.find(n => n.id === net.networkId)?.rdfBaseConflicts?.[SPACE]?.offered?.[0]?.base === NEXT;
+    }, 60_000, 2_000, () => 'B never recorded the higher base A serves');
+    assert.equal((await metaOf(INSTANCES.b, tokenB)).rdf?.base, BASE, 'the served base moved B by itself');
+    const accepted = await patch(INSTANCES.b, tokenB, `/api/spaces/${SPACE}`, { meta: { rdf: { enabled: true, base: NEXT, rebase: true } } });
+    assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+    assert.deepEqual((await metaOf(INSTANCES.b, tokenB)).rdf, { enabled: true, base: NEXT, vocab: `${NEXT}vocab/`, baseEpoch: 1 });
+    assert.equal(readContainerConfig('ythril-b').networks?.find(n => n.id === net.networkId)?.rdfBaseConflicts, undefined);
   });
 });
