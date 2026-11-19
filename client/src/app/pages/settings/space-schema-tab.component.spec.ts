@@ -907,17 +907,18 @@ describe('the type list and pane of bundle-268 (C2)', () => {
     const pane = await selectSchemaType(h, 'entity', 'plain');
     await answerKinds(h, { entity: { body: kindList('entity', OWN) } });
     const acts = $$(pane, '.acts button');
-    expect(acts.length, 'history, export, save to library, remove').toBe(4);
+    expect(acts.length, 'history, convert records, export, save to library, remove').toBe(5);
     const history = acts[0]!;
     expect(history.textContent?.trim()).toBe('');
     expect(history.getAttribute('title')).toBe('spaces.schema.history.button');
     expect(history.getAttribute('aria-label')).toBe('spaces.schema.history.button');
     expect(history.getAttribute('aria-haspopup')).toBe('dialog');
     expect($(history, 'ph-icon')?.getAttribute('name') ?? $(history, 'ph-icon')?.getAttribute('ng-reflect-name')).toBe('clock-counter-clockwise');
-    expect(acts[1]!.getAttribute('aria-label'), 'export has no name').toBe('spaces.schema.exportTypeTitle');
-    expect(acts[2]!.getAttribute('aria-label'), 'save to library has no name').toBe('spaces.schema.saveToLibraryTitle');
-    expect(acts[2]!.getAttribute('aria-label'), 'save to library: the accessible name is the tooltip').toBe(acts[2]!.getAttribute('title'));
-    expect(acts[3]!.getAttribute('aria-label'), 'remove has no name').toBe('common.remove');
+    expect(acts[1]!.textContent?.trim(), 'Convert records is a labelled button, not an icon').toBe('spaces.schema.convert.button');
+    expect(acts[2]!.getAttribute('aria-label'), 'export has no name').toBe('spaces.schema.exportTypeTitle');
+    expect(acts[3]!.getAttribute('aria-label'), 'save to library has no name').toBe('spaces.schema.saveToLibraryTitle');
+    expect(acts[3]!.getAttribute('aria-label'), 'save to library: the accessible name is the tooltip').toBe(acts[3]!.getAttribute('title'));
+    expect(acts[4]!.getAttribute('aria-label'), 'remove has no name').toBe('common.remove');
   });
 
   it('History opens the dialog for the type, and closing it gives the focus back to the History button', async () => {
