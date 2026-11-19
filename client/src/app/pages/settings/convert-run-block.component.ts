@@ -84,7 +84,9 @@ export function runFooterOf(status: ConvertStatusAnswer | null | undefined, noti
   if (isRun(status) && notice?.state !== 'not_started') {
     const n = status.counts.unconverted;
     if (n > 0) return status.state === 'running' ? { kind: 'reviewSoFar', n } : { kind: 'review', n };
-    return status.state === 'running' ? { kind: 'none' } : { kind: 'hint', key: 'spaces.schema.convert.run.nothingLeft' };
+    // A refusal is the thing to act on: "Nothing left to review." beside it would say the run needs nothing (drive round 5).
+    if (status.state === 'running' || status.stepsRefused.length > 0) return { kind: 'none' };
+    return { kind: 'hint', key: 'spaces.schema.convert.run.nothingLeft' };
   }
   if (!isRun(status) && notice?.state === 'started') return { kind: 'none' };
   return { kind: 'hint', key: notice ? 'spaces.schema.convert.run.nothingLeft' : 'spaces.schema.convert.run.nothingToDo' };
@@ -191,7 +193,7 @@ const checkedOf = (s: ConvertStatus): number => s.counts.stamped + s.counts.rewr
               @for (all of r.all; track $index) {
                 <p class="cv-run-line" data-testid="run-refused-all">@for (p of all; track $index) {<span [class.cv-tn]="p.name">{{ p.text }}</span>}</p>
               }
-              <p class="cv-run-line" data-testid="run-refused-fix">{{ 'spaces.schema.convert.refused.fix' | transloco }}</p>
+              <p class="cv-run-line" data-testid="run-refused-fix">{{ (r.listed ? 'spaces.schema.convert.refused.fix' : 'spaces.schema.convert.refused.fixUnlisted') | transloco }}</p>
             </div>
           }
         </div>

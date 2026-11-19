@@ -3436,6 +3436,7 @@
   "spaces.schema.convert.refused.listed.other": "{{count}} Datensätze stehen in der Prüfung als „Die Schritte wurden hier abgelehnt“.",
   "spaces.schema.convert.refused.item": "{{step}}: {{reason}}.",
   "spaces.schema.convert.refused.fix": "So beheben Sie es: Korrigieren Sie diese Schritte und drücken Sie dann am Typ „Datensätze konvertieren“. Die Datensätze bleiben aufgelistet, bis sie konvertiert sind.",
+  "spaces.schema.convert.refused.fixUnlisted": "Die Datensätze, die diese Schritte brauchten, blieben, wie sie waren, und wurden nur gestempelt, wo sie bereits passten. So beheben Sie es: Korrigieren Sie diese Schritte und drücken Sie dann am Typ „Datensätze konvertieren“.",
   "spaces.schema.convert.refused.all": "Diese Instanz hat keinen der Schritte der Abstimmung angewendet: {{reason}}.",
   "conversion.step.renameType": "Typ {{from}} in {{to}} umbenennen",
   "conversion.step.renameProperty": "Eigenschaft {{from}} in {{to}} umbenennen",

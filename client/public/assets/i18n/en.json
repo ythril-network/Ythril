@@ -3436,6 +3436,7 @@
   "spaces.schema.convert.refused.listed.other": "{{count}} records are listed in Review as “The steps were refused here”.",
   "spaces.schema.convert.refused.item": "{{step}}: {{reason}}.",
   "spaces.schema.convert.refused.fix": "To fix it: correct these steps, then press Convert records on the type. The records stay listed until they convert.",
+  "spaces.schema.convert.refused.fixUnlisted": "The records that needed these steps were left as they were, and only stamped where they already fit. To fix it: correct these steps, then press Convert records on the type.",
   "spaces.schema.convert.refused.all": "This instance applied none of the steps of the vote: {{reason}}.",
   "conversion.step.renameType": "Rename the type {{from}} to {{to}}",
   "conversion.step.renameProperty": "Rename the property {{from}} to {{to}}",

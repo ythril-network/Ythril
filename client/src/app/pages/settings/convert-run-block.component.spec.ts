@@ -61,6 +61,7 @@ const WORDS: Record<string, string> = {
   'spaces.schema.convert.refused.listed.other': 'REF-LISTED {{count}}',
   'spaces.schema.convert.refused.item': 'REF-ITEM {{step}} :: {{reason}}',
   'spaces.schema.convert.refused.fix': 'REF-FIX',
+  'spaces.schema.convert.refused.fixUnlisted': 'REF-FIX-UNLISTED',
   'spaces.schema.convert.refused.all': 'REF-ALL {{reason}}',
   'conversion.step.renameType': 'RENAME-TYPE {{from}} => {{to}}',
   'conversion.step.renameProperty': 'RENAME-PROP {{from}} => {{to}}',
@@ -343,6 +344,17 @@ describe('the run block', () => {
       expect(mount(refusedRun()).querySelector('[data-testid="run-refused-listed"]')).toBeNull();
       refusedCount.mockReturnValue(of(0));
       expect(mount(refusedRun()).querySelector('[data-testid="run-refused-listed"]')).toBeNull();
+    });
+
+    it('says the records stay listed only when Review lists some; with none listed it says only what to do, and the footer never says "Nothing left to review." (drive round 5)', () => {
+      expect(text(mount(refusedRun()), 'run-refused-fix'), 'records listed').toBe('REF-FIX');
+      refusedCount.mockReturnValue(of(0));
+      const none = mount(refusedRun({ counts: { stamped: 640, rewritten: 0, unconverted: 0, moved: 0, edgesRestamped: 0 } }));
+      expect(text(none, 'run-refused-fix')).toBe('REF-FIX-UNLISTED');
+      refusedCount.mockReturnValue(of(null));
+      expect(text(mount(refusedRun()), 'run-refused-fix'), 'not known: no claim that records are listed').toBe('REF-FIX-UNLISTED');
+      const done = refusedRun({ counts: { stamped: 640, rewritten: 0, unconverted: 0, moved: 0, edgesRestamped: 0 } });
+      expect(runFooterOf(done, null), 'the refusal is the thing to act on').toEqual({ kind: 'none' });
     });
   });
 
