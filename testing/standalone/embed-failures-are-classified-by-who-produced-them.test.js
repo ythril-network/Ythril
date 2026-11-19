@@ -261,6 +261,10 @@ describe('the worker\'s pause after an unreachable embedder', () => {
     assert.match(body('export function stopBrainEmbeddingWorker('), /\.cancel\s*\(/, 'stopping the worker does not end the pause: shutdown waits for it');
     assert.match(body('export async function runOneEmbedJob('), /\.noteUnreachable\s*\(/, 'the pause is never begun');
     assert.match(body('export async function runOneEmbedJob('), /\.noteEmbedded\s*\(/, 'the pause is never ended');
+    // Each under its own condition: a failure of any other kind must not begin the pause, and an outcome that never called the embedder
+    // (`unchanged`, `gone`) must not end it.
+    assert.match(body('export async function runOneEmbedJob('), /if\s*\(isEmbedUnreachableError\(err\)\)\s*embedderOutagePause\.noteUnreachable\s*\(/, 'the pause begins for a failure that is not the unreachable class');
+    assert.match(body('export async function runOneEmbedJob('), /if\s*\(outcome\s*===\s*'embedded'\)\s*embedderOutagePause\.noteEmbedded\s*\(/, 'the pause ends on an outcome that did not reach the embedder');
   });
 });
 
