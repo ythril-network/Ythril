@@ -189,7 +189,10 @@ describe('the collision pairs give distinct addresses, each a valid IRI that rou
     const names = Object.keys(a);
     assert.equal(new Set(Object.values(a)).size, names.length, 'one namespace, one prefix');
     assert.ok(Object.values(a).includes(`${VOCAB}edge/person#`), 'the second "person" gets a prefix of its own');
-    for (const name of names) assert.match(name, /^[A-Za-z][A-Za-z0-9_-]{0,49}$/);
+    for (const name of names) {
+      assert.match(name, /^[A-Za-z][A-Za-z0-9_-]*$/, `${name} is a prefix name a writer and a parser accept`);
+      assert.ok(name.length <= 50, `${name} is no longer than the 50 characters PrefixZ allows`);
+    }
     const reordered = rdfOn({ edge: m.typeSchemas.edge, entity: m.typeSchemas.entity });
     assert.deepEqual(p(reordered), a, 'two members holding one schema in another key order declare the same prefixes');
   });

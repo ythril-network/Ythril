@@ -147,9 +147,16 @@ export function libraryTermIri(namespace: string, type: string, prop?: string): 
 }
 
 const byCode = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+/** The names of a map in code-unit order: the order every member visits a schema's types in (a visiting order, no canonical text). */
+function namesInOrder(map: object): string[] {
+  const names = Object.keys(map);
+  return names.sort(byCode);
+}
 /** The longest start of a type-named prefix: room for `-<kind>-<n>` within the 50 characters a prefix may have (`PrefixZ`). */
 const PREFIX_STEM_MAX = 36;
 const FIRST_NUMBERED_PREFIX = 2;
+/** A character a prefix name cannot hold (`PrefixZ`, and Turtle's PN_PREFIX as the writer spells it). */
+const NOT_A_PREFIX_CHARACTER = /[^A-Za-z0-9_-]/g;
 
 /**
  * The prefix name a type's property document gets (`person:` for `.../Person#`): the type's name, every character a prefix cannot hold an
@@ -157,7 +164,7 @@ const FIRST_NUMBERED_PREFIX = 2;
  * `<name>-<kind>-2`, `-3`, ... A name is taken when it is a standard, reserved or already-declared prefix.
  */
 function typePrefixName(type: string, kind: string, taken: ReadonlySet<string>): string {
-  let stem = type.replace(/[^A-Za-z0-9_-]/g, '_');
+  let stem = type.replace(NOT_A_PREFIX_CHARACTER, '_');
   stem = stem.charAt(0).toLowerCase().concat(stem.slice(1));
   if (!/^[A-Za-z]/.test(stem)) stem = 't-'.concat(stem);
   stem = stem.slice(0, PREFIX_STEM_MAX);
@@ -184,13 +191,13 @@ export function prefixesFor(meta: SpaceMeta, namespaces: readonly { prefix: stri
   const documents: { document: string; kind: string; type: string }[] = [];
   for (const kind of KNOWLEDGE_TYPES) {
     const map = Object.hasOwn(kinds, kind) ? kinds[kind] ?? {} : {};
-    for (const type of Object.keys(map).sort(byCode)) {
+    for (const type of namesInOrder(map)) {
       const raw = map[type];
       const def = raw && typeof raw === 'object' ? raw as TypeDef : {};
       const typeIri = resolveTermIri(meta, kind, type);
       used.push(typeIri);
       if (typeIri.startsWith(vocab.concat(kind, '/')) && !Object.hasOwn(out, kind)) out[kind] = vocab.concat(kind, '/');
-      for (const prop of Object.keys(def.propertySchemas ?? {}).sort(byCode)) {
+      for (const prop of namesInOrder(def.propertySchemas ?? {})) {
         const propIri = resolveTermIri(meta, kind, type, prop);
         used.push(propIri);
         const hash = propIri.indexOf('#');

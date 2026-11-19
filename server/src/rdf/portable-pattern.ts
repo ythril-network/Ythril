@@ -24,13 +24,16 @@
 
 /** The characters `\` may escape in both dialects (XML Schema `SingleCharEsc` plus XPath's `\$`), and the three control escapes. */
 const SHARED_ESCAPES = new Set([...'\\|.?*+(){}-[]^$', 'n', 'r', 't']);
-const COUNTED = /^\{(\d+)(,(\d*))?\}/;
+/** An escape is a backslash and the one character it escapes. */
+const ESCAPE_LENGTH = 2;
+/** A counted quantifier: `{min}`, `{min,}` or `{min,max}`. */
+const COUNTED = /^\{(?<min>\d+)(?:,(?<max>\d*))?\}/;
 
 /** One character of a class at `j`, or -1 when it is no character both dialects read alike; the index after it otherwise. */
 function classChar(p: string, j: number): number {
   const c = p[j];
   if (c === undefined || c === '[' || c === ']') return -1;
-  if (c === '\\') return SHARED_ESCAPES.has(p[j + 1] ?? '') ? j + 2 : -1;
+  if (c === '\\') return SHARED_ESCAPES.has(p[j + 1] ?? '') ? j + ESCAPE_LENGTH : -1;
   return j + 1;
 }
 
@@ -73,7 +76,8 @@ export function patternReadsAlike(pattern: string): boolean {
       if (c === '?' && afterQuantifier) { afterQuantifier = false; i++; continue; } // lazy, read alike
       const counted = c === '{' ? COUNTED.exec(pattern.slice(i)) : null;
       if (!canQuantify || (c === '{' && counted === null)) return false;
-      if (counted !== null && counted[3] !== undefined && counted[3] !== '' && Number(counted[3]) < Number(counted[1])) return false;
+      const max = counted?.groups?.['max'];
+      if (max !== undefined && max !== '' && Number(max) < Number(counted?.groups?.['min'])) return false;
       i += counted === null ? 1 : counted[0].length;
       canQuantify = false;
       afterQuantifier = true;
@@ -82,7 +86,7 @@ export function patternReadsAlike(pattern: string): boolean {
     afterQuantifier = false;
     if (c === '\\') {
       if (!SHARED_ESCAPES.has(pattern[i + 1] ?? '')) return false;
-      i += 2; canQuantify = true; continue;
+      i += ESCAPE_LENGTH; canQuantify = true; continue;
     }
     if (c === '[') {
       const end = classEnd(pattern, i);
