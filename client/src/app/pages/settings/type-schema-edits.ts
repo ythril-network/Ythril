@@ -120,6 +120,36 @@ export function markStored(state: TypeSchemaState): void {
   for (const entry of state.propertySchemas) { entry._stored = true; delete entry._was; }
 }
 
+/**
+ * Mark the inline copy of a library entry as stored, when the type it replaces was linked to that entry in the stored schema.
+ *
+ * ## What it prevents
+ *
+ * A type linked to a library entry has no properties of its own: the stored schema holds them through the link and the space's records
+ * carry their names. Unlinking turns the link into an inline copy whose properties carry no `_stored` mark, so a rename of one was not
+ * in the ledger and a conversion would have left the values under the old name. Called by the settings state on every assignment of
+ * the staged definitions, so no edit that replaces a linked type can forget it; a copy of a type that was linked only in this sitting,
+ * and a property added after the unlink, stay unmarked (nothing stored to convert from). A type renamed while linked keeps the name it
+ * was stored under.
+ *
+ * Reads the entry's properties as the copy's own: a copy that did not come from the entry (a file imported over the linked type) is
+ * marked the same way, and a rename of a property the records never held then proposes a step that moves nothing.
+ */
+export function markStoredAfterUnlink(
+  before: Partial<Record<KnowledgeType, Record<string, TypeSchemaState>>>,
+  after: Partial<Record<KnowledgeType, Record<string, TypeSchemaState>>>,
+): void {
+  for (const kind of KNOWLEDGE_TYPES) {
+    for (const [name, now] of Object.entries(after[kind] ?? {})) {
+      const was = before[kind]?.[name];
+      if (!was || was === now || was._libRef === undefined || !was._stored) continue;
+      if (now._libRef !== undefined || now._stored) continue;
+      markStored(now);
+      if (was._was !== undefined) now._was = was._was;
+    }
+  }
+}
+
 /** A type renamed since the schema was stored: the kind, the stored name, the name it has now. */
 export interface TypeRename { kind: KnowledgeType; from: string; to: string }
 

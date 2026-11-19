@@ -294,7 +294,7 @@ describe('the Unconverted panel: the filters and the class switch', () => {
 
 describe('the Unconverted panel: Dismiss all N shown, Dismiss and Convert again', () => {
   it('says how many it would dismiss, and sends it through the confirm of the drawing (5b)', async () => {
-    const { button, h, f } = mount({ listUnconverted: typical() });
+    const { button, h } = mount({ listUnconverted: typical() });
     expect(button(/Dismiss all 4 shown/)).toBeDefined();
     button(/Dismiss all 4 shown/)!.click();
     await settle();
@@ -348,7 +348,7 @@ describe('the Unconverted panel: Dismiss all N shown, Dismiss and Convert again'
   });
 
   it('without the write right, Dismiss and Dismiss all are locked with the reason, and nothing is asked of the server', async () => {
-    const { el, h, f, cards } = mount({ listUnconverted: typical() }, { rights: rightsWith('read') });
+    const { el, h, cards } = mount({ listUnconverted: typical() }, { rights: rightsWith('read') });
     const dismiss = [...cards()[0]!.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Dismiss')!;
     expect(dismiss.disabled).toBe(true);
     expect(el.querySelector<HTMLButtonElement>('[data-testid="dismiss-all"]')!.disabled).toBe(true);
@@ -361,7 +361,7 @@ describe('the Unconverted panel: Dismiss all N shown, Dismiss and Convert again'
   });
 
   it('Dismiss on a card asks first and then dismisses that item', async () => {
-    const { cards, h, f } = mount({ listUnconverted: typical() });
+    const { cards, h } = mount({ listUnconverted: typical() });
     [...cards()[2]!.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Dismiss')!.click();
     await settle();
     expect(h.confirm).toHaveBeenCalledTimes(1);
