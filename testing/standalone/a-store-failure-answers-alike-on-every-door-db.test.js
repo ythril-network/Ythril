@@ -435,6 +435,11 @@ describe('a store failure answers alike on every door', { skip }, () => {
    * (the open comment, and any event the door wrote at once), which is everything a stream can say about a store failure before
    * a change happens; the same checks as every other door then read them (`driverTextIn`, and the shared 503 rule when the
    * door reached the failing store). Closing the stream also ends the door's subscription, as the abort did.
+   *
+   * Whether the stream ended inside the look is NOT recorded: the rule this file states is the answer a door gives to the request that
+   * reached the failing store, and a stream that reached it is already held to the 503 above (its 200 fails). A stream the failure
+   * never touched ends or stays open for its own reasons, which are not a store failure's answer, and a close after the headers has
+   * no shared answer to judge it by.
    */
   async function lookAtStream(r) {
     let raw = '';
@@ -452,7 +457,7 @@ describe('a store failure answers alike on every door', { skip }, () => {
     await look.rest;
     return { requestId: r.headers.get('x-request-id'), status: r.status, retryAfter: r.headers.get('retry-after'),
       retryable: undefined, code: undefined, codeName: undefined, error: null, raw,
-      streaming: true, contentType: r.headers.get('content-type'), endedInLook: look.settled };
+      streaming: true, contentType: r.headers.get('content-type') };
   }
 
   async function ask(d) {
