@@ -1,18 +1,18 @@
 /**
- * The area check is layered on reach, and a route it cannot resolve stays enforced rather than open.
+ * The area check is layered on reach, and a request it cannot resolve is refused rather than left to reach.
  *
- * ## Why this ships staged, and why that is not a compromise
+ * ## Why it is no longer staged
  *
- * Reach ("may this token touch this space at all") is already enforced from the rights matrix. The area
- * check adds "and at what level, for what kind of operation". It needs the inventory key, which at runtime
- * can only be reconstructed as `req.baseUrl + req.route.path` — and nested routers can make that disagree
- * with the registered path.
+ * Reach ("may this token touch this space at all") is enforced from the rights matrix. The area check adds
+ * "and at what level, for what kind of operation". It shipped staged: a miss warned and fell through to
+ * reach, on the argument that this could only be stricter than before. That argument held for a route whose
+ * key was rebuilt wrongly; it did not hold for a request whose METHOD has no row. Express runs the GET route
+ * for a HEAD, the inventory has no HEAD rows, and every HEAD to a path-scoped GET route fell through: reach
+ * alone answered for an area the token held nothing on. The key now comes from the route map (`registeredPathOf`),
+ * HEAD is looked up as GET, and a miss is a `403`. The route walk in `every-space-route-has-an-area` holds
+ * that no registered route, with any method it answers, is a miss.
  *
- * So a miss **warns and falls through to reach**, which is yesterday's enforcement. This layer can therefore
- * only ever be stricter than before, never looser: there is no input for which it grants something reach
- * denied. Turning misses into refusals is the follow-up, once the warning has proved the log is clean —
- * flipping now would `403` real traffic on any route whose key was reconstructed wrongly, with no runtime
- * evidence either way.
+ * (The file keeps its name so its history stays with it.)
  *
  * ## What must not drift
  *
@@ -48,11 +48,23 @@ describe('the area check', () => {
     assert.ok(reachAt < areaAt, 'the area check runs before reach, so an unreachable space is judged on level');
   });
 
-  it('an unresolved route falls through to reach, and says so', () => {
+  it('an unresolved request is REFUSED, and says so', () => {
+    /*
+     * INVERTED. This case pinned the staged plan: a miss warned and fell through to reach, "until the log is clean". The log was never
+     * the evidence that mattered: every HEAD to a path-scoped GET route missed (the inventory has GET rows, Express runs the GET route for
+     * a HEAD), so for as long as the area check existed a token that reached a space read the status and headers of every area there.
+     * A fall-through is the permissive default `required-rung.ts` says must never happen. A request the inventory does not resolve is
+     * refused `403 route_unclassified`, still with the warning that names the key; `every-space-route-has-an-area` walks every registered
+     * route, with every method it answers, so no real route is refused by this.
+     */
     const b = body('enforceAreaRung');
-    assert.match(b, /verdict\.kind === 'unclassified'/, 'a miss is not handled at all');
-    assert.match(b, /log\.warn/, 'a miss is silent, so nothing would ever reveal the gap');
-    assert.match(b, /return true;/, 'a miss must fall through to reach, not refuse');
+    const at = b.indexOf("verdict.kind === 'unclassified'");
+    assert.ok(at > -1, 'a miss is not handled at all');
+    const branch = blockAfter(b, at, 'the unclassified branch');
+    assert.match(branch, /log\.warn/, 'a miss is silent, so nothing would reveal which route lacks its row');
+    assert.match(branch, /res\.status\(403\)[\s\S]*?code: 'route_unclassified'/, 'a miss must answer 403 with its named code');
+    assert.match(branch, /return false;/, 'a miss must stop the request');
+    assert.doesNotMatch(branch, /return true;/, 'a miss falls through to reach: the permissive default again');
   });
 
   it('a DELIBERATELY exempt route is silent — it is decided, not missed', () => {
@@ -115,9 +127,9 @@ describe('the area check', () => {
      * compatibility anymore."* That swept two sites; this was the fourth and `toolRightsRefusal` the third.
      *
      * **The POSITION is asserted as well as the refusal**, because getting it wrong breaks the opposite
-     * thing. The check has to run after the `NOT_AREA_SCOPED` and unclassified verdicts: those are decided
-     * exemptions and reach-enforced-with-a-warning respectively, and refusing them for want of a matrix
-     * would area-scope routes the design says are not.
+     * thing. The check has to run after the `NOT_AREA_SCOPED` and unclassified verdicts: the first is a decided
+     * exemption, refusing it for want of a matrix would area-scope a route the design says is not, and the
+     * second is refused with its own code before a matrix is asked about.
      */
     const b = body('enforceAreaRung');
     assert.doesNotMatch(b, /if \(!rights\) return true;/,

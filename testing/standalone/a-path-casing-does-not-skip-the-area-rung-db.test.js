@@ -39,9 +39,14 @@ const AREAS = ['knowledge', 'files', 'schema', 'dataQuality', 'networks'];
 let door, server, base, app, routes;
 const tokenWithout = {};
 
-/** `/api/brain/spaces/:spaceId/stats` as a request path, params filled in, literal segments re-cased by `recase`. */
+/**
+ * `/api/brain/spaces/:spaceId/stats` as a request path, params filled in, literal segments re-cased by `recase`. The space parameter is
+ * `:spaceId`, or `:id` under `/api/spaces`: filled with `x1`, those routes were refused by REACH (the token reaches no `x1`), so the
+ * control below held for them without the area rung being asked at all.
+ */
 function pathOf(route, recase) {
-  return route.split('/').map((seg) => (seg.startsWith(':') ? (seg === ':spaceId' ? SPACE : 'x1') : recase(seg))).join('/');
+  const spaceParam = route.startsWith('/api/spaces/') ? ':id' : ':spaceId';
+  return route.split('/').map((seg) => (seg.startsWith(':') ? (seg === spaceParam ? SPACE : 'x1') : recase(seg))).join('/');
 }
 const capitalised = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 const VARIANTS = [['Capitalised segments', capitalised], ['UPPER CASE segments', (s) => s.toUpperCase()]];
@@ -54,9 +59,12 @@ describe('a casing variant of a path is asked the area rung as the canonical pat
     const tokens = await import('../../server/dist/auth/tokens.js');
     const { ROUTE_RIGHTS } = await import('../../server/dist/auth/space-rights.js');
     routes = ROUTE_RIGHTS.filter(r => r.scope === 'path' && r.method === 'GET');
+    const { RUNG_IMPLICATIONS } = await import('../../server/dist/config/rights-shape.js');
+    const RUNGS = ['none', 'read', 'write', 'admin'];
     for (const area of AREAS) {
-      // Reaches the space, holds every area but this one.
+      // Reaches the space, holds every area but this one, and no rung that implies it (`knowledge: write` implies `schema: read`).
       const perArea = Object.fromEntries(AREAS.map(a => [a, a === area ? 'none' : 'admin']));
+      for (const rule of RUNG_IMPLICATIONS) if (rule.grants === area) perArea[rule.when] = RUNGS[RUNGS.indexOf(rule.atLeast) - 1];
       const t = await tokens.createToken({ name: `casing-without-${area}`, rights: { instanceAdmin: false, createSpaces: false, floor: null, perSpace: { [SPACE]: perArea } } });
       tokenWithout[area] = t.plaintext;
     }

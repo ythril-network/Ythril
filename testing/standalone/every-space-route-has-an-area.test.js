@@ -26,11 +26,33 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mountedRoutes } from './_routes.mjs';
 import { SPACE_AREAS } from '../../server/dist/config/rights-shape.js';
+import { rungFor } from '../../server/dist/auth/required-rung.js';
+import { stripComments } from './_strip-comments.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
+import { bodyOf, argumentsOf } from './_structural-window.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = process.cwd();
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
+
+/**
+ * The exported guards that ask the area rung, DERIVED from the module that defines them: every exported function whose body calls
+ * `enforceAreaRung(`, and every exported const bound to one of those (`requireSpaceAuth = requireSpaceAuthScoped('spaceId')`). A list
+ * written here would miss the next guard, which is exactly the route this walk exists to see.
+ */
+function areaGuards() {
+  const src = stripComments(read('server/src/auth/middleware.ts'));
+  const names = new Set();
+  for (const m of src.matchAll(/^export (?:async )?function (\w+)\s*\(/gm)) {
+    if (/\benforceAreaRung\(/.test(bodyOf(src, m[1]))) names.add(m[1]);
+  }
+  for (const m of src.matchAll(/^export const (\w+)\s*=\s*(\w+)\(/gm)) if (names.has(m[2])) names.add(m[1]);
+  return names;
+}
+
+/** Express runs a GET route for a HEAD (the body is left out), so a GET route answers both; every other route answers its own verb. */
+const methodsAnswered = (method) => (method === 'GET' ? ['GET', 'HEAD'] : [method]);
 
 const INVENTORY = 'server/src/auth/space-rights.ts';
 
@@ -185,6 +207,46 @@ describe('every space-scoped route is classified', () => {
     assert.deepEqual(stale, [], 'NOT_AREA_SCOPED exempts routes that do not exist. Delete the entry — an '
       + 'exemption for a path nothing serves is a standing licence for whatever is added there next:\n  '
       + stale.join('\n  '));
+  });
+
+  /*
+   * THE RUNTIME HALF. The guard refuses a request the inventory does not resolve (`enforceAreaRung`, `403 route_unclassified`), so a
+   * registered route that carries an area guard and has no row for a method it answers would refuse its own callers. Every such route,
+   * with every method Express answers on it (a GET route answers HEAD too), must resolve to a row or an exemption, asked through the
+   * same `rungFor` the guard asks. The routes are every registration of the server (`mountedRoutes`), not only the ones under the
+   * space mounts, because a guard can be mounted on any route.
+   */
+  it('every route that carries an area guard resolves for every method it answers', () => {
+    const guards = areaGuards();
+    for (const g of ['requireSpaceAuth', 'requireSpaceAuthScoped']) assert.ok(guards.has(g), `${g} is not derived as an area guard; re-anchor areaGuards()`);
+    const guardRe = new RegExp(`\\b(${[...guards].join('|')})\\b`);
+    const guarded = mountedRoutes().filter(r => guardRe.test(r.chain));
+    assert.ok(guarded.length >= 50,`only ${guarded.length} routes carry an area guard; the walk would say little`);
+    const misses = [];
+    for (const r of guarded) {
+      for (const m of methodsAnswered(r.method)) {
+        if (rungFor(m, r.path).kind === 'unclassified') misses.push(`${m} ${r.path} (${r.file})`);
+      }
+    }
+    assert.deepEqual(misses.sort(), [], 'these requests carry an area guard and the inventory does not resolve them, so the guard refuses '
+      + 'every caller: give each a ROUTE_RIGHTS row with its area and lowest rung, or a NOT_AREA_SCOPED row with the reason');
+  });
+
+  it('no route is registered in a form the walk above cannot see', () => {
+    // `mountedRoutes` reads `get|post|put|patch|delete` with a literal path. A route added with `all`, `head`, `options` or `route()`,
+    // or a guard mounted with `use()`, would answer requests the walk never asked about.
+    const guardRe = new RegExp(`\\b(${[...areaGuards()].join('|')})\\b`);
+    const unseen = [];
+    for (const file of trackedSources(SERVER_CODE_ROOTS, { floor: 50 })) {
+      const src = stripComments(read(file));
+      for (const m of src.matchAll(/(\w*[Rr]outer|\bapp)\s*\.\s*(all|head|options|route)\s*\(/g)) unseen.push(`${file}: ${m[0]}`);
+      for (const m of src.matchAll(/(\w*[Rr]outer|\bapp)\s*\.\s*(use|get|post|put|patch|delete)\s*\(/g)) {
+        const args = argumentsOf(src, m.index + m[0].length - 1, `${file}: a registration`);
+        const literalPath = /^\s*'[^']*'\s*$/.test(args[0] ?? '');
+        if ((m[2] === 'use' || !literalPath) && guardRe.test(args.join(','))) unseen.push(`${file}: ${m[0]} ${args[0]} carries an area guard`);
+      }
+    }
+    assert.deepEqual(unseen, [], 'register the route with a verb and a literal path, the guard on the route, so the walk sees it');
   });
 
   it('every data-quality route scopes by iterating, not by path', () => {
