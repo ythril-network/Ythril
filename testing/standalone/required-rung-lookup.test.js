@@ -101,6 +101,26 @@ describe('the lookup', () => {
     assert.equal(rungFor('POST', '/api/:tool').kind, 'not-area-scoped');
   });
 
+  /*
+   * HEAD IS THE GET IT MIRRORS. Express answers a `HEAD` with the route registered for `GET` (the same guard, the same handler), and only
+   * the body is left out, so the rights question is the GET's. A lookup keyed on the method as sent finds no `HEAD` row, answers
+   * unclassified, and the guard asked the reach check alone: a token that reached the space read every path-scoped GET's status and
+   * headers in an area it held no rung on. Every GET row, derived from the inventory, so a new one is in front of this at once.
+   */
+  it('a HEAD is asked as the GET it mirrors, for every GET row of the inventory', () => {
+    const gets = ROUTE_RIGHTS.filter(r => r.method === 'GET');
+    assert.ok(gets.length >= 10, `only ${gets.length} GET rows in ROUTE_RIGHTS; the sweep would say little`);
+    const differs = gets
+      .filter(r => JSON.stringify(rungFor('HEAD', r.route)) !== JSON.stringify(rungFor('GET', r.route)))
+      .map(r => `HEAD ${r.route}: ${JSON.stringify(rungFor('HEAD', r.route))}, GET ${JSON.stringify(rungFor('GET', r.route))}`);
+    assert.deepEqual(differs, [], 'a HEAD found a different answer from the GET Express runs for it');
+    assert.deepEqual(rungFor('head', '/api/brain/spaces/:spaceId/stats'), rungFor('GET', '/api/brain/spaces/:spaceId/stats'),
+      'the method is case-blind as the path is');
+    // Only HEAD reads as GET: a path with no GET row stays unclassified for HEAD, and another method never inherits the GET's row.
+    assert.deepEqual(rungFor('HEAD', '/api/brain/spaces/:spaceId/traverse'), { kind: 'unclassified' });
+    assert.deepEqual(rungFor('OPTIONS', '/api/brain/spaces/:spaceId/stats'), { kind: 'unclassified' });
+  });
+
   it('says UNCLASSIFIED for a route nobody decided about, NOT a permissive default', () => {
     assert.deepEqual(rungFor('GET', '/api/brain/spaces/:spaceId/invented'), { kind: 'unclassified' });
     assert.deepEqual(rungFor('PUT', '/api/brain/recall'), { kind: 'unclassified' },
