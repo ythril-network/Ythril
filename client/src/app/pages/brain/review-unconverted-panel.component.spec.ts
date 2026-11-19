@@ -380,6 +380,22 @@ describe('the Unconverted panel: Dismiss all N shown, Dismiss and Convert again'
     expect(h.api.start).toHaveBeenCalledWith('customers', [{ kind: 'entity', type: 'person' }]);
   });
 
+  it('with All types chosen, says on the page why Convert again waits, names the button by it, and drops it once a type is chosen (drive 5)', () => {
+    const groups = [openGroup('person', 'not_conforming', 3), openGroup('company', 'not_conforming', 7)];
+    const { el, f } = mount({ listUnconverted: vi.fn(() => of(okResult(listAnswer(typicalRows(), groups)))) }, { rights: convertingRights() });
+    const again = () => el.querySelector<HTMLButtonElement>('[data-testid="convert-again"]')!;
+    const pick = () => el.querySelector<HTMLElement>('[data-testid="convert-pick"]');
+    expect(again().disabled).toBe(true);
+    expect(pick()?.textContent?.trim(), 'a disabled button\'s tooltip is not shown on a touch screen, and not to every pointer').toBe('Choose a record type to convert again');
+    expect(again().getAttribute('aria-describedby')).toBe(pick()!.id);
+    const type = el.querySelector<HTMLSelectElement>('select[aria-label="Record type"]')!;
+    type.value = [...type.options].find(o => o.textContent?.trim() === 'person')!.value;
+    type.dispatchEvent(new Event('change'));
+    f.detectChanges();
+    expect(pick()).toBeNull();
+    expect(again().getAttribute('aria-describedby')).toBeNull();
+  });
+
   it('without the right to convert, Convert again is locked and the reason is on the page, not only in a tooltip', () => {
     const { el } = mount({ listUnconverted: typical() }, { rights: rightsWith('write') });
     const again = el.querySelector<HTMLButtonElement>('[data-testid="convert-again"]')!;

@@ -126,7 +126,7 @@ interface CardView {
     <ng-template #actions>
       <div class="acts">
         <button type="button" class="btn btn-sm btn-secondary" data-testid="convert-again" [disabled]="!canConvertAgain()"
-                [attr.title]="convertAgainTitle()" [attr.aria-describedby]="state().canConvert() ? null : 'unconverted-convert-locked'"
+                [attr.title]="convertAgainTitle()" [attr.aria-describedby]="convertAgainWhy()"
                 (click)="state().convertAgain()">{{ 'brain.review.unconverted.convertAgain' | transloco }}</button>
         @if (dismissAllLabel(); as label) {
           <button type="button" class="btn btn-sm btn-secondary" data-testid="dismiss-all" [disabled]="!state().canDismiss() || state().bulkBusy()"
@@ -169,6 +169,8 @@ interface CardView {
         }
         @if (!state().canConvert()) {
           <p class="lock-note" id="unconverted-convert-locked" data-testid="convert-locked">{{ 'spaces.schema.convert.locked' | transloco }}</p>
+        } @else if (state().typeChoice() === null) {
+          <p class="lock-note" id="unconverted-convert-pick" data-testid="convert-pick">{{ 'brain.review.unconverted.convertAgainPick' | transloco }}</p>
         }
         @if (!state().canDismiss() && (state().dismissCount() ?? 0) > 0) {
           <p class="lock-note" id="unconverted-dismiss-locked" data-testid="dismiss-locked">{{ 'brain.review.unconverted.dismissLocked' | transloco }}</p>
@@ -338,6 +340,15 @@ export class ReviewUnconvertedPanelComponent {
   protected canConvertAgain(): boolean {
     return this.state().typeChoice() !== null && this.state().canConvert() && !this.state().convertBusy();
   }
+  /**
+   * The line on the page that says why Convert again waits, for the button's `aria-describedby`: the lock, or, with All types chosen, that a type
+   * must be chosen (Convert again converts one type, owner 2026-11-19). A disabled button's title is not shown on a touch screen.
+   */
+  protected convertAgainWhy(): string | null {
+    if (!this.state().canConvert()) return 'unconverted-convert-locked';
+    return this.state().typeChoice() === null ? 'unconverted-convert-pick' : null;
+  }
+
   protected convertAgainTitle(): string {
     if (!this.state().canConvert()) return this.say('spaces.schema.convert.locked');
     return this.say(this.state().typeChoice() === null ? 'brain.review.unconverted.convertAgainPick' : 'brain.review.unconverted.convertAgainTitle');
