@@ -198,7 +198,7 @@ const planKey = (blocks: readonly ConvertBlockPlan[]): string => JSON.stringify(
           [network]="governedBy()" [rights]="rights()" [refusal]="refusal()" [busy]="state.settingsSaving()" (choice)="onChoice($event)" />
       }
       @if (progress(); as p) {
-        <app-convert-records-dialog mode="progress" [spaceId]="state.settingsSpace()!.id" [status]="p.status" [notice]="p.notice" [byAct]="p.from === 'act'"
+        <app-convert-records-dialog mode="progress" [spaceId]="state.settingsSpace()!.id" [status]="p.status" [notice]="p.notice" [byAct]="p.from === 'act'" [origin]="p.from"
           (closed)="closeProgress()" (openReview)="openReview()" />
       }
       @if (submitted(); as s) {

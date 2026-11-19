@@ -3414,6 +3414,8 @@
   "spaces.schema.convert.run.line.left": "{{left}} übrig",
   "spaces.schema.convert.run.retrying": "Einige Datensätze konnten noch nicht geschrieben werden. Sie werden erneut versucht, und die Konvertierung läuft weiter.",
   "spaces.schema.convert.run.noneHere": "Das Schema ist gespeichert. Es gab keine Datensätze dieses Typs.",
+  "spaces.schema.convert.run.noneCurrent": "Nichts zu konvertieren: Jeder Datensatz dieses Typs folgt bereits dem aktuellen Schema.",
+  "spaces.schema.convert.run.noneEmpty": "Es gibt keine Datensätze dieses Typs.",
   "spaces.schema.convert.run.notStarted": "Das Schema ist gespeichert, aber die Konvertierung wurde nicht gestartet: {{error}}. Drücken Sie am Typ „Datensätze konvertieren“, um sie zu starten.",
   "spaces.schema.convert.run.failed": "Die Konvertierung wurde angehalten: {{error}}. Drücken Sie am Typ „Datensätze konvertieren“, um sie erneut zu starten.",
   "spaces.schema.convert.run.openReview": "Prüfung öffnen ({{n}})",

@@ -153,7 +153,7 @@ let seq = 0;
 
           @switch (mode()) {
             @case ('progress') {
-              <app-convert-run-block [spaceId]="spaceId()" [status]="status()" [notice]="notice()" />
+              <app-convert-run-block [spaceId]="spaceId()" [status]="status()" [notice]="notice()" [from]="origin()" />
             }
             @default {
               @if (mode() === 'offer') {
@@ -283,6 +283,8 @@ export class ConvertRecordsDialogComponent {
   readonly notice = input<ConvertRunNotice | null>(null);
   /** `progress`: the run was started by the Convert act on a type, which saves no schema, so the running title says only that records are converted. */
   readonly byAct = input(false);
+  /** `progress`: what led here (a Save, the type's button, the type's note), so the run block words "nothing to convert" by what is true. */
+  readonly origin = input<'save' | 'act' | 'note'>('save');
 
   /** `offer` and `act`: the answer. */
   readonly choice = output<ConvertDialogChoice>();
