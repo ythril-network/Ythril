@@ -108,6 +108,7 @@ const WORDS: Record<string, string> = {
   'spaces.schema.convert.act.noneToCheck': 'DLG-ACT-NONE',
   'spaces.schema.convert.act.run': 'DLG-ACT-RUN',
   'spaces.schema.convert.run.titleRunning': 'DLG-RUN-TITLE-RUNNING',
+  'spaces.schema.convert.run.titleRunningAct': 'DLG-RUN-TITLE-RUNNING-ACT',
   'spaces.schema.convert.run.titleDone': 'DLG-RUN-TITLE-DONE',
   'spaces.schema.convert.run.keepsRunning': 'DLG-RUN-KEEPS-RUNNING',
   'spaces.schema.convert.run.openReview': 'DLG-OPEN-REVIEW {{n}}',
@@ -889,6 +890,18 @@ describe('the convert records dialog', () => {
       expect(host.querySelector('app-convert-run-block [role="progressbar"]')).not.toBeNull();
       expect(text(host, 'cv-foot-hint')).toBe('DLG-NOTHING-TO-DO');
       expect(q(host, 'cv-open-review')).toBeNull();
+    });
+
+    it('a run just begun (the save or start said started, no status read yet) is running, never finished (bundle-285 S10)', () => {
+      const host = mount('progress', { status: null, notice: { state: 'started', types: [{ kind: 'entity', type: 'person' }] } });
+      expect(text(host, 'cv-title')).toBe('DLG-RUN-TITLE-RUNNING');
+      expect(text(host, 'cv-lead')).toBe('DLG-RUN-KEEPS-RUNNING');
+    });
+
+    it('a run the Convert act started says only that records are converted: the act saved no schema (bundle-285 S10, drive D3)', () => {
+      const host = mount('progress', { status: run() });
+      set('byAct', true);
+      expect(text(host, 'cv-title')).toBe('DLG-RUN-TITLE-RUNNING-ACT');
     });
 
     it('running with some unconverted: Open Review (N so far) is a secondary button', () => {

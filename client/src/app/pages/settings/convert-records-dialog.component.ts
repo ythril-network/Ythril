@@ -279,6 +279,8 @@ export class ConvertRecordsDialogComponent {
   /** `progress`: the run as the status door answers it, and what the save answered. */
   readonly status = input<ConvertStatusAnswer | null>(null);
   readonly notice = input<ConvertRunNotice | null>(null);
+  /** `progress`: the run was started by the Convert act on a type, which saves no schema, so the running title says only that records are converted. */
+  readonly byAct = input(false);
 
   /** `offer` and `act`: the answer. */
   readonly choice = output<ConvertDialogChoice>();
@@ -375,7 +377,10 @@ export class ConvertRecordsDialogComponent {
     switch (this.mode()) {
       case 'offer': return this.say(this.network() ? 'spaces.schema.convert.titleNet' : 'spaces.schema.convert.title');
       case 'submitted': return this.say('spaces.schema.convert.submitted.title');
-      case 'progress': return this.say(this.runningNow() ? 'spaces.schema.convert.run.titleRunning' : 'spaces.schema.convert.run.titleDone');
+      case 'progress': {
+        if (!this.runningNow()) return this.say('spaces.schema.convert.run.titleDone');
+        return this.say(this.byAct() ? 'spaces.schema.convert.run.titleRunningAct' : 'spaces.schema.convert.run.titleRunning');
+      }
       case 'act': {
         const type = this.blocks()[0]?.type ?? '';
         return type.length > ACT_TITLE_NAME_MAX ? this.say('spaces.schema.convert.act.titleShort') : this.say('spaces.schema.convert.act.title', { type });
@@ -383,7 +388,8 @@ export class ConvertRecordsDialogComponent {
     }
   });
 
-  private readonly runningNow = computed(() => { const s = this.status(); return !!s && s.state === 'running'; });
+  /** The run goes on: as the status door says, or, before its first answer, as the save or the start said (`started`): never "finished" for a run just begun. */
+  private readonly runningNow = computed(() => { const s = this.status(); return s ? s.state === 'running' : this.notice()?.state === 'started'; });
 
   protected readonly lead = computed<string | null>(() => {
     switch (this.mode()) {

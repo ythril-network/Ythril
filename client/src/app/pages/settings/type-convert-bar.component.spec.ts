@@ -414,6 +414,17 @@ describe('the note about records on an older version', () => {
     expect(m.q('convert-records')!.classList.contains('cv-btn-attn')).toBe(false);
   });
 
+  it('loses the accent once a run it saw has finished and no record of the type is on an older version any more (drive D3)', () => {
+    const invoice = [{ kind: 'entity' as const, type: 'invoice', done: false }];
+    const m = mount({ older: 412, statuses: [okStatus(runningStatus({ types: invoice })), okStatus(doneStatus({ types: [{ ...invoice[0]!, done: true }] }))] }, { type: 'invoice', older: true });
+    m.settle(); vi.advanceTimersByTime(0); m.settle();
+    expect(m.q('convert-records')!.classList.contains('cv-btn-attn'), 'records wait while it runs').toBe(true);
+    m.olderCount.mockReturnValue(of(0));
+    vi.advanceTimersByTime(CONVERT_POLL_MS);
+    m.settle();
+    expect(m.q('convert-records')!.classList.contains('cv-btn-attn')).toBe(false);
+  });
+
   it('asks nothing when the type list does not mark the type older', () => {
     const m = mount({}, { type: 'invoice', older: false });
     m.settle();

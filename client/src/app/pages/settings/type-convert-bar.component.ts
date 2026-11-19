@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, Injector, TemplateRef, computed, effect, inject, input, signal, untracked, viewChild, type ProviderToken } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, InjectionToken, Injector, TemplateRef, computed, effect, inject, input, signal, untracked, viewChild, type ProviderToken } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { forkJoin, of, type Subscription } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
@@ -45,8 +45,17 @@ import { SpaceSettingsState } from './space-settings-state.service';
  *
  * The note says nothing for what it cannot read (the votes of a token that is not an instance administrator, a count that failed): an absent note is
  * never an error, and nothing here blocks the button.
+ *
+ * A run the act starts is shown by whoever provides {@link CONVERT_RUN_HOST} (the settings popup): the same progress dialog, watch and Open Review a
+ * converting Save leaves open, so a run is shown one way whichever button started it. A host without one shows the note only.
  */
 let seq = 0;
+
+/** Who shows a run the Convert act started, as it shows the run a converting Save started. */
+export interface ConvertRunHost { showRun(notice: ConvertRunNotice): void }
+
+/** Provided by the settings popup for the bars inside it; a bar with no host shows its note only. */
+export const CONVERT_RUN_HOST = new InjectionToken<ConvertRunHost>('CONVERT_RUN_HOST');
 
 @Component({
   selector: 'app-type-convert-bar',
@@ -82,6 +91,7 @@ export class TypeConvertBarComponent {
   private readonly injector = inject(Injector);
   private readonly say = pageTranslator();
   private readonly plural = inject(PluralText);
+  private readonly runHost = inject(CONVERT_RUN_HOST, { optional: true });
 
   /** The type in the pane: its kind, and its name as the schema holds it now. */
   readonly kind = input.required<TypedKind>();
@@ -227,19 +237,27 @@ export class TypeConvertBarComponent {
     const conversion = this.api(ConversionApi);
     if (!space || !conversion) return;
 
+    let ranHere = false;
     this.watch = watchConvertRun(conversion, space, {
       onStatus: status => {
         if (gen !== this.generation) return;
         const run = this.runOf(status);
         this.run.set(run);
-        if (run?.state === 'running' && run.types.some(t => t.kind === kind && t.type === type && !t.done)) this.sawRun.set(true);
+        if (run?.state === 'running' && run.types.some(t => t.kind === kind && t.type === type && !t.done)) { this.sawRun.set(true); ranHere = true; }
       },
       onFailure: () => { /* the note is auxiliary: a failed read says nothing, and the watch gives up on its own bound */ },
+      // A run of this type ended while it was watched: the records it converted are no longer on an older version, so the count (and the button's
+      // accent, which points at them) is read again.
+      onFinished: () => { if (gen === this.generation && ranHere) this.readOlder(conversion, space, kind, type, gen); },
     });
     this.readVotes(conversion, space, kind, type, gen);
-    if (this.older()) {
-      this.reads.push(conversion.olderCount(space, kind, type).subscribe(n => { if (gen === this.generation) this.olderCount.set(n); }));
-    }
+    this.readOlder(conversion, space, kind, type, gen);
+  }
+
+  /** How many records of the type are on an older version, when the type list marks it so. */
+  private readOlder(conversion: ConversionApi, space: string, kind: TypedKind, type: string, gen: number): void {
+    if (!this.older()) return;
+    this.reads.push(conversion.olderCount(space, kind, type).subscribe(n => { if (gen === this.generation) this.olderCount.set(n); }));
   }
 
   private runOf(status: ConvertStatusAnswer): ConvertStatus | null {
@@ -298,6 +316,8 @@ export class TypeConvertBarComponent {
       this.dialog.set(null);
       this.sawRun.set(true);
       this.refresh();
+      const types = result.value.types.length > 0 ? result.value.types : choice.types;
+      this.runHost?.showRun({ state: 'started', types, toFp: result.value.toFp });
     });
   }
 }
