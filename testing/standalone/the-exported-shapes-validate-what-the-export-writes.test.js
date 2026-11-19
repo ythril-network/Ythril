@@ -66,6 +66,9 @@ function rdfjs(quads) {
   return out;
 }
 
+/** The fixture's date values that are no calendar date or time, as `<record>.<property>`. */
+const ILL_TYPED_DATES = new Set(['carol.born', 'dave.born', 'e2.since']);
+
 const shapes = () => {
   assert.equal(typeof schemaMod.schemaGraph, 'function', 'schemaGraph is not exported by server/src/rdf/schema-owl-shacl.ts: the schema has no shapes to validate with');
   return datasetFactory.dataset(rdfjs(schemaMod.schemaGraph(META, FP).quads));
@@ -73,7 +76,10 @@ const shapes = () => {
 const records = (kind, doc) => {
   assert.equal(typeof mapperMod.recordTriples, 'function', 'recordTriples is not exported by server/src/rdf/record-triples.ts');
   const out = mapperMod.recordTriples(META, kind, doc, { edgeDetails: 'reification' });
-  assert.deepEqual(out.counts.skippedValues, [], `the record ${doc._id} is wholly exported`);
+  // A date property's value that is no calendar date or time (`next tuesday`, `2026-02-30`, `last spring`) is the only thing left out: the
+  // server accepts it as a date, the export leaves it out and names it (bundle-269 drive, finding 6), so no shape ever meets it.
+  const leftOut = out.counts.skippedValues.filter(v => !(v.reason === 'does-not-fit-its-declared-type' && ILL_TYPED_DATES.has(`${doc._id}.${v.key}`)));
+  assert.deepEqual(leftOut, [], `the record ${doc._id} is wholly exported but for an ill-typed date`);
   return out.quads;
 };
 
@@ -200,11 +206,15 @@ describe('one failing record per kind of constraint, reported for the right shap
 });
 
 describe('a shape never refuses what the server accepts', () => {
-  it('a range is not read on a text, a pattern is not read on a number, a date may be only text, an edge may end outside the set', async () => {
+  it('a range is not read on a text, a pattern is not read on a number, an edge may end outside the set', async () => {
     assert.deepEqual(await validate(DATA()), []);
     const data = DATA();
-    for (const needle of [lit('abc'), lit('7', 'decimal'), lit('5', 'decimal'), lit('Axe'), lit('next tuesday'), lit('2026-02-30')]) {
+    for (const needle of [lit('abc'), lit('7', 'decimal'), lit('5', 'decimal'), lit('Axe')]) {
       assert.ok(data.some(q => q.object.kind === 'literal' && q.object.value === needle.value && q.object.datatype === needle.datatype), `the fixture writes ${needle.value}`);
+    }
+    // A date that is no calendar date or time is left out and named, never written as text (bundle-269 drive, finding 6).
+    for (const text of ['next tuesday', '2026-02-30', 'last spring']) {
+      assert.ok(!data.some(q => q.object.kind === 'literal' && q.object.value === text), `the export leaves ${text} out`);
     }
   });
   // Slice S, standards review row 14: the export writes a number as xsd:decimal, but outside data that says `30` (xsd:integer) is the same

@@ -7,7 +7,7 @@
  * - **A reader that holds a slot for ever.** Only two exports run on an instance. A reader that takes a little at a time never meets the idle
  *   bound, so a rate is asked of it: while the export WAITS on the reader (a write its connection did not take at once), the connection must
  *   accept at least `minBytesPerSecond` on average, judged over each `windowMs` of such waiting. A reader below it is told
- *   ({@link PacedWriter.put} answers `slow`, and the door writes the incomplete ending) and its slot is freed.
+ *   ({@link PacedWriter.deliver} answers `slow`, and the door writes the incomplete ending) and its slot is freed.
  * - **A rate that measures the wrong thing.** What a server can see of its reader is what the operating system accepted from the socket
  *   (`bytesWritten` less what still waits in the socket's own buffer); what the reader has actually received is not visible above the kernel,
  *   whose send buffer (a few MiB, sized by the kernel and not settable from Node for TCP) runs ahead of it. The drive measured an average of
@@ -42,7 +42,7 @@ export type PutOutcome = 'taken' | 'slow' | 'idle' | 'gone';
 /** Writes the text of one answer to its reader at the reader's pace, and judges the pace. */
 export interface PacedWriter {
   /** Write `text`, waiting on the reader where it does not take it at once. */
-  put(text: string): Promise<PutOutcome>;
+  deliver(text: string): Promise<PutOutcome>;
 }
 
 const MS_PER_SECOND = 1_000;
@@ -98,7 +98,7 @@ export function pacedWriter(res: Response, pace: () => ReaderPace): PacedWriter 
   }
 
   return {
-    async put(text) {
+    async deliver(text) {
       const bytes = Buffer.from(text, 'utf8');
       for (let at = 0; at < bytes.length; at += SLICE_BYTES) {
         if (res.destroyed || res.writableEnded) return 'gone';
