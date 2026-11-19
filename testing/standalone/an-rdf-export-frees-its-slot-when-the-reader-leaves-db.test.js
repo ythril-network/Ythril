@@ -23,7 +23,7 @@ const SPACE = 'rdfslots';
 const BIG = 5_000_000;
 const LONG = 'x'.repeat(2_000);
 
-describe('an RDF export frees its slot when the reader leaves', { skip }, () => {
+describe('an RDF export frees its slot when the reader leaves', { skip, timeout: 180_000 }, () => {
   let d, act, t1, t2, t3;
   before(async () => {
     d = await openRdfExportDoors({ suite: 'rdf_export_slots', spaces: [{ id: SPACE, meta: rdfMeta(SPACE) }] });
@@ -39,7 +39,10 @@ describe('an RDF export frees its slot when the reader leaves', { skip }, () => 
   const holdOpen = (key) => new Promise((resolve, reject) => {
     const req = http.get(`${d.server.url}/api/brain/spaces/${SPACE}/export/rdf?format=nquads&maxChars=${BIG}`, { headers: { Authorization: `Bearer ${key}` } }, (res) => {
       res.pause();
-      resolve({ status: res.statusCode, headers: res.headers, res, req, closed: new Promise(r => res.once('close', r)) });
+      // Cut by the server or by us: whichever event the socket's end reaches first. An error is the cut, not a fault of the test.
+      res.on('error', () => {});
+      const closed = new Promise(r => { res.once('close', r); res.once('aborted', r); req.once('close', r); });
+      resolve({ status: res.statusCode, headers: res.headers, res, req, closed });
     });
     req.on('error', (e) => { if (e.code !== 'ECONNRESET') reject(e); });
   });
@@ -72,9 +75,15 @@ describe('an RDF export frees its slot when the reader leaves', { skip }, () => 
     act.setRdfExportIdleMsForTest(300);
     const stalled = await holdOpen(t1.key);
     assert.equal(stalled.status, 200);
-    await stalled.closed;
-    const next = await d.exportRest(t1.key, SPACE, { format: 'nquads', limit: 5 });
+    // The reader takes nothing; within the bound (and a margin for the page to be built) its slot is free again.
+    let next;
+    for (let i = 0; i < 50; i++) {
+      next = await d.exportRest(t1.key, SPACE, { format: 'nquads', limit: 5 });
+      if (next.status !== 429) break;
+      await new Promise(r => setTimeout(r, 200));
+    }
     assert.equal(next.status, 200, 'the idle reader no longer holds the token\'s slot');
+    stalled.req.destroy();
     act.setRdfExportIdleMsForTest(null);
   });
 

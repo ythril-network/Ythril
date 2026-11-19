@@ -84,7 +84,8 @@ export function spaceActTarget(
  * - `completed` — its act ran here (the runner's completion);
  * - `absent` — the space it names is gone here, so there is nothing to act on;
  * - `not-carried` — this instance does not carry the space the round names;
- * - `superseded` — an addition retired by a later deletion of the same network space.
+ * - `superseded` — an addition retired by a later deletion of the same network space, or a passed rebase whose space another round for the
+ *   same epoch already moved (`spaces/apply-rebase-round.ts`).
  */
 export type SpaceActSettlement = 'completed' | 'absent' | 'not-carried' | 'superseded';
 
