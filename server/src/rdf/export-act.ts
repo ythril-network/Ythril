@@ -555,12 +555,14 @@ class ExportWalk {
   }
 
   /**
-   * The report's address: a digest of what the document is (the scope, each member's schema version, where in the walk it starts and where
-   * it ends), never of its bytes, so one page answered in all four formats has one report address (bundle-269 drive, finding 12).
+   * The report's address: a digest of what the document is (the member spaces exported, each one's schema version, where in the walk it
+   * starts and where it ends), never of its bytes, so one page answered in all four formats has one report address (bundle-269 drive,
+   * finding 12). Not the view's own id: a view and a view of the members it reads answer the same document, and a member left unread
+   * leaves no trace in it.
    */
   private report(nextAfter: string | undefined): string {
     const { p } = this;
-    const what = JSON.stringify([p.input.spaceId, p.exported.map(e => [e.space, e.fingerprint]), p.after ?? '', nextAfter ?? '']);
+    const what = JSON.stringify([p.exported.map(e => [e.space, e.fingerprint]), p.after ?? '', nextAfter ?? '']);
     return `urn:ythril:export-report:${createHash('sha256').update(what).digest('hex')}`;
   }
 

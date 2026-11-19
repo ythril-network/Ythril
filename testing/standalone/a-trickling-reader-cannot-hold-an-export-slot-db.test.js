@@ -48,9 +48,13 @@ function bigStore(spec, afterId) {
  */
 function read(url, key, pace) {
   let release;
+  let started;
   const released = new Promise(r => { release = r; });
+  // The status line has arrived: the export holds its slot from here (a probe of the slot before it could find it free, never taken).
+  const headed = new Promise(r => { started = r; });
   const done = new Promise((resolve, reject) => {
     const req = http.get(url, { headers: { Authorization: `Bearer ${key}` } }, (res) => {
+      started();
       const chunks = [];
       let free = pace === 'fast';
       void released.then(() => { free = true; res.resume(); });
@@ -68,7 +72,7 @@ function read(url, key, pace) {
     });
     req.on('error', reject);
   });
-  return { release: () => release(), done };
+  return { release: () => release(), headed, done };
 }
 
 describe('a trickling reader cannot hold an export slot', { skip, timeout: 300_000 }, () => {
@@ -97,6 +101,7 @@ describe('a trickling reader cannot hold an export slot', { skip, timeout: 300_0
     it(`a ${pace} reader below the bound is cut with the incomplete ending it still receives, and its slot is free at once`, async () => {
       const r = read(url, tok.key, pace);
       try {
+        await r.headed;
         await waitFor(slotFree, 60_000, 100, () => 'the slow reader\'s slot was not freed by the rate rule');
       } finally { r.release(); }
       const got = await r.done;
