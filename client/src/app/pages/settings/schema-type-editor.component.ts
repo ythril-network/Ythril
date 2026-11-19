@@ -81,7 +81,10 @@ export interface LayerMark {
   // for longer and reported by the owner on 2026-08-15 with a screenshot — the Required pill rendered as a
   // raw checkbox with its label wrapped under it, and the detail card lost both its column grid and its
   // padding, so every field ran edge to edge with its label against the dialog border.
-  styles: [SCHEMA_MD_STYLES, CHIP_STYLES, PROP_TABLE_STYLES],
+  //
+  // The key cell is the name control (`app-schema-type-name`), whose text sits in the child's template where this component's styles do not
+  // reach: the host element carries the key's look (mono, small, primary colour) and the child's text inherits it.
+  styles: [SCHEMA_MD_STYLES, CHIP_STYLES, PROP_TABLE_STYLES, '.prop-rename { display:inline-flex; align-items:center; min-width:0; font-family:var(--font-mono); font-size:12px; color:var(--text-primary); }'],
   template: `
 @if (libRef(); as libRef) {
   <!-- Linked library schema — editable only after unlinking; shown read-only meanwhile. -->
