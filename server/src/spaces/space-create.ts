@@ -29,7 +29,7 @@ import {
   CreateSpaceBody, TypeSchemasZ, libraryRefRefusal, parseSpaceMeta, stripServerOwnedSpace,
 } from './body-schemas.js';
 import { refuseRemovedDescription } from './spaces.js';
-import { RDF_BASE_NEEDED_STATUS, settleRdf, sharedRdfBaseRefusal } from './rdf-settle.js';
+import { RDF_BASE_NEEDED_STATUS, RDF_BASE_STANDS_STATUS, settleRdf, sharedRdfBaseRefusal } from './rdf-settle.js';
 import { getConfig } from '../config/loader.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { getPublicBaseUrl, publicBaseUrlIsFallback } from '../config/public-url.js';
@@ -46,7 +46,7 @@ const TERM_CLASH_STATUS = 422 as const;
 
 /** A refusal, carrying the status the contract suite pins. */
 export type SpaceCreateRefusal = {
-  status: 400 | 409 | 422;
+  status: 400 | typeof RDF_BASE_STANDS_STATUS | 422;
   body: { error: string; code?: string };
 };
 
