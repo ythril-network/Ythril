@@ -4,7 +4,7 @@ import { forkJoin, of, type Subscription } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { ConversionApi } from '../../core/conversion-api.service';
 import type { BlockCounts, ConvertBlock } from '../../core/conversion-counts';
-import type { ConversionRefusal, ConvertStatus, ConvertStatusAnswer } from '../../core/conversion.types';
+import type { ConversionRefusal, ConvertRunNotice, ConvertStatus, ConvertStatusAnswer } from '../../core/conversion.types';
 import { NetworksApi } from '../../core/networks-api.service';
 import { pageTranslator } from '../../core/page-translator';
 import type { PollHandle } from '../../core/poll-until';
@@ -33,7 +33,7 @@ import { SpaceSettingsState } from './space-settings-state.service';
  *   not saved (a conversion works on the stored schema, which has no new type and no new name), it is disabled WITH its reason visible under the head
  *   and named by `aria-describedby`.
  * - **Two notes at once, or a stale one.** One note at a time, in this order: waiting for a vote (nothing has changed yet), the run in progress, the
- *   run that finished, records on an older version. The finished note is for a run THIS bar saw, or one begun after the settings opened (a Save
+ *   run that finished, a Save that found no records to convert (told by `saveNotice`, never by a read of its own), records on an older version. The finished note is for a run THIS bar saw, or one begun after the settings opened (a Save
  *   re-baselines them): an old finished run found on opening is never announced as news.
  * - **A vote the type does not know it is waiting on.** A round counts for this type when the vote row's own reading of its steps
  *   (`convertBlocksOfRound`) names the type by either of its names, or when the round says it changes the type (`changedTypes`, `kind:type`); the counts are
@@ -70,7 +70,7 @@ let seq = 0;
       </button>
     </ng-template>
     @if (reason(); as why) { <p class="cv-reason cv-bar-hint" [id]="reasonId" data-testid="convert-locked">{{ why }}</p> }
-    @if (note(); as sentence) { <div class="alert alert-info cv-note" role="status" data-testid="convert-note">{{ sentence }}</div> }
+    @if (note(); as n) { <div class="alert alert-info cv-note" role="status" data-testid="convert-note">@if (n.lead) { <strong>{{ n.lead }}</strong> } {{ n.text }}</div> }
     @if (dialog(); as d) {
       <app-convert-records-dialog mode="act" [spaceId]="spaceId()" [blocks]="d.blocks" [staged]="d.staged" [rights]="rights()"
         [refusal]="refusal()" [busy]="starting()" (choice)="onChoice($event)" />
@@ -94,6 +94,12 @@ export class TypeConvertBarComponent {
   readonly older = input(false);
   /** The token's rights, for the lock; unknown rights allow. */
   readonly rights = input<TokenRights | null | undefined>(undefined);
+  /**
+   * What the popup's converting Save answered (`SaveConvertAnswer.convert`), handed down by the popup and the Schema tab: the save already knows
+   * whether it converted anything, so the pane learns it here and asks the server nothing more. Only `nothing` (the type had no records) says
+   * something in the pane; the dialog the save leaves open says the rest.
+   */
+  readonly saveNotice = input<ConvertRunNotice | null>(null);
 
   /** The button, for the head to render among its actions. */
   readonly button = viewChild<TemplateRef<unknown>>('button');
@@ -133,35 +139,49 @@ export class TypeConvertBarComponent {
   /** The button is drawn in the accent while records wait on an older version (drawing 6): the note points at it, so it should be findable. */
   protected readonly attention = computed(() => this.older() && (this.olderCount() ?? 0) > 0);
 
-  /** The one note, or none: waiting for a vote, the run, its finish, records on an older version. */
-  protected readonly note = computed<string | null>(() => {
+  /** The Save answered that this type had no records to convert (and no run began for it since: that is what the run's own note is for). */
+  private readonly savedNothing = computed(() => {
+    const notice = this.saveNotice();
+    return notice?.state === 'nothing' && notice.types.some(t => t.kind === this.kind() && t.type === this.type());
+  });
+
+  /**
+   * The one note, or none: waiting for a vote, the run, its finish, what a Save answered, records on an older version. A note about a Save opens with
+   * a strong lead as drawn ("Schema saved." for the run in progress and for the empty type, "Schema saved. Conversion finished." for the finish);
+   * the others have none.
+   */
+  protected readonly note = computed<{ lead: string | null; text: string } | null>(() => {
+    const plain = (text: string) => ({ lead: null, text });
     const w = this.waiting();
     if (w) {
       const waits = this.say('spaces.schema.convert.note.waiting', { network: w.network });
       const c = w.counts;
-      return c && c.total > 0
+      return plain(c && c.total > 0
         ? `${waits} ${this.plural.text('spaces.schema.convert.note.waitingCounts', c.total, { type: w.type, stamped: c.stamped, rewritten: c.rewritten })}`
-        : waits;
+        : waits);
     }
+    const saved = this.say('spaces.schema.convert.note.saved');
     const run = this.run();
     const entry = run?.types.find(t => t.kind === this.kind() && t.type === this.type());
     if (run && entry) {
       const done = run.counts.stamped + run.counts.rewritten + run.counts.unconverted + run.counts.moved;
       if (run.state === 'running' && !entry.done) {
         return run.left === null
-          ? `${this.say('spaces.schema.convert.run.converting')} (${this.say('spaces.schema.convert.run.counting')})`
-          : this.plural.text('spaces.schema.convert.note.running', done + run.left, { done });
+          ? plain(`${this.say('spaces.schema.convert.run.converting')} (${this.say('spaces.schema.convert.run.counting')})`)
+          : { lead: saved, text: this.plural.text('spaces.schema.convert.note.running', done + run.left, { done }) };
       }
-      if (this.sawRun() || this.state.schemaEpoch() > this.openedAt) {
-        if (run.state === 'failed') return this.say('spaces.schema.convert.run.failed', { error: run.error ?? '' });
+      // A Save that found nothing started no run: a finished run still on the books for the type is an old one, not the Save's.
+      if (this.sawRun() || (!this.savedNothing() && this.state.schemaEpoch() > this.openedAt)) {
+        if (run.state === 'failed') return plain(this.say('spaces.schema.convert.run.failed', { error: run.error ?? '' }));
         const finished = this.say('spaces.schema.convert.note.finished');
-        return run.counts.unconverted > 0 ? `${finished} ${this.plural.text('spaces.schema.convert.note.finishedSome', run.counts.unconverted)}` : finished;
+        return { lead: finished, text: run.counts.unconverted > 0 ? this.plural.text('spaces.schema.convert.note.finishedSome', run.counts.unconverted) : '' };
       }
     }
+    if (this.savedNothing()) return { lead: saved, text: this.say('spaces.schema.convert.note.none') };
     const n = this.olderCount();
     if (n !== null && this.older()) {
-      if (n > 0) return this.plural.text('spaces.schema.convert.note.older', n, { type: this.type() });
-      if (this.pressed()) return this.say('spaces.schema.convert.note.olderNone', { type: this.type() });
+      if (n > 0) return plain(this.plural.text('spaces.schema.convert.note.older', n, { type: this.type() }));
+      if (this.pressed()) return plain(this.say('spaces.schema.convert.note.olderNone', { type: this.type() }));
     }
     return null;
   });

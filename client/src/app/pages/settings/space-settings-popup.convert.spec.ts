@@ -18,6 +18,8 @@
  * - **A refusal stays where it can be fixed**: a bad step on its row, the rate limit, the lock, a conversion already running, each in words, with the
  *   dialog still open and Save still possible; a stale schema or a refused rule closes the dialog, because the answer is in the popup.
  * - **A new type made for a split is saved and kept**: it is in the body AND in the staged schema, so a later Save never deletes it.
+ * - **A Save that found nothing to convert leaves its note in the pane** (bundle-285 slice S9, drawing 3a "none"): the popup hands the answer to the
+ *   Schema tab and the type's bar by input, so the note is there after the dialog is closed and no second request is made for it.
  *
  * ## Seen red
  *
@@ -340,6 +342,64 @@ describe('what a converting Save leaves behind', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(h.navigate).toHaveBeenCalledWith(['/brain'], { queryParams: { space: 'customers', tab: 'review', section: 'unconverted' } });
     expect(h.state.settingsSpace()).toBeNull();
+  });
+});
+
+describe('the pane of the type a converting Save found no records for', () => {
+  const nothing = (types: unknown[] = [{ kind: 'entity', type: 'person' }]) =>
+    mountPopup({ update: () => of({ space: customers(), convert: { state: 'nothing', types } }), statuses: [okStatus({ state: 'none' })] });
+
+  /** Save and convert, close the progress dialog, and let the deferred Schema tab render: the pane is what is left on the page. */
+  async function savedAndClosed(h: ReturnType<typeof nothing>): Promise<HTMLElement | null> {
+    h.open();
+    h.renameCompany();
+    h.popup.saveSettings();
+    h.settle();
+    h.click('cv-primary');
+    h.click('cv-close');
+    await tabRendered(h);
+    return h.q('convert-note');
+  }
+
+  /** The Schema tab sits in a deferred block with a minimum loading time (real time): wait for the type's head, never for a fixed moment. */
+  async function tabRendered(h: ReturnType<typeof nothing>): Promise<void> {
+    await vi.waitFor(async () => {
+      h.settle();
+      await h.fixture.whenStable();
+      h.settle();
+      if (!h.root.querySelector('.sch-detail-head')) throw new Error('the Schema tab never rendered the type head');
+    }, { timeout: 5_000, interval: 50 });
+  }
+
+  it('says "Schema saved." in strong text and that there were no records to convert, after the dialog is closed', async () => {
+    const note = await savedAndClosed(nothing());
+    expect(note, 'the pane holds the note').not.toBeNull();
+    expect(note!.querySelector('strong')!.textContent!.trim()).toBe(english('spaces.schema.convert.note.saved'));
+    expect(note!.textContent!.replace(/\s+/g, ' ').trim()).toBe(`${english('spaces.schema.convert.note.saved')} ${english('spaces.schema.convert.note.none')}`);
+  });
+
+  it('says it with the converted type\'s name even when the answer lists no types, and for an older server\'s answer with no `convert` at all', async () => {
+    expect(await savedAndClosed(nothing([]))).not.toBeNull();
+    expect(await savedAndClosed(mountPopup({ update: () => of({ space: customers() }), statuses: [okStatus({ state: 'none' })] }))).not.toBeNull();
+  });
+
+  it('starts no conversion for it and sends no second save: the save answered it, and the pane is told by input', async () => {
+    const h = nothing();
+    expect(await savedAndClosed(h), 'the note is there').not.toBeNull();
+    expect(h.start).not.toHaveBeenCalled();
+    expect(h.updates).toHaveLength(1);
+  });
+
+  it('goes with the space: opening the settings again shows no such note', async () => {
+    const h = nothing();
+    expect(await savedAndClosed(h), 'the note is there before').not.toBeNull();
+    h.state.closeSettings();
+    h.settle();
+    h.open();
+    h.state.settingsTab.set('schema');
+    h.state.selectType('entity', 'person');
+    await tabRendered(h);
+    expect(h.q('convert-note')).toBeNull();
   });
 });
 
