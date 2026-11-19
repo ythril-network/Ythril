@@ -374,7 +374,7 @@ passages, in chunks, before it writes the new ones; both leave the file alone wi
 `transientFailures` counts the times the embedder did not answer at all, which hand the attempt back rather than spend it;
 `attempts` is spent only on errors a retry cannot fix. What counts is an embed call that **could not reach its HTTP endpoint**
 (connection refused or reset, no route to the host, the name not resolving, a timeout of the connection or of the call itself),
-a 429 or a 5xx, and a lost embedding process. A high `transientFailures` with `attempts` at zero is an outage waiting itself out.
+an HTTP answer of `408`, `429`, `502`, `503`, `504`, `520` to `524`, `529` or `530` (whatever its body says), and a request that was never sent to a lost embedding process. A high `transientFailures` with `attempts` at zero is an outage waiting itself out.
 It was described on the tool and returned by neither door until `Q-109`.
 
 **An unreachable embedder costs a job waiting, never its attempts.** The server decides that from the failure itself (the connection
@@ -383,12 +383,15 @@ failed), not from the words of its message, so an outage of any length leaves ev
 While it lasts the worker also stops claiming new jobs: after one unreachable failure it pauses, 5 seconds at first and doubling
 to 60, and the first embed that works ends the pause. **Waiting is not failing, so an alert on `failed` or on
 `ythril_embed_jobs_failed_total` does not see an outage:** `ythril_embed_jobs_handed_back_total` counts every attempt handed back
-(it rises by one for each job and each retry, for an unreachable embedder, a 429 or 5xx and a lost process alike), and a
+(it rises by one for each job and each retry, for an unreachable embedder, an HTTP status of the wait set and a lost process alike), and a
 `pending` count that does not drain while `transientFailures` climbs says the same per space. Alert on a lasting rate of the
 counter. **A wrong hostname reads as an outage**: a name that does not resolve is a failure to reach the endpoint, so a mistyped
 `embedding.baseUrl` waits like a stopped server; the warning in the server log (once per endpoint per ten minutes) names it.
-What still spends the budget and ends `failed`: a refusal the endpoint answered (`400`, `422`), an address the server refuses
-to call, a header value the runtime refuses and a certificate the runtime rejects.
+What still spends the budget and ends `failed`: an HTTP answer outside the wait set (`400`, `401`, `422`, a `500` among them), an address the
+server refuses to call, a header value the runtime refuses and a certificate the runtime rejects (`525` to `527` are the same fault
+seen through a proxy). **An HTTP answer is judged by its status alone, never by the words of its body:** a `400` whose body says
+`timeout` or `embedding process lost` spends the budget like any `400`, and is never counted as a lost process. A lost process is
+counted (three, then `failed`) only for the request it was holding, by the error the server itself raised.
 
 **One transient failure does end a job: a lost embedding process.** The bundled embedding model runs in a child process
 of the server. When that process is lost (it crashed, was killed, or stopped answering) the embed that was in flight

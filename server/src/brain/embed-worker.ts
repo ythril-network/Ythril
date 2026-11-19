@@ -28,9 +28,9 @@
 
 import {
   claimNextEmbedJob, completeEmbedJob, failEmbedJob, heartbeatEmbedJob, resetStalledEmbedJobs, reviveFailedEmbedJobs,
-  currentEmbedWorkEpoch, waitForEmbedWork, wakeEmbedWorkers, embedFailureMessage, EMBED_PRIORITY,
+  currentEmbedWorkEpoch, waitForEmbedWork, wakeEmbedWorkers, EMBED_PRIORITY,
 } from './embed-queue.js';
-import { isEmbedUnreachableError } from './embed-errors.js';
+import { isEmbedUnreachableError, embedFailureMessage } from './embed-errors.js';
 import { embedderOutagePause } from './embedder-outage-pause.js';
 import { waitOutLocalInferenceBackoff } from './local-inference.js';
 import { SERVER_VERSION } from '../util/server-version.js';

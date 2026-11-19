@@ -10,7 +10,7 @@ import { slotTimeoutMs } from '../config/model-slots.js';
 import { runLocalInference, warmLocalInference } from './local-inference.js';
 import { embedInputCeiling, noteInputCut } from './embed-ceiling.js';
 import { boundedPrefix, utf8Bytes } from '../util/bounded-text.js';
-import { EmbedUnreachableError } from './embed-errors.js';
+import { EmbedUnreachableError, EmbeddingHttpError, BUSY_EMBED_STATUSES } from './embed-errors.js';
 import { isConnectionFailure, isTimeoutFailure } from '../util/socket-failure.js';
 import { warnOnce, SAY_ONCE_WINDOW_MS } from '../util/warn-once.js';
 
@@ -92,31 +92,9 @@ const MAX_LOCAL_EMBED_CHARS = 8_000;
 
 // ── HTTP endpoint fallback ─────────────────────────────────────────────────
 /** `input` is already task-prefixed by `prepareInput` — do not prefix again here. */
-/**
- * A refusal from the embedding endpoint, carrying enough to decide whether trying again is sensible.
- *
- * The message is unchanged from what it was — `Embedding request failed (HTTP 429): …` — because operators
- * have that string in their runbooks and their logs, and it is what a caller shows a requester.
- */
-export class EmbeddingHttpError extends Error {
-  constructor(
-    readonly status: number,
-    readonly body: string,
-    /** From `Retry-After`, when the server sent one and it was a number we can act on. */
-    readonly retryAfterMs: number | null,
-  ) {
-    super(`Embedding request failed (HTTP ${status}): ${body}`);
-    this.name = 'EmbeddingHttpError';
-  }
-}
-
-/**
- * Statuses where trying again is the right move, and nothing else.
- *
- * A 400 or a 413 means the REQUEST is wrong and will be wrong every time — retrying it burns the caller's
- * deadline to arrive at the same answer more slowly. A 401 retried is a lockout waiting to happen.
- */
-const RETRYABLE_EMBED_STATUS = new Set([429, 502, 503, 504]);
+// `EmbeddingHttpError` is defined in `embed-errors.ts` (the verdict reads it, and that module imports nothing) and re-exported here: one class
+// identity for `instanceof` across both import paths. The in-call retry's statuses are `BUSY_EMBED_STATUSES`, beside the queue's wider set.
+export { EmbeddingHttpError };
 
 /**
  * Three attempts, and the delays are deliberately SMALL.
@@ -166,7 +144,7 @@ export async function embedViaHttpWithRetry(
       return await attempt(i);
     } catch (err) {
       lastErr = err;
-      const retryable = err instanceof EmbeddingHttpError && RETRYABLE_EMBED_STATUS.has(err.status);
+      const retryable = err instanceof EmbeddingHttpError && BUSY_EMBED_STATUSES.has(err.status);
       const delayLeft = i < EMBED_RETRY_DELAYS_MS.length;
       if (!retryable || !delayLeft) break;
 
