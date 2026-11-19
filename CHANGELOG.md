@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **Rights:** since 2.6.0 a `HEAD` request skipped a space's area rung on every path-scoped read route: a token that reached the space read the status and headers of an area it held no rung on (a file's size, name and type; whether a type exists; the length and validator of an answer), unaudited. A `HEAD` is now checked and audited as its `GET`, a request no rights row decides is refused `403 route_unclassified`, and a `HEAD` no longer reads a file's content, holds an event-stream slot or walks a space's collections.
+- **Rights:** since 2.6.0 a `HEAD` skipped a space's area rung on path-scoped reads: a token reaching the space read an area's statuses and headers (file size, name, type), unaudited. `HEAD` is now checked and audited as `GET`; a request no rights row decides is refused `403 route_unclassified`.
 
 ## [6.5.5] — 2026-11-08
 
