@@ -247,6 +247,24 @@ describe('the vote slice of the Networks page', () => {
       expect(yesOf(row).disabled).toBe(false);
     });
 
+    it('says which type the change touches, from the round\'s own changed types, where the server\'s summary is generic (drawing 4c)', () => {
+      const f = boot([{ ...CONVERT_ROUND, summary: 'member-b proposes to update the schema of notes-in-the-network' }]);
+      answerCounts(2, 1);
+      f.detectChanges();
+      const summary = rowOf(f).querySelector('.vote-summary')!.textContent!.trim();
+      expect(summary).toBe('Changes to the type person.');
+      expect(summary).not.toContain('proposes to update');
+    });
+
+    it('says it as one counted sentence for several types, and keeps the server\'s summary for a round that carries no conversion', () => {
+      const f = boot([{ ...CONVERT_ROUND, summary: 'generic', changedTypes: ['entity:person', 'entity:company', 'edge:employs'] }]);
+      answerCounts(2, 1);
+      f.detectChanges();
+      expect(rowOf(f).querySelector('.vote-summary')!.textContent!.trim()).toBe('Changes to the types person, company, and employs.');
+      const plain = boot([{ ...SERVER_ROUND, type: 'meta_change', changedTypes: ['entity:person'] }]);
+      expect(rowOf(plain).querySelector('.vote-summary')!.textContent).toContain('Adds');
+    });
+
     it('a round with no conversion renders exactly as today: no block, and no request for rights or counts', () => {
       const f = boot([SERVER_ROUND]);
       expect(blockOf(f), 'a block appeared in a row that carries no conversion').toBeNull();
