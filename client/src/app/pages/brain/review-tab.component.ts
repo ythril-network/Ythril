@@ -15,6 +15,8 @@ import { MergeRefusals } from './merge-refusals';
 import { PluralText } from '../../core/plural-text.service';
 import { ReviewForksPanelComponent } from './review-forks-panel.component';
 import { ReviewForksState } from './review-forks-state';
+import { ReviewUnconvertedPanelComponent } from './review-unconverted-panel.component';
+import { ReviewUnconvertedState } from './review-unconverted-state';
 import { ActivatedRoute } from '@angular/router';
 import { FORK_KINDS, type ForkKind } from '../../core/forks.types';
 import { ReviewCompletenessState } from './review-completeness-state';
@@ -26,8 +28,8 @@ import { duplicatesScanNotices } from './review-scan-notices';
 @Component({
   selector: 'app-review-tab',
   standalone: true,
-  imports: [FormsModule, PhIconComponent, TranslocoPipe, SummaryStripComponent, StatusPillComponent, RelativeTimeComponent, ReviewForksPanelComponent, ReviewContradictionsPanelComponent],
-  providers: [ReviewForksState, ReviewCompletenessState, ReviewContradictionsState],
+  imports: [FormsModule, PhIconComponent, TranslocoPipe, SummaryStripComponent, StatusPillComponent, RelativeTimeComponent, ReviewForksPanelComponent, ReviewContradictionsPanelComponent, ReviewUnconvertedPanelComponent],
+  providers: [ReviewForksState, ReviewCompletenessState, ReviewContradictionsState, ReviewUnconvertedState],
   styles: [`
     .page-title { margin: 0 0 4px; font-size: 18px; }
     .intro { color: var(--text-muted); font-size: 13px; margin: 0 0 16px; }
@@ -111,8 +113,9 @@ import { duplicatesScanNotices } from './review-scan-notices';
         <button class="tab" type="button" role="tab" [class.active]="sub() === t"
           [attr.aria-selected]="sub() === t" [attr.id]="'review-tab-' + t"
           [attr.aria-controls]="'review-panel-' + t" (click)="sub.set(t)">
-          {{ (t === 'forks' ? 'brain.review.forks.tab' : 'review.sub.' + t) | transloco }}
+          {{ (t === 'forks' ? 'brain.review.forks.tab' : t === 'unconverted' ? 'brain.review.unconverted.tab' : 'review.sub.' + t) | transloco }}
           @if (t === 'forks' && (forksState.total() ?? 0) > 0) { <span class="badge badge-gray">{{ forksState.total() }}</span> }
+          @if (t === 'unconverted' && unconvState.badgeText(); as open) { <span class="badge badge-gray">{{ open }}</span> }
         </button>
       }
     </nav>
@@ -235,6 +238,8 @@ import { duplicatesScanNotices } from './review-scan-notices';
                                        [query]="query()" (queryChange)="query.set($event)" [typeFilter]="typeFilter()" />
     } @else if (sub() === 'forks') {
       <app-review-forks-panel [spaceId]="spaceId" [state]="forksState" />
+    } @else if (sub() === 'unconverted') {
+      <app-review-unconverted-panel [spaceId]="spaceId" [state]="unconvState" />
     } @else {
     <section role="tabpanel" id="review-panel-duplicates" aria-labelledby="review-tab-duplicates">
     <p class="intro">{{ 'duplicates.intro' | transloco }}</p>
@@ -360,10 +365,12 @@ import { duplicatesScanNotices } from './review-scan-notices';
 })
 export class ReviewTabComponent implements OnInit, OnChanges {
   /** Sub-views of the space's record-QA queue. Ordered as a reviewer meets them. */
-  readonly SUBTABS = ['duplicates', 'contradictions', 'suggestions', 'forks'] as const;
-  readonly sub = signal<'duplicates' | 'contradictions' | 'suggestions' | 'forks'>('duplicates');
+  readonly SUBTABS = ['duplicates', 'contradictions', 'suggestions', 'forks', 'unconverted'] as const;
+  readonly sub = signal<'duplicates' | 'contradictions' | 'suggestions' | 'forks' | 'unconverted'>('duplicates');
   /** The Forks section's rows, page and last refusal (bundle-81); provided per tab, read by the forks panel. */
   protected readonly forksState = inject(ReviewForksState);
+  /** The Unconverted section's records, counts, filters and acts (bundle-285): provided per tab, read by its panel and by the tab's badge. */
+  protected readonly unconvState = inject(ReviewUnconvertedState);
   /** The Suggestions sub-tab's report (the space's completeness, samples in words); provided per tab, read by the template. */
   protected readonly completeness = inject(ReviewCompletenessState);
   /** The Contradictions section's list, actions and scan (Q-391); provided per tab, read by the contradictions panel. */
@@ -440,7 +447,8 @@ export class ReviewTabComponent implements OnInit, OnChanges {
     // record-type filter has nothing to narrow there. Showing it would imply the list is filtered when
     // it is not, which is the same lie as hiding an active filter.
     // Forks are not duplicates or contradictions either: they are facts, and the filter's types come from the two lists it narrows.
-    this.sub() !== 'suggestions' && this.sub() !== 'forks' && (this.availableTypes().length > 1 || this.typeFilter() !== 'all'));
+    // Unconverted records have a type filter of their own (the types that have open items, from the server's counts).
+    this.sub() !== 'suggestions' && this.sub() !== 'forks' && this.sub() !== 'unconverted' && (this.availableTypes().length > 1 || this.typeFilter() !== 'all'));
 
   /**
    * The options to render: the types present here, plus the active filter if this tab has none of them.
@@ -515,16 +523,17 @@ export class ReviewTabComponent implements OnInit, OnChanges {
    */
   private openAsLinked(): void {
     const qp = this.route?.snapshot.queryParamMap;
+    if (qp?.get('section') === 'unconverted') { this.sub.set('unconverted'); return; }
     if (qp?.get('section') !== 'forks') return;
     this.sub.set('forks');
     const kind = qp.get('forkKind');
     if (kind !== null && (FORK_KINDS as readonly string[]).includes(kind)) this.forksState.kind.set(kind as ForkKind);
   }
 
-  ngOnInit(): void { if (!this.isView) { this.openAsLinked(); this.load(); this.conState.load(this.spaceId); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); } }
+  ngOnInit(): void { if (!this.isView) { this.openAsLinked(); this.load(); this.conState.load(this.spaceId); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); this.unconvState.open(this.spaceId); } }
   /** Switching space in the Brain re-points this tab rather than leaving another space's pairs on screen. A view reads none of it. */
   ngOnChanges(ch: SimpleChanges): void {
-    if (ch['spaceId'] && !ch['spaceId'].firstChange && !this.isView) { this.load(); this.conState.load(this.spaceId); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); }
+    if (ch['spaceId'] && !ch['spaceId'].firstChange && !this.isView) { this.load(); this.conState.load(this.spaceId); this.completeness.load(this.spaceId); this.forksState.load(this.spaceId); this.unconvState.open(this.spaceId); }
   }
 
   load(): void {

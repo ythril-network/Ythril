@@ -16,6 +16,7 @@ import { ForksApi } from '../../core/forks-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { ToastService } from '../../core/toast.service';
+import { unconvertedProviders } from '../../testing/review-unconverted-fixtures';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import type { ForkRow } from '../../core/forks.types';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
@@ -58,6 +59,8 @@ function setup(forksApi: Record<string, unknown>, isView = false, query: Record<
   TestBed.configureTestingModule({
     imports: [ReviewTabComponent, getTranslocoModule({ translation: { en: forksWords() } })],
     providers: [
+      // The Unconverted section loads with the tab (bundle-285); these specs are about Forks, so it answers an empty space.
+      ...unconvertedProviders().providers,
       { provide: SpacesApi, useValue: { getCompleteness: () => of({ spaceId: 'work', score: null, checks: [], truncated: false }) } },
       { provide: BrainApi, useValue: { getEntitiesByIds: () => of({ entities: [] }), getRecord: () => of({}) } },
       { provide: DuplicatesApi, useValue: { listDuplicates: () => of({ duplicates: [] }) } },

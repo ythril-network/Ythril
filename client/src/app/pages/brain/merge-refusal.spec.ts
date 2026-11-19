@@ -32,6 +32,7 @@ import { ForksApi } from '../../core/forks-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { ToastService } from '../../core/toast.service';
+import { unconvertedProviders } from '../../testing/review-unconverted-fixtures';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import type { DuplicateRecord } from '../../core/api.types';
 
@@ -66,6 +67,8 @@ function setup(merge: (id: string) => unknown) {
   TestBed.configureTestingModule({
     imports: [ReviewTabComponent, getTranslocoModule({ translation: { en: EN } })],
     providers: [
+      // The Unconverted section loads with the tab (bundle-285); these specs are about merges, so it answers an empty space.
+      ...unconvertedProviders().providers,
       { provide: SpacesApi, useValue: { getCompleteness: () => of({ spaceId: 'work', score: null, checks: [], truncated: false }) } },
       { provide: BrainApi, useValue: { getEntitiesByIds: () => of({ entities: [] }), getRecord: () => of({}) } },
       { provide: DuplicatesApi, useValue: {
