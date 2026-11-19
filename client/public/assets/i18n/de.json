@@ -3338,6 +3338,7 @@
   "spaces.schema.convert.note.older.many": "{{count}} Datensätze des Typs {{type}} liegen auf einer älteren Version dieses Schemas. Sie wurden bei der Änderung nicht konvertiert. Nutzen Sie oben „Datensätze konvertieren“.",
   "spaces.schema.convert.note.older.other": "{{count}} Datensätze des Typs {{type}} liegen auf einer älteren Version dieses Schemas. Sie wurden bei der Änderung nicht konvertiert. Nutzen Sie oben „Datensätze konvertieren“.",
   "spaces.schema.convert.note.olderNone": "Kein Datensatz des Typs {{type}} liegt auf einer älteren Version dieses Schemas. Es gibt nichts zu konvertieren.",
+  "spaces.schema.convert.note.showRun": "Konvertierung anzeigen",
   "spaces.schema.convert.run.titleRunning": "Schema gespeichert. Datensätze werden konvertiert",
   "spaces.schema.convert.run.titleRunningAct": "Datensätze werden konvertiert",
   "spaces.schema.convert.run.titleDone": "Konvertierung abgeschlossen",

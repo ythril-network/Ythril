@@ -3338,6 +3338,7 @@
   "spaces.schema.convert.note.older.many": "{{count}} records of {{type}} are on an older version of this schema. They were not converted when it changed. Use Convert records above.",
   "spaces.schema.convert.note.older.other": "{{count}} records of {{type}} are on an older version of this schema. They were not converted when it changed. Use Convert records above.",
   "spaces.schema.convert.note.olderNone": "No records of {{type}} are on an older version of this schema. There is nothing to convert.",
+  "spaces.schema.convert.note.showRun": "Show the conversion",
   "spaces.schema.convert.run.titleRunning": "Schema saved. Converting records",
   "spaces.schema.convert.run.titleRunningAct": "Converting records",
   "spaces.schema.convert.run.titleDone": "Conversion finished",

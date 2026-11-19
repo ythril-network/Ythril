@@ -46,6 +46,20 @@ function markedStepSentence(say: PageTranslator, step: ConversionStep): string {
 }
 
 /** A step as pieces: its sentence cut at its names, which are set in the code face. Words every step, however a peer shaped it (`stepSentence`). */
+/**
+ * The one sentence that says a run's steps were refused on this instance, or '' when none was: how many of how many (`refused.head`), or, for a
+ * vote whose steps this instance refused whole, that sentence with its reason in words. The run block heads its refused list with it and the
+ * type's note says it, so a refusal is on the page without opening the run.
+ */
+export function refusedSentence(say: PageTranslator, plural: PluralText, run: ConvertStatus): string {
+  const named = run.stepsRefused.filter(r => r.step !== null).length;
+  if (named > 0) return plural.text('spaces.schema.convert.refused.head', Math.max(run.steps.length, named), { k: named });
+  const whole = run.stepsRefused.find(r => r.step === null);
+  if (!whole) return '';
+  const words = stepRefusalWords(whole.reason);
+  return stripMarks(say('spaces.schema.convert.refused.all', { reason: stripMarks(say(words.key, words.params)) }));
+}
+
 export function stepPieces(say: PageTranslator, step: ConversionStep): SentencePiece[] {
   return piecesOf(markedStepSentence(say, step));
 }
@@ -302,7 +316,7 @@ export class ConvertRunBlockComponent {
     const reasonText = (code: string): string => { const w = stepRefusalWords(code); return this.say(w.key, w.params); };
     const listed = this.refusedListed();
     return {
-      head: named.length > 0 ? this.plural.text('spaces.schema.convert.refused.head', Math.max(run.steps.length, named.length), { k: named.length }) : '',
+      head: named.length > 0 ? refusedSentence(this.say, this.plural, run) : '',
       listed: listed !== null && listed > 0 ? this.plural.text('spaces.schema.convert.refused.listed', listed) : '',
       items: named.map(r => piecesOf(this.say('spaces.schema.convert.refused.item', {
         step: markedStepSentence(this.say, r.step), reason: stripMarks(reasonText(r.reason)),

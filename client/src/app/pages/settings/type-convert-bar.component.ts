@@ -14,6 +14,7 @@ import type { TypedKind } from '../../core/type-field';
 import { convertBlocksOfRound } from '../../core/vote-round-view';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ConvertRecordsDialogComponent, type ConvertDialogChoice } from './convert-records-dialog.component';
+import { refusedSentence } from './convert-run-block.component';
 import { CONVERT_POLL_FAILURES_MAX, CONVERT_POLL_MS, watchConvertRun } from './convert-status-watch';
 import type { ConvertBlockPlan, ConvertSchemas } from './convert-steps';
 import type { TokenRights } from './rights-glyph.component';
@@ -52,7 +53,13 @@ import { SpaceSettingsState } from './space-settings-state.service';
 let seq = 0;
 
 /** Who shows a run the Convert act started, as it shows the run a converting Save started. */
-export interface ConvertRunHost { showRun(notice: ConvertRunNotice): void }
+export interface ConvertRunHost {
+  /**
+   * Show a run in the progress dialog: `from` says what led there (the type's Convert act, or the note's "Show the run" for a run of any source),
+   * `status` is the run as last read when the caller has it, so a finished run shows at once.
+   */
+  showRun(notice: ConvertRunNotice | null, from: 'act' | 'note', status?: ConvertStatusAnswer | null): void;
+}
 
 /** The strong lead of a run's note while it runs (null: none) and when it finished, by what started the run. */
 const RUN_LEADS: Record<ConvertSource['kind'], { running: string | null; finished: string }> = {
@@ -77,6 +84,7 @@ export const CONVERT_RUN_HOST = new InjectionToken<ConvertRunHost>('CONVERT_RUN_
     .cv-btn-attn { color: var(--accent); background: var(--success-dim); box-shadow: inset 0 0 0 1px var(--success-border); }
     .cv-reason { margin: 6px 0 0; }
     .cv-note { margin: 8px 0 0; font-size: 13px; }
+    .cv-show-run { margin-top: 6px; }
     .cv-bar-hint { font-size: 11px; font-weight: 400; color: var(--text-muted); }
   `],
   template: `
@@ -87,7 +95,12 @@ export const CONVERT_RUN_HOST = new InjectionToken<ConvertRunHost>('CONVERT_RUN_
       </button>
     </ng-template>
     @if (reason(); as why) { <p class="cv-reason cv-bar-hint" [id]="reasonId" data-testid="convert-locked">{{ why }}</p> }
-    @if (note(); as n) { <div class="alert alert-info cv-note" role="status" data-testid="convert-note">@if (n.lead) { <strong>{{ n.lead }}</strong> } {{ n.text }}</div> }
+    @if (note(); as n) {
+      <div class="alert alert-info cv-note" role="status" data-testid="convert-note">@if (n.lead) { <strong>{{ n.lead }}</strong> } {{ n.text }}</div>
+      @if (n.run && runHost) {
+        <button class="btn btn-ghost btn-sm cv-show-run" type="button" data-testid="convert-show-run" (click)="showRun()">{{ 'spaces.schema.convert.note.showRun' | transloco }}</button>
+      }
+    }
     @if (dialog(); as d) {
       <app-convert-records-dialog mode="act" [spaceId]="spaceId()" [blocks]="d.blocks" [staged]="d.staged" [rights]="rights()"
         [refusal]="refusal()" [busy]="starting()" (choice)="onChoice($event)" />
@@ -99,7 +112,7 @@ export class TypeConvertBarComponent {
   private readonly injector = inject(Injector);
   private readonly say = pageTranslator();
   private readonly plural = inject(PluralText);
-  private readonly runHost = inject(CONVERT_RUN_HOST, { optional: true });
+  protected readonly runHost = inject(CONVERT_RUN_HOST, { optional: true });
 
   /** The type in the pane: its kind, and its name as the schema holds it now. */
   readonly kind = input.required<TypedKind>();
@@ -173,8 +186,10 @@ export class TypeConvertBarComponent {
    * a run the Convert act alone started saved no schema, so its running note has no lead and its finish opens with "Conversion finished."; the
    * others have none.
    */
-  protected readonly note = computed<{ lead: string | null; text: string } | null>(() => {
+  protected readonly note = computed<{ lead: string | null; text: string; run?: true } | null>(() => {
     const plain = (text: string) => ({ lead: null, text });
+    /** A note about a run: it offers to show that run (`showRun`). */
+    const ofRun = (lead: string | null, text: string) => ({ lead, text, run: true as const });
     const w = this.waiting();
     if (w) {
       const waits = this.say('spaces.schema.convert.note.waiting', { network: w.network });
@@ -192,16 +207,20 @@ export class TypeConvertBarComponent {
       // "Schema changed by the vote." (this member saved nothing), the Convert act nothing (it changes no schema). A run no source names is a Save's.
       const words = RUN_LEADS[run.sources[run.sources.length - 1]?.kind ?? 'write'];
       if (run.state === 'running' && !entry.done) {
-        if (run.left === null) return plain(`${this.say('spaces.schema.convert.run.converting')} (${this.say('spaces.schema.convert.run.counting')})`);
+        if (run.left === null) return ofRun(null, `${this.say('spaces.schema.convert.run.converting')} (${this.say('spaces.schema.convert.run.counting')})`);
         const text = this.plural.text('spaces.schema.convert.note.running', done + run.left, { done });
-        return words.running === null ? plain(text) : { lead: this.say(words.running), text };
+        return ofRun(words.running === null ? null : this.say(words.running), text);
       }
       // A Save that found nothing started no run: a finished run still on the books for the type is an old one, not the Save's.
       const awaited = this.awaitedRound !== null && run.sources.some(s => s.kind === 'round' && s.roundId === this.awaitedRound);
       if (this.sawRun() || awaited || (!this.savedNothing() && this.state.schemaEpoch() > this.openedAt)) {
-        if (run.state === 'failed') return plain(this.say('spaces.schema.convert.run.failed', { error: run.error ?? '' }));
-        const finished = this.say(words.finished);
-        return { lead: finished, text: run.counts.unconverted > 0 ? this.plural.text('spaces.schema.convert.note.finishedSome', run.counts.unconverted) : '' };
+        if (run.state === 'failed') return ofRun(null, this.say('spaces.schema.convert.run.failed', { error: run.error ?? '' }));
+        // What could not be converted, then whether steps were refused here: both on the page without opening the run.
+        const parts = [
+          run.counts.unconverted > 0 ? this.plural.text('spaces.schema.convert.note.finishedSome', run.counts.unconverted) : '',
+          refusedSentence(this.say, this.plural, run),
+        ];
+        return ofRun(this.say(words.finished), parts.filter(p => p !== '').join(' '));
       }
     }
     if (this.savedNothing()) return { lead: saved, text: this.say('spaces.schema.convert.note.none') };
@@ -331,6 +350,11 @@ export class TypeConvertBarComponent {
     });
   }
 
+  /** The note's "Show the run": the progress dialog on the run the note is about, whatever started it (a vote's run has no other way there). */
+  protected showRun(): void {
+    this.runHost?.showRun(null, 'note', this.run());
+  }
+
   // ── The act ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   /** Open the Convert act on this type: no steps yet, the records counted by the dialog itself. */
@@ -357,7 +381,7 @@ export class TypeConvertBarComponent {
       this.sawRun.set(true);
       this.refresh();
       const types = result.value.types.length > 0 ? result.value.types : choice.types;
-      this.runHost?.showRun({ state: 'started', types, toFp: result.value.toFp });
+      this.runHost?.showRun({ state: 'started', types, toFp: result.value.toFp }, 'act');
     });
   }
 }

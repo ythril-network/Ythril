@@ -389,7 +389,11 @@ export class ConvertRecordsDialogComponent {
       case 'submitted': return this.say('spaces.schema.convert.submitted.title');
       case 'progress': {
         if (!this.runningNow()) return this.say('spaces.schema.convert.run.titleDone');
-        return this.say(this.byAct() ? 'spaces.schema.convert.run.titleRunningAct' : 'spaces.schema.convert.run.titleRunning');
+        // "Schema saved." only for a run a Save started: the act's and a vote's run (by the status's most recent source) say only that records convert.
+        const s = this.status();
+        const latest = s && 'sources' in s ? s.sources[s.sources.length - 1]?.kind : undefined;
+        const saved = !this.byAct() && (latest === undefined || latest === 'write');
+        return this.say(saved ? 'spaces.schema.convert.run.titleRunning' : 'spaces.schema.convert.run.titleRunningAct');
       }
       case 'act': {
         const type = this.blocks()[0]?.type ?? '';

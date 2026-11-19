@@ -3338,6 +3338,7 @@
   "spaces.schema.convert.note.older.many": "{{count}} rekordów typu {{type}} jest na starszej wersji tego schematu. Nie zostały skonwertowane przy jego zmianie. Użyj powyżej przycisku „Konwertuj rekordy”.",
   "spaces.schema.convert.note.older.other": "{{count}} rekordów typu {{type}} jest na starszej wersji tego schematu. Nie zostały skonwertowane przy jego zmianie. Użyj powyżej przycisku „Konwertuj rekordy”.",
   "spaces.schema.convert.note.olderNone": "Żaden rekord typu {{type}} nie jest na starszej wersji tego schematu. Nie ma czego konwertować.",
+  "spaces.schema.convert.note.showRun": "Pokaż konwersję",
   "spaces.schema.convert.run.titleRunning": "Schemat zapisany. Konwersja rekordów",
   "spaces.schema.convert.run.titleRunningAct": "Konwersja rekordów",
   "spaces.schema.convert.run.titleDone": "Konwersja zakończona",

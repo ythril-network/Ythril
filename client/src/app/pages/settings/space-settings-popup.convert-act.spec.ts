@@ -17,7 +17,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { of } from 'rxjs';
-import { EN, customers, mountPopup, okStatus } from '../../testing/popup-convert-fixtures';
+import { EN, customers, doneStatus, mountPopup, okStatus } from '../../testing/popup-convert-fixtures';
 import { runningStatus } from '../../testing/review-unconverted-fixtures';
 
 const english = (key: string): string => { expect(EN[key], `${key} exists in en.json`).toBeTypeOf('string'); return EN[key]!; };
@@ -60,6 +60,28 @@ describe('the Convert act from the type head, inside the popup', () => {
     expect(h.text('cv-title')).toBe(english('spaces.schema.convert.run.titleRunningAct'));
     expect(h.text('cv-title')).not.toContain(english('spaces.schema.convert.note.saved'));
     await vi.waitFor(() => expect(h.status, 'the run is read on the watch').toHaveBeenCalled(), { timeout: 2_000, interval: 20 });
+  });
+});
+
+describe('a run the person did not start here, shown from the type\'s note (drive round 4)', () => {
+  it('opens the progress dialog on a finished vote run with its refused step worded, and returns focus to the control on close', async () => {
+    const step = { op: 'renameProperty', kind: 'entity', type: 'person', from: 'company', to: 'employer' } as const;
+    const refused = { steps: [step], stepsRefused: [{ step, reason: 'property_still_declared_here' }], sources: [{ kind: 'round' as const, roundId: 'r1', at: '2026-11-19T10:00:00.000Z' }] };
+    // The member's note sees the vote's run running; the run then finishes, refusing the step.
+    const h = mountPopup({ statuses: [okStatus(runningStatus({ ...refused, left: 100 })), okStatus(doneStatus(refused))] });
+    document.body.appendChild(h.root);
+    h.open();
+    h.state.settingsTab.set('schema');
+    h.state.schemaCollTab.set('entity');
+    h.state.selectType('entity', 'person');
+    await tabRendered(h);
+    await vi.waitFor(() => { h.settle(); if (!h.q('convert-show-run')) throw new Error('no control on the note'); }, { timeout: 2_000, interval: 20 });
+    h.click('convert-show-run');
+    expect(h.root.querySelector('app-convert-run-block'), 'the progress dialog is open').not.toBeNull();
+    await vi.waitFor(() => { h.settle(); expect(h.text('cv-title')).toBe(english('spaces.schema.convert.run.titleDone')); }, { timeout: 2_000, interval: 20 });
+    expect(h.root.querySelector('[data-testid="run-refused-item"]')?.textContent).toContain(english('conversion.stepRefusal.property_still_declared_here'));
+    h.click('cv-close');
+    await vi.waitFor(() => expect(document.activeElement).toBe(h.q('convert-show-run')), { timeout: 2_000, interval: 20 });
   });
 });
 

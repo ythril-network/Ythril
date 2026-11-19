@@ -44,7 +44,7 @@ import { getTranslocoModule } from '../../testing/transloco-testing';
 import { CONVERT_POLL_FAILURES_MAX, CONVERT_POLL_MS } from './convert-status-watch';
 import type { TokenRights } from './rights-glyph.component';
 import { SpaceSettingsState } from './space-settings-state.service';
-import { TypeConvertBarComponent } from './type-convert-bar.component';
+import { CONVERT_RUN_HOST, TypeConvertBarComponent } from './type-convert-bar.component';
 
 const english = (key: string): string => { expect(EN[key], `${key} exists in en.json`).toBeTypeOf('string'); return EN[key]!; };
 const fill = (key: string, params: Record<string, string | number>): string =>
@@ -95,6 +95,7 @@ function mount(over: Setup = {}, host: Partial<HostComponent> = {}) {
   const status = vi.fn(() => of(sequence[Math.min(read++, sequence.length - 1)]!));
   const start = vi.fn(over.start ?? (() => of({ ok: true as const, value: { state: 'started', toFp: 'fp', types: [], steps: 0 } })));
   const olderCount = vi.fn(() => of(over.older === undefined ? 412 : over.older));
+  const showRun = vi.fn();
   const listVotes = vi.fn(() => (over.rounds === 'fail'
     ? throwError(() => new Error('403'))
     : of({ rounds: (over.rounds ?? []).map(r => ({ id: 'r1', networkId: ACME.id, type: 'meta_change', subject: 's', openedAt: '', deadline: '', status: 'open', votes: [], localSpaceId: 'customers', ...r })) })));
@@ -105,6 +106,7 @@ function mount(over: Setup = {}, host: Partial<HostComponent> = {}) {
       SpaceSettingsState,
       { provide: ConversionApi, useValue: { countsFor, status, start, olderCount, refusedCount: () => of(0) } },
       { provide: NetworksApi, useValue: { listVotes } },
+      { provide: CONVERT_RUN_HOST, useValue: { showRun } },
     ],
   });
   const state = TestBed.inject(SpaceSettingsState);
@@ -117,7 +119,7 @@ function mount(over: Setup = {}, host: Partial<HostComponent> = {}) {
   settle();
   const q = <T extends HTMLElement>(id: string): T | null => root.querySelector<T>(`[data-testid="${id}"]`);
   const text = (id: string): string => q(id)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-  return { fixture, host: fixture.componentInstance, state, root, settle, q, text, countsFor, status, start, olderCount, listVotes, space };
+  return { fixture, host: fixture.componentInstance, state, root, settle, q, text, countsFor, status, start, olderCount, listVotes, showRun, space };
 }
 
 const RENAME_PROP = { op: 'renameProperty', kind: 'entity', type: 'person', from: 'company', to: 'employer' } as const;
@@ -604,6 +606,35 @@ describe('the note after a Save that converted nothing, and the strong lead of t
     expect(strong(finished)).toBe(english('spaces.schema.convert.note.actFinished'));
     expect(finished.text('convert-note')).toBe(`${english('spaces.schema.convert.note.actFinished')} 4 records could not be converted.`);
     expect(finished.text('convert-note')).not.toContain(SAVED);
+  });
+
+  it('a finished vote run that refused a step says so in the note, counted, and offers to show the run, which the host opens on it (drive round 4)', () => {
+    const round = [{ kind: 'round' as const, roundId: 'r1', at: '2026-11-19T10:00:00.000Z' }];
+    const refused = { steps: [RENAME_PROP], stepsRefused: [{ step: RENAME_PROP, reason: 'property_still_declared_here' }], sources: round };
+    const m = mount({ statuses: [okStatus(runningStatus(refused)), okStatus(doneStatus(refused))] });
+    m.settle(); vi.advanceTimersByTime(CONVERT_POLL_MS); m.settle();
+    expect(m.text('convert-note')).toContain(english('spaces.schema.convert.refused.head.one'));
+    const show = m.q<HTMLButtonElement>('convert-show-run');
+    expect(show?.textContent?.trim()).toBe(english('spaces.schema.convert.note.showRun'));
+    show!.click();
+    expect(m.showRun).toHaveBeenCalledTimes(1);
+    const [notice, from, status] = m.showRun.mock.calls[0]!;
+    expect(notice).toBeNull();
+    expect(from).toBe('note');
+    expect(status).toMatchObject({ state: 'complete', stepsRefused: refused.stepsRefused });
+  });
+
+  it('offers to show the run for a running run and a finished one with nothing refused, and says nothing of a refusal then', () => {
+    const running = mount({ statuses: [okStatus(runningStatus({ left: 240 }))] });
+    running.settle(); vi.advanceTimersByTime(0); running.settle();
+    expect(running.q('convert-show-run')).not.toBeNull();
+    const done = mount({ statuses: [okStatus(runningStatus()), okStatus(doneStatus())] });
+    done.settle(); vi.advanceTimersByTime(CONVERT_POLL_MS); done.settle();
+    expect(done.q('convert-show-run')).not.toBeNull();
+    expect(done.text('convert-note')).not.toContain('refused');
+    const older = mount({ older: 412 }, { type: 'invoice', older: true });
+    older.settle();
+    expect(older.q('convert-show-run'), 'no run, no control').toBeNull();
   });
 
   it('says "Schema changed by the vote." for a run a passed vote started: this member saved nothing (drive round 3)', () => {
