@@ -46,6 +46,8 @@ const NOT_A_DRAFT: Readonly<Record<string, string>> = {
   'src/app/pages/brain/record-search-bar.component.ts': 'a record search box that emits its query at once to filter the list; it is a filter, not an edit',
   'src/app/pages/brain/review-tab.component.ts': 'review filters (type, search, status) that narrow the pair list; the merge and dismiss actions act at once',
   'src/app/pages/brain/review-contradictions-panel.component.ts': 'a search box and a status filter that narrow the contradiction list; its actions act at once',
+  'src/app/pages/settings/convert-records-dialog.component.ts': 'the answer to the question Save asked (convert, or save only): nothing is stored until the settings popup that opens it sends the answer, and that popup holds the schema draft',
+  'src/app/pages/settings/convert-step-editor.component.ts': 'the rows of the dialog around it: they are the dialog\'s answer, held by the dialog and sent by the popup that holds the schema draft',
   'src/app/pages/brain/review-unconverted-panel.component.ts': 'a record-type filter and a status filter that narrow the unconverted list; Dismiss, Dismiss all shown and Convert again act at once, each after its own confirmation or lock',
   'src/app/pages/graph/graph-toolbar.component.ts': 'the graph depth slider acts at once on the drawn graph, and the entity finder is a search that reports a pick',
   'src/app/pages/graph/graph-linked-records.component.ts': 'a type filter and a description filter over the linked records of one node; they only narrow what is shown',

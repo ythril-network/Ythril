@@ -41,6 +41,9 @@ const EXEMPT: Record<string, string> = {
   'app.component.ts':
     'The application root. Bootstrapped by main.ts rather than routed or imported, which is exactly why it has '
     + 'no referrer — and why every other component having none is a defect.',
+  'convert-records-dialog.component.ts':
+    'Bundle-285 slice S5 builds the Save dialog in isolation; the settings popup (slice S6) opens it. This entry is asserted below to '
+    + 'still be unreferenced, so it fails the moment S6 wires the dialog and must be removed then.',
 };
 
 const strip = (src: string): string => src
