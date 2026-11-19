@@ -1,0 +1,196 @@
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix ythril: <https://w3id.org/ythril/ns#> .
+
+<https://w3id.org/ythril/ns>
+    a owl:Ontology ;
+    rdfs:comment "Ythril stores no array and no nested object in a property: a property holds one plain value — a string, a number, a boolean or a date. Richer content is held as edges and links, and it travels in this export as what it is. Several values of one relationship are several edges or links and appear here as the same predicate stated several times. A reference to another record is an edge and appears as a relation to that record's IRI. A nested thing is a record of its own, joined by an edge. Edges appear as their label's property, with a reifier for the edge's own details; links appear as `dcterms:references`. Every datatype property in this vocabulary is therefore single-valued." ;
+    rdfs:label "Ythril vocabulary" .
+
+ythril:Entity
+    a rdfs:Class ;
+    rdfs:comment "A Ythril entity record." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "Entity" .
+
+ythril:Fact
+    a rdfs:Class ;
+    rdfs:comment "A Ythril fact record." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "Fact" .
+
+ythril:Untyped
+    a rdfs:Class ;
+    rdfs:comment "The class of an entity that declares no type." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "Untyped" .
+
+ythril:confidence
+    a rdf:Property ;
+    rdfs:comment "A chrono record's confidence." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "confidence" .
+
+ythril:contentRedacted
+    a rdf:Property ;
+    rdfs:comment "The record's content was removed by a retention schedule." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "contentRedacted" .
+
+ythril:edgeType
+    a rdf:Property ;
+    rdfs:comment "An edge's type, stated on its reifier." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "edgeType" .
+
+ythril:endpointFrom
+    a rdf:Property ;
+    rdfs:comment "A kind of record an edge type may start at." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "endpointFrom" .
+
+ythril:endpointTo
+    a rdf:Property ;
+    rdfs:comment "A kind of record an edge type may end at." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "endpointTo" .
+
+ythril:mergeFn
+    a rdf:Property ;
+    rdfs:comment "The function that merges two values of a property when two members change it at once." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "mergeFn" .
+
+ythril:namingPattern
+    a rdf:Property ;
+    rdfs:comment "A pattern every entity name of a type must match." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "namingPattern" .
+
+ythril:path
+    a rdf:Property ;
+    rdfs:comment "A file's path within its space." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "path" .
+
+ythril:recurrenceFreq
+    a rdf:Property ;
+    rdfs:comment "How often a chrono record recurs: daily, weekly, monthly or yearly." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "recurrenceFreq" .
+
+ythril:recurrenceInterval
+    a rdf:Property ;
+    rdfs:comment "Every how many periods of its frequency a chrono record recurs." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "recurrenceInterval" .
+
+ythril:recurrenceUntil
+    a rdf:Property ;
+    rdfs:comment "The date or time after which a chrono record no longer recurs." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "recurrenceUntil" .
+
+ythril:requiredEdgeProperty
+    a rdf:Property ;
+    rdfs:comment "A property every edge of a type must carry." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "requiredEdgeProperty" .
+
+ythril:retentionContentDays
+    a rdf:Property ;
+    rdfs:comment "How many days the content of a record of a type is kept before it is removed and the record stays." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "retentionContentDays" .
+
+ythril:retentionDays
+    a rdf:Property ;
+    rdfs:comment "How many days a record of a type is kept before it is deleted." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "retentionDays" .
+
+ythril:rule
+    a rdf:Property ;
+    rdfs:comment "A rule a record of a type or the space must satisfy, written as a node with a name, an expression and a message." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "rule" .
+
+ythril:ruleExpression
+    a rdf:Property ;
+    rdfs:comment "The expression of a rule, as the space states it." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "ruleExpression" .
+
+ythril:ruleKinds
+    a rdf:Property ;
+    rdfs:comment "The kinds of record a space rule applies to." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "ruleKinds" .
+
+ythril:ruleMessage
+    a rdf:Property ;
+    rdfs:comment "The message a rule gives when a record breaks it." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "ruleMessage" .
+
+ythril:ruleName
+    a rdf:Property ;
+    rdfs:comment "The name of a rule." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "ruleName" .
+
+ythril:sizeBytes
+    a rdf:Property ;
+    rdfs:comment "A file's size in bytes." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "sizeBytes" .
+
+ythril:status
+    a rdf:Property ;
+    rdfs:comment "A chrono record's status." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "status" .
+
+ythril:strictLinkage
+    a rdf:Property ;
+    rdfs:comment "Whether the space refuses an edge whose endpoints do not exist." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "strictLinkage" .
+
+ythril:superseded
+    a rdf:Property ;
+    rdfs:comment "The record has been superseded by a later one." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "superseded" .
+
+ythril:suppressEmbeddings
+    a rdf:Property ;
+    rdfs:comment "Records of a type are stored but not embedded for similarity search." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "suppressEmbeddings" .
+
+ythril:unresolvedRef
+    a rdf:Property ;
+    rdfs:comment "A type refers to a schema library entry this export could not resolve." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "unresolvedRef" .
+
+ythril:validationMode
+    a rdf:Property ;
+    rdfs:comment "How strictly the space checks records against its schema." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "validationMode" .
+
+ythril:weight
+    a rdf:Property ;
+    rdfs:comment "An edge's weight, stated on its reifier." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "weight" .
+
+ythril:whenDuePasses
+    a rdf:Property ;
+    rdfs:comment "What happens to a chrono record of a type when its time has passed." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "whenDuePasses" .
+

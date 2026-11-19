@@ -144,6 +144,10 @@ export const HELP_DOCS = [
       'decisions/20-a-scan-hold-warns-by-its-age-not-by-a-count-of-runs.md',
       'decisions/21-a-file-whose-bytes-are-gone-is-removed-here-only-after-evidence-and-an-explicit-delete-keeps-its-tombstone.md',
       'decisions/22-a-field-that-describes-the-write-may-replicate-and-be-left-out-of-the-space-hash.md',
+      'decisions/23-a-property-holds-one-plain-value-and-structure-is-an-edge-or-a-link.md',
+      // The published RDF vocabulary (Q-749), generated from the server's term table: it opens with the rule record 23 states and
+      // links it, so it is read here beside the record. A part of this guide because an entry's own file must sit at the docs root.
+      'rdf/ythril-vocabulary.md',
     ],
   },
   { id: 'workstation-mode-guide', file: 'workstation-mode-guide.md' },
