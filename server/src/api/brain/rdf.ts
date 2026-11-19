@@ -173,7 +173,7 @@ async function sendStream(req: Request, res: Response, stream: RdfExportStream):
   try {
     let chunk: string | undefined = begun.first;
     while (chunk !== undefined) {
-      const how = chunk === '' ? 'taken' : await writer.put(chunk);
+      const how = chunk === '' ? 'taken' : await writer.deliver(chunk);
       audit();
       if (how === 'gone') return;
       if (how === 'idle') {
@@ -243,7 +243,7 @@ async function sendPage(req: Request, res: Response, page: RdfExportPage): Promi
   try {
     for (const chunk of page.chunks) {
       if (chunk === '') continue;
-      const how = await writer.put(chunk);
+      const how = await writer.deliver(chunk);
       if (how === 'gone') return;
       if (how !== 'taken') {
         res.destroy();

@@ -17,7 +17,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { trackedSources } from './_sources.mjs';
+import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const MODULE = 'server/src/export/export-trailers.ts';
 const NAMES = ['Ythril-Export-Complete', 'Ythril-Skipped-Values'];
@@ -62,8 +62,8 @@ describe('a trailer is declared only on a chunked answer', () => {
     });
   }
 
-  it('no other file of server/src declares or adds a trailer', () => {
-    const offenders = trackedSources(['server/src'], { floor: 100 })
+  it('no other file of the server code declares or adds a trailer', () => {
+    const offenders = trackedSources(SERVER_CODE_ROOTS, { floor: 100 })
       .filter(f => f.replace(/\\/g, '/') !== MODULE)
       .filter(f => {
         const src = readFileSync(f, 'utf8');
