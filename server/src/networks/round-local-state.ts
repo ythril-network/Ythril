@@ -24,7 +24,7 @@
  */
 import type { NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
 import { inlineResolvableRefs } from '../spaces/schema-validation.js';
-import { isSpaceActRound, roundDeadlineBeyondCap, roundPastDeadline } from './round-state.js';
+import { isDeleteVoteRound, isSpaceActRound, roundDeadlineBeyondCap, roundPastDeadline } from './round-state.js';
 import { publishesOn } from './network-role.js';
 import { hasRoundShape, canonicalRoundWipeTypes } from './round-shape.js';
 import { DEFAULT_STAMP_SKEW_WARN_MINUTES } from '../brain/stamp-skew.js';
@@ -80,9 +80,10 @@ export function adoptionRefusal(net: NetworkConfig, peerRound: VoteRound, now: n
   if (roundPastDeadline(peerRound, now)) return 'past its deadline or undatable';
   if (roundDeadlineBeyondCap(peerRound)) return 'deadline beyond what a network allows';
   if ((net.roundOutcomes ?? []).some(e => e.roundId === peerRound.roundId)) return 'already recorded here';
-  // D-40: on pub/sub a subscriber's deletion or wipe is its own local act. A publisher holds no round it did not open of those two
-  // types — every other instance there is a subscriber — decided from this instance's role, never from a field a relayer could set.
-  if (isSpaceActRound(peerRound.type) && publishesOn(net)) return 'proposed by a subscriber';
+  // D-40: on pub/sub a subscriber's deletion or wipe is its own local act. A publisher holds no round it did not open of the delete
+  // family — every other instance there is a subscriber — decided from this instance's role, never from a field a relayer could set. A
+  // rebase is of that family (Q-748, review finding 12): held, it would be served open to every other subscriber until its deadline.
+  if (isDeleteVoteRound(peerRound.type) && publishesOn(net)) return 'proposed by a subscriber';
   return null;
 }
 
