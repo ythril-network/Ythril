@@ -253,20 +253,20 @@ let readPage: PageReader = defaultReader;
 export function setRdfExportPageReaderForTest(reader: PageReader | null): void { readPage = reader ?? defaultReader; }
 
 /**
- * The least rate a whole export must keep, averaged from its start, once its grace period is over (bundle-269 review, finding 9): a reader
- * taking a little at a time meets the idle bound for ever, and two such readers held the instance's two slots. The product's other long
- * downloads (the audit-log export, the space backup) have no such bound because an administrator alone reaches them and nothing caps how
- * many run; this one any reader of a space reaches, and two run at once.
+ * The least rate a whole export's reader must keep while the export waits on it (bundle-269 review, finding 9; first drive, finding 7): a
+ * reader taking a little at a time meets the idle bound for ever, and two such readers held the instance's two slots. The product's other
+ * long downloads (the audit-log export, the space backup) have no such bound because an administrator alone reaches them and nothing caps
+ * how many run; this one any reader of a space reaches, and two run at once. How it is measured, and what cannot be: `export/export-reader-pace.ts`.
  */
 export const RDF_EXPORT_MIN_BYTES_PER_SECOND = 16_384;
-/** How long a whole export runs before {@link RDF_EXPORT_MIN_BYTES_PER_SECOND} is asked, in milliseconds. */
-export const RDF_EXPORT_RATE_GRACE_MS = 60_000;
-let rate = { graceMs: RDF_EXPORT_RATE_GRACE_MS, minBytesPerSecond: RDF_EXPORT_MIN_BYTES_PER_SECOND };
+/** How much waiting on the reader one judgement of {@link RDF_EXPORT_MIN_BYTES_PER_SECOND} covers, in milliseconds. */
+export const RDF_EXPORT_RATE_WINDOW_MS = 60_000;
+let rate = { windowMs: RDF_EXPORT_RATE_WINDOW_MS, minBytesPerSecond: RDF_EXPORT_MIN_BYTES_PER_SECOND };
 /** The rate rule the REST door applies now. */
 export const rdfExportRate = (): Readonly<typeof rate> => rate;
 /** Replace the rate rule (a test that needs it to bind at once); `null` restores it. */
-export function setRdfExportRateForTest(r: { graceMs: number; minBytesPerSecond: number } | null): void {
-  rate = r ?? { graceMs: RDF_EXPORT_RATE_GRACE_MS, minBytesPerSecond: RDF_EXPORT_MIN_BYTES_PER_SECOND };
+export function setRdfExportRateForTest(r: { windowMs: number; minBytesPerSecond: number } | null): void {
+  rate = r ?? { windowMs: RDF_EXPORT_RATE_WINDOW_MS, minBytesPerSecond: RDF_EXPORT_MIN_BYTES_PER_SECOND };
 }
 
 /** How long a REST reader may take nothing before its export is cut and its slot freed, in milliseconds. */

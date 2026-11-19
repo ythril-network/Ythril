@@ -93,7 +93,7 @@ describe('an RDF export frees its slot when the reader leaves', { skip, timeout:
   });
 
   // The whole stream only: a page (at most 5 000 000 characters) fits in what the loopback socket buffers absorb, so its write never waits and
-  // an idle bound cannot be reached on loopback; the page path waits through the same `drainedWithin` (`api/brain/rdf.ts`).
+  // an idle bound cannot be reached on loopback; the page path waits through the same `pacedWriter` (`export/export-reader-pace.ts`).
   for (const [path, query] of [['the whole stream', '']]) {
     it(`${path}: a reader that stops reading is cut after the idle bound, and its slot is freed`, async () => {
       act.setRdfExportIdleMsForTest(1_000);
