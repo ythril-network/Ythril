@@ -157,7 +157,9 @@ describe('a property: its axioms and its shape, field by field', () => {
   const P = (prop) => treeAt(quads, termAt('entity', 'person', prop));
   const S = (prop) => treeAt(quads, shapeAt('entity', 'person', prop));
   const DT = (name) => ({ 'sh:datatype': [I(name)] });
-  const NOT_DECIMAL = { 'sh:not': [DT('xsd:decimal')] };
+  // A number may arrive as xsd:decimal (the record form) or xsd:integer (outside data): standards review row 14.
+  const NUMBER = () => LIST(DT('xsd:decimal'), DT('xsd:integer'));
+  const NOT_NUMBER = { 'sh:not': [{ 'sh:or': [NUMBER()] }] };
   const owned = (extra) => ({ 'rdf:type': [I('owl:DatatypeProperty'), I('owl:FunctionalProperty')], 'rdfs:isDefinedBy': [I(ONTOLOGY)], 'rdfs:domain': [I(termAt('entity', 'person'))], ...extra });
   const shape = (prop, extra) => ({ 'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I(termAt('entity', 'person', prop))], 'sh:name': [L(prop)], 'sh:maxCount': [INT(1)], ...extra });
 
@@ -167,18 +169,18 @@ describe('a property: its axioms and its shape, field by field', () => {
     })));
     assert.deepEqual(S('name'), norm(shape('name', {
       'sh:description': [L('The full name')], 'sh:datatype': [I('xsd:string')], 'sh:minCount': [INT(1)], 'sh:minLength': [INT(1)],
-      'sh:or': [LIST(DT('xsd:decimal'), DT('xsd:boolean'), { 'sh:pattern': [L('^[A-Za-z ]+$')] })], 'ythril:pattern': [L('^[A-Za-z ]+$')],
+      'sh:or': [LIST(DT('xsd:decimal'), DT('xsd:integer'), DT('xsd:boolean'), { 'sh:pattern': [L('^[A-Za-z ]+$')] })], 'ythril:pattern': [L('^[A-Za-z ]+$')],
     })));
   });
 
-  it('a number with a range: decimal facets on the range, guarded sh:minInclusive and sh:maxInclusive, each guard its own sh:or', () => {
+  it('a number with a range: decimal facets on the range, a decimal or an integer in the shape, guarded sh:minInclusive and sh:maxInclusive, each guard its own sh:or', () => {
     assert.deepEqual(P('age'), norm(owned({
       'rdfs:label': [L('age')], 'rdfs:comment': [L('Age in years')],
       'rdfs:range': [{ 'rdf:type': [I('rdfs:Datatype')], 'owl:onDatatype': [I('xsd:decimal')], 'owl:withRestrictions': [LIST({ 'xsd:minInclusive': [DEC(0)] }, { 'xsd:maxInclusive': [DEC(150)] })] }],
     })));
     assert.deepEqual(S('age'), norm(shape('age', {
-      'sh:description': [L('Age in years')], 'sh:datatype': [I('xsd:decimal')],
-      'sh:or': [LIST(NOT_DECIMAL, { 'sh:minInclusive': [DEC(0)] }), LIST(NOT_DECIMAL, { 'sh:maxInclusive': [DEC(150)] })],
+      'sh:description': [L('Age in years')],
+      'sh:or': [NUMBER(), LIST(NOT_NUMBER, { 'sh:minInclusive': [DEC(0)] }), LIST(NOT_NUMBER, { 'sh:maxInclusive': [DEC(150)] })],
     })));
   });
 
@@ -187,7 +189,7 @@ describe('a property: its axioms and its shape, field by field', () => {
       'rdfs:label': [L('status')], 'rdfs:range': [{ 'rdf:type': [I('rdfs:Datatype')], 'owl:oneOf': [LIST(L('active'), L('retired'))] }],
     })));
     assert.deepEqual(S('status'), norm(shape('status', { 'sh:datatype': [I('xsd:string')], 'sh:in': [LIST(L('active'), L('retired'))], 'sh:defaultValue': [L('active')] })));
-    assert.deepEqual(S('level')['sh:in'], norm([LIST(DEC(1), DEC(2), DEC(3))]));
+    assert.deepEqual(S('level')['sh:in'], norm([LIST(DEC(1), INT(1), DEC(2), INT(2), DEC(3), INT(3))]), 'sh:in compares terms: a whole number is listed in both datatypes');
     assert.deepEqual(P('level')['rdfs:range'], norm([{ 'rdf:type': [I('rdfs:Datatype')], 'owl:oneOf': [LIST(DEC(1), DEC(2), DEC(3))] }]));
   });
 
@@ -204,9 +206,9 @@ describe('a property: its axioms and its shape, field by field', () => {
   });
 
   it('a range or a pattern with no declared type is a guard only: no datatype, and no restriction the server does not apply to every value', () => {
-    assert.deepEqual(S('loose'), norm(shape('loose', { 'sh:or': [LIST(NOT_DECIMAL, { 'sh:minInclusive': [DEC(5)] })] })));
+    assert.deepEqual(S('loose'), norm(shape('loose', { 'sh:or': [LIST(NOT_NUMBER, { 'sh:minInclusive': [DEC(5)] })] })));
     assert.equal(P('loose')['rdfs:range'], undefined);
-    assert.deepEqual(S('code'), norm(shape('code', { 'sh:or': [LIST(DT('xsd:decimal'), DT('xsd:boolean'), { 'sh:pattern': [L('^A')] })], 'ythril:pattern': [L('^A')] })));
+    assert.deepEqual(S('code'), norm(shape('code', { 'sh:or': [LIST(DT('xsd:decimal'), DT('xsd:integer'), DT('xsd:boolean'), { 'sh:pattern': [L('^A')] })], 'ythril:pattern': [L('^A')] })));
     assert.equal(P('code')['rdfs:range'], undefined);
   });
 
@@ -235,7 +237,7 @@ describe('what does not fit its declared type is left out and named', () => {
       { where: 'entity:t.p', field: 'default', reason: 'does-not-fit-its-declared-type' },
     ]);
     const shape = treeAt(quads, shapeAt('entity', 't', 'p'));
-    assert.deepEqual(shape['sh:in'], norm([LIST(DEC(1), DEC(3))]));
+    assert.deepEqual(shape['sh:in'], norm([LIST(DEC(1), INT(1), DEC(3), INT(3))]));
     assert.equal(shape['sh:defaultValue'], undefined, 'no default is written for a value that is no number');
     assert.deepEqual(treeAt(quads, termAt('entity', 't', 'p'))['rdfs:range'], norm([{ 'rdf:type': [I('rdfs:Datatype')], 'owl:oneOf': [LIST(DEC(1), DEC(3))] }]));
   });

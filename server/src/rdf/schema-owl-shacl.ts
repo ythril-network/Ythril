@@ -274,6 +274,11 @@ interface PropertyFacts {
   declared: DeclaredType | undefined;
   /** The members that fit the declared type; `undefined` when the property states no enumeration (an empty one restricts nothing). */
   members: LiteralTerm[] | undefined;
+  /**
+   * The members as `sh:in` compares them, term by term: each whole-number decimal also as the `xsd:integer` outside data may write it
+   * (standards review row 14). OWL needs no twin: there `1` and `1.0` are one value.
+   */
+  shapeMembers: LiteralTerm[] | undefined;
   default: LiteralTerm | undefined;
   minimum: LiteralTerm | undefined;
   maximum: LiteralTerm | undefined;
@@ -286,16 +291,23 @@ function factsOf(out: Out, def: Bag, where: string): PropertyFacts {
   const declared = declaredOf(own(def, 'type'));
   const raw = own(def, 'enum');
   let members: LiteralTerm[] | undefined;
+  let shapeMembers: LiteralTerm[] | undefined;
   if (Array.isArray(raw) && raw.length > 0) {
     members = [];
+    shapeMembers = [];
     for (const member of raw) {
       const literal = out.literal(member, declared, where, 'enum');
-      if (literal !== undefined) members.push(literal);
+      if (literal === undefined) continue;
+      members.push(literal);
+      shapeMembers.push(literal);
+      const whole = literal.datatype === DATATYPE_OF.number && typeof member === 'number' ? literalForInteger(member) : null;
+      if (whole !== null) shapeMembers.push(whole);
     }
   }
   return {
     declared,
     members,
+    shapeMembers,
     default: out.literal(own(def, 'default'), declared, where, 'default'),
     minimum: out.literal(own(def, 'minimum'), 'number', where, 'minimum'),
     maximum: out.literal(own(def, 'maximum'), 'number', where, 'maximum'),
@@ -356,18 +368,26 @@ function propertyAxioms(out: Out, term: IriTerm, ontology: string, key: string, 
 }
 
 /**
- * The guarded constraints: a range is read only on a decimal, a pattern only on what is no decimal and no boolean, and only a pattern SHACL's
- * regular expressions read as the server does ({@link patternReadsAlike}); every pattern's own text is `ythril:pattern` on the shape.
+ * The datatypes a number may arrive as: `xsd:decimal`, as the record form writes it, and `xsd:integer`, as outside data writes a whole number
+ * (standards review row 14). `sh:datatype` compares the datatype exactly, so a shape names both.
+ */
+const NUMBER_DATATYPES: readonly IriTerm[] = Object.freeze([XSD('decimal'), XSD('integer')]);
+
+/** One `[ sh:datatype d ]` per number datatype: the members of an `sh:or` that a number satisfies. */
+const numberMembers = (out: Out): BlankTerm[] => NUMBER_DATATYPES.map(t => out.shapeWith(SH('datatype'), t));
+
+/**
+ * The guarded constraints: a range is read only on a number (either datatype), a pattern only on what is no number and no boolean, and only a
+ * pattern SHACL's regular expressions read as the server does ({@link patternReadsAlike}); every pattern's own text is `ythril:pattern` on the
+ * shape.
  */
 function guards(out: Out, shape: Subject, facts: PropertyFacts): void {
-  const notDecimal = (): BlankTerm => out.shapeWith(SH('not'), out.shapeWith(SH('datatype'), XSD('decimal')));
-  if (facts.minimum !== undefined) out.add(shape, SH('or'), list([notDecimal(), out.shapeWith(SH('minInclusive'), facts.minimum)]));
-  if (facts.maximum !== undefined) out.add(shape, SH('or'), list([notDecimal(), out.shapeWith(SH('maxInclusive'), facts.maximum)]));
+  const notNumber = (): BlankTerm => out.shapeWith(SH('not'), out.shapeWith(SH('or'), list(numberMembers(out))));
+  if (facts.minimum !== undefined) out.add(shape, SH('or'), list([notNumber(), out.shapeWith(SH('minInclusive'), facts.minimum)]));
+  if (facts.maximum !== undefined) out.add(shape, SH('or'), list([notNumber(), out.shapeWith(SH('maxInclusive'), facts.maximum)]));
   out.say(shape, YTHRIL('pattern'), facts.pattern);
   if (facts.pattern !== undefined && patternReadsAlike(facts.pattern)) {
-    out.add(shape, SH('or'), list([
-      out.shapeWith(SH('datatype'), XSD('decimal')), out.shapeWith(SH('datatype'), XSD('boolean')), out.shapeWith(SH('pattern'), plain(facts.pattern)),
-    ]));
+    out.add(shape, SH('or'), list([...numberMembers(out), out.shapeWith(SH('datatype'), XSD('boolean')), out.shapeWith(SH('pattern'), plain(facts.pattern))]));
   }
 }
 
@@ -384,8 +404,9 @@ function propertyShape(out: Out, shape: IriTerm, path: IriTerm, key: string, def
   out.say(shape, SH('description'), own(def, 'description'));
   out.add(shape, SH('maxCount'), integer(COUNT_ONE));
   if (facts.declared === 'date') out.add(shape, SH('or'), list(DATE_DATATYPES.map(t => out.shapeWith(SH('datatype'), t))));
+  else if (facts.declared === 'number') out.add(shape, SH('or'), list(numberMembers(out)));
   else if (facts.declared !== undefined) out.add(shape, SH('datatype'), iri(DATATYPE_OF[facts.declared]));
-  if (facts.members !== undefined) out.add(shape, SH('in'), list(facts.members));
+  if (facts.shapeMembers !== undefined) out.add(shape, SH('in'), list(facts.shapeMembers));
   guards(out, shape, facts);
   if (facts.required) {
     out.add(shape, SH('minCount'), integer(COUNT_ONE));
