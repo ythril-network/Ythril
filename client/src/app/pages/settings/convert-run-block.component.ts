@@ -81,16 +81,23 @@ export function stepPieces(say: PageTranslator, step: ConversionStep): SentenceP
 export type RunFooter =
   | { kind: 'review'; n: number }
   | { kind: 'reviewSoFar'; n: number }
-  | { kind: 'hint'; key: 'spaces.schema.convert.run.nothingToDo' | 'spaces.schema.convert.run.nothingLeft' };
+  | { kind: 'hint'; key: 'spaces.schema.convert.run.nothingToDo' | 'spaces.schema.convert.run.nothingLeft' }
+  | { kind: 'none' };
 
 const isRun = (s: ConvertStatusAnswer | null | undefined): s is ConvertStatus => !!s && s.state !== 'none' && s.state !== 'per_member';
 
+/**
+ * The progress dialog's footer: Open Review once the run has listed something (with "so far" while it runs), "Nothing left to review." after a
+ * run that listed nothing, and NOTHING while a run goes and has listed nothing yet: it may still list records, so "Nothing to do here." would be
+ * wrong in its first seconds (bundle-285 S10, drive D8). "Nothing to do here." is for a dialog that knows of no run at all.
+ */
 export function runFooterOf(status: ConvertStatusAnswer | null | undefined, notice: ConvertRunNotice | null | undefined): RunFooter {
   if (isRun(status) && notice?.state !== 'not_started') {
     const n = status.counts.unconverted;
     if (n > 0) return status.state === 'running' ? { kind: 'reviewSoFar', n } : { kind: 'review', n };
-    return { kind: 'hint', key: status.state === 'running' ? 'spaces.schema.convert.run.nothingToDo' : 'spaces.schema.convert.run.nothingLeft' };
+    return status.state === 'running' ? { kind: 'none' } : { kind: 'hint', key: 'spaces.schema.convert.run.nothingLeft' };
   }
+  if (!isRun(status) && notice?.state === 'started') return { kind: 'none' };
   return { kind: 'hint', key: notice ? 'spaces.schema.convert.run.nothingLeft' : 'spaces.schema.convert.run.nothingToDo' };
 }
 

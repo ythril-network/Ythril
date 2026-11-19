@@ -332,8 +332,13 @@ describe('the run block', () => {
       expect(runFooterOf(status({ counts: { stamped: 1, rewritten: 1, unconverted: 2, moved: 0, edgesRestamped: 0 } }), null)).toEqual({ kind: 'reviewSoFar', n: 2 });
     });
 
-    it('is a hint when there is nothing to open: "Nothing to do here." while it runs, "Nothing left to review." after', () => {
-      expect(runFooterOf(status(), null)).toEqual({ kind: 'hint', key: 'spaces.schema.convert.run.nothingToDo' });
+    it('says nothing about Review while a run goes and has listed nothing yet: it may still list some (bundle-285 S10)', () => {
+      expect(runFooterOf(status(), null)).toEqual({ kind: 'none' });
+      expect(runFooterOf(status({ counts: { stamped: 0, rewritten: 0, unconverted: 0, moved: 0, edgesRestamped: 0 } }), { state: 'started', types: [] })).toEqual({ kind: 'none' });
+      expect(runFooterOf(null, { state: 'started', types: [] }), 'begun, not read yet').toEqual({ kind: 'none' });
+    });
+
+    it('says "Nothing left to review." after a run that left nothing, and "Nothing to do here." when nothing is known', () => {
       expect(runFooterOf(status({ state: 'complete', left: 0 }), null)).toEqual({ kind: 'hint', key: 'spaces.schema.convert.run.nothingLeft' });
       expect(runFooterOf(null, { state: 'nothing', types: [] })).toEqual({ kind: 'hint', key: 'spaces.schema.convert.run.nothingLeft' });
       expect(runFooterOf(null, null)).toEqual({ kind: 'hint', key: 'spaces.schema.convert.run.nothingToDo' });

@@ -883,13 +883,14 @@ describe('the convert records dialog', () => {
       counts: { stamped: 41, rewritten: 599, unconverted: 0, moved: 0, edgesRestamped: 0 }, left: 100, failures: 0, ...over,
     });
 
-    it('running: says Schema saved, converting records, that closing keeps it running, and shows the run block; the footer says nothing is to do', () => {
+    it('running: says Schema saved, converting records, that closing keeps it running, and shows the run block; the footer says nothing about Review yet', () => {
       const host = mount('progress', { status: run() });
       expect(text(host, 'cv-title')).toBe('DLG-RUN-TITLE-RUNNING');
       expect(text(host, 'cv-lead')).toBe('DLG-RUN-KEEPS-RUNNING');
       expect(host.querySelector('app-convert-run-block [role="progressbar"]')).not.toBeNull();
-      expect(text(host, 'cv-foot-hint')).toBe('DLG-NOTHING-TO-DO');
+      expect(q(host, 'cv-foot-hint'), 'no "Nothing to do here." while the run may still list records (bundle-285 S10)').toBeNull();
       expect(q(host, 'cv-open-review')).toBeNull();
+      expect(text(host, 'cv-foot')).toBe('');
     });
 
     it('a run just begun (the save or start said started, no status read yet) is running, never finished (bundle-285 S10)', () => {
