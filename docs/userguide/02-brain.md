@@ -775,7 +775,10 @@ when you click it. See the integration guide's graph page, *Bodies in one call*.
 > Log names a space the watcher could not read (`Reindex resume failed for space '…' … — retried next tick`), and the
 > gauge `ythril_reindex_in_progress` keeps its last value meanwhile instead of showing too low a count. Records
 > whose rebuild fails are counted as *failed* and listed with the space's embedding jobs; if the embedding
-> service is unreachable, the reindex simply waits for it and strips nothing.
+> service is unreachable, the reindex simply waits for it and strips nothing. A record whose rebuild fails for another reason (a wrong
+> key, a wrong model name) keeps its stored vector while its job is still tried again, as long as the text is unchanged, and loses it only when the
+> job gives up; a record the embedder refuses as too large, or whose text changed meanwhile, loses it at once, because a vector kept
+> beside other text, or for a model the space no longer uses, would be searched.
 >
 > **A personal view has no Reindex button at all.** It holds no records of its own — the spaces it reads do — so it has
 > no index to rebuild. Open one of those spaces to reindex it.

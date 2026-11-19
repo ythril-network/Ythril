@@ -141,7 +141,11 @@ export async function runOneEmbedJob(opts: { heartbeatMs?: number } = {}): Promi
   try {
     // `gone` is a success: the record was deleted between the enqueue and the claim, so nothing is
     // owed. Retrying would keep a job alive for a document that will never come back.
-    const outcome = await embedStoredRecord(job.spaceId, job.recordType, job.recordId, { rebuild: job.rebuild === true });
+    // The job's own counters, so a failed rebuild knows whether this was the job's last try (`embedVerdictEndsJob`, the function `failEmbedJob` decides by).
+    const outcome = await embedStoredRecord(job.spaceId, job.recordType, job.recordId, {
+      rebuild: job.rebuild === true,
+      job: { attempts: job.attempts, lostChildFailures: job.lostChildFailures ?? 0 },
+    });
     // The embedder answered: the pause an outage began is over. Only a call that reached it says so (`unchanged`, `gone` and the rest never called it).
     if (outcome === 'embedded') embedderOutagePause.noteEmbedded();
     await completeEmbedJob(job.spaceId, job.recordType, job.recordId, job.claimToken);

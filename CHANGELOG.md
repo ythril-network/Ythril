@@ -132,6 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Media:** a file whose analysis becomes due at the moment the queue is looking is picked up at once. Before, a replaced or retried file could wait up to 30 seconds for the queue's next full look, and an embedding job the same way.
 - **Embeddings:** an embed job whose call could not reach its HTTP endpoint keeps its attempts and waits with back-off, and the worker pauses until the embedder answers; `ythril_embed_jobs_handed_back_total` counts each hand-back.
 - **Embeddings:** an embed job's fate is decided by the failure's class and its HTTP status, not by words in an embedder's error body; statuses 408, 429, 502 to 504, 520 to 524, 529 and 530 wait.
+- **Embeddings:** a reindex whose embed fails keeps a record's stored vector while its job is tried again and the text is unchanged, and drops it on the last try, a 413 or a changed text.
 - **Startup:** a `config.json` that is there but empty, null, not JSON or unreadable stops the start, naming the file, instead of opening first-run setup; the status door reports the boot's answer.
 - **Startup:** an unreadable `secrets.json`, `schema-library.json` or `schema-catalogs.json` stops the start by name instead of loading empty; the at-rest migration refuses an unreadable state file.
 - **Backups:** backups, offsite copy, restore and `backup.json` no longer read an unreadable path as absent: the offsite copy no longer skips users' files, and a restore no longer rejects a backup as holding no file.
