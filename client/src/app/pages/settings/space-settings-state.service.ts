@@ -116,8 +116,9 @@ export interface TypeSchemaState {
   /**
    * `_stored` and `_was` are the editor's own bookkeeping, like `_enumInput`: they never reach the wire. A property that existed when the
    * schema was opened or last saved is `_stored`; one renamed since carries the name it was stored under as `_was` (see `trackRename`).
+   * `_storedEnum` is a stored property's values as stored (`markStored`): a value removed since is shown struck until Save.
    */
-  propertySchemas: { key: string; s: PropertySchema; _enumInput: string; _stored?: boolean; _was?: string }[];
+  propertySchemas: { key: string; s: PropertySchema; _enumInput: string; _stored?: boolean; _was?: string; _storedEnum?: (string | number | boolean)[] }[];
   /**
    * The CEL rules of this type (F-46): an enforced constraint, so losing one on an unrelated save widens what the space accepts with no
    * message anywhere. Carried by every path that builds this state (the loader, a file, a library entry) and written by

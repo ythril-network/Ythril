@@ -117,7 +117,31 @@ export function renameProp(state: TypeSchemaState, from: string, to: string): Re
 export function markStored(state: TypeSchemaState): void {
   state._stored = true;
   delete state._was;
-  for (const entry of state.propertySchemas) { entry._stored = true; delete entry._was; }
+  for (const entry of state.propertySchemas) {
+    entry._stored = true;
+    delete entry._was;
+    // The values as stored, so the editor can show a stored value removed in this sitting struck until Save (drawing 1c, 2b); never on the wire.
+    if (Array.isArray(entry.s.enum)) entry._storedEnum = [...entry.s.enum];
+    else delete entry._storedEnum;
+  }
+}
+
+/** The stored values of a property that this sitting removed, in their stored order: what the editor shows struck. */
+export function removedEnumVals(entry: TypeSchemaState['propertySchemas'][number]): (string | number | boolean)[] {
+  const now = entry.s.enum ?? [];
+  return (entry._storedEnum ?? []).filter(v => !now.includes(v));
+}
+
+/** Put a removed stored value back, in its stored place among the values that are there. Nothing for a value that was not stored. */
+export function restoreEnumVal(state: TypeSchemaState, propKey: string, val: string | number | boolean): void {
+  const entry = state.propertySchemas.find(e => e.key === propKey);
+  const order = entry?._storedEnum;
+  if (!entry || !order?.includes(val)) return;
+  const now = entry.s.enum ?? [];
+  if (now.includes(val)) return;
+  const back = [...now, val];
+  const rank = (v: string | number | boolean): number => { const i = order.indexOf(v); return i < 0 ? order.length + back.indexOf(v) : i; };
+  entry.s = { ...entry.s, enum: back.sort((a, b) => rank(a) - rank(b)) };
 }
 
 /**
