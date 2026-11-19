@@ -80,7 +80,8 @@ describe('a shared space holds one rebase at a time', { skip }, () => {
       const second = await inst.doors[door](SPACE, { rdf: { enabled: true, base: B2, rebase: true } });
       assert.equal(second.refused, true, `a second rebase was taken while one is held: ${second.text.slice(0, 300)}`);
       assert.equal(second.status, 409, second.text.slice(0, 300));
-      assert.match(second.text, /rdf_rebase_pending/);
+      // REST answers the code in its body; MCP in its structured content.
+      assert.match(`${second.text} ${JSON.stringify(second.body ?? null)}`, /rdf_rebase_pending/);
       assert.ok(second.text.includes(B1), `the refusal names the held round's base: ${second.text.slice(0, 300)}`);
       assert.ok(second.text.includes(held.deadline), `the refusal names the held round's deadline: ${second.text.slice(0, 300)}`);
       assert.equal(rebaseRounds().length, 1, 'a second round was opened');
