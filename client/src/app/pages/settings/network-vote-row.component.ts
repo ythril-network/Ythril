@@ -1,6 +1,9 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
+import { ActiveLanguage } from '../../core/active-language';
 import type { VoteRound } from '../../core/api.types';
+import { formatList } from '../../core/list-format';
+import { PluralText } from '../../core/plural-text.service';
 import type { ConversionStep } from '../../core/conversion.types';
 import { orderedConversionSteps, roundTypeKey, voteTally } from '../../core/vote-round-view';
 import { InstantComponent } from '../../shared/instant.component';
@@ -71,7 +74,9 @@ import { VoteConversionBlockComponent } from './vote-conversion-block.component'
                 [attr.aria-label]="'networks.network.votes.vetoAria' | transloco: { type: (typeKey() | transloco), subject: round().subject }"
                 (click)="cast.emit('veto')">{{ 'networks.network.votes.veto' | transloco }}</button>
       </div>
-      @if (round().summary) {
+      @if (changesLine(); as line) {
+        <div class="vote-summary" data-testid="vote-changes">{{ line }}</div>
+      } @else if (round().summary) {
         <div class="vote-summary">{{ round().summary }}</div>
       }
       @if (conversionSteps(); as steps) {
@@ -87,8 +92,24 @@ export class NetworkVoteRowComponent {
   /** The voter's choice; the page confirms a veto and posts it. */
   cast = output<'yes' | 'veto'>();
 
+  private readonly plural = inject(PluralText);
+  private readonly language = inject(ActiveLanguage).language;
+
   protected typeKey = () => roundTypeKey(this.round().type);
   protected tally = () => voteTally(this.round());
+  /**
+   * For a schema change that carries a conversion, which types it changes, as drawn ("Changes to the type person."; several: one counted sentence),
+   * from the round's own `changedTypes` (`kind:type`). It stands where the server's summary would, which for such a round only says that someone
+   * proposes to update the schema. Null for any other round, or one that names no type: its summary is shown as before.
+   */
+  protected changesLine = (): string | null => {
+    const r = this.round();
+    if (r.type !== 'meta_change' || !r.convertRecords) return null;
+    const names = [...new Set((r.changedTypes ?? []).map(t => t.slice(t.indexOf(':') + 1)).filter(n => n !== ''))];
+    if (names.length === 0) return null;
+    return this.plural.text('networks.network.votes.convert.changes', names.length, { types: formatList(names, this.language()) });
+  };
+
   /** The steps of the conversion the round carries, or null when it carries none a voter can read: the row is then as it was before conversions. */
   protected conversionSteps = (): readonly ConversionStep[] | null => {
     const steps = this.round().convertRecords?.steps;
