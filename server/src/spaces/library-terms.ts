@@ -62,7 +62,7 @@ export function unusableNamespaces(): { group: string; reason: string }[] {
     const reason = unusableReason(ns);
     if (reason === undefined) continue;
     out.push({ group, reason });
-    saidOnce(group, () => log.warn(`schema library group ${peerText(group)}: its namespace in config.json names nothing: ${reason}`));
+    saidOnce(group, () => log.warn(`schema library group ${peerText(group)}: its namespace in config.json names nothing: ${peerText(reason)}`));
   }
   return out;
 }
