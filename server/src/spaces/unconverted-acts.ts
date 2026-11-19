@@ -44,7 +44,7 @@ import {
 } from '../brain/schema-convert-items.js';
 import {
   UNCONVERTED_REFUSAL_CODES, UNCONVERTED_STATUSES, UnconvertedFilterParams, UnconvertedListParams, UnconvertedDismissShownParams, refusalBody,
-  UNCONVERTED_REFUSAL_OPTIONS, type UnconvertedActResult, type UnconvertedCaller, type UnconvertedItem, type UnconvertedRow,
+  UNCONVERTED_REFUSAL_OPTIONS, listedUnconvertedViolations, type UnconvertedActResult, type UnconvertedCaller, type UnconvertedItem, type UnconvertedRow,
 } from './unconverted-terms.js';
 import { CHOSEN_VERSION_ROWS } from '../brain/chosen-versions.js';
 import { mapToRecallResult } from '../brain/recall-result.js';
@@ -76,8 +76,9 @@ const ITEM_ID_MAX = TYPE_NAME_MAX;
 const SUMMARY_MAX = 160;
 
 const rowOf = (item: ListedUnconvertedItem): UnconvertedRow => {
-  const { _id, typeDefinition: _definition, record, ...rest } = item;
-  return { itemId: _id, ...rest, ...(record ? { record } : {}) };
+  const { _id, typeDefinition: _definition, record, violations, ...rest } = item;
+  // Read tolerantly (Q-943): an item stored before violations had codes is listed with its field and reason only, never rewritten.
+  return { itemId: _id, ...rest, violations: listedUnconvertedViolations(violations), ...(record ? { record } : {}) };
 };
 
 /** The fields the summary line of each kind is made from, and no others: a read of a record for this list never reads a property. */

@@ -29,8 +29,11 @@ export const UNKNOWN_FIELD_CODE = 'unknown_field';
 /** What happened to the write whose body carried the field: the judge let it proceed (`stored`) or the write was refused (`refused`). */
 export type UnknownFieldOutcome = 'stored' | 'refused';
 
-/** A row naming one unknown field (or the `…(+N more)` row that counts the rest): a violation row with the stable `code`. */
-export type UnknownFieldRow = SchemaViolation & { code: typeof UNKNOWN_FIELD_CODE };
+/**
+ * A row naming one unknown field (or the `…(+N more)` row that counts the rest): the shape of a violation row, with its own stable `code`
+ * and no `params` — it is about the write's body, not the space's schema, so it is not one of `SCHEMA_VIOLATION_CODES`.
+ */
+export type UnknownFieldRow = Omit<SchemaViolation, 'code' | 'params'> & { code: typeof UNKNOWN_FIELD_CODE };
 
 /** How the wording of a row begins; the MCP text line is the same words after its own label. */
 const LEAD = 'unknown field — ';

@@ -110,7 +110,7 @@ export const IMPORT_PAGE_SIZE = 500;
  */
 export interface ImportViolation {
   _id: string;
-  violations: Array<Pick<SchemaViolation, 'field' | 'reason'>>;
+  violations: Array<Pick<SchemaViolation, 'field' | 'reason' | 'code' | 'params'>>;
 }
 
 /** How many documents a restore's answer names; `schemaViolationsTotal` says how many there were. */
@@ -391,8 +391,9 @@ export async function importPage(family: BrainCollection, docs: readonly unknown
     const rows = [...recorded];
     result.schemaViolations = cutInto(result.schemaViolations, rows.slice(0, IMPORT_VIOLATIONS_NAMED).map(([doc, found]) => ({
       _id: peerText(doc._id),
-      // The one bounded renderer, without values (an import's report never carries one), then the report's own two fields.
-      violations: boundedRows(found, { value: false }).map(({ field, reason }) => ({ field, reason })),
+      // The one bounded renderer, without values (an import's report never carries one), then the report's own fields: the field, the
+      // sentence, and the code and params a screen words it by (Q-943).
+      violations: boundedRows(found, { value: false }).map(({ field, reason, code, params }) => ({ field, reason, code, params })),
     })), IMPORT_VIOLATIONS_NAMED);
     result.schemaViolationsTotal = (result.schemaViolationsTotal ?? 0) + rows.length;
     if (result.schemaViolationsTotal > IMPORT_VIOLATIONS_NAMED) result.schemaViolationsTruncated = true;

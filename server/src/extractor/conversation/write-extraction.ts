@@ -32,7 +32,7 @@
  * `sourceTurns`: returned keyed by record id, stored in no record — every property is folded into the embedded
  * text, and a turn id is noise in every vector of the space.
  */
-import { bulkWrite, BULK_MAX_PER_TYPE, type BulkInput, type BulkResult, type BulkWriteTrust } from '../../brain/bulk.js';
+import { bulkWrite, BULK_MAX_PER_TYPE, type BulkInput, type BulkResult, type BulkWriteTrust, type BulkError } from '../../brain/bulk.js';
 import { INSTANCE_WRITTEN_PROPERTY_KEYS } from '../../spaces/schema-validation.js';
 import type { ValidationMode } from '../../config/types.js';
 import { storeFile } from '../../files/store-file.js';
@@ -63,7 +63,14 @@ const DOOR: ExtractionWriters = {
   linkFile: (spaceId, path, links) => updateFileMeta(spaceId, path, links),
 };
 
-export interface WriteError { phase: 'entities' | 'claims' | 'chrono' | 'edges' | 'transcripts'; key?: string; reason: string }
+/**
+ * A record the write refused, or warned about: its step, its key, the batch row's reason and, when the batch row carried them, the schema
+ * refusal's structured body (`violation`) or the warned violation (`warning`), each with its rows' `code` and `params` (Q-943).
+ */
+export interface WriteError {
+  phase: 'entities' | 'claims' | 'chrono' | 'edges' | 'transcripts'; key?: string; reason: string;
+  violation?: BulkError['violation']; warning?: BulkError['warning'];
+}
 
 export interface WriteOutcome {
   written: { entities: number; claims: number; chrono: number; edges: number; transcripts: number };
@@ -106,7 +113,7 @@ export async function writeExtraction(
       for (const [key, ref] of Object.entries(r.refs ?? {})) ids[key] = ref.id;
       for (const e of r.errors) {
         const key = keyOf(at + e.index);
-        errors.push({ phase, ...(key !== undefined ? { key } : {}), reason: e.reason });
+        errors.push({ phase, ...(key !== undefined ? { key } : {}), reason: e.reason, ...(e.violation ? { violation: e.violation } : {}), ...(e.warning ? { warning: e.warning } : {}) });
       }
     }
     return items.length - errors.filter(e => e.phase === phase).length;

@@ -33,7 +33,7 @@ import { KNOWLEDGE_TYPES } from '../config/types-knowledge.js';
 import type { SpaceMeta, TypeSchema } from '../config/types.js';
 import { getConfig } from '../config/loader.js';
 import { ALL_VIEW_FIELDS, VIEW_FIELDS, viewFieldValue, type RecordView, type ViewField, type ViewKind } from '../brain/record-view.js';
-import type { SchemaViolation } from './schema-validation.js';
+import { schemaViolation, type SchemaViolation, type RuleInputBound, type RuleNotEvaluatedCause } from './schema-violation-codes.js';
 import { withLibraryDefinitions } from './library-ref-expansion.js';
 import { LruMap } from '../util/lru-map.js';
 import { warnOnce } from '../util/warn-once.js';
@@ -135,27 +135,33 @@ function overCodePoints(s: string, cap: number): boolean {
   return false;
 }
 
-/** Whether `v` is over the input caps, and if so a value-free word for how. */
-function oversize(v: unknown, depth = 0): string | undefined {
-  if (typeof v === 'string') return overCodePoints(v, LONGEST_CHECKED_STRING) ? `longer than ${LONGEST_CHECKED_STRING} characters` : undefined;
+/** How deep a map a rule reads may nest before it is too large to check. */
+const DEPTH_CAP = 8;
+
+/** Which cap a value is over, and the cap: value-free, worded by the violation's code (`rule_too_large`). */
+interface Oversize { bound: RuleInputBound; limit: number }
+
+/** Whether `v` is over the input caps, and if so which cap. */
+function oversize(v: unknown, depth = 0): Oversize | undefined {
+  if (typeof v === 'string') return overCodePoints(v, LONGEST_CHECKED_STRING) ? { bound: 'characters', limit: LONGEST_CHECKED_STRING } : undefined;
   if (Array.isArray(v)) {
-    if (v.length > LIST_CAP) return `a list of more than ${LIST_CAP}`;
+    if (v.length > LIST_CAP) return { bound: 'list', limit: LIST_CAP };
     for (const x of v) { const why = oversize(x, depth + 1); if (why) return why; }
     return undefined;
   }
   if (isPlainObject(v)) {
-    if (depth > 8) return 'nested too deeply';
+    if (depth > DEPTH_CAP) return { bound: 'depth', limit: DEPTH_CAP };
     const keys = Object.keys(v);
-    if (keys.length > MAP_CAP) return `a map of more than ${MAP_CAP}`;
+    if (keys.length > MAP_CAP) return { bound: 'map', limit: MAP_CAP };
     for (const k of keys) { const why = oversize(v[k], depth + 1); if (why) return why; }
   }
   return undefined;
 }
 
-/** Which path the rule reads is over the caps, as `self.<path> is <how>`, or `undefined`. Only what the rule reads is measured. */
-function tooLarge(refs: Refs, self: Record<string, unknown>): string | undefined {
+/** Which path the rule reads is over the caps (`self.<path>`, the path without `self.`), and which cap, or `undefined`. Only what the rule reads is measured. */
+function tooLarge(refs: Refs, self: Record<string, unknown>): (Oversize & { path: string }) | undefined {
   const props = (isPlainObject(self['properties']) ? self['properties'] : {}) as Record<string, unknown>;
-  const check = (path: string, v: unknown): string | undefined => { const why = oversize(v); return why ? `self.${path} is ${why}` : undefined; };
+  const check = (path: string, v: unknown): (Oversize & { path: string }) | undefined => { const why = oversize(v); return why ? { path, ...why } : undefined; };
   if (refs.whole) for (const [k, v] of Object.entries(self)) { const why = check(k, v); if (why) return why; }
   for (const f of refs.fields) { const why = check(f, self[f]); if (why) return why; }
   for (const p of refs.props) { const why = check(`properties.${quoted(p)}`, props[p]); if (why) return why; }
@@ -229,41 +235,39 @@ function runCounted(program: Extract<Program, { ok: true }>, self: Record<string
 /** The rows the rules of `meta` give `view`, a `kind` record of type schema `typeSchema` (resolved). Nothing when validation is off. */
 export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView, typeSchema: TypeSchema | undefined): SchemaViolation[] {
   if (meta?.validationMode !== 'warn' && meta?.validationMode !== 'strict') return [];
-  const sources: { field: string; rule: StoredRule; level: 'type' | 'space'; declared: ReadonlySet<string> | null }[] = [];
+  const sources: { field: string; name: string; rule: StoredRule; level: 'type' | 'space'; declared: ReadonlySet<string> | null }[] = [];
   if (isPlainObject(typeSchema) && isPlainObject((typeSchema as Record<string, unknown>)['rules'])) {
     const declared = new Set(Object.keys(typeSchema.propertySchemas ?? {}));
-    for (const [name, r] of rulesIn((typeSchema as Record<string, unknown>)['rules'])) sources.push({ field: `rules.${name}`, rule: r, level: 'type', declared });
+    for (const [name, r] of rulesIn((typeSchema as Record<string, unknown>)['rules'])) sources.push({ field: `rules.${name}`, name, rule: r, level: 'type', declared });
   }
   for (const [name, r] of rulesIn((meta as Record<string, unknown>)['rules'])) {
-    if (spaceRuleKinds(r).includes(kind)) sources.push({ field: `meta.rules.${name}`, rule: r, level: 'space', declared: null });
+    if (spaceRuleKinds(r).includes(kind)) sources.push({ field: `meta.rules.${name}`, name, rule: r, level: 'space', declared: null });
   }
   if (sources.length === 0) return [];
 
   const rows: SchemaViolation[] = [];
   const self = engineSelf(kind, view);
   const own = boundPrograms.get(meta);
-  for (const { field, rule, level, declared } of sources) {
-    const hash = ruleHash(rule.rule);
-    const addRow = (reason: string, reads?: Refs, outcome?: SchemaViolation['outcome']): void => {
-      const row: SchemaViolation = { field, value: undefined, reason, ...(outcome ? { outcome } : {}) };
+  for (const { field, name, rule, level, declared } of sources) {
+    const named = { rule: name, message: rule.message, hash: ruleHash(rule.rule) };
+    const addRow = (row: SchemaViolation, reads?: Refs): void => {
       if (reads) rowReads.set(row, reads);
       rows.push(row);
     };
-    // A rule that could not judge the record: a violation that says which, by its `outcome` as well as in its reason.
-    const say = (outcome: NonNullable<SchemaViolation['outcome']>, what: string, reads?: Refs): void => {
-      addRow(`${rule.message} — ${what} (rule ${hash})`, reads, outcome);
+    // A rule that could not judge the record: a violation that says which, by its `outcome` as well as by its code and cause.
+    const couldNot = (cause: RuleNotEvaluatedCause, reads?: Refs): void => {
+      addRow(schemaViolation('rule_not_evaluated', { ...named, cause }, field, undefined, { outcome: 'could_not_evaluate' }), reads);
     };
-    const couldNot = (why: string, reads?: Refs): void => { say('could_not_evaluate', `could not be evaluated on this record (${why})`, reads); };
-    if (!ruleEngineAvailable()) { couldNot('the rule engine is not available'); continue; }
+    if (!ruleEngineAvailable()) { couldNot('engine_unavailable'); continue; }
     const program = programFor(kind, level, declared, rule.rule, own);
     if (!program.ok) continue; // dead: skipped here, reported by invalidRulesOf and the boot check
     if ([...program.refs.props].some(p => !Object.hasOwn(view.properties, p))) continue; // absent: the rule does not apply
     const large = tooLarge(program.refs, self);
-    if (large) { say('too_large', `too large to check: ${large}`, program.refs); continue; }
+    if (large) { addRow(schemaViolation('rule_too_large', { ...named, ...large }, field, undefined, { outcome: 'too_large' }), program.refs); continue; }
     const out = runCounted(program, self);
-    if (cel!.isCelError(out)) couldNot(/overload/i.test(out.message) ? 'a value of a type the rule does not compare' : 'an evaluation error', program.refs);
-    else if (typeof out !== 'boolean') couldNot('it did not answer true or false', program.refs);
-    else if (!out) addRow(`${rule.message} (rule ${hash})`, program.refs);
+    if (cel!.isCelError(out)) couldNot(/overload/i.test(out.message) ? 'type_mismatch' : 'evaluation_error', program.refs);
+    else if (typeof out !== 'boolean') couldNot('not_boolean', program.refs);
+    else if (!out) addRow(schemaViolation('rule', named, field, undefined), program.refs);
   }
   return rows;
 }

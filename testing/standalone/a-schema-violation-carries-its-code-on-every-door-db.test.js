@@ -133,7 +133,8 @@ describe('a schema violation carries its code on every door', { skip }, () => {
       const violation = schemaViolation('type', { type: 'number', got: 'string' }, 'properties.age', 'x');
       assert.equal(await recordUnconvertedItem(STRICT, { kind: 'entity', record: fresh, toFp: 'f'.repeat(64), reason: 'not_conforming', violations: [violation] }, undefined), 'written');
       const oldId = randomUUID();
-      await pins.door.coll(STRICT, 'schemaConvertItems').insertOne({
+      // The item store's own collection (`spaceCollection(space, 'schemaConvertItems')`), written raw as an older release stored it.
+      await pins.door.coll(STRICT, 'schema_convert_items').insertOne({
         _id: `old-${oldId}`, kind: 'entity', recordId: oldId, type: 'person', seq: 1, fromFp: null, toFp: 'f'.repeat(64), typeDefinition: 'd',
         reason: 'not_conforming', violations: [{ field: 'properties.age', reason: "expected type 'number', got 'string'" }],
         proposed: { set: [], unset: [] }, status: 'open', detectedAt: '2026-01-01T00:00:00.000Z',

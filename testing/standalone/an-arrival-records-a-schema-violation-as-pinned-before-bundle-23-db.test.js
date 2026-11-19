@@ -52,6 +52,8 @@ const MODES = ['strict', 'warn', 'off'];
 const spaceOf = (mode) => `arrive${mode}`;
 const TOKEN = Object.freeze({ rights: { perSpace: {}, spaceAdmin: { floor: true, spaces: [] } }, peerInstanceId: PEER });
 const NUMBER_GOT_STRING = "expected type 'number', got 'string'";
+// Q-943: each row also carries its code and params (added data; the rows are otherwise as pinned).
+const NUMBER = { code: 'type', params: { type: 'number', got: 'string' } };
 
 const meta = (validationMode) => ({
   validationMode,
@@ -75,28 +77,28 @@ const FAMILIES = {
     key: 'entities', collection: 'entities', single: '/entities', statusOnSingle: 'ok',
     bad: (s, id, seq) => build.entity(s, id, seq, { type: 'person', properties: { age: 'old' }, author: { ...PEER_AUTHOR } }),
     ok: (s, id, seq) => build.entity(s, id, seq, { type: 'person', properties: { age: 3 }, author: { ...PEER_AUTHOR } }),
-    row: { field: 'properties.age', value: 'old', reason: NUMBER_GOT_STRING },
+    row: { field: 'properties.age', value: 'old', reason: NUMBER_GOT_STRING, ...NUMBER },
     counts: (n) => ({ upserted: 2, skipped: 0, tombstoned: 0, schemaViolations: n, rejected: 0, forked: 0, forkDepthRefused: 0, invalidFork: 0 }),
   },
   facts: {
     key: 'facts', collection: 'facts', single: '/facts', statusOnSingle: 'inserted',
     bad: (s, id, seq) => build.fact(s, id, seq, { type: 'claim', properties: { confidence: 'high' }, author: { ...PEER_AUTHOR } }),
     ok: (s, id, seq) => build.fact(s, id, seq, { type: 'claim', properties: { confidence: 2 }, author: { ...PEER_AUTHOR } }),
-    row: { field: 'properties.confidence', value: 'high', reason: NUMBER_GOT_STRING },
+    row: { field: 'properties.confidence', value: 'high', reason: NUMBER_GOT_STRING, ...NUMBER },
     counts: (n) => ({ inserted: 2, updated: 0, forked: 0, skipped: 0, forkDepthRefused: 0, tombstoned: 0, schemaViolations: n, rejected: 0, invalidFork: 0 }),
   },
   edges: {
     key: 'edges', collection: 'edges', single: '/edges', statusOnSingle: 'ok',
     bad: (s, id, seq) => build.edge(s, id, seq, { label: 'knows', properties: { since: 'long ago' }, author: { ...PEER_AUTHOR } }),
     ok: (s, id, seq) => build.edge(s, id, seq, { label: 'knows', properties: { since: 1 }, author: { ...PEER_AUTHOR } }),
-    row: { field: 'properties.since', value: 'long ago', reason: NUMBER_GOT_STRING },
+    row: { field: 'properties.since', value: 'long ago', reason: NUMBER_GOT_STRING, ...NUMBER },
     counts: (n) => ({ upserted: 2, skipped: 0, tombstoned: 0, schemaViolations: n, duplicateTriplets: 0, rejected: 0, forked: 0, forkDepthRefused: 0, invalidFork: 0 }),
   },
   chrono: {
     key: 'chrono', collection: 'chrono', single: '/chrono', statusOnSingle: 'ok',
     bad: (s, id, seq) => build.chrono(s, id, seq, { type: 'event', properties: { priority: 'urgent' }, author: { ...PEER_AUTHOR } }),
     ok: (s, id, seq) => build.chrono(s, id, seq, { type: 'event', properties: { priority: 'low' }, author: { ...PEER_AUTHOR } }),
-    row: { field: 'properties.priority', value: 'urgent', reason: 'must be one of: low, high' },
+    row: { field: 'properties.priority', value: 'urgent', reason: 'must be one of: low, high', code: 'enum', params: { allowedValues: ['low', 'high'] } },
     counts: (n) => ({ upserted: 2, skipped: 0, tombstoned: 0, schemaViolations: n, unknownType: 0, rejected: 0, forked: 0, forkDepthRefused: 0, invalidFork: 0 }),
   },
 };
@@ -208,7 +210,7 @@ describe('an arriving record that breaks the schema, as push, pull and import re
         if (mode === 'off') assert.deepEqual(out.results.entities, { inserted: 1, updated: 0, errors: 0 });
         else assert.deepEqual(out.results.entities, {
           inserted: 1, updated: 0, errors: 0, schemaViolationsTotal: 1,
-          schemaViolations: [{ _id: 'imp-bad', violations: [{ field: 'properties.age', reason: NUMBER_GOT_STRING }] }],
+          schemaViolations: [{ _id: 'imp-bad', violations: [{ field: 'properties.age', reason: NUMBER_GOT_STRING, ...NUMBER }] }],
         });
         assert.deepEqual(out.results.facts, { inserted: 1, updated: 0, errors: 0 });
         assert.equal(await door.coll(space, 'entities').countDocuments({ _id: 'imp-bad' }), 1, 'a violating import document was not stored');

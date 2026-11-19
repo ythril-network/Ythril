@@ -86,7 +86,8 @@ describe('a refused bulk item reports the one refusal body beside its reason', {
         assert.deepEqual(Object.keys(row.violation).sort(), ['error', 'introduced', 'message', 'preExisting'],
           'the row\'s violation is not the refusal body without its duplicate `violations` list');
         assert.equal(row.violation.error, 'schema_violation');
-        assert.deepEqual(row.violation.introduced, [{ field: 'properties.age', value: 12, reason: 'must be <= 10' }]);
+        // Q-943: the row also carries its code and params (added data).
+        assert.deepEqual(row.violation.introduced, [{ field: 'properties.age', value: 12, reason: 'must be <= 10', code: 'maximum', params: { comparison: '<=', limit: 10 } }]);
         assert.deepEqual(row.violation.preExisting, []);
         assert.match(row.violation.message, /properties\.age/);
         assert.equal(row.reason, 'schema_violation: must be <= 10', 'the published reason string changed for a plain refusal');

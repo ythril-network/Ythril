@@ -30,10 +30,10 @@ import { TYPE_FIELD } from './ttl.js';
 import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 import { pageMemberList, type ListPage, type ListPageRequest } from './list-page.js';
 import { defaultBudgetChars } from './result-budget.js';
-import { peerText } from '../util/log.js';
 import { isPlainObject } from '../util/plain-object.js';
 import {
-  UNCONVERTED_REASONS, UNCONVERTED_DISMISS_MAX, UNCONVERTED_OPEN_BY_MAX, type UnconvertedReason, type UnconvertedItem,
+  UNCONVERTED_REASONS, UNCONVERTED_DISMISS_MAX, UNCONVERTED_OPEN_BY_MAX, unconvertedViolationOf, type UnconvertedReason, type UnconvertedItem,
+  type UnconvertedViolation,
 } from '../spaces/unconverted-terms.js';
 
 // What an item is, its reason classes and the bulk dismissal's bound are terms the store, the acts and both doors share (`spaces/unconverted-terms.ts`);
@@ -46,8 +46,6 @@ export const UNCONVERTED_VIOLATIONS_MAX = 20;
 export const UNCONVERTED_ITEMS_PER_RUN_MAX = 10_000;
 /** The most items one tick of the watcher judges in one space. */
 export const UNCONVERTED_SWEEP_PER_TICK = 500;
-/** The longest reason an item keeps for one violation. */
-const REASON_MAX = 300;
 /** Hex characters of an item id: half a sha-256, as unique per space as a record id needs. */
 const ITEM_ID_HEX = 32;
 /** The page size a list states none for, and the largest it serves. */
@@ -60,7 +58,7 @@ export interface UnconvertedInput {
   record: { _id: string; seq?: unknown; [field: string]: unknown };
   toFp: string;
   reason: UnconvertedReason;
-  violations?: readonly { field: string; reason: string }[];
+  violations?: readonly UnconvertedViolation[];
   proposed?: { type?: string; set?: Record<string, unknown> | readonly string[]; unset?: readonly string[] };
 }
 
@@ -111,8 +109,8 @@ export async function recordUnconvertedItem(spaceId: string, input: UnconvertedI
     toFp: input.toFp,
     typeDefinition: typeDefinitionOf(meta, input.kind, type),
     reason: input.reason,
-    violations: (input.violations ?? []).slice(0, UNCONVERTED_VIOLATIONS_MAX)
-      .map(v => ({ field: peerText(v.field, { max: REASON_MAX }), reason: peerText(v.reason, { max: REASON_MAX }) })),
+    // Each with its code and params (Q-943), bounded as the reason is: the item writer's one mapping.
+    violations: (input.violations ?? []).slice(0, UNCONVERTED_VIOLATIONS_MAX).map(unconvertedViolationOf),
     proposed: {
       ...(input.proposed?.type !== undefined ? { type: input.proposed.type } : {}),
       set: Array.isArray(set) ? [...set] : Object.keys(set ?? {}),

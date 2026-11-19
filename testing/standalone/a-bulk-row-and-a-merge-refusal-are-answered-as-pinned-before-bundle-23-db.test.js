@@ -51,6 +51,9 @@ const AUTHOR = { instanceId: 'pinmerge-receiver', instanceLabel: 'Receiver' };
 
 const NUMBER_GOT_STRING = "expected type 'number', got 'string'";
 const STRING_GOT_NUMBER = "expected type 'string', got 'number'";
+// Q-943: each row also carries its code and params (added data; the rows are otherwise as pinned).
+const NUMBER = { code: 'type', params: { type: 'number', got: 'string' } };
+const EMPLOYS_FROM = { code: 'endpoint_type', params: { label: 'employs', end: 'from', allowedValues: ['org'] } };
 
 let pins, ids, warnIds, handlers, raiseVersionTo;
 
@@ -93,9 +96,9 @@ describe('bulk rows and a merge refusal, as the doors answer them before bundle-
           // bundle-23: r4.1 + R5-3 Q-315 (a bulk row gains `violation`, the structured refusal; `reason` stays the published string) — was { type, index, reason } only
           assert.deepEqual(out.errors, [
             { type: 'entity', index: 1, reason: `schema_violation: ${NUMBER_GOT_STRING}`,
-              violation: { error: 'schema_violation', message: "The change violates this space's schema: properties.age.", introduced: [{ field: 'properties.age', reason: NUMBER_GOT_STRING, value: 'old' }], preExisting: [] } },
+              violation: { error: 'schema_violation', message: "The change violates this space's schema: properties.age.", introduced: [{ field: 'properties.age', reason: NUMBER_GOT_STRING, value: 'old', ...NUMBER }], preExisting: [] } },
             { type: 'edge', index: 0, reason: "schema_violation: 'employs' declares its from endpoint as one of: org",
-              violation: { error: 'schema_violation', message: "The change violates this space's schema: fromType.", introduced: [{ field: 'fromType', reason: "'employs' declares its from endpoint as one of: org", value: 'person' }], preExisting: [] } },
+              violation: { error: 'schema_violation', message: "The change violates this space's schema: fromType.", introduced: [{ field: 'fromType', reason: "'employs' declares its from endpoint as one of: org", value: 'person', ...EMPLOYS_FROM }], preExisting: [] } },
           ]);
           assert.deepEqual([out.inserted.entities, out.inserted.edges], [1, 0], 'one refused item hid the others, or a refused item was stored');
           const names = (await pins.stored(STRICT, 'entity')).map(d => d.name);
@@ -128,8 +131,11 @@ describe('bulk rows and a merge refusal, as the doors answer them before bundle-
             edges: [{ from: warnIds.person1, to: warnIds.person2, label: 'employs' }],
           });
           assert.deepEqual(out.errors, [
-            { type: 'entity', index: 0, reason: `schema_warning: properties.age — ${NUMBER_GOT_STRING}` },
-            { type: 'edge', index: 0, reason: "schema_warning: fromType — 'employs' declares its from endpoint as one of: org" },
+            // Q-943: the warned violation rides beside the sentence as `warning` (added data).
+            { type: 'entity', index: 0, reason: `schema_warning: properties.age — ${NUMBER_GOT_STRING}`,
+              warning: { field: 'properties.age', value: 'old', reason: NUMBER_GOT_STRING, ...NUMBER } },
+            { type: 'edge', index: 0, reason: "schema_warning: fromType — 'employs' declares its from endpoint as one of: org",
+              warning: { field: 'fromType', value: 'person', reason: "'employs' declares its from endpoint as one of: org", ...EMPLOYS_FROM } },
           ]);
           assert.deepEqual([out.inserted.entities, out.inserted.edges], [1, 1]);
           assert.ok((await pins.stored(WARN, 'entity')).some(d => d.name === 'Warned One'), 'the warned item did not land');
@@ -150,7 +156,7 @@ describe('bulk rows and a merge refusal, as the doors answer them before bundle-
       assert.equal(out.text,
         'bulk_write complete — inserted: {"facts":0,"entities":0,"edges":0,"chrono":0}, updated: {"facts":0,"entities":0,"edges":0,"chrono":0}, '
         + 'connections: {"links":0,"edges":0}, errors: 1\n'
-        + `[{"type":"entity","index":0,"reason":"schema_violation: ${NUMBER_GOT_STRING}","violation":{"error":"schema_violation","message":"The change violates this space's schema: properties.age.","introduced":[{"field":"properties.age","reason":"${NUMBER_GOT_STRING}","value":"old"}],"preExisting":[]}}]`);
+        + `[{"type":"entity","index":0,"reason":"schema_violation: ${NUMBER_GOT_STRING}","violation":{"error":"schema_violation","message":"The change violates this space's schema: properties.age.","introduced":[{"field":"properties.age","reason":"${NUMBER_GOT_STRING}","code":"type","params":{"type":"number","got":"string"},"value":"old"}],"preExisting":[]}}]`);
     });
   });
 
@@ -199,13 +205,14 @@ describe('bulk rows and a merge refusal, as the doors answer them before bundle-
         name: 'a survivor of a type outside the space\'s entity allowlist',
         type: 'thing', survivor: {}, absorbed: {},
         what: 'type: not in entityTypes allowlist: person, org',
-        violations: [{ field: 'type', value: 'thing', reason: 'not in entityTypes allowlist: person, org' }],
+        violations: [{ field: 'type', value: 'thing', reason: 'not in entityTypes allowlist: person, org',
+          code: 'type_not_allowed', params: { allowlist: 'entityTypes', allowedValues: ['person', 'org'] } }],
       },
       {
         name: 'a survivor that takes a property value of the wrong type from the absorbed entity',
         type: 'person', survivor: { age: 3 }, absorbed: { rank: 5 },
         what: `properties.rank: ${STRING_GOT_NUMBER}`,
-        violations: [{ field: 'properties.rank', value: 5, reason: STRING_GOT_NUMBER }],
+        violations: [{ field: 'properties.rank', value: 5, reason: STRING_GOT_NUMBER, code: 'type', params: { type: 'string', got: 'number' } }],
       },
     ];
 
@@ -248,7 +255,8 @@ describe('bulk rows and a merge refusal, as the doors answer them before bundle-
         const out = await merge(STRICT, p);
         // bundle-23: R6-10 Q-93 (keys brought in from the absorbed record are introduced in strict; the merge keeps 400) — was 200, merged and stored
         const error = sentence(STRICT, p, "properties.zzNotDeclared: property 'zzNotDeclared' is not declared on this type");
-        const violations = [{ field: 'properties.zzNotDeclared', value: 1, reason: "property 'zzNotDeclared' is not declared on this type", declared: ['age', 'rank'] }];
+        const violations = [{ field: 'properties.zzNotDeclared', value: 1, reason: "property 'zzNotDeclared' is not declared on this type", declared: ['age', 'rank'],
+          code: 'additional_properties', params: { additionalProperty: 'zzNotDeclared' } }];
         const standard = { error: 'schema_violation', message: error, introduced: violations, preExisting: [], violations };
         assert.equal(out.status, 400, JSON.stringify(out));
         if (door === 'graph_merge') assert.deepEqual(out.structured, standard);
