@@ -765,20 +765,22 @@ describe('the interrupt hook of the real process', () => {
   /** Exit codes a shell reports for each of them: 128 plus the signal's number. */
   const EXIT_CODE = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
 
-  it('registers all three signals, runs the handler once per signal, and ends the process with the signal\'s code afterwards', async () => {
+  it('registers all three signals, runs the handler once per signal, records the signal\'s exit code and does NOT end the process itself', async () => {
     for (const signal of SIGNALS) {
       const proc = fakeProcess();
       const seen = [];
       stack.onProcessSignal(async (s) => { seen.push(s); }, proc);
       for (const s of SIGNALS) assert.equal(proc.listenerCount(s), 1, `${s} has no listener`);
       proc.emit(signal);
-      await until(() => proc.exits.length === 1);
+      await until(() => seen.length === 1);
+      for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
       assert.deepEqual(seen, [signal]);
-      assert.deepEqual(proc.exits, [EXIT_CODE[signal]]);
+      assert.equal(proc.exitCode, EXIT_CODE[signal], 'the signal\'s exit code was not recorded');
+      assert.deepEqual(proc.exits, [], 'the hook ended the process while the start\'s own error line was still to be printed');
     }
   });
 
-  it('keeps the listeners while the handler runs, and a second signal neither runs it again nor ends the process', async () => {
+  it('keeps the listeners while the handler runs, and a second signal neither runs it again nor changes the recorded code', async () => {
     const proc = fakeProcess();
     let finish;
     const seen = [];
@@ -789,18 +791,25 @@ describe('the interrupt hook of the real process', () => {
     proc.emit('SIGTERM');
     await new Promise(r => setImmediate(r));
     assert.deepEqual(seen, ['SIGINT'], 'a second signal ran the handler again');
-    assert.deepEqual(proc.exits, [], 'a second signal ended the process before the removal finished');
+    assert.equal(proc.exitCode, 130, 'a second signal changed the recorded exit code');
+    assert.deepEqual(proc.exits, []);
     finish();
-    await until(() => proc.exits.length === 1);
-    assert.deepEqual(proc.exits, [130]);
   });
 
-  it('a handler that throws still ends the process', async () => {
+  it('a handler that throws still leaves the code recorded and the process alone', async () => {
     const proc = fakeProcess();
     stack.onProcessSignal(async () => { throw new Error('removal failed'); }, proc);
     proc.emit('SIGTERM');
-    await until(() => proc.exits.length === 1);
-    assert.deepEqual(proc.exits, [143]);
+    for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+    assert.equal(proc.exitCode, 143);
+    assert.deepEqual(proc.exits, []);
+  });
+
+  it('with no start in flight there is no listener, so a signal ends the process at once as it always did', () => {
+    const proc = fakeProcess();
+    const dispose = stack.onProcessSignal(async () => {}, proc);
+    dispose();
+    for (const s of SIGNALS) assert.equal(proc.listenerCount(s), 0);
   });
 
   it('the function it returns removes every listener', () => {
@@ -808,6 +817,67 @@ describe('the interrupt hook of the real process', () => {
     const dispose = stack.onProcessSignal(async () => {}, proc);
     dispose();
     for (const s of SIGNALS) assert.equal(proc.listenerCount(s), 0, `${s} keeps a listener`);
+  });
+});
+
+describe('the entry point\'s end', () => {
+  /** An output stream whose writes are called back, or never are, or fail, as a case needs. */
+  function stream(kind = 'ok') {
+    const s = new EventEmitter();
+    s.write = (chunk, callback) => {
+      if (kind === 'ok') callback?.();
+      else if (kind === 'error') s.emit('error', new Error('write EPIPE'));
+      else if (kind === 'throws') throw new Error('write after end');
+      return true;
+    };
+    return s;
+  }
+  function processWith(kind) {
+    const proc = fakeProcess();
+    proc.stdout = stream(kind);
+    proc.stderr = stream(kind);
+    return proc;
+  }
+
+  it('an interrupted start prints its final error line BEFORE the process ends, and ends with the signal\'s code', async () => {
+    const docker = fakeDocker({ up: (c) => up.answer(c) });
+    const up = stoppableUp(docker);
+    const proc = processWith('ok');
+    const order = [];
+    proc.exit = (code) => { proc.exits.push(code); order.push(`exit ${code}`); };
+    const done = stack.main(['own-up', 'q'], {
+      proc, run: docker.run, print: (l) => order.push(String(l)), printError: (l) => order.push(String(l)), random: () => HEX,
+      onSignal: (handler) => stack.onProcessSignal(handler, proc), limits: { ...SHORT_LIMITS, up: LONG_SAFETY_LIMIT_MS },
+    });
+    try {
+      await until(() => docker.of('up').length === 1);
+      proc.emit('SIGINT');
+      await done;
+    } finally {
+      up.release();
+      await done.catch(() => {});
+    }
+    assert.deepEqual(proc.exits, [130], 'the process did not end with the signal\'s code, exactly once');
+    assert.equal(order.at(-1), 'exit 130', `something was printed after the process ended: ${order.join(' | ')}`);
+    const finalLine = order.findIndex(l => /may still come up/.test(l) && l.includes(`own-down q-${HEX}`));
+    assert.ok(finalLine >= 0 && finalLine < order.length - 1, `the error line naming the hand command was not printed before the exit: ${order.join(' | ')}`);
+  });
+
+  it('a run with no signal ends with the code `cli` gave', async () => {
+    for (const [argv, code] of [[['frobnicate'], 1], [['own-list'], 0]]) {
+      const proc = processWith('ok');
+      await stack.main(argv, { proc, run: fakeDocker().run, print: () => {}, printError: () => {} });
+      assert.deepEqual(proc.exits, [code], `${argv.join(' ')} ended ${proc.exits}`);
+    }
+  });
+
+  it('an output stream that never calls back, fails, or throws cannot keep the process from ending', async () => {
+    for (const kind of ['never', 'error', 'throws']) {
+      const proc = processWith(kind);
+      await stack.main(['frobnicate'], { proc, flushMs: 20, run: fakeDocker().run, print: () => {}, printError: () => {} });
+      assert.deepEqual(proc.exits, [1], `a stream that ${kind} left the process alive`);
+      assert.equal(proc.exitCode, 1, 'the code was not set before the flush, so a process that ends by itself would end 0');
+    }
   });
 });
 
@@ -862,35 +932,61 @@ describe('the real docker run', () => {
   });
 });
 
-describe('the guide\'s recipes stop when `own-up` fails', () => {
+/**
+ * The guide's two recipes (bash, PowerShell) hold, in this ORDER: the start (`own-up`), a check that stops the recipe before the
+ * run, the run (`node --test`), and the removal in a `trap` (bash) or a `finally` (PowerShell). They also hold that a numeric check
+ * of the port exists, and that each recipe carries the run's exit status out, so a failed file never reads as passed. What an
+ * honest edit may change is left alone: the wording, `exit` against `throw`, the spelling of the pattern, the variable names.
+ */
+describe('the guide\'s recipes stop when `own-up` fails and keep the run\'s exit status', () => {
   const guide = readFileSync(join(REPO_ROOT, 'docs', 'testing-guide.md'), 'utf8').replace(/\r\n/g, '\n');
   const recipe = (lang) => [...guide.matchAll(new RegExp('```' + lang + '\\n([^]*?)```', 'g'))].map(m => m[1]).find(b => b.includes('own-up'));
+  const STOPS = /\b(exit|throw|return)\b/;
+  const NUMERIC_CHECK = /\[0-9\]|\\d|0-9/;
+  /** The recipe's text between two positions. */
+  const between = (text, from, to) => text.slice(from, to);
 
-  it('there is a recipe in each shell, and it removes the database whatever the run did', () => {
-    for (const lang of ['bash', 'powershell']) {
+  for (const lang of ['bash', 'powershell']) {
+    it(`${lang}: a recipe starts, checks the port as a number and stops, runs the file with the port, and removes the database`, () => {
       const text = recipe(lang);
       assert.ok(text, `the guide has no ${lang} recipe that starts an own database`);
-      assert.match(text, /own-down/);
+      const start = text.indexOf('own-up');
+      const run = text.indexOf('node --test');
+      assert.ok(start >= 0 && run > start, 'the recipe does not start the database and then run the file');
       assert.match(text, /YTHRIL_TEST_MONGO_PORT/);
-    }
-  });
+      const beforeRun = between(text, start, run);
+      assert.match(beforeRun, NUMERIC_CHECK, 'the port is not checked to be a number before the file runs: an empty one runs it against the stack\'s database or skips every test');
+      assert.match(beforeRun, STOPS, 'nothing stops the recipe before the file runs when own-up fails or prints no port');
+      assert.ok(text.indexOf('own-down') > start, 'the database is never removed');
+    });
+  }
 
-  it('bash: a failed `own-up` or an empty or non-numeric port ends the recipe before the file runs', () => {
+  it('bash: a failing pipe is not read as the status of its last command, and the removal is a trap set before the run', () => {
     const text = recipe('bash');
     assert.match(text, /pipefail/, 'a failing own-up inside a pipe is read as the exit status of `tail`');
-    assert.match(text, /\^\[0-9\]\+\$/, 'the port is not checked to be a number');
-    assert.match(text, /exit 1/);
-    assert.ok(text.indexOf('exit 1') < text.indexOf('node --test'), 'the check comes after the file runs');
-    assert.match(text, /trap .*own-down.* EXIT/, 'the database is not removed when the run fails');
+    const trap = text.split('\n').findIndex(l => /\btrap\b/.test(l) && l.includes('own-down'));
+    assert.ok(trap >= 0, 'the removal is not in a trap, so a failed run leaves the database');
+    assert.ok(text.split('\n').findIndex(l => l.includes('node --test')) > trap, 'the trap is set after the run starts');
   });
 
-  it('PowerShell: a failed `own-up` or an empty or non-numeric port throws before the file runs, and the removal is in a finally', () => {
+  it('bash: the trap carries the run\'s exit status out, and a failing removal changes it too', () => {
+    const trap = recipe('bash').split('\n').find(l => /\btrap\b/.test(l) && l.includes('own-down'));
+    assert.match(trap, /\$\?/, 'the trap does not read the status of the run');
+    assert.match(trap, /\bexit\b/, 'the trap does not end the recipe with a status: the removal\'s own would replace the run\'s');
+    assert.match(trap, /own-down[^;]*\|\|/, 'a failing own-down leaves the status as it was');
+  });
+
+  it('PowerShell: the removal is in a finally after the run, and the run\'s exit code is kept past it and ends the block non-zero', () => {
     const text = recipe('powershell');
-    assert.match(text, /\$LASTEXITCODE/, 'a failed own-up is not noticed');
-    assert.match(text, /\\d\+/, 'the port is not checked to be a number');
-    assert.match(text, /throw/);
-    assert.ok(text.indexOf('throw') < text.indexOf('node --test'), 'the check comes after the file runs');
-    assert.match(text, /finally\s*\{[^}]*own-down/, 'the database is not removed when the run fails');
+    const run = text.indexOf('node --test');
+    const fin = text.search(/\bfinally\b/);
+    assert.ok(fin > run, 'there is no finally after the run');
+    assert.ok(text.indexOf('own-down', fin) > fin, 'the removal is not in the finally');
+    const kept = /\$(\w+)\s*=\s*\$LASTEXITCODE/.exec(between(text, run, fin));
+    assert.ok(kept, 'the run\'s exit code is not saved before the finally: afterwards $LASTEXITCODE is own-down\'s, and a failed file reads as passed');
+    const after = text.slice(text.lastIndexOf('own-down'));
+    assert.match(after, new RegExp(`\\$${kept[1]}\\b`), 'the saved exit code is not used after the removal');
+    assert.match(after, /\b(throw|exit)\b/, 'nothing ends the block non-zero when the run failed');
   });
 });
 

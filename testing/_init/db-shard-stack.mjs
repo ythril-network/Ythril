@@ -250,9 +250,10 @@ export function dockerRun(argv, { env, signal } = {}, spawnChild = spawn) {
  * (`run` is handed a signal that aborts) and rejects. A failure carries the command and Docker's own output.
  *
  * `signal` is the caller's own way to stop the call (an interrupt): when it aborts, `run`'s signal aborts, and the call
- * settles when `run` does, never before, so a caller that waits for it knows the child is gone. A call given an aborted
- * signal is not made. The error of a call that was stopped, by the limit or by `signal`, has `stopped: true`: what it was
- * starting may still have happened.
+ * settles when `run` does, never before, so a caller that waits for it knows the `docker` client is gone. It does NOT know the
+ * compose plugin `docker` started is: that can outlive the client and go on creating the project, which is why a stopped start
+ * names the command that removes it by hand. A call given an aborted signal is not made. The error of a call that was
+ * stopped, by the limit or by `signal`, has `stopped: true`: what it was starting may still have happened.
  *
  * @param {string[]} argv
  * @param {object} o
@@ -386,9 +387,12 @@ async function removeOwn(target, { run, limits, printError }, { report = true } 
 const INTERRUPTS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 /**
- * Register `handler` for the interrupts; it runs to its end and then the process exits with the signal's code. The listeners
- * stay registered while it runs, and a signal that arrives meanwhile does nothing: a second Ctrl+C would otherwise kill the
- * removal halfway. Returns the function that unregisters. `proc` is injectable (anything with `on`, `removeListener`, `exit`).
+ * Register `handler` for the interrupts, for as long as a start is in flight (the caller unregisters when it ends). The hook
+ * does NOT end the process: it records the signal's exit code in `proc.exitCode` and the entry point (`main`) ends the process
+ * with it AFTER the start has printed its own final error line, so the line and the code never depend on timing. A signal with
+ * no start in flight has no listener here and ends the process at once, as it always did. The listeners stay registered while
+ * the handler runs, and a signal that arrives meanwhile does nothing: a second Ctrl+C would otherwise kill the removal halfway.
+ * Returns the function that unregisters. `proc` is injectable (anything with `on`, `removeListener`, `exitCode`).
  */
 export function onProcessSignal(handler, proc = process) {
   let handling = false;
@@ -396,7 +400,8 @@ export function onProcessSignal(handler, proc = process) {
     const listener = () => {
       if (handling) return;
       handling = true;
-      Promise.resolve().then(() => handler(signal)).catch(() => {}).finally(() => proc.exit(128 + osConstants.signals[signal]));
+      proc.exitCode = 128 + osConstants.signals[signal];
+      Promise.resolve().then(() => handler(signal)).catch(() => {});
     };
     proc.on(signal, listener);
     return { signal, listener };
@@ -449,6 +454,7 @@ export async function startOwnDb({ label }, { run = dockerRun, limits = DOCKER_L
   try {
     await step(UP_ARGS, limits.up);
     const port = publishedPort(await step(['port', SERVICE, String(CONTAINER_PORT)], limits.port));
+    if (interrupted) throw new Error('interrupted just as the database came up');
     return { name, project: target.project, port };
   } catch (failure) {
     const unsure = failure.stopped === true || interrupted;
@@ -534,11 +540,41 @@ export async function cli(argv, {
   }
 }
 
-if (isEntryPoint(import.meta.url)) {
-  // The process ends here, once its output is written: a compose plugin that outlived a stopped `docker` can hold a pipe open and would otherwise keep it alive.
-  const flushed = (stream) => new Promise((resolve) => { stream.write('', resolve); });
-  cli(process.argv.slice(2)).then(async (code) => {
-    await Promise.all([flushed(process.stdout), flushed(process.stderr)]);
-    process.exit(code);
+/** Milliseconds the end of the process waits for each output stream to take what was written: a closed pipe (`| head`) never answers. */
+const FLUSH_LIMIT_MS = 2_000;
+
+/**
+ * Write nothing to `stream` and wait until everything before it is written, for at most `limitMs`. Never throws and never
+ * waits for good: a stream that is destroyed, whose pipe is closed (EPIPE) or whose write never calls back is given up on.
+ * A no-op `error` listener stays, so a later EPIPE is not an uncaught error.
+ */
+function flushed(stream, limitMs) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, limitMs);
+    timer.unref();
+    const done = () => { clearTimeout(timer); resolve(); };
+    try {
+      stream.on('error', done);
+      stream.write('', done);
+    } catch {
+      done();
+    }
   });
+}
+
+/**
+ * The command line as a process: run `cli`, then end the process with its exit code, or with the code an interrupt recorded
+ * (`onProcessSignal`) when there is one, AFTER the output is written, so the start's final error line is always printed
+ * first. The code is set before the flush, so a process that ends by itself ends with it too. The flush is bounded.
+ * `proc` and the rest are injectable for the test.
+ */
+export async function main(argv, { proc = process, flushMs = FLUSH_LIMIT_MS, ...deps } = {}) {
+  const code = await cli(argv, { onSignal: (handler) => onProcessSignal(handler, proc), ...deps });
+  proc.exitCode = proc.exitCode || code;
+  await Promise.all([flushed(proc.stdout, flushMs), flushed(proc.stderr, flushMs)]);
+  proc.exit(proc.exitCode);
+}
+
+if (isEntryPoint(import.meta.url)) {
+  await main(process.argv.slice(2));
 }

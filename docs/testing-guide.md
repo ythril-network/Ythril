@@ -128,7 +128,7 @@ instead, in a compose project of its own that no other run names, and Docker pic
   out=$(node testing/_init/db-shard-stack.mjs own-up myfile | tail -n 1)
   read -r name port <<< "$out"
   [[ "${port:-}" =~ ^[0-9]+$ ]] || { echo "own-up printed no port: '$out'" >&2; exit 1; }
-  trap 'node testing/_init/db-shard-stack.mjs own-down "$name"' EXIT
+  trap 'rc=$?; node testing/_init/db-shard-stack.mjs own-down "$name" || rc=1; exit $rc' EXIT
   YTHRIL_TEST_MONGO_PORT="$port" node --test testing/standalone/<file>-db.test.js
 )
 ```
@@ -141,14 +141,19 @@ instead, in a compose project of its own that no other run names, and Docker pic
   $name, $port = "$last" -split ' '
   if ($port -notmatch '^\d+$') { throw "own-up printed no port: '$last'" }
   $env:YTHRIL_TEST_MONGO_PORT = $port
-  try { node --test testing/standalone/<file>-db.test.js }
-  finally { Remove-Item Env:YTHRIL_TEST_MONGO_PORT -ErrorAction SilentlyContinue; node testing/_init/db-shard-stack.mjs own-down $name }
+  $rc = 1
+  try { node --test testing/standalone/<file>-db.test.js; $rc = $LASTEXITCODE }
+  finally { Remove-Item Env:YTHRIL_TEST_MONGO_PORT -ErrorAction SilentlyContinue; node testing/_init/db-shard-stack.mjs own-down $name; if ($LASTEXITCODE -ne 0 -and $rc -eq 0) { $rc = $LASTEXITCODE } }
+  if ($rc -ne 0) { throw "the run or the removal failed (exit $rc)" }
 }
 ```
 
 Both stop before the file runs when `own-up` fails or prints no port: without a port the file would run against the stack's
 database (PowerShell: assigning `$null` to the variable removes it, and the harness falls back to 27117) or skip every test
-(bash). Both remove the database when the run fails, too.
+(bash). Both remove the database when the run fails, too, and both end non-zero when the file failed or the removal did:
+bash by `exit $rc` in the trap, PowerShell by a `throw` (an `exit` inside `& { }` would close the shell you pasted it into;
+a script file can use `exit $rc`). PowerShell 5.1 does not throw for a failing `node --test`, so the block saves its code
+(`$rc`) before the removal overwrites `$LASTEXITCODE`.
 
 `own-up <label>` prints `<name> <port>` alone on its last line; the name is the label and eight random hex characters, so two
 starts of one label are two databases. A label is lower-case letters, digits and hyphens, 1 to 40 characters, beginning and
