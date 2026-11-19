@@ -79,6 +79,18 @@ export const YTHRIL_TERMS: readonly YthrilTerm[] = Object.freeze([
   { name: 'requiredEdgeProperty', kind: 'property', comment: 'A property every edge of a type must carry.' },
   { name: 'validationMode', kind: 'property', comment: 'How strictly the space checks records against its schema.' },
   { name: 'strictLinkage', kind: 'property', comment: 'Whether the space refuses an edge whose endpoints do not exist.' },
+  // The report node a page of a records export ends with (standards review row 10); what it says of its scope and shapes is said in standard
+  // terms (dcterms:hasPart, dcterms:isPartOf, sh:shapesGraph), and these name only what no standard term carries: how a page of one export ended.
+  { name: 'ExportReport', kind: 'class', comment: 'One page of an RDF export of Ythril records: how many records it holds, whether it is the last, and what it left out.' },
+  { name: 'recordCount', kind: 'property', comment: 'How many records a page of an export holds.' },
+  { name: 'complete', kind: 'property', comment: 'Whether nothing of the export\'s scope is left after this page: true on its last page.' },
+  { name: 'nextAfter', kind: 'property', comment: 'The cursor that continues an export after this page, passed back as its after parameter.' },
+  { name: 'leftOutCount', kind: 'property', comment: 'How many property values a page of an export left out because none is one plain value that fits its property.' },
+  { name: 'leftOutValue', kind: 'property', comment: 'A property value a page of an export left out, as a node naming its record, its key and why.' },
+  { name: 'leftOutRecord', kind: 'property', comment: 'The record a left-out value belongs to.' },
+  { name: 'leftOutKey', kind: 'property', comment: 'The property key of a left-out value.' },
+  { name: 'leftOutReason', kind: 'property', comment: 'Why a value was left out, in words.' },
+  { name: 'fileTriplesWithheld', kind: 'property', comment: 'The export holds no file statements of some space it covers, because its caller may not read files there.' },
 ]);
 
 /**

@@ -47,6 +47,8 @@ process.env['DATA_ROOT'] = path.join(tmpDir, 'data');
 const EXPORTS = [
   { name: 'the audit log export', path: '/api/admin/audit-log/export', operation: 'audit.export' },
   { name: 'the space export', path: `/api/admin/spaces/${SPACE}/export`, operation: 'space.export' },
+  // Q-750: a space's records leaving as RDF are the same act, whatever `logReads` says.
+  { name: 'the RDF records export', path: `/api/brain/spaces/${SPACE}/export/rdf`, operation: 'rdf.export' },
 ];
 
 let mongo, httpServer, base;

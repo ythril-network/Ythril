@@ -15,6 +15,7 @@ This page and `ythril.ttl` are generated from one table in the server (`server/s
 | Term | Meaning |
 |---|---|
 | `ythril:Entity` | A Ythril entity record. |
+| `ythril:ExportReport` | One page of an RDF export of Ythril records: how many records it holds, whether it is the last, and what it left out. |
 | `ythril:Fact` | A Ythril fact record. |
 | `ythril:Untyped` | The class of an entity that declares no type. |
 
@@ -22,15 +23,24 @@ This page and `ythril.ttl` are generated from one table in the server (`server/s
 
 | Term | Meaning |
 |---|---|
+| `ythril:complete` | Whether nothing of the export's scope is left after this page: true on its last page. |
 | `ythril:confidence` | A chrono record's confidence. |
 | `ythril:contentRedacted` | The record's content was removed by a retention schedule. |
 | `ythril:edgeType` | An edge's type, stated on its reifier. |
 | `ythril:endpointFrom` | A kind of record an edge type may start at. |
 | `ythril:endpointTo` | A kind of record an edge type may end at. |
+| `ythril:fileTriplesWithheld` | The export holds no file statements of some space it covers, because its caller may not read files there. |
+| `ythril:leftOutCount` | How many property values a page of an export left out because none is one plain value that fits its property. |
+| `ythril:leftOutKey` | The property key of a left-out value. |
+| `ythril:leftOutReason` | Why a value was left out, in words. |
+| `ythril:leftOutRecord` | The record a left-out value belongs to. |
+| `ythril:leftOutValue` | A property value a page of an export left out, as a node naming its record, its key and why. |
 | `ythril:mergeFn` | The function that merges two values of a property when two members change it at once. |
 | `ythril:namingPattern` | A pattern every entity name of a type must match. |
+| `ythril:nextAfter` | The cursor that continues an export after this page, passed back as its after parameter. |
 | `ythril:path` | A file's path within its space. |
 | `ythril:pattern` | A pattern every text value of a property must match, as Ythril checks it: an ECMAScript regular expression, unanchored. It is also sh:pattern only where SPARQL regular expressions read it alike. |
+| `ythril:recordCount` | How many records a page of an export holds. |
 | `ythril:recurrenceFreq` | How often a chrono record recurs: daily, weekly, monthly or yearly. |
 | `ythril:recurrenceInterval` | Every how many periods of its frequency a chrono record recurs. |
 | `ythril:recurrenceUntil` | The date or time after which a chrono record no longer recurs. |

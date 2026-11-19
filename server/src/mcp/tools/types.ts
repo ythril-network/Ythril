@@ -228,6 +228,11 @@ export interface ToolHandler {
    * malformed one is answered alike on both doors and never in the validator's words on one (lens sweep S5). Still listed in `tools/list`.
    */
   argumentsJudgedByTheAct?: readonly string[];
+  /**
+   * The JSON Schema of the tool's `structuredContent` on success (MCP 2025-06-18), listed in `tools/list`. Declare it only for a tool whose every
+   * successful answer carries a `structuredContent` of that shape: a client validates the answer against it.
+   */
+  outputSchema?: Readonly<Record<string, unknown>>;
   inputSchema(s: ToolSchemas): Record<string, unknown>;
   handle(ctx: ToolContext): Promise<ToolResult>;
 }

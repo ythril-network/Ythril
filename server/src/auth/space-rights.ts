@@ -124,6 +124,8 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/brain/spaces/:spaceId/traverse', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/similar', method: 'POST', area: 'knowledge', needs: 'read', scope: 'body' },
   { route: '/api/brain/spaces/:spaceId/stats', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
+  // Q-750: the records as RDF, a data read that takes a view; file statements ask `files: read` per space inside the act.
+  { route: '/api/brain/spaces/:spaceId/export/rdf', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/events', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/events/ticket', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/facts', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
@@ -210,6 +212,8 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/spaces/:id/schema-layers', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
   // Q-742: the space's schema versions, read like its meta.
   { route: '/api/spaces/:id/schema-versions', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
+  // Q-751: the schema as OWL and SHACL, read like its meta (a view has no schema of its own).
+  { route: '/api/spaces/:id/schema-rdf', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
   { route: '/api/spaces/:id/network-precedence', method: 'PUT', area: 'schema', needs: 'admin', scope: 'path' },
   // `PATCH /api/spaces/:id` and `DELETE /api/spaces/:id` used to sit here as `schema` rows. They are not
   // views of one area's data, so they moved to `NOT_AREA_SCOPED` below with their reasons.
@@ -394,6 +398,9 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'schema_validate', area: 'schema', needs: 'read' },
   { tool: 'space_schema_layers', area: 'schema', needs: 'read' },
   { tool: 'space_schema_versions', area: 'schema', needs: 'read' },
+  { tool: 'space_schema_rdf', area: 'schema', needs: 'read' },
+  // Q-750: its REST twin's row; file statements ask `files: read` per space inside the act.
+  { tool: 'export_rdf', area: 'knowledge', needs: 'read' },
   { tool: 'space_set_network_precedence', area: 'schema', needs: 'admin' },
   // Governed by a rung from the moment it stopped being an instance-admin tool. `admin: true` exempts a tool
   // from this inventory because an instance-level capability has no space to scope to; `spaceAdmin: true` is

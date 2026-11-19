@@ -127,6 +127,7 @@ function createGlobalMcpServer(tokenId?: string, tokenLabel?: string,
       description: t.description,
       // Through `materialisedSchema`, so what is ADVERTISED is what the validator enforces — see B-6.
       inputSchema: materialisedSchema(t, schemas, accessibleSpaceIds, ownViewIds),
+      ...(t.outputSchema ? { outputSchema: { ...t.outputSchema } } : {}),
     })),
   }));
 
