@@ -202,13 +202,60 @@ describe('the Unconverted panel: a card', () => {
 });
 
 describe('the Unconverted panel: the filters and the class switch', () => {
-  it('offers All types and the types that have open items, and Open and Dismissed in the words the Duplicates list uses (the server lists one status at a time, so there is no All)', () => {
+  it('offers All types and the types that have open items, and Open, Dismissed and All in the words the Duplicates list uses', () => {
     const groups = [openGroup('person', 'not_conforming', 3), openGroup('company', 'not_conforming', 7)];
     const { el } = mount({ listUnconverted: vi.fn(() => of(okResult(listAnswer(typicalRows(), groups)))) });
     const type = el.querySelector<HTMLSelectElement>('select[aria-label="Record type"]')!;
     expect([...type.options].map(o => o.textContent?.trim())).toEqual(['All types', 'company', 'person']);
     const status = el.querySelector<HTMLSelectElement>('select[aria-label="Filter by status"]')!;
-    expect([...status.options].map(o => o.textContent?.trim())).toEqual(['Open', 'Dismissed']);
+    expect([...status.options].map(o => o.textContent?.trim())).toEqual(['Open', 'Dismissed', 'All']);
+  });
+
+  describe('the All list', () => {
+    /** The server's All page: open and dismissed records of one type in one newest-first list, total 5 (3 open of the class "does not fit", 1 open refused, 1 dismissed). */
+    const everything = () => vi.fn(() => {
+      const rows = [unconvertedRow(1), unconvertedRow(2, { status: 'dismissed', record: { summary: 'Tomas Herrera' } }), unconvertedRow(3), unconvertedRow(4), unconvertedRow(5, { reason: 'step_refused', violations: [] })];
+      return of(okResult(listAnswer(rows, TYPICAL, { total: 5 })));
+    });
+    const choose = (el: HTMLElement, f: { detectChanges(): void }) => {
+      const status = el.querySelector<HTMLSelectElement>('select[aria-label="Filter by status"]')!;
+      status.value = 'all';
+      status.dispatchEvent(new Event('change'));
+      f.detectChanges();
+    };
+
+    it('asks for status all and lists both kinds in one page, each card saying its own status, Dismiss on the open ones only', () => {
+      const { el, f, cards, h } = mount({ listUnconverted: everything() });
+      choose(el, f);
+      expect(h.api.listUnconverted).toHaveBeenLastCalledWith('customers', expect.objectContaining({ status: 'all' }));
+      expect(cards().length).toBe(5);
+      const dismissButtons = (c: HTMLElement) => [...c.querySelectorAll('button')].filter(b => b.textContent?.trim() === 'Dismiss').length;
+      expect(cards().map(c => c.textContent!.includes('Dismissed'))).toEqual([false, true, false, false, false]);
+      expect(cards().map(dismissButtons)).toEqual([1, 0, 1, 1, 1]);
+    });
+
+    it('the class switch keeps the counts of open records, as on Open', () => {
+      const { el, f } = mount({ listUnconverted: everything() });
+      choose(el, f);
+      const labels = [...el.querySelectorAll('[role="radiogroup"] [role="radio"]')].map(r => `${r.querySelector('.sg-l')?.textContent} ${r.querySelector('.sg-n')?.textContent}`);
+      expect(labels).toEqual(['All 4', 'Does not fit 3', 'Steps refused 1']);
+    });
+
+    it('"Dismiss all N shown" says the open records, not the five the list holds, and sends only open', async () => {
+      const { el, f, h } = mount({ listUnconverted: everything() });
+      choose(el, f);
+      expect(el.querySelector('[data-testid="dismiss-all"]')?.textContent).toContain('Dismiss all 4 shown');
+      (el.querySelector('[data-testid="dismiss-all"]') as HTMLButtonElement).click();
+      await settle();
+      expect(h.api.dismissShown).toHaveBeenCalledWith('customers', { kind: 'entity', type: 'person', expect: 4 });
+    });
+
+    it('with nothing at all in the space, All shows the overall empty screen, not "no records match"', () => {
+      const { el, f } = mount();
+      choose(el, f);
+      expect(el.querySelector('[data-empty="overall"]')).not.toBeNull();
+      expect(el.querySelector('[data-empty="filter"]')).toBeNull();
+    });
   });
 
   it('choosing a type or a status asks the server for it', () => {

@@ -428,6 +428,61 @@ describe('the Unconverted section: a run that is going', () => {
   });
 });
 
+describe('the Unconverted section: the All list', () => {
+  /** One type, `person`: four open records (three that do not fit, one refused) and two dismissed; the server's All page holds both kinds, its total is 6. */
+  function onAll(over: { cut?: boolean } = {}) {
+    const groups = [openGroup('person', 'not_conforming', 3), openGroup('person', 'step_refused', 1)];
+    const rows = [unconvertedRow(1), unconvertedRow(2, { status: 'dismissed' }), unconvertedRow(3), unconvertedRow(4, { status: 'dismissed' })];
+    const list = vi.fn(() => of(okResult(listAnswer(rows, groups, { total: 6, counts: { open: 4, dismissed: 2, openBy: groups, ...(over.cut ? { openByCut: true } : {}) } }))));
+    const s = setup({ listUnconverted: list });
+    s.state.open('customers');
+    s.state.chooseStatus('all');
+    return { ...s, list };
+  }
+
+  it('asks the server for status all: one list, one paging, both kinds of record', () => {
+    const { api } = onAll();
+    expect(api.listUnconverted).toHaveBeenLastCalledWith('customers', { kind: 'entity', type: 'person', status: 'all', skip: 0, limit: 25 });
+  });
+
+  it('the class switch counts open records on All, as on Open, and the badge is the open count', () => {
+    const { state } = onAll();
+    expect(state.classCounts()).toEqual({ fit: 3, exists: 0, refused: 1 });
+    expect(state.openAll()).toBe(4);
+    expect(state.badge()).toBe(4);
+  });
+
+  it('"Dismiss all N shown" says the OPEN records of the type and class from counts.openBy, never the list\'s total (which counts the dismissed too)', () => {
+    const { state } = onAll();
+    expect(state.total()).toBe(6);
+    expect(state.dismissCount()).toBe(4);
+    state.chooseClass('fit');
+    expect(state.total()).toBe(6);
+    expect(state.dismissCount()).toBe(3);
+  });
+
+  it('sends the open filter, the class\'s reasons and expect = the open count, and no status', async () => {
+    const { state, api } = onAll();
+    state.chooseClass('fit');
+    await state.dismissShown();
+    expect(api.dismissShown).toHaveBeenCalledTimes(1);
+    const [, request] = api.dismissShown.mock.calls[0]!;
+    expect(request).toEqual({ kind: 'entity', type: 'person', reasons: [...reasonsOfClass('fit')], expect: 3 });
+    expect('status' in (request as object)).toBe(false);
+  });
+
+  it('reads the page again after a dismiss with the status still All', async () => {
+    const { state, api } = onAll();
+    await state.dismissShown();
+    expect(api.listUnconverted).toHaveBeenLastCalledWith('customers', expect.objectContaining({ status: 'all' }));
+  });
+
+  it('counts that were cut cannot say how many open records a filter holds, so no number is offered', () => {
+    const { state } = onAll({ cut: true });
+    expect(state.dismissCount()).toBeNull();
+  });
+});
+
 describe('the Unconverted section: Open the record', () => {
   it('reads the record of its kind and id and opens the record drawer on it', () => {
     const { state, getRecord, drawerOpen } = setup({ listUnconverted: vi.fn(() => of(page(1))) });

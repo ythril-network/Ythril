@@ -220,6 +220,14 @@ describe('listUnconverted (Review\'s list)', () => {
     await call;
   });
 
+  it('status all goes over as `status=all`: the server lists open and dismissed in one paged list', async () => {
+    const call = firstValueFrom(api.listUnconverted('customers', { status: 'all', limit: 25 }));
+    const req = http.expectOne(listUrl);
+    expect(req.request.params.get('status')).toBe('all');
+    req.flush(page);
+    await call;
+  });
+
   it('a single reason is the plain form the server has always taken', async () => {
     const call = firstValueFrom(api.listUnconverted('customers', { reasons: ['step_refused'] }));
     const req = http.expectOne(listUrl);
