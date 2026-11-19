@@ -32,7 +32,7 @@ import {
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../merge-fields.js';
 import { type RecordFlags } from '../record-flag.js';
 import { edgeIdFor } from '../edge-id.js';
-import { storedEdgeKind, foldEdgeKinds, edgeEndpointKind, missingRefsRefusal } from '../entity-refs.js';
+import { storedEdgeKind, foldEdgeKinds, edgeEndpointKind } from '../entity-refs.js';
 import { resolveEdgeEndpointNames } from '../edge-endpoint-names.js';
 import type { EdgeDoc, SpaceMeta } from '../../config/types.js';
 import { readMetaForWrite, stampOp, stampSetOf, stampUnsetOf, type MetaForWrite } from '../../spaces/schema-stamp.js';
@@ -342,8 +342,8 @@ export function edgeRefusal(
   if (isStrictLinkage(spaceId)) {
     for (const [id, kind, field] of [[from, edgeEndpointKind(opts?.fromKind), 'from'], [to, edgeEndpointKind(opts?.toKind), 'to']] as const) {
       if (id === subject?.id) continue;
-      const dangling = missingRefsRefusal(spaceId, field, kind, view.missing(kind, [id]));
-      if (dangling) throw new EdgeSchemaViolation(danglingReferenceCheck(field, id, dangling.message));
+      // The row says the missing-reference refusal's own sentence (`reference_not_found`, `missingReferencesText`).
+      if (view.missing(kind, [id]).length > 0) throw new EdgeSchemaViolation(danglingReferenceCheck(spaceId, field, kind, id));
     }
   }
   if (subject?.minted) view.mint(subject.id);

@@ -47,6 +47,8 @@ import {
 } from './write-validation.js';
 import { classifyReadFailure } from './store-failure.js';
 import type { SchemaViolation, ResolvedEdgeEnds } from '../spaces/schema-validation.js';
+import { schemaViolation } from '../spaces/schema-violation-codes.js';
+import type { UnconvertedViolation } from '../spaces/unconverted-terms.js';
 import { updateEntityById } from './entities.js';
 import { updateFact } from './fact.js';
 import { updateChrono } from './chrono.js';
@@ -129,7 +131,7 @@ export type SchemaConvertOutcome =
   | { outcome: 'stamped' }
   | { outcome: 'rewritten'; edgesRestamped: number }
   | { outcome: 'moved' }
-  | { outcome: 'unconverted'; reason: UnconvertedReason; violations: { field: string; reason: string }[]; proposed?: RecordChange };
+  | { outcome: 'unconverted'; reason: UnconvertedReason; violations: UnconvertedViolation[]; proposed?: RecordChange };
 
 /** The key of a split's declared properties in a run: one per kind and source type. */
 export const splitDeclaredKey = (kind: KnowledgeType, from: string): string => `${kind}:${from}`;
@@ -143,7 +145,9 @@ export function convertProjectionOf(kind: KnowledgeType): Readonly<Record<string
 }
 
 const isEmptyChange = (c: RecordChange): boolean => c.type === undefined && Object.keys(c.set).length === 0 && c.unset.length === 0;
-const namesOf = (violations: readonly SchemaViolation[]): { field: string; reason: string }[] => violations.map(v => ({ field: v.field, reason: v.reason }));
+/** The rows an item names: field and sentence, and the code and params a screen words (Q-943); never the record's value. */
+const namesOf = (violations: readonly SchemaViolation[]): UnconvertedViolation[] =>
+  violations.map(v => ({ field: v.field, reason: v.reason, code: v.code, params: v.params }));
 const unconverted = (reason: UnconvertedReason, violations: readonly SchemaViolation[] = [], proposed?: RecordChange): SchemaConvertOutcome =>
   ({ outcome: 'unconverted', reason, violations: namesOf(violations), ...(proposed ? { proposed } : {}) });
 
@@ -325,7 +329,7 @@ export async function convertRecordsPage(
       const failed = run.recordFailure;
       const passes = (failed?.kind === kind && failed.id === record._id ? failed.passes : 0) + 1;
       if (passes < SCHEMA_CONVERT_RECORD_FAILED_PASSES) throw new RecordConversionFailed(kind, record._id, passes, err);
-      out[i] = { outcome: 'unconverted', reason: 'conversion_failed', violations: [{ field: '', reason: errorKindOf(err) }], proposed: change };
+      out[i] = unconverted('conversion_failed', [schemaViolation('conversion_error', { errorKind: errorKindOf(err) }, '', undefined)], change);
     }
   }
 

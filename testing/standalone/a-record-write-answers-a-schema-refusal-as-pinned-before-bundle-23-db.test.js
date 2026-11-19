@@ -42,15 +42,19 @@ const STRICT = spaceOf('strict');
 const START = '2026-10-01T00:00:00.000Z';
 
 /** The refusal body a write that introduces ONE violation answers, as literals. */
-const refusal = (field, value, reason) => ({
+const refusal = (field, value, reason, said) => ({
   error: 'schema_violation',
   message: `The change violates this space's schema: ${field}.`,
-  introduced: [{ field, value, reason }],
+  introduced: [{ field, value, reason, ...said }],
   preExisting: [],
-  violations: [{ field, value, reason }],
+  violations: [{ field, value, reason, ...said }],
 });
 const NUMBER_GOT_STRING = "expected type 'number', got 'string'";
 const PRIORITY = 'must be one of: low, high';
+// Q-943: each row also carries its code and params (added data; the rows are otherwise as pinned).
+const NUMBER = { code: 'type', params: { type: 'number', got: 'string' } };
+const PRIORITY_SAID = { code: 'enum', params: { allowedValues: ['low', 'high'] } };
+const EMPLOYS_FROM = { code: 'endpoint_type', params: { label: 'employs', end: 'from', allowedValues: ['org'] } };
 
 /**
  * One refused write per kind, per verb: the arguments each door takes, and the refusal body every door answers for it.
@@ -60,25 +64,25 @@ const cases = (ids) => ({
   entity: {
     create: { name: 'Ann', type: 'person', properties: { age: 'old' } },
     update: { properties: { age: 'old' } }, id: ids.person1,
-    body: refusal('properties.age', 'old', NUMBER_GOT_STRING),
+    body: refusal('properties.age', 'old', NUMBER_GOT_STRING, NUMBER),
     create_tool: 'save_entity', update_tool: 'update_entity',
   },
   fact: {
     create: { fact: 'the sky is blue', type: 'claim', properties: { confidence: 'high' } },
     update: { properties: { confidence: 'high' } }, id: ids.fact,
-    body: refusal('properties.confidence', 'high', NUMBER_GOT_STRING),
+    body: refusal('properties.confidence', 'high', NUMBER_GOT_STRING, NUMBER),
     create_tool: 'save_fact', update_tool: 'update_fact',
   },
   chrono: {
     create: { title: 'Launch', type: 'event', startsAt: START, properties: { priority: 'urgent' } },
     update: { properties: { priority: 'urgent' } }, id: ids.chrono,
-    body: refusal('properties.priority', 'urgent', PRIORITY),
+    body: refusal('properties.priority', 'urgent', PRIORITY, PRIORITY_SAID),
     create_tool: 'save_chrono', update_tool: 'update_chrono',
   },
   edge: {
     create: { from: ids.person1, to: ids.person2, label: 'knows', properties: { since: 'long ago' } },
     update: { properties: { since: 'long ago' } }, id: ids.edge,
-    body: refusal('properties.since', 'long ago', NUMBER_GOT_STRING),
+    body: refusal('properties.since', 'long ago', NUMBER_GOT_STRING, NUMBER),
     create_tool: 'save_edge', update_tool: 'update_edge',
   },
 });
@@ -111,7 +115,7 @@ describe('a strict space\'s schema refusal, as every record-write door answers i
       const before_ = await pins.stored(STRICT, 'edge');
       const out = await pins.rest('edge', 'create', STRICT, { body: { from: ids.person1, to: ids.person2, label: 'employs' } });
       assert.equal(out.status, 400, JSON.stringify(out.body));
-      assert.deepEqual(out.body, refusal('fromType', 'person', "'employs' declares its from endpoint as one of: org"));
+      assert.deepEqual(out.body, refusal('fromType', 'person', "'employs' declares its from endpoint as one of: org", EMPLOYS_FROM));
       assert.deepEqual(await pins.stored(STRICT, 'edge'), before_);
     });
   });
@@ -148,7 +152,7 @@ describe('a strict space\'s schema refusal, as every record-write door answers i
 
     it('save_edge refused by the type of its end carries the endpoint field in the structured body', async () => {
       const out = await pins.call('save_edge', { space: STRICT, from: ids.person1, to: ids.person2, label: 'employs' });
-      const want = refusal('fromType', 'person', "'employs' declares its from endpoint as one of: org");
+      const want = refusal('fromType', 'person', "'employs' declares its from endpoint as one of: org", EMPLOYS_FROM);
       assert.equal(out.status, 422, out.text);
       assert.deepEqual(out.structured, want);
       assert.equal(out.text, `Error: schema_violation: ${want.message}`);

@@ -23,7 +23,7 @@ import { connectionInputError, connectionsOf, connectionSubject, mintedSubject, 
 import { CHRONO_STATUSES } from '../config/types.js';
 import { parseRecordFlags, type RecordFlags } from './record-flag.js';
 import type { ChronoType, ChronoStatus } from '../config/types.js';
-import { SchemaViolationError, EdgeSchemaViolation, countSchemaRefusal, type UpdateValidation } from './write-validation.js';
+import { SchemaViolationError, EdgeSchemaViolation, countSchemaRefusal, boundedRows, type UpdateValidation } from './write-validation.js';
 import type { SchemaViolation } from '../spaces/schema-validation.js';
 import { writtenRecord, type WrittenRecord } from './connections-not-written.js';
 import type { DesiredLinks } from './links.js';
@@ -103,7 +103,16 @@ export interface BulkWriteTrust {
  * derived from `introduced` alone (what the item did, not what the record already had). A caller that handles the refusal reads the
  * same object here as from `POST /entities`, and does not parse a sentence to find which of its fields to fix.
  */
-export interface BulkError { type: string; index: number; reason: string; violation?: BulkViolation; written?: WrittenRecord; /** The wire code of a refusal that has one (`record_version_at_ceiling`), as the single-record doors answer it. */ code?: string }
+export interface BulkError {
+  type: string; index: number; reason: string; violation?: BulkViolation; written?: WrittenRecord;
+  /** The wire code of a refusal that has one (`record_version_at_ceiling`), as the single-record doors answer it. */
+  code?: string;
+  /**
+   * On a `schema_warning:` row (a warn space let the item through): the violation the sentence says, as a single-record write's `warnings`
+   * row carries it — `code` and `params` beside the reason, bounded by the one renderer (Q-943).
+   */
+  warning?: SchemaViolation;
+}
 
 /** A schema refusal as a batch row carries it (`SchemaViolationError.toRowViolation`). */
 export type BulkViolation = Record<string, unknown>;
@@ -345,7 +354,8 @@ export async function bulkWrite(
    */
   const warn = (type: string, index: number) => (check: UpdateValidation): void => {
     if (check.blocked) return;
-    for (const v of check.warnings) errors.push({ type, index, reason: `schema_warning: ${v.field} — ${v.reason}` });
+    // The sentence stays the published string; the row it says rides beside it, bounded as a write's `warnings` rows are.
+    for (const v of check.warnings) errors.push({ type, index, reason: `schema_warning: ${v.field} — ${v.reason}`, warning: boundedRows([v])[0]! });
   };
 
   // In a space set to refuse, an item that carries an unknown key is rejected here, before anything of it is prepared, and its row is

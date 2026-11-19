@@ -25,6 +25,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 const terms = await import('../../server/dist/spaces/unconverted-terms.js');
+const { peerText } = await import('../../server/dist/util/log.js');
 const fn = (name) => terms[name] ?? (() => { throw new Error(`${name} is not exported by spaces/unconverted-terms.ts`); });
 
 describe('the stored form of a violation', () => {
@@ -35,8 +36,9 @@ describe('the stored form of a violation', () => {
 
   it('bounds the reason as before and cuts a list param', () => {
     const many = Array.from({ length: 60 }, (_, i) => `v${i}`);
-    const stored = fn('unconvertedViolationOf')({ field: 'properties.rank', reason: `must be one of: ${many.join(', ')}`.repeat(10), code: 'enum', params: { allowedValues: many } });
-    assert.ok(stored.reason.length <= 301, `a reason of ${stored.reason.length} characters was stored`);
+    const reason = `must be one of: ${many.join(', ')}`.repeat(10);
+    const stored = fn('unconvertedViolationOf')({ field: 'properties.rank', reason, code: 'enum', params: { allowedValues: many } });
+    assert.equal(stored.reason, peerText(reason, { max: 300 }), 'the reason is not bounded as an item\'s reason always was (300, through peerText)');
     assert.equal(stored.params.allowedValues.length, 51);
     assert.equal(stored.params.allowedValues.at(-1), '…(+10 more)');
   });

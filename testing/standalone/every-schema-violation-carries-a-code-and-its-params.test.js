@@ -36,6 +36,7 @@ const writeValidation = await import(`${DIST}brain/write-validation.js`);
 const { linkTargetRemovedWarnings } = await import(`${DIST}brain/gone-entity-references.js`);
 const { missingRefsRefusal } = await import(`${DIST}brain/entity-refs.js`);
 const { REDOS_REFUSAL } = await import(`${DIST}util/redos.js`);
+const { peerText, NAME_QUOTED } = await import(`${DIST}util/log.js`);
 /** The table's module: absent before the change, and every case then fails on its first row without a code. */
 const codes = await import(`${DIST}spaces/schema-violation-codes.js`).catch(() => ({}));
 const TABLE = codes.SCHEMA_VIOLATION_CODES ?? {};
@@ -223,7 +224,8 @@ describe('the one renderer keeps the code and params, and bounds them', () => {
     const [shown] = writeValidation.boundedRows([row]);
     assert.equal(shown.params.allowedValues.length, 51);
     assert.equal(shown.params.allowedValues.at(-1), '…(+10 more)');
-    assert.ok(shown.params.allowedValues.slice(0, 50).every(v => v.length <= 260), 'a name is not bounded');
+    assert.deepEqual(shown.params.allowedValues.slice(0, 50), many.slice(0, 50).map(v => peerText(v, { max: NAME_QUOTED })), 'a name is not bounded as a quoted name is');
+    assert.ok(shown.params.allowedValues[0].length < many[0].length);
   });
 });
 

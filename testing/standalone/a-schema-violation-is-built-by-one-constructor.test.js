@@ -43,6 +43,10 @@ const EXEMPT = [
     why: 'a stored LINK violation (`LinkViolationDoc`): the peer linkage report of a dangling reference, its own store and door, not a schema row' },
   { file: 'server/src/contract/unknown-field-rows.ts', fn: 'unknownFieldMoreRow',
     why: 'an unknown-field row of a write body: it carries its own code, `unknown_field`, and is no violation of the space\'s schema' },
+  { file: 'server/src/spaces/unconverted-terms.ts', fn: 'unconvertedViolationOf',
+    why: 'the stored form of a constructed row (text bounded, code and params added when the row has them): a copy, not a row raised' },
+  { file: 'server/src/spaces/unconverted-terms.ts', fn: 'listedUnconvertedViolations',
+    why: 'the tolerant reading of a stored item: an item stored before violations had codes holds text only, and is listed so (no migration)' },
 ];
 
 /** The name of the top-level function (or const) `node` sits in; `''` at module level. */

@@ -54,6 +54,8 @@ import type { ResolvedEdgeEnds } from '../spaces/schema-validation.js';
 import { isRuleRow, ruleReadsChanged } from '../spaces/schema-rules.js';
 import { mergeTags, mergePropertiesOrKeep } from './merge-fields.js';
 import { ReferenceRefusal } from './entity-refs.js';
+import { schemaViolation, boundedViolationParams } from '../spaces/schema-violation-codes.js';
+import type { RefKind } from '../config/types-knowledge.js';
 import { WriteConflict } from './write-plan/types.js';
 import { RecordVersionAtCeiling } from './write-precondition.js';
 import { PositionClockUnusable, PositionsSeedUnavailable, ForkRowReadOnly, ForkCapRefusal, EndpointRemoved, LinkTargetRemoved } from '../util/errors.js';
@@ -304,15 +306,19 @@ function boundedValue(value: unknown): unknown {
  * who may read the data keep it. Before this was one function, three of those sinks cut the list themselves and echoed `field` and
  * `value` whole.
  */
-export function boundedRows(rows: readonly SchemaViolation[], { value = true }: { value?: boolean } = {}): SchemaViolation[] {
+export function boundedRows<R extends RenderedRow>(rows: readonly R[], { value = true }: { value?: boolean } = {}): R[] {
   return rows.slice(0, MAX_ROWS).map(v => {
     const { value: held, ...rest } = v;
-    const row: SchemaViolation = { ...rest, field: peerText(v.field, { max: NAME_QUOTED }) } as SchemaViolation;
+    // The params a row's sentence names, bounded as `declared` is (Q-943): a list of a schema's thousand enum values is cut and counted.
+    const row = { ...rest, field: peerText(v.field, { max: NAME_QUOTED }), ...(Object.hasOwn(v, 'params') ? { params: boundedViolationParams(v.params) } : {}) } as RenderedRow;
     // A row with no value stays without one: a `value: undefined` key is a field the row never had.
     if (value && Object.hasOwn(v, 'value')) row.value = boundedValue(held);
-    return row;
+    return row as R;
   });
 }
+
+/** A row as the one renderer takes it: a schema violation, or a row of the same shape with a code of its own (an unknown-field row). */
+type RenderedRow = Pick<SchemaViolation, 'field' | 'reason'> & { value?: unknown; params?: unknown };
 
 export function assertUpdateAllowed(check: UpdateValidation): void {
   if (check.blocked) throw new SchemaViolationError(check);
@@ -355,11 +361,12 @@ export class EdgeSchemaViolation extends SchemaViolationError {
  *
  * Existence is a different question from the schema's, and a different rule (`strictLinkage`, not `validationMode`), but
  * it is refused as the same kind of thing — the caller named something the space does not hold — so it travels in the
- * same body. `message` is the one sentence every door gives for a missing reference (`missingRefsRefusal`).
+ * same body. Its row is `reference_not_found`, and its sentence the one every door gives for a missing reference
+ * (`missingReferencesText`, which `missingRefsRefusal` says too).
  */
-export function danglingReferenceCheck(field: string, value: string, message: string): UpdateValidation {
-  const violation: SchemaViolation = { field, value, reason: message };
-  return { blocked: true, introduced: [violation], preExisting: [], all: [violation], warnings: [violation], message };
+export function danglingReferenceCheck(spaceId: string, field: string, kind: RefKind, id: string): UpdateValidation {
+  const violation = schemaViolation('reference_not_found', { refField: field, refKind: kind, space: spaceId, ids: [id] }, field, id);
+  return { blocked: true, introduced: [violation], preExisting: [], all: [violation], warnings: [violation], message: violation.reason };
 }
 
 /**

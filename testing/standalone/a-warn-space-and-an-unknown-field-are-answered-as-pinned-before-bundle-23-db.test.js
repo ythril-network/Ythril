@@ -55,27 +55,30 @@ const UNDECLARED = 'zzNotDeclared';
 
 const NUMBER_GOT_STRING = "expected type 'number', got 'string'";
 const PRIORITY = 'must be one of: low, high';
+// Q-943: each row also carries its code and params (added data; the rows are otherwise as pinned).
+const NUMBER = { code: 'type', params: { type: 'number', got: 'string' } };
+const PRIORITY_SAID = { code: 'enum', params: { allowedValues: ['low', 'high'] } };
 
 /** One violating write per kind: what it sends, the warning row it earns in a `warn` space, and the field it breaks. */
 const violating = (ids) => ({
   entity: {
     create: { name: 'Ann', type: 'person', properties: { age: 'old' } }, update: { id: ids.person1, properties: { age: 'old' } },
-    row: { field: 'properties.age', value: 'old', reason: NUMBER_GOT_STRING },
+    row: { field: 'properties.age', value: 'old', reason: NUMBER_GOT_STRING, ...NUMBER },
     create_tool: 'save_entity', update_tool: 'update_entity',
   },
   fact: {
     create: { fact: 'the sky is blue', type: 'claim', properties: { confidence: 'high' } }, update: { id: ids.fact, properties: { confidence: 'high' } },
-    row: { field: 'properties.confidence', value: 'high', reason: NUMBER_GOT_STRING },
+    row: { field: 'properties.confidence', value: 'high', reason: NUMBER_GOT_STRING, ...NUMBER },
     create_tool: 'save_fact', update_tool: 'update_fact',
   },
   chrono: {
     create: { title: 'Launch', type: 'event', startsAt: START, properties: { priority: 'urgent' } }, update: { id: ids.chrono, properties: { priority: 'urgent' } },
-    row: { field: 'properties.priority', value: 'urgent', reason: PRIORITY },
+    row: { field: 'properties.priority', value: 'urgent', reason: PRIORITY, ...PRIORITY_SAID },
     create_tool: 'save_chrono', update_tool: 'update_chrono',
   },
   edge: {
     create: { from: ids.person1, to: ids.person2, label: 'knows', properties: { since: 'long ago' } }, update: { id: ids.edge, properties: { since: 'long ago' } },
-    row: { field: 'properties.since', value: 'long ago', reason: NUMBER_GOT_STRING },
+    row: { field: 'properties.since', value: 'long ago', reason: NUMBER_GOT_STRING, ...NUMBER },
     create_tool: 'save_edge', update_tool: 'update_edge',
   },
 });
@@ -141,7 +144,8 @@ describe('a warn space, an unknown field and an undeclared key, as every write d
       it('an edge whose end has the wrong type warns on the endpoint field', async () => {
         const out = await pins.rest('edge', 'create', WARN, { body: { from: warnIds.person1, to: warnIds.person2, label: 'employs' } });
         assert.equal(out.status, 201, JSON.stringify(out.body));
-        assert.deepEqual(out.body.warnings, [{ field: 'fromType', value: 'person', reason: "'employs' declares its from endpoint as one of: org" }]);
+        assert.deepEqual(out.body.warnings, [{ field: 'fromType', value: 'person', reason: "'employs' declares its from endpoint as one of: org",
+          code: 'endpoint_type', params: { label: 'employs', end: 'from', allowedValues: ['org'] } }]);
       });
     });
 
@@ -297,7 +301,8 @@ describe('a warn space, an unknown field and an undeclared key, as every write d
     const DECLARED = { entity: ['age', 'rank'], fact: ['confidence'], edge: ['since'], chrono: ['priority'] };
     const UNDECLARED_REASON = `property '${UNDECLARED}' is not declared on this type`;
     const UNDECLARED_MESSAGE = `The change violates this space's schema: properties.${UNDECLARED}. Not declared on this type: ${UNDECLARED}.`;
-    const undeclaredRow = (kind) => ({ field: `properties.${UNDECLARED}`, value: 1, reason: UNDECLARED_REASON, declared: DECLARED[kind] });
+    const undeclaredRow = (kind) => ({ field: `properties.${UNDECLARED}`, value: 1, reason: UNDECLARED_REASON, declared: DECLARED[kind],
+      code: 'additional_properties', params: { additionalProperty: UNDECLARED } });
     const refusedBody = (kind) => ({ error: 'schema_violation', message: UNDECLARED_MESSAGE, introduced: [undeclaredRow(kind)], preExisting: [], violations: [undeclaredRow(kind)] });
 
     describe('a strict space refuses the key on every door, and stores nothing', () => {

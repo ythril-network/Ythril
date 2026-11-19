@@ -115,6 +115,9 @@ export interface EndpointRuleWarning {
   field: string;
   /** What the label admits, in the same words a refused write would give. */
   reason: string;
+  /** The violation's code (`endpoint_type` or `functional`) and its params, as a refused write's row carries them (Q-943). */
+  code: SchemaViolation['code'];
+  params: SchemaViolation['params'];
 }
 
 /** The full merge plan returned on 409 when unresolved conflicts exist. */
@@ -339,7 +342,7 @@ async function detectEndpointRuleBreaks(
 
     for (const v of validateEdge(meta ?? {}, recordViewOf('edge', e), resolved)) {
       if (v.field !== 'fromType' && v.field !== 'toType' && v.field !== 'functional') continue;
-      out.push({ edgeId: e._id, label: e.label, end, field: v.field, reason: v.reason });
+      out.push({ edgeId: e._id, label: e.label, end, field: v.field, reason: v.reason, code: v.code, params: v.params });
     }
   }
   return out;

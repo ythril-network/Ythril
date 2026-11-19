@@ -52,11 +52,11 @@ import { removeRecords } from './record-removal.js';
 import { removeWithTombstones } from './tombstones.js';
 import { edgeEndpointKind, missingRefs } from './entity-refs.js';
 import { edgeEndsAt, type EdgeEnds } from './edge-ends-of-record.js';
-import { EndpointRemoved, LINK_TARGET_REMOVED } from '../util/errors.js';
+import { EndpointRemoved } from '../util/errors.js';
 import type { WebhookActor } from '../webhooks/dispatcher.js';
 import type { EdgeDoc } from '../config/types.js';
 import type { UpdateValidation } from './write-validation.js';
-import type { SchemaViolation } from '../spaces/schema-validation.js';
+import { schemaViolation, type SchemaViolation } from '../spaces/schema-violation-codes.js';
 
 /** What {@link settleReferencesToRemovedEntity} did. */
 export interface SettledReferences {
@@ -235,15 +235,12 @@ export async function takeBackLinksToGoneEntities(
 
 /**
  * The warning rows for links taken back because their entity was deleted while the record that carried them was written: one row per entity, the
- * `reason` starting with the code. THE one spelling, for every writer that carries links and answers `warnings` — the fact and chrono writers (through
+ * `reason` starting with the code, which the row also carries as its `code` (`link_target_removed`, with `params.entityId`). THE one spelling, for every writer that carries links and answers `warnings` — the fact and chrono writers (through
  * {@link takenBackLinkWarnings}), the inline connections of a record write and a file's `linkEntities` — so the row reads the same whichever door wrote it.
  * Empty for no entities, so a caller adds it unconditionally.
  */
 export function linkTargetRemovedWarnings(entityIds: readonly string[]): SchemaViolation[] {
-  return entityIds.map(id => ({
-    field: 'linkEntities', value: id,
-    reason: `${LINK_TARGET_REMOVED}: the entity '${id}' was deleted while this record was written, so the link to it was not kept; the record itself is written.`,
-  }));
+  return entityIds.map(id => schemaViolation('link_target_removed', { entityId: id }, 'linkEntities', id));
 }
 
 /**

@@ -7,8 +7,8 @@
  *
  * **Two statements of one bound, or of one item.** The acts parse the filters with {@link UnconvertedFilterParams} and the MCP tools declare the
  * same kinds, reasons, statuses and name length from the same constants, so the bounds gate (`a-tool-and-its-route-agree-on-bounds`) compares real
- * bounds; the item store writes the {@link UnconvertedItem} the acts list. A leaf (it imports no module of the server but the knowledge kinds and the
- * rights' type), so the store, the acts, the routes and the tools may all read it. A term moved here is re-exported by the module it came from, for
+ * bounds; the item store writes the {@link UnconvertedItem} the acts list. A leaf (it imports no module of the server but the knowledge kinds, the
+ * rights' type and the violation codes' leaf), so the store, the acts, the routes and the tools may all read it. A term moved here is re-exported by the module it came from, for
  * that module's own readers.
  */
 import { z } from 'zod';
@@ -16,6 +16,7 @@ import { TYPE_NAME_MAX, NAME_QUOTED, peerText, type ParseIssueLike, type ParseRe
 import { listedNames } from '../util/listed-names.js';
 import { KNOWLEDGE_TYPES, type KnowledgeType } from '../config/types-knowledge.js';
 import type { TokenRights } from '../config/rights-shape.js';
+import { boundedViolationParams, type ViolationParams } from './schema-violation-codes.js';
 
 /**
  * Why a record was not converted. `could_not_evaluate` is a split condition the engine could not answer on the record (its own class);
@@ -54,6 +55,47 @@ export const UNCONVERTED_STATUSES = ['open', 'dismissed'] as const;
 /** The statuses a LIST takes: the two an item holds, and `all` for both together (no item holds it). */
 export const UNCONVERTED_LIST_STATUSES = [...UNCONVERTED_STATUSES, 'all'] as const;
 
+/**
+ * One violation of an unconverted item, as stored and listed: the field and the sentence, and (Q-943) the violation's `code` and `params`
+ * beside them. An item stored before violations had codes holds the first two only, and is listed so ({@link listedUnconvertedViolations}):
+ * the two travel together, both or neither.
+ */
+export interface UnconvertedViolation {
+  field: string;
+  reason: string;
+  code?: string;
+  params?: ViolationParams;
+}
+
+/** The longest field and reason an item keeps for one violation. */
+export const UNCONVERTED_REASON_MAX = 300;
+
+/**
+ * The form an item STORES one violation in: field and reason bounded at {@link UNCONVERTED_REASON_MAX}, and the code and params when the
+ * row has them, the params bounded as a refusal's rows are. The item writer's one mapping, so a stored row cannot lose its code.
+ */
+export function unconvertedViolationOf(v: { field: string; reason: string; code?: string; params?: unknown }): UnconvertedViolation {
+  const row: UnconvertedViolation = { field: peerText(v.field, { max: UNCONVERTED_REASON_MAX }), reason: peerText(v.reason, { max: UNCONVERTED_REASON_MAX }) };
+  return typeof v.code === 'string' && isPlainParams(v.params) ? { ...row, code: v.code, params: boundedViolationParams(v.params) } : row;
+}
+
+const isPlainParams = (p: unknown): p is Record<string, unknown> => p !== null && typeof p === 'object' && !Array.isArray(p);
+
+/**
+ * The violations of a STORED item as every list and dismiss answers them. Tolerant by rule (stored data is read, never rewritten at boot):
+ * an item written before codes holds `{ field, reason }` and is answered so, with no `code` key; a code or params that is not well formed
+ * drops both and keeps the text; a row that is not an object is left out, and a value that is not a list is no violations.
+ */
+export function listedUnconvertedViolations(stored: unknown): UnconvertedViolation[] {
+  if (!Array.isArray(stored)) return [];
+  return stored.flatMap((v): UnconvertedViolation[] => {
+    if (v === null || typeof v !== 'object' || Array.isArray(v)) return [];
+    const r = v as Record<string, unknown>;
+    const row: UnconvertedViolation = { field: typeof r['field'] === 'string' ? r['field'] : '', reason: typeof r['reason'] === 'string' ? r['reason'] : '' };
+    return [typeof r['code'] === 'string' && isPlainParams(r['params']) ? { ...row, code: r['code'], params: r['params'] as ViolationParams } : row];
+  });
+}
+
 /** One record a conversion could not convert, as stored. */
 export interface UnconvertedItem {
   _id: string;
@@ -69,7 +111,7 @@ export interface UnconvertedItem {
   /** What the record's type was under `toFp`: the hash its staleness is judged by (`typeDefinitionOf`). */
   typeDefinition: string;
   reason: UnconvertedReason;
-  violations: { field: string; reason: string }[];
+  violations: UnconvertedViolation[];
   /** What the steps would have made of it: the new type, and the property names set and removed. */
   proposed: { type?: string; set: string[]; unset: string[] };
   status: typeof UNCONVERTED_STATUSES[number];

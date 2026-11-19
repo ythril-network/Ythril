@@ -19,7 +19,7 @@ import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { SpacePart } from '../db/space-collection.js';
-import { peerList } from '../util/log.js';
+import { REF_NOUN, quotedRefs, missingReferencesText } from '../spaces/schema-violation-codes.js';
 
 // The field a reader calls each kind of record by is `brain/record-view.ts`'s: it is also what the view of a record titles it with, and
 // a map written beside each of its two readers was how the two came to differ. Re-exported, so a caller that resolves an endpoint's name
@@ -44,13 +44,6 @@ export function isUuidV4(value: unknown): value is string {
  * from here keep working — the point of the move is one definition, not a rename.
  */
 export type { RefKind };
-
-const REF_NOUN: Record<RefKind, string> = {
-  entity: 'entity ID',
-  fact: 'fact ID',
-  chrono: 'chrono ID',
-  file: 'file path',
-};
 
 /**
  * A file is identified by its space-relative PATH, and every other kind by a UUID v4 — so the format check
@@ -86,22 +79,9 @@ export function isWellFormedRef(kind: RefKind, value: unknown): boolean {
   return kind === 'file' ? isSpaceRelativeFilePath(value) : isUuidV4(value);
 }
 
-/** How many references a refusal names before it counts the rest. */
-const REFS_NAMED = 5;
-/**
- * How much of ONE reference a refusal quotes: a UUID or any honest file path whole, and short enough that one
- * oversized reference cannot take the list's whole budget and leave the others it names unnamed.
- */
-const REF_QUOTED = 256;
-
-/**
- * The references a refusal names: the first `REFS_NAMED`, JSON-quoted, each cut at `REF_QUOTED`, then `…(+N more)` —
- * through `peerText`/`peerList`, so a caller's megabyte reference comes back bounded and a line-breaking one escaped
- * (bundle-30 `I5`, `Q-270`). It was `slice(0, 5)` + `(+N more)` written twice in this file, bounding the count and
- * never the element, so the 400 on the REST and MCP write doors echoed whatever the caller sent.
- */
-const quotedRefs = (values: readonly string[]): string =>
-  peerList(values.map(v => JSON.stringify(v)), ', ', { count: REFS_NAMED, each: REF_QUOTED });
+// The references a refusal names (`quotedRefs`), the noun of each kind (`REF_NOUN`) and the missing-reference sentence live with the
+// schema violation's words (`spaces/schema-violation-codes.ts`, Q-943): a missing edge end is a violation row (`reference_not_found`)
+// and says the same sentence as the refusal below, from one function.
 
 /** The values of a reference field that are the wrong SHAPE for the kind it points at. */
 function malformedRefs(kind: RefKind, values: readonly string[]): string[] {
@@ -316,9 +296,5 @@ export function missingRefsRefusal(
   spaceId: string, field: string, kind: RefKind, missing: readonly string[],
 ): ReferenceRefusal | null {
   if (missing.length === 0) return null;
-  return new ReferenceRefusal(
-    `\`${field}\` references ${missing.length} ${REF_NOUN[kind]}${missing.length === 1 ? '' : 's'} that ` +
-    `do${missing.length === 1 ? 'es' : ''} not exist in space '${spaceId}': ${quotedRefs(missing)}. ` +
-    `Create the record first, then link it — the write was refused rather than stored with a dead link.`,
-  );
+  return new ReferenceRefusal(missingReferencesText(field, kind, spaceId, missing));
 }
