@@ -11,7 +11,8 @@ import type { RefusalView } from '../core/refusal-text';
  * server left out. An answer with no rows (a plain refusal) is its sentence alone.
  *
  * The per-property marking is not here: the properties editor marks the input a row is about (`errors`), from the same view.
- * Row ids are `<idPrefix>-row-<n>`, so a caller can point `aria-describedby` at one.
+ * Row ids are `<idPrefix>-row-<n>`, so a caller can point `aria-describedby` at one. A row worded from its violation code carries the
+ * server's own sentence as its `title` (Q-943), the one place every list of violations keeps it.
  */
 @Component({
   selector: 'app-refusal-alert',
@@ -33,7 +34,7 @@ import type { RefusalView } from '../core/refusal-text';
           <p class="refusal-head"> {{ v.headline }} </p>
           <ul class="refusal-rows">
             @for (row of v.rows; track $index) {
-              <li [id]="idPrefix() + '-row-' + $index" [class.pre-existing]="row.kind === 'preExisting'"> {{ row.text }} </li>
+              <li [id]="idPrefix() + '-row-' + $index" [class.pre-existing]="row.kind === 'preExisting'" [attr.title]="row.serverText || null"> {{ row.text }} </li>
             }
           </ul>
           @if (v.more) { <p class="refusal-more"> {{ v.more }} </p> }

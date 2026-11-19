@@ -3,6 +3,7 @@ import { formatList } from './list-format';
 import { pluralText } from './plural-text';
 import { retryAfterSecondsOf } from './retry-after';
 import { translatedOrEmpty } from './translated-text';
+import { violationWording } from './violation-wording';
 
 /**
  * The ONE module that turns a failed request into words and rows (`Q-133`, bundle-23 `R6-14`).
@@ -71,12 +72,20 @@ export interface WireRow {
   reason?: string;
   declared?: string[];
   outcome?: string;
+  /** What kind of violation it is (Q-943): the client words the row from it and `params` (`violation-wording.ts`). */
+  code?: string;
+  params?: Record<string, unknown>;
 }
 
 /** One sentence about one thing that is wrong with a write, and what kind of wrong it is. */
 export interface RefusalRow {
   field: string;
   text: string;
+  /**
+   * The server's own sentence when `text` was worded from the row's code (Q-943), '' when `text` already is the server's sentence. A place
+   * that shows the row puts it in the row's `title`, where a developer reads it.
+   */
+  serverText: string;
   /** `introduced` is what THIS write broke, `preExisting` what the record already had, `warning` a violation that did not block. */
   kind: 'introduced' | 'preExisting' | 'warning';
   /** `undeclared` is a property key the type does not declare; the other three are the outcomes of a check. */
@@ -186,12 +195,16 @@ function outcomeOf(row: WireRow): Outcome {
 /** The name a rule row is about: `rules.minAge` and `meta.rules.minAge` are both `minAge`. */
 const ruleNameOf = (field: string): string => field.replace(RULE_FIELDS, '');
 
-function rowText(transloco: Translate, language: string, row: WireRow, kind: RefusalRow['kind']): { text: string; outcome: Outcome; key: string } {
+function rowText(transloco: Translate, language: string, row: WireRow, kind: RefusalRow['kind']): { text: string; serverText: string; outcome: Outcome; key: string } {
   const outcome = outcomeOf(row);
   const isRule = RULE_FIELDS.test(row.field);
   const key = row.field.startsWith(PROPERTIES_PREFIX) ? row.field.slice(PROPERTIES_PREFIX.length) : '';
   const when = kind === 'preExisting' ? 'preExisting' : 'introduced';
-  const reason = row.reason ?? '';
+  // The reason in the reader's language, worded from the row's code and params; the server's sentence when the client cannot word it (Q-943).
+  const worded = violationWording(transloco, language, row);
+  const reason = worded.text;
+  const saysReason = outcome === 'violated';
+  const serverText = saysReason && worded.key !== null ? worded.serverText : '';
   const subject = key || row.field;
   const family = 'refusal.row';
   const ask = (name: string, params: Record<string, unknown>): string => translatedOrEmpty(transloco, `${family}.${name}.${when}`, params);
@@ -211,7 +224,7 @@ function rowText(transloco: Translate, language: string, row: WireRow, kind: Ref
   // A key the shipped locale lacks must still say the server's reason, and about WHAT, rather than the raw key: never blank.
   // A rule's reason is its author's message and stands alone.
   const fallback = isRule || !reason ? reason || subject : `${subject}: ${reason}`;
-  return { text: text || fallback, outcome, key };
+  return { text: text || fallback, serverText, outcome, key };
 }
 
 function toRows(transloco: Translate, language: string, rows: WireRow[], kind: RefusalRow['kind']): RefusalRow[] {

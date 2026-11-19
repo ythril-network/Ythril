@@ -174,7 +174,7 @@ const suggestedAddAsName = (name: string): string => name + '-2';
         @for (v of validateRows(); track $index) {
           <li>@if (v.sample) { <span class="val-where" data-testid="validate-sample-row">{{ 'validate.sample.row' | transloco }}</span> } @else { <code class="val-where">{{ v.where }}</code> }
             @for (r of v.rows; track $index) {
-              <span class="val-row"><app-status-pill [variant]="outcomeWord(r.outcome).variant">{{ outcomeWord(r.outcome).key | transloco }}</app-status-pill> {{ r.text }}</span>
+              <span class="val-row" [attr.title]="r.serverText || null"><app-status-pill [variant]="outcomeWord(r.outcome).variant">{{ outcomeWord(r.outcome).key | transloco }}</app-status-pill> {{ r.text }}</span>
             }
           </li>
         }
