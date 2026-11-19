@@ -12,9 +12,7 @@
  * that module's own readers.
  */
 import { z } from 'zod';
-import {
-  TYPE_NAME_MAX, NAME_QUOTED, peerText, refusalOfParse, type ParseIssueLike, type ParseRefusal,
-} from '@ythril-network/schema/internal';
+import { TYPE_NAME_MAX, NAME_QUOTED, peerText, type ParseIssueLike, type ParseRefusalOptions } from '@ythril-network/schema/internal';
 import { KNOWLEDGE_TYPES, type KnowledgeType } from '../config/types-knowledge.js';
 import type { TokenRights } from '../config/rights-shape.js';
 
@@ -167,13 +165,14 @@ export const UnconvertedFilterParams = z.object({
 });
 
 /**
- * The refusal of a failed parse of these parameters: the one wording both acts and so both doors send. A failure inside the reason's union names the
- * branch the caller was closest to (the list's element, its length, or the single value), never zod's `Invalid input`.
+ * How a failed parse of these parameters is worded, the one option set both acts hand to `refusalOfParse` (so both doors send one sentence). A
+ * failure inside the reason's union names the branch the caller was closest to (the list's element, its length, or the single value), never zod's
+ * `Invalid input`.
  */
-export const unconvertedParseRefusal = (error: unknown): ParseRefusal => refusalOfParse(error, {
+export const UNCONVERTED_REFUSAL_OPTIONS: ParseRefusalOptions = {
   unionBranch: (branches: readonly ParseIssueLike[][]) =>
     branches.find(b => b.some(i => i.code === 'too_big' || (Array.isArray(i.path) && i.path.length > 0))) ?? branches[0],
-});
+};
 
 /**
  * The `given` of a bulk dismissal as its audit entry records it: the reasons as the parser read them (duplicates and blanks gone), joined into one
