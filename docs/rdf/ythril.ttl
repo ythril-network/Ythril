@@ -74,6 +74,12 @@ ythril:path
     rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
     rdfs:label "path" .
 
+ythril:pattern
+    a rdf:Property ;
+    rdfs:comment "A pattern every text value of a property must match, as Ythril checks it: an ECMAScript regular expression, unanchored. It is also sh:pattern only where SPARQL regular expressions read it alike." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "pattern" .
+
 ythril:recurrenceFreq
     a rdf:Property ;
     rdfs:comment "How often a chrono record recurs: daily, weekly, monthly or yearly." ;

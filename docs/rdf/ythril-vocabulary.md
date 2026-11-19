@@ -30,6 +30,7 @@ This page and `ythril.ttl` are generated from one table in the server (`server/s
 | `ythril:mergeFn` | The function that merges two values of a property when two members change it at once. |
 | `ythril:namingPattern` | A pattern every entity name of a type must match. |
 | `ythril:path` | A file's path within its space. |
+| `ythril:pattern` | A pattern every text value of a property must match, as Ythril checks it: an ECMAScript regular expression, unanchored. It is also sh:pattern only where SPARQL regular expressions read it alike. |
 | `ythril:recurrenceFreq` | How often a chrono record recurs: daily, weekly, monthly or yearly. |
 | `ythril:recurrenceInterval` | Every how many periods of its frequency a chrono record recurs. |
 | `ythril:recurrenceUntil` | The date or time after which a chrono record no longer recurs. |

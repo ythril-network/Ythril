@@ -44,6 +44,7 @@ import {
   blank, iri, list, literalForBoolean, literalForInteger, literalForValue, plain, quad, stdIri, xsd,
   type BlankTerm, type DeclaredType, type IriTerm, type LeftOutReason, type LiteralTerm, type Quad, type Term,
 } from './literals.js';
+import { patternReadsAlike } from './portable-pattern.js';
 import { ontologyIri, prefixesFor, resolveTermIri, shapeIri, termOwnerName, versionIri } from './term-iri.js';
 import { ythrilIri } from './ythril-vocabulary.js';
 
@@ -112,7 +113,7 @@ export const SCHEMA_FIELD_EXPORT: Readonly<Record<SchemaFieldPath, Readonly<Reco
     enum: { owl: ['owl:oneOf'], shacl: ['sh:in'] },
     minimum: { owl: ['owl:withRestrictions'], shacl: ['sh:minInclusive'] },
     maximum: { owl: ['owl:withRestrictions'], shacl: ['sh:maxInclusive'] },
-    pattern: { owl: ['owl:withRestrictions'], shacl: ['sh:pattern'] },
+    pattern: { shacl: ['sh:pattern'], annotation: ['ythril:pattern'] },
     required: { shacl: ['sh:minCount', 'sh:minLength'], annotation: ['ythril:requiredEdgeProperty'] },
     default: { shacl: ['sh:defaultValue'] },
     mergeFn: { annotation: ['ythril:mergeFn'] },
@@ -314,8 +315,9 @@ function restriction(out: Out, base: string, facets: readonly (readonly [IriTerm
 
 /**
  * The range of an own property. An enumeration is the range (its members already fit the declared type). Facets are written only where the
- * server applies them: a range on a declared number, a pattern on a declared string; a range or pattern on a property of another type stays a
- * SHACL guard alone, since an axiom would claim every value of the property is a number or a string.
+ * server applies them: a range on a declared number; a range on a property of another type stays a SHACL guard alone, since an axiom would
+ * claim every value of the property is a number. A pattern is never an OWL facet: an `xsd:pattern` facet is implicitly anchored and reads
+ * `^` and `$` as characters, so it would mean something else than the server's ECMAScript pattern (standards review row 7).
  */
 function rangeOf(out: Out, facts: PropertyFacts): Term | undefined {
   const parts: Term[] = [];
@@ -329,7 +331,6 @@ function rangeOf(out: Out, facts: PropertyFacts): Term | undefined {
   if (facts.declared === 'number' && facts.minimum !== undefined) numeric.push([XSD('minInclusive'), facts.minimum]);
   if (facts.declared === 'number' && facts.maximum !== undefined) numeric.push([XSD('maxInclusive'), facts.maximum]);
   if (numeric.length > 0) parts.push(restriction(out, DATATYPE_OF.number, numeric));
-  if (facts.declared === 'string' && facts.pattern !== undefined) parts.push(restriction(out, DATATYPE_OF.string, [[XSD('pattern'), plain(facts.pattern)]]));
   if (parts.length === 0 && facts.declared !== undefined && facts.members === undefined) {
     return facts.declared === 'date' ? DATE_RANGE : iri(DATATYPE_OF[facts.declared]);
   }
@@ -353,12 +354,16 @@ function propertyAxioms(out: Out, term: IriTerm, ontology: string, key: string, 
   out.say(term, YTHRIL('mergeFn'), facts.mergeFn);
 }
 
-/** The guarded constraints: a range is read only on a decimal, a pattern only on what is no decimal and no boolean. */
+/**
+ * The guarded constraints: a range is read only on a decimal, a pattern only on what is no decimal and no boolean, and only a pattern SHACL's
+ * regular expressions read as the server does ({@link patternReadsAlike}); every pattern's own text is `ythril:pattern` on the shape.
+ */
 function guards(out: Out, shape: Subject, facts: PropertyFacts): void {
   const notDecimal = (): BlankTerm => out.shapeWith(SH('not'), out.shapeWith(SH('datatype'), XSD('decimal')));
   if (facts.minimum !== undefined) out.add(shape, SH('or'), list([notDecimal(), out.shapeWith(SH('minInclusive'), facts.minimum)]));
   if (facts.maximum !== undefined) out.add(shape, SH('or'), list([notDecimal(), out.shapeWith(SH('maxInclusive'), facts.maximum)]));
-  if (facts.pattern !== undefined) {
+  out.say(shape, YTHRIL('pattern'), facts.pattern);
+  if (facts.pattern !== undefined && patternReadsAlike(facts.pattern)) {
     out.add(shape, SH('or'), list([
       out.shapeWith(SH('datatype'), XSD('decimal')), out.shapeWith(SH('datatype'), XSD('boolean')), out.shapeWith(SH('pattern'), plain(facts.pattern)),
     ]));
@@ -516,7 +521,7 @@ function exportType(out: Out, space: Space, kind: KnowledgeType, type: string, r
   if (edge) edgeConstraints(out, space, node, term, type, def);
   for (const p of facts.requiredEdgeProperties) out.add(node, YTHRIL('requiredEdgeProperty'), p);
   const pattern = textOf(own(def, 'namingPattern'));
-  if (kind === 'entity' && pattern !== undefined) {
+  if (kind === 'entity' && pattern !== undefined && patternReadsAlike(pattern)) {
     const label = out.node();
     out.add(node, SH('property'), label);
     out.add(label, RDF_TYPE, SH('PropertyShape'));

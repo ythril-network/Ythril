@@ -63,6 +63,7 @@ export const YTHRIL_TERMS: readonly YthrilTerm[] = Object.freeze([
   // What a space's schema says that no standard term carries (design r4 section 6); written by the schema export.
   { name: 'mergeFn', kind: 'property', comment: 'The function that merges two values of a property when two members change it at once.' },
   { name: 'namingPattern', kind: 'property', comment: 'A pattern every entity name of a type must match.' },
+  { name: 'pattern', kind: 'property', comment: 'A pattern every text value of a property must match, as Ythril checks it: an ECMAScript regular expression, unanchored. It is also sh:pattern only where SPARQL regular expressions read it alike.' },
   { name: 'endpointFrom', kind: 'property', comment: 'A kind of record an edge type may start at.' },
   { name: 'endpointTo', kind: 'property', comment: 'A kind of record an edge type may end at.' },
   { name: 'retentionDays', kind: 'property', comment: 'How many days a record of a type is kept before it is deleted.' },
