@@ -133,14 +133,39 @@ describe('a stalled-read fixture stalls the reader\'s read, or throws', { skip }
     assert.equal(await db.collection('sf_many_src_e').countDocuments({}), 0);
   });
 
-  it('a hung read\'s look is the stall less half a second, and a stall too short for the product\'s worst path to end the read is refused, naming the figures', async () => {
+  it('a hung read\'s look is the product\'s worst path plus the headroom, not the stall less something: a pass that ends well after the bound is outside it', async () => {
     const bound = await import('../../server/dist/db/write-bound.js');
     const worst = 1000 + bound.SERVER_FIRST_MARGIN_MS + bound.KILL_WAIT_MS;
-    assert.equal(await faults.hungReadLookMs({ boundMs: 1000, stallMs: faults.HUNG_READ_STALL_MS }), faults.HUNG_READ_STALL_MS - 500);
-    await assert.rejects(() => faults.hungReadLookMs({ boundMs: 1000, stallMs: 3000 }),
-      (err) => err.message.includes(`${worst} ms`) && /less than the 3000 ms/.test(err.message) && /HUNG_READ_STALL_MS/.test(err.message));
+    const look = await faults.hungReadLookMs({ boundMs: 1000, stallMs: faults.HUNG_READ_STALL_MS });
+    assert.equal(look, worst + 3000, 'the look is not the worst path and the 3 s of headroom');
+    assert.ok(look < 5 * 1000, `a look of ${look} ms is not under what a 1000 ms bound applied five times over would take (${5 * 1000} ms): a pass that ends then would be inside it`);
+    assert.ok(look < faults.HUNG_READ_STALL_MS, 'the look is not shorter than the stall: a pass that waited the stall out would be inside it');
+    assert.equal(await faults.hungReadLookMs({ boundMs: 2000, stallMs: faults.HUNG_READ_STALL_MS }), 2000 + bound.SERVER_FIRST_MARGIN_MS + bound.KILL_WAIT_MS + 3000, 'the look does not follow the bound');
+  });
+
+  it('a stall that does not exceed the look by half a second, or a bound or stall that is not a positive number, is refused naming the figures', async () => {
+    const bound = await import('../../server/dist/db/write-bound.js');
+    const worst = 1000 + bound.SERVER_FIRST_MARGIN_MS + bound.KILL_WAIT_MS;
+    for (const stallMs of [3000, worst + 3000, worst + 3000 + 499]) {
+      await assert.rejects(() => faults.hungReadLookMs({ boundMs: 1000, stallMs }),
+        (err) => err.message.includes(`${worst} ms`) && err.message.includes(`${stallMs} ms stall`) && /HUNG_READ_STALL_MS/.test(err.message), `a ${stallMs} ms stall was accepted`);
+    }
+    assert.equal(await faults.hungReadLookMs({ boundMs: 1000, stallMs: worst + 3000 + 500 }), worst + 3000, 'a stall half a second over the look is refused');
     await assert.rejects(() => faults.hungReadLookMs({ boundMs: 1000, stallMs: 0 }), /positive numbers/);
     await assert.rejects(() => faults.hungReadLookMs({ boundMs: undefined, stallMs: 8000 }), /positive numbers/);
+  });
+
+  it('two withWriteBound calls started together refuse the second, and the first still restores the product\'s bound', async () => {
+    const bound = await import('../../server/dist/db/write-bound.js');
+    const own = bound.housekeepingOpMs();
+    const [first, second] = await Promise.allSettled([
+      faults.withWriteBound({ housekeepingOpMs: 1500 }, async () => 'first'),
+      faults.withWriteBound({ housekeepingOpMs: 2500 }, async () => 'second'),
+    ]);
+    assert.equal(first.status, 'fulfilled', `the first call was refused: ${first.reason}`);
+    assert.equal(second.status, 'rejected', 'the second call, started in the same tick, was accepted: the in-use flag is set after an await');
+    assert.match(String(second.reason?.message), /already set by an enclosing withWriteBound/);
+    assert.equal(bound.housekeepingOpMs(), own, 'a refused second call left the bound set');
   });
 
   it('withWriteBound sets the bound for its body only, puts the product\'s own back whether the body returned or threw, and refuses to nest', async () => {
