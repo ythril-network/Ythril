@@ -462,6 +462,9 @@ previous vector is dropped rather than kept: it describes text the record no lon
 the record is found by its current words and not ranked by meaning. A job that could not reach the embedder keeps its
 attempts and waits, so `list_embed_jobs` shows it `pending` with `transientFailures` rising and `lastError` beginning
 `Could not reach embedding endpoint`; a job whose failure a retry cannot fix is shown `failed`.
+**A rebuild (a reindex's job) is the one exception to dropping the vector:** it keeps the stored vector while the text is unchanged and
+the job will be tried again, and drops it on the job's last try, at once when the embedder refuses the record as too large, and at
+once when the text changed; see the reindex paragraph of the Brain user guide.
 Its matched text is the current text on every path, embedded, suppressed or failed, so text you removed stops
 matching at once.
 

@@ -24,7 +24,8 @@ import {
   factEmbedText, entityEmbedText, edgeEmbedText, chronoEmbedText, fileEmbedText, chunkEmbedText, boundedEmbedText, embedTextFor, embedInputCeiling,
 } from './embed-text.js';
 import { noteInputCut } from './embed-ceiling.js';
-import { OverCeilingError, classifyEmbedFailure } from './embed-errors.js';
+import { OverCeilingError, classifyEmbedFailure, type EmbedVerdict } from './embed-errors.js';
+import { embedVerdictEndsJob, type EmbedJobCounters } from './embed-queue.js';
 import { utf8Bytes } from '../util/bounded-text.js';
 import { resolveEdgeEndpointNames, resolveEndpointNames } from './edge-endpoint-names.js';
 import { edgeEndpointKind } from './entity-refs.js';
@@ -316,6 +317,62 @@ export type EmbedOutcome = 'embedded' | 'gone' | 'excluded' | 'unchanged' | 'tex
  */
 export interface EmbedStoredRecordOptions {
   rebuild?: boolean;
+  /**
+   * The counters of the job this run is for, as the worker holds them: what says whether a failed rebuild is the job's last try
+   * (`embedVerdictEndsJob`). A caller that is no job (a repair, a test) is on its first try.
+   */
+  job?: EmbedJobCounters;
+}
+
+/** The counters of a job that has just been claimed for the first time: what a caller that is no job is taken to be. */
+const FIRST_TRY: EmbedJobCounters = { attempts: 1, lostChildFailures: 0 };
+
+/** What {@link failureLeavesStoredVectorRight} reads of a failed rebuild. */
+export interface FailedRebuild {
+  verdict: EmbedVerdict;
+  /** The text to embed is the stored `matchedText`. */
+  textUnchanged: boolean;
+  /** The stored vector was made by the current model under the embedding configuration in force now. */
+  madeUnderCurrentConfiguration: boolean;
+  /** This was the job's last try: `embedVerdictEndsJob` of the verdict and the job's counters. */
+  lastTry: boolean;
+}
+
+/**
+ * During a rebuild that FAILED, does the failure leave the record's stored vector right (so it stays), or must it be unset?
+ *
+ * ## Why it is a question about the vector and not about the failure
+ *
+ * Recall does not filter by the model stamp: it serves what is stored. A vector kept through a failure is therefore served, so it may be kept
+ * only where it is still right. The first draft kept it for every failure that is not the record's own, and two cases showed that wrong: after a
+ * model change the kept vector is the old model's (and a job that ends `failed` does not hold the reindex open), and a record edited during a
+ * reindex has the old text's. The rule, one row each:
+ *
+ *  1. the verdict `ends` (the embedder refuses the record, or it is over the ceiling): unset;
+ *  2. the text to embed is not the stored text: unset now (text that was removed must stop matching);
+ *  3. the text is the same and the vector was made by the current model under the configuration in force now: kept, however the job ends;
+ *  4. the text is the same and the vector is of another model or configuration: kept while the job will be tried again, unset on its last try.
+ *
+ * A wrong key, a wrong model name or a refused address therefore does not strip a space whose vectors are right.
+ */
+export function failureLeavesStoredVectorRight(i: FailedRebuild): boolean {
+  if (i.verdict.kind === 'ends') return false;
+  if (!i.textUnchanged) return false;
+  if (i.madeUnderCurrentConfiguration) return true;
+  return !i.lastTry;
+}
+
+/**
+ * Was the stored vector made under the embedding configuration (vector width, prefix scheme) in force NOW? It cannot be told, so this is
+ * false and every rebuild takes the fourth row of {@link failureLeavesStoredVectorRight}.
+ *
+ * Nothing records what a space's vectors were built with: the reindex run's `target` is what the run rebuilds FOR (written when it starts, and
+ * rewritten when the configuration changes under it), and `needsReindex` is a flag set from one sampled record's model name at boot. A reindex is
+ * also started by a change of the width or the prefix scheme with the model's name unchanged, and then no stamp differs. Until a space keeps a
+ * record of the configuration its vectors were built with, keeping a vector "however the job ends" would serve an old configuration's vectors.
+ */
+function storedVectorsAreOfCurrentConfiguration(): boolean {
+  return false;
 }
 
 /**
@@ -479,13 +536,19 @@ export async function embedStoredRecord(
     }
     result = await embed(toEmbed);
   } catch (err) {
-    // A rebuild that fails because the EMBEDDER is away changes nothing. The record's text did not change, so its
-    // vector still describes it — under the old model, perhaps, but a model-change reindex keeps recall refused for
-    // the space until it is done. Unsetting here would strip a whole space's vectors at claim rate for as long as
-    // an outage lasts, and the job retries under the rebuild either way. Any other failure is the record's own,
-    // and takes the path below.
+    // A rebuild that fails leaves the stored vector alone only while that vector is still RIGHT, and recall serves what is stored: see
+    // `failureLeavesStoredVectorRight` for the rows. A wrong key or a refused address is not the record's fault and must not strip a space
+    // of vectors that are right; a vector of another model, or of text the record no longer has, must not outlive the job's last try.
+    // The text is the same, and the stamp is the current model's, exactly when the classifier owed this record a rebuild ('rebuild') and
+    // not a re-embed for its model ('model') or its text ('stale'): one comparison of each, in `embedOwed`.
     const verdict = classifyEmbedFailure(err);
-    if (opts.rebuild && (verdict.kind === 'outage' || verdict.kind === 'lost')) throw err;
+    const owedReason = owed.outcome === 'embed' ? owed.reason : null;
+    if (opts.rebuild && failureLeavesStoredVectorRight({
+      verdict,
+      textUnchanged: owedReason === 'rebuild' || owedReason === 'model',
+      madeUnderCurrentConfiguration: owedReason === 'rebuild' && storedVectorsAreOfCurrentConfiguration(),
+      lastTry: embedVerdictEndsJob(verdict, opts.job ?? FIRST_TRY),
+    })) throw err;
     // The failed path, and the one retries and a dead letter end on (`Q-94`). The current text is written so the
     // lexical channel stops matching what the record no longer says, and the vector is DROPPED with it: that vector
     // is of text that is gone, and `matchedText` doubles as the "unchanged" fingerprint above — written beside a
