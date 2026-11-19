@@ -872,11 +872,20 @@ describe('the entry point\'s end', () => {
   });
 
   it('an output stream that never calls back, fails, or throws cannot keep the process from ending', async () => {
-    for (const kind of ['never', 'error', 'throws']) {
-      const proc = processWith(kind);
-      await stack.main(['frobnicate'], { proc, flushMs: 20, run: fakeDocker().run, print: () => {}, printError: () => {} });
-      assert.deepEqual(proc.exits, [1], `a stream that ${kind} left the process alive`);
-      assert.equal(proc.exitCode, 1, 'the code was not set before the flush, so a process that ends by itself would end 0');
+    // The flush's own timer does not hold a process open (a real process whose stream never calls back simply ends, with the code
+    // already set). So this test holds the event loop itself while it waits: with nothing else pending the test runner saw an empty
+    // loop, cancelled this case and every case after it in the file (CI's run of the first push; a local run happened to have a
+    // handle left from an earlier case).
+    const keepAlive = setInterval(() => {}, 1_000);
+    try {
+      for (const kind of ['never', 'error', 'throws']) {
+        const proc = processWith(kind);
+        await stack.main(['frobnicate'], { proc, flushMs: 20, run: fakeDocker().run, print: () => {}, printError: () => {} });
+        assert.deepEqual(proc.exits, [1], `a stream that ${kind} left the process alive`);
+        assert.equal(proc.exitCode, 1, 'the code was not set before the flush, so a process that ends by itself would end 0');
+      }
+    } finally {
+      clearInterval(keepAlive);
     }
   });
 });
