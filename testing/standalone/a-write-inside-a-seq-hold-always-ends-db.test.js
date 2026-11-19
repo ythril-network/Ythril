@@ -64,9 +64,17 @@ const skip = await mongoSkipReason();
 const S = 'holdends';
 const R = 'holdresume';
 const BOUND = { writeTimeoutMs: 2000, holdDeadlineMs: 2000 };
-/** How long past the bound a write may take to be reported ended: the driver ends a bound write within ~2 % (P1). */
-const SLACK_MS = 1500;
-const CAP_MS = BOUND.holdDeadlineMs + SLACK_MS;
+const { SERVER_FIRST_MARGIN_MS, KILL_WAIT_MS } = await import('../../server/dist/db/write-bound.js');
+/** Headroom over the product's worst path, for a loaded runner: 1.5 s over the bound left 0.6 s and CI used it up (main run 44427408708). */
+const HEADROOM_MS = 3000;
+/**
+ * How long a case waits for the write to end once its hold is seen. COMPUTED, never picked: the product's worst path to end a write at
+ * this bound (the bound, then the client backstop `SERVER_FIRST_MARGIN_MS` later, then at most `KILL_WAIT_MS` to see the server
+ * operation gone, all read from the built `db/write-bound`) plus `HEADROOM_MS`. It stays below the time the planted lock is held: the
+ * lock is let go only after this wait (`stalled`'s `finally`), and the server would end its transaction at 60 s (MongoDB's default
+ * `transactionLifetimeLimitSeconds`), so a write that ended within the cap was ended by the bound, never by the lock going.
+ */
+const CAP_MS = Math.max(BOUND.writeTimeoutMs, BOUND.holdDeadlineMs) + SERVER_FIRST_MARGIN_MS + KILL_WAIT_MS + HEADROOM_MS;
 /** How long a case may take to REACH its stall (the hold registered) before the fixture is called broken. */
 const ENTER_MS = 5000;
 
