@@ -2143,6 +2143,7 @@
   "networks.roundType.space_wipe": "Space leeren",
   "networks.roundType.meta_change": "Space-Einstellungen ändern",
   "networks.roundType.space_addition": "Space hinzufügen",
+  "networks.roundType.space_rebase": "RDF-Basisadresse ändern",
   "networks.decisions.outcome.passed": "Angenommen",
   "networks.decisions.outcome.vetoed": "Per Veto abgelehnt",
   "networks.decisions.outcome.expired": "Abgelaufen",
