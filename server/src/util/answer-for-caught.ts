@@ -18,7 +18,7 @@
  *
  * - the store's condition is the DOOR's first question (`storeFailureAnswer`), asked before this and never here;
  * - a stored file that cannot be read: `500`, its base name and "cannot be read";
- * - a socket-shaped failure (`ECONN*`, `EPIPE`, `ETIMEDOUT`, `ENOTFOUND`, `EAI_*`, also through `cause`): `502`, "an upstream service did
+ * - a socket-shaped failure (`isSocketFailure` in `socket-failure.ts`: `ECONN*`, `EPIPE`, `ETIMEDOUT`, `ENOTFOUND`, `EAI_*`, also through `cause`): `502`, "an upstream service did
  *   not answer";
  * - a file-system error, also through `cause`: `500` `file_system_fault`, by the one function that counts and reports a file act's failure;
  * - something the DRIVER raised that is not the store's condition (a server refusal): the driver's words never reach the answer;
@@ -43,6 +43,7 @@ import { StoredFileUnreadable } from '../files/stored-bytes.js';
 import { FileSystemFault } from '../files/act-answers.js';
 import { answerFileActFailure } from '../files/act-failure-answer.js';
 import { isFileSystemError } from './fs-failure-words.js';
+import { isSocketFailure } from './socket-failure.js';
 import { reportServerFailureOncePerWindow } from './report-failure.js';
 
 /** The classes a caught failure is answered as: the metric's `class` label, so a fixed set and never a message. */
@@ -59,9 +60,6 @@ export interface CaughtAnswer {
 /** The words of a fault of ours that has nothing a caller can act on. */
 export const INTERNAL_ERROR_TEXT = 'Internal server error';
 const UPSTREAM_TEXT = 'an upstream service did not answer';
-
-/** Socket-shaped codes: the connection to something else failed, which is not a file act and not the caller's request. */
-const SOCKET_CODE = /^(ECONN[A-Z]*|EPIPE|ETIMEDOUT|ENOTFOUND|EAI_[A-Z_]+)$/;
 
 /**
  * Report a fault's cause to the operator once per operation, class and failure per window; the answer is given every time. Through the
@@ -83,7 +81,8 @@ export function answerForCaught(err: unknown, where: string, { refusals }: { ref
     return { status: 500, body: { error: `${path.basename(err.filePath)} cannot be read.`, retryable: false }, kind: 'unreadable_file' };
   }
   const chain = errorChain(err);
-  if (chain.some(e => SOCKET_CODE.test(String((e as { code?: unknown }).code ?? '')))) {
+  // The doors' rule, written once in `socket-failure.ts` (the embed call asks a wider one of the same chain).
+  if (isSocketFailure(err)) {
     reportCaught(where, 'upstream', err);
     return { status: 502, body: { error: UPSTREAM_TEXT, retryable: false }, kind: 'upstream' };
   }

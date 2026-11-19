@@ -42,7 +42,7 @@ model; a background worker embeds each record moments later. Until it does, the 
 |---|---|
 | `pending` | queued, not started. Normally 0, briefly non-zero after a burst of writes or a sync pull |
 | `processing` | in flight right now |
-| `failed` | gave up after retrying with backoff. **A non-zero value that does not clear is the signal that something is wrong** — usually an unreachable or misconfigured embedding endpoint |
+| `failed` | gave up: a failure a retry cannot fix, or a job that spent its attempts retrying with backoff. **A non-zero value that does not clear is the signal that something is wrong** — usually a misconfigured embedding endpoint (a refused request, a wrong model or key, an address the server will not call). An endpoint that **cannot be reached** does not end a job `failed`: the job stays `pending` and waits (`transientFailures` rises), so alert on that too |
 
 Use it to answer "is this space ready to search". A steady `pending` that never drains, or any lasting
 `failed`, means recall is quietly returning less than the space contains. Rewriting a record requeues it,
@@ -307,7 +307,8 @@ brain record's failure is usually about that record. See the per-record retry ab
 ### Vectorless records — the embed queue for brain records
 
 A brain record is written and its vector is computed **after** the response. If the embedder is unreachable or the text
-chokes it, the record is **stored** and a job records the failure — it is not dropped. But a record without a vector is
+chokes it, the record is **stored** and a job records the failure — it is not dropped. An unreachable embedder leaves the job
+`pending` and waiting (below); a text it refuses leaves it `failed`. But a record without a vector is
 **invisible to `recall` and to `query`'s semantic path**: the vector search cannot return it, and the lexical fallback
 needs an embedding to score. These two endpoints are how you find those records and get them embedded.
 
@@ -368,12 +369,26 @@ existed (6,000 bytes by default) is never embedded as a cut text, which would le
 unfindable by meaning. Its job is `failed` with `attempts` at `maxAttempts` and `lastError` beginning `This passage is larger than
 the embedder accepts`, naming the bytes and the ceiling. **Re-convert its file** to split it into parts that fit: the MCP
 `retry_embed_file`, or `POST /api/files/:spaceId/retry_embedding?path=<file>`. Both work on a file that completed, and the new run deletes the file's old
-passages, in chunks, before it writes the new ones; both leave the file alone with `processing` (`409` on the route) while a worker holds it. `ythril_embed_jobs_failed_total{reason}` counts every job left `failed`, by why.
+passages, in chunks, before it writes the new ones; both leave the file alone with `processing` (`409` on the route) while a worker holds it. `ythril_embed_jobs_failed_total{reason}` counts every job left `failed`, by why, and `ythril_embed_jobs_handed_back_total` counts every attempt handed back to a job that waits.
 
-`transientFailures` counts the times the embedder did not answer at all — connection refused, a timeout, a 429 or 5xx —
-which hand the attempt back rather than spend it; `attempts` is spent only on errors a retry cannot fix. A high
-`transientFailures` with `attempts` at zero is an outage waiting itself out. It was described on the tool and returned by
-neither door until `Q-109`.
+`transientFailures` counts the times the embedder did not answer at all, which hand the attempt back rather than spend it;
+`attempts` is spent only on errors a retry cannot fix. What counts is an embed call that **could not reach its HTTP endpoint**
+(connection refused or reset, no route to the host, the name not resolving, a timeout of the connection or of the call itself),
+a 429 or a 5xx, and a lost embedding process. A high `transientFailures` with `attempts` at zero is an outage waiting itself out.
+It was described on the tool and returned by neither door until `Q-109`.
+
+**An unreachable embedder costs a job waiting, never its attempts.** The server decides that from the failure itself (the connection
+failed), not from the words of its message, so an outage of any length leaves every queued job `pending` with `lastError` beginning
+`Could not reach embedding endpoint`, retried with a back-off that grows from 5 seconds to half an hour, and none of them `failed`.
+While it lasts the worker also stops claiming new jobs: after one unreachable failure it pauses, 5 seconds at first and doubling
+to 60, and the first embed that works ends the pause. **Waiting is not failing, so an alert on `failed` or on
+`ythril_embed_jobs_failed_total` does not see an outage:** `ythril_embed_jobs_handed_back_total` counts every attempt handed back
+(it rises by one for each job and each retry, for an unreachable embedder, a 429 or 5xx and a lost process alike), and a
+`pending` count that does not drain while `transientFailures` climbs says the same per space. Alert on a lasting rate of the
+counter. **A wrong hostname reads as an outage**: a name that does not resolve is a failure to reach the endpoint, so a mistyped
+`embedding.baseUrl` waits like a stopped server; the warning in the server log (once per endpoint per ten minutes) names it.
+What still spends the budget and ends `failed`: a refusal the endpoint answered (`400`, `422`), an address the server refuses
+to call, a header value the runtime refuses and a certificate failure.
 
 **One transient failure does end a job: a lost embedding process.** The bundled embedding model runs in a child process
 of the server. When that process is lost (it crashed, was killed, or stopped answering) the embed that was in flight

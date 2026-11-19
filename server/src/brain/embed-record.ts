@@ -29,7 +29,7 @@ import { utf8Bytes } from '../util/bounded-text.js';
 import { resolveEdgeEndpointNames, resolveEndpointNames } from './edge-endpoint-names.js';
 import { edgeEndpointKind } from './entity-refs.js';
 import { recordSuppressedMany } from './suppress-embeddings.js';
-import { isTransientEmbedError } from './embed-queue.js';
+import { isTransientEmbedFailure } from './embed-queue.js';
 import { getEmbeddingConfig } from '../config/loader.js';
 import { atReadSeq, readSeqOf } from '../db/at-read-seq.js';
 import { UNSET_DERIVED, UNSET_VECTOR, isDerivedFileRow } from '../sync/local-only-fields.js';
@@ -485,7 +485,7 @@ export async function embedStoredRecord(
     // the space until it is done. Unsetting here would strip a whole space's vectors at claim rate for as long as
     // an outage lasts, and the job retries under the rebuild either way. Any other failure is the record's own,
     // and takes the path below.
-    if (opts.rebuild && isTransientEmbedError(err instanceof Error ? err.message : String(err))) throw err;
+    if (opts.rebuild && isTransientEmbedFailure(err)) throw err;
     // The failed path, and the one retries and a dead letter end on (`Q-94`). The current text is written so the
     // lexical channel stops matching what the record no longer says, and the vector is DROPPED with it: that vector
     // is of text that is gone, and `matchedText` doubles as the "unchanged" fingerprint above — written beside a

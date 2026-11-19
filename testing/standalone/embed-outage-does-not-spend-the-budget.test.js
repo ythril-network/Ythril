@@ -97,7 +97,9 @@ describe('the two counters answer different questions', () => {
     const src = readFileSync('server/src/brain/embed-queue.ts', 'utf8')
       .replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
 
-    const branch = src.slice(src.indexOf('isTransientEmbedError(errorMessage)'));
+    const asked = src.indexOf('isTransientEmbedFailure(failure)');
+    assert.ok(asked >= 0, 'failEmbedJob no longer asks isTransientEmbedFailure(failure): re-point this gate at the transient branch');
+    const branch = src.slice(asked);
     const untilNextBranch = branch.slice(0, branch.indexOf('if (attempts < MAX_EMBED_ATTEMPTS)'));
 
     assert.match(untilNextBranch, /attempts: Math\.max\(0, attempts - 1\)/,

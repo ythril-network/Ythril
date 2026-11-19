@@ -31,7 +31,7 @@ import { positionClockUnusable } from '../util/position-clock.js';
 import { setBrainWriteSink } from './brain-write-count.js';
 import { setVersionRaiseSink, VERSION_RAISE_REASONS } from './version-raise-count.js';
 import { setConfigFlushFailureSink } from './config-flush-count.js';
-import { setEmbedJobFailedSink, EMBED_JOB_FAILED_REASONS } from './embed-job-failed-count.js';
+import { declareEmbedJobMetrics } from './embed-job-metrics.js';
 import { setScanHoldSink, SCAN_HOLD_SCANNERS } from './scan-hold-count.js';
 import { setSchemaSnapshotSink, SCHEMA_SNAPSHOT_OUTCOMES } from './schema-snapshot-count.js';
 import { oldestRecordPositionHoldSeconds } from '../sync/record-position-stream.js';
@@ -1942,20 +1942,8 @@ export const embedChunksTotal = new Counter({
 });
 embedChunksTotal.labels({ space: '' }).inc(0);
 
-/**
- * Embed jobs left `failed`, by why (`brain/embed-queue.ts`, ONE helper writes the status so no writer can drop the count, and counts
- * through `metrics/embed-job-failed-count.ts`, which the queue can import where it cannot import this):
- * `refused_413` (the embedder answered payload-too-large), `over_ceiling` (a stored passage is larger than the embedder accepts and
- * needs its file re-converted), `budget` (the attempts ran out), `lost_child` (the inference process was lost too often).
- */
-export const embedJobsFailedCounter = new Counter({
-  name: 'ythril_embed_jobs_failed_total',
-  help: 'Embed jobs left failed, by reason (refused_413, over_ceiling, budget, lost_child)',
-  labelNames: ['reason'] as const,
-  registers: [register],
-});
-setEmbedJobFailedSink(reason => embedJobsFailedCounter.labels({ reason }).inc());
-for (const reason of EMBED_JOB_FAILED_REASONS) embedJobsFailedCounter.labels({ reason }).inc(0);
+/** The embed queue's two job counters, `ythril_embed_jobs_failed_total{reason}` and `ythril_embed_jobs_handed_back_total`, declared by `metrics/embed-job-metrics.ts`. */
+export const { embedJobsFailedCounter, embedJobsHandedBackCounter } = declareEmbedJobMetrics(register);
 
 /**
  * What became of a schema snapshot (`spaces/schema-snapshot-store.ts`, `sync/schema-snapshot-fetch.ts`, counted through

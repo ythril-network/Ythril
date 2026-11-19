@@ -21,6 +21,8 @@ Named volumes persist across upgrades. The server applies any pending MongoDB in
 
 **Breaking changes**, when they occur, will be listed in `CHANGELOG.md` with migration steps.
 
+**After upgrading, an embedder that cannot be reached no longer ends embed jobs `failed`, so an alert on failed jobs does not see an outage.** A job whose embed call could not reach its HTTP endpoint (connection refused or reset, no route, the name not resolving, a timeout) now keeps its attempts and waits with back-off (`pending`, `transientFailures` rising, `lastError` beginning `Could not reach embedding endpoint`), and the worker pauses between jobs until the embedder answers. A wrong hostname waits the same way. Alert on `ythril_embed_jobs_handed_back_total` (or a `pending` count that does not drain while `transientFailures` climbs) as well as on `ythril_embed_jobs_failed_total` and `failed`. Jobs that failed in an earlier outage are re-queued once by the first start of this version, as they were. No action; nothing is stored differently, and a peer's version does not matter.
+
 **After upgrading, a `config.json` that is there but cannot be read or parsed stops the start instead of opening first-run setup.** An empty
 file, one holding only whitespace or `null`, one that is not valid JSON and one the server user may not read each stop the boot with a line naming
 `config.json` and the fix; before, the instance came up as a new one, `GET /api/setup/status` said `configured: false` and the unauthenticated

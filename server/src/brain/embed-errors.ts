@@ -3,10 +3,12 @@
  *
  * ## Why a string has to carry this at all
  *
- * A failure from the embedder crosses a process boundary, then the queue (`failEmbedJob`), and only its message
- * survives: the queue decides whether a job's failure is the embedder's fault or the record's from text, through
- * `isTransientEmbedError`. A crashed inference process is the embedder's fault, so the queue has to be able to
- * recognise one from its message alone, and this module owns the words it recognises.
+ * A failure from the bundled embedder crosses a process boundary, then the queue (`failEmbedJob`), and only its message
+ * survives it: for a failure whose producer cannot be known, the queue decides whether a job's failure is the embedder's
+ * fault or the record's from text, through `isTransientEmbedError`. A crashed inference process is the embedder's fault, so
+ * the queue has to be able to recognise one from its message alone, and this module owns the words it recognises. A failure
+ * whose producer IS known keeps its class all the way to the queue (`LostChildError`, `EmbedUnreachableError`), and the
+ * class is the proof.
  *
  * ## Why the marker is written once
  *
@@ -76,6 +78,32 @@ export class LostChildError extends Error {
 /** Did the HOST raise this? True only for a `LostChildError`; never for something that reads like one. */
 export function isLostChildError(err: unknown): err is LostChildError {
   return err instanceof LostChildError;
+}
+
+/**
+ * The embed call could not REACH its HTTP endpoint: the connection was refused or reset, there was no route, the name did not resolve, or the connection or the
+ * call timed out (`isConnectionFailure` in `util/socket-failure.ts`, asked where the fetch's failure is caught, `brain/embedding.ts`). That is the embedder's
+ * failure and never the record's, so a job that meets it keeps its attempts and waits (`isTransientEmbedFailure`).
+ *
+ * ## Why an object and not words
+ *
+ * The message is the sentence an operator has always been shown, word for word, and it holds none of the needles `isTransientEmbedError` reads, which is how an
+ * outage once spent five attempts on every queued job. The fact that it was an outage is carried by the CLASS: `isEmbedUnreachableError` is by `instanceof` alone,
+ * as `isLostChildError` is, so a plain `Error` or a string with the same sentence (an endpoint's body, a child's text, a refused address) is not one.
+ *
+ * It carries no `code` and no `cause` on purpose: a door that catches it answers a write that needs the vector as it always did (`400`, this sentence), and a
+ * socket code on the chain would make `answerForCaught` answer `502`.
+ */
+export class EmbedUnreachableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EmbedUnreachableError';
+  }
+}
+
+/** Did the embed call raise this? True only for an `EmbedUnreachableError`; never for something that reads like one. */
+export function isEmbedUnreachableError(err: unknown): err is EmbedUnreachableError {
+  return err instanceof EmbedUnreachableError;
 }
 
 /** Both markers, each matched across any run of whitespace, each defused by hyphenating it. */

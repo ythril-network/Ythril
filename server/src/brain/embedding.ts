@@ -10,6 +10,9 @@ import { slotTimeoutMs } from '../config/model-slots.js';
 import { runLocalInference, warmLocalInference } from './local-inference.js';
 import { embedInputCeiling, noteInputCut } from './embed-ceiling.js';
 import { boundedPrefix, utf8Bytes } from '../util/bounded-text.js';
+import { EmbedUnreachableError } from './embed-errors.js';
+import { isConnectionFailure, isTimeoutFailure } from '../util/socket-failure.js';
+import { warnOnce, SAY_ONCE_WINDOW_MS } from '../util/warn-once.js';
 
 export interface EmbeddingResult {
   vector: number[];
@@ -184,6 +187,18 @@ export async function embedViaHttpWithRetry(
   throw lastErr;
 }
 
+/** How an embed call failed before it had an answer, for the one warning: the connection did not land, it timed out, or something else threw. */
+const UNREACHABLE_KINDS = ['unreachable', 'timeout', 'other'] as const;
+type UnreachableKind = (typeof UNREACHABLE_KINDS)[number];
+const unreachableKey = (endpoint: string, kind: UnreachableKind): string => `${kind} ${endpoint}`;
+
+/**
+ * The warning for a failed embed call, said once per endpoint and kind per window. An outage queues a call per record, and a line per call
+ * is a thousand lines that say what the first did; the count of what was handed back is `ythril_embed_jobs_handed_back_total`. A call that worked
+ * forgets the endpoint's keys, so the next outage is news again, and a wrong address that never works warns again every window instead of once for ever.
+ */
+const unreachableWarnedOnce = warnOnce<string>({ every: SAY_ONCE_WINDOW_MS });
+
 async function embedViaHttp(
   input: string,
   cfg: ReturnType<typeof getEmbeddingConfig>,
@@ -216,12 +231,21 @@ async function embedViaHttp(
       signal: AbortSignal.timeout(slotTimeoutMs('embedding', getModelSlots())),
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.warn(`Embedding endpoint unreachable (${peerText(cfg.baseUrl)}): ${peerText(msg)}`);
-    throw new Error(
-      `Could not reach embedding endpoint at ${peerText(cfg.baseUrl)}. ` +
-      `Make sure an embedding server (e.g. Ollama) is running and configured.`,
-    );
+    // What this catch learned and the queue must not have to guess: whether the CONNECTION failed (refused, reset, no route, the name not
+    // resolving, the connection's or the slot's own timeout) or something else threw (the address guard's refusal, a header value the runtime
+    // refuses, a certificate failure, a bad redirect). Only the first is an outage that waiting cures; it is thrown as a class, the others as the
+    // plain `Error` they always were, with the same sentence.
+    const unreachable = isConnectionFailure(err);
+    const kind: UnreachableKind = !unreachable ? 'other' : isTimeoutFailure(err) ? 'timeout' : 'unreachable';
+    const endpoint = peerText(cfg.baseUrl);
+    unreachableWarnedOnce(unreachableKey(endpoint, kind), () => {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(`Embedding endpoint unreachable (${endpoint}): ${peerText(msg)}`);
+    });
+    const sentence =
+      `Could not reach embedding endpoint at ${endpoint}. ` +
+      `Make sure an embedding server (e.g. Ollama) is running and configured.`;
+    throw unreachable ? new EmbedUnreachableError(sentence) : new Error(sentence);
   }
   if (!response.ok) {
     const body = await boundedErrorText(response);
@@ -233,6 +257,8 @@ async function embedViaHttp(
   if (vector.length !== cfg.dimensions) {
     log.warn(`Embedding dimensions mismatch: expected ${cfg.dimensions}, got ${vector.length}.`);
   }
+  // The endpoint answered with a vector: the next failure to reach it is news again.
+  for (const kind of UNREACHABLE_KINDS) unreachableWarnedOnce.forget(unreachableKey(peerText(cfg.baseUrl), kind));
   return { vector, model: cfg.model, dimensions: vector.length };
 }
 
