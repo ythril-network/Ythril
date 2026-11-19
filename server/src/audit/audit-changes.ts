@@ -134,7 +134,7 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // Q-750, Q-751: what an RDF export carried, never the data: the scope it covered (the members the caller read, joined), the format, the
   // counts, the values left out and the records they belong to, whether file statements were withheld, and where the page started and ends.
   'rdf.export': ['format', 'edgeDetails', 'members', 'records', 'complete', 'skippedValues', 'skippedNamed', 'fileTriplesWithheld', 'after', 'nextAfter'],
-  'schema.rdf_export': ['format', 'fingerprint', 'leftOut'],
+  'schema.rdf.export': ['format', 'fingerprint', 'leftOut'],
   // What a space import landed, in totals: records stored new, records replaced, records refused, records the restore left out because this
   // instance deleted them after the backup, and records that were already past their expiry when they landed (the next sweep takes them).
   // Beside them the schema versions it kept and skipped, and how many keys of the body it did not read: counts only, never a key's name.
