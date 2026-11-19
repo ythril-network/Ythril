@@ -54,7 +54,38 @@ export const YTHRIL_TERMS: readonly YthrilTerm[] = Object.freeze([
   { name: 'edgeType', kind: 'property', comment: 'An edge\'s type, stated on its reifier.' },
   { name: 'path', kind: 'property', comment: 'A file\'s path within its space.' },
   { name: 'sizeBytes', kind: 'property', comment: 'A file\'s size in bytes.' },
+  // The chrono recurrence, one property per part (the record form, `server/src/rdf/record-triples.ts`).
+  { name: 'recurrenceFreq', kind: 'property', comment: 'How often a chrono record recurs: daily, weekly, monthly or yearly.' },
+  { name: 'recurrenceInterval', kind: 'property', comment: 'Every how many periods of its frequency a chrono record recurs.' },
+  { name: 'recurrenceUntil', kind: 'property', comment: 'The date or time after which a chrono record no longer recurs.' },
+  // What a space's schema says that no standard term carries (design r4 section 6); written by the schema export.
+  { name: 'mergeFn', kind: 'property', comment: 'The function that merges two values of a property when two members change it at once.' },
+  { name: 'namingPattern', kind: 'property', comment: 'A pattern every entity name of a type must match.' },
+  { name: 'endpointFrom', kind: 'property', comment: 'A kind of record an edge type may start at.' },
+  { name: 'endpointTo', kind: 'property', comment: 'A kind of record an edge type may end at.' },
+  { name: 'retentionDays', kind: 'property', comment: 'How many days a record of a type is kept before it is deleted.' },
+  { name: 'retentionContentDays', kind: 'property', comment: 'How many days the content of a record of a type is kept before it is removed and the record stays.' },
+  { name: 'suppressEmbeddings', kind: 'property', comment: 'Records of a type are stored but not embedded for similarity search.' },
+  { name: 'whenDuePasses', kind: 'property', comment: 'What happens to a chrono record of a type when its time has passed.' },
+  { name: 'rule', kind: 'property', comment: 'A rule a record of a type or the space must satisfy, written as a node with a name, an expression and a message.' },
+  { name: 'ruleName', kind: 'property', comment: 'The name of a rule.' },
+  { name: 'ruleExpression', kind: 'property', comment: 'The expression of a rule, as the space states it.' },
+  { name: 'ruleMessage', kind: 'property', comment: 'The message a rule gives when a record breaks it.' },
+  { name: 'ruleKinds', kind: 'property', comment: 'The kinds of record a space rule applies to.' },
+  { name: 'unresolvedRef', kind: 'property', comment: 'A type refers to a schema library entry this export could not resolve.' },
+  { name: 'requiredEdgeProperty', kind: 'property', comment: 'A property every edge of a type must carry.' },
+  { name: 'validationMode', kind: 'property', comment: 'How strictly the space checks records against its schema.' },
+  { name: 'strictLinkage', kind: 'property', comment: 'Whether the space refuses an edge whose endpoints do not exist.' },
 ]);
+
+/**
+ * The address of a declared `ythril:` term: {@link YTHRIL_NS} plus its name. A name that is not a row of {@link YTHRIL_TERMS} throws, so no
+ * module can write a term the published vocabulary does not declare (`every-ythril-term-is-declared-in-the-vocabulary.test.js`).
+ */
+export function ythrilIri(name: string): string {
+  if (!YTHRIL_TERMS.some(t => t.name === name)) throw new Error(`ythril:${name} is not declared in YTHRIL_TERMS (server/src/rdf/ythril-vocabulary.ts)`);
+  return YTHRIL_NS.concat(name);
+}
 
 const RDF = STANDARD_PREFIXES['rdf']!;
 const RDFS = STANDARD_PREFIXES['rdfs']!;
