@@ -889,7 +889,8 @@ export const MEDIA_OUTAGE_HAND_BACKS_MAX = 5;
 export type HandBackOutcome = 'handed_back' | 'past_limit' | 'lost';
 
 /**
- * Give a claimed job back WITHOUT spending an attempt, because its run found the embedder unavailable for the whole of it (`embedder-unavailable.ts`).
+ * Give a claimed job back WITHOUT spending an attempt, because its run was cut short by, or met throughout, an unavailable embedder
+ * (`embedder-unavailable.ts`).
  *
  * ## Why it is not `failJob`
  *
@@ -939,7 +940,7 @@ export async function handBackJob(spaceId: string, claim: JobClaim, reason: stri
     return stillHeld ? 'past_limit' : 'lost';
   }
   markSpaceMayHaveWork(spaceId);
-  log.info(`Media job ${peerText(spaceId)}/${peerText(claim.jobId)} handed back without spending an attempt: the embedder was unavailable for its whole run (${peerText(reason)})`);
+  log.info(`Media job ${peerText(spaceId)}/${peerText(claim.jobId)} handed back without spending an attempt: its run was cut short by, or met throughout, an unavailable embedder (${peerText(reason)})`);
   return 'handed_back';
 }
 

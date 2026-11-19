@@ -3,7 +3,7 @@
  *
  * ## What it prevents
  *
- * A media job whose run found the embedder unavailable for the whole of it is handed back without spending an attempt, and without a cap on how
+ * A media job whose run was cut short by, or met throughout, an unavailable embedder is handed back without spending an attempt, and without a cap on how
  * long it may wait (`job-queue.ts:handBackJob`). Without this gate the worker would claim every queued file in turn during an outage, and each
  * claim pays for its vision, speech-to-text or conversion work before it meets the embedder again. So a hand-back starts a pause, and the claim
  * claims nothing while it runs. When it has run out, the claim first PROBES the embedder with one short embed call: an answer ends the outage and
@@ -102,7 +102,7 @@ export function createMediaClaimGate(deps: MediaClaimGateDeps): MediaClaimGate {
     noteHandBack() {
       outageKnown = true;
       const owedMs = deps.pause.noteUnreachable();
-      log.warn(`Media worker: a run found the embedder unavailable throughout; nothing is claimed for ${inSeconds(owedMs)} s, then the embedder is probed`);
+      log.warn(`Media worker: a run was cut short by, or met throughout, an unavailable embedder; nothing is claimed for ${inSeconds(owedMs)} s, then the embedder is probed`);
       return owedMs;
     },
     outageRemainingMs: () => deps.pause.remainingMs(),

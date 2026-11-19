@@ -741,7 +741,7 @@ async function processJob(
         return;
       }
     }
-    // The embedder was unavailable for the WHOLE run (`embedder-unavailable.ts`): not the file's failure, so the job is handed back with no attempt
+    // The run was cut short by, or met throughout, an unavailable embedder (`embedder-unavailable.ts`): not the file's failure, so the job is handed back with no attempt
     // spent, and the worker claims nothing until a probe finds the embedder answering (`embedder-outage-gate.ts`). `handBackJob` says why it did
     // not: `'lost'` ends the run as abandoned, as above; `'past_limit'` (handed back too often for one run) and a write that failed for another
     // reason take the failure path below, which spends the attempt.

@@ -380,8 +380,8 @@ It was described on the tool and returned by neither door until `Q-109`.
 **An unavailable embedder costs a job waiting, not its attempts.** The server decides that from the failure itself (the connection
 failed, a status of the wait set, a request never sent to a lost embedding process), not from the words of its message: such a job
 stays `pending` with `lastError` naming the failure (`Could not reach embedding endpoint` for a connection), retried with a back-off
-that grows from 5 seconds to half an hour, and is not marked `failed` for it. A file's run waits by the same rule when the embedder was
-unavailable for the whole run; it spends its attempt past a small limit of such hand-backs, and while the embedder is down the media
+that grows from 5 seconds to half an hour, and is not marked `failed` for it. A file's run waits by the same rule when it was cut short by,
+or met throughout, an unavailable embedder; it spends its attempt past a small limit of such hand-backs, and while the embedder is down the media
 worker starts no file (see [When the embedder is unavailable](05b-media-embedding.md#when-the-embedder-is-unavailable)).
 While it lasts the worker also stops claiming new jobs: after one unreachable failure it pauses, 5 seconds at first and doubling
 to 60, and the first embed that works ends the pause. **Waiting is not failing, so an alert on `failed` or on
