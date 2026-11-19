@@ -89,6 +89,12 @@ export interface SaveConvertAnswer { convert?: ConvertRunNotice }
 
 export type UnconvertedStatus = 'open' | 'dismissed';
 
+/**
+ * What a list may ask for: an item's two stored statuses, or `all` (both, in one newest-first list with one paging, each row carrying its own
+ * status). Only the LIST takes `all`: the bulk dismiss takes open items only and refuses any other status, so `UnconvertedDismissRequest` has none.
+ */
+export type UnconvertedListStatus = UnconvertedStatus | 'all';
+
 /** A property of a record that does not fit and why: field names and reasons only, never a stored value. */
 export interface UnconvertedViolation { field: string; reason: string }
 
@@ -133,7 +139,7 @@ export interface UnconvertedListAnswer {
 export interface UnconvertedFilter { kind?: TypedKind; type?: string; reasons?: readonly UnconvertedReason[] }
 
 /** A list request: the filter, the status (`open` unless another is asked), and the page. */
-export interface UnconvertedQuery extends UnconvertedFilter { status?: UnconvertedStatus; skip?: number; limit?: number }
+export interface UnconvertedQuery extends UnconvertedFilter { status?: UnconvertedListStatus; skip?: number; limit?: number }
 
 export interface DismissOneAnswer { item: UnconvertedRow }
 

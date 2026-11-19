@@ -9,7 +9,7 @@ import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import { ConversionApi } from '../../core/conversion-api.service';
 import type {
   ConversionRefusal, ConversionResult, ConvertStatus, ConvertStatusAnswer, UnconvertedFilter, UnconvertedListAnswer, UnconvertedOpenGroup, UnconvertedQuery,
-  UnconvertedRow, UnconvertedStatus,
+  UnconvertedListStatus, UnconvertedRow,
 } from '../../core/conversion.types';
 import { LatestWins } from '../../core/latest-wins';
 import { formatCount } from '../../core/plural-text';
@@ -60,7 +60,10 @@ const reasonOf = (refusal: ConversionRefusal): string => (refusal.kind === 'othe
  * - **A poll that outlives its space.** The status of a running conversion is asked every three seconds while it runs and stops when it ends, when
  *   another space opens, and when the state is destroyed; a list is read again only when a record was listed since, and once when the run ends.
  *
- * The server lists one status at a time (`open` unless `dismissed` is asked), so the status choice is Open or Dismissed: there is no "All" to ask for.
+ * The status choice is Open, Dismissed or All: the server lists `all` as one newest-first list with one paging, each row carrying its own status. The
+ * class counts are of OPEN records (the server's `counts.openBy`), so they stay on Open and All and are not shown on Dismissed; "Dismiss all N shown" says the
+ * OPEN records of the filter, which on All is read from `counts.openBy` and never from the list's `total` (that counts the dismissed too), and the bulk
+ * dismiss carries no status (the server refuses any but open).
  * Provided by the Review tab, one per mounted tab.
  */
 @Injectable()
@@ -99,7 +102,7 @@ export class ReviewUnconvertedState {
   readonly classChoice = signal<UnconvertedClassChoice>('all');
   /** The record type chosen; null is "All types". */
   readonly typeChoice = signal<OpenTypeRef | null>(null);
-  readonly statusChoice = signal<UnconvertedStatus>('open');
+  readonly statusChoice = signal<UnconvertedListStatus>('open');
   /** The item whose dismiss is on its way. */
   readonly busyItem = signal<string | null>(null);
   readonly bulkBusy = signal(false);
@@ -128,7 +131,7 @@ export class ReviewUnconvertedState {
 
   /** The number on each class pill: the open items of the class, for the chosen type or all. Null on the Dismissed list: the counts are of open records. */
   readonly classCounts = computed<Record<UnconvertedClass, number> | null>(() =>
-    this.statusChoice() === 'open' ? openCountsByClass(this.groups(), this.typeChoice() ?? undefined) : null);
+    this.statusChoice() !== 'dismissed' ? openCountsByClass(this.groups(), this.typeChoice() ?? undefined) : null);
   /** The number on the "All" pill. */
   readonly openAll = computed(() => {
     const counts = this.classCounts();
@@ -144,7 +147,18 @@ export class ReviewUnconvertedState {
   });
 
   /** What "Dismiss all N shown" says N is: the list's total for the filter on the Open list. Null on the Dismissed list: only open records are dismissed. */
-  readonly dismissCount = computed<number | null>(() => (this.statusChoice() === 'open' ? this.total() : null));
+  readonly dismissCount = computed<number | null>(() => {
+    const status = this.statusChoice();
+    if (status === 'open') return this.total();
+    // All: the list's total holds the dismissed records too, so the OPEN ones of the type and class come from the server's groups. Cut groups do not
+    // add up to the whole, so no number is offered rather than one the server would refuse.
+    if (status === 'all' && !this.countsCut()) {
+      const counts = openCountsByClass(this.groups(), this.typeChoice() ?? undefined);
+      const cls = this.classChoice();
+      return cls === 'all' ? counts.fit + counts.exists + counts.refused : counts[cls];
+    }
+    return null;
+  });
   readonly canDismiss = computed(() => knowledgeAllowed(this.rights(), this.space(), 'write'));
   readonly canConvert = computed(() => mayConvertRecords(this.rights(), this.space()));
 
@@ -274,7 +288,7 @@ export class ReviewUnconvertedState {
     void this.load(0);
   }
 
-  chooseStatus(status: UnconvertedStatus): void {
+  chooseStatus(status: UnconvertedListStatus): void {
     if (status === this.statusChoice()) return;
     this.statusChoice.set(status);
     void this.load(0);

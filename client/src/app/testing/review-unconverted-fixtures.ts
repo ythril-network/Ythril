@@ -18,8 +18,7 @@ import { dictionary } from './i18n-dictionary';
  * ## The words
  *
  * `unconvertedWords()` is the REAL English of the keys the section reads, so a button is found by what a person reads on it. Keys the section
- * needs that the shipped files do not hold yet are listed in `PENDING_WORDS` with the sentence the section asks for; the shipped value wins
- * where there is one, so the day the locale files carry the key this table is dead weight a spec can drop, and nothing else changes.
+ * has no stand-in: a key the locale files lack renders as the key, and the key-coverage gate says so.
  */
 
 /** The prefixes the section reads under; everything else of the dictionary stays out so a flat key cannot collide with a tree node. */
@@ -30,27 +29,10 @@ const PREFIXES = [
   'common.prev', 'common.next', 'common.cancel', 'common.loadFailed', 'common.retry', 'common.close',
 ];
 
-/** Keys the section asks for that the locale files of slice S3 do not carry, with the English the section expects (the return of S7 lists them). */
-export const PENDING_WORDS: Readonly<Record<string, string>> = {
-  'brain.review.unconverted.count.one': '{{range}} of {{count}} record',
-  'brain.review.unconverted.count.few': '{{range}} of {{count}} records',
-  'brain.review.unconverted.count.many': '{{range}} of {{count}} records',
-  'brain.review.unconverted.count.other': '{{range}} of {{count}} records',
-  'brain.review.unconverted.emptyFilter.title': 'No records match these filters',
-  'brain.review.unconverted.emptyFilter.body': 'There are unconverted records, but none for the reason, record type and status chosen. Choose All to see them.',
-  'brain.review.unconverted.cut': 'The counts are incomplete: this space has more groups of unconverted records than the page counts. Choose a record type to see exact numbers.',
-  'brain.review.unconverted.openFailed': 'This record could not be opened.',
-  'brain.review.unconverted.actFailed': 'The change could not be made. Reload the list to see where it stands.',
-  'brain.review.unconverted.confirm.bodyAll.one': 'This takes the {{count}} open record off the list. It is not converted and not changed. You can still find it under “Dismissed”.',
-  'brain.review.unconverted.confirm.bodyAll.few': 'This takes the {{count}} open records off the list. They are not converted and not changed. You can still find them under “Dismissed”.',
-  'brain.review.unconverted.confirm.bodyAll.many': 'This takes the {{count}} open records off the list. They are not converted and not changed. You can still find them under “Dismissed”.',
-  'brain.review.unconverted.confirm.bodyAll.other': 'This takes the {{count}} open records off the list. They are not converted and not changed. You can still find them under “Dismissed”.',
-};
-
 /** The English words of the section as the tree `getTranslocoModule` takes. */
 export function unconvertedWords(): Record<string, unknown> {
   const shipped = dictionary('en');
-  const flat: Record<string, string> = { ...PENDING_WORDS };
+  const flat: Record<string, string> = {};
   for (const [key, value] of Object.entries(shipped)) if (PREFIXES.some(p => key.startsWith(p))) flat[key] = value;
   const tree: Record<string, any> = {};
   for (const [key, value] of Object.entries(flat)) {

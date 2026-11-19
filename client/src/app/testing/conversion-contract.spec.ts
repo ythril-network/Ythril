@@ -262,6 +262,12 @@ describe('every reason a record is left unconverted for has a class the page wor
   it('the statuses are the server\'s', () => {
     expect(sorted(aliasLiterals(TYPES, 'UnconvertedStatus'))).toEqual(sorted(constLiterals(TERMS, 'UNCONVERTED_STATUSES')));
   });
+
+  it('the list statuses are the server\'s: the stored two and `all` (the list takes it, the bulk dismiss refuses it)', () => {
+    // `UNCONVERTED_LIST_STATUSES = [...UNCONVERTED_STATUSES, 'all']`: the spread is not a literal, so the stored two are added here.
+    const server = [...constLiterals(TERMS, 'UNCONVERTED_STATUSES'), ...constLiterals(TERMS, 'UNCONVERTED_LIST_STATUSES')];
+    expect(sorted(aliasLiterals(TYPES, 'UnconvertedListStatus'))).toEqual(sorted(server));
+  });
 });
 
 // ── the unconverted row and its list ──────────────────────────────────────────────────────────────────────────────
@@ -347,7 +353,11 @@ describe('the bulk dismiss and the one dismiss answer what the client reads', ()
 
   it('the bulk dismiss takes the filter and `expect`', () => {
     const keys = [...TERMS.matchAll(/UnconvertedDismissShownParams\s*=\s*UnconvertedFilterParams\.extend\(\{\s*(\w+):/g)].map(m => m[1]);
-    expect(keys).toEqual(['expect']);
+    // The server's own keys beside the shared filter: `status` (optional, whose one valid value is `open`, so the client never sends it: the bulk
+    // dismiss is of open items by definition and `all` or `dismissed` is a 400) and `expect`.
+    expect(keys).toEqual(['status']);
+    expect(TERMS).toMatch(/UnconvertedDismissShownParams[\s\S]*?z\.enum\(\['open'\]/);
+    expect(TERMS).toMatch(/UnconvertedDismissShownParams[\s\S]*?expect:\s*z\.number\(\)/);
     expect(sorted(interfaceKeys(TYPES, 'UnconvertedDismissRequest'))).toEqual(['expect', 'kind', 'reason', 'type']);
   });
 });

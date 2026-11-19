@@ -135,6 +135,7 @@ interface CardView {
       <select id="unconverted-status" [attr.aria-label]="'duplicates.statusFilterAria' | transloco" (change)="onStatus($any($event.target).value)">
         <option value="open" [selected]="state().statusChoice() === 'open'">{{ 'duplicates.status.open' | transloco }}</option>
         <option value="dismissed" [selected]="state().statusChoice() === 'dismissed'">{{ 'duplicates.status.dismissed' | transloco }}</option>
+        <option value="all" [selected]="state().statusChoice() === 'all'">{{ 'duplicates.status.all' | transloco }}</option>
       </select>
     </ng-template>
 
@@ -185,7 +186,7 @@ interface CardView {
         @if (!state().canConvert()) {
           <p class="lock-note" id="unconverted-convert-locked" data-testid="convert-locked">{{ 'spaces.schema.convert.locked' | transloco }}</p>
         }
-        @if (!state().canDismiss() && state().statusChoice() === 'open' && (state().dismissCount() ?? 0) > 0) {
+        @if (!state().canDismiss() && (state().dismissCount() ?? 0) > 0) {
           <p class="lock-note" id="unconverted-dismiss-locked" data-testid="dismiss-locked">{{ 'brain.review.unconverted.dismissLocked' | transloco }}</p>
         }
 
@@ -331,7 +332,7 @@ export class ReviewUnconvertedPanelComponent {
     this.state().chooseType(value === '' ? null : (this.state().typeOptions().find(t => this.typeKey(t) === value) ?? null));
   }
 
-  protected onStatus(value: string): void { this.state().chooseStatus(value === 'dismissed' ? 'dismissed' : 'open'); }
+  protected onStatus(value: string): void { this.state().chooseStatus(value === 'dismissed' || value === 'all' ? value : 'open'); }
 
   /** Choose a class; `focus` moves focus to its pill (the arrow keys do, a click already has it). */
   protected choose(key: UnconvertedClassChoice, focus: boolean): void {
