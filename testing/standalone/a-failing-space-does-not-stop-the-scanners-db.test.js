@@ -98,7 +98,7 @@ describe('a failing or hung space does not stop the scanners', { skip }, () => {
     for (const space of ALL) await raiseVersionTo(space, 20);
     // No bound is set here: only the HANGS case needs the short one (`withWriteBound`), and every other case runs at the product's own, so an
     // ordinary read of a healthy space on a loaded host cannot run past a 1 s bound and stop a pass that planted some other fault.
-    proto =Object.getPrototypeOf(door.mongo.col('probe'));
+    proto = Object.getPrototypeOf(door.mongo.col('probe'));
     realFindOne = proto.findOne;
     proto.findOne = function recording(filter, ...rest) {
       const name = this.collectionName;

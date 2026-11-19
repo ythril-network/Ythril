@@ -194,9 +194,16 @@ let boundHeldByACase = false;
  */
 export async function withWriteBound(bounds, fn) {
   assert.ok(!boundHeldByACase, 'withWriteBound: a bound is already set by an enclosing withWriteBound; the inner restore would put the product\'s own bound back under the outer one');
-  const restore = await setWriteBoundForTest(bounds);
+  // The flag is taken before the first await: two calls started in one tick must not both pass the check above.
   boundHeldByACase = true;
-  try { return await fn(); } finally { boundHeldByACase = false; restore(); }
+  let restore;
+  try {
+    restore = await setWriteBoundForTest(bounds);
+    return await fn();
+  } finally {
+    boundHeldByACase = false;
+    restore?.();
+  }
 }
 
 // ── A collection that refuses ────────────────────────────────────────────────────────────────────────────────
@@ -490,21 +497,26 @@ export const HUNG_READ_STALL_MS = 8000;
 /** How much longer than the product's worst path to end a hung read a test's look must be allowed to run. */
 const HUNG_READ_HEADROOM_MS = 3000;
 
+/** How much longer than the look the stall must be, so a pass that waited the stall out is outside the look. */
+const HUNG_READ_STALL_OVER_LOOK_MS = 500;
+
 /**
- * How long a test looks at a pass over a hung read before it calls the read un-ended: `stallMs - 500`, THROWING when that leaves
- * less than {@link HUNG_READ_HEADROOM_MS} over the product's worst path to end the read.
+ * How long a test looks at a pass over a hung read before it calls the read un-ended: the product's worst path to end the read plus
+ * {@link HUNG_READ_HEADROOM_MS}, THROWING when `stallMs` does not exceed that by {@link HUNG_READ_STALL_OVER_LOOK_MS}.
  *
  * ## What it prevents
  *
  * A case that sets the housekeeping bound to `boundMs`, stalls a read for `stallMs` and asks "did the pass end at the bound, not at the
- * stall" looks for `stallMs - 500`. The product ends a hung read in `boundMs`, and when the server's own deadline does not answer, the
+ * stall" must look for long enough that a loaded host does not turn a right answer red, and for no longer than that, or a bound applied
+ * five times over still passes. The product ends a hung read in `boundMs`, and when the server's own deadline does not answer, the
  * client backstop ends it `SERVER_FIRST_MARGIN_MS` later and the kill takes at most `KILL_WAIT_MS` (`server/src/db/write-bound.ts`,
- * both read from the build here, never copied). So the worst path is `boundMs + SERVER_FIRST_MARGIN_MS + KILL_WAIT_MS`, and the look
- * must leave room for everything else the pass does after it: with `stallMs` 3000 and a 1000 ms bound the room was 600 ms, and four
- * database files running at once used it up (a pass seen still waiting at 2501 ms of a 3000 ms stall; the same figure took the TTL
- * sweep file to 8000, bundle-211). The stall is a real wait the guard sits through once per case, so the room is bought with the stall
- * and not with a looser look: a look that is not shorter than the stall would pass a pass that waited the stall out.
- * A caller cannot pick a stall too short for its bound: this throws, naming the figures.
+ * both read from the build here, never copied). So the worst path is `boundMs + SERVER_FIRST_MARGIN_MS + KILL_WAIT_MS`, and the look is
+ * that plus the room the rest of the pass needs on a loaded host: with a look of the stall less half a second and a 1000 ms bound the
+ * room was 600 ms at a 3000 ms stall, and four database files running at once used it up (a pass seen still waiting at 2501 ms; the
+ * TTL sweep file went to 8000 for it, bundle-211); the look as the stall less half a second at 8000 ms fixed that and loosened the look
+ * to 7500 ms, where a bound five times too long passed. The stall is what has to be long, a real wait the guard sits through once per
+ * case; the look is the worst path and the headroom, and the stall must stay longer than the look, so a pass that waited the stall out
+ * is never inside it. A caller cannot pick a stall too short for its bound: this throws, naming the figures.
  *
  * @param {{ boundMs: number, stallMs: number }} o `boundMs` is what the test sets (`housekeepingOpMs`), `stallMs` what the view stalls for
  * @returns {Promise<number>} the look, ms
@@ -514,10 +526,11 @@ export async function hungReadLookMs({ boundMs, stallMs }) {
     `hungReadLookMs: boundMs and stallMs must be positive numbers, got ${boundMs} and ${stallMs}`);
   const bound = await import('../../server/dist/db/write-bound.js');
   const worstPathMs = boundMs + bound.SERVER_FIRST_MARGIN_MS + bound.KILL_WAIT_MS;
-  const lookMs = stallMs - 500;
-  assert.ok(lookMs - worstPathMs >= HUNG_READ_HEADROOM_MS,
-    `hungReadLookMs: a look of ${lookMs} ms over a pass whose hung read the product ends within ${worstPathMs} ms (the ${boundMs} ms bound + ${bound.SERVER_FIRST_MARGIN_MS} ms + `
-    + `${bound.KILL_WAIT_MS} ms) leaves ${lookMs - worstPathMs} ms for the rest of the pass, less than the ${HUNG_READ_HEADROOM_MS} ms a loaded host needs: stall the read longer (HUNG_READ_STALL_MS)`);
+  const lookMs = worstPathMs + HUNG_READ_HEADROOM_MS;
+  assert.ok(stallMs - lookMs >= HUNG_READ_STALL_OVER_LOOK_MS,
+    `hungReadLookMs: the look is ${lookMs} ms (the product ends a hung read within ${worstPathMs} ms: the ${boundMs} ms bound + ${bound.SERVER_FIRST_MARGIN_MS} ms + ${bound.KILL_WAIT_MS} ms, `
+    + `plus ${HUNG_READ_HEADROOM_MS} ms of headroom) and the ${stallMs} ms stall does not exceed it by ${HUNG_READ_STALL_OVER_LOOK_MS} ms: a pass that waited the stall out would be inside the look. `
+    + 'Stall the read longer (HUNG_READ_STALL_MS)');
   return lookMs;
 }
 
