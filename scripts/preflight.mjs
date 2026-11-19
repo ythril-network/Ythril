@@ -406,6 +406,13 @@ stage('surface-matrix-audit', async () => {
  * Checking the ROOT `tsconfig.json` is what hid it: that config includes the specs without the vitest types,
  * so it reported 297 errors of which 175 were `Cannot find name 'expect'` — noise a real error hides inside.
  * The two real projects are the question worth asking.
+ *
+ * The APP project is checked by Angular's compiler (`ngc --noEmit`), not plain `tsc`: `tsc` does not read templates, and the extended
+ * template diagnostics `client/tsconfig.json` sets to error (an unused standalone import, a `??` on a value that cannot be null), a
+ * `styles` entry the build cannot evaluate and a template type error are the compiler's alone. Every slice of bundle-285 passed all its
+ * specs and this stage while `npm run build:client` failed on exactly those; the production build runs only in the full
+ * preflight, so a static run never saw it. `ngc` answers it here in seconds, the spec project still goes through `scripts/tsc.mjs`
+ * (first, so the install check speaks before any compiler does).
  */
 stage('typecheck:client', async () => {
   console.log('\n── client type-check (app + spec projects) ──');

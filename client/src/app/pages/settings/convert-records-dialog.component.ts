@@ -1,4 +1,3 @@
-import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, linkedSignal, output, signal, untracked, viewChild } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import type { Subscription } from 'rxjs';
@@ -78,7 +77,11 @@ export interface ConvertDialogChoice {
 
 const NOTHING: Omit<ConvertDialogChoice, 'outcome'> = { steps: [], blocks: [], types: [], addedTypes: [] };
 
-/** One empty object and one empty list for every "nothing here" a binding hands a child: a fresh one per check would be a change at every check. */
+/**
+ * One empty object for every block without a refused row: a fresh one per check would be a change at every check. Every per-block list the
+ * template reads by index (`rows`, `warnings`, `sentences`, `errorsByBlock`) is mapped from `blocks`, so an index of a block always holds one:
+ * the template has no `??` fallback (the production build refuses a dead one, NG8102).
+ */
 const NO_ERRORS: Record<number, string> = {};
 
 type CountView = { state: 'loading' } | { state: 'failed' } | { state: 'ready'; counts: BlockCounts };
@@ -97,7 +100,7 @@ let seq = 0;
   selector: 'app-convert-records-dialog',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgTemplateOutlet, TranslocoPipe, PhIconComponent, ModalDirective, ConvertStepEditorComponent, ConvertRunBlockComponent],
+  imports: [TranslocoPipe, PhIconComponent, ModalDirective, ConvertStepEditorComponent, ConvertRunBlockComponent],
   styles: [DIALOG_STYLES, `
     /* Above the settings popup that hosts it, as every dialog opened from inside it. */
     .dialog-backdrop { z-index: ${STACK.hostedDialog}; }
@@ -167,7 +170,7 @@ let seq = 0;
                       @if (b.was) { <span class="sch-hint" data-testid="cv-was">{{ wasText(b.was) }}</span> }
                       <span class="cv-count" data-testid="cv-stepcount">{{ stepCountText(i) }}</span>
                     </div>
-                    @for (w of warnings()[i] ?? none; track $index) {
+                    @for (w of warnings()[i]; track $index) {
                       <div class="alert alert-warning cv-warn-line" role="status" data-testid="cv-warning">@for (p of w; track $index) {<span [class.cv-tn]="p.name">{{ p.text }}</span>}</div>
                     }
                     <p class="cv-preview" data-testid="cv-counts">
@@ -178,12 +181,12 @@ let seq = 0;
                     @if (showUnfit(i)) { <p class="sch-hint" data-testid="cv-unfit">{{ 'spaces.schema.convert.dialog.unfitHint' | transloco }}</p> }
                     @if (showWhole(i)) { <p class="sch-hint" data-testid="cv-whole">{{ 'spaces.schema.convert.wholeType' | transloco }}</p> }
                     @if (editing() || mode() === 'act') {
-                      <app-convert-step-editor [steps]="rows()[i] ?? noRows" [kind]="b.kind" [type]="b.type" [staged]="stagedWithAdded()" [canAddStep]="canAddStep()"
-                        [errors]="errorsByBlock()[i] ?? noErrors" [focusError]="focusFor(i)" (stepsChange)="setRows(i, $event)" (typeAdded)="addType($event)" />
+                      <app-convert-step-editor [steps]="rows()[i]" [kind]="b.kind" [type]="b.type" [staged]="stagedWithAdded()" [canAddStep]="canAddStep()"
+                        [errors]="errorsByBlock()[i]" [focusError]="focusFor(i)" (stepsChange)="setRows(i, $event)" (typeAdded)="addType($event)" />
                     } @else {
-                      @if (sentences()[i]?.length) {
+                      @if (sentences()[i].length) {
                         <ul class="cv-sent">
-                          @for (s of sentences()[i] ?? none; track $index) { <li data-testid="cv-sentence">@for (p of s; track $index) {<span [class.cv-tn]="p.name">{{ p.text }}</span>}</li> }
+                          @for (s of sentences()[i]; track $index) { <li data-testid="cv-sentence">@for (p of s; track $index) {<span [class.cv-tn]="p.name">{{ p.text }}</span>}</li> }
                         </ul>
                       }
                     }
@@ -290,10 +293,6 @@ export class ConvertRecordsDialogComponent {
   private readonly plural = inject(PluralText);
   private readonly say = pageTranslator();
   private readonly toggle = viewChild<ElementRef<HTMLButtonElement>>('toggle');
-
-  protected readonly none: SentencePiece[][] = [];
-  protected readonly noRows: EditStep[] = [];
-  protected readonly noErrors = NO_ERRORS;
 
   private readonly id = ++seq;
   protected readonly titleId = `cv-title-${this.id}`;
