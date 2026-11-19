@@ -63,6 +63,30 @@ export async function listenApp() {
 }
 
 /**
+ * An express app a test BUILT (the product's routers mounted on an `express()` of its own) served on loopback.
+ *
+ * The question it answers is `listenApp`'s for a test whose subject is a router or a middleware and not the whole application, and
+ * what it prevents is the same: a server made with `http.createServer(app)` keeps Node's 5 s keep-alive, closes an idle connection after
+ * it, and a client that reuses a pooled connection after a busy gap in this process (a case's assertions, a loaded machine) has a request
+ * reset a few milliseconds after it is sent. The product's `configureConnections` is applied here, before the server listens, so no
+ * caller can drop it. It starts no scheduling and so has none to end; `close()` ends the server and its open sockets, as `listenOnLoopback`
+ * does, and a second call is a no-op.
+ *
+ * Not for the application itself (`listenApp`), and not for a fake peer or a stub the code under test calls: those are not the
+ * product's server and have no connection settings of the product's to keep.
+ *
+ * @param {import('express').Express} app built, not yet served
+ * @returns {Promise<{ url: string, port: number, httpServer: import('node:http').Server, close: () => Promise<void> }>}
+ */
+export async function listenRouterApp(app) {
+  const { configureConnections } = await import('../../server/dist/http-connections.js');
+  const httpServer = http.createServer(app);
+  configureConnections(httpServer);
+  const server = await listenOnLoopback(httpServer);
+  return { url: server.url, port: server.port, httpServer, close: server.close };
+}
+
+/**
  * The application as a router a test calls directly, with no server.
  *
  * @returns {Promise<{ router: import('express').Express, close: () => Promise<void> }>} `close()` ends scheduling; a second

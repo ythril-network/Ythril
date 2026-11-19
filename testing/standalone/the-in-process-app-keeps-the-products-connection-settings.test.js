@@ -16,13 +16,15 @@
  *    from the product's own module and never typed here, and a bare server's differ (so the comparison cannot hold for nothing).
  * 2. The race itself, in the shape of `a-busy-server-does-not-drop-a-request-sent-on-an-idle-connection`: a connection goes idle, this
  *    process is busy for longer than a bare server's keep-alive, and a request sent on that connection straight after is answered.
+ * 3. `listenRouterApp(app)`, the same helper's other door for an express app a test built, gives its server the same settings, answers, and
+ *    ends on `close()`.
  *
  * Run: node --test testing/standalone/the-in-process-app-keeps-the-products-connection-settings.test.js (a prior `npm run build` in server/)
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { listenApp } from '../_shared/in-process-app.mjs';
+import { listenApp, listenRouterApp } from '../_shared/in-process-app.mjs';
 import { tempInstanceDir, removeInstanceDir, bootInstance } from './_vote-round-instance.mjs';
 
 /** One request on a chosen agent, so the test decides which socket is reused. */
@@ -50,6 +52,23 @@ describe('the in-process application keeps the product\'s connection settings', 
     assert.notEqual(bare.keepAliveTimeout, product.keepAliveTimeout, 'configureConnections changes nothing on a bare server: the comparison below would hold for nothing');
     assert.equal(app.httpServer.keepAliveTimeout, product.keepAliveTimeout, 'the keep-alive timeout is not the product\'s');
     assert.equal(app.httpServer.headersTimeout, product.headersTimeout, 'the header timeout is not the product\'s');
+  });
+
+  it('an express app a test built, served through listenRouterApp, has them too, answers, and is ended by close()', async () => {
+    const express = (await import('express')).default;
+    const product = http.createServer();
+    configureConnections(product);
+    const router = express();
+    router.get('/ping', (_req, res) => { res.json({ ok: true }); });
+    const served = await listenRouterApp(router);
+    try {
+      assert.ok(served.httpServer instanceof http.Server, 'listenRouterApp() does not hand back the http server it started');
+      assert.equal(served.httpServer.keepAliveTimeout, product.keepAliveTimeout, 'the keep-alive timeout is not the product\'s');
+      assert.equal(served.httpServer.headersTimeout, product.headersTimeout, 'the header timeout is not the product\'s');
+      assert.deepEqual(await request(new http.Agent({ keepAlive: false }), `${served.url}/ping`), { status: 200 });
+    } finally { await served.close(); }
+    assert.equal(served.httpServer.listening, false, 'close() left the server listening');
+    await served.close();
   });
 
   it('a request sent on an idle connection after this process was busy for longer than a bare server\'s keep-alive is answered', { timeout: 30_000 }, async () => {

@@ -39,14 +39,12 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { removeInstanceDir } from './_vote-round-instance.mjs';
-import { listenApp } from '../_shared/in-process-app.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenApp, listenRouterApp } from '../_shared/in-process-app.mjs';
 import { tempInstance, boot } from './_round-open-fixtures.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
@@ -156,7 +154,7 @@ describe('the skip predicate, row by row (the real limiter, a distinct address p
       else if (f === 'truthy') res.locals.meteredByToken = 1;
       res.status(Number(req.params.status)).json({ from: 'route' });
     });
-    server = await listenOnLoopback(http.createServer(app));
+    server = await listenRouterApp(app);
   });
   after(async () => { await server?.close(); restoreEnv(); });
 

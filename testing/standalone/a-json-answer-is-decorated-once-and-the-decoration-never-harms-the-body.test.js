@@ -48,10 +48,9 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenRouterApp } from '../_shared/in-process-app.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 
 const express = createRequire(path.resolve('server/package.json'))('express');
@@ -130,7 +129,7 @@ describe('decorateJsonAnswer', () => {
       mod.decorateJsonAnswer(res, 'rows', (s, body) => ({ ...body, rows: ['a'] }));
       res.status(503).json({ error: 'store', retryable: false });
     });
-    server = await listenOnLoopback(http.createServer(app));
+    server = await listenRouterApp(app);
     base = server.url;
   });
   after(async () => { await server?.close(); });

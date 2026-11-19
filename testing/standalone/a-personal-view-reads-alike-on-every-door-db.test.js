@@ -402,7 +402,6 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
   // that is not one, with the hint, and never reach the handler.
   it('the body-scoped guard expands a view only for an area and rung that take a view', async () => {
     const express = (await import('express')).default;
-    const http = await import('node:http');
     const { requireBodyScopedSpace } = await import('../../server/dist/auth/middleware.js');
     const { takesAView } = await import('../../server/dist/auth/space-rights.js');
     const { RUNGS } = await import('../../server/dist/config/rights-shape.js');
@@ -417,8 +416,8 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
     for (const p of pairs) {
       app.post(`/probe/${p.area}/${p.needs}`, requireBodyScopedSpace(p.area, p.needs), (req, res) => { reached.push(`${p.area}/${p.needs}`); res.json({ spaces: req.authorisedSpaces }); });
     }
-    const { listenOnLoopback } = await import('../_shared/local-server.mjs');
-    const server = await listenOnLoopback(http.createServer(app));
+    const { listenRouterApp } = await import('../_shared/in-process-app.mjs');
+    const server = await listenRouterApp(app);
     const url = server.url;
     try {
       const wrong = [];
