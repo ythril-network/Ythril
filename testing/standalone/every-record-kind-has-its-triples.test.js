@@ -299,10 +299,10 @@ describe('what the form leaves out of a record, and names', () => {
     assert.ok(!quads.some((q) => q.predicate.value.endsWith('/age') || q.predicate.value.endsWith('/other')));
     assert.deepEqual(counts.skippedValues.map((s) => s.key).sort(), ['age', 'other']);
   });
-  it('a date-typed string that is no calendar date stays a plain string and is counted as untyped', () => {
+  it('a date-typed string that is no calendar date does not fit its declared type: left out and named (bundle-269 drive, finding 6)', () => {
     const { quads, counts } = run('entity', entity({ born: 'last spring' }));
-    assert.deepEqual(only(quads, `${BASE}entity/e9`, `${VOCAB}entity/person#born`), lit('last spring'));
-    assert.equal(counts.untypedTemporals, 1);
+    assert.equal(objects(quads, `${BASE}entity/e9`, `${VOCAB}entity/person#born`).length, 0, 'no plain string in place of a date');
+    assert.deepEqual(counts.skippedValues.map((s) => [s.key, s.reason]), [['born', 'does-not-fit-its-declared-type']]);
   });
   it('a property of no declared type is typed by what it is: string, decimal or boolean', () => {
     const { quads } = run('entity', entity({ s: 'x', n: -12.5, b: false }));
