@@ -25,6 +25,8 @@ import { publishesOn } from '../networks/network-role.js';
 import { parseMetaRound, type MetaRoundParse, type MetaRoundProposal } from './meta-round-merge.js';
 import type { NetworkConfig, SpaceMeta, VoteRound } from '../config/types.js';
 import type { ParsedSpaceMeta } from '../spaces/body-schemas.js';
+import type { RdfBaseConflict } from '@ythril-network/schema';
+import { recordRdfConflict } from '../spaces/rdf-settle.js';
 import { keyedLock } from '../util/keyed-lock.js';
 import { settleSpaceAct } from '../spaces/apply-wipe-round.js';
 import { reportSpaceFailure } from '../util/space-failure.js';
@@ -267,12 +269,14 @@ export function planPassedMetaChange(net: NetworkConfig, round: VoteRound): Meta
     ...(ok(layer) ? { layer: ok(layer)!.meta } : {}),
     conflicts: (ok(own) ?? ok(layer))?.conflicts ?? [],
     unknownFields: [...(ok(own)?.unknownFields ?? []), ...(ok(layer)?.unknownFields ?? [])],
+    // Q-748 (review finding 2): another RDF base the round carries, kept out of every store by the settle, is recorded, never dropped.
+    ...((ok(own) ?? ok(layer))?.rdfConflict ? { rdfConflict: (ok(own) ?? ok(layer))!.rdfConflict } : {}),
   };
 }
 
 /** The plan {@link planPassedMetaChange} answers. */
 export type MetaRoundPlan =
-  | { ok: true; localSpace: string; ownEdit: boolean; own?: ParsedSpaceMeta; layer?: ParsedSpaceMeta; conflicts: string[]; unknownFields: string[] }
+  | { ok: true; localSpace: string; ownEdit: boolean; own?: ParsedSpaceMeta; layer?: ParsedSpaceMeta; conflicts: string[]; unknownFields: string[]; rdfConflict?: RdfBaseConflict }
   | { ok: false; localSpace: string; reason: string };
 
 /**
@@ -296,6 +300,8 @@ export const passedMetaChange = {
     const currentMeta = getConfig().spaces.find(s => s.id === plan.localSpace)?.meta;
     if (plan.own) commitOwnMetaEdit(plan.localSpace, () => plan.own!);
     if (plan.layer) storeNetworkLayer(net.id, plan.localSpace, plan.layer);
+    // The proposer offered another RDF base for the space: recorded beside the network under the proposer, as its served base would be.
+    if (plan.rdfConflict) recordRdfConflict(net, plan.localSpace, plan.rdfConflict, round.subjectInstanceId);
     // `Q-746`: what this member does with its records, decided from the effective schema before the stores above were written and after.
     startRoundConversion(net, round, plan, currentMeta);
     // F-42 / Q-61: the proposer tells the members below what the network just changed — on every path a round
