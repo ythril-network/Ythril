@@ -5,17 +5,18 @@
  *
  * ## What each answers
  *
- * - {@link listUnconvertedAct}: `{ items, count, total, limit, skip, truncated, nextSkip?, ...the budget figures, counts: { open, dismissed } }`,
- *   newest first, narrowed by `kind`, `type` and `status` (`open` unless `dismissed` is asked). `counts` are those of the whole space, whatever
- *   the filters. A row is the stored item (`itemId` for its id; its internal staleness hash is not served) and, when the record is still stored,
+ * - {@link listUnconvertedAct}: `{ items, count, total, limit, skip, truncated, nextSkip?, ...the budget figures, counts: { open, dismissed, openBy,
+ *   openByCut? } }`, newest first, narrowed by `kind`, `type`, `reason` (one, or a list: the items of any) and `status` (`open` unless `dismissed` is
+ *   asked). `counts` are those of the whole space, whatever the filters; `openBy` groups the open items by kind, type and reason (`{ kind, type,
+ *   reason, n }`, in that order, at most `UNCONVERTED_OPEN_BY_MAX`, `openByCut: true` when there were more). A row is the stored item (`itemId` for its id; its internal staleness hash is not served) and, when the record is still stored,
  *   `record: { summary }`: the record's own name or summary, the one line the duplicate list gives for it ({@link summariseRecall}), read for
  *   the page's rows only. A read never writes: a row whose record was written, deleted or converted since is left to the watcher's tick
  *   (`sweepStaleUnconvertedItems`).
  * - {@link dismissUnconvertedAct}: `{ item }`, the row as listed, now `dismissed`. The record is not touched, and a run that meets the same
  *   record version toward the same target does not open the item again (`recordUnconvertedItem`).
  * - {@link dismissShownUnconvertedAct}: `{ dismissed }`, every open item a `kind`/`type`/`reason` filter lists (the list takes the same filter, so
- *   a count shown and the set dismissed are one question), when the caller was shown exactly `expect` of them; bounded, one write, refused
- *   with the current number when the count moved. The list's `record.summary` is part of the rows the byte budget counts.
+ *   a count shown and the set dismissed are one question; `reason` may be a list, and `expect` and `current` count over all of its reasons), when
+ *   the caller was shown exactly `expect` of them; bounded, one write, refused with the current number when the count moved. The list's `record.summary` is part of the rows the byte budget counts.
  *
  * ## What it prevents
  *
@@ -43,14 +44,14 @@ import {
 } from '../brain/schema-convert-items.js';
 import {
   UNCONVERTED_REFUSAL_CODES, UNCONVERTED_STATUSES, UnconvertedFilterParams, UnconvertedListParams, UnconvertedDismissShownParams, refusalBody,
-  type UnconvertedActResult, type UnconvertedCaller, type UnconvertedItem, type UnconvertedRow,
+  unconvertedParseRefusal, type UnconvertedActResult, type UnconvertedCaller, type UnconvertedItem, type UnconvertedRow,
 } from './unconverted-terms.js';
 import { CHOSEN_VERSION_ROWS } from '../brain/chosen-versions.js';
 import { mapToRecallResult } from '../brain/recall-result.js';
 import { summariseRecall } from '../brain/recall-shape.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
-import { NAME_QUOTED, peerText, refusalOfParse } from '../util/log.js';
+import { NAME_QUOTED, peerText } from '../util/log.js';
 import { unknownSpaceAnswer } from './unknown-space.js';
 
 // The terms the acts and both doors share live in `unconverted-terms.ts` (the bounds the tools declare from); re-exported for the readers that name them here.
@@ -115,9 +116,17 @@ function refusedBefore(spaceId: string, caller: UnconvertedCaller, needs: 'read'
 
 const FILTER_CODES: Readonly<Record<string, string>> = { kind: BAD_KIND, type: BAD_TYPE, status: BAD_STATUS, reason: BAD_REASON, expect: BAD_EXPECT };
 
+/** The 400 of a failed parse of the filters: the wording is the terms' one (`unconvertedParseRefusal`), the code is the failing field's, `fallback` for any other. */
+function parseRefusal(error: unknown, fallback: string): UnconvertedActResult {
+  const refusal = unconvertedParseRefusal(error);
+  const field = String(refusal.issues[0]?.path[0] ?? '');
+  return { status: BAD_REQUEST, error: refusal.error, code: FILTER_CODES[field] ?? fallback };
+}
+
 /**
  * One page of the space's unconverted items (needs `knowledge: read`), refused in this order: an unknown space (404, or 410 for a retired
- * id), a missing rung (403 `unconverted_rung`), a malformed `kind`, `type` or `status` (400 by its own code), a malformed `skip` or `limit`
+ * id), a missing rung (403 `unconverted_rung`), a malformed `kind`, `type`, `reason` (an unknown one anywhere in a list, or a list over the bound,
+ *  included) or `status` (400 by its own code), a malformed `skip` or `limit`
  * or byte budget (400 `unconverted_bad_paging`).
  */
 export async function listUnconvertedAct(
@@ -128,11 +137,7 @@ export async function listUnconvertedAct(
   if (before) return before;
   const spaces = viewRead ?? [spaceId];
   const parsed = UnconvertedListParams.safeParse({ kind: params['kind'], type: params['type'], reason: params['reason'], status: params['status'] });
-  if (!parsed.success) {
-    const refusal = refusalOfParse(parsed.error);
-    const field = String(refusal.issues[0]?.path[0] ?? '');
-    return { status: BAD_REQUEST, error: refusal.error, code: FILTER_CODES[field] ?? BAD_KIND };
-  }
+  if (!parsed.success) return parseRefusal(parsed.error, BAD_KIND);
   const { kind, type, reason, status } = parsed.data;
   // The record part is added before the byte budget is applied, so the bytes the answer reports and the page it cuts count it.
   const withSummaries = async (space: string, rows: ListedUnconvertedItem[]): Promise<ListedUnconvertedItem[]> => {
@@ -152,7 +157,7 @@ export async function listUnconvertedAct(
     body: {
       items: listed.items.map(rowOf),
       ...listed.fields,
-      counts: { open: listed.open, dismissed: listed.dismissed },
+      counts: { open: listed.open, dismissed: listed.dismissed, openBy: listed.openBy, ...(listed.openByCut ? { openByCut: true } : {}) },
     },
   };
 }
@@ -188,11 +193,7 @@ export async function dismissShownUnconvertedAct(spaceId: string, params: Record
   const before = refusedBefore(spaceId, caller, 'write');
   if (before) return before;
   const parsed = UnconvertedDismissShownParams.safeParse({ kind: params['kind'], type: params['type'], reason: params['reason'], expect: params['expect'] });
-  if (!parsed.success) {
-    const refusal = refusalOfParse(parsed.error);
-    const field = String(refusal.issues[0]?.path[0] ?? '');
-    return { status: BAD_REQUEST, error: refusal.error, code: FILTER_CODES[field] ?? BAD_EXPECT };
-  }
+  if (!parsed.success) return parseRefusal(parsed.error, BAD_EXPECT);
   const { expect, kind, type, reason } = parsed.data;
   const done = await dismissOpenUnconvertedItems(spaceId, { ...(kind !== undefined ? { kind } : {}), ...(type !== undefined ? { type } : {}), ...(reason !== undefined ? { reason } : {}) }, expect);
   if (done.ok) return { status: OK, body: { dismissed: done.dismissed } };
