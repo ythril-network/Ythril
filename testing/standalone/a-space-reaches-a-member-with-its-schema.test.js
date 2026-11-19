@@ -31,7 +31,7 @@ const body = (src, head) => {
 describe('a library reference travels resolved', () => {
   it('both doors a meta leaves by inline the references this instance can resolve', () => {
     assert.match(read('server/src/api/sync/meta.ts'), /inlineResolvableRefs\(replicatedMetaOf\(/);
-    assert.match(body(read('server/src/networks/round-local-state.ts'), 'export function roundForPeer'), /inlineResolvableRefs\(copy\.pendingMeta\)/);
+    assert.match(body(read('server/src/networks/round-local-state.ts'), 'export function roundForPeer'), /inlineResolvableRefs\(copy\.pendingMeta[,)]/);
   });
   it('an arriving layer leaves out only the types it cannot resolve, not the whole schema', () => {
     const accept = body(read('server/src/sync/space-meta-pull.ts'), 'export function acceptNetworkLayer');

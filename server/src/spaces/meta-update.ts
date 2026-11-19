@@ -584,10 +584,14 @@ export function planSpaceMetaUpdate(input: {
     const minted = parseSpaceMeta(mergeSpaceMeta(base, parsed.data.meta, parsed.data.typeSchemasMode ?? 'merge'), { against: base });
     if (!minted.ok) return { ok: false, refusal: { status: 400, body: { error: minted.message } } };
     mergedMeta = minted.meta;
-    // Q-748 rule 5: on a space with RDF on, two terms with one address are refused, both named. Asked of the resolved schema, as the
-    // resolver names it; a space with RDF off names nothing, so nothing is asked.
-    if (mergedMeta.rdf?.enabled === true && mergedMeta.rdf.base) {
-      const clashes = termClashes(inlineResolvableRefs(mergedMeta) as SpaceMeta);
+    // Q-748 rule 5: on a space with RDF on, two terms with one address are refused, both named. Asked of the schema the space RUNS after the
+    // edit, resolved as the resolver names it: its own definitions laid under each network's layer, so an own type cannot take an address a
+    // layer's type already has (the review's suspicion, proven). A space with RDF off names nothing, so nothing is asked.
+    const runs = effectiveMetaAfterEdit(getConfig(), space, {
+      base, incoming: parsed.data.meta as Partial<SpaceMeta>, mode: parsed.data.typeSchemasMode ?? 'merge', merged: mergedMeta, targetNetwork,
+    });
+    if (runs.rdf?.enabled === true && runs.rdf.base) {
+      const clashes = termClashes(inlineResolvableRefs(runs));
       if (clashes.length > 0) {
         return { ok: false, refusal: { status: TERM_CLASH_STATUS, body: { error: `two terms of this space would have one RDF address: ${clashes.map(c => c.message).join('; ')}`, code: 'rdf_term_clash' } } };
       }
