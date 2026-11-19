@@ -3526,5 +3526,6 @@
   "conversion.editor.addValue": "+ Wert hinzufügen",
   "conversion.editor.removeValue": "Diesen Wert entfernen",
   "spaces.schema.convert.incomplete": "Einige Schritte sind nicht fertig: Füllen Sie jeden Namen aus und wählen Sie, was aus jedem alten Wert wird, oder entfernen Sie den Schritt.",
-  "spaces.schema.convert.warn.rule": "Die Regel {{rule}} von {{type}} liest noch {{property}}, das jetzt {{to}} heißt. Eine Umbenennung schreibt Regeln nicht um: Passen Sie die Regel an, damit sie {{to}} liest."
+  "spaces.schema.convert.warn.rule": "Die Regel {{rule}} von {{type}} liest noch {{property}}, das jetzt {{to}} heißt. Eine Umbenennung schreibt Regeln nicht um: Passen Sie die Regel an, damit sie {{to}} liest.",
+  "spaces.schema.convert.run.pollFailed": "Der Fortschritt der Konvertierung konnte nicht gelesen werden. Es wird erneut versucht."
 }

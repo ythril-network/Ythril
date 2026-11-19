@@ -3526,5 +3526,6 @@
   "conversion.editor.addValue": "+ Add a value",
   "conversion.editor.removeValue": "Remove this value",
   "spaces.schema.convert.incomplete": "Some steps are not finished: fill in every name and choose what each old value becomes, or remove the step.",
-  "spaces.schema.convert.warn.rule": "The rule {{rule}} of {{type}} still reads {{property}}, which is now called {{to}}. A rename does not rewrite rules: edit the rule so it reads {{to}}."
+  "spaces.schema.convert.warn.rule": "The rule {{rule}} of {{type}} still reads {{property}}, which is now called {{to}}. A rename does not rewrite rules: edit the rule so it reads {{to}}.",
+  "spaces.schema.convert.run.pollFailed": "The progress of the conversion could not be read. Trying again."
 }
