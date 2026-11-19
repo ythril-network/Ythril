@@ -15,7 +15,6 @@
  * - **A silent drop.** A schema value the graph leaves out (`SchemaLeftOut`) is named in the closing comment and the summary.
  */
 import { z } from 'zod';
-import type { SpaceMeta } from '@ythril-network/schema';
 import { refusalOfParse } from '../util/log.js';
 import { EXPORT_OK, EXPORT_BAD_REQUEST, EXPORT_NOT_ACCEPTABLE, EXPORT_CONFLICT } from '../export/export-statuses.js';
 import { getConfig } from '../config/loader.js';
@@ -23,7 +22,7 @@ import { schemaGraph, type SchemaLeftOut } from './schema-owl-shacl.js';
 import { createRdfWriter, RdfWriteError, type RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES, RDF_BAD_FORMAT } from './export-format.js';
 import {
-  rdfSpaceState, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
+  rdfSpaceState, holderOfAddress, RDF_BASE_SHARED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
 } from './rdf-space-state.js';
 
 /** The formats the schema export offers. */
@@ -31,7 +30,7 @@ export const RDF_SCHEMA_FORMATS: readonly RdfFormat[] = Object.freeze(['turtle',
 /** The parameters both doors take (the REST `Accept` header beside them). */
 export const RdfSchemaParams = z.object({ format: z.enum(['turtle', 'jsonld']).optional() });
 /** Every refusal code the schema export answers. */
-export const RDF_SCHEMA_REFUSAL_CODES: readonly string[] = Object.freeze([RDF_BAD_FORMAT, 'rdf_format_not_acceptable', 'rdf_not_enabled', 'rdf_base_conflict', 'rdf_term_clash', RDF_UNWRITABLE]);
+export const RDF_SCHEMA_REFUSAL_CODES: readonly string[] = Object.freeze([RDF_BAD_FORMAT, 'rdf_format_not_acceptable', 'rdf_not_enabled', 'rdf_base_conflict', RDF_BASE_SHARED, 'rdf_term_clash', RDF_UNWRITABLE]);
 
 /** What the schema export says about itself. */
 export interface RdfSchemaSummary {
@@ -47,17 +46,6 @@ export interface RdfSchemaSummary {
 export type RdfSchemaOutcome =
   | { status: typeof EXPORT_OK; text: string; summary: RdfSchemaSummary; contentType: string; disposition: string; auditChanges: Array<{ field: string; to: string | number }> }
   | { status: typeof EXPORT_BAD_REQUEST | typeof EXPORT_NOT_ACCEPTABLE | typeof EXPORT_CONFLICT; error: string; code: string; detail?: Record<string, unknown> };
-
-/** What in the schema holds `value`: the type or property whose explicit `iri` it is (`kind:type[.property]`), else the RDF setting. */
-function holderOf(meta: SpaceMeta, value: string | undefined): string {
-  for (const [kind, map] of Object.entries((meta.typeSchemas ?? {}) as Record<string, Record<string, { iri?: unknown; propertySchemas?: Record<string, { iri?: unknown }> }> | undefined>)) {
-    for (const [type, def] of Object.entries(map ?? {})) {
-      if (def?.iri === value) return `The type ${kind}:${type} of the schema (its iri)`;
-      for (const [prop, p] of Object.entries(def?.propertySchemas ?? {})) if (p?.iri === value) return `The property ${kind}:${type}.${prop} of the schema (its iri)`;
-    }
-  }
-  return 'The RDF setting of the space (meta.rdf.base or meta.rdf.vocab) or a library namespace its terms use';
-}
 
 /** Export the schema of `spaceId`. */
 export function rdfSchemaExportAct(input: {
@@ -82,7 +70,7 @@ export function rdfSchemaExportAct(input: {
     text = writer.open() + writer.write({ quads: graph.quads }) + writer.close(comment);
   } catch (err) {
     if (!(err instanceof RdfWriteError)) throw err;
-    return unwritableRefusal(new RdfUnwritable(holderOf(state.meta, err.value), err.value));
+    return unwritableRefusal(new RdfUnwritable(holderOfAddress(state.meta, err.value), err.value));
   }
   const summary: RdfSchemaSummary = {
     space: spaceId, format: choice.format, mediaType: RDF_MEDIA_TYPES[choice.format], ontology: graph.ontology, version: graph.version,

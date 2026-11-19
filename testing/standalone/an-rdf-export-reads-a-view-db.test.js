@@ -12,8 +12,9 @@
  *   bytes as a view holding only the readable member (body, report node, closing comment, trailers, `Ythril-View-Members`), on both doors,
  *   and the audit row names only the readable member. This is how `recall` and `filter` over a view already answer: the guard narrows the
  *   members once (`viewReadMembers`) and `viewMembers` lists only those read.
- * - A member with RDF off that the caller does read is left out and named (`membersWithoutRdf`); a view none of whose read members has RDF
- *   on is 409 `rdf_not_enabled`.
+ * - A member with RDF off that the caller does read is left out and named (`membersWithoutRdf`; on REST `Ythril-View-Members-Without-Rdf`
+ *   and the document's ending, bundle-269 drive finding 11); a view none of whose read members has RDF on is 409 `rdf_not_enabled`.
+ * - A view with no member the caller reads answers an empty document whose ending (and report node, `rdfs:comment`) says why.
  * - **File triples need the files rung**: a caller without it gets the export without file triples and is told so
  *   (`Ythril-File-Triples: withheld`, `fileTriplesWithheld: true`), and the note says nothing of how many or which.
  *
@@ -121,6 +122,16 @@ describe('an RDF export reads a view', { skip }, () => {
     assert.equal(r.isError, false, r.text.slice(0, 300));
     assert.deepEqual(r.structured.members, [A]);
     assert.deepEqual(r.structured.membersWithoutRdf, [OFF]);
+    // REST says it too (bundle-269 drive, finding 11: only MCP named them), in a header a browser may read and in the document's ending.
+    for (const params of [{}, { maxChars: BIG }]) {
+      const rest = await d.exportRest(t.key, mixed, params);
+      assert.equal(rest.status, 200, rest.text.slice(0, 300));
+      assert.equal(rest.headers['ythril-view-members-without-rdf'], OFF, JSON.stringify(rest.headers));
+      assert.match(String(rest.headers['access-control-expose-headers']), /Ythril-View-Members-Without-Rdf/);
+      assert.match(rest.text, new RegExp(`members left out, RDF off: ${OFF}`));
+    }
+    const head = await d.rest(t.key, 'HEAD', `/api/brain/spaces/${encodeURIComponent(mixed)}/export/rdf`);
+    assert.equal(head.status, 200);
     const onlyOff = await view(t.key, 'onlyoff', [OFF]);
     const refused = await d.exportRest(t.key, onlyOff, {});
     assert.equal(refused.status, 409, refused.text.slice(0, 300));
@@ -128,6 +139,27 @@ describe('an RDF export reads a view', { skip }, () => {
     const mcp = await d.exportMcp(t.key, { space: onlyOff });
     assert.equal(mcp.isError, true);
     assert.match(mcp.text, /rdf_not_enabled/);
+  });
+
+  it('a view with no member the caller reads says in its report why it is empty (the drive: 200 and an empty file)', async () => {
+    const t = await d.mint('nomember', reads(A));
+    const id = await view(t.key, 'gone', [A]);
+    await d.setRights(t.id, r => { delete r.perSpace[A]; r.perSpace[B] = d.row({ knowledge: 'read' }); });
+    for (const format of ['turtle', 'trig']) {
+      const r = await d.exportRest(t.key, id, { format });
+      assert.equal(r.status, 200, r.text.slice(0, 300));
+      assert.match(r.text, /no member of this view is one you may read/, `${format}: the ending says why it is empty`);
+      assert.ok(!r.text.includes(A), `${format}: and names no member`);
+    }
+    const trig = await d.exportRest(t.key, id, { format: 'trig' });
+    const quads = await parseRdf('trig', trig.text);
+    const report = [...reportGraphs(quads, vocab.YTHRIL_NS)][0];
+    assert.ok(quads.some(q => q.graph.value === report && q.predicate.value === 'http://www.w3.org/2000/01/rdf-schema#comment'
+      && /no member of this view is one you may read/.test(q.object.value)), 'the report node says it in standard terms (rdfs:comment)');
+    const m = await d.exportMcp(t.key, { space: id });
+    assert.equal(m.isError, false, m.text.slice(0, 300));
+    assert.deepEqual(m.structured.members, []);
+    assert.match(m.document, /no member of this view is one you may read/);
   });
 
   it('file triples need the files rung, and the note says nothing of how many or which', async () => {

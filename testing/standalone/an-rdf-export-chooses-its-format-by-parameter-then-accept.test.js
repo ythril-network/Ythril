@@ -120,4 +120,26 @@ describe('an RDF export chooses its format by parameter, then Accept, then the s
     assert.match(disposition('@my-view', 'trig'), /filename="my-view\.trig"|filename="_my-view\.trig"/);
     assert.match(disposition('...', 'jsonld'), /filename="export\.jsonld"/, 'a name of dots alone gives a plain name');
   });
+
+  /*
+   * The headers RDF clients really send (bundle-269 drive, finding 5), ranked by the client's weights first and the scope's order second.
+   * Quoted from each client's source as known offline (no request leaves a test): Jena's RDF header as the parent quoted it (Apache Jena
+   * `WebContent`, graph and dataset types together); the graph-only header the drive sent as Jena's; rdflib's `URLInputSource` headers for
+   * `format="turtle"`, `"trig"` and `"json-ld"`; curl's default `*\/*`. The drive's header gives a view JSON-LD, and rightly: it weighs JSON-LD
+   * 0.7 and TriG only through `*\/*` at 0.1.
+   */
+  const CLIENTS = [
+    ['Jena (RDF types, as the parent quoted it)', JENA, 'turtle', 'trig'],
+    ['Jena graph types (the drive\'s header)', 'text/turtle,application/n-triples;q=0.9,application/rdf+xml;q=0.8,application/ld+json;q=0.7,*/*;q=0.1', 'turtle', 'jsonld'],
+    ['rdflib format="turtle"', 'text/turtle, application/x-turtle, */*;q=0.1', 'turtle', 'trig'],
+    ['rdflib format="trig"', 'application/trig, */*;q=0.1', 'trig', 'trig'],
+    ['rdflib format="json-ld"', 'application/ld+json, application/json;q=0.9, */*;q=0.1', 'jsonld', 'jsonld'],
+    ['curl (default)', '*/*', 'turtle', 'trig'],
+  ];
+  for (const [client, accept, one, several] of CLIENTS) {
+    it(`${client}: ${one} for one space, ${several} for a view of several`, () => {
+      assert.equal(ok({ accept, members: 1 }), one);
+      assert.equal(ok({ accept, members: 2 }), several);
+    });
+  }
 });

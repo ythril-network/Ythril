@@ -15,7 +15,8 @@
  * - **Negotiation said out loud**: the `Accept` header is handed to the act (the `format` parameter wins), and every answer says
  *   `Vary: Accept`.
  * - **The page's facts where a client reads them**: `Link: <...after=X>; rel="next"` (RFC 8288) while records are left, known before the
- *   status line; `Ythril-View-Members` for a view and `Ythril-File-Triples: withheld` when file statements were left out, both exposed to
+ *   status line; `Ythril-View-Members` for a view (and `Ythril-View-Members-Without-Rdf`, `Ythril-View-Members-In-Conflict` for the read
+ *   members it left out) and `Ythril-File-Triples: withheld` when file statements were left out, all exposed to
  *   browsers; the budget used (`Ythril-Budget-Chars`, `Ythril-Budget-Bytes` when stated); the left-out values in the HTTP trailers declared
  *   up front (`Trailer:`) on a chunked answer only (`export/export-trailers.ts`: an HTTP/1.0 or a `HEAD` answer cannot carry them, and a
  *   declared one ended the server), beside the closing comment and the report node the document carries; `Retry-After` on a 429 and a 503.
@@ -30,7 +31,8 @@ import { requireSpaceAuth } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { viewReadOfRequest } from '../../spaces/read-scope.js';
 import {
-  rdfExportAct, rdfExportHeadAct, rdfExportIdleMs, rdfExportRate, type RdfExportPage, type RdfExportRefusal, type RdfExportStream,
+  rdfExportAct, rdfExportHeadAct, rdfExportIdleMs, rdfExportRate, type MembersLeftOut, type RdfExportPage, type RdfExportRefusal,
+  type RdfExportStream,
 } from '../../rdf/export-act.js';
 import { trailersFor } from '../../export/export-trailers.js';
 import { headAskedAsGet } from '../../export/export-head.js';
@@ -44,7 +46,20 @@ import { schemaFingerprintOf } from '../../spaces/schema-stamp.js';
 export const rdfExportRouter = Router();
 
 /** The headers a browser may read of an export answer. */
-const EXPOSED = 'Link, Content-Disposition, Ythril-View-Members, Ythril-File-Triples, Ythril-Budget-Chars, Ythril-Budget-Bytes';
+const EXPOSED = 'Link, Content-Disposition, Ythril-View-Members, Ythril-View-Members-Without-Rdf, Ythril-View-Members-In-Conflict, '
+  + 'Ythril-File-Triples, Ythril-Budget-Chars, Ythril-Budget-Bytes';
+
+/**
+ * The view's members on the answer: those exported (`Ythril-View-Members`), and those the caller reads that were left out, RDF off or names
+ * not settled (bundle-269 drive, finding 11: only MCP named them). Each a member the guard accepted for the caller, percent-encoded (a
+ * header value is Latin-1).
+ */
+function setViewHeaders(res: Response, viewMembers: readonly string[] | undefined, leftOut: MembersLeftOut): void {
+  const list = (ids: readonly string[]): string => ids.map(encodeURIComponent).join(', ');
+  if (viewMembers) res.setHeader('Ythril-View-Members', list(viewMembers));
+  if (leftOut.withoutRdf.length > 0) res.setHeader('Ythril-View-Members-Without-Rdf', list(leftOut.withoutRdf));
+  if (leftOut.inConflict.length > 0) res.setHeader('Ythril-View-Members-In-Conflict', list(leftOut.inConflict));
+}
 
 const ROUTE = 'GET /api/brain/spaces/:spaceId/export/rdf';
 
@@ -116,7 +131,7 @@ function answerHead(res: Response, input: Parameters<typeof rdfExportHeadAct>[0]
   res.status(EXPORT_OK);
   res.setHeader('Content-Type', head.contentType);
   res.setHeader('Content-Disposition', head.disposition);
-  if (head.viewMembers) res.setHeader('Ythril-View-Members', head.viewMembers.map(encodeURIComponent).join(', '));
+  setViewHeaders(res, head.viewMembers, head.membersLeftOut);
   if (head.fileTriplesWithheld) res.setHeader('Ythril-File-Triples', 'withheld');
   res.end();
 }
@@ -149,7 +164,7 @@ async function sendStream(req: Request, res: Response, stream: RdfExportStream):
   res.setHeader('Content-Disposition', stream.disposition);
   // Declared only on a chunked answer: an HTTP/1.0 reader reads the same facts in the document's ending.
   const trailers = trailersFor(req, res, STREAM_TRAILERS);
-  if (stream.viewMembers) res.setHeader('Ythril-View-Members', stream.viewMembers.map(encodeURIComponent).join(', '));
+  setViewHeaders(res, stream.viewMembers, stream.membersLeftOut);
   if (stream.fileTriplesWithheld) res.setHeader('Ythril-File-Triples', 'withheld');
   const pace = (): ReaderPace => ({ ...rdfExportRate(), idleMs: rdfExportIdleMs() });
   const writer = pacedWriter(res, pace);
@@ -219,7 +234,7 @@ async function sendPage(req: Request, res: Response, page: RdfExportPage): Promi
   res.setHeader('Ythril-Budget-Chars', String(summary.budgetChars));
   if (summary.budgetBytes !== null) res.setHeader('Ythril-Budget-Bytes', String(summary.budgetBytes));
   if (summary.nextAfter) res.setHeader('Link', nextLink(req, summary.format, summary.nextAfter));
-  if (page.viewMembers) res.setHeader('Ythril-View-Members', page.viewMembers.map(encodeURIComponent).join(', '));
+  setViewHeaders(res, page.viewMembers, { withoutRdf: summary.membersWithoutRdf ?? [], inConflict: summary.membersInConflict ?? [] });
   if (summary.fileTriplesWithheld) res.setHeader('Ythril-File-Triples', 'withheld');
   // A page is bounded (at most the largest budget) and built before its first byte: only the idle bound applies to its reader, no rate.
   const writer = pacedWriter(res, () => ({ windowMs: rdfExportIdleMs(), minBytesPerSecond: 0, idleMs: rdfExportIdleMs() }));
