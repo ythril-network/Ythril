@@ -54,6 +54,16 @@ describe('watchConvertRun', () => {
     h.watch.stop();
   });
 
+  it('readAtOnce: false (a caller that has just read the status) waits one interval before its first read (S13)', () => {
+    const status = vi.fn(() => of(okStatus(runningStatus())));
+    const watch = watchConvertRun({ status }, 'customers', { onStatus: () => {}, onFailure: () => {} }, { readAtOnce: false });
+    vi.advanceTimersByTime(CONVERT_POLL_MS - 1);
+    expect(status).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(status).toHaveBeenCalledTimes(1);
+    watch.stop();
+  });
+
   it('keeps its interval bounded: three seconds', () => {
     expect(CONVERT_POLL_MS).toBe(3000);
     expect(CONVERT_POLL_FAILURES_MAX).toBeGreaterThan(0);

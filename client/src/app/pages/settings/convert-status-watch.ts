@@ -5,11 +5,11 @@ import type { ConversionResult, ConvertStatusAnswer } from '../../core/conversio
 /**
  * Read a conversion's progress until it ends (bundle-285 slice S6, Q-747; plan section 3.1 item 7).
  *
- * Two places show a run as it goes: the dialog a converting Save leaves open, and the note on the type. Both ask the same question, "how far has the
- * run got, and is it still going?", so the loop is written once, with the guards a hand-written copy forgets. It is `pollUntil` (a failed request
+ * Three places show a run as it goes: the dialog a converting Save leaves open, the note on the type, and the Review page's Unconverted section. All
+ * ask the same question, "how far has the run got, and is it still going?", so the loop is written once, with the guards a hand-written copy forgets. It is `pollUntil` (a failed request
  * schedules the next one, a hidden tab skips its read, `stop()` drops an answer still in flight) with the three things this question adds:
  *
- * - **A bounded interval.** One read at once, then one every {@link CONVERT_POLL_MS}.
+ * - **A bounded interval.** One read at once (or after one interval, for a caller that has just read), then one every {@link CONVERT_POLL_MS}.
  * - **It ends.** On an answer that is not a run in progress (finished, failed, no run), on `stop()`, and after {@link CONVERT_POLL_FAILURES_MAX}
  *   reads in a row that failed: a server that never answers is not asked for ever. The caller is told when it gave up.
  * - **A failed read is said, and tried again.** `ConversionApi.status` answers a refusal as a value, never as an error, so a refused read is a failure here
@@ -34,10 +34,13 @@ export interface ConvertWatchHooks {
 /** What the watch asks of the conversion API. */
 export interface ConvertStatusSource { status(spaceId: string): Observable<ConversionResult<ConvertStatusAnswer>> }
 
-/** Start watching the run of `spaceId`. Call `stop()` when the page or dialog that shows it goes. */
-export function watchConvertRun(source: ConvertStatusSource, spaceId: string, hooks: ConvertWatchHooks): PollHandle {
+/**
+ * Start watching the run of `spaceId`. Call `stop()` when the page or dialog that shows it goes. `readAtOnce: false` is for a caller that has just read
+ * the status itself (the Review page reads it once on opening, and watches only a run that answered "running"): the first read then waits one interval.
+ */
+export function watchConvertRun(source: ConvertStatusSource, spaceId: string, hooks: ConvertWatchHooks, { readAtOnce = true }: { readAtOnce?: boolean } = {}): PollHandle {
   let failures = 0;
-  let first = true;
+  let first = readAtOnce;
   /** One more failed read: say so, and whether the bound is reached. */
   const failed = (): boolean => {
     failures++;

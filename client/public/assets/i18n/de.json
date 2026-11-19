@@ -3512,6 +3512,8 @@
   "brain.review.unconverted.running.few": "Die Konvertierung von {{type}} läuft noch: {{done}} von {{count}} Datensätzen geprüft. Diese Liste wächst mit dem Lauf.",
   "brain.review.unconverted.running.many": "Die Konvertierung von {{type}} läuft noch: {{done}} von {{count}} Datensätzen geprüft. Diese Liste wächst mit dem Lauf.",
   "brain.review.unconverted.running.other": "Die Konvertierung von {{type}} läuft noch: {{done}} von {{count}} Datensätzen geprüft. Diese Liste wächst mit dem Lauf.",
+  "brain.review.unconverted.runLost": "Der Fortschritt der Konvertierung konnte nicht gelesen werden, deshalb fragt diese Seite nicht mehr nach. Die Konvertierung läuft vielleicht noch.",
+  "brain.review.unconverted.checkRun": "Erneut prüfen",
   "brain.review.unconverted.typeLabel": "Datensatztyp",
   "brain.review.unconverted.allTypes": "Alle Typen",
   "brain.review.unconverted.convertAgain": "Erneut konvertieren",

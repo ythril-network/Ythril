@@ -84,6 +84,8 @@ interface CardView {
     .refusal-close { background: none; border: none; color: inherit; cursor: pointer; padding: 2px; line-height: 1; flex-shrink: 0; }
     .run-line { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0 0; font-size: 13px; }
     .run-line span { min-width: 0; overflow-wrap: anywhere; }
+    .run-lost { flex-wrap: wrap; align-items: center; }
+    .run-lost span { flex: 1 1 220px; }
 
     /* The filters and the two actions: one row on a wide screen; on a phone the filters fold and the actions sit below. */
     .type-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; font-size: 13px; }
@@ -170,6 +172,11 @@ interface CardView {
       } @else if (state().loaded()) {
         @if (state().running(); as run) {
           <div class="alert alert-info run-line" role="status" data-testid="unconverted-running"><ph-icon name="arrows-clockwise" [size]="16"/><span>{{ runText(run) }}</span></div>
+        } @else if (state().runLost()) {
+          <div class="alert alert-warning run-line run-lost" role="status" data-testid="unconverted-run-lost">
+            <span>{{ 'brain.review.unconverted.runLost' | transloco }}</span>
+            <button class="btn btn-sm btn-secondary" type="button" (click)="state().checkRun()">{{ 'brain.review.unconverted.checkRun' | transloco }}</button>
+          </div>
         }
 
         @if (phone()) {
