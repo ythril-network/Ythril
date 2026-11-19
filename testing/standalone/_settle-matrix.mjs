@@ -30,7 +30,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { allowEngineToDialPrivatePeers, bootInstance, callRoute } from './_vote-round-instance.mjs';
-import { SELF, P1, P2, JOINER, NET_ID, ROUND_ID, scenario, bootScenario } from './_vote-round-sites.mjs';
+import { SELF, P1, P2, JOINER, NET_ID, ROUND_ID, REBASE_SCENARIO, scenario, bootScenario } from './_vote-round-sites.mjs';
 import { requireExport } from './_round-open-fixtures.mjs';
 import { quiescent } from './_quiescence.mjs';
 import { entriesOf } from './_space-act-harness.mjs';
@@ -66,6 +66,8 @@ export const AFTER_A_VOTE = {
   space_wipe: { applied: true, members: [P1, P2], spaces: ['general', 'notes'], pending: [], layers: [], notified: false, runs: { wipe: 1 } },
   meta_change: { applied: false, members: [P1, P2], spaces: ['general', 'notes'], pending: [], layers: ['notes'], notified: false, runs: {} },
   space_addition: { applied: false, members: [P1, P2], spaces: ['general', 'notes'], pending: ['fresh'], layers: [], notified: false, runs: {} },
+  // Q-748: a passed rebase lands at its DEADLINE, never at the pass: concluded and passed, not applied, nothing else moved.
+  space_rebase: { applied: false, members: [P1, P2], spaces: ['general', 'notes'], pending: [], layers: [], notified: false, runs: {} },
 };
 
 /**
@@ -81,6 +83,7 @@ export const AFTER_AT_OPEN = {
   // definitions, and a network layer is written here only where this instance already holds one — a fresh network holds none.
   meta_change: { applied: false, members: [], spaces: ['general', 'notes'], pending: [], layers: [], notified: false, runs: {} },
   space_addition: { applied: false, members: [], spaces: ['fresh', 'general', 'notes'], pending: [], layers: [], notified: false, runs: {} },
+  space_rebase: { applied: false, members: [], spaces: ['general', 'notes'], pending: [], layers: [], notified: false, runs: {} },
 };
 
 const member = (instanceId, extra = {}) => ({
@@ -98,6 +101,7 @@ function proposalOf(roundType, netType, peerUrl) {
   const spaces = {
     space_deletion: named('notes'), space_wipe: named('notes'), space_addition: named('fresh'),
     meta_change: { ...named('notes'), pendingMeta: { purpose: 'a purpose the network chose' }, metaChangedFields: ['purpose'], baseMetaVersion: 0 },
+    space_rebase: { spaceId: 'notes', rebase: { ...REBASE_SCENARIO } },
   };
   if (roundType === 'join') return { ...base, subjectInstanceId: JOINER, pendingMember: member(JOINER), ...(netType === 'braintree' ? { requiredVoters: [SELF] } : {}) };
   if (roundType === 'remove') return { ...base, subjectInstanceId: P2, subjectUrl: peerUrl, ...(netType === 'braintree' ? { requiredVoters: [SELF] } : {}) };
@@ -198,7 +202,8 @@ export async function bootCell(dir, via, roundType, netType, peer) {
   const scen = scenario(roundType, netType, site, peer.url);
   // On pub/sub a deletion or wipe that passes by a vote is the PUBLISHER's, reaching a subscriber (D-40, X10): a publisher never passes
   // one it did not open. So in those cells this instance subscribes — it pulls from P1, its publisher.
-  if (netType === 'pubsub' && (roundType === 'space_deletion' || roundType === 'space_wipe')) {
+  // A rebase is of the delete family (Q-748): the same holds for it.
+  if (netType === 'pubsub' && (roundType === 'space_deletion' || roundType === 'space_wipe' || roundType === 'space_rebase')) {
     const publisher = scen.net.members.find(m => m.instanceId === P1);
     if (publisher) publisher.direction = 'pull';
   }

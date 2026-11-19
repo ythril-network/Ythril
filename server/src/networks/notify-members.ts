@@ -38,6 +38,8 @@ export const NOTICE_EVENTS = [
   { event: 'space_wipe_pending', round: 'space_wipe', wakes: true },
   { event: 'meta_change_pending', round: 'meta_change', wakes: false },
   { event: 'sync_available', round: 'space_addition', wakes: true },
+  // Q-748: a rebase is counted as a deletion is, and its voting period is a member's time to veto or leave: it wakes, as a deletion's does.
+  { event: 'space_rebase_pending', round: 'space_rebase', wakes: true },
   { event: 'member_departed', round: null, wakes: false },
   { event: 'member_removed', round: null, wakes: false },
 ] as const;

@@ -41,7 +41,7 @@ const iso = (ms) => new Date(ms).toISOString();
 const PAST = iso(NOW - 60_000);
 const FUTURE = iso(NOW + 3_600_000);
 const NET_TYPES = ['closed', 'democratic', 'club', 'braintree', 'pubsub'];
-const ROUND_TYPES = ['join', 'remove', 'space_deletion', 'space_wipe', 'meta_change', 'space_addition'];
+const ROUND_TYPES = ['join', 'remove', 'space_deletion', 'space_wipe', 'meta_change', 'space_addition', 'space_rebase'];
 const SPACES = [{ id: 'general', label: 'General', builtIn: true, folders: [] }, { id: 'notes', label: 'Notes', folders: [] }];
 
 const member = (instanceId, extra = {}) => ({ instanceId, label: instanceId.slice(-2), url: `https://${instanceId.slice(-2)}.example`, tokenHash: 'h', direction: 'both', ...extra });
@@ -51,6 +51,7 @@ const round = (type, over = {}) => ({
   ...(type === 'join' ? { pendingMember: member(JOINER) } : {}),
   ...(type.startsWith('space_') || type === 'meta_change' ? { spaceId: type === 'space_addition' ? 'fresh' : 'notes' } : {}),
   ...(type === 'meta_change' ? { pendingMeta: { purpose: 'a new purpose' }, metaChangedFields: ['purpose'], baseMetaVersion: 0 } : {}),
+  ...(type === 'space_rebase' ? { rebase: { base: 'https://new.example.org/ld/notes/', vocab: 'https://new.example.org/ld/notes/vocab/', epoch: 1 } } : {}),
   ...over,
 });
 const network = (type, rounds, over = {}) => ({
