@@ -10,6 +10,10 @@
  *   there and it keeps its base, its epoch and every name it gave out.
  * - **A landing lost to a restart.** What is owed is the round itself, kept in the network config by the prune until it has landed
  *   (`rebaseRoundUnapplied`); the expiry tick lands every owed one through {@link applyOwedRebaseRounds}; nothing is held in memory.
+ * - **One network's yes over another's veto.** A space in several networks gets one round per network (the door opens one on each), and a
+ *   deletion removes a space's copy only once no network carries it, so a veto in one network keeps it. A base cannot leave one network and
+ *   stay in another, so the rebase takes that rule's destructive half: the names land only once every network carrying the space here has
+ *   passed a round to the same names and come due; while one is still open nothing lands, and a veto or an expiry there supersedes it.
  * - **A landing marked before its store** (review finding 13 of slice A). The round is marked only after the store succeeded: a store that
  *   throws leaves it owed for the next tick, said once per window; a moved setting no stored meta can hold concludes the round as FAILED
  *   (`refusedHere`, a log line, `space.rdf_rebase_failed`), never as landed.
@@ -30,7 +34,7 @@ import {
 } from '../networks/round-audit.js';
 import { log, peerText } from '../util/log.js';
 import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
-import { rebaseLandingOrder, rebaseRoundOwed, roundPassedUnvetoed } from '../networks/round-state.js';
+import { rebaseLandingOrder, rebaseRoundOwed, roundIsOpen, roundPassedUnvetoed, roundPastDeadline } from '../networks/round-state.js';
 import { rebaseRoundSpaceOf, settleRdf } from './rdf-settle.js';
 import { storeMovedRdf } from './rdf-store.js';
 import { settleSpaceAct } from './apply-wipe-round.js';
@@ -46,6 +50,25 @@ function winnerOf(cfg: Config, localSpaceId: string, epoch: number): VoteRound |
   const rivals = cfg.networks.flatMap(n => (n.pendingRounds ?? []).filter(r => r.type === 'space_rebase' && r.rebase?.epoch === epoch
     && roundPassedUnvetoed(r) && rebaseRoundSpaceOf(n, r) === localSpaceId));
   return rivals.sort(rebaseLandingOrder)[0];
+}
+
+/**
+ * What the OTHER networks carrying `localSpaceId` here say about `round`'s names, as a deletion asks before it removes a space's copy (the
+ * copy goes only once no network carries it): `'let'` when every one of them holds a passed rebase round to the same names whose deadline
+ * has come, `'wait'` while one of them still holds such a round open or before its deadline, `'held'` (naming the network) when one vetoed
+ * it, let it expire, or holds no rebase to these names.
+ */
+function otherNetworks(cfg: Config, net: NetworkConfig, localSpaceId: string, round: VoteRound, now: number): 'let' | 'wait' | { held: string } {
+  let wait = false;
+  for (const other of cfg.networks) {
+    if (other === net || !other.spaces.includes(localSpaceId)) continue;
+    const same = (other.pendingRounds ?? []).filter(r => r.type === 'space_rebase' && rebaseRoundSpaceOf(other, r) === localSpaceId
+      && r.rebase?.base === round.rebase?.base && r.rebase?.vocab === round.rebase?.vocab && r.rebase?.epoch === round.rebase?.epoch);
+    if (same.some(r => roundPassedUnvetoed(r) && roundPastDeadline(r, now))) continue;
+    if (same.some(r => roundPassedUnvetoed(r) || roundIsOpen(r, now))) { wait = true; continue; }
+    return { held: other.id };
+  }
+  return wait ? 'wait' : 'let';
 }
 
 /** Conclude `round` here without landing it: said, audited, and marked so the prune lets it go. */
@@ -66,15 +89,20 @@ export function applyOwedRebaseRounds(net: NetworkConfig, cfg: Config, now: numb
   let wrote = false;
   const owed = (net.pendingRounds ?? []).filter(r => rebaseRoundOwed(r, now)).sort(rebaseLandingOrder);
   for (const round of owed) {
-    wrote = true;
     const local = rebaseRoundSpaceOf(net, round);
     const space = local === undefined ? undefined : cfg.spaces.find(s => s.id === local);
-    if (!space || !round.rebase) { settleSpaceAct(net, round, 'not-carried'); continue; }
+    if (!space || !round.rebase) { settleSpaceAct(net, round, 'not-carried'); wrote = true; continue; }
     const winner = winnerOf(cfg, space.id, round.rebase.epoch);
     if (winner && winner !== round && (winner.rebase?.base !== round.rebase.base || winner.rebase?.vocab !== round.rebase.vocab)) {
       supersede(net, round, space.id, `round ${peerText(winner.roundId)} lands epoch ${round.rebase.epoch} (the earlier deadline, then the lower round id)`);
+      wrote = true;
       continue;
     }
+    // A space in several networks moves only once every network carrying it here has let it (the deletion's rule): a veto in one holds it.
+    const others = otherNetworks(cfg, net, space.id, round, now);
+    if (others === 'wait') continue;
+    wrote = true;
+    if (others !== 'let') { supersede(net, round, space.id, `network ${peerText(others.held)}, which carries the space here too, did not pass a rebase to these names`); continue; }
     const stored = space.ownMeta?.rdf ?? space.meta?.rdf;
     if ((stored?.baseEpoch ?? -1) >= round.rebase.epoch) {
       // Its twin (the same names, opened on another network carrying the space) already landed them: nothing to say. Anything else lost.
