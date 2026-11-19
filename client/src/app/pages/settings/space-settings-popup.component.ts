@@ -35,14 +35,25 @@
  * to drift.
  */
 import { SpaceSchemaLayersComponent } from './space-schema-layers.component';
-import { ChangeDetectionStrategy, Component, computed, inject, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, Injector, afterEveryRender, computed, effect, inject, output, signal, untracked } from '@angular/core';
+import { Router } from '@angular/router';
+import { forkJoin, type Subscription } from 'rxjs';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ModalDirective } from '../../shared/modal.directive';
 import { StatusPillComponent } from '../../shared/status-pill.component';
 import { SpacesApi } from '../../core/spaces-api.service';
 import type { Space } from '../../core/api.types';
-import { SpaceSettingsState } from './space-settings-state.service';
+import { AuthApi } from '../../core/auth-api.service';
+import { ConversionApi, conversionRefusalOf, convertNoticeOf } from '../../core/conversion-api.service';
+import type { ConversionRefusal, ConvertRunNotice, ConvertStatusAnswer } from '../../core/conversion.types';
+import type { PollHandle } from '../../core/poll-until';
+import { pageTranslator } from '../../core/page-translator';
+import { ConvertRecordsDialogComponent, type ConvertDialogChoice } from './convert-records-dialog.component';
+import { convertBlocks, withAddedTypes, type AddedType, type ConvertBlockPlan, type ConvertSchemas } from './convert-steps';
+import { watchConvertRun } from './convert-status-watch';
+import type { TokenRights } from './rights-glyph.component';
+import { SpaceSettingsState, typeStateFromSchema } from './space-settings-state.service';
 import { SpacesStore } from './spaces-store.service';
 import { SpaceSettingsTabComponent } from './space-settings-tab.component';
 import { SpaceSchemaTabComponent } from './space-schema-tab.component';
@@ -53,6 +64,14 @@ import { describeRefusal, refusalIssues } from '../../core/refusal-text';
 import { formatList } from '../../core/list-format';
 import { ActiveLanguage } from '../../core/active-language';
 
+/** What the footer's standing count of the changed types' records says: not known, none of them has records, or one does. `key` is the plan it was counted for. */
+interface ConvertHint { state: 'unknown' | 'empty' | 'records'; key: string; types: { type: string; was?: string }[] }
+const NO_HINT: ConvertHint = { state: 'unknown', key: '', types: [] };
+/** Wait this long after an edit that changes which types are converted before counting their records: a count per keystroke is a request per keystroke. */
+const HINT_WAIT_MS = 400;
+/** The plan a hint was counted for: the types and their steps, so an edit inside a type (which changes neither) counts nothing again. */
+const planKey = (blocks: readonly ConvertBlockPlan[]): string => JSON.stringify(blocks.map(b => [b.kind, b.type, b.was ?? null, b.steps]));
+
 @Component({
   selector: 'app-space-settings-popup',
   standalone: true,
@@ -60,7 +79,7 @@ import { ActiveLanguage } from '../../core/active-language';
   imports: [
     SpaceSchemaLayersComponent,
     TranslocoPipe, PhIconComponent, ModalDirective, StatusPillComponent,
-    SpaceSettingsTabComponent, SpaceSchemaTabComponent, SpaceDuplicatesTabComponent, SpaceDangerTabComponent,
+    SpaceSettingsTabComponent, SpaceSchemaTabComponent, SpaceDuplicatesTabComponent, SpaceDangerTabComponent, ConvertRecordsDialogComponent,
   ],
   styles: [SPACE_DIALOG_STYLES],
   template: `
@@ -139,6 +158,10 @@ import { ActiveLanguage } from '../../core/active-language';
               @if (state.settingsNotice() && !state.isDirty()) {
                 <div class="alert alert-info" style="flex:1;margin:0;padding:6px 12px;font-size:13px;">{{ state.settingsNotice() }}</div>
               }
+              <!-- A changed type whose records are counted as none: said BEFORE the press, because the press then saves without asking. -->
+              @if (state.isDirty() && conversionNote(); as note) {
+                <div class="alert alert-info" style="flex:1;margin:0;padding:6px 12px;font-size:13px;" role="status" data-testid="convert-none-note">{{ note }}</div>
+              }
               <!-- Once the outcome is TERMINAL, the button says so.
                    A governed save answers 202 and opens a vote, so the work is finished and there is nothing
                    left to submit, but the button still read "Save changes" and the only exit was the (X),
@@ -152,18 +175,32 @@ import { ActiveLanguage } from '../../core/active-language';
                    change, which is the same trap B-15 was reported for by a different route. NOTE: no backticks
                    in a template comment -- one ends the template string and the error points at @Component. -->
               @if (state.settingsSubmitted() && !state.isDirty()) {
-                <button class="btn btn-primary" type="button" (click)="state.closeSettings()">
+                <button class="btn btn-primary" type="button" data-testid="settings-done" (click)="state.closeSettings()">
                   {{ 'spaces.popup.footer.done' | transloco }}
                 </button>
               } @else {
-                <button class="btn btn-primary" type="button" (click)="saveSettings()" [disabled]="state.settingsSaving()">
-                  @if (state.settingsSaving()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ 'spaces.popup.footer.saveChanges' | transloco }}
+                <button class="btn btn-primary" type="button" data-testid="settings-save" (click)="saveSettings()" [disabled]="state.settingsSaving()">
+                  @if (state.settingsSaving()) { <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span> }{{ footerLabel() | transloco }}
                 </button>
               }
             </div>
           }
         </div><!-- sp-panel -->
       </div><!-- sp-backdrop -->
+
+      <!-- The conversion the Save offers, the run it leaves open, and the vote it was submitted to: one dialog, three faces, above this one. -->
+      @if (offer(); as o) {
+        <app-convert-records-dialog mode="offer" [spaceId]="state.settingsSpace()!.id" [blocks]="o.blocks" [staged]="o.staged"
+          [network]="governedBy()" [rights]="rights()" [refusal]="refusal()" [busy]="state.settingsSaving()" (choice)="onChoice($event)" />
+      }
+      @if (progress(); as p) {
+        <app-convert-records-dialog mode="progress" [spaceId]="state.settingsSpace()!.id" [status]="p.status" [notice]="p.notice"
+          (closed)="closeProgress()" (openReview)="openReview()" />
+      }
+      @if (submitted(); as s) {
+        <app-convert-records-dialog mode="submitted" [spaceId]="state.settingsSpace()!.id" [blocks]="s.blocks" [network]="s.network"
+          (closed)="submitted.set(null)" (openNetworks)="openNetworks()" />
+      }
     }
   `,
 })
@@ -171,6 +208,8 @@ export class SpaceSettingsPopupComponent {
   readonly state = inject(SpaceSettingsState);
   private spacesApi = inject(SpacesApi);
   private transloco = inject(TranslocoService);
+  private readonly say = pageTranslator();
+  private readonly injector = inject(Injector);
   private readonly language = inject(ActiveLanguage).language;
   /** The list store, so a successful save updates the row behind the modal. Both hosts provide it. */
   private store = inject(SpacesStore);
@@ -201,6 +240,129 @@ export class SpaceSettingsPopupComponent {
     return nets.length > 0 ? nets.map(n => n.label).join(', ') : null;
   });
 
+  // ── The conversion a Save offers (bundle-285 slice S6, Q-747) ─────────────────────────────────────────────────────────
+
+  /**
+   * The schema as the space stores it, as `buildMeta` writes it: read whenever the state is re-baselined (opened, saved, rebased on the layers),
+   * the one moment the staged schema IS the stored one. `convertBlocks` sets the staged schema against it to find the types a Save changes.
+   */
+  private stored: ConvertSchemas | null = null;
+  private lastStored: ConvertSchemas | null = null;
+
+  /** The dialog the Save opens (`offer`), the run it leaves open (`progress`) and the vote it went to (`submitted`): at most one of each. */
+  protected readonly offer = signal<{ blocks: ConvertBlockPlan[]; staged: ConvertSchemas } | null>(null);
+  protected readonly progress = signal<{ notice: ConvertRunNotice | null; status: ConvertStatusAnswer | null } | null>(null);
+  protected readonly submitted = signal<{ blocks: ConvertBlockPlan[]; network: string } | null>(null);
+  /** The refusal of the last converting Save, for the dialog to word; cleared when it is tried again. */
+  protected readonly refusal = signal<ConversionRefusal | null>(null);
+  /** The token's rights, read once when the dialog first opens; unknown (`undefined`, or `null` when unreadable) counts as allowed: the server decides. */
+  protected readonly rights = signal<TokenRights | null | undefined>(undefined);
+
+  /** The footer's standing count (see `refreshHint`), and what it was counted for. */
+  protected readonly hint = signal<ConvertHint>(NO_HINT);
+  private hintKey = '';
+  private lastSnapshot = '';
+  private hintTimer: ReturnType<typeof setTimeout> | undefined;
+  private hintRead: Subscription | undefined;
+
+  private watch: PollHandle | null = null;
+  private pollFailed = false;
+  /** The space the dialogs above belong to: another space opening ends them. */
+  private convertSpace = '';
+
+  /** "Submit for vote" when the save will open a vote about types that hold records (drawing 4a); otherwise the plain Save. */
+  protected readonly footerLabel = computed(() => (this.governedBy() && this.hint().state === 'records' ? 'spaces.schema.convert.submitForVote' : 'spaces.popup.footer.saveChanges'));
+
+  /** The footer's line for changed types with no records at all (plan F2), in the words of the drawing; none otherwise. */
+  protected readonly conversionNote = computed<string | null>(() => {
+    const h = this.hint();
+    if (h.state !== 'empty' || h.types.length === 0) return null;
+    const first = h.types[0]!;
+    const network = this.governedBy();
+    if (network) return this.say('spaces.schema.convert.noRecordsNet', { network, type: first.was ?? first.type });
+    if (h.types.length >= 2) return this.say('spaces.schema.convert.noRecordsTwo');
+    return first.was !== undefined ? this.say('spaces.schema.convert.noRecordsShort', { type: first.was }) : this.say('spaces.schema.convert.noRecords', { type: first.type });
+  });
+
+  constructor() {
+    effect(() => {
+      this.state.schemaEpoch();
+      const open = this.state.settingsSpace();
+      untracked(() => { this.stored = open ? (this.state.buildMeta().typeSchemas as ConvertSchemas) : null; });
+    });
+    effect(() => {
+      const open = this.state.settingsSpace();
+      untracked(() => { if (!open || open.id !== this.convertSpace) this.endConversion(); });
+    });
+    // After every render, not in `ngDoCheck`: a hook of this component runs only when its PARENT's view is refreshed, and an edit made deep in
+    // the Schema tab marks the popup for traversal, not for refresh. A render follows every edit event.
+    afterEveryRender(() => this.refreshHint());
+    inject(DestroyRef).onDestroy(() => this.endConversion());
+  }
+
+  /** The types a Save with these changes converts, and the schema they are read from; none when the body changes no type. */
+  private plan(body: Record<string, unknown>): { blocks: ConvertBlockPlan[]; staged: ConvertSchemas } {
+    const staged = (body['meta'] as { typeSchemas?: ConvertSchemas } | undefined)?.typeSchemas;
+    if (!staged || !this.stored) return { blocks: [], staged: {} };
+    return { blocks: convertBlocks(this.stored, staged, this.state.renameLedger()), staged };
+  }
+
+  /**
+   * The footer's standing count: once an edit changes WHICH types a Save converts (not what is inside them), their records are counted after a
+   * short wait, so a Save that has nothing to ask can say so before the press and then save without a dialog. Run after every render, so it only
+   * compares two strings unless the staged schema moved; it never writes a signal except to forget a count that no longer applies.
+   */
+  private refreshHint(): void {
+    if (!this.state.settingsSpace()) return;
+    const snapshot = this.state.snapshot();
+    if (snapshot === this.lastSnapshot && this.stored === this.lastStored) return;
+    this.lastSnapshot = snapshot;
+    this.lastStored = this.stored;
+    const blocks = this.plan(this.state.changedSettings()).blocks;
+    const key = blocks.length > 0 ? planKey(blocks) : '';
+    if (key === this.hintKey) return;
+    this.hintKey = key;
+    clearTimeout(this.hintTimer);
+    this.hintRead?.unsubscribe();
+    this.hint.set(NO_HINT);
+    if (key) {
+      const space = this.state.settingsSpace()!.id;
+      this.hintTimer = setTimeout(() => this.countHint(space, key, blocks), HINT_WAIT_MS);
+    }
+  }
+
+  private countHint(space: string, key: string, blocks: readonly ConvertBlockPlan[]): void {
+    const api = this.injector.get(ConversionApi);
+    this.hintRead = forkJoin(blocks.map(b => api.countsFor(space, { kind: b.kind, type: b.type, ...(b.was !== undefined ? { was: b.was } : {}), steps: [] }))).subscribe(answers => {
+      if (this.hintKey !== key) return;
+      const state = answers.some(a => a.ok && a.counts.total > 0) ? 'records' : answers.every(a => a.ok) ? 'empty' : 'unknown';
+      this.hint.set({ state, key, types: blocks.map(b => ({ type: b.type, ...(b.was !== undefined ? { was: b.was } : {}) })) });
+    });
+  }
+
+  /** Stop everything the conversion started here: the run's watch, the dialogs, the footer's count. */
+  private endConversion(): void {
+    this.watch?.stop();
+    this.watch = null;
+    this.offer.set(null);
+    this.progress.set(null);
+    this.submitted.set(null);
+    this.refusal.set(null);
+    this.convertSpace = '';
+    clearTimeout(this.hintTimer);
+    this.hintRead?.unsubscribe();
+    this.hintKey = '';
+    this.lastSnapshot = '';
+    this.hint.set(NO_HINT);
+  }
+
+  private loadRights(): void {
+    if (this.rights() !== undefined) return;
+    let auth: AuthApi;
+    try { auth = this.injector.get(AuthApi); } catch { return; }
+    auth.verifyToken().subscribe({ next: me => this.rights.set(me.rights ?? null), error: () => this.rights.set(null) });
+  }
+
   /** Close the pop-up, prompting first if the editor has unsaved edits. */
   async attemptClose(): Promise<void> {
     if (await this.state.confirmDiscardIfDirty()) this.state.closeSettings();
@@ -224,7 +386,7 @@ export class SpaceSettingsPopupComponent {
      * The empty case is a real one: the footer Save is reachable with nothing edited, and the body is
      * `.strict()` with an at-least-one-field refine, so sending `{}` would be a 400 rather than a no-op.
      */
-    const body = this.state.changedSettings();
+    const body = this.bodyNow();
     if (!Object.keys(body).length) {
       this.state.settingsSaving.set(false);
       // A notice and NOT a submission: nothing was sent, so Save has to stay. Before `B-15` this
@@ -232,12 +394,46 @@ export class SpaceSettingsPopupComponent {
       this.state.settingsNotice.set(this.transloco.translate('spaces.settings.nothingToSave'));
       return;
     }
-    // An emptied label field means "unchanged", not "no name": the diff compares against what the dialog
-    // opened with, so a blank simply does not appear in the body.
+    // A changed type whose records exist (or are not known yet) is asked about first: the dialog says what converting would do and the
+    // answer decides whether the save carries `convertRecords`. Only counts that SAY none, for every changed type, save without asking.
+    const { blocks, staged } = this.plan(body);
+    if (blocks.length > 0 && this.hintFor(blocks) !== 'empty') {
+      this.state.settingsSaving.set(false);
+      this.loadRights();
+      this.convertSpace = target.id;
+      this.refusal.set(null);
+      this.offer.set({ blocks, staged });
+      return;
+    }
+    this.send(target, body, null);
+  }
+
+  /** What the standing count says of this plan: nothing, unless it was counted for exactly this plan. */
+  private hintFor(blocks: readonly ConvertBlockPlan[]): ConvertHint['state'] {
+    const h = this.hint();
+    return h.key === planKey(blocks) ? h.state : 'unknown';
+  }
+
+  /**
+   * ONLY WHAT CHANGED (`changedSettings`), with an emptied label left out: it means "unchanged", not "no name", because the diff compares
+   * against what the dialog opened with, so a blank simply does not appear in the body.
+   */
+  private bodyNow(): Record<string, unknown> {
+    const body = this.state.changedSettings();
     if (body['label'] === '') delete body['label'];
-    // A schema save is conditional on the version of the meta the dialog read (If-Match): a save made on top of somebody else's
-    // change is refused (412) instead of overwriting it.
+    return body;
+  }
+
+  /**
+   * Send the save. `choice` is the dialog's answer when it was "convert", and only then does the body carry `convertRecords`: the steps are put
+   * in HERE, from the choice, so no other path can send them. A schema save is conditional on the version of the meta the dialog read
+   * (If-Match): a save made on top of somebody else's change is refused (412) instead of overwriting it.
+   */
+  private send(target: Space, base: Record<string, unknown>, choice: ConvertDialogChoice | null): void {
+    const body = choice ? { ...base, convertRecords: { steps: choice.steps } } : base;
     const ifMatch = 'meta' in body && this.state.schMetaVersion !== undefined ? { ifMatch: this.state.schMetaVersion } : {};
+    this.state.settingsSaving.set(true);
+    this.refusal.set(null);
     this.spacesApi.updateSpace(target.id, body, ifMatch).subscribe({
       next: (result) => {
         this.state.settingsSaving.set(false);
@@ -255,9 +451,11 @@ export class SpaceSettingsPopupComponent {
           // applied it before answering. Say so (the answer carries no space to merge; the list was refreshed above).
           this.state.settingsNotice.set(localSetting
             ? this.transloco.translate('spaces.settings.votePendingLocalNow', { networks })
-            : this.transloco.translate('spaces.settings.votePending', { networks }));
+            : this.transloco.translate(choice ? 'spaces.schema.convert.submitted.notice' : 'spaces.settings.votePending', { networks }));
           this.state.markPristine();   // it is submitted; it is not an unsaved edit any more
           this.state.settingsSubmitted.set(true);  // ...and Save must stop offering to submit it again
+          // A conversion that goes with the vote is said on its own dialog: the steps and this instance's counts stay on screen, and the way to the vote is a button.
+          if (choice) { this.offer.set(null); this.submitted.set({ blocks: choice.blocks.map(b => ({ ...b, offers: [], warnings: [] })), network: networks }); }
           return;                      // stay open so the notice is read, unlike the applied path
         }
         this.store.applySpace(result.space);
@@ -275,6 +473,7 @@ export class SpaceSettingsPopupComponent {
           }));
           this.state.markPristine();
           this.state.settingsSubmitted.set(true);
+          if (choice) this.afterConvert(target, choice, result);
           return;
         }
         // Re-baseline BEFORE closing. The dirty snapshot was only ever taken when a space was opened, so
@@ -283,6 +482,9 @@ export class SpaceSettingsPopupComponent {
         // it, but any path that keeps the dialog open (or reopens it without a full load) nagged — and a
         // discard prompt after a save teaches people to click through discard prompts.
         this.state.markPristine();
+        // A converting save stays open: the run is the next thing to read, in the dialog and on the type.
+        if (choice) { this.state.settingsSubmitted.set(true); this.afterConvert(target, choice, result); return; }
+        this.offer.set(null);
         this.state.closeSettings();
       },
       error: (err) => {
@@ -290,10 +492,83 @@ export class SpaceSettingsPopupComponent {
         const view = describeRefusal(this.transloco, '', err, 'spaces.error.saveFailed');
         this.state.settingsError.set(view.text);
         // 412: somebody changed the schema first - offer to read the current one. Anything else that names a rule opens that rule.
+        const ruleShown = view.reload ? false : this.state.showRuleRefusal(refusalIssues(err), view.text);
         if (view.reload) this.state.settingsConflict.set(true);
-        else this.state.showRuleRefusal(refusalIssues(err), view.text);
+        // The dialog keeps a refusal it can word and the user can act on from there (a bad step, the rate limit, the lock, a conversion already
+        // running); a stale schema or a rule is answered in the popup, so the dialog goes and the popup says it.
+        if (!this.offer()) return;
+        if (view.reload || ruleShown) { this.offer.set(null); return; }
+        this.state.settingsError.set('');
+        this.refusal.set(conversionRefusalOf(err));
       },
     });
+  }
+
+  /** What the dialog answered. Cancel saves nothing and leaves every edit; Save only sends today's body; Convert sends the steps with it. */
+  protected onChoice(choice: ConvertDialogChoice): void {
+    const target = this.state.settingsSpace();
+    if (!this.offer() || !target) return;
+    if (choice.outcome === 'cancel') { this.offer.set(null); this.refusal.set(null); return; }
+    if (choice.outcome === 'later') { this.offer.set(null); this.send(target, this.bodyNow(), null); return; }
+    if (choice.addedTypes.length > 0) this.addTypes(choice.addedTypes);
+    this.send(target, this.bodyNow(), choice);
+  }
+
+  /** The types "Add a new type" made are part of the schema being saved: in the staged state (so no later Save deletes them), as copies of their sources. */
+  private addTypes(added: readonly AddedType[]): void {
+    const withAdded = withAddedTypes(this.state.buildMeta().typeSchemas as ConvertSchemas, added);
+    const next = { ...this.state.schTypeSchemas };
+    for (const { kind, name } of added) {
+      if (next[kind]?.[name]) continue;
+      next[kind] = { ...(next[kind] ?? {}), [name]: typeStateFromSchema(withAdded[kind]?.[name]) };
+    }
+    this.state.schTypeSchemas = next;
+  }
+
+  /** The schema is saved and the popup stays open: select the first converted type, and show what became of the run the save asked for. */
+  private afterConvert(target: Space, choice: ConvertDialogChoice, result: unknown): void {
+    this.offer.set(null);
+    const first = choice.types[0];
+    if (first) {
+      this.state.settingsTab.set('schema');
+      this.state.schemaCollTab.set(first.kind);
+      this.state.selectType(first.kind, first.type);
+    }
+    const notice = convertNoticeOf(result) ?? { state: 'nothing' as const, types: [] };
+    this.convertSpace = target.id;
+    this.progress.set({ notice, status: null });
+    if (notice.state === 'started') this.watchRun(target.id);
+  }
+
+  /** Read the run on the bound `watchConvertRun` keeps; a failed read says so in the footer and the next good answer takes the sentence away. */
+  private watchRun(spaceId: string): void {
+    this.watch?.stop();
+    const clearFailure = (): void => { if (this.pollFailed) { this.pollFailed = false; this.state.settingsError.set(''); } };
+    this.watch = watchConvertRun(this.injector.get(ConversionApi), spaceId, {
+      onStatus: status => { clearFailure(); this.progress.update(p => (p ? { ...p, status } : p)); },
+      onFailure: () => { this.pollFailed = true; this.state.settingsError.set(this.transloco.translate('spaces.schema.convert.run.pollFailed')); },
+    });
+  }
+
+  protected closeProgress(): void {
+    this.watch?.stop();
+    this.watch = null;
+    this.progress.set(null);
+  }
+
+  /** Open Review on the Unconverted section, asking first when the popup holds an edit the move would lose. */
+  protected async openReview(): Promise<void> {
+    const space = this.state.settingsSpace()?.id;
+    if (!space || !(await this.state.confirmDiscardIfDirty())) return;
+    this.state.closeSettings();
+    void this.injector.get(Router).navigate(['/brain'], { queryParams: { space, tab: 'review', section: 'unconverted' } });
+  }
+
+  /** Open Networks, where the vote this save opened is decided. */
+  protected async openNetworks(): Promise<void> {
+    if (!(await this.state.confirmDiscardIfDirty())) return;
+    this.state.closeSettings();
+    void this.injector.get(Router).navigate(['/settings/networks']);
   }
 
   /** Read the schema as it is now, after a 412. The staged edits are what is lost, so the usual discard question is asked first. */

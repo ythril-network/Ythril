@@ -3,6 +3,7 @@ import type { ReembedResult, ReindexStatus } from './embed-ops.types';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, catchError, map, of, throwError } from 'rxjs';
 import { spaceActOutcome, type SpaceActOutcome } from './space-act-outcome';
+import type { ConversionStep } from './conversion.types';
 import type {
   Space, SpaceMeta, SpacesResponse, SpaceMetaResponse, KnowledgeType, TypeSchema,
   DupeActionRule, SpaceStats, SpaceActivity, SpaceActivityResponse, WipeCollectionType, CompletenessReport,
@@ -76,8 +77,11 @@ export class SpacesApi {
   /**
    * `ifMatch` is the version of the space's meta the caller read: sent as `If-Match`, so a schema save made on top of somebody else's
    * change is refused with 412 instead of silently overwriting it. A bare integer in quotes, the entity-tag spelling the server accepts.
+   *
+   * `convertRecords` asks the save to convert the records of the types it changed with these steps (none is a stamp-only conversion); the server
+   * refuses it without `meta`. Only the Save dialog's "convert" answer sends it (`SpaceSettingsPopupComponent`).
    */
-  updateSpace(id: string, body: { label?: string; maxGiB?: number | null; meta?: Partial<SpaceMeta>; typeSchemasMode?: 'merge' | 'replace'; dupeRules?: DupeActionRule[]; dupeMergeSurvivor?: 'older' | 'newer'; dupeRulesOnInsert?: boolean; recordTtlDays?: number | RecordTtlWindows | null; unknownWriteFields?: 'warn' | 'refuse' | '' | null; documentExtraction?: 'off' | 'ocr' | 'vlm' | 'repair' | 'auto' | null; imageAnalysis?: 'off' | 'caption' | 'recognition' | 'auto' | null; audioAnalysis?: 'off' | 'on' | 'auto' | null; videoAnalysis?: 'off' | 'audio' | 'full' | 'auto' | null; textAnalysis?: 'off' | 'embed' | 'chunk' | 'auto' | null }, options: { ifMatch?: number } = {}): Observable<UpdateSpaceResult> {
+  updateSpace(id: string, body: { label?: string; maxGiB?: number | null; meta?: Partial<SpaceMeta>; typeSchemasMode?: 'merge' | 'replace'; convertRecords?: { steps: ConversionStep[] }; dupeRules?: DupeActionRule[]; dupeMergeSurvivor?: 'older' | 'newer'; dupeRulesOnInsert?: boolean; recordTtlDays?: number | RecordTtlWindows | null; unknownWriteFields?: 'warn' | 'refuse' | '' | null; documentExtraction?: 'off' | 'ocr' | 'vlm' | 'repair' | 'auto' | null; imageAnalysis?: 'off' | 'caption' | 'recognition' | 'auto' | null; audioAnalysis?: 'off' | 'on' | 'auto' | null; videoAnalysis?: 'off' | 'audio' | 'full' | 'auto' | null; textAnalysis?: 'off' | 'embed' | 'chunk' | 'auto' | null }, options: { ifMatch?: number } = {}): Observable<UpdateSpaceResult> {
     const headers = options.ifMatch === undefined ? undefined : { 'If-Match': `"${options.ifMatch}"` };
     return this.http.patch<UpdateSpaceResult>(`/api/spaces/${id}`, body, headers ? { headers } : undefined);
   }

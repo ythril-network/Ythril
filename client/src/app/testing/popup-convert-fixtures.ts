@@ -1,3 +1,4 @@
+import { ChangeDetectorRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Router } from '@angular/router';
@@ -121,7 +122,9 @@ export function mountPopup(options: HarnessOptions = {}) {
   const state = popup.state;
   const root = fixture.nativeElement as HTMLElement;
 
-  const settle = (): void => { fixture.detectChanges(); fixture.detectChanges(); };
+  // The settings state is plain fields, not signals: a render follows an edit only because the EDIT was an event, which marks its view dirty. A spec
+  // that edits the state in code has to say so, or no render (and no hook that runs after one) follows.
+  const settle = (): void => { fixture.componentRef.injector.get(ChangeDetectorRef).markForCheck(); fixture.detectChanges(); fixture.detectChanges(); };
   const q = <T extends HTMLElement>(id: string): T | null => root.querySelector<T>(`[data-testid="${id}"]`);
   const text = (id: string): string => q(id)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
   const click = (id: string): void => { const el = q(id); if (!el) throw new Error(`nothing to click: [data-testid="${id}"]`); el.click(); settle(); };
