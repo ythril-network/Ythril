@@ -62,7 +62,8 @@ describe('the area check', () => {
     assert.ok(at > -1, 'a miss is not handled at all');
     const branch = blockAfter(b, at, 'the unclassified branch');
     assert.match(branch, /log\.warn/, 'a miss is silent, so nothing would reveal which route lacks its row');
-    assert.match(branch, /res\.status\(403\)[\s\S]*?code: 'route_unclassified'/, 'a miss must answer 403 with its named code');
+    assert.match(branch, /res\.status\(UNCLASSIFIED_REFUSED\)[\s\S]*?code: 'route_unclassified'/, 'a miss must answer its refusal with its named code');
+    assert.match(code, /const UNCLASSIFIED_REFUSED = 403;/, 'the refusal of a miss is a 403, as a missing rung is');
     assert.match(branch, /return false;/, 'a miss must stop the request');
     assert.doesNotMatch(branch, /return true;/, 'a miss falls through to reach: the permissive default again');
   });
