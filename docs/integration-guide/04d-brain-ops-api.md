@@ -388,7 +388,7 @@ to 60, and the first embed that works ends the pause. **Waiting is not failing, 
 counter. **A wrong hostname reads as an outage**: a name that does not resolve is a failure to reach the endpoint, so a mistyped
 `embedding.baseUrl` waits like a stopped server; the warning in the server log (once per endpoint per ten minutes) names it.
 What still spends the budget and ends `failed`: a refusal the endpoint answered (`400`, `422`), an address the server refuses
-to call, a header value the runtime refuses and a certificate failure.
+to call, a header value the runtime refuses and a certificate the runtime rejects.
 
 **One transient failure does end a job: a lost embedding process.** The bundled embedding model runs in a child process
 of the server. When that process is lost (it crashed, was killed, or stopped answering) the embed that was in flight
