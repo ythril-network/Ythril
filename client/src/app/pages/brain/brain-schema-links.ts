@@ -23,6 +23,9 @@ import { SpaceSettingsState } from '../settings/space-settings-state.service';
  *   declared types. The data model draws entity types only, so the pop-up opens on the entities.
  * - **A count that outlives its space.** The Review tab's count is read once per space the page shows, an answer for another space is dropped, a personal
  *   view (which has no Review tab) is never asked, and a count that is zero, unknown or failed is `null`: the tab shows a number only for a real one.
+ * - **A count that outlives an act (S12, Q-939).** The page's own read is the count only until the Review tab's Unconverted section has read one
+ *   (`seen`, after its every list answer: a dismiss, a bulk dismiss, a run's records), and the settings pop-up closing reads it again. The page reads it
+ *   on no timer: every change comes from an act on this page.
  * - **A host with no network to ask.** The reads go through the injector; a host without them draws no count and no pencil, and nothing throws.
  *
  * Call {@link brainSchemaLinks} once, as a field initializer (it injects).
@@ -49,13 +52,31 @@ export class BrainSchemaLinks {
       const view = this.isView();
       untracked(() => this.readUnconverted(space, view));
     });
+    // The pop-up closing: a Save, a type's Convert records or a vote's run seen there may have converted records while it was open.
+    let settingsOpen = false;
+    effect(() => {
+      const open = this.state.settingsSpace() !== null;
+      if (settingsOpen && !open) untracked(() => this.refresh());
+      settingsOpen = open;
+    });
+  }
+
+  /**
+   * The open count the Review tab's Unconverted section read for `space`, after its every list answer (a load, a dismiss, a bulk dismiss, a run's
+   * records): from then on the tab shows that number, never an older read of the page's own (one still on its way is dropped). An answer about a
+   * space the page no longer shows is dropped.
+   */
+  seen(read: { space: string; open: number }): void {
+    if (read.space !== this.spaceId() || this.isView()) return;
+    this.read?.unsubscribe();
+    this.unconvertedOpen.set(read.open > 0 ? read.open : null);
   }
 
   private api<T>(token: ProviderToken<T>): T | null {
     try { return this.injector.get(token); } catch { return null; }
   }
 
-  /** Read the open count again, for the space shown now (after a save, which may have started a conversion). */
+  /** Read the open count again, for the space shown now (when the settings pop-up closes: a conversion may have run in it). */
   refresh(): void {
     this.readUnconverted(this.spaceId(), this.isView());
   }
