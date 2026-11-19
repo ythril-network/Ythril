@@ -230,14 +230,14 @@ const CITED = [
   },
   {
     what: 'how many references a write\'s reference refusal names (integration guide)',
-    source: 'server/src/brain/entity-refs.ts',
+    source: 'server/src/spaces/schema-violation-codes.ts',
     code: /const REFS_NAMED = ([0-9_]+);/,
     doc: 'docs/integration-guide.md',
     text: (v) => new RegExp(`names its first \\*\\*${v}\\*\\* references`),
   },
   {
     what: 'how much of one reference a reference refusal quotes (integration guide)',
-    source: 'server/src/brain/entity-refs.ts',
+    source: 'server/src/spaces/schema-violation-codes.ts',
     code: /const REF_QUOTED = ([0-9_]+);/,
     doc: 'docs/integration-guide.md',
     text: (v) => new RegExp(`references, each cut at \\*\\*${v}\\*\\* characters`),

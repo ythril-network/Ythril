@@ -130,7 +130,7 @@ describe('a schema violation carries its code on every door', { skip }, () => {
       const { schemaViolation } = await import('../../server/dist/spaces/schema-violation-codes.js').catch(() => ({}));
       assert.equal(typeof schemaViolation, 'function', 'spaces/schema-violation-codes.ts exports no schemaViolation');
       const fresh = { _id: randomUUID(), name: 'Fresh', type: 'person', seq: 1 };
-      const violation = schemaViolation('type', { type: 'number', got: 'string' }, 'properties.age', 'x');
+      const violation = schemaViolation('type', { type: 'number', got: 'string' }, { field: 'properties.age', value: 'x' });
       assert.equal(await recordUnconvertedItem(STRICT, { kind: 'entity', record: fresh, toFp: 'f'.repeat(64), reason: 'not_conforming', violations: [violation] }, undefined), 'written');
       const oldId = randomUUID();
       // The item store's own collection (`spaceCollection(space, 'schemaConvertItems')`), written raw as an older release stored it.

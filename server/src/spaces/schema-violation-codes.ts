@@ -209,22 +209,25 @@ const WORDS: { readonly [C in SchemaViolationCode]: (p: SchemaViolationParamsByC
   conversion_error: (p) => p.errorKind,
 };
 
-/** The marks only some rows carry. */
-export interface ViolationMarks {
+/** Where a row points (`field`, and the `value` found there) and the marks only some rows carry. */
+export interface ViolationAt {
+  field: string;
+  value: unknown;
   declared?: string[];
   outcome?: SchemaViolation['outcome'];
 }
 
 /**
  * A violation row: `{ field, value, reason, code, params }` with the reason worded from the code and params, and the marks a row of
- * that kind carries. THE one way a row is built: a code it does not know throws, so a row cannot leave without one.
+ * that kind carries. THE one way a row is built: a code it does not know throws, so a row cannot leave without one. `at` is written as
+ * an object at the call (`{ field: 'type', value }`), so the field a validator refuses is named where it refuses it.
  */
-export function schemaViolation<C extends SchemaViolationCode>(code: C, params: ParamsOf<C>, field: string, value: unknown, marks: ViolationMarks = {}): SchemaViolation {
+export function schemaViolation<C extends SchemaViolationCode>(code: C, params: ParamsOf<C>, at: ViolationAt): SchemaViolation {
   if (!Object.hasOwn(SCHEMA_VIOLATION_CODES, code)) throw new TypeError(`schemaViolation: '${String(code)}' is not a schema violation code`);
   return {
-    field, value, reason: schemaViolationText(code, params), code, params: params as unknown as ViolationParams,
-    ...(marks.declared ? { declared: marks.declared } : {}),
-    ...(marks.outcome ? { outcome: marks.outcome } : {}),
+    field: at.field, value: at.value, reason: schemaViolationText(code, params), code, params: params as unknown as ViolationParams,
+    ...(at.declared ? { declared: at.declared } : {}),
+    ...(at.outcome ? { outcome: at.outcome } : {}),
   };
 }
 

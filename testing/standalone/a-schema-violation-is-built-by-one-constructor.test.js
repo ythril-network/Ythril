@@ -109,7 +109,7 @@ describe('every schema violation row is built by the one constructor', () => {
   });
 
   it('no row is built by hand outside the constructor\'s module', () => {
-    assert.deepEqual(handBuilt(found), [], 'a violation row written by hand carries no code a screen can word: build it with schemaViolation(code, params, field, value)');
+    assert.deepEqual(handBuilt(found), [], 'a violation row written by hand carries no code a screen can word: build it with schemaViolation(code, params, { field, value })');
   });
 
   it('every exemption still names a row (one that names nothing is a hole waiting for a row)', () => {

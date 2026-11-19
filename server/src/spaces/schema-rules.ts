@@ -256,18 +256,18 @@ export function evaluateRules(meta: SpaceMeta, kind: ViewKind, view: RecordView,
     };
     // A rule that could not judge the record: a violation that says which, by its `outcome` as well as by its code and cause.
     const couldNot = (cause: RuleNotEvaluatedCause, reads?: Refs): void => {
-      addRow(schemaViolation('rule_not_evaluated', { ...named, cause }, field, undefined, { outcome: 'could_not_evaluate' }), reads);
+      addRow(schemaViolation('rule_not_evaluated', { ...named, cause }, { field, value: undefined, outcome: 'could_not_evaluate' }), reads);
     };
     if (!ruleEngineAvailable()) { couldNot('engine_unavailable'); continue; }
     const program = programFor(kind, level, declared, rule.rule, own);
     if (!program.ok) continue; // dead: skipped here, reported by invalidRulesOf and the boot check
     if ([...program.refs.props].some(p => !Object.hasOwn(view.properties, p))) continue; // absent: the rule does not apply
     const large = tooLarge(program.refs, self);
-    if (large) { addRow(schemaViolation('rule_too_large', { ...named, ...large }, field, undefined, { outcome: 'too_large' }), program.refs); continue; }
+    if (large) { addRow(schemaViolation('rule_too_large', { ...named, ...large }, { field, value: undefined, outcome: 'too_large' }), program.refs); continue; }
     const out = runCounted(program, self);
     if (cel!.isCelError(out)) couldNot(/overload/i.test(out.message) ? 'type_mismatch' : 'evaluation_error', program.refs);
     else if (typeof out !== 'boolean') couldNot('not_boolean', program.refs);
-    else if (!out) addRow(schemaViolation('rule', named, field, undefined), program.refs);
+    else if (!out) addRow(schemaViolation('rule', named, { field, value: undefined }), program.refs);
   }
   return rows;
 }

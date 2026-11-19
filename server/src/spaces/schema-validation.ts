@@ -174,7 +174,7 @@ export function validateEntity(meta: SpaceMeta, record: RecordView, instanceWrit
   // Entity type allowlist (if any types are defined, entity.type must be one of them)
   if (entity.type && entitySchemas && kindHasAllowlist(meta.typeSchemas, 'entity')) {
     if (!Object.prototype.hasOwnProperty.call(entitySchemas, entity.type)) {
-      violations.push(schemaViolation('type_not_allowed', { allowlist: 'entityTypes', allowedValues: Object.keys(entitySchemas) }, 'type', entity.type));
+      violations.push(schemaViolation('type_not_allowed', { allowlist: 'entityTypes', allowedValues: Object.keys(entitySchemas) }, { field: 'type', value: entity.type }));
     }
   }
 
@@ -197,9 +197,9 @@ export function validateEntity(meta: SpaceMeta, record: RecordView, instanceWrit
     const outcome = testPattern(typeSchema.namingPattern, entity.title);
     const named = { type: entity.type, pattern: typeSchema.namingPattern };
     if (outcome === 'not-evaluated') {
-      violations.push(schemaViolation('naming_pattern_not_evaluated', named, 'name', entity.title));
+      violations.push(schemaViolation('naming_pattern_not_evaluated', named, { field: 'name', value: entity.title }));
     } else if (outcome === 'no-match') {
-      violations.push(schemaViolation('naming_pattern', named, 'name', entity.title));
+      violations.push(schemaViolation('naming_pattern', named, { field: 'name', value: entity.title }));
     }
   }
 
@@ -305,7 +305,7 @@ export function validateEdge(
   if (edge.label && edgeSchemas && kindHasAllowlist(meta.typeSchemas, 'edge')) {
     if (!SERVER_WRITTEN_EDGE_LABELS.has(edge.label)
       && !Object.prototype.hasOwnProperty.call(edgeSchemas, edge.label)) {
-      violations.push(schemaViolation('type_not_allowed', { allowlist: 'edgeLabels', allowedValues: Object.keys(edgeSchemas) }, 'label', edge.label));
+      violations.push(schemaViolation('type_not_allowed', { allowlist: 'edgeLabels', allowedValues: Object.keys(edgeSchemas) }, { field: 'label', value: edge.label }));
     }
   }
 
@@ -322,14 +322,14 @@ export function validateEdge(
     const ends = labelSchema.endpoints;
     const label = edge.label ?? '';
     if (ends?.from && resolved.fromType !== undefined && !endpointAllows(ends.from, resolved.fromType)) {
-      violations.push(schemaViolation('endpoint_type', { label, end: 'from', allowedValues: [...ends.from] }, 'fromType', resolved.fromType));
+      violations.push(schemaViolation('endpoint_type', { label, end: 'from', allowedValues: [...ends.from] }, { field: 'fromType', value: resolved.fromType }));
     }
     if (ends?.to && resolved.toType !== undefined && !endpointAllows(ends.to, resolved.toType)) {
-      violations.push(schemaViolation('endpoint_type', { label, end: 'to', allowedValues: [...ends.to] }, 'toType', resolved.toType));
+      violations.push(schemaViolation('endpoint_type', { label, end: 'to', allowedValues: [...ends.to] }, { field: 'toType', value: resolved.toType }));
     }
     const others = resolved.otherEdgesFromSubject ?? 0;
     if (labelSchema.functional && others > 0) {
-      violations.push(schemaViolation('functional', { label, count: others }, 'functional', resolved.otherEdgesFromSubject));
+      violations.push(schemaViolation('functional', { label, count: others }, { field: 'functional', value: resolved.otherEdgesFromSubject }));
     }
   }
 
@@ -376,7 +376,7 @@ export function validateFact(meta: SpaceMeta, record: RecordView, instanceWritte
   // Fact type allowlist (if any types are defined, fact.type must be one of them)
   if (fact.type && factSchemas && kindHasAllowlist(meta.typeSchemas, 'fact')) {
     if (!Object.prototype.hasOwnProperty.call(factSchemas, fact.type)) {
-      violations.push(schemaViolation('type_not_allowed', { allowlist: 'memoryTypes', allowedValues: Object.keys(factSchemas) }, 'type', fact.type));
+      violations.push(schemaViolation('type_not_allowed', { allowlist: 'memoryTypes', allowedValues: Object.keys(factSchemas) }, { field: 'type', value: fact.type }));
     }
   }
 
@@ -413,7 +413,7 @@ export function validateChrono(meta: SpaceMeta, record: RecordView, instanceWrit
   // Chrono type allowlist (if custom types are defined, chrono.type must be one of them)
   if (chrono.type && chronoSchemas && kindHasAllowlist(meta.typeSchemas, 'chrono')) {
     if (!Object.prototype.hasOwnProperty.call(chronoSchemas, chrono.type)) {
-      violations.push(schemaViolation('type_not_allowed', { allowlist: 'chronoTypes', allowedValues: Object.keys(chronoSchemas) }, 'type', chrono.type));
+      violations.push(schemaViolation('type_not_allowed', { allowlist: 'chronoTypes', allowedValues: Object.keys(chronoSchemas) }, { field: 'type', value: chrono.type }));
     }
   }
 
@@ -517,7 +517,7 @@ export function buildSchemaSummary(meta: SpaceMeta): string {
 function checkUnresolvedRef(typeSchema: TypeSchema | undefined): SchemaViolation[] {
   if (!typeSchema?._unresolvedRef) return [];
   const entry = libraryEntryNameOf(typeSchema._unresolvedRef) ?? typeSchema._unresolvedRef;
-  return [schemaViolation('ref_unresolved', { entry }, '$ref', typeSchema._unresolvedRef)];
+  return [schemaViolation('ref_unresolved', { entry }, { field: '$ref', value: typeSchema._unresolvedRef })];
 }
 
 /**
@@ -590,7 +590,7 @@ function validatePropertiesAgainstSchema(
     // Required check (inline flag on PropertySchema)
     if (schema.required) {
       if (val === undefined || val === null || val === '') {
-        violations.push(schemaViolation('required', { missingProperty: key }, `properties.${key}`, val ?? null));
+        violations.push(schemaViolation('required', { missingProperty: key }, { field: `properties.${key}`, value: val ?? null }));
         continue; // skip further checks for missing required field
       }
     }
@@ -625,7 +625,7 @@ function validatePropertiesAgainstSchema(
       const named = peerText(key, { max: NAME_QUOTED });
       // A type can declare hundreds, and every undeclared key of a record repeats the list: bounded, with the rest COUNTED.
       shown ??= boundedNames(declared.slice().sort());
-      violations.push(schemaViolation('additional_properties', { additionalProperty: named }, `properties.${named}`, value, { declared: shown }));
+      violations.push(schemaViolation('additional_properties', { additionalProperty: named }, { field: `properties.${named}`, value, declared: shown }));
     }
   }
 
@@ -642,7 +642,7 @@ function validateValue(field: string, value: unknown, schema: PropertySchema): S
   if (schema.type) {
     const expectedJsType = schema.type === 'date' ? 'string' : schema.type;
     if (typeof value !== expectedJsType) {
-      violations.push(schemaViolation('type', { type: schema.type, got: typeof value }, field, value));
+      violations.push(schemaViolation('type', { type: schema.type, got: typeof value }, { field, value }));
       return violations; // no point checking further if type is wrong
     }
   }
@@ -651,17 +651,17 @@ function validateValue(field: string, value: unknown, schema: PropertySchema): S
   if (schema.enum && schema.enum.length > 0) {
     if (!schema.enum.includes(value as string | number | boolean)) {
       // Each value as the sentence says it (`join` writes a value as `String` does), so the list and the sentence say the same.
-      violations.push(schemaViolation('enum', { allowedValues: schema.enum.map(v => String(v)) }, field, value));
+      violations.push(schemaViolation('enum', { allowedValues: schema.enum.map(v => String(v)) }, { field, value }));
     }
   }
 
   // Numeric range
   if (typeof value === 'number') {
     if (schema.minimum !== undefined && value < schema.minimum) {
-      violations.push(schemaViolation('minimum', { comparison: '>=', limit: schema.minimum }, field, value));
+      violations.push(schemaViolation('minimum', { comparison: '>=', limit: schema.minimum }, { field, value }));
     }
     if (schema.maximum !== undefined && value > schema.maximum) {
-      violations.push(schemaViolation('maximum', { comparison: '<=', limit: schema.maximum }, field, value));
+      violations.push(schemaViolation('maximum', { comparison: '<=', limit: schema.maximum }, { field, value }));
     }
   }
 
@@ -680,9 +680,9 @@ function validateValue(field: string, value: unknown, schema: PropertySchema): S
      */
     const outcome = testPattern(schema.pattern, value);
     if (outcome === 'not-evaluated') {
-      violations.push(schemaViolation('pattern_not_evaluated', { pattern: schema.pattern }, field, value));
+      violations.push(schemaViolation('pattern_not_evaluated', { pattern: schema.pattern }, { field, value }));
     } else if (outcome === 'no-match') {
-      violations.push(schemaViolation('pattern', { pattern: schema.pattern }, field, value));
+      violations.push(schemaViolation('pattern', { pattern: schema.pattern }, { field, value }));
     }
   }
 
