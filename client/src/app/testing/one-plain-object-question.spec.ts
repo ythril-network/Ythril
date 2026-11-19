@@ -18,7 +18,8 @@
  * ## Seen red
  *
  * Red at 877a5d3c5: the six copies (`core/conversion-api.service.ts`, `core/conversion-step-words.ts`, `core/forks-api.service.ts`,
- * `core/type-change-words.ts`, `core/vote-round-view.ts`, `pages/settings/vote-conversion-block.component.ts`).
+ * `core/type-change-words.ts`, `core/vote-round-view.ts`, `pages/settings/vote-conversion-block.component.ts`); the seventh, `isPlainObject` in
+ * `pages/settings/space-settings-state.service.ts`, was found by this gate and swapped too.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -28,14 +29,6 @@ import { CLIENT_ROOT, trackedAppSources } from './tracked-sources';
 
 /** The one module that answers the question. */
 const MODULE = 'src/app/core/plain-object.ts';
-
-/**
- * Known copies outside the slice that built this gate, each with its reason. Keep this list short: a copy is replaced by the module, not listed.
- */
-const KNOWN: Record<string, string> = {
-  'src/app/pages/settings/space-settings-state.service.ts':
-    'isPlainObject, older than the module; outside bundle-285 S13\'s scope list, reported to its lead for the one-line swap',
-};
 
 /** `text` without the parentheses that wrap all of it: `((a && b))` is `a && b`, and `(a) && (b)` stays as it is. */
 function unwrap(text: string): string {
@@ -104,15 +97,8 @@ describe('the client asks whether a value is a plain object in one module', () =
 
   it('no tracked app source but core/plain-object.ts declares its own copy', () => {
     const offenders = sources
-      .filter(p => p !== MODULE && !Object.hasOwn(KNOWN, p))
+      .filter(p => p !== MODULE)
       .flatMap(p => plainObjectCopies(stripComments(readFileSync(resolve(CLIENT_ROOT, p), 'utf8'))).map(c => `${p}:${c.line}  ${c.name}`));
     expect(offenders, `import isPlainObject from core/plain-object.ts instead:\n  ${offenders.join('\n  ')}`).toEqual([]);
-  });
-
-  it('each known copy is still there: a stale row is removed with its copy', () => {
-    for (const [p, reason] of Object.entries(KNOWN)) {
-      expect(sources, `${p} is no longer tracked (${reason})`).toContain(p);
-      expect(plainObjectCopies(stripComments(readFileSync(resolve(CLIENT_ROOT, p), 'utf8'))), `${p} holds no copy any more: drop its row`).not.toEqual([]);
-    }
   });
 });
