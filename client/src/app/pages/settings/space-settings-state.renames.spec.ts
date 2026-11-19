@@ -16,7 +16,11 @@ import { of } from 'rxjs';
 import { SpacesApi } from '../../core/spaces-api.service';
 import type { Space } from '../../core/api.types';
 import { getTranslocoModule } from '../../testing/transloco-testing';
-import { SpaceSettingsState, emptyTypeSchemaState } from './space-settings-state.service';
+import { SchemaApi } from '../../core/schema-api.service';
+import { ToastService } from '../../core/toast.service';
+import { NO_TYPE_READS } from '../../testing/schema-type-reads';
+import { SpaceSettingsState, emptyTypeSchemaState, typeStateFromSchema } from './space-settings-state.service';
+import { SpaceSchemaTabComponent } from './space-schema-tab.component';
 
 const STATS = { spaceId: 'work', facts: 1, entities: 2, edges: 3, chrono: 4, files: 5 };
 
@@ -263,5 +267,121 @@ describe('the bookkeeping never reaches the server', () => {
     expect(meta).toContain('"employer"');
     expect(meta).toContain('"customer"');
     expect(meta).not.toMatch(/_was|_stored|wasType/);
+  });
+});
+
+/*
+ * A type linked to a library entry holds no properties of its own: the stored schema holds them through the link, and the space's
+ * records carry the library's property names. Unlinking turns the link into an inline copy of the entry, and a rename of one of those
+ * properties must still be recorded against the stored name, or the conversion would lose the values. A property ADDED after the
+ * unlink was never stored, and records nothing.
+ */
+describe('a type unlinked from a library entry keeps the stored names of the properties it held through the link', () => {
+  const entry = {
+    name: 'shared-svc', knowledgeType: 'entity', typeName: 'svc',
+    schema: { namingPattern: '^S', propertySchemas: { cost: { type: 'number' }, owner: { type: 'string' } } },
+  };
+  const linked = {
+    id: 'work', label: 'Work',
+    meta: { typeSchemas: { entity: { svc: { $ref: 'library:shared-svc' }, person: { propertySchemas: { age: { type: 'number' } } } } } },
+  } as unknown as Space;
+
+  /** The tab's own `unlinkType`, on a tab mounted over the state: the path an operator takes. */
+  function mountTab() {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [SpaceSchemaTabComponent, getTranslocoModule()],
+      providers: [
+        SpaceSettingsState,
+        { provide: SpacesApi, useValue: { getSpaceStats: () => of(STATS) } },
+        { provide: ToastService, useValue: { show: () => {}, error: () => {}, success: () => {}, info: () => {} } },
+        { provide: SchemaApi, useValue: { listSchemaLibrary: () => of({ entries: [entry] }), upsertSchemaLibraryEntry: () => of({ entry: {} }), ...NO_TYPE_READS } },
+      ],
+    });
+    const c = TestBed.createComponent(SpaceSchemaTabComponent).componentInstance;
+    const state = TestBed.inject(SpaceSettingsState);
+    state.openSettings(linked);
+    c.ngOnInit();
+    return { c, state };
+  }
+
+  /** What `unlinkType` does to the staged definitions, without the tab. */
+  function unlinkInState(s: SpaceSettingsState) {
+    s.schTypeSchemas = { ...s.schTypeSchemas, entity: { ...s.schTypeSchemas.entity, svc: typeStateFromSchema(entry.schema) } };
+  }
+
+  it('unlink then rename: the rename is in the ledger with the stored name', () => {
+    const { c, state } = mountTab();
+    expect(state.typeLibRef('entity', 'svc')).toBe('shared-svc');
+    c.unlinkType('entity', 'svc');
+    expect(state.renameProp('entity', 'svc', 'cost', 'price')).toBe(null);
+    expect(state.renameLedger()).toEqual({
+      types: [],
+      props: [{ kind: 'entity', type: 'svc', wasType: 'svc', from: 'cost', to: 'price' }],
+    });
+  });
+
+  it('unlinking alone is no rename', () => {
+    const { c, state } = mountTab();
+    c.unlinkType('entity', 'svc');
+    expect(state.renameLedger()).toEqual(NOTHING);
+  });
+
+  it('a property added after the unlink was never stored: renaming it records nothing', () => {
+    const s = make();
+    s.openSettings(linked);
+    unlinkInState(s);
+    s.typeState('entity', 'svc')._newPropInput = 'region';
+    s.addProp('entity', 'svc');
+    expect(s.renameProp('entity', 'svc', 'region', 'zone')).toBe(null);
+    expect(s.renameLedger()).toEqual(NOTHING);
+  });
+
+  it('rename back after the unlink removes the rename again', () => {
+    const s = make();
+    s.openSettings(linked);
+    unlinkInState(s);
+    s.renameProp('entity', 'svc', 'cost', 'price');
+    s.renameProp('entity', 'svc', 'price', 'cost');
+    expect(s.renameLedger()).toEqual(NOTHING);
+  });
+
+  it('the unlinked type itself was stored under its name, so renaming it is in the ledger too', () => {
+    const s = make();
+    s.openSettings(linked);
+    unlinkInState(s);
+    s.renameType('entity', 'svc', 'service');
+    s.renameProp('entity', 'service', 'owner', 'steward');
+    expect(s.renameLedger()).toEqual({
+      types: [{ kind: 'entity', from: 'svc', to: 'service' }],
+      props: [{ kind: 'entity', type: 'service', wasType: 'svc', from: 'owner', to: 'steward' }],
+    });
+  });
+
+  it('while the type is linked there is nothing to rename: no properties of its own, and the ledger stays empty', () => {
+    const s = make();
+    s.openSettings(linked);
+    expect(s.renameProp('entity', 'svc', 'cost', 'price')).toBe('missing');
+    expect(s.renameLedger()).toEqual(NOTHING);
+  });
+
+  it('a save after the rename clears the ledger, and the next rename names the saved name', () => {
+    const s = make();
+    s.openSettings(linked);
+    unlinkInState(s);
+    s.renameProp('entity', 'svc', 'cost', 'price');
+    s.markPristine();
+    expect(s.renameLedger()).toEqual(NOTHING);
+    s.renameProp('entity', 'svc', 'price', 'fee');
+    expect(s.renameLedger().props).toEqual([{ kind: 'entity', type: 'svc', wasType: 'svc', from: 'price', to: 'fee' }]);
+  });
+
+  it('a type linked only in this sitting was not stored linked: unlinking it makes no stored name', () => {
+    const s = make();
+    s.openSettings(stored);
+    s.schTypeSchemas = { ...s.schTypeSchemas, entity: { ...s.schTypeSchemas.entity, fresh: emptyTypeSchemaState({ _libRef: 'shared-svc' }) } };
+    s.schTypeSchemas = { ...s.schTypeSchemas, entity: { ...s.schTypeSchemas.entity, fresh: typeStateFromSchema(entry.schema) } };
+    s.renameProp('entity', 'fresh', 'cost', 'price');
+    expect(s.renameLedger()).toEqual(NOTHING);
   });
 });

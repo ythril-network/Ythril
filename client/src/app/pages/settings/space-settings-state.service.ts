@@ -14,7 +14,7 @@ import {
   addEnumVal as addEnumValTo,
   removeEnumVal as removeEnumValFrom,
   renameProp as renamePropOf,
-  markStored, trackRename, renameLedgerOf,
+  markStored, markStoredAfterUnlink, trackRename, renameLedgerOf,
   type RenameError, type RenameLedger,
 } from './type-schema-edits';
 
@@ -495,9 +495,20 @@ export class SpaceSettingsState {
    * config.json rather than being erased the first time someone opens this tab and hits save. The
    * retirement is reversible; silently destroying an operator's data to tidy up a field would not be.
    */
-  schTypeSchemas:    Partial<Record<KnowledgeType, Record<string, TypeSchemaState>>> = {
+  private stagedTypeSchemas: Partial<Record<KnowledgeType, Record<string, TypeSchemaState>>> = {
     entity: {}, fact: {}, edge: {}, chrono: {},
   };
+  /**
+   * The staged type definitions. Assigned whole by every edit that adds, replaces or removes a type (the tab, an import, a rename), so
+   * the assignment is where one thing is noticed that no caller could be trusted to say: a type that was LINKED to a library entry when
+   * the schema was stored and is now an inline copy (`unlinkType`). The stored schema held that type's properties through the link and the
+   * records carry their names, so the copy's properties are stored ones (`markStoredAfterUnlink`) and a rename of one reaches the ledger.
+   */
+  get schTypeSchemas(): Partial<Record<KnowledgeType, Record<string, TypeSchemaState>>> { return this.stagedTypeSchemas; }
+  set schTypeSchemas(next: Partial<Record<KnowledgeType, Record<string, TypeSchemaState>>>) {
+    markStoredAfterUnlink(this.stagedTypeSchemas, next);
+    this.stagedTypeSchemas = next;
+  }
   schNewTypeInputs:  Record<string, string> = { entity: '', fact: '', edge: '', chrono: '' };
   /**
    * The space-wide rules (F-46): the rows of `meta.rules`, each with the kinds it applies to. A plain field like the rest of this tab's
