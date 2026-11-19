@@ -274,6 +274,8 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
 
   private watch: PollHandle | null = null;
   private pollFailed = false;
+  /** The popup opened on the Schema tab with a type chosen, and that type's head has not been drawn yet: once it is, it is shown (`showTypeOnceDrawn`). */
+  private typeToShow = false;
   /** The space the dialogs above belong to: another space opening ends them. */
   private convertSpace = '';
 
@@ -301,9 +303,16 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
       const open = this.state.settingsSpace();
       untracked(() => { if (!open || open.id !== this.convertSpace) this.endConversion(); });
     });
+    // Opened on the Schema tab with a type already chosen (the Overview's pencil): that type is what the person asked to see.
+    let wasOpen = false;
+    effect(() => {
+      const open = this.state.settingsSpace() !== null;
+      untracked(() => { this.typeToShow = open && (wasOpen ? this.typeToShow : this.state.settingsTab() === 'schema' && this.state.schSelectedType !== null); });
+      wasOpen = open;
+    });
     // After every render, not in `ngDoCheck`: a hook of this component runs only when its PARENT's view is refreshed, and an edit made deep in
     // the Schema tab marks the popup for traversal, not for refresh. A render follows every edit event.
-    afterEveryRender(() => this.refreshHint());
+    afterEveryRender(() => { this.refreshHint(); this.showTypeOnceDrawn(); });
     inject(DestroyRef).onDestroy(() => this.endConversion());
   }
 
@@ -603,18 +612,31 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
   }
 
   /**
+   * The popup opened on a type (the Overview's pencil, S12): once the Schema tab (a deferred block) has drawn that type's head, it is shown as a
+   * closed run's dialog shows it, scrolled into view with focus in it. The modal keeps the pencil as the element to give focus back to on close.
+   */
+  private showTypeOnceDrawn(): void {
+    if (!this.typeToShow || !(this.host.nativeElement as HTMLElement).querySelector('.sch-detail-head')) return;
+    this.typeToShow = false;
+    this.backToWhereTheFlowBegan('type');
+  }
+
+  /**
    * Once the dialog is gone, scroll the type head with its note into view and put focus on the control that led there: the type's Convert records
    * for the act, the note's "Show the run" for a run shown from the note, the footer button that took Save's place (Done) for a Save. The modal
    * returns focus to the element focused when it opened, and that element no longer exists (the act's dialog, or Save), so without this focus
-   * fell to the page body (drive D5).
+   * fell to the page body (drive D5). Opened on a type (`type`), focus goes to the type's name control (its rename button, the first button of the
+   * head): it names the type, so a screen reader says which type opened, and Tab goes on from the head into the type's editor below it.
    */
-  private backToWhereTheFlowBegan(from: 'save' | 'act' | 'note'): void {
+  private backToWhereTheFlowBegan(from: 'save' | 'act' | 'note' | 'type'): void {
     const host = this.host.nativeElement as HTMLElement;
     // The type head and the note under it are what the run is told by now: scrolled into view (the pane kept the scroll it had behind the dialog).
-    host.querySelector<HTMLElement>('.sch-detail-head')?.scrollIntoView?.({ block: 'start' });
+    const head = host.querySelector<HTMLElement>('.sch-detail-head');
+    head?.scrollIntoView?.({ block: 'start' });
     const to = from === 'act' ? host.querySelector<HTMLElement>('[data-testid="convert-records"]')
       : from === 'note' ? host.querySelector<HTMLElement>('[data-testid="convert-show-run"]')
-        : host.querySelector<HTMLElement>('[data-testid="settings-done"], [data-testid="settings-save"]');
+        : from === 'type' ? head?.querySelector<HTMLElement>('button') ?? null
+          : host.querySelector<HTMLElement>('[data-testid="settings-done"], [data-testid="settings-save"]');
     to?.focus({ preventScroll: true });
   }
 
