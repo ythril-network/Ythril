@@ -1332,6 +1332,7 @@
   "spaces.schema.propDetail.enumValues": "Enum-Werte",
   "spaces.schema.propDetail.enumHint": "– Auf genaue Menge beschränken",
   "spaces.schema.propDetail.enumPlaceholder": "Wert + Eingabetaste",
+  "spaces.schema.propDetail.removeEnumValue": "{{value}} entfernen",
   "spaces.dangerZone.retentionTitle": "Aufbewahrung",
   "spaces.dangerZone.retentionDescription": "Löscht Datensätze zeitgesteuert. Drei Stufen, spezifischste zuerst: ein beim Schreiben gesetztes ttlDays; dann das eigene Fenster des Datensatztyps, gesetzt am Typ im Schema-Tab; dann das space-weite Fenster für diese Datensatzart, unten.",
   "spaces.dangerZone.retentionSpaceWideHint": "Ein Fenster je Datensatzart. Gilt jeweils für Datensätze dieser Art ohne eigenes ttlDays und ohne Fenster am Typ. Feld leer lassen für keinen Ablauf.",

@@ -1332,6 +1332,7 @@
   "spaces.schema.propDetail.enumValues": "Wartości wyliczeniowe",
   "spaces.schema.propDetail.enumHint": "— ogranicz się do dokładnego zestawu",
   "spaces.schema.propDetail.enumPlaceholder": "wartość + Enter",
+  "spaces.schema.propDetail.removeEnumValue": "Usuń {{value}}",
   "spaces.dangerZone.retentionTitle": "Retencja",
   "spaces.dangerZone.retentionDescription": "Usuwa rekordy według czasu. Trzy poziomy, od najbardziej szczegółowego: ttlDays ustawione przy zapisie rekordu; potem własne okno typu, ustawiane na typie w zakładce Schema; potem okno przestrzeni dla tego rodzaju rekordu, poniżej.",
   "spaces.dangerZone.retentionSpaceWideHint": "Jedno okno na rodzaj rekordu. Każde dotyczy rekordów tego rodzaju bez własnego ttlDays i bez okna na typie. Pozostaw pole puste, aby nie wygasały.",

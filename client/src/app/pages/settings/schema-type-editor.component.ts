@@ -363,7 +363,7 @@ export interface LayerMark {
               @if (p.s.mergeFn) { <span class="badge badge-blue">{{ p.s.mergeFn }}</span> }
             </td>
             <td (click)="$event.stopPropagation()">
-              <button class="icon-btn danger" type="button" (click)="onRemoveProp(p.key)" [attr.title]="'common.remove' | transloco"><ph-icon name="x" [size]="14"/></button>
+              <button class="icon-btn danger" type="button" (click)="onRemoveProp(p.key)" [attr.title]="'common.remove' | transloco" [attr.aria-label]="'propertiesEditor.removeFor' | transloco: { key: p.key }"><ph-icon name="x" [size]="14"/></button>
             </td>
           </tr>
           @if (isOpen(p.key)) {
@@ -428,7 +428,7 @@ export interface LayerMark {
                         <label>{{ 'spaces.schema.propDetail.enumValues' | transloco }} <span class="sch-hint">{{ 'spaces.schema.propDetail.enumHint' | transloco }}</span></label>
                         <div class="chip-wrap">
                           @for (ev of (p.s.enum??[]); track ev) {
-                            <span class="chip">{{ ev }}<button type="button" class="chip-rm" (click)="onRemoveEnum(p.key,ev)"><ph-icon name="x" [size]="12"/></button></span>
+                            <span class="chip">{{ ev }}<button type="button" class="chip-rm" (click)="onRemoveEnum(p.key,ev)" [attr.aria-label]="'spaces.schema.propDetail.removeEnumValue' | transloco: { value: ev }"><ph-icon name="x" [size]="12"/></button></span>
                           }
                           <input type="text" class="chip-field" [(ngModel)]="p._enumInput"
                             [placeholder]="'spaces.schema.propDetail.enumPlaceholder' | transloco" (keydown)="onEnumKey($event,p.key)" />
