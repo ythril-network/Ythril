@@ -3,6 +3,9 @@ import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { holdUnsavedEdits } from '../../core/unsaved-edits';
 
+/** Where a type rename's refusal sentences live (`.empty`, `.exists`, `.missing`). A prefix, not a key: the key is built from it. */
+const TYPE_REFUSAL_PREFIX = 'spaces.schema.renameError';
+
 /**
  * A declared type's NAME, or a property's KEY, and the affordance to change it.
  *
@@ -89,7 +92,7 @@ export class SchemaTypeNameComponent {
   /** The words of the pencil's tooltip. */
   readonly titleKey = input<string>('spaces.schema.renameType');
   /** Where the refusal sentences live: `<prefix>.empty`, `.exists`, `.missing`. */
-  readonly errorKeyPrefix = input<string>('spaces.schema.renameError');
+  readonly errorKeyPrefix = input<string>(TYPE_REFUSAL_PREFIX);
   /** The class of the name beside the pencil. */
   readonly nameClass = input<string>('dt');
 
