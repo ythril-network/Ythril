@@ -18,6 +18,9 @@
  * - **The status is read on a bound** (at once, every three seconds while it runs) and the reading stops when the run ends and when the bar goes.
  * - **Older records** say how many, from the count; none is said only after Convert records was pressed; an unreadable count says nothing.
  * - **The act** counts, starts through `ConversionApi.start` with the steps the dialog chose, closes on success and keeps a refusal in the dialog.
+ * - **A Save that found nothing to convert** is said under the head ("Schema saved." and that there were no records of the type to convert) from
+ *   the notice the popup hands in through `saveNotice`; and the lead of the saved notes ("Schema saved.", or "Schema saved. Conversion finished.")
+ *   is strong text, as drawn (bundle-285 slice S9, moments 3a and 3b).
  *
  * ## Seen red
  *
@@ -31,7 +34,7 @@ import { of, throwError } from 'rxjs';
 import type { Space } from '../../core/api.types';
 import { blockCounts, type ConvertBlock } from '../../core/conversion-counts';
 import { ConversionApi } from '../../core/conversion-api.service';
-import type { ConversionResult, ConvertStatusAnswer } from '../../core/conversion.types';
+import type { ConversionResult, ConvertRunNotice, ConvertStatusAnswer } from '../../core/conversion.types';
 import { NetworksApi } from '../../core/networks-api.service';
 import type { VoteRound } from '../../core/api.types';
 import type { TypedKind } from '../../core/type-field';
@@ -48,6 +51,8 @@ const fill = (key: string, params: Record<string, string | number>): string =>
   Object.entries(params).reduce((text, [name, value]) => text.replaceAll(`{{${name}}}`, String(value)), english(key));
 
 const ACME = { id: 'net-1', label: 'Acme team', type: 'democratic' };
+/** The lead the pane's notes about a Save open with, drawn as strong text ("Schema saved."). */
+const SAVED = english('spaces.schema.convert.note.saved');
 
 /** The Schema tab's markup for the bar, as far as the bar is concerned: the button inside the head's actions, the bar under the head. */
 @Component({
@@ -55,7 +60,7 @@ const ACME = { id: 'net-1', label: 'Acme team', type: 'democratic' };
   imports: [TypeConvertBarComponent, NgTemplateOutlet],
   template: `
     <div class="sch-detail-head"><span class="acts" data-testid="acts"><ng-container *ngTemplateOutlet="bar.button()" /></span></div>
-    <app-type-convert-bar #bar [kind]="kind" [type]="type" [was]="was" [saved]="saved" [older]="older" [rights]="rights" />
+    <app-type-convert-bar #bar [kind]="kind" [type]="type" [was]="was" [saved]="saved" [older]="older" [rights]="rights" [saveNotice]="saveNotice" />
   `,
 })
 class HostComponent {
@@ -65,6 +70,8 @@ class HostComponent {
   saved = true;
   older = false;
   rights: TokenRights | null | undefined = instanceAdminRights();
+  /** What the popup's converting Save answered; the pane's note learns it through this input, never through a second request. */
+  saveNotice: ConvertRunNotice | null = null;
 }
 
 interface Setup {
@@ -214,7 +221,7 @@ describe('the note while the run goes, and when it ends', () => {
   it('says how far the run is, in checked of total, for a run that includes this type', () => {
     const m = mount({ statuses: [okStatus(runningStatus({ left: 240, counts: { stamped: 31, rewritten: 366, unconverted: 3, moved: 0, edgesRestamped: 0 } }))] });
     tick(m);
-    expect(m.text('convert-note')).toBe(fill('spaces.schema.convert.note.running.other', { done: '400', count: '640' }));
+    expect(m.text('convert-note')).toBe(`${SAVED} ${fill('spaces.schema.convert.note.running.other', { done: '400', count: '640' })}`);
   });
 
   it('says nothing for a run that does not include this type, and nothing for a space that never had a run', () => {
@@ -445,5 +452,92 @@ describe('the note about records on an older version', () => {
     const rules = Array.from(document.styleSheets).flatMap(s => Array.from(s.cssRules)).map(r => r.cssText).filter(t => /\.cv-(bar|note|reason)/.test(t));
     expect(rules.length, 'the bar\'s rules were read').toBeGreaterThan(2);
     expect(rules.filter(r => /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i.test(r))).toEqual([]);
+  });
+});
+
+describe('the note after a Save that converted nothing, and the strong lead of the saved notes', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const NOTHING: ConvertRunNotice = { state: 'nothing', types: [{ kind: 'entity', type: 'person' }] };
+  const strong = (m: ReturnType<typeof mount>): string | undefined => m.q('convert-note')?.querySelector('strong')?.textContent?.trim();
+
+  it('says "Schema saved." in strong text, then that there were no records to convert, from the notice the popup hands in (no read of its own)', () => {
+    const m = mount({}, { saveNotice: NOTHING });
+    m.settle();
+    expect(strong(m)).toBe(SAVED);
+    expect(m.text('convert-note')).toBe(`${SAVED} ${english('spaces.schema.convert.note.none')}`);
+    expect(m.countsFor).not.toHaveBeenCalled();
+    expect(m.start).not.toHaveBeenCalled();
+  });
+
+  it('shows it for the type the Save converted and for no other', () => {
+    const other = mount({}, { type: 'contact', saveNotice: NOTHING });
+    other.settle();
+    expect(other.q('convert-note')).toBeNull();
+    const kind = mount({}, { kind: 'fact', type: 'person', saveNotice: NOTHING });
+    kind.settle();
+    expect(kind.q('convert-note')).toBeNull();
+  });
+
+  it('is there as long as the popup hands it in and gone when it takes it back', () => {
+    const m = mount({}, { saveNotice: NOTHING });
+    m.settle();
+    expect(m.q('convert-note')).not.toBeNull();
+    m.host.saveNotice = null;
+    m.settle();
+    expect(m.q('convert-note')).toBeNull();
+  });
+
+  it('is not said for a Save that started a run, one that did not start, or one that went to a vote', () => {
+    for (const state of ['started', 'not_started', 'after_vote'] as const) {
+      const m = mount({}, { saveNotice: { state, types: NOTHING.types } });
+      m.settle();
+      expect(m.q('convert-note'), state).toBeNull();
+    }
+  });
+
+  it('gives way to the run\'s own finished note, which says more, and to a vote the type waits on', () => {
+    const run = mount({ statuses: [okStatus(runningStatus()), okStatus(doneStatus())] }, { saveNotice: NOTHING });
+    run.settle(); vi.advanceTimersByTime(CONVERT_POLL_MS); run.settle();
+    expect(run.text('convert-note')).toContain(english('spaces.schema.convert.note.finished'));
+    expect(run.text('convert-note')).not.toContain(english('spaces.schema.convert.note.none'));
+    const vote = mount({ rounds: [{ convertRecords: { steps: [RENAME_PROP] } } as Partial<VoteRound>] }, { saveNotice: NOTHING });
+    vote.settle(); vi.advanceTimersByTime(0); vote.settle();
+    expect(vote.text('convert-note')).toContain(fill('spaces.schema.convert.note.waiting', { network: 'Acme team' }));
+    expect(vote.text('convert-note')).not.toContain(english('spaces.schema.convert.note.none'));
+  });
+
+  it('prefers it to the finished note of an OLD run of the type that the save re-baselined past: that Save started no run', () => {
+    const m = mount({ statuses: [okStatus(doneStatus())] }, { saveNotice: NOTHING });
+    m.settle();
+    m.state.markPristine();
+    m.settle(); vi.advanceTimersByTime(0); m.settle();
+    expect(m.text('convert-note')).toBe(`${SAVED} ${english('spaces.schema.convert.note.none')}`);
+    expect(m.text('convert-note')).not.toContain(english('spaces.schema.convert.note.finished'));
+  });
+
+  it('opens the running note with "Schema saved." in strong text, and the rest plain', () => {
+    const m = mount({ statuses: [okStatus(runningStatus({ left: 240 }))] });
+    m.settle(); vi.advanceTimersByTime(0); m.settle();
+    expect(strong(m)).toBe(SAVED);
+    expect(m.q('convert-note')!.textContent).not.toMatch(/^\s*Schema saved\.\s*Schema saved\./);
+  });
+
+  it('makes the whole "Schema saved. Conversion finished." strong, and leaves the count of what could not be converted plain', () => {
+    const m = mount({ statuses: [okStatus(runningStatus()), okStatus(doneStatus())] });
+    m.settle(); vi.advanceTimersByTime(CONVERT_POLL_MS); m.settle();
+    expect(strong(m)).toBe(english('spaces.schema.convert.note.finished'));
+    expect(m.text('convert-note')).toBe(`${english('spaces.schema.convert.note.finished')} 4 records could not be converted.`);
+  });
+
+  it('keeps the waiting, older and failed notes plain, as drawn: no strong text', () => {
+    const waiting = mount({ rounds: [{ convertRecords: { steps: [RENAME_PROP] } } as Partial<VoteRound>] });
+    waiting.settle(); vi.advanceTimersByTime(0); waiting.settle();
+    expect(waiting.q('convert-note')).not.toBeNull();
+    expect(strong(waiting)).toBeUndefined();
+    const older = mount({ older: 412 }, { type: 'invoice', older: true });
+    older.settle();
+    expect(strong(older)).toBeUndefined();
   });
 });

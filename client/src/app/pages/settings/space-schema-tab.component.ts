@@ -14,12 +14,13 @@
  * unrendered. That hazard is exactly why OnPush was not retrofitted onto the 1600-line parent and
  * is applied per component instead.
  */
-import { Component, ChangeDetectionStrategy, DestroyRef, Injector, inject, signal, ElementRef, ViewChild, OnInit, computed, effect, untracked } from '@angular/core';
+import { Component, ChangeDetectionStrategy, DestroyRef, Injector, inject, input, signal, ElementRef, ViewChild, OnInit, computed, effect, untracked } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SchemaTypeNameComponent } from './schema-type-name.component';
 import { TypeConvertBarComponent } from './type-convert-bar.component';
 import { holdsSchemaAdmin } from '../../core/token-capability';
+import type { ConvertRunNotice } from '../../core/conversion.types';
 import type { TokenRights } from './rights-glyph.component';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { PhIconComponent } from '../../shared/ph-icon.component';
@@ -346,7 +347,7 @@ const suggestedAddAsName = (name: string): string => name + '-2';
           </span>
         </div>
         <app-type-convert-bar #convertBar [kind]="kt" [type]="name" [was]="state.typeWas(kt, name)" [saved]="state.typeState(kt, name)._stored === true"
-          [older]="olderMark(kt, name)" [rights]="tokenRights()" />
+          [older]="olderMark(kt, name)" [rights]="tokenRights()" [saveNotice]="convertNotice()" />
 
         <!-- The editor body is a shared component: the Brain Overview opens the SAME one in a dialog, so a
              one-field schema change no longer means a trip to Space Settings and back. The header above
@@ -626,6 +627,8 @@ export class SpaceSchemaTabComponent implements OnInit {
   private readonly schemaAdmin = signal(true);
   /** The token's rights as read, for the Convert records lock: `null` until they are read (or when they cannot be), which allows. */
   protected readonly tokenRights = signal<TokenRights | null>(null);
+  /** What the popup's converting Save answered; the type's bar says "no records to convert" from it (the save knew, so nothing is asked again). */
+  readonly convertNotice = input<ConvertRunNotice | null>(null);
   readonly canEditRules = computed(() => this.schemaAdmin());
   /**
    * The "This instance" control is charged to the same area as the rules (`schema` admin on REST), so it follows the same signal; it

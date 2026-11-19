@@ -128,7 +128,7 @@ const planKey = (blocks: readonly ConvertBlockPlan[]): string => JSON.stringify(
             @if (state.settingsTab() === 'schema') {
               @defer (on immediate) {
                 <app-space-schema-layers [spaceId]="state.settingsSpace()!.id" />
-                <app-space-schema-tab />
+                <app-space-schema-tab [convertNotice]="savedNotice()" />
               } @loading (minimum 200ms) { <span class="spinner"></span> }
             }
 
@@ -253,6 +253,8 @@ export class SpaceSettingsPopupComponent {
   protected readonly offer = signal<{ blocks: ConvertBlockPlan[]; staged: ConvertSchemas } | null>(null);
   protected readonly progress = signal<{ notice: ConvertRunNotice | null; status: ConvertStatusAnswer | null } | null>(null);
   protected readonly submitted = signal<{ blocks: ConvertBlockPlan[]; network: string } | null>(null);
+  /** What the last converting Save answered, kept after its dialog is closed: the Schema tab's type pane says from it that nothing was converted. */
+  protected readonly savedNotice = signal<ConvertRunNotice | null>(null);
   /** The refusal of the last converting Save, for the dialog to word; cleared when it is tried again. */
   protected readonly refusal = signal<ConversionRefusal | null>(null);
   /** The token's rights, read once when the dialog first opens; unknown (`undefined`, or `null` when unreadable) counts as allowed: the server decides. */
@@ -347,6 +349,7 @@ export class SpaceSettingsPopupComponent {
     this.watch = null;
     this.offer.set(null);
     this.progress.set(null);
+    this.savedNotice.set(null);
     this.submitted.set(null);
     this.refusal.set(null);
     this.convertSpace = '';
@@ -540,6 +543,8 @@ export class SpaceSettingsPopupComponent {
     const notice = convertNoticeOf(result) ?? { state: 'nothing' as const, types: [] };
     this.convertSpace = target.id;
     this.progress.set({ notice, status: null });
+    // An answer that lists no types is about the types this Save converted.
+    this.savedNotice.set(notice.types.length > 0 ? notice : { ...notice, types: choice.types });
     if (notice.state === 'started') this.watchRun(target.id);
   }
 
