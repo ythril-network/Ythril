@@ -17,7 +17,9 @@
  *
  * Every tracked `.js`/`.mjs` file under `testing/` is parsed, and every module specifier it imports (static `import … from`,
  * and `import('…')` with a literal) that resolves to `server/dist/app.js` is a finding, except in the helper itself. A floor on
- * the files that use the helper keeps the gate from passing over a tree where nothing starts an app at all.
+ * the files that use the helper keeps the gate from passing over a tree where nothing starts an app at all. The helper is also the one
+ * place the app's server is created, so it is held to apply the product's `configureConnections` to it before it listens: a server that
+ * keeps Node's 5 s keep-alive resets a request a busy process sends on an idle connection (bundle-348).
  *
  * ## Seen red
  *
@@ -32,6 +34,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, posix } from 'node:path';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
 import { parseSource, ts, lineOf } from '../_shared/syntax-tree.mjs';
+import { stripComments } from './_strip-comments.mjs';
 
 const HELPER = 'testing/_shared/in-process-app.mjs';
 const APP = 'server/dist/app.js';
@@ -68,6 +71,18 @@ describe('the application is started in a test only through the in-process helpe
       : specs.filter(s => s.target === APP).map(s => `${file}:${s.line}`));
     assert.deepEqual(direct, [], 'these files start the app themselves, so their teardown leaves the config watcher and the cron '
       + `schedulers running; use listenApp() or appRouter() from ${HELPER}:\n  ${direct.join('\n  ')}`);
+  });
+
+  it('the helper gives the server it creates for the app the product\'s connection settings, before it listens', () => {
+    // Only the helper may create the app's server (the case above), so this is the one place the setting can be dropped. A server that keeps
+    // Node's 5 s keep-alive closes an idle connection a busy process then reuses (Q-73; the store-failure gate's resets, bundle-348).
+    const text = stripComments(readFileSync(join(REPO_ROOT, HELPER), 'utf8'));
+    assert.match(text, /import\(\s*['"][^'"]*server\/dist\/http-connections\.js['"]\s*\)/, `${HELPER} does not load the product's http-connections module`);
+    const create = text.search(/http\.createServer\(\s*createApp\(\)\s*\)/);
+    const apply = text.search(/configureConnections\(\s*httpServer\s*\)/);
+    const listen = text.search(/listenOnLoopback\(\s*httpServer\s*\)/);
+    assert.ok(create > -1 && apply > create && listen > apply,
+      `${HELPER} must create the app's server, apply configureConnections to it, and only then listen (positions ${create}, ${apply}, ${listen})`);
   });
 
   it(`the helper exists, imports the app, and at least ${HELPER_USERS_FLOOR} files use it`, () => {
