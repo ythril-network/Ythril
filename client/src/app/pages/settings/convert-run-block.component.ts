@@ -41,7 +41,7 @@ const stripMarkers = (s: string): string => s.split(OPEN).join('').split(CLOSE).
 const mark = (name: string): string => `${OPEN}${stripMarkers(name)}${CLOSE}`;
 
 /** How a sentence's text parameters are treated: a name is marked; `plain` text has its markers taken out; `trusted` text is a sentence already made here. */
-interface Params { plain?: readonly string[]; trusted?: readonly string[] }
+export interface Params { plain?: readonly string[]; trusted?: readonly string[] }
 
 function markedParams(params: Record<string, unknown> | undefined, how: Params): Record<string, unknown> | undefined {
   if (!params) return params;
@@ -49,6 +49,14 @@ function markedParams(params: Record<string, unknown> | undefined, how: Params):
     if (typeof value !== 'string' || how.trusted?.includes(key)) return [key, value];
     return [key, how.plain?.includes(key) ? stripMarkers(value) : mark(value)];
   }));
+}
+
+/** A name wrapped in the private markers, for a counted sentence (`PluralText`) that sets it in the code face; read back with `piecesOf`. */
+export const markName = mark;
+
+/** The pieces of any sentence whose text parameters are names (marked) unless `how` says they are plain text or a sentence already made here. */
+export function markedPieces(say: PageTranslator, key: string, params: Record<string, unknown>, how: Params = {}): SentencePiece[] {
+  return piecesOf(say(key, markedParams(params, how)));
 }
 
 /** Parameters of a step's sentence that are sentences already made (a map's pairs, a split's cases) or an operation name: not names. */
