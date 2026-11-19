@@ -33,8 +33,15 @@ export const REVIEW_SEGMENTED_STYLES = `
     .sg-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 `;
 
-/** The control on a phone: a 2 x 2 grid below `maxWidthPx`. */
-export const reviewSegmentedPhone = (maxWidthPx: number): string => `
+/**
+ * The control on a phone: a 2 x 2 grid below `maxWidthPx`.
+ *
+ * A function DECLARATION whose body is one `return`: a component's `styles` are evaluated at build time by Angular's static evaluator, which
+ * reads such a function and refuses an expression-bodied arrow ("Failed to resolve styles ... to a string", NG1010; the production build
+ * failed on it while every spec passed). `typecheck:client` runs that compiler, so a second such helper fails there.
+ */
+export function reviewSegmentedPhone(maxWidthPx: number): string {
+  return `
     @media (max-width: ${maxWidthPx}px) {
       .sg { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
       .sg-opt { border-left: none; border-top: 1px solid var(--border); justify-content: space-between; }
@@ -42,6 +49,7 @@ export const reviewSegmentedPhone = (maxWidthPx: number): string => `
       .sg-opt:nth-child(even) { border-left: 1px solid var(--border); }
     }
 `;
+}
 
 /** The finding card of a Review queue: the grid of cards, a card's head (the type and when), and the record boxes inside it. */
 export const REVIEW_CARD_STYLES = `
