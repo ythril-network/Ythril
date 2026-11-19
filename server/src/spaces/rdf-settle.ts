@@ -29,6 +29,8 @@ import type { NetworkConfig, SpaceConfig, VoteRound } from '../config/types.js';
 import { defaultBaseFor, defaultVocabFor } from '../rdf/term-iri.js';
 import { localToRemote, remoteToLocal } from '../sync/space-map.js';
 import { rebaseRoundHeld, rebaseRoundUnapplied } from '../networks/round-state.js';
+import { log, peerText } from '../util/log.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 
 /** Who is writing the setting. */
 export type RdfSource = 'local' | 'settings-round' | 'layer' | 'rebase-round';
@@ -131,12 +133,71 @@ export function layerRdfConflict(held: RdfSetting | undefined, layer: unknown, c
 
 /**
  * The base conflict that stands for `localSpaceId`, merged over every network holding one, or `undefined`. THE reading the RDF doors ask
- * (409 `rdf_base_conflict`, slice D); written only by the effective-meta recompute and cleared by a landed rebase.
+ * (409 `rdf_base_conflict`, slice D) and the one an admin's accept is held to: only an offer a CURRENT member of its network still makes
+ * counts (review finding 8: a member that left takes its offer with it), each distinct offer once. Written by {@link recordRdfOffers}, cleared
+ * by a landed or accepted base.
  */
 export function rdfBaseConflictOf(cfg: { networks: readonly NetworkConfig[] }, localSpaceId: string): RdfBaseConflict | undefined {
-  const all = cfg.networks.map(n => n.rdfBaseConflicts?.[localSpaceId]).filter((c): c is RdfBaseConflict => c !== undefined);
-  if (all.length === 0) return undefined;
-  return { held: all[0]!.held, offered: all.flatMap(c => c.offered) };
+  let held: RdfBaseConflict['held'] | undefined;
+  const offered: RdfBaseConflict['offered'] = [];
+  const seen = new Set<string>();
+  for (const net of cfg.networks) {
+    const c = net.rdfBaseConflicts?.[localSpaceId];
+    if (!c) continue;
+    const members = new Set(net.members.map(m => m.instanceId));
+    for (const o of c.offered) {
+      const key = `${o.base}|${vocabOf(o) ?? ''}|${o.epoch}`;
+      if ((o.memberId !== undefined && !members.has(o.memberId)) || seen.has(key)) continue;
+      seen.add(key);
+      offered.push(o);
+      held ??= c.held;
+    }
+  }
+  return held && offered.length > 0 ? { held, offered } : undefined;
+}
+
+/**
+ * The highest epoch an offer may name (review finding 8): half the schema's maximum, so a member that accepts the highest offer can still be
+ * rebased that many times again. An offer above it is invalid and refused; a peer can never push the space to the maximum, where the next
+ * rebase could not be proposed.
+ */
+export const RDF_OFFERED_EPOCH_MAX = Math.floor(RDF_BASE_EPOCH_MAX / 2);
+
+/** An offer above the epoch bound: said once per network and member per window. */
+const offerRefused = warnOnce<string>({ max: 50, every: SAY_ONCE_WINDOW_MS });
+
+/** One offer, as {@link recordRdfOffers} takes it. */
+type RdfOffer = { base: string; vocab?: string; epoch: number };
+
+/**
+ * THE writer of a space's recorded base conflicts beside `net` (review finding 8). Replaces what `memberId` offered before (`undefined`: the
+ * network's layer, which names no member) with `offers`, then keeps only offers that still stand against `held`, that a current member makes
+ * (an offer naming no member is the layer's) and whose epoch is within {@link RDF_OFFERED_EPOCH_MAX}, in one stable order. Writes, and answers
+ * true, only when what is stored changes: two members offering two bases do not cause a save per sync.
+ */
+export function recordRdfOffers(net: NetworkConfig, localSpaceId: string, held: RdfSetting | undefined, memberId: string | undefined, offers: readonly RdfOffer[]): boolean {
+  const before = net.rdfBaseConflicts?.[localSpaceId];
+  let next: RdfBaseConflict | undefined;
+  if (held?.base) {
+    const members = new Set(net.members.map(m => m.instanceId));
+    const fresh = offers.filter((o) => {
+      if (o.epoch <= RDF_OFFERED_EPOCH_MAX) return true;
+      offerRefused(`${net.id}:${memberId ?? 'layer'}`, () => log.warn(`network ${peerText(net.id)}: ${memberId === undefined ? 'its layer' : `member ${peerText(memberId)}`} `
+        + `offers an RDF base at epoch ${o.epoch}, above the highest a network may offer (${RDF_OFFERED_EPOCH_MAX}); refused as invalid`));
+      return false;
+    });
+    const offered = [
+      ...(before?.offered ?? []).filter(o => o.memberId !== memberId),
+      ...fresh.map(o => ({ networkId: net.id, ...(memberId !== undefined ? { memberId } : {}), base: o.base, vocab: vocabOf(o)!, epoch: o.epoch })),
+    ].filter(o => (o.memberId === undefined || members.has(o.memberId)) && o.epoch <= RDF_OFFERED_EPOCH_MAX && offerStands(o, held))
+      .sort((a, b) => `${a.memberId ?? ''}|${a.base}|${a.vocab ?? ''}|${a.epoch}`.localeCompare(`${b.memberId ?? ''}|${b.base}|${b.vocab ?? ''}|${b.epoch}`));
+    if (offered.length > 0) next = { held: { base: held.base, vocab: vocabOf(held)!, epoch: held.baseEpoch ?? 0 }, offered };
+  }
+  if (JSON.stringify(before) === JSON.stringify(next)) return false;
+  const kept = { ...(net.rdfBaseConflicts ?? {}) };
+  if (next) kept[localSpaceId] = next; else delete kept[localSpaceId];
+  net.rdfBaseConflicts = Object.keys(kept).length > 0 ? kept : undefined;
+  return true;
 }
 
 /**
@@ -153,19 +214,12 @@ function vocabOf(r: { base?: string; vocab?: string }): string | undefined {
 }
 
 /**
- * Record `conflict` (from a passed settings round, or any writer that computed one) beside `net` for `localSpaceId`, replacing what the same
- * source offered before (`memberId`, or none). Never drops a computed conflict. Returns whether the stored state changed.
+ * Record `conflict` (a passed settings round's, review finding 2) beside `net` for `localSpaceId` as `memberId`'s offer, through
+ * {@link recordRdfOffers}: a computed conflict is recorded, never dropped. Returns whether the stored state changed.
  */
 export function recordRdfConflict(net: NetworkConfig, localSpaceId: string, conflict: RdfBaseConflict, memberId?: string): boolean {
-  const before = net.rdfBaseConflicts?.[localSpaceId];
-  const offered = [
-    ...(before?.offered ?? []).filter(o => o.memberId !== memberId),
-    ...conflict.offered.map(o => ({ ...o, ...(memberId !== undefined ? { memberId } : {}), ...(net.id ? { networkId: net.id } : {}) })),
-  ];
-  const next: RdfBaseConflict = { held: conflict.held, offered };
-  if (JSON.stringify(before) === JSON.stringify(next)) return false;
-  net.rdfBaseConflicts = { ...(net.rdfBaseConflicts ?? {}), [localSpaceId]: next };
-  return true;
+  const held: RdfSetting = { enabled: true, base: conflict.held.base, ...(conflict.held.vocab ? { vocab: conflict.held.vocab } : {}), baseEpoch: conflict.held.epoch };
+  return recordRdfOffers(net, localSpaceId, held, memberId, conflict.offered);
 }
 
 /** The most spaces one served `rdfBases` map may name: far above any network's spaces, and a bound on what a peer can make this instance read. */
@@ -198,42 +252,32 @@ export function servedRdfBasesOf(net: Pick<NetworkConfig, 'spaces' | 'spaceMap'>
  * Compare what a peer of the voted network `net` serves (`served`, its `rdfBases`, untrusted) with the bases this member holds, and record or
  * clear the conflicts beside `net` (`rdfBaseConflicts`). Mutates `net`; returns whether it changed anything. Never throws.
  *
- * - Another base at the SAME or a HIGHER epoch, for a space this member carries with RDF on, records a conflict naming `net`. Nothing lands:
- *   the admin accepts the offered base (or a rebase round lands) and the conflict clears.
- * - A lower epoch changes nothing; a conflict none of whose offers still stands against what the member holds is cleared.
+ * - Another base or vocab at the SAME or a HIGHER epoch, for a space this member carries with RDF on, records `memberId`'s offer naming `net`
+ *   (review findings 2, 3). Nothing lands: the admin accepts the offered names (or a rebase round lands) and the conflict clears.
+ * - Offers are kept PER MEMBER (review finding 8): what `memberId` serves replaces what it offered before, so a member that serves the held
+ *   names again (or a lower epoch) withdraws its offer, and one that leaves the network takes it with it; the conflict stands while any
+ *   offer stands. An epoch above {@link RDF_OFFERED_EPOCH_MAX} is refused as invalid. Nothing is written unless what is stored changes.
+ * - A higher epoch for which a passed rebase round is still to land here is early, not a conflict.
  * - What is served is read by the setting's validators and bounded first; an entry no door would accept is left out, and a list that is not
  *   one (an older build serves none) is nothing.
  * - Pub/sub and braintree are left to their layers.
  */
-export function takeServedRdfBases(net: NetworkConfig, spaces: readonly SpaceConfig[], served: unknown): boolean {
+export function takeServedRdfBases(net: NetworkConfig, spaces: readonly SpaceConfig[], served: unknown, memberId?: string): boolean {
   if (!VOTED_NETWORK_TYPES.has(net.type)) return false;
   const entries = served && typeof served === 'object' && !Array.isArray(served) ? Object.entries(served as Record<string, unknown>) : [];
   if (entries.length > SERVED_RDF_BASES_MAX) return false;
   let changed = false;
-  const conflicts = { ...(net.rdfBaseConflicts ?? {}) };
   for (const local of net.spaces) {
     const held = spaces.find(s => s.id === local)?.meta?.rdf;
-    if (held?.enabled !== true || !held.base) continue;
-    const heldEpoch = held.baseEpoch ?? 0;
-    const recorded = conflicts[local];
-    if (recorded && !recorded.offered.some(o => offerStands(o, held))) { delete conflicts[local]; changed = true; }
+    const on = held?.enabled === true && held.base ? held : undefined;
     const key = localToRemote(net, local);
-    const raw = key.length <= SERVED_SPACE_KEY_MAX ? entries.find(([k]) => k === key)?.[1] : undefined;
-    if (raw === undefined) continue;
+    const raw = on && key.length <= SERVED_SPACE_KEY_MAX ? entries.find(([k]) => k === key)?.[1] : undefined;
     // A value no door would accept is left out, unsaid: an older or a hostile peer's text is never quoted back.
-    const offer = ServedRdfBaseZ.safeParse(raw);
-    if (!offer.success) continue;
-    // A lower epoch is a stale copy; the same base agrees. Another base at the SAME epoch is a conflict too (review finding 2): two
-    // members that enabled RDF apart each hold their own instance's default base at epoch 0.
-    // The vocab travels with the base (review finding 3): the same base with another vocab is a conflict as well.
-    const offered = { base: offer.data.base, vocab: vocabOf(offer.data)!, epoch: offer.data.baseEpoch };
-    if (!offerStands(offered, held)) continue;
-    const next: RdfBaseConflict = { held: { base: held.base, vocab: vocabOf(held)!, epoch: heldEpoch }, offered: [{ networkId: net.id, ...offered }] };
-    if (JSON.stringify(conflicts[local]) === JSON.stringify(next)) continue;
-    conflicts[local] = next;
-    changed = true;
+    const offer = raw === undefined ? undefined : ServedRdfBaseZ.safeParse(raw);
+    const early = offer?.success === true && offer.data.baseEpoch > (on?.baseEpoch ?? 0) && heldRebaseEpochs({ networks: [net] }, local).has(offer.data.baseEpoch);
+    const offers = offer?.success === true && !early ? [{ base: offer.data.base, vocab: vocabOf(offer.data)!, epoch: offer.data.baseEpoch }] : [];
+    if (recordRdfOffers(net, local, on, memberId, offers)) changed = true;
   }
-  if (changed) net.rdfBaseConflicts = Object.keys(conflicts).length > 0 ? conflicts : undefined;
   return changed;
 }
 

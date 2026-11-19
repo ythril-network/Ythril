@@ -28,7 +28,7 @@ import { derivedFromStored, type ParsedSpaceMeta, type ParsedTypeSchema } from '
 import { updateSpace } from './spaces.js';
 import { layersFor } from './network-layers.js';
 import { keepLayerSnapshot } from './schema-snapshot-store.js';
-import { heldRebaseEpochs, layerRdfConflict } from './rdf-settle.js';
+import { heldRebaseEpochs, layerRdfConflict, recordRdfOffers } from './rdf-settle.js';
 
 export { layersFor };
 
@@ -80,11 +80,8 @@ function recordRdfConflicts(cfg: Config, spaceId: string, held: SpaceMeta['rdf']
     // A network that sends no layer (a voted one) records its conflicts from what its peers serve (`takeServedRdfBases`); not this walk's.
     if (layer === undefined) continue;
     const conflict = layerRdfConflict(held, layer, { networkId: net.id, heldRebaseEpochs: epochs });
-    if (isDeepStrictEqual(conflict, net.rdfBaseConflicts?.[spaceId])) continue;
-    const kept = { ...(net.rdfBaseConflicts ?? {}) };
-    if (conflict) kept[spaceId] = conflict; else delete kept[spaceId];
-    net.rdfBaseConflicts = Object.keys(kept).length > 0 ? kept : undefined;
-    changed = true;
+    // The layer's offer names no member; the members' own offers (a voted network's served bases) are left as they stand (review finding 8).
+    if (recordRdfOffers(net, spaceId, held, undefined, conflict?.offered ?? [])) changed = true;
   }
   return changed;
 }
