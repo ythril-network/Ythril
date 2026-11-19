@@ -1,4 +1,3 @@
-import type { VoteRound } from './api.types';
 import { COLLECTION_OF_KIND, type ConvertBlock } from './conversion-counts';
 import type { ConversionStep } from './conversion.types';
 
@@ -42,6 +41,31 @@ export interface ServerVoteRound {
    * The conversion that rides with a schema round: the steps a voter approves with the schema change (bundle-284). Peer-authored, signed by the
    * proposer's cast. Read by the vote row's conversion block, which binds every name in it as text.
    */
+  convertRecords?: { steps?: ConversionStep[] };
+}
+
+/**
+ * A vote round as the pages read it: what `voteRoundFromServer` makes of a `ServerVoteRound`. Declared here, beside the shape it is made
+ * from, and re-exported by `core/api.types.ts` for the pages that import it from there.
+ */
+export interface VoteRound {
+  id: string;
+  networkId: string;
+  type: string;
+  subject: string;
+  openedAt: string;
+  deadline: string;
+  status: 'open' | 'passed' | 'failed';
+  votes: { instanceId: string; vote: 'yes' | 'veto'; }[];
+  /** What a meta_change round proposes, and the one-sentence form the server wrote of it. Absent when the round sends none. */
+  metaChangedFields?: string[];
+  changedTypes?: string[];
+  keptTypes?: string[];
+  proposesLayer?: boolean;
+  summary?: string;
+  /** What THIS instance calls the round's space: the space whose records the conversion below would rewrite here. Absent when the space is not carried here. */
+  localSpaceId?: string;
+  /** The conversion that rides with a schema round: the steps a voter approves with the schema (bundle-285). Absent when the round carries none. */
   convertRecords?: { steps?: ConversionStep[] };
 }
 

@@ -9,7 +9,6 @@ import type { RecallGraphReport } from './recall-graph-report';
 import type { ResultSpillLink, SpillReport } from './read-spill';
 import type { RecallHit } from './recall-hit';
 import type { ActEntryView, OwedSpaceAct } from './space-act-outcome';
-import type { ConversionStep } from './conversion.types';
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -930,26 +929,8 @@ export interface NetworkMember {
 // The invite bundle's shape lives with the codec that reads it — `core/invite-code.ts`.
 export type { InviteBundle } from './invite-code';
 
-export interface VoteRound {
-  id: string;
-  networkId: string;
-  type: string;
-  subject: string;
-  openedAt: string;
-  deadline: string;
-  status: 'open' | 'passed' | 'failed';
-  votes: { instanceId: string; vote: 'yes' | 'veto'; }[];
-  /** What a meta_change round proposes, and the one-sentence form the server wrote of it. Absent when the round sends none. */
-  metaChangedFields?: string[];
-  changedTypes?: string[];
-  keptTypes?: string[];
-  proposesLayer?: boolean;
-  summary?: string;
-  /** What THIS instance calls the round's space: the space whose records the conversion below would rewrite here. Absent when the space is not carried here. */
-  localSpaceId?: string;
-  /** The conversion that rides with a schema round: the steps a voter approves with the schema (bundle-285). Absent when the round carries none. */
-  convertRecords?: { steps?: ConversionStep[] };
-}
+// A vote round as the pages read it lives with the server's shape and the translation between them — `core/vote-round-view.ts`.
+export type { VoteRound } from './vote-round-view';
 
 /** How a round ended, as this instance read it. `ended` is the client's own word for a round recorded without a reason. */
 export type VoteOutcome = 'passed' | 'vetoed' | 'expired';
