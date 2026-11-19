@@ -22,7 +22,7 @@ const dir = tempInstanceDir('ythril-rdf-accept-');
 const skip = await mongoSkipReason();
 const OLD = { enabled: true, base: 'https://old.example.org/ld/notes/', vocab: 'https://old.example.org/ld/notes/vocab/', baseEpoch: 0 };
 const NEW = 'https://new.example.org/ld/notes/';
-const conflictOf = (space) => ({ held: { base: OLD.base, vocab: OLD.vocab, epoch: 0 },
+const conflict = () => ({ held: { base: OLD.base, vocab: OLD.vocab, epoch: 0 },
   offered: [{ networkId: 'net', memberId: P1, base: NEW, vocab: `${NEW}vocab/`, epoch: 1 }] });
 
 describe('accepting an offered RDF base', { skip }, () => {
@@ -39,7 +39,7 @@ describe('accepting an offered RDF base', { skip }, () => {
         id: 'net', label: 'Net', type: 'closed', origin: 'created', syncSchedule: '', spaces: ['notes', 'clashy'], votingDeadlineHours: 24,
         createdAt: '2026-01-01T00:00:00.000Z', pendingRounds: [],
         members: [{ instanceId: P1, label: 'Peer', url: 'https://a1.example', tokenHash: 'h', direction: 'both' }],
-        rdfBaseConflicts: { notes: conflictOf('notes'), clashy: conflictOf('clashy') },
+        rdfBaseConflicts: { notes: conflict(), clashy: conflict() },
       }],
     });
     metaUpdate = await import('../../server/dist/spaces/meta-update.js');
