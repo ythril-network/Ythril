@@ -56,7 +56,7 @@ describe('a member that missed a passed rebase', () => {
     layer(NEW);
     assert.equal(space().meta.rdf.base, OLD.base, 'a layer moved the stored base');
     const conflict = settle.rdfBaseConflictOf(loader.getConfig(), 'notes');
-    assert.deepEqual(conflict, { held: { base: OLD.base, epoch: 0 }, offered: [{ networkId: 'net-1', base: NEW.base, epoch: 1 }] });
+    assert.deepEqual(conflict, { held: { base: OLD.base, vocab: OLD.vocab, epoch: 0 }, offered: [{ networkId: 'net-1', base: NEW.base, vocab: NEW.vocab, epoch: 1 }] });
   });
   it('a layer at the epoch of a passed round still to land here is early, and records nothing', () => {
     const passed = {

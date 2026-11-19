@@ -76,14 +76,14 @@ describe('a voted network records and clears a higher RDF base', { skip }, () =>
 
   it('the served vote list carries each shared space\'s base and epoch under the network\'s id, and none for RDF off', () => {
     assert.equal(served.code, 200, JSON.stringify(served.body));
-    assert.deepEqual(served.body.rdfBases, { notes: { base: NEW.base, baseEpoch: 1 } });
+    assert.deepEqual(served.body.rdfBases, { notes: { base: NEW.base, vocab: NEW.vocab, baseEpoch: 1 } });
   });
 
   it('after a gossip pass the member keeps its base and records the conflict beside the network', async () => {
     const { runSyncForPeer } = await import('../../server/dist/sync/engine.js');
     await runSyncForPeer(P1);
     const conflict = await settled(() => receiver().rdfBaseConflicts ?? null);
-    assert.deepEqual(conflict, { notes: { held: { base: OLD.base, epoch: 0 }, offered: [{ networkId: 'receiver', base: NEW.base, epoch: 1 }] } });
+    assert.deepEqual(conflict, { notes: { held: { base: OLD.base, vocab: OLD.vocab, epoch: 0 }, offered: [{ networkId: 'receiver', base: NEW.base, vocab: NEW.vocab, epoch: 1 }] } });
     assert.deepEqual(rdfOf(), OLD, 'nothing lands by itself');
   });
 

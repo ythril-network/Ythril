@@ -231,9 +231,13 @@ export interface RdfSetting {
  * the server beside the network that offered it (`NetworkConfig.rdfBaseConflicts`), never in the meta, so no caller can set or echo it.
  */
 export interface RdfBaseConflict {
-  held: { base: string; epoch: number };
-  /** Each offer names the member that makes it (`memberId`) where one does: a member's offer is replaced by what it offers next. */
-  offered: { networkId?: string; memberId?: string; base: string; epoch: number }[];
+  /** The names this instance holds: its base, its vocab (absent from a conflict recorded before the vocab was named) and its epoch. */
+  held: { base: string; vocab?: string; epoch: number };
+  /**
+   * Each offer names the member that makes it (`memberId`) where one does: a member's offer is replaced by what it offers next. The vocab
+   * travels with the base: an accept takes the offered vocab, and another vocab at the same base and epoch is a conflict too.
+   */
+  offered: { networkId?: string; memberId?: string; base: string; vocab?: string; epoch: number }[];
 }
 
 /** Structured schema and metadata for a space — all fields optional. */
