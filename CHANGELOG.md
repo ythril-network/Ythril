@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Schema:** after such a save each instance stamps the copies that already fit the new schema in place (no new version, nothing replicated) and rewrites the ones a step changes, in the background; a rewrite moves the record to the top of lists by change date and replicates it.
 - **Schema:** `POST` and `GET /api/spaces/:id/schema-convert` and MCP `space_schema_convert` and `space_schema_conversion` start a conversion toward the current schema (`knowledge: admin` and the space's admin right) and read how it went.
 - **Schema:** `GET /api/spaces/:id/schema-convert/items`, the one and bulk dismissals under it, and MCP `list_unconverted`, `dismiss_unconverted` and `dismiss_unconverted_shown` list and dismiss the records a conversion could not convert, naming fields and never values.
+- **Schema:** `reason` on the unconverted list and its bulk dismissal takes one reason or a list of them (REST `reason=a,b` or repeated; MCP a string or an array); `expect` counts over all of them.
+- **Schema:** the unconverted list takes `status=all` (open and dismissed together, newest first, each row saying its `status`) and answers `counts.openBy`: the open items of the space by kind, type and reason, on REST and MCP.
 - **Schema:** metrics `ythril_schema_convert_records_total` and `ythril_schema_convert_runs_in_progress`; audit events `schema.convert.start`, `schema.convert.run`, `unconverted.list`, `unconverted.dismiss` and `unconverted.dismiss_shown`.
 - **Import/export:** an admin space export carries `schemaSnapshots`, `{ fp, text, links }` for each schema version its records use and each one those link; one too large for an importer is left out, counted `schemaSnapshotsOmitted`.
 - **Import/export:** an import keeps each verified schema version as fetched, after its records, and skips one that is not; it answers `schemaSnapshots: { landed, held, refused }`, and its audit row counts `snapshotsLanded`, `snapshotsRefused` and `unreadArraysTotal`.
@@ -52,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files:** metrics `ythril_files_absent_bytes_removed_total`, `ythril_files_awaiting_bytes` and `ythril_files_absent_bytes_held`.
 - **Files:** a text window of `read_file` and of `converted` on `GET /api/brain/spaces/:spaceId/files/extract` that was cut carries `budgetBoundBy`, naming `maxChars`, `maxTokens` or `maxBytes` to raise.
 - **Spaces:** `GET /api/spaces?counts=true` and MCP `list_spaces` name a space whose count failed in `countsIncomplete` beside `spaces` and give it no `counts`; MCP answers no zeros for it. The key is absent when every count succeeded.
+- **Web:** the Schema tab converts records. A pencil renames a property (the row says "was" the old name); Save asks what to do with the records of a type you changed (convert now, or save only) and shows the steps, the counts and the run as it goes.
+- **Web:** each type has a labelled "Convert records" button, locked without the space's admin right, and a note when records wait on an older version of its schema; in a networked space Save submits the conversion with the vote and the type says it is waiting for it.
+- **Web:** Review has an "Unconverted" section: the records a conversion left, by reason, with Open the record, Dismiss, "Dismiss all N shown" and Convert again, and the open count on the Review tab.
+- **Web:** a vote that comes with a conversion shows its steps in words and this instance's own record counts before a member votes.
 - **Web:** Settings → About has a "Third-party software" card, and Settings → Help offers the third-party notices as a document readable inside the instance.
 
 ### Changed
@@ -65,6 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Schema:** the per-type files `schemas/<space>_<kind>_<type>.json` are no longer written; the housekeeping cycle removes the ones this instance wrote, locally and without a tombstone.
 - **Schema:** the schema version index keys the stamp and the type; the index pass builds it, then drops the old one. Until a collection has either, a schema-version read answers `503 schema_index_building`.
 - **Schema:** `schema_update` and `PATCH` say a named type is replaced whole: send the complete type as `space_meta` returned it. The MCP door has no `If-Match`; read `space_meta` after the write.
+- **Schema:** the bulk dismissal (`POST /api/spaces/:id/schema-convert/items/dismiss`, MCP `dismiss_unconverted_shown`) answers `400 unconverted_bad_status` to a `status` other than `open`: it dismisses open items only. A caller that sent `all` or `dismissed` must drop it.
 - **Records:** a `schemaFingerprint` sent in a write body is ignored (not named as an unknown field, never stored); `deleteFields` refuses it by name.
 - **Sync:** the space hash (Merkle root) leaves out `schemaFingerprint`; copies that differ only in it count as equal (ADR 22).
 - **Sync:** `GET /api/sync/meta` asks `schema: read` on the space.
@@ -122,6 +129,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Web:** the Brain Overview's pencil on a type opens the space's settings on that type for a token with the schema right; it was never drawn, and neither was the Usage panel's "Reset usage", which shows to the same tokens now.
+- **Web:** a property is "Eigenschaft" in German and "właściwość" in Polish in the schema tab, where they said "Eigentum" and "Neuer Immobilienname" (real estate) and "nieruchomość"; Polish words written without their accents ("wedlug", "wyslij", among others) are corrected.
 - **Web:** a document-processing setting an environment variable pins is shown locked on the Media processing page, and a save no longer sends it. Before, one pinned setting made every save on the page fail with no reason shown.
 - **Web:** a screen reader reads the token hint on the login page, and the password hint and mismatch message on the setup page, with their fields.
 - **Records:** `entityName`, `fromName` and `toName` on `POST /api/filter` and MCP `filter` narrow the caller's `filter` instead of replacing its `_id`, `$or`, `from` or `to`; the web client's fact list by ids and an entity name now answers their intersection.
