@@ -1,7 +1,8 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, InjectionToken, Injector, TemplateRef, computed, effect, inject, input, signal, untracked, viewChild, type ProviderToken } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { forkJoin, of, type Subscription } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { forkJoin, of, type Observable, type Subscription } from 'rxjs';
+import { catchError, map, shareReplay } from 'rxjs/operators';
+import type { VoteRound } from '../../core/api.types';
 import { ConversionApi } from '../../core/conversion-api.service';
 import type { BlockCounts, ConvertBlock } from '../../core/conversion-counts';
 import type { ConversionRefusal, ConvertRunNotice, ConvertSource, ConvertStatus, ConvertStatusAnswer } from '../../core/conversion.types';
@@ -15,7 +16,7 @@ import { convertBlocksOfRound } from '../../core/vote-round-view';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ConvertRecordsDialogComponent, type ConvertDialogChoice } from './convert-records-dialog.component';
 import { refusedSentence } from './convert-run-block.component';
-import { CONVERT_POLL_FAILURES_MAX, CONVERT_POLL_MS, watchConvertRun } from './convert-status-watch';
+import { CONVERT_POLL_FAILURES_MAX, watchConvertRun } from './convert-status-watch';
 import type { ConvertBlockPlan, ConvertSchemas } from './convert-steps';
 import type { TokenRights } from './rights-glyph.component';
 import { SpaceSettingsState } from './space-settings-state.service';
@@ -41,6 +42,8 @@ import { SpaceSettingsState } from './space-settings-state.service';
  *   those of this instance's records, under the name they still carry, so the note and the vote row cannot count different records.
  * - **A run read for ever.** The status is read on `watchConvertRun`'s bound: at once, every three seconds while it runs, ended by the run's end, by a
  *   re-read after a save, and by the bar going. A read that fails says nothing here (the dialog a converting Save leaves open does say so).
+ * - **A vote read at a run's pace.** The networks are scanned once per popup opening and a waited round is read every {@link VOTE_WATCH_MS} while the
+ *   tab is visible, at once on returning to the type or the tab (`watchRound` states the rule).
  * - **A note that outlives its answer.** Every read belongs to a generation; an answer of an older one (another type, another space, a save since) is dropped.
  * - **A host with no network to ask.** The reads go through the injector and a host that has no HTTP client reads no note; the button still shows.
  *
@@ -70,6 +73,21 @@ const RUN_LEADS: Record<ConvertSource['kind'], { running: string | null; finishe
 
 /** Provided by the settings popup for the bars inside it; a bar with no host shows its note only. */
 export const CONVERT_RUN_HOST = new InjectionToken<ConvertRunHost>('CONVERT_RUN_HOST');
+
+/**
+ * Milliseconds between two reads of a round a type waits on, while the tab is visible. A vote stays open for hours or days: half a minute keeps the
+ * note honest without a request every few seconds for as long as the popup is open (lens finding 2, S13).
+ */
+export const VOTE_WATCH_MS = 30_000;
+
+/** One popup opening's (or save's) scan of the space's networks for open rounds: `key` is the space and the settings' baseline it was made at. */
+interface RoundsScan { key: string; answer: Observable<{ label: string; rounds: VoteRound[] }[]> }
+
+/**
+ * The scan each settings state made last, shared by every type the reader selects in that opening, so a type selection costs no request per network.
+ * A save or a new opening moves the baseline (`schemaEpoch`) and so the key; a waited round that changes drops the entry.
+ */
+const roundScans = new WeakMap<SpaceSettingsState, RoundsScan>();
 
 @Component({
   selector: 'app-type-convert-bar',
@@ -299,15 +317,29 @@ export class TypeConvertBarComponent {
     return status.state === 'none' || status.state === 'per_member' ? null : status;
   }
 
-  /** The open rounds of the space's networks that carry a conversion naming this type; the first one is what the note waits for. */
+  /**
+   * The open rounds of the space's networks that carry a conversion naming this type; the first one is what the note waits for. The networks are
+   * scanned once per popup opening or save (`roundScans`) and the answer is reused for every type selected until a waited round changes.
+   */
   private readVotes(conversion: ConversionApi, space: string, kind: TypedKind, type: string, gen: number): void {
     const networks = this.state.settingsSpace()?.networks ?? [];
     const api = networks.length > 0 ? this.api(NetworksApi) : null;
     if (!api) return;
-    this.reads.push(forkJoin(networks.map(n => api.listVotes(n.id).pipe(
-      map(r => ({ label: n.label, rounds: r.rounds })),
-      catchError(() => of({ label: n.label, rounds: [] })),
-    ))).subscribe(all => {
+    const key = `${space}|${this.state.schemaEpoch()}`;
+    let scan = roundScans.get(this.state);
+    // A scan of this opening already exists: the reader came (back) to this type, so a round it waits on is read again at once.
+    const reused = scan?.key === key;
+    if (!scan || !reused) {
+      scan = {
+        key,
+        answer: forkJoin(networks.map(n => api.listVotes(n.id).pipe(
+          map(r => ({ label: n.label, rounds: r.rounds })),
+          catchError(() => of({ label: n.label, rounds: [] as VoteRound[] })),
+        ))).pipe(shareReplay(1)),
+      };
+      roundScans.set(this.state, scan);
+    }
+    this.reads.push(scan.answer.subscribe(all => {
       if (gen !== this.generation) return;
       for (const { label, rounds } of all) {
         for (const round of rounds) {
@@ -320,7 +352,7 @@ export class TypeConvertBarComponent {
           this.reads.push(conversion.countsFor(space, block).subscribe(answer => {
             if (gen === this.generation && answer.ok) this.waiting.update(w => (w ? { ...w, counts: answer.counts } : w));
           }));
-          this.watchRound(api, round.networkId, round.id, gen);
+          this.watchRound(api, round.networkId, round.id, gen, reused);
           return;
         }
       }
@@ -328,26 +360,44 @@ export class TypeConvertBarComponent {
   }
 
   /**
-   * Read the waited round again on the run watch's interval until it is no longer open (passed, vetoed or expired), then read everything again:
-   * the waiting note goes and the run the round started, running or finished, takes over. Neither the run watch (it ends on an answer that is not
-   * a run in progress, and a veto starts none) nor a save (a member's schema changes by the vote, with the popup open) would tell the bar. Stopped
-   * with the bar's other reads (another type, a save, the bar going), and after as many failed reads in a row as the run watch allows.
+   * Read the waited round again until it is no longer open (passed, vetoed or expired), then read everything again: the waiting note goes and the
+   * run the round started, running or finished, takes over. Neither the run watch (it ends on an answer that is not a run in progress, and a veto
+   * starts none) nor a save (a member's schema changes by the vote, with the popup open) would tell the bar.
+   *
+   * The rule: a vote lasts hours or days, so it is not watched at a run's pace. One read of the round's network every {@link VOTE_WATCH_MS} while the
+   * tab is visible (a hidden tab skips its reads), one at once when the tab becomes visible again and when the reader returns to the type
+   * (`readNow`: the scan was reused), and none per second-scale tick. Stopped when the popup closes (the bar goes), the type changes or a save
+   * re-reads (`stopReading`), the round is no longer open, and after as many failed reads in a row as the run watch allows. Ten visible minutes
+   * cost at most one read per interval; the note gives way within one interval of the round closing, or at once on returning to the type or the tab.
    */
-  private watchRound(api: NetworksApi, networkId: string, roundId: string, gen: number): void {
+  private watchRound(api: NetworksApi, networkId: string, roundId: string, gen: number, readNow: boolean): void {
     let failures = 0;
-    this.roundWatch = pollUntil({
-      delayMs: () => CONVERT_POLL_MS,
+    let first = readNow;
+    const watch = (): PollHandle => pollUntil({
+      delayMs: () => { const wait = first ? 0 : VOTE_WATCH_MS; first = false; return wait; },
       request: () => api.listVotes(networkId),
       onAnswer: ({ rounds }) => {
         failures = 0;
         if (gen !== this.generation) return false;
         if (rounds.some(r => r.id === roundId && r.status === 'open')) return true;
+        // The round changed: the scan this opening shares is out of date, so the next refresh scans again.
+        roundScans.delete(this.state);
         this.awaitedRound = roundId;
         this.refresh();
         return false;
       },
-      onError: () => { if (++failures >= CONVERT_POLL_FAILURES_MAX) this.roundWatch?.stop(); },
+      onError: () => { if (++failures >= CONVERT_POLL_FAILURES_MAX) stop(); },
     });
+    let poll = watch();
+    const onVisible = (): void => {
+      if (document.hidden || !poll.active) return;
+      poll.stop();
+      first = true;
+      poll = watch();
+    };
+    const stop = (): void => { poll.stop(); document.removeEventListener('visibilitychange', onVisible); };
+    document.addEventListener('visibilitychange', onVisible);
+    this.roundWatch = { stop, get active() { return poll.active; } };
   }
 
   /** The note's "Show the run": the progress dialog on the run the note is about, whatever started it (a vote's run has no other way there). */
