@@ -17,6 +17,7 @@ import { ForksApi } from '../../core/forks-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { ToastService } from '../../core/toast.service';
+import { unconvertedProviders } from '../../testing/review-unconverted-fixtures';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 import type { DuplicateRecord } from '../../core/api.types';
 
@@ -37,6 +38,8 @@ function setup(
   TestBed.configureTestingModule({
     imports: [ReviewTabComponent, getTranslocoModule()],
     providers: [
+      // The Unconverted section loads with the tab (bundle-285); these specs are about the other sections, so it answers an empty space.
+      ...unconvertedProviders().providers,
       { provide: SpacesApi, useValue: {
         getCompleteness: () => of({ spaceId: 'work', score: null, checks: [], truncated: false }),
         ...compApi,
@@ -335,15 +338,17 @@ describe('ReviewTabComponent', () => {
   });
 
   describe('sub-tabs', () => {
-    it('offers Duplicates, Contradictions, Suggestions and Forks as real tabs, Duplicates first and Forks last', () => {
+    it('offers Duplicates, Contradictions, Suggestions, Forks and Unconverted as real tabs, Duplicates first and Unconverted last', () => {
       const { f } = setup();
       const tabs = [...(f.nativeElement as HTMLElement).querySelectorAll('nav.tabs button[role="tab"]')];
-      expect(tabs.length).toBe(4);   // 3 until bundle-81 added the Forks tab
+      expect(tabs.length).toBe(5);   // 3 until bundle-81 added the Forks tab, 4 until bundle-285 added Unconverted
       expect(tabs[0].getAttribute('aria-selected')).toBe('true');   // lands on Duplicates
       expect(tabs[1].getAttribute('aria-selected')).toBe('false');
       expect(tabs[2].getAttribute('aria-selected')).toBe('false');
       expect(tabs[3].getAttribute('aria-selected')).toBe('false');
       expect(tabs[3].id).toBe('review-tab-forks');
+      expect(tabs[4].getAttribute('aria-selected')).toBe('false');
+      expect(tabs[4].id).toBe('review-tab-unconverted');
     });
 
     it('switches panels, and the duplicates list is not rendered while Contradictions is shown', () => {

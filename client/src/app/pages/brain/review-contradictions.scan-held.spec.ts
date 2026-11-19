@@ -37,6 +37,7 @@ import { ForksApi } from '../../core/forks-api.service';
 import { SpacesApi } from '../../core/spaces-api.service';
 import { BrainApi } from '../../core/brain-api.service';
 import { ToastService } from '../../core/toast.service';
+import { unconvertedProviders } from '../../testing/review-unconverted-fixtures';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
 
 const I18N = resolve(__dirname, '../../../../public/assets/i18n');
@@ -53,6 +54,8 @@ function setup(scan: () => unknown) {
   TestBed.configureTestingModule({
     imports: [ReviewTabComponent, getTranslocoModule()],
     providers: [
+      // The Unconverted section loads with the tab (bundle-285); these specs are about the contradictions scan, so it answers an empty space.
+      ...unconvertedProviders().providers,
       { provide: SpacesApi, useValue: { getCompleteness: () => of({ spaceId: 'work', score: null, checks: [], truncated: false }) } },
       { provide: BrainApi, useValue: { getEntitiesByIds: () => of({ entities: [] }), getRecord: () => of({ _id: 'x', name: 'full record' }) } },
       { provide: DuplicatesApi, useValue: { listDuplicates: () => of({ duplicates: [] }), scanDuplicates: () => of({}) } },
