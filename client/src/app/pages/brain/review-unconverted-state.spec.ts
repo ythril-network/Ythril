@@ -15,6 +15,9 @@
  *
  * Red on the unchanged base (bundle-285 with S1 to S3): `review-unconverted-state.ts` does not exist, so the file fails to load:
  * "Failed to resolve import "./review-unconverted-state"".
+ *
+ * The bounded run watch (S13, finding 1) was red at 877a5d3c5: "expected "spy" to be called 21 times, but got 51 times" (the old poll asked a failing
+ * status door every three seconds for as long as the run was last seen going), then "state.runLost is not a function".
  */
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -26,6 +29,7 @@ import {
 } from '../../testing/review-unconverted-fixtures';
 import type { ConversionResult, UnconvertedListAnswer } from '../../core/conversion.types';
 import { reasonsOfClass } from '../../core/unconverted-reasons';
+import { CONVERT_POLL_FAILURES_MAX, CONVERT_POLL_MS } from '../settings/convert-status-watch';
 import { ReviewUnconvertedState } from './review-unconverted-state';
 
 /** The groups of a space with one type: 982 do not fit, 41 exist, 23 were refused (the drawing's overfull numbers). */
@@ -425,6 +429,48 @@ describe('the Unconverted section: a run that is going', () => {
     expect(api.status.mock.calls.length).toBe(asked + 1);
     expect(api.status.mock.calls.every(c => c[0] === 'customers' || c[0] === 'support')).toBe(true);
     expect(api.status.mock.calls.at(-1)![0]).toBe('support');
+  });
+
+  // S13 (finding 1): the watch is `watchConvertRun`'s, so a status door that keeps failing while a run is going is asked a bounded number of times.
+  it('a running run whose status keeps failing is asked about at most CONVERT_POLL_FAILURES_MAX more times, then the state says it stopped and asks no more', () => {
+    let reads = 0;
+    const status = vi.fn(() => of(++reads === 1 ? okResult(runningStatus()) : refused({ kind: 'other', status: 503, error: 'down' })));
+    const { state, api } = setup({ status });
+    state.open('customers');
+    vi.advanceTimersByTime(CONVERT_POLL_MS * (CONVERT_POLL_FAILURES_MAX + 30));
+    expect(api.status).toHaveBeenCalledTimes(1 + CONVERT_POLL_FAILURES_MAX);
+    expect(state.runLost()).toBe(true);
+    // the last progress read is not shown as if it were current
+    expect(state.running()).toBeNull();
+    vi.advanceTimersByTime(CONVERT_POLL_MS * 100);
+    expect(api.status).toHaveBeenCalledTimes(1 + CONVERT_POLL_FAILURES_MAX);
+  });
+
+  it('Check again after the watch gave up reads the run at once and, while it runs, watches it again', () => {
+    let failing = true;
+    let reads = 0;
+    const status = vi.fn(() => of(++reads === 1 || !failing ? okResult(runningStatus()) : refused({ kind: 'other', status: 503, error: 'down' })));
+    const { state, api } = setup({ status });
+    state.open('customers');
+    vi.advanceTimersByTime(CONVERT_POLL_MS * (CONVERT_POLL_FAILURES_MAX + 1));
+    expect(state.runLost()).toBe(true);
+    failing = false;
+    const before = api.status.mock.calls.length;
+    state.checkRun();
+    expect(api.status.mock.calls.length).toBe(before + 1);
+    expect(state.runLost()).toBe(false);
+    expect(state.running()).toEqual({ names: ['person'], done: 184, total: 1000 });
+    vi.advanceTimersByTime(CONVERT_POLL_MS);
+    expect(api.status.mock.calls.length).toBe(before + 2);
+  });
+
+  it('one failed read while a run is going is not the end: the next good answer is shown and nothing is said', () => {
+    const answers = [okResult(runningStatus()), refused({ kind: 'other', status: 503, error: 'down' }), okResult(runningStatus())];
+    const { state } = setup({ status: vi.fn(() => of(answers.shift() ?? okResult(runningStatus()))) });
+    state.open('customers');
+    vi.advanceTimersByTime(CONVERT_POLL_MS * 2);
+    expect(state.runLost()).toBe(false);
+    expect(state.running()).not.toBeNull();
   });
 });
 

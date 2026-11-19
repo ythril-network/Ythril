@@ -14,6 +14,9 @@
  *
  * Red on the unchanged base (bundle-285 with S1 to S3): `review-unconverted-panel.component.ts` does not exist, so the file fails to load:
  * "Failed to resolve import "./review-unconverted-panel.component"".
+ *
+ * The sentence of a run watch that gave up (S13, finding 1) was red at 877a5d3c5: no `[data-testid="unconverted-run-lost"]` ("the given combination of
+ * arguments (undefined and string) is invalid for this assertion").
  */
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -24,6 +27,7 @@ import {
   type ConversionApiStub, type UnconvertedHarnessOptions,
 } from '../../testing/review-unconverted-fixtures';
 import type { UnconvertedRow } from '../../core/conversion.types';
+import { CONVERT_POLL_FAILURES_MAX, CONVERT_POLL_MS } from '../settings/convert-status-watch';
 import { ReviewUnconvertedPanelComponent } from './review-unconverted-panel.component';
 import { ReviewUnconvertedState } from './review-unconverted-state';
 
@@ -453,6 +457,27 @@ describe('the Unconverted panel: a run that is going, and the pager', () => {
   it('says that a conversion is still running and how far it is, in the drawing\'s sentence', () => {
     const { el } = mount({ listUnconverted: typical(), status: vi.fn(() => of(okResult(runningStatus()))) });
     expect(el.querySelector('[role="status"]')?.textContent).toContain('The conversion of person is still running: 184 of 1,000 records checked. This list grows as it goes.');
+  });
+
+  it('when the run can no longer be read it says so, stops asking, and Check again asks once more (S13, finding 1)', () => {
+    let failing = true;
+    let reads = 0;
+    const status = vi.fn(() => of(++reads === 1 || !failing ? okResult(runningStatus()) : refused({ kind: 'other', status: 503, error: 'down' })));
+    const { el, f } = mount({ listUnconverted: typical(), status });
+    vi.advanceTimersByTime(CONVERT_POLL_MS * (CONVERT_POLL_FAILURES_MAX + 5));
+    f.detectChanges();
+    const lost = el.querySelector('[data-testid="unconverted-run-lost"]');
+    expect(lost?.textContent).toContain('The progress of the conversion could not be read, so this page stopped asking.');
+    expect(el.textContent).not.toContain('is still running');
+    const asked = status.mock.calls.length;
+    vi.advanceTimersByTime(CONVERT_POLL_MS * 50);
+    expect(status.mock.calls.length).toBe(asked);
+    failing = false;
+    (lost!.querySelector('button') as HTMLButtonElement).click();
+    f.detectChanges();
+    expect(status.mock.calls.length).toBe(asked + 1);
+    expect(el.querySelector('[data-testid="unconverted-run-lost"]')).toBeNull();
+    expect(el.textContent).toContain('is still running');
   });
 
   it('says nothing about a run when none is going', () => {

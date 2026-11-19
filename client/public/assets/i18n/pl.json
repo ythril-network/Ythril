@@ -3512,6 +3512,8 @@
   "brain.review.unconverted.running.few": "Konwersja typu {{type}} nadal trwa: sprawdzono {{done}} z {{count}} rekordów. Ta lista rośnie w trakcie.",
   "brain.review.unconverted.running.many": "Konwersja typu {{type}} nadal trwa: sprawdzono {{done}} z {{count}} rekordów. Ta lista rośnie w trakcie.",
   "brain.review.unconverted.running.other": "Konwersja typu {{type}} nadal trwa: sprawdzono {{done}} z {{count}} rekordów. Ta lista rośnie w trakcie.",
+  "brain.review.unconverted.runLost": "Nie udało się odczytać postępu konwersji, więc ta strona przestała pytać. Konwersja może nadal trwać.",
+  "brain.review.unconverted.checkRun": "Sprawdź ponownie",
   "brain.review.unconverted.typeLabel": "Typ rekordu",
   "brain.review.unconverted.allTypes": "Wszystkie typy",
   "brain.review.unconverted.convertAgain": "Konwertuj ponownie",

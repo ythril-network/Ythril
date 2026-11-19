@@ -3512,6 +3512,8 @@
   "brain.review.unconverted.running.few": "The conversion of {{type}} is still running: {{done}} of {{count}} records checked. This list grows as it goes.",
   "brain.review.unconverted.running.many": "The conversion of {{type}} is still running: {{done}} of {{count}} records checked. This list grows as it goes.",
   "brain.review.unconverted.running.other": "The conversion of {{type}} is still running: {{done}} of {{count}} records checked. This list grows as it goes.",
+  "brain.review.unconverted.runLost": "The progress of the conversion could not be read, so this page stopped asking. The conversion may still be running.",
+  "brain.review.unconverted.checkRun": "Check again",
   "brain.review.unconverted.typeLabel": "Record type",
   "brain.review.unconverted.allTypes": "All types",
   "brain.review.unconverted.convertAgain": "Convert again",

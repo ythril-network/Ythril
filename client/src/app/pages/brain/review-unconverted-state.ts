@@ -14,19 +14,17 @@ import type {
 import { LatestWins } from '../../core/latest-wins';
 import { formatCount } from '../../core/plural-text';
 import { PluralText } from '../../core/plural-text.service';
-import { pollUntil, type PollHandle } from '../../core/poll-until';
+import type { PollHandle } from '../../core/poll-until';
 import { knowledgeAllowed, mayConvertRecords } from '../../core/token-capability';
 import {
   openCountsByClass, openTypesOf, reasonsOfClass, soleOpenType, type OpenTypeRef, type UnconvertedClass,
 } from '../../core/unconverted-reasons';
+import { watchConvertRun } from '../settings/convert-status-watch';
 import type { TokenRights } from '../settings/rights-glyph.component';
 import { RecordDrawerState } from './record-drawer-state.service';
 
 /** Records per page: the size of the other Review lists' pages. */
 export const UNCONVERTED_PAGE_SIZE = 25;
-
-/** How long a running conversion waits before it is asked about again. */
-export const UNCONVERTED_POLL_MS = 3_000;
 
 /** The class pill chosen: one of the three classes of reasons, or every record. */
 export type UnconvertedClassChoice = UnconvertedClass | 'all';
@@ -57,8 +55,10 @@ const reasonOf = (refusal: ConversionRefusal): string => (refusal.kind === 'othe
  * - **A lock that is only a refusal.** A caller without the write right cannot dismiss and one without the conversion price cannot Convert again: the
  *   server is not asked, and the panel says why. The server still decides every act; rights that are not known yet count as allowed.
  * - **A server that did not answer reading as a clean list.** A failed load is `loadError`, a caller who may not read is `denied`; neither is "no records".
- * - **A poll that outlives its space.** The status of a running conversion is asked every three seconds while it runs and stops when it ends, when
- *   another space opens, and when the state is destroyed; a list is read again only when a record was listed since, and once when the run ends.
+ * - **A poll that outlives its space, or never gives up.** The status of a running conversion is watched by `watchConvertRun` (the one module that owns
+ *   the interval, the stop conditions and the failure bound): it stops when the run ends, when another space opens, when the state is destroyed, and
+ *   after the watch's bound of failed reads in a row, when `runLost` says so and `checkRun()` asks again; a list is read again only when a record was
+ *   listed since, and once when the run ends.
  *
  * The status choice is Open, Dismissed or All: the server lists `all` as one newest-first list with one paging, each row carrying its own status. The
  * class counts are of OPEN records (the server's `counts.openBy`), so they stay on Open and All and are not shown on Dismissed; "Dismiss all N shown" says the
@@ -114,6 +114,8 @@ export class ReviewUnconvertedState {
   /** The counts were cut: the space holds more groups than the answer carries, so the pills do not add up to the whole. */
   readonly countsCut = signal(false);
   private readonly runStatus = signal<ConvertStatus | null>(null);
+  /** The watch of a running conversion gave up after its bound of failed reads: the page says so and offers to check again (`checkRun`). */
+  readonly runLost = signal(false);
 
   /** How many records the space holds open, all types and reasons, or null before the first answer: the badge on the tab. */
   readonly badge = computed(() => this.counts()?.open ?? null);
@@ -217,6 +219,7 @@ export class ReviewUnconvertedState {
     this.typeChoice.set(null);
     this.statusChoice.set('open');
     this.runStatus.set(null);
+    this.runLost.set(false);
     this.rights.set(null);
     this.firstAnswer = true;
     this.readRights(spaceId);
@@ -439,6 +442,12 @@ export class ReviewUnconvertedState {
     });
   }
 
+  /** "Check again" after the watch gave up: read the run once more and, while it runs, watch it again. */
+  checkRun(): void {
+    this.runLost.set(false);
+    this.readRun(this.space());
+  }
+
   /** Ask once how the conversion of the space stands; when one is running, keep asking until it ends. */
   private readRun(spaceId: string): void {
     this.runRead.run(this.api.status(spaceId), result => {
@@ -447,18 +456,23 @@ export class ReviewUnconvertedState {
     });
   }
 
+  /** Watch the run on `watchConvertRun`'s interval and bound; the read just made is its first, so the watch's own first read waits one interval. */
   private keepAsking(spaceId: string): void {
     if (this.poll?.active) return;
-    this.poll = pollUntil({
-      delayMs: () => UNCONVERTED_POLL_MS,
-      request: () => this.api.status(spaceId),
-      onAnswer: result => spaceId === this.space() && this.takeRun(result) !== 'over',
-    });
+    this.poll = watchConvertRun(this.api, spaceId, {
+      onStatus: status => { if (spaceId === this.space()) this.takeRun({ ok: true, value: status }); },
+      onFailure: (_inARow, gaveUp) => {
+        if (!gaveUp || spaceId !== this.space()) return;
+        // The last progress read is no longer known to be current: the page says the watch stopped instead of showing it.
+        this.runStatus.set(null);
+        this.runLost.set(true);
+      },
+    }, { readAtOnce: false });
   }
 
   /**
-   * What an answer of the status door says: a run `going`, `over` (no run, a finished one, or a caller who may not read it), or `unknown` (the read failed:
-   * the run is not known to have ended, so a poll goes on). A list is read again when a record was listed since the last answer, and once when a run ends.
+   * What an answer of the status door says: a run `going`, `over` (no run, a finished one, or a caller who may not read it), or `unknown` (the read failed;
+   * the watch counts its own failures towards its bound). A list is read again when a record was listed since the last answer, and once when a run ends.
    */
   private takeRun(result: ConversionResult<ConvertStatusAnswer>): 'going' | 'over' | 'unknown' {
     const was = this.runStatus();
