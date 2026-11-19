@@ -92,6 +92,9 @@ auditRouter.get('/export', globalRateLimit, requireAdminMfa, async (req, res) =>
     // The date is the operator's anchor for which export a file is; the extension tells their tooling.
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     res.setHeader('Content-Disposition', `attachment; filename="ythril-audit-${stamp}.ndjson"`);
+    // A HEAD is answered the export's status and headers and no entry is read for it: Express runs this GET route for it and Node drops the
+    // body, so the walk below would serialise the whole log to send nothing.
+    if (req.method === 'HEAD') { res.end(); return; }
 
     for await (const entry of streamAuditEntries(params)) {
       await write(JSON.stringify(entry) + '\n');

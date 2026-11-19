@@ -116,10 +116,15 @@ spaceTransferRouter.get('/:spaceId/export', globalRateLimit, requireAdminMfaScop
     // The store is asked BEFORE the 200 is committed: the first family's first batch is read while the status can still change, so a store
     // that fails answers 503 like every door (`sendCaughtFailure`). Asked after the envelope, the failure could only destroy a response whose
     // status line and envelope still sat in the compressor and the corked socket: the client got no answer at all (bundle-40 CI, Q-267).
-    const cursors = REPLICATED_FAMILIES.map(f => cursorOf(f.collection));
+    // A HEAD is answered the export's status and type and nothing is read for it: Express runs this GET route for it and Node drops the body, so
+    // the walk below would serialise the whole space to send nothing, and the audit row would count its documents as written. The row it
+    // leaves holds the zero counts set above.
+    const head = req.method === 'HEAD';
+    const cursors = head ? [] : REPLICATED_FAMILIES.map(f => cursorOf(f.collection));
     await cursors[0]?.hasNext();
     res.status(200);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    if (head) { res.end(); return; }
     // Envelope fields first — JSON.stringify each value so escaping is correct.
     await write(
       '{'
