@@ -28,7 +28,7 @@ import { inChunks } from '../util/chunks.js';
 import { KeyGenerations } from '../util/key-generations.js';
 import { idKeysetPage, type IdPage } from '../db/id-keyset-page.js';
 import { isoKeysetFilters, isoKeysetSort, tieThenRange, type IsoPosition } from '../util/seq-keyset.js';
-import type { WebhookActor } from '../webhooks/dispatcher.js';
+import type { WebhookActor } from '../webhooks/webhook-actor.js';
 
 /**
  * What a move writes on its tombstones: the two paths, and what housekeeping needs to finish the move should the request that

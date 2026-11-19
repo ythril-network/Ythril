@@ -35,7 +35,8 @@ import { validateEntity, getSpaceMeta, applyValidation, type SchemaViolation } f
 import { readMetaForWrite, stampOpIfUnmoved, foldStampOp, carryStamp, type MetaForWrite, type SchemaCheckOutcome } from '../spaces/schema-stamp.js';
 import { classifyMergedEntity, countSchemaRefusal, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { recordViewOf } from './record-view.js';
-import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
+import { emitWebhookEvent } from '../webhooks/dispatcher.js';
+import type { WebhookActor } from '../webhooks/webhook-actor.js';
 import { eventEntryOf } from './read-projection.js';
 import type { EntityDoc, EdgeDoc, FileMetaDoc, LinkDoc, PropertySchema } from '../config/types.js';
 import { writeTombstone, stampTombstones } from './tombstones.js';

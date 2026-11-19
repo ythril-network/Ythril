@@ -1,5 +1,5 @@
 import type { Config, SpaceConfig } from '../../config/types.js';
-import type { WebhookActor } from '../../webhooks/dispatcher.js';
+import type { WebhookActor } from '../../webhooks/webhook-actor.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 
 /**

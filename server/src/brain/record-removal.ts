@@ -39,7 +39,8 @@ import { inHeldTransaction } from './held-transaction.js';
 import { removeWithTombstones } from './tombstones.js';
 import { removeForksOf, settleRemovedForks } from './forks.js';
 import { retireEmbedJobs } from './embed-queue.js';
-import { emitWebhookEvent, type WebhookActor } from '../webhooks/dispatcher.js';
+import { emitWebhookEvent } from '../webhooks/dispatcher.js';
+import type { WebhookActor } from '../webhooks/webhook-actor.js';
 import { TOMBSTONE_COLLECTION } from '../config/types-knowledge.js';
 
 /** The record shapes that are removed with a tombstone through this module. */
