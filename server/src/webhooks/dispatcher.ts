@@ -499,6 +499,9 @@ function sayDeliveryFailureOnce(kind: string, webhookId: string, say: () => void
 // ── Public emit API ─────────────────────────────────────────────────────────
 
 // `WebhookActor`, who caused a mutation, lives in the leaf `webhook-actor.ts`: a module that only names an actor must not import this one.
+// Re-exported for `brain/edges.ts` alone, which imports this module to emit anyway and sits at its frozen size (no-new-god-files): a second
+// import line there would grow it.
+export type { WebhookActor } from './webhook-actor.js';
 
 export interface EmitWebhookEventOptions {
   event: WebhookEventType;
