@@ -237,8 +237,23 @@ class Out {
 /** Everything an export reads about the space: its names, its own terms, the shape addresses. */
 class Space {
   readonly vocab: string;
+  /** How many types name each property address. */
+  private readonly uses = new Map<string, number>();
   constructor(readonly meta: SpaceMeta, readonly ontology: string, private readonly namespaces: readonly SchemaNamespace[]) {
     this.vocab = prefixesFor(meta, namespaces)['vocab']!;
+    for (const [kind, map] of Object.entries((meta.typeSchemas ?? {}) as Record<string, Record<string, { propertySchemas?: Record<string, unknown> }> | undefined>)) {
+      for (const [type, def] of Object.entries(map ?? {})) {
+        for (const prop of Object.keys(def?.propertySchemas ?? {})) {
+          const address = resolveTermIri(meta, kind as KnowledgeType, type, prop);
+          this.uses.set(address, (this.uses.get(address) ?? 0) + COUNT_ONE);
+        }
+      }
+    }
+  }
+
+  /** Is the property `address` named by more than one type? */
+  shared(address: string): boolean {
+    return (this.uses.get(address) ?? 0) > COUNT_ONE;
   }
 
   /** Is `address` the space's own: under its vocab or under an instance group namespace? */
@@ -529,7 +544,9 @@ function typeProperties(out: Out, space: Space, kind: KnowledgeType, type: strin
     const where = termOwnerName({ kind, type, prop: key });
     const f = factsOf(out, pdef, where);
     const term = space.term(kind, type, key);
-    if (space.isOwn(term.value)) propertyAxioms(out, term, space.ontology, key, pdef, f, edge ? undefined : facts.term);
+    // An own property two types share (the clash rule lets them only with one definition) is one property: no domain, which OWL would read
+    // as both classes at once (bundle-269 review, finding 6).
+    if (space.isOwn(term.value)) propertyAxioms(out, term, space.ontology, key, pdef, f, edge || space.shared(term.value) ? undefined : facts.term);
     const shape = space.shape(kind, type, key);
     propertyShape(out, shape, term, key, pdef, f, facts.edgeClass);
     if (!edge) out.add(facts.node, SH('property'), shape);

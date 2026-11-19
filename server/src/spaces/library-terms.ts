@@ -149,7 +149,7 @@ export function spaceEditRdfGuard(spaceId: string, before: SpaceMeta, after: Spa
 /** One space's terms from `metaBefore` under `stateBefore` to `metaAfter` under `stateAfter`: a clash refusal, `'renamed'`, or `null`. */
 function termChange(spaceId: string, metaBefore: SpaceMeta, stateBefore: LibraryState, metaAfter: SpaceMeta, stateAfter: LibraryState): LibraryRdfRefusal | 'renamed' | null {
   const next = resolvedUnder(metaAfter, stateAfter);
-  const clashes = termClashes(next);
+  const clashes = termClashes(next, Object.values(libraryNamespaces()));
   if (clashes.length > 0) {
     return { status: RDF_BASE_STANDS_STATUS, body: {
       code: 'rdf_term_clash', error: `in space ${peerText(spaceId)}, this change would give two terms one RDF address: ${clashes.map(c => c.message).join('; ')}`,

@@ -23,6 +23,7 @@
  * Pure: it reads only what it is handed.
  */
 import { KNOWLEDGE_TYPES, RESERVED_PREFIXES, iriFragment, iriSegment, type KnowledgeType, type SpaceMeta } from '@ythril-network/schema';
+import { isDeepStrictEqual } from 'node:util';
 import { RDF_RESERVED_PREDICATES, STANDARD_PREFIXES, YTHRIL_NS } from './ythril-vocabulary.js';
 
 /** Thrown when a space has RDF off: nothing of it may be named. `code` is the refusal every RDF door answers with (409). */
@@ -163,6 +164,18 @@ const NOT_A_PREFIX_CHARACTER = /[^A-Za-z0-9_-]/g;
  * `_`, its first letter lower-case, `t-` before it when it does not start with a letter; if that name is taken, `<name>-<kind>`, then
  * `<name>-<kind>-2`, `-3`, ... A name is taken when it is a standard, reserved or already-declared prefix.
  */
+/**
+ * URI schemes a prefix must never be, beside those the document's own addresses use: the IANA-registered schemes an RDF address commonly
+ * carries. A short list on purpose: the document's own schemes are read from it, this only keeps a common one free for the next record.
+ */
+export const WELL_KNOWN_SCHEMES: readonly string[] = Object.freeze([
+  'http', 'https', 'urn', 'mailto', 'tel', 'tag', 'did', 'file', 'data', 'ftp', 'geo', 'info', 'ark', 'doi', 'isbn', 'uuid', 'oid', 'ldap',
+  'news', 'sip', 'ws', 'wss', 'xmpp', 'ipfs', 'magnet', 'about', 'blob',
+]);
+
+/** The scheme of an absolute address, lower-cased (`''` for none). */
+const schemeOf = (address: string): string => /^([A-Za-z][A-Za-z0-9+.-]*):/.exec(address)?.[1]?.toLowerCase() ?? '';
+
 function typePrefixName(type: string, kind: string, taken: ReadonlySet<string>): string {
   let stem = type.replace(NOT_A_PREFIX_CHARACTER, '_');
   stem = stem.charAt(0).toLowerCase().concat(stem.slice(1));
@@ -205,9 +218,12 @@ export function prefixesFor(meta: SpaceMeta, namespaces: readonly { prefix: stri
       }
     }
   }
-  for (const ns of namespaces) if (!Object.hasOwn(out, ns.prefix) && used.some(iri => iri.startsWith(ns.iri))) out[ns.prefix] = ns.iri;
+  // No prefix is a scheme an address of the document uses, nor a well-known one: a JSON-LD processor reads `geo:52.5,13.4` as a prefixed
+  // name when `geo` is declared, and the writer refuses such a document (bundle-269 review, finding 7).
+  const schemes = new Set([...WELL_KNOWN_SCHEMES, ...[...used, vocab].map(schemeOf)]);
+  for (const ns of namespaces) if (!Object.hasOwn(out, ns.prefix) && !schemes.has(ns.prefix.toLowerCase()) && used.some(iri => iri.startsWith(ns.iri))) out[ns.prefix] = ns.iri;
   const owned = [vocab, ...namespaces.map(ns => ns.iri)];
-  const taken = new Set([...Object.keys(out), ...RESERVED_PREFIXES]);
+  const taken = new Set([...Object.keys(out), ...RESERVED_PREFIXES, ...schemes]);
   const declared = new Set(Object.values(out));
   for (const { document, kind, type } of documents) {
     if (declared.has(document) || !owned.some(ns => document.startsWith(ns))) continue;
@@ -226,7 +242,7 @@ export interface TermOwner { kind: TermKind; type: string | null; prop?: string 
 export interface TermClash {
   iri: string;
   owners: TermOwner[];
-  reason: 'same-iri' | 'property-types-differ' | 'under-vocab' | 'under-base' | 'reserved-predicate';
+  reason: 'same-iri' | 'property-types-differ' | 'same-type-property' | 'definitions-differ' | 'under-vocab' | 'under-base' | 'reserved-predicate';
   /** One sentence naming both owners and the address. */
   message: string;
 }
@@ -238,14 +254,16 @@ const ownerText = (o: TermOwner): string => (o.prop === undefined ? `${o.kind} t
 
 /**
  * Every clash in `meta` (resolved): two types, or a type and a property, with one address; two properties with one address and differing
- * declared types (agreeing types may share one); an explicit `iri` under the space's own vocab, where the derived names live, or under its
+ * declared types; two properties of ONE type with one address (bundle-269 review, finding 6: a record holding both breaks its single-value
+ * shape); an own property (under one of `namespaces`, the instance's library group namespaces) shared by types that define it differently
+ * (types of agreeing definitions, and outside addresses with agreeing types, may share one); an explicit `iri` under the space's own vocab, where the derived names live, or under its
  * base, where its records' addresses live; an explicit `iri` equal to a predicate the mapper writes. Empty when there is none. Throws {@link RdfNotEnabled} for a space with RDF off.
  */
-export function termClashes(meta: SpaceMeta): TermClash[] {
+export function termClashes(meta: SpaceMeta, namespaces: readonly { iri: string }[] = []): TermClash[] {
   const names = namesOf(meta);
   const out: TermClash[] = [];
   const types: { iri: string; owner: TermOwner }[] = [];
-  const props: { iri: string; owner: TermOwner; declared: unknown }[] = [];
+  const props: { iri: string; owner: TermOwner; declared: unknown; def: unknown }[] = [];
   for (const [kind, map] of Object.entries((meta.typeSchemas ?? {}) as Record<string, Record<string, unknown> | undefined>)) {
     for (const [type, raw] of Object.entries(map ?? {})) {
       const def = raw && typeof raw === 'object' ? raw as TypeDef : {};
@@ -254,7 +272,7 @@ export function termClashes(meta: SpaceMeta): TermClash[] {
       types.push({ iri: resolveTermIri(meta, k, type), owner: { kind: k, type } });
       for (const [prop, p] of Object.entries(def.propertySchemas ?? {})) {
         if (typeof p?.iri === 'string') explicitChecks(out, p.iri, { kind: k, type, prop }, names);
-        props.push({ iri: resolveTermIri(meta, k, type, prop), owner: { kind: k, type, prop }, declared: p?.type });
+        props.push({ iri: resolveTermIri(meta, k, type, prop), owner: { kind: k, type, prop }, declared: p?.type, def: p });
       }
     }
   }
@@ -264,14 +282,27 @@ export function termClashes(meta: SpaceMeta): TermClash[] {
     for (let j = i + 1; j < types.length; j++) if (types[i]!.iri === types[j]!.iri) pair(types[i]!.iri, types[i]!.owner, types[j]!.owner, 'same-iri', 'both resolve to');
     for (const p of props) if (p.iri === types[i]!.iri) pair(p.iri, types[i]!.owner, p.owner, 'same-iri', 'both resolve to');
   }
+  const own = (address: string): boolean => namespaces.some(ns => address.startsWith(ns.iri));
   for (let i = 0; i < props.length; i++) {
     for (let j = i + 1; j < props.length; j++) {
       const a = props[i]!, b = props[j]!;
-      if (a.iri === b.iri && a.declared !== b.declared) pair(a.iri, a.owner, b.owner, 'property-types-differ', `declare different types (${String(a.declared ?? 'none')}, ${String(b.declared ?? 'none')}) and both resolve to`);
+      if (a.iri !== b.iri) continue;
+      if (a.declared !== b.declared) { pair(a.iri, a.owner, b.owner, 'property-types-differ', `declare different types (${String(a.declared ?? 'none')}, ${String(b.declared ?? 'none')}) and both resolve to`); continue; }
+      // Two keys of ONE type on one address: a record holding both holds two values on a path its shapes allow once (review finding 6).
+      if (a.owner.kind === b.owner.kind && a.owner.type === b.owner.type) { pair(a.iri, a.owner, b.owner, 'same-type-property', 'are two properties of one type and both resolve to'); continue; }
+      // An own property shared by two types is one property: its definitions must agree, or the exported axioms contradict each other.
+      if (own(a.iri) && !isDeepStrictEqual(definitionOf(a.def), definitionOf(b.def))) pair(a.iri, a.owner, b.owner, 'definitions-differ', 'define one own property differently and both resolve to');
     }
   }
   return out;
 }
+
+/** What a property definition says, apart from its words (a description may differ between the types that share a property). */
+const definitionOf = (def: unknown): unknown => {
+  if (!def || typeof def !== 'object') return def;
+  const { description: _description, ...rest } = def as Record<string, unknown>;
+  return rest;
+};
 
 /**
  * The checks of an explicit address: not under the space's own vocab, where the derived names live; not under its base, where every record,
