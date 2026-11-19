@@ -7,14 +7,14 @@ import type { BlockCounts, ConvertBlock } from '../../core/conversion-counts';
 import type { ConversionRefusal, ConvertRunNotice, ConvertStatus, ConvertStatusAnswer } from '../../core/conversion.types';
 import { NetworksApi } from '../../core/networks-api.service';
 import { pageTranslator } from '../../core/page-translator';
-import type { PollHandle } from '../../core/poll-until';
+import { pollUntil, type PollHandle } from '../../core/poll-until';
 import { PluralText } from '../../core/plural-text.service';
 import { mayConvertRecords } from '../../core/token-capability';
 import type { TypedKind } from '../../core/type-field';
 import { convertBlocksOfRound } from '../../core/vote-round-view';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { ConvertRecordsDialogComponent, type ConvertDialogChoice } from './convert-records-dialog.component';
-import { watchConvertRun } from './convert-status-watch';
+import { CONVERT_POLL_FAILURES_MAX, CONVERT_POLL_MS, watchConvertRun } from './convert-status-watch';
 import type { ConvertBlockPlan, ConvertSchemas } from './convert-steps';
 import type { TokenRights } from './rights-glyph.component';
 import { SpaceSettingsState } from './space-settings-state.service';
@@ -144,6 +144,10 @@ export class TypeConvertBarComponent {
   private generation = 0;
   private lastTarget = '';
   private watch: PollHandle | null = null;
+  /** The re-read of the round the waiting note is about (`watchRound`). */
+  private roundWatch: PollHandle | null = null;
+  /** The round the bar waited on and saw close: its run, even one already finished, is news. */
+  private awaitedRound: string | null = null;
   private reads: Subscription[] = [];
   private startRead: Subscription | undefined;
 
@@ -185,7 +189,8 @@ export class TypeConvertBarComponent {
         return actOnly ? plain(text) : { lead: saved, text };
       }
       // A Save that found nothing started no run: a finished run still on the books for the type is an old one, not the Save's.
-      if (this.sawRun() || (!this.savedNothing() && this.state.schemaEpoch() > this.openedAt)) {
+      const awaited = this.awaitedRound !== null && run.sources.some(s => s.kind === 'round' && s.roundId === this.awaitedRound);
+      if (this.sawRun() || awaited || (!this.savedNothing() && this.state.schemaEpoch() > this.openedAt)) {
         if (run.state === 'failed') return plain(this.say('spaces.schema.convert.run.failed', { error: run.error ?? '' }));
         const finished = this.say(actOnly ? 'spaces.schema.convert.note.actFinished' : 'spaces.schema.convert.note.finished');
         return { lead: finished, text: run.counts.unconverted > 0 ? this.plural.text('spaces.schema.convert.note.finishedSome', run.counts.unconverted) : '' };
@@ -218,6 +223,8 @@ export class TypeConvertBarComponent {
   private stopReading(): void {
     this.watch?.stop();
     this.watch = null;
+    this.roundWatch?.stop();
+    this.roundWatch = null;
     this.reads.forEach(s => s.unsubscribe());
     this.reads = [];
     this.startRead?.unsubscribe();
@@ -231,7 +238,7 @@ export class TypeConvertBarComponent {
     const kind = this.kind();
     const type = this.type();
     const target = `${space}|${kind}|${type}`;
-    if (target !== this.lastTarget) { this.lastTarget = target; this.sawRun.set(false); this.pressed.set(false); }
+    if (target !== this.lastTarget) { this.lastTarget = target; this.sawRun.set(false); this.pressed.set(false); this.awaitedRound = null; }
     this.run.set(null);
     this.waiting.set(null);
     this.olderCount.set(null);
@@ -286,10 +293,34 @@ export class TypeConvertBarComponent {
           this.reads.push(conversion.countsFor(space, block).subscribe(answer => {
             if (gen === this.generation && answer.ok) this.waiting.update(w => (w ? { ...w, counts: answer.counts } : w));
           }));
+          this.watchRound(api, round.networkId, round.id, gen);
           return;
         }
       }
     }));
+  }
+
+  /**
+   * Read the waited round again on the run watch's interval until it is no longer open (passed, vetoed or expired), then read everything again:
+   * the waiting note goes and the run the round started, running or finished, takes over. Neither the run watch (it ends on an answer that is not
+   * a run in progress, and a veto starts none) nor a save (a member's schema changes by the vote, with the popup open) would tell the bar. Stopped
+   * with the bar's other reads (another type, a save, the bar going), and after as many failed reads in a row as the run watch allows.
+   */
+  private watchRound(api: NetworksApi, networkId: string, roundId: string, gen: number): void {
+    let failures = 0;
+    this.roundWatch = pollUntil({
+      delayMs: () => CONVERT_POLL_MS,
+      request: () => api.listVotes(networkId),
+      onAnswer: ({ rounds }) => {
+        failures = 0;
+        if (gen !== this.generation) return false;
+        if (rounds.some(r => r.id === roundId && r.status === 'open')) return true;
+        this.awaitedRound = roundId;
+        this.refresh();
+        return false;
+      },
+      onError: () => { if (++failures >= CONVERT_POLL_FAILURES_MAX) this.roundWatch?.stop(); },
+    });
   }
 
   // ── The act ──────────────────────────────────────────────────────────────────────────────────────────────────────────────

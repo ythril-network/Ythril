@@ -386,6 +386,48 @@ describe('the note while a vote waits', () => {
     expect(m.text('convert-note')).toContain(fill('spaces.schema.convert.note.waiting', { network: 'Acme team' }));
   });
 
+  it('goes when the round is no longer open, and the run the round started takes over, with the popup still open (drive round 2)', () => {
+    const fromRound = runningStatus({ sources: [{ kind: 'round', roundId: 'r1', at: '2026-11-19T10:00:00.000Z' }], left: 240,
+      counts: { stamped: 31, rewritten: 366, unconverted: 3, moved: 0, edgesRestamped: 0 } });
+    const m = mount({ rounds: [round([RENAME_PROP])], statuses: [okStatus({ state: 'none' }), okStatus(fromRound)] });
+    vi.advanceTimersByTime(0);
+    m.settle();
+    expect(m.text('convert-note')).toContain(fill('spaces.schema.convert.note.waiting', { network: 'Acme team' }));
+    m.listVotes.mockReturnValue(of({ rounds: [] }));
+    vi.advanceTimersByTime(CONVERT_POLL_MS);
+    m.settle();
+    vi.advanceTimersByTime(1);   // the run's first read, scheduled inside the round's tick, is due a moment later
+    m.settle();
+    expect(m.text('convert-note')).not.toContain(fill('spaces.schema.convert.note.waiting', { network: 'Acme team' }));
+    expect(m.text('convert-note')).toContain(fill('spaces.schema.convert.note.running.other', { done: '400', count: '640' }));
+  });
+
+  it('announces the round\'s run as finished when it ended before the round was seen to close (the popup stayed open throughout)', () => {
+    const done = doneStatus({ sources: [{ kind: 'round', roundId: 'r1', at: '2026-11-19T10:00:00.000Z' }] });
+    const m = mount({ rounds: [round([RENAME_PROP])], statuses: [okStatus({ state: 'none' }), okStatus(done)] });
+    vi.advanceTimersByTime(0);
+    m.settle();
+    m.listVotes.mockReturnValue(of({ rounds: [{ ...round([RENAME_PROP]), id: 'r1', status: 'concluded' } as never] }));
+    vi.advanceTimersByTime(CONVERT_POLL_MS);
+    m.settle();
+    vi.advanceTimersByTime(1);
+    m.settle();
+    expect(m.text('convert-note')).toContain(english('spaces.schema.convert.note.finished'));
+  });
+
+  it('reads the votes again only while a vote is waited on, and stops when the bar goes', () => {
+    const idle = mount({ rounds: [] });
+    vi.advanceTimersByTime(CONVERT_POLL_MS * 5);
+    expect(idle.listVotes).toHaveBeenCalledTimes(1);
+    const m = mount({ rounds: [round([RENAME_PROP])] });
+    vi.advanceTimersByTime(CONVERT_POLL_MS * 2);
+    const reads = m.listVotes.mock.calls.length;
+    expect(reads, 'the round is read again on the bound while it waits').toBeGreaterThan(1);
+    m.fixture.destroy();
+    vi.advanceTimersByTime(CONVERT_POLL_MS * 10);
+    expect(m.listVotes).toHaveBeenCalledTimes(reads);
+  });
+
   it('is read again after a save', () => {
     const m = mount({ rounds: [] });
     m.settle();
