@@ -34,16 +34,25 @@ async function endScheduling() {
 /**
  * The application served on loopback.
  *
- * @returns {Promise<{ url: string, port: number, close: () => Promise<void> }>} `close()` ends the server, then scheduling;
- *   a second call is a no-op.
+ * The server keeps connections the way the product's does (`configureConnections`, which `server/src/index.ts` applies to the server it
+ * creates): without its 95 s keep-alive the test server closes an idle connection after Node's default 5 s, and a client that reuses a
+ * pooled connection after a busy gap in this same process (a case's assertions, a loaded machine) has a request reset a few
+ * milliseconds after it is sent. A caller cannot drop the setting: it is applied here, before the server listens.
+ *
+ * @returns {Promise<{ url: string, port: number, httpServer: import('node:http').Server, close: () => Promise<void> }>} `close()` ends
+ *   the server, then scheduling; a second call is a no-op.
  */
 export async function listenApp() {
   const { createApp } = await import('../../server/dist/app.js');
-  const server = await listenOnLoopback(http.createServer(createApp()));
+  const { configureConnections } = await import('../../server/dist/http-connections.js');
+  const httpServer = http.createServer(createApp());
+  configureConnections(httpServer);
+  const server = await listenOnLoopback(httpServer);
   let closed = false;
   return {
     url: server.url,
     port: server.port,
+    httpServer,
     async close() {
       if (closed) return;
       closed = true;
