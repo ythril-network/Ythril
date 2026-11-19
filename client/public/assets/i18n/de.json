@@ -3319,6 +3319,7 @@
   "spaces.schema.convert.note.running.many": "Die Datensätze dieses Typs werden konvertiert: {{done}} von {{count}} geprüft.",
   "spaces.schema.convert.note.running.other": "Die Datensätze dieses Typs werden konvertiert: {{done}} von {{count}} geprüft.",
   "spaces.schema.convert.note.finished": "Schema gespeichert. Konvertierung abgeschlossen.",
+  "spaces.schema.convert.note.actFinished": "Konvertierung abgeschlossen.",
   "spaces.schema.convert.note.finishedSome.one": "{{count}} Datensatz konnte nicht konvertiert werden.",
   "spaces.schema.convert.note.finishedSome.few": "{{count}} Datensätze konnten nicht konvertiert werden.",
   "spaces.schema.convert.note.finishedSome.many": "{{count}} Datensätze konnten nicht konvertiert werden.",

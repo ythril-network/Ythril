@@ -531,6 +531,27 @@ describe('the note after a Save that converted nothing, and the strong lead of t
     expect(m.text('convert-note')).toBe(`${english('spaces.schema.convert.note.finished')} 4 records could not be converted.`);
   });
 
+  it('says nothing of a saved schema about a run the Convert act started (every source is the act): the act saves no schema', () => {
+    const act = [{ kind: 'act' as const, at: '2026-11-19T10:00:00.000Z' }];
+    const running = mount({ statuses: [okStatus(runningStatus({ sources: act, left: 240, counts: { stamped: 31, rewritten: 366, unconverted: 3, moved: 0, edgesRestamped: 0 } }))] });
+    running.settle(); vi.advanceTimersByTime(0); running.settle();
+    expect(running.text('convert-note')).toBe(fill('spaces.schema.convert.note.running.other', { done: '400', count: '640' }));
+    expect(running.text('convert-note')).not.toContain(SAVED);
+    expect(strong(running)).toBeUndefined();
+    const finished = mount({ statuses: [okStatus(runningStatus({ sources: act })), okStatus(doneStatus({ sources: act }))] });
+    finished.settle(); vi.advanceTimersByTime(CONVERT_POLL_MS); finished.settle();
+    expect(strong(finished)).toBe(english('spaces.schema.convert.note.actFinished'));
+    expect(finished.text('convert-note')).toBe(`${english('spaces.schema.convert.note.actFinished')} 4 records could not be converted.`);
+    expect(finished.text('convert-note')).not.toContain(SAVED);
+  });
+
+  it('keeps "Schema saved." for a run a Save joined, though the act started it', () => {
+    const both = [{ kind: 'act' as const, at: '2026-11-19T10:00:00.000Z' }, { kind: 'write' as const, at: '2026-11-19T10:01:00.000Z' }];
+    const m = mount({ statuses: [okStatus(runningStatus({ sources: both, left: 240 }))] });
+    m.settle(); vi.advanceTimersByTime(0); m.settle();
+    expect(strong(m)).toBe(SAVED);
+  });
+
   it('keeps the waiting, older and failed notes plain, as drawn: no strong text', () => {
     const waiting = mount({ rounds: [{ convertRecords: { steps: [RENAME_PROP] } } as Partial<VoteRound>] });
     waiting.settle(); vi.advanceTimersByTime(0); waiting.settle();

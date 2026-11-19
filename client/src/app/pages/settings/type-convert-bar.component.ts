@@ -148,7 +148,8 @@ export class TypeConvertBarComponent {
   /**
    * The one note, or none: waiting for a vote, the run, its finish, what a Save answered, records on an older version. A note about a Save opens with
    * a strong lead as drawn ("Schema saved." for the run in progress and for the empty type, "Schema saved. Conversion finished." for the finish);
-   * the others have none.
+   * a run the Convert act alone started saved no schema, so its running note has no lead and its finish opens with "Conversion finished."; the
+   * others have none.
    */
   protected readonly note = computed<{ lead: string | null; text: string } | null>(() => {
     const plain = (text: string) => ({ lead: null, text });
@@ -165,15 +166,17 @@ export class TypeConvertBarComponent {
     const entry = run?.types.find(t => t.kind === this.kind() && t.type === this.type());
     if (run && entry) {
       const done = run.counts.stamped + run.counts.rewritten + run.counts.unconverted + run.counts.moved;
+      // The Convert act saves no schema: a run only the act started (every source the server lists is `act`) says nothing of one.
+      const actOnly = run.sources.length > 0 && run.sources.every(s => s.kind === 'act');
       if (run.state === 'running' && !entry.done) {
-        return run.left === null
-          ? plain(`${this.say('spaces.schema.convert.run.converting')} (${this.say('spaces.schema.convert.run.counting')})`)
-          : { lead: saved, text: this.plural.text('spaces.schema.convert.note.running', done + run.left, { done }) };
+        if (run.left === null) return plain(`${this.say('spaces.schema.convert.run.converting')} (${this.say('spaces.schema.convert.run.counting')})`);
+        const text = this.plural.text('spaces.schema.convert.note.running', done + run.left, { done });
+        return actOnly ? plain(text) : { lead: saved, text };
       }
       // A Save that found nothing started no run: a finished run still on the books for the type is an old one, not the Save's.
       if (this.sawRun() || (!this.savedNothing() && this.state.schemaEpoch() > this.openedAt)) {
         if (run.state === 'failed') return plain(this.say('spaces.schema.convert.run.failed', { error: run.error ?? '' }));
-        const finished = this.say('spaces.schema.convert.note.finished');
+        const finished = this.say(actOnly ? 'spaces.schema.convert.note.actFinished' : 'spaces.schema.convert.note.finished');
         return { lead: finished, text: run.counts.unconverted > 0 ? this.plural.text('spaces.schema.convert.note.finishedSome', run.counts.unconverted) : '' };
       }
     }

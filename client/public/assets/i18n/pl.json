@@ -3319,6 +3319,7 @@
   "spaces.schema.convert.note.running.many": "Trwa konwersja rekordów tego typu: sprawdzono {{done}} z {{count}}.",
   "spaces.schema.convert.note.running.other": "Trwa konwersja rekordów tego typu: sprawdzono {{done}} z {{count}}.",
   "spaces.schema.convert.note.finished": "Schemat zapisany. Konwersja zakończona.",
+  "spaces.schema.convert.note.actFinished": "Konwersja zakończona.",
   "spaces.schema.convert.note.finishedSome.one": "Nie udało się skonwertować {{count}} rekordu.",
   "spaces.schema.convert.note.finishedSome.few": "Nie udało się skonwertować {{count}} rekordów.",
   "spaces.schema.convert.note.finishedSome.many": "Nie udało się skonwertować {{count}} rekordów.",
