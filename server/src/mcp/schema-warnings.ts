@@ -54,6 +54,14 @@ export const UNKNOWN_ARGUMENT_RULE = 'After the target space is resolved, an arg
   + 'refuses the call and writes nothing. Either way the answer names it, with a suggestion when it looks like a misspelling. A retired '
   + 'name is refused everywhere.';
 
+/**
+ * The sentence every record-write tool's DESCRIPTION carries about a violation row (Q-943): each row says what is wrong by a stable code
+ * and its values, beside the English sentence, so an agent or a screen branches on the code and never parses the words. Said once, beside
+ * {@link UNKNOWN_ARGUMENT_RULE}, so the write tools cannot say it differently.
+ */
+export const VIOLATION_ROW_RULE = 'Every violation row (in `introduced`, `preExisting`, `violations` and `warnings`) carries `code` and '
+  + '`params` beside its `field` and English `reason`: branch on the code, word it from the params, and keep the reason for display.';
+
 export interface SchemaWarningAnswer {
   /** Lines for the text answer, one per violation, without a leading newline. Empty when there is nothing to say. */
   lines: string[];

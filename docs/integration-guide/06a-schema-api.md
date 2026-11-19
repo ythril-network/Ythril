@@ -549,11 +549,13 @@ the answer would be meaningless. In `strict` mode a violating update is refused 
 {
   "error": "schema_violation",
   "message": "The change violates this space's schema: status.",
-  "introduced": [ { "field": "properties.status", "value": "nonsense", "reason": "not in enum: open, closed" } ],
+  "introduced": [ { "field": "properties.status", "value": "nonsense", "reason": "must be one of: open, closed", "code": "enum", "params": { "allowedValues": ["open", "closed"] } } ],
   "preExisting": [],
-  "violations": [ { "field": "properties.status", "value": "nonsense", "reason": "not in enum: open, closed" } ]
+  "violations": [ { "field": "properties.status", "value": "nonsense", "reason": "must be one of: open, closed", "code": "enum", "params": { "allowedValues": ["open", "closed"] } } ]
 }
 ```
+
+Every row carries `code` and `params` beside its `reason`, on every door: the codes are in [Schema violation codes](04f-write-semantics.md#schema-violation-codes).
 
 **This is the one refusal body, on every door.** The REST create and update routes, the MCP write tools (as
 `structuredContent`, with `isError`), the `POST /api/<tool>` twin and a refused [merge](04b-graph-api.md#merge-two-entities)

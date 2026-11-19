@@ -76,7 +76,8 @@ export const save_bulkTool: ToolHandler = {
     + 'that record\'s reason. A record that lost such a race costs the call one more round trip.\n\n'
     + 'RESPONSE: `inserted` and `updated` (counts per collection), `connections` (the links and edges the '
     + 'ITEMS\' own fields attached, which is a different question from `inserted.edges` — that one counts the '
-    + 'top-level `edges` array), `errors` (one entry per rejected item, with its collection and index, and `written` on a row whose record was stored), and '
+    + 'top-level `edges` array), `errors` (one entry per rejected item, with its collection and index, and `written` on a row whose record was stored; '
+    + 'a schema refusal\'s row carries `violation` and a warn space\'s row `warning`, whose violation rows each carry `code` and `params` beside the reason), and '
     + '`refs` (the id each `$ref` key was given, for items that were written).',
   mutating: true,
   spaceRequired: true,

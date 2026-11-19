@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Schema:** every schema violation row carries a stable `code` and its `params` beside its `field` and `reason`, on every REST door and MCP tool that answers one (refusals, warnings, bulk rows, now with `warning`, the dry run, unconverted items, push and import reports, ingest); the codes are `SCHEMA_VIOLATION_CODES` and the integration guide's table. An unconverted item stored before carries none.
 - **Schema:** `schemaFingerprint` on `GET /api/spaces/:id/meta` and MCP `space_meta`: the SHA-256 of the space schema's canonical text, the same on every instance holding the same schema; derived, and stripped when the meta is sent back.
 - **Schema:** the schema versions a space uses are kept privately in `<space>_schema_snapshots`, named by their fingerprint, with what each was built from (own types, network layers). A database backup carries them.
 - **Schema:** a schema version is kept while a record here carries it, while it is current or a network's layer, and while a kept version links it; once none holds, the housekeeping cycle removes it no sooner than a day after it first found it unused.

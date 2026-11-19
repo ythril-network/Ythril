@@ -4,7 +4,7 @@
 
 How a brain record behaves when you write it, update it and read it back: expiry, stamp integrity, what a
 `PATCH` does to `tags` and `properties`, optimistic concurrency, what a read never sends, retiring a record
-from semantic search, and partial updates with `deleteFields`.
+from semantic search, partial updates with `deleteFields`, and the codes every schema violation carries.
 
 **These rules are not about facts.** They apply to entities, edges and chrono entries the same way. The
 endpoints themselves are in
@@ -678,3 +678,55 @@ PATCH /api/brain/spaces/:spaceId/files?path=…
 
 **MCP tools:** all five — `update_fact`, `update_entity`, `update_edge`, `update_chrono` and
 `update_file_meta` — accept a `deleteFields` array with the same semantics.
+
+### Schema violation codes
+
+Every schema violation the server reports is a row `{ field, value?, reason, code, params }`: `reason` is the English
+sentence it always was, and **`code` and `params` say the same thing for a program**, so a screen words it in its own
+language and falls back to `reason` for a code it does not know. The sentence is built from the code and params by one
+function, so the two never disagree. A row about an undeclared key also carries `declared`, and a rule that could not
+judge the record carries `outcome`, as before ([Schema Validation](06a-schema-api.md#schema-validation)).
+
+It is the same row on every door, REST and MCP alike: a refusal's `introduced`, `preExisting` and `violations`, a write's
+`warnings`, a bulk item's `violation` and `warning` ([Bulk Write](04d-brain-ops-api.md#bulk-write)), a merge preview's
+endpoint warnings, the dry run's rows ([Validate Schema](06a-schema-api.md#validate-schema-dry-run)), an unconverted
+item's `violations` ([Converting Records](06e-converting-records.md)), a push answer's `schemaViolations`, an import's
+report and an ingest's `writeErrors`. On MCP it is in `structuredContent`, beside the text.
+
+`params` is a flat object of plain values (a text, a number, a boolean or a list of texts) and holds only what the
+sentence says, never the record's value. A list is cut as `declared` is: 50 names, then `…(+N more)`. Where a
+violation is a JSON Schema keyword's concept the code is that keyword in lower_snake and the params are named as
+[Ajv](https://ajv.js.org/api.html#validation-errors) names that keyword's error params; the rest are Ythril's own
+rules. The list is `SCHEMA_VIOLATION_CODES` in
+[`server/src/spaces/schema-violation-codes.ts`](https://github.com/ythril-network/Ythril/blob/main/server/src/spaces/schema-violation-codes.ts):
+
+| `code` | `params` | Follows | Example `reason` |
+|--------|----------|---------|------------------|
+| `type_not_allowed` | `allowlist`, `allowedValues` | Ythril: a kind with declared types admits only those | `not in entityTypes allowlist: person, org` |
+| `ref_unresolved` | `entry` | Ythril: a `$ref` to a library entry this instance lacks | `schema library entry 'gone' not found — update or remove this $ref` |
+| `naming_pattern` | `type`, `pattern` | Ythril: `namingPattern` on the record's name | `does not match naming pattern for type 'person': ^[A-Z]` |
+| `naming_pattern_not_evaluated` | `type`, `pattern` | Ythril: the pattern was not run | `naming pattern for type 'person' not evaluated, so nothing was checked: (a+)+ — …` |
+| `endpoint_type` | `label`, `end`, `allowedValues` | Ythril: an edge label's `endpoints` | `'employs' declares its from endpoint as one of: org` |
+| `functional` | `label`, `count` | Ythril: a `functional` label | `'employs' is declared functional: one subject may have at most one. 1 other edge(s) …` |
+| `required` | `missingProperty` | JSON Schema `required` | `required property 'id' is missing or empty` |
+| `additional_properties` | `additionalProperty` | JSON Schema `additionalProperties: false` | `property 'statuz' is not declared on this type` |
+| `type` | `type`, `got` | JSON Schema `type` (`date` is a text) | `expected type 'number', got 'string'` |
+| `enum` | `allowedValues` | JSON Schema `enum` | `must be one of: open, closed` |
+| `minimum` | `comparison`, `limit` | JSON Schema `minimum` | `must be >= 0` |
+| `maximum` | `comparison`, `limit` | JSON Schema `maximum` | `must be <= 150` |
+| `pattern` | `pattern` | JSON Schema `pattern` | `does not match pattern: ^[a-z]+$` |
+| `pattern_not_evaluated` | `pattern` | Ythril: the pattern was not run | `pattern not evaluated, so nothing was checked: (a+)+ — …` |
+| `rule` | `rule`, `message`, `hash` | Ythril: a CEL [rule](06a-schema-api.md#rules) | `A person must be an adult (rule 3f9a1c02)` |
+| `rule_not_evaluated` | `rule`, `message`, `hash`, `cause` | Ythril: the rule could not judge the record | `… — could not be evaluated on this record (an evaluation error) (rule 3f9a1c02)` |
+| `rule_too_large` | `rule`, `message`, `hash`, `path`, `bound`, `limit` | Ythril: a value the rule reads is over the caps | `… — too large to check: self.properties.a is longer than 10000 characters (rule …)` |
+| `link_target_removed` | `entityId` | Ythril: a warning, the linked entity was deleted meanwhile | `link_target_removed: the entity '…' was deleted while this record was written, …` |
+| `reference_not_found` | `refField`, `refKind`, `space`, `ids` | Ythril: with `strictLinkage`, an edge end names nothing | ``` `from` references 1 entity ID that does not exist in space 'qa': "…". … ``` |
+| `conversion_error` | `errorKind` | Ythril: only on an unconverted item | `TypeError` |
+
+`cause` is one of `engine_unavailable`, `type_mismatch`, `evaluation_error`, `not_boolean`; `bound` one of
+`characters`, `list`, `map`, `depth`; `end` is `from` or `to`; `comparison` is `>=` or `<=`. The row's place follows
+RFC 9457's extension members (a machine-readable member beside the human-readable text), and on MCP a refusal is a
+tool result with `isError`, as the MCP specification reports a tool execution error. An unknown-field row
+(`code: "unknown_field"`) sits in the same `warnings` list but is about the request body, not the schema, and has no
+`params`. **An unconverted item stored before 6.6** has `field` and `reason` only and is listed as it is, without a
+`code`: word it by `reason`.

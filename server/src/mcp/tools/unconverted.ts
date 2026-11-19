@@ -57,7 +57,7 @@ export const list_unconvertedTool: ToolHandler = {
     + 'every member it reads, merged newest first, with `counts` summed over them); `reason` says why it was not converted (`not_conforming`, `no_case_matched`, `both_set`, `could_not_evaluate`, '
     + '`relationship_exists`, `functional_taken`, `version_ceiling`, `fork`, `step_refused`, `conversion_failed`: a rewrite that kept failing for a reason '
     + 'no other class names, its one violation naming the kind of error and never its words), `violations` names the fields that do not conform and why '
-    + '(never their values), `proposed` what the steps would have made of it (a new type, the property names set and removed), and `record.summary` is '
+    + '(never their values), each row with its `code` and `params` to word it by (an item stored before codes existed has `field` and `reason` only), `proposed` what the steps would have made of it (a new type, the property names set and removed), and `record.summary` is '
     + 'the record\'s own name or summary, absent when the record is gone. Newest first. The answer carries `total`, `skip`, `limit`, `count`, `truncated`, '
     + '`nextSkip` when the page is cut, and `counts` (`{ open, dismissed, openBy }`, of the whole space whatever the filters: `openBy` is the open items '
     + `grouped as \`[{ kind, type, reason, n }]\`, ordered by kind, type and reason, and summing to \`open\`; past ${UNCONVERTED_OPEN_BY_MAX} groups it holds the first ${UNCONVERTED_OPEN_BY_MAX} and \`openByCut\` is true). This call writes nothing: a row for a `

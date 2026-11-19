@@ -7,7 +7,7 @@ import { traverseGraph } from '../../brain/traverse-graph.js';
 import { readEditAudit } from '../../brain/edit-audit.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
 import { type UpdateValidation } from '../../brain/write-validation.js';
-import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE, VIOLATION_ROW_RULE } from '../schema-warnings.js';
 import { getConfig } from '../../config/loader.js';
 import { isStrictLinkage } from '../../spaces/space-lookup.js';
 import { findFirstAcrossMembers } from '../../spaces/across-members.js';
@@ -34,6 +34,7 @@ export const save_edgeTool: ToolHandler = {
     + 'Both endpoints must name records that exist when the space uses strict linkage — entities by default, or a fact, chrono entry or file when `fromKind`/`toKind` says so; that is a refusal, not a dangling edge. So is an entity end that was deleted or merged while the edge was being written (`409` `endpoint_removed`; the edge was taken back, so read the graph again before retrying). And an edge IS a searchable record: it carries its own embedding and competes with knowledge for a recall\'s result slots, which is why `recall` has a `types` filter.\n\n'
     + 'A LABEL CAN DICTATE WHAT SITS AT EACH END, AND HOW MANY. A space may declare that `reports_to` runs from a person to a person, and that a person reports to at most one manager; this write is REFUSED when it breaks either, with `fromType`, `toType` or `functional` as the violation field and the admitted types in the reason. Read `typeSchemas.edge` from `space_meta` before inventing a label, or expect the refusal to teach you the model one edge at a time. A subject holds at most ONE edge under a functional label, whatever its `to`; "another edge" means a different `to` or end kind. Re-writing the same edge is never a cardinality breach — an edge is not its own duplicate. Writers that run at the same time cannot both win: in a strict space the loser is refused exactly as a sequential second write is, and only one that keeps losing answers a conflict (409). An endpoint that resolves to nothing is not a type breach, because a space may permit dangling references.\n\n'
     + 'IF THE SPACE VALIDATES: `introduced` are violations this write caused and are what refuses it; `preExisting` were already stored, are reported, and do NOT block. Branch on `introduced`.\n\n'
+    + VIOLATION_ROW_RULE + '\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
@@ -200,6 +201,7 @@ export const update_edgeTool: ToolHandler = {
     + 'whether this copy is newer. An edge whose next version would pass the ceiling is refused (`409` `record_version_at_ceiling`, nothing '
     + 'written). A patch that sets an end\'s kind to entity is refused (`409` `endpoint_removed`) when that entity was deleted meanwhile, and the edge is taken back. '
     + 'An id that does not exist is an error, not a silent no-op.\n\n'
+    + VIOLATION_ROW_RULE + '\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,

@@ -312,13 +312,14 @@ document is reported only when it was stored, only for what the copy it replaced
 in a space whose `validationMode` is `off`. An undeclared property key is one of the things reported.
 
 Each affected collection carries a `schemaViolations` array naming the documents and what was wrong with each —
-**by `field` and `reason`, never a value**, a restore's answer being no place for a backup's data:
+**by `field`, `reason`, `code` and `params`, never a value**, a restore's answer being no place for a backup's data
+([Schema violation codes](04f-write-semantics.md#schema-violation-codes)):
 
 ```json
 "entities": {
   "inserted": 3, "updated": 1, "errors": 0,
   "schemaViolations": [
-    { "_id": "e1b2c3d4-...", "violations": [ { "field": "properties.owner", "reason": "required property 'owner' is missing or empty" } ] }
+    { "_id": "e1b2c3d4-...", "violations": [ { "field": "properties.owner", "reason": "required property 'owner' is missing or empty", "code": "required", "params": { "missingProperty": "owner" } } ] }
   ],
   "schemaViolationsTotal": 120,
   "schemaViolationsTruncated": true

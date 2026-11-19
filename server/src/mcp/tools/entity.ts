@@ -8,7 +8,7 @@ import { entityDeleteBlockers } from '../../brain/entity-delete-guard.js';
 import { deleteEntityCascade } from '../../brain/entity-delete-cascade.js';
 // The shared write gate, imported rather than reimplemented — see the note in memory.ts.
 import type { UpdateValidation } from '../../brain/write-validation.js';
-import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE } from '../schema-warnings.js';
+import { schemaWarningAnswer, UNDECLARED_KEY_RULE, UNKNOWN_ARGUMENT_RULE, VIOLATION_ROW_RULE } from '../schema-warnings.js';
 import { type PropertyResolution, type EndpointRuleWarning, mergeEntities, MERGE_MAX_RELINKS } from '../../brain/merge.js';
 import { getConfig } from '../../config/loader.js';
 import { findFirstAcrossMembers } from '../../spaces/across-members.js';
@@ -24,6 +24,7 @@ export const save_entityTool: ToolHandler = {
   description: 'Create or update a named entity in the knowledge graph. Identity is by `id` — supply one and the matching record is updated, omit it and a NEW record is always inserted regardless of name. Two entities may share a name; nothing deduplicates for you. Search by name with `filter` on the `entities` collection first if you meant to update.\n\n'
     + 'An upsert onto an existing record MERGES: properties and tags are merged over what is stored, so you can set one field without restating the rest, and the record is validated in its MERGED form rather than as the fragment you sent. That is why a partial upsert of a conformant record is accepted even when the fragment alone would fail a required-property rule.\n\n'
     + 'IF THE SPACE VALIDATES, a refusal names WHOSE FAULT it is. `introduced` are violations your write caused — fix those. `preExisting` were already stored and your write neither caused nor fixed them; in `strict` mode they are REPORTED and do NOT refuse the write, so an unrelated edit is never blocked by a field somebody else broke. Branch on `introduced` and treat `preExisting` as a repair opportunity rather than an error.\n\n'
+    + VIOLATION_ROW_RULE + '\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
@@ -188,6 +189,7 @@ export const update_entityTool: ToolHandler = {
     + 'compares to know whether this copy is newer. An entity whose next version would pass the ceiling is refused (`409` '
     + '`record_version_at_ceiling`, nothing written). An id that does not exist is an error, not a silent no-op, so a successful '
     + 'reply means a record really changed.\n\n'
+    + VIOLATION_ROW_RULE + '\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
@@ -341,6 +343,7 @@ export const graph_mergeTool: ToolHandler = {
     + 'RESOLVE EVERY CONFLICT OR NOTHING HAPPENS. A partial map returns the plan again rather than merging what it can, because a half-merge would leave two records that are neither separate nor one.\n\n'
     + 'Per type: numeric properties accept `fn:avg|min|max|sum`, booleans accept `fn:and|or|xor`, and strings take "survivor", "absorbed", or "custom" with `customValue` — there is no function that can combine two strings sensibly, so you have to choose. Properties that do NOT conflict are carried over without appearing in the plan.\n\n'
     + 'IT CAN LEAVE AN EDGE BREAKING ITS LABEL\'S RULE, AND IT TELLS YOU WHICH. Relinking rewrites the ends of stored edges, so merging two entities of different types can move an edge onto an end its label forbids — and that is a legitimate thing to do, because a merge is how a mistyped record gets fixed. Any such edge is listed on both the plan and the result, naming the end that moved and what the label admits. It is REPORTED, not refused: a rule declared after the data existed must not make duplicates unmergeable. Fix them afterwards with `update_edge`/`delete_edge`, or widen the label\'s endpoints in the space schema.\n\n'
+    + VIOLATION_ROW_RULE + '\n\n'
     + UNKNOWN_ARGUMENT_RULE,
   mutating: true,
   spaceRequired: true,
