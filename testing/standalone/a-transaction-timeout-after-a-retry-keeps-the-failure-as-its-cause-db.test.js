@@ -30,6 +30,7 @@
  * clock, so its end of a statement sent with the deadline's remainder can be back while ours still reads a few ms short. Those rows
  * send the read that opens an attempt to the real store and answer it with the server's error a fixed time before the deadline,
  * so our clock reads before it on every machine; their control ends a read that carried its own, shorter, per-operation limit.
+ * The callback rows do the same to a statement the callback sends through the bounded door (`getDb()`).
  *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-transaction-timeout-after-a-retry-keeps-the-failure-as-its-cause-db.test.js
@@ -197,7 +198,7 @@ describe('a transaction timeout after a retry keeps the failure that made it ret
   // the server's end of it, given `EARLY_MS` before its limit runs out by our clock.
   it('the server ending the opening read of a later attempt by the deadline\'s remainder, before our clock reads the deadline, is answered StoreTimeout', async () => {
     restoreBound = await setWriteBoundForTest(SHORT_BOUND);
-    const fault = await endTheOpeningReadEarly({ fromCall: 2 });
+    const fault = await endAStatementEarly(THE_OPENING_READ, { fromCall: 2 });
     const first = transientFailure('first');
     let calls = 0;
     let err;
@@ -221,7 +222,7 @@ describe('a transaction timeout after a retry keeps the failure that made it ret
 
   it('the server ending the opening read of the only attempt by the deadline\'s remainder, before our clock reads the deadline, is answered StoreTimeout', async () => {
     restoreBound = await setWriteBoundForTest(SHORT_BOUND);
-    const fault = await endTheOpeningReadEarly({ fromCall: 1 });
+    const fault = await endAStatementEarly(THE_OPENING_READ, { fromCall: 1 });
     let err;
     try {
       err = await thrownBy(async () => assert.fail('fixture: the opening read answered, so the callback ran'));
@@ -236,7 +237,7 @@ describe('a transaction timeout after a retry keeps the failure that made it ret
   it('control: the opening read ended by its OWN per-operation limit, shorter than the deadline\'s remainder, is thrown as it came', async () => {
     // Each operation 1 s, the transaction 20 s: the opening read carries its own 1 s, not the remainder.
     restoreBound = await setWriteBoundForTest({ writeTimeoutMs: SHORT_BOUND.writeTimeoutMs, holdDeadlineMs: GENEROUS_BOUND.holdDeadlineMs });
-    const fault = await endTheOpeningReadEarly({ fromCall: 1 });
+    const fault = await endAStatementEarly(THE_OPENING_READ, { fromCall: 1 });
     let err;
     try {
       err = await thrownBy(async () => assert.fail('fixture: the opening read answered, so the callback ran'));
@@ -247,42 +248,118 @@ describe('a transaction timeout after a retry keeps the failure that made it ret
     assert.equal(fault.ended[0].maxTimeMS, SHORT_BOUND.writeTimeoutMs, 'fixture: the opening read did not carry its own per-operation limit');
     assert.equal(err, fault.ended[0].error, 'a statement\'s own time limit, shorter than the transaction\'s bound, was re-dressed as the bound\'s StoreTimeout');
   });
+
+  // The same end on a statement the CALLBACK sends: its limit is chosen where it is sent (`db/write-bound.ts`), the deadline's
+  // remainder when that is no more than the per-operation figure, and the server's end of it is the bound's end as much.
+  it('the server ending a callback statement of a later attempt by the deadline\'s remainder, before our clock reads the deadline, is answered StoreTimeout', async () => {
+    restoreBound = await setWriteBoundForTest(SHORT_BOUND);
+    const fault = await endAStatementEarly(THE_CALLBACK_INSERT, { fromCall: 1 });
+    const first = transientFailure('first');
+    let calls = 0;
+    let err;
+    try {
+      err = await thrownBy(async (session) => {
+        calls += 1;
+        if (calls === 1) throw first;
+        await insertThroughTheDoor(session);
+        assert.fail('fixture: the callback\'s statement answered');
+      });
+    } finally {
+      fault.restore();
+    }
+    assert.equal(calls, 2, 'fixture: the callback did not run a second time, so the retry was never reached');
+    assert.equal(fault.ended.length, 1, 'fixture: the callback\'s statement was never ended');
+    assert.ok(fault.ended[0].maxTimeMS <= SHORT_BOUND.holdDeadlineMs,
+      `fixture: the callback's statement carried ${fault.ended[0].maxTimeMS} ms, more than the deadline's remainder`);
+    assert.ok(fault.ended[0].clockBeforeDeadline, 'fixture: the server\'s end was not given before our clock read the deadline');
+    assert.ok(err instanceof StoreTimeout, `it threw ${err?.name}: ${err?.message}, not a StoreTimeout`);
+    assert.equal(err.cause, first, 'the StoreTimeout does not carry the transient failure that made the transaction retry');
+  });
+
+  it('the server ending the only attempt\'s callback statement by the deadline\'s remainder, before our clock reads the deadline, is answered StoreTimeout', async () => {
+    restoreBound = await setWriteBoundForTest(SHORT_BOUND);
+    const fault = await endAStatementEarly(THE_CALLBACK_INSERT, { fromCall: 1 });
+    let err;
+    try {
+      err = await thrownBy(async (session) => {
+        await insertThroughTheDoor(session);
+        assert.fail('fixture: the callback\'s statement answered');
+      });
+    } finally {
+      fault.restore();
+    }
+    assert.equal(fault.ended.length, 1, 'fixture: the callback\'s statement was never ended');
+    assert.ok(fault.ended[0].clockBeforeDeadline, 'fixture: the server\'s end was not given before our clock read the deadline');
+    assert.ok(err instanceof StoreTimeout, `it threw ${err?.name}: ${err?.message}, not a StoreTimeout`);
+    assert.equal(err.cause, fault.ended[0].error, 'the StoreTimeout does not carry the server\'s own error as its cause');
+  });
+
+  it('control: a callback statement ended by its OWN per-operation limit, shorter than the deadline\'s remainder, is thrown as it came', async () => {
+    // Each operation 1 s, the transaction 20 s: the callback's statement carries its own 1 s, not the remainder.
+    restoreBound = await setWriteBoundForTest({ writeTimeoutMs: SHORT_BOUND.writeTimeoutMs, holdDeadlineMs: GENEROUS_BOUND.holdDeadlineMs });
+    const fault = await endAStatementEarly(THE_CALLBACK_INSERT, { fromCall: 1 });
+    let err;
+    try {
+      err = await thrownBy(async (session) => {
+        await insertThroughTheDoor(session);
+        assert.fail('fixture: the callback\'s statement answered');
+      });
+    } finally {
+      fault.restore();
+    }
+    assert.equal(fault.ended.length, 1, 'fixture: the callback\'s statement was never ended');
+    assert.equal(fault.ended[0].maxTimeMS, SHORT_BOUND.writeTimeoutMs, 'fixture: the callback\'s statement did not carry its own per-operation limit');
+    assert.equal(err, fault.ended[0].error, 'a callback statement\'s own time limit, shorter than the transaction\'s bound, was re-dressed as the bound\'s StoreTimeout');
+  });
 });
 
-/** How long before its limit runs out by OUR clock the server's end of the opening read is given: a server clock that runs ahead. */
+/** How long before its limit runs out by OUR clock the server's end of a statement is given: a server clock that runs ahead. */
 const EARLY_MS = 100;
 
+/** The collection the callback's statement writes to in the callback rows; nothing of it lands (the transaction is aborted). */
+const CALLBACK_PROBE = 'txn_timeout_callback_probe';
+
+/** The read `openOnTheServer` sends to open each attempt: `findOne` of `__transaction_opens__` in `transaction_seal`. */
+const THE_OPENING_READ = { method: 'findOne', matches: (coll, filter) => coll === 'transaction_seal' && filter?._id === '__transaction_opens__' };
+/** The callback's own statement in the callback rows: an `insertOne` into `CALLBACK_PROBE`, sent through the bounded door. */
+const THE_CALLBACK_INSERT = { method: 'insertOne', matches: coll => coll === CALLBACK_PROBE };
+
+/** The callback rows' statement: one insert through `getDb()`, the door every statement of a callback goes through. */
+async function insertThroughTheDoor(session) {
+  const { getDb } = await import('../../server/dist/db/mongo.js');
+  await getDb().collection(CALLBACK_PROBE).insertOne({ _id: `probe-${Date.now()}-${Math.random()}` }, { session });
+}
+
 /**
- * From the `fromCall`-th call on, the read that opens a bounded transaction (`openOnTheServer`: `findOne` of
- * `__transaction_opens__` in `transaction_seal`) is sent to the real store, and then answered with the server's MaxTimeMSExpired
- * `EARLY_MS` before its limit — the `maxTimeMS` it was sent with, or the transaction's deadline when that comes first — has run
- * out by this process's clock. `ended` records each ended read: the limit it carried, the error, and whether our clock still read
- * before the transaction's deadline when the error was thrown. The built error is the one `loseNextCommitReply`
- * (`_write-faults.mjs`) builds, for the same reason: the store cannot be made to end a statement early on demand (no fail points on
- * the test store).
+ * From the `fromCall`-th matching call of `statement` on, the statement is sent to the real store, and then answered with the
+ * server's MaxTimeMSExpired `EARLY_MS` before its limit — the `maxTimeMS` it was sent with, or the transaction's deadline when
+ * that comes first — has run out by this process's clock. `ended` records each ended statement: the limit it carried, the error,
+ * and whether our clock still read before the transaction's deadline when the error was thrown. The built error is the one
+ * `loseNextCommitReply` (`_write-faults.mjs`) builds, for the same reason: the store cannot be made to end a statement early on
+ * demand (no fail points on the test store).
  */
-async function endTheOpeningReadEarly({ fromCall }) {
+async function endAStatementEarly({ method, matches }, { fromCall }) {
   const mongo = await import('../../server/dist/db/mongo.js');
-  // Read inside the read's own call: the transaction's bound scope is the active one there.
+  // Read inside the statement's own call: the transaction's bound scope is the active one there.
   const { boundTimeLeft } = await import('../../server/dist/db/write-bound.js');
   const proto = Object.getPrototypeOf(mongo.getMongo().db('probe').collection('probe'));
-  const original = proto.findOne;
+  const original = proto[method];
   const ended = [];
   let calls = 0;
-  proto.findOne = async function endedEarly(filter, options, ...rest) {
-    if (this.collectionName !== 'transaction_seal' || filter?._id !== '__transaction_opens__') return original.call(this, filter, options, ...rest);
+  proto[method] = async function endedEarly(first, options, ...rest) {
+    if (!matches(this.collectionName, first)) return original.call(this, first, options, ...rest);
     calls += 1;
     const sentAt = Date.now();
     const deadline = sentAt + boundTimeLeft();
-    const answer = await original.call(this, filter, options, ...rest);
+    const answer = await original.call(this, first, options, ...rest);
     if (calls < fromCall) return answer;
     const limitEnds = Math.min(sentAt + options.maxTimeMS, deadline);
-    await elapse(Math.max(0, limitEnds - EARLY_MS - Date.now()), 'simulated latency: the server runs the read until its own clock, ahead of ours, reads its limit');
+    await elapse(Math.max(0, limitEnds - EARLY_MS - Date.now()), 'simulated latency: the server runs the statement until its own clock, ahead of ours, reads its limit');
     const error = serverDeadlineFailure();
     ended.push({ maxTimeMS: options.maxTimeMS, error, clockBeforeDeadline: boundTimeLeft() > 0 });
     throw error;
   };
-  return { ended, restore: () => { proto.findOne = original; } };
+  return { ended, restore: () => { proto[method] = original; } };
 }
 
 /** The server's answer to a statement whose `maxTimeMS` ran out, as the driver delivers it: no transient label, so no retry. */
