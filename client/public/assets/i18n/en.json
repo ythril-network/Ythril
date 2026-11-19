@@ -1332,6 +1332,7 @@
   "spaces.schema.propDetail.enumValues": "Enum values",
   "spaces.schema.propDetail.enumHint": "— restrict to exact set",
   "spaces.schema.propDetail.enumPlaceholder": "value + Enter",
+  "spaces.schema.propDetail.removeEnumValue": "Remove {{value}}",
   "spaces.dangerZone.retentionTitle": "Retention",
   "spaces.dangerZone.retentionDescription": "Deletes records on a timer. Three tiers, most specific first: a ttlDays set on a record when it is written; then that record type's own window, set on the type in the Schema tab; then the space-wide window for that kind of record, below.",
   "spaces.dangerZone.retentionSpaceWideHint": "One window per kind of record. Each applies to records of that kind with no ttlDays of their own and no window on their type. Leave a field empty for no expiry.",

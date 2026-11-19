@@ -35,7 +35,7 @@
  * to drift.
  */
 import { SpaceSchemaLayersComponent } from './space-schema-layers.component';
-import { ChangeDetectionStrategy, Component, DestroyRef, Injector, afterEveryRender, computed, effect, forwardRef, inject, output, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, Injector, afterEveryRender, afterNextRender, computed, effect, forwardRef, inject, output, signal, untracked } from '@angular/core';
 import { Router } from '@angular/router';
 import { forkJoin, type Subscription } from 'rxjs';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
@@ -214,6 +214,7 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
   private transloco = inject(TranslocoService);
   private readonly say = pageTranslator();
   private readonly injector = inject(Injector);
+  private readonly host = inject(ElementRef);
   private readonly language = inject(ActiveLanguage).language;
   /** The list store, so a successful save updates the row behind the modal. Both hosts provide it. */
   private store = inject(SpacesStore);
@@ -572,9 +573,24 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
   }
 
   protected closeProgress(): void {
+    const byAct = this.progress()?.byAct ?? false;
     this.watch?.stop();
     this.watch = null;
     this.progress.set(null);
+    afterNextRender(() => this.backToWhereTheRunBegan(byAct), { injector: this.injector });
+  }
+
+  /**
+   * Once the run's dialog is gone, put focus on the control that led to it: the type's Convert records for the act, the footer button that took
+   * Save's place (Done) for a converting Save. The modal returns focus to the element focused when it opened, and that element no longer exists
+   * (the act's dialog, or Save), so without this focus fell to the page body (drive D5).
+   */
+  private backToWhereTheRunBegan(byAct: boolean): void {
+    const host = this.host.nativeElement as HTMLElement;
+    const to = byAct
+      ? host.querySelector<HTMLElement>('[data-testid="convert-records"]')
+      : host.querySelector<HTMLElement>('[data-testid="settings-done"], [data-testid="settings-save"]');
+    to?.focus();
   }
 
   /** Open Review on the Unconverted section, asking first when the popup holds an edit the move would lose. */
