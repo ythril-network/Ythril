@@ -1974,12 +1974,13 @@ export const embedInputCutTotal = new Counter({
 for (const producer of ['whole-document', 'media', 'http']) embedInputCutTotal.labels({ producer }).inc(0);
 
 /**
- * Document passages stored WITHOUT a vector because the embedder refused them during conversion (the file still converts; the
- * passage is findable by its words only). Otherwise nothing reports a partial failure unless every passage failed.
+ * Document passages stored WITHOUT a vector because their embed call failed during conversion (the passage is findable by its words only).
+ * Otherwise nothing reports a partial failure unless every passage failed. A passage a run did not send because the embedder already looked
+ * dead is not counted: that run is handed back and stores nothing that lasts, and each hand-back would count it again.
  */
 export const conversionChunksUnembeddedTotal = new Counter({
   name: 'ythril_conversion_chunks_unembedded_total',
-  help: 'Document passages stored without a vector because the embedder refused them',
+  help: 'Document passages stored without a vector because their embed call failed (a passage not sent to an embedder already unavailable is not counted)',
   registers: [register],
 });
 conversionChunksUnembeddedTotal.inc(0);

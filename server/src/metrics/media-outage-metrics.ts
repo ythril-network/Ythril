@@ -27,7 +27,7 @@ export const mediaJobsHandedBackTotal = new Counter({
 });
 mediaJobsHandedBackTotal.labels({ space: '', media_type: 'text' }).inc(0);
 
-/** What a probe of the embedder found, the one list: `answered` (it spoke, the outage is over), `unavailable` (the next pause starts). */
+/** What a probe of the embedder found, the one list: `answered` (no proven outage: the pause ends), `unavailable` (a proven outage: the next pause starts). */
 export const MEDIA_EMBEDDER_PROBE_OUTCOMES = ['answered', 'unavailable'] as const;
 export type MediaEmbedderProbeOutcome = (typeof MEDIA_EMBEDDER_PROBE_OUTCOMES)[number];
 

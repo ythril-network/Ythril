@@ -98,7 +98,9 @@ means the call could not reach the embedder, the embedder answered a status of t
 `524`, `529`, `530`), or the bundled embedding process was lost before the request was sent. For a document that is every passage;
 for audio, every chunk whose transcript was sent to the embedder (a silent chunk, or one that failed to transcribe, is not counted:
 a run whose every chunk failed to transcribe spends an attempt as before); for an image, its one embed. One busy answer among a
-document's passages is not that: the other passages are stored and the file ends `"partial"`.
+document's passages is not that: the other passages are stored and the file ends `"partial"`. A document run that meets an
+unavailable embedder for as many passages in a row as it sends at once, with none embedded, stops sending the rest and waits the
+same way, whatever a call still in flight brings back: it never ends `"partial"` with passages it did not send.
 
 Such a job goes back to the queue, its attempt refunded, behind the media queue's own schedule (30 s, then 2 minutes, then 5
 minutes), and the file reads `"processing"` while it waits, never `"failed"`. The job counts its hand-backs (`outageFailures` on
@@ -107,9 +109,11 @@ run handed back again and again past a small limit (an embedder that answers the
 proxy that times out on large requests) takes the failure path and spends its attempt.
 
 While the embedder is known to be down, the media worker claims **no** file at all, also one whose file takes no vector: before
-each claim it waits out a pause (5 seconds, doubling to 60) and then probes the embedder with one short embed call. An answer (a
-vector, or a refusal of the request itself) ends the outage; anything else starts the next pause. Files start again at most one
-pause step after the embedder is back. The server log says so at each hand-back and each pause, and
+each claim it waits out a pause (5 seconds, doubling to 60) and then probes the embedder with one short embed call. A probe that
+meets an unavailable embedder, as defined above, starts the next pause; any other outcome (a vector, a refusal, any other error)
+ends it, and files whose runs then fail for that other reason spend their attempts as before. A file not yet handed back starts
+at most one pause step after the embedder is back; a file already handed back also waits out its own place in the schedule above,
+up to 5 minutes. The server log says so at each hand-back and each pause, and
 `ythril_media_embedder_probes_total{outcome="unavailable"}` keeps rising for as long as it lasts: alert on that, since
 `ythril_media_jobs_failed_total` does not move and `ythril_media_jobs_handed_back_total` stops once the worker holds its claims.
 

@@ -1,33 +1,38 @@
 /**
- * Did a media run find the embedder UNAVAILABLE for the whole of it, so that its job waits for the embedder instead of spending an attempt?
+ * Was a media run cut short by, or did it meet throughout, an UNAVAILABLE embedder, so that its job waits for the embedder instead of spending an
+ * attempt?
  *
  * ## What it prevents
  *
  * A run whose every embed met an unreachable embedder (or a status of the wait set, or an inference process that was lost before the request was
  * sent) was failed like a file that cannot be processed: three attempts in about two and a half minutes, then `failed`, shorter than a restart of
- * the embedder. The run now says so by throwing {@link EmbedderUnavailableThroughout}, and the worker hands the job back
- * (`job-queue.ts:handBackJob`).
+ * the embedder. The run now says so by throwing {@link EmbedderUnavailableForRun}, and the worker hands the job back (`job-queue.ts:handBackJob`).
  *
- * ## Only for the whole run
+ * ## Only for the whole run, or a run cut short
  *
  * One busy answer for one passage of a long document is not this: the other passages are stored, and the file ends `partial` as before. Each
- * producer decides at the end of its run, from what it counted: a document when every passage failed and every failure was an unavailable embedder;
- * audio when at least one embed was ATTEMPTED and every attempted one was unavailable (a silent chunk is no attempt, and a failed transcription is
- * not the embedder's). An image's one embed call reaches the worker unchanged, and {@link waitsForEmbedder} asks it of that failure directly.
+ * producer decides at the end of its run, from what it counted: a document when every passage failed and every failure was an unavailable embedder,
+ * OR when it skipped any passage because the embedder already looked dead ({@link embedderLooksDead}), whatever a call still in flight brought back
+ * afterwards: a run cut short never ends `partial` with passages it never sent, which nothing would retry. Audio, when at least one embed was
+ * ATTEMPTED and every attempted one was unavailable (a silent chunk is no attempt, and a failed transcription is not the embedder's). An image's one
+ * embed call reaches the worker unchanged, and {@link waitsForEmbedder} asks it of that failure directly. The hand-back limit bounds all of them.
  */
 import { isEmbedderUnavailable } from '../../brain/embed-errors.js';
 
-/** A run that found the embedder unavailable for all of it. Thrown by the producer that counted it; the worker asks {@link waitsForEmbedder}. */
-export class EmbedderUnavailableThroughout extends Error {
+/**
+ * A run cut short by an unavailable embedder, or one that met it for all of its embeds. Thrown by the producer that counted it; the worker asks
+ * {@link waitsForEmbedder}.
+ */
+export class EmbedderUnavailableForRun extends Error {
   constructor(what: string, lastCause: string) {
     super(`The embedder was unavailable for ${what}; the file waits for it without spending an attempt. Last cause: ${lastCause}`);
-    this.name = 'EmbedderUnavailableThroughout';
+    this.name = 'EmbedderUnavailableForRun';
   }
 }
 
 /** Does this failure of a run mean its job waits for the embedder: the run said so, or its one embed call met an unavailable embedder. */
 export function waitsForEmbedder(failure: unknown): boolean {
-  return failure instanceof EmbedderUnavailableThroughout || isEmbedderUnavailable(failure);
+  return failure instanceof EmbedderUnavailableForRun || isEmbedderUnavailable(failure);
 }
 
 /**

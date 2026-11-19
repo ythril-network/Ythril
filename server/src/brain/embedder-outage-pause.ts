@@ -3,7 +3,7 @@
  *
  * ## What it prevents
  *
- * An unreachable embedder costs a job waiting and not its attempts (`EmbedUnreachableError`, `isTransientEmbedFailure`). Without a pause in the WORKER the
+ * An unreachable embedder costs a job waiting and not its attempts (`EmbedUnreachableError`, an `outage` of `classifyEmbedFailure`). Without a pause in the WORKER the
  * queue would still churn: every job with no back-off yet is claimed, fails at once, is written back with a back-off of its own, and the next is claimed, so a
  * thousand queued records are a thousand claims, a thousand failed calls and a thousand writes for one fact (the embedder is down). One failure stands for the
  * queue: after it the worker claims no further job for a pause that starts short (so a blip costs seconds), doubles to a cap (so a long outage is probed about once

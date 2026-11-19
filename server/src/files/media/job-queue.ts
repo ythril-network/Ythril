@@ -1187,7 +1187,7 @@ export async function rekeyJobsForMove(
  *    the write itself). A worker that claimed it between this read and this write leaves the write matching nothing: the answer is
  *    `'processing'` and the file row is as the run left it, never marked `pending` under a worker that is working. (It read, wrote the
  *    row, then wrote the job with no condition, and put a claimed job back to pending under its own token.)
- *  - **A retry that is not clean.** The reset is {@link RUN_RESET} with its {@link DEFERRAL_MARKS}: a deferred job retried skipped the
+ *  - **A retry that is not clean.** The reset is {@link RUN_RESET} with the run's marks ({@link RUN_MARKS}): a deferred job retried skipped the
  *    caption the retry was asked for (S8). The job's identity (`arrival`, the type) is untouched.
  *  - **A late `pending` over a finished run.** The row is written after the job, so the job is not claimable for
  *    {@link REPLACE_SETTLE_MS}: a worker that claimed it in the gap would mark the row `processing` and finish, and the late `pending`

@@ -374,7 +374,7 @@ passages, in chunks, before it writes the new ones; both leave the file alone wi
 `transientFailures` counts the times the embedder did not answer at all, which hand the attempt back rather than spend it;
 `attempts` is spent only on errors a retry cannot fix. What counts is an embed call that **could not reach its HTTP endpoint**
 (connection refused or reset, no route to the host, the name not resolving, a timeout of the connection or of the call itself),
-an HTTP answer of `408`, `429`, `502`, `503`, `504`, `520` to `524`, `529` or `530` (whatever its body says), and a request that was never sent to a lost embedding process. A high `transientFailures` with `attempts` at zero is an outage waiting itself out.
+an HTTP answer of `408`, `429`, `502`, `503`, `504`, `520` to `524`, `529` or `530` (whatever its body says), and a lost embedding process (the request it was holding counts here too, until its own cap ends the job). A high `transientFailures` with `attempts` at zero is an outage waiting itself out.
 It was described on the tool and returned by neither door until `Q-109`.
 
 **An unavailable embedder costs a job waiting, not its attempts.** The server decides that from the failure itself (the connection
