@@ -26,7 +26,8 @@ describe('a violation row\'s server sentence is its title (Q-943)', () => {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({ imports: [RefusalAlertComponent, getTranslocoModule({ translation: { en: words } })] });
     const f = TestBed.createComponent(RefusalAlertComponent);
-    f.componentRef.setInput('view', describeRefusal({ translate }, 'en', { status: 422, error: { error: 'schema_violation', introduced: [coded, plain] } }));
+    const refused = { status: 422, error: { error: 'schema_violation', introduced: [coded, plain] } };
+    f.componentRef.setInput('view', describeRefusal({ translate }, 'en', refused));
     f.detectChanges();
     const items = [...(f.nativeElement as HTMLElement).querySelectorAll('li')];
     expect(items.map(li => li.textContent?.trim())).toEqual(['age: must be a number, not text', 'size: must be a number']);

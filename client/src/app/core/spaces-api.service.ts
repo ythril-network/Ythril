@@ -55,7 +55,7 @@ export interface ValidateSchemaResult {
   /** The size budget cut this page: the check goes on from `nextAfter` as after any page. */
   truncated?: boolean;
   /** A sample's row has no `_id`: it is the pasted record, not a stored one. */
-  violations: { collection: string; _id?: string; violations: { field: string; reason?: string; value?: unknown; declared?: string[]; outcome?: string }[] }[];
+  violations: { collection: string; _id?: string; violations: { field: string; reason?: string; value?: unknown; declared?: string[]; outcome?: string; code?: string; params?: Record<string, unknown> }[] }[];
   staleGuards?: unknown[];
   /** Where the next page starts (sent back as `after`); absent when the check is complete. The server's `_id`-keyset spelling. */
   nextAfter?: string;

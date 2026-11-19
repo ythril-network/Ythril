@@ -6,7 +6,8 @@ import { pageTranslator } from '../../core/page-translator';
 import { formatCount } from '../../core/plural-text';
 import { PluralText } from '../../core/plural-text.service';
 import { ActiveLanguage } from '../../core/active-language';
-import type { UnconvertedRow } from '../../core/conversion.types';
+import type { UnconvertedRow, UnconvertedViolation } from '../../core/conversion.types';
+import { violationWording } from '../../core/violation-wording';
 import { UNCONVERTED_CLASSES, reasonClassOf, type OpenTypeRef, type UnconvertedClass } from '../../core/unconverted-reasons';
 import { ErrorStateComponent } from '../../shared/error-state.component';
 import { PhIconComponent } from '../../shared/ph-icon.component';
@@ -27,6 +28,16 @@ const PHONE_QUERY = `(max-width: ${PHONE_MAX_WIDTH}px)`;
 /** How many characters of a record's id the card shows. */
 const SHORT_ID_LENGTH = 8;
 
+/**
+ * How many violation chips a card shows before one chip counts the rest (Q-943). The drawing's overfull frame wraps two chips under the why; a
+ * record that breaks a schema in many places would otherwise push its actions off the card. The rest are announced as "+N more", and the record
+ * itself (Open the record) shows every property.
+ */
+export const VIOLATION_CHIPS_SHOWN = 6;
+
+/** One chip: the field as the server names it (without `properties.`), the reason in the reader's language, and the server's sentence for its title. */
+interface ChipView { text: string; title: string | null }
+
 /** One pill of the class switch. `count` is null where the numbers would be a lie (the Dismissed list: the counts are of open records). */
 interface Pill { key: UnconvertedClassChoice; label: string; count: string | null }
 
@@ -38,7 +49,9 @@ interface CardView {
   /** The record's own name or summary; null when the record is gone. Never a stored property. */
   name: string | null;
   shortId: string;
-  violations: string[];
+  violations: ChipView[];
+  /** "+N more" for the violations past {@link VIOLATION_CHIPS_SHOWN}; '' when every one has its chip. */
+  moreViolations: string;
   found: string;
   iso: string;
   dismissed: boolean;
@@ -96,6 +109,7 @@ interface CardView {
     .sug-why.todo { color: var(--text-muted); }
     .sug-samples { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 5px; }
     .sug-samples li { font-family: var(--font-mono); font-size: 11px; padding: 2px 7px; border-radius: 999px; background: var(--bg-elevated); border: 1px solid var(--border-muted); color: var(--text-primary); max-width: 100%; overflow-wrap: anywhere; }
+    .sug-samples li.more { font-family: inherit; color: var(--text-secondary); background: none; border-style: dashed; }
     .dup-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; margin-top: auto; }
     .pagination { margin-top: 16px; }
 
@@ -225,7 +239,8 @@ interface CardView {
                 <p class="sug-why">{{ ('brain.review.unconverted.why.' + c.cls) | transloco }}</p>
                 @if (c.violations.length > 0) {
                   <ul class="sug-samples" [attr.aria-label]="'brain.review.unconverted.violationsAria' | transloco">
-                    @for (v of c.violations; track $index) { <li>{{ v }}</li> }
+                    @for (v of c.violations; track $index) { <li [attr.title]="v.title">{{ v.text }}</li> }
+                    @if (c.moreViolations) { <li class="more" data-testid="violations-more">{{ c.moreViolations }}</li> }
                   </ul>
                 }
                 <p class="sug-why todo">{{ ('brain.review.unconverted.todo.' + c.cls) | transloco }}</p>
@@ -301,11 +316,23 @@ export class ReviewUnconvertedPanelComponent {
       kindLabel: this.say(`brain.review.forks.kindNoun.${row.kind}`),
       name: row.record ? row.record.summary : null,
       shortId: row.recordId.slice(0, SHORT_ID_LENGTH),
-      violations: row.violations.map(v => `${v.field.startsWith(PROPERTY_PREFIX) ? v.field.slice(PROPERTY_PREFIX.length) : v.field}: ${v.reason}`),
+      violations: row.violations.slice(0, VIOLATION_CHIPS_SHOWN).map(v => this.chipOf(v)),
+      moreViolations: row.violations.length > VIOLATION_CHIPS_SHOWN
+        ? this.plural.text('brain.review.unconverted.moreViolations', row.violations.length - VIOLATION_CHIPS_SHOWN) : '',
       found: this.say('brain.review.unconverted.found', { when: this.dates.relative(row.detectedAt) }),
       iso: this.dates.iso(row.detectedAt),
       dismissed: row.status === 'dismissed',
     };
+  }
+
+  /**
+   * One chip as moment 5 draws it: the field, then the reason worded in the reader's language from the violation's code (`violationWording`;
+   * its server sentence when the client cannot word it, as for an item stored before codes existed). The server's sentence is the title.
+   */
+  private chipOf(v: UnconvertedViolation): ChipView {
+    const field = v.field.startsWith(PROPERTY_PREFIX) ? v.field.slice(PROPERTY_PREFIX.length) : v.field;
+    const worded = violationWording({ translate: (key, params) => this.say(key, params) }, this.active.language() || 'en', v);
+    return { text: `${field}: ${worded.text}`, title: worded.key !== null && worded.serverText ? worded.serverText : null };
   }
 
   protected typeKey(t: OpenTypeRef): string { return `${t.kind}:${t.type}`; }

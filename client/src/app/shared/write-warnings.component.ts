@@ -11,7 +11,8 @@ import { PhIconComponent } from './ph-icon.component';
  * screens a record is written from. A toast goes in seconds, and a warning is about a record that stays wrong until someone fixes
  * it, so it is a persistent inline notice: `role="status"` (heard politely, not as an interruption), one line per warning, and
  * a close button. The host replaces the list with each save's warnings and empties it when a save carries none; this component
- * only shows what it is given and says when it is dismissed.
+ * only shows what it is given and says when it is dismissed. A row worded from its violation code carries the server's sentence as its
+ * `title` (Q-943).
  */
 @Component({
   selector: 'app-write-warnings',
@@ -34,7 +35,7 @@ import { PhIconComponent } from './ph-icon.component';
         <div class="body">
           <p class="title">{{ 'writeWarnings.title' | transloco }}</p>
           <ul>
-            @for (row of rows(); track $index) { <li> {{ row.text }} </li> }
+            @for (row of rows(); track $index) { <li [attr.title]="row.serverText || null"> {{ row.text }} </li> }
           </ul>
           @if (truncated()) { <p class="more" data-testid="write-warnings-more">{{ 'writeWarnings.more' | transloco }}</p> }
         </div>

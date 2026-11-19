@@ -95,8 +95,11 @@ export type UnconvertedStatus = 'open' | 'dismissed';
  */
 export type UnconvertedListStatus = UnconvertedStatus | 'all';
 
-/** A property of a record that does not fit and why: field names and reasons only, never a stored value. */
-export interface UnconvertedViolation { field: string; reason: string }
+/**
+ * A property of a record that does not fit and why: field names and reasons only, never a stored value. `code` and `params` are there on an
+ * item stored since Q-943 and absent on one stored before; `core/violation-wording.ts` words the row from them, or says `reason`.
+ */
+export interface UnconvertedViolation { field: string; reason: string; code?: string; params?: Record<string, unknown> }
 
 /**
  * One record a conversion could not convert, as listed. `reason` is one of the server's `UNCONVERTED_REASONS` (`reasonClassOf` gives its
