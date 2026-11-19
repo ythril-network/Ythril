@@ -48,8 +48,9 @@ import type { KnowledgeType, PropertySchema } from '../../core/api.types';
 import type { RuleRow, TypeSchemaState } from './space-settings-state.service';
 import { RuleRowsComponent, type RuleRowRefusal } from '../../shared/rule-rows.component';
 import { RULE_LIMITS } from '../../shared/rule-limits';
+import { SchemaTypeNameComponent } from './schema-type-name.component';
 import {
-  addProp, removeProp, addEnumVal, removeEnumVal,
+  addProp, removeProp, renameProp, addEnumVal, removeEnumVal,
   toggleEndpoint, endpointsFor, isAnyEnd, endpointPairs, endNamesFor, isStaleEndName, UNTYPED_END, type EndpointSide,
 } from './type-schema-edits';
 import { SCHEMA_MD_STYLES } from './schema-styles';
@@ -68,7 +69,7 @@ export interface LayerMark {
   selector: 'app-schema-type-editor',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, TranslocoPipe, PhIconComponent, HscrollTopDirective, RuleRowsComponent],
+  imports: [FormsModule, TranslocoPipe, PhIconComponent, HscrollTopDirective, RuleRowsComponent, SchemaTypeNameComponent],
   // Neither of these is decoration, and BOTH came loose when this editor was extracted out of the schema tab.
   // Angular scopes styles, so a class this template renders and this array does not define gets browser
   // defaults — with no error, in a component that still works perfectly.
@@ -326,7 +327,10 @@ export interface LayerMark {
             </td>
             <td>
               <div class="prop-name">
-                <span class="prop-name-key">{{ p.key }}</span>
+                <!-- The key, its pencil and, after a rename that is not saved yet, "was <old name>": one control, the one the type name uses. -->
+                <app-schema-type-name class="prop-rename" nameClass="prop-name-key" [name]="p.key" [rename]="renamerFor(p.key)" [was]="p._was ?? null"
+                  labelKey="spaces.schema.renamePropAria" [labelParams]="{ key: p.key }" titleKey="spaces.schema.renameProp"
+                  errorKeyPrefix="spaces.schema.renamePropError" />
                 @if (layerMarks()[p.key]; as mark) {
                   <!-- A network layer supplies this property's definition (a clash it wins): said by name, and the other networks can be
                        offered it as a proposal - a vote there, never a direct write. Siblings of each other, not nested in the row's
@@ -518,6 +522,11 @@ export class SchemaTypeEditorComponent {
 
   /** Asked for, not done: the notice lives here, the action belongs to the host. */
   readonly unlink = output<void>();
+  /**
+   * A property of this type was renamed (the stored schema is untouched until Save): its old key and its new one. The draft already
+   * carries the rename and the name it was stored under, so a host needs this only to follow it, not to record it.
+   */
+  readonly propRenamed = output<{ from: string; to: string }>();
 
   /** Short alias so the template reads as `d().field` rather than repeating `draft()`. */
   readonly d = this.draft;
@@ -604,6 +613,21 @@ export class SchemaTypeEditorComponent {
   onAddProp(): void {
     const key = addProp(this.draft());
     if (key !== null) this.toggleOpen(key);   // expand what was just created
+  }
+  /**
+   * The rename the pencil of one row performs: the pure edit on the draft, and an error KEY or null, as the type name's own rename.
+   * The row's open detail card follows the key, and the host is told only when something was renamed.
+   */
+  renamerFor(from: string): (to: string) => 'empty' | 'exists' | 'missing' | null {
+    return (to: string) => {
+      const err = renameProp(this.draft(), from, to);
+      const key = to.trim();
+      if (err !== null || key === from) return err;
+      const open = new Set(this.openRows());
+      if (open.delete(from)) { open.add(key); this.openRows.set(open); }
+      this.propRenamed.emit({ from, to: key });
+      return null;
+    };
   }
   onRemoveProp(key: string): void {
     removeProp(this.draft(), key);

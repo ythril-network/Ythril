@@ -108,6 +108,18 @@ describe('renaming', () => {
     expect(input(), 'the field closes').toBeNull();
   });
 
+  it('the row is the same row after a rename, so the keyboard stays on its pencil', async () => {
+    const { fixture, el, open, type, press, pencil } = mount(draftOf('company', 'email'));
+    const row = el.querySelector('tr.prop-row');
+    open('company');
+    type('employer');
+    press('Enter');
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(el.querySelector('tr.prop-row')).toBe(row);
+    expect(document.activeElement).toBe(pencil('employer'));
+  });
+
   it('tells its host what was renamed', () => {
     const { rename, renamed, listen } = mount(draftOf('company', 'email'));
     listen();
