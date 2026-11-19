@@ -41,12 +41,15 @@ import { storeFailureAnswer } from '../brain/store-failure.js';
 import { refusalOfParse } from '../util/log.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 import { takeExportSlot, EXPORT_RETRY_AFTER_SECONDS, type ExportSlot } from '../export/export-slots.js';
+import {
+  EXPORT_OK, EXPORT_BAD_REQUEST, EXPORT_FORBIDDEN, EXPORT_NOT_ACCEPTABLE, EXPORT_CONFLICT, EXPORT_BUSY, EXPORT_UNAVAILABLE,
+} from '../export/export-statuses.js';
 import { blank, iri, plain, quad, stdIri, typed, xsd, type Quad, type EdgeDetails, type LeftOutReason } from './literals.js';
 import { RDF_READ_FIELDS, SKIPPED_VALUES_NAMED_MAX, recordTriples, createSkippedLog, type RdfRecordKind, type SkippedValue } from './record-triples.js';
 import { graphIri, prefixesFor, recordAddressable, recordIri, versionIri } from './term-iri.js';
 import { createRdfWriter, type RdfFormat } from './serialize.js';
-import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES } from './export-format.js';
-import { rdfSpaceState, RDF_NOT_ENABLED, type RdfCaller } from './rdf-space-state.js';
+import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES, RDF_BAD_FORMAT } from './export-format.js';
+import { rdfSpaceState, RDF_NOT_ENABLED, type RdfCaller, type FingerprintOf } from './rdf-space-state.js';
 import { ythrilIri } from './ythril-vocabulary.js';
 
 /** The most records one page holds. */
@@ -70,7 +73,7 @@ export const RDF_EXPORT_INCOMPLETE = 'rdf_export_incomplete';
 
 /** Every refusal code the records export answers, for the tool's description and the guide. */
 export const RDF_EXPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
-  'rdf_bad_format', 'rdf_format_not_acceptable', RDF_BAD_EDGE_DETAILS, RDF_BAD_AFTER, RDF_BAD_LIMIT, RDF_BAD_BUDGET, RDF_EXPORT_RUNG,
+  RDF_BAD_FORMAT, 'rdf_format_not_acceptable', RDF_BAD_EDGE_DETAILS, RDF_BAD_AFTER, RDF_BAD_LIMIT, RDF_BAD_BUDGET, RDF_EXPORT_RUNG,
   RDF_NOT_ENABLED, 'rdf_base_conflict', RDF_EXPORT_BUSY, RDF_EXPORT_INCOMPLETE,
 ]);
 
@@ -82,7 +85,7 @@ export const RDF_EDGE_DETAILS: readonly EdgeDetails[] = Object.freeze(['rdf12', 
  * not take is dropped, never followed.
  */
 export const RdfExportParams = z.object({
-  format: z.unknown().optional(),
+  format: z.enum(['turtle', 'trig', 'nquads', 'jsonld']).optional(),
   edgeDetails: z.enum(['rdf12', 'reification']).optional(),
   after: z.string().min(1).max(RDF_EXPORT_CURSOR_MAX).optional(),
   limit: z.number().int().min(1).max(RDF_EXPORT_LIMIT_MAX).optional(),
@@ -92,6 +95,7 @@ export const RdfExportParams = z.object({
 });
 
 const FIELD_CODES: Readonly<Record<string, string>> = {
+  format: RDF_BAD_FORMAT,
   edgeDetails: RDF_BAD_EDGE_DETAILS, after: RDF_BAD_AFTER, limit: RDF_BAD_LIMIT, maxChars: RDF_BAD_BUDGET, maxBytes: RDF_BAD_BUDGET, maxTokens: RDF_BAD_BUDGET,
 };
 
@@ -137,13 +141,13 @@ export interface RdfExportSummary {
 
 /** A finished page: its text in pieces, its summary, what each door puts on its wire, and the slot to release when it is sent. */
 export interface RdfExportPage {
-  status: 200;
+  status: typeof EXPORT_OK;
   chunks: string[];
   summary: RdfExportSummary;
   contentType: string;
   disposition: string;
-  /** The REST trailers: the count of left-out values and the records they belong to. */
-  trailers: Record<string, string>;
+  /** The records the named left-out values belong to, each once (the REST door spells them into its trailer). */
+  skippedRecords: string[];
   /** The audit row's changes (scalars only, cut to the operation's allowlist by the middleware). */
   auditChanges: Array<{ field: string; to: string | number | boolean }>;
   /** The view's members, for `Ythril-View-Members`; absent for a space. */
@@ -152,7 +156,7 @@ export interface RdfExportPage {
 }
 
 export interface RdfExportRefusal {
-  status: 400 | 403 | 406 | 409 | 429 | 503;
+  status: typeof EXPORT_BAD_REQUEST | typeof EXPORT_FORBIDDEN | typeof EXPORT_NOT_ACCEPTABLE | typeof EXPORT_CONFLICT | typeof EXPORT_BUSY | typeof EXPORT_UNAVAILABLE;
   error: string;
   code: string;
   detail?: Record<string, unknown>;
@@ -175,15 +179,19 @@ export interface RdfExportInput {
   /** Who a slot counts against: the calling token's id, or the address of a caller with none. */
   callerKey: string;
   transport: 'mcp' | 'rest';
+  /** The door's `schemaFingerprintOf` (`rdf-space-state.ts` says why it is handed in). */
+  fingerprintOf: FingerprintOf;
 }
 
 /** A position in the walk: a member space, a kind, the last `_id` read. Opaque to the caller. */
 interface Cursor { space: string; kind: RdfRecordKind; last: string }
+/** The parts of a cursor's text: the member space, the kind, the last `_id`. */
+const CURSOR_PARTS = 3;
 const encodeCursor = (c: Cursor): string => Buffer.from(JSON.stringify([c.space, c.kind, c.last]), 'utf8').toString('base64url');
 function decodeCursor(text: string, members: readonly string[]): Cursor | null {
   try {
     const v: unknown = JSON.parse(Buffer.from(text, 'base64url').toString('utf8'));
-    if (!Array.isArray(v) || v.length !== 3 || !v.every(x => typeof x === 'string')) return null;
+    if (!Array.isArray(v) || v.length !== CURSOR_PARTS ||!v.every(x => typeof x === 'string')) return null;
     const [space, kind, last] = v as [string, string, string];
     if (!members.includes(space) || !WALK.some(w => w.kind === kind)) return null;
     return { space, kind: kind as RdfRecordKind, last };
@@ -225,11 +233,11 @@ export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutc
   if (!parsed.success) {
     const refusal = refusalOfParse(parsed.error);
     const field = String(refusal.issues[0]?.path[0] ?? '');
-    return { status: 400, error: refusal.error, code: FIELD_CODES[field] ?? RDF_BAD_LIMIT };
+    return { status: EXPORT_BAD_REQUEST, error: refusal.error, code: FIELD_CODES[field] ?? RDF_BAD_LIMIT };
   }
   const view = input.viewMembers !== undefined;
   if (!view && !mayRead(rights, spaceId, 'knowledge')) {
-    return { status: 403, error: `Exporting the records of a space needs knowledge: read on it, which this token does not hold on '${spaceId}'`, code: RDF_EXPORT_RUNG };
+    return { status: EXPORT_FORBIDDEN, error: `Exporting the records of a space needs knowledge: read on it, which this token does not hold on '${spaceId}'`, code: RDF_EXPORT_RUNG };
   }
   const cfg = getConfig();
   const members = view ? [...input.viewMembers!] : [spaceId];
@@ -238,7 +246,7 @@ export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutc
   const inConflict: string[] = [];
   let firstRefusal: RdfExportRefusal | null = null;
   for (const m of members) {
-    const state = rdfSpaceState(cfg, m, caller);
+    const state = rdfSpaceState(cfg, m, caller, input.fingerprintOf);
     if (state.ok) { exported.push({ space: m, meta: state.meta, fingerprint: state.fingerprint }); continue; }
     firstRefusal ??= { status: state.status, error: state.error, code: state.code, ...(state.detail ? { detail: state.detail } : {}) };
     (state.code === RDF_NOT_ENABLED ? withoutRdf : inConflict).push(m);
@@ -249,20 +257,20 @@ export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutc
   if (!choice.ok) return { status: choice.status, error: choice.error, code: choice.code, detail: { formats: choice.formats } };
   const format = choice.format;
   if (format === 'jsonld' && parsed.data.edgeDetails === 'rdf12') {
-    return { status: 400, error: 'JSON-LD 1.1 has no triple term, so it carries edge details only in the classic form: leave edgeDetails out or send reification', code: RDF_BAD_EDGE_DETAILS };
+    return { status: EXPORT_BAD_REQUEST, error: 'JSON-LD 1.1 has no triple term, so it carries edge details only in the classic form: leave edgeDetails out or send reification', code: RDF_BAD_EDGE_DETAILS };
   }
   const edgeDetails: EdgeDetails = parsed.data.edgeDetails ?? (format === 'jsonld' ? 'reification' : 'rdf12');
   const cursor = parsed.data.after === undefined ? null : decodeCursor(parsed.data.after, exported.map(e => e.space));
   if (parsed.data.after !== undefined && !cursor) {
-    return { status: 400, error: 'after: not a cursor this export gave (pass the nextAfter of the previous page, or the after of its Link)', code: RDF_BAD_AFTER };
+    return { status: EXPORT_BAD_REQUEST, error: 'after: not a cursor this export gave (pass the nextAfter of the previous page, or the after of its Link)', code: RDF_BAD_AFTER };
   }
   const resolved = resolveBudget(parsed.data, defaultBudgetChars(transport), 1);
-  if (!resolved.ok) return { status: 400, error: resolved.error, code: RDF_BAD_BUDGET };
+  if (!resolved.ok) return { status: EXPORT_BAD_REQUEST, error: resolved.error, code: RDF_BAD_BUDGET };
 
   const slot = takeExportSlot(input.callerKey);
   if (!slot) {
     return {
-      status: 429, code: RDF_EXPORT_BUSY, retryAfterSeconds: EXPORT_RETRY_AFTER_SECONDS,
+      status: EXPORT_BUSY, code: RDF_EXPORT_BUSY, retryAfterSeconds: EXPORT_RETRY_AFTER_SECONDS,
       error: 'An export is already running for this token, or as many exports as the instance runs at once: try again when it ends',
     };
   }
@@ -274,9 +282,9 @@ export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutc
   } catch (err) {
     slot.release();
     const store = storeFailureAnswer(err, `export_rdf '${spaceId}'`);
-    if (store && store.status === 503) {
+    if (store && store.status === EXPORT_UNAVAILABLE) {
       return {
-        status: 503, code: RDF_EXPORT_INCOMPLETE, retryAfterSeconds: store.retryAfterSeconds ?? EXPORT_RETRY_AFTER_SECONDS,
+        status: EXPORT_UNAVAILABLE, code: RDF_EXPORT_INCOMPLETE, retryAfterSeconds: store.retryAfterSeconds ?? EXPORT_RETRY_AFTER_SECONDS,
         error: 'The store did not answer a page of this export in time, so nothing of the page was sent: try again (from the same after)',
       };
     }
@@ -442,13 +450,12 @@ async function buildPage(p: PageInput): Promise<RdfExportPage> {
     fileTriplesWithheld: withheld, truncated: refused !== null, budgetChars, budgetBytes, charsReturned: chars, bytesReturned: bytes,
     ...(refused ? { budgetBoundBy: budgetBoundBy(refused, p.budget) } : {}),
   };
-  const recordsNamed = [...new Set(namedFirst.map(v => encodeURIComponent(v.recordId)))];
   const auditNamed = names.join(', ');
   return {
-    status: 200, chunks, summary, slot: p.slot,
+    status: EXPORT_OK, chunks, summary, slot: p.slot,
     contentType: rdfContentType(p.format, writer.version),
     disposition: rdfContentDisposition(p.input.spaceId, p.format),
-    trailers: { 'Ythril-Skipped-Values': String(summaryOfSkipped.count), 'Ythril-Skipped-Records': recordsNamed.join(', ') },
+    skippedRecords: [...new Set(namedFirst.map(v => v.recordId))],
     auditChanges: [
       { field: 'format', to: p.format }, { field: 'edgeDetails', to: p.edgeDetails }, { field: 'members', to: summary.members.join(',') },
       { field: 'records', to: records }, { field: 'complete', to: complete }, { field: 'skippedValues', to: summaryOfSkipped.count },

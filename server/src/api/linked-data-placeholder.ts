@@ -11,16 +11,23 @@
  * Unauthenticated and reading nothing: it answers the same to every caller and says nothing of any space.
  */
 import { Router } from 'express';
+import { EXPORT_NOT_FOUND } from '../export/export-statuses.js';
 
 /** Mounted by `app.ts` at `/ld`, before the single-page app. */
 export const linkedDataPlaceholderRouter = Router();
 
+const TITLE = 'Not a resolvable address yet';
+
 linkedDataPlaceholderRouter.use((_req, res) => {
-  res.status(404).type('application/problem+json').send(JSON.stringify({
+  // JSON as every error answer is (`{ error }` beside the RFC 9457 members); its media type says it is a problem body, and `json` keeps a
+  // Content-Type already set.
+  res.setHeader('Content-Type', 'application/problem+json; charset=utf-8');
+  res.status(EXPORT_NOT_FOUND).json({
     type: 'about:blank',
-    title: 'Not a resolvable address yet',
-    status: 404,
-    detail: 'Addresses under /ld/ are names for now: Ythril does not resolve them yet. A space\'s records are exported as RDF by '
+    title: TITLE,
+    status: EXPORT_NOT_FOUND,
+    detail: 'The addresses an RDF export writes are names for now: Ythril does not resolve them yet. A space\'s records are exported as RDF by '
       + 'GET /api/brain/spaces/{spaceId}/export/rdf (MCP export_rdf), and its schema by GET /api/spaces/{spaceId}/schema-rdf (MCP space_schema_rdf).',
-  }));
+    error: TITLE,
+  });
 });

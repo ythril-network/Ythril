@@ -20,6 +20,7 @@ import { viewReadOfCall } from '../../spaces/read-scope.js';
 import { toolRefusalOfAct } from '../../util/errors.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
 import { KEYSET_PAGER } from '../../brain/result-budget.js';
+import { schemaFingerprintOf } from '../../spaces/schema-stamp.js';
 
 const STRINGS = { type: 'array', items: { type: 'string' } } as const;
 
@@ -73,7 +74,7 @@ export const export_rdfTool: ToolHandler = {
       space: s.requiredSpace,
       format: { type: 'string', enum: [...RDF_FORMATS], description: 'turtle, trig, nquads or jsonld. Omit it for the default: Turtle for one space, TriG for a view of several (Turtle holds one graph, so it is refused for several: 406 `rdf_format_not_acceptable`).' },
       edgeDetails: { type: 'string', enum: [...RDF_EDGE_DETAILS], description: 'How an edge\'s own details (weight, type, properties) are stated. `rdf12` (the default for the text formats) is RDF 1.2, announced in the document: a reader older than RDF 1.2 cannot parse it. `reification` is the classic form every reader takes (and the only form JSON-LD carries).' },
-      after: { type: 'string', maxLength: RDF_EXPORT_CURSOR_MAX, description: 'The `nextAfter` of the previous page, to continue after it. Omit it to start from the beginning. Anything else is refused (`rdf_bad_after`).' },
+      after: { type: 'string', minLength: 1, maxLength: RDF_EXPORT_CURSOR_MAX, description: 'The `nextAfter` of the previous page, to continue after it. Omit it to start from the beginning. Anything else is refused (`rdf_bad_after`).' },
       limit: { type: 'integer', minimum: 1, maximum: RDF_EXPORT_LIMIT_MAX, description: 'The most records in this page. Omit it to let the size ceiling alone end the page.' },
       ...budgetSizeSchema('record', KEYSET_PAGER),
     },
@@ -85,7 +86,7 @@ export const export_rdfTool: ToolHandler = {
     const r = await rdfExportAct({
       spaceId: ctx.callSpace, viewMembers: viewReadOfCall(ctx, ctx.callSpace),
       params: { format, edgeDetails, after, limit, maxChars, maxBytes, maxTokens },
-      caller: ctx.callerRecord ?? { rights: ctx.rights ?? null }, callerKey: ctx.rateKey, transport: ctx.transport,
+      caller: ctx.callerRecord ?? { rights: ctx.rights ?? null }, callerKey: ctx.rateKey, transport: ctx.transport, fingerprintOf: schemaFingerprintOf,
     });
     if ('error' in r) {
       throw toolRefusalOfAct(r.status, r.error, {

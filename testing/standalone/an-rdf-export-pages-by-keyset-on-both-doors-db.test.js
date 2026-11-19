@@ -18,6 +18,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { openRdfExportDoors, rdfMeta, baseOf, parseRdf } from './_rdf-export-doors.mjs';
 
 const skip = await mongoSkipReason();
@@ -36,7 +37,7 @@ describe('an RDF export pages by keyset on both doors', { skip }, () => {
   after(async () => { await d?.close(); });
 
   // The records' own subjects: an entity or a fact address (an agent node is stated again on each page that names it).
-  const record = new RegExp(`^${baseOf(SPACE).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:entity|fact)/[^/#]+$`);
+  const record = new RegExp(`^${escapeRegExp(baseOf(SPACE))}(?:entity|fact)/[^/#]+$`);
   const subjectsOf = async (format, text) => (await parseRdf(format, text))
     .filter(q => q.predicate.value === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' && record.test(q.subject.value))
     .map(q => q.subject.value);

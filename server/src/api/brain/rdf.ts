@@ -26,6 +26,8 @@ import { rdfExportAct, rdfExportIdleMs, type RdfExportPage } from '../../rdf/exp
 import { answeredUnknownSpace } from '../write-target-answer.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import type { TokenRights } from '../../config/rights-shape.js';
+import { EXPORT_OK } from '../../export/export-statuses.js';
+import { schemaFingerprintOf } from '../../spaces/schema-stamp.js';
 
 export const rdfExportRouter = Router();
 
@@ -47,7 +49,7 @@ rdfExportRouter.get('/spaces/:spaceId/export/rdf', globalRateLimit, requireSpace
         format: req.query['format'], edgeDetails: req.query['edgeDetails'], after: req.query['after'], limit: req.query['limit'],
         maxChars: req.query['maxChars'], maxBytes: req.query['maxBytes'], maxTokens: req.query['maxTokens'],
       },
-      caller: token, callerKey: token?.id ?? req.ip ?? '', transport: 'rest',
+      caller: token, callerKey: token?.id ?? req.ip ?? '', transport: 'rest', fingerprintOf: schemaFingerprintOf,
     });
   } catch (err) {
     sendCaughtFailure(res, 'GET /api/brain/spaces/:spaceId/export/rdf', err);
@@ -76,10 +78,15 @@ async function sendPage(req: Request, res: Response, page: RdfExportPage): Promi
   const release = (): void => { if (!released) { released = true; page.slot.release(); } };
   res.once('close', release);
   req.auditChangesExplicit = page.auditChanges;
-  res.status(200);
+  res.status(EXPORT_OK);
   res.setHeader('Content-Type', page.contentType);
   res.setHeader('Content-Disposition', page.disposition);
-  res.setHeader('Trailer', Object.keys(page.trailers).join(', '));
+  // A header value is Latin-1: the record ids are percent-encoded, as the view members are.
+  const trailers = {
+    'Ythril-Skipped-Values': String(summary.skippedValues.count),
+    'Ythril-Skipped-Records': page.skippedRecords.map(encodeURIComponent).join(', '),
+  };
+  res.setHeader('Trailer', Object.keys(trailers).join(', '));
   res.setHeader('Ythril-Budget-Chars', String(summary.budgetChars));
   if (summary.budgetBytes !== null) res.setHeader('Ythril-Budget-Bytes', String(summary.budgetBytes));
   if (summary.nextAfter) res.setHeader('Link', nextLink(req, summary.format, summary.nextAfter));
@@ -94,7 +101,7 @@ async function sendPage(req: Request, res: Response, page: RdfExportPage): Promi
         return;
       }
     }
-    res.addTrailers(page.trailers);
+    res.addTrailers(trailers);
     res.end();
   } finally {
     if (res.writableEnded || res.destroyed) release();

@@ -48,10 +48,16 @@ export class NotEmbeddedYetError extends NotFoundError {}
  * `body` is the structure the REST door answers beside that sentence — a failed parse's `{ error, issues }` — carried as the tool
  * result's `structuredContent`, so a caller that reads the structure gets it on both doors and not on one.
  */
+/**
+ * The statuses a {@link ToolRefusal} carries. 406 and 503 joined with the RDF export (Q-750): a format the scope cannot take, and a page the store
+ * did not answer, answered alike on both doors.
+ */
+export const TOOL_REFUSAL_STATUSES = Object.freeze([400, 403, 404, 406, 409, 410, 422, 429, 503] as const);
+export type ToolRefusalStatus = (typeof TOOL_REFUSAL_STATUSES)[number];
+
 export class ToolRefusal extends Error {
   override readonly name = 'ToolRefusal';
-  // 406 and 503: an export's format the scope cannot take, and a page the store did not answer (Q-750), answered alike on both doors.
-  constructor(readonly status: 400 | 403 | 404 | 406 | 409 | 410 | 422 | 429 | 503, message: string, readonly body?: Readonly<Record<string, unknown>>) {
+  constructor(readonly status: ToolRefusalStatus, message: string, readonly body?: Readonly<Record<string, unknown>>) {
     super(message);
   }
 }

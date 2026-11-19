@@ -10,16 +10,16 @@
  *   only to a caller who may read that network through its own doors (`visibleNetworks`: `networks: read` on every space it carries, or
  *   administering them all); anyone else is told the base is in conflict and who can settle it.
  * - **A second spelling of the space's names.** The meta handed back is the resolved one (`inlineResolvableRefs`), which the record form and
- *   the schema graph need, and the fingerprint is the one every record names in `dcterms:conformsTo` (`schemaFingerprintOf`).
+ *   the schema graph need, and the fingerprint is the one every record names in `dcterms:conformsTo` (the door's `schemaFingerprintOf`).
  */
 import type { SpaceMeta } from '@ythril-network/schema';
-import type { Config } from '../config/types.js';
+import type { Config, SpaceConfig } from '../config/types.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { rdfBaseConflictOf } from '../spaces/rdf-settle.js';
 import { inlineResolvableRefs } from '../spaces/schema-validation.js';
-import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
 import { visibleNetworks } from '../auth/network-rights.js';
 import { peerText, NAME_QUOTED } from '../util/log.js';
+import { EXPORT_CONFLICT } from '../export/export-statuses.js';
 
 /** The code of a space with RDF off. */
 export const RDF_NOT_ENABLED = 'rdf_not_enabled';
@@ -31,16 +31,22 @@ export interface RdfCaller { admin?: boolean; rights?: TokenRights | null }
 
 export type RdfSpaceState =
   | { ok: true; meta: SpaceMeta; fingerprint: string }
-  | { ok: false; status: 409; code: typeof RDF_NOT_ENABLED | typeof RDF_BASE_CONFLICT; error: string; detail?: Record<string, unknown> };
+  | { ok: false; status: typeof EXPORT_CONFLICT; code: typeof RDF_NOT_ENABLED | typeof RDF_BASE_CONFLICT; error: string; detail?: Record<string, unknown> };
+
+/**
+ * The fingerprint of a configured space's schema now (`schemaFingerprintOf`, `spaces/schema-stamp.ts`), handed in by the door: that module sits
+ * in the server's largest import cycle, and an act that imported it would join the cycle with everything that imports the act.
+ */
+export type FingerprintOf = (space: SpaceConfig) => string;
 
 /** Whether `spaceId` (a configured space) can be exported as RDF for `caller`, with its resolved meta and fingerprint. */
-export function rdfSpaceState(cfg: Config, spaceId: string, caller: RdfCaller | undefined): RdfSpaceState {
+export function rdfSpaceState(cfg: Config, spaceId: string, caller: RdfCaller | undefined, fingerprintOf: FingerprintOf): RdfSpaceState {
   const space = cfg.spaces.find(s => s.id === spaceId);
   const rdf = space?.meta?.rdf;
   const named = `'${peerText(spaceId, { max: NAME_QUOTED })}'`;
   if (!space || rdf?.enabled !== true || !rdf.base) {
     return {
-      ok: false, status: 409, code: RDF_NOT_ENABLED,
+      ok: false, status: EXPORT_CONFLICT, code: RDF_NOT_ENABLED,
       error: `Space ${named} has RDF switched off, so its records have no addresses to export: an administrator of its schema switches it on (meta.rdf.enabled)`,
     };
   }
@@ -52,12 +58,12 @@ export function rdfSpaceState(cfg: Config, spaceId: string, caller: RdfCaller | 
     });
     const told = seen.map(o => `network '${peerText(o.networkId ?? '', { max: NAME_QUOTED })}'${o.memberId ? ` (member '${peerText(o.memberId, { max: NAME_QUOTED })}')` : ''} offers the base ${o.base} at epoch ${o.epoch}`);
     return {
-      ok: false, status: 409, code: RDF_BASE_CONFLICT,
+      ok: false, status: EXPORT_CONFLICT, code: RDF_BASE_CONFLICT,
       error: `Space ${named} has an RDF base that a network it is shared in contests, so its addresses are not settled and nothing is exported. `
         + 'An administrator of the space\'s networks settles it: accept the offered base or rebase the space (PATCH /api/spaces/:id with rdf.rebase).'
         + (told.length > 0 ? ` ${told.join('; ')}.` : ''),
       ...(seen.length > 0 ? { detail: { conflict: { held: conflict.held, offered: seen } } } : {}),
     };
   }
-  return { ok: true, meta: inlineResolvableRefs(space.meta as SpaceMeta), fingerprint: schemaFingerprintOf(space) };
+  return { ok: true, meta: inlineResolvableRefs(space.meta as SpaceMeta), fingerprint: fingerprintOf(space) };
 }

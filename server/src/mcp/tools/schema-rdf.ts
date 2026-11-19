@@ -7,6 +7,8 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { rdfSchemaExportAct, RDF_SCHEMA_FORMATS, RDF_SCHEMA_REFUSAL_CODES } from '../../rdf/schema-export-act.js';
 import { toolRefusalOfAct } from '../../util/errors.js';
+import { EXPORT_OK } from '../../export/export-statuses.js';
+import { schemaFingerprintOf } from '../../spaces/schema-stamp.js';
 
 export const RDF_SCHEMA_OUTPUT_SCHEMA = {
   type: 'object',
@@ -41,8 +43,10 @@ export const space_schema_rdfTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
-    const r = rdfSchemaExportAct({ spaceId: ctx.callSpace, format: ctx.args['format'], caller: ctx.callerRecord ?? { rights: ctx.rights ?? null } });
-    if (r.status !== 200) throw toolRefusalOfAct(r.status, r.error, { error: r.error, code: r.code, ...(r.detail ?? {}) });
+    const r = rdfSchemaExportAct({
+      spaceId: ctx.callSpace, format: ctx.args['format'], caller: ctx.callerRecord ?? { rights: ctx.rights ?? null }, fingerprintOf: schemaFingerprintOf,
+    });
+    if (r.status !== EXPORT_OK) throw toolRefusalOfAct(r.status, r.error, { error: r.error, code: r.code, ...(r.detail ?? {}) });
     ctx.recordAuditChanges?.(r.auditChanges);
     return {
       content: [{ type: 'text' as const, text: r.text }, { type: 'text' as const, text: JSON.stringify(r.summary) }],
