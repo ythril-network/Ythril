@@ -344,7 +344,7 @@ describe('the SkippedLog: the count, the first named, the rest counted', () => {
     assert.equal(typeof max, 'number', 'SKIPPED_VALUES_NAMED_MAX is exported');
     const log = fn('createSkippedLog')();
     const values = Array.from({ length: max + 7 }, (_, i) => ({ recordId: `r${i}`, kind: 'entity', key: 'k', reason: 'not-a-plain-value' }));
-    for (let i = 0; i < values.length; i += 10) log.add(values.slice(i, i + 10));
+    for (const v of values) log.add([v]);
     const sum = log.summary();
     assert.equal(sum.count, max + 7);
     assert.equal(sum.named.length, max);

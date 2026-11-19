@@ -22,6 +22,7 @@
  * home space's meta.
  */
 import type { KnowledgeType, SpaceMeta } from '@ythril-network/schema';
+import { SCHEMA_FINGERPRINT_FIELD } from '@ythril-network/schema/internal';
 import { isRefKind, type RefKind } from '../config/types-knowledge.js';
 import {
   iri, literalForBoolean, literalForDecimal, literalForInteger, literalForTemporal, literalForValue, plain, stdIri, temporalKind, triple,
@@ -69,7 +70,7 @@ export interface RecordTriplesResult {
   leftOut?: LeftOutRecord;
 }
 
-const SHARED_FIELDS = ['_id', 'tags', 'description', 'author', 'createdAt', 'updatedAt', 'schemaFingerprint', 'superseded', 'forkOf'] as const;
+const SHARED_FIELDS = ['_id', 'tags', 'description', 'author', 'createdAt', 'updatedAt', SCHEMA_FINGERPRINT_FIELD, 'superseded', 'forkOf'] as const;
 
 /**
  * The fields the mapper reads, per record kind, and nothing else. Also the export's cursor projection. Includes the marks that exclude a
@@ -191,15 +192,18 @@ class Form {
       }
     }
     if (d['superseded'] === true) this.add(subject, iri(ythrilIri('superseded')), literalForBoolean(true));
-    if (isText(d['schemaFingerprint'])) this.add(subject, stdIri('dcterms', 'conformsTo'), iri(versionIri(this.meta, d['schemaFingerprint'])));
+    const stamp = d[SCHEMA_FINGERPRINT_FIELD];
+    if (isText(stamp)) this.add(subject, stdIri('dcterms', 'conformsTo'), iri(versionIri(this.meta, stamp)));
   }
 
   /** Each property as one literal on its term, typed by its declared type; what is no plain value or does not fit is left out and named. */
   properties(subject: IriTerm, raw: unknown, termKind: TermKind, type: string | null): void {
     if (raw === undefined || raw === null) return;
     if (!isBag(raw)) { this.skip('properties', 'not-a-plain-value'); return; }
-    for (const key of Object.keys(raw).sort()) {
-      const outcome = literalForValue(raw[key], declaredTypeOf(this.meta, termKind, type, key));
+    // The outcomes are ordered by property key (code units), so two members' exports of one record agree whatever the order a store gave its keys.
+    const outcomes = Object.keys(raw).map(key => ({ key, outcome: literalForValue(raw[key], declaredTypeOf(this.meta, termKind, type, key)) }));
+    outcomes.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    for (const { key, outcome } of outcomes) {
       if (outcome.kind === 'nothing') continue;
       if (outcome.kind === 'left-out') { this.skip(key, outcome.reason); continue; }
       if (outcome.untypedTemporal) this.untypedTemporals++;
