@@ -13,6 +13,7 @@ import { ModalDirective } from '../../shared/modal.directive';
 import { PhIconComponent } from '../../shared/ph-icon.component';
 import { DIALOG_STYLES } from '../settings/dialog.styles';
 import { compareForkVersions, fieldSegments, forkOwnFields, textSegments, type FieldDifference, type Segment } from './fork-diff';
+import { REVIEW_SEGMENTED_STYLES, reviewSegmentedPhone } from './review-panel.styles';
 
 /** Characters of the discarded text the confirmation quotes: enough to recognise it, short enough to read in a dialog. */
 const QUOTE_CHARS = 90;
@@ -64,18 +65,11 @@ interface RowView {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [NgTemplateOutlet, TranslocoPipe, ModalDirective, PhIconComponent],
-  styles: [DIALOG_STYLES, `
+  styles: [DIALOG_STYLES, REVIEW_SEGMENTED_STYLES, reviewSegmentedPhone(560), `
     :host { display: block; }
 
     /* The kind switch: one radio group, four cells on a desktop and a 2 x 2 grid on a phone. */
-    .sg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; margin: 0 0 10px; background: var(--bg-surface); }
-    .sg-opt { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 7px 16px; min-height: 36px; font: inherit; font-size: 13px; font-weight: 500; color: var(--text-secondary); background: transparent; border: none; border-left: 1px solid var(--border); cursor: pointer; white-space: nowrap; }
-    .sg-opt:first-child { border-left: none; }
-    .sg-opt:hover { color: var(--text-primary); background: var(--bg-elevated); }
-    .sg-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
-    .sg-opt[aria-checked="true"] { color: var(--text-primary); background: var(--bg-overlay); box-shadow: inset 0 -2px 0 var(--accent); }
-    .sg-n { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-muted); }
-    .sg-opt[aria-checked="true"] .sg-n { color: var(--text-secondary); }
+    .sg { margin: 0 0 10px; }
     .sg-opt[data-zero="1"] { color: var(--text-muted); }
     .sg-el { width: 6px; height: 6px; border-radius: 50%; background: var(--warning); flex-shrink: 0; }
 
@@ -134,10 +128,6 @@ interface RowView {
     .fk-actions button:focus-visible, .dialog button:focus-visible, .l3-full summary:focus-visible, .kind-empty button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     @media (max-width: 560px) {
-      .sg { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
-      .sg-opt { border-left: none; border-top: 1px solid var(--border); justify-content: space-between; }
-      .sg-opt:nth-child(-n+2) { border-top: none; }
-      .sg-opt:nth-child(even) { border-left: 1px solid var(--border); }
       .l3-f { grid-template-columns: 1fr; gap: 0; }
       .fk-actions .btn { flex: 1 1 100%; justify-content: center; }
     }

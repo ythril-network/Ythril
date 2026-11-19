@@ -10,6 +10,7 @@ import { StatusPillComponent } from '../../shared/status-pill.component';
 import { SummaryStripComponent, type SummaryItem } from '../../shared/summary-strip.component';
 import { ReviewContradictionsState } from './review-contradictions-state';
 import { scorePct, scoreVariant } from './review-score';
+import { REVIEW_CARD_STYLES } from './review-panel.styles';
 
 /**
  * The Contradictions tab panel of Review: the intro, its own status and scan strip, and the list or its loading, failed and empty states
@@ -25,19 +26,13 @@ import { scorePct, scoreVariant } from './review-score';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, TranslocoPipe, PhIconComponent, StatusPillComponent, RelativeTimeComponent, ErrorStateComponent, SummaryStripComponent],
-  styles: [`
+  styles: [REVIEW_CARD_STYLES, `
     :host { display: block; }
     .intro { color: var(--text-muted); font-size: 13px; margin: 0 0 16px; }
     .strip-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .strip-ctl select { font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); }
     .dup-search { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-muted); }
     .dup-search input { border: 0; background: transparent; color: var(--text-primary); font-size: 13px; outline: none; width: 150px; }
-
-    .dup-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; margin-top: 16px; }
-    .dup-card { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
-    .dup-card-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
-    .dup-type { color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; }
-    .dup-when { color: var(--text-muted); font-size: 11px; margin-left: auto; }
 
     .conf { display: inline-flex; align-items: center; gap: 6px; }
     .conf-track { width: 54px; height: 6px; border-radius: 3px; background: var(--bg-elevated); overflow: hidden; }
@@ -48,9 +43,6 @@ import { scorePct, scoreVariant } from './review-score';
     .conf-pct { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
 
     .dup-ab { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: stretch; }
-    .dup-rec { border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 9px; background: var(--bg-primary); min-width: 0; }
-    .dup-rec-l { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
-    .dup-rec-txt { font-size: 12px; white-space: pre-wrap; word-break: break-word; color: var(--text-primary); }
     .dup-rec.b .dup-rec-txt { color: var(--text-secondary); }
     .dup-vs { display: flex; align-items: center; color: var(--text-muted); font-size: 11px; font-style: italic; }
 
