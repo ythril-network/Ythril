@@ -45,6 +45,7 @@
 import type { ScopeShape } from './space-rights.js';
 import { ROUTE_RIGHTS, NOT_AREA_SCOPED_PATHS, type SpaceArea } from './space-rights.js';
 import type { Rung } from '../config/rights-shape.js';
+import { governedMethod } from '../http/governed-method.js';
 
 export interface RungRequirement {
   area: SpaceArea;
@@ -67,9 +68,13 @@ export type RungVerdict =
  * here in another casing must still find its row. A lookup that is exact about case is the Q-700 bypass: `/Api/Brain/...` found no row,
  * was taken for unclassified, and skipped the area rung. Parameter names differ only in case nowhere in the inventory
  * (`a-path-casing-does-not-skip-the-area-rung-db.test.js` and `required-rung-lookup.test.js` hold the lookup).
+ *
+ * The METHOD is the one the request is governed as (`http/governed-method.ts`): a `HEAD` is the `GET` it mirrors, since Express runs
+ * the GET route for it. Keyed by the method as sent, a HEAD found no row and was taken for unclassified, so the area rung was never
+ * asked of it on any path-scoped GET route (`head-is-judged-as-the-get-it-mirrors-db.test.js`).
  */
 function key(method: string, routePath: string): string {
-  return `${method.toUpperCase()} ${path(routePath)}`;
+  return `${governedMethod(method)} ${path(routePath)}`;
 }
 
 /** Trailing slashes normalised the same way, so the two lists cannot disagree on `/x` versus `/x/`; case-blind like `key`. */
