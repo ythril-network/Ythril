@@ -35,6 +35,7 @@
  */
 import express from 'express';
 import type { Application, Request } from 'express';
+import { trimTrailingSlashes } from './path-spelling.js';
 
 /** The label of a request no mount or route claims. */
 export const UNMATCHED = 'unmatched';
@@ -82,7 +83,7 @@ recordMounts();
 
 /** A pattern as the inventory spells it: no trailing slash, `/` for the root. */
 function normalise(p: string): string {
-  return p.replace(/\/+$/, '') || '/';
+  return trimTrailingSlashes(p);
 }
 
 function walk(stack: readonly LayerLike[], prefix: string, onPath: readonly object[]): void {
