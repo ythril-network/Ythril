@@ -37,6 +37,8 @@ import type { SpaceMeta } from '../config/types.js';
 import { readPeerMeta, readStoredMeta, stripServerOwnedMeta } from '../spaces/body-schemas.js';
 import { eachTypeDefinition, mergeMetaFields, mergeTypeDefinition, PER_TYPE_META_FIELD } from '../spaces/meta-fields.js';
 import { isPlainObject, ownValue } from '../util/plain-object.js';
+import { settleRdf, type RdfSettleContext } from '../spaces/rdf-settle.js';
+import type { RdfBaseConflict } from '@ythril-network/schema';
 
 type Obj = Record<string, unknown>;
 
@@ -82,6 +84,8 @@ export function mergeReplicatedMeta(
   if (!read.ok) return { meta: base as SpaceMeta, changed: false, invalid: read.message };
 
   const next = mergeMetaFields(base, { ...read.meta } as Obj, mergeTypesAdditively);
+  // Q-748: a network's copy never moves this space's stored base; it is settled, never replaced.
+  keepSettledRdf(next, local?.rdf, read.meta['rdf'], {});
   const comparable = (m: Obj) => replicatedMetaOf(m as SpaceMeta);
   return {
     meta: next as SpaceMeta,
@@ -100,9 +104,10 @@ export interface MetaLayer { networkId: string; meta: unknown }
  * first so the network first in `layers` wins an exact type-and-property clash. Owner decision 2026-09-25, option A:
  * default precedence is the order the networks were joined, and the operator may reorder it.
  */
-export function effectiveMeta(own: SpaceMeta | undefined, layers: readonly MetaLayer[]): SpaceMeta {
+export function effectiveMeta(own: SpaceMeta | undefined, layers: readonly MetaLayer[], heldRebaseEpochs?: ReadonlySet<number>): SpaceMeta {
   let meta: SpaceMeta = { ...(own ?? {}) };
-  for (const layer of [...layers].reverse()) meta = layOverStored(meta, layer.meta);
+  delete meta.rdfBaseConflict;
+  for (const layer of [...layers].reverse()) meta = layOverStored(meta, layer.meta, { networkId: layer.networkId, ...(heldRebaseEpochs ? { heldRebaseEpochs } : {}) });
   return meta;
 }
 
@@ -111,9 +116,30 @@ export function effectiveMeta(own: SpaceMeta | undefined, layers: readonly MetaL
  * this instance sends a network. It reads what is valid TODAY (`readStoredMeta`) and leaves out what is not: a layer was parsed when it
  * was stored, so this is no gate, and parsing it whole and dropping it for one stale type (the pattern rule is newer than the layer)
  * is how a member held a layer it did not run (`Q-216`). What ARRIVES goes through `mergeReplicatedMeta`, which parses.
+ *
+ * The RDF setting is settled, never replaced (Q-748): the base `base` holds stays, whatever the layer and its precedence, and a base the
+ * layer offers that no held round explains is recorded as `rdfBaseConflict`.
  */
-function layOverStored(base: SpaceMeta, stored: unknown): SpaceMeta {
-  return mergeMetaFields({ ...base }, readStoredMeta(stored).meta, mergeTypesAdditively) as SpaceMeta;
+function layOverStored(base: SpaceMeta, stored: unknown, ctx: RdfSettleContext = {}): SpaceMeta {
+  const layer = readStoredMeta(stored).meta;
+  const next = mergeMetaFields({ ...base }, layer, mergeTypesAdditively);
+  keepSettledRdf(next, base.rdf, layer['rdf'], ctx);
+  return next as SpaceMeta;
+}
+
+/**
+ * Write into `next` the RDF setting a layer leaves (`spaces/rdf-settle.ts`, source `layer`) over `stored`, and the conflict it finds, if any,
+ * beside what `next` already records. The one place the two layer merges settle it, so neither can replace the base whole.
+ */
+function keepSettledRdf(next: Obj, stored: SpaceMeta['rdf'], offered: unknown, ctx: RdfSettleContext): void {
+  // Both were parsed where they were stored or read (`readStoredMeta`, `readPeerMeta`), so the object is the body's shape.
+  const settled = settleRdf(stored, isPlainObject(offered) ? offered as unknown as SpaceMeta['rdf'] : undefined, 'layer', ctx);
+  const rdf = settled.ok ? settled.rdf : stored;
+  if (rdf === undefined) delete next['rdf']; else next['rdf'] = rdf;
+  if (settled.ok && settled.conflict) {
+    const held = isPlainObject(next['rdfBaseConflict']) ? next['rdfBaseConflict'] as unknown as RdfBaseConflict : undefined;
+    next['rdfBaseConflict'] = held ? { ...held, offered: [...held.offered, ...settled.conflict.offered] } : settled.conflict;
+  }
 }
 
 /**

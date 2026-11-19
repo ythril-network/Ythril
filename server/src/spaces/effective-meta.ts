@@ -28,6 +28,7 @@ import { derivedFromStored, type ParsedSpaceMeta, type ParsedTypeSchema } from '
 import { updateSpace } from './spaces.js';
 import { layersFor } from './network-layers.js';
 import { keepLayerSnapshot } from './schema-snapshot-store.js';
+import { heldRebaseEpochs } from './rdf-settle.js';
 
 export { layersFor };
 
@@ -48,8 +49,12 @@ export function recomputeEffectiveMeta(spaceId: string, persist = false): boolea
   // Without the server's own counters: the version and history belong to `meta`, which `updateSpace` keeps.
   const setApart = !space.ownMeta;
   if (setApart) space.ownMeta = replicatedMetaOf(space.meta) as SpaceMeta;
-  const next = effectiveMeta(space.ownMeta!, layers);
-  if (isDeepStrictEqual(replicatedMetaOf(next), replicatedMetaOf(space.meta))) {
+  const next = effectiveMeta(space.ownMeta!, layers, heldRebaseEpochs(cfg, spaceId));
+  // Q-748: a base adopted from a network (nothing was stored here) becomes this instance's own, so it outlives the layer: a member that
+  // leaves keeps the base it took. One the own definitions already hold is never replaced (the settle kept it).
+  if (next.rdf?.base && !space.ownMeta!.rdf?.base) { space.ownMeta = { ...space.ownMeta!, rdf: next.rdf }; persist = true; }
+  const conflictMoved = !isDeepStrictEqual(next.rdfBaseConflict, space.meta?.rdfBaseConflict);
+  if (!conflictMoved && isDeepStrictEqual(replicatedMetaOf(next), replicatedMetaOf(space.meta))) {
     if (setApart || persist) saveConfig(cfg);
     return false;
   }

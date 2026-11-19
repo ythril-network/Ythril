@@ -17,9 +17,10 @@
  *   accepted (counted and warned by the caller, never refused: a skewed clock is not an attack).
  */
 import { z } from 'zod';
+import { BaseIriZ, NamespaceIriZ } from '@ythril-network/schema';
 import { BRAIN_COLLECTIONS, type BrainCollection } from '../config/types-knowledge.js';
 
-const VOTE_ROUND_TYPES = ['join', 'remove', 'space_deletion', 'space_wipe', 'meta_change', 'space_addition'] as const;
+const VOTE_ROUND_TYPES = ['join', 'remove', 'space_deletion', 'space_wipe', 'meta_change', 'space_addition', 'space_rebase'] as const;
 
 /** The most casts, and required voters, one served round may carry: one per member, far above any network's roster. */
 const MAX_ROUND_VOTERS = 1_000;
@@ -48,7 +49,12 @@ export const IncomingVoteRound = z.object({
   // At most one entry per collection: a repeat within that is an older proposer's, stored canonical; more is no wipe anyone opened.
   wipeTypes: z.array(z.enum(BRAIN_COLLECTIONS as unknown as [string, ...string[]])).max(BRAIN_COLLECTIONS.length).optional(),
   requiredVoters: z.array(z.string()).max(MAX_ROUND_VOTERS).optional(),
-}).passthrough();
+  // Q-748: what a `space_rebase` round moves the base to. Read as the setting's own validators read an address, so a served round cannot
+  // carry a base no door would accept; the casts bind it (`bsig`).
+  rebase: z.object({ base: BaseIriZ, vocab: NamespaceIriZ, epoch: z.number().int().min(1).max(1_000_000) }).optional(),
+}).passthrough().refine(r => r.type !== 'space_rebase' || (r.rebase !== undefined && typeof r.spaceId === 'string'), {
+  message: 'a space_rebase round names its space and carries the new base',
+});
 
 /** Does `round` have the declared shape of a served round? */
 export function hasRoundShape(round: unknown): boolean {
