@@ -57,6 +57,10 @@
     "protobufjs": "^7.5.5"
   },
   "devDependencies": {
-    "markdownlint-cli2": "^0.23.1"
+    "@rdfjs/dataset": "^2.0.3",
+    "jsonld": "^9.0.0",
+    "markdownlint-cli2": "^0.23.1",
+    "n3": "^2.13.12",
+    "rdf-validate-shacl": "^0.7.0"
   }
 }
