@@ -90,6 +90,13 @@ function clientLimits(src: string, name = 'RULE_LIMITS', where = CLIENT_LIMITS):
   const inner = src.slice(from, i - 1);
   const out: Record<string, string> = {};
   for (const e of inner.matchAll(/(\w+)\s*:\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[^,\n]+)/g)) out[e[1]!] = e[2]!.trim();
+  // A limit may be named by an UPPER_CASE constant of the same file (`stepsMax: STEPS_MAX`, so the number is declared once, on a line that names it):
+  // the value compared is that constant's own initialiser, never the name.
+  for (const [key, value] of Object.entries(out)) {
+    if (!/^[A-Z][A-Z0-9_]*$/.test(value)) continue;
+    const named = new RegExp(`(?:^|\\n)\\s*const\\s+${value}\\s*(?::[^=]*)?=\\s*([^;\\n]+);`).exec(src);
+    if (named) out[key] = named[1]!.trim();
+  }
   return out;
 }
 

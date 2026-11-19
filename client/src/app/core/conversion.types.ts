@@ -1,5 +1,5 @@
 import type { TypedKind } from './type-field';
-import type { UnconvertedReason } from './unconverted-reasons';
+import type { UnconvertedReason } from './unconverted-reason-list';
 
 /**
  * Every server shape the record-conversion pages read (bundle-285, Q-747), typed once.

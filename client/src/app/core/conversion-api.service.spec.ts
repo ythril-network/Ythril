@@ -329,6 +329,14 @@ describe('countsFor (the records a block counts, through the filter tool)', () =
     expect(await call).toMatchObject({ ok: true, counts: { total: 7, rewritten: 0, stamped: 7 } });
   });
 
+  it.each([['entity', 'entities'], ['fact', 'facts'], ['edge', 'edges'], ['chrono', 'chrono']] as const)('a %s block is counted in the %s collection', async (kind, collection) => {
+    const call = firstValueFrom(api.countsFor('customers', { kind, type: 'sample', steps: [] }));
+    const requests = http.match('/api/filter');
+    expect(requests.map(r => filterBody(r)['collection'])).toEqual([collection]);
+    requests[0]!.flush(total(3));
+    expect(await call).toMatchObject({ ok: true, counts: { total: 3 } });
+  });
+
   it('a count that failed is `{ ok: false }`, never zero: the dialog says it could not count and still offers both outcomes', async () => {
     const call = firstValueFrom(api.countsFor('customers', { kind: 'entity', type: 'person', steps: [rename] }));
     const requests = http.match('/api/filter');

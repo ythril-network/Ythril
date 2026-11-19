@@ -1,5 +1,6 @@
 import { FORK_KINDS } from './forks.types';
 import type { UnconvertedOpenGroup } from './conversion.types';
+import { UNCONVERTED_REASONS, type UnconvertedReason } from './unconverted-reason-list';
 
 /**
  * The reasons a record is listed as unconverted, the three classes Review groups them into, and the counts the class switch and the type
@@ -22,12 +23,8 @@ import type { UnconvertedOpenGroup } from './conversion.types';
  *   (`counts.openBy`), nothing else.
  */
 
-/** Why a record was not converted: the server's `UNCONVERTED_REASONS`, in its order. */
-export const UNCONVERTED_REASONS = [
-  'not_conforming', 'no_case_matched', 'both_set', 'could_not_evaluate',
-  'relationship_exists', 'functional_taken', 'version_ceiling', 'fork', 'step_refused', 'conversion_failed',
-] as const;
-export type UnconvertedReason = typeof UNCONVERTED_REASONS[number];
+/** Why a record was not converted: the server's `UNCONVERTED_REASONS`, in its order (declared in `unconverted-reason-list`, which has no import). */
+export { UNCONVERTED_REASONS, type UnconvertedReason };
 
 /** What the user can do about a record: the three classes of the reason switch, in the order it lists them. */
 export const UNCONVERTED_CLASSES = ['fit', 'exists', 'refused'] as const;

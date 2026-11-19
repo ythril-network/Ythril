@@ -18,6 +18,9 @@ import { REVIEW_SEGMENTED_STYLES, reviewSegmentedPhone } from './review-panel.st
 /** Characters of the discarded text the confirmation quotes: enough to recognise it, short enough to read in a dialog. */
 const QUOTE_CHARS = 90;
 
+/** The screen width below which the kind switch is a 2 x 2 grid. */
+const PHONE_MAX_WIDTH = 560;
+
 /** What Review shows of one fork, worked out once per change instead of once per question the template asks. */
 interface RowView {
   row: ForkRow;
@@ -65,7 +68,7 @@ interface RowView {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [NgTemplateOutlet, TranslocoPipe, ModalDirective, PhIconComponent],
-  styles: [DIALOG_STYLES, REVIEW_SEGMENTED_STYLES, reviewSegmentedPhone(560), `
+  styles: [DIALOG_STYLES, REVIEW_SEGMENTED_STYLES, reviewSegmentedPhone(PHONE_MAX_WIDTH), `
     :host { display: block; }
 
     /* The kind switch: one radio group, four cells on a desktop and a 2 x 2 grid on a phone. */

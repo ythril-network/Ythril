@@ -21,7 +21,11 @@ const PROPERTY_PREFIX = 'properties.';
 const SUMMARY_TYPE_MAX = 24;
 
 /** The widest screen the filters fold on: the drawing's phone rule. */
-const PHONE_QUERY = '(max-width: 760px)';
+const PHONE_MAX_WIDTH = 760;
+const PHONE_QUERY = `(max-width: ${PHONE_MAX_WIDTH}px)`;
+
+/** How many characters of a record's id the card shows. */
+const SHORT_ID_LENGTH = 8;
 
 /** One pill of the class switch. `count` is null where the numbers would be a lie (the Dismissed list: the counts are of open records). */
 interface Pill { key: UnconvertedClassChoice; label: string; count: string | null }
@@ -58,7 +62,7 @@ interface CardView {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [NgTemplateOutlet, TranslocoPipe, ErrorStateComponent, PhIconComponent],
-  styles: [REVIEW_SEGMENTED_STYLES, reviewSegmentedPhone(760), REVIEW_CARD_STYLES, `
+  styles: [REVIEW_SEGMENTED_STYLES, reviewSegmentedPhone(PHONE_MAX_WIDTH), REVIEW_CARD_STYLES, `
     :host { display: block; --rv-grid-top: 12px; }
     .intro { color: var(--text-muted); font-size: 13px; margin: 0 0 16px; }
     .refusal { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; margin: 8px 0 12px; font-size: 13px; }
@@ -294,7 +298,7 @@ export class ReviewUnconvertedPanelComponent {
       cls: reasonClassOf(row.reason),
       kindLabel: this.say(`brain.review.forks.kindNoun.${row.kind}`),
       name: row.record ? row.record.summary : null,
-      shortId: row.recordId.slice(0, 8),
+      shortId: row.recordId.slice(0, SHORT_ID_LENGTH),
       violations: row.violations.map(v => `${v.field.startsWith(PROPERTY_PREFIX) ? v.field.slice(PROPERTY_PREFIX.length) : v.field}: ${v.reason}`),
       found: this.say('brain.review.unconverted.found', { when: this.dates.relative(row.detectedAt) }),
       iso: this.dates.iso(row.detectedAt),

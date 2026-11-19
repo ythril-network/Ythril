@@ -35,6 +35,9 @@ import { piecesOf, type SentencePiece } from './vote-conversion-block.component'
 // ── Names in sentences ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The private marker characters of the vote row's `piecesOf`: control characters, so no real name holds one. */
+/** The bar's whole width, as a percentage. */
+const PERCENT_FULL = 100;
+
 const OPEN = '\u0001';
 const CLOSE = '\u0002';
 const stripMarkers = (s: string): string => s.split(OPEN).join('').split(CLOSE).join('');
@@ -277,7 +280,7 @@ export class ConvertRunBlockComponent {
     const run = this.running();
     const total = this.total();
     if (!run || total === null) return null;
-    return total > 0 ? Math.min(100, Math.round((checkedOf(run) / total) * 100)) : (run.state === 'complete' ? 100 : null);
+    return total > 0 ? Math.min(PERCENT_FULL, Math.round((checkedOf(run) / total) * PERCENT_FULL)) : (run.state === 'complete' ? PERCENT_FULL : null);
   });
 
   protected readonly barLabel = computed(() => {
