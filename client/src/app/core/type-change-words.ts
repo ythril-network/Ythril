@@ -19,24 +19,27 @@ export type Say = (key: string, params?: Record<string, string>) => string;
 
 const PROPERTY_PREFIX = 'propertySchemas.';
 
-/** Where the words of a place and of a facet live: `<key>.<name>` in each language's file. */
-const PLACE_KEY = 'spaces.schema.history.place';
-const FACET_KEY = 'spaces.schema.history.facet';
+/**
+ * Where the words of a place and of a facet live: `<prefix><name>` in each language's file. Written with their trailing dot, so the
+ * unused-key probe reads every key under them as reached by a prefix the code builds (`check-i-accessibility-i18n-deep-untranslated-and-unused`).
+ */
+const PLACE_KEY = 'spaces.schema.history.place.';
+const FACET_KEY = 'spaces.schema.history.facet.';
 
 /**
  * Every facet a property definition can carry (`PropertySchema` in `schema/src/vocabulary.ts`) and every place a type has above its
  * properties (`TypeSchema`, and the keys of its `retention` and `endpoints`). A name the schema gains and this list lacks prints raw,
  * as a newer server's facet must; `type-change-words.schema.spec.ts` fails until the name is here and has words.
  */
-const PROPERTY_FACETS: ReadonlySet<string> = new Set(['description', 'type', 'enum', 'minimum', 'maximum', 'pattern', 'mergeFn', 'required', 'default']);
+const PROPERTY_FACETS: ReadonlySet<string> = new Set(['description', 'type', 'enum', 'minimum', 'maximum', 'pattern', 'mergeFn', 'required', 'default', 'iri']);
 const TYPE_PLACES: ReadonlySet<string> = new Set([
   'description', 'namingPattern', 'retention', 'retention.days', 'retention.contentDays', 'suppressEmbeddings', 'whenDuePasses',
-  'endpoints', 'endpoints.from', 'endpoints.to', 'functional',
+  'endpoints', 'endpoints.from', 'endpoints.to', 'functional', 'iri',
 ]);
 /** A type's rule is a place of its own per name: `rules.<name>`, and its `rule` or `message` (a name is `[a-z][a-zA-Z0-9_-]*`, never a dot). */
 const RULE_PLACE = /^rules\.([^.]+)(?:\.(rule|message))?$/;
 /** The facets whose value is a plain value the words put in a sentence of their own (`required` and `enum` have their own shapes). */
-const VALUE_FACETS: ReadonlySet<string> = new Set(['description', 'minimum', 'maximum', 'pattern', 'mergeFn', 'default']);
+const VALUE_FACETS: ReadonlySet<string> = new Set(['description', 'minimum', 'maximum', 'pattern', 'mergeFn', 'default', 'iri']);
 
 /** A place that is exactly one property: `propertySchemas.<name>`, nothing deeper. */
 const isPropertyPlace = (place: string): boolean => place.startsWith(PROPERTY_PREFIX) && place.length > PROPERTY_PREFIX.length && !place.slice(PROPERTY_PREFIX.length).includes('.');
@@ -52,11 +55,11 @@ export function changePlaceWords(place: string, say: Say): string {
     const dot = rest.indexOf('.');
     if (dot < 0) return rest;
     const facet = rest.slice(dot + 1);
-    return `${rest.slice(0, dot)}: ${PROPERTY_FACETS.has(facet) ? say(`${PLACE_KEY}.property.${facet}`) : facet}`;
+    return `${rest.slice(0, dot)}: ${PROPERTY_FACETS.has(facet) ? say(`${PLACE_KEY}property.${facet}`) : facet}`;
   }
-  if (TYPE_PLACES.has(place)) return say(`${PLACE_KEY}.${place}`);
+  if (TYPE_PLACES.has(place)) return say(`${PLACE_KEY}${place}`);
   const rule = RULE_PLACE.exec(place);
-  if (rule) return say(`${PLACE_KEY}.rules${rule[2] ? `.${rule[2]}` : ''}`, { name: rule[1]! });
+  if (rule) return say(`${PLACE_KEY}rules${rule[2] ? `.${rule[2]}` : ''}`, { name: rule[1]! });
   return place;
 }
 
@@ -71,13 +74,13 @@ function plainWords(v: string | number | boolean, say: Say): string {
 /** One facet of a property definition in words, or null when it is no plain value (the caller then keeps the whole value as JSON). */
 function facetWords(key: string, v: unknown, say: Say): string | null {
   if (key === 'required' && typeof v === 'boolean') {
-    const word = say(`${FACET_KEY}.required`);
-    return v ? word : say(`${FACET_KEY}.not`, { facet: word });
+    const word = say(`${FACET_KEY}required`);
+    return v ? word : say(`${FACET_KEY}not`, { facet: word });
   }
-  if (VALUE_FACETS.has(key) && isPlain(v)) return say(`${FACET_KEY}.${key}`, { value: plainWords(v, say) });
-  if (key === 'enum' && Array.isArray(v) && v.length > 0 && v.every(isPlain)) return say(`${FACET_KEY}.enum`, { value: v.map(x => plainWords(x, say)).join(', ') });
+  if (VALUE_FACETS.has(key) && isPlain(v)) return say(`${FACET_KEY}${key}`, { value: plainWords(v, say) });
+  if (key === 'enum' && Array.isArray(v) && v.length > 0 && v.every(isPlain)) return say(`${FACET_KEY}enum`, { value: v.map(x => plainWords(x, say)).join(', ') });
   // A facet this client has no words for (a newer server's, or a known one with a value of another shape) is shown as it is written.
-  if (typeof v === 'boolean') return v ? key : say(`${FACET_KEY}.not`, { facet: key });
+  if (typeof v === 'boolean') return v ? key : say(`${FACET_KEY}not`, { facet: key });
   if (typeof v === 'string' || typeof v === 'number') return `${key} ${v}`;
   if (Array.isArray(v) && v.length > 0 && v.every(isPlain)) return `${key} (${v.map(x => plainWords(x, say)).join(', ')})`;
   return null;

@@ -83,6 +83,8 @@ export interface TypeSchemaState {
    */
   endpoints?:  { from?: string[]; to?: string[] };
   functional?: boolean;
+  /** Q-748: the type's RDF address, carried rather than edited (no control yet), for the reason the two fields above are carried. */
+  iri?: string;
   /**
    * How long records of this type are kept — the SCHEMA tier of record > schema > space.
    *
@@ -194,6 +196,7 @@ export function typeStateFromSchema(raw: unknown): TypeSchemaState {
     // An edge label's ends and cardinality: no control carries them in every host, and a save rebuilds the object.
     endpoints: endpoints ? { ...(from ? { from: [...from] } : {}), ...(to ? { to: [...to] } : {}) } : undefined,
     functional: typeof raw['functional'] === 'boolean' ? raw['functional'] : undefined,
+    iri: typeof raw['iri'] === 'string' ? raw['iri'] : undefined,
     // Spread preserves every field of a property, including `$ref`.
     propertySchemas: Object.entries(props).map(([key, ps]) => ({ key, s: { ...(ps as PropertySchema) }, _enumInput: '' })),
     rules: ruleRowsFromWire(raw['rules']),
@@ -241,7 +244,8 @@ export function typeSchemaFromState(
   state: TypeSchemaState,
   { withRetention = true }: { withRetention?: boolean } = {},
 ): TypeSchema {
-  const ts: TypeSchema = {};
+  // `iri` (Q-748) is typed here and not in `api.types.ts`, whose size is frozen; the wire carries it like every other field.
+  const ts: TypeSchema & { iri?: string } = {};
   // Trimmed and omitted when empty, like every other optional here: an empty string would store a
   // description that says nothing and read as one somebody wrote.
   if (state.description.trim()) ts.description = state.description.trim();
@@ -290,6 +294,8 @@ export function typeSchemaFromState(
     // who unticks it is saying this label is not functional rather than declining to say.
     if (state.functional !== undefined) ts.functional = state.functional;
   }
+  // Q-748: the type's RDF address, on every kind; carried, so a save of another field never renames the type in an export.
+  if (state.iri) ts.iri = state.iri;
   // Rules, as the map the wire holds, keyed by name; omitted when the type has none, so a type without rules carries no empty map.
   // `rule` and `message` only: the row's other fields are the editor's own (an open disclosure, a buffer).
   const rules = state.rules.filter(r => r.name.trim());
@@ -323,7 +329,9 @@ export function typeSchemaFromState(
         const coerced = defaultForType(s.default, s.type);
         if (coerced !== undefined) schema.default = coerced;
       }
-      ps[key] = schema;
+      // Q-748: the property's RDF address, carried (no control) so a save never renames it in an export. Typed beside, as the type's is.
+      const iri = (s as PropertySchema & { iri?: unknown }).iri;
+      ps[key] = typeof iri === 'string' && iri ? { ...schema, iri } as PropertySchema : schema;
     }
     ts.propertySchemas = ps;
   }
