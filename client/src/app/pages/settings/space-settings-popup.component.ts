@@ -451,7 +451,9 @@ export class SpaceSettingsPopupComponent {
           // applied it before answering. Say so (the answer carries no space to merge; the list was refreshed above).
           this.state.settingsNotice.set(localSetting
             ? this.transloco.translate('spaces.settings.votePendingLocalNow', { networks })
-            : this.transloco.translate(choice ? 'spaces.schema.convert.submitted.notice' : 'spaces.settings.votePending', { networks }));
+            : choice
+              ? this.transloco.translate('spaces.schema.convert.submitted.notice', { network: networks })
+              : this.transloco.translate('spaces.settings.votePending', { networks }));
           this.state.markPristine();   // it is submitted; it is not an unsaved edit any more
           this.state.settingsSubmitted.set(true);  // ...and Save must stop offering to submit it again
           // A conversion that goes with the vote is said on its own dialog: the steps and this instance's counts stay on screen, and the way to the vote is a button.
