@@ -16,6 +16,8 @@
  *   `rdf_base_frozen` naming both, unless `rebase: true`: then, on a space in no network, the base moves and the epoch goes up by one; on a
  *   networked space nothing moves here and a `space_rebase` round is proposed (`proposeRebase`), applied at its deadline. The vocab moves
  *   only with the base.
+ *   A door then asks {@link sharedRdfBaseRefusal} of the setting it would leave: a base another space of this instance holds with RDF on is
+ *   409 `rdf_base_shared` (slice F), by the comparison the exports use ({@link otherHoldersOfRdfBase}). `settleRdf` itself stays pure.
  * - `settings-round`, `layer`: what arrives never moves a stored base, at any epoch. No `rdf` keeps the stored one. Nothing stored adopts
  *   what arrives (the first enable of a shared space). A different base at a higher epoch for which a passed rebase round is still to land
  *   here is early, and quiet; any other different base at the same or a higher epoch is a named conflict; a lower epoch is a stale copy.
@@ -29,7 +31,9 @@ import type { NetworkConfig, SpaceConfig, VoteRound } from '../config/types.js';
 import { defaultBaseFor, defaultVocabFor } from '../rdf/term-iri.js';
 import { localToRemote, remoteToLocal } from '../sync/space-map.js';
 import { rebaseRoundHeld, rebaseRoundUnapplied } from '../networks/round-state.js';
-import { log, peerText } from '../util/log.js';
+import { log, NAME_QUOTED, peerText } from '../util/log.js';
+import type { TokenRights } from '../config/rights-shape.js';
+import { holdsRung } from '../auth/reachable-spaces.js';
 import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 
 /** Who is writing the setting. */
@@ -127,6 +131,46 @@ export function heldRebaseEpochs(cfg: { networks: readonly NetworkConfig[] }, lo
  */
 export function heldRebaseRounds(cfg: { networks: readonly NetworkConfig[] }, localSpaceId: string, now: number): VoteRound[] {
   return cfg.networks.flatMap(net => (net.pendingRounds ?? []).filter(r => rebaseRoundHeld(r, now) && rebaseRoundSpaceOf(net, r) === localSpaceId));
+}
+
+/** The code of a base another space of this instance holds with RDF on too (409): refused at the save, and by the exports for a pair that exists. */
+export const RDF_BASE_SHARED = 'rdf_base_shared';
+
+/** The longest part of a base a sharing refusal repeats. */
+const SHARED_BASE_SHOWN = 120;
+
+/**
+ * The OTHER spaces of this instance that hold `base` with RDF on, and which of them `rights` may be told of (instance administration, or
+ * `schema: read` on that space: the no-trace rule, a refusal names nothing the caller could not read through the other doors). THE one
+ * comparison both the save doors and the exports ask: a space with RDF off holds no address, so it does not count; a space is never its own
+ * other. A caller with no rights is told of none.
+ */
+export function otherHoldersOfRdfBase(cfg: { spaces: readonly SpaceConfig[] }, spaceId: string, base: string, rights: TokenRights | null | undefined):
+  { holders: SpaceConfig[]; named: string[] } {
+  const holders = cfg.spaces.filter(s => s.id !== spaceId && s.meta?.rdf?.enabled === true && s.meta.rdf.base === base);
+  const named = holders.filter(s => !!rights && (rights.instanceAdmin === true || holdsRung(rights, s.id, 'schema', 'read'))).map(s => s.id);
+  return { holders, named };
+}
+
+/**
+ * The refusal of a SAVE that would give a space an address another space holds (`409 rdf_base_shared`, bundle-269 slice F), or `undefined`.
+ * `after` is the setting the write leaves (the settled one; a networked rebase, the base it proposes). Asked of what the write MOVES: a space
+ * already on that base with RDF on (a pair a peer's round made, which the exports refuse) is not blocked from a write that leaves it as it is.
+ * What arrives from a peer never asks this: it moves no stored base.
+ */
+export function sharedRdfBaseRefusal(cfg: { spaces: readonly SpaceConfig[] }, spaceId: string, stored: RdfSetting | undefined,
+  after: { enabled?: boolean; base?: string } | undefined, rights: TokenRights | null | undefined):
+  { status: typeof RDF_BASE_STANDS_STATUS; code: typeof RDF_BASE_SHARED; error: string } | undefined {
+  const base = after?.base;
+  if (after?.enabled !== true || !base) return undefined;
+  if (stored?.enabled === true && stored.base === base) return undefined;
+  const { holders, named } = otherHoldersOfRdfBase(cfg, spaceId, base, rights);
+  if (holders.length === 0) return undefined;
+  return {
+    status: RDF_BASE_STANDS_STATUS, code: RDF_BASE_SHARED,
+    error: `the RDF base ${peerText(base, { max: SHARED_BASE_SHOWN })} is held with RDF on by another space of this instance, so it would give one address two meanings `
+      + `and is not saved: send another rdf.base${named.length > 0 ? ` (held by ${named.map(id => `'${peerText(id, { max: NAME_QUOTED })}'`).join(', ')})` : ''}`,
+  };
 }
 
 /**

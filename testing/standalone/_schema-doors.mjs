@@ -54,16 +54,17 @@ export async function bootSchemaInstance(dir, { spaces, library = [], networks =
   const librarySeed = JSON.parse(JSON.stringify(library));
   const metaSeed = new Map(seed.map(s => [s.id, JSON.parse(JSON.stringify(s.meta ?? {}))]));
 
-  const mcpCtx = (spaceId, args) => ({
-    callSpace: spaceId, callSpaces: [spaceId], accessibleSpaceIds: [spaceId], viewReads: new Map(), args: { space: spaceId, ...args }, rights: RIGHTS,
+  // `rights`: the caller of a write that is not the administrator (the third argument of a door that takes it).
+  const mcpCtx = (spaceId, args, rights = RIGHTS) => ({
+    callSpace: spaceId, callSpaces: [spaceId], accessibleSpaceIds: [spaceId], viewReads: new Map(), args: { space: spaceId, ...args }, rights,
   });
 
   /** @type {SchemaInstance} */
   const instance = {
     dir, loader,
     doors: {
-      'space-patch': (spaceId, meta) => callRoute(spacesRouter, 'patch', '/:id', { params: { id: spaceId }, body: { meta }, authToken: AUTH }).then(fromRoute),
-      'mcp-schema-update': async (spaceId, meta) => fromTool(await spacesTools.schema_updateTool.handle(mcpCtx(spaceId, meta))),
+      'space-patch': (spaceId, meta, rights = RIGHTS) => callRoute(spacesRouter, 'patch', '/:id', { params: { id: spaceId }, body: { meta }, authToken: { rights } }).then(fromRoute),
+      'mcp-schema-update': async (spaceId, meta, rights = RIGHTS) => fromTool(await spacesTools.schema_updateTool.handle(mcpCtx(spaceId, meta, rights))),
       'put-schema': (spaceId, meta) => callRoute(spacesRouter, 'put', '/:id/schema', { params: { id: spaceId }, body: { typeSchemas: meta.typeSchemas }, authToken: AUTH }).then(fromRoute),
       'put-single-type': (spaceId, meta) => {
         const [kind, types] = Object.entries(meta.typeSchemas)[0];
@@ -72,8 +73,10 @@ export async function bootSchemaInstance(dir, { spaces, library = [], networks =
           { params: { id: spaceId, knowledgeType: kind, typeName: type }, body: schema, authToken: AUTH }).then(fromRoute);
       },
       // The create door: a NEW space whose meta arrives with it (`POST /`), id derived from the space the row is driven against.
-      'space-create': (spaceId, meta) => callRoute(spacesRouter, 'post', '/',
-        { body: { id: `${spaceId}-new`, label: 'New space', meta }, authToken: AUTH }).then(fromRoute),
+      'space-create': (spaceId, meta, rights = RIGHTS) => callRoute(spacesRouter, 'post', '/',
+        { body: { id: `${spaceId}-new`, label: 'New space', meta }, authToken: { rights } }).then(fromRoute),
+      // The same create through the MCP tool (`save_space`); a test names it, the `$ref` tables do not list it.
+      'mcp-save-space': async (spaceId, meta, rights = RIGHTS) => fromTool(await spacesTools.save_spaceTool.handle(mcpCtx(spaceId, { id: `${spaceId}-new`, label: 'New space', meta }, rights))),
       // The dry-run doors (F-46): a proposed meta checked over one sample record, so nothing stored is read and no rail is taken.
       'validate-rest': (spaceId, meta) => callRoute(spacesRouter, 'post', '/:id/validate-schema',
         { params: { id: spaceId }, body: { meta, sample: SAMPLE }, authToken: AUTH }).then(fromRoute),
@@ -124,7 +127,7 @@ const SAMPLE = Object.freeze({ kind: 'entity', record: { name: 'sample', type: '
  * @typedef {object} SchemaInstance
  * @property {string} dir
  * @property {any} loader
- * @property {Record<string, (spaceId: string, meta: any) => Promise<{refused: boolean, status: number, text: string, body: any}>>} doors
+ * @property {Record<string, (spaceId: string, meta: any, rights?: any) => Promise<{refused: boolean, status: number, text: string, body: any}>>} doors
  * @property {{post: Function, put: Function, patch: Function, exportSpace: Function}} library
  * @property {(spaceId: string) => any} heldTypes
  * @property {(spaceId: string) => any} heldMeta

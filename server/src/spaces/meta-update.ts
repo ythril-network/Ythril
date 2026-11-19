@@ -64,7 +64,8 @@ import {
 } from '../sync/governance.js';
 import { parseMetaRound, type MetaRoundProposal } from '../sync/meta-round-merge.js';
 import type { ConversionStep } from '@ythril-network/schema/internal';
-import { heldRebaseRounds, rdfBaseConflictOf, RDF_BASE_STANDS_STATUS, settleRdf, type RebaseProposal, type RdfRefusalStatus } from './rdf-settle.js';
+import { heldRebaseRounds, rdfBaseConflictOf, RDF_BASE_STANDS_STATUS, settleRdf, sharedRdfBaseRefusal, type RebaseProposal, type RdfRefusalStatus } from './rdf-settle.js';
+import type { TokenRights } from '../config/rights-shape.js';
 import { storeMovedRdf } from './rdf-store.js';
 import type { RdfSetting } from '@ythril-network/schema';
 import { termClashes } from '../rdf/term-iri.js';
@@ -253,7 +254,7 @@ function badConversionStepRefusal(refusal: { error: string; issues: readonly { p
  * must be the request's only change: a rebase lands at its round's deadline, and a write that carried it with other edits would answer one
  * outcome for two acts that land at different times.
  */
-function settleRdfOfWrite(space: SpaceConfig, data: z.infer<typeof UpdateSpaceBody>):
+function settleRdfOfWrite(space: SpaceConfig, data: z.infer<typeof UpdateSpaceBody>, rights: TokenRights | null | undefined):
   { ok: true; proposeRebase?: RebaseProposal; acceptRdf?: RdfSetting } | { ok: false; refusal: MetaUpdateRefusal } {
   const meta = data.meta as (Partial<SpaceMeta> & { rdf?: SpaceMeta['rdf'] & { rebase?: true } }) | undefined;
   if (meta?.rdf === undefined) return { ok: true };
@@ -267,6 +268,12 @@ function settleRdfOfWrite(space: SpaceConfig, data: z.infer<typeof UpdateSpaceBo
     spaceId: space.id, networked, offeredBases, ...(publicBaseUrlIsFallback() ? {} : { publicBaseUrl: getPublicBaseUrl() }),
   });
   if (!settled.ok) return { ok: false, refusal: { status: settled.status, body: { error: settled.error, code: settled.code } } };
+  // A base another space of this instance holds with RDF on is refused here, at the save (bundle-269 slice F; the exports keep their own
+  // refusal for a pair that exists). Asked of the base the write leaves: a networked rebase leaves the stored one and PROPOSES the new, which
+  // is the one a vote would make this space's, so it is the one held to this.
+  const shared = sharedRdfBaseRefusal(cfg, space.id, space.meta?.rdf,
+    settled.proposeRebase ? { enabled: settled.rdf?.enabled, base: settled.proposeRebase.base } : settled.rdf, rights);
+  if (shared) return { ok: false, refusal: { status: shared.status, body: { error: shared.error, code: shared.code } } };
   // One rebase at a time (review finding 1): a round opened while another is held would take the same epoch, and only one can land. The
   // identical repeat of this instance's own proposal is not a second rebase: the apply answers the round in progress.
   const next = settled.proposeRebase;
@@ -438,6 +445,8 @@ export function planSpaceMetaUpdate(input: {
   space: SpaceConfig | undefined;
   body: unknown;
   ifMatch: string | undefined;
+  /** Who writes: what decides which other space a `rdf_base_shared` refusal may name (`schema: read` on it, or instance administration). */
+  caller?: { rights?: TokenRights | null };
 }): MetaUpdateDecision {
   const { spaceId, space, body, ifMatch } = input;
 
@@ -484,7 +493,7 @@ export function planSpaceMetaUpdate(input: {
 
   // Q-748: the RDF setting is settled by its one rule before anything is merged — an omission keeps the stored value, the base is frozen,
   // and on a networked space a rebase is a `space_rebase` round of its own, never a field of a settings round.
-  const rdfSettled = settleRdfOfWrite(space, parsed.data);
+  const rdfSettled = settleRdfOfWrite(space, parsed.data, input.caller?.rights);
   if (!rdfSettled.ok) return { ok: false, refusal: rdfSettled.refusal };
   const rebaseProposal = rdfSettled.proposeRebase;
   const acceptRdf = rdfSettled.acceptRdf;
