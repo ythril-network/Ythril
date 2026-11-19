@@ -50,7 +50,7 @@ import { graphIri, prefixesFor, recordAddressable, recordIri, versionIri } from 
 import { createRdfWriter, rdfVersionOf, RdfWriteError, type RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES, RDF_BAD_FORMAT } from './export-format.js';
 import {
-  rdfSpaceState, RDF_NOT_ENABLED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
+  rdfSpaceState, RDF_BASE_SHARED, RDF_NOT_ENABLED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
 } from './rdf-space-state.js';
 import { ythrilIri } from './ythril-vocabulary.js';
 
@@ -91,7 +91,7 @@ export const RDF_EXPORT_INCOMPLETE = 'rdf_export_incomplete';
 /** Every refusal code the records export answers, for the tool's description and the guide. */
 export const RDF_EXPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   RDF_BAD_FORMAT, 'rdf_format_not_acceptable', RDF_BAD_EDGE_DETAILS, RDF_BAD_AFTER, RDF_BAD_LIMIT, RDF_BAD_BUDGET,
-  RDF_NOT_ENABLED, 'rdf_base_conflict', 'rdf_term_clash', RDF_UNWRITABLE, RDF_EXPORT_BUSY, RDF_EXPORT_INCOMPLETE,
+  RDF_NOT_ENABLED, 'rdf_base_conflict', RDF_BASE_SHARED, 'rdf_term_clash', RDF_UNWRITABLE, RDF_EXPORT_BUSY, RDF_EXPORT_INCOMPLETE,
 ]);
 
 /** The edge forms, by their parameter value. */
@@ -156,6 +156,12 @@ export interface RdfExportSummary {
   budgetBoundBy?: string[];
 }
 
+/**
+ * A view's members the caller reads that the export leaves out, by why: RDF off (`withoutRdf`), or names not settled (`inConflict`: a
+ * contested or shared base, a term clash, an address no document can carry). Only members the guard accepted for the caller are ever here.
+ */
+export interface MembersLeftOut { withoutRdf: string[]; inConflict: string[] }
+
 /** A finished page: its text in pieces, its summary, what each door puts on its wire, and the slot to release when it is sent. */
 export interface RdfExportPage {
   status: typeof EXPORT_OK;
@@ -191,6 +197,8 @@ export interface RdfExportStream {
   contentType: string;
   disposition: string;
   viewMembers?: string[];
+  /** The view's read members left out, RDF off and names not settled (as the summary's `membersWithoutRdf`, `membersInConflict`). */
+  membersLeftOut: MembersLeftOut;
   /** Some member's file statements are left out (no `files: read` there): known before the first record. */
   fileTriplesWithheld: boolean;
   slot: ExportSlot;
@@ -297,7 +305,7 @@ type PreparedExport = Omit<PageInput, 'slot' | 'input'>;
  * used, the trailers) are left out, as the RFC allows for a value determined while the content is generated.
  */
 export function rdfExportHeadAct(input: Omit<RdfExportInput, 'whole'>):
-  | { status: typeof EXPORT_OK; contentType: string; disposition: string; viewMembers?: string[]; fileTriplesWithheld: boolean }
+  | { status: typeof EXPORT_OK; contentType: string; disposition: string; viewMembers?: string[]; membersLeftOut: MembersLeftOut; fileTriplesWithheld: boolean }
   | RdfExportRefusal {
   const prepared = prepareExport(input);
   if ('error' in prepared) return prepared;
@@ -306,6 +314,7 @@ export function rdfExportHeadAct(input: Omit<RdfExportInput, 'whole'>):
     contentType: rdfContentType(prepared.format, rdfVersionOf(prepared.format, prepared.edgeDetails)),
     disposition: rdfContentDisposition(input.spaceId, prepared.format),
     ...(prepared.view ? { viewMembers: prepared.exported.map(e => e.space) } : {}),
+    membersLeftOut: { withoutRdf: [...prepared.withoutRdf], inConflict: [...prepared.inConflict] },
     fileTriplesWithheld: prepared.exported.some(e => !prepared.files(e.space)),
   };
 }
@@ -450,6 +459,9 @@ type WalkStep =
  */
 export const INCOMPLETE_LINE = '!ythril-export-incomplete\n';
 
+/** Why the export of a view with no member the caller reads holds no records. */
+const EMPTY_VIEW_WORDS = 'no member of this view is one you may read, so it holds no records';
+
 /**
  * What one answer has read and written, and the writer that spells it: the one walk the bounded page and the whole stream share, so the two
  * cannot read, count, name or end differently.
@@ -586,6 +598,9 @@ class ExportWalk {
       quads.push(quad(graphName, stdIri('dcterms', 'isPartOf'), report));
       quads.push(quad(graphName, stdIri('sh', 'shapesGraph'), iri(shapesAt)));
     }
+    // A view with no member the caller reads holds nothing, and says why, in standard terms (bundle-269 drive, finding 11).
+    const empty = p.view && p.exported.length === 0 ? EMPTY_VIEW_WORDS : undefined;
+    if (empty) quads.push(quad(report, stdIri('rdfs', 'comment'), plain(empty)));
     const tail = p.format === 'turtle' ? '' : this.writer.write({ graph: reportId, quads });
     const how = o.incomplete !== undefined ? `INCOMPLETE, the export could not finish: ${o.incomplete}`
       : o.complete ? 'complete, nothing is left' : `more after this page (after=${o.nextAfter})`;
@@ -593,6 +608,10 @@ class ExportWalk {
       `ythril-export: ${this.records} records${o.whole ? '' : ' on this page'}`, how,
       `${left.count} property values left out${left.words.length > 0 ? `: ${left.words.join(', ')}` : ''}`,
       ...(this.withheld ? ['file statements withheld (files: read is needed)'] : []),
+      // Only members the guard accepted for the caller are ever named (the no-trace rule), as MCP names them in the summary.
+      ...(p.withoutRdf.length > 0 ? [`members left out, RDF off: ${p.withoutRdf.join(', ')}`] : []),
+      ...(p.inConflict.length > 0 ? [`members left out, RDF names not settled: ${p.inConflict.join(', ')}`] : []),
+      ...(empty ? [empty] : []),
       ...(shapes.length > 0 ? [`shapes: ${shapes.map(s => `<${s}>`).join(' ')}`] : []),
     ].join('; ');
     if (o.incomplete !== undefined) return `${tail}# ${comment.replace(/[\r\n]/g, ' ')}\n${INCOMPLETE_LINE}`;
@@ -615,8 +634,13 @@ class ExportWalk {
   }
 }
 
-/** One bounded page: `limit` records or the byte budget, whichever ends it first, and whether records are left after it. */
-async function buildPage(p: PageInput): Promise<RdfExportPage> {
+/**
+ * One bounded page: `limit` records or the byte budget, whichever ends it first, and whether records are left after it. A page of two or
+ * more records never exceeds its ceiling, its ending included: an ending that does not fit even with no value named (a long cursor it states
+ * twice, bundle-269 drive finding 8) makes the page be built again with as many records as leave room for it (`cap`, the ceiling that cut
+ * it in `cappedBy`). Only a page of one record may exceed it, since a record is never cut.
+ */
+async function buildPage(p: PageInput, cap?: number, cappedBy?: { chars: boolean; bytes: boolean }): Promise<RdfExportPage> {
   const w = new ExportWalk(p);
   const body: string[] = [];
   let next: Cursor | undefined;
@@ -631,9 +655,10 @@ async function buildPage(p: PageInput): Promise<RdfExportPage> {
     if (s.type !== 'record') continue;
     const overChars = w.chars + s.text.length > doc.chars - reserve(doc.chars);
     const overBytes = doc.bytes !== null && w.bytes + Buffer.byteLength(s.text, 'utf8') > doc.bytes - reserve(doc.bytes);
+    const capped = cap !== undefined && w.records >= cap;
     // The record that does not fit is not this page's: the next page starts at it. The first record is always admitted whole.
-    if (w.records > 0 && (overChars || overBytes)) {
-      refused = { chars: overChars, bytes: overBytes };
+    if (w.records > 0 && (overChars || overBytes || capped)) {
+      refused = capped && cappedBy ? cappedBy : { chars: overChars, bytes: overBytes };
       next = { space: s.member.space, kind: s.kind, last: s.previous };
       break;
     }
@@ -651,6 +676,12 @@ async function buildPage(p: PageInput): Promise<RdfExportPage> {
   while (!fits(ending) && namedLimit > 0) {
     namedLimit = Math.floor(namedLimit / ENDING_SHRINK);
     ending = w.ending({ complete, whole: false, nextAfter, namedLimit });
+  }
+  if (!fits(ending) && w.records > 1) {
+    const room = { chars: doc.chars - w.head.length - ending.length, bytes: doc.bytes === null ? null : doc.bytes - Buffer.byteLength(w.head + ending, 'utf8') };
+    const by = { chars: w.chars + ending.length > doc.chars, bytes: doc.bytes !== null && w.bytes + Buffer.byteLength(ending, 'utf8') > doc.bytes };
+    // As many records as leave room for this ending, and always fewer than now, so the page shrinks to one record at the most.
+    return buildPage(p, Math.max(1, Math.min(recordsThatFit(body, room), w.records - 1)), by);
   }
   const chunks = [w.head, ...body, ending];
   const sentChars = chunks.reduce((n, c) => n + c.length, 0);
@@ -677,6 +708,20 @@ async function buildPage(p: PageInput): Promise<RdfExportPage> {
     auditChanges: w.auditChanges(complete, nextAfter),
     ...(p.view ? { viewMembers: summary.members } : {}),
   };
+}
+
+/** How many of `body`'s records, from the first, fit in `room` (characters, and bytes when a byte ceiling is stated). */
+function recordsThatFit(body: readonly string[], room: { chars: number; bytes: number | null }): number {
+  let chars = 0;
+  let bytes = 0;
+  let n = 0;
+  for (const text of body) {
+    chars += text.length;
+    bytes += Buffer.byteLength(text, 'utf8');
+    if (chars > room.chars || (room.bytes !== null && bytes > room.bytes)) break;
+    n++;
+  }
+  return n;
 }
 
 let chunkObserver: ((chars: number) => void) | null = null;
@@ -728,6 +773,7 @@ function streamWhole(p: PageInput): RdfExportStream {
   const files = p.exported.some(e => !p.files(e.space));
   return {
     status: EXPORT_OK, kind: 'stream', slot: p.slot, fileTriplesWithheld: files,
+    membersLeftOut: { withoutRdf: [...p.withoutRdf], inConflict: [...p.inConflict] },
     contentType: rdfContentType(p.format, w.writer.version),
     disposition: rdfContentDisposition(p.input.spaceId, p.format),
     ...(p.view ? { viewMembers: p.exported.map(e => e.space) } : {}),

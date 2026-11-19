@@ -9,6 +9,11 @@
  * - **A refusal that tells more than the caller may read** (parent, 2026-11-19). The conflict names the offering network, member and base
  *   only to a caller who may read that network through its own doors (`visibleNetworks`: `networks: read` on every space it carries, or
  *   administering them all); anyone else is told the base is in conflict and who can settle it.
+ * - **One address, two meanings.** A base another space of this instance holds too is `409 rdf_base_shared` (the other space named only to
+ *   a caller who may read its schema): `<base>schema` would name two ontologies (bundle-269 drive, finding 10). The save doors do not yet
+ *   refuse such a base; until they do, the exports refuse to give it out.
+ * - **A refusal that blames the wrong holder.** A stored address no document can carry (the base, the vocab, an explicit `iri`, a library
+ *   namespace) is `409 rdf_unwritable` naming what holds it, before any record is read (drive, finding 9).
  * - **A second spelling of the space's names.** The meta handed back is the resolved one (`inlineResolvableRefs`), which the record form and
  *   the schema graph need, and the fingerprint is the one every record names in `dcterms:conformsTo` (the door's `schemaFingerprintOf`).
  */
@@ -17,8 +22,10 @@ import type { Config, SpaceConfig } from '../config/types.js';
 import type { TokenRights } from '../config/rights-shape.js';
 import { rdfBaseConflictOf } from '../spaces/rdf-settle.js';
 import { inlineResolvableRefs } from '../spaces/schema-validation.js';
-import { termClashes } from './term-iri.js';
+import { isWritableIri } from '@ythril-network/schema/internal';
+import { prefixesFor, termClashes } from './term-iri.js';
 import { visibleNetworks } from '../auth/network-rights.js';
+import { holdsRung } from '../auth/reachable-spaces.js';
 import { peerText, NAME_QUOTED } from '../util/log.js';
 import { EXPORT_CONFLICT } from '../export/export-statuses.js';
 
@@ -58,9 +65,56 @@ export function unwritableRefusal(err: RdfUnwritable): { status: typeof EXPORT_C
 /** Who asks: what decides which networks a refusal may name. */
 export interface RdfCaller { admin?: boolean; rights?: TokenRights | null }
 
+/** The code of a space whose base another space of this instance holds too. */
+export const RDF_BASE_SHARED = 'rdf_base_shared';
+
 export type RdfSpaceState =
   | { ok: true; meta: SpaceMeta; fingerprint: string }
-  | { ok: false; status: typeof EXPORT_CONFLICT; code: typeof RDF_NOT_ENABLED | typeof RDF_BASE_CONFLICT | typeof RDF_TERM_CLASH; error: string; detail?: Record<string, unknown> };
+  | {
+    ok: false; status: typeof EXPORT_CONFLICT;
+    code: typeof RDF_NOT_ENABLED | typeof RDF_BASE_CONFLICT | typeof RDF_BASE_SHARED | typeof RDF_TERM_CLASH | typeof RDF_UNWRITABLE;
+    error: string; detail?: Record<string, unknown>;
+  };
+
+/**
+ * What in a space's resolved meta holds `value`: the type or property whose explicit `iri` it is (`kind:type[.property]`), else the RDF
+ * setting or a library namespace. The one place an address an export cannot write is traced to what an administrator corrects; the schema
+ * export asks it for what its writer refuses.
+ */
+export function holderOfAddress(meta: SpaceMeta, value: string | undefined): string {
+  const rdf = meta.rdf;
+  if (value !== undefined && rdf?.base !== undefined && value === rdf.base) return 'The RDF setting of the space (meta.rdf.base)';
+  if (value !== undefined && rdf?.vocab !== undefined && value === rdf.vocab) return 'The RDF setting of the space (meta.rdf.vocab)';
+  for (const [kind, map] of Object.entries((meta.typeSchemas ?? {}) as Record<string, Record<string, { iri?: unknown; propertySchemas?: Record<string, { iri?: unknown }> }> | undefined>)) {
+    for (const [type, def] of Object.entries(map ?? {})) {
+      if (def?.iri === value) return `The type ${kind}:${type} of the schema (its iri)`;
+      for (const [prop, p] of Object.entries(def?.propertySchemas ?? {})) if (p?.iri === value) return `The property ${kind}:${type}.${prop} of the schema (its iri)`;
+    }
+  }
+  return 'The RDF setting of the space (meta.rdf.base or meta.rdf.vocab) or a library namespace its terms use';
+}
+
+/**
+ * The first stored address of `meta` that no RDF document can carry, with what holds it, or `null`: the base, the vocab, every explicit
+ * `iri`, and the namespaces its terms are written under. Asked before any record is read, so a refusal names the setting or the type to
+ * correct, never the first record whose address happened to be built from it (bundle-269 drive, finding 9: a base holding U+0001 was blamed
+ * on "the entity '00000000-...'").
+ */
+function firstUnwritableAddress(meta: SpaceMeta, namespaces: readonly { prefix: string; iri: string }[]): RdfUnwritable | null {
+  const addresses: string[] = [];
+  if (meta.rdf?.base !== undefined) addresses.push(meta.rdf.base);
+  if (meta.rdf?.vocab !== undefined) addresses.push(meta.rdf.vocab);
+  for (const map of Object.values((meta.typeSchemas ?? {}) as Record<string, Record<string, { iri?: unknown; propertySchemas?: Record<string, { iri?: unknown }> }> | undefined>)) {
+    for (const def of Object.values(map ?? {})) {
+      if (typeof def?.iri === 'string') addresses.push(def.iri);
+      for (const p of Object.values(def?.propertySchemas ?? {})) if (typeof p?.iri === 'string') addresses.push(p.iri);
+    }
+  }
+  const bad = addresses.find(a => !isWritableIri(a));
+  if (bad !== undefined) return new RdfUnwritable(holderOfAddress(meta, bad), bad);
+  const ns = Object.values(prefixesFor(meta, namespaces)).find(a => !isWritableIri(a));
+  return ns === undefined ? null : new RdfUnwritable('A library namespace the space\'s terms are written under', ns);
+}
 
 /**
  * The fingerprint of a configured space's schema now (`schemaFingerprintOf`, `spaces/schema-stamp.ts`), handed in by the door: that module sits
@@ -94,10 +148,24 @@ export function rdfSpaceState(cfg: Config, spaceId: string, caller: RdfCaller | 
       ...(seen.length > 0 ? { detail: { conflict: { held: conflict.held, offered: seen } } } : {}),
     };
   }
+  // Two spaces of this instance with one base give one address two meanings (`<base>schema` would name two ontologies; bundle-269 drive,
+  // finding 10). The other space is named only to a caller who may read its schema: a refusal reveals nothing the other doors would not.
+  const sharing = cfg.spaces.filter(s => s.id !== spaceId && s.meta?.rdf?.enabled === true && s.meta.rdf.base === rdf.base);
+  if (sharing.length > 0) {
+    const rights = caller?.rights;
+    const told = sharing.filter(s => !!rights && (rights.instanceAdmin === true || holdsRung(rights, s.id, 'schema', 'read')));
+    return {
+      ok: false, status: EXPORT_CONFLICT, code: RDF_BASE_SHARED,
+      error: `Space '${peerText(spaceId, { max: NAME_QUOTED })}' holds the RDF base ${peerText(rdf.base, { max: UNWRITABLE_SHOWN })}, which another space of this `
+        + `instance holds too, so its addresses are not its own and nothing is exported. An administrator gives one of them another base `
+        + `(PATCH /api/spaces/:id with rdf.rebase).${told.length > 0 ? ` Holding it too: ${told.map(s => `'${peerText(s.id, { max: NAME_QUOTED })}'`).join(', ')}.` : ''}`,
+    };
+  }
   const meta = inlineResolvableRefs(space.meta as SpaceMeta);
+  const namespaces = Object.values(cfg.schemaLibraryNamespaces ?? {});
   // A schema stored before the clash rule grew (bundle-269 review, finding 6) can hold a pair the save doors now refuse: no migration, the
   // export answers the save's code naming the pair, so the shapes never contradict a record the server accepted.
-  const clashes = termClashes(meta, Object.values(cfg.schemaLibraryNamespaces ?? {}));
+  const clashes = termClashes(meta, namespaces);
   if (clashes.length > 0) {
     return {
       ok: false, status: EXPORT_CONFLICT, code: RDF_TERM_CLASH,
@@ -105,5 +173,7 @@ export function rdfSpaceState(cfg: Config, spaceId: string, caller: RdfCaller | 
         + `${clashes.map(c => c.message).join('; ')}. An administrator of its schema gives one of them another address`,
     };
   }
+  const unwritable = firstUnwritableAddress(meta, namespaces);
+  if (unwritable) return { ok: false, ...unwritableRefusal(unwritable) };
   return { ok: true, meta, fingerprint: fingerprintOf(space) };
 }
