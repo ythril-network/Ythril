@@ -43,8 +43,6 @@ type Slot = number | 'otherwise';
 /** The width of a name field in characters, as the drawing sizes them: the name and some room, never narrower than 11 or wider than 42. */
 const widthOf = (value: string): number => Math.min(Math.max(value.length + 6, 11), 42);
 
-let seq = 0;
-
 @Component({
   selector: 'app-convert-step-editor',
   standalone: true,
