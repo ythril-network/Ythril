@@ -506,6 +506,15 @@ export function planSpaceMetaUpdate(input: {
   // `unknownWriteFields` (Q-320): both sides go through the one reader, so absent, `'warn'`, `''` and `null` are ONE state and a PATCH that
   // changes nothing records nothing (`audit-changes.ts` skips equal sides). Left to the spread above, the cleared forms would read as
   // a change from `refuse` to `''` or `null`, and a no-op PATCH of `'warn'` on a space that already warns would record a change from nothing.
+  // An accepted offer took `meta` out of the write (it lands alone): its names are the after side, and it moves every address the space gives
+  // out, so it is held to the term-clash rule on the meta it leaves, as any other base move (review finding 7).
+  if (acceptRdf !== undefined) {
+    audit.after['rdf'] = acceptRdf;
+    const clashes = termClashes(inlineResolvableRefs({ ...(space.meta ?? {}), rdf: acceptRdf } as SpaceMeta));
+    if (clashes.length > 0) {
+      return { ok: false, refusal: { status: TERM_CLASH_STATUS, body: { error: `accepting this base would give two terms of this space one RDF address: ${clashes.map(c => c.message).join('; ')}`, code: 'rdf_term_clash' } } };
+    }
+  }
   audit.before['unknownWriteFields'] = unknownWriteFieldsMode(space);
   audit.after['unknownWriteFields'] = parsed.data.unknownWriteFields === undefined
     ? unknownWriteFieldsMode(space)
