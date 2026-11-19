@@ -203,7 +203,7 @@ describe('a personal view reads alike on every door and writes nowhere (Q-531)',
     const restList = await d.rest(owner.key, 'GET', `/api/spaces/${encodeURIComponent('@team')}/schema-convert/items`);
     const mcpList = await d.mcp(owner.key, 'list_unconverted', { space: '@team' });
     const shape = (b) => ({ rows: (b?.items ?? []).map(r => [r.space, r.itemId, typeof r.record?.summary]), counts: b?.counts, total: b?.total, viewMembers: b?.viewMembers });
-    const want = { rows: [[OPS, `vp-item-${OPS}`, 'string'], [QA, `vp-item-${QA}`, 'string']], counts: { open: 2, dismissed: 0 }, total: 2, viewMembers: [QA, OPS] };
+    const want = { rows: [[OPS, `vp-item-${OPS}`, 'string'], [QA, `vp-item-${QA}`, 'string']], counts: { open: 2, dismissed: 0, openBy: [{ kind: 'entity', type: 'thing', reason: 'not_conforming', n: 2 }] }, total: 2, viewMembers: [QA, OPS] };
     assert.equal(restList.status, 200, `REST list of a two-member view: ${fmt(restList)}`);
     assert.deepEqual(shape(restList.body), want, 'REST list of a two-member view: newest first across the members, each row naming its member');
     assert.deepEqual(shape(mcpList.structured), want, `MCP list of a two-member view: ${mcpList.text.slice(0, 200)}`);

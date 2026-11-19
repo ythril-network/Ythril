@@ -27,6 +27,7 @@ import type { Response } from 'express';
 import { sendCaughtFailure } from './send-failure.js';
 import { viewReadOfRequest } from '../spaces/read-scope.js';
 import { dismissChanges, dismissShownChanges } from '../audit/audit-changes.js';
+import { dismissAuditGiven } from '../spaces/unconverted-terms.js';
 
 export const spaceUnconvertedRouter = Router();
 
@@ -38,8 +39,9 @@ const sendAnswer = (res: Response, r: UnconvertedActResult): void => {
 const callerOf = (req: { authToken?: unknown }): UnconvertedCaller =>
   ({ rights: (req.authToken as { rights?: TokenRights } | undefined)?.rights, transport: 'rest' });
 
-// GET /api/spaces/:id/schema-convert/items?kind=&type=&status=&skip=&limit= - one page of the unconverted items, newest first; `status` is `open`
-// (the default) or `dismissed`. Filters are parsed by `UnconvertedListParams` inside the act.
+// GET /api/spaces/:id/schema-convert/items?kind=&type=&reason=&status=&skip=&limit= - one page of the unconverted items, newest first; `status` is `open`
+// (the default) or `dismissed`; `reason` is one reason or several (`reason=a,b` or `reason=a&reason=b`). Filters are parsed by `UnconvertedListParams`
+// inside the act.
 spaceUnconvertedRouter.get('/:id/schema-convert/items', globalRateLimit, requireSpaceAuthScoped('id'), async (req, res) => {
   const spaceId = req.params['id'] as string;
   try {
@@ -65,14 +67,15 @@ spaceUnconvertedRouter.post('/:id/schema-convert/items/:itemId/dismiss', globalR
 });
 
 // POST /api/spaces/:id/schema-convert/items/dismiss {kind?, type?, reason?, expect} - dismiss every OPEN item the filter lists, when the caller was
-// shown exactly `expect` of them (else 409 with the current number and nothing dismissed); answers `{ dismissed }`. Validated inside the act.
+// shown exactly `expect` of them (else 409 with the current number and nothing dismissed); answers `{ dismissed }`. `reason` is one reason or a list
+// of them (an array, or one text with commas), `expect` counts over all of them. Validated inside the act.
 spaceUnconvertedRouter.post('/:id/schema-convert/items/dismiss', globalRateLimit, requireSpaceAuthScoped('id'), denyReadOnly, async (req, res) => {
   const spaceId = req.params['id'] as string;
   const body = (req.body ?? {}) as Record<string, unknown>;
   try {
     const given = { kind: body['kind'], type: body['type'], reason: body['reason'], expect: body['expect'] };
     const answer = await dismissShownUnconvertedAct(spaceId, given, callerOf(req));
-    if (!('error' in answer)) req.auditChangesExplicit = dismissShownChanges(given, (answer.body as { dismissed: number }).dismissed);
+    if (!('error' in answer)) req.auditChangesExplicit = dismissShownChanges(dismissAuditGiven(given), (answer.body as { dismissed: number }).dismissed);
     sendAnswer(res, answer);
   } catch (err) {
     sendCaughtFailure(res, 'POST /api/spaces/:id/schema-convert/items/dismiss', err);

@@ -40,6 +40,7 @@ import { openConvertDoor, CONVERT_META } from './_schema-convert.mjs';
 import { moduleOrNull } from './_b81c-door.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
 import { openMountedDoor } from './_mounted-door.mjs';
+import { openAndDismissed } from './_unconverted-fixture.mjs';
 
 const skip = await mongoSkipReason();
 const S = 'unconv';
@@ -206,7 +207,7 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     const a = await alike('list', {});
     assert.equal(a.status, 200, JSON.stringify(a.body));
     assert.deepEqual(ids(a), ['c1', 'f1', 'o1', 'p2', 'p1']);
-    assert.deepEqual(a.body.counts, { open: 5, dismissed: 0 });
+    assert.deepEqual(openAndDismissed(a.body.counts), { open: 5, dismissed: 0 });
     assert.equal(a.body.total, 5);
     assert.equal(a.body.count, 5);
     assert.equal(a.body.truncated, false);
@@ -231,7 +232,7 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     assert.deepEqual(ids(await alike('list', { kind: 'fact', type: 'claim' })), ['f1']);
     const none = await alike('list', { kind: 'chrono', type: 'person' });
     assert.deepEqual([none.body.items, none.body.total], [[], 0]);
-    assert.deepEqual(none.body.counts, { open: 5, dismissed: 0 }, 'a filter narrows the page, not the counts');
+    assert.deepEqual(openAndDismissed(none.body.counts), { open: 5, dismissed: 0 }, 'a filter narrows the page, not the counts');
     assert.deepEqual(ids(await alike('list', { status: 'open' })), ['c1', 'f1', 'o1', 'p2', 'p1']);
     const dismissed = await alike('list', { status: 'dismissed' });
     assert.deepEqual([dismissed.body.items, dismissed.body.total], [[], 0]);
@@ -326,7 +327,7 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
       assert.match(a.body.error, /nosuch/);
     }
     const empty = await alike('list', { space: OTHER });
-    assert.deepEqual([empty.status, empty.body.items, empty.body.counts], [200, [], { open: 0, dismissed: 0 }]);
+    assert.deepEqual([empty.status, empty.body.items, openAndDismissed(empty.body.counts)], [200, [], { open: 0, dismissed: 0 }]);
     const foreign = await alike('dismiss', { space: OTHER, itemId: itemOf.p1 });
     assert.deepEqual([foreign.status, foreign.body.code], [404, 'unconverted_item_not_found']);
     assert.equal((await door.itemRows(S)).find(r => r._id === itemOf.p1).status, 'open');
@@ -365,11 +366,11 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
 
     const open = await alike('list', {});
     assert.deepEqual(ids(open), ['c1', 'f1']);
-    assert.deepEqual(open.body.counts, { open: 2, dismissed: 3 });
+    assert.deepEqual(openAndDismissed(open.body.counts), { open: 2, dismissed: 3 });
     const gone = await alike('list', { status: 'dismissed' });
     assert.deepEqual(ids(gone), ['o1', 'p2', 'p1'], 'the dismissed list is newest first too');
     assert.deepEqual(gone.body.items.map(r => r.status), ['dismissed', 'dismissed', 'dismissed']);
-    assert.deepEqual(gone.body.counts, { open: 2, dismissed: 3 });
+    assert.deepEqual(openAndDismissed(gone.body.counts), { open: 2, dismissed: 3 });
     const again = await alike('dismiss', { itemId: itemOf.p1 }, WRITER);
     assert.deepEqual([again.status, again.body.item.status], [200, 'dismissed'], 'dismissing a dismissed item leaves it dismissed');
   });
@@ -397,7 +398,7 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     assert.equal(rows.find(r => r._id === itemOf.c1)?.status, 'open', 'a run does not write the item of a record that has none: the control of this test is void');
     for (const r of dismissedBefore) assert.equal(rows.find(x => x._id === r._id)?.status, 'dismissed', `${r.recordId} was opened again`);
     assert.deepEqual(ids(await alike('list', { status: 'dismissed' })), ['o1', 'p2', 'p1']);
-    assert.deepEqual((await alike('list', {})).body.counts, { open: 2, dismissed: 3 });
+    assert.deepEqual(openAndDismissed((await alike('list', {})).body.counts), { open: 2, dismissed: 3 });
   });
 
   it('leaves a row whose record is gone listed, without a record part, until the watcher\'s tick removes it', async () => {
@@ -427,6 +428,16 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     assert.deepEqual(ids(await alike('list', { reason: 'not_conforming' })), ['c1', 'o1', 'p2', 'p1']);
     assert.deepEqual(ids(await alike('list', { kind: 'entity', reason: 'no_case_matched' })), []);
     assert.deepEqual(ids(await alike('list', { reason: '' })), ['c1', 'f1', 'o1', 'p2', 'p1'], 'an empty reason is no filter');
+    // The list form (bundle-285 S1): a list of reasons is the one question on the act, the router and the tool, answered alike.
+    const listForm = async (reason) => {
+      const a = await alike('list', { reason });
+      assert.equal(a.status, 200, `the list form ${JSON.stringify(reason)} was refused: ${JSON.stringify(a.body)}`);
+      return ids(a);
+    };
+    assert.deepEqual(await listForm(['no_case_matched', 'not_conforming']), ['c1', 'f1', 'o1', 'p2', 'p1'], 'a list of reasons lists the items of any of them');
+    assert.deepEqual(await listForm(['no_case_matched', 'relationship_exists']), ['f1'], 'a list lists the items of the reasons it names, and a reason nobody holds adds none');
+    const badList = await alike('list', { reason: ['no_case_matched', 'no_such_reason'] });
+    assert.deepEqual([badList.status, badList.body.code], [400, 'unconverted_bad_reason'], 'an unknown reason anywhere in the list is refused by the single form\'s code');
     const bad = await alike('list', { reason: 'no_such_reason' });
     assert.deepEqual([bad.status, bad.body.code], [400, 'unconverted_bad_reason']);
     assert.match(bad.tool.text, /unconverted_bad_reason/);
@@ -458,7 +469,7 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
     const every = await viaAct('shown', { expect: await shown({}) }, WRITER, 'mcp');
     assert.deepEqual([every.status, every.body], [200, { dismissed: 1 }]);
     assert.deepEqual(Object.values(await statusMap()), ['dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed']);
-    assert.deepEqual((await alike('list', { status: 'dismissed' })).body.counts, { open: 0, dismissed: 5 });
+    assert.deepEqual(openAndDismissed((await alike('list', { status: 'dismissed' })).body.counts), { open: 0, dismissed: 5 });
     const nothing = await alike('shown', { expect: 0 });
     assert.deepEqual([nothing.status, nothing.body], [200, { dismissed: 0 }], 'nothing open: nothing to dismiss, and it says so');
   });
@@ -651,7 +662,7 @@ describe('the unconverted doors answer alike (real MongoDB)', { skip }, () => {
 
     it('lists as the act does, on the mounted route and through the registered tool: every filter, every page, the same rows and counts', async () => {
       await arrange(ALL_OPEN);
-      for (const args of [{}, { kind: 'entity' }, { type: 'person' }, { kind: 'fact', type: 'claim' }, { status: 'dismissed' }, { reason: 'not_conforming' },
+      for (const args of [{}, { kind: 'entity' }, { type: 'person' }, { kind: 'fact', type: 'claim' }, { status: 'dismissed' }, { reason: 'not_conforming' }, { reason: ['not_conforming', 'no_case_matched'] },
         { limit: 2 }, { limit: 2, skip: 2 }, { skip: 10 }, { kind: '', type: '', status: '' }]) {
         const expected = await viaAct('list', args, who.reader.rights, 'rest');
         assert.equal(expected.status, 200, JSON.stringify(expected));

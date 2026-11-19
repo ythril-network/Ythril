@@ -12,7 +12,9 @@
  * that module's own readers.
  */
 import { z } from 'zod';
-import { TYPE_NAME_MAX } from '@ythril-network/schema/internal';
+import {
+  TYPE_NAME_MAX, NAME_QUOTED, peerText, refusalOfParse, type ParseIssueLike, type ParseRefusal,
+} from '@ythril-network/schema/internal';
 import { KNOWLEDGE_TYPES, type KnowledgeType } from '../config/types-knowledge.js';
 import type { TokenRights } from '../config/rights-shape.js';
 
@@ -26,6 +28,19 @@ export const UNCONVERTED_REASONS = [
   'relationship_exists', 'functional_taken', 'version_ceiling', 'fork', 'step_refused', 'conversion_failed',
 ] as const;
 export type UnconvertedReason = typeof UNCONVERTED_REASONS[number];
+
+/**
+ * The most reasons one call names (`reason` as a list): every reason there is, once. A longer list repeats one, so it is refused rather than
+ * trimmed: a caller that sent it counted wrongly, and a trimmed list would answer another question than the one asked.
+ */
+export const UNCONVERTED_REASONS_MAX = UNCONVERTED_REASONS.length;
+
+/**
+ * The most (kind, type, reason) groups the list's `counts.openBy` names. It is the Review page's pills and type choices, which a person reads: a
+ * space whose open items fall in more groups than this is a space whose conversion went wrong in a way the groups cannot show, and the list says
+ * so (`counts.openByCut`) instead of growing with the data.
+ */
+export const UNCONVERTED_OPEN_BY_MAX = 500;
 
 /**
  * The most open items one bulk dismiss names. The call reads the ids it will dismiss once (one more than this, to know there are too many) and
@@ -109,16 +124,68 @@ const blankIsAbsent = (v: unknown): unknown => (v === '' ? undefined : v);
 /** A filter both doors may leave out or send blank: optional outside the blank rule too, so the schema states it as optional, as the tools do. */
 const optionalFilter = <T extends z.ZodType>(inner: T) => z.preprocess(blankIsAbsent, inner.optional()).optional();
 
+/** One reason, refused by naming the value (bounded and escaped by `peerText`, as every name a caller sends is) and not by zod's own list of options. */
+const ReasonName = z.enum(UNCONVERTED_REASONS, {
+  error: issue => `'${peerText(issue.input, { max: NAME_QUOTED })}' is not a reason: it is one of ${UNCONVERTED_REASONS.join(', ')}`,
+});
+
+/** One reason, or a list of at most {@link UNCONVERTED_REASONS_MAX}: what the tools declare, and what the parser below accepts after it has split a text. */
+const ReasonOrList = z.union([
+  ReasonName,
+  z.array(ReasonName).max(UNCONVERTED_REASONS_MAX, { error: `a list names at most ${UNCONVERTED_REASONS_MAX} reasons, each once` }),
+]);
+
+/**
+ * The reasons a caller sent as one list of names, or the value itself when it is not text for the schema to refuse: a text is split at commas
+ * (`reason=a,b`), a list is each of its texts split the same way (`reason=a&reason=b` arrives as one, an MCP argument as another), a piece is trimmed,
+ * and a blank piece is no piece. Nothing left is no filter at all, as a blank `reason=` always was. A single text with no comma stays a text.
+ */
+function reasonsOf(value: unknown): unknown {
+  const parts: unknown[] = Array.isArray(value) ? value : [value];
+  if (!parts.every(p => typeof p === 'string')) return value;
+  const names = parts.flatMap(p => (p as string).split(',')).map(s => s.trim()).filter(s => s !== '');
+  if (names.length === 0) return undefined;
+  return names.length === 1 && !Array.isArray(value) ? names[0] : names;
+}
+
+/**
+ * `reason` as a list of the reasons asked for, each once in the order given (an absent or blank value is absent): the one parser of the list's and
+ * the bulk dismissal's `reason`, on both doors and in both acts, so a form one of them takes the other takes and a refusal is worded once.
+ */
+const ReasonsParam = z.preprocess(reasonsOf, ReasonOrList.transform((r): UnconvertedReason[] => (typeof r === 'string' ? [r] : [...new Set(r)])).optional()).optional();
+
 /**
  * The filters both doors take, parsed by this one schema so the route's query and the tool's arguments cannot state different bounds: the MCP
  * tools declare the same kinds, reasons and name length from the same constants, and the bounds gate compares the two.
- * `skip` and `limit` are the list module's (`resolveListPaging`) and are not parsed here.
+ * `reason` is one reason or a list of them (the items of any), parsed to a list. `skip` and `limit` are the list module's (`resolveListPaging`)
+ * and are not parsed here.
  */
 export const UnconvertedFilterParams = z.object({
   kind: optionalFilter(z.enum(KNOWLEDGE_TYPES)),
   type: optionalFilter(z.string().max(TYPE_NAME_MAX)),
-  reason: optionalFilter(z.enum(UNCONVERTED_REASONS)),
+  reason: ReasonsParam,
 });
+
+/**
+ * The refusal of a failed parse of these parameters: the one wording both acts and so both doors send. A failure inside the reason's union names the
+ * branch the caller was closest to (the list's element, its length, or the single value), never zod's `Invalid input`.
+ */
+export const unconvertedParseRefusal = (error: unknown): ParseRefusal => refusalOfParse(error, {
+  unionBranch: (branches: readonly ParseIssueLike[][]) =>
+    branches.find(b => b.some(i => i.code === 'too_big' || (Array.isArray(i.path) && i.path.length > 0))) ?? branches[0],
+});
+
+/**
+ * The `given` of a bulk dismissal as its audit entry records it: the reasons as the parser read them (duplicates and blanks gone), joined into one
+ * text, because the audit allowlist keeps scalars and a list would be dropped, leaving an entry that says a filter was given and not which. The
+ * other fields are as given; a `reason` the parser refuses stays as it came (the act refused the call, and a refused call records no change).
+ */
+export function dismissAuditGiven(given: Record<string, unknown>): Record<string, unknown> {
+  const parsed = ReasonsParam.safeParse(given['reason']);
+  if (!parsed.success) return given;
+  const { reason: _given, ...rest } = given;
+  return parsed.data === undefined ? rest : { ...rest, reason: parsed.data.join(',') };
+}
 
 /** The list's parameters: the filter the bulk dismiss shares, and the `status` only a list chooses. */
 export const UnconvertedListParams = UnconvertedFilterParams.extend({

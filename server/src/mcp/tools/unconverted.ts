@@ -16,7 +16,8 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { listUnconvertedAct, dismissUnconvertedAct, dismissShownUnconvertedAct } from '../../spaces/unconverted-acts.js';
 import {
-  refusalBody, UNCONVERTED_REFUSAL_CODES, UNCONVERTED_DISMISS_MAX, UNCONVERTED_REASONS, UNCONVERTED_STATUSES, type UnconvertedRow,
+  refusalBody, dismissAuditGiven, UNCONVERTED_REFUSAL_CODES, UNCONVERTED_DISMISS_MAX, UNCONVERTED_REASONS, UNCONVERTED_REASONS_MAX, UNCONVERTED_OPEN_BY_MAX,
+  UNCONVERTED_STATUSES, type UnconvertedRow,
 } from '../../spaces/unconverted-terms.js';
 import { KNOWLEDGE_TYPES } from '../../config/types-knowledge.js';
 import { TYPE_NAME_MAX } from '@ythril-network/schema/internal';
@@ -27,7 +28,13 @@ import { viewReadOfCall } from '../../spaces/read-scope.js';
 /** The filters' bounds as the act's schema holds them (`UnconvertedFilterParams`), from the same constants; each tool adds its own words. */
 const KIND_FILTER = { type: 'string', enum: [...KNOWLEDGE_TYPES] } as const;
 const TYPE_FILTER = { type: 'string', maxLength: TYPE_NAME_MAX } as const;
-const REASON_FILTER = { type: 'string', enum: [...UNCONVERTED_REASONS] } as const;
+/** One reason, or a list of them bounded by the number of reasons there are: the two forms the act's one parser takes (`UnconvertedFilterParams`). */
+const REASON_FILTER = {
+  anyOf: [
+    { type: 'string', enum: [...UNCONVERTED_REASONS] },
+    { type: 'array', items: { type: 'string', enum: [...UNCONVERTED_REASONS] }, maxItems: UNCONVERTED_REASONS_MAX },
+  ],
+} as const;
 
 /** The refusal codes a list can answer: the filters, the paging and the rung. */
 const LIST_CODES: ReadonlySet<string> = new Set([
@@ -52,7 +59,8 @@ export const list_unconvertedTool: ToolHandler = {
     + 'no other class names, its one violation naming the kind of error and never its words), `violations` names the fields that do not conform and why '
     + '(never their values), `proposed` what the steps would have made of it (a new type, the property names set and removed), and `record.summary` is '
     + 'the record\'s own name or summary, absent when the record is gone. Newest first. The answer carries `total`, `skip`, `limit`, `count`, `truncated`, '
-    + '`nextSkip` when the page is cut, and `counts` (`{ open, dismissed }`, of the whole space whatever the filters). This call writes nothing: a row for a '
+    + '`nextSkip` when the page is cut, and `counts` (`{ open, dismissed, openBy }`, of the whole space whatever the filters: `openBy` is the open items '
+    + `grouped as \`[{ kind, type, reason, n }]\`, ordered by kind, type and reason, and summing to \`open\`; past ${UNCONVERTED_OPEN_BY_MAX} groups it holds the first ${UNCONVERTED_OPEN_BY_MAX} and \`openByCut\` is true). This call writes nothing: a row for a `
     + 'record that was edited, converted or deleted since is removed by the server\'s own sweep a little later, and is listed until then. '
     + 'To settle one: edit the record (a later write checks it against the schema and stamps it), or convert again with other steps '
     + '(an administrator\'s call), or dismiss the item to stop listing it (a write call). Needs `knowledge: read`. '
@@ -70,7 +78,7 @@ export const list_unconvertedTool: ToolHandler = {
       // The bounds of the act's schema (`UnconvertedListParams`); the act still refuses a wrong one by its own code, the words the route answers too.
       kind: { ...KIND_FILTER, description: 'Only the items of records of this kind: `entity`, `fact`, `edge` or `chrono`. Omit for every kind. Anything else is refused (`unconverted_bad_kind`).' },
       type: { ...TYPE_FILTER, description: 'Only the items of records of this type (a relationship\'s label for an edge), as a row\'s `type` says. Omit for every type. A name no schema could declare is refused (`unconverted_bad_type`).' },
-      reason: { ...REASON_FILTER, description: 'Only the items with this reason class (a row\'s `reason`, for example `not_conforming` or `no_case_matched`). Omit for every reason. The same filter the bulk dismissal takes, so the number you are shown is the number it dismisses. Anything else is refused (`unconverted_bad_reason`).' },
+      reason: { ...REASON_FILTER, description: `Only the items with this reason class (a row's \`reason\`, for example \`not_conforming\` or \`no_case_matched\`), or with any of a list of them: send an array of at most ${UNCONVERTED_REASONS_MAX} reasons (as many as there are, each once; a comma text such as \`fork,not_conforming\` is the same list). \`total\` counts the items of all of them. Omit for every reason. The same filter the bulk dismissal takes, so the number you are shown is the number it dismisses. An unknown reason anywhere in the list, or a longer list, is refused (\`unconverted_bad_reason\`).` },
       status: { type: 'string', enum: [...UNCONVERTED_STATUSES], description: '`open` (the default) lists the records still to settle, `dismissed` the ones that were dismissed. One status per call: `counts` carries both numbers. Anything else is refused (`unconverted_bad_status`).' },
       skip: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: 'Rows to skip before the page, newest first: the `nextSkip` of the previous page. The server reads past them, so a deep skip costs a deep read.' },
       limit: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: 'Rows in the page. A limit above the largest page is held to it and the answer\'s `limit` says what applied; the page also stops at the byte budget, and `truncated` and `nextSkip` say so.' },
@@ -142,7 +150,7 @@ export const dismiss_unconverted_shownTool: ToolHandler = {
       space: s.requiredSpace,
       kind: { ...KIND_FILTER, description: 'Only the items of records of this kind: `entity`, `fact`, `edge` or `chrono`. Omit for every kind. Anything else is refused (`unconverted_bad_kind`). The same filter `list_unconverted` takes.' },
       type: { ...TYPE_FILTER, description: 'Only the items of records of this type (a relationship\'s label for an edge). Omit for every type. A name no schema could declare is refused (`unconverted_bad_type`).' },
-      reason: { ...REASON_FILTER, description: 'Only the items with this reason class (a `list_unconverted` row\'s `reason`). Omit for every reason. Anything else is refused (`unconverted_bad_reason`).' },
+      reason: { ...REASON_FILTER, description: `Only the items with this reason class (a \`list_unconverted\` row's \`reason\`), or with any of a list of them: send an array of at most ${UNCONVERTED_REASONS_MAX} reasons (as many as there are, each once). \`expect\` then counts the open items of all of them. Omit for every reason. An unknown reason anywhere in the list, or a longer list, is refused (\`unconverted_bad_reason\`).` },
       expect: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: 'REQUIRED: the number of open items `list_unconverted` told you this filter lists (`total` with `status: "open"`). If the number now differs, nothing is dismissed and the call is refused (409, `unconverted_changed`, with the `current` number), so a confirmation of one number never dismisses another. Cost: list again and confirm when it moved.' },
     },
     required: ['space', 'expect'],
@@ -152,7 +160,7 @@ export const dismiss_unconverted_shownTool: ToolHandler = {
     const { kind, type, reason, expect } = ctx.args;
     const r = await dismissShownUnconvertedAct(ctx.callSpace, { kind, type, reason, expect }, { rights: ctx.rights, transport: ctx.transport });
     if ('error' in r) throw toolRefusalOfAct(r.status, r.error, refusalBody(r));
-    ctx.recordAuditChanges?.(dismissShownChanges({ kind, type, reason, expect }, (r.body as { dismissed: number }).dismissed));
+    ctx.recordAuditChanges?.(dismissShownChanges(dismissAuditGiven({ kind, type, reason, expect }), (r.body as { dismissed: number }).dismissed));
     const text = `Dismissed ${(r.body as { dismissed: number }).dismissed} open unconverted item(s) in '${ctx.callSpace}': they stay listed under status "dismissed", and the records themselves are unchanged.`;
     return { content: [{ type: 'text' as const, text }], structuredContent: { ...r.body } };
   },

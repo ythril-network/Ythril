@@ -32,11 +32,13 @@ import { pageMemberList, type ListPage, type ListPageRequest } from './list-page
 import { defaultBudgetChars } from './result-budget.js';
 import { peerText } from '../util/log.js';
 import { isPlainObject } from '../util/plain-object.js';
-import { UNCONVERTED_REASONS, UNCONVERTED_DISMISS_MAX, type UnconvertedReason, type UnconvertedItem } from '../spaces/unconverted-terms.js';
+import {
+  UNCONVERTED_REASONS, UNCONVERTED_DISMISS_MAX, UNCONVERTED_OPEN_BY_MAX, type UnconvertedReason, type UnconvertedItem,
+} from '../spaces/unconverted-terms.js';
 
 // What an item is, its reason classes and the bulk dismissal's bound are terms the store, the acts and both doors share (`spaces/unconverted-terms.ts`);
 // re-exported for the readers that name them here.
-export { UNCONVERTED_REASONS, UNCONVERTED_DISMISS_MAX, type UnconvertedReason, type UnconvertedItem };
+export { UNCONVERTED_REASONS, UNCONVERTED_DISMISS_MAX, UNCONVERTED_OPEN_BY_MAX, type UnconvertedReason, type UnconvertedItem };
 
 /** The most violations one item names. */
 export const UNCONVERTED_VIOLATIONS_MAX = 20;
@@ -129,33 +131,82 @@ export async function recordUnconvertedItem(spaceId: string, input: UnconvertedI
  */
 export type ListedUnconvertedItem = UnconvertedItem & { space: string; record?: { summary: string } };
 
-/** What a list of the items answers: the page, its fields, and how many rows are open and dismissed in the whole of the spaces it read. */
+/** How many open items one (kind, type, reason) holds: a group of `counts.openBy`. */
+export interface UnconvertedOpenGroup {
+  kind: KnowledgeType;
+  type: string;
+  reason: UnconvertedReason;
+  n: number;
+}
+
+/**
+ * What a list of the items answers: the page, its fields, and how many rows are open and dismissed in the whole of the spaces it read, with the open
+ * ones grouped (`openBy`, at most {@link UNCONVERTED_OPEN_BY_MAX} groups, `openByCut` when there were more).
+ */
 export type UnconvertedList =
-  | { ok: true; items: ListedUnconvertedItem[]; fields: Record<string, unknown>; open: number; dismissed: number }
+  | { ok: true; items: ListedUnconvertedItem[]; fields: Record<string, unknown>; open: number; dismissed: number; openBy: UnconvertedOpenGroup[]; openByCut: boolean }
   | { ok: false; error: string };
 
-/** What narrows a list of the items, and what a bulk dismiss takes: the one set of fields both read, so a count shown and a set dismissed are one question. */
+/**
+ * What narrows a list of the items, and what a bulk dismiss takes: the one set of fields both read, so a count shown and a set dismissed are one question.
+ * `reason` is the reasons asked for: an item of any of them matches (the acts' one parser gives a list, whether the caller sent one reason or several).
+ */
 export interface UnconvertedFilter {
   kind?: string;
   type?: string;
-  reason?: UnconvertedReason;
+  reason?: readonly UnconvertedReason[];
   status?: UnconvertedItem['status'];
 }
 
-/** The stored-item filter of `f`: a field not given, or given empty, narrows nothing. */
+/** The stored-item filter of `f`: a field not given, or given empty (an empty list of reasons too), narrows nothing. */
 const filterOf = (f: UnconvertedFilter): Record<string, unknown> => ({
   ...(f.status !== undefined ? { status: f.status } : {}),
   ...(typeof f.kind === 'string' && f.kind !== '' ? { kind: f.kind } : {}),
   ...(typeof f.type === 'string' && f.type !== '' ? { type: f.type } : {}),
-  ...(f.reason !== undefined ? { reason: f.reason } : {}),
+  ...(f.reason !== undefined && f.reason.length > 0 ? { reason: { $in: [...f.reason] } } : {}),
 });
+
+/** One text before another by the code units of its characters: the order a stored key sorts in, so a group list merged here is in the order each space's own read was. */
+const before = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * The OPEN items of the `spaces` grouped by kind, type and reason, whatever any request narrows by: one grouped read of each space's open items,
+ * ordered by the group's key and cut at {@link UNCONVERTED_OPEN_BY_MAX} + 1 groups inside the database, so the answer's size is bounded by the bound
+ * and never by the data. The groups of several spaces (a personal view's members) are added by their key, in key order, and the first
+ * {@link UNCONVERTED_OPEN_BY_MAX} are kept; `cut` says there were more (in one space, or after the members were added).
+ *
+ * ## What serves the read
+ *
+ * No index: the collection holds the items of the records a conversion could not convert, one for each record, removed by the sweep when the record
+ * changes, and a run lists at most {@link UNCONVERTED_ITEMS_PER_RUN_MAX} of them. The list already reads it whole for `counts` (open and dismissed);
+ * this is the same scan grouped, once for each space, with the group count bounded in the pipeline.
+ */
+async function openItemsByGroup(spaces: readonly string[]): Promise<{ groups: UnconvertedOpenGroup[]; cut: boolean }> {
+  const perSpace = await Promise.all(spaces.map(async id => await items(id).aggregate([
+    { $match: asFilter<UnconvertedItem>({ status: 'open' }) },
+    { $group: { _id: { kind: '$kind', type: '$type', reason: '$reason' }, n: { $sum: 1 } } },
+    { $sort: { '_id.kind': 1, '_id.type': 1, '_id.reason': 1 } },
+    { $limit: UNCONVERTED_OPEN_BY_MAX + 1 },
+  ]).toArray() as Array<{ _id: { kind: KnowledgeType; type: string; reason: UnconvertedReason }; n: number }>));
+  const merged = new Map<string, UnconvertedOpenGroup>();
+  for (const rows of perSpace) {
+    for (const { _id, n } of rows) {
+      const key = `${_id.kind}\u0000${_id.type}\u0000${_id.reason}`;
+      const held = merged.get(key);
+      if (held) held.n += n; else merged.set(key, { kind: _id.kind, type: _id.type, reason: _id.reason, n });
+    }
+  }
+  const all = [...merged.values()].sort((a, b) => before(a.kind, b.kind) || before(a.type, b.type) || before(a.reason, b.reason));
+  const cut = all.length > UNCONVERTED_OPEN_BY_MAX || perSpace.some(rows => rows.length > UNCONVERTED_OPEN_BY_MAX);
+  return { groups: all.slice(0, UNCONVERTED_OPEN_BY_MAX), cut };
+}
 
 /**
  * The items of the `spaces` (one space, or the members a personal view reads), newest first across them, narrowed by `kind`, `type`, `reason`
  * and `status` (all of them when none is given, so the filter is the caller's to state: the door's act states `open` by default), paged by the
  * one list rule (`skip`, `limit`, the byte budget; over several spaces the merge reads at most `UNCONVERTED_ITEMS_PER_RUN_MAX` deep). Each row
  * names its space. Writes nothing: a stale item is listed until the watcher's tick removes it. `transport` names the door, whose budget default
- * applies.
+ * applies. The answer also groups the OPEN items of the whole of the spaces by kind, type and reason (`openBy`), whatever the request narrows by.
  *
  * `enrich` adds to the rows read for the page before the byte budget is applied, so what it adds is counted in the bytes the answer reports
  * and in where the page is cut (the door's `record.summary`); it never changes which rows are listed, their order or the totals.
@@ -180,11 +231,17 @@ export async function listUnconvertedItems(
     ceiling: UNCONVERTED_ITEMS_PER_RUN_MAX,
   });
   if (!page.ok) return page;
-  const counts = await Promise.all(spaces.map(id => Promise.all([
-    items(id).countDocuments(asFilter<UnconvertedItem>({ status: 'open' })),
-    items(id).countDocuments(asFilter<UnconvertedItem>({ status: 'dismissed' })),
-  ])));
-  return { ok: true, items: page.rows, fields: page.fields, open: sumOf(counts.map(c => c[0])), dismissed: sumOf(counts.map(c => c[1])) };
+  const [counts, grouped] = await Promise.all([
+    Promise.all(spaces.map(id => Promise.all([
+      items(id).countDocuments(asFilter<UnconvertedItem>({ status: 'open' })),
+      items(id).countDocuments(asFilter<UnconvertedItem>({ status: 'dismissed' })),
+    ]))),
+    openItemsByGroup(spaces),
+  ]);
+  return {
+    ok: true, items: page.rows, fields: page.fields, open: sumOf(counts.map(c => c[0])), dismissed: sumOf(counts.map(c => c[1])),
+    openBy: grouped.groups, openByCut: grouped.cut,
+  };
 }
 
 const sumOf = (ns: readonly number[]): number => ns.reduce((n, m) => n + m, 0);
