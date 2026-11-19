@@ -3,8 +3,8 @@
  *
  * ## The defect this refuses
  *
- * `a-write-the-bound-ended-never-lands-db` and its late variant take longer than a file may, so each is cut into part files, each its
- * own process with its own door (`_landing-parts.mjs`). Every part is green on its own lanes, so a cut that drops a lane, or runs one
+ * A landing experiment that takes longer than a file may (today the late variant of `a-write-the-bound-ended-never-lands-db`) is cut
+ * into part files, each its own process with its own door (`_landing-parts.mjs`). Every part is green on its own lanes, so a cut that drops a lane, or runs one
  * lane in two parts and another in none, is green everywhere while a holder or door is held nowhere. Asserted here, with no database:
  *
  * - the cut (`lanesOfPart`) is a partition of a table of any length into any count of parts, none empty, and it refuses a count that
@@ -50,14 +50,15 @@ describe('the parts of a split landing experiment run every lane once', () => {
 
   it('partOf answers a split experiment\'s part and refuses anything else', () => {
     const stems = Object.keys(SPLIT_EXPERIMENTS);
-    assert.ok(stems.includes('a-write-the-bound-ended-never-lands') && stems.includes('a-write-the-bound-ended-never-lands-when-the-command-is-late'),
-      `the split experiments are ${stems.join(', ')}: the base and the late experiment are not both cut by this module`);
+    assert.ok(stems.includes('a-write-the-bound-ended-never-lands-when-the-command-is-late'),
+      `the split experiments are ${stems.join(', ') || 'none'}: the late experiment is not cut by this module`);
     for (const [stem, count] of Object.entries(SPLIT_EXPERIMENTS)) {
       assert.ok(Number.isInteger(count) && count >= 2, `'${stem}' is cut into ${count} part(s)`);
       assert.deepEqual(partOf(stem, count - 1), { stem, index: count - 1, count });
       assert.throws(() => partOf(stem, count), /is not one of/);
     }
     assert.throws(() => partOf('a-write-the-bound-ended-never-lands-under-a-client-timeout', 0), /not a split experiment/);
+    assert.throws(() => partOf('a-write-the-bound-ended-never-lands', 0), /not a split experiment/, 'the base experiment is one file, never a part');
   });
 
   it('a file name says which part it is, and a file of another experiment is no part of this one', () => {

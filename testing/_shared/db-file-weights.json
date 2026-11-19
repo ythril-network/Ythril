@@ -11,7 +11,6 @@
     "a-write-the-bound-ended-never-lands-db.test.js": 64,
     "an-arriving-edge-is-recorded-against-its-endpoint-and-functional-rules-db.test.js": 62,
     "an-arrival-records-an-undeclared-key-once-and-only-what-it-added-db.test.js": 60,
-    "a-write-the-bound-ended-never-lands-part-2-db.test.js": 58,
     "a-metrics-route-label-is-a-fixed-set-db.test.js": 58,
     "a-restore-reports-which-files-no-longer-match-their-records-db.test.js": 56,
     "push-and-pull-decide-alike-db.test.js": 54,

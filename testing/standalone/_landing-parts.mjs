@@ -22,10 +22,9 @@ import { parseSource, walkEveryNode, ts } from '../_shared/syntax-tree.mjs';
 export const SPLIT_EXPERIMENTS = Object.freeze({
   // The count is the fewest parts whose measured time each stays well under the 60 s a file may take (the runs are in the commit that
   // set it); a new holder case that pushes a part past it is a reason to raise the count here, never to drop lanes. A part cannot go
-  // under one lane's repetitions run one after another (each waits out the last one's settle window), so past the count where that
-  // chain is what a part waits for, another part only adds a door's setup: the base experiment's count is that point, and its
-  // parts stay above 60 s by the chain (its commit has the figures).
-  'a-write-the-bound-ended-never-lands': 4,
+  // under one lane's repetitions run one after another (each waits out the last one's settle window), and every part pays its own
+  // door's setup: an experiment whose one file already waits only for that chain is NOT split, because parts would add setups to the
+  // total the database groups wait for and shorten nothing. That is why the base experiment is one file (its header says why).
   'a-write-the-bound-ended-never-lands-when-the-command-is-late': 2,
 });
 
