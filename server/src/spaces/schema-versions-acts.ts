@@ -39,6 +39,7 @@ import { isSchemaFingerprint } from '@ythril-network/schema/internal';
 import { resolveBudget, defaultBudgetChars, carriagesFor, budgetCeilingZ, type BudgetRequest } from '../brain/result-budget.js';
 import { pageList } from '../brain/list-page.js';
 import { refusalOfParse } from '../util/log.js';
+import { listedNames } from '../util/listed-names.js';
 import { variationOf, EMPTY_SCHEMA_FINGERPRINT } from './schema-stamp.js';
 import { snapshots } from './schema-snapshot-store.js';
 import { fingerprintTypesIn, STAMPED_COLLECTIONS, FINGERPRINT_TYPES_DEFAULT_MS, type StampedCollection } from './schema-snapshot-carried.js';
@@ -243,13 +244,6 @@ export async function diffSchemaVersionAct(
 /** The arguments of the one door, as both doors hand them over. */
 export type SchemaVersionsArgs = { fp?: unknown; against?: unknown; skip?: unknown; kind?: unknown; type?: unknown; fps?: unknown } & BudgetRequest;
 
-/** `fps` as sent: an array on the tool, one comma-separated value on the route (or a repeated one). */
-function fpsOf(fps: unknown): unknown[] {
-  if (Array.isArray(fps)) return fps.flatMap(v => (typeof v === 'string' ? v.split(',') : [v])).filter(v => v !== '');
-  if (typeof fps === 'string') return fps.split(',').filter(v => v !== '');
-  return [fps];
-}
-
 /**
  * The type forms (bundle-268, Q-744 design r4 §5), refused in a fixed order so every malformed request has one code: `bad_kind`, then
  * `type_needs_kind`, then `fps_needs_type` / `kind_needs_type`, then `too_many_fps` and `bad_fingerprint`. Two refusals carry their message and
@@ -278,10 +272,13 @@ async function typeFormAct(spaceId: string, args: SchemaVersionsArgs, budget: Bu
   if (!budgetCheck.ok) return { status: 400, error: budgetCheck.error };
   if (fps !== undefined) {
     if (fp !== undefined) return { status: 400, error: '`fps` and `fp` are two forms: send one' };
-    const list = fpsOf(fps);
-    if (list.length > FPS_MAX) return { status: 400, error: `\`fps\` names at most ${FPS_MAX} fingerprints`, code: TOO_MANY_FPS };
+    // `fps` as sent: an array on the tool, one comma-separated value on the route (or a repeated one); the one reading of that is `listedNames`.
+    const listed = listedNames(fps, FPS_MAX);
+    if (listed.kind === 'not_text') return badFingerprint('every member of fps');
+    if (listed.over) return { status: 400, error: `\`fps\` names at most ${FPS_MAX} fingerprints`, code: TOO_MANY_FPS };
+    const list = listed.names;
     if (list.length === 0 || list.some(v => !isSchemaFingerprint(v))) return badFingerprint('every member of fps');
-    return typeStandingsAct(spaceId, k, type as string, list as string[], caller);
+    return typeStandingsAct(spaceId, k, type as string, list, caller);
   }
   if (fp !== undefined) {
     if (typeof fp !== 'string') return badFingerprint('fp');

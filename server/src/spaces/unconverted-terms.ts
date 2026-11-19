@@ -13,6 +13,7 @@
  */
 import { z } from 'zod';
 import { TYPE_NAME_MAX, NAME_QUOTED, peerText, type ParseIssueLike, type ParseRefusalOptions } from '@ythril-network/schema/internal';
+import { listedNames } from '../util/listed-names.js';
 import { KNOWLEDGE_TYPES, type KnowledgeType } from '../config/types-knowledge.js';
 import type { TokenRights } from '../config/rights-shape.js';
 
@@ -142,10 +143,11 @@ const ReasonOrList = z.union([
  * and a blank piece is no piece. Nothing left is no filter at all, as a blank `reason=` always was. A single text with no comma stays a text.
  */
 function reasonsOf(value: unknown): unknown {
-  const parts: unknown[] = Array.isArray(value) ? value : [value];
-  if (!parts.every(p => typeof p === 'string')) return value;
-  const names = parts.flatMap(p => (p as string).split(',')).map(s => s.trim()).filter(s => s !== '');
+  const listed = listedNames(value, UNCONVERTED_REASONS_MAX);
+  if (listed.kind === 'not_text') return value;
+  const { names } = listed;
   if (names.length === 0) return undefined;
+  // A list over the bound comes back one name too long, so the schema's own length refusal speaks.
   return names.length === 1 && !Array.isArray(value) ? names[0] : names;
 }
 
