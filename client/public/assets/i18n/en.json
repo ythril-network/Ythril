@@ -3319,6 +3319,7 @@
   "spaces.schema.convert.note.running.many": "Converting the records of this type: {{done}} of {{count}} checked.",
   "spaces.schema.convert.note.running.other": "Converting the records of this type: {{done}} of {{count}} checked.",
   "spaces.schema.convert.note.finished": "Schema saved. Conversion finished.",
+  "spaces.schema.convert.note.actFinished": "Conversion finished.",
   "spaces.schema.convert.note.finishedSome.one": "{{count}} record could not be converted.",
   "spaces.schema.convert.note.finishedSome.few": "{{count}} records could not be converted.",
   "spaces.schema.convert.note.finishedSome.many": "{{count}} records could not be converted.",
