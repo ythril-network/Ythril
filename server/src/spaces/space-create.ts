@@ -31,11 +31,16 @@ import {
 import { refuseRemovedDescription } from './spaces.js';
 import { RDF_BASE_NEEDED_STATUS, settleRdf } from './rdf-settle.js';
 import { getPublicBaseUrl, publicBaseUrlIsFallback } from '../config/public-url.js';
+import { termClashes } from '../rdf/term-iri.js';
+import { inlineResolvableRefs } from './schema-validation.js';
 import { retiredSpaceFieldError } from '../brain/retired-write-fields.js';
 import { ReservedSpaceIdError } from './unknown-space.js';
 import { refusalText } from '../brain/store-failure.js';
 import { reportServerFailure } from '../util/report-failure.js';
 import { SpaceStillBeingRemoved, SPACE_STILL_BEING_REMOVED, SPACE_STILL_BEING_REMOVED_RETRY_AFTER_S } from './search-index-drops-in-flight.js';
+
+/** The status of a new space whose terms would share one RDF address: understood, and not storable (as on PATCH). */
+const TERM_CLASH_STATUS = 422 as const;
 
 /** A refusal, carrying the status the contract suite pins. */
 export type SpaceCreateRefusal = {
@@ -108,6 +113,12 @@ export function planSpaceCreate(body: unknown): SpaceCreateDecision {
     // Nothing is stored yet, so the only refusal is the first set's (`rdf_base_needed`, 400).
     if (!rdf.ok) return { ok: false, refusal: { status: RDF_BASE_NEEDED_STATUS, body: { error: rdf.error, code: rdf.code } } };
     if (rdf.rdf === undefined) delete seededMeta.rdf; else seededMeta.rdf = rdf.rdf;
+    // Q-748 rule 5 at create too (review finding 9): a space stored with two terms of one address would answer rdf_term_clash to every
+    // later library write that touches it. Asked of the resolved schema, as on PATCH.
+    const clashes = seededMeta.rdf?.enabled === true && seededMeta.rdf.base ? termClashes(inlineResolvableRefs(seededMeta)) : [];
+    if (clashes.length > 0) {
+      return { ok: false, refusal: { status: TERM_CLASH_STATUS, body: { code: 'rdf_term_clash', error: `two terms of this space would have one RDF address: ${clashes.map(c => c.message).join('; ')}` } } };
+    }
   }
 
   // What `createSpace` stores is parsed: the seeded meta is the caller's parsed meta with two defaults laid under it, and it

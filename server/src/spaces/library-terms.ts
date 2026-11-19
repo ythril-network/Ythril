@@ -128,21 +128,45 @@ export function libraryRdfGuard(spaces: readonly SpaceConfig[], before: LibraryS
   for (const space of spaces) {
     const meta = space.meta;
     if (meta?.rdf?.enabled !== true || !meta.rdf.base || !linksAnEntry(meta, [...before.library, ...after.library])) continue;
-    const next = resolvedUnder(meta, after);
-    const clashes = termClashes(next);
-    if (clashes.length > 0) {
-      return { status: RDF_BASE_STANDS_STATUS, body: {
-        code: 'rdf_term_clash', error: `in space ${peerText(space.id)}, this library change would give two terms one RDF address: ${clashes.map(c => c.message).join('; ')}`,
-        // Structured for a client that words the refusal in its own language: the space, the first clash's terms and the address.
-        space: space.id, terms: clashes[0]!.owners.map(termOwnerName), iri: clashes[0]!.iri,
-      } };
-    }
-    const was = termAddresses(resolvedUnder(meta, before));
-    const now = termAddresses(next);
-    if ([...now].some(([k, iri]) => was.has(k) && was.get(k) !== iri)) renamed.push(space.id);
+    const change = termChange(space.id, meta, before, meta, after);
+    if (change === 'renamed') renamed.push(space.id); else if (change) return change;
   }
+  return renameRefusal(renamed, rebase, 'library change');
+}
+
+/**
+ * What a write of ONE space's schema from `before` to `after` does to its RDF terms under the library as it stands (review finding 9: a
+ * group apply replaces a type by a namespaced entry): `null` when nothing is renamed or clashes, or the space has RDF off afterwards; 409
+ * `rdf_term_rename` unless `rebase`; 409 `rdf_term_clash` naming both terms. The guard the library's entry writes run, for a write of the
+ * space's own definitions through a library door.
+ */
+export function spaceEditRdfGuard(spaceId: string, before: SpaceMeta, after: SpaceMeta, rebase: boolean): LibraryRdfRefusal | null {
+  if (after.rdf?.enabled !== true || !after.rdf.base) return null;
+  const state = currentLibraryState();
+  const change = termChange(spaceId, before.rdf?.enabled === true && before.rdf.base ? before : after, state, after, state);
+  return change === 'renamed' ? renameRefusal([spaceId], rebase, 'change') : change;
+}
+
+/** One space's terms from `metaBefore` under `stateBefore` to `metaAfter` under `stateAfter`: a clash refusal, `'renamed'`, or `null`. */
+function termChange(spaceId: string, metaBefore: SpaceMeta, stateBefore: LibraryState, metaAfter: SpaceMeta, stateAfter: LibraryState): LibraryRdfRefusal | 'renamed' | null {
+  const next = resolvedUnder(metaAfter, stateAfter);
+  const clashes = termClashes(next);
+  if (clashes.length > 0) {
+    return { status: RDF_BASE_STANDS_STATUS, body: {
+      code: 'rdf_term_clash', error: `in space ${peerText(spaceId)}, this change would give two terms one RDF address: ${clashes.map(c => c.message).join('; ')}`,
+      // Structured for a client that words the refusal in its own language: the space, the first clash's terms and the address.
+      space: spaceId, terms: clashes[0]!.owners.map(termOwnerName), iri: clashes[0]!.iri,
+    } };
+  }
+  const was = termAddresses(resolvedUnder(metaBefore, stateBefore));
+  const now = termAddresses(next);
+  return [...now].some(([k, iri]) => was.has(k) && was.get(k) !== iri) ? 'renamed' : null;
+}
+
+/** The 409 `rdf_term_rename` naming `renamed`, or `null` when nothing is renamed or the caller sent `rebase`. */
+function renameRefusal(renamed: readonly string[], rebase: boolean, what: string): LibraryRdfRefusal | null {
   if (renamed.length === 0 || rebase) return null;
-  return { status: RDF_BASE_STANDS_STATUS, body: { code: 'rdf_term_rename', spaces: renamed, error: `this library change renames RDF terms of ${renamed.map(id => `space ${peerText(id)}`).join(', ')}, whose records' exports would name them differently from then on: send rebase: true to make the change on purpose` } };
+  return { status: RDF_BASE_STANDS_STATUS, body: { code: 'rdf_term_rename', spaces: [...renamed], error: `this ${what} renames RDF terms of ${renamed.map(id => `space ${peerText(id)}`).join(', ')}, whose records' exports would name them differently from then on: send rebase: true to make the change on purpose` } };
 }
 
 /** Does `meta` reference one of `library`'s entries by `$ref`? */
