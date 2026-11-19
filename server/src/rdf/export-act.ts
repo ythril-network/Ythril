@@ -51,7 +51,8 @@ import { createRdfWriter, RdfWriteError, type RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES, RDF_BAD_FORMAT } from './export-format.js';
 import {
   rdfSpaceState, RDF_NOT_ENABLED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
-} from './rdf-space-state.js';import { ythrilIri } from './ythril-vocabulary.js';
+} from './rdf-space-state.js';
+import { ythrilIri } from './ythril-vocabulary.js';
 
 /** The most records one page holds. */
 export const RDF_EXPORT_LIMIT_MAX = 10_000;
