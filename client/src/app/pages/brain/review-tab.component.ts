@@ -1,4 +1,6 @@
-import { Component, inject, signal, computed, effect, untracked, OnInit, OnChanges, SimpleChanges, Input, Output, EventEmitter } from '@angular/core';
+import { Component, inject, signal, computed, OnInit, OnChanges, SimpleChanges, Input, Output, EventEmitter } from '@angular/core';
+import { outputFromObservable, toObservable } from '@angular/core/rxjs-interop';
+import { filter } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { DuplicateRecord, ContradictionRecord } from '../../core/api.types';
 import { DuplicatesApi } from '../../core/duplicates-api.service';
@@ -382,14 +384,7 @@ export class ReviewTabComponent implements OnInit, OnChanges {
    * The Unconverted section's open count, with its space, after every list answer of its state (`openRead`): the page's own Review tab shows it,
    * so a dismiss, a bulk dismiss or a run's records move that count too, with no read of the page's own (S12, Q-939).
    */
-  @Output() unconvertedOpen = new EventEmitter<{ space: string; open: number }>();
-
-  constructor() {
-    effect(() => {
-      const read = this.unconvState.openRead();
-      if (read) untracked(() => this.unconvertedOpen.emit(read));
-    });
-  }
+  readonly unconvertedOpen = outputFromObservable(toObservable(this.unconvState.openRead).pipe(filter(read => read !== null)));
 
   /** The space being reviewed. Required: this view is per-space now, never instance-wide. */
   @Input({ required: true }) spaceId = '';
