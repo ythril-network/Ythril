@@ -50,7 +50,8 @@ export class NotEmbeddedYetError extends NotFoundError {}
  */
 export class ToolRefusal extends Error {
   override readonly name = 'ToolRefusal';
-  constructor(readonly status: 400 | 403 | 404 | 409 | 410 | 422 | 429, message: string, readonly body?: Readonly<Record<string, unknown>>) {
+  // 406 and 503: an export's format the scope cannot take, and a page the store did not answer (Q-750), answered alike on both doors.
+  constructor(readonly status: 400 | 403 | 404 | 406 | 409 | 410 | 422 | 429 | 503, message: string, readonly body?: Readonly<Record<string, unknown>>) {
     super(message);
   }
 }

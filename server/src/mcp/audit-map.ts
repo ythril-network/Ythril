@@ -181,6 +181,7 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   space_meta: 'space.list',
   // Q-742: a space's schema versions, read like its meta - `GET /api/spaces/:id/schema-versions` records `space.list`.
   space_schema_versions: 'space.list',
+  space_schema_rdf: 'schema.rdf_export',
 
   // ── Not audited operations, with the reason each. ──────────────────────────────────────────────
   // Returns this instance's own documentation. Reads no space and no record.
@@ -264,6 +265,8 @@ export const MCP_OPERATION_SUBJECTS: Record<string, (args: unknown) => string> =
  */
 export const MCP_ACT_OPERATIONS: Readonly<Record<string, string>> = {
   file_stamp_report: 'file.stamps.reported',
+  // Q-750: a space's records leaving as RDF, an act on both doors (the route's rule carries no `read: true`).
+  export_rdf: 'rdf.export',
 };
 
 /** The act a non-mutating tool's call is recorded as (always, never gated by `logReads`), or `null` when it is not one. */

@@ -14,6 +14,12 @@ ythril:Entity
     rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
     rdfs:label "Entity" .
 
+ythril:ExportReport
+    a rdfs:Class ;
+    rdfs:comment "One page of an RDF export of Ythril records: how many records it holds, whether it is the last, and what it left out." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "ExportReport" .
+
 ythril:Fact
     a rdfs:Class ;
     rdfs:comment "A Ythril fact record." ;
@@ -25,6 +31,12 @@ ythril:Untyped
     rdfs:comment "The class of an entity that declares no type." ;
     rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
     rdfs:label "Untyped" .
+
+ythril:complete
+    a rdf:Property ;
+    rdfs:comment "Whether nothing of the export's scope is left after this page: true on its last page." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "complete" .
 
 ythril:confidence
     a rdf:Property ;
@@ -56,6 +68,42 @@ ythril:endpointTo
     rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
     rdfs:label "endpointTo" .
 
+ythril:fileTriplesWithheld
+    a rdf:Property ;
+    rdfs:comment "The export holds no file statements of some space it covers, because its caller may not read files there." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "fileTriplesWithheld" .
+
+ythril:leftOutCount
+    a rdf:Property ;
+    rdfs:comment "How many property values a page of an export left out because none is one plain value that fits its property." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "leftOutCount" .
+
+ythril:leftOutKey
+    a rdf:Property ;
+    rdfs:comment "The property key of a left-out value." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "leftOutKey" .
+
+ythril:leftOutReason
+    a rdf:Property ;
+    rdfs:comment "Why a value was left out, in words." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "leftOutReason" .
+
+ythril:leftOutRecord
+    a rdf:Property ;
+    rdfs:comment "The record a left-out value belongs to." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "leftOutRecord" .
+
+ythril:leftOutValue
+    a rdf:Property ;
+    rdfs:comment "A property value a page of an export left out, as a node naming its record, its key and why." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "leftOutValue" .
+
 ythril:mergeFn
     a rdf:Property ;
     rdfs:comment "The function that merges two values of a property when two members change it at once." ;
@@ -68,6 +116,12 @@ ythril:namingPattern
     rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
     rdfs:label "namingPattern" .
 
+ythril:nextAfter
+    a rdf:Property ;
+    rdfs:comment "The cursor that continues an export after this page, passed back as its after parameter." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "nextAfter" .
+
 ythril:path
     a rdf:Property ;
     rdfs:comment "A file's path within its space." ;
@@ -79,6 +133,12 @@ ythril:pattern
     rdfs:comment "A pattern every text value of a property must match, as Ythril checks it: an ECMAScript regular expression, unanchored. It is also sh:pattern only where SPARQL regular expressions read it alike." ;
     rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
     rdfs:label "pattern" .
+
+ythril:recordCount
+    a rdf:Property ;
+    rdfs:comment "How many records a page of an export holds." ;
+    rdfs:isDefinedBy <https://w3id.org/ythril/ns> ;
+    rdfs:label "recordCount" .
 
 ythril:recurrenceFreq
     a rdf:Property ;

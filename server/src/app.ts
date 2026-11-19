@@ -19,6 +19,8 @@ import { spaceSchemaLayersRouter } from './api/spaces-schema-layers.js';
 import { spaceSchemaVersionsRouter } from './api/spaces-schema-versions.js';
 import { spaceSchemaConvertRouter } from './api/spaces-schema-convert.js';
 import { spaceUnconvertedRouter } from './api/spaces-unconverted.js';
+import { spaceSchemaRdfRouter } from './api/spaces-schema-rdf.js';
+import { linkedDataPlaceholderRouter } from './api/linked-data-placeholder.js';
 import { fileStoreRouter } from './api/files.js';
 import { toolsRouter } from './api/tools.js';
 import { conflictsRouter } from './api/conflicts.js';
@@ -317,6 +319,7 @@ export function createApp() {
   app.use('/api/spaces', spaceSchemaVersionsRouter);  // Q-742: schema versions listed, read and compared
   app.use('/api/spaces', spaceSchemaConvertRouter);  // Q-746: a schema conversion started and read
   app.use('/api/spaces', spaceUnconvertedRouter);  // Q-919: the records a conversion could not convert, listed and dismissed
+  app.use('/api/spaces', spaceSchemaRdfRouter);  // Q-751: the schema as OWL and SHACL
   app.use('/api/files', fileStoreRouter);
   app.use('/api/conflicts', conflictsRouter);
   app.use('/api/duplicates', duplicatesRouter);
@@ -567,6 +570,9 @@ export function createApp() {
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Not found' });
   });
+
+  // Q-750: an RDF record address is a name, not a page: a problem body, never the app shell.
+  app.use('/ld', linkedDataPlaceholderRouter);
 
   // ── Angular SPA — static assets ──────────────────────────────────────────
   // Serve the compiled Angular app. All non-API routes fall through to
