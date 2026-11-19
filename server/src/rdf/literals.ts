@@ -59,8 +59,10 @@ export type DeclaredType = 'string' | 'number' | 'boolean' | 'date';
 export type TemporalKind = 'dateTimeStamp' | 'dateTime' | 'date';
 
 const ZONE = '(?:Z|[+-](?:0\\d|1[0-3]):[0-5]\\d|[+-]14:00)';
-const DATE_RE = new RegExp(`^(-?\\d{4,})-(\\d{2})-(\\d{2})(${ZONE})?$`);
-const DATETIME_RE = new RegExp(`^(-?\\d{4,})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(\\.\\d+)?(${ZONE})?$`);
+/** XSD 1.1 `yearFrag` (Part 2 §D.3.1): four digits, or more with no leading zero (`02026` is no year); year 0000 and negative years are in. */
+const YEAR = '(-?(?:[1-9]\\d{3,}|0\\d{3}))';
+const DATE_RE = new RegExp(`^${YEAR}-(\\d{2})-(\\d{2})(${ZONE})?$`);
+const DATETIME_RE = new RegExp(`^${YEAR}-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(\\.\\d+)?(${ZONE})?$`);
 
 const isLeap = (y: number): boolean => y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
 const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
