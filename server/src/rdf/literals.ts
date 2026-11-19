@@ -64,13 +64,20 @@ const DATETIME_RE = new RegExp(`^(-?\\d{4,})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})
 
 const isLeap = (y: number): boolean => y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
 const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const NONZERO_DIGIT = /[1-9]/;
+const FEBRUARY = 2;
+const LEAP_FEBRUARY_DAYS = 29;
+const LAST_HOUR = 23;
+const LAST_MINUTE_OR_SECOND = 59;
+/** Hour 24 is allowed only as the end of a day (24:00:00). */
+const END_OF_DAY_HOUR = 24;
 
 /** Is `year-month-day` a day on the calendar? */
 function calendarDay(year: string, month: string, day: string): boolean {
   const m = Number(month);
   const d = Number(day);
-  if (m < 1 || m > 12 || d < 1) return false;
-  return d <= (m === 2 && isLeap(Number(year)) ? 29 : MONTH_DAYS[m - 1]!);
+  if (m < 1 || m > MONTH_DAYS.length || d < 1) return false;
+  return d <= (m === FEBRUARY && isLeap(Number(year)) ? LEAP_FEBRUARY_DAYS : MONTH_DAYS[m - 1]!);
 }
 
 /**
@@ -80,15 +87,20 @@ function calendarDay(year: string, month: string, day: string): boolean {
  */
 export function temporalKind(s: string): TemporalKind | null {
   const date = DATE_RE.exec(s);
-  if (date) return calendarDay(date[1]!, date[2]!, date[3]!) ? 'date' : null;
-  const dt = DATETIME_RE.exec(s);
-  if (!dt || !calendarDay(dt[1]!, dt[2]!, dt[3]!)) return null;
-  const hour = Number(dt[4]);
-  const minute = Number(dt[5]);
-  const second = Number(dt[6]);
-  if (minute > 59 || second > 59) return null;
-  if (hour === 24 ? minute !== 0 || second !== 0 || /[1-9]/.test(dt[7] ?? '') : hour > 23) return null;
-  return dt[8] === undefined ? 'dateTime' : 'dateTimeStamp';
+  if (date) {
+    const [, year, month, day] = date;
+    return calendarDay(year!, month!, day!) ? 'date' : null;
+  }
+  const dateTime = DATETIME_RE.exec(s);
+  if (!dateTime) return null;
+  const [, year, month, day, hh, mm, ss, fraction, zone] = dateTime;
+  if (!calendarDay(year!, month!, day!)) return null;
+  const hour = Number(hh);
+  const minute = Number(mm);
+  const second = Number(ss);
+  if (minute > LAST_MINUTE_OR_SECOND || second > LAST_MINUTE_OR_SECOND) return null;
+  if (hour === END_OF_DAY_HOUR ? minute !== 0 || second !== 0 || NONZERO_DIGIT.test(fraction ?? '') : hour > LAST_HOUR) return null;
+  return zone === undefined ? 'dateTime' : 'dateTimeStamp';
 }
 
 /** A temporal literal that keeps the stored text, typed by what it is; a string that is no calendar date or time stays a plain literal. */
