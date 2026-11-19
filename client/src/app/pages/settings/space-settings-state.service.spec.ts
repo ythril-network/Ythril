@@ -156,7 +156,8 @@ describe('SpaceSettingsState — openSettings populates every tab', () => {
     const st = c.typeState('entity', 'person');
     expect(st.namingPattern).toBe('^[A-Z]');
     expect((st as unknown as Record<string, unknown>)['tagSuggestions']).toBeUndefined();
-    expect(st.propertySchemas).toEqual([{ key: 'age', s: { type: 'number', minimum: 0 }, _enumInput: '' }]);
+    // `_stored`: the editor's own mark that this property is the stored one, which a rename of it is then recorded against.
+    expect(st.propertySchemas).toEqual([{ key: 'age', s: { type: 'number', minimum: 0 }, _enumInput: '', _stored: true }]);
   });
 
   it('copies a per-space documentExtraction override into the form, and clears to "" when absent (F11-c)', () => {
