@@ -3,7 +3,7 @@
  *
  * ## What it prevents
  *
- * A media job whose run found the embedder unavailable for all of it is handed back without spending an attempt, so `ythril_media_jobs_failed_total` does not
+ * A media job whose run was cut short by, or met throughout, an unavailable embedder is handed back without spending an attempt, so `ythril_media_jobs_failed_total` does not
  * move during an outage, and the hand-back counter stops rising as soon as the media worker's pause holds the queue (nothing is claimed while it runs). An
  * operator with only those two would see a quiet queue and no reason. `ythril_media_embedder_probes_total{outcome="unavailable"}` keeps rising once per pause
  * step for as long as the outage lasts, which is the series to alert on; the hand-back counter says how many runs met it.
@@ -18,10 +18,10 @@
 import { Counter } from 'prom-client';
 import { register } from './registry.js';
 
-/** Runs of a media job handed back because the embedder was unavailable for the whole run, by space and media type (the labels of the media job counters). */
+/** Runs of a media job handed back because the run was cut short by, or met throughout, an unavailable embedder, by space and media type (the labels of the media job counters). */
 export const mediaJobsHandedBackTotal = new Counter({
   name: 'ythril_media_jobs_handed_back_total',
-  help: 'Media job runs handed back without spending an attempt because the embedder was unavailable for the whole run, by space and media type',
+  help: 'Media job runs handed back without spending an attempt because the run was cut short by, or met throughout, an unavailable embedder, by space and media type',
   labelNames: ['space', 'media_type'] as const,
   registers: [register],
 });

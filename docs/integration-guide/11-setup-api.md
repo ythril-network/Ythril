@@ -192,7 +192,7 @@ a dashboard that wants "everything that did not reach a handler" reads `unmatche
 | `ythril_media_jobs_completed_total` | counter | Jobs that finished, by space and media type |
 | `ythril_media_jobs_failed_total` | counter | Jobs that exhausted their retries, by space and media type |
 | `ythril_media_jobs_retried_total` | counter | Attempts that failed and were re-queued, by space and media type — including a job whose claim was recovered while it was still running, and a run superseded by a newer one (its file was written again) |
-| `ythril_media_jobs_handed_back_total` | counter | Runs handed back without spending an attempt because the embedder was unavailable for the whole run, by space and media type. It stops rising once the media worker holds its claims for the outage; see the next row |
+| `ythril_media_jobs_handed_back_total` | counter | Runs handed back without spending an attempt because the run was cut short by, or met throughout, an unavailable embedder, by space and media type. It stops rising once the media worker holds its claims for the outage; see the next row |
 | `ythril_media_embedder_probes_total` | counter | Probes of the embedder the media worker makes before it claims again after a hand-back, by `outcome` (`answered`, `unavailable`). `unavailable` rises once per pause step (5 to 60 s) for as long as the embedder is down: **the series to alert on for an embedder outage seen by files**, since a waiting file is never `failed` |
 | `ythril_media_jobs_failed` | gauge | Jobs sitting in the terminal `failed` state by space, counted **at scrape time** (a backlog, not a rate) |
 | `ythril_media_job_duration_seconds` | histogram | End-to-end time per job by media type |
