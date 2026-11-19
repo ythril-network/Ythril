@@ -3522,5 +3522,9 @@
   "networks.network.votes.convert.counts.other": "Wird dies angenommen, konvertiert diese Instanz die {{count}} Datensätze des Typs {{type}}, die sie hält (nur gestempelt: {{stamped}}, umgeschrieben: {{rewritten}}), nach einer Synchronisation mit ihren Peers. Bei einem Veto ändert sich nichts.",
   "networks.network.votes.convert.none": "Hier gibt es keine Datensätze des Typs {{type}}, daher würde auf dieser Instanz nichts konvertiert.",
   "networks.network.votes.convert.countFailed": "Die Datensatzzahlen dieser Instanz konnten nicht gelesen werden.",
-  "networks.network.votes.convert.noSpace": "Dieser Space ist nicht auf dieser Instanz, daher werden hier keine Datensätze gezählt."
+  "networks.network.votes.convert.noSpace": "Dieser Space ist nicht auf dieser Instanz, daher werden hier keine Datensätze gezählt.",
+  "conversion.editor.addValue": "+ Wert hinzufügen",
+  "conversion.editor.removeValue": "Diesen Wert entfernen",
+  "spaces.schema.convert.incomplete": "Einige Schritte sind nicht fertig: Füllen Sie jeden Namen aus und wählen Sie, was aus jedem alten Wert wird, oder entfernen Sie den Schritt.",
+  "spaces.schema.convert.warn.rule": "Die Regel {{rule}} von {{type}} liest noch {{property}}, das jetzt {{to}} heißt. Eine Umbenennung schreibt Regeln nicht um: Passen Sie die Regel an, damit sie {{to}} liest."
 }

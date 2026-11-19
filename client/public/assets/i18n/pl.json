@@ -3522,5 +3522,9 @@
   "networks.network.votes.convert.counts.other": "Jeśli to przejdzie, ta instancja skonwertuje {{count}} rekordów typu {{type}}, które posiada (tylko ostemplowane: {{stamped}}, przepisane: {{rewritten}}), po jednej synchronizacji z innymi węzłami sieci. Jeśli zawetujesz, nic się nie zmieni.",
   "networks.network.votes.convert.none": "Nie ma tu rekordów typu {{type}}, więc na tej instancji nic nie zostałoby skonwertowane.",
   "networks.network.votes.convert.countFailed": "Nie udało się odczytać liczby rekordów na tej instancji.",
-  "networks.network.votes.convert.noSpace": "Tej przestrzeni nie ma na tej instancji, więc nie są tu liczone żadne rekordy."
+  "networks.network.votes.convert.noSpace": "Tej przestrzeni nie ma na tej instancji, więc nie są tu liczone żadne rekordy.",
+  "conversion.editor.addValue": "+ Dodaj wartość",
+  "conversion.editor.removeValue": "Usuń tę wartość",
+  "spaces.schema.convert.incomplete": "Niektóre kroki nie są dokończone: wypełnij każdą nazwę i wybierz, czym staje się każda stara wartość, albo usuń krok.",
+  "spaces.schema.convert.warn.rule": "Reguła {{rule}} typu {{type}} nadal odczytuje {{property}}, które teraz nazywa się {{to}}. Zmiana nazwy nie przepisuje reguł: popraw regułę, aby odczytywała {{to}}."
 }
