@@ -296,3 +296,53 @@ describe('the Review tab\'s count follows every act that changes it (S12, Q-939:
     await until(m, () => countText(m) === '3', 'the count read after the pop-up closed');
   });
 });
+
+describe('the Overview pencil lands on the type (S12, Q-747: the fifth drive saw the Schema tab at its top)', () => {
+  afterEach(() => { document.body.innerHTML = ''; });
+
+  it('opens the settings with the type\'s head scrolled into view and focus on its name control; closing gives focus back to the pencil', async () => {
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
+    try {
+      const m = mount();
+      document.body.appendChild(m.el);
+      const pen = m.pen('person')!;
+      (pen as unknown as HTMLElement).focus();
+      expect(document.activeElement, 'the pencil holds focus before the press').toBe(pen);
+      pen.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await until(m, () => !!m.el.querySelector('.sch-detail-head app-schema-type-name'), 'the type head in the pop-up');
+      const head = m.el.querySelector<HTMLElement>('.sch-detail-head')!;
+      expect(head.textContent).toContain('person');
+      await vi.waitFor(() => {
+        m.fixture.detectChanges();
+        expect(scrolled, 'the type head is the element scrolled to').toContain(head);
+        expect(document.activeElement, 'focus is on the type\'s name control').toBe(head.querySelector('app-schema-type-name button'));
+      }, { timeout: 2_000, interval: 20 });
+      m.c.spaceSettings.closeSettings();
+      m.fixture.detectChanges();
+      await vi.waitFor(() => expect(document.activeElement, 'focus is back on the pencil').toBe(pen), { timeout: 2_000, interval: 20 });
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it('the cog, which opens the settings on their first tab, moves neither scroll nor focus to a type', async () => {
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
+    try {
+      const m = mount();
+      document.body.appendChild(m.el);
+      m.c.openSpaceSettings();
+      await until(m, () => !!m.el.querySelector('.sp-panel'), 'the pop-up');
+      // The person then goes to the Schema tab and picks the type themselves: the pane stays where they put it.
+      m.c.spaceSettings.settingsTab.set('schema');
+      m.c.spaceSettings.selectType('entity', 'person');
+      await until(m, () => !!m.el.querySelector('.sch-detail-head app-schema-type-name'), 'the type head in the pop-up');
+      expect(scrolled).toEqual([]);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+});
