@@ -84,7 +84,7 @@ const planKey = (blocks: readonly ConvertBlockPlan[]): string => JSON.stringify(
     SpaceSettingsTabComponent, SpaceSchemaTabComponent, SpaceDuplicatesTabComponent, SpaceDangerTabComponent, ConvertRecordsDialogComponent,
   ],
   styles: [SPACE_DIALOG_STYLES],
-  // The type bars inside show a run their Convert act started through this popup's own progress dialog (`showRun`).
+  // The type bars inside show a run (their Convert act's, or any run their note is about) through this popup's own progress dialog (`showRun`).
   providers: [{ provide: CONVERT_RUN_HOST, useExisting: forwardRef(() => SpaceSettingsPopupComponent) }],
   template: `
     <!-- SETTINGS POPUP -->
@@ -198,7 +198,7 @@ const planKey = (blocks: readonly ConvertBlockPlan[]): string => JSON.stringify(
           [network]="governedBy()" [rights]="rights()" [refusal]="refusal()" [busy]="state.settingsSaving()" (choice)="onChoice($event)" />
       }
       @if (progress(); as p) {
-        <app-convert-records-dialog mode="progress" [spaceId]="state.settingsSpace()!.id" [status]="p.status" [notice]="p.notice" [byAct]="p.byAct"
+        <app-convert-records-dialog mode="progress" [spaceId]="state.settingsSpace()!.id" [status]="p.status" [notice]="p.notice" [byAct]="p.from === 'act'"
           (closed)="closeProgress()" (openReview)="openReview()" />
       }
       @if (submitted(); as s) {
@@ -256,7 +256,7 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
 
   /** The dialog the Save opens (`offer`), the run it leaves open (`progress`) and the vote it went to (`submitted`): at most one of each. */
   protected readonly offer = signal<{ blocks: ConvertBlockPlan[]; staged: ConvertSchemas } | null>(null);
-  protected readonly progress = signal<{ notice: ConvertRunNotice | null; status: ConvertStatusAnswer | null; byAct: boolean } | null>(null);
+  protected readonly progress = signal<{ notice: ConvertRunNotice | null; status: ConvertStatusAnswer | null; from: 'save' | 'act' | 'note' } | null>(null);
   protected readonly submitted = signal<{ blocks: ConvertBlockPlan[]; network: string } | null>(null);
   /** What the last converting Save answered, kept after its dialog is closed: the Schema tab's type pane says from it that nothing was converted. */
   protected readonly savedNotice = signal<ConvertRunNotice | null>(null);
@@ -547,18 +547,21 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
     }
     const notice = convertNoticeOf(result) ?? { state: 'nothing' as const, types: [] };
     this.convertSpace = target.id;
-    this.progress.set({ notice, status: null, byAct: false });
+    this.progress.set({ notice, status: null, from: 'save' });
     // An answer that lists no types is about the types this Save converted.
     this.savedNotice.set(notice.types.length > 0 ? notice : { ...notice, types: choice.types });
     if (notice.state === 'started') this.watchRun(target.id);
   }
 
-  /** A type's Convert act started a run: show it as a converting Save's run is shown, in the same dialog, on the same watch. */
-  showRun(notice: ConvertRunNotice): void {
+  /**
+   * A type's Convert act started a run, or a type's note asks to show its run (of any source, a vote's included): shown as a converting Save's
+   * run is shown, in the same dialog, on the same watch, starting from the status the caller last read.
+   */
+  showRun(notice: ConvertRunNotice | null, from: 'act' | 'note', status: ConvertStatusAnswer | null = null): void {
     const space = this.state.settingsSpace();
     if (!space) return;
     this.convertSpace = space.id;
-    this.progress.set({ notice, status: null, byAct: true });
+    this.progress.set({ notice, status, from });
     this.watchRun(space.id);
   }
 
@@ -573,25 +576,31 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
   }
 
   protected closeProgress(): void {
-    const byAct = this.progress()?.byAct ?? false;
+    const from = this.progress()?.from ?? 'save';
     this.watch?.stop();
     this.watch = null;
     this.progress.set(null);
-    afterNextRender(() => this.backToWhereTheRunBegan(byAct), { injector: this.injector });
+    this.afterDialogClosed(from);
+  }
+
+  /** The two closes of a dialog this popup opened over the Schema tab (the run's, the vote's) end alike. */
+  private afterDialogClosed(from: 'save' | 'act' | 'note'): void {
+    afterNextRender(() => this.backToWhereTheFlowBegan(from), { injector: this.injector });
   }
 
   /**
-   * Once the run's dialog is gone, put focus on the control that led to it: the type's Convert records for the act, the footer button that took
-   * Save's place (Done) for a converting Save. The modal returns focus to the element focused when it opened, and that element no longer exists
-   * (the act's dialog, or Save), so without this focus fell to the page body (drive D5).
+   * Once the dialog is gone, scroll the type head with its note into view and put focus on the control that led there: the type's Convert records
+   * for the act, the note's "Show the run" for a run shown from the note, the footer button that took Save's place (Done) for a Save. The modal
+   * returns focus to the element focused when it opened, and that element no longer exists (the act's dialog, or Save), so without this focus
+   * fell to the page body (drive D5).
    */
-  private backToWhereTheRunBegan(byAct: boolean): void {
+  private backToWhereTheFlowBegan(from: 'save' | 'act' | 'note'): void {
     const host = this.host.nativeElement as HTMLElement;
     // The type head and the note under it are what the run is told by now: scrolled into view (the pane kept the scroll it had behind the dialog).
     host.querySelector<HTMLElement>('.sch-detail-head')?.scrollIntoView?.({ block: 'start' });
-    const to = byAct
-      ? host.querySelector<HTMLElement>('[data-testid="convert-records"]')
-      : host.querySelector<HTMLElement>('[data-testid="settings-done"], [data-testid="settings-save"]');
+    const to = from === 'act' ? host.querySelector<HTMLElement>('[data-testid="convert-records"]')
+      : from === 'note' ? host.querySelector<HTMLElement>('[data-testid="convert-show-run"]')
+        : host.querySelector<HTMLElement>('[data-testid="settings-done"], [data-testid="settings-save"]');
     to?.focus({ preventScroll: true });
   }
 
