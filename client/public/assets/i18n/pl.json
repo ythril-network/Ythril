@@ -3436,6 +3436,7 @@
   "spaces.schema.convert.refused.listed.other": "{{count}} rekordów jest wymienionych w Przeglądzie jako „Kroki zostały tu odrzucone”.",
   "spaces.schema.convert.refused.item": "{{step}}: {{reason}}.",
   "spaces.schema.convert.refused.fix": "Jak to naprawić: popraw te kroki, a potem naciśnij „Konwertuj rekordy” przy typie. Rekordy pozostają na liście, dopóki nie zostaną skonwertowane.",
+  "spaces.schema.convert.refused.fixUnlisted": "Rekordy, które potrzebowały tych kroków, pozostały bez zmian i zostały tylko ostemplowane tam, gdzie już pasowały. Jak to naprawić: popraw te kroki, a potem naciśnij „Konwertuj rekordy” przy typie.",
   "spaces.schema.convert.refused.all": "Ta instancja nie zastosowała żadnego z kroków głosowania: {{reason}}.",
   "conversion.step.renameType": "Zmień nazwę typu {{from}} na {{to}}",
   "conversion.step.renameProperty": "Zmień nazwę właściwości {{from}} na {{to}}",
