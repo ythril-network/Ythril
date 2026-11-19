@@ -6,6 +6,7 @@ import {
 } from '../../core/api.types';
 import { TranslocoService } from '@jsverse/transloco';
 import { SpacesApi } from '../../core/spaces-api.service';
+import { isPlainObject } from '../../core/plain-object';
 import type { SchemaLayersView } from '../../core/schema-api.service';
 import { UnsavedEdits } from '../../core/unsaved-edits';
 import {
@@ -26,8 +27,6 @@ export interface RuleRow { name: string; rule: string; message: string }
 
 /** A space rule row: the same, plus the kinds it applies to. An EMPTY list means every kind, and is omitted on the wire. */
 export interface SpaceRuleRow extends RuleRow { kinds: KnowledgeType[] }
-
-const isPlainObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /**
  * The rows of a `rules` map as it arrives from the API, a file or a library entry, copied BY VALUE.
