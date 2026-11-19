@@ -56,6 +56,7 @@ import { openPushDoor } from './_push-door.mjs';
 import { mountedRoutesWithSource } from './_routes.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
 import { settleWithin } from './_write-faults.mjs';
+import { answerOfFailedFetch } from './_failed-fetch-answer.mjs';
 
 const skip = await mongoSkipReason();
 // Five faults run over every door in ONE process: ~376 requests each, from one credential. The instance's limiter
@@ -486,7 +487,7 @@ describe('a store failure answers alike on every door', { skip }, () => {
       if (isEventStream(r)) return await lookAtStream(r);
       raw = await r.text();
     } catch (err) {
-      return { status: r?.status ?? 0, raw: String(err), error: String(err), timedOut: true };
+      return answerOfFailedFetch(err, { status: r?.status ?? 0 });
     }
     let body; try { body = JSON.parse(raw); } catch { body = null; }
     const retryable = body?.retryable ?? body?.data?.retryable;
@@ -539,6 +540,8 @@ describe('a store failure answers alike on every door', { skip }, () => {
       }
       // A stream opened in the look is read, never waited for (`lookAtStream`); a door that gave no answer at all is the one that timed out.
       if (a.timedOut) wrong.push(`${d.name}: no answer within ${PER_DOOR_MS} ms of a store failure`);
+      // Any other failed fetch is a request that got no answer for another reason: the door was not asked, which is a failure of this case too.
+      if (a.connectionFailed) wrong.push(`${d.name}: the connection failed (${a.causeCode}) before the door answered, so it was never asked about the store: ${a.error}`);
       // MFA is off before every door (`undoNeighbours`): a door that asks the probe for a code was closed by its neighbour, not asked.
       if (a.status === 403 && /MFA_REQUIRED/.test(a.raw)) wrong.push(`${d.name}: answered MFA_REQUIRED, so it was never asked about the store`);
     }
