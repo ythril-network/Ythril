@@ -26,7 +26,7 @@
  * hosts disagree about it: the settings tab keeps a set across every type it has open, and a modal editing
  * one type does not need one at all. The service keeps its own set and calls these for the data half.
  */
-import type { PropertySchema } from '../../core/api.types';
+import { KNOWLEDGE_TYPES, type KnowledgeType, type PropertySchema } from '../../core/api.types';
 import type { TypeSchemaState } from './space-settings-state.service';
 
 /** A property key that is blank, or already taken, is not an edit — it is a typo. */
@@ -58,6 +58,100 @@ export function addProp(state: TypeSchemaState): string | null {
 
 export function removeProp(state: TypeSchemaState, propKey: string): void {
   state.propertySchemas = state.propertySchemas.filter(e => e.key !== propKey);
+}
+
+// ── Renames, and what the stored schema needs to hear about them (Q-747) ────────────────────────────────────
+//
+// A rename of a property or a type is not a removal plus an addition: the records already written carry the old name, and the
+// Save dialog proposes a conversion step (`renameProperty`, `renameType`) only when it is told which name a thing was STORED under.
+// So the edit remembers it, on the thing itself: `_stored` says the thing existed when the schema was opened or last saved, `_was` the
+// name it was stored under once it carries another. The ledger the dialog reads is derived from those marks (`renameLedgerOf`), so no
+// host has to tell it anything, a removed thing takes its entry with it, and an entry cannot outlive what it names.
+
+/** Why a rename was refused: no name, a name the type or space already holds, or the thing is not there any more. */
+export type RenameError = 'empty' | 'exists' | 'missing';
+
+/** What both a type and a property carry for a rename. */
+interface RenameMarks { _stored?: boolean; _was?: string }
+
+/**
+ * Record that a thing now named `to` was named `from`, keeping the STORED name.
+ *
+ * ## What it prevents
+ *
+ * A chain read as its last link: `a` to `b` to `c` recorded as `b` to `c` proposes a step that moves values the records do not hold
+ * (they are still under `a`). So the earliest name is kept, a rename back to it forgets the rename, and a thing that was never stored
+ * (added in this sitting, or removed and added again) has nothing stored to convert from and records nothing.
+ */
+export function trackRename(item: RenameMarks, from: string, to: string): void {
+  const stored = item._stored ? (item._was ?? from) : undefined;
+  if (stored === undefined || stored === to) delete item._was;
+  else item._was = stored;
+}
+
+/**
+ * Rename one property of a type, in place, keeping its definition and its place in the list.
+ *
+ * The same shape as the type rename: an error KEY when it cannot be done (`empty`, `exists` for a key another property of the type
+ * already holds, `missing`), and nothing changed then. Never a merge: two definitions never become one key. The new name is trimmed,
+ * and the name it already has is no change.
+ */
+export function renameProp(state: TypeSchemaState, from: string, to: string): RenameError | null {
+  const key = to.trim();
+  if (!key) return 'empty';
+  const at = state.propertySchemas.findIndex(e => e.key === from);
+  if (at < 0) return 'missing';
+  if (key === from) return null;
+  if (state.propertySchemas.some(e => e.key === key)) return 'exists';
+  // The row object stays the same object, re-keyed, so whatever holds it (the editor's open card, its focus) keeps holding it.
+  const entry = state.propertySchemas[at]!;
+  entry.key = key;
+  trackRename(entry, from, key);
+  return null;
+}
+
+/**
+ * Mark a type and its properties as the stored schema: what is there now is what the server holds, so nothing is renamed yet.
+ * Called when a space is opened and after a save.
+ */
+export function markStored(state: TypeSchemaState): void {
+  state._stored = true;
+  delete state._was;
+  for (const entry of state.propertySchemas) { entry._stored = true; delete entry._was; }
+}
+
+/** A type renamed since the schema was stored: the kind, the stored name, the name it has now. */
+export interface TypeRename { kind: KnowledgeType; from: string; to: string }
+
+/**
+ * A property renamed since the schema was stored. `type` is the name its type has NOW (a conversion applies its type step first, so a
+ * property step names the new type), `wasType` the name the type was stored under, `from` and `to` the stored and the current key.
+ */
+export interface PropRename { kind: KnowledgeType; type: string; wasType: string; from: string; to: string }
+
+/** Every rename waiting to be saved, in STORED names. */
+export interface RenameLedger { types: TypeRename[]; props: PropRename[] }
+
+/**
+ * What the stored schema needs, as far as names go, to become the staged one: derived from the marks `trackRename` keeps.
+ *
+ * Kinds in their fixed order, types and properties in the order they stand in the editor.
+ */
+export function renameLedgerOf(schemas: Partial<Record<KnowledgeType, Record<string, TypeSchemaState>>>): RenameLedger {
+  const types: TypeRename[] = [];
+  const props: PropRename[] = [];
+  for (const kind of KNOWLEDGE_TYPES) {
+    for (const [type, state] of Object.entries(schemas[kind] ?? {})) {
+      const wasType = state._stored && state._was !== undefined ? state._was : type;
+      if (wasType !== type) types.push({ kind, from: wasType, to: type });
+      for (const entry of state.propertySchemas) {
+        if (entry._stored && entry._was !== undefined && entry._was !== entry.key) {
+          props.push({ kind, type, wasType, from: entry._was, to: entry.key });
+        }
+      }
+    }
+  }
+  return { types, props };
 }
 
 /**

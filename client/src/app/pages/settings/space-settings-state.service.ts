@@ -13,6 +13,9 @@ import {
   removeProp as removePropFrom,
   addEnumVal as addEnumValTo,
   removeEnumVal as removeEnumValFrom,
+  renameProp as renamePropOf,
+  markStored, trackRename, renameLedgerOf,
+  type RenameError, type RenameLedger,
 } from './type-schema-edits';
 
 /**
@@ -110,7 +113,11 @@ export interface TypeSchemaState {
    * has a schema at all.
    */
   whenDuePasses: 'overdue' | 'nothing' | null;
-  propertySchemas: { key: string; s: PropertySchema; _enumInput: string }[];
+  /**
+   * `_stored` and `_was` are the editor's own bookkeeping, like `_enumInput`: they never reach the wire. A property that existed when the
+   * schema was opened or last saved is `_stored`; one renamed since carries the name it was stored under as `_was` (see `trackRename`).
+   */
+  propertySchemas: { key: string; s: PropertySchema; _enumInput: string; _stored?: boolean; _was?: string }[];
   /**
    * The CEL rules of this type (F-46): an enforced constraint, so losing one on an unrelated save widens what the space accepts with no
    * message anywhere. Carried by every path that builds this state (the loader, a file, a library entry) and written by
@@ -125,6 +132,9 @@ export interface TypeSchemaState {
    * silently converts a linked schema into an empty inline one — pinned by the round-trip tests.
    */
   _libRef?: string;
+  /** The same bookkeeping for the TYPE itself: stored when the schema was opened or last saved, `_was` the name it was stored under after a rename. */
+  _stored?: boolean;
+  _was?: string;
 }
 
 /**
@@ -742,6 +752,8 @@ export class SpaceSettingsState {
 
   /** Re-baseline both dirty snapshots — called after opening a space and after a save. */
   markPristine(): void {
+    // What is staged is now what is stored, so no rename is waiting (`renameLedger`).
+    for (const states of Object.values(this.schTypeSchemas)) for (const state of Object.values(states ?? {})) markStored(state);
     this.pristinePayload = this.settingsPayload();
     this.initialSnapshot = this.snapshot();
     this.dupeInitialSnapshot = this.dupeSnapshot();
@@ -892,6 +904,8 @@ export class SpaceSettingsState {
     const map = this.schTypeSchemas[kt] ?? {};
     if (!(from in map)) return 'missing';
     if (trimmed in map) return 'exists';
+    // The type remembers the name it was stored under, and its properties' renames ride along on their own marks (`renameLedger`).
+    trackRename(map[from]!, from, trimmed);
 
     // Rebuilt in the SAME order, with the renamed entry in the old one's place.
     const next: Record<string, TypeSchemaState> = {};
@@ -922,6 +936,35 @@ export class SpaceSettingsState {
       this.schSelectedType = { kt, name: trimmed };
     }
     return null;
+  }
+
+  /**
+   * Rename one property of a type. An error key when it cannot be done, as `renameType` answers; nothing changes then.
+   *
+   * The edit itself is `renameProp` in `type-schema-edits.ts` (the editor calls the same function on its draft); what stays here is
+   * the settings tab's own set of open rows, which follows the key.
+   */
+  renameProp(kt: KnowledgeType, typeName: string, from: string, to: string): RenameError | null {
+    const state = this.schTypeSchemas[kt]?.[typeName];
+    if (!state) return 'missing';
+    const err = renamePropOf(state, from, to);
+    const key = to.trim();
+    if (err === null && key !== from && this.schExpandedProps.delete(this.propKey(kt, typeName, from))) {
+      this.schExpandedProps.add(this.propKey(kt, typeName, key));
+    }
+    return err;
+  }
+
+  /**
+   * Every rename waiting to be saved, in the names the schema is STORED under: what a conversion step is built from.
+   * Derived from what is staged, so it is empty after an open or a save and a removed thing takes its entry with it.
+   */
+  renameLedger(): RenameLedger { return renameLedgerOf(this.schTypeSchemas); }
+
+  /** The name a renamed type was stored under, or null when it was not renamed (or was added since the schema was stored). */
+  typeWas(kt: KnowledgeType, name: string): string | null {
+    const state = this.schTypeSchemas[kt]?.[name];
+    return state?._stored && state._was !== undefined ? state._was : null;
   }
 
   removeType(kt: KnowledgeType, name: string): void {
