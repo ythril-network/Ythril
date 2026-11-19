@@ -44,14 +44,14 @@ import {
 } from '../brain/schema-convert-items.js';
 import {
   UNCONVERTED_REFUSAL_CODES, UNCONVERTED_STATUSES, UnconvertedFilterParams, UnconvertedListParams, UnconvertedDismissShownParams, refusalBody,
-  unconvertedParseRefusal, type UnconvertedActResult, type UnconvertedCaller, type UnconvertedItem, type UnconvertedRow,
+  UNCONVERTED_REFUSAL_OPTIONS, type UnconvertedActResult, type UnconvertedCaller, type UnconvertedItem, type UnconvertedRow,
 } from './unconverted-terms.js';
 import { CHOSEN_VERSION_ROWS } from '../brain/chosen-versions.js';
 import { mapToRecallResult } from '../brain/recall-result.js';
 import { summariseRecall } from '../brain/recall-shape.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { readStoredById } from '../db/read-by-id.js';
-import { NAME_QUOTED, peerText } from '../util/log.js';
+import { NAME_QUOTED, peerText, refusalOfParse, type ParseRefusal } from '../util/log.js';
 import { unknownSpaceAnswer } from './unknown-space.js';
 
 // The terms the acts and both doors share live in `unconverted-terms.ts` (the bounds the tools declare from); re-exported for the readers that name them here.
@@ -116,9 +116,8 @@ function refusedBefore(spaceId: string, caller: UnconvertedCaller, needs: 'read'
 
 const FILTER_CODES: Readonly<Record<string, string>> = { kind: BAD_KIND, type: BAD_TYPE, status: BAD_STATUS, reason: BAD_REASON, expect: BAD_EXPECT };
 
-/** The 400 of a failed parse of the filters: the wording is the terms' one (`unconvertedParseRefusal`), the code is the failing field's, `fallback` for any other. */
-function parseRefusal(error: unknown, fallback: string): UnconvertedActResult {
-  const refusal = unconvertedParseRefusal(error);
+/** The 400 of a refused parse of the filters (`refusalOfParse` with the terms' one option set): the code is the failing field's, `fallback` for any other. */
+function parseRefusal(refusal: ParseRefusal, fallback: string): UnconvertedActResult {
   const field = String(refusal.issues[0]?.path[0] ?? '');
   return { status: BAD_REQUEST, error: refusal.error, code: FILTER_CODES[field] ?? fallback };
 }
@@ -137,7 +136,7 @@ export async function listUnconvertedAct(
   if (before) return before;
   const spaces = viewRead ?? [spaceId];
   const parsed = UnconvertedListParams.safeParse({ kind: params['kind'], type: params['type'], reason: params['reason'], status: params['status'] });
-  if (!parsed.success) return parseRefusal(parsed.error, BAD_KIND);
+  if (!parsed.success) return parseRefusal(refusalOfParse(parsed.error, UNCONVERTED_REFUSAL_OPTIONS), BAD_KIND);
   const { kind, type, reason, status } = parsed.data;
   // The record part is added before the byte budget is applied, so the bytes the answer reports and the page it cuts count it.
   const withSummaries = async (space: string, rows: ListedUnconvertedItem[]): Promise<ListedUnconvertedItem[]> => {
@@ -193,7 +192,7 @@ export async function dismissShownUnconvertedAct(spaceId: string, params: Record
   const before = refusedBefore(spaceId, caller, 'write');
   if (before) return before;
   const parsed = UnconvertedDismissShownParams.safeParse({ kind: params['kind'], type: params['type'], reason: params['reason'], expect: params['expect'] });
-  if (!parsed.success) return parseRefusal(parsed.error, BAD_EXPECT);
+  if (!parsed.success) return parseRefusal(refusalOfParse(parsed.error, UNCONVERTED_REFUSAL_OPTIONS), BAD_EXPECT);
   const { expect, kind, type, reason } = parsed.data;
   const done = await dismissOpenUnconvertedItems(spaceId, { ...(kind !== undefined ? { kind } : {}), ...(type !== undefined ? { type } : {}), ...(reason !== undefined ? { reason } : {}) }, expect);
   if (done.ok) return { status: OK, body: { dismissed: done.dismissed } };
