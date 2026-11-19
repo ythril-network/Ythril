@@ -35,7 +35,11 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** First port of the shard Mongos: `DB_SHARD_BASE_PORT + index`. Clear of 27117 (`ythril-mongo-a`) on purpose. */
+/**
+ * First port of the shard Mongos: `DB_SHARD_BASE_PORT + index`. Clear of 27117 (`ythril-mongo-a`) on purpose. The compose
+ * override that publishes a shard's port also serves an own database (`db-shard-stack.mjs`), which is given port 0 so that
+ * Docker picks one, and so takes no port of this range.
+ */
 export const DB_SHARD_BASE_PORT = 27400;
 
 /** The most shards the plan will make: ports are not unbounded, and past this the Docker VM has no room for another Mongo. */

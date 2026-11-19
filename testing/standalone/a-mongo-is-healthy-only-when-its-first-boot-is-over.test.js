@@ -52,7 +52,7 @@ import assert from 'node:assert/strict';
 import { basename } from 'node:path';
 import * as composeFile from '../_shared/compose-file.mjs';
 import { trackedSources } from './_sources.mjs';
-import { TEST_MONGO_PORT } from '../_shared/test-mongo-address.mjs';
+import { STACK_MONGO_PORT } from '../_shared/test-mongo-address.mjs';
 
 const IMAGE = 'mongodb-atlas-local';
 const IMAGE_OWN_CHECK = /\/usr\/local\/bin\/runner\s+healthcheck\b/;
@@ -104,8 +104,8 @@ describe('a Mongo is healthy only when its first boot is over', () => {
 
   it('the test stack\'s Mongo the harness connects to is among them', () => {
     const harness = MONGOS.filter((m) => m.file === TEST_COMPOSE)
-      .filter((m) => (m.service.ports ?? []).some((p) => String(p).includes(`:${TEST_MONGO_PORT}:`)));
-    assert.equal(harness.length, 1, `${harness.length} service(s) of the atlas-local image publish port ${TEST_MONGO_PORT}`);
+      .filter((m) => (m.service.ports ?? []).some((p) => String(p).includes(`:${STACK_MONGO_PORT}:`)));
+    assert.equal(harness.length, 1, `${harness.length} service(s) of the atlas-local image publish port ${STACK_MONGO_PORT}`);
   });
 
   for (const { file, name, service } of MONGOS) {

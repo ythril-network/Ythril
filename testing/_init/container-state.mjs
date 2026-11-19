@@ -68,7 +68,7 @@ function dockerAsk(argv, timeoutMs) {
  * NOT unref'd: it is what keeps the process alive until the bound answers; unref'd, a hung ask with nothing else alive
  * let the event loop end with the race still pending (bundle-288's first Full run). It is cleared as soon as either settles.
  */
-function within(promise, ms) {
+export function within(promise, ms) {
   let timer;
   const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`no answer in ${ms} ms`)), ms); });
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));

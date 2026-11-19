@@ -12,6 +12,10 @@
 ## reason as the base file's: the password is in that file). `a-db-shards-keep-a-harness-database-on-one-mongo` holds the
 ## override to those two, so it cannot grow a setting of its own.
 ##
+## The same override also serves ONE database of a caller's own (`db-shard-stack.mjs own-up`): a compose project named
+## `ythril-db-own-<label>-<8 hex>`, with the port variable set to 0 so that Docker picks the loopback port, which `docker
+## compose port` then reports. The variable is required on every call of the override, a take-down included.
+##
 services:
   ythril-mongo-a:
     container_name: !reset null
