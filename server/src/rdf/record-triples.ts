@@ -8,7 +8,8 @@
  * - **Data read as links.** A property value is ONE plain literal on its property's address, never an IRI or a node, whatever the string looks
  *   like (a record id, a URL). Richer content is held as edges and links (decision record 23, owner 2026-11-18) and travels as what it is:
  *   an edge is the statement `<from> <term(label)> <to>` (several edges of one label are the one predicate several times, each with its own
- *   reifier, the record address of the edge), a link is `dcterms:references`, a nested thing is a record of its own reached by an edge.
+ *   reifier, the record address of the edge, typed by its label's class `edgeClassIri` so the label's property shapes reach it alone), a link
+ *   is `dcterms:references`, a nested thing is a record of its own reached by an edge.
  * - **A silent drop or a guess.** A property value that is a list or an object (only a direct database write can leave one), a value that
  *   does not fit its declared type, and a number that is no decimal give NO triple and are returned in `counts.skippedValues` as
  *   `{ recordId, kind, key, reason }`; the rest of the record is exported intact. `null` states nothing and is not counted. The mapper never
@@ -28,7 +29,7 @@ import {
   iri, literalForBoolean, literalForDecimal, literalForInteger, literalForTemporal, literalForValue, plain, stdIri, temporalKind, triple,
   type DeclaredType, type EdgeDetails, type IriTerm, type LeftOutReason, type LiteralTerm, type Quad, type Term, type TemporalKind,
 } from './literals.js';
-import { agentIri, graphIri, recordAddressable, recordIri, resolveTermIri, versionIri, type TermKind } from './term-iri.js';
+import { agentIri, edgeClassIri, graphIri, recordAddressable, recordIri, resolveTermIri, versionIri, type TermKind } from './term-iri.js';
 import { ythrilIri } from './ythril-vocabulary.js';
 
 /** The record kinds this module gives a form: the four knowledge types, a link and a file. */
@@ -295,6 +296,8 @@ function endsOf(meta: SpaceMeta, d: Record<string, unknown>, defaultKind: RefKin
 function edgeForm(f: Form, d: Record<string, unknown>, s: IriTerm, ends: { from: IriTerm; to: IriTerm }, label: string): void {
   const predicate = iri(resolveTermIri(f.meta, 'edge', label));
   f.add(ends.from, predicate, ends.to);
+  // The reifier is of its label's class, so the shapes of the label's own properties reach this label's edges and no other's.
+  f.add(s, TYPE(), iri(edgeClassIri(f.meta, label)));
   if (f.opts.edgeDetails === 'rdf12') {
     f.add(s, stdIri('rdf', 'reifies'), triple(ends.from, predicate, ends.to));
   } else {
