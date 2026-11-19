@@ -521,7 +521,7 @@ async function propagateVotesWithPeer(
       return;
     }
     // Unread: every served round is read by its declared shape where it is taken (`sync/served-rounds.ts`, X11).
-    const { rounds: peerRounds } = await boundedJson<{ rounds?: unknown }>(resp, 'sync peer');
+    const { rounds: peerRounds, rdfBases } = await boundedJson<{ rounds?: unknown; rdfBases?: unknown }>(resp, 'sync peer');
     if (!Array.isArray(peerRounds)) return;
 
     const fresh = getConfig();
@@ -530,8 +530,8 @@ async function propagateVotesWithPeer(
 
     // One reading of the clock for the whole pass: what is adopted, merged into and concluded is judged at the same instant.
     const now = Date.now();
-    // Evidence, adoptions and merged casts: what this list changes here (`sync/served-rounds.ts`).
-    const { changed, refused } = takeServedRounds(freshNet, peerRounds, member, now);
+    // Evidence, adoptions and merged casts, and (Q-748) the RDF bases a voted network's peer serves (`sync/served-rounds.ts`).
+    const { changed, refused } = takeServedRounds(freshNet, peerRounds, member, now, { rdfBases, spaces: fresh.spaces });
 
     if (refused.size > 0) {
       log.debug(`Vote gossip: did not adopt ${peerText([...refused].map(([why, n]) => `${n} round(s) ${why}`).join(', '))} from ${peerText(member.label)}`);

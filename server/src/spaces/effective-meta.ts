@@ -77,7 +77,9 @@ function recordRdfConflicts(cfg: Config, spaceId: string, held: SpaceMeta['rdf']
   let changed = false;
   for (const net of cfg.networks) {
     const layer = net.schemaLayers?.[spaceId];
-    const conflict = layer === undefined ? undefined : layerRdfConflict(held, layer, { networkId: net.id, heldRebaseEpochs: epochs });
+    // A network that sends no layer (a voted one) records its conflicts from what its peers serve (`takeServedRdfBases`); not this walk's.
+    if (layer === undefined) continue;
+    const conflict = layerRdfConflict(held, layer, { networkId: net.id, heldRebaseEpochs: epochs });
     if (isDeepStrictEqual(conflict, net.rdfBaseConflicts?.[spaceId])) continue;
     const kept = { ...(net.rdfBaseConflicts ?? {}) };
     if (conflict) kept[spaceId] = conflict; else delete kept[spaceId];
