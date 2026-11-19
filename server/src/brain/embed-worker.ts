@@ -17,6 +17,9 @@
  * fail at once and spend a transient step per job. The host is asked (`waitOutLocalInferenceBackoff`), and answers
  * immediately whenever there is no backoff, including for an external endpoint that never starts a child.
  *
+ * An HTTP embedder that cannot be reached is waited out too, by the loop: after one `EmbedUnreachableError` it claims no further job for a pause that grows to a cap
+ * and ends with the first embed that worked (`embedder-outage-pause.ts`), because one failure stands for the queue and a claim per queued job would fail each in turn.
+ *
  * Sleeping is event-driven, not polled: `waitForEmbedWork` returns the moment an enqueue announces
  * work, so a write into an idle instance is embedded in milliseconds rather than waiting out a poll
  * interval. The epoch sampled before the claim is what closes the race where work arrives between a
@@ -25,8 +28,10 @@
 
 import {
   claimNextEmbedJob, completeEmbedJob, failEmbedJob, heartbeatEmbedJob, resetStalledEmbedJobs, reviveFailedEmbedJobs,
-  currentEmbedWorkEpoch, waitForEmbedWork, wakeEmbedWorkers, EMBED_PRIORITY,
+  currentEmbedWorkEpoch, waitForEmbedWork, wakeEmbedWorkers, embedFailureMessage, EMBED_PRIORITY,
 } from './embed-queue.js';
+import { isEmbedUnreachableError } from './embed-errors.js';
+import { embedderOutagePause } from './embedder-outage-pause.js';
 import { waitOutLocalInferenceBackoff } from './local-inference.js';
 import { SERVER_VERSION } from '../util/server-version.js';
 import { embedStoredRecord } from './embed-record.js';
@@ -95,8 +100,8 @@ export async function runEmbedStallTick(): Promise<void> {
  * The sweeps of a worker's start. Anything left `processing` by a previous process is dead by definition (nothing survives a
  * restart holding a claim), so the reset runs with a zero timeout rather than making the first records of the new run wait out
  * the stall window; then the one clean attempt per VERSION for anything that went terminally `failed` under an older one. A
- * systemic outage — an embedder unreachable for a quarter of an hour during an upgrade — spends every job's whole attempt budget at
- * once, and a terminal job is never claimed again. Reported from a live instance: "after updating all space indexing failed and
+ * systemic outage — an embedder unreachable for a quarter of an hour during an upgrade — spent every job's whole attempt budget at
+ * once (an unreachable endpoint now hands the attempt back instead), and a terminal job is never claimed again. Reported from a live instance: "after updating all space indexing failed and
  * since has not been retried automatically." Logged at INFO with a count, because a silent mass requeue is indistinguishable from
  * nothing happening. A space whose revive failed is retried by {@link runEmbedStallTick}. One-shot: the worker starts it with `void`.
  */
@@ -136,7 +141,9 @@ export async function runOneEmbedJob(opts: { heartbeatMs?: number } = {}): Promi
   try {
     // `gone` is a success: the record was deleted between the enqueue and the claim, so nothing is
     // owed. Retrying would keep a job alive for a document that will never come back.
-    await embedStoredRecord(job.spaceId, job.recordType, job.recordId, { rebuild: job.rebuild === true });
+    const outcome = await embedStoredRecord(job.spaceId, job.recordType, job.recordId, { rebuild: job.rebuild === true });
+    // The embedder answered: the pause an outage began is over. Only a call that reached it says so (`unchanged`, `gone` and the rest never called it).
+    if (outcome === 'embedded') embedderOutagePause.noteEmbedded();
     await completeEmbedJob(job.spaceId, job.recordType, job.recordId, job.claimToken);
 
     // A rebuild nobody wrote into is not an insert: running the insert rule for it would scan every record of a
@@ -153,10 +160,12 @@ export async function runOneEmbedJob(opts: { heartbeatMs?: number } = {}): Promi
       .then(m => m.evaluateRecordForDuplicates(job.spaceId, job.recordType, job.recordId))
       .catch(() => { /* best-effort, exactly as it was on the write path */ });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = embedFailureMessage(err);
+    // One failure stands for the queue: the loop claims nothing for a pause (see `embedder-outage-pause.ts`), instead of failing every queued job in turn.
+    if (isEmbedUnreachableError(err)) embedderOutagePause.noteUnreachable();
     // `transientFailures` comes from the job the worker already holds — no second read, and no
-    // `findOneAndUpdate` to recover a post-increment value.
-    await failEmbedJob(job.spaceId, job.recordType, job.recordId, job.attempts, msg, job.transientFailures ?? 0, {
+    // `findOneAndUpdate` to recover a post-increment value. The error itself is passed, not its message: the object is what says an outage.
+    await failEmbedJob(job.spaceId, job.recordType, job.recordId, job.attempts, err, job.transientFailures ?? 0, {
       lostChildFailures: job.lostChildFailures ?? 0,
       claimToken: job.claimToken,
     });
@@ -172,6 +181,10 @@ export async function runOneEmbedJob(opts: { heartbeatMs?: number } = {}): Promi
 
 async function loop(): Promise<void> {
   while (!stopping) {
+    // Before the epoch is sampled and before the claim: while the embedder is unreachable no job is claimed, however many are queued. Ended by the first
+    // embed that worked, and by `stopBrainEmbeddingWorker`, so it never delays a shutdown.
+    await embedderOutagePause.waitOut();
+    if (stopping) break;
     // Sampled BEFORE the claim — this is what makes the wake-up race closed rather than unlikely.
     const epoch = currentEmbedWorkEpoch();
     let claimed = false;
@@ -190,6 +203,8 @@ export function startBrainEmbeddingWorker(): void {
   if (running) return;
   running = true;
   stopping = false;
+  // A pause begun by an earlier run of the worker is not this run's: it starts by claiming.
+  embedderOutagePause.noteEmbedded();
 
   // One-shot, and not awaited: the reset of a dead process's claims, then the version's revive (see `runEmbedBootSweeps`). A space
   // either could not finish is reported by the walk and retried by the stall tick below.
@@ -203,6 +218,7 @@ export function startBrainEmbeddingWorker(): void {
 export function stopBrainEmbeddingWorker(): void {
   stopping = true;
   stallJob.stop();
-  // Wake the sleeper so shutdown is not delayed by a full idle interval.
+  // Wake the sleeper so shutdown is not delayed by a full idle interval, and end an outage pause, which would delay it by the pause.
+  embedderOutagePause.cancel();
   wakeEmbedWorkers();
 }

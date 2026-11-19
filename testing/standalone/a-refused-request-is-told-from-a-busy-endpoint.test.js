@@ -69,7 +69,7 @@ describe('the truth table', () => {
 
 describe('the order is held where the decision is made', () => {
   const src = () => stripComments(fs.readFileSync('server/src/brain/embed-queue.ts', 'utf8'));
-  it('failEmbedJob asks isRequestRefusal before isTransientEmbedError, and the refusal branch writes attempts = MAX_EMBED_ATTEMPTS', () => {
+  it('failEmbedJob asks isRequestRefusal before isTransientEmbedFailure, and the refusal branch writes attempts = MAX_EMBED_ATTEMPTS', () => {
     const s = src();
     const head = s.indexOf('export async function failEmbedJob(');
     assert.ok(head >= 0, 'no failEmbedJob');
@@ -80,9 +80,9 @@ describe('the order is held where the decision is made', () => {
     }
     const body = s.slice(head, end);
     const refusal = body.search(/\bisRequestRefusal\s*\(/);
-    const transient = body.search(/\bisTransientEmbedError\s*\(/);
+    const transient = body.search(/\bisTransientEmbedFailure\s*\(/);
     assert.ok(refusal >= 0, 'failEmbedJob never asks isRequestRefusal');
-    assert.ok(transient >= 0, 'failEmbedJob no longer asks isTransientEmbedError (the transient branch was dropped?)');
+    assert.ok(transient >= 0, 'failEmbedJob no longer asks isTransientEmbedFailure (the transient branch was dropped?)');
     assert.ok(refusal < transient, 'the refusal is asked AFTER the transient needles, which read the same text and can match a 413 body');
     const refusalBranch = body.slice(refusal, transient);
     assert.match(refusalBranch, /status:\s*'failed'/);

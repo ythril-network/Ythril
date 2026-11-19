@@ -44,8 +44,9 @@ import { declareStep } from '../util/housekeeping-signals.js';
 import { CLAIM_OP_MS } from '../db/write-bound.js';
 import { newClaimToken } from '../files/media/lease.js';
 import { isSpillPath } from './spill-path.js';
-import { LOST_MARKER, NOT_SENT_MARKER, isRequestRefusal, isOverCeilingMessage } from './embed-errors.js';
+import { LOST_MARKER, NOT_SENT_MARKER, isRequestRefusal, isOverCeilingMessage, isEmbedUnreachableError } from './embed-errors.js';
 import { embedJobsFailedTotal, type EmbedJobFailedReason } from '../metrics/embed-job-failed-count.js';
+import { embedJobsHandedBackTotal } from '../metrics/embed-job-handed-back-count.js';
 import { embeddingSuppressedFor } from './suppress-embeddings.js';
 import { getSpaceMeta } from '../spaces/schema-validation.js';
 import type { BrainEmbedJobDoc, BrainEmbedRecordType } from '../config/types.js';
@@ -549,8 +550,9 @@ export async function retireEmbedJobs(
  * budget: the embedder said this input is too large, which no retry changes, so `failEmbedJob` ends the job at once
  * (`isRequestRefusal`, asked before this). A `400` keeps its budget because a misconfigured embedder answers it for every record.
  *
- * Matched on the message because that is what reaches us — the embedder is behind `fetch`, an HTTP client or
- * an inference child process depending on configuration, and there is no one error type across the three.
+ * Matched on the message for a failure whose producer cannot be known: an inference child process's text, an endpoint's status line. A
+ * failure whose producer IS known carries its class instead, and {@link isTransientEmbedFailure} asks the class first. This function is
+ * the words half of that question and stays here for it, asked by nothing else (`embed-failures-are-classified-by-who-produced-them.test.js`).
  */
 export function isTransientEmbedError(message: string): boolean {
   const m = message.toLowerCase();
@@ -564,6 +566,27 @@ export function isTransientEmbedError(message: string): boolean {
     'too many requests', 'service unavailable', 'bad gateway', 'gateway timeout', 'temporarily unavailable',
     ' 429', ' 502', ' 503', ' 504', 'status 429', 'status 502', 'status 503', 'status 504',
   ].some(needle => m.includes(needle));
+}
+
+/**
+ * The text of a caught embed failure: an `Error`'s message, or the string it is. The one derivation, so `lastError` and every rule that reads words see
+ * the same text. It is never `peerText(err)` of the object, which would prefix the class name and unanchor the rules that match the start of the message
+ * (`isRequestRefusal`).
+ */
+export function embedFailureMessage(failure: unknown): string {
+  return failure instanceof Error ? failure.message : String(failure);
+}
+
+/**
+ * Is this caught failure the EMBEDDER's, to be waited out, and not the record's? THE one answer, asked by the queue (`failEmbedJob`) and by the rebuild guard
+ * (`embedStoredRecord`, which keeps a stored vector through an outage), so the two cannot disagree.
+ *
+ * The object comes first: an `EmbedUnreachableError` is the embed call saying its connection failed, which words cannot say (the sentence it carries holds
+ * no needle) and a string cannot forge (a plain `Error` or a string with the same sentence is not one). Anything else is asked of its message by
+ * {@link isTransientEmbedError}, as before: the lost process's markers, an HTTP status line, a socket code in a child's text.
+ */
+export function isTransientEmbedFailure(failure: unknown): boolean {
+  return isEmbedUnreachableError(failure) || isTransientEmbedError(embedFailureMessage(failure));
 }
 
 /** What a job left `failed` stores. The status is a literal here so nothing but a failure can be written through {@link endEmbedJob}. */
@@ -598,7 +621,7 @@ async function endEmbedJob(
 /**
  * Requeue with backoff, or leave `failed` once the attempt budget is spent.
  *
- * A TRANSIENT failure hands the attempt back and never goes terminal — see `isTransientEmbedError`. It is
+ * A TRANSIENT failure hands the attempt back and never goes terminal — see `isTransientEmbedFailure`, which `failure` (the caught value, or a string) is asked of. It is
  * given back rather than withheld because `claimNextEmbedJob` increments `attempts` at CLAIM time, before
  * the outcome is known, so by the time we are here it has already been spent.
  *
@@ -611,7 +634,7 @@ export async function failEmbedJob(
   recordType: BrainEmbedRecordType,
   recordId: string,
   attempts: number,
-  errorMessage: string,
+  failure: unknown,
   transientFailures = 0,
   opts: {
     /** How many times this job has already been in flight when the inference process was lost. */
@@ -622,6 +645,9 @@ export async function failEmbedJob(
 ): Promise<void> {
   const now = new Date().toISOString();
   const filter = claimedBy(recordType, recordId, opts.claimToken);
+  // The caught value is an error object or a string, and ONE message is derived from it first: every rule below that reads words, and `lastError`,
+  // read this string exactly as they did when the worker passed only a message. Only the transient question below is asked of the object.
+  const errorMessage = embedFailureMessage(failure);
   // Stored, and read back by `list_embed_jobs`: the one renderer — redacted, cut on a code point, saying it was cut —
   // rather than a code-unit slice that can split a surrogate (bundle-30 I6, C16).
   const lastError = peerText(errorMessage, { max: 500 });
@@ -654,9 +680,9 @@ export async function failEmbedJob(
     return;
   }
 
-  if (isTransientEmbedError(errorMessage)) {
+  if (isTransientEmbedFailure(failure)) {
     const failures = transientFailures + 1;
-    await jobs(spaceId).updateOne(
+    const handedBack = await jobs(spaceId).updateOne(
       asFilter<BrainEmbedJobDoc>(filter),
       asUpdate<BrainEmbedJobDoc>({
         $set: {
@@ -671,6 +697,8 @@ export async function failEmbedJob(
         },
       }),
     );
+    // Counted only when the write landed: a claim that was taken over matches nothing, and the attempt it lost was not handed back by this call.
+    if (handedBack.matchedCount > 0) embedJobsHandedBackTotal.count();
     _signal.markSpaceMayHaveWork(spaceId);
     return;
   }
@@ -703,9 +731,10 @@ export async function failEmbedJob(
  * The retry policy above is sized for a PER-RECORD failure and was being applied to a SYSTEMIC one. Five
  * attempts at 5s / 30s / 120s / 600s is a budget of about **twelve and a half minutes** from the first
  * failure to terminal `failed` — and `claimNextEmbedJob` filters on `status: 'pending'`, so terminal means
- * never claimed again. An embedder that is unreachable for a quarter of an hour during an upgrade therefore
- * takes every queued job in every space terminal, at once, and the instance stops indexing without ever
- * reporting a fault: each individual job did exactly what it was told to do.
+ * never claimed again. An embedder that was unreachable for a quarter of an hour during an upgrade therefore
+ * took every queued job in every space terminal, at once (while an unreachable endpoint still spent attempts, before
+ * `EmbedUnreachableError`), and the instance stopped indexing without ever reporting a fault: each individual job
+ * did exactly what it was told to do.
  *
  * `resetStalledEmbedJobs` does not help — it revives `processing` jobs whose worker died, which is a
  * different accident. Nothing revived `failed`.
@@ -722,8 +751,9 @@ export async function failEmbedJob(
  * terminal, which is a revive that does nothing. `lastError` is deliberately KEPT — an operator looking at a
  * re-queued job should still be able to see what it died of last time.
  *
- * This does not make the retry policy right, only survivable: an "embedder unreachable" and a "this text is
- * malformed" still cost the same one attempt. Classifying them is the other half, tracked as EJ-1.
+ * This is the repair for what ended `failed` anyway. The retry policy is right for an outage now: an embed call that could not
+ * reach its endpoint hands the attempt back and waits (`EmbedUnreachableError`, `isTransientEmbedFailure`), so an outage no
+ * longer ends a job `failed`, and what ends one is the record's or the settings' own failure.
  *
  * ## It answers WHICH spaces it did not finish (`Q-274`, `S-R3`)
  *

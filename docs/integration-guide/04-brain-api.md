@@ -459,7 +459,9 @@ you sent were the ones the vector is built from. The record keeps its previous v
 catches up, which is a moment later; unlike a create, an updated record is never *absent* from `recall` in
 the meantime, it is briefly ranked on its previous text. **If the embed then fails** (the embedder is down), the
 previous vector is dropped rather than kept: it describes text the record no longer holds. Until a retry succeeds
-the record is found by its current words and not ranked by meaning, and `list_embed_jobs` shows the failed job.
+the record is found by its current words and not ranked by meaning. A job that could not reach the embedder keeps its
+attempts and waits, so `list_embed_jobs` shows it `pending` with `transientFailures` rising and `lastError` beginning
+`Could not reach embedding endpoint`; a job whose failure a retry cannot fix is shown `failed`.
 Its matched text is the current text on every path, embedded, suppressed or failed, so text you removed stops
 matching at once.
 
