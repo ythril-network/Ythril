@@ -20,8 +20,8 @@ import type { Config, NetworkConfig } from '../config/types.js';
 import { logInternalAudit } from '../audit/audit.js';
 import { log, peerText } from '../util/log.js';
 import { rebaseRoundOwed } from '../networks/round-state.js';
-import { parseSpaceMeta } from './body-schemas.js';
 import { rebaseRoundSpaceOf, settleRdf } from './rdf-settle.js';
+import { storeMovedRdf } from './rdf-store.js';
 import { settleSpaceAct } from './apply-wipe-round.js';
 
 /** The audit operation of one landing of a passed rebase round: one row per member that lands it. */
@@ -32,8 +32,7 @@ const AUDIT_PATH_PART_MAX = 80;
 
 /**
  * Land every rebase round of `net` owed at `now` (passed, unvetoed, its deadline come, not applied here): set the space's base, vocab and
- * epoch, parsed as every stored meta is, in its own definitions and its effective meta; mark the round in the same synchronous step; clear
- * the space's recorded base conflicts; write one `space.rdf_rebase` audit row. A round for a space not carried here is marked and moves
+ * epoch, and clear the space's recorded base conflicts (`storeMovedRdf`); mark the round in the same synchronous step; write one `space.rdf_rebase` audit row. A round for a space not carried here is marked and moves
  * nothing. SYNCHRONOUS, for the expiry tick's one save; returns whether it changed the config.
  */
 export function applyOwedRebaseRounds(net: NetworkConfig, cfg: Config, now: number): boolean {
@@ -47,17 +46,7 @@ export function applyOwedRebaseRounds(net: NetworkConfig, cfg: Config, now: numb
     const settled = settleRdf(space.ownMeta?.rdf ?? space.meta?.rdf, round.rebase, 'rebase-round');
     settleSpaceAct(net, round, 'completed');
     if (!settled.ok || !settled.rebased || !settled.rdf) continue;
-    const effective = parseSpaceMeta({ ...(space.meta ?? {}), rdf: settled.rdf }, { against: space.meta ?? {} });
-    if (!effective.ok) {
-      log.warn(`space '${peerText(space.id)}': the rebase of round ${peerText(round.roundId)} could not be stored: ${peerText(effective.message)}`);
-      continue;
-    }
-    space.meta = effective.meta;
-    if (space.ownMeta) {
-      const own = parseSpaceMeta({ ...space.ownMeta, rdf: settled.rdf }, { against: space.ownMeta });
-      if (own.ok) space.ownMeta = own.meta;
-    }
-    clearConflictsOf(cfg, space.id);
+    if (!storeMovedRdf(cfg, space, settled.rdf)) continue;
     log.info(`space '${peerText(space.id)}': RDF base moved from ${peerText(settled.rebased.from)} to ${peerText(settled.rebased.to)} `
       + `(epoch ${settled.rebased.epoch}) by round ${peerText(round.roundId)} of network ${peerText(net.id)}`);
     try {
@@ -71,13 +60,4 @@ export function applyOwedRebaseRounds(net: NetworkConfig, cfg: Config, now: numb
     }
   }
   return wrote;
-}
-
-/** Forget every network's recorded base conflict for `spaceId`: a landed rebase settles them. */
-function clearConflictsOf(cfg: Config, spaceId: string): void {
-  cfg.networks.forEach((n) => {
-    if (n.rdfBaseConflicts?.[spaceId] === undefined) return;
-    const { [spaceId]: _gone, ...kept } = n.rdfBaseConflicts;
-    n.rdfBaseConflicts = Object.keys(kept).length > 0 ? kept : undefined;
-  });
 }

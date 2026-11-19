@@ -19,7 +19,8 @@
  *   whose clock runs ahead is not an attacker), counted in `ythril_round_clock_ahead_total`, and said once per network and peer - never
  *   once per round, which a mixed fleet would raise every cycle.
  */
-import type { NetworkConfig, NetworkMember, VoteCast, VoteRound } from '../config/types.js';
+import type { NetworkConfig, NetworkMember, SpaceConfig, VoteCast, VoteRound } from '../config/types.js';
+import { takeServedRdfBases } from '../spaces/rdf-settle.js';
 import { IncomingVoteRound } from '../networks/round-shape.js';
 import { adoptPeerRound, adoptionRefusal, roundOpenedAhead, type AdoptionRefusal } from '../networks/round-local-state.js';
 import { roundIsOpen } from '../networks/round-state.js';
@@ -65,14 +66,17 @@ function noteClockAhead(net: NetworkConfig, member: NetworkMember, round: VoteRo
 
 /**
  * Take what `served` (a member's GET .../votes answer, unread) changes in `net` (the live network the caller saves): evidence, adoptions
- * and merged casts. Returns whether anything changed and, per reason, how many rounds were not adopted.
+ * and merged casts, and (Q-748) the RDF bases a voted network's peer serves beside the list (`rdfBases`, read untrusted by
+ * `takeServedRdfBases`: a higher epoch is recorded as a conflict, nothing lands). Returns whether anything changed and, per reason, how many
+ * rounds were not adopted.
  */
 export function takeServedRounds(
   net: NetworkConfig, served: readonly unknown[], member: NetworkMember, now: number,
+  beside: { rdfBases?: unknown; spaces?: readonly SpaceConfig[] } = {},
 ): { changed: boolean; refused: Map<AdoptionRefusal, number> } {
   const refused = new Map<AdoptionRefusal, number>();
   const count = (why: AdoptionRefusal): void => { refused.set(why, (refused.get(why) ?? 0) + 1); };
-  let changed = false;
+  let changed = beside.spaces ? takeServedRdfBases(net, beside.spaces, beside.rdfBases) : false;
   for (const raw of served) {
     const read = IncomingVoteRound.safeParse(raw);
     if (!read.success) { count('malformed'); continue; }

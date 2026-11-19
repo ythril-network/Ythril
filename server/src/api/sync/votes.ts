@@ -17,6 +17,10 @@ import { sendCaughtFailure } from '../send-failure.js';
 import { requireNetworkStanding } from '../../auth/network-standing.js';
 import { memberView } from '../../networks/member-view.js';
 import { castReplaces } from '../../sync/served-rounds.js';
+import { servedRdfBasesOf } from '../../spaces/rdf-settle.js';
+
+/** The first release that serves `rdfBases` beside the vote list (Q-748); a peer before it serves none, and that is no conflict. */
+export const RDF_BASES_SERVED_SINCE = '6.6.0';
 
 export const syncVotesRouter = Router();
 
@@ -48,7 +52,9 @@ syncVotesRouter.get('/networks/:networkId/votes', syncRateLimit, requireAuth, re
         if (safeRound.pendingMember) safeRound.pendingMember = memberView(safeRound.pendingMember, 'pending') as unknown as typeof safeRound.pendingMember;
         return safeRound;
       });
-    res.json({ rounds: open });
+    // Q-748: each shared space's RDF base and epoch, so a member of a voted network that missed a passed rebase is told (`takeServedRdfBases`).
+    // An older build neither serves nor reads it (since RDF_BASES_SERVED_SINCE).
+    res.json({ rounds: open, rdfBases: servedRdfBasesOf(net, cfg.spaces) });
   } catch (err) {
     sendCaughtFailure(res, 'sync GET /networks/:networkId/votes', err);
   }

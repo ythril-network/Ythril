@@ -23,10 +23,11 @@
  *
  * Pure: the public URL, whether the space is networked and the epochs of the held rounds are handed in.
  */
-import type { RdfBaseConflict, RdfSetting } from '@ythril-network/schema';
-import type { NetworkConfig, VoteRound } from '../config/types.js';
+import { z } from 'zod';
+import { BaseIriZ, RDF_BASE_EPOCH_MAX, type RdfBaseConflict, type RdfSetting } from '@ythril-network/schema';
+import type { NetworkConfig, SpaceConfig, VoteRound } from '../config/types.js';
 import { defaultBaseFor, defaultVocabFor } from '../rdf/term-iri.js';
-import { remoteToLocal } from '../sync/space-map.js';
+import { localToRemote, remoteToLocal } from '../sync/space-map.js';
 import { rebaseRoundUnapplied } from '../networks/round-state.js';
 
 /** Who is writing the setting. */
@@ -47,6 +48,8 @@ export interface RdfSettleContext {
   heldRebaseEpochs?: ReadonlySet<number>;
   /** The network a layer or round came from, named in a conflict. */
   networkId?: string;
+  /** The bases peers offer at a higher epoch (the recorded conflicts of the space): a networked rebase to one of them accepts it. */
+  offeredBases?: readonly { base: string; epoch: number }[];
 }
 
 /** A rebase a networked door proposes as a `space_rebase` round. */
@@ -63,6 +66,8 @@ export type RdfSettled =
     proposeRebase?: RebaseProposal;
     /** A base offered that no round explains. */
     conflict?: RdfBaseConflict;
+    /** A networked door's rebase took over a base a peer offered at a higher epoch (`offeredBases`): it lands here alone, no round. */
+    acceptedOffer?: true;
   }
   | { ok: false; status: RdfRefusalStatus; code: 'rdf_base_needed' | 'rdf_base_frozen' | 'rdf_base_unchanged'; error: string };
 
@@ -123,6 +128,67 @@ export function rdfBaseConflictOf(cfg: { networks: readonly NetworkConfig[] }, l
   return { held: all[0]!.held, offered: all.flatMap(c => c.offered) };
 }
 
+/** The most spaces one served `rdfBases` map may name: far above any network's spaces, and a bound on what a peer can make this instance read. */
+export const SERVED_RDF_BASES_MAX = 1_000;
+/** The longest network space id a served `rdfBases` key may be. */
+const SERVED_SPACE_KEY_MAX = 200;
+
+/** One space's base as a member serves it beside its vote list: read by the setting's own validators, never taken as it came. */
+const ServedRdfBaseZ = z.object({ base: BaseIriZ, baseEpoch: z.number().int().min(0).max(RDF_BASE_EPOCH_MAX) }).strip();
+
+/** The network types whose members exchange `rdfBases`: the voted ones, which pull no schema layer (pub/sub and braintree have the layer). */
+const VOTED_NETWORK_TYPES: ReadonlySet<string> = new Set(['closed', 'club', 'democratic']);
+
+/**
+ * What this member serves a peer of `net` beside its vote list (Q-748; owner, 2026-11-19, "tell it, do not move it"): each space `net` carries
+ * here with RDF on, under the NETWORK's id for it, as `{ base, baseEpoch }`. Nothing for a space with RDF off.
+ */
+export function servedRdfBasesOf(net: Pick<NetworkConfig, 'spaces' | 'spaceMap'>, spaces: readonly SpaceConfig[]): Record<string, { base: string; baseEpoch: number }> {
+  const out: Record<string, { base: string; baseEpoch: number }> = {};
+  for (const local of net.spaces) {
+    const rdf = spaces.find(s => s.id === local)?.meta?.rdf;
+    if (rdf?.enabled !== true || !rdf.base) continue;
+    out[localToRemote(net as NetworkConfig, local)] = { base: rdf.base, baseEpoch: rdf.baseEpoch ?? 0 };
+  }
+  return out;
+}
+
+/**
+ * Compare what a peer of the voted network `net` serves (`served`, its `rdfBases`, untrusted) with the bases this member holds, and record or
+ * clear the conflicts beside `net` (`rdfBaseConflicts`). Mutates `net`; returns whether it changed anything. Never throws.
+ *
+ * - A HIGHER epoch with another base, for a space this member carries with RDF on, records a conflict naming `net`. Nothing lands: the admin
+ *   accepts the offered base (or a rebase round lands) and the conflict clears.
+ * - A lower or equal epoch changes nothing; a conflict whose offered epoch the member's own has reached is cleared.
+ * - What is served is read by the setting's validators and bounded first; an entry no door would accept is left out, and a list that is not
+ *   one (an older build serves none) is nothing.
+ * - Pub/sub and braintree are left to their layers.
+ */
+export function takeServedRdfBases(net: NetworkConfig, spaces: readonly SpaceConfig[], served: unknown): boolean {
+  if (!VOTED_NETWORK_TYPES.has(net.type)) return false;
+  const entries = served && typeof served === 'object' && !Array.isArray(served) ? Object.entries(served as Record<string, unknown>) : [];
+  if (entries.length > SERVED_RDF_BASES_MAX) return false;
+  let changed = false;
+  const conflicts = { ...(net.rdfBaseConflicts ?? {}) };
+  for (const local of net.spaces) {
+    const held = spaces.find(s => s.id === local)?.meta?.rdf;
+    if (held?.enabled !== true || !held.base) continue;
+    const heldEpoch = held.baseEpoch ?? 0;
+    const recorded = conflicts[local];
+    if (recorded && recorded.offered.every(o => o.epoch <= heldEpoch)) { delete conflicts[local]; changed = true; }
+    const key = localToRemote(net, local);
+    const raw = key.length <= SERVED_SPACE_KEY_MAX ? entries.find(([k]) => k === key)?.[1] : undefined;
+    const offer = raw === undefined ? undefined : ServedRdfBaseZ.safeParse(raw);
+    if (!offer?.success || offer.data.baseEpoch <= heldEpoch || offer.data.base === held.base) continue;
+    const next: RdfBaseConflict = { held: { base: held.base, epoch: heldEpoch }, offered: [{ networkId: net.id, base: offer.data.base, epoch: offer.data.baseEpoch }] };
+    if (JSON.stringify(conflicts[local]) === JSON.stringify(next)) continue;
+    conflicts[local] = next;
+    changed = true;
+  }
+  if (changed) net.rdfBaseConflicts = Object.keys(conflicts).length > 0 ? conflicts : undefined;
+  return changed;
+}
+
 /** Settle `incoming` against `stored` for `source`. Never throws. */
 export function settleRdf(stored: RdfSetting | undefined, incoming: RdfIncoming | undefined, source: RdfSource, ctx: RdfSettleContext = {}): RdfSettled {
   if (incoming === undefined) return { ok: true, rdf: stored };
@@ -169,6 +235,16 @@ function settleLocal(stored: RdfSetting | undefined, sent: Partial<RdfSetting> &
       + (baseMoves ? 'send rdf.rebase: true with the new base to change it deliberately; every address the space gave out changes with it' : 'the vocab moves only with the base: send a new rdf.base with rdf.rebase: true') };
   }
   const next: RebaseProposal = { base: sent.base!, vocab: sent.vocab ?? defaultVocabFor(sent.base!), epoch: epoch + 1 };
+  // A base a peer of a voted network offers at a higher epoch (a recorded conflict) is ACCEPTED here, at its epoch, with no round: the network
+  // already moved, this member missed it, and its admin is taking it over (owner, 2026-11-19: "tell it, do not move it").
+  const offer = ctx.networked ? ctx.offeredBases?.find(o => o.base === next.base && o.epoch > epoch) : undefined;
+  if (offer) {
+    return {
+      ok: true, acceptedOffer: true,
+      rdf: clean({ enabled, base: next.base, vocab: next.vocab, baseEpoch: offer.epoch }),
+      rebased: { from: stored.base, to: next.base, epoch: offer.epoch },
+    };
+  }
   if (ctx.networked) return { ok: true, rdf: clean({ ...stored, enabled }), proposeRebase: next };
   return {
     ok: true,
