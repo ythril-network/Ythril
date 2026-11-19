@@ -31,10 +31,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import http from 'node:http';
 import express from 'express';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenRouterApp } from '../_shared/in-process-app.mjs';
 import { auditRowsOf } from './_audit-rows.mjs';
 
 const skip = await mongoSkipReason();
@@ -73,7 +72,7 @@ describe('an audit entry records only the changes its operation allows (real Mon
       { field: 'apiKey', to: SECRET },
     ]));
     app.post('/api/admin/reload-config', explicit([{ field: 'apiKey', to: SECRET }, { field: LISTED.field, to: 'x' }]));
-    httpServer = await listenOnLoopback(http.createServer(app));
+    httpServer = await listenRouterApp(app);
     base = `http://127.0.0.1:${httpServer.port}`;
   });
 

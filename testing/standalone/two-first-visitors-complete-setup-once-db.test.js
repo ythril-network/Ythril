@@ -30,7 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import express from 'express';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenRouterApp } from '../_shared/in-process-app.mjs';
 import { mongoSkipReason, openTestMongo, closeTestMongo } from './_mongo-harness.mjs';
 
 const skip = await mongoSkipReason();
@@ -62,7 +62,7 @@ describe('two first visitors complete setup once', { skip }, () => {
     const app = express();
     app.use(express.json());
     app.use('/api/setup', setupRouter);
-    server = await listenOnLoopback(http.createServer(app));
+    server = await listenRouterApp(app);
   });
   after(async () => {
     await server?.close();

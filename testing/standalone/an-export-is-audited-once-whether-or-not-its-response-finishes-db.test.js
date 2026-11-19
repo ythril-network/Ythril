@@ -33,7 +33,7 @@ import path from 'node:path';
 import http from 'node:http';
 import express from 'express';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenRouterApp } from '../_shared/in-process-app.mjs';
 import { auditRowsOf } from './_audit-rows.mjs';
 
 const skip = await mongoSkipReason();
@@ -77,7 +77,7 @@ describe('an export writes exactly one audit entry, finished or cut off (real Mo
       if (req.query.cut !== '1') res.end('{"_id":"b"}]}');
     };
     for (const e of EXPORTS) app.get(e.path.replace(SPACE, ':spaceId'), stream);
-    httpServer = await listenOnLoopback(http.createServer(app));
+    httpServer = await listenRouterApp(app);
     base = `http://127.0.0.1:${httpServer.port}`;
   });
 

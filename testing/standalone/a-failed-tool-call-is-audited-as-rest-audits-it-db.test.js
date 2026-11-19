@@ -39,10 +39,9 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import http from 'node:http';
 import express from 'express';
 import { elapse } from '../_shared/sleep.mjs';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenRouterApp } from '../_shared/in-process-app.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 
@@ -251,7 +250,7 @@ describe('a failed tool call is audited as REST audits its twin', { skip }, () =
       const answer = (req, res) => { const s = Number(req.query.s); if (s === 500) throw new TypeError('q444: handler fault'); res.status(s).json({ error: 'stub' }); };
       app.post('/api/brain/filter', answer);
       app.patch('/api/brain/:space/entities/:id', answer);
-      server = await listenOnLoopback(http.createServer(app));
+      server = await listenRouterApp(app);
       port = server.port;
     });
     after(async () => { await server?.close(); });
@@ -312,7 +311,7 @@ describe('a failed tool call is audited as REST audits its twin', { skip }, () =
         const out = await callTool({ name: 'similar', args: req.body ?? {}, caller: restToolCaller(req) });
         res.status(out.status).json({ text: out.result.content.map(c => c.text).join('\n') });
       });
-      server = await listenOnLoopback(http.createServer(app));
+      server = await listenRouterApp(app);
       port = server.port;
     });
     after(async () => { await server?.close(); });
@@ -338,7 +337,7 @@ describe('a failed tool call is audited as REST audits its twin', { skip }, () =
       app.use((req, _res, next) => { req.authToken = { id: `failedtoolaudit-classic-${++n}`, name: 'classic', rights: door.ADMIN }; next(); });
       app.use(auditMiddleware);
       app.post('/api/brain/similar', (_req, res) => { res.status(429).json({ error: 'rate limited' }); });
-      const s = await listenOnLoopback(http.createServer(app));
+      const s = await listenRouterApp(app);
       try {
         const r = await fetch(`http://127.0.0.1:${s.port}/api/brain/similar`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
         assert.equal(r.status, 429);

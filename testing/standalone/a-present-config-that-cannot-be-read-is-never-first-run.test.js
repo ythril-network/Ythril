@@ -42,7 +42,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { listenOnLoopback } from '../_shared/local-server.mjs';
+import { listenRouterApp } from '../_shared/in-process-app.mjs';
 import { withBlockedPaths } from './_unreadable-paths.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ythril-config-presence-'));
@@ -118,7 +118,7 @@ describe('a present config.json that cannot be read is never first run', () => {
       const app = express();
       app.use(express.json());
       app.use('/api/setup', setup.setupRouter);
-      server = await listenOnLoopback(http.createServer(app));
+      server = await listenRouterApp(app);
     });
     after(async () => { await server?.close(); });
 
