@@ -118,8 +118,10 @@ describe('HelpComponent', () => {
       // `04a`…`04d`, a suffix rather than a renumbering so that every published link to parts 05-17 keeps
       // working. The shape is still pinned — a letter, not `[a-z0-9-]*`, which would re-admit a traversal
       // segment the digits are here to exclude.
+      // One part is named, not numbered: the generated RDF vocabulary page `rdf/ythril-vocabulary.md`, whose name is the address the
+      // vocabulary's redirect serves (Q-749); it is listed by its exact path so the numbered shape stays pinned for every other part.
       for (const part of ('parts' in d ? d.parts : [])) {
-        expect(part).toMatch(/^[a-z0-9-]+\/\d\d[a-z]?-[a-z0-9-]+\.md$/);
+        expect(part).toMatch(/^(?:[a-z0-9-]+\/\d\d[a-z]?-[a-z0-9-]+\.md|rdf\/ythril-vocabulary\.md)$/);
       }
     }
   });
