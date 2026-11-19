@@ -85,7 +85,10 @@ export interface LayerMark {
   // The key cell is the name control (`app-schema-type-name`), whose text sits in the child's template where this component's styles do not
   // reach: the host element carries the key's look (mono, small, primary colour) and the child's text inherits it.
   styles: [SCHEMA_MD_STYLES, CHIP_STYLES, PROP_TABLE_STYLES, '.prop-rename { display:inline-flex; align-items:center; min-width:0; font-family:var(--font-mono); font-size:12px; color:var(--text-primary); }',
-    '.chip-gone { opacity:.75; border-style:dashed; } .chip-gone s { color:var(--text-muted); }'],
+    // A removed value must stay readable (the user reads which one they took out): no fill and a dashed outline set it apart from a live chip,
+    // the strike says removed, and the text is --text-secondary (6.85:1 on the field's --bg-surface), never dimmed. Its put-back sign keeps the
+    // live remove sign's colour (.chip-rm, --text-muted, 5.09:1).
+    '.chip-gone { background:transparent; border:1px dashed var(--text-muted); color:var(--text-secondary); } .chip-gone s { color:var(--text-secondary); text-decoration-thickness:1px; }'],
   template: `
 @if (libRef(); as libRef) {
   <!-- Linked library schema — editable only after unlinking; shown read-only meanwhile. -->

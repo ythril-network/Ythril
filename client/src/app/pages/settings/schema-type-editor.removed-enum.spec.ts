@@ -62,6 +62,17 @@ describe('a stored enum value removed in this sitting', () => {
     expect(JSON.stringify(typeSchemaFromState('entity', draft))).not.toMatch(/lead|_storedEnum/);
   });
 
+  it('is readable: its text in the secondary text token (6.85:1 on the field), no dimming, the dashed outline and the strike carrying "removed" (drive round 5)', () => {
+    const m = mount(stored());
+    m.remove('lead');
+    const rules = Array.from(document.styleSheets).flatMap(s => Array.from(s.cssRules)).map(r => r.cssText).filter(t => /\.chip-gone/.test(t));
+    expect(rules.length, 'the struck chip has rules of its own').toBeGreaterThan(0);
+    expect(rules.join('\n'), 'nothing dims the chip or its put-back sign').not.toMatch(/opacity/);
+    expect(rules.some(r => /color:\s*var\(--text-secondary\)/.test(r) && !/\.chip-rm/.test(r)), 'the value reads in --text-secondary').toBe(true);
+    expect(rules.some(r => /dashed/.test(r)), 'a dashed outline marks it removed').toBe(true);
+    expect(rules.join('\n'), 'not the muted token, which the drive could not read on the accent tint').not.toMatch(/\.chip-gone s[^{]*\{[^}]*--text-muted/);
+  });
+
   it('is put back in its stored place by its control, and is a live chip again', () => {
     const draft = stored();
     const m = mount(draft);
