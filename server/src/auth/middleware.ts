@@ -386,19 +386,17 @@ function enforceMfa(
  * (no `spaces` allowlist) always pass.
  */
 /**
- * The AREA check, layered on top of reach — and deliberately staged.
+ * The AREA check, layered on top of reach.
  *
- * A route the inventory does not resolve at RUNTIME falls through to the reach check alone, with a warning.
- * That is not the permissive default this feature exists to remove: reach is still enforced, so this can
- * only ever be stricter than yesterday, never looser. The inventory key is the route's REGISTERED full
- * pattern, read from the route map (`http/route-map.ts`) by the Route object the request matched. It used to
- * be rebuilt from `req.baseUrl + req.route.path`, which is the caller's spelling of the mount: a mixed-case
- * path found no row and skipped the area rung (Q-700).
- *
- * The warning is the point. It names the key that missed, so the log says exactly which routes still need
- * the mapping before misses can be turned into refusals — which is the follow-up. Flipping to refuse now
- * would 403 real traffic on any route whose key I reconstructed wrongly, and I have no runtime evidence yet
- * that I did not.
+ * A request the inventory does not resolve at RUNTIME is REFUSED `403 route_unclassified`, with a warning
+ * that names the key. It used to fall through to the reach check alone, staged "until the log is clean", on
+ * the argument that this could only be stricter than before. A HEAD broke that argument: Express runs the GET
+ * route for it, the inventory has GET rows only, and every HEAD to a path-scoped GET route was answered on
+ * reach alone, in every area. The lookup now asks HEAD as GET (`required-rung.ts`), and a miss refuses;
+ * `every-space-route-has-an-area.test.js` walks every registered route with every method it answers, so no
+ * real route is refused for want of a row. The inventory key is the route's REGISTERED full pattern, read
+ * from the route map (`http/route-map.ts`) by the Route object the request matched; it used to be rebuilt
+ * from `req.baseUrl + req.route.path`, the caller's spelling of the mount (Q-700).
  */
 function enforceAreaRung(
   res: Response,
@@ -416,10 +414,14 @@ function enforceAreaRung(
   // four routes guaranteed could never be reached. See the note on NOT_AREA_SCOPED for the whole account.
   if (verdict.kind === 'not-area-scoped') return true;
   if (verdict.kind === 'unclassified') {
-    log.warn(`Space rights: no inventory entry for '${peerText(req.method)} ${peerText(routePath)}' — reach enforced, area not. `
+    log.warn(`Space rights: no inventory entry for '${peerText(req.method)} ${peerText(routePath)}' — refused. `
       + 'Add it to ROUTE_RIGHTS with its area and lowest rung, or to NOT_AREA_SCOPED with the reason it is not '
-      + 'a view of the space\'s data; misses become refusals once the log is clean.');
-    return true;
+      + 'a view of the space\'s data.');
+    res.status(403).json({
+      error: `No rights row decides '${peerText(req.method)} ${peerText(routePath)}', so it is refused`,
+      code: 'route_unclassified',
+    });
+    return false;
   }
   const need = verdict;
   // `iterates` gates its LOOP, not the call. `body` is owned by `requireBodyScopedSpace`, which checks the
@@ -437,9 +439,9 @@ function enforceAreaRung(
    * mapping, and the reach guard answers a different question — which spaces, not which areas within one.
    *
    * It is here rather than at the top because everything above decides whether an area rung is the question
-   * at all. A route on `NOT_AREA_SCOPED` is a DECIDED exemption, and an unclassified one is reach-enforced
-   * with a warning — refusing those for want of a matrix would area-scope routes the design says are not,
-   * which is the opposite of the recorded decision.
+   * at all. A route on `NOT_AREA_SCOPED` is a DECIDED exemption — refusing it for want of a matrix would
+   * area-scope a route the design says is not, which is the opposite of the recorded decision — and an
+   * unclassified request has already been refused with its own code.
    *
    * Owner, 2026-09-05: *"no matrix = refuse - no fallback no backwards compatibility anymore."* That swept
    * `tokenReachesSpace` and `editorScopeFor`; this was the fourth copy and `toolRightsRefusal` the third.
