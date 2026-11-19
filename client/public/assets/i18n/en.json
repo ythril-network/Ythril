@@ -3522,5 +3522,9 @@
   "networks.network.votes.convert.counts.other": "If this passes, this instance converts the {{count}} records of {{type}} it holds ({{stamped}} only stamped, {{rewritten}} rewritten), after one sync with its peers. If you veto, nothing changes.",
   "networks.network.votes.convert.none": "There are no records of {{type}} here, so nothing would be converted on this instance.",
   "networks.network.votes.convert.countFailed": "The record counts of this instance could not be read.",
-  "networks.network.votes.convert.noSpace": "This space is not on this instance, so no records are counted here."
+  "networks.network.votes.convert.noSpace": "This space is not on this instance, so no records are counted here.",
+  "conversion.editor.addValue": "+ Add a value",
+  "conversion.editor.removeValue": "Remove this value",
+  "spaces.schema.convert.incomplete": "Some steps are not finished: fill in every name and choose what each old value becomes, or remove the step.",
+  "spaces.schema.convert.warn.rule": "The rule {{rule}} of {{type}} still reads {{property}}, which is now called {{to}}. A rename does not rewrite rules: edit the rule so it reads {{to}}."
 }
