@@ -203,7 +203,7 @@ const planKey = (blocks: readonly ConvertBlockPlan[]): string => JSON.stringify(
       }
       @if (submitted(); as s) {
         <app-convert-records-dialog mode="submitted" [spaceId]="state.settingsSpace()!.id" [blocks]="s.blocks" [network]="s.network"
-          (closed)="submitted.set(null)" (openNetworks)="openNetworks()" />
+          (closed)="closeSubmitted()" (openNetworks)="openNetworks()" />
       }
     }
   `,
@@ -466,7 +466,11 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
           this.state.markPristine();   // it is submitted; it is not an unsaved edit any more
           this.state.settingsSubmitted.set(true);  // ...and Save must stop offering to submit it again
           // A conversion that goes with the vote is said on its own dialog: the steps and this instance's counts stay on screen, and the way to the vote is a button.
-          if (choice) { this.offer.set(null); this.submitted.set({ blocks: choice.blocks.map(b => ({ ...b, offers: [], warnings: [] })), network: networks }); }
+          if (choice) {
+            this.offer.set(null);
+            this.showFirstConverted(choice);
+            this.submitted.set({ blocks: choice.blocks.map(b => ({ ...b, offers: [], warnings: [] })), network: networks });
+          }
           return;                      // stay open so the notice is read, unlike the applied path
         }
         this.store.applySpace(result.space);
@@ -537,14 +541,18 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
   }
 
   /** The schema is saved and the popup stays open: select the first converted type, and show what became of the run the save asked for. */
+  /** The Schema tab with the first type a conversion names selected: where its note (running, finished, or waiting for the vote) is read. */
+  private showFirstConverted(choice: ConvertDialogChoice): void {
+    const first = choice.types[0];
+    if (!first) return;
+    this.state.settingsTab.set('schema');
+    this.state.schemaCollTab.set(first.kind);
+    this.state.selectType(first.kind, first.type);
+  }
+
   private afterConvert(target: Space, choice: ConvertDialogChoice, result: unknown): void {
     this.offer.set(null);
-    const first = choice.types[0];
-    if (first) {
-      this.state.settingsTab.set('schema');
-      this.state.schemaCollTab.set(first.kind);
-      this.state.selectType(first.kind, first.type);
-    }
+    this.showFirstConverted(choice);
     const notice = convertNoticeOf(result) ?? { state: 'nothing' as const, types: [] };
     this.convertSpace = target.id;
     this.progress.set({ notice, status: null, from: 'save' });
@@ -581,6 +589,12 @@ export class SpaceSettingsPopupComponent implements ConvertRunHost {
     this.watch = null;
     this.progress.set(null);
     this.afterDialogClosed(from);
+  }
+
+  /** "Submitted for a vote" closed: the type head with its waiting note in view, focus on the footer button that took Save's place. */
+  protected closeSubmitted(): void {
+    this.submitted.set(null);
+    this.afterDialogClosed('save');
   }
 
   /** The two closes of a dialog this popup opened over the Schema tab (the run's, the vote's) end alike. */

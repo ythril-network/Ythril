@@ -85,6 +85,38 @@ describe('a run the person did not start here, shown from the type\'s note (driv
   });
 });
 
+describe('closing "Submitted for a vote" (drive round 4)', () => {
+  it('ends as the run dialog\'s close does: the type head with its waiting note scrolled into view, focus on the footer button', async () => {
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
+    try {
+      const pending = { status: 'vote_pending', rounds: [{ networkId: 'net-1', networkLabel: 'Acme team', roundId: 'r1', outcome: 'vote_pending' }] };
+      const h = mountPopup({
+        space: customers({ networks: [{ id: 'net-1', label: 'Acme team', type: 'democratic' }] } as never),
+        update: () => of({ ...pending, convert: { state: 'after_vote', types: [{ kind: 'entity', type: 'person' }] } }) as never,
+      });
+      document.body.appendChild(h.root);
+      h.open();
+      h.renameCompany();
+      h.popup.saveSettings();
+      h.settle();
+      h.click('cv-primary');
+      expect(h.text('cv-title')).toBe(english('spaces.schema.convert.submitted.title'));
+      // Behind the dialog the Schema tab (a deferred block) opens on the converted type, while the person reads the dialog.
+      await vi.waitFor(async () => { h.settle(); await h.fixture.whenStable(); if (!h.root.querySelector('.sch-detail-head')) throw new Error('no type head'); }, { timeout: 5_000, interval: 50 });
+      h.click('cv-close');
+      await vi.waitFor(() => {
+        h.settle();
+        expect(scrolled.some(e => e.classList.contains('sch-detail-head')), 'the type head is scrolled into view').toBe(true);
+        expect(document.activeElement).toBe(h.q('settings-done'));
+      }, { timeout: 5_000, interval: 50 });
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+});
+
 describe('closing the run\'s dialog with its X (drive D5)', () => {
   it('after the act, puts focus back on the type\'s Convert records button that opened the flow', async () => {
     const h = mountPopup({ statuses: [okStatus(runningStatus({ sources: ACT, left: 500 }))] });
