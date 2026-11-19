@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Members below 6.6.0 drop `schemaFingerprint` on arrival and forward records without it | None; a record is stamped again on its next write on a newer member |
 | A `merkle: true` network reports divergence while a member runs below 6.6.0 or was rolled back to 6.5: 6.5 hashes a stored `schemaFingerprint` | Upgrade or roll back every member together |
 | Records written before this release carry no `schemaFingerprint`; nothing backfills it | None; a record is stamped on its next write that conforms |
+| An embedder that cannot be reached no longer ends embed jobs `failed`: they wait (`pending`, `transientFailures` rising) | None; alert on `ythril_embed_jobs_handed_back_total` as well as on failed jobs |
 | An importer below 6.6.0 skips the `schemaSnapshots` of a 6.6 export: the records land without their schema versions, which are then fetched from members or stay unheld | Import a 6.6 export into 6.6.0 or later to keep the versions |
 | A member below 6.6.0 keeps a schema vote's conversion steps, takes the schema and converts nothing | After it upgrades, run `POST /api/spaces/:id/schema-convert` on the types the change reached |
 
@@ -127,6 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Spaces:** `update_space` refused for a face width the space's stored descriptors rule out answers 409 and `Error: <sentence>` on MCP and `POST /api/update_space`, as `PATCH /api/spaces/:id` does; it read `Error: Error (409): …` with status 400.
 - **Housekeeping:** a space set aside after a slow answer is checked again once its pause ends, even when its last check found it still building its positions. Before, no background task, the media queue included, checked that space again until a restart.
 - **Media:** a file whose analysis becomes due at the moment the queue is looking is picked up at once. Before, a replaced or retried file could wait up to 30 seconds for the queue's next full look, and an embedding job the same way.
+- **Embeddings:** an embed job whose call could not reach its HTTP endpoint keeps its attempts and waits with back-off, and the worker pauses until the embedder answers; `ythril_embed_jobs_handed_back_total` counts each hand-back.
 - **Startup:** a `config.json` that is there but empty, null, not JSON or unreadable stops the start, naming the file, instead of opening first-run setup; the status door reports the boot's answer.
 - **Startup:** an unreadable `secrets.json`, `schema-library.json` or `schema-catalogs.json` stops the start by name instead of loading empty; the at-rest migration refuses an unreadable state file.
 - **Backups:** backups, offsite copy, restore and `backup.json` no longer read an unreadable path as absent: the offsite copy no longer skips users' files, and a restore no longer rejects a backup as holding no file.
