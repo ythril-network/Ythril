@@ -264,7 +264,7 @@ describe('a type: its class, its node shape and its annotations', () => {
     }));
     const node = N('entity', 'person');
     const naming = node['sh:property'].find(x => typeof x === 'object');
-    assert.deepEqual(naming, norm({ 'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I('rdfs:label')], 'sh:pattern': [L('^[A-Z]')] }));
+    assert.deepEqual(naming, norm({ 'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I('rdfs:label')], 'sh:name': [L('name')], 'sh:pattern': [L('^[A-Z]')] }));
     const { 'sh:property': _hung, ...rest } = node;
     assert.deepEqual(rest, norm({
       'rdf:type': [I('sh:NodeShape')], 'sh:name': [L('person')], 'sh:description': [L('A person we know')],
@@ -315,7 +315,7 @@ describe('an edge type: a property, never a class', () => {
       'ythril:endpointTo': [I(termAt('entity', 'person')), I('ythril:Untyped'), I(termAt('entity', 'UNTYPED'))],
       'ythril:requiredEdgeProperty': [I(termAt('edge', 'knows', 'strength'))],
       'sh:property': [{
-        'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I(label)],
+        'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I(label)], 'sh:name': [L('knows')],
         'sh:or': [LIST({ 'sh:class': [I(termAt('entity', 'person'))] }, { 'sh:class': [I('ythril:Untyped')] }, { 'sh:class': [I(termAt('entity', 'UNTYPED'))] }, isEntity)],
       }],
     }));
@@ -329,7 +329,7 @@ describe('an edge type: a property, never a class', () => {
   it('a functional label is at most one object for a subject', () => {
     assert.deepEqual(treeAt(quads, shapeAt('edge', 'reports_to')), norm({
       'rdf:type': [I('sh:NodeShape')], 'sh:name': [L('reports_to')], 'sh:targetSubjectsOf': [I(termAt('edge', 'reports_to'))],
-      'sh:property': [{ 'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I(termAt('edge', 'reports_to'))], 'sh:maxCount': [INT(1)] }],
+      'sh:property': [{ 'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I(termAt('edge', 'reports_to'))], 'sh:name': [L('reports_to')], 'sh:maxCount': [INT(1)] }],
     }));
   });
 
@@ -367,6 +367,32 @@ describe('an unresolved library reference is exported, never dropped and never a
     const { quads } = graph(withTypes('edge', { e: { $ref: 'library:missing' }, ok: { $ref: 'library:there', description: 'inlined from the library' } }));
     assert.deepEqual(treeAt(quads, shapeAt('edge', 'e'))['ythril:unresolvedRef'], [L('library:missing')]);
     assert.equal(treeAt(quads, shapeAt('edge', 'ok'))['ythril:unresolvedRef'], undefined);
+  });
+});
+
+describe('every shape is named, whatever a name holds', () => {
+  it('every node shape and every property shape of the fixture has an sh:name, the helper shapes of a naming pattern and an edge label included', () => {
+    const { quads } = graph();
+    const shapes = quads.filter(q => q.predicate.value === iriOf('rdf:type') && [iriOf('sh:NodeShape'), iriOf('sh:PropertyShape')].includes(q.object.value));
+    assert.ok(shapes.length > 20, 'the fixture has many shapes');
+    for (const { subject } of shapes) {
+      const named = quads.filter(q => q.predicate.value === iriOf('sh:name') && (subject.kind === 'blank' ? q.subject.kind === 'blank' && q.subject.id === subject.id : q.subject.value === subject.value));
+      assert.equal(named.length, 1, `${subject.value ?? `blank node ${subject.id}`} has one sh:name`);
+    }
+  });
+
+  it('a name with a slash, a hash, a space, a quote and a non-ASCII letter is encoded in the address and kept whole in sh:name and the label, and is written', async () => {
+    const type = 'odd/type #1 "x" é';
+    const prop = 'a#b c/d';
+    const { quads, prefixes } = graph(withTypes('entity', { [type]: { propertySchemas: { [prop]: { type: 'string' } } } }));
+    const shape = quads.find(q => q.predicate.value === iriOf('sh:path') && q.object.kind === 'iri' && q.object.value.startsWith(`${VOCAB}entity/`));
+    assert.ok(shape, 'the property shape names the property term');
+    assert.ok(!/[ "#]/.test(shape.object.value.slice(VOCAB.length)), 'no character an address cannot hold is written raw');
+    assert.deepEqual(treeAt(quads, shape.subject.value)['sh:name'], [L(prop)]);
+    assert.deepEqual(treeAt(quads, shape.object.value)['rdfs:label'], [L(prop)]);
+    let out = '';
+    for await (const chunk of ser.serializeRdf('turtle', [{ quads }], { prefixes })) out += chunk;
+    assert.ok(new Parser({ format: 'Turtle' }).parse(out).length > 10, 'the writer wrote it and a parser read it');
   });
 });
 
