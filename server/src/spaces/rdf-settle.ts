@@ -281,10 +281,15 @@ export function takeServedRdfBases(net: NetworkConfig, spaces: readonly SpaceCon
     const on = held?.enabled === true && held.base ? held : undefined;
     const key = localToRemote(net, local);
     const raw = on && key.length <= SERVED_SPACE_KEY_MAX ? entries.find(([k]) => k === key)?.[1] : undefined;
-    // A value no door would accept is left out, unsaid: an older or a hostile peer's text is never quoted back.
-    const offer = raw === undefined ? undefined : ServedRdfBaseZ.safeParse(raw);
-    const early = offer?.success === true && offer.data.baseEpoch > (on?.baseEpoch ?? 0) && heldRebaseEpochs({ networks: [net] }, local).has(offer.data.baseEpoch);
-    const offers = offer?.success === true && !early ? [{ base: offer.data.base, vocab: vocabOf(offer.data)!, epoch: offer.data.baseEpoch }] : [];
+    const offers: RdfOffer[] = [];
+    if (raw !== undefined) {
+      // A value no door would accept is left out, unsaid: an older or a hostile peer's text is never quoted back.
+      const offer = ServedRdfBaseZ.safeParse(raw);
+      if (offer.success) {
+        const early = offer.data.baseEpoch > (on?.baseEpoch ?? 0) && heldRebaseEpochs({ networks: [net] }, local).has(offer.data.baseEpoch);
+        if (!early) offers.push({ base: offer.data.base, vocab: vocabOf(offer.data)!, epoch: offer.data.baseEpoch });
+      }
+    }
     if (recordRdfOffers(net, local, on, memberId, offers)) changed = true;
   }
   return changed;

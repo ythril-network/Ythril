@@ -587,10 +587,13 @@ export function planSpaceMetaUpdate(input: {
     // Q-748 rule 5: on a space with RDF on, two terms with one address are refused, both named. Asked of the schema the space RUNS after the
     // edit, resolved as the resolver names it: its own definitions laid under each network's layer, so an own type cannot take an address a
     // layer's type already has (the review's suspicion, proven). A space with RDF off names nothing, so nothing is asked.
-    const runs = effectiveMetaAfterEdit(getConfig(), space, {
-      base, incoming: parsed.data.meta as Partial<SpaceMeta>, mode: parsed.data.typeSchemasMode ?? 'merge', merged: mergedMeta, targetNetwork,
-    });
-    if (runs.rdf?.enabled === true && runs.rdf.base) {
+    // The layers are read only for a space with RDF on (its own setting is what the effective meta keeps): any other write asks nothing of the config.
+    const runs = mergedMeta.rdf?.enabled === true || space.meta?.rdf?.enabled === true
+      ? effectiveMetaAfterEdit(getConfig(), space, {
+        base, incoming: parsed.data.meta as Partial<SpaceMeta>, mode: parsed.data.typeSchemasMode ?? 'merge', merged: mergedMeta, targetNetwork,
+      })
+      : undefined;
+    if (runs?.rdf?.enabled === true && runs.rdf.base) {
       const clashes = termClashes(inlineResolvableRefs(runs));
       if (clashes.length > 0) {
         return { ok: false, refusal: { status: TERM_CLASH_STATUS, body: { error: `two terms of this space would have one RDF address: ${clashes.map(c => c.message).join('; ')}`, code: 'rdf_term_clash' } } };
