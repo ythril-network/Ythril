@@ -35,7 +35,7 @@ const E = 'http://ex.org/';
 const iri = (value) => ({ kind: 'iri', value });
 const lit = (value, datatype) => (datatype === undefined ? { kind: 'literal', value } : { kind: 'literal', value, datatype });
 const q = (s, p, o, g) => ({ subject: typeof s === 'string' ? iri(s) : s, predicate: iri(p), object: typeof o === 'string' ? iri(o) : o, ...(g ? { graph: iri(g) } : {}) });
-const PREFIXES = () => ({ rdf: RDF, rdfs: 'http://www.w3.org/2000/01/rdf-schema#', xsd: XSD, schema: 'https://schema.org/', time: 'http://www.w3.org/2006/time#', dcterms: 'http://purl.org/dc/terms/', prov: 'http://www.w3.org/ns/prov#', ythril: vocab.YTHRIL_NS });
+const PREFIXES = () => ({ rdf: RDF, rdfs: 'http://www.w3.org/2000/01/rdf-schema#', xsd: XSD, schema: 'http://schema.org/', time: 'http://www.w3.org/2006/time#', dcterms: 'http://purl.org/dc/terms/', prov: 'http://www.w3.org/ns/prov#', ythril: vocab.YTHRIL_NS });
 
 async function write(format, batches) {
   assert.equal(typeof ser.serializeRdf, 'function', 'serializeRdf is not exported by server/src/rdf/serialize.ts: there is no writer');

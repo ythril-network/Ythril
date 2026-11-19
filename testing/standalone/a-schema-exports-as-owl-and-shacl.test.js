@@ -104,8 +104,8 @@ describe('own terms and outside terms', () => {
   const meta = withTypes('entity', {
     person: { description: 'Own class words', propertySchemas: { nick: { type: 'string', description: 'Own property words' } } },
     contact: {
-      iri: 'https://schema.org/Person', description: 'Outside class words',
-      propertySchemas: { email: { type: 'string', iri: 'https://schema.org/email', description: 'Outside property words', required: true } },
+      iri: 'http://schema.org/Person', description: 'Outside class words',
+      propertySchemas: { email: { type: 'string', iri: 'http://schema.org/email', description: 'Outside property words', required: true } },
     },
   });
 
@@ -118,7 +118,7 @@ describe('own terms and outside terms', () => {
       'rdf:type': [I('owl:DatatypeProperty'), I('owl:FunctionalProperty')], 'rdfs:label': [L('nick')], 'rdfs:comment': [L('Own property words')],
       'rdfs:isDefinedBy': [I(ONTOLOGY)], 'rdfs:domain': [I(termAt('entity', 'person'))], 'rdfs:range': [I('xsd:string')],
     }));
-    const outside = subjectsOf(quads).filter(s => s.startsWith('https://schema.org/'));
+    const outside = subjectsOf(quads).filter(s => s.startsWith('http://schema.org/'));
     assert.deepEqual(outside, [], 'nothing is stated about schema:Person or schema:email');
   });
 
@@ -127,11 +127,11 @@ describe('own terms and outside terms', () => {
     const type = treeAt(quads, shapeAt('entity', 'contact'));
     assert.deepEqual(type['sh:description'], [L('Outside class words')]);
     assert.deepEqual(type['sh:name'], [L('contact')]);
-    assert.deepEqual(type['sh:targetClass'], [I('https://schema.org/Person')]);
+    assert.deepEqual(type['sh:targetClass'], [I('http://schema.org/Person')]);
     const prop = treeAt(quads, shapeAt('entity', 'contact', 'email'));
     assert.deepEqual(prop['sh:description'], [L('Outside property words')]);
     assert.deepEqual(prop['sh:name'], [L('email')]);
-    assert.deepEqual(prop['sh:path'], [I('https://schema.org/email')]);
+    assert.deepEqual(prop['sh:path'], [I('http://schema.org/email')]);
     assert.deepEqual(prop['sh:minCount'], [INT(1)]);
   });
 
@@ -214,7 +214,7 @@ describe('a property: its axioms and its shape, field by field', () => {
 
   it('an explicit address is the path of the shape and no own term', () => {
     assert.deepEqual(S('email'), norm({
-      'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I('https://schema.org/email')], 'sh:name': [L('email')], 'sh:description': [L('Mail address')],
+      'rdf:type': [I('sh:PropertyShape')], 'sh:path': [I('http://schema.org/email')], 'sh:name': [L('email')], 'sh:description': [L('Mail address')],
       'sh:maxCount': [INT(1)], 'sh:datatype': [I('xsd:string')],
     }));
     assert.equal(P('email')['rdf:type'], undefined);
@@ -347,9 +347,9 @@ describe('an edge type: a property, never a class', () => {
   });
 
   it('an outside edge label is the target and the path and never a subject', () => {
-    const q = graph(withTypes('edge', { friend: { iri: 'https://schema.org/knows', functional: true, description: 'Mapped' } })).quads;
-    assert.deepEqual(subjectsOf(q).filter(s => s.startsWith('https://schema.org/')), []);
-    assert.deepEqual(treeAt(q, shapeAt('edge', 'friend'))['sh:targetSubjectsOf'], [I('https://schema.org/knows')]);
+    const q = graph(withTypes('edge', { friend: { iri: 'http://schema.org/knows', functional: true, description: 'Mapped' } })).quads;
+    assert.deepEqual(subjectsOf(q).filter(s => s.startsWith('http://schema.org/')), []);
+    assert.deepEqual(treeAt(q, shapeAt('edge', 'friend'))['sh:targetSubjectsOf'], [I('http://schema.org/knows')]);
     assert.deepEqual(treeAt(q, shapeAt('edge', 'friend'))['sh:description'], [L('Mapped')]);
   });
 });

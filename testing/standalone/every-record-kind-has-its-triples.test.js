@@ -36,14 +36,14 @@ const BASE = 'https://ythril.example.org/ld/space-1/';
 const VOCAB = `${BASE}vocab/`;
 const NS = {
   rdf: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#', rdfs: 'http://www.w3.org/2000/01/rdf-schema#', xsd: 'http://www.w3.org/2001/XMLSchema#',
-  schema: 'https://schema.org/', time: 'http://www.w3.org/2006/time#', dcterms: 'http://purl.org/dc/terms/', prov: 'http://www.w3.org/ns/prov#',
+  schema: 'http://schema.org/', time: 'http://www.w3.org/2006/time#', dcterms: 'http://purl.org/dc/terms/', prov: 'http://www.w3.org/ns/prov#',
 };
 const YT = () => vocab.YTHRIL_NS;
 
 const META = {
   rdf: { enabled: true, base: BASE, vocab: VOCAB, baseEpoch: 0 },
   typeSchemas: {
-    entity: { person: { propertySchemas: { age: { type: 'number' }, nick: { type: 'string' }, born: { type: 'date' }, active: { type: 'boolean' }, email: { type: 'string', iri: 'https://schema.org/email' } } } },
+    entity: { person: { propertySchemas: { age: { type: 'number' }, nick: { type: 'string' }, born: { type: 'date' }, active: { type: 'boolean' }, email: { type: 'string', iri: 'http://schema.org/email' } } } },
     fact: { note: { propertySchemas: { weight: { type: 'number' } } } },
     chrono: { event: { propertySchemas: { room: { type: 'string' } } }, deadline: {} },
     edge: { knows: { propertySchemas: { since: { type: 'date' }, strength: { type: 'number' } } } },

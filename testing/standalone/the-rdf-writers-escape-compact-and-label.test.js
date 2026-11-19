@@ -35,7 +35,7 @@ const need = (name) => {
 const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const RDFS = 'http://www.w3.org/2000/01/rdf-schema#';
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
-const SCHEMA = 'https://schema.org/';
+const SCHEMA = 'http://schema.org/';
 const E = 'http://ex.org/';
 const iri = (value) => ({ kind: 'iri', value });
 const blank = (id) => ({ kind: 'blank', id });
@@ -101,8 +101,9 @@ describe('Turtle: prefixes, compact names only where safe, a type as "a"', () =>
       '',
       `<${S}>`,
       '    a ythril:Entity ;',
-      '    rdfs:label "A" ;',
-      '    schema:keywords "k1", "k2" .',
+      // Predicates are sorted by their full address: http://schema.org/keywords comes before http://www.w3.org/...#label.
+      '    schema:keywords "k1", "k2" ;',
+      '    rdfs:label "A" .',
       '',
       '',
     ].join('\n'));

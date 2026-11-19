@@ -24,7 +24,9 @@ export const STANDARD_PREFIXES: Readonly<Record<string, string>> = Object.freeze
   xsd: 'http://www.w3.org/2001/XMLSchema#',
   owl: 'http://www.w3.org/2002/07/owl#',
   sh: 'http://www.w3.org/ns/shacl#',
-  schema: 'https://schema.org/',
+  // http, not https (owner, 2026-11-19): schema.org's own JSON-LD context and the data already published use it, and a namespace cannot
+  // change once an export left an instance.
+  schema: 'http://schema.org/',
   time: 'http://www.w3.org/2006/time#',
   dcterms: 'http://purl.org/dc/terms/',
   prov: 'http://www.w3.org/ns/prov#',
