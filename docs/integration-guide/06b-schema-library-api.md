@@ -262,8 +262,9 @@ Authorization: Bearer <admin-token>
 
 The namespace is stored in `config.json` (`schemaLibraryNamespaces`) and `GET /groups` shows it as `namespace: { prefix, iri }`. Every entry
 of the group then carries `iri = <iri><kind>/<typeName>` and each property `<iri><kind>/<typeName>/<property>`, each name percent-encoded
-where IRI syntax needs it, unless the entry sets its own `iri`. That is part of the definition a linking space runs on, so the schema
-fingerprint of every such space changes with the namespace, and each keeps the new schema version.
+where IRI syntax needs it, unless the entry sets its own `iri`. That is part of the definition a linking space with RDF on runs on, so the
+schema fingerprint of every such space changes with the namespace, and each keeps the new schema version. A linking space with RDF off
+names nothing: the namespace changes neither its fingerprint nor what it sends its peers.
 
 | answer | when |
 |---|---|

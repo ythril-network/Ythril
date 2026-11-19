@@ -14,7 +14,7 @@
  */
 
 import type { SpaceMeta, PropertySchema, TypeSchema, KnowledgeType } from '../config/types.js';
-import { getConfig } from '../config/loader.js';
+import { getConfig, getSchemaLibrary } from '../config/loader.js';
 import { effectiveLibraryEntries } from './library-terms.js';
 import { hasReDoSRisk, MAX_PATTERN_LENGTH } from '../util/redos.js';
 import { isRecordView, recordViewOf, type RecordView, type ViewKind } from '../brain/record-view.js';
@@ -64,7 +64,7 @@ export type InstanceWrittenKeys = Partial<Record<'entity' | 'edge' | 'fact' | 'c
  * Returns the resolved inline schema, or `undefined` if the reference cannot be found.
  * Returns the schema unchanged when no `$ref` is present.
  */
-export function resolveTypeSchema(schema: TypeSchema | undefined): TypeSchema | undefined {
+export function resolveTypeSchema(schema: TypeSchema | undefined, named = true): TypeSchema | undefined {
   if (!schema) return schema;
   const ref = schema.$ref;
   if (!ref) return schema;
@@ -72,8 +72,9 @@ export function resolveTypeSchema(schema: TypeSchema | undefined): TypeSchema | 
   // Resolve library reference
   const name = libraryEntryNameOf(ref);
   if (name !== undefined) {
-    // The effective entry (Q-748): its group namespace's addresses are part of the definition a space runs on.
-    const entry = effectiveLibraryEntries().find(e => e.name === name);
+    // `named`: the effective entry (Q-748), its group namespace's addresses part of the definition; else the entry as stored, for a space with
+    // RDF off, which names nothing (review finding 5: RDF is inert when off).
+    const entry = (named ? effectiveLibraryEntries() : getSchemaLibrary()).find(e => e.name === name);
     return entry ? entry.schema : undefined;
   }
 
@@ -128,15 +129,19 @@ export function resolveMetaRefs(meta: SpaceMeta): SpaceMeta {
  * `resolveMetaRefs` on purpose: that one is for VALIDATING here and stamps `_unresolvedRef`; this one is for SENDING,
  * and a stamp this instance invented must not become part of another instance's schema.
  */
-export function inlineResolvableRefs<M extends Partial<SpaceMeta>>(meta: M): M {
+export function inlineResolvableRefs<M extends Partial<SpaceMeta>>(meta: M, rdf: SpaceMeta['rdf'] = meta?.rdf): M {
   if (!meta?.typeSchemas) return meta;
+  // A group namespace names the terms of a space with RDF ON only (review finding 5): for any other space nothing it gives is inlined for a
+  // peer or fingerprinted, so a namespace changes neither what a member before 6.6 is sent nor the space's schema. `rdf` is the SPACE's
+  // setting, handed in where the meta is a fragment that does not carry it (a round's `pendingMeta`).
+  const named = rdf?.enabled === true && !!rdf.base;
   let changed = false;
   const out: Partial<Record<KnowledgeType, Record<string, TypeSchema>>> = {};
   for (const [kt, ktMap] of Object.entries(meta.typeSchemas) as [KnowledgeType, Record<string, TypeSchema> | undefined][]) {
     if (!ktMap) continue;
     out[kt] = {};
     for (const [typeName, schema] of Object.entries(ktMap)) {
-      const resolved = schema?.$ref ? resolveTypeSchema(schema) : undefined;
+      const resolved = schema?.$ref ? resolveTypeSchema(schema, named) : undefined;
       if (resolved) changed = true;
       out[kt]![typeName] = resolved ?? schema;
     }

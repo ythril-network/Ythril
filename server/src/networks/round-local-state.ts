@@ -106,6 +106,7 @@ export function adoptPeerRound(net: NetworkConfig, peerRound: VoteRound): VoteRo
  */
 export function roundForPeer<T extends Partial<Record<LocalField, unknown>> & { pendingMeta?: SpaceMeta; type?: string; concluded?: boolean }>(
   round: T,
+  spaceRdf?: SpaceMeta['rdf'],
 ): Omit<T, LocalField> {
   const copy = withoutLocalState(round) as Omit<T, LocalField> & { pendingMeta?: SpaceMeta; concluded?: boolean };
   // A deletion or wipe is served concluded only once its act has completed here (design v5 §3.1): a peer lifts its hold on the
@@ -113,6 +114,9 @@ export function roundForPeer<T extends Partial<Record<LocalField, unknown>> & { 
   if (isSpaceActRound(round.type)) {
     copy.concluded = round.concluded === true && round.appliedHere === true;
   }
-  if (copy.pendingMeta) copy.pendingMeta = inlineResolvableRefs(copy.pendingMeta);
+  // The space's RDF setting decides whether a group namespace names its terms (review finding 5): the one the round carries when it carries
+  // one (it is what the space will hold), else the space's own, handed in, since a round's meta is a fragment. A space with RDF off sends no
+  // namespace address to its peers.
+  if (copy.pendingMeta) copy.pendingMeta = inlineResolvableRefs(copy.pendingMeta, copy.pendingMeta.rdf ?? spaceRdf);
   return copy;
 }
