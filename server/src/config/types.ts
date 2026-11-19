@@ -848,6 +848,8 @@ export interface Config extends BodyLimitsConfig {
   instanceId: string;
   instanceLabel: string;
   publicUrl?: string;         // optional canonical public URL for this brain instance
+  /** Q-748: per schema-library group, the namespace its entries' RDF terms are named under (`spaces/library-terms.ts`). */
+  schemaLibraryNamespaces?: Record<string, { prefix: string; iri: string }>;
   /** Ed25519 public signing key (SPKI PEM) for this instance. Published to peers
    *  so they can verify our signed governance vote casts. Private half is in
    *  secrets.json. Generated on first startup after setup. */

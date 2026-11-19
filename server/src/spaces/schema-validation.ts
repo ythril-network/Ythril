@@ -14,7 +14,8 @@
  */
 
 import type { SpaceMeta, PropertySchema, TypeSchema, KnowledgeType } from '../config/types.js';
-import { getSchemaLibrary, getConfig } from '../config/loader.js';
+import { getConfig } from '../config/loader.js';
+import { effectiveLibraryEntries } from './library-terms.js';
 import { hasReDoSRisk, MAX_PATTERN_LENGTH } from '../util/redos.js';
 import { isRecordView, recordViewOf, type RecordView, type ViewKind } from '../brain/record-view.js';
 import { NAME_QUOTED, peerText } from '../util/log.js';
@@ -71,7 +72,8 @@ export function resolveTypeSchema(schema: TypeSchema | undefined): TypeSchema | 
   // Resolve library reference
   const name = libraryEntryNameOf(ref);
   if (name !== undefined) {
-    const entry = getSchemaLibrary().find(e => e.name === name);
+    // The effective entry (Q-748): its group namespace's addresses are part of the definition a space runs on.
+    const entry = effectiveLibraryEntries().find(e => e.name === name);
     return entry ? entry.schema : undefined;
   }
 

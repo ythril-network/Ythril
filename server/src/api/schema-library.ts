@@ -20,6 +20,8 @@
  *   GET    /api/schema-library/catalogs/:name/entries/:entryName — preview one foreign entry
  *   GET    /api/schema-library/groups                 — list distinct schema group names
  *   POST   /api/schema-library/groups/:group/apply    — apply all entries in a group to a space
+ *   PUT    /api/schema-library/groups/:group/namespace — set the RDF namespace of a group's entries (Q-748)
+ *   DELETE /api/schema-library/groups/:group/namespace — remove it
  *   POST   /api/schema-library/export-space           — export a space's typeSchemas as a named group
  *
  * Routes (unauthenticated, public):
@@ -54,6 +56,8 @@ import { log, peerText, peerList, refusalOfParse, NAME_QUOTED } from '../util/lo
 import { notFoundSentence } from '../util/errors.js';
 import { sendLostSpace } from './write-target-answer.js';
 import { restartSchemaConvertInTurn } from '../sync/governance.js';
+import { currentLibraryState, libraryNamespaces, libraryRdfGuard } from '../spaces/library-terms.js';
+import { deleteNamespace, putNamespace } from './schema-library-namespaces.js';
 
 export const schemaLibraryRouter = Router();
 
@@ -67,6 +71,17 @@ function afterLibraryEdit(names: readonly string[]): void {
   keepSnapshotsOfSpacesLinking(names);
   const usages = libraryUsages(getConfig().spaces);
   void restartSchemaConvertInTurn(names.flatMap(n => (usages.get(n) ?? []).map(u => u.spaceId)));
+}
+
+/**
+ * Save `next` as the library unless the change would rename an RDF-enabled linking space's terms without `rebase`, or give two of its
+ * terms one address (Q-748, `libraryRdfGuard`): then answer the 409 and store nothing. Every library write that changes entries saves here.
+ */
+function savedUnlessRdfRefuses(next: ParsedLibraryEntry[], rebase: boolean, res: import('express').Response): boolean {
+  const refused = libraryRdfGuard(getConfig().spaces, currentLibraryState(), { library: next, namespaces: libraryNamespaces() }, rebase);
+  if (refused) { res.status(refused.status).json(refused.body); return false; }
+  saveSchemaLibrary(next);
+  return true;
 }
 
 // ── Rate limiters ──────────────────────────────────────────────────────────
@@ -177,6 +192,8 @@ export const LibraryEntryPutBodyZ = z.object({
   published: z.boolean().optional(),
   sourceUrl: z.string().url().max(2048).nullable().optional(),
   sourceCatalog: z.string().max(200).nullable().optional(),
+  /** Q-748: rename the RDF terms of a linking RDF-enabled space on purpose (the edit is refused 409 `rdf_term_rename` without it). */
+  rebase: z.literal(true).optional(),
 });
 
 /**
@@ -203,6 +220,8 @@ export const LibraryEntryPatchBodyZ = z.object({
   sourceCatalog: z.string().max(200).nullable().optional(),
   /** Dot paths inside `schema`: `propertySchemas.<key>`, `namingPattern`, `propertySchemas`. */
   deleteFields: z.array(z.string().min(1).max(300)).max(100).optional(),
+  /** Q-748: as on PUT. */
+  rebase: z.literal(true).optional(),
 }).strict();
 
 /** Body for PATCH /:name/publish */
@@ -289,11 +308,17 @@ schemaLibraryRouter.get('/groups', globalRateLimit, requireAuth, (_req, res) => 
       groupMap.set(entry.schemaGroup, (groupMap.get(entry.schemaGroup) ?? 0) + 1);
     }
   }
+  const namespaces = getConfig().schemaLibraryNamespaces ?? {};
   const groups = Array.from(groupMap.entries())
-    .map(([name, count]) => ({ name, count }))
+    .map(([name, count]) => ({ name, count, ...(namespaces[name] ? { namespace: namespaces[name] } : {}) }))
     .sort((a, b) => a.name.localeCompare(b.name));
   res.json({ groups });
 });
+
+// ── PUT|DELETE /groups/:group/namespace — the RDF namespace of a group's entries (Q-748, `schema-library-namespaces.ts`) ──
+
+schemaLibraryRouter.put('/groups/:group/namespace', globalRateLimit, requireAdminMfa, (req, res) => putNamespace(req, res, afterLibraryEdit));
+schemaLibraryRouter.delete('/groups/:group/namespace', globalRateLimit, requireAdminMfa, (req, res) => deleteNamespace(req, res, afterLibraryEdit));
 
 // ── POST /export-space — export a space's typeSchemas as a named group ────
 //
@@ -407,7 +432,7 @@ schemaLibraryRouter.post('/export-space', globalRateLimit, requireAdminMfa, (req
     }
   }
 
-  saveSchemaLibrary(library);
+  if (!savedUnlessRdfRefuses(library, false, res)) return;
   afterLibraryEdit(resultEntries.map(e => e.name));
   res.json({
     created, updated, entries: resultEntries,
@@ -635,7 +660,7 @@ schemaLibraryRouter.put('/:name', globalRateLimit, requireAdminMfa, (req, res) =
     };
     const updatedLibrary = [...library];
     updatedLibrary[existingIdx] = updatedEntry;
-    saveSchemaLibrary(updatedLibrary);
+    if (!savedUnlessRdfRefuses(updatedLibrary, parsed.data.rebase === true, res)) return;
     afterLibraryEdit([name]);
     // A library entry is referenced by `$ref` from any number of spaces, so editing one changes what all
     // of them validate against. The audit layer records the scalar metadata plus the property-key names
@@ -753,7 +778,7 @@ schemaLibraryRouter.patch('/:name', globalRateLimit, requireAdminMfa, (req, res)
 
   const next = [...library];
   next[idx] = updated;
-  saveSchemaLibrary(next);
+  if (!savedUnlessRdfRefuses(next, patch.rebase === true, res)) return;
   afterLibraryEdit([updated.name]);
   // Same reasoning as PUT: this entry is `$ref`d from any number of spaces, so editing it changes what all of
   // them validate against. The audit layer records the scalar metadata and which property KEYS changed, never

@@ -218,7 +218,7 @@ GET /api/schema-library/groups
 Authorization: Bearer <token>
 ```
 
-**Response** `200 { "groups": [ { "name", "count" } ] }` — every distinct `schemaGroup` with the number of entries in it, sorted by name.
+**Response** `200 { "groups": [ { "name", "count", "namespace"? } ] }` — every distinct `schemaGroup` with the number of entries in it, sorted by name, and its RDF namespace when it has one ([below](#a-groups-rdf-namespace)).
 
 ```http
 POST /api/schema-library/export-space
@@ -241,6 +241,44 @@ Content-Type: application/json
 Injects a `$ref` into the target space's `typeSchemas` for every library entry in `:group`, wiring the space to the shared definitions. **Response** `200` with the applied entries; `404` if the group has no entries or the space does not exist. Requires an admin token (and MFA when enabled).
 
 On a space in a network the apply is a vote, as every schema write there is: it answers `202 { "status": "vote_pending", "rounds" }` and the references land when the round passes (Q-52).
+
+#### A group's RDF namespace
+
+A group can name its entries' RDF terms under a namespace of its own, so every space that links them gives them the same addresses
+([RDF names](06a-schema-api.md#rdf-names-metardf-and-iri)).
+
+```http
+PUT /api/schema-library/groups/:group/namespace
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+
+{ "prefix": "acme", "iri": "https://acme.example/ns/", "rebase": true }
+```
+
+```http
+DELETE /api/schema-library/groups/:group/namespace?rebase=true
+Authorization: Bearer <admin-token>
+```
+
+The namespace is stored in `config.json` (`schemaLibraryNamespaces`) and `GET /groups` shows it as `namespace: { prefix, iri }`. Every entry
+of the group then carries `iri = <iri><kind>/<typeName>` and each property `<iri><kind>/<typeName>/<property>`, each name percent-encoded
+where IRI syntax needs it, unless the entry sets its own `iri`. That is part of the definition a linking space runs on, so the schema
+fingerprint of every such space changes with the namespace, and each keeps the new schema version.
+
+| answer | when |
+|---|---|
+| `200 { group, namespace }` / `200 { group, removed: true }` | stored / removed |
+| `400` | a prefix that is reserved (`rdf`, `schema`, `ythril`, `vocab`, a URI scheme, …) or malformed, or an IRI that is not a namespace (absolute, ending in `/` or `#`) |
+| `404 group_not_found` / `404 namespace_not_found` | the group has no entries / no namespace to remove |
+| `409 namespace_prefix_taken` | another group holds the prefix |
+| `409 rdf_term_rename` | an RDF-enabled space links the group and the change renames its terms; send `rebase: true` (or `?rebase=true`) to make it on purpose |
+| `409 rdf_term_clash` | the change would give two terms of a linking RDF-enabled space one address, both named |
+
+The same two guards hold every library write that changes an entry linked by an RDF-enabled space: a `PUT` or `PATCH` of an entry that
+renames a term (its `typeName`, `knowledgeType`, `schemaGroup` or `iri`) answers `409 rdf_term_rename` unless the body carries
+`rebase: true`, and a write that would make two terms of such a space share an address answers `409 rdf_term_clash`. A namespace in
+`config.json` that no door would accept (a hand edit) names nothing and is said once in the log. Requires an admin token (and MFA when
+enabled).
 
 #### Using `$ref` in space typeSchemas
 
