@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT } from './_sources.mjs';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 
 const { NamespaceIriZ } = await import('../../schema/dist/index.js');
 
@@ -57,7 +58,7 @@ describe('the namespace hint says what the validator accepts', () => {
         for (const c of refused.filter(r => r === '#')) {
           assert.ok(hint.includes(c), `the hint does not say that ${c} is refused: ${hint}`);
           for (const a of accepted) {
-            const offered = new RegExp(`${a.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&')}\\s*(?:${OR[locale]})\\s*${c}`, 'iu');
+            const offered = new RegExp(`${escapeRegExp(a)}\\s*(?:${OR[locale]})\\s*${escapeRegExp(c)}`, 'iu');
             assert.doesNotMatch(hint, offered, `the hint offers ${c} as an ending beside ${a}: ${hint}`);
           }
         }
