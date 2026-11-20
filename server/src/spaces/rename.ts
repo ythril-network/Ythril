@@ -268,6 +268,12 @@ export function applySpaceRenameToConfig(cfg: Config, space: SpaceConfig, oldId:
         net.spaceOrigins[newId] = net.spaceOrigins[oldId]!;
         delete net.spaceOrigins[oldId];
       }
+      // The RDF base conflict it recorded for the space: left under the old id, the export under the new id is served (the refusal is
+      // lifted silently) and a space created under the old id inherits it.
+      if (net.rdfBaseConflicts?.[oldId] !== undefined && net.rdfBaseConflicts[newId] === undefined) {
+        net.rdfBaseConflicts[newId] = net.rdfBaseConflicts[oldId]!;
+        delete net.rdfBaseConflicts[oldId];
+      }
       for (const p of net.pendingSpaces ?? []) if (p.localId === oldId) p.localId = newId;
     }
 
