@@ -6,7 +6,7 @@
  *
  * - A commit that fails after its first window landed leaves the act owed; run again, it resumes from its spool and index, and every record of
  *   the file is stored exactly once, under the id minted the first time. Its folder is gone at its end.
- * - While the act stands, a schema write to its space is refused on both doors with `space_being_imported`, its sentence naming the RDF import, and so is a
+ * - While the act stands, a schema write to its space is refused on both doors with `space_being_rdf_imported`, its sentence naming the RDF import, and so is a
  *   record write; the status door answers it as running; after it completes the same schema write passes.
  *
  * Run: node --test testing/standalone/an-rdf-import-act-resumes-and-holds-its-space-db.test.js (server build and the test MongoDB)
@@ -80,7 +80,7 @@ describe('an RDF import act resumes and holds its space (real routes, real Mongo
     const schema = { typeSchemas: { entity: { place: { propertySchemas: {} } } } };
     const patch = await d.rest(writer.key, 'PATCH', `/api/spaces/${HELD}`, { meta: schema });
     assert.equal(patch.status, 409, patch.text?.slice(0, 300));
-    assert.equal(patch.body?.code, 'space_being_imported');
+    assert.equal(patch.body?.code, 'space_being_rdf_imported');
     assert.match(patch.body?.error ?? '', /RDF import/i);
     const tool = await d.toolCall(writer.key, 'schema_update', { space: HELD, ...schema });
     assert.equal(tool.isError, true, tool.text.slice(0, 300));

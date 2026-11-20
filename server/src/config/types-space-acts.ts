@@ -99,11 +99,12 @@ export const SPACE_ACT_KINDS = {
    * An RDF import into one space (bundle-270, Q-753; `spaces/rdf-import-act.ts`): ordinary checked writes of a file its door sorted into a
    * folder (`spoolId`), all or nothing. Its own lane runs one RDF import body at a time instance-wide, apart from restores; it forgets no
    * mark, because its writes are ordinary local writes that sync sends on, unlike a restore's. While it stands no schema write reaches its
-   * space either (`spaces/schema-write-gate.ts`), so the schema its dry plan judged by is the one its commit lands under. Its refusal shares
-   * the admin import's code, which every client already reads as "an act stands; retry when it ends"; the sentence names the RDF import.
+   * space either (`spaces/schema-write-gate.ts`), so the schema its dry plan judged by is the one its commit lands under. Its refusal has a
+   * code of its own, not the admin import's: one code per kind is held by `every-space-act-kind-refuses-a-local-write`, and the client
+   * words it (the file screens' toast set and every refusal prefix, `data-acts-have-words.spec.ts`).
    */
   'rdf-import': {
-    lane: 'rdf-import', writeRefusalCode: 'space_being_imported',
+    lane: 'rdf-import', writeRefusalCode: 'space_being_rdf_imported',
     writeRefusalWhy: () => 'an RDF import is writing into it; retry once the import completes',
     instanceWide: false, keyFields: ['spoolId'], forgetsMarks: null, wholeSet: false,
   },
