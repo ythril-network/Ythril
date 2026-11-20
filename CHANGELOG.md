@@ -114,6 +114,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** every local preflight run records a `Preflight-Run` with each stage's time and outcome (kept in `test-results/unrecorded` without an instance); `node scripts/test-times.mjs --preflight-trend` prints the stage times over runs.
 - **Testing:** the CI-run recorder lists main's runs without GitHub's `status=completed` filter and keeps the completed ones itself; a run that filter still lacked is now found.
 - **Testing:** `--preflight-costs` also writes `test-results/file-times-all.json`, the per-file times of every CI test job on main (a rerun counts as one run), for a slow-file check the development flow runs after a merge; written only when every job has times.
+- **Testing:** CI runs the pure standalone files as two jobs (`test:standalone:pure -- --shard=<k>/2`); `test-results/file-times.json` reads both shard jobs' records, a run's shards as one run. No change to what ships.
 - **Testing:** every `node --test` the standalone runner starts is time-bounded: a test or hook pending past 15 minutes fails, and a batch that never exits is ended and named.
 - **Testing:** the standalone harness no longer changes `setTimeout` after a close; it worked around the search-index check fixed below.
 - **Testing:** a test that waits on the media worker and times out says what the worker logged during the wait, and whether the queue was still checking the job's space or had set it aside.
