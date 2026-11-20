@@ -1,7 +1,8 @@
 /**
  * Make the build of ONE index on ONE collection fail with an error the store itself gave, while every other index builds
  * (bundle-101, Q-445 design rev 5.1 item 7: "a failing best-effort or report index", "the background pass names a failed index",
- * "a restore whose unique build fails (store error injected)").
+ * "a restore whose unique build fails (store error injected)"), or of a SET of indexes at once ({@link failIndexBuilds},
+ * bundle-356: a case that refuses one index per pass pays one pass per index).
  *
  * ## Why not `_write-faults.mjs` `failWrites`
  *
@@ -13,7 +14,8 @@
  *
  * **A fault that never fired.** An index the code under test never builds (or builds through a method this did not wrap) fails
  * nothing, and "a failing index does not stop X" then passes having failed nothing. {@link failIndexBuild}'s `fired` says how
- * many builds it refused, and a test asserts it before believing the rest.
+ * many builds it refused, and a test asserts it before believing the rest. With a set of targets the total is not enough (one
+ * refused target hides another that never fired), so {@link failIndexBuilds} counts each target on its own.
  *
  * **An error nobody would get.** The error thrown is the store's own refusal of an index it cannot build (a key with an unknown
  * index type, code 67 `CannotCreateIndex`), taken from the harness store once ({@link storeIndexRefusal}): a `space-failure` to
@@ -41,32 +43,66 @@ export async function storeIndexRefusal(db) {
 /** The name a `createIndex(keys, options)` call builds. */
 const nameOfCall = (keys, options) => options?.name ?? defaultIndexName(keys);
 
+const targetKey = (collectionName, indexName) => `${collectionName}\u0000${indexName}`;
+
 /**
- * Wrap `proto` (`Collection.prototype`) so that a build of the armed index on the armed collection throws `err`.
+ * Wrap `proto` (`Collection.prototype`) so that a build of any armed index on its armed collection throws the armed error.
+ * Each armed target is counted on its own.
+ *
+ * @returns {{
+ *   fail(targets: { collectionName: string, indexName: string }[], err: Error): void,
+ *   firedOf(collectionName: string, indexName: string): number,
+ *   fired(): number,
+ *   clear(): void,
+ *   restore(): void,
+ * }}
+ */
+export function failIndexBuilds(proto) {
+  const originals = { createIndex: proto.createIndex, createIndexes: proto.createIndexes };
+  let armed = null;
+  /** @type {Map<string, number>} */
+  let firedBy = new Map();
+  const hit = (coll, keys, options) => {
+    const key = targetKey(coll.collectionName, nameOfCall(keys, options));
+    if (!armed?.keys.has(key)) return false;
+    firedBy.set(key, (firedBy.get(key) ?? 0) + 1);
+    return true;
+  };
+  proto.createIndex = async function createIndex(keys, options, ...rest) {
+    if (hit(this, keys, options)) throw armed.err;
+    return originals.createIndex.call(this, keys, options, ...rest);
+  };
+  proto.createIndexes = async function createIndexes(specs, ...rest) {
+    // One call is refused whole, and every target in it is counted: the store refuses the batch, not one spec of it.
+    const refused = (specs ?? []).map(s => hit(this, s.key, s)).filter(Boolean).length > 0;
+    if (refused) throw armed.err;
+    return originals.createIndexes.call(this, specs, ...rest);
+  };
+  return {
+    fail(targets, err) {
+      assert.ok(err instanceof Error, 'failIndexBuilds: the fault is not an error');
+      assert.ok(targets.length > 0, 'failIndexBuilds: no target is armed, so nothing would be refused');
+      armed = { keys: new Set(targets.map(t => targetKey(t.collectionName, t.indexName))), err };
+      firedBy = new Map();
+    },
+    firedOf: (collectionName, indexName) => firedBy.get(targetKey(collectionName, indexName)) ?? 0,
+    fired: () => [...firedBy.values()].reduce((a, b) => a + b, 0),
+    clear() { armed = null; firedBy = new Map(); },
+    restore() { armed = null; Object.assign(proto, originals); },
+  };
+}
+
+/**
+ * {@link failIndexBuilds} for ONE index on ONE collection: the form a case that refuses one build at a time reads.
  *
  * @returns {{ fail(collectionName: string, indexName: string, err: Error): void, fired(): number, clear(): void, restore(): void }}
  */
 export function failIndexBuild(proto) {
-  const originals = { createIndex: proto.createIndex, createIndexes: proto.createIndexes };
-  let armed = null;
-  let fired = 0;
-  const hits = (coll, keys, options) => armed && coll.collectionName === armed.collectionName && nameOfCall(keys, options) === armed.indexName;
-  proto.createIndex = async function createIndex(keys, options, ...rest) {
-    if (hits(this, keys, options)) { fired++; throw armed.err; }
-    return originals.createIndex.call(this, keys, options, ...rest);
-  };
-  proto.createIndexes = async function createIndexes(specs, ...rest) {
-    if ((specs ?? []).some(s => hits(this, s.key, s))) { fired++; throw armed.err; }
-    return originals.createIndexes.call(this, specs, ...rest);
-  };
+  const many = failIndexBuilds(proto);
   return {
-    fail(collectionName, indexName, err) {
-      assert.ok(err instanceof Error, `failIndexBuild: the fault for ${indexName} is not an error`);
-      armed = { collectionName, indexName, err };
-      fired = 0;
-    },
-    fired: () => fired,
-    clear() { armed = null; fired = 0; },
-    restore() { armed = null; Object.assign(proto, originals); },
+    fail: (collectionName, indexName, err) => many.fail([{ collectionName, indexName }], err),
+    fired: many.fired,
+    clear: many.clear,
+    restore: many.restore,
   };
 }

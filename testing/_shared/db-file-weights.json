@@ -4,7 +4,6 @@
   "slowSeconds": 15,
   "seconds": {
     "a-write-the-bound-ended-never-lands-db.test.js": 231,
-    "a-failing-space-index-in-the-background-pass-is-named-db.test.js": 220,
     "every-declared-space-index-stands-after-a-restore-db.test.js": 136,
     "an-arrival-records-an-undeclared-key-once-and-only-what-it-added-db.test.js": 121,
     "an-arriving-edge-is-recorded-against-its-endpoint-and-functional-rules-db.test.js": 112,
