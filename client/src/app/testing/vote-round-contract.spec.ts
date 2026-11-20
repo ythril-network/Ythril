@@ -30,6 +30,7 @@ const NOT_READ: Record<string, string> = {
   wipeTypes: 'which collections a space_wipe empties; not shown by the row today',
   baseMetaVersion: 'the version a proposal was computed against; machinery for the conclusion, not for the voter',
   metaBase: 'what the proposed fields and types held in the base the proposal was computed against (R6-8): the conclusion measures "did somebody change this since" against it; not what a voter is asked about',
+  notAppliedHere: 'LOCAL: the network passed a meta_change round and this member could not apply it; the vote row shows the outcome `passed`, and the mark is carried for the member\'s own log and round outcomes (`notApplied`), not for the row',
   refusedHere: 'LOCAL: why this member did not read the schema a meta_change round carries (R6-6); the layers panel shows it from `schema-layers` (`refusedRounds`), not the vote row',
   requiredVoters: 'braintree machinery for the conclusion',
   appliedHere: 'LOCAL conclusion bookkeeping',
