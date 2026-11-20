@@ -96,6 +96,11 @@ describe('a voted network records and clears a higher RDF base', { skip }, () =>
   });
 
   it('the admin accepts the offered base: it lands here alone at the offered epoch, and the conflict is gone', async () => {
+    // The peer's copy lives in this instance too, and an instance refuses a base another of its spaces holds with RDF on
+    // (`409 rdf_base_shared`, slice F): the copy has served its list, so its RDF goes off before the accept. Set on the live config, as the
+    // peer's own state is planted: a door's write to a space of the voted network `served` is a vote there, and a reload from the file
+    // would drop the conflict the gossip pass recorded in memory.
+    inst.loader.getConfig().spaces.find(s => s.id === 'peer-notes').meta.rdf.enabled = false;
     const accepted = await inst.doors['space-patch']('notes', { rdf: { enabled: true, base: NEW.base, rebase: true } });
     assert.equal(accepted.refused, false, accepted.text.slice(0, 300));
     assert.deepEqual(rdfOf(), { enabled: true, base: NEW.base, vocab: NEW.vocab, baseEpoch: 1 });
