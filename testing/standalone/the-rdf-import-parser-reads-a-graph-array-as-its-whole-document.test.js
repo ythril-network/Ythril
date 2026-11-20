@@ -6,22 +6,25 @@
  *
  * The JSON-LD library holds the statements of a root `@graph` array until the root closes (its graph name may still come) and its tokenizer
  * keeps the whole value of the object it is given, so a reader memory followed the document, and over 2 MiB the product's own export could
- * not be imported as JSON-LD. The reader now takes the root object apart itself (`server/src/rdf/jsonld-graph-scan.ts`) and hands the library the
- * array's nodes in documents of their own, each with the root's `@context` (and `@id`). Every part of the root and of its nodes that such a
- * split can get wrong is held here, each against the SAME document read whole: the baseline gives the array's key as an alias (`"g": "@graph"`
- * in the context), which the reader does not take apart, so the library reads it whole; the two readings must be the same statements,
- * blank-node names and graphs included.
+ * not be imported as JSON-LD. A document that ends within `RDF_MAX_UNPARSED_CHARS` is still read whole by the library, whatever its shape and key
+ * order; one that passes the bound as a root of only a context, an `@id` and an array is read again from its start by the reader's own scanner
+ * (`server/src/rdf/jsonld-graph-scan.ts`), which hands the library the array's nodes in documents of their own, each with the root's `@context`
+ * (and `@id`). Every part of the root and of its nodes that such a split can get wrong is held here, each against the SAME document read whole.
+ * The split is reached on small documents through the `maxUnparsedChars` option (`SPLIT`: the bound a caller with a lower ceiling passes); the
+ * baseline gives the array's key as an alias (`"g": "@graph"` in the context), which the reader does not take apart, so the library reads it
+ * whole under the default bound. The two readings must be the same statements, blank-node names and graphs included.
  *
  * ## What it holds
  *
- * - the export's real output (a seeded space: every record kind, a named graph, a second graph, a default-graph batch; both edge forms), cut
- *   into pieces of 4093 bytes and into pieces that split every token, plain and gzipped, reads as the whole reading does;
+ * - the export's real output (a seeded space: every record kind, a named graph, a second graph, a default-graph batch), cut into pieces of 4093
+ *   bytes and into pieces that split every token, plain and gzipped, reads as the whole reading does;
  * - blank nodes: a label shared by nodes of different batches is one subject (under the caller's prefix), anonymous nodes are numbered as the
  *   whole reading numbers them, a named graph nested in a node, a node with a context of its own, an `@reverse`, a `@list`, odd elements (a
  *   string, `null`, an array, `{}`), an empty array;
  * - what is not this shape is not touched: a document that is one object and no array, an array in a node, a root with properties of its own;
- * - key order: a context that is not first, or comes after an `@id`, is `rdf_jsonld_not_streamable`; a key after the array is too, naming it;
- * - the end: content after the document is refused (same piece and a later one), a document cut off inside the array is `rdf_malformed`;
+ * - key order: a context that is not first, or comes after an `@id`, is `rdf_jsonld_not_streamable`; a key after the array is read when the document
+ *   is within the bound (a root `@id` after the array names its graph), and is refused naming it when the document passes the bound;
+ * - the end: content after the document is refused (same piece and a later one), a document cut off inside the array is `rdf_malformed`, on both routes;
  * - the bounds still fire by their names on such a document (`RDF_MAX_TOKEN_CHARS`, `RDF_MAX_LITERAL_CHARS`, `RDF_MAX_UNPARSED_CHARS` for one
  *   node over it, `RDF_MAX_INFLATED_BYTES`, `RDF_MAX_INFLATE_RATIO`), and a node of exactly the bound is read. There is no line bound for JSON-LD (the
  *   case of `the-rdf-import-parser-holds-its-bounds` reads a one-line `@graph` far over it); the quad count is the import's (`RDF_IMPORT_MAX_QUADS`);
@@ -54,17 +57,24 @@ function aliased(doc) {
   return out;
 }
 const read = async (text, size = 4093, options) => (await readQuads('jsonld', sourceOf(pieces(text, size)), options)).map(canonQuad).sort();
-/** The statements of `doc` as the reader reads it, which must be the statements of its whole reading. */
+/** The bound a caller with a lower ceiling passes: a document over it is read by the scanner and the batches. The documents below are over it, and under the default bound. */
+const splitAt = (maxUnparsedChars) => ({ bounds: { maxUnparsedChars } });
+const SPLIT = splitAt(20_000);
+/** For a document of a hundred characters or so, whose nodes are under fifty. */
+const SPLIT_TINY = splitAt(50);
+/** The statements of `doc` as the reader reads it over its bound, which must be the statements of its whole reading under the default one. */
 async function readsAsWhole(doc, what, size = 4093) {
-  const split = await read(JSON.stringify(doc), size);
+  const text = JSON.stringify(doc);
+  assert.ok(text.length > SPLIT.bounds.maxUnparsedChars, `${what}: the document (${text.length} characters) must pass the bound it is read over`);
+  const split = await read(text, size, SPLIT);
   const whole = await read(JSON.stringify(aliased(doc)), size);
   assert.ok(whole.length > 0, `${what}: the whole reading read nothing`);
   assert.deepEqual(split, whole, what);
   return split;
 }
 /** What reading `text` comes to: its statements, or the code that refused it. */
-async function outcome(text, size = 4093) {
-  try { return { quads: await read(text, size) }; } catch (err) { assert.equal(err?.name, 'RdfParseError', String(err)); return { refused: err.code }; }
+async function outcome(text, options, size = 4093) {
+  try { return { quads: await read(text, size, options) }; } catch (err) { assert.equal(err?.name, 'RdfParseError', String(err)); return { refused: err.code }; }
 }
 
 /** Nodes of every kind a space export or a stranger writes; the array of `count` of them is several batches long from about 400. */
@@ -79,9 +89,11 @@ function nodeOf(k) {
   }
 }
 const nodes = (count) => Array.from({ length: count }, (_, k) => nodeOf(k));
-const MANY = 6000;
+const MANY = 2500;
 
 describe('the export\'s own output is read as its whole document is read', () => {
+  /** The export's nodes are far under this; the export is far over it. */
+  const EXPORT_SPLIT = splitAt(60_000);
   /**
    * The fixture space exported as the product writes it (JSON-LD writes the classic reification of an edge, never RDF 1.2 triple terms): the
    * record graph as a default-graph batch and as 40 graphs of its own, and a batch of blank nodes with each of them (the writer numbers the labels of
@@ -100,19 +112,19 @@ describe('the export\'s own output is read as its whole document is read', () =>
   };
   it('every statement, graph and blank node is the whole reading\'s, plain, in pieces of 4093 and 13 bytes, and gzipped', async () => {
     const text = await write('jsonld', exported(), 'reification');
-    assert.ok(text.length > 3 * BATCH, `the export (${text.length} characters) must reach the library in several documents`);
+    assert.ok(text.length > 3 * BATCH && text.length > EXPORT_SPLIT.bounds.maxUnparsedChars, `the export (${text.length} characters) must pass its bound and reach the library in several documents`);
     const doc = JSON.parse(text);
     assert.ok(doc['@graph'].some(item => item['@graph']) && doc['@graph'].some(item => !item['@graph']), 'named graphs and default-graph nodes are both there');
     const whole = await read(JSON.stringify(aliased(doc)));
     assert.ok(whole.length > 3000, 'a real export');
-    assert.deepEqual(await read(text, 4093), whole);
-    assert.deepEqual(await read(text, 13), whole);
-    const gz = (await readQuads('jsonld', sourceOf(pieces(gzipSync(Buffer.from(text)), 997)))).map(canonQuad).sort();
+    assert.deepEqual(await read(text, 4093, EXPORT_SPLIT), whole);
+    assert.deepEqual(await read(text, 13, EXPORT_SPLIT), whole);
+    const gz = (await readQuads('jsonld', sourceOf(pieces(gzipSync(Buffer.from(text)), 997)), EXPORT_SPLIT)).map(canonQuad).sort();
     assert.deepEqual(gz, whole, 'the gzipped body');
   });
   it('the blank nodes of the export carry the prefix the caller names, and the nodes of different batches stay different nodes', async () => {
     const text = await write('jsonld', exported(), 'reification');
-    const back = await readQuads('jsonld', sourceOf(pieces(text, 4093)), { blankNodePrefix: 'b-' });
+    const back = await readQuads('jsonld', sourceOf(pieces(text, 4093)), { ...EXPORT_SPLIT, blankNodePrefix: 'b-' });
     const blanks = new Set(back.flatMap(x => [x.subject, x.object]).filter(t => t.kind === 'blank').map(t => t.id));
     assert.ok(blanks.size > 0, 'the fixture holds blank nodes');
     assert.ok([...blanks].every(id => id.startsWith('b-')), `a blank node does not carry the caller's prefix: ${[...blanks].join(', ')}`);
@@ -125,26 +137,26 @@ describe('the export\'s own output is read as its whole document is read', () =>
 describe('a node array reads as its whole document reads, whatever its nodes hold', () => {
   it('every kind of node, in several batches, in pieces of 4093 and of 65536 bytes', async () => {
     const doc = { '@context': CTX, '@graph': nodes(MANY) };
-    assert.ok(JSON.stringify(doc).length > 4 * BATCH);
+    assert.ok(JSON.stringify(doc).length > 3 * BATCH);
     const quads = await readsAsWhole(doc, 'pieces of 4093', 4093);
     assert.deepEqual(await readsAsWhole(doc, 'pieces of 65536', 65536), quads);
-    assert.ok(quads.length > 8000, `${quads.length} statements`);
+    assert.ok(quads.length > 3000, `${quads.length} statements`);
   });
   it('a named graph document (the root @id after the context) too', async () => {
     await readsAsWhole({ '@context': CTX, '@id': 'http://a/graph', '@graph': nodes(MANY) }, 'a root with an @id');
   });
   it('a document with no context at all, named and not (the addresses are absolute)', async () => {
-    const absolute = Array.from({ length: 4000 }, (_, k) => ({ '@id': `http://a/s${k}`, 'http://a/p': [`value ${k}`, { 'http://a/p': 'inner' }] }));
-    assert.ok(JSON.stringify(absolute).length > 3 * BATCH);
+    const absolute = Array.from({ length: 1500 }, (_, k) => ({ '@id': `http://a/s${k}`, 'http://a/p': [`value ${k}`, { 'http://a/p': 'inner' }] }));
+    assert.ok(JSON.stringify(absolute).length > SPLIT.bounds.maxUnparsedChars);
     for (const root of [{ '@graph': absolute }, { '@id': 'http://a/graph', '@graph': absolute }]) {
       const whole = await read(JSON.stringify({ '@context': { g: '@graph' }, ...Object.fromEntries(Object.entries(root).map(([k, v]) => [k === '@graph' ? 'g' : k, v])) }));
       assert.ok(whole.length > 3000);
-      assert.deepEqual(await read(JSON.stringify(root)), whole, Object.keys(root).join(', '));
+      assert.deepEqual(await read(JSON.stringify(root), 4093, SPLIT), whole, Object.keys(root).join(', '));
     }
   });
   it('a label shared by nodes of different batches is one subject, under the prefix the caller names; anonymous nodes are all different', async () => {
     const doc = { '@context': CTX, '@graph': nodes(MANY) };
-    const quads = await readQuads('jsonld', sourceOf(pieces(JSON.stringify(doc), 4093)), { blankNodePrefix: 'x-' });
+    const quads = await readQuads('jsonld', sourceOf(pieces(JSON.stringify(doc), 4093)), { ...SPLIT, blankNodePrefix: 'x-' });
     const about = quads.filter(x => x.subject.kind === 'blank' && x.object.kind === 'literal' && /about the shared node/.test(x.object.value));
     assert.equal(about.length, nodes(MANY).filter((_, k) => k % 6 === 3).length, 'every statement about the shared node is read');
     assert.equal(new Set(about.map(x => x.subject.id)).size, 1, 'the shared label is more than one subject');
@@ -168,21 +180,23 @@ describe('a node array reads as its whole document reads, whatever its nodes hol
       [], [{}], ['a string'], [null], [[{ '@id': 'ex:a', p: 1 }, { '@id': 'ex:b', p: 2 }]], [1, 2.5, true],
       [{ '@id': 'ex:a', p: 1 }, {}, { '@id': 'ex:b', p: 2 }], [{ '@graph': [{ '@id': 'ex:z', p: 1 }] }],
     ]) {
-      const doc = { '@context': CTX, '@graph': elements };
-      const split = await outcome(JSON.stringify(doc));
+      // A context of fifty characters and nodes under sixty, so that a bound of sixty is passed by the document and by no node.
+      const doc = { '@context': { p: 'http://a/p', ex: 'http://a/', q: 'http://a/q' }, '@graph': elements };
+      const split = await outcome(JSON.stringify(doc), splitAt(60));
       const whole = await outcome(JSON.stringify(aliased(doc)));
+      assert.ok(JSON.stringify(doc).length > 60, JSON.stringify(doc));
       assert.deepEqual(split, whole, `elements ${JSON.stringify(elements)}`);
     }
   });
   it('pieces that split every token, string and escape read the same (a small document, pieces of 1 to 7 bytes)', async () => {
     const doc = { '@context': CTX, '@graph': nodes(60).concat([{ '@id': 'ex:esc', p: 'a "quoted" \\ back\\slash é \u{1F600} ]}, [{' }]) };
     const whole = await read(JSON.stringify(aliased(doc)), 65536);
-    for (const size of [1, 2, 3, 5, 7]) assert.deepEqual(await read(JSON.stringify(doc), size), whole, `pieces of ${size}`);
+    for (const size of [1, 2, 3, 5, 7]) assert.deepEqual(await read(JSON.stringify(doc), size, splitAt(2000)), whole, `pieces of ${size}`);
   });
   it('whitespace between the parts of the root and of the array is read (a pretty-printed document)', async () => {
     const doc = { '@context': CTX, '@graph': nodes(300) };
-    assert.deepEqual(await read(JSON.stringify(doc, null, 4), 37), await read(JSON.stringify(aliased(doc), null, 4), 37));
-    assert.deepEqual(await read(`\n \t${JSON.stringify(doc, null, 2)}\r\n\r\n  `, 4093), await read(JSON.stringify(aliased(doc)), 4093));
+    assert.deepEqual(await read(JSON.stringify(doc, null, 4), 37, splitAt(2000)), await read(JSON.stringify(aliased(doc), null, 4), 37));
+    assert.deepEqual(await read(`\n \t${JSON.stringify(doc, null, 2)}\r\n\r\n  `, 4093, splitAt(2000)), await read(JSON.stringify(aliased(doc)), 4093));
   });
 });
 
@@ -207,49 +221,74 @@ describe('what is not a root @graph array is read as before', () => {
   });
 });
 
-describe('key order that cannot be streamed is refused by name', () => {
+describe('key order', () => {
   /** Absolute addresses only, so that nothing but the order of the keys can refuse the document. */
   const array = JSON.stringify([{ '@id': 'http://a/s', 'http://a/p': 'x' }]);
-  const refused = async (text, what) => {
-    const err = await refusalOf('jsonld', sourceOf(pieces(text, 4093)));
+  const refused = async (text, what, options) => {
+    const err = await refusalOf('jsonld', sourceOf(pieces(text, 4093)), options);
     assert.equal(err.code, 'rdf_jsonld_not_streamable', `${what}: ${err.code}: ${err.message}`);
     return err;
   };
-  it('a context after the array', async () => {
-    assert.match((await refused(`{"@graph":${array},"@context":{"p":"http://a/p"}}`, 'context last')).message, /@context/);
-    assert.match((await refused(`{"@context":{"p":"http://a/p"},"@graph":${array},"@context":{}}`, 'context twice')).message, /@context/);
+  it('a context after the array is refused by name, within the bound and over it', async () => {
+    for (const options of [undefined, SPLIT_TINY]) {
+      assert.match((await refused(`{"@graph":${array},"@context":{"p":"http://a/p"}}`, 'context last', options)).message, /@context/);
+      assert.match((await refused(`{"@context":{"p":"http://a/p"},"@graph":${array},"@context":{}}`, 'context twice', options)).message, /@context/);
+    }
   });
-  it('a context after the @id', async () => {
-    assert.match((await refused(`{"@id":"http://a/g","@context":{"p":"http://a/p"},"@graph":${array}}`, 'id then context')).message, /@context/);
+  it('a context after the @id is refused by name, within the bound and over it', async () => {
+    for (const options of [undefined, SPLIT_TINY]) {
+      assert.match((await refused(`{"@id":"http://a/g","@context":{"p":"http://a/p"},"@graph":${array}}`, 'id then context', options)).message, /@context/);
+    }
   });
-  it('a key after the array (it may name the graph or add statements about it), naming the key, whatever the size', async () => {
-    const err = await refused(`{"@context":{"p":"http://a/p"},"@graph":${array},"@id":"http://a/g"}`, '@id after');
+  it('a root @id after the array is read when the document is within the bound, and names the graph of the array', async () => {
+    const back = await readQuads('jsonld', sourceOf(pieces(`{"@context":{"p":"http://a/p"},"@graph":${array},"@id":"http://a/g"}`, 7)));
+    assert.equal(back.length, 1);
+    assert.equal(back[0].graph?.value, 'http://a/g');
+  });
+  it('a root property after the array is not refused as out of order when the document is within the bound: the library answers for it', async () => {
+    const answer = await outcome(`{"@context":{"p":"http://a/p"},"@graph":${array},"p":"x"}`);
+    assert.notEqual(answer.refused, 'rdf_jsonld_not_streamable', JSON.stringify(answer));
+  });
+  it('a key after the array is refused naming the key and its place when the document passes the bound (a document that does)', async () => {
+    const text = `{"@context":{"p":"http://a/p"},"@graph":${array},"@id":"http://a/g"}`;
+    const err = await refused(text, '@id after', SPLIT_TINY);
     assert.match(err.message, /@id/);
     assert.match(err.message, /@graph/);
-    const text = `{"@context":{"p":"http://a/p"},"@graph":${array},"@id":"http://a/g"}`;
     assert.deepEqual(err.place, { line: 1, column: text.lastIndexOf('"@id"') + 1 }, 'the place of the key');
-    assert.match((await refused(`{"@context":{"p":"http://a/p"},"@graph":${array},"p":"x"}`, 'a property after')).message, /"p"/);
+    assert.match((await refused(`{"@context":{"p":"http://a/p"},"@graph":${array},"p":"x"}`, 'a property after', SPLIT_TINY)).message, /"p"/);
+  });
+  it('the same shape over a larger document: a key after an array of many nodes that passes the bound is refused naming the key', async () => {
+    const options = splitAt(200_000);
+    const text = `{"@context":{"p":"http://a/p"},"@graph":[${Array.from({ length: 8000 }, (_, k) => `{"@id":"http://a/s${k}","http://a/p":"v"}`).join(',')}],"@id":"http://a/g"}`;
+    assert.ok(text.length > 200_000);
+    assert.deepEqual(Object.keys(await outcome(text, undefined)), ['quads'], 'within the default bound the same document is read');
+    const err = await refused(text, 'over the bound', options);
+    assert.match(err.message, /@id/);
+    assert.equal(err.place?.column, text.lastIndexOf('"@id"') + 1);
   });
 });
 
 describe('the end of the document', () => {
   const doc = JSON.stringify({ '@context': { p: 'http://a/p' }, '@graph': [{ '@id': 'http://a/s', p: 'x' }, { '@id': 'http://a/t', p: 'y' }] });
-  it('content after the document is refused, in its own piece and in the piece that ends the document; white space is not content', async () => {
-    for (const tail of ['x', '{}', '\n  \n[', ' ,']) {
-      for (const size of [4093, doc.length, 9]) {
-        const err = await refusalOf('jsonld', sourceOf(pieces(`${doc}${tail}`, size)));
-        assert.equal(err.code, 'rdf_malformed', `${JSON.stringify(tail)} in pieces of ${size}: ${err.code}`);
-        assert.match(err.message, /follows the end/);
+  // Within the bound the library reads the document; over it (the node is under 50 characters, the document over) the scanner does.
+  for (const [route, options] of [['whole', undefined], ['scanner', SPLIT_TINY]]) {
+    it(`${route}: content after the document is refused, in its own piece and in the piece that ends the document; white space is not content`, async () => {
+      for (const tail of ['x', '{}', '\n  \n[', ' ,']) {
+        for (const size of [4093, doc.length, 9]) {
+          const err = await refusalOf('jsonld', sourceOf(pieces(`${doc}${tail}`, size)), options);
+          assert.equal(err.code, 'rdf_malformed', `${JSON.stringify(tail)} in pieces of ${size}: ${err.code}`);
+          assert.match(err.message, /follows the end/);
+        }
       }
-    }
-    assert.equal((await read(`${doc}\n \r\n\t `, 4)).length, 2);
-  });
-  it('a document cut off inside the array, inside a node and before the array is refused as not closed', async () => {
-    for (const cut of [doc.indexOf('"@graph"') + 12, doc.indexOf('http://a/t') + 3, doc.length - 2, doc.length - 1]) {
-      const err = await refusalOf('jsonld', sourceOf(pieces(doc.slice(0, cut), 11)));
-      assert.equal(err.code, 'rdf_malformed', `cut at ${cut}: ${err.code}: ${err.message}`);
-    }
-  });
+      assert.equal((await read(`${doc}\n \r\n\t `, 4, options)).length, 2);
+    });
+    it(`${route}: a document cut off inside the array, inside a node and before its last brace is refused as not closed`, async () => {
+      for (const cut of [doc.indexOf('"@graph"') + 12, doc.indexOf('http://a/t') + 3, doc.length - 2, doc.length - 1]) {
+        const err = await refusalOf('jsonld', sourceOf(pieces(doc.slice(0, cut), 11)), options);
+        assert.equal(err.code, 'rdf_malformed', `cut at ${cut}: ${err.code}: ${err.message}`);
+      }
+    });
+  }
 });
 
 describe('the bounds fire by their names on a @graph document', () => {
@@ -260,21 +299,26 @@ describe('the bounds fire by their names on a @graph document', () => {
     assert.equal(err.bound, name);
     assert.ok(err.message.includes(name), err.message);
   };
+  // The document passes a bound a node does not: small nodes (over the bound) and then the node under test, which is under it.
+  const padding = (count) => Array.from({ length: count }, (_, k) => `{"@id":"http://a/pad${k}","p":"v"}`);
+  const address = (n) => `http://a/${'p'.repeat(n - 'http://a/'.length)}`;
   for (const size of [4096, 65536]) {
     it(`RDF_MAX_TOKEN_CHARS: an address of the bound in a node is read, one more is refused (pieces of ${size})`, async () => {
       const max = bound('RDF_MAX_TOKEN_CHARS');
-      const address = (n) => `http://a/${'p'.repeat(n - 'http://a/'.length)}`;
-      const text = (n) => doc('{"@id":"http://a/s1","p":"x"}', `{"@id":"http://a/s2","p":{"@id":"${address(n)}"}}`);
-      assert.equal((await read(text(max), size)).length, 2);
-      exceeded(await refusalOf('jsonld', sourceOf(pieces(text(max + 1), size))), 'RDF_MAX_TOKEN_CHARS');
-    });
-    it(`RDF_MAX_LITERAL_CHARS: a literal of the bound in a node is read, one more is refused (pieces of ${size})`, async () => {
-      const max = bound('RDF_MAX_LITERAL_CHARS');
-      const text = (n) => doc('{"@id":"http://a/s1","p":"x"}', `{"@id":"http://a/s2","p":"${'a'.repeat(n)}"}`);
-      assert.equal((await read(text(max), size)).length, 2);
-      exceeded(await refusalOf('jsonld', sourceOf(pieces(text(max + 1), size))), 'RDF_MAX_LITERAL_CHARS');
+      const pad = padding(1500);
+      const text = (n) => doc(...pad, `{"@id":"http://a/s2","p":{"@id":"${address(n)}"}}`);
+      assert.equal((await read(text(max), size, SPLIT)).length, pad.length + 1);
+      exceeded(await refusalOf('jsonld', sourceOf(pieces(text(max + 1), size)), SPLIT), 'RDF_MAX_TOKEN_CHARS');
     });
   }
+  it('RDF_MAX_LITERAL_CHARS: a literal of the bound in a node is read, one more is refused', async () => {
+    const max = bound('RDF_MAX_LITERAL_CHARS');
+    const passes = splitAt(150_000);
+    const pad = padding(5000);
+    const text = (n) => doc(...pad, `{"@id":"http://a/s2","p":"${'a'.repeat(n)}"}`);
+    assert.equal((await read(text(max), 65536, passes)).length, pad.length + 1);
+    exceeded(await refusalOf('jsonld', sourceOf(pieces(text(max + 1), 65536)), passes), 'RDF_MAX_LITERAL_CHARS');
+  });
   it('RDF_MAX_UNPARSED_CHARS: one node of the bound is read, one character more is refused, before it is held whole', async () => {
     const max = bound('RDF_MAX_UNPARSED_CHARS');
     /** A node of exactly `n` characters: a list of literals of a thousand characters and a last one that fills it. */
@@ -322,26 +366,26 @@ describe('a malformed node names its place', () => {
       const text = documentWith(before, '{"@id": "http://a/bad", "p": #BAD}');
       assert.ok(before === 0 || text.length > 3 * BATCH);
       for (const size of [37, 4093]) {
-        const err = await refusalOf('jsonld', sourceOf(pieces(text, size)));
+        const err = await refusalOf('jsonld', sourceOf(pieces(text, size)), SPLIT_TINY);
         assert.equal(err.code, 'rdf_malformed', `${err.code}: ${err.message}`);
         assert.deepEqual(err.place, placeOf(text, '#BAD'), `pieces of ${size}`);
       }
     });
     it(`a relative address, after ${before} nodes: the line of its node`, async () => {
       const text = documentWith(before, '{"@id": "relative/address", "p": "x"}');
-      const err = await refusalOf('jsonld', sourceOf(pieces(text, 4093)));
+      const err = await refusalOf('jsonld', sourceOf(pieces(text, 4093)), SPLIT_TINY);
       assert.equal(err.code, 'rdf_relative_iri', `${err.code}: ${err.message}`);
       assert.equal(err.place?.line, placeOf(text, '"relative/address"').line);
     });
   }
   it('a bracket that closes the wrong thing, and a missing comma between nodes, are refused with their place', async () => {
     const wrong = `{\n "@context": {"p": "http://a/p"},\n "@graph": [\n  {"@id": "http://a/s", "p": "x"}\n }\n`;
-    const e1 = await refusalOf('jsonld', sourceOf(pieces(wrong, 5)));
+    const e1 = await refusalOf('jsonld', sourceOf(pieces(wrong, 5)), SPLIT_TINY);
     assert.equal(e1.code, 'rdf_malformed');
     const closer = placeOf(wrong, '\n }\n');
     assert.deepEqual(e1.place, { line: closer.line + 1, column: 2 }, 'the place of the closing brace');
     const missing = `{"@context": {"p": "http://a/p"},\n "@graph": [\n  {"@id": "http://a/s", "p": "x"}\n  {"@id": "http://a/t", "p": "y"}\n ]}`;
-    const e2 = await refusalOf('jsonld', sourceOf(pieces(missing, 5)));
+    const e2 = await refusalOf('jsonld', sourceOf(pieces(missing, 5)), SPLIT_TINY);
     assert.equal(e2.code, 'rdf_malformed');
     assert.equal(e2.place?.line, 4);
   });

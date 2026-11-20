@@ -72,3 +72,19 @@ export function canon(term) {
 
 /** A canonical string for a quad, its graph included. */
 export const canonQuad = (quad) => `${canon(quad.subject)} ${canon(quad.predicate)} ${canon(quad.object)} ${quad.graph ? canon(quad.graph) : '-'}`;
+
+/**
+ * A document as pieces made on demand, never held whole: `head`, then `count` items (`item(k)`, `group` to a piece, comma-separated), then `tail`.
+ * `fed.n` counts the characters handed to the reader, so a case can say how much of the document was fed when a statement came.
+ */
+export function lazyDocument(head, count, item, tail, fed, group = 1) {
+  return Readable.from((function* () {
+    fed.n += head.length; yield Buffer.from(head);
+    for (let k = 0; k < count; k += group) {
+      let s = '';
+      for (let j = k; j < Math.min(k + group, count); j += 1) s += `${j === 0 ? '' : ','}${item(j)}`;
+      fed.n += s.length; yield Buffer.from(s);
+    }
+    fed.n += tail.length; yield Buffer.from(tail);
+  })(), { objectMode: false });
+}
