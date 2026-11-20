@@ -102,6 +102,8 @@ describe('a test that failed on a commit that also passed is named, with its fai
     assert.deepEqual(named(otherCommit), []);
     assert.equal(otherCommit.exit, 0);
     assert.deepEqual(otherCommit.tests.map(t => `${t.failures} of ${t.runs}`), ['1 of 2'], 'its rate is still counted');
+    const printed = (await load()).failureRateLines(otherCommit).join('\n');
+    assert.match(printed, new RegExp(`1 of 2\\s+${A.replace(/[.]/g, '\\.')}\\s+${NAME}`), 'and printed, though it names no test');
 
     const otherKind = await rates([
       record({ source: 'local', runId: 'local-1', job: 'local', files: [[A, [NAME]]] }),
@@ -240,6 +242,17 @@ describe('the script answers by exit code over the recorded runs, reading only',
         assert.equal(c.args.filter?.type, 'Test-Run');
       }
       assert.ok(!everything(r).includes(server.token), 'the token is never printed');
+    });
+  });
+
+  it('reads the records with their measurements a page at a time, never one request per record', async () => {
+    // A request per record met the instance's per-token rate limit (429) on the first read of the real records (Q-948).
+    const seed = Array.from({ length: 25 }, (_, i) => record({ runId: String(i + 1) }));
+    await withServer(seed, async (server, env) => {
+      const r = await runReader([], env);
+      assert.equal(r.code, 0, everything(r));
+      assert.match(r.stdout, /25 records of 25 runs/);
+      assert.ok(server.calls.length <= 5, `${server.calls.length} requests for 25 records`);
     });
   });
 
