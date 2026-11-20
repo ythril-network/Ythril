@@ -40,6 +40,7 @@ import { scratchRoot as scratchRootOf } from '../../scripts/_shared/scratch-root
 import { testChildEnv } from '../_shared/test-child-env.mjs';
 import { startFakeYthril } from '../_shared/fake-ythril-tool-server.mjs';
 import { makeWorkdir, runTimes, everything, cleanEnv } from '../_shared/test-times-harness.mjs';
+import { plantPreflightTree } from '../_shared/planted-preflight-tree.mjs';
 
 const url = (p) => pathToFileURL(join(REPO_ROOT, p)).href;
 /** Imported inside each test, so a base without the module fails each test for the missing module and not the whole file at load. */
@@ -254,11 +255,7 @@ describe('the real preflight leaves its record, and its exit status is the one i
   function planted(args, { changelog = 1, unrunTests = 0, seed = () => {}, env = {}, runnerHead = null } = {}) {
     const dir = mkdtempSync(join(scratchRoot(), 'preflight-record-'));
     try {
-      mkdirSync(join(dir, 'scripts'));
-      writeFileSync(join(dir, 'scripts/unregistered-local-files.mjs'), 'process.exit(0);\n');
-      writeFileSync(join(dir, 'scripts/check-changelog.mjs'), `console.log('planted: no [Unreleased] line'); process.exit(${changelog});\n`);
-      writeFileSync(join(dir, 'scripts/unrun-tests.mjs'), `console.log('planted: a test no job selects'); process.exit(${unrunTests});\n`);
-      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'planted', private: true, type: 'module', scripts: {} }));
+      plantPreflightTree(dir, { changelog, unrunTests });
       seed(dir);
       // The runner's own variable is set or left out by the case, never inherited from the container this test runs in.
       const base = { ...process.env };
