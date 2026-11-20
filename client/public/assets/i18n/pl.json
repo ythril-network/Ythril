@@ -1931,7 +1931,7 @@
   "schemaLib.namespace.removing": "Usuwanie…",
   "schemaLib.namespace.prefixLabel": "Prefiks",
   "schemaLib.namespace.iriLabel": "Adres przestrzeni nazw",
-  "schemaLib.namespace.iriHint": "Adres bezwzględny zakończony znakiem / lub #, na przykład https://example.org/ns/",
+  "schemaLib.namespace.iriHint": "Adres bezwzględny zakończony znakiem / i niezawierający znaku #, na przykład https://example.org/ns/",
   "schemaLib.namespace.rebaseChoice": "Celowo zmień nazwy tych terminów: wymienione wyżej przestrzenie będą je odtąd eksportować pod nowymi nazwami",
   "schemaLib.namespace.saved": "Zapisano przestrzeń nazw",
   "schemaLib.namespace.removed": "Usunięto przestrzeń nazw",
