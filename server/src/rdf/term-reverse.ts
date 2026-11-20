@@ -24,16 +24,17 @@
  * `foreign` (under no base given). `termOfIri`: `term` (the owners, `shared`, and `how`: `schema` when the space's own schema declares the
  * address, `vocabulary` when only the vocab's Direct Mapping reads it, as for a type the schema does not declare or a source's term),
  * `product` (a `ythril:` term, with what it means), `mapper-predicate` (a predicate the record mapper writes on its own account),
- * `refused`, or `foreign`.
+ * `refused`, or `foreign`. `shapeOfAddress` reads the address of a SHACL shape the schema export writes
+ * (`<base>schema/shape/<kind>/<type>[#<prop>]`) to its kind, type and property by the same rule: `shape`, `refused` with a reason, or `foreign`.
  *
  * ## State
  *
  * None. `addressNames` builds an immutable value from a meta (the space's RESOLVED one, library `$ref`s inlined, so an entry's `iri` is
  * seen) and an optional source; the caller keeps it and passes it to every read. Nothing here reads a store, a file or the network.
  */
-import { KNOWLEDGE_TYPES, type SpaceMeta } from '@ythril-network/schema';
+import { KNOWLEDGE_TYPES, type KnowledgeType, type SpaceMeta } from '@ythril-network/schema';
 import {
-  agentIri, defaultVocabFor, namesOf, ontologyIri, recordAddressable, recordIri, resolveTermIri, versionIri,
+  agentIri, defaultVocabFor, namesOf, ontologyIri, recordAddressable, recordIri, resolveTermIri, shapeIri, versionIri,
   type RecordKind, type TermKind, type TermOwner,
 } from './term-iri.js';
 import { RDF_RESERVED_PREDICATES, YTHRIL_NS, YTHRIL_TERMS } from './ythril-vocabulary.js';
@@ -300,5 +301,51 @@ export function termOfIri(address: string, names: AddressNames): TermRead {
   if (RDF_RESERVED_PREDICATES.includes(address)) return { answer: 'mapper-predicate', iri: address };
   const side = longest(address, names, 'vocab');
   return side === null ? { answer: 'foreign' } : termOfVocabulary(side, address);
+}
+
+/** What {@link shapeOfAddress} answers: the kind, type and (for a property shape) property a shape address names. */
+export type ShapeRead =
+  | { answer: 'shape'; of: ReadOf; kind: KnowledgeType; type: string; prop?: string }
+  | Refused
+  | Foreign;
+
+const SHAPE_PATH = 'schema/shape/';
+const isShapeKind = (s: string): s is KnowledgeType => (KNOWLEDGE_TYPES as readonly string[]).includes(s);
+
+/**
+ * What a SHACL shape address names (`<base>schema/shape/<kind>/<seg(type)>[#<frag(prop)>]`, the schema export's). Read only when the forward
+ * rule (`shapeIri`) applied to what was decoded gives the very address back, as every read of this module is; an address under a base's
+ * `schema/shape/` that is not that spelling is `refused` with its reason (a file has no shape, so `file` is an unknown kind here), and one under
+ * no base's shape path is `foreign`. Of the bases an address lies under, the longest wins. Pure.
+ */
+export function shapeOfAddress(address: string, names: AddressNames): ShapeRead {
+  let side: Side | null = null;
+  for (const candidate of names.sides) {
+    const under = address.startsWith(candidate.base) && address.slice(candidate.base.length).startsWith(SHAPE_PATH);
+    if (under && (side === null || candidate.base.length > side.base.length)) side = candidate;
+  }
+  if (side === null) return { answer: 'foreign' };
+  const { of } = side;
+  const rest = address.slice(side.base.length + SHAPE_PATH.length);
+  const slash = rest.indexOf('/');
+  const kind = slash < 0 ? rest : rest.slice(0, slash);
+  if (!isShapeKind(kind)) return refuse(of, 'unknown-kind');
+  if (slash < 0) return refuse(of, 'empty-name');
+  const tail = rest.slice(slash + 1);
+  const hash = tail.indexOf('#');
+  const typeText = hash < 0 ? tail : tail.slice(0, hash);
+  const fragment = hash < 0 ? null : tail.slice(hash + 1);
+  if (typeText === '' || fragment === '') return refuse(of, 'empty-name');
+  if (hasTrailingPart(typeText, false)) return refuse(of, 'trailing-part');
+  const type = nameOf(typeText, false);
+  if (!type.ok) return refuse(of, type.reason);
+  let prop: string | undefined;
+  if (fragment !== null) {
+    const named = nameOf(fragment, false);
+    if (!named.ok) return refuse(of, named.reason);
+    prop = named.value;
+  }
+  if (shapeIri(side.derive, kind, type.value, prop) !== address) return refuse(of, 'not-the-spelling-the-export-writes');
+  return prop === undefined ? { answer: 'shape', of, kind, type: type.value } : { answer: 'shape', of, kind, type: type.value, prop };
 }
 
