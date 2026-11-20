@@ -158,6 +158,7 @@ Both doors need `knowledge: write`, for a dry run and the status too: they answe
 | 409 | `rdf_import_refused` | The import was refused; nothing was written |
 | 409 | `rdf_not_enabled` | The space has RDF off |
 | 409 | `rdf_import_busy` | Another RDF import is being read in |
+| 409 | `space_being_restored`, `space_being_rdf_imported` and the other `space_being_*` codes | Another act holds the space (a restore, a migration, a conversion, an import): the import is refused with that act's code before the file is read, as every write is; a dry run is not |
 | 409 | `rdf_import_space_changed` | The space's RDF base or vocabulary changed while the file was being read, or after the import was registered and before its first window (a schema the network decided; the file is sorted by them); nothing was imported, send it again. Once the first window has landed nothing ends the import: it finishes by the base it began with |
 | 404 | `rdf_import_not_found` | The status door: no import of this space has that id, or its report is past seven days |
 | 409 | `rdf_base_conflict`, `rdf_base_shared`, `rdf_term_clash`, `rdf_unwritable` | The space's RDF names are not settled (a contested or shared base, a term clash, an address no document can carry), as for the exports |
