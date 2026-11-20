@@ -23,8 +23,13 @@ import { STANDARD_PREFIXES } from './ythril-vocabulary.js';
 export interface IriTerm { kind: 'iri'; value: string }
 /** A blank node; `id` is local to one batch, the writer gives the document-wide label. */
 export interface BlankTerm { kind: 'blank'; id: string }
-/** A literal: no `datatype` is a plain literal (`xsd:string`, no language tag). */
-export interface LiteralTerm { kind: 'literal'; value: string; datatype?: string }
+/**
+ * A literal: no `datatype` and no `language` is a plain literal (`xsd:string`, no language tag). A `datatype` is a typed value; a `language` is a
+ * tagged string (`rdf:langString`, which the model never spells out) and, as RDF 1.2 writes it, carries a base direction after two hyphens
+ * (`ar--rtl`). The two are never both set: a tag and a datatype are apart. Only the reader of foreign RDF (`parse.ts`) sets `language`; the
+ * writers never write a language tag, because a stored text has none (`literalForValue`).
+ */
+export interface LiteralTerm { kind: 'literal'; value: string; datatype?: string; language?: string }
 /** An RDF collection; the writer writes it in each format's own way. */
 export interface ListTerm { kind: 'list'; items: readonly Term[] }
 /** An RDF 1.2 triple term, the object of `rdf:reifies`. */
