@@ -1930,7 +1930,7 @@
   "schemaLib.namespace.removing": "Removing…",
   "schemaLib.namespace.prefixLabel": "Prefix",
   "schemaLib.namespace.iriLabel": "Namespace address",
-  "schemaLib.namespace.iriHint": "An absolute address ending in / or #, for example https://example.org/ns/",
+  "schemaLib.namespace.iriHint": "An absolute address ending in /, with no # in it, for example https://example.org/ns/",
   "schemaLib.namespace.rebaseChoice": "Rename these terms on purpose: the spaces named above will export them under the new names from now on",
   "schemaLib.namespace.saved": "Namespace saved",
   "schemaLib.namespace.removed": "Namespace removed",

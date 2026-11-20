@@ -432,6 +432,26 @@ You can edit a shipped entry and the edit is kept. A shipped entry you delete co
 instance starts, because ingest cannot run without it. They arrive published (globe on); unpublish them if your
 library endpoint should not offer them.
 
+**RDF namespaces of schema groups.** Once at least one entry belongs to a group, the top of this tab shows the card
+**RDF namespaces of schema groups**. It lists each group with the number of schemas in it and the namespace it holds, or
+"No namespace: each space names these terms itself". **Set namespace** (**Change namespace** on a group that has one) asks for a
+**Prefix** and a **Namespace address**. The address is an absolute address that ends in `/` and holds no `#`, for example
+`https://example.org/ns/`; the prefix is a letter followed by letters, digits, `_` or `-` (at most 50 characters) and is not one
+Ythril keeps for the standard vocabularies (`rdf`, `owl`, `xsd`, `schema` and the like). Every space that links an entry of the
+group then names the entry's type under the namespace (`<namespace><type>`, and each property as a fragment of that address), unless
+the entry sets an address of its own; a space with RDF switched off is not touched. Three things are refused, each in words that name
+what is in the way:
+
+- **A prefix another group already uses.** Choose another prefix.
+- **Two terms of one space that would get the same address.** The refusal names the space, the terms and the address; choose another
+  namespace, or give one of the terms an address of its own.
+- **A change that renames the terms of a space whose RDF names are switched on.** The refusal names the spaces, and the form shows the
+  choice **Rename these terms on purpose**: tick it to go ahead, and those spaces export the terms under the new names from then on.
+  Removing a namespace asks first, and asks again, as a deliberate rename, when such a space links the group.
+
+A namespace belongs to its group's entries: when the last entry of a group is deleted, moved to another group or loses its group, the
+namespace goes with it and its prefix is free again.
+
 **Publishing:** Click the globe icon on a card to make the entry visible to other Ythril instances. The icon turns accented when published. Click again to unpublish. No space data is ever exposed — only the schema definition.
 
 **Sharing your library:** The **Share This Library** panel shows your instance's **Public endpoint** URL. Click **Copy URL** to copy it. Other instances can paste this URL when adding a catalog link.
