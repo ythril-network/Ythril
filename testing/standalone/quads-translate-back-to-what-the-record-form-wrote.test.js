@@ -35,6 +35,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { blankComments } from './_strip-comments.mjs';
+import { SCHEMA_PACKAGE_NAME } from './_relative-specifier.mjs';
 import { META as FIXTURE_META, DOCS as FIXTURE_DOCS, BASE } from './_rdf-writer-fixtures.mjs';
 import {
   fn, reverse, forwardQuads, groupsOf, contextFor, assertAccounted, iri, blank, lit, q, RDF, XSD, SCHEMA_ORG,
@@ -209,7 +210,8 @@ describe('quads translate back to what the record form wrote', () => {
 
   it('what is left out on purpose is named: the server-owned triples, the time nodes, the agent', () => {
     const run = sameSpaceCase(FIXTURE_META, 'rdf12');
-    const why = (pred) => run.notTaken.filter(n => n.quad.predicate.value === pred).map(n => n.why);
+    // A file's own statements are left out as a file's, whatever their predicate.
+    const why = (pred) => run.notTaken.filter(n => n.quad.predicate.value === pred && !n.quad.subject.value?.startsWith(`${BASE}file/`)).map(n => n.why);
     const ythril = vocabulary.ythrilIri;
     for (const p of ['http://purl.org/dc/terms/created', 'http://purl.org/dc/terms/modified', 'http://purl.org/dc/terms/conformsTo', 'http://www.w3.org/ns/prov#wasAttributedTo', ythril('superseded'), ythril('contentRedacted')]) {
       assert.ok(why(p).length > 0 && why(p).every(w => w === 'server-owned'), `${p} is left out as server-owned`);
@@ -246,8 +248,9 @@ describe('quads translate back to what the record form wrote', () => {
     const quadsToOps = fn('quadsToOps');
     const names = reverse.addressNames(FIXTURE_META);
     const doc = DOCS.find(([k, d]) => k === 'fact' && d._id === 'f2');
-    const g1 = forwardQuads(FIXTURE_META, [doc], 'rdf12', `${BASE}`).quads;
-    const g2 = forwardQuads(FIXTURE_META, [doc], 'rdf12', 'https://elsewhere.example.org/g2').quads;
+    const f2 = addressOf(FIXTURE_META, 'fact', 'f2');
+    const g1 = forwardQuads(FIXTURE_META, [doc], 'rdf12', `${BASE}`).quads.filter(x => x.subject.value === f2);
+    const g2 = forwardQuads(FIXTURE_META, [doc], 'rdf12', 'https://elsewhere.example.org/g2').quads.filter(x => x.subject.value === f2);
     const minted = new Map([[addressOf(FIXTURE_META, 'fact', 'f2'), { kind: 'fact', id: 'm-f2' }]]);
     const ctx = contextFor({ meta: FIXTURE_META, names, quads: [...g1, ...g2], minted });
     const groups = groupsOf([...g1, ...g2], names);
@@ -285,7 +288,7 @@ describe('the translator holds no second address rule and reads no store', () =>
   it('imports nothing that reads a store, the network or a file', () => {
     const specifiers = [...src.matchAll(/from\s*'([^']+)'/g)].map(m => m[1]);
     assert.ok(specifiers.length > 0, 'the import lines were read');
-    const allowed = new Set(['./term-reverse.js', './literals.js', './ythril-vocabulary.js', './import-reasons.js', './term-iri.js', '@ythril-network/schema', '../config/types-knowledge.js']);
+    const allowed = new Set(['./term-reverse.js', './literals.js', './ythril-vocabulary.js', './import-reasons.js', './term-iri.js', SCHEMA_PACKAGE_NAME, '../config/types-knowledge.js']);
     for (const s of specifiers) assert.ok(allowed.has(s), `quads-to-ops.ts imports ${s}: the translator is pure and asks nothing`);
   });
 });

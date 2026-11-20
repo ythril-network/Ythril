@@ -131,6 +131,26 @@ describe('every import reason is named and tested', () => {
     });
   }
 
+  it("a value is read by its property's declared type, not by what it looks like", () => {
+    const names = reverse.addressNames(META);
+    const ask = (quads, mode) => fn('quadsToOps')(quads, contextFor({ meta: META, names, quads, mode, minted: mintX() }));
+    const person = q(X, TYPE, `${V}entity/person`);
+    for (const [quad, what] of [
+      [q(X, `${V}entity/person#age`, lit('36')), 'a plain literal on a number property'],
+      [q(X, `${V}entity/person#born`, lit('yesterday')), 'a plain literal on a date property'],
+      [q(X, `${V}entity/person#born`, lit('3', `${XSD}decimal`)), 'a decimal on a date property'],
+    ]) {
+      const strict = ask([person, quad], 'strict');
+      assert.deepEqual(strict.reasons.map(r => [r.code, r.outcome]), [['datatype-refused', 'refused']], `${what} is refused in strict`);
+      const warn = ask([person, quad], 'warn');
+      assert.deepEqual(warn.reasons.map(r => [r.code, r.outcome, r.kept]), [['datatype-refused', 'recorded', true]], `${what} is recorded in warn and kept`);
+      assert.equal(typeof Object.values(warn.ops[0].fields.properties)[0], 'string', `${what} is kept as its lexical form`);
+    }
+    const typed = ask([person, q(X, `${V}entity/person#age`, lit('36', `${XSD}integer`)), q(X, `${V}entity/person#born`, lit('1815-12-10', `${XSD}date`))], 'strict');
+    assert.deepEqual(typed.reasons, [], 'an integer on a number property and a date on a date property are taken');
+    assert.deepEqual(typed.ops[0].fields.properties, { age: 36, born: '1815-12-10' });
+  });
+
   it('a language-tagged string is never read as a plain one in silence', () => {
     for (const mode of ['strict', 'warn', 'off']) {
       const out = run('language-tagged-literal', mode);
