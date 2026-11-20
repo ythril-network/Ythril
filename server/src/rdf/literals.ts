@@ -61,6 +61,24 @@ export const xsd = (local: 'string' | 'decimal' | 'integer' | 'boolean' | 'date'
 /** The type a property schema declares (`schema/src/vocabulary.ts`, `PropertySchema.type`). */
 export type DeclaredType = 'string' | 'number' | 'boolean' | 'date';
 
+const isRecordBag = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * The declared type of a property of `kind`/`type` in a resolved meta, read from own keys only: the one reader the record form writes a value
+ * by (`record-triples.ts`) and the import reads it back by (`quads-to-ops.ts`), so the two cannot disagree on which properties are typed.
+ * Pure, like everything here: the translator may import it.
+ */
+export function declaredTypeOf(meta: { typeSchemas?: unknown }, kind: string, type: string | null, prop: string): DeclaredType | undefined {
+  if (kind === 'file' || type === null) return undefined;
+  const kinds = isRecordBag(meta.typeSchemas) ? meta.typeSchemas : {};
+  const types = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
+  const def = isRecordBag(types) && Object.hasOwn(types, type) ? types[type] : undefined;
+  const props = isRecordBag(def) && isRecordBag(def['propertySchemas']) ? def['propertySchemas'] : undefined;
+  const own = props && Object.hasOwn(props, prop) ? props[prop] : undefined;
+  const declared = isRecordBag(own) ? own['type'] : undefined;
+  return declared === 'string' || declared === 'number' || declared === 'boolean' || declared === 'date' ? declared : undefined;
+}
+
 /** The kinds of temporal literal. */
 export type TemporalKind = 'dateTimeStamp' | 'dateTime' | 'date';
 

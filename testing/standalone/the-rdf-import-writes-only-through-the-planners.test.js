@@ -17,14 +17,14 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTrackedSources } from './_sources.mjs';
+import { readTrackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
 
 const FORBIDDEN = [/\bdb\/mongo(\.js)?['"]/, /\bsync\/arrivals(\.js)?['"]/, /\bbrain\/bulk(\.js)?['"]/];
 const IMPORT_MODULE = /(^|\/)(rdf-import[^/]*|import-(spool|index|reasons)|quads-to-ops)\.ts$/;
 const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
 
 describe('the RDF import writes only through the planners', () => {
-  const sources = readTrackedSources(['server/src'], { ext: ['.ts'], floor: 100 }).filter(s => IMPORT_MODULE.test(s.file));
+  const sources = readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 100 }).filter(s => IMPORT_MODULE.test(s.file));
 
   it('the act and its doors are modules of the import', () => {
     const files = sources.map(s => s.file);

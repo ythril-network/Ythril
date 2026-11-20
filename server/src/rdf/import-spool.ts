@@ -42,6 +42,7 @@ import {
 } from '../config/secretbox.js';
 import { FILE_MODE, mkdirPrivate } from '../util/fs-modes.js';
 import { isMissingPath } from '../util/path-present.js';
+import { renameOverSync } from '../util/rename-over.js';
 import type { BlankTerm, IriTerm, Quad, Term } from './literals.js';
 import { recordOfAddress, type AddressNames } from './term-reverse.js';
 
@@ -288,6 +289,30 @@ function quadOf(line: string): Quad {
   return JSON.parse(line.slice(line.indexOf('\t', b + 1) + 1)) as Quad;
 }
 
+/**
+ * Write `lines` as the whole file `name` of `folder`, replacing an earlier one only once this one is whole (a crash mid-write leaves the
+ * earlier file as it was): the index and an import's state are each one such file.
+ */
+export async function writeWholeSpoolFile(folder: ImportFolder, name: string, lines: Iterable<string>): Promise<void> {
+  const tmp = name.replace(/\.spool$/, '-tmp.spool');
+  await fsp.rm(fileIn(folder, tmp), { force: true });
+  const writer = openSpoolLineWriter(folder, tmp);
+  try {
+    for (const line of lines) await writer.write(line);
+    await writer.close();
+  } catch (err) {
+    await writer.abort();
+    await fsp.rm(fileIn(folder, tmp), { force: true });
+    throw err;
+  }
+  renameOverSync(fileIn(folder, tmp), fileIn(folder, name));
+}
+
+/** Remove every operation file of `folder` (a translation that runs again starts its operations afresh). */
+export async function removeOperations(folder: ImportFolder): Promise<void> {
+  for (const name of await fsp.readdir(folder.dir)) if (OPS_FILE.test(name)) await fsp.rm(path.join(folder.dir, name), { force: true });
+}
+
 // ── The sort ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** All quads of one subject in one graph, a record's parts with it. */
@@ -437,6 +462,21 @@ export async function sortedSpool(quads: AsyncIterable<Quad>, folder: ImportFold
     for (const name of [...created]) await drop(name);
     throw err;
   }
+}
+
+/** The name every file of a sort carries (its runs and its sorted result). */
+const SORT_FILE = /^sort-[0-9a-f]{12}-\d{6}\.spool$/;
+
+/**
+ * The groups of the sorted file a finished {@link sortedSpool} left in `folder`, for an import resumed after a restart: read as the first run
+ * read them, any number of times. A finished sort leaves exactly one file of its own (its runs are removed as they merge, and a failed sort
+ * removes everything it wrote), so a folder holding none or several is not one a finished sort left, and it throws.
+ */
+export async function reopenSortedSpool(folder: ImportFolder): Promise<() => AsyncGenerator<QuadGroup, void, undefined>> {
+  const sorted = (await fsp.readdir(folder.dir)).filter(n => SORT_FILE.test(n));
+  if (sorted.length !== 1) throw new Error(`The import folder holds ${sorted.length} sorted files; a finished sort leaves exactly one.`);
+  const name = sorted[0]!;
+  return () => groupsOf(folder, name);
 }
 
 async function* groupsOf(folder: ImportFolder, sorted: string): AsyncGenerator<QuadGroup, void, undefined> {
