@@ -300,7 +300,18 @@ describe('Audit coverage — every mutating route must resolve to an operation',
     assert.ok(words.size > 40 && words.has('files') && words.has('facts') && words.has('chrono'), `the rules name ${words.size} words, ${[...words].slice(0, 8)}`);
     const NEUTRAL = 'zzparam';
     const differs = [];
+    // Pairs of SERVED routes whose paths overlap by design, so a parameter called like the other route's literal reads as either; each is
+    // an entry of data with its reason and review date, the count of entries is part of the failure message below.
+    const OVERLAPS = new Map([
+      ['POST /api/networks/peers/:peerId/sync|votes', {
+        reviewBy: '2027-06-01',
+        reason: 'a peer is an instance id (a uuid, never a word) and `POST /api/networks/:id/votes/:roundId` reads `/api/networks/peers/votes/sync` as the network `peers`; the table keeps the peer door above the network pattern, as its comment says',
+      }],
+    ]);
+    for (const [key, o] of OVERLAPS) assert.ok(o.reason.length > 20 && o.reviewBy > new Date().toISOString().slice(0, 10), `the overlap ${key} has no reason or is past its review date`);
     for (const route of routes) {
+      // The tool door and the other exempt routes are not rule-table routes (see EXEMPT): `POST /api/:tool` named `spaces` is the spaces router's, not the door's.
+      if (exemptionOf(route.path)) continue;
       const params = route.path.match(/:[A-Za-z_]\w*/g) ?? [];
       for (let i = 0; i < params.length; i++) {
         const build = value => { let k = 0; return route.path.replace(/:[A-Za-z_]\w*/g, () => (k++ === i ? value : `${NEUTRAL}${k}`)); };
@@ -308,12 +319,13 @@ describe('Audit coverage — every mutating route must resolve to an operation',
         for (const word of words) {
           const sent = build(word);
           const hit = resolveOperation(route.method, sent);
-          const shown = (h, own) => h && JSON.stringify([h.operation, h.read, h.writtenWhenCutOff, h.spaceId === own ? 'THE-PARAM' : h.spaceId, h.entryId === own ? 'THE-PARAM' : h.entryId]);
+          if (OVERLAPS.has(`${route.method} ${route.path}|${word}`)) continue;
+          const shown =(h, own) => h && JSON.stringify([h.operation, h.read, h.writtenWhenCutOff, h.spaceId === own ? 'THE-PARAM' : h.spaceId, h.entryId === own ? 'THE-PARAM' : h.entryId]);
           if (shown(hit, word) !== shown(base, NEUTRAL)) differs.push(`${route.method} ${sent}: ${hit ? `${hit.operation} of '${hit.spaceId}'` : 'no rule'}, not ${base ? `${base.operation}` : 'no rule'}`);
         }
       }
     }
-    assert.deepEqual(differs, [], 'a rule answers for another route when a parameter is called like a word a rule names; anchor the rule to a path segment:\n  ' + differs.slice(0, 40).join('\n  '));
+    assert.deepEqual(differs, [], 'a rule answers for another route when a parameter is called like a word a rule names; anchor the rule to a path segment (' + OVERLAPS.size + ' served overlap(s) allowed by name):\n  ' + differs.slice(0, 40).join('\n  '));
   });
 
   it('a space rename is recorded as space.rename, not swallowed by space.update', () => {

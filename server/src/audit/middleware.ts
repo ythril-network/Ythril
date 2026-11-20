@@ -53,46 +53,56 @@ export interface RouteRule {
 /** The capture group that holds the item id in the dismissal's pattern (`/api/spaces/<space>/schema-convert/items/<item>/dismiss`): the space is group 1. */
 const DISMISS_ITEM_GROUP = 2;
 
+/*
+ * THE SPACE SEGMENT OF A BRAIN RULE: `spaces\/([^/]+)`.
+ *
+ * The brain routes are `/api/brain/spaces/<space>/...` and nothing else (the short `/api/brain/<space>/...` is a 404 since 5.0). The rules
+ * once also read the short form, with the `spaces/` optional, and that optional part let the regex SKIP the literal `spaces` and take it for
+ * the space: `GET /api/brain/spaces/files/export/rdf` (a space called `files`) was the file-list rule's prefix with the space `spaces`, and the
+ * records export of that space left no row with `audit.logReads` off; `GET /api/brain/spills/facts` was the fact list of a space `spills`.
+ * A rule is written for a path the server serves, so the table reads that one form. The coverage gate tries every parameter as every
+ * word a rule names.
+ */
 export const ROUTE_RULES: RouteRule[] = [
   // ── Fact CRUD ──────────────────────────────────────────────────────────
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/facts$/,   operation: 'fact.create',  spaceGroup: 1 },
-  { method: 'PATCH',  pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/facts\/([^/]+)$/, operation: 'fact.update', spaceGroup: 1, entryGroup: 2 },
-  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/facts\/([^/]+)$/, operation: 'fact.delete', spaceGroup: 1, entryGroup: 2 },
-  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/facts$/,   operation: 'fact.delete',  spaceGroup: 1 },
-  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/facts/,    operation: 'fact.list',    spaceGroup: 1, read: true },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/facts$/,   operation: 'fact.create',  spaceGroup: 1 },
+  { method: 'PATCH',  pattern: /^\/api\/brain\/spaces\/([^/]+)\/facts\/([^/]+)$/, operation: 'fact.update', spaceGroup: 1, entryGroup: 2 },
+  { method: 'DELETE', pattern: /^\/api\/brain\/spaces\/([^/]+)\/facts\/([^/]+)$/, operation: 'fact.delete', spaceGroup: 1, entryGroup: 2 },
+  { method: 'DELETE', pattern: /^\/api\/brain\/spaces\/([^/]+)\/facts$/,   operation: 'fact.delete',  spaceGroup: 1 },
+  { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/facts(?:\/|$)/,    operation: 'fact.list',    spaceGroup: 1, read: true },
 
   // ── Entity CRUD ──────────────────────────────────────────────────────────
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/entities\/([^/]+)\/merge\/([^/]+)$/, operation: 'entity.merge', spaceGroup: 1, entryGroup: 2 },
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/entities$/,   operation: 'entity.create',  spaceGroup: 1 },
-  { method: 'PATCH',  pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/entities\/([^/]+)$/, operation: 'entity.update', spaceGroup: 1, entryGroup: 2 },
-  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/entities\/([^/]+)$/, operation: 'entity.delete', spaceGroup: 1, entryGroup: 2 },
-  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/entities$/,   operation: 'entity.delete',  spaceGroup: 1 },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/entities\/([^/]+)\/merge\/([^/]+)$/, operation: 'entity.merge', spaceGroup: 1, entryGroup: 2 },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/entities$/,   operation: 'entity.create',  spaceGroup: 1 },
+  { method: 'PATCH',  pattern: /^\/api\/brain\/spaces\/([^/]+)\/entities\/([^/]+)$/, operation: 'entity.update', spaceGroup: 1, entryGroup: 2 },
+  { method: 'DELETE', pattern: /^\/api\/brain\/spaces\/([^/]+)\/entities\/([^/]+)$/, operation: 'entity.delete', spaceGroup: 1, entryGroup: 2 },
+  { method: 'DELETE', pattern: /^\/api\/brain\/spaces\/([^/]+)\/entities$/,   operation: 'entity.delete',  spaceGroup: 1 },
   // `F-17`: the cascade PREVIEW, before the generic entities GET below it — order matters here, since that
   // one has no `$` and would swallow this path as a list.
-  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/entities\/([^/]+)\/cascade-preview$/, operation: 'entity.cascade_preview', spaceGroup: 1, entryGroup: 2, read: true },
-  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/entities/,    operation: 'entity.list',    spaceGroup: 1, read: true },
+  { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/entities\/([^/]+)\/cascade-preview$/, operation: 'entity.cascade_preview', spaceGroup: 1, entryGroup: 2, read: true },
+  { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/entities(?:\/|$)/,    operation: 'entity.list',    spaceGroup: 1, read: true },
 
   // ── Edge CRUD ────────────────────────────────────────────────────────────
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/edges$/,      operation: 'edge.create',    spaceGroup: 1 },
-  { method: 'PATCH',  pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/edges\/([^/]+)$/, operation: 'edge.update', spaceGroup: 1, entryGroup: 2 },
-  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/edges\/([^/]+)$/, operation: 'edge.delete', spaceGroup: 1, entryGroup: 2 },
-  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/edges$/,      operation: 'edge.delete',    spaceGroup: 1 },
-  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/edges/,       operation: 'edge.list',      spaceGroup: 1, read: true },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/edges$/,      operation: 'edge.create',    spaceGroup: 1 },
+  { method: 'PATCH',  pattern: /^\/api\/brain\/spaces\/([^/]+)\/edges\/([^/]+)$/, operation: 'edge.update', spaceGroup: 1, entryGroup: 2 },
+  { method: 'DELETE', pattern: /^\/api\/brain\/spaces\/([^/]+)\/edges\/([^/]+)$/, operation: 'edge.delete', spaceGroup: 1, entryGroup: 2 },
+  { method: 'DELETE', pattern: /^\/api\/brain\/spaces\/([^/]+)\/edges$/,      operation: 'edge.delete',    spaceGroup: 1 },
+  { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/edges(?:\/|$)/,       operation: 'edge.list',      spaceGroup: 1, read: true },
 
   // ── Links ────────────────────────────────────────────────────────────────
   // No `link.list`: links are read through `/query` like any other collection, so the read is already
   // audited under that route rather than under a second one that does not exist.
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/links$/,      operation: 'link.create',    spaceGroup: 1 },
-  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/links\/([^/]+)$/, operation: 'link.delete', spaceGroup: 1, entryGroup: 2 },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/links$/,      operation: 'link.create',    spaceGroup: 1 },
+  { method: 'DELETE', pattern: /^\/api\/brain\/spaces\/([^/]+)\/links\/([^/]+)$/, operation: 'link.delete', spaceGroup: 1, entryGroup: 2 },
 
   // ── Chrono CRUD ──────────────────────────────────────────────────────────
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/chrono\/([^/]+)$/, operation: 'chrono.update', spaceGroup: 1, entryGroup: 2 },
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/chrono$/,     operation: 'chrono.create',  spaceGroup: 1 },
-  { method: 'PATCH',  pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/chrono\/([^/]+)$/, operation: 'chrono.update', spaceGroup: 1, entryGroup: 2 },
-  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/chrono\/([^/]+)$/, operation: 'chrono.delete', spaceGroup: 1, entryGroup: 2 },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/chrono\/([^/]+)$/, operation: 'chrono.update', spaceGroup: 1, entryGroup: 2 },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/chrono$/,     operation: 'chrono.create',  spaceGroup: 1 },
+  { method: 'PATCH',  pattern: /^\/api\/brain\/spaces\/([^/]+)\/chrono\/([^/]+)$/, operation: 'chrono.update', spaceGroup: 1, entryGroup: 2 },
+  { method: 'DELETE', pattern: /^\/api\/brain\/spaces\/([^/]+)\/chrono\/([^/]+)$/, operation: 'chrono.delete', spaceGroup: 1, entryGroup: 2 },
   // Bulk chrono delete had no rule — facts/entities/edges all had one, chrono did not.
-  { method: 'DELETE', pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/chrono$/,     operation: 'chrono.delete',  spaceGroup: 1 },
-  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/chrono/,      operation: 'chrono.list',    spaceGroup: 1, read: true },
+  { method: 'DELETE', pattern: /^\/api\/brain\/spaces\/([^/]+)\/chrono$/,     operation: 'chrono.delete',  spaceGroup: 1 },
+  { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/chrono(?:\/|$)/,      operation: 'chrono.list',    spaceGroup: 1, read: true },
 
   // ── File operations ──────────────────────────────────────────────────────
   //
@@ -109,13 +119,13 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'GET',    pattern: /^\/api\/files\/([^/]+)$/,                          operation: 'file.read',      spaceGroup: 1, read: true },
   // The client file change feed (bundle-255); `file_changes` is its MCP twin and records the same operation.
   { method: 'GET',    pattern: /^\/api\/files\/([^/]+)\/changes$/,                 operation: 'file.changes',   spaceGroup: 1, read: true },
-  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/files/,       operation: 'file.list',      spaceGroup: 1, read: true },
+  { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/files(?:\/|$)/,       operation: 'file.list',      spaceGroup: 1, read: true },
   // File METADATA mutations live on the brain router and had no rules at all.
   // `file.meta.delete` had a rule here and its route is gone (5.0): the metadata-only delete was a second
   // door onto half of one act, and `deleteFileCascade` removes the record with the file. A rule for a route
   // nobody serves is a classification about nothing, and it makes the coverage numbers read as complete.
-  { method: 'PATCH',  pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/files$/,      operation: 'file.meta.update', spaceGroup: 1 },
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/reindex$/,    operation: 'space.reindex',  spaceGroup: 1 },
+  { method: 'PATCH',  pattern: /^\/api\/brain\/spaces\/([^/]+)\/files$/,      operation: 'file.meta.update', spaceGroup: 1 },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/reindex$/,    operation: 'space.reindex',  spaceGroup: 1 },
   { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/embedding-queue\/media\/retry-failed$/, operation: 'file.retry_embedding_all', spaceGroup: 1 },
   // A record retry is audited because it is the operator saying "embed this again" about a record that already gave
   // up, and the snapshot is the only place the failure it was retried FROM survives: a successful retry clears
@@ -358,19 +368,19 @@ export const ROUTE_RULES: RouteRule[] = [
   { method: 'POST',   pattern: /^\/api\/brain\/similar$/,                           operation: 'brain.similar',        read: true },
   // A read spill (Q-92) names no space in its path: the spaces it touches are the spill's own record.
   { method: 'GET',    pattern: /^\/api\/brain\/spills\/[^/]+$/,                     operation: 'brain.spill.read',     read: true },
-  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/stats$/,      operation: 'brain.stats',          spaceGroup: 1, read: true },
+  { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/stats$/,      operation: 'brain.stats',          spaceGroup: 1, read: true },
 
   // ── Bulk write ───────────────────────────────────────────────────────────
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/bulk$/,       operation: 'bulk.write',     spaceGroup: 1 },
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/ingest$/,     operation: 'brain.ingest',   spaceGroup: 1 },
-  { method: 'GET',    pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/ingest\/[^/]+$/, operation: 'brain.ingest.status', spaceGroup: 1, read: true },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/bulk$/,       operation: 'bulk.write',     spaceGroup: 1 },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/ingest$/,     operation: 'brain.ingest',   spaceGroup: 1 },
+  { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/ingest\/[^/]+$/, operation: 'brain.ingest.status', spaceGroup: 1, read: true },
 
   // ── Traverse ─────────────────────────────────────────────────────────────
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/traverse$/,   operation: 'brain.traverse', spaceGroup: 1, read: true },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/traverse$/,   operation: 'brain.traverse', spaceGroup: 1, read: true },
 
   // ── SSE ticket mints (read-shaped: they mint a single-use ticket to WATCH a stream, no state
   //    change worth auditing; the streams themselves are reads) ──────────────
-  { method: 'POST',   pattern: /^\/api\/brain\/(?:spaces\/)?([^/]+)\/events\/ticket$/, operation: 'brain.events.ticket', spaceGroup: 1, read: true },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/events\/ticket$/, operation: 'brain.events.ticket', spaceGroup: 1, read: true },
   { method: 'POST',   pattern: /^\/api\/about\/logs\/ticket$/,                      operation: 'about.logs.ticket', read: true },
 ];
 
