@@ -164,7 +164,8 @@ describe('an RDF base is kept through every door', { skip }, () => {
   }
 
   it('the guide says what both doors do with a partial write: enabled is named every time, a base or vocab left out is kept', () => {
-    const guide = readFileSync('docs/integration-guide/06a-schema-api.md', 'utf8');
+    // The RDF names section lives in the Exports chapter (moved out of 06a when that guide reached its size ceiling).
+    const guide = readFileSync('docs/integration-guide/06f-exports.md', 'utf8');
     assert.doesNotMatch(guide, /A write that leaves a field out keeps the stored value/, 'the drive showed this false for enabled');
     assert.match(guide, /names `enabled`/, 'the guide says a write of meta.rdf names enabled');
     assert.match(guide, /`base` or `vocab` it leaves out keeps the stored one/);

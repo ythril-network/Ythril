@@ -245,7 +245,7 @@ On a space in a network the apply is a vote, as every schema write there is: it 
 #### A group's RDF namespace
 
 A group can name its entries' RDF terms under a namespace of its own, so every space that links them gives them the same addresses
-([RDF names](06a-schema-api.md#rdf-names-metardf-and-iri)).
+([RDF names](06f-exports.md#rdf-names-metardf-and-iri)).
 
 ```http
 PUT /api/schema-library/groups/:group/namespace

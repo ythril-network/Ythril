@@ -280,12 +280,6 @@ not told by the sync. So the write itself says it:
 `networks: read` on the networks that carry the space; any other caller gets `keys`, `memberCount` and no names. The
 write is applied regardless. Upgrade every instance of the network ([Upgrading](02b-upgrading.md)).
 
-### RDF names: `meta.rdf` and `iri`
-
-`meta.rdf` gives a space's records and schema terms web addresses (IRIs) for an RDF export: `{ "enabled": true, "base": "<IRI ending in />", "vocab": "<namespace>", "baseEpoch": <n> }`, set by `PATCH /api/spaces/:id` or MCP `schema_update` (`rdf`) at the schema `admin` rung. It is off until `enabled: true`; a space without it names nothing and behaves as before. Every record's address is `<base><kind>/<id>`; `vocab` (default `<base>vocab/`) names the space's own types and properties, and moves only with the base. The first enable takes the base you send, or `<public URL>/ld/<space id>/` from the instance's `publicUrl` (or `PUBLIC_BASE_URL`); with neither it answers `400 rdf_base_needed`. Give a space a persistent base when you first switch RDF on: a w3id.org or purl.org address redirected to the space, or a domain of your own, rather than the instance's URL. Every address an export gives out is built from the base, and others keep those addresses: an instance's URL changes when the instance moves, while a base changes only by a rebase that retires every address the space gave out. Every write of `meta.rdf` names `enabled` (without it the write is `400`); a `base` or `vocab` it leaves out keeps the stored one, and `baseEpoch` is the server's own count of base changes.
-
-The base is set once: a different `base` or `vocab` answers `409 rdf_base_frozen`, naming both. Send the new base with `rebase: true` (never stored) to change it on purpose, which changes every address the space gave out: on a space in no network at once, with `baseEpoch` one higher; on a space in a network it opens a `space_rebase` vote, answers `202 vote_pending` and lands at the vote's deadline ([the rebase vote](08-networks-api.md#the-rebase-vote-space_rebase)); send `rdf` alone then (`400 rdf_rebase_alone`). A base another space of this instance already holds with RDF on is refused at the save, `409 rdf_base_shared` and nothing stored: for an enable, a rebase (a networked one too, before the vote opens), an accepted offer, and a create (`POST /api/spaces`, MCP `save_space`, which leaves no space behind). The other space is named only to a caller with `schema: read` on it (or instance administration); a space with RDF off holds no address and does not count, and the default `<public URL>/ld/<space id>/` meets it only through another space's explicit base. A pair that already exists (a landed vote made it) does not refuse a write that leaves the base as it is: the exports refuse it ([06f](06f-exports.md)). A settings vote, a network's layer and a precedence swap never change the base; a base a network offers at a higher epoch that no held vote explains (a member that missed the vote) is recorded on this instance beside that network, as a base conflict; sending that base with `rebase: true` accepts it here alone at its epoch, with the vocab it was offered with, and a rebase vote settles it too. `rdf` is refused with `targetNetwork` (`400 rdf_not_a_layer_field`). On MCP a refusal's `code` is in the structured content. A type and a property may name their own address with `iri` (`http://schema.org/Person`, `http://schema.org/email`: schema.org terms are written in `http://schema.org/`, the namespace its own JSON-LD context and existing data use); without one the vocab names them in the W3C Direct Mapping's shape: a type is `<vocab><kind>/<type>` and its property `<vocab><kind>/<type>#<property>` (an untyped record's or a file's property `<vocab><kind>#<property>`), each name percent-encoded only where IRI syntax needs it, and an empty name has none. A `vocab` ends in `/` and holds no `#`. `iri` is part of the schema: changing it changes the schema fingerprint and shows in a version diff as a change of shape. On a space with RDF on, a write that leaves two terms with one address answers `422 rdf_term_clash` (creating such a space too, and accepting an offered base that would leave one), naming both: two types, or a type and a property, with one `iri`; two properties with one and different declared types (agreeing types may share one); an `iri` under the space's own vocab, or anywhere under its base (where its records' addresses live, so `<base>entity/Person` could be the record `Person`); or one the export writes itself (such as `rdfs:label`, `dcterms:created`).
-
 ### Schema versions
 
 ```http
@@ -634,7 +628,7 @@ interface TypeSchema {
                                                   //   text, never parsed, max 4000. An assistant reads
                                                   //   it; nothing validates against it. See 06-spaces-api.md.
   namingPattern?: string;                         // entity only — regex for name validation
-  iri?: string;                                   // the type's RDF address; see RDF names above
+  iri?: string;                                   // the type's RDF address; see RDF names in 06f-exports.md
   retention?: { days?: number; contentDays?: number };  // per-type retention, the middle tier of
                                                   //   record > schema > space. `contentDays` is chrono-only
                                                   //   and is rejected elsewhere. See 04-brain-api.md.
@@ -666,7 +660,7 @@ interface PropertySchema {
   mergeFn?: 'avg' | 'min' | 'max' | 'sum' | 'and' | 'or' | 'xor';  // entity merge hint
   required?: boolean;  // if true, property must be present on every write
   default?: string | number | boolean;  // value inserted when property is absent
-  iri?: string;        // the property's RDF address; see RDF names above
+  iri?: string;        // the property's RDF address; see RDF names in 06f-exports.md
 }
 ```
 
