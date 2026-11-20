@@ -56,6 +56,7 @@ import {
   tokenOf, entityType, text, oneOf, setOwnSchema, writeEntities, recordOn, holdsAll, fingerprintOn, conversionOf, runEnds, runEndsHere,
   forksIn, rootOn, itemsOf, joinedPubsub,
 } from './_schema-convert-pair.mjs';
+import { ownTokens } from '../_shared/own-token.mjs';
 
 const RUN = Date.now();
 const A = INSTANCES.a;
@@ -76,7 +77,9 @@ const ROWS = {
 const CONVERTED = { ada: { name: 'Ada', status: 'x' }, bo: { name: 'Bo', status: 'y' }, cy: { name: 'Cy', status: 'x' } };
 const REWRITTEN = Object.keys(CONVERTED);
 
-let tA, tB, space, pubsub, SPACE;
+let tSave, tA, tB, space, pubsub, SPACE;
+// The save that carries convertRecords is counted on the heavy-call rail per token: it is made with a token minted for this file (a-heavy-call-in-a-stack-test-spends-its-own-tokens-budget).
+const own = ownTokens();
 /** name -> id of each record A wrote. */
 const ids = {};
 /** name -> `{ a, b }`: what each instance held of the record after B received it and before the conversion. */
@@ -86,6 +89,7 @@ const convertedOnA = {};
 let aRun, bRun;
 
 before(async () => {
+  tSave = await own.mint('cvvote');
   tA = tokenOf('a');
   tB = tokenOf('b');
   space = await createTestSpace('cvvote', [[A, tA]]);
@@ -108,7 +112,7 @@ after(async () => {
 
 describe('a conversion carried by a vote converges on every member', () => {
   it('A saves the change with the steps: the publisher\'s own yes passes the round and A\'s run converts A\'s copies', async () => {
-    const r = await patch(A, tA, `/api/spaces/${SPACE}`, { meta: AFTER, convertRecords: { steps: STEPS } });
+    const r = await patch(A, tSave, `/api/spaces/${SPACE}`, { meta: AFTER, convertRecords: { steps: STEPS } });
     assert.equal(r.status, 200, `the save on the publisher: ${r.status} ${JSON.stringify(r.body)}`);
     assert.equal(r.body.convert?.state, 'started', `the save did not start a run on the instance whose yes passed the round: ${JSON.stringify(r.body.convert)}`);
     // A plain poll: a sync triggered from A here would let B hear of the round before A's conversion is finished.

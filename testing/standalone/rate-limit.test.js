@@ -29,11 +29,21 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, waitFor } from '../sync/helpers.js';
+import { ownTokens } from '../_shared/own-token.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKEN_FILE_C = path.join(__dirname, '..', 'sync', 'configs', 'c', 'token.txt');
 
 let tokenC;
+
+/*
+ * The destructive-call throttle below counts per token, and it counts on a token of this file's own (`a-heavy-call-in-a-stack-test-spends-its-own-tokens-budget`).
+ * Minted here, in the first hook of the file, because instance C keeps the real `authRateLimit` (ten token creates a minute per address) and the
+ * burst in the first describe uses the window up: a mint after it would be a 429. One create of the ten, which the burst's "at least one 429" does not mind.
+ */
+const ownC = ownTokens({ instance: 'c' });
+let heavyToken;
+before(async () => { heavyToken = await ownC.mint('rl-heavy'); });
 
 describe('authRateLimit on POST /api/tokens', () => {
   before(() => {
@@ -148,10 +158,6 @@ describe('the destructive-call throttle, on the tool door (5/min)', () => {
    * one place. This probes the HTTP door because that is the one a test can drive with `fetch`; there is no
    * second implementation for the MCP door to disagree with.
    */
-  before(() => {
-    tokenC = fs.readFileSync(TOKEN_FILE_C, 'utf8').trim();
-  });
-
   it('reaches the tool once, then 429s within the limit (5/min)', async () => {
     /*
      * A REACHABLE space with no `confirm`: the call gets past the gates, reaches the handler, is counted,
@@ -163,7 +169,7 @@ describe('the destructive-call throttle, on the tool door (5/min)', () => {
      */
     const bulkDelete = () => fetch(`${INSTANCES.c}/api/delete_space_data`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenC}` },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${heavyToken}` },
       body: JSON.stringify({ space: 'general' }),
     });
 

@@ -42,6 +42,7 @@ import {
   tokenOf, entityType, text, setOwnSchema, writeEntities, recordOn, holdsAll, metaOn, conversionOf, runEnds, runEndsHere, forksIn, rootOn, itemsOf,
   entitiesOfType, joinedPubsub,
 } from './_schema-convert-pair.mjs';
+import { ownTokens } from '../_shared/own-token.mjs';
 
 const RUN = Date.now();
 const A = INSTANCES.a;
@@ -53,7 +54,9 @@ const STEPS = [{ op: 'renameType', kind: 'entity', from: 'person', to: 'human' }
 const NAMES = ['ada', 'bo', 'cy'];
 const ROWS = NAMES.map(n => ({ name: `${n} ${RUN}`, type: 'person', properties: { fullName: n } }));
 
-let tA, tB, space, pubsub, SPACE;
+let tSave, tA, tB, space, pubsub, SPACE;
+// The save that carries convertRecords is counted on the heavy-call rail per token: it is made with a token minted for this file (a-heavy-call-in-a-stack-test-spends-its-own-tokens-budget).
+const own = ownTokens();
 let ids = [];
 /** id -> what A held after A's run was complete, before B had heard of the round. */
 const convertedOnA = {};
@@ -61,6 +64,7 @@ const convertedOnA = {};
 const before_ = {};
 
 before(async () => {
+  tSave = await own.mint('cvrename');
   tA = tokenOf('a');
   tB = tokenOf('b');
   space = await createTestSpace('cvtype', [[A, tA]]);
@@ -81,7 +85,7 @@ const typesOf = (run) => run.types.map(t => `${t.kind}:${t.type}`).sort();
 
 describe('a type renamed on a network keeps the old type and moves the records', () => {
   it('A saves the new type with the step: A\'s run reaches the source type as well as the target and moves A\'s copies', async () => {
-    const r = await patch(A, tA, `/api/spaces/${SPACE}`, { meta: AFTER, convertRecords: { steps: STEPS } });
+    const r = await patch(A, tSave, `/api/spaces/${SPACE}`, { meta: AFTER, convertRecords: { steps: STEPS } });
     assert.equal(r.status, 200, `the save on the publisher: ${r.status} ${JSON.stringify(r.body)}`);
     assert.equal(r.body.convert?.state, 'started', `the save did not start a run: ${JSON.stringify(r.body.convert)}`);
     assert.deepEqual(r.body.convert.types.map(t => `${t.kind}:${t.type}`).sort(), ['entity:human', 'entity:person'], 'the save names the source and the target type');
