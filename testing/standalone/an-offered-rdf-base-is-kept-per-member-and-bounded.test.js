@@ -8,7 +8,7 @@
  * - A member's offer is dropped when that member serves an equal or lower epoch with the held names (it corrected itself, or the member
  *   moved), or leaves the network; the conflict stands while any offer stands.
  * - The conflict the doors read lists only offers a current member still makes, so an admin can accept only such an offer.
- * - An offered epoch above `RDF_OFFERED_EPOCH_MAX`, a bound derived from the schema's maximum and well below it (a rebase after an accept
+ * - An offered epoch above `RDF_ADOPTED_EPOCH_MAX` (the schema package's one bound), a bound derived from the schema's maximum and well below it (a rebase after an accept
  *   stays possible), is refused as invalid.
  *
  * Run: node --test testing/standalone/an-offered-rdf-base-is-kept-per-member-and-bounded.test.js (after the server build)
@@ -17,7 +17,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 const settle = await import('../../server/dist/spaces/rdf-settle.js');
-const { RDF_BASE_EPOCH_MAX } = await import('../../schema/dist/index.js');
+const { RDF_BASE_EPOCH_MAX, RDF_ADOPTED_EPOCH_MAX } = await import('../../schema/dist/index.js');
 
 const OLD = { enabled: true, base: 'https://old.example.org/ld/notes/', vocab: 'https://old.example.org/ld/notes/vocab/', baseEpoch: 0 };
 const B1 = 'https://one.example.org/ld/notes/';
@@ -57,8 +57,8 @@ describe('offers are kept per member', () => {
 
 describe('an offered epoch is bounded', () => {
   it('the bound is derived from the schema maximum and lies well below it', () => {
-    assert.equal(typeof settle.RDF_OFFERED_EPOCH_MAX, 'number', 'rdf-settle exports no RDF_OFFERED_EPOCH_MAX');
-    assert.ok(settle.RDF_OFFERED_EPOCH_MAX <= RDF_BASE_EPOCH_MAX / 2, `${settle.RDF_OFFERED_EPOCH_MAX} leaves no room to rebase after an accept`);
+    assert.equal(typeof RDF_ADOPTED_EPOCH_MAX, 'number', 'the schema package exports no RDF_ADOPTED_EPOCH_MAX');
+    assert.ok(RDF_ADOPTED_EPOCH_MAX <= RDF_BASE_EPOCH_MAX / 2, `${RDF_ADOPTED_EPOCH_MAX} leaves no room to rebase after an accept`);
   });
   it('an offer above the bound is refused as invalid: no conflict', () => {
     const n = net();

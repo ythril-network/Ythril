@@ -16,7 +16,7 @@ export {
 } from './meta-fields.js';
 export * from './library-ref-name.js';
 // Q-748: the address validators and the one segment encoder.
-export { IRI_MAX, RDF_BASE_EPOCH_MAX, IriZ, NamespaceIriZ, BaseIriZ, PrefixZ, RESERVED_PREFIXES, iriSegment, iriFragment } from './iri.js';
+export { IRI_MAX, RDF_BASE_EPOCH_MAX, RDF_ADOPTED_EPOCH_MAX, IriZ, NamespaceIriZ, BaseIriZ, PrefixZ, RESERVED_PREFIXES, iriSegment, iriFragment } from './iri.js';
 export {
   withSchemaLibrary, currentSchemaLibrary, libraryDefinitionOf, takeBackLibraryDefinition,
   type SchemaLibraryEntryLike, type SchemaLibrarySource,
