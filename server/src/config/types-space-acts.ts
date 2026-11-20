@@ -98,8 +98,9 @@ export const SPACE_ACT_KINDS = {
   /*
    * An RDF import into one space (bundle-270, Q-753; `spaces/rdf-import-act.ts`): ordinary checked writes of a file its door sorted into a
    * folder (`spoolId`), all or nothing. Its own lane runs one RDF import body at a time instance-wide, apart from restores; it forgets no
-   * mark, because its writes are ordinary local writes that sync sends on, unlike a restore's. While it stands no schema write reaches its
-   * space either (`spaces/schema-write-gate.ts`), so the schema its dry plan judged by is the one its commit lands under. Its refusal has a
+   * mark, because its writes are ordinary local writes that sync sends on, unlike a restore's. While it stands no schema write a caller
+   * starts at a door reaches its space either (`spaces/schema-write-gate.ts`); a schema the network decided (a passed round, an arriving layer, a
+   * space leaving a network) is applied, and the import judges and stamps by the schema it read when it began. Its refusal has a
    * code of its own, not the admin import's: one code per kind is held by `every-space-act-kind-refuses-a-local-write`, and the client
    * words it (the file screens' toast set and every refusal prefix, `data-acts-have-words.spec.ts`).
    */
