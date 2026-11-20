@@ -31,12 +31,15 @@
  * regenerates its figures from `gh`; a drained old payload would overwrite a newer record). The destination and the CI refusal
  * are `record-destination.mjs`, the one-writer lock is `record-lock.mjs`.
  *
- * Imports: Node built-ins, `ythril-api.mjs` and the two no-package test modules the recorder already uses (the advisory CI job
- * runs without `npm ci`).
+ * Imports: Node built-ins, `ythril-api.mjs`, `failure-rates.mjs` (no import of its own) and the two no-package test modules the
+ * recorder already uses (the advisory CI job runs without `npm ci`).
  */
 import { YthrilApiError } from './ythril-api.mjs';
 import { newestBy } from './newest-by.mjs';
 import { TIMING_SCOPES } from '../../testing/_shared/timing-reporter.mjs';
+// The kinds a `Test-Run` may say it is are the failure-rate reader's list (a pure module with no import): one list, so a kind the
+// recorder writes is one the reader counts.
+import { RUN_KINDS } from './failure-rates.mjs';
 
 export const TELEMETRY_SPACE = 'y-proj-ythril';
 
@@ -60,8 +63,9 @@ export const TEST_RUN_SCHEMA = Object.freeze({
   recordKey: { type: 'string', required: true, doc: '`source:runId:attempt:job:suite`, `:` and `%` escaped inside a part. The identity: a second recording finds this one.' },
   formatVersion: { type: 'number', required: true, doc: 'The version of this list; a reader skips a record of a version it does not know.' },
   source: { type: 'string', required: true, values: ['ci', 'local'], doc: 'Where the run happened.' },
-  commit: { type: 'string', required: true, doc: 'The full commit sha the run tested.' },
+  commit: { type: 'string', required: true, doc: 'The full commit sha the run tested; for a `pull-request` run the pull request\'s head commit, while the run tested its merge with the base.' },
   branch: { type: 'string', required: true, doc: 'The branch: the run object\'s for CI, git\'s for a local run.' },
+  runKind: { type: 'string', required: false, values: [...RUN_KINDS], doc: 'The kind of run, decided from the Actions run object for CI: `push-main` (a push to main from ci.yml), `pull-request` (a pull request run of a branch of this repository; its `commit` is the pull request\'s head while the run tested the merge with its base, so it pairs by commit with no run but another attempt of itself), `full-run` (full-run.yml on a full-run/ ref), `preflight`, `local`. Absent on a record written before the field: a CI one is a push to main, a local one local. Only a `push-main` record that passed in full is a time baseline.' },
   runId: { type: 'string', required: true, doc: 'The Actions run id as text, or `local-<start>-<commit7>`.' },
   attempt: { type: 'number', required: true, doc: 'The run attempt (1 for a local run).' },
   job: { type: 'string', required: true, doc: 'The CI job that produced the results (the id its artifact name carries), or `local`.' },

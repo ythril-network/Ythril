@@ -21,13 +21,15 @@
  *
  * ## What this prevents
  *
- * Six ways a recorder like this goes wrong quietly, each closed in one place:
+ * The ways a recorder like this goes wrong quietly, each closed in one place:
  *
  * 1. **A stranger's numbers.** CI runs live in a public repository where anyone may open a pull request or push to
  *    a fork, and every one of them can upload an artifact called `test-results-…`. {@link trustedRuns} is the ONE
- *    function that turns the Actions API's list into the runs worth reading, from the RUN OBJECT alone; nothing an
- *    artifact says about itself is believed, and {@link parseArtifact} reads the bytes as hostile input (size caps,
- *    no `..` or absolute names, nothing written to disk). `--record-ci`, the baselines and `--trend` all start there.
+ *    function that turns the Actions API's list into the runs worth reading, by {@link ciRunKind}, from the RUN OBJECT
+ *    alone: a push to main, a pull request run of a branch of this repository, a Full run (Q-948); a fork's pull request
+ *    is refused by name. Nothing an artifact says about itself is believed, and {@link parseArtifact} reads the bytes as
+ *    hostile input (size caps, no `..` or absolute names, nothing written to disk). `--record-ci` and the summary's
+ *    baseline start there.
  * 2. **A second record for the same run.** The identity is {@link recordKey}, `source:runId:attempt:job:suite`. The
  *    recorder FINDS by `properties.recordKey`, then updates by id or inserts: it cannot supply its own id, because
  *    `save_chrono` ignores one that names nothing. Two recorders at once would race the find and the insert, so
@@ -40,7 +42,7 @@
  *    not count, `success: false` with no failure counted: `incomplete` as well). `layout` is a LABEL of the workflow's
  *    shape, derived from which jobs left results (`ci-parallel-v2` when more than one test job did, else `ci-serial-v1`;
  *    never from a job's name), and is not a key to compare records by. A baseline is drawn only from `scope: full` +
- *    `outcome: passed` + branch `main`, each suite on its own.
+ *    `outcome: passed` + branch `main` of a CI push to main, each suite on its own.
  * 4. **A lost record.** When the instance is unset, unreachable or refuses, the payload is kept in
  *    `test-results/unrecorded/`, one line says why, and the next `--record` that can reach the instance drains it.
  *    A recording problem is never a test failure: `--record` exits 0 whenever it could not record.
@@ -48,10 +50,17 @@
  *    the guards), is never printed or stored, and a failure message is masked of token-shaped strings and home
  *    paths before it is written. Recording is refused under `GITHUB_ACTIONS` / `CI`: CI never holds the token.
  * 6. **An undocumented input.** Every flag and variable this reads is in {@link HELP}, printed by `--help`.
+ * 7. **Another kind's times in a baseline** (Q-948). Every record says its kind (`runKind`, refused unwritten in
+ *    `buildPayload`); a pull request record's `commit` is the pull request's head while its run tested the merge with the
+ *    base, so it is told apart by its kind and pairs by commit with nothing but another attempt of its own run. Only CI's
+ *    green full push to main is a time baseline, by the one rule `isTimeBaselineRun` (`_shared/all-suite-file-times.mjs`)
+ *    that the trend, the flags' baseline, both per-file times snapshots and the summary's comparison ask; a record written
+ *    before the field has no kind, and a CI one reads as a push to main, as before.
  *
  * ## Decisions the plan left open
  *
- * - **Backfill** (`--record-ci`) walks the completed, trusted runs newest first and stops at the FIRST run that is
+ * - **Backfill** (`--record-ci`) walks the completed, trusted runs of each kind (its own listing) newest first and stops,
+ *   per kind, so a recorded pull request run never ends the walk of main, at the FIRST run of that kind that is
  *   recorded COMPLETELY (the instance holds a record of it and of every job whose results artifact the run still lists;
  *   decided from the artifact list and the held keys, so no zip is downloaded for a job already recorded), or after
  *   {@link BACKFILL_RUNS} runs. A run recorded only partly (the instance went away between its records) is not the stop:
@@ -105,7 +114,7 @@ import { withRecordLock, recordLockPath, lockWaitMs, LOCK_WAIT_ENV, LOCK_WAIT_MS
 import { newestBy, newestThenHigherAttempt } from './_shared/newest-by.mjs';
 import { workflowCommand } from './_shared/workflow-command.mjs';
 import { recordDestination, refuseRecordingUnderCi } from './_shared/record-destination.mjs';
-import { CI_WORKFLOW } from '../testing/_shared/ci-workflow-path.mjs';
+import { CI_WORKFLOW, FULL_RUN_WORKFLOW, FULL_RUN_PREFIX } from '../testing/_shared/ci-workflow-path.mjs';
 import { readCappedBody } from './_shared/capped-body.mjs';
 import { isEntryPoint } from './_shared/script-cli.mjs';
 import { timingResultFiles } from './_shared/timing-results.mjs';
@@ -113,7 +122,7 @@ import { readTimingLog, timingResultsDir, TEST_RESULTS_DIR_ENV } from '../testin
 import { spoolPayload } from './_shared/unrecorded-spool.mjs';
 import { preflightTrendLines, stageStats, medianOf, STAGE_STATS_WINDOW } from './_shared/preflight-run-record.mjs';
 import { writeStageCosts, writeFileTimes, writeFileTimesAll, STAGE_COSTS_FILE, FILE_TIMES_FILE, FILE_TIMES_ALL_FILE, MAX_AHEAD_MS } from './_shared/stage-costs.mjs';
-import { allSuiteFileTimes, isTrustedRun, FILE_TIMES_RUNS, TRUSTED_RUN_KIND } from './_shared/all-suite-file-times.mjs';
+import { allSuiteFileTimes, isTrustedRun, isTimeBaselineRun, FILE_TIMES_RUNS, TIME_BASELINE_WHERE } from './_shared/all-suite-file-times.mjs';
 import { expectedResultsStems } from './full-run-reuse.mjs';
 import { maskText } from './_shared/mask-text.mjs';
 import { waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
@@ -159,6 +168,9 @@ export { TEST_RUN_SCHEMA, TEST_RUN_RETENTION_DAYS };
  */
 export const testRunTypeDeclaration = () => telemetryTypeDeclaration(TEST_RUN_SPEC);
 
+/** A record's identity as the server's `filter` names it: each key under `properties.`. */
+const asProperties = (identity) => Object.fromEntries(Object.entries(identity).map(([key, value]) => [`properties.${key}`, value]));
+
 /** `maxChars` asked of `filter` for a page that excludes `measurements`. */
 const PAGE_MAX_CHARS = 1_000_000;
 
@@ -168,23 +180,60 @@ function assertConforms(properties) {
 
 // ---- who may be read ----------------------------------------------------------------------------------------------
 
+/** The kinds of CI run the recorder reads, each from its own listing (Q-948); a record carries its kind in `runKind`. */
+export const CI_RUN_KINDS = Object.freeze(['push-main', 'pull-request', 'full-run']);
+
 /**
- * The runs worth reading: a push to `main` of THIS repository, from `ci.yml`. Decided from the run object the API
- * returned and from nothing an artifact claims: a fork's push has another head repository, a pull request's run
- * reports `…ci.yml@refs/pull/N/merge`, another workflow reports its own file. A failed run is admitted: identity is
- * not outcome, and a failed main run still has timings.
+ * The kind of a CI run, or null when it is not worth reading: decided from the run object the API returned (workflow file, event,
+ * repository, head repository, head branch) and from nothing an artifact claims.
+ *
+ * - `push-main`: a push to `main` of THIS repository, from `ci.yml`.
+ * - `pull-request`: a `pull_request` run of `ci.yml` whose head repository is THIS one. A branch of this repository is pushed by
+ *   someone who may push to main, so its numbers are as trusted; a fork's pull request has the fork as head repository (or none,
+ *   once deleted) and its artifacts are a stranger's: refused.
+ * - `full-run`: a push run of `full-run.yml` (the caller of `ci.yml`) on a `full-run/` ref of THIS repository.
+ *
+ * Another workflow reports its own file, a ref spelling of a path or a branch is not the path or the branch, and a pull request run
+ * of `pull_request_target` runs the base's code with a stranger's input: all refused. A failed run is admitted: identity is not
+ * outcome, and a failed run still has its results.
+ *
+ * @param {object} run
+ * @returns {'push-main' | 'pull-request' | 'full-run' | null}
+ */
+export function ciRunKind(run) {
+  if (run === null || typeof run !== 'object' || run.repository?.full_name !== REPO || run.head_repository?.full_name !== REPO) return null;
+  if (run.event === 'push' && run.path === WORKFLOW_PATH && run.head_branch === 'main') return 'push-main';
+  if (run.event === 'pull_request' && run.path === WORKFLOW_PATH) return 'pull-request';
+  if (run.event === 'push' && run.path === FULL_RUN_WORKFLOW && typeof run.head_branch === 'string' && run.head_branch.startsWith(FULL_RUN_PREFIX)) return 'full-run';
+  return null;
+}
+
+/**
+ * Why a run is not read, in words a caller can act on; null for a run of an accepted kind ({@link ciRunKind}). A fork's pull request
+ * is named as that, with the repository it came from: it is the stranger's run the rule exists for.
+ *
+ * @param {object} run
+ * @returns {string | null}
+ */
+export function ciRunRefusal(run) {
+  if (ciRunKind(run) !== null) return null;
+  const head = typeof run?.head_repository?.full_name === 'string' ? run.head_repository.full_name : 'a repository that no longer exists';
+  if (run?.event === 'pull_request' && run.repository?.full_name === REPO && head !== REPO) return `a pull request from another repository (${maskText(head)}): its results are not read`;
+  return `not a push to main from ci.yml, a pull request run of a branch of ${REPO}, or a Full run on a ${FULL_RUN_PREFIX} ref of ${REPO}`;
+}
+
+/**
+ * The runs worth reading: those of an accepted kind ({@link ciRunKind}), or of `kind` alone when it is given. Every reader of the
+ * Actions API's lists starts here.
  *
  * @param {object[]} runs
+ * @param {'push-main' | 'pull-request' | 'full-run'} [kind]
  * @returns {object[]}
  */
-export function trustedRuns(runs) {
+export function trustedRuns(runs, kind) {
   if (!Array.isArray(runs)) throw new TypeError('trustedRuns: the list of runs must be an array');
-  return runs.filter(r => r !== null && typeof r === 'object'
-    && r.event === 'push'
-    && r.head_repository?.full_name === REPO
-    && r.repository?.full_name === REPO
-    && r.path === WORKFLOW_PATH
-    && r.head_branch === 'main');
+  if (kind !== undefined && !CI_RUN_KINDS.includes(kind)) throw new TypeError(`trustedRuns: no kind of run is called ${JSON.stringify(kind)} (${CI_RUN_KINDS.join(', ')})`);
+  return runs.filter(r => { const k = ciRunKind(r); return k !== null && (kind === undefined || k === kind); });
 }
 
 // ---- reading an artifact ------------------------------------------------------------------------------------------
@@ -441,7 +490,10 @@ const wallOf = (summary) => wallBetween(summary.startedAt, summary.endedAt);
  * to give, from the results' own span ({@link wallOf}): it is never derived here from `startsAt`/`endsAt`, which for CI are
  * the RUN's and would give every job the run's wall.
  */
-function buildPayload({ source, runId, attempt, job, suite, summary, commit, branch, layout, dirty, startsAt, endsAt, wallMs }) {
+function buildPayload({ source, runKind, runId, attempt, job, suite, summary, commit, branch, layout, dirty, startsAt, endsAt, wallMs }) {
+  // Every record says its kind (Q-948): without it a pull request record would read as a push to main, by the rule for records
+  // written before the field, and enter the time baselines. Refused here, so no caller can leave it out.
+  if (typeof runKind !== 'string' || !runKind) throw new Error(`test-times: ${recordKey({ source, runId, attempt, job, suite })}: a record without its kind of run is not built`);
   const start = startsAt ?? summary.startedAt;
   const end = endsAt ?? summary.endedAt ?? start;
   // A record the ceiling made leave failures or files out says so on the output of EVERY pass that builds one (here, so no caller can drop it).
@@ -449,7 +501,7 @@ function buildPayload({ source, runId, attempt, job, suite, summary, commit, bra
   if (cutNote) console.log(`test-times: ${recordKey({ source, runId, attempt, job, suite })}: ${cutNote}`);
   const properties = assertConforms({
     recordKey: recordKey({ source, runId, attempt, job, suite }),
-    formatVersion: FORMAT_VERSION, source, commit, branch, runId: String(runId), attempt: Number(attempt), job, suite,
+    formatVersion: FORMAT_VERSION, source, runKind, commit, branch, runId: String(runId), attempt: Number(attempt), job, suite,
     ms: summary.ms, ...(Number.isFinite(wallMs) ? { wallMs: Math.round(wallMs) } : {}),
     files: summary.fileCount, tests: summary.tests, passed: summary.passed, failed: summary.failed, cancelled: summary.cancelled,
     skipped: summary.skipped, todo: summary.todo, outcome: summary.outcome, scope: summary.scope, layout, dirty,
@@ -563,7 +615,7 @@ function localClientPayload({ root, commit, branch, dirty }) {
   if (report.startMs < committedAtMs) throw new Error('client report older than this commit: it is not this commit\'s run');
   const summary = summariseClient({ report, root, trackedSpecs: specsTrackedAt(commit) });
   const runId = `local-${summary.startedAt.replace(/[-:.]/g, '')}-${commit.slice(0, 7)}`;
-  return buildPayload({ source: 'local', runId, attempt: 1, job: 'local', suite: 'client', summary, commit, branch, layout: 'local', dirty, wallMs: wallOf(summary) });
+  return buildPayload({ source: 'local', runKind: 'local', runId, attempt: 1, job: 'local', suite: 'client', summary, commit, branch, layout: 'local', dirty, wallMs: wallOf(summary) });
 }
 
 /**
@@ -599,7 +651,7 @@ function localPayloads() {
       const start = summary.startedAt ?? mtimes[0];
       const end = summary.endedAt ?? mtimes.at(-1);
       const runId = `local-${start.replace(/[-:.]/g, '')}-${commit.slice(0, 7)}`;
-      payloads.push(buildPayload({ source: 'local', runId, attempt: 1, job: 'local', suite, summary, commit, branch, layout: 'local', dirty, startsAt: start, endsAt: end, wallMs: wallBetween(start, end) }));
+      payloads.push(buildPayload({ source: 'local', runKind: 'local', runId, attempt: 1, job: 'local', suite, summary, commit, branch, layout: 'local', dirty, startsAt: start, endsAt: end, wallMs: wallBetween(start, end) }));
     } catch (err) { problems.push(`${suite}: ${firstLine(err)}`); }
   }
   if (hasClient) {
@@ -705,6 +757,16 @@ const LISTING_PAGES = 5;
  * reader keeps the completed runs itself (`r.status === 'completed'`).
  */
 const completedPushesPath = (page = 1) => `/repos/${REPO}/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=100&page=${page}`;
+/**
+ * Each kind's own listing (Q-948), one spelling per kind for the same reason: pushes to main as above, the pull request runs of
+ * `ci.yml`, the push runs of `full-run.yml`. A listing is a page of candidates only: every run on it is judged by {@link ciRunKind},
+ * and a run of another kind than its listing's is not taken from it (a server that does not filter lists it under each).
+ */
+const LISTING_OF_KIND = Object.freeze({
+  'push-main': completedPushesPath,
+  'pull-request': (page = 1) => `/repos/${REPO}/actions/workflows/ci.yml/runs?event=pull_request&per_page=100&page=${page}`,
+  'full-run': (page = 1) => `/repos/${REPO}/actions/workflows/${FULL_RUN_WORKFLOW.split('/').at(-1)}/runs?event=push&per_page=100&page=${page}`,
+});
 const GITHUB_TIMEOUT_MS = 30_000;
 const GITHUB_JSON_CAP = 20_000_000;
 const GITHUB_ZIP_CAP = 100_000_000;
@@ -878,9 +940,13 @@ async function ciPayloads(gh, run, have = new Set()) {
   if (!runId || !startsAt || !isSha(run.head_sha) || !Number.isInteger(run.run_attempt) || run.run_attempt < 1) {
     throw new Error(`run ${String(run.id)}: the run object lacks an id, a start, a commit or an attempt`);
   }
+  // The kind is the run object's (never an artifact's), and a run of no accepted kind is never read: refused here too, so no caller
+  // that forgot to filter its listing can read a stranger's artifact.
+  const runKind = ciRunKind(run);
+  if (!runKind) throw new Error(`run ${String(run.id)}: ${ciRunRefusal(run)}`);
   const base = `/repos/${REPO}/actions/runs/${runId}`;
   const artifacts = await listedArtifacts(gh, runId);
-  const common = { source: 'ci', runId, commit: run.head_sha, branch: run.head_branch, layout: layoutOfRun(artifacts, run), dirty: false, startsAt, endsAt };
+  const common = { source: 'ci', runKind, runId, commit: run.head_sha, branch: run.head_branch, layout: layoutOfRun(artifacts, run), dirty: false, startsAt, endsAt };
 
   // Every attempt's artifacts, the earlier attempts first: each (attempt, job) is one record, and one that is recorded is not downloaded.
   const listed = readableResultArtifacts(artifacts, run);
@@ -942,16 +1008,21 @@ async function ciPayloads(gh, run, have = new Set()) {
  *
  * @param {number} runId
  * @param {Set<number>} listedIds every run id the pages held, trusted or not
+ * @param {Map<number, object>} listedRuns the run object of each of them, as the listing held it
  * @param {object[]} trusted the trusted runs, newest first
  * @param {string} outcome what the pass did not do ('recorded', 'rewritten')
  * @param {{ ms: number, intervalMs: number } | null} [waited] the bound the listing was read again within, when it was
  */
-function unlistedRunRefusal(runId, listedIds, trusted, outcome, waited = null) {
-  if (listedIds.has(runId)) return `test-times: run ${runId} is in the listing but is not a trusted run (not a push to main of ${REPO} from ci.yml, or not completed); nothing ${outcome}`;
+function unlistedRunRefusal(runId, listedIds, listedRuns, trusted, outcome, waited = null) {
+  if (listedIds.has(runId)) {
+    const listed = listedRuns.get(runId);
+    const why = ciRunRefusal(listed) ?? `a ${ciRunKind(listed)} run that has not completed`;
+    return `test-times: run ${runId} is in the listing but is not a trusted run: ${why}; nothing ${outcome}`;
+  }
   const newest = trusted[0];
   const newestSaid = newest ? `the newest run it listed is ${describeRun(newest)}` : 'it listed no trusted run';
   const waitedSaid = waited ? `; the listing was read again for ${waited.ms}ms (every ${waited.intervalMs}ms) and never held it` : '';
-  return `test-times: run ${runId} is not in the listing of completed pushes to main of ${REPO} from ci.yml: the listing may be stale (${newestSaid}), or the run is not a trusted one${waitedSaid}; nothing ${outcome}`;
+  return `test-times: run ${runId} is not in the listing of completed pushes to main of ${REPO} from ci.yml, nor in those of its pull request runs and Full runs: the listing may be stale (${newestSaid}), or the run is not a trusted one${waitedSaid}; nothing ${outcome}`;
 }
 
 const LISTING_WAIT_ENV = 'YTHRIL_TEST_RUNS_LISTING_WAIT_MS';
@@ -997,25 +1068,34 @@ async function recordCi({ rewriteKey, runId } = {}) {
 
   let exit = 0;
   const locked = await withRecordLock(async () => {
-    // Both modes read the same listing, filtered by the API and by trustedRuns(): a run that is not in it is not
+    // Both modes read the same listings, filtered by the API and by trustedRuns(): a run that is not in them is not
     // trusted. A rewrite looks for its run in it (a run older than the listing's pages has no artifacts left anyway).
     const parts = rewriteKey ? parseRecordKey(rewriteKey) : null;
     const rewriteId = parts ? positiveInteger(parts.runId) : null;
     if (rewriteKey && (!parts || parts.source !== 'ci' || !rewriteId)) { console.error('test-times: --rewrite needs a ci record key (ci:<runId>:<attempt>:<job>:<suite>)'); exit = 1; return; }
+    // Each kind is read from its own listing (Q-948), a page of every listing in turn, so a run named in one listing is found
+    // without paging another to its end first.
     const readListing = async () => {
-      const collected = [];
+      const collected = Object.fromEntries(CI_RUN_KINDS.map(k => [k, []]));
       const listedIds = new Set();
-      for (let page = 1; page <= LISTING_PAGES; page++) {
-        const listed = await gh.json(completedPushesPath(page));
-        const held = listed?.workflow_runs ?? [];
-        if (!held.length) break;
-        for (const r of held) { const id = runIdOf(r); if (id) listedIds.add(id); }
-        collected.push(...trustedRuns(held).filter(r => r.status === 'completed'));
-        // A pass stops paging when it holds what it walks: a rewrite, the run it names; a named run, the newest runs AND the
-        // page that lists it (it may lie past them); a bare pass, the newest runs.
-        if (rewriteKey ? collected.some(isRun(rewriteId)) : collected.length >= BACKFILL_RUNS && (!runId || listedIds.has(runId))) break;
+      const listedRuns = new Map();
+      const done = new Set();
+      const holdsRewrite = () => CI_RUN_KINDS.some(k => collected[k].some(isRun(rewriteId)));
+      for (let page = 1; page <= LISTING_PAGES && done.size < CI_RUN_KINDS.length; page++) {
+        for (const kind of CI_RUN_KINDS) {
+          if (done.has(kind)) continue;
+          const listed = await gh.json(LISTING_OF_KIND[kind](page));
+          const held = listed?.workflow_runs ?? [];
+          if (!held.length) { done.add(kind); continue; }
+          for (const r of held) { const id = runIdOf(r); if (id) { listedIds.add(id); if (!listedRuns.has(id)) listedRuns.set(id, r); } }
+          collected[kind].push(...trustedRuns(held, kind).filter(r => r.status === 'completed' && !collected[kind].some(isRun(runIdOf(r)))));
+          // A listing stops paging when the pass holds what it walks: a rewrite, the run it names (in any listing); a named run,
+          // this kind's newest runs AND the page that lists it (it may lie past them, in any listing); a bare pass, the newest runs.
+          if (rewriteKey ? holdsRewrite() : collected[kind].length >= BACKFILL_RUNS && (!runId || listedIds.has(runId))) done.add(kind);
+        }
+        if (rewriteKey && holdsRewrite()) break;
       }
-      return { collected, listedIds };
+      return { collected, listedIds, listedRuns };
     };
     // A named run is read for until the listing holds it (trusted or not: a run it holds and will not trust is never going to
     // be trusted, so it is not waited for) or the bound ends; every other pass reads once.
@@ -1029,16 +1109,22 @@ async function recordCi({ rewriteKey, runId } = {}) {
         waited = wait;
       }
     } else listing = await readListing();
-    const { listedIds } = listing;
-    const newest = listing.collected.sort(newestRunFirst);
-    const runs = rewriteKey ? newest.filter(isRun(rewriteId)) : newest.slice(0, BACKFILL_RUNS);
+    const { listedIds, listedRuns } = listing;
+    const newestOf = Object.fromEntries(CI_RUN_KINDS.map(k => [k, listing.collected[k].sort(newestRunFirst)]));
+    const newest = CI_RUN_KINDS.flatMap(k => newestOf[k]).sort(newestRunFirst);
+    // Each kind is walked on its own, newest first, with its own stop and its own bound: a recorded pull request run never ends the
+    // walk of main, nor the reverse.
+    const runsOf = (kind) => (rewriteKey ? newestOf[kind].filter(isRun(rewriteId)) : newestOf[kind].slice(0, BACKFILL_RUNS));
     // The refusal comes BEFORE the first write, so a pass that failed leaves no record of some other run behind.
     const waitedFor = rewriteKey ? rewriteId : runId;
-    if (waitedFor && !newest.some(isRun(waitedFor))) { console.error(unlistedRunRefusal(waitedFor, listedIds, newest, rewriteKey ? 'rewritten' : 'recorded', waited)); exit = 1; return; }
-    if (!rewriteKey) console.log(newest[0] ? `test-times: newest listed run: ${describeRun(newest[0])}` : 'test-times: the listing held no trusted completed run');
+    if (waitedFor && !newest.some(isRun(waitedFor))) { console.error(unlistedRunRefusal(waitedFor, listedIds, listedRuns, newest, rewriteKey ? 'rewritten' : 'recorded', waited)); exit = 1; return; }
+    if (!rewriteKey) {
+      for (const kind of CI_RUN_KINDS) console.log(newestOf[kind][0] ? `test-times: newest listed ${kind} run: ${describeRun(newestOf[kind][0])}` : `test-times: the ${kind} listing held no trusted completed run`);
+    }
+    const named = waitedFor ? newest.find(isRun(waitedFor)) : null;
+    if (named) console.log(`test-times: run ${describeRun(named)} is a ${ciRunKind(named)} run`);
 
     let recorded = 0;
-    let stoppedAtRecorded = false;
     const walked = new Set();
     const STOP_RECORDED = 'recorded';
     const STOP_DOWN = 'down';
@@ -1066,7 +1152,7 @@ async function recordCi({ rewriteKey, runId } = {}) {
         if (rewriteKey && payloads.every(p => p.properties.measurements === 'none')) {
           console.error(`test-times: run ${run.id} has no artifacts left; the record is not overwritten with nothing`); exit = 1; return undefined;
         }
-        for (const p of payloads) { await recordPayload(dest.api, p); recorded++; console.log(`test-times: recorded ${p.properties.recordKey}`); }
+        for (const p of payloads) { await recordPayload(dest.api, p); recorded++; console.log(`test-times: recorded ${p.properties.recordKey} (${p.properties.runKind})`); }
       } catch (err) {
         console.error(`test-times: run ${run.id}: ${whyOf(err, dest.shownUrl)}`);
         exit = 1;
@@ -1074,22 +1160,27 @@ async function recordCi({ rewriteKey, runId } = {}) {
       }
       return undefined;
     };
-    let stop;
-    for (const run of runs) {
-      stop = await walkRun(run);
-      if (stop) break;
+    let down = false;
+    let walkedCount = 0;
+    for (const kind of CI_RUN_KINDS) {
+      const runs = runsOf(kind);
+      let stop;
+      for (const run of runs) {
+        walkedCount++;
+        stop = await walkRun(run);
+        if (stop) break;
+      }
+      if (stop === STOP_DOWN) { down = true; break; }
+      if (!rewriteKey && stop !== STOP_RECORDED && runs.length >= BACKFILL_RUNS) {
+        console.log(`test-times: walked ${BACKFILL_RUNS} ${kind} runs without meeting one recorded completely (a run recorded but missing a job's record is not complete: its missing records were written and the walk went on); older ${kind} runs are not backfilled`);
+      }
     }
-    stoppedAtRecorded = stop === STOP_RECORDED;
     // A named run is walked wherever it sits: the stop rule and the newest-runs bound say where the walk of the NEWEST runs
     // ends, not whether the run a caller asked for is looked at, and a pass that exits 0 about a run it never walked has said
     // it recorded something it did not. Only a gone instance excuses it (the exit is already 1 then).
-    const named = runId && !rewriteKey ? newest.find(isRun(runId)) : null;
-    const walkedApart = Boolean(named) && !walked.has(named.id) && stop !== STOP_DOWN;
-    if (walkedApart) await walkRun(named);
-    if (!rewriteKey && !stoppedAtRecorded && runs.length >= BACKFILL_RUNS) {
-      console.log(`test-times: walked ${BACKFILL_RUNS} runs without meeting one recorded completely (a run recorded but missing a job's record is not complete: its missing records were written and the walk went on); older runs are not backfilled`);
-    }
-    console.log(`test-times: recorded ${recorded} record(s) from ${runs.length + (walkedApart ? 1 : 0)} run(s)`);
+    const walkedApart = Boolean(named) && !rewriteKey && !walked.has(named.id) && !down;
+    if (walkedApart) { walkedCount++; await walkRun(named); }
+    console.log(`test-times: recorded ${recorded} record(s) from ${walkedCount} run(s)`);
   });
   if (locked === null) { console.error('test-times: another recorder holds the record lock (in the git common dir)'); return 1; }
   return exit;
@@ -1113,13 +1204,15 @@ async function rewriteLocal(key) {
 
 const BASELINE_RUNS = 10;
 /**
- * A record or run summary is baseline material: branch main, scope full, outcome passed. Asked of a SUITE of a run summary
- * (`suites[suite]` carrying its own `scope` and `outcome`) it is that suite's own scope and outcome that count, so the client
- * covering a subset in one run does not take the node suites' baselines with it, nor the reverse.
+ * A record or run summary is baseline material by the one rule every reader of times asks ({@link isTimeBaselineRun}: CI's push to
+ * main, scope full, outcome passed). Asked of a SUITE of a run summary (`suites[suite]` carrying its own `scope` and `outcome`) it is
+ * that suite's own scope and outcome that count, so the client covering a subset in one run does not take the node suites' baselines
+ * with it, nor the reverse.
  */
 const qualifies = (r, suite) => {
-  const own = suite === undefined ? undefined : r?.suites?.[suite];
-  return r?.branch === 'main' && (own?.scope ?? r?.scope) === 'full' && (own?.outcome ?? r?.outcome) === 'passed';
+  if (r === null || typeof r !== 'object') return false;
+  const own = suite === undefined ? undefined : r.suites?.[suite];
+  return isTimeBaselineRun({ ...r, scope: own?.scope ?? r.scope, outcome: own?.outcome ?? r.outcome });
 };
 
 /** The newest {@link BASELINE_RUNS} runs that qualify for `suite`, the judged run left out of its own baseline. */
@@ -1175,7 +1268,7 @@ const TREND_RUNS = 30;
 const PREFLIGHT_TREND_RUNS = 20;
 
 /** Entries of the trend population only: the predicate is asked of the server and checked again here. */
-const trendPredicate = { type: CHRONO_TYPE, 'properties.branch': 'main', 'properties.scope': 'full', 'properties.outcome': 'passed' };
+const trendPredicate = { type: CHRONO_TYPE, ...asProperties(TIME_BASELINE_WHERE) };
 const isTrendRow = (r) => r?.type === CHRONO_TYPE && qualifies(r.properties) && r.properties.formatVersion === FORMAT_VERSION
   && typeof r.properties.commit === 'string' && typeof r.properties.suite === 'string' && typeof r.startsAt === 'string' && typeof r.properties.ms === 'number';
 
@@ -1269,7 +1362,8 @@ async function trend({ last, flags }) {
     const summaries = [];
     for (const r of used) {
       const files = await filesOf(dest.api, r).catch(() => null);
-      summaries.push({ runId: r.properties.recordKey, startsAt: r.startsAt, branch: r.properties.branch, scope: r.properties.scope, outcome: r.properties.outcome, suites: { [group]: { ms: r.properties.ms, files: files ?? {} } } });
+      const { source, runKind, branch, scope, outcome } = r.properties;
+      summaries.push({ runId: r.properties.recordKey, startsAt: r.startsAt, source, runKind, branch, scope, outcome, suites: { [group]: { ms: r.properties.ms, files: files ?? {} } } });
     }
     const [judged, ...history] = summaries;
     for (const f of flagFiles(judged, history)) { flagged++; console.log(`slow file: ${f.file} in ${group} took ${seconds(f.ms)}, over ${seconds(f.limit)}`); }
@@ -1315,9 +1409,6 @@ async function writeStageCostSnapshot(api, runner) {
   writeStageCosts(resultsDir(), { generatedAt: new Date().toISOString(), window: STAGE_STATS_WINDOW, runner, runs, stages });
   return `test-times: stage costs written to ${shown(join(resultsDir(), STAGE_COSTS_FILE))} (${runs} ${runner} run(s))`;
 }
-
-/** A record's identity as the server's `filter` names it: each key under `properties.`. */
-const asProperties = (identity) => Object.fromEntries(Object.entries(identity).map(([key, value]) => [`properties.${key}`, value]));
 /** The pure job's id: the unsplit job's records carry it, and its shard jobs are `<id>-<k>` (the results stems `ci.yml` uploads). */
 const PURE_JOB = 'standalone-pure';
 /**
@@ -1327,10 +1418,14 @@ const PURE_JOB = 'standalone-pure';
  * shards' newer runs replace them.
  */
 const pureJobs = () => [PURE_JOB, ...testJobs().filter(j => j.startsWith(`${PURE_JOB}-`) && /^\d+$/.test(j.slice(PURE_JOB.length + 1)))];
-/** What a `Test-Run` must be for its per-file times to rank the preflight's pure files: CI's own run of a pure job (`job`), over main, of the whole suite. */
-const fileTimesWhere = (job) => asProperties({ ...TRUSTED_RUN_KIND, job });
+/**
+ * What a `Test-Run` must be for its per-file times to rank the preflight's pure files: a record of a pure job (`job`) that may enter a
+ * time baseline ({@link isTimeBaselineRun}: CI's green push to main, of the whole suite), asked of the server by its fields and checked
+ * again here by the rule.
+ */
+const fileTimesWhere = (job) => asProperties({ ...TIME_BASELINE_WHERE, job });
 const isFileTimesRow = (r, job) => r?.type === CHRONO_TYPE && typeof r.startsAt === 'string' && typeof r._id === 'string'
-  && Object.entries(fileTimesWhere(job)).every(([path, value]) => r.properties?.[path.slice('properties.'.length)] === value);
+  && isTrustedRun({ ...r.properties }, [job]);
 
 /** The records one page of {@link newestRunRows} asks for. */
 const RUN_ROWS_PAGE = 10;
@@ -1438,10 +1533,10 @@ const testJobs = () => expectedResultsStems(readFileSync(resolve(import.meta.dir
 async function allSuiteRuns(api, jobs) {
   const runs = [];
   for (const job of jobs) {
-    const ofJob = await newestRunRows(api, asProperties({ ...TRUSTED_RUN_KIND, job }), r => isTrustedRun({ ...r.properties }, [job]));
+    const ofJob = await newestRunRows(api, fileTimesWhere(job), r => isTrustedRun({ ...r.properties }, [job]));
     for (const r of ofJob) {
-      const { source, branch, scope, runId, attempt } = r.properties;
-      runs.push({ job, source, branch, scope, runId, attempt, startsAt: r.startsAt, files: await filesOf(api, r) });
+      const { source, runKind, branch, scope, outcome, runId, attempt } = r.properties;
+      runs.push({ job, source, runKind, branch, scope, outcome, runId, attempt, startsAt: r.startsAt, files: await filesOf(api, r) });
     }
   }
   return runs;
@@ -1580,7 +1675,7 @@ async function summaryBaseline(figures) {
   try {
     gh = githubClient();
     const listed = await gh.json(completedPushesPath());
-    const runs = trustedRuns(listed?.workflow_runs ?? [])
+    const runs = trustedRuns(listed?.workflow_runs ?? [], 'push-main')
       .filter(r => r.status === 'completed' && r.conclusion === 'success' && String(r.id) !== currentId && runIdOf(r) && startedOf(r))
       .sort(newestRunFirst)
       .slice(0, SUMMARY_BASELINE_RUNS);
@@ -1605,7 +1700,8 @@ async function summaryBaseline(figures) {
           try { suites.push(clientFigures(parseClientReport(clientText), process.cwd())); } catch { warnings.push(annotate('baseline', `run ${run.id}: its client report was not read, so the client is not judged against it`)); }
         }
         if (!suites.length) continue;
-        history.push({ runId: String(run.id), startsAt: startedOf(run), branch: 'main', suites: Object.fromEntries(suites.map(baselineSuite)) });
+        // A run of the push-main listing, judged by its suites' own scope and outcome through the one baseline rule (`qualifies`).
+        history.push({ runId: String(run.id), startsAt: startedOf(run), source: 'ci', runKind: ciRunKind(run), branch: run.head_branch, suites: Object.fromEntries(suites.map(baselineSuite)) });
       } catch (err) {
         warnings.push(annotate('baseline', `run ${run.id} was not read: ${firstLine(err)}`));
       }
@@ -1660,14 +1756,18 @@ export const HELP = `usage: node scripts/test-times.mjs <command>
                            and the client's ${CLIENT_RESULTS}, which a preflight run writes); exits 0 whenever it could not
                            record, and keeps the payload in test-results/unrecorded/ for the next one. Run by hand.
                            (test-results/ is the folder ${TEST_RESULTS_DIR_ENV} names, an absolute path, when it is set.)
-  --record-ci [<runId>]    record the completed CI runs (push to main of ${REPO}, ci.yml) not yet recorded, the client
-                           job's included (its artifact's ${CLIENT_RESULTS}); walks newest first and stops at the first
-                           completely recorded run or after ${BACKFILL_RUNS} runs, and says the newest run it listed.
-                           With <runId> (a positive integer: the run you are waiting for) the pass FAILS, writing
-                           nothing, when that run is not in the listing of completed pushes to main (a stale page) or
-                           is listed but not a trusted run, instead of reporting a quiet success; a run the listing does
-                           not hold yet is waited for first (the listing is read again, see the two variables below);
-                           the named run is walked wherever it sits, past the stop and past the ${BACKFILL_RUNS} runs too.
+  --record-ci [<runId>]    record the completed CI runs of ${REPO} not yet recorded, of three kinds, each record saying
+                           its kind (runKind): push-main (a push to main, ci.yml), pull-request (a pull request run of
+                           ci.yml from a branch of ${REPO}; a fork's pull request is refused) and full-run (full-run.yml
+                           on a ${FULL_RUN_PREFIX} ref); the client job's included (its artifact's ${CLIENT_RESULTS}).
+                           Each kind is read from its own listing and walked newest first, stopping at its first
+                           completely recorded run or after ${BACKFILL_RUNS} runs; says the newest run of each it listed.
+                           With <runId> (a positive integer: the run you are waiting for, of any of the three kinds,
+                           whose kind it says) the pass FAILS, writing nothing, when that run is not in the listings
+                           (a stale page) or is listed but not a trusted run, instead of reporting a quiet success; a
+                           run the listings do not hold yet is waited for first (they are read again, see the two
+                           variables below); the named run is walked wherever it sits, past the stop and past the
+                           ${BACKFILL_RUNS} runs too. Only a green push-main record that ran in full is a time baseline.
                            Run by hand.
   --drain-unrecorded       send what test-results/unrecorded/ holds (a Preflight-Run that scripts/preflight.mjs kept, a Test-Run
                            an earlier --record kept), then refresh ${STAGE_COSTS_FILE} (also when nothing was kept) and, when missing

@@ -12,9 +12,10 @@
  * - **A snapshot that reads as "no slow files".** A job with no record on the instance (a shard not recorded yet, the client's) leaves its
  *   files out, and a snapshot without them answers "nothing slow" for every one. {@link allSuiteFileTimes} THROWS when no row holds a
  *   file, and when any job it was asked for holds none, naming the jobs. The snapshot is whole across the jobs or it is not made.
- * - **A time from a run that is not CI's own full run of main.** A laptop's run, a branch, a files-only or subset run, or a job the caller
- *   did not name sets no time ({@link isTrustedRun}); the same kind is what the reader asks the server for ({@link TRUSTED_RUN_KIND}),
- *   and the rows are checked again here.
+ * - **A time from a run that is not CI's own green full run of main.** A laptop's run, a branch, a files-only or subset run, a red run
+ *   (it stopped early, so its times are short), a pull request run or a Full run (Q-948), or a job the caller did not name sets no time
+ *   ({@link isTrustedRun} over {@link isTimeBaselineRun}, the one baseline rule); the reader asks the server for
+ *   {@link TIME_BASELINE_WHERE}, and the rows are checked again here.
  * - **A moved or repeated file counted twice.** The key is the path, so a file whose shard changed between runs is one key. A run recorded
  *   twice (the attempts of a rerun) counts once, by its newest record. Only the newest {@link FILE_TIMES_RUNS} runs that hold a file set
  *   its time, so the old shard's times fade out as the new shard's runs arrive.
@@ -26,16 +27,32 @@
 import { newestThenHigherAttempt } from './newest-by.mjs';
 import { medianOf } from './preflight-run-record.mjs';
 import { isCount } from './measurements.mjs';
+import { runKindOf } from './failure-rates.mjs';
 
 /** The newest runs of a job (and of a file) the per-file times rest on. */
 export const FILE_TIMES_RUNS = 5;
 
-/** What a `Test-Run` must be for its per-file times to rank the files: CI's own run, over main, of the whole suite. */
-export const TRUSTED_RUN_KIND = Object.freeze({ source: 'ci', branch: 'main', scope: 'full' });
+/**
+ * The fields a `Test-Run` must hold for its times to enter a baseline, as the server can be asked for them: CI's own run, over main,
+ * of the whole suite, green. The kind is checked by {@link isTimeBaselineRun} and not asked of the server: a record written before the
+ * field has none, and it is a push to main.
+ */
+export const TIME_BASELINE_WHERE = Object.freeze({ source: 'ci', branch: 'main', scope: 'full', outcome: 'passed' });
 
-/** Whether `run` is of the trusted kind and of one of `jobs`. */
-export const isTrustedRun = (run, jobs) => run !== null && typeof run === 'object'
-  && Object.entries(TRUSTED_RUN_KIND).every(([key, value]) => run[key] === value) && jobs.includes(run.job);
+/**
+ * May this record's times enter a time baseline: the ONE rule every reader of times asks (the per-file times snapshots, the trend, the
+ * flags' baseline and the summary's comparison with the last runs of main), so no reader takes a red run's short times, a laptop's, or
+ * a pull request run's or a Full run's (Q-948) into "how long main takes". Branch main, scope full, outcome passed, source ci, and the
+ * kind of run a push to main: `runKind` `push-main`, or none on a CI record (one written before the field; `failure-rates.mjs`
+ * `runKindOf` reads it so). A pull request run or a Full run on a branch named main is still not one.
+ *
+ * @param {object} properties a record's properties, or a run summary with the same fields
+ */
+export const isTimeBaselineRun = (properties) => properties !== null && typeof properties === 'object'
+  && Object.entries(TIME_BASELINE_WHERE).every(([key, value]) => properties[key] === value) && runKindOf(properties) === 'push-main';
+
+/** Whether `run` may enter a baseline ({@link isTimeBaselineRun}) and is of one of `jobs`. */
+export const isTrustedRun = (run, jobs) => isTimeBaselineRun(run) && jobs.includes(run.job);
 
 /** Newest start first; the attempts of one run start together, so the higher attempt first: the one a run is counted by. */
 const newestFirst = newestThenHigherAttempt('startsAt', (r) => r.attempt);
@@ -43,7 +60,7 @@ const newestFirst = newestThenHigherAttempt('startsAt', (r) => r.attempt);
 /**
  * Per test file, the median of its time over the newest {@link FILE_TIMES_RUNS} trusted runs that hold it, across `jobs`.
  *
- * @param {Array<{ job: string, source: string, branch: string, scope: string, runId: string, attempt?: number, startsAt: string, files: Record<string, number> | null }>} runs
+ * @param {Array<{ job: string, source: string, branch: string, scope: string, outcome: string, runKind?: string, runId: string, attempt?: number, startsAt: string, files: Record<string, number> | null }>} runs
  *   one row per recorded job of a run: its identity, when it started and its per-file times (null when its measurements could not be read);
  *   the attempts of one run are rows of one `runId`, and the newest start (then the higher `attempt`) is the one the run counts by
  * @param {{ jobs: string[] }} options every job the snapshot must cover
