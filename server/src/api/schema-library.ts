@@ -56,8 +56,8 @@ import { log, peerText, peerList, refusalOfParse, NAME_QUOTED } from '../util/lo
 import { notFoundSentence } from '../util/errors.js';
 import { sendLostSpace } from './write-target-answer.js';
 import { restartSchemaConvertInTurn } from '../sync/governance.js';
-import { currentLibraryState, libraryNamespaces, libraryRdfGuard, spaceEditRdfGuard } from '../spaces/library-terms.js';
-import { deleteNamespace, putNamespace } from './schema-library-namespaces.js';
+import { currentLibraryState, libraryNamespaces, libraryRdfGuard, namespaceOfGroup, spaceEditRdfGuard } from '../spaces/library-terms.js';
+import { deleteNamespace, forgetNamespacesOfEmptyGroups, putNamespace } from './schema-library-namespaces.js';
 
 export const schemaLibraryRouter = Router();
 
@@ -81,6 +81,7 @@ function savedUnlessRdfRefuses(next: ParsedLibraryEntry[], rebase: boolean, res:
   const refused = libraryRdfGuard(getConfig().spaces, currentLibraryState(), { library: next, namespaces: libraryNamespaces() }, rebase);
   if (refused) { res.status(refused.status).json(refused.body); return false; }
   saveSchemaLibrary(next);
+  forgetNamespacesOfEmptyGroups(next);
   return true;
 }
 
@@ -310,7 +311,7 @@ schemaLibraryRouter.get('/groups', globalRateLimit, requireAuth, (_req, res) => 
   }
   const namespaces = getConfig().schemaLibraryNamespaces ?? {};
   const groups = Array.from(groupMap.entries())
-    .map(([name, count]) => ({ name, count, ...(namespaces[name] ? { namespace: namespaces[name] } : {}) }))
+    .map(([name, count]) => ({ name, count, ...(namespaceOfGroup(namespaces, name) ? { namespace: namespaceOfGroup(namespaces, name) } : {}) }))
     .sort((a, b) => a.name.localeCompare(b.name));
   res.json({ groups });
 });

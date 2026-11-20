@@ -15,7 +15,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { NamespaceIriZ, PrefixZ } from '@ythril-network/schema';
 import { getConfig, getSchemaLibrary, saveConfig } from '../config/loader.js';
-import { currentLibraryState, libraryRdfGuard, type LibraryNamespace } from '../spaces/library-terms.js';
+import { currentLibraryState, libraryRdfGuard, namespaceOfGroup, type LibraryNamespace } from '../spaces/library-terms.js';
 import { NAME_QUOTED, peerText, refusalOfParse } from '../util/log.js';
 
 /** The body of a namespace PUT: the prefix and the namespace IRI, and `rebase: true` to rename linked terms on purpose. */
@@ -52,6 +52,23 @@ function usable(all: Record<string, LibraryNamespace>): Record<string, LibraryNa
   return Object.fromEntries(Object.entries(all).filter(([, ns]) => PrefixZ.safeParse(ns.prefix).success && NamespaceIriZ.safeParse(ns.iri).success));
 }
 
+/**
+ * Take the namespace of every group `library` holds no entry of out of `config.json` (lens finding 7). A namespace names the terms of a
+ * group's entries and holds a prefix; with the last entry gone (deleted, moved to another group, its group cleared) it names nothing, is
+ * listed nowhere (`GET /groups` lists the groups that have entries) and still blocks its prefix (`namespace_prefix_taken`), so nobody could
+ * see or remove it. Called by the one save every library write that changes entries goes through. Nothing is saved when none is orphaned.
+ */
+export function forgetNamespacesOfEmptyGroups(library: readonly { schemaGroup?: string | undefined }[]): void {
+  const cfg = getConfig();
+  const held = cfg.schemaLibraryNamespaces;
+  if (!held) return;
+  const groups = new Set(library.map(e => e.schemaGroup));
+  const kept = Object.entries(held).filter(([group]) => groups.has(group));
+  if (kept.length === Object.keys(held).length) return;
+  cfg.schemaLibraryNamespaces = kept.length > 0 ? Object.fromEntries(kept) : undefined;
+  saveConfig(cfg);
+}
+
 /** `PUT /groups/:group/namespace`. `afterEdit` is the library's own aftercare of an edit (new schema versions, conversion restarts). */
 export function putNamespace(req: Request, res: Response, afterEdit: (names: readonly string[]) => void): void {
   const group = String(req.params['group'] ?? '');
@@ -76,7 +93,7 @@ export function putNamespace(req: Request, res: Response, afterEdit: (names: rea
 export function deleteNamespace(req: Request, res: Response, afterEdit: (names: readonly string[]) => void): void {
   const group = String(req.params['group'] ?? '');
   const held = { ...(getConfig().schemaLibraryNamespaces ?? {}) };
-  if (held[group] === undefined) { res.status(NOTHING_TO_NAME).json({ error: `group '${peerText(group, { max: NAME_QUOTED })}' has no namespace`, code: 'namespace_not_found' }); return; }
+  if (namespaceOfGroup(held, group) === undefined) { res.status(NOTHING_TO_NAME).json({ error: `group '${peerText(group, { max: NAME_QUOTED })}' has no namespace`, code: 'namespace_not_found' }); return; }
   delete held[group];
   const refused = storeNamespaces(held, req.query['rebase'] === 'true');
   if (refused) { res.status(refused.status).json(refused.body); return; }

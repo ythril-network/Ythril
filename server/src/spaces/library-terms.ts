@@ -51,9 +51,16 @@ function unusableReason(ns: unknown): string | undefined {
 
 /** The namespaces that name something, by group: every stored one a door would accept. */
 export function libraryNamespaces(): Record<string, LibraryNamespace> {
-  const out: Record<string, LibraryNamespace> = {};
-  for (const [group, ns] of Object.entries(storedNamespaces())) if (unusableReason(ns) === undefined) out[group] = { prefix: ns.prefix, iri: ns.iri };
-  return out;
+  // fromEntries defines each key as an own property: `out[group] = ...` for a group called `__proto__` set the map's prototype instead.
+  return Object.fromEntries(Object.entries(storedNamespaces()).filter(([, ns]) => unusableReason(ns) === undefined).map(([group, ns]) => [group, { prefix: ns.prefix, iri: ns.iri }]));
+}
+
+/**
+ * The namespace `group` holds in `namespaces`, or `undefined`. THE one lookup by group name: a group is any name the library accepts, and a
+ * plain object answers `constructor`, `toString` and `__proto__` with what every object inherits (lens finding 6), so only an own key counts.
+ */
+export function namespaceOfGroup<T>(byGroup: Readonly<Record<string, T>>, group: string): T | undefined {
+  return Object.hasOwn(byGroup, group) ? byGroup[group] : undefined;
 }
 
 /** The stored namespaces that name nothing, each with why; each is said once in the log when found. */
@@ -98,7 +105,7 @@ function resolvedUnder(meta: SpaceMeta, state: LibraryState): SpaceMeta {
     for (const [name, def] of Object.entries(map ?? {})) {
       const ref = def?.$ref ? libraryEntryNameOf(def.$ref) : undefined;
       const entry = ref === undefined ? undefined : state.library.find(e => e.name === ref);
-      const ns = entry?.schemaGroup ? state.namespaces[entry.schemaGroup] : undefined;
+      const ns = entry?.schemaGroup ? namespaceOfGroup(state.namespaces, entry.schemaGroup) : undefined;
       out[kind]![name] = entry ? (ns ? entryWithNamespace(entry, ns.iri) : entry).schema : def;
     }
   }
@@ -195,7 +202,10 @@ export function effectiveLibraryEntries(): ParsedLibraryEntry[] {
   const key = `${JSON.stringify(namespaces)}|${library.map(e => `${e.name}@${String(e.updatedAt ?? '')}`).join('|')}`;
   if (memo && memo.library === library && memo.key === key) return memo.out;
   unusableNamespaces();
-  const out = library.map(e => (e.schemaGroup && namespaces[e.schemaGroup] ? entryWithNamespace(e, namespaces[e.schemaGroup]!.iri) : e));
+  const out = library.map((e) => {
+    const ns = e.schemaGroup ? namespaceOfGroup(namespaces, e.schemaGroup) : undefined;
+    return ns ? entryWithNamespace(e, ns.iri) : e;
+  });
   memo = { library, key, out };
   return out;
 }
