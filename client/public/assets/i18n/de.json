@@ -1942,6 +1942,8 @@
   "schemaLib.namespace.removeRebaseMessage": "Spaces mit eingeschalteten RDF-Namen verknüpfen diese Gruppe. Das Entfernen des Namensraums benennt ihre Begriffe um, und ihre Exporte verwenden ab jetzt die neuen Namen.",
   "schemaLib.namespace.refusal.rdf_term_rename": "Damit werden die RDF-Begriffe von {{spaces}} umbenannt. Wählen Sie das bewusste Umbenennen, um fortzufahren.",
   "schemaLib.namespace.refusal.rdf_term_clash": "In {{space}} hätten {{terms}} dieselbe Adresse {{iri}}. Wählen Sie einen anderen Namensraum oder geben Sie einem der Begriffe eine eigene Adresse.",
+  "schemaLib.namespace.refusal.field.iri": "Verwenden Sie eine absolute Adresse, die auf / endet und kein # enthält, zum Beispiel https://example.org/ns/",
+  "schemaLib.namespace.refusal.field.prefix": "Ein Präfix beginnt mit einem Buchstaben und enthält danach nur Buchstaben, Ziffern, _ oder -, höchstens 50 Zeichen. Reservierte Präfixe wie rdf, owl, xsd oder http sind nicht erlaubt.",
   "schemaLib.namespace.refusal.namespace_prefix_taken": "Eine andere Schema-Gruppe verwendet dieses Präfix bereits.",
   "schemaLib.namespace.refusal.group_not_found": "Diese Schema-Gruppe hat keine Einträge mehr.",
   "schemaLib.namespace.refusal.namespace_not_found": "Diese Schema-Gruppe hat keinen Namensraum.",

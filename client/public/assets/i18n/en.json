@@ -1942,6 +1942,8 @@
   "schemaLib.namespace.removeRebaseMessage": "Spaces with RDF names switched on link this group. Removing the namespace renames their terms, and their exports use the new names from now on.",
   "schemaLib.namespace.refusal.rdf_term_rename": "This renames the RDF terms of {{spaces}}. Choose to rename them on purpose to go ahead.",
   "schemaLib.namespace.refusal.rdf_term_clash": "In {{space}}, {{terms}} would share the address {{iri}}. Choose another namespace, or give one of the terms an address of its own.",
+  "schemaLib.namespace.refusal.field.iri": "Use an absolute address that ends in / and holds no #, for example https://example.org/ns/",
+  "schemaLib.namespace.refusal.field.prefix": "A prefix starts with a letter, then holds only letters, digits, _ or -, at most 50 characters. Reserved prefixes such as rdf, owl, xsd or http are not allowed.",
   "schemaLib.namespace.refusal.namespace_prefix_taken": "Another schema group already uses this prefix.",
   "schemaLib.namespace.refusal.group_not_found": "This schema group has no entries any more.",
   "schemaLib.namespace.refusal.namespace_not_found": "This schema group has no namespace.",

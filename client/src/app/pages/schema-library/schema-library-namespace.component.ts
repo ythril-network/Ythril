@@ -7,10 +7,13 @@
  * A namespace names the RDF terms of every space that links a group's schemas, so changing it is a rename those spaces' exports carry from then
  * on. The server refuses that without `rebase` (`rdf_term_rename`, naming the spaces) and refuses a namespace that would give two terms one
  * address (`rdf_term_clash`, naming both terms). This view says each in the reader's language and offers the one choice the first allows:
- * make the rename on purpose. It never retries with `rebase` on its own.
+ * make the rename on purpose. It never retries with `rebase` on its own. A 400 for the prefix or the address (the validator's refusal, which
+ * names the field and says its reason in English) is worded from the field, in the same language; the server's sentence is its title.
  *
  * Its own component because the library page (`schema-library.component.ts`) is at its size ceiling; the page hosts it on the library tab.
- * Every act has its in-flight, failed and empty state; a draft is held as unsaved edits; a removal asks first.
+ * Every act has its in-flight, failed and empty state; a draft is held as unsaved edits; a removal asks first. The empty state ("no schema
+ * group yet") is reachable though the page draws this card only while an entry has a group: the card reads the groups itself, and its read
+ * can disagree with the page's (a group removed elsewhere since the page loaded, Retry after a failed read).
  */
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -39,6 +42,8 @@ interface NamespaceDraft {
   openedWith: { prefix: string; iri: string };
   saving: boolean;
   error: string;
+  /** The server's own sentence when `error` is worded from the answer's code or field, '' when `error` already is it: the error's title. */
+  errorDetail: string;
   /** The server refused the write as a rename of linked terms: the operator may make it on purpose. */
   renameRefused: boolean;
   rebase: boolean;
@@ -109,7 +114,7 @@ interface NamespaceDraft {
                   <input type="text" [id]="'ns-iri-' + g.name" name="iri" [ngModel]="draft()!.iri" (ngModelChange)="patch({ iri: $event })" maxlength="2000" autocomplete="off" required />
                   <p class="ns-hint">{{ 'schemaLib.namespace.iriHint' | transloco }}</p>
                 </div>
-                @if (draft()!.error) { <p class="ns-error" role="alert">{{ draft()!.error }}</p> }
+                @if (draft()!.error) { <p class="ns-error" role="alert" [attr.title]="draft()!.errorDetail || null">{{ draft()!.error }}</p> }
                 @if (draft()!.renameRefused) {
                   <label class="ns-rebase">
                     <input type="checkbox" name="rebase" [ngModel]="draft()!.rebase" (ngModelChange)="patch({ rebase: $event })" />
@@ -170,7 +175,7 @@ export class SchemaLibraryNamespaceComponent implements OnInit {
   open(g: SchemaLibraryGroup): void {
     const prefix = g.namespace?.prefix ?? '';
     const iri = g.namespace?.iri ?? '';
-    this.draft.set({ group: g.name, prefix, iri, openedWith: { prefix, iri }, saving: false, error: '', renameRefused: false, rebase: false });
+    this.draft.set({ group: g.name, prefix, iri, openedWith: { prefix, iri }, saving: false, error: '', errorDetail: '', renameRefused: false, rebase: false });
   }
 
   /** Change fields of the draft through its signal (the client is zoneless: an in-place edit is a change nothing sees). */
@@ -187,7 +192,7 @@ export class SchemaLibraryNamespaceComponent implements OnInit {
   save(): void {
     const d = this.draft();
     if (!d || d.saving) return;
-    this.draft.set({ ...d, saving: true, error: '' });
+    this.draft.set({ ...d, saving: true, error: '', errorDetail: '' });
     const body = { prefix: d.prefix.trim(), iri: d.iri.trim(), ...(d.rebase ? { rebase: true as const } : {}) };
     this.schemaApi.setGroupNamespace(d.group, body).subscribe({
       next: (r) => {
@@ -199,9 +204,11 @@ export class SchemaLibraryNamespaceComponent implements OnInit {
         const current = this.draft();
         if (!current) return;
         const renameRefused = answerCode(err) === 'rdf_term_rename';
+        const error = refusalText(this.transloco, err, `${WORDS}saveFailed`, NAMESPACE_REFUSAL_PREFIX);
+        const server = httpErrorReason(err);
         this.draft.set({
           ...current, saving: false, renameRefused: current.renameRefused || renameRefused,
-          error: refusalText(this.transloco, err, `${WORDS}saveFailed`, NAMESPACE_REFUSAL_PREFIX),
+          error, errorDetail: server !== error ? server : '',
         });
       },
     });
