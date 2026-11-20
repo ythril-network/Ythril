@@ -146,6 +146,33 @@ describe('a passed meta_change round is applied while an RDF import stands on it
   });
 });
 
+describe('tail T6: a passed round whose apply keeps failing', () => {
+  it('is retried at each settle, ends on this member as the round of a vote it already cast, and the change still arrives as a layer by sync', async () => {
+    const round = roundOf({ here: false });
+    await boot({ round });
+    governance.setMetaChangeApplyHookForTest(() => { throw new Error('planted: the apply fails every time'); });
+    try {
+      for (let i = 0; i < 3; i += 1) {
+        const out = settleNow(roundNow(round.roundId));
+        assert.equal(out.failed.length, 1, `settle ${i}: the failure is told to the settle each time (retried, not given up)`);
+        assert.equal(roundNow(round.roundId).concluded, false, `settle ${i}: the round stays open for the next settle`);
+      }
+      assert.equal(spaceNow().meta.purpose, 'the purpose before', 'nothing was applied');
+      // Past the deadline the member ends it (nothing is retried for ever): what the round and its log then say of it.
+      const late = settle.settleRounds(netNow(), loader.getConfig(), [roundNow(round.roundId)], 'tick', Date.parse(round.deadline) + 60_000);
+      const ended = roundNow(round.roundId);
+      assert.equal(ended.concluded, true, `the round ends at its deadline (${late.failed.length} failure(s) told)`);
+      assert.equal(spaceNow().meta.purpose, 'the purpose before', 'still not applied by the round');
+      assert.equal(netNow().roundOutcomes.filter(e => e.roundId === round.roundId).length, 1, 'the log records it once');
+      // What the other members hold is their own state: a round the vote carried, applied by each of them. This member still gets the schema
+      // the network decided as the layer the meta pull stores, which is a write the failing apply does not run.
+      governance.setMetaChangeApplyHookForTest(null);
+      assert.equal(pull.acceptNetworkLayer(NET, SPACE, { purpose: 'the purpose the network chose' }, P1), true, 'the layer is accepted');
+      assert.equal(spaceNow().meta.purpose, 'the purpose the network chose', 'the member holds the network\'s schema through the layer');
+    } finally { governance.setMetaChangeApplyHookForTest(null); }
+  });
+});
+
 describe('the other things a network decides are applied while an RDF import stands', () => {
   it('a layer arriving by sync is stored and becomes the space\'s schema', async () => {
     await boot({});
