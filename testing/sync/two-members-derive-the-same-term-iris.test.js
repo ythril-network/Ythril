@@ -27,7 +27,15 @@ const SCHEMA = {
 };
 let tokenA, tokenB, net, termIri;
 
-const metaOf = async (base, token) => ((await get(base, token, `/api/spaces/${SPACE}`)).body?.space ?? {}).meta ?? {};
+// The served meta read (`GET /api/spaces/:id/meta`, the meta's keys at the top of its answer): no route serves `GET /api/spaces/:id`, and
+// reading it gave every case an empty meta (a-test-asks-only-for-routes-the-server-serves).
+const metaOf = async (base, token) => {
+  const r = await get(base, token, `/api/spaces/${SPACE}/meta`);
+  assert.equal(r.status, 200, `the meta read answered ${r.status}`);
+  return r.body;
+};
+/** The base conflict B records beside the network, as the server keeps it (the meta answer carries none). */
+const recordedConflictOnB = () => readContainerConfig('ythril-b').networks?.find(n => n.id === net.networkId)?.rdfBaseConflicts?.[SPACE];
 const syncBoth = async () => {
   await post(INSTANCES.b, tokenB, `/api/networks/${net.networkId}/sync?wait=true`, {}).catch(() => {});
   await post(INSTANCES.a, tokenA, `/api/networks/${net.networkId}/sync?wait=true`, {}).catch(() => {});
@@ -93,7 +101,7 @@ describe('two members derive the same term IRIs', () => {
     const [a, b] = [await metaOf(INSTANCES.a, tokenA), await metaOf(INSTANCES.b, tokenB)];
     assert.equal(a.rdf?.base, BASE);
     assert.equal(b.rdf?.base, BASE);
-    assert.equal(b.rdfBaseConflict, undefined, 'no conflict is recorded where the members agree');
+    assert.equal(recordedConflictOnB(), undefined, 'no conflict is recorded where the members agree');
   });
 
   it('a member that missed a rebase is told through the served rdfBases, and its admin accepts the base (owner, 2026-11-19)', async () => {

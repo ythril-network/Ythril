@@ -28,7 +28,13 @@ const NEW = `https://new.example.org/ld/${SPACE}/`;
 const LANDS_WITHIN_MS = 150_000;
 let tokenA, tokenB, net, roundId;
 
-const metaOf = async (base, token) => ((await get(base, token, `/api/spaces/${SPACE}`)).body?.space ?? {}).meta ?? {};
+// The served meta read (`GET /api/spaces/:id/meta`, the meta's keys at the top of its answer): no route serves `GET /api/spaces/:id`, and
+// reading it gave every case an empty meta (a-test-asks-only-for-routes-the-server-serves).
+const metaOf = async (base, token) => {
+  const r = await get(base, token, `/api/spaces/${SPACE}/meta`);
+  assert.equal(r.status, 200, `the meta read answered ${r.status}`);
+  return r.body;
+};
 const rebaseAudits = async (base, token) => ((await get(base, token, `/api/admin/audit-log?operation=space.rdf_rebase&limit=50`)).body?.entries ?? [])
   .filter(e => e.spaceId === SPACE);
 const syncBoth = async () => {
@@ -82,7 +88,8 @@ describe('a member that leaves before a rebase keeps its base', () => {
     assert.equal((await rebaseAudits(INSTANCES.a, tokenA)).length, 1, 'A writes one space.rdf_rebase entry');
     const b = await metaOf(INSTANCES.b, tokenB);
     assert.deepEqual(b.rdf, { enabled: true, base: OLD, vocab: `${OLD}vocab/`, baseEpoch: 0 }, 'the member that left lost its base');
-    assert.equal(b.rdfBaseConflict, undefined);
+    // The meta answer carries no conflict; what B records is in its config, beside a network it no longer holds.
+    assert.equal(readContainerConfig('ythril-b').networks?.find(n => n.id === net.networkId), undefined, 'B still holds the network it left');
     assert.equal((await rebaseAudits(INSTANCES.b, tokenB)).length, 0);
   });
 });
