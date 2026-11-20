@@ -280,6 +280,12 @@ not told by the sync. So the write itself says it:
 `networks: read` on the networks that carry the space; any other caller gets `keys`, `memberCount` and no names. The
 write is applied regardless. Upgrade every instance of the network ([Upgrading](02b-upgrading.md)).
 
+**A rebase proposal says it too.** `rdf.rebase: true` on a space in a network opens a `space_rebase` round
+([the rebase vote](08-networks-api.md#the-rebase-vote-space_rebase)), which only release 6.6.0 and later read: an older member
+neither votes on it nor applies it. The `202 vote_pending` answer (REST) and the structured content (MCP) then carry a row of
+the same shape with the code `members_may_not_read_round`, `keys: ["space_rebase"]` and `since: "6.6.0"`; `members` is shown on
+the same terms. The round is open regardless.
+
 ### Schema versions
 
 ```http

@@ -54,8 +54,10 @@ export const NEW_TYPE_FIELDS: Readonly<Record<string, string>> = Object.freeze({
 export interface MemberSkew {
   /** The release that reads these keys. */
   since: string;
-  /** The keys the write sets: a top-level name, or `typeSchemas.<kind>.<type>.<field>` for a type's field. Bounded. */
+  /** The keys the write sets: a top-level name, or `typeSchemas.<kind>.<type>.<field>` for a type's field. Bounded. For a round, its type. */
   keys: string[];
+  /** Set when the write opens a vote round an earlier release cannot read, not when it sets a key: the type of that round. */
+  round?: string;
   /** The labels of the members not known to run `since` or later. Whether a caller may be shown them is the caller's question. */
   members: Array<{ label: string; networkId: string; neverHeardFrom: boolean }>;
 }
@@ -90,16 +92,43 @@ function newKeysSet(proposal: SpaceMeta | undefined): Map<string, string[]> {
 export function membersBehindNewKeys(proposal: SpaceMeta | undefined, networks: readonly Pick<NetworkConfig, 'id' | 'members'>[]): MemberSkew[] {
   const out: MemberSkew[] = [];
   for (const [since, keys] of newKeysSet(proposal)) {
-    const behind = new Map<string, MemberSkew['members'][number]>();
-    for (const net of networks) {
-      for (const member of net.members as readonly NetworkMember[]) {
-        if (peerRunsAtLeast(member, since) || behind.has(member.instanceId)) continue;
-        // Never exchanged with (`versionCheckedAt` unset) is a different thing from a peer that answered and named a version below
-        // `since`: the first may be current and just not heard from, the second is not. Both are named; the answer says which.
-        behind.set(member.instanceId, { label: member.label, networkId: net.id, neverHeardFrom: !member.versionCheckedAt });
-      }
-    }
-    if (behind.size > 0) out.push({ since, keys: boundedNames(keys), members: [...behind.values()] });
+    const members = membersBelow(since, networks);
+    if (members.length > 0) out.push({ since, keys: boundedNames(keys), members });
   }
   return out;
+}
+
+/** The members of `networks`, once each, that are not known to run `since` or later, as a {@link MemberSkew} names them. */
+function membersBelow(since: string, networks: readonly Pick<NetworkConfig, 'id' | 'members'>[]): MemberSkew['members'] {
+  const behind = new Map<string, MemberSkew['members'][number]>();
+  for (const net of networks) {
+    for (const member of net.members as readonly NetworkMember[]) {
+      if (peerRunsAtLeast(member, since) || behind.has(member.instanceId)) continue;
+      // Never exchanged with (`versionCheckedAt` unset) is a different thing from a peer that answered and named a version below
+      // `since`: the first may be current and just not heard from, the second is not. Both are named; the answer says which.
+      behind.set(member.instanceId, { label: member.label, networkId: net.id, neverHeardFrom: !member.versionCheckedAt });
+    }
+  }
+  return [...behind.values()];
+}
+
+/**
+ * The first release that reads each kind of vote round the previous release does not know (Q-748, lens finding 10). A member below it
+ * neither votes on such a round nor applies it, so on a closed or braintree network it cannot pass until the member upgrades, and on a
+ * democratic one the member's missing yes counts against the majority.
+ */
+export const NEW_ROUND_TYPES: Readonly<Record<string, string>> = Object.freeze({
+  space_rebase: '6.6.0',
+});
+
+/**
+ * The members of `networks` (the networks a proposal opens a round of `roundType` on) that are not known to read that round: one entry
+ * naming the round type, none when the type is older than every member's release, or no member is behind. As {@link membersBehindNewKeys}
+ * for a key, so a round proposal and a key write warn alike, from the one question of who is below a release.
+ */
+export function membersBehindRoundType(roundType: string, networks: readonly Pick<NetworkConfig, 'id' | 'members'>[]): MemberSkew[] {
+  if (!Object.hasOwn(NEW_ROUND_TYPES, roundType)) return [];
+  const since = NEW_ROUND_TYPES[roundType]!;
+  const members = membersBelow(since, networks);
+  return members.length > 0 ? [{ since, keys: [roundType], round: roundType, members }] : [];
 }

@@ -48,7 +48,8 @@ describe('a rebase proposal names the members that cannot read the round', { ski
   before(async () => {
     await openTestMongo('rdf_rebase_skew');
     inst = await bootSchemaInstance(dir, { spaces: [{ id: SPACE, label: 'Shared', folders: [], meta: { rdf: OLD } }], networks: [network([])] });
-    ({ SERVER_VERSION: current } = await import('../../server/dist/util/server-version.js'));
+    // A member that runs the release that reads the round: the build's own version is the 6.5.x before it ships, so the release is named.
+    current = '6.6.0';
   });
   after(async () => {
     inst?.close();
