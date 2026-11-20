@@ -30,6 +30,7 @@ import { CHOSEN_VERSION_ROWS } from '../chosen-versions.js';
 import { refuseForkEdit } from '../forks.js';
 import { SubjectEdges, functionalSubjectKey } from '../functional-subject.js';
 import { inChunks } from '../../util/chunks.js';
+import { RequestRefusal } from '../../util/errors.js';
 import { missingRefs } from '../entity-refs.js';
 import { RECORD_COLLECTION, REF_KINDS, type RefKind } from '../../config/types-knowledge.js';
 import type { EdgeDoc, LinkDoc } from '../../config/types.js';
@@ -75,6 +76,8 @@ export interface SeedRecord { readonly _id: string; readonly type?: string | nul
 
 /** Per read, at most this many `$or` clauses (a by-id read is chunked by its reader). Well under every bound the probe measured. */
 const CHUNK = 500;
+/** The link rows one owner may hold, as every link writer holds it: the per-class cap in each class. */
+const LINK_ROWS_PER_OWNER = MAX_LINKS_PER_KIND * REF_KINDS.length;
 
 /** A triplet's key is the edge's own id — an end stated as `entity` and one left unstated are one key. */
 export const tripletKey = (t: Triplet) => edgeIdFor(t.from, t.to, t.label, t.fromKind, t.toKind);
@@ -128,6 +131,8 @@ export class ReadSet {
   private readonly seededIds = new Map<SeedKind, Set<string>>();
   /** Per record (`linkOwnerKey`): its stored link rows' ends, by end kind — for the records `ReadWant.links` named. */
   private readonly linkRows = new Map<string, Map<RefKind, string[]>>();
+  /** The owners (`linkOwnerKey`) that hold more link rows than {@link LINK_ROWS_PER_OWNER}: their links are not held, and asking for them is refused. */
+  private readonly overLinked = new Set<string>();
 
   constructor(readonly spaceId: string, private readonly read: RecordsById = readRecordsById) {}
 
@@ -201,19 +206,33 @@ export class ReadSet {
     const ownersWanted = [...new Map((want.links ?? []).map(o => [linkOwnerKey(o.fromKind, o.id), o])).values()]
       .filter(o => !this.linkRows.has(linkOwnerKey(o.fromKind, o.id)) && !this.mintedIds.has(o.id));
     const links = () => col<LinkDoc>(spaceCollection(this.spaceId, 'links'));
-    for (const chunk of inChunks(ownersWanted, CHUNK)) {
-      // Bounded by its owners: each holds at most MAX_LINKS_PER_KIND rows per class, the bound every link writer refuses past.
-      const found = await links().find(asFilter<LinkDoc>({
-        spaceId: this.spaceId, $or: chunk.map(o => ({ from: o.id, fromKind: o.fromKind })),
-      } as never), { projection: { _id: 0, from: 1, fromKind: 1, to: 1, toKind: 1 } })
-        .limit(chunk.length * MAX_LINKS_PER_KIND * REF_KINDS.length).toArray() as Array<Pick<LinkDoc, 'from' | 'fromKind' | 'to' | 'toKind'>>;
-      for (const o of chunk) this.linkRows.set(linkOwnerKey(o.fromKind, o.id), new Map());
-      for (const row of found) {
+    type Row = Pick<LinkDoc, 'from' | 'fromKind' | 'to' | 'toKind'>;
+    const projection = { _id: 0, from: 1, fromKind: 1, to: 1, toKind: 1 };
+    const fill = (rows: readonly Row[]): void => {
+      for (const row of rows) {
         const held = this.linkRows.get(linkOwnerKey(row.fromKind, row.from));
         if (!held) continue;
         const ends = held.get(row.toKind);
         if (ends) ends.push(row.to);
         else held.set(row.toKind, [row.to]);
+      }
+    };
+    for (const chunk of inChunks(ownersWanted, CHUNK)) {
+      // Bounded by its owners: each holds at most MAX_LINKS_PER_KIND rows per class, the bound every link writer refuses past.
+      const limit = chunk.length * LINK_ROWS_PER_OWNER;
+      const found = await links().find(asFilter<LinkDoc>({
+        spaceId: this.spaceId, $or: chunk.map(o => ({ from: o.id, fromKind: o.fromKind })),
+      } as never), { projection }).limit(limit).toArray() as Row[];
+      for (const o of chunk) this.linkRows.set(linkOwnerKey(o.fromKind, o.id), new Map());
+      if (found.length < limit) { fill(found); continue; }
+      // The chunk's limit was reached, so some owner may hold more than its share (rows that arrived by sync are not held to the cap) and
+      // may have crowded another's rows out of the one limit. Read each owner under its own: an owner within its bound is read whole, one
+      // over it is marked, and is never answered with the part of its links that happened to fit (`storedLinks`).
+      for (const o of chunk) {
+        const own = await links().find(asFilter<LinkDoc>({ spaceId: this.spaceId, from: o.id, fromKind: o.fromKind } as never), { projection })
+          .limit(LINK_ROWS_PER_OWNER + 1).toArray() as Row[];
+        if (own.length > LINK_ROWS_PER_OWNER) this.overLinked.add(linkOwnerKey(o.fromKind, o.id));
+        else fill(own);
       }
     }
   }
@@ -245,6 +264,18 @@ export class ReadSet {
     }
   }
 
+  /**
+   * Take back a seed: the record the import brought will not be written (the dry plan refused it), so an edge or a link planned afterwards
+   * finds it absent, as the commit will. A record that is no longer only seeded (planned) or never was is left as it is, and `false` is
+   * answered. The id stays one this import minted: nothing stored can be an edge from it, whether or not it is written.
+   */
+  unseed(kind: SeedKind, id: string): boolean {
+    if (!this.seeded(kind, id)) return false;
+    this.seededIds.get(kind)!.delete(id);
+    this.recordsOf(kind).set(id, null);
+    return true;
+  }
+
   /** Whether `id` is a record only the import brings, not yet planned (`seed`). */
   seeded(kind: SeedKind, id: string): boolean {
     return this.seededIds.get(kind)?.has(id) === true;
@@ -256,6 +287,9 @@ export class ReadSet {
    */
   storedLinks(fromKind: RefKind, id: string): DesiredLinks {
     if (this.mintedIds.has(id) && !this.linkRows.has(linkOwnerKey(fromKind, id))) return {};
+    if (this.overLinked.has(linkOwnerKey(fromKind, id))) {
+      throw new RequestRefusal(`the ${fromKind} '${id}' holds more links than an import reads (${LINK_ROWS_PER_OWNER}), so what it holds cannot be known whole and nothing can be converged onto it without taking links away`);
+    }
     const held = this.linkRows.get(linkOwnerKey(fromKind, id));
     if (!held) throw new Error(`read set: the links of ${fromKind} '${id}' were asked about but never loaded`);
     return Object.fromEntries(held) as DesiredLinks;

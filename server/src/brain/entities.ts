@@ -30,7 +30,7 @@ import { CHOSEN_VERSION_ROWS } from './chosen-versions.js';
 import { edgeEndsAt } from './edge-ends-of-record.js';
 import { unstampEdgesOfRetypedEntity } from './retyped-entity-edges.js';
 import { planEntity, entityWant, type EntityInput } from './write-plan/plan-entity.js';
-import { planAndCommitOne } from './write-plan/plan-and-commit.js';
+import { planAndCommitOne, refuseOversizeRecord } from './write-plan/plan-and-commit.js';
 import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /** An item that references a given entity, and — for an edge — which of its ends does. */
@@ -136,6 +136,7 @@ export async function upsertEntity(
    * against a read set; the write is the commit's. A batch asks for the same plans in bulk (`Q-99` part 3).
    */
   const input: EntityInput = { name, type, tags, properties, description, id, opts, ttlDays, onValidation };
+  refuseOversizeRecord({ kind: 'entity', input });
   // Refused before the plan pays for an embedding; the commit asks again per stage, for a write admitted just before an act registers.
   assertSpaceTakesWrites(spaceId, 'entities');
   const done = await planAndCommitOne(spaceId, entityWant(input), view => planEntity(spaceId, input, view));

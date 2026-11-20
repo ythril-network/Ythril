@@ -531,6 +531,15 @@ function edgeOp(L: Ledger, subject: Subject, graph: string | null, classLabel: s
   if ('file' in from || 'file' in to) { L.skipRest('file'); return null; }
   if ('code' in from) { L.rest(from.code); return null; }
   if ('code' in to) { L.rest(to.code); return null; }
+  // An edge's address names ONE stored edge, and the planner keys an edge by its triplet: a statement of other ends or another label would
+  // converge onto the address and write a NEW edge carrying the stored one's values (review F3). The address and the statement must agree.
+  const addressed = (subject.address?.of === 'space' ? ctx.stored.get(recordKey('edge', subject.address.id))?.doc : undefined) as
+    { from?: unknown; to?: unknown; label?: unknown; fromKind?: unknown; toKind?: unknown } | undefined;
+  // (A stored edge always states its ends; a context row that does not is a partial one and there is nothing to compare it with.)
+  if (addressed?.from !== undefined && !(addressed.from === from.ref.id && addressed.to === to.ref.id && addressed.label === label)) {
+    L.rest('contradicting-kind');
+    return null;
+  }
   [...settling, ...quads.filter(q => STATEMENT_PARTS.has(q.predicate.value))].forEach(q => L.take(q));
   const read = readFields(L, 'edge', label, L.open(quads), ctx);
   read.fields = { ...read.fields, from: from.ref.id, fromKind: from.ref.kind, to: to.ref.id, toKind: to.ref.kind, label };

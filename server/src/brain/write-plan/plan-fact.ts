@@ -96,6 +96,7 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet,
   const { suppressed, vector } = await vectorBeforeWrite({
     spaceId, kind: 'fact', existing, schemaKey: { type: type ?? existing?.type }, stated: opts?.suppressEmbeddings,
     wanted: opts?.waitForEmbedding === true || opts?.checkDuplicates === true || opts?.checkContradictions === true,
+    planMeta: trusted?.planMeta !== undefined ? write.meta : undefined,
     text: () => embedText,
   });
   const advisories = await neighbourAdvisories(spaceId, 'fact', vector, opts, { properties });

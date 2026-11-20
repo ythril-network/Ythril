@@ -112,11 +112,16 @@ export function suppressedAfterWrite(
   stored: Record<string, unknown> | null | undefined,
   typed: Record<string, unknown>,
   stated: boolean | undefined,
+  /**
+   * The meta the write judges with, when it is not the stored one: the plan schema an import proposes (`planMetaFor`), whose type tier decides
+   * for the record the import will leave (review F7). Omitted, the stored meta is read, as for every door.
+   */
+  meta?: ReturnType<typeof getSpaceMeta>,
 ): boolean {
   return embeddingSuppressedFor(spaceId, recordType, {
     ...typed,
     [RECORD_SUPPRESS_FIELD]: stated !== undefined ? stated : stored?.[RECORD_SUPPRESS_FIELD],
-  });
+  }, meta === undefined ? getSpaceMeta(spaceId) : meta);
 }
 
 /** Mongo fragment matching the records the record tier does NOT suppress. */

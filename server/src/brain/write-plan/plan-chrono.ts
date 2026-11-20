@@ -10,7 +10,9 @@ import { type ContradictionWarning } from '../insert-contradictions.js';
 import { chronoEmbedText } from '../embed-text.js';
 import { derivedFieldsForWrite } from '../derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
-import { applyPropertyDefaults } from '../../spaces/schema-validation.js';
+import { applyPropertyDefaults, getAllowedChronoTypes } from '../../spaces/schema-validation.js';
+import { chronoTypeError } from '../record-checks.js';
+import { RequestRefusal } from '../../util/errors.js';
 import { readMetaForWrite, stampOp, stampSetOf, stampUnsetOf } from '../../spaces/schema-stamp.js';
 import { classifyChronoUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
 import { mergeTags, mergeProperties, mergePropertiesOrKeep } from '../merge-fields.js';
@@ -81,6 +83,12 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   // THE SCHEMA IS ENFORCED HERE, against the merged record; defaults on insert only.
   // The meta and the schema stamp in ONE read (Q-736): the stamp names the schema this check judged with, never a later one.
   const write = readMetaForWrite(spaceId, trusted?.planMeta);
+  // A record built from a document (an import's trusted arguments) meets the allowlist the doors hold a create to, in every validation mode:
+  // the plan schema's chrono types when it defines any, else the built-in ones (review F2).
+  if (trusted) {
+    const typeRefusal = chronoTypeError(fields.type, getAllowedChronoTypes(write.meta));
+    if (typeRefusal) throw new RequestRefusal(typeRefusal);
+  }
   const withDefaults = existing
     ? fields.properties
     : applyPropertyDefaults(write.meta?.typeSchemas?.chrono?.[fields.type], fields.properties);
@@ -104,6 +112,7 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
   const { suppressed, vector } = await vectorBeforeWrite({
     spaceId, kind: 'chrono', existing, schemaKey: { type: fields.type }, stated: opts?.suppressEmbeddings,
     wanted: opts?.waitForEmbedding === true,
+    planMeta: trusted?.planMeta !== undefined ? write.meta : undefined,
     text: () => embedText,
   });
   // The vector and the text it was made from go in together or not at all (rule I, `derivedFieldsForWrite`).

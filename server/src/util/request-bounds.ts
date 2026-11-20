@@ -27,6 +27,8 @@
 
 /** Characters in a fact's `fact` — on every write door AND the sync door, which took any length until `Q-108`. */
 export const MAX_FACT_LENGTH = 50_000;
+/** The cap as every message spells it (`50 000`, a space between thousands), derived: the number is written once, here. */
+export const MAX_FACT_LENGTH_TEXT = String(MAX_FACT_LENGTH).replace(/\B(?=(\d{3})+$)/g, ' ');
 
 /** Tags on one record. The sync door's value since it existed — the write doors follow it, not the reverse. */
 export const MAX_TAGS = 100;
