@@ -39,7 +39,6 @@ const NOT_READ: Record<string, string> = {
   actLocalId: 'LOCAL: the local space id a deletion or wipe acts on here (bundle-106); the owed act is shown from `owedSpaceActs`, not the vote row',
   peersConcluded: 'LOCAL: which peers say they concluded the round, the evidence the exchange hold reads (bundle-106); machinery, not what a voter is asked about',
   convertOwed: 'LOCAL: this instance concluded the round and still owes its conversion run (bundle-284); machinery for the run, shown by the conversion status, not the vote row',
-  rebase: 'the new RDF base a space_rebase round carries (bundle-269); a voter must read it, and the vote row does not show it yet: the row declares the key when the RDF settings UI is built, and this entry then fails as stale',
 };
 
 /**
@@ -80,6 +79,15 @@ describe('the client reads the vote round the server serves', () => {
   it('the ignore list names only keys the server has and the client does not read — no stale reasons', () => {
     const stale = Object.keys(NOT_READ).filter(k => !serverKeys.includes(k) || clientKeys.includes(k));
     expect(stale, 'entries whose reason no longer describes a key').toEqual([]);
+  });
+
+  /**
+   * A `space_rebase` round moves a space's RDF base and with it every address the space gave out (bundle-269 lens finding 3): the voter
+   * must read the new base, so the key is neither ignored above nor folded away.
+   */
+  it('the base a space_rebase round moves to reaches the row: declared by both types', () => {
+    expect(clientKeys, '`ServerVoteRound` does not declare `rebase`').toContain('rebase');
+    expect(viewKeys, '`VoteRound` does not declare `rebase`: the row cannot show the base').toContain('rebase');
   });
 
   it('ServerVoteRound declares nothing the server does not send', () => {

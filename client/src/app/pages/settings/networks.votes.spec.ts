@@ -188,6 +188,64 @@ describe('the vote slice of the Networks page', () => {
   });
 
   /**
+   * A `space_rebase` round (bundle-269 lens finding 3): a voter is asked to approve moving a space's RDF base, which changes every address
+   * the space gave out. The row said "Change RDF base: notes (member-b)" and nothing of the base it moves to, because `voteRoundFromServer`
+   * copied only what it named. The round goes through the REAL `NetworksApi`, so the row sees only what the translation keeps.
+   */
+  describe('a space_rebase round', () => {
+    const REBASE = { base: 'https://new.example.org/ld/notes/', vocab: 'https://new.example.org/vocab/notes/', epoch: 3 };
+    const REBASE_ROUND = {
+      roundId: 'r4', type: 'space_rebase', subjectInstanceId: 'i-2', subjectLabel: 'member-b', spaceId: 'notes-in-the-network',
+      localSpaceId: 'team-notes', openedAt: '2026-10-08T10:00:00.000Z', deadline: '2026-10-09T10:00:00.000Z',
+      votes: [], summary: 'member-b proposes to change the RDF base of team-notes.', rebase: REBASE,
+    };
+    const lineOf = (f: ComponentFixture<NetworksComponent>): HTMLElement | null =>
+      f.nativeElement.querySelector('[data-testid="vote-rebase"]');
+
+    beforeEach(() => {
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        imports: [NetworksComponent, getTranslocoModule({ translation: { en: {
+          ...TRANSLATION,
+          'networks.network.votes.rebase': 'REBASE base={{base}} vocab={{vocab}} epoch={{epoch}}',
+        } } })],
+        providers: [
+          provideHttpClient(), provideHttpClientTesting(),
+          { provide: SpacesApi, useValue: { listSpaces: () => of({ spaces: [] }) } },
+          { provide: AdminApi, useValue: { getAbout: () => of({ publicUrl: '' }) } },
+          { provide: ConfirmDialogService, useValue: { confirm } },
+        ],
+      });
+      http = TestBed.inject(HttpTestingController);
+    });
+
+    it('shows the base it moves to, the vocabulary and the epoch beside the summary', () => {
+      const f = boot([REBASE_ROUND]);
+      const line = lineOf(f);
+      expect(line, 'the row of a rebase round shows nothing of the base it moves to').not.toBeNull();
+      expect(line!.textContent).toContain(`base=${REBASE.base}`);
+      expect(line!.textContent).toContain(`vocab=${REBASE.vocab}`);
+      expect(line!.textContent).toContain('epoch=3');
+      expect(rowOf(f).textContent, 'the proposer\'s summary is still shown').toContain('proposes to change the RDF base');
+    });
+
+    it('shows the base as text a peer wrote: markup in it is shown, never parsed', () => {
+      const evil = { base: 'https://x.example/<b>bold</b>/', vocab: 'https://x.example/<i>v</i>/', epoch: 2 };
+      const f = boot([{ ...REBASE_ROUND, rebase: evil }]);
+      expect(lineOf(f)!.textContent).toContain('<b>bold</b>');
+      expect(f.nativeElement.querySelector('.vote-row b'), 'a peer-authored base was parsed as HTML').toBeNull();
+    });
+
+    it('a round that carries no rebase, or a malformed one, shows no such line', () => {
+      expect(lineOf(boot([{ ...REBASE_ROUND, rebase: undefined }])), 'a line appeared for a round with no rebase').toBeNull();
+    });
+
+    it('a round of another type shows none', () => {
+      expect(lineOf(boot()), 'a line appeared in an ordinary round').toBeNull();
+    });
+  });
+
+  /**
    * A schema round that carries a conversion (bundle-285 S8, Q-940, drawing moment 4c): the member who votes reads the steps and this
    * instance's own counts under the proposer's summary. The round goes through the REAL `NetworksApi`, so the row only sees what
    * `voteRoundFromServer` copies: a field the translation drops would leave the row as it is today and every test of the block green.

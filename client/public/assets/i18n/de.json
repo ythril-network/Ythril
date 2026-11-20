@@ -2194,6 +2194,7 @@
   "networks.network.votes.opened": "Eröffnet",
   "networks.network.votes.yesAria": "Mit Ja stimmen: {{type}}: {{subject}}",
   "networks.network.votes.vetoAria": "Veto einlegen: {{type}}: {{subject}}",
+  "networks.network.votes.rebase": "Verschiebt die RDF-Basisadresse auf {{base}} (Vokabular {{vocab}}), Basiswechsel Nummer {{epoch}}. Jede Adresse, die dieser Space vergeben hat, ändert sich damit.",
   "networks.network.votes.recorded": "Die Stimme wurde erfasst.",
   "networks.network.votes.concluded": "{{type}}: {{subject}} — Ergebnis: {{outcome}}",
   "networks.network.votes.closed": "Die Abstimmung über {{type}}: {{subject}} endete am {{deadline}}. Die Stimme wurde nicht gezählt.",
