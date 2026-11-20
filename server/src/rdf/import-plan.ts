@@ -206,13 +206,16 @@ export class ImportCommitIncomplete extends Error {
  * Plan and commit one window of operations, in the store's order of kinds, against a fresh read of the store. Answers how many of the window's
  * operations inserted and how many converged; throws {@link ImportCommitIncomplete} when any did not land (nothing is reported landed then).
  */
-export async function commitWindow(spaceId: string, ops: readonly RecordOp[], minted: MintedEnds): Promise<{ inserted: number; converged: number }> {
+export async function commitWindow(
+  spaceId: string, ops: readonly RecordOp[], minted: MintedEnds, beforeCommitPlans?: () => unknown,
+): Promise<{ inserted: number; converged: number }> {
   const view = importReadSet(spaceId);
   await seedImported(view, ops, minted);
   const items = ops.map(op => opItem(spaceId, op));
   await view.load(mergeWants(items.map(i => i.want)));
   const plans: WritePlan[] = [];
   for (const item of items) plans.push((await item.plan(view)).plan);
+  await beforeCommitPlans?.();
   const outcomes = await commitPlans(spaceId, plans);
   const failed = outcomes.findIndex(o => !o.ok);
   // The outcome's own reason can quote a value of the record: it is never put in the sentence, which reaches the act's entry and the log.
