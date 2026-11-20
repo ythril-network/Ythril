@@ -22,6 +22,15 @@
  * the base commit at the doors, as the ticket's doneWhen asks; the database test pins the rest of the truth table.
  * Both the target and the last decoy are polled indexed first, so a half-ingested window cannot pass it.
  *
+ * ## One file, over the budget
+ *
+ * This file takes longer than the 60 s a file may, on purpose (bundle-356). Nearly all of its time is `before`: the rule needs the
+ * target ranked below more than the vector window (`max(FRESH_SCAN_CAP, WINDOW_FLOOR)` + 40 decoys, about 1040 records) through the real
+ * embedder, which has no cache, and the cases then run in well under a second. Fewer decoys would let the fresh-write scan or the vector
+ * window supply the target and the case would pass on the very defect it exists for; decoys without embeddings cannot outrank the target,
+ * so the positive control fails; a recall window floor lowered for the test stack is a product knob only tests use, and it is stack-wide.
+ * A cut that keeps the rule keeps the embeddings: the time is the rule's cost, not a wait.
+ *
  * FAILS rather than skips on CI when the embedder is unavailable — `requireEmbedding`.
  *
  * Run: node --test testing/integration/a-filtered-recall-never-misses-a-match-both-doors.test.js
