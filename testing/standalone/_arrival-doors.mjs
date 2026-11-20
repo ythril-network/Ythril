@@ -33,6 +33,73 @@ import { waitFor } from '../_shared/wait-for.mjs';
 export const ARRIVING_FAMILIES = Object.freeze(['entities', 'edges']);
 
 /**
+ * The spaces an arrival test starts, and which one a case takes (`take`).
+ *
+ * ## What it prevents
+ *
+ * A recording is SAID once per (space, peer) per window (`sync/arrival-recording.ts`, `sayRecordedTally`), and the pull door has one peer, so a
+ * second pull into the same space within the window writes no log line. A test that gave every pull case a space nobody had used started 26
+ * and 24 spaces (each a full `initSpace`) and spent two thirds of its time in the hook. But the window hides only the LINE: the sync history
+ * row of the cycle is written whatever the window decides (it carries the summary the recording returns), so a case that reads the history
+ * row, or any structured sink, never needed a space of its own. Only a case that reads the LOG LINES of a pull does, and it must ask for one
+ * (`take(..., { lines: true })`): a pull's lines read from a space an earlier pull wrote into throw (`completeLines`, the observation's
+ * `valueSinks`), so a case never passes over a line the window hid.
+ *
+ * ## What each space is
+ *
+ *  - shared, `shared` per mode: wiped by every `take` and used by every door, a pull included. A wipe does not reset the member's marks
+ *    (`lastPosReceived`); the fake peer's scripted page ignores them, so a page is served whatever the space last received.
+ *  - line-only, `lineOnly[mode]` per mode: the pull case that reads the lines takes the next one, once. Never wiped, never shared. A door
+ *    that names a new peer for every request (push) says its line every time, so it takes a shared space for such a case too.
+ *
+ * @param {object} o
+ * @param {string} o.prefix  every space id starts with this
+ * @param {readonly string[]} o.modes
+ * @param {number} o.shared  shared spaces per mode, taken in turn
+ * @param {Record<string, number>} o.lineOnly  line-only spaces per mode
+ */
+export function arrivalSpacePool({ prefix, modes, shared, lineOnly }) {
+  const ids = (kind, mode, n) => Array.from({ length: n }, (_, i) => `${prefix}${kind}${mode}${i}`);
+  const sharedOf = Object.fromEntries(modes.map(m => [m, ids('shared', m, shared)]));
+  const linesOf = Object.fromEntries(modes.map(m => [m, ids('lines', m, lineOnly[m] ?? 0)]));
+  const modeOfSpace = new Map(modes.flatMap(m => [...sharedOf[m], ...linesOf[m]].map(id => [id, m])));
+  const turn = Object.fromEntries(modes.map(m => [m, 0]));
+  const used = Object.fromEntries(modes.map(m => [m, 0]));
+  return {
+    /** Every space the door opens with. */
+    all: [...modeOfSpace.keys()],
+    /** The mode a space was made for. */
+    modeOf: (id) => modeOfSpace.get(id),
+    /**
+     * The space a case starts from: the mode's next shared space, wiped; or, for a case that reads the log lines of a door whose line the window
+     * can hide (`d.lineNeedsFreshSpace`), the mode's next line-only space.
+     * @param {{ wipe: (id: string) => Promise<void> }} door  the opened door
+     * @param {{ lineNeedsFreshSpace?: boolean }} d  the door's row of the table
+     * @param {string} mode
+     */
+    async take(door, d, mode, { lines = false } = {}) {
+      if (lines && d.lineNeedsFreshSpace) {
+        const id = linesOf[mode][used[mode]++];
+        assert.ok(id, `the ${mode} line-only spaces (${linesOf[mode].length}) ran out: enlarge lineOnly.${mode}`);
+        return id;
+      }
+      const id = sharedOf[mode][turn[mode]++ % shared];
+      await door.wipe(id);
+      return id;
+    },
+  };
+}
+
+/**
+ * The log lines of an observation, for a case whose subject is the lines. Throws for a pull taken in a space an earlier pull had written into:
+ * its window may have hidden the line, so a count of lines there would pass over nothing.
+ */
+export function completeLines(obs) {
+  assert.ok(obs.lineWindowOpen !== false, 'this pull went into a space an earlier pull wrote into: its once-per-window line may be hidden, so take a line-only space (take(..., { lines: true }))');
+  return obs.lines;
+}
+
+/**
  * @param {object} o
  * @param {string} o.peerPrefix  the instance id every push names its peer by (a new peer per request, so a once-per-window line never hides a second recording)
  */
@@ -43,6 +110,8 @@ export function arrivalHarness({ peerPrefix }) {
     /** @type {any} */ importMod: undefined,
     /** @type {any} */ log: undefined,
     pusher: 0,
+    /** The spaces a pull has written into, so a later pull there knows its line may be hidden by the window. */
+    pulledInto: new Set(),
     nextPeer: () => peerToken(`${peerPrefix}${++h.pusher}`),
 
     /** Open the pull door (a push door and a fake peer) and import the modules the doors drive. */
@@ -127,11 +196,19 @@ export function arrivalHarness({ peerPrefix }) {
         },
         pull: {
           perDocRows: false, counted: false,
+          // One peer: a second pull into a space within the window says no line, so a case that reads the lines needs a space no pull wrote into.
+          lineNeedsFreshSpace: true,
           async arrive(space, docs, beside = {}) {
+            const lineWindowOpen = !h.pulledInto.has(space);
+            h.pulledInto.add(space);
             h.door.state.records = { [space]: { ...beside, [family]: docs } };
             const { out, lines, history } = await h.cycle();
             assert.equal(out.errors, 0, `the pull cycle failed: ${JSON.stringify(out)} ${lines.join(' | ')}`);
-            return { rows: [], lines, history, batchCount: null, valueSinks: `${lines.join('\n')}\n${history}` };
+            return {
+              rows: [], lines, history, batchCount: null, lineWindowOpen,
+              // The value sinks include the lines: read where the window hid them, that read would pass over a value written into the line.
+              get valueSinks() { return `${completeLines(this).join('\n')}\n${history}`; },
+            };
           },
         },
         import: {

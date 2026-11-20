@@ -44,7 +44,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
-import { arrivalHarness } from './_arrival-doors.mjs';
+import { arrivalHarness, arrivalSpacePool } from './_arrival-doors.mjs';
 import { forkIdOf } from './_fork-kinds.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -67,31 +67,20 @@ const metaOf = (validationMode) => ({
   },
 });
 
-const POOL = { strict: 3, warn: 12, off: 3 };
+/*
+ * A space a case starts from (`arrivalSpacePool`, `_arrival-doors.mjs`): a shared one, wiped first, on every door. The recording is said
+ * once per (space, peer) per window and the pull has one peer, so a second pull into a space says no log line, but the sync history row of
+ * the cycle is written whatever the window decides; every case here reads the rows, the count or the history row (`recordedBy`), never the
+ * line alone, so none needs a space no pull wrote into (`lineOnly` is empty: a case that reads a pull's lines would have to ask for one).
+ */
 const SHARED = 2;
-const names = (prefix, n) => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
-const PULL_POOL = Object.fromEntries(MODES.map(m => [m, names(`aepull${m}`, POOL[m])]));
-const SHARED_POOL = Object.fromEntries(MODES.map(m => [m, names(`aeshared${m}`, SHARED)]));
-const ALL_SPACES = MODES.flatMap(m => [...PULL_POOL[m], ...SHARED_POOL[m]]);
-const META = Object.fromEntries(MODES.flatMap(m => [...PULL_POOL[m], ...SHARED_POOL[m]].map(id => [id, metaOf(m)])));
-const turn = { strict: 0, warn: 0, off: 0 };
-const pulled = { strict: 0, warn: 0, off: 0 };
+const pool = arrivalSpacePool({ prefix: 'ae', modes: MODES, shared: SHARED, lineOnly: {} });
+const ALL_SPACES = pool.all;
+const META = Object.fromEntries(ALL_SPACES.map(id => [id, metaOf(pool.modeOf(id))]));
 
 const harness = arrivalHarness({ peerPrefix: 'aerec-peer-' });
 const DOORS = harness.doors('edges');
 let door;
-
-/** A space a case starts from: a new one for a pull (a once-per-window line must not hide a second recording), a wiped shared one otherwise. */
-async function freshSpace(doorName, mode) {
-  if (doorName === 'pull') {
-    const id = PULL_POOL[mode][pulled[mode]++];
-    assert.ok(id, `the pull pool of ${POOL[mode]} ${mode} spaces ran out — enlarge POOL`);
-    return id;
-  }
-  const id = SHARED_POOL[mode][turn[mode]++ % SHARED];
-  await door.wipe(id);
-  return id;
-}
 
 /** Four entities every case may use: two people and two orgs. */
 const people = (space) => [build.entity(space, 'p1', 1, { type: 'person' }), build.entity(space, 'p2', 2, { type: 'person' })];
@@ -141,10 +130,10 @@ describe('an arriving edge is recorded against the endpoint and functional rules
 
   for (const [name, d] of Object.entries(DOORS)) {
     describe(name, () => {
-      const fresh = (mode) => freshSpace(name, mode);
+      const fresh = (mode) => pool.take(door, d, mode);
 
       it('the pools are in place, so the cases below do not pass over nothing', () => {
-        assert.ok(ALL_SPACES.length >= MODES.length * 3, 'the fresh spaces were not derived');
+        assert.ok(ALL_SPACES.length >= MODES.length * SHARED, 'the spaces were not derived');
         assert.ok(Object.values(META).every(m => m.typeSchemas.edge.worksAt.functional === true && m.typeSchemas.edge.worksAt.endpoints.from[0] === 'person'), 'a pool space lacks the rules');
       });
 

@@ -36,7 +36,9 @@
  *  - pull: no structured answer exists. The sinks are the sync history row of the cycle that pulled it and every log line the
  *    cycle wrote; a key is recorded if its NAME appears in either, which is what R6-9 promises ("sync history per space
  *    {records with violations, top keys/rules by count}", "one line per (space, peer) per window"), without fixing the
- *    spelling. A pull's repeated arrival is in a fresh space per case, so a warn-once window never hides a recording.
+ *    spelling. The line is said once per window, so a second pull into a space says none; the history row is written whatever
+ *    the window decides. A case reads the history row in a shared space; only the two cases about the lines of a pull ("once",
+ *    "names, never values") take a space no pull wrote into, which `_arrival-doors.mjs` makes them ask for.
  *
  * ## What the unchanged base does, stated so a green control is read as one
  *
@@ -54,7 +56,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
-import { arrivalHarness } from './_arrival-doors.mjs';
+import { arrivalHarness, arrivalSpacePool, completeLines } from './_arrival-doors.mjs';
 import { undeclaredKeySpaces, spaceOf, MODES, namesTheKey } from './_undeclared-key-doors.mjs';
 
 const skip = (await mongoSkipReason()) || privateAddressSkipReason();
@@ -63,31 +65,19 @@ const skip = (await mongoSkipReason()) || privateAddressSkipReason();
 const SECRET = 'SECRET-VALUE-9f3a';
 
 /*
- * A space a case can start from. A recording said once per (space, peer) per window would hide a second recording from a case
- * that reuses a space with a peer, and the PULL door has one peer: so a pull case takes a space nobody used before (PULL_POOL,
- * one per use). The push doors name a new peer for every request and the import answers its rows, so those take a shared space
- * in turn (SHARED_POOL) and wipe it first. The schema of every space is the shared fixture's, mode by mode.
+ * A space a case can start from (`arrivalSpacePool`, `_arrival-doors.mjs`). A recording is said once per (space, peer) per window and the
+ * PULL door has one peer, so a second pull into a space says no log line; but the sync history row of the cycle is written whatever the
+ * window decides. So every case takes a shared space, wiped first, and reads the structured sinks (the rows, the count, the history row),
+ * and only the two cases whose subject is the log lines of a pull — (4) "once" and (6) "names, never values" — take a line-only space
+ * no pull wrote into (`{ lines: true }`): `LINE_ONLY` is one for (4) and one per judging mode for (6). The schema of every space is the
+ * shared fixture's, mode by mode.
  */
-const PULL_POOL_SIZE = { strict: 3, warn: 10, off: 4 };
 const SHARED_SIZE = 3;
+const LINE_ONLY = { strict: 1, warn: 2, off: 0 };
 const SCHEMA_OF = Object.fromEntries(MODES.map(m => [m, undeclaredKeySpaces().find(s => s.id === spaceOf(m)).meta]));
-const names = (prefix, n) => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
-const PULL_POOL = Object.fromEntries(MODES.map(m => [m, names(`ukpull${m}`, PULL_POOL_SIZE[m])]));
-const SHARED_POOL = Object.fromEntries(MODES.map(m => [m, names(`ukshared${m}`, SHARED_SIZE)]));
-const ALL_SPACES = MODES.flatMap(m => [...PULL_POOL[m], ...SHARED_POOL[m]]);
-const META = Object.fromEntries(MODES.flatMap(m => [...PULL_POOL[m], ...SHARED_POOL[m]].map(id => [id, structuredClone(SCHEMA_OF[m])])));
-const turn = { strict: 0, warn: 0, off: 0 };
-const pulled = { strict: 0, warn: 0, off: 0 };
-async function freshSpace(doorName, mode) {
-  if (doorName === 'pull') {
-    const id = PULL_POOL[mode][pulled[mode]++];
-    assert.ok(id, `the pull pool of ${PULL_POOL_SIZE[mode]} ${mode} spaces ran out — enlarge PULL_POOL_SIZE`);
-    return id;
-  }
-  const id = SHARED_POOL[mode][turn[mode]++ % SHARED_SIZE];
-  await door.wipe(id);
-  return id;
-}
+const pool = arrivalSpacePool({ prefix: 'uk', modes: MODES, shared: SHARED_SIZE, lineOnly: LINE_ONLY });
+const ALL_SPACES = pool.all;
+const META = Object.fromEntries(ALL_SPACES.map(id => [id, structuredClone(SCHEMA_OF[pool.modeOf(id)])]));
 
 /** The four doors and what drives them are `_arrival-doors.mjs`'s, shared with every test of what an arrival records. */
 const harness = arrivalHarness({ peerPrefix: 'ukrec-peer-' });
@@ -127,9 +117,9 @@ describe('an arrival records an undeclared key once, and only what it added', { 
 
   for (const [name, d] of Object.entries(DOORS)) {
     describe(name, () => {
-      const fresh = (mode) => freshSpace(name, mode);
+      const fresh = (mode, o) => pool.take(door, d, mode, o);
       it('the pool is in place, so the cases below do not pass over nothing', () => {
-        assert.ok(ALL_SPACES.length >= MODES.length * 3, 'the fresh spaces were not derived');
+        assert.ok(ALL_SPACES.length >= MODES.length * 3, 'the spaces were not derived');
         assert.ok(Object.values(META).every(m => m.typeSchemas.entity.service.propertySchemas.status), 'a pool space lacks the declared property');
       });
 
@@ -147,17 +137,18 @@ describe('an arrival records an undeclared key once, and only what it added', { 
       for (const mode of ['strict', 'warn']) {
         it(`(1) a stored document carrying an undeclared key is RECORDED in a ${mode} space`, async () => {
           const space = await fresh(mode);
-          const obs = await d.arrive(space, [entity(space, 'e1', 5, keys('zzRecordedKey'))]);
+          const key = `zzRecordedKey${mode}`;   // a key only this case writes: a record an earlier case left in a shared space is never read as this one's
+          const obs = await d.arrive(space, [entity(space, 'e1', 5, keys(key))]);
           assert.ok((await storedOf(space)).has('e1'), 'the document was not stored');
-          assert.ok(recorded(obs, 'zzRecordedKey'),
+          assert.ok(recorded(obs, key),
             `the stored document's undeclared key was recorded nowhere on the ${name} door: rows ${JSON.stringify(obs.rows)}, `
             + `lines ${JSON.stringify(obs.lines.filter(l => !/Gossip|Vote|Schema from|File |sync cycle/i.test(l)))}, `
             + `history ${obs.history ?? '(none)'}`);
           if (d.perDocRows) {
-            const [row, ...more] = rowsNaming(obs, 'zzRecordedKey');
+            const [row, ...more] = rowsNaming(obs, key);
             assert.ok(row && more.length === 0, `expected one row for the key, got ${JSON.stringify(obs.rows)}`);
             assert.equal(row.id, 'e1', 'the row does not name the document');
-            assert.ok(namesTheKey(JSON.stringify(row), 'zzRecordedKey'), `the row does not say the key is not declared: ${JSON.stringify(row)}`);
+            assert.ok(namesTheKey(JSON.stringify(row), key), `the row does not say the key is not declared: ${JSON.stringify(row)}`);
           }
           if (d.counted) assert.equal(obs.batchCount, 1, 'the batch did not count the one recorded document');
         });
@@ -236,7 +227,7 @@ describe('an arrival records an undeclared key once, and only what it added', { 
       });
 
       it('(4) one arrival records each undeclared key once, and a clean document beside them records none', async () => {
-        const space = await fresh('warn');
+        const space = await fresh('warn', { lines: true });   // a line-only space on the pull: its subject is the lines
         const obs = await d.arrive(space, [
           entity(space, 'e1', 5, keys('zzOnceOne')),
           entity(space, 'e2', 5, keys('zzOnceTwo')),
@@ -245,7 +236,10 @@ describe('an arrival records an undeclared key once, and only what it added', { 
         assert.deepEqual(recordedOf(obs, ['zzOnceOne', 'zzOnceTwo']), ['zzOnceOne', 'zzOnceTwo'], 'a key of a stored document was not recorded');
         for (const key of ['zzOnceOne', 'zzOnceTwo']) {
           assert.ok(rowsNaming(obs, key).length <= 1, `'${key}' has ${rowsNaming(obs, key).length} rows: ${JSON.stringify(obs.rows)}`);
-          assert.ok(linesNaming(obs, key).length <= 1, `'${key}' is named by ${linesNaming(obs, key).length} log lines: ${JSON.stringify(linesNaming(obs, key))}`);
+          // A pull into a space no pull wrote into says its line, once: exactly one line names the key. A line missing would leave "at most one" green.
+          const named = (d.lineNeedsFreshSpace ? completeLines(obs) : obs.lines).filter(l => l.includes(key));
+          if (d.lineNeedsFreshSpace) assert.equal(named.length, 1, `'${key}' is named by ${named.length} log lines, not the one a first pull says: ${JSON.stringify(named)}`);
+          else assert.ok(named.length <= 1, `'${key}' is named by ${named.length} log lines: ${JSON.stringify(named)}`);
         }
         if (d.perDocRows) assert.ok(!obs.rows.some(r => r.id === 'e3'), 'the clean document was recorded');
         if (d.counted) assert.equal(obs.batchCount, 2, 'the batch counted other than the two documents that carry a key: a recount?');
@@ -253,8 +247,8 @@ describe('an arrival records an undeclared key once, and only what it added', { 
 
       it('(5, control) an off space stores the same arrival', async () => {
         const space = await fresh('off');
-        await d.arrive(space, [entity(space, 'e1', 5, keys('zzOffKey'))]);
-        assert.equal((await storedOf(space)).get('e1')?.properties?.zzOffKey, SECRET, 'the off space did not store the document');
+        await d.arrive(space, [entity(space, 'e1', 5, keys('zzOffStoredKey'))]);
+        assert.equal((await storedOf(space)).get('e1')?.properties?.zzOffStoredKey, SECRET, 'the off space did not store the document');
       });
 
       it('(5) an off space records nothing where a warn space records the same arrival', async () => {
@@ -279,9 +273,10 @@ describe('an arrival records an undeclared key once, and only what it added', { 
 
       it('(6) the sinks built for the record carry the key\'s NAME and never its VALUE', async () => {
         for (const mode of ['strict', 'warn']) {
-          const space = await fresh(mode);
-          const obs = await d.arrive(space, [entity(space, 'e1', 5, keys('zzSecretKey'))]);
-          assert.ok(recorded(obs, 'zzSecretKey'), `nothing recorded the key in the ${mode} space, so there is no sink to read for a value`);
+          const space = await fresh(mode, { lines: true });   // a line-only space on the pull: a value written into its line is what is looked for
+          const key = `zzSecretKey${mode}`;
+          const obs = await d.arrive(space, [entity(space, 'e1', 5, keys(key))]);
+          assert.ok(recorded(obs, key), `nothing recorded the key in the ${mode} space, so there is no sink to read for a value`);
           assert.ok(!obs.valueSinks.includes(SECRET), `a sink carries the VALUE of an undeclared key (${mode} space): ${obs.valueSinks.split('\n').filter(l => l.includes(SECRET)).join(' | ').slice(0, 400)}`);
         }
       });
