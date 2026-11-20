@@ -115,7 +115,9 @@ const gateJob = (i) => i.jobs.jobs.find((j) => j.name === GATE);
 const another = (over) => ({ ...clone(RUNS.workflow_runs[0]), ...over });
 
 describe('the recorded real responses (Full run 41895080392) are what the decision is shown', () => {
-  it('the fixtures are the real run: one run of full-run.yml for the head, 13 jobs, 13 artifacts, every list whole', () => {
+  // The artifact list is the recorded one with the Integration and Sync results under the names their shard jobs upload
+  // (bundle-356, Q-947: `test-results-<suite>-<shard>-<attempt>`); the rest is as GitHub answered.
+  it('the fixtures are the real run: one run of full-run.yml for the head, its jobs and artifacts, every list whole', () => {
     assert.equal(RUNS.total_count, RUNS.workflow_runs.length);
     assert.equal(JOBS.total_count, JOBS.jobs.length);
     assert.equal(ARTIFACTS.total_count, ARTIFACTS.artifacts.length);
@@ -202,12 +204,12 @@ const REFUSALS = [
   ['"Full run / Build & Test" failed in that attempt', (i) => { gateJob(i).conclusion = 'failure'; }, 'build-and-test-not-success', 'notice'],
   ['"Full run / Build & Test" was skipped', (i) => { gateJob(i).conclusion = 'skipped'; }, 'build-and-test-not-success', 'notice'],
   ['"Full run / Build & Test" is not among the jobs', (i) => { i.jobs.jobs = i.jobs.jobs.filter((j) => j.name !== GATE); i.jobs.total_count = i.jobs.jobs.length; }, 'build-and-test-not-success', 'notice'],
-  ['a results artifact was never uploaded', (i) => { i.artifacts.artifacts = i.artifacts.artifacts.filter((a) => a.name !== 'test-results-sync-1'); i.artifacts.total_count = i.artifacts.artifacts.length; }, 'artifact-missing', 'notice'],
+  ['a results artifact was never uploaded', (i) => { i.artifacts.artifacts = i.artifacts.artifacts.filter((a) => a.name !== 'test-results-sync-1-1');i.artifacts.total_count = i.artifacts.artifacts.length; }, 'artifact-missing', 'notice'],
   ['one database shard\'s results are missing (the set is derived from ci.yml, so a short list cannot read as whole)', (i) => { i.artifacts.artifacts = i.artifacts.artifacts.filter((a) => a.name !== 'test-results-standalone-db-3-1'); i.artifacts.total_count = i.artifacts.artifacts.length; }, 'artifact-missing', 'notice'],
   ['a results artifact expired', (i) => { i.artifacts.artifacts.find((a) => a.name === 'test-results-redteam-1').expired = true; }, 'artifact-expired', 'notice'],
   ['the runs page holds fewer runs than its total_count', (i) => { i.runs.total_count = 101; }, 'page-short', 'warning'],
   ['the jobs page holds fewer jobs than its total_count', (i) => { i.jobs.total_count = 14; }, 'page-short', 'warning'],
-  ['the artifacts page holds fewer artifacts than its total_count', (i) => { i.artifacts.total_count = 14; }, 'page-short', 'warning'],
+  ['the artifacts page holds fewer artifacts than its total_count', (i) => { i.artifacts.total_count = i.artifacts.artifacts.length + 1; }, 'page-short', 'warning'],
   ['the runs read failed (an API error)', (i) => { i.runs = { error: 'HTTP 403: Resource not accessible by integration' }; }, 'api-error', 'warning'],
   ['the jobs read failed', (i) => { i.jobs = { error: 'HTTP 502' }; }, 'api-error', 'warning'],
   ['the artifacts read failed', (i) => { i.artifacts = { error: 'HTTP 500' }; }, 'api-error', 'warning'],
@@ -255,9 +257,9 @@ describe('the results the decision expects are derived from ci.yml, never listed
 
   it('follows the workflow: a renamed results upload and a shorter shard matrix change what is expected', async () => {
     const { expectedResultsStems } = await reuse();
-    const renamed = ciText().replace('name: test-results-sync-${{ github.run_attempt }}', 'name: test-results-sync-two-${{ github.run_attempt }}');
+    const renamed = ciText().replace('name: test-results-sync-${{ matrix.shard }}-${{ github.run_attempt }}', 'name: test-results-sync-two-${{ matrix.shard }}-${{ github.run_attempt }}');
     assert.notEqual(renamed, ciText(), 'the mutation found nothing to rename: re-anchor this row');
-    assert.ok(expectedResultsStems(renamed).includes('sync-two') && !expectedResultsStems(renamed).includes('sync'));
+    assert.ok(expectedResultsStems(renamed).includes('sync-two-1') && !expectedResultsStems(renamed).includes('sync-1'));
     const shorter = ciText().replace('shard: [0, 1, 2, 3]', 'shard: [0, 1]');
     assert.notEqual(shorter, ciText(), 'the mutation found nothing to shorten: re-anchor this row');
     assert.deepEqual(expectedResultsStems(shorter).filter((s) => s.startsWith('standalone-db-')).sort(), ['standalone-db-0', 'standalone-db-1']);
@@ -265,7 +267,7 @@ describe('the results the decision expects are derived from ci.yml, never listed
 
   it('is the set a decision refuses a missing member of (a stem it does not expect is not required)', async () => {
     const { decideReuse } = await reuse();
-    const fewer = input((i) => { i.expected = i.expected.filter((s) => s !== 'sync'); i.artifacts.artifacts = i.artifacts.artifacts.filter((a) => a.name !== 'test-results-sync-1'); i.artifacts.total_count -= 1; });
+    const fewer = input((i) => { i.expected = i.expected.filter((s) => s !== 'sync-1'); i.artifacts.artifacts = i.artifacts.artifacts.filter((a) => a.name !== 'test-results-sync-1-1'); i.artifacts.total_count -= 1; });
     assert.equal(decideReuse(fewer).fullRun, `${RUN_ID}.1`);
   });
 });
@@ -337,8 +339,8 @@ describe('verifyReuse — the run the reuse job named is read again, and anythin
     ['the run is of another repository', { run: { ...RUNS.workflow_runs[0], head_repository: { full_name: 'someone/Ythril' } } }],
     ['the run is of another workflow file', { run: { ...RUNS.workflow_runs[0], path: '.github/workflows/ci.yml' } }],
     ['Build & Test of that attempt is not success', { jobs: { ...JOBS, jobs: JOBS.jobs.map((j) => (j.name === GATE ? { ...j, conclusion: 'failure' } : j)) } }],
-    ['a results artifact is gone at download', { artifacts: { total_count: 12, artifacts: ARTIFACTS.artifacts.filter((a) => a.name !== 'test-results-integration-1') } }],
-    ['a results artifact expired at download', { artifacts: { ...ARTIFACTS, artifacts: ARTIFACTS.artifacts.map((a) => (a.name === 'test-results-sync-1' ? { ...a, expired: true } : a)) } }],
+    ['a results artifact is gone at download', { artifacts: { total_count: ARTIFACTS.total_count - 1, artifacts: ARTIFACTS.artifacts.filter((a) => a.name !== 'test-results-integration-1-1') } }],
+    ['a results artifact expired at download', { artifacts: { ...ARTIFACTS, artifacts: ARTIFACTS.artifacts.map((a) => (a.name === 'test-results-sync-1-1' ? { ...a, expired: true } : a)) } }],
     ['the artifacts page is short of its total', { artifacts: { ...ARTIFACTS, total_count: 99 } }],
   ]) {
     it(`a mismatch fails, with the remedy: ${what}`, async () => {

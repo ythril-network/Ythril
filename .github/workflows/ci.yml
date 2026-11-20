@@ -604,13 +604,23 @@ jobs:
         uses: ./.github/actions/dump-test-stack-logs
 
   integration:
-    name: Integration
+    name: Integration (shard ${{ matrix.shard }} of 2)
     needs: [reuse, prepare]
+    # One condition for the whole matrix: a skipped matrix is a single skipped job, so no shard stands down alone.
     if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
-    # Measured 510-570 s of tests after about 150 s of setup, and one job rather than shards: standalone, not
-    # integration, was the longest suite on this runner shape. A cold doc-office build (LibreOffice) is on top of it
-    # on the first run. 45 minutes bounds a wedged instance.
+    # The suite runs its files one at a time against one live stack, so as one job it was the job a run waited for
+    # (640 s of tests after about 130 s of setup, Q-947). Each shard is a job with a stack of its own, the files packed by
+    # their recorded seconds (`run-suite.mjs --shard`, `testing/_shared/suite-file-seconds.json`). `fail-fast` is off so one
+    # red shard does not hide the other's verdict; `Build & Test` fails when either failed (a matrix job's result is the
+    # worst of its jobs). The matrix must be exactly 1 to the count, and the count the one the runner plans: a short matrix
+    # is files that run nowhere, a repeated shard files that run twice (held by
+    # `ci-runs-every-integration-and-sync-shard-exactly-once`). A cold doc-office build (LibreOffice) is on top of it on
+    # the first run. 45 minutes bounds a wedged instance.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -694,13 +704,17 @@ jobs:
           node testing/sync/setup.js a b
 
       - name: Run integration tests
-        run: npm run test:integration
+        # This job's shard of the suite; the runner refuses (non-zero) a shard outside 1 to the count it plans.
+        run: npm run test:integration -- --shard="$SUITE_SHARD"
+        env:
+          SUITE_SHARD: ${{ matrix.shard }}/2
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-integration-${{ github.run_attempt }}
+          # The shard is in the name: uploads from both shards under one name would be refused, or overwrite each other.
+          name: test-results-integration-${{ matrix.shard }}-${{ github.run_attempt }}
           path: test-results/
           if-no-files-found: error
           retention-days: 30
@@ -710,11 +724,18 @@ jobs:
         uses: ./.github/actions/dump-test-stack-logs
 
   sync:
-    name: Sync
+    name: Sync (shard ${{ matrix.shard }} of 2)
     needs: [reuse, prepare]
+    # One condition for the whole matrix, as Integration's.
     if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
-    # Measured 383-388 s of tests after about 150 s of setup. 45 minutes bounds a network that never converges.
+    # Sharded as Integration is, for the same reason (520 s of tests on one stack after about 120 s of setup, Q-947): each
+    # shard a job with four instances of its own, fail-fast off, the matrix 1 to the count the runner plans (held by
+    # `ci-runs-every-integration-and-sync-shard-exactly-once`). 45 minutes bounds a network that never converges.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -767,13 +788,17 @@ jobs:
           node testing/sync/setup.js
 
       - name: Run sync tests
-        run: npm run test:sync
+        # This job's shard of the suite; the runner refuses (non-zero) a shard outside 1 to the count it plans.
+        run: npm run test:sync -- --shard="$SUITE_SHARD"
+        env:
+          SUITE_SHARD: ${{ matrix.shard }}/2
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-sync-${{ github.run_attempt }}
+          # The shard is in the name: uploads from both shards under one name would be refused, or overwrite each other.
+          name: test-results-sync-${{ matrix.shard }}-${{ github.run_attempt }}
           path: test-results/
           if-no-files-found: error
           retention-days: 30
