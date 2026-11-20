@@ -25,6 +25,9 @@ const FIELD_NAME_MAX_CHARS = 200;
 /** The kinds an import writes, in the store's commit order (`brain/write-plan/types.ts`, `COMMIT_ORDER`: facts, entities, chrono, edges). */
 export const IMPORT_OP_ORDER: readonly OpKind[] = ['fact', 'entity', 'chrono', 'edge'];
 
+/** The code of the reason a record of a commit window is left out for ({@link ReportBuilder.leftOutAtCommit}). */
+export const STORED_RECORD_GONE = 'stored_record_gone';
+
 /** One statement of a reason: its subject, predicate and object, a literal object shown by its datatype and length only. */
 export interface ReportStatement { subject: string; predicate: string; object: string; graph?: string }
 
@@ -131,6 +134,18 @@ export class ReportBuilder {
         : `The ${kind} this subject states would not be written (${code}): a bound, a link, a reference or its version refuses it.`,
       ...(refusal.violation ? { fields: violationFields(refusal.violation) } : {}),
     });
+  }
+  /**
+   * A record of a commit window the store no longer let be written, though the dry plan passed it (a stored record it converges onto, links to
+   * or ends at went meanwhile: the database's expiry). The import's earlier windows had landed, so it cannot be refused whole: the reason is
+   * RECORDED, and the counts are taken back, so the report says what landed.
+   */
+  leftOutAtCommit(kind: OpKind, subject: string, op: 'insert' | 'converge'): void {
+    this.add({
+      code: STORED_RECORD_GONE, outcome: 'recorded', kind, subject, statements: [], statementCount: 0,
+      message: `The ${kind} this subject states was not written: after the import was planned, a record it converges onto, links to or ends at was no longer stored. Every other record of the import was written.`,
+    });
+    this.report.kinds[kind][op === 'insert' ? 'inserted' : 'converged'] -= 1;
   }
   /** A statement left out on purpose. */
   notTaken(why: string, n = 1): void { this.report.notTaken[why] = (this.report.notTaken[why] ?? 0) + n; }
