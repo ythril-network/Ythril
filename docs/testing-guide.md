@@ -416,6 +416,14 @@ of the same run, or in another run of the same commit and kind. A record from un
 request run pairs only within its own run. Exit 0: none; 1: it names some; 2: the records hold no result per test, fewer
 than two runs do, or they cannot be read, never a pass. Every answer says the kinds of run it rests on and those absent (a
 CI record without a kind is a push to main, a local one local), the records and runs read, and the records it left out.
+`--list never-failed,together` (or `--list all`, which adds the first list) prints two more lists over the same runs:
+the slowest tenth of the test files by the per-file times of `test-results/file-times-all.json` (written by
+`node scripts/test-times.mjs --preflight-costs`; the client's files, whose times are vitest's, are ranked among themselves)
+that have no recorded failure in the span, each with its time and the number of runs that ran it, a file that ran in fewer
+than two runs being left out and counted; and the groups of two or more tests that each failed at least twice and failed in
+exactly the same runs every time, compared over the runs that ran both tests' files. Exit 0: the asked lists are empty;
+1: one holds an entry; 2: the records hold no result per test, fewer than two runs do, or the per-file times cannot be read
+(missing, stale or empty), never a pass.
 The rules are `scripts/_shared/failure-rates.mjs`; the reading, shared with `--trend --flags`, is
 `scripts/_shared/test-run-reads.mjs`.
 
