@@ -117,6 +117,7 @@ export const RDF_IMPORT_SCHEMA_NOT_AVAILABLE = 'rdf_import_schema_not_available'
 export const RDF_IMPORT_SEVERAL_GRAPHS = 'rdf_import_several_graphs';
 export const RDF_IMPORT_NOT_FOUND = 'rdf_import_not_found';
 export const RDF_IMPORT_BUSY = 'rdf_import_busy';
+export const RDF_IMPORT_SPACE_CHANGED = 'rdf_import_space_changed';
 export const RDF_IMPORT_UNSUPPORTED_ENCODING = 'rdf_unsupported_encoding';
 export const RDF_IMPORT_FILES_LOST = 'rdf_import_files_lost';
 export const RDF_IMPORT_STATE_UNREADABLE = 'rdf_import_state_unreadable';
@@ -127,7 +128,7 @@ export const RDF_IMPORT_BODY_TOO_LARGE_BOUND = 'importBodyMaxBytes';
 
 /** Every code an import door or a status door answers: its own, the reader's, the space state's, and the existence rule's. */
 export const RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
-  RDF_IMPORT_REFUSED, RDF_IMPORT_BAD_PARAM, RDF_IMPORT_SCHEMA_NOT_AVAILABLE, RDF_IMPORT_SEVERAL_GRAPHS, RDF_IMPORT_NOT_FOUND, RDF_IMPORT_BUSY,
+  RDF_IMPORT_REFUSED, RDF_IMPORT_BAD_PARAM, RDF_IMPORT_SCHEMA_NOT_AVAILABLE, RDF_IMPORT_SEVERAL_GRAPHS, RDF_IMPORT_NOT_FOUND, RDF_IMPORT_BUSY, RDF_IMPORT_SPACE_CHANGED,
   RDF_IMPORT_UNSUPPORTED_ENCODING, RDF_IMPORT_FILES_LOST, RDF_IMPORT_STATE_UNREADABLE, RDF_IMPORT_STORAGE_EXCEEDED, RDF_IMPORT_SHUTTING_DOWN,
   'rdf_malformed', 'rdf_relative_iri', 'rdf_remote_context', 'rdf_jsonld_not_streamable', 'rdf_bound_exceeded', 'rdf_gzip_invalid',
   'rdf_unsupported_format', 'rdf_unsupported', 'rdf_source_failed',
@@ -626,6 +627,12 @@ class BodyTooLarge extends Error {
   constructor(readonly limit: number) { super('the body is over the import body bound'); }
 }
 
+/**
+ * The space's RDF base or vocabulary is not what the door sorted the file by: the spool's grouping (a chrono's time nodes with their owner) and
+ * the record count were made by the addressing the space had then, and the act reads the meta again under its hold.
+ */
+class SpaceChangedUnderDoor extends Error {}
+
 /** `body` counted against `max` bytes as it arrives. */
 async function* counted(body: AsyncIterable<Uint8Array | string>, max: number): AsyncGenerator<Uint8Array | string, void, undefined> {
   let n = 0;
@@ -764,6 +771,10 @@ async function readAndRun(input: RdfImportInput, options: ImportOptions, meta: S
     kept = report;
     void sweepReports(Date.now()).catch(err => log.warn(`the RDF import report sweep failed: ${peerText(err)}`));
     await knobs.hooks?.beforeRegister?.();
+    // Asked in the step that registers the act, nothing awaited between: from the registration on a caller's schema write is refused (the gate), so the
+    // addressing the act reads under its hold is the one asked here. A space the import can no longer be made in is the act's first answer, not this.
+    const now = rdfSpaceState(getConfig(), input.spaceId, input.caller, schemaFingerprintOf);
+    if (now.ok && (now.meta.rdf?.base !== meta.rdf?.base || now.meta.rdf?.vocab !== meta.rdf?.vocab)) throw new SpaceChangedUnderDoor();
     const entryId = registerOwnSpaceAct({ kind: KIND, localId: input.spaceId, spoolId: importId });
     handedOver = true;
     releaseFolder();
@@ -791,6 +802,9 @@ function refusedAnswer(report: RdfImportReport): RdfImportRefusal {
 
 /** The answer to a fault of the door's own pass that is the file's, or null. */
 function doorRefusalOf(err: unknown, format: RdfFormat): RdfImportRefusal | null {
+  if (err instanceof SpaceChangedUnderDoor) {
+    return refusal(HTTP.CONFLICT, RDF_IMPORT_SPACE_CHANGED, "The space's RDF base or vocabulary changed while the file was being read; nothing was imported: send the file again");
+  }
   if (err instanceof RdfImportBoundExceeded) {
     return refusal(HTTP.TOO_LARGE, err.code, `The file is over the import's bound ${err.bound} (${err.limit}); nothing was imported`, { bound: err.bound, limit: err.limit });
   }
