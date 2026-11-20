@@ -661,6 +661,12 @@ Both are audited (`fork.list` as a read, `fork.resolve` naming the fork).
 
 ---
 
+### Import RDF
+
+`POST /api/brain/spaces/:spaceId/import/rdf` (MCP `import_rdf`) writes the records an RDF document states, all or nothing: every statement is checked by the planners these routes use before anything is written, and a strict space refuses the whole file for one statement it cannot hold. A subject under the space's own base updates its stored record; every other subject is a new record with an id this instance mints. `knowledge: write`, for a dry run too. The parameters, the report and its status route are in [Exports → RDF import](06f-exports.md#rdf-import).
+
+---
+
 ### Empty a space
 
 ```http

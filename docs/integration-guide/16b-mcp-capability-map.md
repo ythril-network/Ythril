@@ -58,8 +58,7 @@ and the two are identical by construction. The REST routes with no tool are in
 | **Brain — ingest status** | | | |
 | | `ingest_status` | `POST /api/ingest_status` · legacy: `GET /api/brain/spaces/:spaceId/ingest/:runId` | read `knowledge` |
 | **Brain — export** | | | |
-| | `export_rdf` | `POST /api/export_rdf` · legacy: `GET /api/brain/spaces/:spaceId/export/rdf` | read `knowledge` |
-| **Brain — ops** | | | |
+| | `export_rdf` | `POST /api/export_rdf` · legacy: `GET /api/brain/spaces/:spaceId/export/rdf` | read `knowledge` || **Brain — ops** | | | |
 | | `space_stats` | `POST /api/space_stats` · legacy: `GET /api/brain/spaces/:spaceId/stats` | read `knowledge` |
 | | `space_reindex` | `POST /api/space_reindex` · legacy: `POST /api/brain/spaces/:spaceId/reindex` | admin `knowledge` |
 | | `list_embed_jobs` | `POST /api/list_embed_jobs` · legacy: `GET /api/brain/spaces/:spaceId/embedding-queue/records` | read `knowledge` |
