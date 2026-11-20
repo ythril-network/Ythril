@@ -27,7 +27,8 @@ import { planEntity, entityWant, type EntityInput } from '../brain/write-plan/pl
 import { planFact, factWant, type FactInput } from '../brain/write-plan/plan-fact.js';
 import { planChrono, chronoWant, type ChronoInput } from '../brain/write-plan/plan-chrono.js';
 import { planEdge, edgeWant, type EdgeInput } from '../brain/write-plan/plan-edge.js';
-import { dryPlan, type DryItem, type DryRefusal } from '../brain/write-plan/dry-plan.js';
+import { dryPlan, type DryItem, type DryPlanResult, type DryRefusal } from '../brain/write-plan/dry-plan.js';
+import { RequestRefusal } from '../util/errors.js';
 import { commitPlans } from '../brain/write-plan/commit.js';
 import type { WritePlan } from '../brain/write-plan/types.js';
 import { recordKey, type RecordOp, type StoredRecord } from './quads-to-ops.js';
@@ -42,10 +43,16 @@ export type MintedEnds = ReadonlyMap<string, MintedEnd>;
 const SEED_KINDS: readonly SeedKind[] = ['entity', 'fact', 'chrono'];
 const isSeedKind = (k: string): k is SeedKind => (SEED_KINDS as readonly string[]).includes(k);
 
-/** The trusted arguments of an operation: a minted id for an insert of a kind whose identity is minted; none otherwise. */
-function trustOf(spaceId: string, op: RecordOp): PlanTrust | undefined {
-  return op.op === 'insert' && op.kind !== 'edge' ? trustedPlan(spaceId, { mintedId: op.id }) : undefined;
+/**
+ * The trusted arguments of an operation: always issued, so every item the import plans meets what a planner asks of a trusted caller only (the
+ * chrono type list among it, review F2), a converge and an edge included; a minted id besides for an insert of a kind whose identity is minted.
+ */
+function trustOf(spaceId: string, op: RecordOp): PlanTrust {
+  return trustedPlan(spaceId, op.op === 'insert' && op.kind !== 'edge' ? { mintedId: op.id } : {});
 }
+
+/** The id the read set is seeded with for an operation's record, when the import brings it: an insert of a kind that can be an end. */
+export const seededIdOf = (op: RecordOp): string | undefined => (op.op === 'insert' && op.kind !== 'edge' ? op.id : undefined);
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -60,7 +67,7 @@ export function opItem(spaceId: string, op: RecordOp): DryItem {
         name: text(f.name), type: text(f.type), tags: f.tags, properties: f.properties,
         ...(f.description !== undefined ? { description: f.description } : {}), ...addressed,
       };
-      return { kind: 'entity', input, want: entityWant(input, trust), plan: view => planEntity(spaceId, input, view, trust) };
+      return { kind: 'entity', input, seededId: seededIdOf(op), want: entityWant(input, trust), plan: view => planEntity(spaceId, input, view, trust) };
     }
     case 'fact': {
       const f = op.fields;
@@ -68,7 +75,7 @@ export function opItem(spaceId: string, op: RecordOp): DryItem {
         fact: text(f.fact), tags: f.tags, properties: f.properties, linkEntities: op.links.entity ?? [],
         ...(f.type !== undefined ? { type: f.type } : {}), ...(f.description !== undefined ? { description: f.description } : {}), ...addressed,
       };
-      return { kind: 'fact', input, want: factWant(input, trust), plan: view => planFact(spaceId, input, view, trust) };
+      return { kind: 'fact', input, seededId: seededIdOf(op), want: factWant(input, trust), plan: view => planFact(spaceId, input, view, trust) };
     }
     case 'chrono': {
       const f = op.fields;
@@ -82,7 +89,7 @@ export function opItem(spaceId: string, op: RecordOp): DryItem {
           ...addressed,
         },
       };
-      return { kind: 'chrono', input, want: chronoWant(input, trust), plan: view => planChrono(spaceId, input, view, trust) };
+      return { kind: 'chrono', input, seededId: seededIdOf(op), want: chronoWant(input, trust), plan: view => planChrono(spaceId, input, view, trust) };
     }
     case 'edge': {
       const f = op.fields;
@@ -130,8 +137,24 @@ export async function seedImported(view: ReadSet, ops: readonly RecordOp[], mint
 }
 
 /**
+ * A stored record the translation must read cannot be read whole: it holds more link rows than an import reads (`ReadSet.storedLinks`), so
+ * what a converge would take away cannot be known and nothing can be converged onto it. It is the file's to answer, not a fault: the import
+ * is REFUSED for it (the report names the record's kind and id), and a retry would meet it again.
+ */
+export class StoredRecordUnreadable extends Error {
+  override readonly name = 'StoredRecordUnreadable';
+  constructor(readonly kind: RecordKind, readonly id: string) {
+    super(`the ${kind} '${id}' holds more links than an import reads`);
+  }
+}
+
+/** The report's code for {@link StoredRecordUnreadable}. */
+export const STORED_RECORD_LINKS_OVER_BOUND = 'stored_record_links_over_bound';
+
+/**
  * The stored records the translation of a window reads, by `recordKey`: each with its link rows when its kind holds links. Read through the
- * planners' own read set (one merged read), so the import reads the store the way its planners will; a fork row reads as absent.
+ * planners' own read set (one merged read), so the import reads the store the way its planners will; a fork row reads as absent. Throws
+ * {@link StoredRecordUnreadable} for a record whose links are over the bound.
  */
 export async function loadStoredRecords(spaceId: string, wants: ReadonlyArray<{ kind: RecordKind; id: string }>): Promise<Map<string, StoredRecord>> {
   const found = new Map<string, StoredRecord>();
@@ -144,18 +167,31 @@ export async function loadStoredRecords(spaceId: string, wants: ReadonlyArray<{ 
   for (const w of wants) {
     const doc = view.stored(w.kind, w.id, 'unresolved');
     if (doc === null) continue;
-    found.set(recordKey(w.kind, w.id), { doc, ...(w.kind === 'fact' || w.kind === 'chrono' ? { links: view.storedLinks(w.kind, w.id) } : {}) });
+    let links: StoredRecord['links'];
+    if (w.kind === 'fact' || w.kind === 'chrono') {
+      try { links = view.storedLinks(w.kind, w.id); } catch (err) {
+        if (err instanceof RequestRefusal) throw new StoredRecordUnreadable(w.kind, w.id);
+        throw err;
+      }
+    }
+    found.set(recordKey(w.kind, w.id), { doc, ...(links !== undefined ? { links } : {}) });
   }
   return found;
 }
 
 /** What a dry plan of a window answers: per operation its plan (`null` when refused), and every refusal by operation index. */
-export interface DryWindow { plans: ReadonlyArray<WritePlan | null>; refusals: readonly DryRefusal[] }
+export interface DryWindow {
+  plans: ReadonlyArray<WritePlan | null>;
+  refusals: readonly DryRefusal[];
+  /** The seeds the dry plan took back for a record it refused (`DryPlanResult.unseeded`). */
+  unseeded: DryPlanResult['unseeded'];
+}
 
 /** Dry-plan one window of operations against `view` (seeded here), writing nothing. */
 export async function dryPlanWindow(spaceId: string, ops: readonly RecordOp[], view: ReadSet, minted: MintedEnds): Promise<DryWindow> {
   await seedImported(view, ops, minted);
-  return dryPlan(ops.map(op => opItem(spaceId, op)), view);
+  const { plans, refusals, unseeded } = await dryPlan(ops.map(op => opItem(spaceId, op)), view);
+  return { plans, refusals, unseeded };
 }
 
 /** A read set for `spaceId`, as the dry plan and the commit plan against. */
