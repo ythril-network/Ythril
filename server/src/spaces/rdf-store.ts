@@ -13,6 +13,7 @@ import type { RdfSetting } from '@ythril-network/schema';
 import type { Config, SpaceConfig } from '../config/types.js';
 import { parseSpaceMeta } from './body-schemas.js';
 import { log, peerText } from '../util/log.js';
+import { forgetRdfBaseConflict } from '../networks/take-space-out-of-network.js';
 
 /**
  * Store `rdf` as `space`'s setting, parsed, in its effective meta and its own definitions, and forget every network's recorded base conflict of
@@ -29,10 +30,6 @@ export function storeMovedRdf(cfg: Config, space: SpaceConfig, rdf: RdfSetting):
     const own = parseSpaceMeta({ ...space.ownMeta, rdf }, { against: space.ownMeta });
     if (own.ok) space.ownMeta = own.meta;
   }
-  cfg.networks.forEach((n) => {
-    if (n.rdfBaseConflicts?.[space.id] === undefined) return;
-    const { [space.id]: _gone, ...kept } = n.rdfBaseConflicts;
-    n.rdfBaseConflicts = Object.keys(kept).length > 0 ? kept : undefined;
-  });
+  for (const n of cfg.networks) forgetRdfBaseConflict(n, space.id);
   return true;
 }
