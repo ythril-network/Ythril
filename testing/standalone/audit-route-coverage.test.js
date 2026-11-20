@@ -143,6 +143,7 @@ function exemptionOf(routePath) {
 const AUDITED_NON_MUTATING = [
   ['GET', '/api/admin/audit-log/export', 'audit.export'],
   ['GET', '/api/admin/spaces/:spaceId/export', 'space.export'],
+  ['GET', '/api/brain/spaces/:spaceId/export/rdf', 'rdf.export'],
 ];
 
 /** Substitute `:param` segments with a concrete sample so the rule regexes can be tested. */
@@ -263,6 +264,26 @@ describe('Audit coverage — every mutating route must resolve to an operation',
     // The read-only code check stays out of the log — it is the one MFA route that changes nothing, and
     // it is also the one a health-check hits repeatedly.
     assert.equal(resolveOperation('POST', '/api/mfa/verify'), null);
+  });
+
+  it('no exact rule is shadowed by an earlier one: a mounted route an anchored rule matches resolves to that rule', async () => {
+    // Rule order decides: the first matching rule of the method wins. An anchored rule (`^...$`, written for one route) placed after a
+    // prefix rule that also matches its route is never reached, and the route is recorded under the prefix rule's operation. Found by the
+    // rebase of bundle-269: `GET /api/spaces/:id/schema-rdf` sat after the `GET /^\/api\/spaces/` prefix rule and was recorded as
+    // `space.list`, never as `schema.rdf.export`.
+    const { ROUTE_RULES } = await import('../../server/dist/audit/middleware.js');
+    const shadowed = [];
+    for (const route of routes) {
+      const sent = concretise(route.path);
+      const hit = resolveOperation(route.method, sent);
+      for (const rule of ROUTE_RULES) {
+        if (rule.method !== route.method || !rule.pattern.source.endsWith('$')) continue;
+        if (!new RegExp(rule.pattern.source, `${rule.pattern.flags.replace('i', '')}i`).test(sent)) continue;
+        if (hit?.operation !== rule.operation) shadowed.push(`${route.method} ${route.path}: ${rule.operation} is shadowed by ${hit?.operation}`);
+        break;
+      }
+    }
+    assert.deepEqual(shadowed, [], 'move each anchored rule above the earlier rule that takes its route');
   });
 
   it('a space rename is recorded as space.rename, not swallowed by space.update', () => {
