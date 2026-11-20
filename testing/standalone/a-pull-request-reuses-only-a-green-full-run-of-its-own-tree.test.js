@@ -115,7 +115,7 @@ const gateJob = (i) => i.jobs.jobs.find((j) => j.name === GATE);
 const another = (over) => ({ ...clone(RUNS.workflow_runs[0]), ...over });
 
 describe('the recorded real responses (Full run 41895080392) are what the decision is shown', () => {
-  // The artifact list is the recorded one with the Integration and Sync results under the names their shard jobs upload
+  // The artifact list is the recorded one with the Integration, Sync and standalone pure results under the names their shard jobs upload
   // (bundle-356, Q-947: `test-results-<suite>-<shard>-<attempt>`); the rest is as GitHub answered.
   it('the fixtures are the real run: one run of full-run.yml for the head, its jobs and artifacts, every list whole', () => {
     assert.equal(RUNS.total_count, RUNS.workflow_runs.length);

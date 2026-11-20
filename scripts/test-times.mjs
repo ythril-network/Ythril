@@ -1260,10 +1260,19 @@ async function writeStageCostSnapshot(api, runner) {
 
 /** A record's identity as the server's `filter` names it: each key under `properties.`. */
 const asProperties = (identity) => Object.fromEntries(Object.entries(identity).map(([key, value]) => [`properties.${key}`, value]));
-/** What a `Test-Run` must be for its per-file times to rank the preflight's pure files: CI's own run of the pure job, over main, of the whole suite. */
-const FILE_TIMES_WHERE = asProperties({ ...TRUSTED_RUN_KIND, job: 'standalone-pure' });
-const isFileTimesRow = (r) => r?.type === CHRONO_TYPE && typeof r.startsAt === 'string' && typeof r._id === 'string'
-  && Object.entries(FILE_TIMES_WHERE).every(([path, value]) => r.properties?.[path.slice('properties.'.length)] === value);
+/** The pure job's id: the unsplit job's records carry it, and its shard jobs are `<id>-<k>` (the results stems `ci.yml` uploads). */
+const PURE_JOB = 'standalone-pure';
+/**
+ * The jobs whose records rank the preflight's pure files: the unsplit job's name, and each shard of it that `ci.yml` uploads results for
+ * (bundle-356, Q-947: the pure kind runs as two jobs, recorded as `standalone-pure-1` and `standalone-pure-2`). Derived from the workflow,
+ * so a shard added there is read the day it exists; the unsplit name stays, so the records from before the split still count until the
+ * shards' newer runs replace them.
+ */
+const pureJobs = () => [PURE_JOB, ...testJobs().filter(j => j.startsWith(`${PURE_JOB}-`) && /^\d+$/.test(j.slice(PURE_JOB.length + 1)))];
+/** What a `Test-Run` must be for its per-file times to rank the preflight's pure files: CI's own run of a pure job (`job`), over main, of the whole suite. */
+const fileTimesWhere = (job) => asProperties({ ...TRUSTED_RUN_KIND, job });
+const isFileTimesRow = (r, job) => r?.type === CHRONO_TYPE && typeof r.startsAt === 'string' && typeof r._id === 'string'
+  && Object.entries(fileTimesWhere(job)).every(([path, value]) => r.properties?.[path.slice('properties.'.length)] === value);
 
 /** The records one page of {@link newestRunRows} asks for. */
 const RUN_ROWS_PAGE = 10;
@@ -1309,24 +1318,43 @@ async function newestRunRows(api, where, qualifies) {
   return [...byRun.values()].sort(newestStartFirst).slice(0, FILE_TIMES_RUNS);
 }
 
-/** The newest record of each of the newest {@link FILE_TIMES_RUNS} distinct CI runs of the pure job ({@link newestRunRows}). */
-const fileTimesRows = (api) => newestRunRows(api, FILE_TIMES_WHERE, isFileTimesRow);
+/**
+ * The newest {@link FILE_TIMES_RUNS} distinct CI runs of the pure job, each with the newest record of every pure job ({@link pureJobs}) it
+ * holds, newest first. Asked per job ({@link newestRunRows}), then gathered by run: the two shards of one run are one run, never two slots,
+ * and a run counts by its newest record.
+ */
+async function fileTimesRuns(api) {
+  const byRun = new Map();
+  for (const job of pureJobs()) {
+    for (const row of await newestRunRows(api, fileTimesWhere(job), r => isFileTimesRow(r, job))) {
+      const run = String(row.properties.runId ?? row.startsAt);
+      const held = byRun.get(run) ?? { startsAt: row.startsAt, rows: [] };
+      if (row.startsAt > held.startsAt) held.startsAt = row.startsAt;
+      held.rows.push(row);
+      byRun.set(run, held);
+    }
+  }
+  return [...byRun.values()].sort(newestStartFirst).slice(0, FILE_TIMES_RUNS);
+}
 
 /**
  * Write the file-times snapshot the preflight starts its slowest pure files by (`_shared/stage-costs.mjs`, `_shared/slow-first-units.mjs`):
- * per file, the median of its time over the newest CI runs of the pure job. Relative times are enough to rank the files, so CI's times rank
- * the files the container runs. A record whose measurements do not parse (or hold no file time) is not counted; a record whose measurements
- * were cut for size still holds every file's time and is. A write with no run to rest on is refused rather than made from nothing.
+ * per file, the median of its time over the newest CI runs of the pure job, a run's shards read together. Relative times are enough to rank
+ * the files, so CI's times rank the files the container runs. A record whose measurements do not parse (or hold no file time) is not counted;
+ * a record whose measurements were cut for size still holds every file's time and is. A write with no run to rest on is refused rather than
+ * made from nothing.
  *
  * @returns {Promise<string>} the line to say
  */
 async function writeFileTimeSnapshot(api) {
   const usable = [];
-  for (const row of await fileTimesRows(api)) {
-    const files = await filesOf(api, row);
-    if (!files) continue;
-    const times = Object.entries(files).filter(([file, ms]) => typeof file === 'string' && file !== '__proto__' && isCount(ms));
-    if (times.length) usable.push({ startsAt: row.startsAt, times });
+  for (const run of await fileTimesRuns(api)) {
+    const times = [];
+    for (const row of run.rows) {
+      const files = await filesOf(api, row);
+      if (files) times.push(...Object.entries(files).filter(([file, ms]) => typeof file === 'string' && file !== '__proto__' && isCount(ms)));
+    }
+    if (times.length) usable.push({ startsAt: run.startsAt, times });
   }
   if (!usable.length) throw new Error(`no recorded CI run of the standalone-pure job on main (scope full) holds per-file times to measure`);
   const byFile = new Map();

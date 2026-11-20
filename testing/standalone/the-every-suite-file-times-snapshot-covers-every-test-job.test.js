@@ -54,6 +54,9 @@ const at = (ms) => new Date(ms).toISOString();
 const ALL = 'file-times-all.json';
 const PURE = 'file-times.json';
 const JOBS_OF_CI = expectedResultsStems(readFileSync(join(REPO_ROOT, '.github/workflows/ci.yml'), 'utf8'));
+/** The shards of the pure job (`standalone-pure-<k>`, bundle-356): the jobs the pure snapshot reads, beside the unsplit job's name. */
+const PURE_JOBS_OF_CI = JOBS_OF_CI.filter(j => /^standalone-pure-\d+$/.test(j));
+const PURE_JOB = PURE_JOBS_OF_CI[0];
 
 // ---- the builder, over planted rows ----------------------------------------------------------------------------------
 
@@ -207,12 +210,13 @@ describe('test-times writes file-times-all.json beside file-times.json (a fake i
 
   /** The ci.yml jobs are the ones this test seeds: a workflow with no db shard would make the cases below vacuous. */
   it('the jobs of ci.yml include the pure job, the client\'s and every db shard (the cases below mean what they say)', () => {
-    assert.ok(JOBS_OF_CI.includes('standalone-pure') && JOBS_OF_CI.includes('client-tests'), JOBS_OF_CI.join(' '));
+    assert.ok(PURE_JOBS_OF_CI.length >= 2, `ci.yml uploads ${PURE_JOBS_OF_CI.length} pure shard result(s), not one per shard: ${JOBS_OF_CI.join(' ')}`);
+    assert.ok(JOBS_OF_CI.includes('client-tests'), JOBS_OF_CI.join(' '));
     assert.ok(JOBS_OF_CI.filter(j => /^standalone-db-\d+$/.test(j)).length >= 2, JOBS_OF_CI.join(' '));
     assert.ok(JOBS_OF_CI.length >= 6, JOBS_OF_CI.join(' '));
   });
 
-  it('--preflight-costs writes both: file-times-all.json from every job of ci.yml, file-times.json from the pure job only, byte for byte as before', async () => {
+  it('--preflight-costs writes both: file-times-all.json from every job of ci.yml, file-times.json from the pure job\'s shards only, in the shape as before', async () => {
     await withInstance(async ({ server, work, env }) => {
       seedPreflightRun(server);
       seedEveryJob(server);
@@ -220,13 +224,17 @@ describe('test-times writes file-times-all.json beside file-times.json (a fake i
       assert.equal(r.code, 0, everything(r));
       assert.deepEqual(resultsOf(work.dir), [ALL, PURE, 'stage-costs.json'], 'the write left a temporary file, or lacks a snapshot');
 
-      const pureIndex = JOBS_OF_CI.indexOf('standalone-pure');
-      const scale = pureIndex + 1;
       const pure = readJson(work.dir, PURE);
       assert.deepEqual(Object.keys(pure), ['generatedAt', 'newestSourceAt', 'runs', 'files'], 'the pure snapshot changed its shape');
       assert.equal(pure.runs, 5);
       assert.equal(pure.newestSourceAt, ciRunDay(5));
-      assert.deepEqual(pure.files, { [fileOf('standalone-pure', 'a')]: 300 * scale, [fileOf('standalone-pure', 'b')]: 2500 * scale }, 'the pure snapshot holds another job\'s file, or lost its own');
+      const ofShards = {};
+      for (const job of PURE_JOBS_OF_CI) {
+        const scale = JOBS_OF_CI.indexOf(job) + 1;
+        Object.assign(ofShards, { [fileOf(job, 'a')]: 300 * scale, [fileOf(job, 'b')]: 2500 * scale });
+      }
+      assert.ok(PURE_JOBS_OF_CI.length >= 2, `ci.yml has ${PURE_JOBS_OF_CI.length} pure shard job(s)`);
+      assert.deepEqual(pure.files, ofShards, 'the pure snapshot holds another job\'s file, or lost a shard\'s');
 
       const all = readJson(work.dir, ALL);
       assert.deepEqual(Object.keys(all), ['generatedAt', 'newestSourceAt', 'runs', 'files'], 'the every-suite snapshot is not in the shape of file-times.json');
@@ -302,26 +310,29 @@ describe('test-times writes file-times-all.json beside file-times.json (a fake i
   }));
 
   it('the five are five distinct RUNS per job: a newest run with three attempts does not take three of the slots', async () => {
+    assert.ok(PURE_JOB, `ci.yml uploads no pure shard results (${JOBS_OF_CI.join(' ')}): the pure snapshot has no shard job to read`);
     await withInstance(async ({ server, work, env }) => {
       seedPreflightRun(server);
       seedEveryJob(server);
-      seedReruns(server, 'standalone-pure', 5, [7777, 9000]);
+      seedReruns(server, PURE_JOB, 5, [7777, 9000]);
       const r = await runTimes(['--preflight-costs'], { cwd: work.dir, env });
       assert.equal(r.code, 0, everything(r));
-      const scale = JOBS_OF_CI.indexOf('standalone-pure') + 1;
+      const scale = JOBS_OF_CI.indexOf(PURE_JOB) + 1;
       // Runs 1..4 hold 100..400 (a) and 1000..4000 (b), scaled; run 5 holds its newest attempt's 9000 in both. Five runs: the median is the third.
-      const expected = { [fileOf('standalone-pure', 'a')]: 300 * scale, [fileOf('standalone-pure', 'b')]: 3000 * scale };
-      assert.deepEqual(readJson(work.dir, ALL).files[fileOf('standalone-pure', 'a')], expected[fileOf('standalone-pure', 'a')], 'the rerun\'s attempts took slots: the median rests on fewer than five runs (every-suite)');
-      assert.deepEqual(readJson(work.dir, ALL).files[fileOf('standalone-pure', 'b')], expected[fileOf('standalone-pure', 'b')]);
-      assert.deepEqual(readJson(work.dir, PURE).files, expected, 'the pure snapshot has the same slots, and the same defect (file-times.json)');
+      const expected = { [fileOf(PURE_JOB, 'a')]: 300 * scale, [fileOf(PURE_JOB, 'b')]: 3000 * scale };
+      assert.deepEqual(readJson(work.dir, ALL).files[fileOf(PURE_JOB, 'a')], expected[fileOf(PURE_JOB, 'a')], 'the rerun\'s attempts took slots: the median rests on fewer than five runs (every-suite)');
+      assert.deepEqual(readJson(work.dir, ALL).files[fileOf(PURE_JOB, 'b')], expected[fileOf(PURE_JOB, 'b')]);
+      const pure = readJson(work.dir, PURE).files;
+      assert.deepEqual({ [fileOf(PURE_JOB, 'a')]: pure[fileOf(PURE_JOB, 'a')], [fileOf(PURE_JOB, 'b')]: pure[fileOf(PURE_JOB, 'b')] }, expected, 'the pure snapshot has the same slots, and the same defect (file-times.json)');
       assert.equal(readJson(work.dir, PURE).runs, 5);
     });
   });
 
   it('a job whose server holds fewer than five runs (each with attempts) is measured over the runs it has, and the run count says so', async () => {
+    assert.ok(PURE_JOB, `ci.yml uploads no pure shard results (${JOBS_OF_CI.join(' ')}): the pure snapshot has no shard job to read`);
     await withInstance(async ({ server, work, env }) => {
       seedPreflightRun(server);
-      const fewer = 'standalone-pure';
+      const fewer = PURE_JOB;
       seedEveryJob(server, [fewer]);
       for (const n of [1, 2]) {
         seedCiTestRun(server, { n, job: fewer, rows: [[fileOf(fewer, 'a'), n * 100], [fileOf(fewer, 'b'), n * 100]] });
@@ -330,7 +341,8 @@ describe('test-times writes file-times-all.json beside file-times.json (a fake i
       const r = await runTimes(['--preflight-costs'], { cwd: work.dir, env });
       assert.equal(r.code, 0, everything(r));
       assert.equal(readJson(work.dir, ALL).files[fileOf(fewer, 'a')], 150, 'two runs, 100 and 200');
-      assert.equal(readJson(work.dir, PURE).runs, 2);
+      // The pure snapshot rests on the runs of both shards (the other shard has five), and this shard's file on its own two.
+      assert.equal(readJson(work.dir, PURE).files[fileOf(fewer, 'a')], 150, 'the pure snapshot did not measure the shard over the two runs it has');
     });
   });
 

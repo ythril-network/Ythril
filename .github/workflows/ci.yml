@@ -47,7 +47,9 @@ concurrency:
 #
 #   client-tests        the client's unit tests and its production build (its own `npm ci`)
 #   standalone-pure     the standalone files that need nothing but `server/dist` (and `client/dist`); first, before the install, the
-#                       files that read only tracked text (`run-standalone.mjs --only=text`)
+#                       files that read only tracked text (`run-standalone.mjs --only=text`). A MATRIX of two shards of the pure
+#                       kind (`--shard=<k>/2`, packed by recorded seconds); the text step runs in shard 1 only. Held by
+#                       `ci-runs-every-standalone-pure-shard-exactly-once`.
 #   standalone-db       the standalone files that open the harness MongoDB: ythril-mongo-a and nothing else. A MATRIX, one
 #                       job per shard of the `-db` plan (`testing/_shared/db-shard-plan.mjs`), each with its own fresh Mongo:
 #                       the runner's one-shard mode (`YTHRIL_TEST_DB_SHARDS` with `YTHRIL_TEST_DB_SHARD_INDEX`) runs only that
@@ -229,12 +231,22 @@ jobs:
           retention-days: 30
 
   standalone-pure:
-    name: Standalone (no services)
+    name: Standalone (no services, shard ${{ matrix.shard }} of 2)
     needs: reuse
+    # One condition for the whole matrix: a skipped matrix is a single skipped job, so no shard stands down alone.
     if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' }}
     runs-on: ubuntu-latest
-    # The offline files that need no database: measured about 145 s of tests after about 80 s of install and builds.
+    # The offline files that need no database. As one job it was the job a run waited for once Integration and Sync were split
+    # (nine batches one after another, 545 s of tests, Q-947), so the pure kind runs as two shard jobs, the files packed by their
+    # recorded seconds (`run-standalone.mjs --shard`, `testing/_shared/pure-file-seconds.json`). `fail-fast` is off so one red shard
+    # does not hide the other's verdict; `Build & Test` fails when either failed (a matrix job's result is the worst of its jobs).
+    # The matrix must be exactly 1 to the count the runner plans, and the text-only step runs in shard 1 only (held by
+    # `ci-runs-every-standalone-pure-shard-exactly-once` and `the-npm-scripts-and-ci-run-every-standalone-kind-once`).
     # 30 minutes is a hung file, not a slow one.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -255,7 +267,9 @@ jobs:
         # Before the install and the builds, on purpose (Q-870): these files are the ones the classifier (testing/_shared/text-only-test.mjs) says need
         # no build and no package, and here nothing is built or installed, so a file it wrongly calls text-only fails for want of what it needs. A build
         # path that lives in data (a record that cites `server/dist`) is the one thing a static rule cannot see; on a developer machine a stale build
-        # hides it. The next step runs the rest of the pure third without them, so every file runs once.
+        # hides it. The next step runs the rest of the pure third without them, so every file runs once. In shard 1 only: a matrix
+        # runs every step in every cell, and the text kind is not sharded.
+        if: matrix.shard == 1
         run: node testing/_init/run-standalone.mjs --only=text
 
       - name: Install dependencies
@@ -273,13 +287,17 @@ jobs:
         run: npm run build:client
 
       - name: Standalone tests that need no services
-        run: npm run test:standalone:pure
+        # This job's shard of the pure kind; the runner refuses (non-zero) a shard outside 1 to the count it plans.
+        run: npm run test:standalone:pure -- --shard="$PURE_SHARD"
+        env:
+          PURE_SHARD: ${{ matrix.shard }}/2
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-standalone-pure-${{ github.run_attempt }}
+          # The shard is in the name: uploads from both shards under one name would be refused, or overwrite each other.
+          name: test-results-standalone-pure-${{ matrix.shard }}-${{ github.run_attempt }}
           path: test-results/
           if-no-files-found: error
           retention-days: 30

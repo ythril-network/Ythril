@@ -76,9 +76,9 @@ const withWorld = (body) => withRecordingWorld(world(), async ({ github, ythril,
 describe('the fakes answer what GitHub answers', () => {
   it('names every job by its display name, never by the id an artifact name carries', () => {
     // Jobs that are not a matrix: a matrix job's display name carries its axis (`Integration (shard 1 of 2)`), which the fake does not render.
-    const ids = ['prepare', 'client-tests', 'standalone-pure', 'redteam', 'test'];
+    const ids = ['prepare', 'client-tests', 'standalone-instance', 'redteam', 'test'];
     const listed = githubJobs(...ids);
-    assert.deepEqual(listed.map(j => j.name), ['Prepare', 'Client tests', 'Standalone (no services)', 'Red team', 'Build & Test']);
+    assert.deepEqual(listed.map(j => j.name), ['Prepare', 'Client tests', 'Standalone (instances)', 'Red team', 'Build & Test']);
     for (const [i, id] of ids.entries()) assert.notEqual(listed[i].name, id, `${id} is served under its own id, which the API never does`);
   });
 });

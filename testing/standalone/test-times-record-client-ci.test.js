@@ -252,7 +252,8 @@ describe('the client job counts for the stop rule: a complete run is not downloa
 
 describe('the fakes speak the API as it is: a job is named by its display name', () => {
   it('serves `Client tests` and `Prepare`, never the job ids the artifact names carry', () => {
-    const names = githubJobs('client-tests', 'prepare', 'standalone-pure').map(j => j.name);
-    assert.deepEqual(names, ['Client tests', 'Prepare', 'Standalone (no services)']);
+    // Jobs that are not a matrix: a matrix job's display name carries its axis, which the fake does not render.
+    const names = githubJobs('client-tests', 'prepare', 'standalone-instance').map(j => j.name);
+    assert.deepEqual(names, ['Client tests', 'Prepare', 'Standalone (instances)']);
   });
 });
