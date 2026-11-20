@@ -89,6 +89,18 @@ const { refusalPrefixes: readRefusalPrefixes } = await import(/* @vite-ignore */
   refusalPrefixes: (sources: Array<{ file: string; src: string }>) => { prefixes: string[]; unresolved: string[] };
 };
 
+/**
+ * The codes the server can answer, read by `testing/standalone/_server-refusal-codes.mjs`: the reader the unused-translation-keys check counts a
+ * sentence under a refusal prefix live by (second review F13). The write-closed codes read from the act kinds' table above must be among them, so
+ * the two readers never name different sets and a spelling this spec reads that the check's reader misses fails here.
+ */
+const SERVER_CODES = resolve(__dirname, '../../../../testing/standalone/_server-refusal-codes.mjs');
+const TRACKED = resolve(__dirname, '../../../../testing/standalone/_sources.mjs');
+const { serverRefusalCodes } = await import(/* @vite-ignore */ pathToFileURL(SERVER_CODES).href) as { serverRefusalCodes: (sources: string[]) => string[] };
+const { trackedSources, SERVER_CODE_ROOTS } = await import(/* @vite-ignore */ pathToFileURL(TRACKED).href) as {
+  trackedSources: (dirs: readonly string[], opts: { ext: string[]; floor: number; specs: boolean }) => string[]; SERVER_CODE_ROOTS: readonly string[];
+};
+
 function refusalPrefixes(): { prefixes: string[]; unresolved: string[] } {
   return readRefusalPrefixes(trackedAppSources().map(file => ({ file, src: readClientSource(file) })));
 }
@@ -100,6 +112,11 @@ describe('every write-closed code has its sentence under every refusal prefix (b
   it('finds the prefixes (a floor, so a changed spelling cannot pass by finding none) and resolves every prefix argument', () => {
     expect(prefixes.length, `refusal prefixes found: ${prefixes.join(', ')}`).toBeGreaterThanOrEqual(4);
     expect(unresolved, 'refusal prefixes this gate cannot read').toEqual([]);
+  });
+
+  it('every write-closed code is a code the server source spells (the reader the unused-keys check counts a refusal sentence live by)', () => {
+    const answered = serverRefusalCodes(trackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 100, specs: false }).map(f => readRepoSource(f)));
+    expect(writeClosedCodes.filter(c => !answered.includes(c)), 'write-closed codes the server-code reader does not find').toEqual([]);
   });
 
   for (const loc of LOCALES) {

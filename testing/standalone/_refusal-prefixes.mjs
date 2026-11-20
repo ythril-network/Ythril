@@ -15,15 +15,19 @@
  *
  * It throws when `refusalText`'s module is not among the sources or has no default prefix, so a moved module or a changed spelling cannot
  * pass by finding nothing.
+ *
+ * It also reads the keys a screen spells itself under such a constant (`spelled`): the unused-keys check counts a key under a prefix used only
+ * when the server can answer its last part (`_server-refusal-codes.mjs`) or the client spells it, so a sentence nothing looks up is named.
  */
 import { callArguments } from './_call-arguments.mjs';
+import { stripComments } from './_strip-comments.mjs';
 
 /** The position of the prefix among each reader's arguments. */
 const PREFIX_ARGUMENT = { refusalText: 3, describeRefusal: 4 };
 
 /**
  * @param {Array<{ file: string, src: string }>} sources the client's tracked non-spec `.ts` sources, `file` as the caller names them
- * @returns {{ prefixes: string[], unresolved: string[] }}
+ * @returns {{ prefixes: string[], unresolved: string[], spelled: string[] }} `spelled`: the keys built as `${REFUSAL_CONSTANT}.<name>`
  */
 export function refusalPrefixes(sources) {
   const constants = new Map();
@@ -51,5 +55,13 @@ export function refusalPrefixes(sources) {
       }
     }
   }
-  return { prefixes: [...prefixes].sort(), unresolved };
+  // A key the client spells itself under a refusal constant (`${FORK_REFUSALS}.generic`): looked up by a name of the client's own, not by a code
+  // the server sends, so it is used whatever the server answers. Only a constant named for refusals spells one (second review F13).
+  const spelled = new Set();
+  for (const { src } of sources) {
+    for (const m of stripComments(src).matchAll(/\$\{(\w+)\}\.([A-Za-z]\w*)/g)) {
+      if (constants.has(m[1])) spelled.add(`${constants.get(m[1])}.${m[2]}`);
+    }
+  }
+  return { prefixes: [...prefixes].sort(), unresolved, spelled: [...spelled].sort() };
 }
