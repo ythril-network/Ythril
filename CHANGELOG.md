@@ -65,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** `GET /api/brain/spaces/:spaceId/export/rdf` and MCP `export_rdf` export a space, or a personal view, as Turtle, TriG, N-Quads or JSON-LD, page by page ([Exports](docs/integration-guide/06f-exports.md)).
 - **RDF:** an export names the values it left out and the shapes of each graph, and gives file statements only with `files: read`; a base two spaces of one instance hold is refused (`rdf_base_shared`), when it is saved or created and by the exports.
 - **RDF:** `GET /api/spaces/:id/schema-rdf` and MCP `space_schema_rdf` export a space's schema as OWL and SHACL in Turtle or JSON-LD, every description included.
+- **RDF:** a base a network of a voted kind offers at a higher epoch is recorded beside that network and refused by the exports (`rdf_base_conflict`); the record follows its space: it is gone when the space leaves the network and moves when the space is renamed.
 - **RDF:** the Ythril vocabulary is published under `docs/rdf/`, with decision record 23: a property holds one plain value; structure is an edge or a link.
 - **MCP:** a tool may declare an `outputSchema` in `tools/list`; `export_rdf` and `space_schema_rdf` do.
 - **Server:** an address under `/ld/` answers `404` with a problem body naming the export, instead of the web app.
@@ -138,6 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Audit:** a request to a brain route of a space called `files`, `facts`, `entities`, `edges` or `chrono` was recorded under another route's operation (the records export of such a space left no entry with read logging off); the audit rules read the one path form the server serves.
 - **Web:** the Brain Overview's pencil on a type opens the space's settings on that type for a token with the schema right; it was never drawn, and neither was the Usage panel's "Reset usage", which shows to the same tokens now.
 - **Web:** a property is "Eigenschaft" in German and "właściwość" in Polish in the schema tab, where they said "Eigentum" and "Neuer Immobilienname" (real estate) and "nieruchomość"; Polish words written without their accents ("wedlug", "wyslij", among others) are corrected.
 - **Web:** a document-processing setting an environment variable pins is shown locked on the Media processing page, and a save no longer sends it. Before, one pinned setting made every save on the page fail with no reason shown.
