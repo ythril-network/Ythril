@@ -22,7 +22,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { planEdge, edgeWant, resolveEdgeEndsForWrite, guardIn, type EdgeInput } from './write-plan/plan-edge.js';
 import { writeRelabel } from './write-plan/guarded-relabel.js';
 import { FUNCTIONAL_GUARD, UNSET_GUARD } from '../sync/local-only-fields.js';
-import { planAndCommitOne } from './write-plan/plan-and-commit.js';
+import { planAndCommitOne, refuseOversizeRecord } from './write-plan/plan-and-commit.js';
 import { refuseEdgeToGoneEntity } from './gone-entity-references.js';
 import { atReadSeq } from '../db/at-read-seq.js';
 import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
@@ -102,7 +102,7 @@ export async function upsertEdge(
    * `edgeRefusal` decides for this door, the edge routes, an inline edge and a batch alike.
    */
   const input: EdgeInput = { from, to, label, weight, type, description, properties, tags, ttlDays, opts };
-  assertSpaceTakesWrites(spaceId, 'edges');   // before the plan pays for an embedding; the commit asks again per stage
+  refuseOversizeRecord({ kind: 'edge', input }); assertSpaceTakesWrites(spaceId, 'edges');   // before the plan pays for an embedding; the commit asks again per stage
   const done = await planAndCommitOne(spaceId, edgeWant(spaceId, input), view => planEdge(spaceId, input, view));
   const edge = { ...done.plan.result, seq: done.seq } as unknown as EdgeDoc;
   // `edge.created` on both branches, as it has always been answered.

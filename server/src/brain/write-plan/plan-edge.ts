@@ -383,7 +383,8 @@ function edgeTrust(spaceId: string, trust: PlanTrust | undefined): PlanTrust | u
 export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet, trust?: PlanTrust): Promise<EdgePlanned> {
   const { from, to, label, weight, type, description, tags, ttlDays, properties, opts } = input;
   // The meta and the schema stamp in ONE read (Q-736): the refusal judges with it, and the guard and the stamp below come from it.
-  const write = readMetaForWrite(spaceId, edgeTrust(spaceId, trust)?.planMeta);
+  const trusted = edgeTrust(spaceId, trust);
+  const write = readMetaForWrite(spaceId, trusted?.planMeta);
   // The refusal first: nothing below is decided, noted or embedded for an edge the space does not allow.
   const { existing, withDefaults, check } = edgeRefusal(spaceId, input, view, undefined, [], write);
   opts?.onValidation?.(check);
@@ -407,6 +408,7 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet,
   const { suppressed, vector } = await vectorBeforeWrite({
     spaceId, kind: 'edge', existing, schemaKey: { label }, stated: opts?.suppressEmbeddings,
     wanted: opts?.waitForEmbedding === true,
+    planMeta: trusted?.planMeta !== undefined ? write.meta : undefined,
     text,
   });
   // The vector and the text it was made from go in together or not at all (rule I, `derivedFieldsForWrite`). An edge's

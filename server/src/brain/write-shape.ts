@@ -47,7 +47,7 @@ import { primitivePropertyError } from './property-values.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
 import { CHRONO_STATUSES } from '../config/types.js';
 import type { KnowledgeType } from '../config/types-knowledge.js';
-import { tagsError, MAX_FACT_LENGTH } from '../util/request-bounds.js';
+import { tagsError, MAX_FACT_LENGTH, MAX_FACT_LENGTH_TEXT } from '../util/request-bounds.js';
 
 /**
  * A record type this module holds a table for — the four knowledge types, DERIVED.
@@ -110,7 +110,7 @@ const SHAPE: Record<ShapedType, Record<string, Check>> = {
     // too. Only the LENGTH cap was missing from the update, on both surfaces.
     fact: v => nonEmptyStr('fact')(v)
       ?? (typeof v === 'string' && v.length > MAX_FACT_LENGTH
-        ? '`fact` must not exceed 50 000 characters' : null),
+        ? `\`fact\` must not exceed ${MAX_FACT_LENGTH_TEXT} characters` : null),
     type: str('type'),
     tags: tags,
     description: str('description'),

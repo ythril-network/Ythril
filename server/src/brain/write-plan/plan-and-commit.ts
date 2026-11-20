@@ -21,7 +21,18 @@ import { healStaleMarker } from './heal-stale-marker.js';
 import { FUNCTIONAL_GUARD } from '../../sync/local-only-fields.js';
 import { WriteConflict, type CommitOutcome, type WritePlan } from './types.js';
 import { RecordVersionAtCeiling, RECORD_VERSION_AT_CEILING } from '../write-precondition.js';
-import { EndpointRemoved } from '../../util/errors.js';
+import { EndpointRemoved, RequestRefusal } from '../../util/errors.js';
+import { plannedSizeError, type PlannedInput } from '../record-checks.js';
+
+/**
+ * A single-record door's one size question, asked of the planner input before anything is planned or embedded: the bound the bulk import
+ * holds each item to (`record-checks.ts`). A body within the JSON body bound can still hold a record over it (each invalid UTF-8 byte
+ * parses to a character of three bytes), so no door is exempt (review F4).
+ */
+export function refuseOversizeRecord(item: PlannedInput): void {
+  const why = plannedSizeError(item);
+  if (why) throw new RequestRefusal(why);
+}
 
 /** The write guard an INSERT plan carries (an edge under a functional label in a space that refuses), or `undefined`. */
 function guardOf(plan: WritePlan): string | undefined {

@@ -43,6 +43,7 @@ import type { BlankTerm, IriTerm, LiteralTerm, Quad, Term, TripleTerm } from './
 import { xsd } from './literals.js';
 import { RDF_FORMATS, type RdfFormat } from './serialize.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
+import { DEFAULT_IMPORT_BODY_MAX_BYTES } from '../config/body-limits.js';
 
 /** The longest literal value the reader takes: twice the longest text the store keeps (`MAX_FACT_LENGTH`, 50 000), so a text that fits is read and one that could never be stored is not buffered. */
 export const RDF_MAX_LITERAL_CHARS = 100_000;
@@ -57,7 +58,7 @@ export const RDF_MAX_INFLATE_RATIO = 200;
 /** The inflated size below which the ratio is not asked: a small, very regular document compresses far beyond the ratio and is no risk. */
 export const RDF_INFLATE_RATIO_FLOOR_BYTES = 1_048_576;
 /** The most bytes a gzip body may hold once inflated: the admin import door's own ceiling (`DEFAULT_IMPORT_BODY_MAX_BYTES`, 1 GiB). */
-export const RDF_MAX_INFLATED_BYTES = 1_073_741_824;
+export const RDF_MAX_INFLATED_BYTES = DEFAULT_IMPORT_BODY_MAX_BYTES;
 /** The prefix of a blank node's id when the caller names none. */
 export const RDF_DEFAULT_BLANK_NODE_PREFIX = 'in-';
 /** The characters of a piece fed to a parser. */
@@ -66,6 +67,8 @@ const CHUNK_CHARS = 65_536;
 const ZLIB_FAILURES: ReadonlySet<string> = new Set(['Z_DATA_ERROR', 'Z_BUF_ERROR', 'Z_STREAM_ERROR', 'Z_NEED_DICT', 'Z_MEM_ERROR', 'Z_VERSION_ERROR']);
 /** The last code point a single UTF-16 unit holds; above it a character is a surrogate pair. */
 const LAST_BMP_CODE_POINT = 0xffff;
+/** The code of `\n`: the character a library counts lines by. */
+const LINE_FEED = 0x0a;
 /** The units that open a surrogate pair: a piece never ends on one, so a pair is never cut between two parsers' writes. */
 const HIGH_SURROGATES = Object.freeze({ first: 0xd800, last: 0xdbff });
 /** How much of the text fed is kept to turn a library's report (a line, a token, a byte offset) into a line and column: two pieces. */
@@ -160,6 +163,8 @@ function resolveBounds(given: Partial<RdfParseBounds> | undefined): RdfParseBoun
 class Where {
   private line = 1;
   private column = 0;
+  /** The characters since the last line end of either kind (line feed or lone carriage return), across pieces: what the line bound measures. */
+  private run = 0;
   /** The last {@link TAIL_CHARS} characters fed, and the line, column and byte offset of the first of them. */
   private tail = '';
   private tailLine = 1;
@@ -179,20 +184,27 @@ class Where {
       for (let at = dropped.indexOf('\n'); at !== -1; at = dropped.indexOf('\n', at + 1)) this.tailLine += 1;
       this.tailColumn = lastEnd === -1 ? this.tailColumn + dropped.length : dropped.length - lastEnd - 1;
     }
+    // A line for the bound ends at a line feed OR a lone carriage return (white space in every text format, and the line end of old files);
+    // the line NUMBER a library reports counts line feeds only, as the libraries do.
     this.longest = { length: 0, line: this.line };
     let line = this.line;
     let start = 0;
+    const lineEnd = /[\r\n]/g;
     for (;;) {
-      const end = text.indexOf('\n', start);
-      const length = (start === 0 ? this.column : 0) + ((end === -1 ? text.length : end) - start);
+      lineEnd.lastIndex = start;
+      const found = lineEnd.exec(text);
+      const end = found === null ? -1 : found.index;
+      const length = (start === 0 ? this.run : 0) + ((end === -1 ? text.length : end) - start);
       if (length > this.longest.length) this.longest = { length, line };
       if (end === -1) break;
-      line += 1;
+      if (text.charCodeAt(end) === LINE_FEED) line += 1;
       start = end + 1;
     }
     const lastEnd = text.lastIndexOf('\n');
+    const lastBreak = Math.max(lastEnd, text.lastIndexOf('\r'));
     this.line = line;
     this.column = lastEnd === -1 ? this.column + text.length : text.length - lastEnd - 1;
+    this.run = lastBreak === -1 ? this.run + text.length : text.length - lastBreak - 1;
   }
 
   /** The place just after the last text fed. */
@@ -606,6 +618,7 @@ async function* jsonLdQuads(pieces: AsyncIterable<string>, prefix: string, bound
   const after = new AfterDocument();
   let unparsed = 0;
   let seen = 0;
+  let holdsGraph = false;
   try {
     for await (const piece of pieces) {
       const extra = after.feed(piece);
@@ -617,7 +630,15 @@ async function* jsonLdQuads(pieces: AsyncIterable<string>, prefix: string, bound
       if (failure) throw jsonLdRefusal(failure, refused, where);
       if (quads !== seen) { seen = quads; unparsed = 0; } else {
         unparsed += piece.length;
-        if (unparsed > bounds.maxUnparsedChars) throw overBound('maxUnparsedChars', bounds.maxUnparsedChars, 'text that completes no statement', where.now());
+        // The library holds a top-level `@graph` array whole until it closes (the first statement of the product's own export arrives with its
+        // last character), so over the bound such a document is not "no statement yet" but one that cannot be read streaming (review U6).
+        if (quads === 0 && !holdsGraph) holdsGraph = piece.includes('"@graph"');
+        if (unparsed > bounds.maxUnparsedChars) {
+          if (holdsGraph) {
+            throw new RdfParseError('rdf_jsonld_not_streamable', `the document's @graph array is read whole before any statement is released, and it is over ${bounds.maxUnparsedChars} characters: split the data into several documents, or send it as Turtle, TriG or N-Quads`, { place: where.now() });
+          }
+          throw overBound('maxUnparsedChars', bounds.maxUnparsedChars, 'text that completes no statement', where.now());
+        }
       }
     }
     parser.end();

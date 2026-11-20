@@ -9,6 +9,8 @@
  *
  *  - the record's own checks (`plannedInputError`, `brain/record-checks.ts`: shape, link caps, size), which the bulk import asks too: without
  *    them an oversized record passes the dry plan and fails in the store after other records landed (A5);
+ *  - what a door asks of a create (`plannedCreateError`: the required fields, the recurrence parse; and, in the chrono planner, the type the
+ *    space allows): a record built from a document that no door would create is refused here, not stored (review F2);
  *  - the item's planner, with the read set the commit will plan against (seeded with what the import brings, `ReadSet.seed`) and the trusted
  *    arguments it will hand it (`trust.ts`): the schema, the functional labels, strict linkage and the links;
  *  - the version ceiling: a converge onto a record whose version is already the highest sync accepts is refused at the commit
@@ -27,7 +29,7 @@
  * Items are planned in the commit's order of kinds (`COMMIT_ORDER`: facts, entities, chrono, edges), so an edge sees the records the same set
  * plans, and in their own order within a kind; refusals are answered in item order.
  */
-import { plannedInputError, type PlannedInput } from '../record-checks.js';
+import { plannedInputError, plannedCreateError, type PlannedInput } from '../record-checks.js';
 import { SchemaViolationError } from '../write-validation.js';
 import { RecordVersionAtCeiling, RECORD_VERSION_AT_CEILING } from '../write-precondition.js';
 import { MAX_INGEST_SEQ } from '../../util/seq.js';
@@ -41,6 +43,11 @@ import { COMMIT_ORDER, type PlanKind, type WritePlan } from './types.js';
  * itself, with the trusted arguments the caller holds (`planEntity(spaceId, input, view, trust)` and its siblings).
  */
 export type DryItem = PlannedInput & {
+  /**
+   * The id the read set was seeded with for this record (`ReadSet.seed`), when the import brought it: if the item is refused it will not be
+   * written, so its seed is taken back before the next item is planned and named in {@link DryPlanResult.unseeded}.
+   */
+  readonly seededId?: string | undefined;
   readonly want: ReadWant;
   readonly plan: (view: ReadSet) => Promise<{ readonly plan: WritePlan }>;
 };
@@ -58,6 +65,12 @@ export interface DryRefusal {
 export interface DryPlanResult {
   readonly plans: ReadonlyArray<WritePlan | null>;
   readonly refusals: readonly DryRefusal[];
+  /**
+   * The seeds taken back because their record was refused (in the order it happened). Records are planned in the commit's order (facts first),
+   * so a fact or a chrono planned BEFORE the refusal was judged with the record present: a caller that goes on without the refused records
+   * plans again on a fresh read set seeded without these, until a plan names none.
+   */
+  readonly unseeded: ReadonlyArray<{ readonly kind: 'entity' | 'fact' | 'chrono'; readonly id: string }>;
 }
 
 /** Whether the commit would refuse this plan for its record's version: a converge onto a version that takes no successor sync accepts. */
@@ -71,8 +84,15 @@ const atVersionCeiling = (plan: WritePlan): boolean =>
 export async function dryPlan(items: readonly DryItem[], view: ReadSet): Promise<DryPlanResult> {
   const plans: Array<WritePlan | null> = items.map(() => null);
   const refusals: DryRefusal[] = [];
+  const unseeded: Array<{ kind: 'entity' | 'fact' | 'chrono'; id: string }> = [];
+  // A record refused is a record not written: the items planned after it must not find it present (review U5).
+  const takeBack = (index: number): void => {
+    const item = items[index]!;
+    if (item.seededId !== undefined && item.kind !== 'edge' && view.unseed(item.kind, item.seededId)) unseeded.push({ kind: item.kind, id: item.seededId });
+  };
   const refuse = (index: number, err: unknown): void => {
     const kind = items[index]!.kind;
+    takeBack(index);
     if (err instanceof SchemaViolationError) {
       // The one refusal body every door answers (`toStructured`), beside the sentence.
       refusals.push({ index, kind, reason: err.message, violation: err.toStructured() });
@@ -85,10 +105,12 @@ export async function dryPlan(items: readonly DryItem[], view: ReadSet): Promise
 
   const checked: number[] = [];
   items.forEach((item, index) => {
-    const why = plannedInputError(item);
+    // What a door asks of a create too (`createError`): a record built from a document is no exception, and it is refused before anything loads.
+    const why = plannedInputError(item) ?? plannedCreateError(item);
     if (why) refusals.push({ index, kind: item.kind, reason: why });
     else checked.push(index);
   });
+  for (const r of refusals) takeBack(r.index);
   await view.load(mergeWants(checked.map(i => items[i]!.want)));
 
   for (const kind of COMMIT_ORDER) {
@@ -105,5 +127,5 @@ export async function dryPlan(items: readonly DryItem[], view: ReadSet): Promise
     }
   }
   refusals.sort((a, b) => a.index - b.index);
-  return { plans, refusals };
+  return { plans, refusals, unseeded };
 }

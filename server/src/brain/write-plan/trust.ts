@@ -45,16 +45,30 @@ export class PlanTrust {
     if (token !== MINTED_HERE) throw new Error('PlanTrust is built by trustedPlan(spaceId, ...) alone: a planner\'s trusted arguments never come from a request.');
     this.mintedId = mintedId;
     this.planMeta = planMeta;
+    // Whatever an issued trust says is what a planner reads: nothing changes it after `trustedPlan` made it.
+    Object.freeze(this);
   }
 }
+
+/**
+ * The trusts `trustedPlan` issued, held by this module alone. `instanceof` is not proof of issue: `Object.create(PlanTrust.prototype)` with
+ * chosen fields never runs the constructor and its token check (review F5), so `trustFor` asks this set, and a wrapper that re-exports the
+ * factory still cannot make a trust of its own fields.
+ */
+const ISSUED = new WeakSet<PlanTrust>();
+
+/** Whether `id` is a UUID v4: what a minted id is. */
+const isMintedId = (id: unknown): id is string => typeof id === 'string' && isUuid(id) && uuidVersion(id) === MINTED_UUID_VERSION;
 
 /** The trusted arguments for planning a write to `spaceId`. Throws on a minted id that is not a UUID v4. */
 export function trustedPlan(spaceId: string, args: { mintedId?: string; planMeta?: object }): PlanTrust {
   const { mintedId, planMeta } = args;
-  if (mintedId !== undefined && !(isUuid(mintedId) && uuidVersion(mintedId) === MINTED_UUID_VERSION)) {
+  if (mintedId !== undefined && !isMintedId(mintedId)) {
     throw new Error(`trustedPlan: a minted id is a UUID v4 the instance generated, not '${mintedId}'`);
   }
-  return new PlanTrust(MINTED_HERE, spaceId, mintedId, planMeta);
+  const trust = new PlanTrust(MINTED_HERE, spaceId, mintedId, planMeta);
+  ISSUED.add(trust);
+  return trust;
 }
 
 /**
@@ -63,7 +77,9 @@ export function trustedPlan(spaceId: string, args: { mintedId?: string; planMeta
  */
 export function trustFor(spaceId: string, trust: PlanTrust | undefined, requestId: string | undefined): PlanTrust | undefined {
   if (trust === undefined) return undefined;
-  if (!(trust instanceof PlanTrust)) throw new Error('a planner\'s trusted arguments are a PlanTrust from trustedPlan');
+  if (!(trust instanceof PlanTrust) || !ISSUED.has(trust)) throw new Error('a planner\'s trusted arguments are a PlanTrust from trustedPlan');
+  // Checked again where it is used, not only where it is issued: the id is the identity of a new record.
+  if (trust.mintedId !== undefined && !isMintedId(trust.mintedId)) throw new Error('a planner\'s trusted arguments are a PlanTrust from trustedPlan');
   if (trust.spaceId !== spaceId) throw new Error(`the trusted arguments were made for space '${trust.spaceId}', not for space '${spaceId}'`);
   if (trust.mintedId !== undefined && requestId !== undefined) {
     throw new Error(`a write names the id '${requestId}' and carries a minted id: a minted id is the identity of a new record, an id only addresses one`);

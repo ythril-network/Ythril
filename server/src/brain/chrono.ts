@@ -28,18 +28,15 @@ import type { ChronoEntry } from '../config/types.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { planChrono, chronoWant, type ChronoInput, type ChronoFields } from './write-plan/plan-chrono.js';
-import { planAndCommitOne } from './write-plan/plan-and-commit.js';
+import { planAndCommitOne, refuseOversizeRecord } from './write-plan/plan-and-commit.js';
 import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 // Re-exported so existing importers (and the C5 tests) keep reaching it here; it lives in its own leaf
 // module only to keep chrono.ts ↔ recall.ts from importing each other. See chrono-status.ts.
 export { deriveChronoStatus } from './chrono-status.js';
 
-/**
- * The recurrence frequencies a chrono entry may repeat on. EXPORTED so a test can exercise all of them
- * rather than naming four -- a fifth would otherwise be accepted by this validator and tried by nothing.
- */
-export const RECURRENCE_FREQ = ['daily', 'weekly', 'monthly', 'yearly'] as const;
+// The recurrence rule lives in its own leaf module (`recurrence.ts`) so the shared record checks can ask it; re-exported for its importers.
+export { RECURRENCE_FREQ, parseRecurrence } from './recurrence.js';
 
 /**
  * Every optional field a `deleteFields` path may clear on a chrono entry.
@@ -58,54 +55,6 @@ export const RECURRENCE_FREQ = ['daily', 'weekly', 'monthly', 'yearly'] as const
 const DELETABLE_CHRONO_FIELDS: readonly string[] = [
   'description', 'tags', 'properties', 'recurrence', 'endsAt', 'confidence', 'suppressEmbeddings',
 ];
-
-/**
- * Validate and normalise a `recurrence` block.
- *
- * Shared by REST and MCP. REST previously destructured `recurrence` straight out of the
- * request body and handed it to createChrono with NO shape check — unlike every sibling
- * field — so an arbitrary object could be persisted and later fed to date logic. MCP did
- * not expose it at all, so recurring entries were unreachable for agents.
- *
- * Returns `{ ok: true, value }` (value `undefined` when absent), or `{ ok: false, error }`.
- */
-export function parseRecurrence(
-  raw: unknown,
-): { ok: true; value: ChronoEntry['recurrence'] } | { ok: false; error: string } {
-  if (raw == null) return { ok: true, value: undefined };
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ok: false, error: 'recurrence must be an object' };
-  }
-  const r = raw as Record<string, unknown>;
-
-  const freq = r['freq'];
-  if (typeof freq !== 'string' || !(RECURRENCE_FREQ as readonly string[]).includes(freq)) {
-    return { ok: false, error: `recurrence.freq must be one of: ${RECURRENCE_FREQ.join(', ')}` };
-  }
-
-  // `interval` is required by the type. Default it rather than persisting a half-formed
-  // block that would later read as NaN.
-  let interval = 1;
-  if (r['interval'] !== undefined) {
-    if (typeof r['interval'] !== 'number' || !Number.isInteger(r['interval']) || r['interval'] < 1) {
-      return { ok: false, error: 'recurrence.interval must be a positive integer' };
-    }
-    interval = r['interval'];
-  }
-
-  let until: string | undefined;
-  if (r['until'] !== undefined) {
-    if (typeof r['until'] !== 'string' || Number.isNaN(Date.parse(r['until']))) {
-      return { ok: false, error: 'recurrence.until must be an ISO 8601 date string' };
-    }
-    until = r['until'];
-  }
-
-  return {
-    ok: true,
-    value: { freq: freq as 'daily' | 'weekly' | 'monthly' | 'yearly', interval, ...(until ? { until } : {}) },
-  };
-}
 
 /**
  * Store a new chrono entry.
@@ -130,6 +79,7 @@ export async function createChrono(
   // A link taken back because its entity was deleted while this was written is a warning on the answer (`link_target_removed`, Q-305).
   const takenBack = takenBackLinkWarnings(opts?.onValidation);
   const input: ChronoInput = { fields, ttlDays, opts: takenBack.onValidation ? { ...opts, onValidation: takenBack.onValidation } : opts };
+  refuseOversizeRecord({ kind: 'chrono', input });
   // Refused before the plan pays for an embedding; the commit asks again per stage, for a write admitted just before an act registers.
   assertSpaceTakesWrites(spaceId, 'chrono');
   const done = await planAndCommitOne(spaceId, chronoWant(input), view => planChrono(spaceId, input, view));

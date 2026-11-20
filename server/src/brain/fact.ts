@@ -31,7 +31,7 @@ import { writeFilterFor, writeOutcome } from './write-precondition.js';
 import { NEVER_RETURNED_PROJECTION, withoutVector, eventEntryOf } from './read-projection.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { planFact, factWant, type FactInput } from './write-plan/plan-fact.js';
-import { planAndCommitOne } from './write-plan/plan-and-commit.js';
+import { planAndCommitOne, refuseOversizeRecord } from './write-plan/plan-and-commit.js';
 import { admitSpaceWrite, assertSpaceTakesWrites } from '../spaces/space-write-gate.js';
 
 /** Store a new fact with semantic embedding */
@@ -97,6 +97,7 @@ export async function saveFact(
   // A link taken back because its entity was deleted while this was written is a warning on the answer (`link_target_removed`, Q-305).
   const takenBack = takenBackLinkWarnings(opts?.onValidation);
   const input: FactInput = { fact, linkEntities, tags, description, properties, type, opts: takenBack.onValidation ? { ...opts, onValidation: takenBack.onValidation } : opts, ttlDays, id };
+  refuseOversizeRecord({ kind: 'fact', input });
   // Refused before the plan pays for an embedding; the commit asks again per stage, for a write admitted just before an act registers.
   assertSpaceTakesWrites(spaceId, 'facts');
   const done = await planAndCommitOne(spaceId, factWant(input), view => planFact(spaceId, input, view));

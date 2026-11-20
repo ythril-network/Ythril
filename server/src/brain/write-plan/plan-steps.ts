@@ -26,6 +26,7 @@ import { applyRecordFlags, type RecordFlags } from '../record-flag.js';
 import { stampSkewOnCreate } from '../stamp-skew.js';
 import { stampOp, stampSetOf, type MetaForWrite, type SchemaCheckOutcome } from '../../spaces/schema-stamp.js';
 import type { DupeCheckOpts } from '../write-options.js';
+import type { SpaceMeta } from '../../config/types.js';
 import type { ReadSet } from './read-set.js';
 import type { PlanKind } from './types.js';
 
@@ -63,10 +64,12 @@ export async function vectorBeforeWrite(args: {
   stated: boolean | undefined;
   /** The caller needs the vector before the write: it waits for it, or a check compares against it. */
   wanted: boolean;
+  /** The meta of the plan schema an import proposes, when the write has one: the type tier is read from it, not from the stored meta (F7). */
+  planMeta?: SpaceMeta | undefined;
   text: () => string | Promise<string>;
 }): Promise<{ suppressed: boolean; vector: InlineVector | null }> {
   const suppressed = suppressedAfterWrite(args.spaceId, args.kind,
-    args.existing as Record<string, unknown> | null, args.schemaKey, args.stated);
+    args.existing as Record<string, unknown> | null, args.schemaKey, args.stated, args.planMeta);
   if (suppressed || !args.wanted) return { suppressed, vector: null };
   // Unguarded on purpose: the caller asked for a record that is searchable when this returns.
   const result = await embed(await args.text());

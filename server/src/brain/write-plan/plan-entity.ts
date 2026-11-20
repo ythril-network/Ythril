@@ -91,6 +91,7 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
   const { suppressed, vector } = await vectorBeforeWrite({
     spaceId, kind: 'entity', existing, schemaKey: { type }, stated: opts?.suppressEmbeddings,
     wanted: opts?.waitForEmbedding === true || opts?.checkDuplicates === true || opts?.checkContradictions === true,
+    planMeta: trusted?.planMeta !== undefined ? write.meta : undefined,
     text: () => embedText,
   });
   // The vector and the text it was made from go in together or not at all (rule I, `derivedFieldsForWrite`).
