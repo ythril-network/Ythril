@@ -75,6 +75,11 @@ describe('requestAddress', () => {
   it('answers a request with no socket at all', () => {
     assert.equal(requestAddress({}), 'unknown');
   });
+
+  it('answers a request whose socket is gone: express reads req.ip from the socket and throws once it is null (a client that left while its upload was refused)', () => {
+    const gone = { get ip() { throw new TypeError("Cannot read properties of null (reading 'remoteAddress')"); }, socket: null };
+    assert.equal(requestAddress(gone), 'unknown');
+  });
 });
 
 describe('nothing else in the server says either again', () => {

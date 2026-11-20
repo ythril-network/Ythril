@@ -295,6 +295,25 @@ describe('check-i-accessibility-i18n-deep-untranslated-and-unused', () => {
     assert.equal(decideOf(i18n, add('// t(\'zz.planted.title\') is gone', 'zz.planted.title'), ceilings, TODAY).holds, false);
   });
 
+  it('counts a key under a refusal prefix as used, and still names a key nothing looks up (bundle-270 H7)', () => {
+    // The client looks a refusal up as `<prefix>.<code>` for whatever code the server sends (`refusalText`), so no file spells the key: the
+    // prefixes are read from the client by the module its own spec reads them with, and every key under one is reached.
+    assert.ok(input.refusalPrefixes.length >= 4, `refusal prefixes read: ${input.refusalPrefixes}`);
+    assert.ok(input.refusalPrefixes.includes('files.refusal') && input.refusalPrefixes.includes('data.refusal'), String(input.refusalPrefixes));
+    const plant = (key) => withDict(input.source, (d) => { d[key] = 'Planted wording'; return d; });
+    const known = Object.keys(input.dicts[input.source]).find((k) => k.startsWith('files.refusal.space_being_'));
+    assert.ok(known, 'the dictionary words a write-closed code under files.refusal');
+    assert.equal(decideOf(i18n, plant(`${input.refusalPrefixes[0]}.space_being_planted`), ceilings, TODAY).holds, true);
+    assert.equal(decideOf(i18n, plant('zz.planted.space_being_planted'), ceilings, TODAY).holds, false, 'a key under no prefix is still named');
+    assert.equal(decideOf(i18n, plant('zz.refusal.space_being_planted'), ceilings, TODAY).holds, false, 'a prefix is read from the client, not guessed from a name');
+    assert.equal(i18n.unusedKeys({ [known]: 'x' }, ['const nothing = 1;'], []).length, 1, 'with no prefix read, the key the client builds at run time is named');
+    assert.deepEqual(i18n.unusedKeys({ [known]: 'x' }, ['const nothing = 1;'], ['files.refusal']), []);
+  });
+
+  it('cannot answer when no refusal prefix was read from the client', () => {
+    assert.throws(() => decideOf(i18n, { ...input, refusalPrefixes: [] }, ceilings, TODAY), /refusal prefixes/);
+  });
+
   it('does not count a value with no letter as untranslated, and does count one that equals the source after trimming', () => {
     assert.deepEqual(i18n.untranslatedKeys({ a: '{{n}}', b: '-', c: 'Open' }, { a: '{{n}}', b: '-', c: ' Open ' }), ['c']);
   });

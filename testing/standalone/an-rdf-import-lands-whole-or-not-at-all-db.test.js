@@ -164,8 +164,9 @@ describe('an RDF import lands whole or not at all (real routes, real MongoDB)', 
     assert.deepEqual(await d.records(BOUND, 'entities'), []);
   });
 
-  it('a bound only the act meets (records past the index, a bare edge among them) ends the act, releases the space and answers 413', async () => {
-    // Two subjects pass the door's pass; the bare edge is minted while the file is translated, as the third record of a bound of two.
+  it('a bound only the translation meets (records past the index, a bare edge among them) is answered 413 by the door, the space never held', async () => {
+    // Two subjects pass the door's reading pass; the bare edge is minted while the file is translated, still at the door, as the third record
+    // of a bound of two (the-rdf-import-act-works-on-the-review-fixes-db.test.js holds that no act was registered).
     act.setRdfImportKnobsForTest({ maxRecords: 2 });
     try {
       const r = await d.importRest(writer.key, BOUND, goodTurtle(BOUND));
