@@ -7,6 +7,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { of, throwError, Subject } from 'rxjs';
 import { HttpErrorResponse } from '@angular/common/http';
 import { getTranslocoModule } from '../../testing/transloco-testing';
+import { dictionary, LOCALES } from '../../testing/i18n-dictionary';
 import { SchemaApi } from '../../core/schema-api.service';
 import { ToastService } from '../../core/toast.service';
 import { ConfirmDialogService } from '../../core/confirm-dialog.service';
@@ -24,11 +25,17 @@ const GROUPS = [
 ];
 const refused = (body: Record<string, unknown>) => throwError(() => new HttpErrorResponse({ status: 409, error: body }));
 
-function mount(api: Record<string, unknown>, confirm = vi.fn(async () => true)) {
+/** The page's own language with its real words, or (no `locale`) the English marker words above. */
+function mount(api: Record<string, unknown>, confirm = vi.fn(async () => true), locale?: string) {
   TestBed.resetTestingModule();
   const toast = { show: vi.fn(), error: vi.fn(), success: vi.fn(), info: vi.fn() };
   TestBed.configureTestingModule({
-    imports: [SchemaLibraryNamespaceComponent, getTranslocoModule({ translation: { en: WORDS } })],
+    imports: [SchemaLibraryNamespaceComponent, locale === undefined
+      ? getTranslocoModule({ translation: { en: WORDS } })
+      : getTranslocoModule({
+        langs: Object.fromEntries(LOCALES.map(l => [l, dictionary(l)])),
+        translocoConfig: { availableLangs: [...LOCALES], defaultLang: locale },
+      })],
     providers: [
       { provide: SchemaApi, useValue: { getSchemaLibraryGroups: () => of({ groups: structuredClone(GROUPS) }), ...api } },
       { provide: ToastService, useValue: toast },
@@ -147,4 +154,42 @@ describe('the schema groups\' RDF namespaces', () => {
     }
     for (const b of Array.from(el.querySelectorAll('button'))) expect(['button', 'submit']).toContain(b.getAttribute('type'));
   });
+});
+
+/**
+ * A 400 for a field of the form (bundle-269 browser check, note 1): the answer of a body the server's validator refused is `{ error, issues:
+ * [{ code, path }] }`, with the field in `path` and the server's English in `error`. The card showed that English, with the field's name,
+ * in German and Polish too, beside a localised hint that says the same thing. It is worded from the field the answer names, in the page's
+ * language, and the server's sentence is the element's title.
+ */
+describe('a refusal of a field of the namespace form is worded in the page\'s language', () => {
+  const SERVER = {
+    iri: 'iri: a namespace IRI ends in "/" and holds no "#"',
+    prefix: 'prefix: a prefix is a letter, then letters, digits, "_" or "-", at most 50 characters',
+  };
+  const badBody = (field: 'iri' | 'prefix') => throwError(() => new HttpErrorResponse({
+    status: 400, error: { error: SERVER[field], issues: [{ code: 'custom', path: [field] }] },
+  }));
+
+  for (const locale of LOCALES) {
+    for (const field of ['iri', 'prefix'] as const) {
+      it(`${locale}: a 400 about the ${field} is the locale's sentence for that field, the server's sentence in its title`, () => {
+        const { fixture, c, el } = mount({ setGroupNamespace: vi.fn(() => badBody(field)) }, undefined, locale);
+        c.open(GROUPS[1]!);
+        c.patch({ prefix: 'beta', iri: 'https://beta.example/ns#' });
+        c.save();
+        fixture.detectChanges();
+        const shown = el.querySelector('.ns-error') as HTMLElement;
+        const said = (shown.textContent ?? '').trim();
+        const words = dictionary(locale)[`schemaLib.namespace.refusal.field.${field}`];
+        expect(words, `${locale}.json has no words for a refused ${field}`).toBeTruthy();
+        expect(said).toBe(words);
+        expect(said, 'the server\'s English is on the page').not.toContain(SERVER[field]);
+        if (locale !== 'en') {
+          expect(said, `the ${locale} sentence is the English one`).not.toBe(dictionary('en')[`schemaLib.namespace.refusal.field.${field}`]);
+        }
+        expect(shown.getAttribute('title')).toBe(SERVER[field]);
+      });
+    }
+  }
 });

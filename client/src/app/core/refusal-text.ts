@@ -33,6 +33,8 @@ import { violationWording } from './violation-wording';
  * 3. a locked second factor (`code: 'MFA_LOCKED'`, a 429): one sentence in EVERY key family, with the wait in minutes;
  * 4. a `code` the client knows, translated under `keyPrefix` (the network refusals by default, `files.refusal` for a file
  *    act: a code names a sentence only inside its own family);
+ * 4b. no code, but a body the server's validator refused (`issues`): the field each issue names, translated under
+ *    `<keyPrefix>.field.<name>` when the family words EVERY field named (never a mix of words and English);
  * 5. the body's own prose, and last the caller's `fallbackKey`.
  */
 
@@ -165,6 +167,24 @@ export function answerCode(err: unknown): string {
 export function refusalIssues(err: unknown): unknown[] {
   const issues = bodyOf(err)?.['issues'];
   return Array.isArray(issues) ? issues : [];
+}
+
+/** A name a form field has: what `refusalOfParse` puts first in an issue's path, and the only shape the client builds a key from. */
+const FIELD_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+/**
+ * The fields a zod-body refusal (`{ error, issues: [{ code, path }] }`, no `code` of its own) is about: the first segment of each issue's
+ * path, once each, in order. [] for any other answer. A family that words a field defines `<keyPrefix>.field.<name>`.
+ */
+function issueFields(body: Record<string, unknown> | null): string[] {
+  const names: string[] = [];
+  const issues: unknown = body?.['issues'];
+  for (const issue of Array.isArray(issues) ? issues as unknown[] : []) {
+    const path = (issue as { path?: unknown } | null)?.path;
+    const first = Array.isArray(path) ? path[0] : undefined;
+    if (typeof first === 'string' && FIELD_NAME.test(first) && !names.includes(first)) names.push(first);
+  }
+  return names;
 }
 
 /** The body's own prose: its `message` when `error` is a code, else its `error`; '' when it states none. */
@@ -348,6 +368,11 @@ export function describeRefusal(
       spaces: formatList(names('spaces'), lang), space: nonEmpty(body?.['space']), terms: formatList(names('terms'), lang), iri: nonEmpty(body?.['iri']),
     });
     if (sentence) return plain(withRequestId(sentence, err));
+  }
+  if (!code) {
+    const fields = issueFields(body);
+    const sentences = fields.map(f => translatedOrEmpty(transloco, `${keyPrefix}.field.${f}`));
+    if (fields.length > 0 && sentences.every(Boolean)) return plain(withRequestId(sentences.join(' '), err));
   }
   const prose = proseOf(err);
   if (prose) return plain(withRequestId(prose, err));

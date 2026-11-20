@@ -125,3 +125,28 @@ describe('SchemaLibraryComponent — exporting an entry (characterization for Q-
     }
   });
 });
+
+/**
+ * The RDF namespaces card of the page (Q-748, bundle-269 browser check, note 4). The page draws it only while an entry has a group
+ * (`availableGroups()`), and the card then reads the groups itself, from the server. The two reads can disagree (a group removed elsewhere
+ * since the page loaded, the card's Retry after a failed read), so the card's own empty state is reachable and stays: without it that card
+ * would be a heading, a purpose line and nothing.
+ */
+describe('SchemaLibraryComponent — the namespaces card is drawn for a group, and says so when the server lists none', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+
+  it('draws the card for an entry with a group, and its empty state when the server lists no group', () => {
+    const { fixture } = create();
+    const card = (fixture.nativeElement as HTMLElement).querySelector('app-schema-library-namespace');
+    expect(card, 'the card is not drawn for an entry with a group').not.toBeNull();
+    expect(card!.textContent).toContain('schemaLib.namespace.empty');
+  });
+
+  it('draws no card while no entry has a group', () => {
+    const { fixture, schemaApi } = create();
+    schemaApi.listSchemaLibrary.mockReturnValue(of({ entries: [{ ...ENTRY, schemaGroup: undefined }] }) as never);
+    (fixture.componentInstance as any).load();
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).querySelector('app-schema-library-namespace')).toBeNull();
+  });
+});

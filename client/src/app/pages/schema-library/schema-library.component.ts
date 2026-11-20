@@ -152,13 +152,13 @@ export function entriesFromTypeSchemas(
     .type-filter-btn { background:none; border:1px solid var(--border); border-radius:20px; padding:2px 12px; font-size:12px; cursor:pointer; color:var(--text-muted); transition:all .15s; font-family:var(--font); }
     .type-filter-btn:hover { color:var(--text-primary); border-color:var(--text-muted); }
     .type-filter-btn.active { background:var(--accent-dim); color:var(--accent); border-color:color-mix(in srgb,var(--accent) 60%,transparent); font-weight:600; }
-    .entry-title-row { display:flex; align-items:center; gap:6px; margin-bottom:2px; }
+    .entry-title-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-bottom:2px; }
     .entry-footer { display:flex; justify-content:flex-end; gap:8px; align-items:center; margin-top:6px; }
-    .entry-grid { display:grid; gap:10px; }
+    .entry-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; }
     .entry-card { background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:14px 16px; display:flex; align-items:flex-start; justify-content:space-between; gap:12px; transition:border-color .15s; cursor:pointer; }
     .entry-card:hover { border-color: var(--accent); }
     .entry-main { flex:1; min-width:0; }
-    .entry-name { font-weight:600; font-size:14px; color:var(--text-primary); font-family:var(--font-mono); }
+    .entry-name { font-weight:600; font-size:14px; color:var(--text-primary); font-family:var(--font-mono); overflow-wrap:anywhere; min-width:0; }
     .entry-meta { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:4px; }
     .entry-description { font-size:12px; color:var(--text-secondary); margin-top:4px; word-break:break-word; }
     .entry-actions { display:flex; gap:6px; flex-shrink:0; }
