@@ -26,6 +26,7 @@ import { effectiveMeta, replicatedMetaOf } from '../sync/replicated-meta.js';
 import { PER_TYPE_META_FIELD } from './meta-fields.js';
 import { derivedFromStored, type ParsedSpaceMeta, type ParsedTypeSchema } from './body-schemas.js';
 import { updateSpace } from './spaces.js';
+import { assertSchemaWritable } from './schema-write-gate.js';
 import { layersFor } from './network-layers.js';
 import { keepLayerSnapshot } from './schema-snapshot-store.js';
 import { heldRebaseEpochs, layerRdfConflict, recordRdfOffers } from './rdf-settle.js';
@@ -124,6 +125,7 @@ export function storeNetworkLayer(networkId: string, spaceId: string, meta: Pars
 export function commitOwnMetaEdit(spaceId: string, edit: (base: SpaceMeta) => ParsedSpaceMeta): SpaceConfig | null {
   const space = getConfig().spaces.find(s => s.id === spaceId);
   if (!space) return null;
+  assertSchemaWritable(spaceId);
   if (!space.ownMeta) return updateSpace(spaceId, { meta: edit(space.meta ?? {}) });
   space.ownMeta = replicatedMetaOf(edit(space.ownMeta)) as SpaceMeta;
   recomputeEffectiveMeta(spaceId, true);
