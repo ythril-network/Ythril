@@ -20,7 +20,7 @@
  *   |----------------------------------------------------------------------|------------------------------------|-------------------|
  *   | space PATCH, MCP `schema_update` (`meta-update.ts`)                  | `assertSchemaWritable`             | a door            |
  *   | the per-type routes, the library's save (`api/spaces.ts`, `schema-library.ts`) | `commitOwnMetaEdit`      | a door            |
- *   | `setNetworkPrecedenceAct` (an operator's reorder)                    | `recomputeEffectiveMeta`           | a door            |
+ *   | `setNetworkPrecedenceAct` (an operator's reorder)                    | `assertSchemaWritable`, before its first write | a door |
  *   | a passed `meta_change` round, the proposer's own edit (`governance.ts`) | `commitOwnMetaEdit`             | the network's     |
  *   | a passed `meta_change` round, a member's layer (`governance.ts`)     | `storeNetworkLayer` -> `updateSpace` | the network's   |
  *   | a layer arriving by sync (`space-meta-pull.ts`)                      | `storeNetworkLayer` -> `updateSpace` | the network's   |
@@ -43,7 +43,7 @@ const NET = '66666666-6666-4666-8666-666666666666';
 const SPACE = 'notes';
 const HELD = 'space_being_rdf_imported';
 
-let loader, settle, effective, spaces, gate, pull, networkSpaces, governance;
+let loader, settle, effective, spaces, gate, pull, networkSpaces, governance, layerActs;
 
 before(async () => {
   loader = await bootInstance(dir, { instanceId: SELF });
@@ -54,6 +54,7 @@ before(async () => {
   pull = await import('../../server/dist/sync/space-meta-pull.js');
   networkSpaces = await import('../../server/dist/networks/network-spaces.js');
   governance = await import('../../server/dist/sync/governance.js');
+  layerActs = await import('../../server/dist/spaces/schema-layers-acts.js');
 });
 after(() => { governance.setMetaChangeApplyHookForTest?.(null); removeInstanceDir(dir); });
 
@@ -178,6 +179,19 @@ describe('what an operator starts at a door stays refused while an RDF import st
     assert.throws(() => spaces.updateSpace(SPACE, { meta: { purpose: 'an operator\'s edit' } }), refusedByImport, 'updateSpace with a meta (the space PATCH)');
     assert.throws(() => gate.assertSchemaWritable(SPACE), refusedByImport, 'the gate itself');
     assert.equal(JSON.stringify(spaceNow().meta), before, 'a refused door write changed the schema');
+  });
+
+  it('tail T1: setting the network precedence is refused before it writes: the stored order and the config stay as they were', async () => {
+    // The act wrote `networkPrecedence` and saved the config, and only its recompute met the gate: with the import standing it saved the new
+    // order and then threw. A reorder that moves no schema never met the gate at all.
+    await boot({ layer: { purpose: 'the purpose of the network' }, imported: false });
+    effective.recomputeEffectiveMeta(SPACE, true);
+    await standImport();
+    const before = JSON.stringify(loader.getConfig());
+    assert.equal(spaceNow().networkPrecedence, undefined, 'the order starts unset');
+    assert.throws(() => layerActs.setNetworkPrecedenceAct(SPACE, { networks: [NET] }), refusedByImport, 'the reorder answers the import\'s code');
+    assert.equal(spaceNow().networkPrecedence, undefined, 'the refused reorder stored its order');
+    assert.equal(JSON.stringify(loader.getConfig()), before, 'the refused reorder changed the config');
   });
 
   it('a round\'s apply does not leave the gate open for a door call that follows it', async () => {
