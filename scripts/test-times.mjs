@@ -114,6 +114,7 @@ import { waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
 import { CLIENT_RESULTS, parseClientReport, readClientReport } from './_shared/client-results.mjs';
 import { isCount, storedPath, measurementsText } from './_shared/measurements.mjs';
+import { testRunMeasurements } from './_shared/test-run-reads.mjs';
 import { renderRunSummary, seconds } from './_shared/run-summary.mjs';
 
 // ---- what is recorded, and where ----------------------------------------------------------------------------------
@@ -1169,13 +1170,8 @@ async function trendRowsPerSuite(api, limit) {
 
 /** A record's per-file times, fetched on their own (the listing never carries `measurements`). */
 async function filesOf(api, row) {
-  const chars = Number(row.properties.measurementsChars);
-  const answer = await api.call('filter', {
-    space: SPACE, collection: 'chrono', filter: { _id: row._id }, projection: { 'properties.measurements': 1 }, limit: 1,
-    maxChars: Math.min(5_000_000, (Number.isFinite(chars) ? chars : 1_000_000) + 5000),
-  });
-  const text = answer?.data?.results?.[0]?.properties?.measurements;
-  if (typeof text !== 'string') return null;
+  const text = await testRunMeasurements(api, row);
+  if (text === null) return null;
   try { return Object.fromEntries((JSON.parse(text).files ?? []).map(f => [f.file, f.ms])); } catch { return null; }
 }
 
