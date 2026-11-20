@@ -14,7 +14,7 @@
  *   `{ key, graph?, subject, quads }`, one per subject and graph, a record's parts delivered with it: `names` is the reverse addressing's
  *   `addressNames(...)`, and an address it reads as a record part (a chrono's `#start` and `#end`) is grouped under its record.
  *   A subject's characters are counted by {@link termChars} over each quad's subject, predicate, object and graph.
- * - `subjectKey(subject, graph?)` is the key a group carries and the index is keyed by.
+ * - `quadGroupKey(subject, graph?)` is the key a group carries and the index is keyed by.
  * - `openOperationSpool(folder)` answers `{ append(kind, op), close(), read(order) }`: one file per kind, read back kind by kind in `order`.
  *
  * `server/src/rdf/import-index.ts`: `new ImportIndex({ maxRecords? })` with `set(key, { kind, id, stored })`, `get(key)`, `has(key)`, `size`,

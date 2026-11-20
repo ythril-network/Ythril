@@ -53,7 +53,8 @@ async function holdsAt(label, quads, field, bound, limit) {
   assert.deepEqual(namesIn(over.dir), [], `the refused pass left ${namesIn(over.dir).join(', ')} behind`);
 }
 
-describe('the import spool refuses at its bounds', () => {
+// A refusal that never settles is a failure, not a stalled run: an abort once waited on a destroyed stream's `finish` for ever.
+describe('the import spool refuses at its bounds', { timeout: 60_000 }, () => {
   it('the quads of the file: passes at the bound, refused one over it', async () => {
     const quads = spread(40, 5);
     await holdsAt('quads', quads, 'maxQuads', 'RDF_IMPORT_MAX_QUADS', quads.length);
