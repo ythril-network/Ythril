@@ -12,6 +12,10 @@
  *   data it governs) is refused (`rdf_jsonld_not_streamable`), never held whole.
  * - **Memory the author chooses.** Each bound below is a named constant with its reason; exceeding one refuses with `rdf_bound_exceeded` and
  *   the constant's NAME in `bound`. A gzip body is counted after it inflates, against the bytes read so far and against an absolute cap.
+ * - **A JSON-LD array the library would hold.** The library keeps the whole root object it reads, and holds a root `@graph` array's statements
+ *   until the root closes, so the product's own export (`{"@context", "@graph": [nodes]}`) would be held whole. {@link GraphArrayScanner} takes such
+ *   a root apart and {@link GraphReader} gives the library a few nodes at a time, each batch the document in miniature; any other shape is read
+ *   whole under the bounds, and a root that cannot be streamed is refused by name over them (`rdf_jsonld_not_streamable`).
  * - **A refusal that ends the process.** A parser's error is an event; nobody listening makes it an uncaught exception. Every failure of a
  *   library, of the source, of the UTF-8 decoding or of the gzip stream surfaces as one {@link RdfParseError} thrown from the iteration, with
  *   the line and column where the document is wrong when they can be told.
@@ -44,6 +48,7 @@ import { xsd } from './literals.js';
 import { RDF_FORMATS, type RdfFormat } from './serialize.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 import { DEFAULT_IMPORT_BODY_MAX_BYTES } from '../config/body-limits.js';
+import { GraphArrayScanner, GraphScanRefusal, placeAfter, type GraphEvent, type GraphPlace } from './jsonld-graph-scan.js';
 
 /** The longest literal value the reader takes: twice the longest text the store keeps (`MAX_FACT_LENGTH`, 50 000), so a text that fits is read and one that could never be stored is not buffered. */
 export const RDF_MAX_LITERAL_CHARS = 100_000;
@@ -156,6 +161,18 @@ function resolveBounds(given: Partial<RdfParseBounds> | undefined): RdfParseBoun
 
 // ── Where in the document ────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** The index of the character of `text` that starts `offset` bytes in, as UTF-8 (how the JSON tokenizer counts), or undefined when `text` ends before it. */
+function charIndexAtByte(text: string, offset: number): number | undefined {
+  let at = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    if (at >= offset) return i;
+    const code = text.codePointAt(i)!;
+    at += Buffer.byteLength(String.fromCodePoint(code), 'utf8');
+    if (code > LAST_BMP_CODE_POINT) i += 1;
+  }
+  return undefined;
+}
+
 /**
  * Tracks the text fed so far, so an error a library reports by line, token or byte offset becomes a line and column of the document. Only the
  * last few pieces are kept: a position further back, or inside a line longer than they hold, is answered with the line alone.
@@ -215,14 +232,9 @@ class Where {
 
   /** The place of the character `offset` bytes into the last piece fed: how the JSON tokenizer counts, from the start of the chunk it was given. */
   inLastAtByte(offset: number): RdfPlace | undefined {
-    let at = 0;
-    for (let i = this.tail.length - this.lastPiece; i < this.tail.length; i += 1) {
-      if (at >= offset) return this.placeAt(i);
-      const code = this.tail.codePointAt(i)!;
-      at += Buffer.byteLength(String.fromCodePoint(code), 'utf8');
-      if (code > LAST_BMP_CODE_POINT) i += 1;
-    }
-    return undefined;
+    const first = this.tail.length - this.lastPiece;
+    const index = charIndexAtByte(this.tail.slice(first), offset);
+    return index === undefined ? undefined : this.placeAt(first + index);
   }
 
   /** The text of `line` as far as the tail reaches, and the column its first held character is at (`offset`). */
@@ -375,11 +387,10 @@ interface RdfJsTerm {
  * label the document gave stays what it is for Turtle (the library prefixes it with `l`), and is marked with that `l` here for JSON-LD, so a label
  * and an anonymous node never share a name.
  */
-function blankFactory(markLabels: boolean): object {
-  let anonymous = 0;
+function blankFactory(markLabels: boolean, counter: { next: number } = { next: 0 }): object {
   return {
     ...N3Factory,
-    blankNode: (name?: string) => N3Factory.blankNode(name === undefined ? `~${anonymous++}` : markLabels ? `l${name}` : name),
+    blankNode: (name?: string) => N3Factory.blankNode(name === undefined ? `~${counter.next++}` : markLabels ? `l${name}` : name),
     // The JSON-LD library asks for a plain string with a null language, which n3's factory reads as a term.
     literal: (value: string, languageOrDatatype?: unknown) => N3Factory.literal(value, languageOrDatatype === null ? undefined : languageOrDatatype as string),
   };
@@ -562,18 +573,18 @@ class AfterDocument {
   }
 }
 
-/** The library's error as a refusal. */
-function jsonLdRefusal(error: Error, refused: { address?: string }, where: Where): RdfParseError {
+/** The library's error as a refusal; `locate` turns the byte offset the tokenizer names (when it names one) into a place of the document. */
+function jsonLdRefusal(error: Error, refused: { address?: string }, locate: (byteOffset: number | undefined) => RdfPlace): RdfParseError {
   if (refused.address !== undefined) {
     return new RdfParseError('rdf_remote_context', `the document names the remote context ${cut(refused.address)}, which is never fetched: put its terms inline in the document's @context`, { address: refused.address });
   }
   const code = (error as { code?: unknown }).code;
   if (code === 'invalid streaming key order') {
-    return new RdfParseError('rdf_jsonld_not_streamable', `the document is not in streaming order: a @context must be the first key of its object, and an @id and @type must come before the properties (${cut(error.message)})`, { place: where.now() });
+    return new RdfParseError('rdf_jsonld_not_streamable', `the document is not in streaming order: a @context must be the first key of its object, and an @id and @type must come before the properties (${cut(error.message)})`, { place: locate(undefined) });
   }
   const unclosed = /^Unclosed document/.test(error.message);
   const offset = /^Unexpected "[\s\S]*" at position (\d+)/.exec(error.message)?.[1];
-  const place = (offset !== undefined ? where.inLastAtByte(Number(offset)) : undefined) ?? where.now();
+  const place = locate(offset === undefined ? undefined : Number(offset));
   const address = /^Invalid (?:resource|term|predicate) IRI: ([\s\S]*)$/.exec(error.message)?.[1]
     ?? /^Invalid IRI mapping found for context entry '[^']*': '"?([\s\S]*?)"?'$/.exec(error.message)?.[1];
   if (address !== undefined && !ABSOLUTE_IRI.test(address)) {
@@ -584,7 +595,7 @@ function jsonLdRefusal(error: Error, refused: { address?: string }, where: Where
 
 /** The part of a JSON-LD parser the reader uses. */
 interface JsonLdSurface extends Eventful {
-  write(chunk: Buffer): boolean;
+  write(chunk: Buffer, callback?: () => void): boolean;
   end(): void;
   destroy(): void;
   on(event: 'data', listener: (quad: RdfJsTerm) => void): unknown;
@@ -592,17 +603,144 @@ interface JsonLdSurface extends Eventful {
   on(event: 'error', listener: (error: Error) => void): unknown;
 }
 
-async function* jsonLdQuads(pieces: AsyncIterable<string>, prefix: string, bounds: RdfParseBounds, where: Where): AsyncGenerator<Quad> {
-  const refused: { address?: string } = {};
-  const parser = new JsonLdParser({
+/** The one place a JSON-LD parser is built: a streaming profile, strict values, the given blank-node numbering, and a loader that fetches nothing. */
+function newJsonLdParser(factory: object, refused: { address?: string }): JsonLdSurface {
+  return new JsonLdParser({
     streamingProfile: true,
     // A plain @type after the @id adds a statement about a subject already known; only a type with a context of its own, which would change how the
     // keys already read are understood, is out of order.
     streamingProfileAllowOutOfOrderPlainType: true,
     strictValues: true,
-    dataFactory: blankFactory(true) as never,
+    dataFactory: factory as never,
     documentLoader: refusingLoader(refused),
   }) as unknown as JsonLdSurface;
+}
+
+/** A scanner's refusal as the reader's own. */
+function refusalOfScan(error: unknown, bounds: RdfParseBounds): unknown {
+  if (!(error instanceof GraphScanRefusal)) return error;
+  if (error.kind === 'too-long') return overBound('maxUnparsedChars', bounds.maxUnparsedChars, 'a node of the @graph array', error.place);
+  return new RdfParseError(error.kind === 'not-streamable' ? 'rdf_jsonld_not_streamable' : 'rdf_malformed', error.message, { place: error.place });
+}
+
+/** One library document: a few nodes of the array under the root's `@context` and `@id`, written to a parser of its own and read to its end. */
+interface Batch {
+  parser: JsonLdSurface;
+  queue: RdfJsTerm[];
+  counter: { next: number };
+  failure?: Error;
+  ended: boolean;
+  wake?: () => void;
+  count: number;
+  chars: number;
+}
+
+/**
+ * Reads the nodes of a root `@graph` array (the events of a {@link GraphArrayScanner}) by giving the library, for every few nodes, a document
+ * of its own: `{"@context": <the root's>, "@id": <the root's>, "@graph": [ node, node, ... ]}`. That is the document in miniature, so the
+ * statements and graphs are those of the whole reading, and the library holds one batch at a time.
+ *
+ * What a split could get wrong, and where it is held: a blank-node LABEL is the document's (one prefix-and-label name whichever batch it is in);
+ * an anonymous node is numbered by one counter across the batches, and a root with no `@id` costs each batch one blank node (the name the
+ * library gives its graph) which is taken back, so the numbers are the whole reading's; a batch ends at {@link CHUNK_CHARS} of nodes, or
+ * at the context's length when that is more, so the context is parsed once per piece of document of its own size.
+ */
+class GraphReader {
+  private batch: Batch | undefined;
+  /** The number the next anonymous node is given: the counter at the end of the last batch, less the node that batch spent on its graph's name. */
+  private anonymous = 0;
+  private opened = 0;
+  private place: GraphPlace;
+  private readonly terms: Terms;
+  private readonly header: string;
+  private readonly headPlace: GraphPlace;
+  private readonly batchChars: number;
+  private readonly spentOnGraphName: number;
+
+  constructor(head: Extract<GraphEvent, { kind: 'head' }>, prefix: string, bounds: RdfParseBounds, private readonly refused: { address?: string }) {
+    this.place = head.place;
+    this.headPlace = head.place;
+    this.terms = new Terms(prefix, bounds, () => false, () => this.place);
+    this.header = `{${head.context === undefined ? '' : `"@context":${head.context},`}${head.id === undefined ? '' : `"@id":${head.id},`}"@graph":[`;
+    this.batchChars = Math.max(CHUNK_CHARS, head.context?.length ?? 0);
+    this.spentOnGraphName = head.id === undefined ? 1 : 0;
+  }
+
+  async *take(events: GraphEvent[]): AsyncGenerator<Quad> {
+    for (const event of events) {
+      if (event.kind === 'node') yield* this.node(event.text, event.place);
+      else if (event.kind === 'end') yield* this.end();
+    }
+  }
+
+  private async *node(text: string, place: GraphPlace): AsyncGenerator<Quad> {
+    this.place = place;
+    const batch = this.batch ?? await this.start();
+    const chunk = `${batch.count === 0 ? '' : ','}${text}`;
+    await this.write(batch, chunk, place, batch.count === 0 ? 0 : 1);
+    batch.count += 1;
+    batch.chars += text.length;
+    yield* this.drain(batch);
+    if (batch.chars >= this.batchChars) yield* this.close();
+  }
+
+  /** The document ended: the last batch is closed, and a document with no node at all still has its `@context` read. */
+  private async *end(): AsyncGenerator<Quad> {
+    if (this.opened === 0) await this.start();
+    yield* this.close();
+  }
+
+  private async start(): Promise<Batch> {
+    const counter = { next: this.anonymous };
+    const parser = newJsonLdParser(blankFactory(true, counter), this.refused);
+    const batch: Batch = { parser, queue: [], counter, ended: false, count: 0, chars: 0 };
+    const poke = (): void => { const resume = batch.wake; batch.wake = undefined; resume?.(); };
+    parser.on('data', (quad) => { batch.queue.push(quad); });
+    parser.on('error', (error) => { batch.failure ??= error; poke(); });
+    parser.on('end', () => { batch.ended = true; poke(); });
+    parser.on('close', poke);
+    this.batch = batch;
+    this.opened += 1;
+    await this.write(batch, this.header, this.headPlace, 0);
+    return batch;
+  }
+
+  /** Writes `chunk` and waits until the library has read it; its failure is refused with the place `skip` characters into `chunk` from `start`. */
+  private async write(batch: Batch, chunk: string, start: GraphPlace, skip: number): Promise<void> {
+    if (!batch.failure) await new Promise<void>((resolve) => { batch.wake = resolve; batch.parser.write(Buffer.from(chunk, 'utf8'), () => resolve()); });
+    batch.wake = undefined;
+    if (!batch.failure) return;
+    throw jsonLdRefusal(batch.failure, this.refused, (offset) => {
+      const index = offset === undefined ? undefined : charIndexAtByte(chunk, offset);
+      return index === undefined || index < skip ? start : placeAfter(start, chunk.slice(skip), index - skip);
+    });
+  }
+
+  private *drain(batch: Batch): Generator<Quad> {
+    for (const raw of batch.queue.splice(0)) yield this.terms.quad(raw);
+  }
+
+  private async *close(): AsyncGenerator<Quad> {
+    const batch = this.batch;
+    if (!batch) return;
+    this.batch = undefined;
+    try {
+      await this.write(batch, ']}', this.place, 0);
+      batch.parser.end();
+      while (!batch.ended && !batch.failure) await new Promise<void>((resolve) => { batch.wake = resolve; });
+      if (batch.failure) throw jsonLdRefusal(batch.failure, this.refused, () => this.place);
+      yield* this.drain(batch);
+    } finally {
+      batch.parser.destroy();
+    }
+    this.anonymous = batch.counter.next - this.spentOnGraphName;
+    await yieldToEventLoop();
+  }
+}
+
+async function* jsonLdQuads(pieces: AsyncIterable<string>, prefix: string, bounds: RdfParseBounds, where: Where): AsyncGenerator<Quad> {
+  const refused: { address?: string } = {};
+  const parser = newJsonLdParser(blankFactory(true), refused);
   const queue: RdfJsTerm[] = [];
   let failure: Error | undefined;
   let ended = false;
@@ -619,32 +757,49 @@ async function* jsonLdQuads(pieces: AsyncIterable<string>, prefix: string, bound
   let unparsed = 0;
   let seen = 0;
   let holdsGraph = false;
+  const locate = (offset: number | undefined): RdfPlace => (offset === undefined ? undefined : where.inLastAtByte(offset)) ?? where.now();
+  // A root object that is only a context, an @id and a `@graph` array is read a node at a time (GraphReader); anything else, as a whole.
+  const scan = new GraphArrayScanner(bounds.maxUnparsedChars);
+  let graph: GraphReader | undefined;
   try {
     for await (const piece of pieces) {
+      let events: GraphEvent[];
+      try { events = scan.feed(piece); } catch (err) { throw refusalOfScan(err, bounds); }
+      if (scan.mode === 'graph') {
+        const head = events.find((event): event is Extract<GraphEvent, { kind: 'head' }> => event.kind === 'head');
+        // What the library was given before the array began is only the root's first keys: nothing of it is wanted.
+        if (head) { parser.destroy(); graph = new GraphReader(head, prefix, bounds, refused); }
+        try { yield* graph!.take(events); } catch (err) { throw refusalOfScan(err, bounds); }
+        continue;
+      }
       const extra = after.feed(piece);
       if (extra !== undefined) throw new RdfParseError('rdf_malformed', 'content follows the end of the JSON-LD document', { place: where.inLast(extra) });
       if (!failure && !parser.write(Buffer.from(piece, 'utf8'))) await settled(parser);
       // The library reports a failure, and finishes its asynchronous jobs, on later turns: wait for them, so a failure is seen against the piece it came from.
       await yieldToEventLoop();
       while (queue.length) yield terms.quad(queue.shift()!);
-      if (failure) throw jsonLdRefusal(failure, refused, where);
+      if (failure) throw jsonLdRefusal(failure, refused, locate);
       if (quads !== seen) { seen = quads; unparsed = 0; } else {
         unparsed += piece.length;
-        // The library holds a top-level `@graph` array whole until it closes (the first statement of the product's own export arrives with its
-        // last character), so over the bound such a document is not "no statement yet" but one that cannot be read streaming (review U6).
+        // The library holds the statements of a `@graph` array in a root of its own (properties, or an alias for `@graph`) until the root closes,
+        // so over the bound such a document is not "no statement yet" but one that cannot be read as a stream (review U6).
         if (quads === 0 && !holdsGraph) holdsGraph = piece.includes('"@graph"');
         if (unparsed > bounds.maxUnparsedChars) {
           if (holdsGraph) {
-            throw new RdfParseError('rdf_jsonld_not_streamable', `the document's @graph array is read whole before any statement is released, and it is over ${bounds.maxUnparsedChars} characters: split the data into several documents, or send it as Turtle, TriG or N-Quads`, { place: where.now() });
+            throw new RdfParseError('rdf_jsonld_not_streamable', `the document's @graph array sits in a root that is more than a @context, an @id and the array (it has properties of its own, or @graph is an alias), so it is read whole before any statement is released, and it is over ${bounds.maxUnparsedChars} characters: split the data into several documents, or send it as Turtle, TriG or N-Quads`, { place: where.now() });
           }
           throw overBound('maxUnparsedChars', bounds.maxUnparsedChars, 'text that completes no statement', where.now());
         }
       }
     }
+    if (graph) {
+      try { scan.finish(); } catch (err) { throw refusalOfScan(err, bounds); }
+      return;
+    }
     parser.end();
     for (;;) {
       while (queue.length) yield terms.quad(queue.shift()!);
-      if (failure) throw jsonLdRefusal(failure, refused, where);
+      if (failure) throw jsonLdRefusal(failure, refused, locate);
       if (ended) return;
       await changed();
     }
