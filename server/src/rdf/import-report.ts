@@ -62,8 +62,6 @@ export interface RdfImportReport {
   endedAt?: string;
   /** Our sentence when the import failed for good (its folder was lost or cannot be read). */
   error?: string;
-  /** The bound a refused import met only while it ran (its records past the index's bound). */
-  bound?: { name: string; limit: number };
 }
 
 /** Every kind at zero. */

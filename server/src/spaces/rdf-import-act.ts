@@ -7,16 +7,19 @@
  *
  * - **Two doors that differ.** Parameters, defaults, bounds, every refusal and its code, and the report are decided here; a door only reads its
  *   body off its wire and puts the answer back on it. The parameters are judged by one schema (`RdfImportParams`) before anything else runs.
- * - **A stranger's file landing half.** The door reads the whole file into a sorted spool (`rdf/import-spool.ts`) before anything is decided,
- *   answering a malformed file (400 with its place) and a file over a bound (413 naming it) itself, with no act registered. The act then
- *   translates every group (`rdf/quads-to-ops.ts`), dry-plans every operation with the real planners (`rdf/import-plan.ts`), and only when
- *   nothing was refused commits, kind by kind in the store's order over the whole import (A1). A reason the space's mode refuses, or any
- *   refusal of a planner, refuses the whole import in every mode: nothing lands, every reason is answered with its statements (named up to
- *   {@link RDF_IMPORT_REASONS_NAMED_MAX}, the rest counted), and the act ends as an input failure that RELEASES the space (A11). A reason the
- *   mode records is answered, and the import goes on.
+ * - **A stranger's file landing half.** The door reads the whole file into a sorted spool (`rdf/import-spool.ts`), builds the import's index
+ *   (bare edges counted: each is a record of it) and translates every group (`rdf/quads-to-ops.ts`) before any act is registered, answering a
+ *   malformed file (400 with its place) and a file over a bound, the index's record bound included (413 naming it), itself, and a reason the
+ *   space's mode refuses (409 with the report) likewise: the space is never held for a file that cannot land. The act then dry-plans every
+ *   operation with the real planners (`rdf/import-plan.ts`), and only when nothing was refused commits, kind by kind in the store's order over
+ *   the whole import (A1). Any refusal of a planner refuses the whole import in every mode: nothing lands, every reason is answered with its
+ *   statements (named up to {@link RDF_IMPORT_REASONS_NAMED_MAX}, the rest counted), and the act ends as an input failure that RELEASES the
+ *   space (A11). A reason the mode records is answered, and the import goes on. A record the dry plan refuses is not written, so the plan
+ *   runs again without it until no record is judged with a refused one present (`dryPlanPass`).
  * - **A supplied id made an identity.** Every new subject's id is minted here, once, before any group is translated, and kept in the import's
- *   index (`rdf/import-index.ts`) beside its spool; an edge stated as a bare triple is minted under its triplet. A commit resumed after a crash
- *   plans the same operations under the same ids and converges onto what its first attempt landed: no record is written twice.
+ *   index (`rdf/import-index.ts`) beside its spool; an edge stated as a bare triple is minted under its triplet. The operations carry the ids
+ *   into the act's folder, so a commit resumed after a crash plans the same operations under the same ids and converges onto what its first
+ *   attempt landed: no record is written twice.
  * - **A space changed under the import.** The act holds the space as every act does (no other writer, its sync exchange held), and while it
  *   stands no schema write reaches the space (`schema-write-gate.ts`, A3), so the commit lands under the schema the dry plan judged by.
  * - **A dry run that is a write.** A dry run needs the import's own rung (A10), translates and dry-plans inline, registers no act, holds
@@ -65,14 +68,16 @@ export { RDF_IMPORT_REASONS_NAMED_MAX, rdfImportAuditChanges, type RdfImportRepo
 import { ythrilIri } from '../rdf/ythril-vocabulary.js';
 import type { ImportMode } from '../rdf/import-reasons.js';
 import {
-  RdfImportBoundExceeded, openImportFolder, openOperationSpool, readSpoolLines, removeImportFolder, removeOperations, reopenSortedSpool,
+  RdfImportBoundExceeded, openImportFolder, openOperationSpool, readSpoolLines, removeImportFolder, removeOperations,
   sortedSpool, writeWholeSpoolFile, type ImportFolder, type ImportSpoolBounds, type QuadGroup,
 } from '../rdf/import-spool.js';
 import { ImportIndex, type IndexedRecord } from '../rdf/import-index.js';
 import {
   groupSubjectOf, quadsToOps, recordKey, recordKindOfGroup, tripletsOfGroup, type MintedRecord, type QuadsToOpsContext, type RecordOp,
 } from '../rdf/quads-to-ops.js';
-import { commitWindow, dryPlanWindow, importReadSet, loadStoredRecords, type MintedEnd } from '../rdf/import-plan.js';
+import {
+  STORED_RECORD_LINKS_OVER_BOUND, StoredRecordUnreadable, commitWindow, dryPlanWindow, importReadSet, loadStoredRecords, seededIdOf, type MintedEnd,
+} from '../rdf/import-plan.js';
 
 const KIND = 'rdf-import' as const;
 
@@ -179,7 +184,8 @@ interface ActState {
   importId: string;
   space: string;
   options: ImportOptions;
-  phase: 'sorted' | 'translated' | 'planned' | 'committing';
+  /** Where the act stands: the door's pass ended with the translation, so the act begins at `translated`. */
+  phase: 'translated' | 'planned' | 'committing';
   committed: number;
   report: RdfImportReport;
 }
@@ -281,13 +287,25 @@ function spaceRecordOf(term: Term, names: AddressNames): { kind: RecordKind; id:
   return read.answer === 'record' && read.of === 'space' ? { kind: read.kind, id: read.id } : null;
 }
 
-/** What one run of the passes works with. */
-interface Run {
+/**
+ * What the door's translation works with: the sorted file's groups, the space's meta and the options the file is read under. The index and
+ * the translation are the door's, before any act is registered, so a bound they meet (the index's record bound, bare edges counted) is a 413
+ * at the door and a stored record they cannot read is a refusal in the report, never an act that fails after the caller was told 202.
+ */
+interface TranslateRun {
   spaceId: string;
   folder: ImportFolder;
   meta: SpaceMeta;
   options: ImportOptions;
   groups: () => AsyncGenerator<QuadGroup, void, undefined>;
+  builder: ReportBuilder;
+}
+
+/** What the act's passes work with: the operations the translation left in the folder, and where the act stands (`null`: a dry run). */
+interface Run {
+  spaceId: string;
+  folder: ImportFolder;
+  /** Replaced by the report the last dry plan pass built (the one whose refusals name every record that was judged without a refused one). */
   builder: ReportBuilder;
   state: ActState | null;
   commit: boolean;
@@ -297,7 +315,7 @@ interface Run {
  * Pass 1: every subject's kind, and an id minted for each new one under it (an address under this space's base whose record is stored keeps
  * its stored id); the triplets the file asserts and reifies.
  */
-async function indexPass(run: Run): Promise<{ index: ImportIndex; asserted: DigestSet; reified: DigestSet }> {
+async function indexPass(run: TranslateRun): Promise<{ index: ImportIndex; asserted: DigestSet; reified: DigestSet }> {
   const names = namesByGraph(run.meta, run.options);
   const index = new ImportIndex(knobs.maxRecords !== undefined ? { maxRecords: knobs.maxRecords } : {});
   const asserted = new DigestSet();
@@ -329,37 +347,67 @@ async function indexPass(run: Run): Promise<{ index: ImportIndex; asserted: Dige
   return { index, asserted, reified };
 }
 
+/**
+ * The nodes a quad names: its subject and its object, and the ends of a triple term in object position (an edge reifier's statement:
+ * `rdf:reifies <<( s p o )>>`), nested ones too. A stored record the file names only there is an end the translator must know (review U3).
+ */
+function nodesOf(q: Quad): Term[] {
+  const nodes: Term[] = [q.subject];
+  const visit = (t: Term): void => {
+    if (t.kind === 'triple') { visit(t.subject); visit(t.object); } else nodes.push(t);
+  };
+  visit(q.object);
+  return nodes;
+}
+
 /** Pass 2: every group translated into operations, spooled per kind; reasons and statements not taken counted. */
-async function translatePass(run: Run, index: ImportIndex, asserted: DigestSet, reified: DigestSet): Promise<void> {
+async function translatePass(run: TranslateRun, index: ImportIndex, asserted: DigestSet, reified: DigestSet): Promise<void> {
   const names = namesByGraph(run.meta, run.options);
   const minted = new MintedThroughIndex(index);
   await removeOperations(run.folder);
   const ops = await openOperationSpool(run.folder);
-  for await (const window of windowsOf(run.groups(), windowSize())) {
-    const wants: Array<{ kind: RecordKind; id: string }> = [];
-    for (const group of window) {
-      const n = names(group.graph?.value);
-      for (const q of group.quads) {
-        for (const term of [q.subject, q.object]) {
-          const r = spaceRecordOf(term, n);
-          if (r) wants.push(r);
+  try {
+    for await (const window of windowsOf(run.groups(), windowSize())) {
+      const wants: Array<{ kind: RecordKind; id: string }> = [];
+      for (const group of window) {
+        const n = names(group.graph?.value);
+        for (const q of group.quads) {
+          for (const term of nodesOf(q)) {
+            const r = spaceRecordOf(term, n);
+            if (r) wants.push(r);
+          }
         }
       }
+      const stored = await loadStoredRecords(run.spaceId, wants);
+      for (const group of window) {
+        const ctx: QuadsToOpsContext = {
+          names: names(group.graph?.value), meta: run.meta, mode: run.options.mode, blankNodes: run.options.blankNodes,
+          stored, minted, asserted, reified,
+        };
+        const out = quadsToOps(group.quads, ctx);
+        for (const op of out.ops) await ops.append(op.kind, op);
+        out.reasons.forEach(r => run.builder.translation(r));
+        out.notTaken.forEach(nt => run.builder.notTaken(nt.why));
+      }
     }
-    const stored = await loadStoredRecords(run.spaceId, wants);
-    for (const group of window) {
-      const ctx: QuadsToOpsContext = {
-        names: names(group.graph?.value), meta: run.meta, mode: run.options.mode, blankNodes: run.options.blankNodes,
-        stored, minted, asserted, reified,
-      };
-      const out = quadsToOps(group.quads, ctx);
-      for (const op of out.ops) await ops.append(op.kind, op);
-      out.reasons.forEach(r => run.builder.translation(r));
-      out.notTaken.forEach(nt => run.builder.notTaken(nt.why));
-    }
+  } finally {
+    await ops.close();
   }
-  await ops.close();
   await index.write(run.folder);
+}
+
+/**
+ * The door's passes, in order: every subject's kind and id (the index), then every group translated into operations. Reasons are the
+ * builder's. A stored record the translation cannot read (its links are over the bound) refuses the import, named in the report.
+ */
+async function translateStage(run: TranslateRun): Promise<void> {
+  try {
+    const { index, asserted, reified } = await indexPass(run);
+    await translatePass(run, index, asserted, reified);
+  } catch (err) {
+    if (!(err instanceof StoredRecordUnreadable)) throw err;
+    run.builder.planner(err.kind, err.id, { code: STORED_RECORD_LINKS_OVER_BOUND });
+  }
 }
 
 /** Every operation, kind by kind in the store's order, in windows of one kind. */
@@ -387,17 +435,49 @@ async function mintedEndsOf(folder: ImportFolder): Promise<Map<string, MintedEnd
   return ends;
 }
 
-/** Pass 3: every operation dry-planned with the real planners; refusals answered, the counts of what would land kept. */
-async function dryPlanPass(run: Run, minted: Map<string, MintedEnd>): Promise<void> {
+/**
+ * One dry plan over every operation, with `seeds` as the records the import brings: refusals go to `builder`, the counts of what would land
+ * are kept. Answers the ids of the records it refused (the planner took back their seed within a window; the others are named here, since
+ * the records of other kinds and windows were planned in read sets of their own).
+ */
+async function dryPlanOnce(run: Run, builder: ReportBuilder, seeds: ReadonlyMap<string, MintedEnd>): Promise<Set<string>> {
   const edges = importReadSet(run.spaceId);
   const kinds = emptyKinds();
+  const refused = new Set<string>();
   for await (const w of opWindows(run.folder)) {
     const kind = w[0]!.kind;
-    const result = await dryPlanWindow(run.spaceId, w, kind === 'edge' ? edges : importReadSet(run.spaceId), minted);
-    for (const refusal of result.refusals) run.builder.planner(refusal.kind, w[refusal.index]!.correlation, refusal);
+    const result = await dryPlanWindow(run.spaceId, w, kind === 'edge' ? edges : importReadSet(run.spaceId), seeds);
+    for (const refusal of result.refusals) {
+      const op = w[refusal.index]!;
+      builder.planner(refusal.kind, op.correlation, refusal);
+      const id = seededIdOf(op);
+      if (id !== undefined) refused.add(id);
+    }
+    for (const taken of result.unseeded) refused.add(taken.id);
     for (const plan of result.plans) if (plan) kinds[kind][plan.op === 'insert' ? 'inserted' : 'converged'] += 1;
   }
-  run.builder.report.kinds = kinds;
+  builder.report.kinds = kinds;
+  return refused;
+}
+
+/**
+ * Pass 3: every operation dry-planned with the real planners; refusals answered, the counts of what would land kept.
+ *
+ * A record the dry plan refuses is not written, so a record that names it must not be judged with it present. The records are planned in the
+ * commit's order (facts, entities, chrono, edges), and a fact that links an entity was planned before the entity's refusal was known: the plan
+ * runs again, on a fresh read set and a fresh report, without the records it refused, until a run refuses none that it had still seeded. Each
+ * run takes at least one id out of a finite set of seeds, so it ends; its last report is the one that names every record judged without the
+ * refused ones (and holds the refusals of every earlier run too, since a refused record stays refused).
+ */
+async function dryPlanPass(run: Run, minted: ReadonlyMap<string, MintedEnd>): Promise<ReportBuilder> {
+  const seeds = new Map(minted);
+  const base = run.builder.report;
+  for (;;) {
+    const attempt = new ReportBuilder(structuredClone(base));
+    const refused = await dryPlanOnce(run, attempt, seeds);
+    // A seed taken out is a record the next run plans without: `delete` says whether this run's refusals still had it.
+    if (![...refused].map(id => seeds.delete(id)).some(Boolean)) return attempt;
+  }
 }
 
 /** Pass 4: every operation committed, window by window, from where an earlier attempt stopped. */
@@ -417,10 +497,10 @@ async function commitPass(run: Run, minted: Map<string, MintedEnd>): Promise<voi
 }
 
 /**
- * Run the passes from where `run.state` stands (a dry run from the start, with no state). Answers the report's status; never writes a record
- * before every operation was translated and dry-planned without a refusal.
+ * Run the act's passes from where `run.state` stands (a dry run from the start, with no state), the translation having been the door's.
+ * Answers the report's status; never writes a record before every operation was dry-planned without a refusal.
  */
-async function runPasses(run: Run): Promise<'refused' | 'planned' | 'completed'> {
+async function planAndCommit(run: Run): Promise<'refused' | 'planned' | 'completed'> {
   const state = run.state;
   const persist = async (phase: ActState['phase']): Promise<void> => {
     if (!state) return;
@@ -429,15 +509,9 @@ async function runPasses(run: Run): Promise<'refused' | 'planned' | 'completed'>
     await writeState(run.folder, state);
     await keepReport(run.builder.report);
   };
-  if (!state || state.phase === 'sorted') {
-    const { index, asserted, reified } = await indexPass(run);
-    await translatePass(run, index, asserted, reified);
-    if (run.builder.refused) return 'refused';
-    await persist('translated');
-  }
   const minted = await mintedEndsOf(run.folder);
   if (!state || state.phase === 'translated') {
-    await dryPlanPass(run, minted);
+    run.builder = await dryPlanPass(run, minted);
     if (run.builder.refused) return 'refused';
     await persist('planned');
   }
@@ -473,19 +547,9 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
   const cfg = getConfig();
   const space = rdfSpaceState(cfg, entry.localId, undefined, schemaFingerprintOf);
   if (!space.ok) return gone(HTTP.CONFLICT, `RDF is no longer usable on the space (${space.code}).`);
-  const groups = await reopenSortedSpool(folder);
-  const builder = new ReportBuilder(state.report);
-  let outcome: Awaited<ReturnType<typeof runPasses>>;
-  try {
-    outcome = await runPasses({ spaceId: entry.localId, folder, meta: space.meta, options: state.options, groups, builder, state, commit: true });
-  } catch (err) {
-    // A bound only the act can meet (the records, bare edges included, past the index's bound) is the file's: another attempt meets it again,
-    // so the act ends and releases the space, as a refusal does (A11), and the door answers the bound.
-    if (!(err instanceof RdfImportBoundExceeded)) throw err;
-    await keepReport({ ...builder.report, status: 'refused', bound: { name: err.bound, limit: err.limit }, endedAt: new Date().toISOString() });
-    return { failedFinally: { status: HTTP.TOO_LARGE, message: `The RDF import into space '${entry.localId}' was refused: ${err.message}` }, afterCompletion: forget };
-  }
-  const report = { ...builder.report, endedAt: new Date().toISOString() };
+  const run: Run = { spaceId: entry.localId, folder, builder: new ReportBuilder(state.report), state, commit: true };
+  const outcome = await planAndCommit(run);
+  const report = { ...run.builder.report, endedAt: new Date().toISOString() };
   if (outcome === 'refused') {
     await keepReport({ ...report, status: 'refused' });
     return {
@@ -687,14 +751,22 @@ async function readAndRun(input: RdfImportInput, options: ImportOptions, meta: S
       quads: sorted.quads, subjects: sorted.subjects, kinds: emptyKinds(), reasons: [], reasonCount: 0, reasonsByCode: {}, notTaken: {},
       startedAt: new Date().toISOString(),
     };
+    // The index and the translation are the door's, before any act is registered: a bound they meet answers 413 here (nothing registered, no
+    // report kept), and a refusal of the translation answers 409 with the report, the space never held.
+    const run: Run = { spaceId: input.spaceId, folder, builder: new ReportBuilder(report), state: null, commit: false };
+    await translateStage({ spaceId: input.spaceId, folder, meta, options, groups: sorted.groups, builder: run.builder });
     if (dryRun) {
-      const builder = new ReportBuilder(report);
-      const outcome = await runPasses({ spaceId: input.spaceId, folder, meta, options, groups: sorted.groups, builder, state: null, commit: false });
-      const done = { ...builder.report, endedAt: new Date().toISOString() };
+      const outcome = run.builder.refused ? 'refused' : await planAndCommit(run);
+      const done = { ...run.builder.report, endedAt: new Date().toISOString() };
       return outcome === 'refused' ? refusedAnswer({ ...done, status: 'refused' }) : { kind: 'report', status: HTTP.OK, report: done };
     }
-    await writeState(folder, { importId, space: input.spaceId, options, phase: 'sorted', committed: 0, report });
-    await keepReport(report);
+    if (run.builder.refused) {
+      const refused: RdfImportReport = { ...run.builder.report, status: 'refused', endedAt: new Date().toISOString() };
+      await keepReport(refused);
+      return refusedAnswer(refused);
+    }
+    await writeState(folder, { importId, space: input.spaceId, options, phase: 'translated', committed: 0, report: run.builder.report });
+    await keepReport(run.builder.report);
     void sweepReports(Date.now()).catch(err => log.warn(`the RDF import report sweep failed: ${peerText(err)}`));
     let entryId: string;
     try {
@@ -747,9 +819,6 @@ async function waitForAct(spaceId: string, importId: string, entryId: string): P
   const settled = wait.results[0]!;
   const report = await readReport(importId);
   if (settled.ok && report) return { kind: 'report', status: HTTP.OK, report };
-  if (report?.status === 'refused' && report.bound) {
-    return refusal(HTTP.TOO_LARGE, 'rdf_bound_exceeded', `The file is over the import's bound ${report.bound.name} (${report.bound.limit}); nothing was imported`, { ...report.bound, bound: report.bound.name, importId });
-  }
   if (report?.status === 'refused') return refusedAnswer(report);
   if (settled.interrupted) return refusal(HTTP.UNAVAILABLE, 'shutting down', 'shutting down; the import resumes after the next start', { importId });
   const failure = spaceActFailureAnswer(settled.cause ?? new Error(settled.error ?? 'the import did not complete'), 'local', `rdf import '${spaceId}'`);

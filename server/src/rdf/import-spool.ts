@@ -464,21 +464,6 @@ export async function sortedSpool(quads: AsyncIterable<Quad>, folder: ImportFold
   }
 }
 
-/** The name every file of a sort carries (its runs and its sorted result). */
-const SORT_FILE = /^sort-[0-9a-f]{12}-\d{6}\.spool$/;
-
-/**
- * The groups of the sorted file a finished {@link sortedSpool} left in `folder`, for an import resumed after a restart: read as the first run
- * read them, any number of times. A finished sort leaves exactly one file of its own (its runs are removed as they merge, and a failed sort
- * removes everything it wrote), so a folder holding none or several is not one a finished sort left, and it throws.
- */
-export async function reopenSortedSpool(folder: ImportFolder): Promise<() => AsyncGenerator<QuadGroup, void, undefined>> {
-  const sorted = (await fsp.readdir(folder.dir)).filter(n => SORT_FILE.test(n));
-  if (sorted.length !== 1) throw new Error(`The import folder holds ${sorted.length} sorted files; a finished sort leaves exactly one.`);
-  const name = sorted[0]!;
-  return () => groupsOf(folder, name);
-}
-
 async function* groupsOf(folder: ImportFolder, sorted: string): AsyncGenerator<QuadGroup, void, undefined> {
   let current: { entry: Entry; quads: Quad[] } | null = null;
   const groupOf = (c: { entry: Entry; quads: Quad[] }): QuadGroup => {
