@@ -33,7 +33,7 @@ import { localToRemote, remoteToLocal } from '../sync/space-map.js';
 import { rebaseRoundHeld, rebaseRoundUnapplied } from '../networks/round-state.js';
 import { log, NAME_QUOTED, peerText } from '../util/log.js';
 import type { TokenRights } from '../config/rights-shape.js';
-import { holdsRung } from '../auth/reachable-spaces.js';
+import { mayReadArea } from '../auth/reachable-spaces.js';
 import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 
 /** Who is writing the setting. */
@@ -148,7 +148,7 @@ const SHARED_BASE_SHOWN = 120;
 export function otherHoldersOfRdfBase(cfg: { spaces: readonly SpaceConfig[] }, spaceId: string, base: string, rights: TokenRights | null | undefined):
   { holders: SpaceConfig[]; named: string[] } {
   const holders = cfg.spaces.filter(s => s.id !== spaceId && s.meta?.rdf?.enabled === true && s.meta.rdf.base === base);
-  const named = holders.filter(s => !!rights && (rights.instanceAdmin === true || holdsRung(rights, s.id, 'schema', 'read'))).map(s => s.id);
+  const named = holders.filter(s => mayReadArea(rights, s.id, 'schema')).map(s => s.id);
   return { holders, named };
 }
 

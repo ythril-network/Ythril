@@ -53,7 +53,7 @@ import { spaceCollection } from '../db/space-collection.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 import { refusalOfParse } from '../util/log.js';
 import { isDeepStrictEqual } from 'node:util';
-import { holdsRung } from '../auth/reachable-spaces.js';
+import { mayReadArea } from '../auth/reachable-spaces.js';
 import { describeFieldRequirement, refusalsForSpaceUpdate, typeRuleEditsIn } from '../auth/space-field-rights.js';
 import { isPlainObject } from '../util/plain-object.js';
 import { viewSourceProjection, type ViewKind } from '../brain/record-view.js';
@@ -204,13 +204,6 @@ export function refusalOfUnsavableRules(
     + 'Check with the stored rules, or ask for the right to change them.';
 }
 
-/** Whether `rights` may see the stored values of `spaceId`'s records: `knowledge: read`, or an instance administrator. */
-export function mayReadStoredValues(rights: TokenRights | null | undefined, spaceId: string): boolean {
-  if (!rights) return false;
-  if (rights.instanceAdmin) return true;
-  return holdsRung(rights, spaceId, 'knowledge', 'read');
-}
-
 /** The stored-data checks running, by space. Module state, so a second door finds the first one's run. */
 const checks = heavyRunner();
 
@@ -251,7 +244,7 @@ function decodeCursor(text: string, memberIds: readonly string[]): Cursor | null
  * @param memberIds      the spaces to read, as each door narrows a proxy (REST by request, MCP by the connection's reach)
  * @param body           the caller's arguments — any value; refused here when it is not that shape
  * @param rights         the caller's rights — a REQUIRED key, so a door cannot leave it out: they decide whether it may see stored
- *                       values ({@link mayReadStoredValues}) and whether a check may run the rules of a proposed meta
+ *                       values ({@link mayReadArea} on `knowledge`) and whether a check may run the rules of a proposed meta
  *                       ({@link refusalOfUnsavableRules}). `null` / `undefined` is a caller with none.
  * @param callerKey      who the rail counts against: the calling token's id, or its address when it has none
  * @param transport      the door, which decides the byte budget's default and how many times it carries the answer
@@ -260,7 +253,8 @@ export async function beginSchemaValidate(input: {
   spaceId: string; memberIds: string[]; body: unknown; rights: TokenRights | null | undefined; callerKey: string; transport: 'mcp' | 'rest';
 }): Promise<SchemaValidateOutcome> {
   const { spaceId, memberIds, rights, callerKey, transport } = input;
-  const canReadValues = mayReadStoredValues(rights, spaceId);
+  // The stored values of the records: `knowledge: read`, or an instance administrator.
+  const canReadValues = mayReadArea(rights, spaceId, 'knowledge');
   const space = getConfig().spaces.find(s => s.id === spaceId);
   if (!space) { const lost = lostSpaceAnswer(null, spaceId); return { status: lost.status, error: lost.body.error, body: lost.body }; }
   const parsed = SchemaValidateBody.safeParse(input.body ?? {});
