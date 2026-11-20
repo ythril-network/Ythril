@@ -36,7 +36,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { FAKE_GH_TOKEN } from '../_shared/fake-github-actions.mjs';
-import { withRecordingWorld, propertiesByKey as records, runTimes, everything, REPO, SHA, T, githubRun as run, githubJobs, resultsArtifact as artifact } from '../_shared/test-times-harness.mjs';
+import {
+  withRecordingWorld, propertiesByKey as records, runTimes, everything, REPO, SHA, T, githubRun as run, githubPullRequestRun as pullRequestRun, githubFullRun as fullRun,
+  githubJobs, resultsArtifact as artifact, makeWorkdir, writeResults,
+} from '../_shared/test-times-harness.mjs';
+import { startFakeYthril } from '../_shared/fake-ythril-tool-server.mjs';
 
 const spec = (suite, batch, file, extra = {}) => ({ suite, batch, files: [{ file, ms: 5000, tests: [T('one', 2000), T('two', 3000)] }], ...extra });
 
@@ -52,7 +56,7 @@ function world() {
   const runs = [
     run(1001, { head_sha: SHA('1') }),                                                 // trusted, parallel layout
     run(1002, { head_repository: { full_name: 'attacker/Ythril' } }),                 // a fork's push
-    run(1003, { event: 'pull_request' }),                                              // a pull request
+    pullRequestRun(1003, { head_repository: { full_name: 'attacker/Ythril' } }),        // a fork's pull request
     run(1004, { path: '.github/workflows/release.yml' }),                              // another workflow
     run(1005, { head_branch: 'release/5.6.x' }),                                       // another branch
     run(1006, { status: 'in_progress', conclusion: null }),                            // trusted identity, not finished
@@ -253,13 +257,13 @@ const SHORT_WAIT = { [WAIT_ENV]: String(WAIT_MS), [INTERVAL_ENV]: String(INTERVA
 const ARRIVING_WAIT = { [WAIT_ENV]: '30000', [INTERVAL_ENV]: String(INTERVAL_MS) };
 
 /** The ids of the runs `trustedRuns` admits and of the ones it must refuse (1008 is added by {@link worldWithFullRun}). */
-const TRUSTED_IDS = ['1001', '1007'];
-const UNTRUSTED_IDS = ['1002', '1003', '1004', '1005', '1008'];
+const TRUSTED_IDS = ['1001', '1007', '1008'];
+const UNTRUSTED_IDS = ['1002', '1003', '1004', '1005'];
 
-/** `world()` plus a full-run run (a push to `full-run/x` from `full-run.yml`: listed by the API, never trusted). */
+/** `world()` plus a full-run run (a push to `full-run/x` from `full-run.yml`: listed by the API, recorded as a `full-run`, Q-948). */
 function worldWithFullRun() {
   const w = world();
-  w.runs.push(run(1008, { path: '.github/workflows/full-run.yml', name: 'Full run', head_branch: 'full-run/x', head_sha: SHA('8') }));
+  w.runs.push(fullRun(1008, { head_branch: 'full-run/x', head_sha: SHA('8') }));
   w.artifactsByRun[1008] = [artifact(5009, 'test-results-standalone-pure-1', ['standalone-pure.jsonl', spec('standalone', 'pure', 'testing/standalone/a.test.js')])];
   return w;
 }
@@ -274,7 +278,8 @@ describe('--record-ci <runId>', () => {
           'ci:1001:1:integration:integration',
           'ci:1001:1:standalone-pure:standalone',
           'ci:1007:1:build-and-test:standalone',
-        ], 'the named run, and the trusted run the walk records beside it, are recorded; nothing of an untrusted one');
+          'ci:1008:1:standalone-pure:standalone',
+        ], 'the named run, and the trusted runs the walk records beside it, are recorded; nothing of an untrusted one');
         assert.ok(Object.keys(records(ythril)).some(k => k.startsWith(`ci:${id}:`)), `a record of the named run ${id} exists`);
       });
     });
@@ -641,5 +646,116 @@ describe('--record-ci: the artifact listing is read to its end', () => {
       assert.deepEqual(Object.keys(records(ythril)), ['ci:3002:1:standalone-pure:standalone'], 'the result past the first page was not recorded (a `none` row, or nothing)');
       assert.ok(github.requests.filter(q => /\/runs\/3002\/artifacts$/.test(q.path)).length >= 2, 'the listing was read once');
     });
+  });
+});
+
+// ── pull request runs and Full runs are recorded beside the pushes to main, each record saying its kind (Q-948) ───────────
+//
+// What this prevents: tests fail mostly in pull request runs and Full runs, and those left no record, so a failure rate read from
+// the records rested on main alone. Recording them must not let a fork's pull request write a record (its artifacts are a
+// stranger's), must not let one kind's stop end another kind's walk, and every record must say its kind, so no reader pairs a
+// pull request record by commit with a run of another kind (its commit is the pull request's head; the run tested the merge).
+
+const pureArtifact = (id, file = 'testing/standalone/a.test.js') => [artifact(id, 'test-results-standalone-pure-1', ['standalone-pure.jsonl', spec('standalone', 'pure', file)])];
+
+/** A push to main (1101), a pull request of a branch of this repository (1102), a fork's pull request (1103), a Full run (1104). */
+function kindsWorld() {
+  return {
+    runs: [
+      run(1101, { head_sha: SHA('1'), run_started_at: '2026-10-05T10:00:00Z' }),
+      pullRequestRun(1102, { head_sha: SHA('2'), run_started_at: '2026-10-05T11:00:00Z' }),
+      pullRequestRun(1103, { head_sha: SHA('3'), head_branch: 'patch-1', head_repository: { full_name: 'attacker/Ythril' }, run_started_at: '2026-10-05T12:00:00Z' }),
+      fullRun(1104, { head_sha: SHA('4'), run_started_at: '2026-10-05T13:00:00Z' }),
+    ],
+    jobsByRun: {},
+    artifactsByRun: { 1101: pureArtifact(5101), 1102: pureArtifact(5102), 1103: pureArtifact(5103), 1104: pureArtifact(5104) },
+  };
+}
+
+describe('--record-ci: pull request runs and Full runs', () => {
+  it('records the push to main, the pull request of this repository and the Full run, each record with its kind and the run object\'s branch and commit; the fork\'s pull request is never asked about', async () => {
+    await withRecordingWorld(kindsWorld(), async ({ github, ythril, pass }) => {
+      const r = await pass();
+      assert.equal(r.code, 0, everything(r));
+      const rec = records(ythril);
+      assert.deepEqual(Object.keys(rec).sort(), ['ci:1101:1:standalone-pure:standalone', 'ci:1102:1:standalone-pure:standalone', 'ci:1104:1:standalone-pure:standalone']);
+      const of = (id) => rec[`ci:${id}:1:standalone-pure:standalone`];
+      assert.deepEqual([1101, 1102, 1104].map(id => of(id).runKind), ['push-main', 'pull-request', 'full-run']);
+      assert.deepEqual([1101, 1102, 1104].map(id => of(id).branch), ['main', 'bundle-1', 'full-run/bundle-1']);
+      assert.deepEqual([1101, 1102, 1104].map(id => of(id).commit), [SHA('1'), SHA('2'), SHA('4')]);
+      assert.ok(!github.askedAbout().has('1103'), `the fork's pull request was read (asked about: ${[...github.askedAbout()].join(', ')})`);
+      assert.ok(!github.requests.some(q => q.path.includes('5103')), 'the fork\'s artifact was fetched');
+    });
+  });
+
+  it('asks the API for each kind\'s own listing: pushes to main and pull requests of ci.yml, pushes of full-run.yml', async () => {
+    await withRecordingWorld(kindsWorld(), async ({ github, pass }) => {
+      const r = await pass();
+      assert.equal(r.code, 0, everything(r));
+      const read = Object.keys(github.listingsRead()).map(k => k.replace(`/repos/${REPO}/actions/workflows/`, '')).sort();
+      assert.deepEqual(read, ['ci.yml/runs?pull_request', 'ci.yml/runs?push', 'full-run.yml/runs?push'], `the listings read: ${read.join(', ')}`);
+    });
+  });
+
+  // The run that lost its record is each kind's in turn, so a stop shared across kinds is caught whichever kind is walked first
+  // or whichever run is newest (1101 is the oldest, 1104 the newest).
+  for (const [lost, kind] of [['1101', 'push-main'], ['1102', 'pull-request'], ['1104', 'full-run']]) {
+    it(`a completely recorded run of another kind does not stop the walk of the ${kind} runs: each kind has its own stop`, async () => {
+      await withRecordingWorld(kindsWorld(), async ({ ythril, pass }) => {
+        const first = await pass();
+        assert.equal(first.code, 0, everything(first));
+        assert.equal(ythril.store.length, 3, `the first pass did not record all three kinds:\n${everything(first)}`);
+        ythril.store.splice(ythril.store.findIndex(e => e.properties.runId === lost), 1);
+        const r = await pass();
+        assert.equal(r.code, 0, everything(r));
+        assert.ok(Object.keys(records(ythril)).includes(`ci:${lost}:1:standalone-pure:standalone`), `a recorded run of another kind stopped the walk of the ${kind} runs:\n${everything(r)}`);
+        assert.equal(ythril.store.length, 3);
+      });
+    });
+  }
+
+  for (const [id, kind] of [[1102, 'pull-request'], [1104, 'full-run'], [1101, 'push-main']]) {
+    it(`--record-ci ${id} records the ${kind} run it names and says its kind on the output`, async () => {
+      await withRecordingWorld(kindsWorld(), async ({ ythril, pass }) => {
+        const r = await pass(['--record-ci', String(id)]);
+        assert.equal(r.code, 0, everything(r));
+        assert.equal(records(ythril)[`ci:${id}:1:standalone-pure:standalone`]?.runKind, kind, `the named run is not recorded as ${kind}:\n${everything(r)}`);
+        assert.ok(everything(r).split(/\r?\n/).some(l => l.includes(String(id)) && l.includes(kind)), `no line names run ${id} with its kind ${kind}:\n${everything(r)}`);
+      });
+    });
+  }
+
+  it('--record-ci of a fork\'s pull request run is refused by name, before anything is written or its artifacts read', async () => {
+    await withRecordingWorld(kindsWorld(), async ({ github, ythril, pass }) => {
+      const r = await pass(['--record-ci', '1103']);
+      assert.equal(r.code, 1, everything(r));
+      assert.match(everything(r), /1103[^\n]*pull request from another repository/, `the refusal does not name a fork's pull request:\n${everything(r)}`);
+      assert.match(everything(r), /attacker\/Ythril/, 'the refusal does not name the repository the pull request came from');
+      assert.deepEqual(writesTo(ythril), []);
+      assert.ok(!github.askedAbout().has('1103'));
+    });
+  });
+
+  it('--rewrite of a pull request run\'s key records it again with its kind', async () => {
+    await withRecordingWorld(kindsWorld(), async ({ ythril, pass }) => {
+      const r = await pass(['--rewrite', 'ci:1102:1:standalone-pure:standalone']);
+      assert.equal(r.code, 0, everything(r));
+      assert.equal(records(ythril)['ci:1102:1:standalone-pure:standalone']?.runKind, 'pull-request', everything(r));
+    });
+  });
+});
+
+describe('--record: a local run says its kind', () => {
+  it('every record of a local run carries runKind local', async () => {
+    const ythril = await startFakeYthril();
+    const work = makeWorkdir();
+    try {
+      writeResults(work.dir, spec('standalone', 'pure', 'testing/standalone/a.test.js'));
+      const r = await runTimes(['--record'], { cwd: work.dir, env: { YTHRIL_TEST_RUNS_URL: ythril.url, YTHRIL_TEST_RUNS_TOKEN: ythril.token } });
+      assert.equal(r.code, 0, everything(r));
+      const kinds = ythril.store.map(e => e.properties.runKind);
+      assert.ok(kinds.length >= 1, `nothing was recorded:\n${everything(r)}`);
+      assert.deepEqual([...new Set(kinds)], ['local']);
+    } finally { await ythril.close(); work.cleanup(); }
   });
 });

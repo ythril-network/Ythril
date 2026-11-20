@@ -79,6 +79,20 @@ describe('--type-schema', () => {
     assert.ok(CHRONO_TYPE in chrono);
   });
 
+  it('declares runKind, the kind of run a record is (Q-948): an optional string of every kind the failure-rate reader names, and a record without one still conforms', async () => {
+    const { RUN_KINDS } = await import('../../scripts/_shared/failure-rates.mjs');
+    const declared = testRunTypeDeclaration().typeSchemas.chrono[CHRONO_TYPE].propertySchemas.runKind;
+    assert.ok(declared, 'the Test-Run declaration has no runKind property');
+    assert.equal(declared.type, 'string');
+    assert.notEqual(declared.required, true, 'runKind is required: every record written before it would stop conforming');
+    assert.deepEqual([...declared.enum].sort(), [...RUN_KINDS].sort(), 'the kinds the record may carry are not the kinds the reader counts');
+    assert.match(declared.description, /pull request/i, 'the field does not say what a pull request record\'s commit is');
+    const { checkTelemetryProperties, TEST_RUN_SPEC } = await import('../../scripts/_shared/telemetry-record.mjs');
+    const required = Object.fromEntries(Object.entries(TEST_RUN_SCHEMA).filter(([, f]) => f.required).map(([k, f]) => [k, f.values?.[0] ?? (f.type === 'number' ? 1 : f.type === 'boolean' ? false : 'x')]));
+    assert.doesNotThrow(() => checkTelemetryProperties(TEST_RUN_SPEC, required), 'a record without a kind (one written before the field) no longer conforms');
+    assert.throws(() => checkTelemetryProperties(TEST_RUN_SPEC, { ...required, runKind: 'fork' }), /runKind/, 'a kind outside the list is written');
+  });
+
   it('the server\'s validator for typeSchemas accepts it', () => {
     const parsed = TypeSchemasZ.safeParse(testRunTypeDeclaration().typeSchemas);
     assert.ok(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues).slice(0, 600));

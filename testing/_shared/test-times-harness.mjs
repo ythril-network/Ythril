@@ -216,6 +216,21 @@ export const githubRun = (id, over = {}) => ({
 });
 
 /**
+ * A pull request run of the CI workflow as the API returns it (read from the API's runs of this repository, 2026-11-20):
+ * `event: pull_request`, `path` the plain workflow file (no `@refs/pull/…`), `head_branch` the pull request's branch, `head_sha`
+ * its head commit (the run tested the merge with its base, whose sha the run object does not carry), `repository` this one and
+ * `head_repository` the repository the branch lives in: THIS one for a branch of this repository, the fork for a fork's
+ * (`over: { head_repository: { full_name: 'someone/Ythril' } }`). `pull_requests` is empty for a fork's run and for a merged one.
+ */
+export const githubPullRequestRun = (id, over = {}) => githubRun(id, { event: 'pull_request', head_branch: 'bundle-1', pull_requests: [], ...over });
+
+/**
+ * A Full run as the API returns it (read likewise): the run of `full-run.yml` (a caller of `ci.yml`) for a push to a ref under
+ * `full-run/`, of this repository.
+ */
+export const githubFullRun = (id, over = {}) => githubRun(id, { name: 'Full run', path: '.github/workflows/full-run.yml', head_branch: 'full-run/bundle-1', ...over });
+
+/**
  * A result artifact for the fake API: `{ id, name, zip }`, the zip holding one results file per `[fileName, spec]` pair
  * (`spec` as `jsonlFor` takes it).
  */
