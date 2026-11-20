@@ -144,8 +144,8 @@ describe('the RDF import doors read any body and answer what happened (real rout
     };
     // The neighbouring doors take a peer-bound token (Q-244 has not widened the refused set), and a read door answers it as a read.
     const neighbourWrite = await attempt('POST entities', () => d.rest(peer.key, 'POST', `/api/brain/spaces/${PEER}/entities`, entity));
-    const neighbourRead = await attempt('GET entities', () => d.rest(peer.key, 'GET', `/api/brain/spaces/${PEER}/entities`));
-    assert.ok(neighbourWrite.status < 300 && neighbourRead.status < 300, `the neighbouring doors take a peer-bound token: ${neighbourWrite.status} ${neighbourRead.status}`);
+    const neighbourTool = await attempt('save_entity', () => d.toolCall(peer.key, 'save_entity', { space: PEER, name: 'By a peer, by tool', type: 'person' }));
+    assert.ok(neighbourWrite.status < 300 && neighbourTool.isError === false, `the neighbouring doors take a peer-bound token: ${neighbourWrite.status} ${neighbourTool.text.slice(0, 120)}`);
     // The import is a space act: it registers, and a request a peer-bound token made is a transfer of the space the registration tells to stop. The
     // answer is a refusal in words (the registered set of tools a peer token may not call), never a connection that closes with no answer.
     const rest = await attempt('REST import', () => d.importRest(peer.key, PEER, goodTurtle(PEER)));
@@ -156,7 +156,7 @@ describe('the RDF import doors read any body and answer what happened (real rout
     assert.match(tool.text, /import_rdf/);
     assert.match(tool.text, /operator token/);
     assert.deepEqual(d.actsOf(PEER), [], 'no act was registered');
-    assert.deepEqual((await d.records(PEER, 'entities')).map(e => e.name), ['By a peer'], 'nothing was imported');
+    assert.deepEqual((await d.records(PEER, 'entities')).map(e => e.name).sort(), ['By a peer', 'By a peer, by tool'], 'nothing was imported');
     // The status doors read: answered as a read of an import that does not exist, as for any token.
     const missing = '00000000-0000-4000-8000-000000000000';
     const statusRest = await attempt('REST status', () => d.statusRest(peer.key, PEER, missing));

@@ -683,6 +683,17 @@ export async function dropSpaceData(
     log.warn(peerText(msg));
     errors.push(msg);
   }
+  // 2f. Drop the space's RDF import reports and import folders (bundle-270 second review F9). They are files in the data root, keyed by import id, and
+  // the prefix drop cannot reach them: a space created again under the id would show the old one's reports (subject addresses of its records) to its
+  // writers. Here, with 2b to 2e, so a resumed delete does it too.
+  try {
+    const { dropRdfImportsOfSpace } = await import('./rdf-import-files.js');
+    await dropRdfImportsOfSpace(spaceId);
+  } catch (err) {
+    const msg = `Could not drop the RDF imports of '${spaceId}': ${err}`;
+    log.warn(peerText(msg));
+    errors.push(msg);
+  }
   // 3. Delete the space files directory
   const filesDir = path.resolve(getDataRoot(), 'files', spaceId);
   try {

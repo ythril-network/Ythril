@@ -45,7 +45,9 @@ describe('the RDF import keeps its files and reports honestly (real routes, real
   it('F8: the start\'s sweep leaves the folder of an upload a door holds', async () => {
     let release;
     const gate = new Promise(r => { release = r; });
-    act.setRdfImportKnobsForTest({ hooks: { beforeRegister: () => gate } });
+    let reachedIt;
+    const reached = new Promise(r => { reachedIt = r; });
+    act.setRdfImportKnobsForTest({ hooks: { beforeRegister: () => { reachedIt(); return gate; } } });
     // A report past its keep window: the sweep's last step, so its removal says the sweep has ended.
     fs.mkdirSync(reports(), { recursive: true });
     const stale = path.join(reports(), 'a-stale-report.spool');
@@ -53,7 +55,8 @@ describe('the RDF import keeps its files and reports honestly (real routes, real
     fs.utimesSync(stale, new Date(Date.now() - 8 * DAY), new Date(Date.now() - 8 * DAY));
     const answer = d.importRest(writer.key, SWEEP, goodTurtle(SWEEP));
     try {
-      await until('the door to hold its folder', () => listed(root()).length === 1);
+      await reached;
+      assert.equal(listed(root()).length, 1, 'the door holds one folder');
       const [held] = listed(root());
       const files = listed(path.join(root(), held)).sort();
       assert.ok(files.length > 0, 'the door has written its sorted file');

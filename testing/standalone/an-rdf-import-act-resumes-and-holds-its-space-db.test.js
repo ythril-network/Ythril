@@ -45,7 +45,7 @@ describe('an RDF import act resumes and holds its space (real routes, real Mongo
       hooks: { afterCommitWindow: () => { if (failures === 0) { failures += 1; throw new Error('planted: the process stops after the first window'); } } },
     });
     const r = await d.importRest(writer.key, RESUME, goodTurtle(RESUME));
-    assert.ok(r.status >= 500, `the failed attempt is answered as a failure: ${r.status} ${r.text.slice(0, 300)}`);
+    assert.equal(r.status, 202, `the failed attempt stays owed, so it is answered as running: ${r.status} ${r.text.slice(0, 300)}`);
     assert.equal(failures, 1);
     const [entry] = d.actsOf(RESUME);
     assert.ok(entry, 'the act is owed');

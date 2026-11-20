@@ -11,16 +11,18 @@
  * run and a status answer what is stored), recorded as `rdf.import` (`MCP_TOOL_OPERATIONS`).
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { toolRefusalOfAct } from '../../util/errors.js';
+import { TOOL_REFUSAL_STATUSES, toolRefusalOfAct } from '../../util/errors.js';
 import { JSON_BODY_MAX_BYTES } from '../../config/body-limits.js';
 import { RDF_FORMATS } from '../../rdf/serialize.js';
 import {
-  rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, RDF_IMPORT_REASONS_NAMED_MAX, RDF_IMPORT_REFUSAL_CODES, type RdfImportRefusal,
+  rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, runningBodyOf, RDF_IMPORT_REASONS_NAMED_MAX, RDF_IMPORT_REFUSAL_CODES, type RdfImportRefusal,
   RDF_IMPORT_ADDRESS_MAX, RDF_IMPORT_GRAPH_BASES_MAX, RDF_IMPORT_GRAPH_BASE_MIN_CHARS, RDF_IMPORT_GRAPH_BASE_MAX_CHARS,
 } from '../../spaces/rdf-import-act.js';
 
 /** The act's refusal as the tool's: its status and code, and what more it carries (a refused import's report) as structured content. */
 function refusalOf(r: RdfImportRefusal): Error {
+  // A status the tool does not carry (the storage limit's 507) is an error result in the act's own sentence and code, as the fact tool's is.
+  if (!(TOOL_REFUSAL_STATUSES as readonly number[]).includes(r.status)) return new Error(`${r.error} (${r.code})`);
   return toolRefusalOfAct(r.status as Parameters<typeof toolRefusalOfAct>[0], r.error, { error: r.error, code: r.code, ...(r.detail ?? {}) });
 }
 
@@ -69,7 +71,7 @@ export const import_rdfTool: ToolHandler = {
       spaceId: ctx.callSpace, params, body: inline(typeof document === 'string' ? document : ''), caller: ctx.callerRecord ?? { rights: ctx.rights ?? null },
     });
     if (answer.kind === 'running') {
-      const running = { importId: answer.importId, status: 'running', location: answer.location };
+      const running = runningBodyOf(answer);
       return { content: [{ type: 'text' as const, text: JSON.stringify(running) }], structuredContent: running };
     }
     if (answer.kind === 'refused') {

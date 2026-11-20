@@ -8,6 +8,7 @@ import express from 'express';
 import compression from 'compression';
 import { shouldCompress, staticCacheControl } from './util/transfer.js';
 import { spaceTransferRouter, markImportBody, skipsGlobalParsers, IMPORT_PATH } from './api/admin-space-transfer.js';
+import { RDF_IMPORT_PATH } from './api/brain/rdf-import.js';
 import path from 'path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'url';
@@ -126,6 +127,8 @@ export function createApp() {
   // The admin import reads its own body (`api/admin-space-transfer.ts`): marked here, by Express's own match of its path, so neither parser
   // buffers it; its route, below every middleware, spools it once the caller is let in.
   app.post(IMPORT_PATH, markImportBody);
+  // The RDF import reads its body off the wire itself (any media type: curl sends form data by default, a client may send JSON), under its own bounds.
+  app.post(RDF_IMPORT_PATH, markImportBody);
   app.use(express.json({ limit: JSON_BODY_MAX_BYTES, type: (req) => !skipsGlobalParsers(req) && Boolean((req as express.Request).is('application/json')) }));
   app.use(express.urlencoded({ extended: true, limit: JSON_BODY_MAX_BYTES, type: (req) => !skipsGlobalParsers(req) && Boolean((req as express.Request).is('application/x-www-form-urlencoded')) }));
 

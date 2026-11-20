@@ -48,10 +48,12 @@ export function specialPurposeApproverRefusal(
 /**
  * The tools a peer-bound token may not call: the user doors that store a file as THIS instance's own upload.
  *
- * ONE named set, here and nowhere else. `write_file` is the only member today; Q-244 widens this set to every user write door
+ * ONE named set, here and nowhere else. `write_file` and `import_rdf` (its REST route asks this same function) are the members today; Q-244 widens this set to every user write door
  * (ingest, save_bulk, move_file, update_file_meta, the PATCH routes) and the callers need no change when it does.
  */
 const PEER_REFUSED_TOOLS: ReadonlyMap<string, string> = new Map([
+  // bundle-270 second review U2: the RDF import registers a space act, which stops the transfers of its space, and a request a peer's token made is one of them: its connection was destroyed with no answer.
+  ['import_rdf', 'writes records as this instance\'s own and holds the space as an act, and this token is bound to a peer (a sync credential), which delivers records through the sync door only'],
   ['write_file', 'stores a file as this instance\'s own upload, and this token is bound to a peer (a sync credential), which delivers files through the sync door only'],
   // bundle-255: the client file change feed lists deleted paths for the feed window; a peer reads deletions as file tombstones on its own protocol.
   ['file_changes', 'is the client file change feed, and this token is bound to a peer (a sync credential), which reads deletions as file tombstones through the sync door'],

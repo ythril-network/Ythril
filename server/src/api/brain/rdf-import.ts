@@ -17,12 +17,17 @@ import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
 import { sendCaughtFailure } from '../send-failure.js';
-import { rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, type RdfImportRefusal } from '../../spaces/rdf-import-act.js';
+import { rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, runningBodyOf, type RdfImportRefusal } from '../../spaces/rdf-import-act.js';
+import { peerBoundTo, peerTokenToolRefusal } from '../../auth/peer-bound.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 
 export const rdfImportRouter = Router();
 
 const ROUTE = 'POST /api/brain/spaces/:spaceId/import/rdf';
+/** The import's path: `app.ts` marks it before the global body parsers, so that none of them takes the body the act reads off the wire itself. */
+export const RDF_IMPORT_PATH = '/api/brain/spaces/:spaceId/import/rdf';
+/** The status a peer-bound token's import is refused with. */
+const FORBIDDEN = 403;
 const STATUS_ROUTE = 'GET /api/brain/spaces/:spaceId/import/rdf/:importId';
 
 /** A refusal of the act, with what more it carries. */
@@ -35,6 +40,10 @@ rdfImportRouter.post('/spaces/:spaceId/import/rdf', globalRateLimit, requireSpac
   const spaceId = req.params['spaceId'] as string;
   if (answeredUnknownSpace(req, res, spaceId)) return;
   const token = req.authToken as { admin?: boolean; rights?: TokenRights | null } | undefined;
+  // The one set of what a peer-bound token may not call (the tool's twin asks it too): the import registers a space act, which stops the
+  // transfers of its space, and a request a peer's token made is one of them.
+  const peerRefusal = peerTokenToolRefusal(peerBoundTo(req.authToken as object | undefined), 'import_rdf');
+  if (peerRefusal) { res.status(FORBIDDEN).json({ error: peerRefusal }); return; }
   let answer;
   try {
     answer = await rdfImportAct({
@@ -57,7 +66,7 @@ rdfImportRouter.post('/spaces/:spaceId/import/rdf', globalRateLimit, requireSpac
   }
   if (answer.kind === 'running') {
     res.setHeader('Location', answer.location);
-    res.status(answer.status).json({ importId: answer.importId, status: 'running', location: answer.location });
+    res.status(answer.status).json(runningBodyOf(answer));
     return;
   }
   const report = answer.detail?.['report'];

@@ -41,6 +41,8 @@ describe('the RDF import reads the store only under its hold (real routes, real 
   after(async () => { act?.setRdfImportKnobsForTest?.(null); runner?.setSpaceActKnobsForTest?.(null); await d?.close(); });
 
   const seed = async (space) => {
+    // A space whose links are converted records (the boot conversion has run for it): a delete reads its connections.
+    d.loader.mutateConfig(cfg => { cfg.spaces.find(s => s.id === space).completeLinkage = true; });
     await d.seed(space, 'entity', [
       { _id: KEPT, spaceId: space, seq: 1, name: 'Stored one', type: 'person', description: 'the first description', properties: { age: 1 } },
       { _id: LOST, spaceId: space, seq: 1, name: 'Stored two', type: 'person', description: 'the second description' },
@@ -68,8 +70,14 @@ describe('the RDF import reads the store only under its hold (real routes, real 
     assert.equal(kept.description, said.patch < 300 ? 'changed by a caller' : 'the first description',
       `the first record's description after the caller's PATCH (answered ${said.patch})`);
     if (said.del < 300) {
-      assert.deepEqual(people.filter(p => p.name === 'Stored two').map(p => p._id), [],
-        `the record the caller deleted (answered ${said.del}) is not back, under its id or a new one`);
+      // The file still states the record under this space's address: with the record gone it is a new record, as the file says it, with the
+      // id the instance mints (never the old one, which only addresses) and none of the deleted record's content, which the file does not state.
+      const again = people.filter(p => p.name === 'Stored two');
+      assert.ok(again.length <= 1, `the deleted record is back at most once as the file's own: ${again.length}`);
+      for (const p of again) {
+        assert.notEqual(p._id, LOST, 'a supplied address never becomes the new record\'s identity');
+        assert.equal(p.description, undefined, `the content of the record the caller deleted (answered ${said.del}) is not brought back from an older copy`);
+      }
     } else {
       assert.ok(people.some(p => p._id === LOST), 'a delete the door refused left the record');
     }

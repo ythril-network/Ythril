@@ -60,8 +60,12 @@ export interface RdfImportReport {
   notTaken: Record<string, number>;
   startedAt: string;
   endedAt?: string;
-  /** Our sentence when the import failed for good (its folder was lost or cannot be read). */
+  /** Our sentence when the import failed for good (its folder was lost or cannot be read, or the space can no longer hold it). */
   error?: string;
+  /** The status and code a door answers a failure for good by: the same on both doors, kept so the status door and a later reader see it. */
+  failure?: { status: number; code: string };
+  /** When an owed act (one that failed and will be tried again) is retried: said by the status door, from the act. */
+  retryAt?: string;
 }
 
 /** Every kind at zero. */
