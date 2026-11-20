@@ -221,6 +221,10 @@ export const ROUTE_RULES: RouteRule[] = [
   // Q-750: a space's (or a view's) records leaving as RDF are the same act, recorded whatever `logReads` says, with the page's scope, format,
   // counts and left-out values (never the data), through `req.auditChangesExplicit`; MCP `export_rdf` records the same act (`MCP_ACT_OPERATIONS`).
   { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/export\/rdf$/,        operation: 'rdf.export', spaceGroup: 1, writtenWhenCutOff: true },
+  // Q-753: an RDF import is one row per request with its counts (never a value of the file), through `req.auditChangesExplicit`; MCP
+  // `import_rdf` records the same operation. Its status is a read.
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/import\/rdf$/,        operation: 'rdf.import', spaceGroup: 1 },
+  { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/import\/rdf\/[^/]+$/, operation: 'rdf.import.status', spaceGroup: 1, read: true },
   // A restore writes every record family of the space from a body, so it is audited with its counts like the wipe beside it.
   { method: 'POST',   pattern: /^\/api\/admin\/spaces\/([^/]+)\/import$/,             operation: SPACE_IMPORT_OPERATION, spaceGroup: 1 },
   // Every peer verifies this instance's signatures against its published key, so replacing it changes what the network trusts of this instance.

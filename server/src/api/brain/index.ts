@@ -21,6 +21,7 @@ import { embedJobsRouter } from './embed-jobs.js';
 import { spillsRouter } from './spills.js';
 import { forksRouter } from './forks.js';
 import { rdfExportRouter } from './rdf.js';
+import { rdfImportRouter } from './rdf-import.js';
 
 export const brainRouter = Router();
 brainRouter.use(memoriesRouter);
@@ -37,3 +38,4 @@ brainRouter.use(embedJobsRouter);
 brainRouter.use(spillsRouter);
 brainRouter.use(forksRouter);
 brainRouter.use(rdfExportRouter);
+brainRouter.use(rdfImportRouter);

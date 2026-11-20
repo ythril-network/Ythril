@@ -184,6 +184,9 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   // Q-742: a space's schema versions, read like its meta - `GET /api/spaces/:id/schema-versions` records `space.list`.
   space_schema_versions: 'space.list',
   space_schema_rdf: 'schema.rdf.export',
+  // Q-753: the operations their REST twins record.
+  import_rdf: 'rdf.import',
+  import_rdf_status: 'rdf.import.status',
 
   // ── Not audited operations, with the reason each. ──────────────────────────────────────────────
   // Returns this instance's own documentation. Reads no space and no record.

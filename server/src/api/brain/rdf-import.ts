@@ -1,0 +1,84 @@
+/**
+ * The RDF import over REST: `POST /api/brain/spaces/:spaceId/import/rdf[?format=&dryRun=&blankNodes=&sourceBase=&sourceVocab=&graphBase=]`
+ * with the document as the body (its media type in `Content-Type`, plain or `Content-Encoding: gzip`), and its status at
+ * `GET /api/brain/spaces/:spaceId/import/rdf/:importId` (bundle-270, slice S6, Q-753). The twins of MCP `import_rdf` and `import_rdf_status`.
+ *
+ * ## What it prevents
+ *
+ * Both doors run `spaces/rdf-import-act.ts`, which owns the parameters, the bounds, every refusal and its code, the act and the report; this
+ * door only hands it the body as it arrives (never buffered: the act reads it into its spool under its bounds) and puts the answer on HTTP:
+ * `200` with the report, `202` with `Location` while the act runs past the door's budget, the act's refusals with their status and code.
+ * The rung (`knowledge: write`, for a dry run too) is the route's guard's (`ROUTE_RIGHTS`); an id that is not a configured space, a view's
+ * included, is answered by the one existence rule before anything is read. The audit row (`rdf.import`) takes the report's counts, never a
+ * value of the file.
+ */
+import { Router, type Request, type Response } from 'express';
+import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
+import { globalRateLimit } from '../../rate-limit/middleware.js';
+import { answeredUnknownSpace } from '../write-target-answer.js';
+import { sendCaughtFailure } from '../send-failure.js';
+import { rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, type RdfImportRefusal } from '../../spaces/rdf-import-act.js';
+import type { TokenRights } from '../../config/rights-shape.js';
+
+export const rdfImportRouter = Router();
+
+const ROUTE = 'POST /api/brain/spaces/:spaceId/import/rdf';
+const STATUS_ROUTE = 'GET /api/brain/spaces/:spaceId/import/rdf/:importId';
+
+/** A refusal of the act, with what more it carries. */
+function sendRefusal(res: Response, r: RdfImportRefusal): void {
+  res.status(r.status).json({ error: r.error, code: r.code, ...(r.detail ?? {}) });
+}
+
+// POST /api/brain/spaces/:spaceId/import/rdf - an RDF document into the space, all or nothing.
+rdfImportRouter.post('/spaces/:spaceId/import/rdf', globalRateLimit, requireSpaceAuth, denyReadOnly, async (req: Request, res: Response) => {
+  const spaceId = req.params['spaceId'] as string;
+  if (answeredUnknownSpace(req, res, spaceId)) return;
+  const token = req.authToken as { admin?: boolean; rights?: TokenRights | null } | undefined;
+  let answer;
+  try {
+    answer = await rdfImportAct({
+      spaceId,
+      params: {
+        format: req.query['format'], dryRun: req.query['dryRun'], blankNodes: req.query['blankNodes'], sourceBase: req.query['sourceBase'],
+        sourceVocab: req.query['sourceVocab'], graphBase: req.query['graphBase'], schema: req.query['schema'],
+      },
+      body: req, contentType: req.headers['content-type'], contentEncoding: req.headers['content-encoding'],
+      caller: token,
+    });
+  } catch (err) {
+    sendCaughtFailure(res, ROUTE, err);
+    return;
+  }
+  if (answer.kind === 'report') {
+    req.auditChangesExplicit = rdfImportAuditChanges(answer.report);
+    res.status(200).json(answer.report);
+    return;
+  }
+  if (answer.kind === 'running') {
+    res.setHeader('Location', answer.location);
+    res.status(202).json({ importId: answer.importId, status: 'running', location: answer.location });
+    return;
+  }
+  const report = answer.detail?.['report'];
+  if (report && typeof report === 'object') req.auditChangesExplicit = rdfImportAuditChanges(report as Parameters<typeof rdfImportAuditChanges>[0]);
+  sendRefusal(res, answer);
+});
+
+// GET /api/brain/spaces/:spaceId/import/rdf/:importId - what an import of this space did or is doing.
+rdfImportRouter.get('/spaces/:spaceId/import/rdf/:importId', globalRateLimit, requireSpaceAuth, async (req: Request, res: Response) => {
+  const spaceId = req.params['spaceId'] as string;
+  if (answeredUnknownSpace(req, res, spaceId)) return;
+  let answer;
+  try {
+    answer = await rdfImportStatusAct({ spaceId, params: { importId: req.params['importId'] } });
+  } catch (err) {
+    sendCaughtFailure(res, STATUS_ROUTE, err);
+    return;
+  }
+  if (answer.kind === 'refused') {
+    sendRefusal(res, answer);
+    return;
+  }
+  res.status(200).json(answer.report);
+});

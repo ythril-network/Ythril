@@ -154,11 +154,24 @@ describe('a door governed by a read rung never writes a space', () => {
     }
   });
 
+  /** Tools priced at a write rung that write nothing on purpose, each with why and when it is looked at again. */
+  const READS_AT_A_WRITE_RUNG = new Map([
+    ['import_rdf_status', {
+      reason: 'an RDF import\'s report names which records the space stores and which values break its schema, which only the import\'s '
+        + 'own rung may learn (bundle-270, plan amendment A10); it reads a report file and writes nothing',
+      reviewBy: '2027-05-20',
+    }],
+  ]);
+
   it('every write-rung tool reaches a writer, so the walk and the writer set meet', () => {
     // The converse of the rule, and what makes a clean run mean something: a walk that reached nothing, or a
     // writer set nothing reached, would pass every read door too.
-    const hollow = TOOL_RIGHTS.filter(r => r.needs === 'write')
+    const hollow = TOOL_RIGHTS.filter(r => r.needs === 'write' && !READS_AT_A_WRITE_RUNG.has(r.tool))
       .filter(r => writesReachedBy({ roots: [toolHandlerRoot(INDEX, r.tool)] }).length === 0).map(r => r.tool);
+    for (const [tool, { reason, reviewBy }] of READS_AT_A_WRITE_RUNG) {
+      assert.ok(TOOL_RIGHTS.some(r => r.tool === tool && r.needs === 'write'), `${tool} is no longer priced at a write rung: remove its entry`);
+      assert.ok(reason.length > 40 && Date.parse(reviewBy) > Date.now(), `${tool}: its entry says why, and is not past its review date ${reviewBy}`);
+    }
     assert.deepEqual(hollow, [], `write-rung tool(s) that reach no space writer: ${hollow.join(', ')}. Either the walk `
       + 'lost the path to their writes or the writer derivation lost the writes — a read door would pass the same way.');
   });
