@@ -341,7 +341,7 @@ node scripts/test-times.mjs --help                # every flag and variable, pri
 
 | Variable | Meaning |
 |---|---|
-| `YTHRIL_TEST_RUNS_URL` | The Ythril instance to record to, for `test-times.mjs` and for `trade.mjs --record` / `--history`. `https`, or `http` to `127.0.0.1`, `localhost` or `[::1]`. |
+| `YTHRIL_TEST_RUNS_URL` | The Ythril instance to record to, for `test-times.mjs` and for `trade.mjs --record` / `--history`, and to read from for `test-failure-rates.mjs`. `https`, or `http` to `127.0.0.1`, `localhost` or `[::1]`. |
 | `YTHRIL_TEST_RUNS_TOKEN` | A token that may write chrono entries in the space the scripts record to. Never printed, never stored, never in a payload, and never handed to the `gh` and `git` children of `trade.mjs`. |
 | `YTHRIL_TEST_RUNS_LOCK_WAIT_MS` | How long a recorder waits for the record lock (one per repository, in the git common dir), in milliseconds; a positive integer, default 120000. Both `test-times.mjs` and `trade.mjs --record` honour it. |
 | `GH_TOKEN` | A token that may read this repository's Actions runs and artifacts, for `--record-ci` and `--rewrite`. |
@@ -408,6 +408,16 @@ What the recorder guarantees, and why each is there:
   (the `Test-Run` type, one year of retention, embeddings suppressed, and the server's default chrono types beside it,
   in merge mode), generated from the same list the recorder writes its records by. Send them with `schema_update` on
   `y-proj-ythril` once, and read the type back with `space_meta`; without that, nothing bounds the history.
+
+`node scripts/test-failure-rates.mjs [--since <days>]` reads the records back (default: the last 30 days) and names every
+test that failed on a commit that also passed, as its failures over the runs that ran its file ("1 of 2"), highest rate
+first. A run is one attempt of one recorded run; a test is named when its file ran without it failing in another attempt
+of the same run, or in another run of the same commit and kind. A record from uncommitted changes never pairs, and a pull
+request run pairs only within its own run. Exit 0: none; 1: it names some; 2: the records hold no result per test, fewer
+than two runs do, or they cannot be read, never a pass. Every answer says the kinds of run it rests on and those absent (a
+CI record without a kind is a push to main, a local one local), the records and runs read, and the records it left out.
+The rules are `scripts/_shared/failure-rates.mjs`; the reading, shared with `--trend --flags`, is
+`scripts/_shared/test-run-reads.mjs`.
 
 ## Skips
 
@@ -775,7 +785,7 @@ Every variable the scripts and runners in `scripts/` and `testing/_init/` read i
 | `YTHRIL_TEST_DB_SHARD_INDEX` | `testing/_shared/db-shard-plan.mjs` (`dbFilesThisProcessRuns`) | With `YTHRIL_TEST_DB_SHARDS`, run exactly one shard of the database third (the files of `planDbShards(files, count)[index]`) against the MongoDB at `YTHRIL_TEST_MONGO_PORT`, starting none; CI sets it from its matrix. An index with no count, or outside 0 to the count minus one, is refused (non-zero). Only with `--only=db`. |
 | `YTHRIL_TEST_DB_SHARD_PORT` | `testing/docker-compose.db-shard.yml` | The loopback port of one MongoDB started by `db-shard-stack.mjs`: a shard's own port, or 0 for an own database (Docker picks it). Set by `db-shard-stack.mjs` on every compose call, take-down included; never by hand. |
 | `YTHRIL_TEST_OWN_DB_DOCKER` | `testing/standalone/an-own-database-starts-and-goes-docker.test.js` | `1` registers the test that starts two own databases of one scratch label on real containers, connects to both ports, lists them and removes each (about 6 GB of Docker memory, several minutes). Absent, the test is not registered, so no run reports it skipped. |
-| `YTHRIL_TEST_RUNS_URL`, `YTHRIL_TEST_RUNS_TOKEN` | `scripts/test-times.mjs`, `scripts/trade.mjs` | The recorder's instance and token (trade: `--record` and `--history`). See [recording](#recording-runs-to-a-ythril-instance-optional). Stripped from every test's environment. |
+| `YTHRIL_TEST_RUNS_URL`, `YTHRIL_TEST_RUNS_TOKEN` | `scripts/test-times.mjs`, `scripts/trade.mjs`, `scripts/test-failure-rates.mjs` | The recorder's instance and token (trade: `--record` and `--history`; the failure-rate reader only reads). See [recording](#recording-runs-to-a-ythril-instance-optional). Stripped from every test's environment. |
 | `GH_TOKEN`, `GITHUB_API_URL` | `scripts/test-times.mjs` | Read access to this repository's Actions runs, and the API base. |
 | `CLIENT_TEST_OUTCOME` | `scripts/mask-client-report.mjs` | The client test command's own result (`success`, `failure`, `cancelled` or `skipped`), which CI's mask step passes and which is written into the masked report as `runnerOutcome`; the recorder reads a failed runner with no failure counted as an incomplete run. Unset: nothing is stamped. |
 | `YTHRIL_TEST_WAIT_TIMING_FILE` | `testing/_shared/wait-for.mjs` | A file every wait appends one timing line to. Unset: nothing is recorded. |
