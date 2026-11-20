@@ -29,7 +29,11 @@ function serverActKinds(): { kinds: string[]; instanceWideKinds: string[]; insta
   const end = src.indexOf('} as const', start);
   if (start < 0 || end < 0) throw new Error('SPACE_ACT_KINDS not found in types-space-acts.ts: the record moved or was renamed');
   const body = src.slice(start, end);
-  const entries = [...body.matchAll(/\n {2}([a-z][A-Za-z]*): \{([\s\S]*?)\n {2}\}/g)];
+  // A kind whose name is not an identifier is a quoted key (`'rdf-import'`): a reader that knew only bare keys saw no such kind, so its
+  // refusal code and its words were checked for nobody (the RDF import shared another kind's code and every gate here stayed green).
+  const entries = [...body.matchAll(/\n {2}'?([a-z][A-Za-z-]*)'?: \{([\s\S]*?)\n {2}\}/g)];
+  const declared = [...body.matchAll(/\bwriteRefusalCode:/g)].length;
+  if (entries.length !== declared) throw new Error(`read ${entries.length} act kinds but the record declares ${declared} write-refusal codes - a kind's key is spelled in a way this reader skips`);
   const kinds = entries.map(m => m[1]!);
   const instanceWide = entries.filter(m => /instanceWide:\s*true/.test(m[2]!));
   const instanceWideKinds = instanceWide.map(m => m[1]!);
@@ -129,6 +133,11 @@ describe('every write-closed code has its sentence under every refusal prefix (b
       expect(missing, `${loc}.json lacks words for a refusal the server sends while an act stands`).toEqual([]);
     });
   }
+
+  it('every kind answers its writes with a code of its own, the RDF import\'s among them (a shared code is a state nobody can tell apart)', () => {
+    expect(serverActKinds().kinds, 'the reader sees the quoted kind').toContain('rdf-import');
+    expect(writeClosedCodes.filter((code, i) => writeClosedCodes.indexOf(code) !== i), 'write-closed codes two kinds share').toEqual([]);
+  });
 
   it('the file screens\' toast sets classify every write-closed code (a code in neither set is one nobody decided)', () => {
     const src = readClientSource('src/app/pages/files/file-listing.store.ts');

@@ -137,7 +137,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/turtle" \
 
 ### While it runs
 
-The import is a space act. From the moment it is registered until it ends, the space takes no other write (`409 space_being_imported`, the sentence naming the RDF import), no schema write (the type routes, the whole schema, the validation mode, MCP `schema_update`: the same code) and no sync. One RDF import body runs at a time on the instance; a large file holds its space for minutes. After a restart it resumes where it was, under the ids it minted the first time, so no record is written twice. A refused import ends the act, and the space takes writes again.
+The import is a space act. From the moment it is registered until it ends, the space takes no other write (`409 space_being_rdf_imported`, the sentence naming the RDF import), no schema write (the type routes, the whole schema, the validation mode, MCP `schema_update`: the same code) and no sync. One RDF import body runs at a time on the instance; a large file holds its space for minutes. After a restart it resumes where it was, under the ids it minted the first time, so no record is written twice. A refused import ends the act, and the space takes writes again.
 
 ### Rights and audit
 
