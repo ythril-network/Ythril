@@ -111,7 +111,8 @@ describe('the RDF import commits by the schema it planned by and finishes (real 
     const v = `${baseOf(MIDDLE)}vocab/`;
     const label = '<http://www.w3.org/2000/01/rdf-schema#label>';
     const file = [
-      `<${at(ALICE)}> a <${v}entity/person> ; ${label} "Alice" .`,
+      // The file states a new name for Alice: a converge that changed nothing writes nothing (fix round 4, R3), so it would have no plan to fail.
+      `<${at(ALICE)}> a <${v}entity/person> ; ${label} "Alice Liddell" .`,
       `<http://people.example/bob> a <${v}entity/person> ; ${label} "Bob" .`,
       `<http://people.example/carol> a <${v}entity/person> ; ${label} "Carol" .`,
       '',
@@ -135,7 +136,7 @@ describe('the RDF import commits by the schema it planned by and finishes (real 
     const settled = await runner.runSpaceAct(entry.id);
     assert.equal(settled.ok, true, settled.error);
     const names = (await d.records(MIDDLE, 'entities')).map(p => p.name).sort();
-    assert.deepEqual(names, ['Alice', 'Bob', 'Carol'], 'every record once: none twice, none missing');
+    assert.deepEqual(names, ['Alice Liddell', 'Bob', 'Carol'], 'every record once: none twice, none missing');
     assert.deepEqual(d.actsOf(MIDDLE), []);
   });
 
