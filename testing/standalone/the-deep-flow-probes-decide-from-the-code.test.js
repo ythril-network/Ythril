@@ -45,6 +45,9 @@ import * as ux from '../../tools/flow-checks/check-i-ux-deep-route-set-derived.m
 import * as visual from '../../tools/flow-checks/check-i-testing-visual-regression.mjs';
 import * as docs from '../../tools/flow-checks/check-i-docs-deep-pages-older-than-their-code.mjs';
 import * as i18n from '../../tools/flow-checks/check-i-accessibility-i18n-deep-untranslated-and-unused.mjs';
+import { refusalPrefixes as refusalPrefixesOf } from './_refusal-prefixes.mjs';
+// Loaded by name so a tree without the reader fails the case that needs it, not every case of this file.
+const { serverRefusalCodes } = await import('./_server-refusal-codes.mjs').catch(() => ({}));
 import * as bundle from '../../tools/flow-checks/check-i-performance-client-bundle-and-rendering.mjs';
 import * as measure from '../../tools/flow-checks/check-i-observability-measurement-records-carry-their-context.mjs';
 import * as params from '../../tools/flow-checks/check-i-integration-deep-parameters-match-both-doors.mjs';
@@ -303,15 +306,52 @@ describe('check-i-accessibility-i18n-deep-untranslated-and-unused', () => {
     const plant = (key) => withDict(input.source, (d) => { d[key] = 'Planted wording'; return d; });
     const known = Object.keys(input.dicts[input.source]).find((k) => k.startsWith('files.refusal.space_being_'));
     assert.ok(known, 'the dictionary words a write-closed code under files.refusal');
-    assert.equal(decideOf(i18n, plant(`${input.refusalPrefixes[0]}.space_being_planted`), ceilings, TODAY).holds, true);
     assert.equal(decideOf(i18n, plant('zz.planted.space_being_planted'), ceilings, TODAY).holds, false, 'a key under no prefix is still named');
     assert.equal(decideOf(i18n, plant('zz.refusal.space_being_planted'), ceilings, TODAY).holds, false, 'a prefix is read from the client, not guessed from a name');
     assert.equal(i18n.unusedKeys({ [known]: 'x' }, ['const nothing = 1;'], []).length, 1, 'with no prefix read, the key the client builds at run time is named');
-    assert.deepEqual(i18n.unusedKeys({ [known]: 'x' }, ['const nothing = 1;'], ['files.refusal']), []);
+    assert.deepEqual(i18n.unusedKeys({ [known]: 'x' }, ['const nothing = 1;'], ['files.refusal'], { codes: [known.split('.').pop()], spelled: [] }), []);
   });
 
-  it('cannot answer when no refusal prefix was read from the client', () => {
+  it('names a dead key under a refusal prefix: its last part must be a code the server can answer (second review F13)', () => {
+    // The client words a refusal as `<prefix>.<code>` for any code the server sends, so a sentence for a code the server has stopped sending was
+    // counted used for being under the prefix, and nothing named it. A key under a prefix is used only when its last part is such a code.
+    assert.ok(Array.isArray(input.refusalCodes), 'the check reads the codes the server answers with (input.refusalCodes)');
+    assert.ok(input.refusalCodes.length >= 30, `server refusal codes read: ${input.refusalCodes.length}`);
+    const plant = (key) => withDict(input.source, (d) => { d[key] = 'Planted wording'; return d; });
+    const prefix = input.refusalPrefixes.find((p) => p === 'files.refusal');
+    assert.ok(prefix, `refusal prefixes read: ${input.refusalPrefixes}`);
+    const dead = decideOf(i18n, plant(`${prefix}.space_being_planted`), ceilings, TODAY);
+    assert.equal(dead.holds, false, 'a key under a prefix for a code the server never sends is not named');
+    assert.match(dead.reason, /no client file refers to/);
+    const live = Object.keys(input.dicts[input.source]).find((k) => k.startsWith(`${prefix}.`) && input.refusalCodes.includes(k.split('.').pop()));
+    assert.ok(live, 'the dictionary words a code the server answers under files.refusal');
+    // The same key with its code no longer answered by the server is the retired sentence: named.
+    const retired = { ...input, refusalCodes: input.refusalCodes.filter((c) => c !== live.split('.').pop()) };
+    assert.equal(decideOf(i18n, retired, ceilings, TODAY).holds, false, `${live} is named once the server no longer answers its code`);
+    assert.equal(decideOf(i18n, input, ceilings, TODAY).holds, true);
+    // A key built as `${REFUSAL_CONSTANT}.<name>` is spelled by the client, and is used whatever the server sends.
+    assert.ok(input.refusalSpelled.includes('brain.review.forks.refusal.generic'), `keys the client spells under a refusal constant: ${input.refusalSpelled}`);
+    const generic = { 'brain.review.forks.refusal.generic': 'x' };
+    assert.deepEqual(i18n.unusedKeys(generic, ['const nothing = 1;'], ['brain.review.forks.refusal'], { codes: ['space_retired'], spelled: [] }), ['brain.review.forks.refusal.generic']);
+    assert.deepEqual(i18n.unusedKeys(generic, ['const nothing = 1;'], ['brain.review.forks.refusal'], { codes: ['space_retired'], spelled: ['brain.review.forks.refusal.generic'] }), []);
+    assert.throws(() => i18n.unusedKeys(generic, ['const nothing = 1;'], ['brain.review.forks.refusal']), /codes/, 'prefixes without the codes cannot tell a live sentence from a dead one');
+  });
+
+  it('reads the keys a client source spells under a refusal constant, and every code the server source answers with', () => {
+    const sources = [
+      { file: 'client/src/app/core/refusal-text.ts', src: "export function refusalText(a, b, c, keyPrefix = 'networks.refusal') {}" },
+      { file: 'client/src/app/x.ts', src: "const X_REFUSALS = 'x.refusal'; t(`${X_REFUSALS}.generic`); t(`${OTHER}.never`);" },
+    ];
+    assert.deepEqual(refusalPrefixesOf(sources).spelled, ['x.refusal.generic'], 'only a constant named for refusals spells a key');
+    assert.equal(typeof serverRefusalCodes, 'function', 'testing/standalone/_server-refusal-codes.mjs exports serverRefusalCodes');
+    const codes = serverRefusalCodes(Array.from({ length: 40 }, (_, i) => `res.status(409).json({ code: 'planted_code_${i}', other: "not_a_code_either" });`));
+    assert.ok(codes.includes('planted_code_7') && codes.includes('not_a_code_either'));
+    assert.throws(() => serverRefusalCodes(['const a = 1;']), /server/, 'a reader that found no codes would call every refusal sentence dead');
+  });
+
+  it('cannot answer when no refusal prefix, no server code was read', () => {
     assert.throws(() => decideOf(i18n, { ...input, refusalPrefixes: [] }, ceilings, TODAY), /refusal prefixes/);
+    assert.throws(() => decideOf(i18n, { ...input, refusalCodes: [] }, ceilings, TODAY), /server refusal codes/);
   });
 
   it('does not count a value with no letter as untranslated, and does count one that equals the source after trimming', () => {
