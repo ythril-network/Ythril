@@ -43,6 +43,11 @@
  * On the base (0b066822): the pull door stores a tombstoned record, keeps a superseded tombstone, skips a fork,
  * stores a wrong-typed field and an undeclared key, and stores a file whose `parentFileId` is not a string.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 38 s (measured 2026-11-20). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads several times that: the time of the crowd, not of this file. Cutting it would add fixtures and shorten no run.
+ *
  * Run: node --test testing/standalone/push-and-pull-decide-alike-db.test.js
  */
 import { describe, it, before, after } from 'node:test';

@@ -39,6 +39,11 @@
  * Rule 1: base serves and stores (200). Rule 2: base counts a 503 as a failed transfer (the failure count moves, the turn throws).
  * Rules 3-5 fail on the missing module `sync/positions-owed.js`. Rule 6: base writes no `positionsReadyAt`, no `pos`, no `writtenHere`.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 15 s (measured 2026-11-20). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads several times that: the time of the crowd, not of this file. Cutting it would add fixtures and shorten no run.
+ *
  * Run: a Mongo the harness accepts, then node --test testing/standalone/a-space-owes-its-positions-until-one-write-db.test.js
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
