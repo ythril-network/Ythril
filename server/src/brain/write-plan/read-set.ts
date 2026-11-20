@@ -210,7 +210,10 @@ export class ReadSet {
       for (const o of chunk) this.linkRows.set(linkOwnerKey(o.fromKind, o.id), new Map());
       for (const row of found) {
         const held = this.linkRows.get(linkOwnerKey(row.fromKind, row.from));
-        if (held) held.set(row.toKind, [...(held.get(row.toKind) ?? []), row.to]);
+        if (!held) continue;
+        const ends = held.get(row.toKind);
+        if (ends) ends.push(row.to);
+        else held.set(row.toKind, [row.to]);
       }
     }
   }
