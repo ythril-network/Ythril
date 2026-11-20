@@ -187,14 +187,18 @@ export function layerRdfConflict(held: RdfSetting | undefined, layer: unknown, c
 /**
  * The base conflict that stands for `localSpaceId`, merged over every network holding one, or `undefined`. THE reading the RDF doors ask
  * (409 `rdf_base_conflict`, slice D) and the one an admin's accept is held to: only an offer a CURRENT member of its network still makes
- * counts (review finding 8: a member that left takes its offer with it), each distinct offer once. Written by {@link recordRdfOffers}, cleared
- * by a landed or accepted base.
+ * counts (review finding 8: a member that left takes its offer with it), each distinct offer once, and only of a network that still carries
+ * the space (it leaves with the space, `networks/take-space-out-of-network.ts`). Written by {@link recordRdfOffers}, cleared by a landed or
+ * accepted base.
  */
 export function rdfBaseConflictOf(cfg: { networks: readonly NetworkConfig[] }, localSpaceId: string): RdfBaseConflict | undefined {
   let held: RdfBaseConflict['held'] | undefined;
   const offered: RdfBaseConflict['offered'] = [];
   const seen = new Set<string>();
   for (const net of cfg.networks) {
+    // A network that does not carry the space records nothing about it: an entry left under its id (a config an older build wrote, a hand
+    // edit) is no conflict, whatever else it says.
+    if (!net.spaces.includes(localSpaceId)) continue;
     const c = net.rdfBaseConflicts?.[localSpaceId];
     if (!c) continue;
     const members = new Set(net.members.map(m => m.instanceId));

@@ -286,6 +286,36 @@ describe('Audit coverage — every mutating route must resolve to an operation',
     assert.deepEqual(shadowed, [], 'move each anchored rule above the earlier rule that takes its route');
   });
 
+  it('no rule answers for another route\'s path because of what a parameter is called', async () => {
+    // The shadow gate above, and `concretise`, put one literal (`sample`) in every parameter, so a rule that reads the PATH ambiguously
+    // is invisible to them: `GET /api/brain/spaces/files/export/rdf` (a space called `files`) was read as the file-list rule's prefix of a
+    // space `spaces`, and the records export left no row with logReads off (bundle-269, review finding 3). Here each parameter of each
+    // route in turn is every literal word a rule names (and `spaces`), the others stay a neutral token, and the request must resolve as
+    // the same request with the neutral token does: the same operation and flags, the ids as sent.
+    const { ROUTE_RULES } = await import('../../server/dist/audit/middleware.js');
+    const words = new Set(['spaces']);
+    for (const rule of ROUTE_RULES) {
+      for (const w of rule.pattern.source.replace(/\\[a-zA-Z]/g, '').match(/[A-Za-z][A-Za-z0-9_-]+/g) ?? []) words.add(w);
+    }
+    assert.ok(words.size > 40 && words.has('files') && words.has('facts') && words.has('chrono'), `the rules name ${words.size} words, ${[...words].slice(0, 8)}`);
+    const NEUTRAL = 'zzparam';
+    const differs = [];
+    for (const route of routes) {
+      const params = route.path.match(/:[A-Za-z_]\w*/g) ?? [];
+      for (let i = 0; i < params.length; i++) {
+        const build = value => { let k = 0; return route.path.replace(/:[A-Za-z_]\w*/g, () => (k++ === i ? value : `${NEUTRAL}${k}`)); };
+        const base = resolveOperation(route.method, build(NEUTRAL));
+        for (const word of words) {
+          const sent = build(word);
+          const hit = resolveOperation(route.method, sent);
+          const shown = (h, own) => h && JSON.stringify([h.operation, h.read, h.writtenWhenCutOff, h.spaceId === own ? 'THE-PARAM' : h.spaceId, h.entryId === own ? 'THE-PARAM' : h.entryId]);
+          if (shown(hit, word) !== shown(base, NEUTRAL)) differs.push(`${route.method} ${sent}: ${hit ? `${hit.operation} of '${hit.spaceId}'` : 'no rule'}, not ${base ? `${base.operation}` : 'no rule'}`);
+        }
+      }
+    }
+    assert.deepEqual(differs, [], 'a rule answers for another route when a parameter is called like a word a rule names; anchor the rule to a path segment:\n  ' + differs.slice(0, 40).join('\n  '));
+  });
+
   it('a space rename is recorded as space.rename, not swallowed by space.update', () => {
     // Rule order matters: the generic `/api/spaces/:id` PATCH rule would otherwise shadow it.
     const hit = resolveOperation('PATCH', '/api/spaces/my-space/rename');

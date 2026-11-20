@@ -4,8 +4,8 @@
  * ## What it is, and why it is a leaf
  *
  * Everything a network holds FOR a space goes with it - its place in `spaces`, its id mapping, the schema layer the network sent, the
- * layer's unread marker, the membership origin, every member's receive marks, and a pending offer of it - or a re-add later finds the old
- * mapping and layer waiting. It edits the network object it is handed, saves nothing and reads no config.
+ * layer's unread marker, the membership origin, the RDF base conflict it recorded, every member's receive marks, and a pending offer of it -
+ * or a re-add later finds the old mapping and layer waiting. It edits the network object it is handed, saves nothing and reads no config.
  *
  * Two callers share it: `removeSpaceFromNetwork` (a passed deletion round, which saves) and the 6.0 migration of a proxy to personal
  * views (`config/migrate-proxies-to-views.ts`, a transform of a parsed config that must not save). The loader runs the migration, so
@@ -38,6 +38,21 @@ export function forgetPendingOffer(net: NetworkConfig, networkSpaceId: string): 
 }
 
 /**
+ * Forget the base conflict `net` recorded for the space `localId` (`NetworkConfig.rdfBaseConflicts`, Q-748), in place: the one spelling of
+ * "this network records no RDF base conflict for that space", so a space leaving the network and a base that landed or was accepted
+ * (`spaces/rdf-store.ts`) cannot clean it up two ways. A conflict outliving its space would leave a space that left its network refusing
+ * every export for good, with nothing able to clear it (an accept needs a networked space), and hand the refusal to a space created later
+ * under the same id.
+ * @returns whether a conflict was forgotten.
+ */
+export function forgetRdfBaseConflict(net: NetworkConfig, localId: string): boolean {
+  if (net.rdfBaseConflicts?.[localId] === undefined) return false;
+  const { [localId]: _gone, ...kept } = net.rdfBaseConflicts;
+  net.rdfBaseConflicts = Object.keys(kept).length > 0 ? kept : undefined;
+  return true;
+}
+
+/**
  * Take `localId` out of `net`, in place.
  * @returns whether the network carried the space, whether it held a schema layer for it (the effective schema is rebuilt then), and the
  * network's id for it (`null` when it was not carried).
@@ -54,6 +69,7 @@ export function takeSpaceOutOfNetwork(
   if (net.schemaLayers) delete net.schemaLayers[localId];
   if (net.schemaLayerUnread) delete net.schemaLayerUnread[localId];
   if (net.spaceOrigins) delete net.spaceOrigins[localId];
+  forgetRdfBaseConflict(net, localId);
   forgetEveryMark(net, localId);
   forgetPendingOffer(net, networkSpaceId);
   return { carried: true, hadLayer, networkSpaceId };
