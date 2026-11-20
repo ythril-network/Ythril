@@ -74,7 +74,8 @@ the same npm scripts, split across jobs.
 
 To run one file: `node --test testing/<suite>/<file>.test.js`. To run part of a stack suite through its runner, pass
 node's own flags after `--`, for example `npm run test:integration -- --test-name-pattern=<pattern>`. A run that is
-narrowed like that is recorded as a subset, never as the whole suite.
+narrowed like that is recorded as a subset, never as the whole suite. `--shard=<k>/<n>` runs only shard `k` of the `n` CI
+cuts Integration or Sync in (the same files CI's shard job `k` runs); without it the whole suite runs.
 
 ### The thirds of standalone
 
@@ -628,7 +629,12 @@ The authoritative description is the comment at the top of `.github/workflows/ci
 - **Stack jobs** wait for `prepare`, load the image and start only the services their suite drives, with
   `--no-build --pull never` so compose can neither rebuild nor pull a different image: the standalone instance third
   (`standalone-instance`), `integration`, `sync` and the red team (`redteam`). Each ends by uploading its results and, on failure, dumping the containers' logs. They
-  stand down on a reused run too, and also require `prepare` to have succeeded.
+  stand down on a reused run too, and also require `prepare` to have succeeded. `integration` and `sync` are each a matrix of
+  shard jobs, each with a stack of its own, running `npm run test:<suite> -- --shard=<k>/<n>`: the runner packs the suite's
+  files by the seconds recorded in `testing/_shared/suite-file-seconds.json` (longest first into the emptier shard), so the
+  halves take about the same time; each shard uploads `test-results-<suite>-<k>-<attempt>` and writes `<suite>-<k>of<n>.jsonl`,
+  so the gate's merged download holds both. `ci-runs-every-integration-and-sync-shard-exactly-once` holds that the matrix is
+  every shard of the runner's count and every tracked file of the suite runs in exactly one.
 - **`Build & Test`** (`test`) is the only required check. It waits for every other job and fails unless each succeeded; a suite job
   may be skipped only beside a named, reused Full run, and `reuse` and `changelog` must then have succeeded. Where a run is
   reused it reads that Full run again first (its commit, trigger, branch, repository, latest attempt, its own gate and every
