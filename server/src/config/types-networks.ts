@@ -355,6 +355,13 @@ export interface VoteRound {
   /** LOCAL: when this instance concluded the round (ISO8601), read from the request's own `now`. Never taken from or served to a peer. */
   concludedAt?: string;
   /**
+   * LOCAL: the votes passed this `meta_change` round on THIS instance and the apply threw (every attempt so far): set by the failing apply, cleared
+   * by one that succeeds. A round left open is retried at each settle; at its deadline it ends with the word `passed` (what the network decided), not
+   * `expired`, and its outcome entry carries `notApplied`. `passed` stays false on the round: it is the flag decisions read, and nothing was applied
+   * here (the schema the network decided still arrives as the layer the meta pull stores). Never taken from or served to a peer.
+   */
+  notAppliedHere?: boolean;
+  /**
    * LOCAL: why THIS instance did not read the schema this `meta_change` round carries (R6-6) — the failing types and what is wrong
    * with each, bounded. Set when the member refused to cast yes on it, or when it passed and the member applied NONE of it: a
    * round whose changed parts a member cannot parse is applied whole or not at all, and an operator is shown which. Never taken
@@ -399,6 +406,8 @@ export interface RoundOutcomeEntry {
   eligible: number;
   /** What a meta_change round proposed, in words. */
   summary?: string;
+  /** The round passed (`outcome`) and this instance did not apply it (`VoteRound.notAppliedHere`); absent otherwise. */
+  notApplied?: true;
   subjectInstanceId?: string;
   inviteKeyHash?: string;
 }
