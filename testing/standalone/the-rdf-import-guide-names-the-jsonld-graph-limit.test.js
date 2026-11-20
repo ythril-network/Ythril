@@ -33,17 +33,19 @@ function importSection() {
 }
 
 describe('the import guide names the JSON-LD @graph limit', () => {
-  it('names the code, the bound, and the formats that have no such limit', () => {
+  it('names the code, the shape, the bound in words, and the formats that have no such limit', () => {
     const section = importSection();
     assert.ok(section.includes('`rdf_jsonld_not_streamable`'), 'the section names the refusal code');
-    assert.ok(section.includes('`RDF_MAX_UNPARSED_CHARS`'), 'the section names the bound');
+    // The bound is described, not named: an UPPER_CASE name in a guide is read as a setting (env-var-docs-coverage), and this one is a constant.
+    assert.ok(section.includes('text that completes no statement'), 'the section says which bound it is, in the reader\'s own words');
     assert.ok(section.includes('`@graph`'), 'the section names the shape that meets it');
     assert.match(section, /Turtle, TriG and N-Quads have no such limit/);
   });
 
-  it('the code and the bound it names are the reader\'s own', () => {
+  it('the code and the bound the section describes are the reader\'s own', () => {
     const parser = read('server/src/rdf/parse.ts');
     assert.match(parser, /export const RDF_MAX_UNPARSED_CHARS\b/);
     assert.match(parser, /new RdfParseError\('rdf_jsonld_not_streamable'/);
+    assert.ok(parser.includes('text that completes no statement'), 'the reader says of its bound what the guide says');
   });
 });
