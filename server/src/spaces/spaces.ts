@@ -16,6 +16,7 @@ import type { ParsedSpaceMeta } from './body-schemas.js';
 import { META_VERSION_CAP } from './_shared.js';
 import { keepVariationSnapshots } from './schema-snapshot-store.js';
 import { sweepAfterMetaWrite } from '../brain/suppression-sweep.js';
+import { assertSchemaWritable } from './schema-write-gate.js';
 
 /**
  * A space's MCP-facing directive, under the one name that still has a store behind it.
@@ -92,6 +93,8 @@ export function updateSpace(
   const cfg = getConfig();
   const space = cfg.spaces.find(s => s.id === spaceId);
   if (!space) return null;
+  // A schema write waits for a standing RDF import of the space (amendment A3): refused before anything of this update is applied.
+  if (updates.meta !== undefined) assertSchemaWritable(spaceId);
   if (typeof updates.label === 'string') space.label = updates.label;
   /*
    * `description` used to be folded in here, into `meta.purpose`, so a directive edit took the version bump

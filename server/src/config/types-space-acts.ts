@@ -20,7 +20,7 @@
 import type { BrainCollection } from './types-knowledge.js';
 
 /** The lane an act's body runs in: one body at a time per lane (`spaces/space-act-runner.ts`, "Lanes"). */
-export type SpaceActLane = 'space-op' | 'wipe' | 'restore' | 'import';
+export type SpaceActLane = 'space-op' | 'wipe' | 'restore' | 'import' | 'rdf-import';
 
 /** The fields of a request that make two requests the same act, besides its kind and space. */
 export type SpaceActKeyField = 'types' | 'networkId' | 'newId' | 'spoolId';
@@ -94,6 +94,18 @@ export const SPACE_ACT_KINDS = {
     lane: 'import', writeRefusalCode: 'space_being_imported',
     writeRefusalWhy: () => 'an import is restoring it; retry once the import completes',
     instanceWide: false, keyFields: ['spoolId'], forgetsMarks: 'forgetReceived', wholeSet: false,
+  },
+  /*
+   * An RDF import into one space (bundle-270, Q-753; `spaces/rdf-import-act.ts`): ordinary checked writes of a file its door sorted into a
+   * folder (`spoolId`), all or nothing. Its own lane runs one RDF import body at a time instance-wide, apart from restores; it forgets no
+   * mark, because its writes are ordinary local writes that sync sends on, unlike a restore's. While it stands no schema write reaches its
+   * space either (`spaces/schema-write-gate.ts`), so the schema its dry plan judged by is the one its commit lands under. Its refusal shares
+   * the admin import's code, which every client already reads as "an act stands; retry when it ends"; the sentence names the RDF import.
+   */
+  'rdf-import': {
+    lane: 'rdf-import', writeRefusalCode: 'space_being_imported',
+    writeRefusalWhy: () => 'an RDF import is writing into it; retry once the import completes',
+    instanceWide: false, keyFields: ['spoolId'], forgetsMarks: null, wholeSet: false,
   },
 } as const satisfies Record<string, SpaceActKindSpec>;
 
@@ -172,7 +184,7 @@ export interface SpaceActEntry {
   setId?: string;
   /** A restore's backup, by id under the backups root; never a path, which is resolved again (and checked) when the body runs. */
   backupId?: string;
-  /** An import's spooled body, by id under the import spool; never a path, which is resolved again (and checked) when the body runs. */
+  /** An import's spooled body (an admin import's spool, an RDF import's folder), by id; never a path, which is resolved again (and checked) when the body runs. */
   spoolId?: string;
 }
 

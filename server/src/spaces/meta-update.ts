@@ -76,6 +76,7 @@ import { roundAnswer, roundDecided, type RoundAnswer } from '../networks/vote-ac
 
 // The merge a write makes, and the base it is merged over, live with the rights check's copy of the same question (`meta-write-base.ts`).
 import { mergeSpaceMeta, metaWriteBase } from './meta-write-base.js';
+import { assertSchemaWritable } from './schema-write-gate.js';
 export { mergeSpaceMeta };
 
 /**
@@ -838,6 +839,8 @@ function skewOf(plan: MetaUpdatePlan, reached: readonly NetworkConfig[]): Pick<N
  */
 export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUpdateOutcome> {
   const { spaceId: id, space, data: patchData, mergedMeta, proposal } = plan;
+  // Before anything is written, the local settings included: a space an RDF import holds takes no schema write (amendment A3).
+  if (mergedMeta !== undefined || proposal !== undefined) assertSchemaWritable(id);
   const cfg = getConfig();
   // The effective schema before anything is written: what a run's split steps read their declared properties from, and its rules' before.
   const metaBefore = space.meta;
