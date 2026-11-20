@@ -16,6 +16,7 @@ import { clashesOf, ownAgainstEffective, replicatedMetaOf } from '../sync/replic
 import { carriedLocalId } from '../sync/space-map.js';
 import { layersFor, recomputeEffectiveMeta } from './effective-meta.js';
 import { lostSpaceAnswer } from './unknown-space.js';
+import { assertSchemaWritable } from './schema-write-gate.js';
 import { restartSchemaConvertInTurn } from '../sync/governance.js';
 
 /** An act's answer: the HTTP status is the contract, so both doors carry it. */
@@ -84,6 +85,9 @@ export function setNetworkPrecedenceAct(spaceId: string, input: unknown): Schema
   const stray = parsed.data.networks.filter(id => !carrying.has(id));
   // The ids are the caller's: quoted through the bounded list renderer, each cut at `NAME_QUOTED` (R6-11), never joined whole.
   if (stray.length) return { status: 400, error: `Not networks that carry '${peerText(spaceId, { max: NAME_QUOTED })}': ${peerList(stray, ', ', { each: NAME_QUOTED })}` };
+  // A schema write a caller starts: refused while an RDF import stands, BEFORE the first write (the order is saved before the recompute that would
+  // meet the gate, and a reorder that moves no schema never meets it).
+  assertSchemaWritable(spaceId);
   const order = [...new Set(parsed.data.networks)];
   space.networkPrecedence = order.length ? order : undefined;
   saveConfig(cfg);
