@@ -73,6 +73,7 @@ import {
   IMPORT_OP_ORDER, ReportBuilder, emptyKinds, emptyUnchanged, rdfImportAuditChanges, type RdfImportReport,
 } from '../rdf/import-report.js';
 import { unknownSpaceAnswer } from './unknown-space.js';
+import { assertSpaceTakesWrites, spaceWriteClosedAnswer } from './space-write-gate.js';
 
 export { RDF_IMPORT_REASONS_NAMED_MAX, rdfImportAuditChanges, type RdfImportReport } from '../rdf/import-report.js';
 export { RDF_IMPORT_DIR, RDF_IMPORT_REPORT_DIR, RDF_IMPORT_REPORT_KEEP_MS };
@@ -707,6 +708,15 @@ export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnsw
   // The one existence rule: an id that is not a configured space (a view included: an import writes into a space) is answered as missing.
   const unknown = unknownSpaceAnswer(null, input.spaceId, false, cfg);
   if (unknown) return refusal(unknown.status, unknown.body.code ?? 'space_not_found', unknown.body.error);
+  // A space another act holds (a restore, a migration, a conversion, an import) takes no import: answered with that act's own code, as every
+  // write door answers it, before a byte of the file is read. A dry run writes nothing and is not asked.
+  if (p.dryRun !== true) {
+    try { assertSpaceTakesWrites(input.spaceId); } catch (err) {
+      const closed = spaceWriteClosedAnswer(err);
+      if (!closed) throw err;
+      return refusal(closed.status, closed.body.code, closed.body.error);
+    }
+  }
   const format = p.format ?? formatOfMediaType(input.contentType);
   if (!format) {
     return refusal(HTTP.UNSUPPORTED_MEDIA, 'rdf_unsupported_format', `The document's format is not one the import reads: send ${RDF_FORMATS.map(f => RDF_MEDIA_TYPES[f]).join(', ')}, or name it in format`);

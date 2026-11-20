@@ -74,6 +74,9 @@ const REQUESTS = {
   // at 3, its parent `f1` at 1); `{ keep }` alone is a 400 before the act is asked.
   'POST /api/brain/spaces/:spaceId/forks/:forkId/resolve': { params: { forkId: 'aaaaaaaa-0000-4000-8000-0000000000f3' }, body: { kind: 'fact', keep: 'fork', ifMatchSeq: 3, ifMatchParentSeq: 1 }, gone: { coll: 'facts', _id: 'aaaaaaaa-0000-4000-8000-0000000000f3' }, coll: 'facts', match: { _id: 'aaaaaaaa-0000-4000-8000-0000000000f1', fact: 'the fork text, resolved during the restore' } },
   'POST /api/brain/spaces/:spaceId/bulk': { body: { facts: [{ fact: 'bulk during the restore' }] }, coll: 'facts', match: { fact: 'bulk during the restore' } },
+  // The RDF import (bundle-270): one entity as JSON-LD, which the door reads from a JSON body. A space another act holds takes no import: the
+  // door answers that act's code before it registers an act of its own, and no record of the file lands.
+  'POST /api/brain/spaces/:spaceId/import/rdf': { query: { format: 'jsonld' }, body: { '@context': { name: 'http://schema.org/name' }, '@id': 'https://example.org/actheld409/imported-during', name: 'Imported during' }, coll: 'entities', match: { name: 'Imported during' } },
 };
 
 /** Derived routes under the prefix that are not one write of a record, each with why. */
@@ -95,7 +98,9 @@ let door, server, adminKey, wantCode;
 
 describe('a write a standing act refuses answers 409 with its code on every REST record route (real MongoDB, real app)', { skip }, () => {
   before(async () => {
-    door = await openPushDoor({ suite: 'actheld409', spaces: [{ id: S, label: S, folders: [], completeLinkage: true, meta: { suppressEmbeddings: true } }] });
+    door = await openPushDoor({ suite: 'actheld409', spaces: [{ id: S, label: S, folders: [], completeLinkage: true, meta: { suppressEmbeddings: true,
+      // RDF is on, so the import's route is refused for the standing act and not for the space having no RDF.
+      rdf: { enabled: true, base: 'https://example.org/actheld409/', vocab: 'https://example.org/actheld409/vocab/', baseEpoch: 0 } } }] });
     const { SPACE_ACT_KINDS } = await import('../../server/dist/config/types-space-acts.js');
     wantCode = SPACE_ACT_KINDS?.restore?.writeRefusalCode;
     const tokens = await import('../../server/dist/auth/tokens.js');
