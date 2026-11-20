@@ -16,6 +16,7 @@ import { shapeError } from './write-shape.js';
 import { factTextError, plannedInputError } from './record-checks.js';
 import { parseRecurrence } from './chrono.js';
 import { getConfig } from '../config/loader.js';
+import { checkQuota, QuotaError } from '../quota/quota.js';
 import { resolveMetaRefs, getAllowedChronoTypes, type InstanceWrittenKeys } from '../spaces/schema-validation.js';
 import type { SpaceMeta } from '../config/types.js';
 import { isStrictLinkage } from '../spaces/space-lookup.js';
@@ -249,6 +250,21 @@ export function bulkItemsRefusal(input: Record<string, unknown>): string | null 
  */
 export function bulkBatchRefusal(input: Record<string, unknown>): string | null {
   return bulkSizeRefusal(input) ?? bulkItemsRefusal(input);
+}
+
+/**
+ * Why this batch is refused before anything is written because the brain's hard storage limit is reached, or `null`: the body REST answers `507`
+ * with (the fact doors' own: the sentence and `storageExceeded`) and the sentence the tool answers as an error. The one question both doors
+ * ask, so neither can drop it.
+ */
+export async function bulkStorageRefusal(): Promise<{ error: string; storageExceeded: true } | null> {
+  try {
+    await checkQuota('brain');
+    return null;
+  } catch (err) {
+    if (err instanceof QuotaError) return { error: err.message, storageExceeded: true };
+    throw err;
+  }
 }
 
 /**

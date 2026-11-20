@@ -9,7 +9,7 @@
 
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { TTL_DAYS_SCHEMA, SUPERSEDED_SCHEMA, SUPPRESS_EMBEDDINGS_SCHEMA, recurrenceSchema, uuidSchema, FORK_ROWS_ARE_READ_ONLY } from './shared.js';
-import { bulkWrite, bulkWriteTotal, bulkBodyRefusal, BULK_BODY_KEYS, BULK_MAX_PER_TYPE } from '../../brain/bulk.js';
+import { bulkWrite, bulkWriteTotal, bulkBodyRefusal, bulkStorageRefusal, BULK_BODY_KEYS, BULK_MAX_PER_TYPE } from '../../brain/bulk.js';
 import { writeDoorOfTransport } from '../../contract/judged-write-operations.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { edgeEndpointKindSchema } from '../../brain/entity-refs.js';
@@ -296,6 +296,9 @@ export const save_bulkTool: ToolHandler = {
     // validation so it can report per-item errors, which left a retired or unknown key accepted and ignored.
     const refusal = bulkBodyRefusal(a, MCP_BULK_KEYS);
     if (refusal) throw new Error(refusal.error);
+    // The brain's hard storage limit, as the fact tools refuse it (the REST door asks the same function).
+    const storageRefused = await bulkStorageRefusal();
+    if (storageRefused) throw new Error(storageRefused.error);
     const ts = callSpace;
 
     const result = await bulkWrite(ts, {
