@@ -628,7 +628,7 @@ interface TypeSchema {
                                                   //   text, never parsed, max 4000. An assistant reads
                                                   //   it; nothing validates against it. See 06-spaces-api.md.
   namingPattern?: string;                         // entity only — regex for name validation
-  iri?: string;                                   // the type's RDF address; see RDF names in 06f-exports.md
+  iri?: string;                                   // the type's RDF address; see `meta.rdf` in 06f-exports.md
   retention?: { days?: number; contentDays?: number };  // per-type retention, the middle tier of
                                                   //   record > schema > space. `contentDays` is chrono-only
                                                   //   and is rejected elsewhere. See 04-brain-api.md.
