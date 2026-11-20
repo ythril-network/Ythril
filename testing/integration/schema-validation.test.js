@@ -25,6 +25,9 @@ const TEST_SPACE = `schema-test-${RUN}`;
 let tokenA;
 function token() { return tokenA; }
 
+// Before the first hook: a file-level `before` runs the moment it is registered and reads `own`.
+const own = ownTokens();
+
 before(async () => {
   // Its own token: the stored-data check below is counted on the heavy-call rail per token (main run 44736302108: a 429 from slots other files had spent).
   tokenA = await own.mint('schema-validation');
@@ -33,17 +36,14 @@ before(async () => {
   assert.equal(r.status, 201, `Failed to create test space: ${JSON.stringify(r.body)}`);
 });
 
-after(async () => {
-  // Teardown: delete the test space
+// Teardown: delete the test space, through `own` so it runs before the token is removed.
+own.after(async () => {
   await fetch(`${INSTANCES.a}/api/spaces/${TEST_SPACE}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ confirm: true }),
   }).catch(() => {});
 });
-
-// After the hook above that deletes the space with this token: hooks run in registration order, and the token goes last.
-const own = ownTokens();
 
 // ── Helper: PATCH meta on test space ───────────────────────────────────────
 async function setMeta(meta) {

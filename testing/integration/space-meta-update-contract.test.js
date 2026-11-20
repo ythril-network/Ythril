@@ -39,7 +39,7 @@
  * Run: node --test testing/integration/space-meta-update-contract.test.js
  */
 
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { INSTANCES, post, get, patch, delWithBody } from '../sync/helpers.js';
 import { ownTokens } from '../_shared/own-token.mjs';
@@ -56,6 +56,9 @@ async function metaNow() {
   return { version: r.body.version ?? 0, validationMode: r.body.validationMode, body: r.body };
 }
 
+// The file's token is its own (a save that names `convertRecords` is counted on the heavy-call rail per token). Before the first hook: a file-level `before` runs the moment it is registered and reads `own`.
+const own = ownTokens();
+
 before(async () => {
   token = await own.mint('meta-contract');
   const r = await post(INSTANCES.a, token, '/api/spaces', { id: SPACE, label: `Meta contract ${RUN}` });
@@ -66,12 +69,10 @@ before(async () => {
   assert.ok([200, 202].includes(w.status), `seed write failed: ${w.status} ${JSON.stringify(w.body)}`);
 });
 
-after(async () => {
+// Through `own`, so the space is deleted with the token before the token is removed.
+own.after(async () => {
   await delWithBody(INSTANCES.a, token, `/api/spaces/${SPACE}`, { confirm: true }).catch(() => {});
 });
-
-// The file's token is its own (a save that names `convertRecords` is counted on the heavy-call rail per token). Registered after the hook above, which uses it: the token goes last.
-const own = ownTokens();
 
 describe('PATCH /api/spaces/:id — each refusal keeps its own status', () => {
   it('404 for a space that does not exist, ahead of every other check', async () => {

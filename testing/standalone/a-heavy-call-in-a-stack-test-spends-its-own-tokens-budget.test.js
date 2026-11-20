@@ -33,6 +33,7 @@ import { readTrackedSources, REPO_ROOT, SERVER_CODE_ROOTS } from './_sources.mjs
 import { splitStandalone } from '../_shared/standalone-split.mjs';
 import { heavyDoors, doorSitesIn } from './_heavy-doors.mjs';
 import { tokenFlow, OWN_TOKEN_MODULE } from './_token-flow.mjs';
+import { ts, parseSource, lineOf, walkEveryNode, unwrapExpression } from '../_shared/syntax-tree.mjs';
 
 const doors = heavyDoors(readTrackedSources(SERVER_CODE_ROOTS, { ext: ['.ts'], floor: 300 }));
 
@@ -105,6 +106,65 @@ describe('a planted heavy call with the shared token is found, the same call wit
     const helper = { file: 'testing/sync/_pair.mjs', text: `export const tokenOf = (x) => fs.readFileSync(path.join(C, x, 'token.txt'), 'utf8').trim();` };
     const test = { file: 'testing/sync/planted.test.js', text: `import { tokenOf } from './_pair.mjs';\nconst tA = tokenOf('a');\npatch(A, tA, '/api/spaces/x', { convertRecords: {} });` };
     assert.ok(planted([helper, test]).length >= 1);
+  });
+});
+
+/**
+ * Where `ownTokens()` stands among the hooks of its block (the file, or the `describe` callback it is called in). A root `before` runs the
+ * moment it is registered, so `const own = ownTokens()` below it is uninitialised when the hook reads it (Full run 44753447026: 87 cancelled
+ * cases in two shards); and a plain `after` registered with it would run in registration order, before or after the token's removal. So: the
+ * call comes before the first `before(` of its block, and the block has no plain `after(` (a cleanup that uses the token is `own.after(fn)`).
+ */
+function ownTokenPlacement(file, text) {
+  const sf = parseSource(file, text);
+  const problems = [];
+  const hookName = (st) => (ts.isExpressionStatement(st) && ts.isCallExpression(st.expression) && ts.isIdentifier(st.expression.expression)
+    ? st.expression.expression.text : null);
+  const isOwnCall = (st) => ts.isVariableStatement(st) && st.declarationList.declarations.some(d => d.initializer
+    && ts.isCallExpression(d.initializer) && ts.isIdentifier(d.initializer.expression) && d.initializer.expression.text === 'ownTokens');
+  // The names a `.mint(...)` result is put in: a plain `after` that reads one of them runs on a token another hook may already have removed.
+  const minted = new Set();
+  const mintCall = (e) => e && ts.isCallExpression(unwrapExpression(e)) && ts.isPropertyAccessExpression(unwrapExpression(e).expression) && unwrapExpression(e).expression.name.text === 'mint';
+  walkEveryNode(sf, (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && mintCall(n.initializer)) minted.add(n.name.text);
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(n.left) && mintCall(n.right)) minted.add(n.left.text);
+  });
+  const usesMinted = (st) => { let hit = false; walkEveryNode(st, (n) => { if (ts.isIdentifier(n) && minted.has(n.text)) hit = true; }); return hit; };
+  const blocks = [sf];
+  walkEveryNode(sf, (n) => { if (ts.isBlock(n) && isFnBody(n)) blocks.push(n); });
+  for (const block of blocks) {
+    const statements = block.statements;
+    const at = statements.findIndex(isOwnCall);
+    if (at < 0) continue;
+    statements.forEach((st, i) => {
+      const hook = hookName(st);
+      if (hook === 'before' && i < at) problems.push(`${file}:${lineOf(sf, st)} a before(...) is registered above ownTokens(): it runs at once and reads an uninitialised const`);
+      if (hook === 'after' && usesMinted(st)) problems.push(`${file}:${lineOf(sf, st)} a plain after(...) beside ownTokens() that uses a minted token: use own.after(fn) so it runs before the token is removed`);
+    });
+  }
+  return problems;
+}
+const isFnBody = (n) => n.parent && ts.isFunctionLike(n.parent);
+
+describe('ownTokens() is placed so its hooks run in an order that works', () => {
+  const ok = `import { ownTokens } from '../_shared/own-token.mjs';\nconst own = ownTokens();\nbefore(async () => { T = await own.mint('x'); });\nown.after(async () => {});`;
+  it('reports a before registered above ownTokens()', () => {
+    const bad = `before(async () => { T = await own.mint('x'); });\nconst own = ownTokens();`;
+    assert.equal(ownTokenPlacement('testing/integration/p.test.js', bad).length, 1);
+  });
+  it('reports a plain after beside ownTokens()', () => {
+    assert.equal(ownTokenPlacement('testing/integration/p.test.js', `${ok}\nafter(async () => { await del(A, T, '/x'); });`).length, 1);
+    assert.deepEqual(ownTokenPlacement('testing/integration/p.test.js', `${ok}\nafter(async () => { await del(A, shared, '/x'); });`), [], 'an after that uses a token it did not mint is not ordered by the helper');
+  });
+  it('reports a misplaced call inside a describe too', () => {
+    const bad = `describe('d', () => {\n  before(async () => { T = await own.mint('x'); });\n  const own = ownTokens();\n});`;
+    assert.equal(ownTokenPlacement('testing/integration/p.test.js', bad).length, 1);
+  });
+  it('accepts the order the helper documents', () => assert.deepEqual(ownTokenPlacement('testing/integration/p.test.js', ok), []));
+  it('holds for every stack-suite file that calls it', () => {
+    const files = stackFiles().filter(f => f.text.includes('ownTokens('));
+    assert.ok(files.length >= 10, `${files.length} files call ownTokens(); the scan is broken`);
+    assert.deepEqual(files.flatMap(f => ownTokenPlacement(f.file, f.text)), []);
   });
 });
 
