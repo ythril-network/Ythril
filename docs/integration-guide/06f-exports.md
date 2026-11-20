@@ -107,6 +107,56 @@ At most two exports run at once on the instance, one per token; another answers 
 | 429 | `rdf_export_busy` | Two exports run, or one of yours |
 | 503 | `rdf_export_incomplete` | The store did not answer a page |
 
+## RDF import
+
+`POST /api/brain/spaces/:spaceId/import/rdf` and MCP `import_rdf` import an RDF document into a space: **Turtle**, **TriG**, **N-Quads** or **JSON-LD**, named by `Content-Type` (`text/turtle`, `application/trig`, `application/n-quads`, `application/ld+json`) or by `format`, plain or gzipped (`Content-Encoding: gzip`). MCP takes the document inline (`document`, up to the MCP body limit) and needs `format`; a larger file goes through the route.
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/turtle" \
+  --data-binary @people.ttl "https://ythril.example/api/brain/spaces/research/import/rdf?dryRun=true"
+```
+
+**All or nothing.** The whole file is read and sorted, every statement translated into records, and every record checked by the same planners an ordinary write goes through, before anything is written. A statement the space cannot hold is a reason, answered with its statements. In a **strict** space a reason refuses the whole import; so does, in every mode, a statement with no Ythril form (several values on one property, two kinds for one subject, an annotation on a triple the file does not assert) and any record a planner would refuse (a bound, a link, a reference). Nothing lands then, and the answer is `409 rdf_import_refused` with the report. In a **warn** or **off** space the reasons that mode records are answered and the import lands. Then the records are written kind by kind (facts, entities, chrono entries, edges), each an ordinary write: stamped with the schema it was judged by, synced, and queued for embedding.
+
+**What becomes of a subject.** A subject under the space's own base whose record is stored is updated in place, and nothing is taken away: a field the file does not state keeps its stored value, tags and links are joined. Every other subject is a **new** record with an id this instance mints: importing the same foreign file twice makes its records twice, so run it with `dryRun` first. A file exported by another space keeps its records apart from yours: name that space's base as `sourceBase` (TriG, N-Quads and JSON-LD default to the file's one data graph). A file of several data graphs (a view's export) needs one `graphBase` per graph; a paged export imported page by page does not keep the links between pages. Files are never imported (their bytes are not in RDF); a file statement is counted as not taken.
+
+### Parameters
+
+| Parameter | Values | Default |
+|---|---|---|
+| `format` | `turtle`, `trig`, `nquads`, `jsonld` | REST: from `Content-Type`; MCP: required |
+| `dryRun` | `true`: read, translate and check everything, write nothing, register no act | `false` |
+| `blankNodes` | `refuse`, `mint` (a blank subject becomes a new record) | `refuse` |
+| `sourceBase`, `sourceVocab` | The base (and vocabulary, default `<sourceBase>vocab/`) of the space the file came from | the file's one data graph |
+| `graphBase` | `"<graph address> <source base>"`, once per data graph (REST: repeat the parameter; MCP: an array) | none |
+| `schema` | Not available yet: refused by name (`rdf_import_schema_not_available`) | |
+
+### The answer and the report
+
+`200` with the report when the import finished within the request, `202` with `importId`, `status: "running"` and `location` (also the `Location` header) while it runs on, `409 rdf_import_refused` with the report when it was refused. `GET /api/brain/spaces/:spaceId/import/rdf/:importId` and MCP `import_rdf_status` (`importId`) answer the report for seven days. The report holds `status` (`running`, `completed`, `refused`, `failed`, `dry-run`), `quads` and `subjects`, per kind the records `inserted` and `converged`, the `reasons` (each its `code`, `outcome` `refused` or `recorded`, its message and up to 20 of its statements; the first 100 reasons are named, `reasonCount` and `reasonsByCode` count them all) and `notTaken` (the statements left out on purpose, by why: server-owned, derived, a file, the export's own description). A statement shows a literal by its datatype and length, never its text.
+
+### While it runs
+
+The import is a space act. From the moment it is registered until it ends, the space takes no other write (`409 space_being_imported`, the sentence naming the RDF import), no schema write (the type routes, the whole schema, the validation mode, MCP `schema_update`: the same code) and no sync. One RDF import body runs at a time on the instance; a large file holds its space for minutes. After a restart it resumes where it was, under the ids it minted the first time, so no record is written twice. A refused import ends the act, and the space takes writes again.
+
+### Rights and audit
+
+Both doors need `knowledge: write`, for a dry run and the status too: they answer which records are stored and which values break the schema. Every import is audited as `rdf.import` with its counts (never a value of the file), and sends one `bulk.write` webhook summary.
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `rdf_import_bad_param` | A parameter that is not one the import takes, or a source base that is not an absolute address ending in `/` |
+| 400 | `rdf_import_schema_not_available` | `schema` was sent |
+| 400 | `rdf_import_several_graphs` | Several data graphs and one without its `graphBase` |
+| 400 | `rdf_malformed` (and the reader's other codes) | The file is not well-formed: the answer names the line and column (`place`) |
+| 403 | (the rights guard's) | No `knowledge: write` on the space |
+| 404 | `space_not_found` | A personal view: an import writes into a space |
+| 409 | `rdf_import_refused` | The import was refused; nothing was written |
+| 409 | `rdf_not_enabled` | The space has RDF off |
+| 409 | `rdf_import_busy` | Another RDF import is being read in |
+| 413 | `rdf_bound_exceeded` | Over a bound, named in `bound`: the statements, the subjects, the statements or characters of one subject, the records, a literal or token, the inflated size, the body |
+| 415 | `rdf_unsupported_format`, `rdf_unsupported_encoding` | A media type or `Content-Encoding` the import does not read |
+
 ## RDF schema export
 
 `GET /api/spaces/:id/schema-rdf` and MCP `space_schema_rdf` give a space's schema as an OWL ontology (what its own types and properties mean) and SHACL shapes (what its records may hold), in **Turtle** (the default) or **JSON-LD**, by `format` or by `Accept` (`text/turtle`, `application/ld+json`).
