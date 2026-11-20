@@ -69,8 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** a base a network of a voted kind offers at a higher epoch is recorded beside that network and refused by the exports (`rdf_base_conflict`); the record follows its space: it is gone when the space leaves the network and moves when the space is renamed.
 - **RDF:** a rebase proposal on a space in a network answers a `members_may_not_read_round` warning naming the members below 6.6.0 (or never heard from), who neither vote on the round nor apply it; the vote row of a rebase round shows the base it moves to, its vocabulary and its epoch (en, de, pl).
 - **RDF:** the server carries the reader the RDF import will use (Turtle, TriG, N-Quads, JSON-LD, plain or gzipped). It fetches nothing (a remote JSON-LD `@context` is refused) and refuses a malformed or oversized file with its line and column.
-- **RDF:** `POST /api/brain/spaces/:spaceId/import/rdf` and MCP `import_rdf` import RDF, all or nothing: a strict space refuses the file for one statement it cannot hold, naming each reason. `dryRun` writes nothing. `knowledge: write` ([Exports](docs/integration-guide/06f-exports.md#rdf-import)).
-- **RDF:** while an import lands, its space takes no other write, no schema write and no sync (`409 space_being_imported`); it resumes after a restart. MCP `import_rdf_status` and `GET .../import/rdf/:importId` answer its report.
+- **RDF:** `POST /api/brain/spaces/:spaceId/import/rdf` and MCP `import_rdf` import RDF, all or nothing: a strict space refuses a file with a statement it cannot hold. `dryRun` writes nothing. `knowledge: write`; peer tokens get `403` ([Exports](docs/integration-guide/06f-exports.md#rdf-import)).
+- **RDF:** while an import lands, its space takes no other write, no schema write and no sync (`409 space_being_rdf_imported`); it resumes after a restart. MCP `import_rdf_status` and `GET .../import/rdf/:importId` answer its report.
 - **RDF:** the stream of a whole export is sent uncompressed, whatever `Accept-Encoding` asks; a slow or idle cut and a refusal for want of an export slot each leave one log line (space and rule, no record).
 - **RDF:** the user guide describes the "RDF namespaces of schema groups" card of the Schema Library page.
 - **RDF:** the Ythril vocabulary is published under `docs/rdf/`, with decision record 23: a property holds one plain value; structure is an edge or a link.
@@ -81,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Brain:** no user-facing effect: the checks a record must pass before it is stored (shape, link caps, size) are one module the bulk import calls, and the write planners can plan a whole import without writing, for the coming RDF import.
+- **Brain:** a record over 10 MiB as JSON is refused `400` at the single-record doors (none checked its size before); `POST .../bulk` and `save_bulk` answer `507` `storage_exceeded` at the brain's hard storage limit, as the fact doors do.
 - **Licence:** releases from the next one on are under the Ythril License: passing on the source, changed versions or images is no longer licensed, and the free small-business tier is under 50 people. Releases already published keep their terms.
 - **Schema:** type rows in the schema tab show only the name: the property, rules, pattern, library and retention pills are gone; retention and the library link stay in the type's pane.
 - **Schema:** `older` no longer walks every stamped record; version texts are read in byte-bounded chunks; a pass past its deadline answers 503 `schema_versions_busy`; edges get a `{label: 1}` index, built in the background.
