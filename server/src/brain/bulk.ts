@@ -252,6 +252,9 @@ export function bulkBatchRefusal(input: Record<string, unknown>): string | null 
   return bulkSizeRefusal(input) ?? bulkItemsRefusal(input);
 }
 
+/** The status REST answers {@link bulkStorageRefusal} with: Insufficient Storage, as the fact doors answer it. */
+export const BULK_STORAGE_STATUS = 507;
+
 /**
  * Why this batch is refused before anything is written because the brain's hard storage limit is reached, or `null`: the body REST answers `507`
  * with (the fact doors' own: the sentence and `storageExceeded`) and the sentence the tool answers as an error. The one question both doors
