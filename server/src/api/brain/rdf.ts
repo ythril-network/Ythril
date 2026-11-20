@@ -165,6 +165,10 @@ async function sendStream(req: Request, res: Response, stream: RdfExportStream):
   res.status(EXPORT_OK);
   res.setHeader('Content-Type', stream.contentType);
   res.setHeader('Content-Disposition', stream.disposition);
+  // Never compressed (lens finding 2): the rate asked of the reader is bytes of the export, and a compressor would be measured instead (a
+  // well-compressible export taken at a fraction of its size), would hold the ending back in its own buffer, and would hide the slices the
+  // pace is judged on. The guide states the rate in the bytes sent; sent uncompressed they are the export's own.
+  res.setHeader('X-No-Compression', '1');
   // Declared only on a chunked answer: an HTTP/1.0 reader reads the same facts in the document's ending.
   const trailers = trailersFor(req, res, STREAM_TRAILERS);
   setViewHeaders(res, stream.viewMembers, stream.membersLeftOut);
