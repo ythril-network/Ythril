@@ -426,6 +426,25 @@ describe('--summary: the baseline reads the client like any suite', () => {
   });
 });
 
+describe('--summary: a run that was re-run is one run of the baseline, judged by its newest attempt (Q-948)', () => {
+  it('twelve runs each holding attempt 1 at 90 s and attempt 2 at 5 s: ten runs are compared and the 5 s attempt is the baseline', async () => {
+    const slowFirst = { ...usual, files: [{ file: A, ms: 90_000, tests: [T('fast one', 10)] }] };
+    const w = worldOf({ client: () => null });
+    for (const r of w.runs) {
+      r.run_attempt = 2;
+      w.artifactsByRun[r.id] = [resultsArtifact(9000 + r.id, 'test-results-standalone-pure-1', ['standalone-pure-1.jsonl', slowFirst]), artifact(9400 + r.id, usual)]
+        .map((a, i) => (i === 1 ? { ...a, name: 'test-results-standalone-pure-2' } : a));
+    }
+    await withJudgedRun(w, async ({ work, env }) => {
+      const dir = results(work, [{ ...STANDALONE, files: [{ file: A, ms: 60_000, tests: [T('fast one', 10)] }] }]);
+      const r = await summary(['--results', dir], work, env);
+      assert.equal(r.code, 0, everything(r));
+      assert.match(r.stdout, /compared with 10 run\(s\)/, 'the attempts of a run were counted as runs');
+      assert.ok(r.stdout.split('\n').some(l => /slow file/.test(l) && l.includes(A)), `the older attempt's 90 s was the baseline:\n${r.stdout}`);
+    });
+  });
+});
+
 /** An artifact whose `client.json` is cut off with a token in it. */
 function buildBadClientZip() {
   return buildZip([{ name: 'client.json', data: `{"testResults": [ ${TOKEN} ` }]);

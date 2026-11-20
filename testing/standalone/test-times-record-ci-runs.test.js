@@ -563,3 +563,83 @@ describe('--record-ci with no name', () => {
     });
   });
 });
+
+// ── every attempt of a run is recorded, and the listing of a run's artifacts is read to its end (Q-948) ───────────────────
+//
+// What this prevents: a test that failed in attempt 1 and passed in attempt 2 of one commit is exactly what a failure rate is
+// for, and the recorder kept only the newest attempt of each job, so attempt 1's failure was never recorded. And a run whose
+// artifact listing is longer than one page (GitHub pages at 100) lost the results that sat past the first page.
+
+const failingSpec = () => spec('standalone', 'pure', 'testing/standalone/a.test.js', {
+  files: [{ file: 'testing/standalone/a.test.js', ms: 5000, tests: [T('one', 2000, { status: 'fail', message: 'boom' }), T('two', 3000)] }],
+});
+
+describe('--record-ci: a run with two attempts', () => {
+  const twoAttempts = () => ({
+    runs: [run(3001, { run_attempt: 2, head_sha: SHA('3') })],
+    jobsByRun: { 3001: githubJobs('prepare', 'standalone-pure') },
+    artifactsByRun: {
+      3001: [
+        artifact(7001, 'test-results-standalone-pure-1', ['standalone-pure.jsonl', failingSpec()]),
+        artifact(7002, 'test-results-standalone-pure-2', ['standalone-pure.jsonl', spec('standalone', 'pure', 'testing/standalone/a.test.js')]),
+        artifact(7003, 'test-results-standalone-pure-3', ['standalone-pure.jsonl', spec('standalone', 'pure', 'testing/standalone/a.test.js')]),
+      ],
+    },
+  });
+
+  it('records both attempts, each under its own key, with attempt 1\'s failure named; an attempt the run never had is not believed; a second pass writes nothing', async () => {
+    await withRecordingWorld(twoAttempts(), async ({ ythril, pass }) => {
+      const first = await pass();
+      assert.equal(first.code, 0, everything(first));
+      assert.deepEqual(Object.keys(records(ythril)).sort(), ['ci:3001:1:standalone-pure:standalone', 'ci:3001:2:standalone-pure:standalone']);
+      const rec = records(ythril);
+      assert.equal(rec['ci:3001:1:standalone-pure:standalone'].failed, 1);
+      assert.equal(rec['ci:3001:1:standalone-pure:standalone'].outcome, 'failed');
+      assert.match(rec['ci:3001:1:standalone-pure:standalone'].measurements, /"test":"one"/);
+      assert.equal(rec['ci:3001:2:standalone-pure:standalone'].failed, 0);
+      assert.equal(rec['ci:3001:2:standalone-pure:standalone'].outcome, 'passed');
+      const saves = ythril.callsTo('save_chrono').length;
+      const second = await pass();
+      assert.equal(second.code, 0, everything(second));
+      assert.equal(ythril.callsTo('save_chrono').length, saves, 'a second pass wrote a record');
+      assert.equal(ythril.store.length, 2);
+    });
+  });
+});
+
+describe('--record-ci: a record that cannot hold everything says what it left out', () => {
+  it('1,500 failing tests with names too long to keep with their files: every name that fits is kept, the record counts the rest, and the pass says so on its output', async () => {
+    const tests = Array.from({ length: 1500 }, (_, k) => T(`${String(k).padStart(4, '0')} ${'n'.repeat(290)}`, 1, { status: 'fail', message: 'boom' }));
+    const world = {
+      runs: [run(3003, { head_sha: SHA('5') })],
+      jobsByRun: { 3003: githubJobs('prepare', 'standalone-pure') },
+      artifactsByRun: { 3003: [artifact(8200, 'test-results-standalone-pure-1', ['standalone-pure.jsonl', spec('standalone', 'pure', 'testing/standalone/a.test.js', { files: [{ file: 'testing/standalone/a.test.js', ms: 5000, tests }] })])] },
+    };
+    await withRecordingWorld(world, async ({ ythril, pass }) => {
+      const r = await pass();
+      assert.equal(r.code, 0, everything(r));
+      const m = JSON.parse(records(ythril)['ci:3003:1:standalone-pure:standalone'].measurements);
+      assert.equal(m.truncated, true);
+      assert.ok(m.dropped.failures > 0 && m.files[0].failures.length + m.dropped.failures === 1500, JSON.stringify(m.dropped));
+      assert.ok(m.files[0].failures.length > 400, 'the failures that fit were not kept');
+      assert.match(everything(r), new RegExp(`ci:3003:1:standalone-pure:standalone[^\\n]*${m.dropped.failures} failure`), `the pass did not say what it left out:\n${everything(r).slice(0, 2000)}`);
+    });
+  });
+});
+
+describe('--record-ci: the artifact listing is read to its end', () => {
+  it('a results artifact that sits past the first page of 100 is found and recorded', async () => {
+    const strays = Array.from({ length: 100 }, (_, i) => artifact(8000 + i, `coverage-report-${i}`, ['x.txt', spec('standalone', 'pure', 'testing/standalone/a.test.js')]));
+    const world = {
+      runs: [run(3002, { head_sha: SHA('4') })],
+      jobsByRun: { 3002: githubJobs('prepare', 'standalone-pure') },
+      artifactsByRun: { 3002: [...strays, artifact(8100, 'test-results-standalone-pure-1', ['standalone-pure.jsonl', spec('standalone', 'pure', 'testing/standalone/a.test.js')])] },
+    };
+    await withRecordingWorld(world, async ({ github, ythril, pass }) => {
+      const r = await pass();
+      assert.equal(r.code, 0, everything(r));
+      assert.deepEqual(Object.keys(records(ythril)), ['ci:3002:1:standalone-pure:standalone'], 'the result past the first page was not recorded (a `none` row, or nothing)');
+      assert.ok(github.requests.filter(q => /\/runs\/3002\/artifacts$/.test(q.path)).length >= 2, 'the listing was read once');
+    });
+  });
+});

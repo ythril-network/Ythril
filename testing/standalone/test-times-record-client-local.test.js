@@ -371,8 +371,8 @@ describe('what the client\'s report says is masked on the way in, and a hostile 
   });
 });
 
-describe('a run with very many failures still records, keeping per-file figures when the detail is too long', () => {
-  it('past the ceiling on `measurements` the record carries every file\'s figures and says it was cut', async () => {
+describe('a run with very many failures still records, keeping the failures before the per-file figures when the detail is too long', () => {
+  it('past the ceiling on `measurements` the record carries the failures that fit, counts what it left out, and says it was cut', async () => {
     await withClientRun({}, async ({ server, dir, report, env }) => {
       const r0 = report('failed');
       const one = r0.testResults[0];
@@ -395,7 +395,13 @@ describe('a run with very many failures still records, keeping per-file figures 
       assert.ok(p.measurementsChars <= 400_000, `measurements is ${p.measurementsChars} characters`);
       const m = measurementsOf(entry);
       assert.equal(m.truncated, true);
-      assert.equal(m.files.length, FILES, 'a cut record keeps every file\'s figures');
+      // Q-948: a cut record keeps the failures before the figures of files, so what does not fit is counted, never silent.
+      // Every file here fails once (each file's figures are its failure's file), so a file left out is a failure left out.
+      const kept = m.files.reduce((n, f) => n + (f.failures?.length ?? 0), 0);
+      assert.equal(m.files.length + m.dropped.files, FILES, 'a cut record accounts for every file: kept or counted as dropped');
+      assert.equal(kept + m.dropped.failures, FILES, 'a cut record accounts for every failure: kept or counted as dropped');
+      assert.ok(m.files.every(f => f.failures?.length === 1), 'a file was kept without the failure that is its reason to be kept');
+      assert.match(everything(r), /measurements cut to fit/, 'the recorder did not say on its output that it left failures out');
     });
   });
 });

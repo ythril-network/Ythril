@@ -82,7 +82,9 @@ export async function startFakeGithub({ runs, listings, pages, lagsUnderStatusFi
     }
     if ((m = u.pathname.match(/\/actions\/runs\/(\d+)\/artifacts$/))) {
       const list = (artifactsByRun[m[1]] ?? []).map(a => ({ id: a.id, name: a.name, size_in_bytes: a.zip.length, expired: a.expired === true }));
-      return json(200, { total_count: list.length, artifacts: page > 1 ? [] : list });
+      // A listing is paged the way the API pages it: `per_page` rows a page (all of them when none is asked for), `total_count` the whole.
+      const per = Number(u.searchParams.get('per_page') ?? list.length) || list.length;
+      return json(200, { total_count: list.length, artifacts: list.slice((page - 1) * per, page * per) });
     }
     if ((m = u.pathname.match(/\/actions\/artifacts\/(\d+)\/zip$/))) {
       if (!artifactById.has(m[1])) return json(404, { message: 'Not Found' });

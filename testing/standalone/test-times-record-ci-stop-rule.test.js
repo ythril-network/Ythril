@@ -138,3 +138,68 @@ describe('--record-ci: where the walk stops', () => {
     });
   });
 });
+
+// ── a run with more than one attempt (Q-948) ─────────────────────────────────────────────────────────────────────────────
+//
+// Every attempt of a run is recorded, so "recorded completely" is decided per (attempt, job): the walk stops at a run when every
+// non-expired results artifact of every attempt it lists has its record.
+
+describe('--record-ci: attempts and the stop rule', () => {
+  const pure = (id, attempt) => artifact(id, `test-results-standalone-pure-${attempt}`, ['standalone-pure.jsonl', spec('standalone', 'pure', 'testing/standalone/a.test.js')]);
+  const worldWithAttempts = () => ({
+    runs: [
+      run(2001, { head_sha: SHA('2'), run_attempt: 2, run_started_at: '2026-10-05T12:00:00Z', updated_at: '2026-10-05T12:20:00Z' }),
+      run(2000, { head_sha: SHA('1'), run_started_at: '2026-10-05T10:00:00Z', updated_at: '2026-10-05T10:20:00Z' }),
+    ],
+    jobsByRun: { 2001: githubJobs('prepare', 'standalone-pure'), 2000: githubJobs('prepare', 'standalone-pure') },
+    artifactsByRun: { 2001: [pure(6101, 1), pure(6102, 2)], 2000: [pure(6103, 1)] },
+  });
+
+  it('a run recorded at attempt 2 only is not complete while attempt 1\'s artifact is listed: attempt 1 is written and the walk goes on', async () => {
+    await withRecordingWorld(worldWithAttempts(), async ({ ythril, pass }) => {
+      assert.equal((await pass()).code, 0);
+      // The instance holds the newest attempt of the newest run, as a recorder that kept only the newest attempt left it.
+      ythril.store.splice(0, ythril.store.length, ...ythril.store.filter(e => e.properties.recordKey === 'ci:2001:2:standalone-pure:standalone'));
+      const r = await pass();
+      assert.equal(r.code, 0, everything(r));
+      assert.deepEqual(keysOf(ythril), ['ci:2000:1:standalone-pure:standalone', 'ci:2001:1:standalone-pure:standalone', 'ci:2001:2:standalone-pure:standalone'],
+        'the run holding only its attempt 2 was taken as recorded');
+    });
+  });
+
+  it('a recorded run that gains an attempt is completed by the next pass: only the new attempt is downloaded and written', async () => {
+    const w = worldWithAttempts();
+    w.runs[0].run_attempt = 1;
+    w.artifactsByRun[9999] = [pure(6102, 2)]; // the fake serves the bytes of every artifact it was given; run 9999 is never listed
+    w.artifactsByRun[2001] = [pure(6101, 1)];
+    await withRecordingWorld(w, async ({ github, ythril, pass }) => {
+      assert.equal((await pass()).code, 0);
+      assert.deepEqual(keysOf(ythril), ['ci:2000:1:standalone-pure:standalone', 'ci:2001:1:standalone-pure:standalone']);
+      w.runs[0].run_attempt = 2; // the run was re-run
+      w.artifactsByRun[2001] = [pure(6101, 1), pure(6102, 2)];
+      const sent = github.requests.length;
+      const r = await pass();
+      assert.equal(r.code, 0, everything(r));
+      assert.deepEqual(keysOf(ythril), ['ci:2000:1:standalone-pure:standalone', 'ci:2001:1:standalone-pure:standalone', 'ci:2001:2:standalone-pure:standalone']);
+      const fetched = zipRequests(github, sent).map(q => q.path).join(' ');
+      assert.ok(/6102/.test(fetched) && !/6101/.test(fetched), `only attempt 2's artifact is downloaded: ${fetched}`);
+    });
+  });
+
+  it('a gained attempt of a run BEHIND a recorded run is not found by the bare pass (it stops at the recorded run) and is by naming the run', async () => {
+    const w = worldWithAttempts();
+    w.runs[0].run_attempt = 1;
+    w.artifactsByRun[9999] = [pure(6104, 2)]; // never listed; the fake serves its bytes once run 2000 lists it
+    w.artifactsByRun[2001] = [pure(6101, 1)];
+    await withRecordingWorld(w, async ({ ythril, pass }) => {
+      assert.equal((await pass()).code, 0);
+      w.runs[1].run_attempt = 2; // the OLDER run is re-run
+      w.artifactsByRun[2000] = [pure(6103, 1), pure(6104, 2)];
+      assert.equal((await pass()).code, 0);
+      assert.ok(!keysOf(ythril).includes('ci:2000:2:standalone-pure:standalone'), 'the bare pass walked past a recorded run');
+      const named = await pass(['--record-ci', '2000']);
+      assert.equal(named.code, 0, everything(named));
+      assert.ok(keysOf(ythril).includes('ci:2000:2:standalone-pure:standalone'), 'naming the run did not record its new attempt');
+    });
+  });
+});

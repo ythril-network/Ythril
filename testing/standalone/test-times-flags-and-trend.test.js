@@ -260,6 +260,31 @@ describe('--trend', () => {
     } finally { await server.close(); work.cleanup(); }
   });
 
+  it('a run recorded at two attempts (passed twice, one start) is drawn once and is one run of its own baseline (Q-948)', async () => {
+    const server = await startFakeYthril();
+    const work = makeWorkdir();
+    try {
+      const seed = (n, attempt, ms, startsAt) => server.seed({
+        title: 'standalone', startsAt, endsAt: startsAt,
+        properties: {
+          recordKey: `ci:${n}:${attempt}:standalone-pure:standalone`, source: 'ci', commit: String(n).repeat(40), branch: 'main', runId: String(n), attempt,
+          job: 'standalone-pure', suite: 'standalone', outcome: 'passed', scope: 'full', layout: 'ci-parallel-v2', formatVersion: 1,
+          ms, files: 1, tests: 1, passed: 1, failed: 0, cancelled: 0, skipped: 0, todo: 0, dirty: false, measurements: '{"files":[]}',
+        },
+      });
+      for (let n = 1; n <= 3; n++) seed(n, 1, 100_000, `2026-09-0${n}T10:00:00.000Z`);
+      // Run 4 ran twice, both attempts 130 s: against three runs at 100 s it is 30 % over the usual and over the max. With its own
+      // attempt 1 among the baseline the max would be 130 s and nothing could exceed it.
+      seed(4, 1, 130_000, '2026-09-04T10:00:00.000Z');
+      seed(4, 2, 130_000, '2026-09-04T10:00:00.000Z');
+      const r = await runTimes(['--trend', '--flags'], { cwd: work.dir, env: { YTHRIL_TEST_RUNS_URL: server.url, YTHRIL_TEST_RUNS_TOKEN: server.token } });
+      assert.equal(r.code, 0, everything(r));
+      const drawn = r.stdout.split('\n').filter(l => l.startsWith('standalone ') && l.includes('4444444'));
+      assert.equal(drawn.length, 1, `run 4 is drawn ${drawn.length} times:\n${r.stdout}`);
+      assert.match(r.stdout, /slow suite: standalone-pure\/standalone|slow suite: ci\/standalone-pure\/standalone/, `the slow run was not flagged against three runs:\n${r.stdout}`);
+    } finally { await server.close(); work.cleanup(); }
+  });
+
   it('does not trust the server\'s predicate: a subset, failed or feature-branch row that comes back anyway is not drawn', async () => {
     const t = await trend();
     // A server that ignores the predicate and answers with every row (measurements still stripped, as asked).
