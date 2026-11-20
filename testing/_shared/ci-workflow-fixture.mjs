@@ -38,7 +38,7 @@ const UPLOAD_RESULTS = (job) => `
           retention-days: 30`;
 
 /** A stack job: full history, build the server its tests import, restore the image, start the stack from it without building or pulling, run, upload. */
-const STACK_JOB = (id, name, script = id) => `
+const STACK_JOB = (id, name, script = id, beforeStart = '') => `
   ${id}:
     name: ${name}
     needs: [reuse, prepare]
@@ -60,7 +60,7 @@ const STACK_JOB = (id, name, script = id) => `
         with:
           name: ythril-test-image-@{{ github.run_attempt }}
       - name: Load the test image
-        run: docker load -i ythril-test-image.tar
+        run: docker load -i ythril-test-image.tar${beforeStart}
       - name: Start test containers
         run: |
           docker compose -p ythril-test -f testing/docker-compose.test.yml up -d --wait \\
@@ -74,7 +74,31 @@ const STACK_JOB = (id, name, script = id) => `
  * PR-only CHANGELOG check, which a reused run still makes; neither skips, and the gate waits for both.
  */
 export const TEST_JOBS = ['client-tests', 'prepare', 'standalone', 'integration', 'sync'];
-export const NEEDED_JOBS = ['reuse', 'changelog', ...TEST_JOBS];
+/**
+ * The job that writes the layer caches, on a push to main only (bundle-356, Q-947). It is no suite and nothing waits for it, but
+ * the gate does: it stands down beside a reused run as the suites do, and it is also skipped whenever the event is not a push
+ * to main.
+ */
+export const CACHE_JOB = 'layer-cache';
+export const NEEDED_JOBS = ['reuse', 'changelog', ...TEST_JOBS, CACHE_JOB];
+
+/** The condition that names a push to main, spelled as the workflow's main-only steps spell it. */
+const MAIN_PUSH = "github.event_name == 'push' && github.ref == 'refs/heads/main'";
+
+/** The integration job READS the document sidecars' layer caches (it never writes them): one build step each, as the real job has. */
+const SIDECAR_READS = `
+      - uses: docker/build-push-action@v6
+        with:
+          context: sidecars/doc-render
+          load: true
+          tags: ythril-doc-render:0.2.0
+          cache-from: type=gha,scope=ythril-doc-render
+      - uses: docker/build-push-action@v6
+        with:
+          context: sidecars/doc-office
+          load: true
+          tags: ythril-doc-office:0.2.0
+          cache-from: type=gha,scope=ythril-doc-office`;
 
 /** The one condition of a job that stands down on a reused run, as the YAML text of its `if:`. */
 const STANDS_DOWN = "@{{ !cancelled() && needs.reuse.outputs.full_run == '' }}";
@@ -109,7 +133,8 @@ try { run('${CLIENT_COMMAND}'); } catch { /* reported below */ }
 const verdictLines = NEEDED_JOBS
   .map((id) => {
     if (id === 'reuse') return '          [ -z "$FULL_RUN" ] || check reuse "@{{ needs.reuse.result }}"';
-    return `          ${id === 'changelog' ? 'check' : 'check_suite'} ${id} "@{{ needs.${id}.result }}"`;
+    const checker = id === 'changelog' ? 'check' : id === CACHE_JOB ? 'check_main_only' : 'check_suite';
+    return `          ${checker} ${id} "@{{ needs.${id}.result }}"`;
   })
   .join('\n');
 
@@ -199,13 +224,14 @@ jobs:
           cache: npm${NPM_CI}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          cleanup: false
       - name: Expose GitHub Actions cache to Buildx
         uses: crazy-max/ghaction-github-runtime@${SHA}
       - name: Build test image
         run: |
           docker buildx build \\
             --cache-from type=gha,scope=ythril-test \\
-            @{{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '--cache-to type=gha,mode=max,scope=ythril-test' || '' }} \\
             --output type=docker,dest=ythril-test-image.tar -t ythril-test:latest -f Dockerfile .
       - name: Upload the test image
         uses: actions/upload-artifact@v4
@@ -216,7 +242,30 @@ jobs:
             server/dist
           if-no-files-found: error
           retention-days: 1
-          compression-level: 0${STACK_JOB('standalone', 'Standalone', 'standalone:instance')}${STACK_JOB('integration', 'Integration')}${STACK_JOB('sync', 'Sync')}
+          compression-level: 0${STACK_JOB('standalone', 'Standalone', 'standalone:instance')}${STACK_JOB('integration', 'Integration', 'integration', SIDECAR_READS)}${STACK_JOB('sync', 'Sync')}
+  layer-cache:
+    name: Layer cache
+    needs: reuse
+    if: @{{ !cancelled() && needs.reuse.outputs.full_run == '' && ${MAIN_PUSH} }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Expose GitHub Actions cache to Buildx
+        uses: crazy-max/ghaction-github-runtime@${SHA}
+      - name: Write the layer caches
+        if: ${MAIN_PUSH}
+        run: |
+          docker buildx build --cache-from type=gha,scope=ythril-test --cache-to type=gha,mode=max,scope=ythril-test --output type=cacheonly -f Dockerfile .
+          docker buildx build --cache-from type=gha,scope=ythril-doc-render --cache-to type=gha,mode=max,scope=ythril-doc-render --output type=cacheonly sidecars/doc-render
+          docker buildx build --cache-from type=gha,scope=ythril-doc-office --cache-to type=gha,mode=max,scope=ythril-doc-office --output type=cacheonly sidecars/doc-office
   ci-advisory:
     name: CI advisory
     needs: [reuse, standalone, integration, sync]
@@ -256,11 +305,14 @@ jobs:
       - name: Every needed job succeeded
         env:
           FULL_RUN: @{{ needs.reuse.outputs.full_run }}
+          EVENT_NAME: @{{ github.event_name }}
+          REF: @{{ github.ref }}
         run: |
           fail=0
           bad() { echo "::error::$1 finished: $2"; fail=1; }
           check() { [ "$2" = success ] || bad "$1" "$2"; }
           check_suite() { [ "$2" = success ] || { [ "$2" = skipped ] && [ -n "$FULL_RUN" ]; } || bad "$1" "$2"; }
+          check_main_only() { [ "$2" = success ] || { [ "$2" = skipped ] && { [ -n "$FULL_RUN" ] || [ "$EVENT_NAME" != push ] || [ "$REF" != refs/heads/main ]; }; } || bad "$1" "$2"; }
 ${verdictLines}
           exit $fail
       - uses: actions/checkout@v4

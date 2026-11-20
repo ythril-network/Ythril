@@ -229,9 +229,9 @@ repository code in `ci.yml` at all, and the answer is short:
   deciding step and `Build & Test`'s verify step (`GH_TOKEN`, to read a Full run), and that gate's download of the reused
   run's results (`github-token`). No other step sets it; the workflow-level permissions are `contents: read`, and only those
   three jobs (`CI advisory`, `reuse`, `Build & Test`) add `actions: read`.
-- **The cache token, in `prepare`.** The step that exposes the Actions cache to Buildx puts the runtime token and cache
-  URL in the environment of the steps after it in that job, so the image build can read the layer cache; the cache is
-  written on a push to main only.
+- **The cache token, in `prepare` and `layer-cache`.** The step that exposes the Actions cache to Buildx puts the runtime
+  token and cache URL in the environment of the steps after it in that job, so `layer-cache` can send the layers to the
+  cache (on a push to main only) and `prepare` can read them back.
 - **Test-only credentials.** The harness MongoDB's password is a known value published in the compose file and the
   database listens on loopback only; the tokens the test stack mints belong to its own throwaway instances.
 - **Not the recorder's token.** The test-run recorder is refused under CI (`GITHUB_ACTIONS` or `CI` set), so CI never holds
@@ -617,8 +617,14 @@ The authoritative description is the comment at the top of `.github/workflows/ci
   standalone files that need only `server/dist` (`standalone-pure`), the standalone files that need only the test MongoDB
   (`standalone-db`, one job per shard of the plan), and `prepare`. Each waits for `reuse` and **stands down** (is skipped)
   when `reuse` named a Full run.
-- **`prepare`** runs the docs lint and the one build of the test image, written as an archive other jobs load. It is the only
-  job that writes a cache.
+- **`prepare`** runs the docs lint and the one build of the test image, written as an archive other jobs load. It only
+  reads the layer cache, and its buildx setup does not clean its builder up at the end of the job (the runner is discarded).
+- **`layer-cache`** runs on a push to `main` only and is the one job that writes a cache: the layers of the test image and of
+  each document sidecar, built `--output type=cacheonly`. It waits for `reuse` alone, so it starts with the run and the write
+  never holds `prepare` or the jobs that wait for the image (on main it took 276 s and 160 s of `prepare` in two of five
+  recorded runs). It stands down on a reused run, and a pull request or a full run skips it. `Build & Test` waits for it and
+  lets it be skipped on those events, never on a push to `main` with no run reused, so a cache that silently stopped being
+  written fails the run.
 - **Stack jobs** wait for `prepare`, load the image and start only the services their suite drives, with
   `--no-build --pull never` so compose can neither rebuild nor pull a different image: the standalone instance third
   (`standalone-instance`), `integration`, `sync` and the red team (`redteam`). Each ends by uploading its results and, on failure, dumping the containers' logs. They
@@ -687,7 +693,7 @@ keeps the full local run.
 
 Caches are writes to a shared store with a size limit, so the rule is about who may write:
 
-- **Only a push to `main` writes the image and sidecar layer caches, and only `prepare` does it.** Every run reads. A pull
+- **Only a push to `main` writes the image and sidecar layer caches, and only `layer-cache` does it.** Every run reads. A pull
   request that wrote would evict the layers every other run needs, and could poison what `main` reads. The cost is stated: a
   pull request that pushes again rebuilds layers its previous run built, and so does a full run after a bundle that changed
   image layers, because its ref is not `main`. A gate derives this from the workflow: those cache writes carry the
@@ -700,8 +706,9 @@ Caches are writes to a shared store with a size limit, so the rule is about who 
 - **What is not, and why, each by measurement:** the database image (pulling it takes as long as restoring and loading a
   cache of it), `node_modules` (`npm ci` takes as long as unpacking the tree), and Dockerfile cache mounts (a runner is
   fresh, so a mount cache is always empty).
-- **The cache credential is exposed to one step**, pinned by commit, immediately before the image build and after the only
-  install, so no install script runs while it is exposed.
+- **The cache credential is exposed to one step per building job** (`prepare` and `layer-cache`), pinned by commit,
+  immediately before the build and after the job's last install (`layer-cache` has none), so no install script runs while it
+  is exposed.
 - **What may be uploaded as an artifact is a short allowlist:** the results folders and the test image archive (which
   carries the same notices as the published image), kept one day. No database image and no sidecar image is ever an
   artifact; a gate refuses it.
@@ -718,7 +725,8 @@ Caches are writes to a shared store with a size limit, so the rule is about who 
   only another workspace needs (the image installs the server and the schema only), and a build with no lock beside the
   scripts folder. The cure is always `npm ci`.
 
-To see what a run's cache did, read the build step's log in `prepare`: the layers it restored are marked cached.
+To see what a run's cache did, read the build step's log in `prepare`: the layers it restored are marked cached. To see
+what a push to `main` wrote, read the `layer-cache` job's log.
 
 ## The stack's budget
 

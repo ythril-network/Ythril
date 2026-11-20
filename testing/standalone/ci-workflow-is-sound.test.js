@@ -68,6 +68,20 @@
  *    before it downloads that run's results.
  *  - `the changelog job`: the CHANGELOG check is a job of its own, so a run that skips the suites still makes it.
  *
+ * ## The layer caches are written by a job of their own (bundle-356, Q-947)
+ *
+ * `prepare` built the image and then wrote the layer cache on a push to main (276 s and 160 s in two of five recorded runs), and
+ * every job that waits for the image waited for the write. The write is the job `layer-cache`'s, which starts with the run:
+ *
+ *  - `layer cache job`: only that job writes a cache, every scope any job reads, by builds that export nothing; `prepare` reads
+ *    the test image's cache, builds no sidecar and does not clean its builder up at the job's end; the job runs on a push to
+ *    main only, waits for `reuse` alone, stands down beside a reused Full run and has a timeout.
+ *  - `runtime token`: every job that builds from a shell with the gha cache holds the credential once, after its last install and
+ *    right before the build; no other job holds it.
+ *  - `merge gate`: the gate waits for the job and runs the verdict for a push to main, a pull request and a full-run ref (the event
+ *    is the verdict's own `env`): skipped passes except on a push to main with no run named, failed or cancelled never passes.
+ *  - no comment of ci.yml and no sentence of the testing guide says `prepare` writes a cache.
+ *
  * Run: node --test testing/standalone/ci-workflow-is-sound.test.js
  */
 import { describe, it } from 'node:test';
@@ -120,9 +134,13 @@ function findBash() {
  * `needs.<id>.outputs.<name>` (an output nobody set is the empty string, as GitHub renders it) and `toJSON(needs)` — and any
  * other is refused, because a verdict the gate cannot read is a verdict the gate cannot hold to the rule.
  */
-function renderVerdict(step, results, outputs = {}) {
+function renderVerdict(step, results, outputs = {}, github = null) {
   const render = (text) => String(text).replace(/\$\{\{([\s\S]*?)\}\}/g, (_, raw) => {
     const e = raw.trim();
+    // The event the run is for (`github.event_name`, `github.ref`), only when the caller names one: a verdict that reads it
+    // without being given one is refused, as every expression this gate cannot render is.
+    if (github && e === 'github.event_name') return github.event_name;
+    if (github && e === 'github.ref') return github.ref;
     const one = e.match(/^needs\.([\w-]+)\.result$/);
     if (one) return results[one[1]] ?? '';
     const out = e.match(/^needs\.([\w-]+)\.outputs\.([\w-]+)$/);
@@ -139,12 +157,26 @@ function renderVerdict(step, results, outputs = {}) {
 /** The run a reused pull request names: what `reuse` outputs when a Full run of the same tree was found ("<run id>.<attempt>"). */
 const NAMED_RUN = '7654321.1';
 
+/**
+ * The events a verdict is run for. A cell that names none is a push to main: the one event on which a job that writes the layer
+ * caches must have run, so a skip of it is what the cell is looking for. A pull request and a push to another ref (a Full run's
+ * `full-run/<bundle>`, which calls ci.yml with the event of its own push) never run it.
+ */
+const PUSH_TO_MAIN = { event_name: 'push', ref: 'refs/heads/main' };
+const PULL_REQUEST = { event_name: 'pull_request', ref: 'refs/pull/1/merge' };
+const PUSH_TO_FULL_RUN_REF = { event_name: 'push', ref: 'refs/heads/full-run/b356' };
+
+/** The two halves of a push to main, as a job's `if` spells them (the existing main-only steps spell it so). */
+const MAIN_ONLY_CONJUNCTS = ["github.event_name == 'push'", "github.ref == 'refs/heads/main'"];
+/** A job that runs on a push to main and on no other event: both halves are conjuncts of its `if`. */
+const runsOnlyOnMainPush = (job) => MAIN_ONLY_CONJUNCTS.every((c) => ifConjuncts(job).includes(c));
+
 /** The jobs of the gate's `needs` that run no suite: `reuse` decides, `changelog` is the PR-only check. A reused run skips neither's verdict. */
 const NOT_SUITES = [REUSE_JOB_ID, 'changelog'];
 
 /** Run the verdict step once. `results` is each needed job's result, `fullRun` what `reuse` output; the exit status, or an Error naming what cannot be rendered. */
-function runVerdict(verdict, results, fullRun) {
-  const rendered = renderVerdict(verdict, results, { [REUSE_JOB_ID]: { [REUSE_OUTPUT]: fullRun } });
+function runVerdict(verdict, results, fullRun, event = PUSH_TO_MAIN) {
+  const rendered = renderVerdict(verdict, results, { [REUSE_JOB_ID]: { [REUSE_OUTPUT]: fullRun } }, event);
   return spawnSync(findBash(), ['-e', '-c', rendered.script], { env: { ...process.env, ...rendered.env }, encoding: 'utf8' }).status;
 }
 
@@ -166,7 +198,7 @@ function verdictSkipSet(gate, needs) {
 }
 
 /** The gate job's verdict: every needed job must have succeeded, a suite may be skipped only beside a named reused run, and anything else must fail the step. */
-function verdictViolations(gate, needs) {
+function verdictViolations(gate, needs, mainOnly = []) {
   const v = [];
   const steps = stepsOf(gate.job);
   const readsNeeds = (s) => /\bneeds\b/.test(`${s.run ?? ''}\n${JSON.stringify(s.env ?? {})}`);
@@ -187,6 +219,9 @@ function verdictViolations(gate, needs) {
     v.push('the verdict never names `success`: a check for `failure` passes a job that was skipped or cancelled');
   }
   if (/\|\|\s*true\b/.test(text)) v.push('the verdict step ends a failing path in `|| true`');
+  // The event the run is for (a ref is a name a pusher chose, on a Full run's `full-run/<bundle>`) is data: it reaches the shell
+  // through `env:`, where it cannot be code. A job's result is one of a fixed set of words and may stand in the text.
+  if (/\$\{\{[^}]*\bgithub\b/.test(text)) v.push('the verdict reads a `github.*` value inside its script text: the event reaches the shell through env, never inside the script');
 
   // The truth table, executed (Q-710). A pull request whose tree a green Full run already tested skips the suites and names that
   // run in the `reuse` job's one output; the verdict is the only thing that tells a skip that is the saving from a skip that is a
@@ -227,6 +262,31 @@ function verdictViolations(gate, needs) {
     if (needs.includes('changelog') && cell(resultsOf(needs, { changelog: 'skipped' }), NAMED_RUN) === 0) {
       v.push('the gate PASSES when changelog is skipped and a run is named: the CHANGELOG check is not part of a reused run');
     }
+
+    // The jobs that run only on a push to main (the one that writes the layer caches, Q-947). Skipped is the right answer on every
+    // other event, and the wrong one on a push to main with no run named: the cache would then stop being written and nothing
+    // would say so. A failed or cancelled one fails the gate on every event. The event is the verdict's own `env`, never a guess.
+    const events = [['a push to main', PUSH_TO_MAIN], ['a pull request', PULL_REQUEST], ['a push to a full-run ref', PUSH_TO_FULL_RUN_REF]];
+    for (const id of mainOnly) {
+      for (const [where, event] of events) {
+        if (runVerdict(verdict, resultsOf(needs), '', event) !== 0) v.push(`the gate FAILS when every job succeeded on ${where}`);
+        for (const bad of ['failure', 'cancelled']) {
+          if (runVerdict(verdict, resultsOf(needs, { [id]: bad }), '', event) === 0) v.push(`the gate PASSES when ${id} is ${bad} on ${where}`);
+        }
+        const skipped = runVerdict(verdict, resultsOf(needs, { [id]: 'skipped' }), '', event);
+        if (event === PUSH_TO_MAIN && skipped === 0) v.push(`the gate PASSES when ${id} is skipped on ${where} and no run is named: the layer caches would silently stop being written`);
+        if (event !== PUSH_TO_MAIN && skipped !== 0) v.push(`the gate FAILS when ${id} is skipped on ${where} and no run is named: the job runs only on a push to main`);
+      }
+      if (runVerdict(verdict, resultsOf(needs, { [id]: 'skipped' }), NAMED_RUN, PUSH_TO_MAIN) !== 0) {
+        v.push(`the gate FAILS when ${id} is skipped on a push to main and a run is named: a reused run stands the job down`);
+      }
+    }
+    // The event gives nothing to a job that is not main-only: skipped with no run named fails on a pull request and on a full-run ref.
+    for (const id of needs.filter((n) => n !== REUSE_JOB_ID && !mainOnly.includes(n))) {
+      for (const [where, event] of events.slice(1)) {
+        if (runVerdict(verdict, resultsOf(needs, { [id]: 'skipped' }), '', event) === 0) v.push(`the gate PASSES when ${id} is skipped on ${where} and no run is named: only a main-only job may be skipped for its event`);
+      }
+    }
   } catch (e) { v.push(e.message); }
   return v;
 }
@@ -259,7 +319,8 @@ function mergeGateViolations(doc) {
 
   // Every job the gate's verdict covers must be a job the gate waits for, whatever else the verdict reads.
   const verdictNeeds = needs.filter((id) => expected.includes(id));
-  if (verdictNeeds.length) v.push(...verdictViolations(gate, verdictNeeds));
+  const mainOnly = verdictNeeds.filter((id) => runsOnlyOnMainPush(doc.jobs[id]));
+  if (verdictNeeds.length) v.push(...verdictViolations(gate, verdictNeeds, mainOnly));
   else v.push('the gate waits for nothing, so its verdict cannot be run');
   return v;
 }
@@ -474,25 +535,125 @@ function cacheViolations(doc) {
 // ───────────────────────────────────────── the runtime token ─────────────────────────────────────────
 
 const RUNTIME_ACTION = 'crazy-max/ghaction-github-runtime';
-const RUNTIME_JOB = 'prepare';
+/**
+ * The jobs that build with a `type=gha` cache from a shell step: the ones whose buildx call needs the Actions cache credential
+ * (`docker/build-push-action` hands it over by itself). Derived from the steps, so a third such job is a job that must hold the
+ * token the way these do, and a job that holds it without building is a credential exposed for nothing. Since Q-947 they are
+ * `prepare` (reads the cache) and `layer-cache` (writes it).
+ */
+const gha = /type=gha/;
+const buildsWithGhaCache = (job) => stepsOf(job).some((s) => /docker\s+buildx\s+build\b/.test(shellOf(s)) && gha.test(shellOf(s)));
 
 function runtimeTokenViolations(doc) {
   const v = [];
-  const uses = [];
+  const holders = jobEntries(doc).filter(({ job }) => buildsWithGhaCache(job)).map((j) => j.id);
+  if (!holders.includes('prepare')) v.push(`the jobs that build with the gha cache are [${holders.join(', ')}]; \`prepare\` is among them, or the derivation is broken`);
   for (const { id, job } of jobEntries(doc)) {
-    stepsOf(job).forEach((s, i) => { if (usesOf(s)?.action === RUNTIME_ACTION) uses.push({ id, job, i, s }); });
+    const uses = [];
+    stepsOf(job).forEach((s, i) => { if (usesOf(s)?.action === RUNTIME_ACTION) uses.push({ i, s }); });
+    if (!holders.includes(id)) {
+      if (uses.length) v.push(`the runtime token is exposed in \`${id}\`; only a job that builds with the gha cache holds it (${holders.join(', ')})`);
+      continue;
+    }
+    if (uses.length !== 1) { v.push(`${uses.length} steps use ${RUNTIME_ACTION} in \`${id}\`; exactly one, in each job that builds with the gha cache`); continue; }
+    const [{ i, s }] = uses;
+    if (!isCommitPinned(usesOf(s).ref)) v.push(`${RUNTIME_ACTION} is pinned to \`${usesOf(s).ref}\`: a tag moves, a commit does not`);
+    const steps = stepsOf(job);
+    // After the LAST install of the job (a job with none has nothing to wait for): no install script runs while it is exposed.
+    const lastInstall = steps.map(runsNpmCi).lastIndexOf(true);
+    if (lastInstall > i) v.push(`the runtime token is exposed before \`npm ci\` runs in \`${id}\`: every install script then holds it`);
+    const next = steps[i + 1];
+    const consumes = next && (usesOf(next)?.action === 'docker/build-push-action' || /docker\s+buildx\s+(build|bake)\b/.test(shellOf(next)));
+    if (!consumes) v.push(`the step after the runtime token in \`${id}\` is not the buildx build: the token must sit immediately before the one step that uses it`);
   }
-  if (uses.length !== 1) return [`${uses.length} steps use ${RUNTIME_ACTION}; exactly one, in \`${RUNTIME_JOB}\``];
-  const { id, job, i, s } = uses[0];
-  if (id !== RUNTIME_JOB) v.push(`the runtime token is exposed in \`${id}\`; only \`${RUNTIME_JOB}\` builds the image`);
-  if (!isCommitPinned(usesOf(s).ref)) v.push(`${RUNTIME_ACTION} is pinned to \`${usesOf(s).ref}\`: a tag moves, a commit does not`);
-  const steps = stepsOf(job);
-  const install = steps.findIndex(runsNpmCi);
-  if (install < 0 || install > i) v.push('the runtime token is exposed before `npm ci` runs: every install script then holds it');
-  const next = steps[i + 1];
-  const consumes = next && (usesOf(next)?.action === 'docker/build-push-action' || /docker\s+buildx\s+(build|bake)\b/.test(shellOf(next)));
-  if (!consumes) v.push('the step after the runtime token is not the buildx build: the token must sit immediately before the one step that uses it');
   return v;
+}
+
+// ───────────────────────────────────────── the layer cache job (Q-947) ─────────────────────────────────────────
+
+const LAYER_CACHE_JOB = 'layer-cache';
+
+/** Every `docker buildx build` command a step runs, a command continued over lines with `\` read as one. */
+const buildxBuilds = (step) => shellOf(step).replace(/\\\r?\n\s*/g, ' ').split('\n').map((l) => l.trim()).filter((l) => /\bdocker\s+buildx\s+build\b/.test(l));
+const scopesOf = (text) => [...String(text).matchAll(/scope=([\w.-]+)/g)].map((m) => m[1]);
+
+/**
+ * The cache scopes a job names under one flag (`cache-from` or `cache-to`): a buildx command's `--<flag> type=gha,...,scope=x`
+ * (inside a `${{ }}` too: a write in an expression is a write) and the action input of the same name.
+ */
+function cacheScopes(job, flag) {
+  const out = [];
+  for (const s of stepsOf(job)) {
+    for (const cmd of buildxBuilds(s)) for (const m of cmd.matchAll(new RegExp(`--${flag}\\s+(\\S+)`, 'g'))) out.push(...scopesOf(m[1]));
+    if (Object.prototype.hasOwnProperty.call(s.with ?? {}, flag)) out.push(...scopesOf(s.with[flag]));
+  }
+  return out;
+}
+
+/**
+ * The layer caches are written by a job of their own, and `prepare` only reads them. On a push to main `prepare` spent 276 s and
+ * 160 s writing the cache after the image was built (runs 44679947918 and 44662830182) and every job that waits for the image
+ * waited for the write. The write moves to `layer-cache`, which starts with the run. Held here:
+ *  - exactly that job writes a cache, and it writes every scope any job reads (a scope read and never written is built cold for
+ *    ever, one written and never read is a waste), each by a build that exports nothing (`--output type=cacheonly`);
+ *  - `prepare` builds the test image from the cache and runs no sidecar build and no cache fill, and its buildx setup does not
+ *    clean its builder up at the job's end (the runner is discarded; the clean-up held every stack job for up to 35 s);
+ *  - `layer-cache` runs on a push to main only, waits for `reuse` and nothing else, stands down beside a reused Full run, and has
+ *    a timeout. The merge gate waits for it and may let it be skipped on any other event (`merge gate`).
+ */
+function layerCacheViolations(doc) {
+  const v = [];
+  const jobs = jobEntries(doc);
+  const writers = jobs.filter(({ job }) => stepsOf(job).some(writesLayerCache)).map((j) => j.id);
+  if (writers.join() !== LAYER_CACHE_JOB) {
+    v.push(`the jobs that write a layer cache are [${writers.join(', ')}]; exactly \`${LAYER_CACHE_JOB}\`: a write inside \`prepare\` holds every job that waits for the image`);
+  }
+  const prepare = doc.jobs.prepare;
+  if (prepare) {
+    if (!cacheScopes(prepare, 'cache-from').includes('ythril-test')) v.push('prepare does not read the test image\'s layer cache (`--cache-from type=gha,scope=ythril-test`)');
+    for (const s of stepsOf(prepare)) {
+      if (/cacheonly|sidecars\//.test(shellOf(s))) v.push(`prepare step "${s.name ?? shellOf(s).slice(0, 40)}" builds a document sidecar or fills a cache: that is \`${LAYER_CACHE_JOB}\`'s`);
+    }
+    const setup = stepWhere(prepare, (s) => usesOf(s)?.action === 'docker/setup-buildx-action');
+    if (String(setup?.with?.cleanup) !== 'false') v.push('prepare\'s buildx setup has no `cleanup: false`: its post step stops the builder at the end of the job, and every job that waits for the image waits for that');
+  }
+  const cache = doc.jobs[LAYER_CACHE_JOB];
+  if (!cache) return [...v, `no job \`${LAYER_CACHE_JOB}\`: nothing writes the layer caches`];
+  // What the OTHER jobs read: the writer reads each scope it writes (a build seeds itself from it), which says nothing of a reader.
+  const read = new Set(jobs.filter((j) => j.id !== LAYER_CACHE_JOB).flatMap(({ job }) => cacheScopes(job, 'cache-from')));
+  const written = new Set(cacheScopes(cache, 'cache-to'));
+  if (read.size < 3) v.push(`only ${read.size} cache scope(s) are read by any job (floor 3: the test image and two sidecars): the derivation is broken`);
+  for (const scope of read) if (!written.has(scope)) v.push(`the scope ${scope} is read and \`${LAYER_CACHE_JOB}\` never writes it: every run builds it cold`);
+  for (const scope of written) if (!read.has(scope)) v.push(`the scope ${scope} is written by \`${LAYER_CACHE_JOB}\` and no job reads it`);
+  const builds = stepsOf(cache).flatMap(buildxBuilds);
+  if (builds.length < 3) v.push(`${LAYER_CACHE_JOB} runs ${builds.length} build(s) (floor 3): the derivation is broken`);
+  for (const cmd of builds) {
+    const to = scopesOf((cmd.match(/--cache-to\s+(\S+)/) ?? [])[1]);
+    const from = scopesOf((cmd.match(/--cache-from\s+(\S+)/) ?? [])[1]);
+    if (to.length !== 1 || from.join() !== to.join()) v.push(`${LAYER_CACHE_JOB}: \`${cmd.slice(0, 90)}\` does not read and write one and the same scope`);
+    if (!/--output\s+type=cacheonly\b/.test(cmd)) v.push(`${LAYER_CACHE_JOB}: \`${cmd.slice(0, 90)}\` exports an image: this job writes caches and nothing else (\`--output type=cacheonly\`)`);
+  }
+  if (!runsOnlyOnMainPush(cache)) v.push(`${LAYER_CACHE_JOB} does not run on a push to main only: its \`if\` must carry \`${MAIN_ONLY_CONJUNCTS.join('` and `')}\``);
+  if (JSON.stringify([].concat(cache.needs ?? [])) !== JSON.stringify([REUSE_JOB_ID])) v.push(`${LAYER_CACHE_JOB} waits for ${JSON.stringify(cache.needs ?? null)}; only \`${REUSE_JOB_ID}\`, or it starts after the job it was moved out of`);
+  if (!skipsWhenRunIsReused(cache)) v.push(`${LAYER_CACHE_JOB} does not stand down beside a reused Full run: it must carry \`!cancelled() && ${REUSE_EMPTY}\``);
+  if (!Number.isInteger(cache['timeout-minutes'])) v.push(`${LAYER_CACHE_JOB} has no \`timeout-minutes\``);
+  return v;
+}
+
+/**
+ * A sentence of a comment or a guide that names `prepare` as the writer of a layer cache. The writer is `layer-cache` now and a
+ * text that still says `prepare` sends a reader to the wrong job when the cache stops being written. Read with comment markers
+ * and line breaks gone, one sentence at a time.
+ */
+const PREPARE_WRITES = [
+  /`prepare`[^.]*\b(?:writes?|written|fills?|filled)\b[^.]*\b(?:caches?|scopes?|layers?)\b/i,
+  /\b(?:caches?|scopes?|layers?)\b[^.]*\b(?:written|filled|writes?)\b[^.]*\bby\b[^.]*`prepare`/i,
+  /only\s+`prepare`\s+does\s+it/i,
+  /only\s+job\s+that\s+writes\s+a\s+cache/i,
+];
+function prepareWritesClaims(text, comments) {
+  const prose = comments ? text.split('\n').filter((l) => /^\s*#/.test(l)).map((l) => l.replace(/^\s*#\s?/, '')).join(' ') : text;
+  return prose.replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/).filter((s) => PREPARE_WRITES.some((re) => re.test(s))).map((s) => s.trim());
 }
 
 // ───────────────────────────────────────── permissions ─────────────────────────────────────────
@@ -1382,6 +1543,7 @@ const RULES = {
   'one suite per results artifact': oneSuitePerResultsArtifactViolations,
   'caches': cacheViolations,
   'runtime token': runtimeTokenViolations,
+  'layer cache job': layerCacheViolations,
   'permissions': permissionViolations,
   'concurrency': concurrencyViolations,
   'stack jobs': stackJobViolations,
@@ -1456,17 +1618,78 @@ const BREAKAGES = [
     stepWhere(job(d, 'sync'), (s) => usesOf(s)?.action === 'actions/upload-artifact').with.name = 'test-results-sync';
   }, 'artifact uploads', /run_attempt/],
   ['the layer cache is written from pull requests', (d) => {
-    const s = stepWhere(job(d, 'prepare'), (x) => /cache-to/.test(x.run ?? ''));
-    s.run = s.run.replace(/\$\{\{[^}]*\}\}/, '--cache-to type=gha,mode=max,scope=ythril-test');
+    delete stepWhere(job(d, LAYER_CACHE_JOB), (x) => /cache-to/.test(x.run ?? '')).if;
   }, 'caches', /cache-to` is not guarded/],
   ['the cache guard admits any push', (d) => {
-    const s = stepWhere(job(d, 'prepare'), (x) => /cache-to/.test(x.run ?? ''));
-    s.run = s.run.replace("github.event_name == 'push' && github.ref == 'refs/heads/main'", "github.event_name == 'push'");
+    const s = stepWhere(job(d, LAYER_CACHE_JOB), (x) => /cache-to/.test(x.run ?? ''));
+    s.if = s.if.replace("github.event_name == 'push' && github.ref == 'refs/heads/main'", "github.event_name == 'push'");
   }, 'caches', /cache-to` is not guarded/],
   ['the cache guard is an `||` away from every event', (d) => {
-    const s = stepWhere(job(d, 'prepare'), (x) => /cache-to/.test(x.run ?? ''));
-    s.run = s.run.replace("&& github.ref == 'refs/heads/main' &&", "&& github.ref == 'refs/heads/main' || github.event_name == 'pull_request' &&");
+    const s = stepWhere(job(d, LAYER_CACHE_JOB), (x) => /cache-to/.test(x.run ?? ''));
+    s.if = `${s.if} || github.event_name == 'pull_request'`;
   }, 'caches', /cache-to` is not guarded/],
+  // ── the layer caches are written by a job of their own, and prepare only reads them (bundle-356, Q-947) ──
+  ['prepare writes the layer cache again', (d) => {
+    const s = stepWhere(job(d, 'prepare'), (x) => /cache-from/.test(x.run ?? ''));
+    s.run = s.run.replace('--output', "--cache-to type=gha,mode=max,scope=ythril-test \\\n            --output");
+  }, 'layer cache job', /jobs that write a layer cache are \[prepare, layer-cache\]/],
+  ['prepare fills the sidecars\' caches again', (d) => {
+    job(d, 'prepare').steps.push({ name: 'Fill the sidecars', run: 'docker buildx build --cache-from type=gha,scope=ythril-doc-render --output type=cacheonly sidecars/doc-render' });
+  }, 'layer cache job', /prepare step "Fill the sidecars" builds a document sidecar or fills a cache/],
+  ['prepare stops reading the test image\'s cache', (d) => {
+    const s = stepWhere(job(d, 'prepare'), (x) => /cache-from/.test(x.run ?? ''));
+    s.run = s.run.replace(/--cache-from \S+ \\\n\s*/, '');
+  }, 'layer cache job', /prepare does not read the test image's layer cache/],
+  ['prepare\'s buildx setup cleans its builder up at the end of the job', (d) => {
+    delete stepWhere(job(d, 'prepare'), (x) => usesOf(x)?.action === 'docker/setup-buildx-action').with.cleanup;
+  }, 'layer cache job', /no `cleanup: false`/],
+  ['the layer cache job is gone', (d) => { delete d.jobs[LAYER_CACHE_JOB]; }, 'layer cache job', /no job `layer-cache`/],
+  ['the layer cache job skips a scope a job reads', (d) => {
+    const s = stepWhere(job(d, LAYER_CACHE_JOB), (x) => /cache-to/.test(x.run ?? ''));
+    s.run = s.run.split('\n').filter((l) => !l.includes('ythril-doc-office')).join('\n');
+  }, 'layer cache job', /scope ythril-doc-office is read and `layer-cache` never writes it/],
+  ['the layer cache job writes a scope nobody reads', (d) => {
+    const s = stepWhere(job(d, LAYER_CACHE_JOB), (x) => /cache-to/.test(x.run ?? ''));
+    s.run += '\ndocker buildx build --cache-from type=gha,scope=ythril-other --cache-to type=gha,mode=max,scope=ythril-other --output type=cacheonly sidecars/other';
+  }, 'layer cache job', /scope ythril-other is written by `layer-cache` and no job reads it/],
+  ['the layer cache job exports an image', (d) => {
+    const s = stepWhere(job(d, LAYER_CACHE_JOB), (x) => /cache-to/.test(x.run ?? ''));
+    s.run = s.run.replace('--output type=cacheonly -f Dockerfile', '--output type=docker,dest=x.tar -f Dockerfile');
+  }, 'layer cache job', /exports an image/],
+  ['the layer cache job runs on every push', (d) => {
+    job(d, LAYER_CACHE_JOB).if = "${{ !cancelled() && needs.reuse.outputs.full_run == '' && github.event_name == 'push' }}";
+  }, 'layer cache job', /does not run on a push to main only/],
+  ['the layer cache job waits for prepare', (d) => { job(d, LAYER_CACHE_JOB).needs = ['reuse', 'prepare']; }, 'layer cache job', /waits for \["reuse","prepare"\]/],
+  ['the layer cache job does not stand down beside a reused run', (d) => {
+    job(d, LAYER_CACHE_JOB).if = "${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
+  }, 'layer cache job', /does not stand down beside a reused Full run/],
+  ['the layer cache job has no timeout', (d) => { delete job(d, LAYER_CACHE_JOB)['timeout-minutes']; }, 'layer cache job', /no `timeout-minutes`/],
+  // ── the merge gate waits for the layer cache job, and the event is its own env (Q-947) ──
+  ['the gate stops waiting for the layer cache job', (d) => { job(d, 'test').needs = job(d, 'test').needs.filter((n) => n !== LAYER_CACHE_JOB); }, 'merge gate', /does not wait for: layer-cache/],
+  ['the verdict forgets the layer cache job', (d) => {
+    const s = stepsOf(job(d, 'test'))[0];
+    s.run = s.run.split('\n').filter((l) => !l.includes('needs.layer-cache.')).join('\n');
+  }, 'merge gate', /PASSES when layer-cache is (?:failure|cancelled|skipped)/],
+  ['the verdict treats the layer cache job as a suite: skipped passes only beside a named run', (d) => {
+    const s = stepsOf(job(d, 'test'))[0];
+    s.run = s.run.replace('check_main_only layer-cache', 'check_suite layer-cache');
+  }, 'merge gate', /FAILS when layer-cache is skipped on a pull request and no run is named/],
+  ['the verdict lets the layer cache job be skipped on a push to main', (d) => {
+    const s = stepsOf(job(d, 'test'))[0];
+    s.run = s.run.replace('|| [ "$REF" != refs/heads/main ]', '|| true');
+  }, 'merge gate', /PASSES when layer-cache is skipped on a push to main and no run is named/],
+  ['the verdict lets the layer cache job fail on a pull request', (d) => {
+    const s = stepsOf(job(d, 'test'))[0];
+    s.run = s.run.replace('check_main_only() { [ "$2" = success ] ||', 'check_main_only() { [ "$2" = success ] || [ "$EVENT_NAME" = pull_request ] ||');
+  }, 'merge gate', /PASSES when layer-cache is failure on a pull request/],
+  ['the verdict reads the event inside its script text', (d) => {
+    const s = stepsOf(job(d, 'test'))[0];
+    s.run = s.run.replace('"$EVENT_NAME"', '"${{ github.event_name }}"');
+  }, 'merge gate', /reads a `github\.\*` value inside its script text/],
+  ['the verdict lets every skipped job pass on a pull request', (d) => {
+    const s = stepsOf(job(d, 'test'))[0];
+    s.run = s.run.replace('check_suite() { [ "$2" = success ] || { [ "$2" = skipped ] && [ -n "$FULL_RUN" ]; }', 'check_suite() { [ "$2" = success ] || { [ "$2" = skipped ] && { [ -n "$FULL_RUN" ] || [ "$EVENT_NAME" != push ]; }; }');
+  }, 'merge gate', /only a main-only job may be skipped for its event/],
   ['a cache is saved by the combined action', (d) => {
     job(d, 'sync').steps.unshift({ uses: 'actions/cache@v4', with: { path: '~/.x', key: 'k' } });
   }, 'caches', /saves on every run/],
@@ -1479,14 +1702,24 @@ const BREAKAGES = [
   ['setup-node caches something other than npm', (d) => {
     stepWhere(job(d, 'sync'), (s) => usesOf(s)?.action === 'actions/setup-node').with.cache = 'yarn';
   }, 'caches', /sanctioned/],
-  ['the runtime token is exposed in a second job', (d) => {
+  ['the runtime token is exposed in a job that does not build', (d) => {
     job(d, 'sync').steps.splice(1, 0, clone(stepWhere(job(d, 'prepare'), (s) => usesOf(s)?.action === 'crazy-max/ghaction-github-runtime')));
-  }, 'runtime token', /exactly one/],
+  }, 'runtime token', /exposed in `sync`; only a job that builds with the gha cache holds it/],
+  ['the runtime token is exposed twice in a job that builds', (d) => {
+    job(d, LAYER_CACHE_JOB).steps.splice(1, 0, clone(stepWhere(job(d, 'prepare'), (s) => usesOf(s)?.action === 'crazy-max/ghaction-github-runtime')));
+  }, 'runtime token', /2 steps use crazy-max\/ghaction-github-runtime in `layer-cache`; exactly one/],
+  ['the runtime token is missing from the job that writes the cache', (d) => {
+    job(d, LAYER_CACHE_JOB).steps = job(d, LAYER_CACHE_JOB).steps.filter((x) => usesOf(x)?.action !== 'crazy-max/ghaction-github-runtime');
+  }, 'runtime token', /0 steps use crazy-max\/ghaction-github-runtime in `layer-cache`; exactly one/],
   ['the runtime token moves to another job', (d) => {
     const s = stepWhere(job(d, 'prepare'), (x) => usesOf(x)?.action === 'crazy-max/ghaction-github-runtime');
     job(d, 'prepare').steps = job(d, 'prepare').steps.filter((x) => x !== s);
     job(d, 'sync').steps.splice(1, 0, s);
-  }, 'runtime token', /only `prepare` builds/],
+  }, 'runtime token', /exposed in `sync`/],
+  ['the runtime token in the cache job is exposed before an install', (d) => {
+    const steps = job(d, LAYER_CACHE_JOB).steps;
+    steps.splice(steps.findIndex((s) => usesOf(s)?.action === 'crazy-max/ghaction-github-runtime') + 1, 0, { name: 'Install', run: 'npm ci --workspaces=false' });
+  }, 'runtime token', /before `npm ci` runs in `layer-cache`|immediately before/],
   ['the runtime token is pinned to a tag', (d) => {
     stepWhere(job(d, 'prepare'), (s) => usesOf(s)?.action === 'crazy-max/ghaction-github-runtime').uses = 'crazy-max/ghaction-github-runtime@v3';
   }, 'runtime token', /a tag moves/],
@@ -1744,7 +1977,7 @@ const BREAKAGES = [
   ['the advisory job keeps a bare always()', (d) => { job(d, 'ci-advisory').if = 'always()'; }, 'suite jobs stand down on a reused run', /must wait for `reuse`/],
   ['the verdict lets no suite be skipped (the jobs that stand down would fail the gate)', (d) => {
     const s = stepsOf(job(d, 'test'))[0];
-    s.run = s.run.replaceAll('check_suite ', 'check ');
+    s.run = s.run.replaceAll('check_suite ', 'check ').replace('check_main_only layer-cache', 'check layer-cache');
   }, 'suite jobs stand down on a reused run', /the verdict lets \[\] be skipped/],
   ['the verdict lets a skipped suite pass whether or not a run is named', (d) => {
     const s = stepsOf(job(d, 'test'))[0];
@@ -1933,6 +2166,22 @@ describe('ci.yml — the rules, held against the real workflow', () => {
     assert.ok(!stepsOf(gate.job).some(runsNpmCi), 'the gate job runs npm ci; the checks import only node built-ins (held by unexpected-skips-fail-the-ci-gate), so it is an install for nothing');
   });
 
+  it('the real merge gate waits for the layer cache job, and its verdict is right for that job on a push to main, a pull request and a full-run ref', () => {
+    const [gate] = mergeGateEntries(REAL);
+    const needs = [].concat(gate.job.needs ?? []);
+    const mainOnly = needs.filter((id) => runsOnlyOnMainPush(REAL.jobs[id]));
+    assert.deepEqual(mainOnly, [LAYER_CACHE_JOB], 'the gate waits for exactly one job that runs on a push to main only');
+    assert.deepEqual(verdictViolations(gate, needs, mainOnly), []);
+  });
+
+  it('no comment of ci.yml and no sentence of the testing guide names `prepare` as the writer of a layer cache (the writer is `layer-cache`)', () => {
+    const ci = readFileSync(join(REPO_ROOT, CI_WORKFLOW), 'utf8');
+    const guide = readFileSync(join(REPO_ROOT, 'docs', 'testing-guide.md'), 'utf8');
+    assert.deepEqual(prepareWritesClaims(ci, true), [], 'a comment in ci.yml still says prepare writes a cache');
+    assert.deepEqual(prepareWritesClaims(guide, false), [], 'docs/testing-guide.md still says prepare writes a cache');
+    assert.ok(/layer-cache/.test(guide), 'the guide never names the job that writes the layer caches');
+  });
+
   it('the gate is a job of its own that nothing else waits for (a gate in the middle is not a gate)', () => {
     const [gate] = mergeGateEntries(REAL);
     assert.ok(gate, `no job is named "${MERGE_GATE_NAME}"`);
@@ -2007,35 +2256,73 @@ describe('ci.yml — which package.json test scripts are aggregates of suites (d
 
 describe('ci.yml — other ways of writing the same rule are accepted, so the gate holds the property and not the spelling', () => {
   const MAIN_PUSH = "github.event_name == 'push' && github.ref == 'refs/heads/main'";
-  const buildStep = (d) => stepWhere(job(d, 'prepare'), (x) => /cache-to/.test(x.run ?? ''));
+  const buildStep = (d) => stepWhere(job(d, LAYER_CACHE_JOB), (x) => /cache-to/.test(x.run ?? ''));
 
   it('a cache-to under a condition on the STEP, written as a literal', () => {
     const d = clone(GOOD);
-    const s = buildStep(d);
-    s.run = s.run.replace(/\$\{\{[^}]*\}\}/, '--cache-to type=gha,mode=max,scope=ythril-test');
-    s.if = MAIN_PUSH;
+    assert.equal(buildStep(d).if, MAIN_PUSH, 'the conforming miniature guards the writing step itself');
     assert.deepEqual(cacheViolations(d), []);
+    assert.deepEqual(layerCacheViolations(d), []);
+  });
+
+  it('every cache-to inside its own expression, with no condition on the step; one left bare is refused', () => {
+    const d = clone(GOOD);
+    const s = buildStep(d);
+    delete s.if;
+    s.run = s.run.replace(/--cache-to (\S+)/g, (m) => `\${{ ${MAIN_PUSH} && '${m}' || '' }}`);
+    assert.deepEqual(cacheViolations(d), []);
+    s.run = s.run.replace(/\$\{\{[^}]*(--cache-to \S+)'[^}]*\}\}/, '$1');
+    assert.ok(cacheViolations(d).some((m) => /cache-to` is not guarded/.test(m)));
   });
 
   it('a cache-to input of build-push-action, guarded in its own expression; unguarded it is refused', () => {
     const d = clone(GOOD);
-    const steps = job(d, 'prepare').steps;
-    steps.splice(steps.indexOf(buildStep(d)), 1, {
+    const steps = job(d, LAYER_CACHE_JOB).steps;
+    // build-push-action hands the cache credential over by itself: no token step, no shell build
+    job(d, LAYER_CACHE_JOB).steps = steps.filter((x) => usesOf(x)?.action !== 'crazy-max/ghaction-github-runtime');
+    job(d, LAYER_CACHE_JOB).steps.splice(job(d, LAYER_CACHE_JOB).steps.indexOf(buildStep(d)), 1, {
       uses: 'docker/build-push-action@v6',
       with: { context: '.', 'cache-from': 'type=gha,scope=ythril-test', 'cache-to': `\${{ ${MAIN_PUSH} && 'type=gha,mode=max,scope=ythril-test' || '' }}` },
     });
     assert.deepEqual(cacheViolations(d), []);
-    assert.deepEqual(runtimeTokenViolations(d), [], 'build-push-action is a buildx build for the runtime-token rule');
-    stepWhere(job(d, 'prepare'), (x) => x.uses?.startsWith('docker/build-push-action')).with['cache-to'] = 'type=gha,mode=max,scope=ythril-test';
+    assert.deepEqual(runtimeTokenViolations(d), [], 'a job whose build is an action holds no token step');
+    stepWhere(job(d, LAYER_CACHE_JOB), (x) => x.uses?.startsWith('docker/build-push-action')).with['cache-to'] = 'type=gha,mode=max,scope=ythril-test';
     assert.ok(cacheViolations(d).some((m) => /cache-to` is not guarded/.test(m)));
   });
 
   it('a cache-to under a condition on the JOB', () => {
     const d = clone(GOOD);
-    const s = buildStep(d);
-    s.run = s.run.replace(/\$\{\{[^}]*\}\}/, '--cache-to type=gha,mode=max,scope=ythril-test');
-    job(d, 'prepare').if = MAIN_PUSH;
+    delete buildStep(d).if;
+    job(d, LAYER_CACHE_JOB).if = MAIN_PUSH;
     assert.deepEqual(cacheViolations(d), []);
+  });
+
+  it('the layer cache job, not the verdict, is what a pull request never runs: the same verdict on a Full run\'s own ref and on a pull request skips it', () => {
+    const verdict = verdictStepOf({ job: job(GOOD, 'test') });
+    const needs = job(GOOD, 'test').needs;
+    for (const event of [PULL_REQUEST, PUSH_TO_FULL_RUN_REF]) {
+      assert.equal(runVerdict(verdict, resultsOf(needs, { [LAYER_CACHE_JOB]: 'skipped' }), '', event), 0, JSON.stringify(event));
+    }
+    assert.notEqual(runVerdict(verdict, resultsOf(needs, { [LAYER_CACHE_JOB]: 'skipped' }), '', PUSH_TO_MAIN), 0);
+    assert.equal(runVerdict(verdict, resultsOf(needs, { [LAYER_CACHE_JOB]: 'skipped' }), NAMED_RUN, PUSH_TO_MAIN), 0);
+    assert.equal(runVerdict(verdict, resultsOf(needs, { [LAYER_CACHE_JOB]: 'success' }), '', PUSH_TO_MAIN), 0);
+    assert.notEqual(runVerdict(verdict, resultsOf(needs, { [LAYER_CACHE_JOB]: 'failure' }), '', PULL_REQUEST), 0);
+    assert.notEqual(runVerdict(verdict, resultsOf(needs, { [LAYER_CACHE_JOB]: 'cancelled' }), '', PUSH_TO_MAIN), 0);
+  });
+
+  it('a verdict read without an event is refused, never rendered as an empty one', () => {
+    assert.throws(() => renderVerdict({ run: 'echo ${{ github.ref }}' }, {}), /cannot render/);
+    assert.equal(renderVerdict({ env: { REF: '${{ github.ref }}' } }, {}, {}, PULL_REQUEST).env.REF, 'refs/pull/1/merge');
+  });
+
+  it('a comment or a guide that says `prepare` writes a layer cache is found, and one that says `layer-cache` does is not', () => {
+    for (const stale of [
+      'the GitHub Actions layer cache, WRITTEN only by `prepare` on a push to main',
+      'READ-only here: `prepare` fills the scope on main.',
+      'Only a push to `main` writes the image and sidecar layer caches, and only `prepare` does it.',
+      '`prepare` runs the docs lint. It is the only\n  job that writes a cache.',
+    ]) assert.equal(prepareWritesClaims(stale.split('\n').map((l) => `# ${l}`).join('\n'), true).length, 1, stale);
+    assert.deepEqual(prepareWritesClaims('# WRITTEN only by `layer-cache` on a push to main, READ by every run. `prepare` reads it.', true), []);
   });
 
   it('an advisory job is one whose every step is continue-on-error, as well as one that says so on the job', () => {

@@ -54,7 +54,13 @@ concurrency:
 #                       shard's files. A runner has room for one Mongo, so the shards run as jobs and not as containers of
 #                       one job. Held by `ci-runs-every-db-shard-exactly-once`: the matrix is exactly the plan's indices,
 #                       each upload carries its index, and `Build & Test` waits for the job and checks its result.
-#   prepare             the docs lint, and the one build of the test image
+#   prepare             the docs lint, and the one build of the test image; it only READS the layer cache
+#   layer-cache         a push to main only: the one writer of the three layer caches (the test image's and each document
+#                       sidecar's), a job of its own that starts with the run so the write never holds `prepare`, and with
+#                       it every job that waits for the image (Q-947: 276 s and 160 s of `prepare` in two of five main runs).
+#                       A pull request and a Full run skip it; the merge gate waits for it and fails the run when it failed
+#                       or was cancelled, or was skipped on a push to main with no reused run (a cache that silently stops
+#                       being written would make every later build cold).
 #
 # Everything that drives a running Ythril waits for `prepare`, loads the image it built and starts ONLY the services
 # its suite needs (`--no-build --pull never`, so compose can neither rebuild nor pull a different image). Each carries
@@ -72,7 +78,7 @@ concurrency:
 # failing the run (timings and trends), and it stands down on a reused run: it reads THIS run's results.
 #
 # What is cached, and why only that: the test image's layers and each document sidecar's layers, in the GitHub
-# Actions layer cache, WRITTEN only by `prepare` on a push to main and READ by every run (a pull request that wrote
+# Actions layer cache, WRITTEN only by `layer-cache` on a push to main and READ by every run (a pull request that wrote
 # the cache would evict the layers every other run needs, and could poison the one main reads); the npm download
 # cache (setup-node), keyed on the lockfile. NOT cached, by measurement: atlas-local (the pull takes as long as a
 # restore plus a load), node_modules (`npm ci` takes as long as unpacking the tree), Dockerfile cache
@@ -423,9 +429,12 @@ jobs:
         uses: docker/setup-buildx-action@v3
         with:
           driver-opts: image=moby/buildkit:buildx-stable-1
+          # The runner is discarded with the job: the post step that stops and removes the builder bought nothing and cost
+          # up to 35 s at the end of the job, which every job that waits for the image waited for (Q-947, 16 to 35 s).
+          cleanup: false
 
       - name: Expose GitHub Actions cache to Buildx
-        # Sets ACTIONS_CACHE_URL / ACTIONS_RUNTIME_TOKEN so `--cache-from/--cache-to type=gha` works from a script.
+        # Sets ACTIONS_CACHE_URL / ACTIONS_RUNTIME_TOKEN so `--cache-from type=gha` works from a script.
         # Pinned to a commit (v3.1.0) because it hands a credential to the step after it, and a tag can be moved.
         # Immediately before the one step that uses it, and after the only `npm ci`.
         uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124
@@ -438,7 +447,9 @@ jobs:
         # runners at build time. `--output type=docker,dest=` writes the archive directly: no `--load` into the local
         # daemon and no `docker save` round trip.
         #
-        # The cache is READ on every run and WRITTEN on a push to main only.
+        # The cache is READ here on every run and never written: on a push to main the job `layer-cache` writes it, from the
+        # same Dockerfile and tree, while this job builds. A write here held every job that waits for the image for up to
+        # 276 s after the image tar was already built (Q-947).
         #
         # Through the retry script: the build pulls its base images from Docker Hub inside BuildKit, where a store loaded by a
         # `docker pull` cannot reach, so the whole build is the unit that is run again when the registry did not answer (Q-145).
@@ -446,18 +457,8 @@ jobs:
         run: |
           node scripts/retry-on-registry-failure.mjs -- docker buildx build \
             --cache-from type=gha,scope=ythril-test \
-            ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '--cache-to type=gha,mode=max,scope=ythril-test' || '' }} \
             --output type=docker,dest=ythril-test-image.tar \
             -t ythril-test:latest -f Dockerfile .
-
-      - name: Fill the document sidecars' layer caches (main only)
-        # The integration job builds doc-render and doc-office from their own scopes and can only READ them. This is
-        # the one place that writes them, and only on main, so a pull request's first run builds them cold and every
-        # run after the first merge reads them warm. `cacheonly`: nothing is loaded or exported here.
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          node scripts/retry-on-registry-failure.mjs -- docker buildx build --cache-from type=gha,scope=ythril-doc-render --cache-to type=gha,mode=max,scope=ythril-doc-render --output type=cacheonly sidecars/doc-render
-          node scripts/retry-on-registry-failure.mjs -- docker buildx build --cache-from type=gha,scope=ythril-doc-office --cache-to type=gha,mode=max,scope=ythril-doc-office --output type=cacheonly sidecars/doc-office
 
       - name: Upload the test image
         # The Ythril test image only. It carries NOTICE and LICENSE exactly as the published image does (the same
@@ -471,6 +472,61 @@ jobs:
           retention-days: 1
           # The model layer is half the archive and does not compress; the CPU would buy nothing.
           compression-level: 0
+
+  # The ONE writer of the layer caches (Q-947), on a push to main only: the test image's scope, and the two document sidecars'
+  # scopes that `integration` can only read. It was two steps of `prepare`, and every job that waits for the image waited for
+  # them (276 s and 160 s in two of five recorded main runs). It waits for `reuse` alone, so it starts with the run, and builds
+  # `--output type=cacheonly`: nothing is exported or uploaded, only the layers are sent to the cache. The merge gate waits for
+  # it and lets it be skipped on any event but a push to main (and beside a reused Full run, as the suites): a write that
+  # silently stopped would make every later build cold. A pull request never writes the cache and still does not.
+  # The cache credential is exposed to the one step that builds, as `prepare` does it; this job has no install at all.
+  layer-cache:
+    name: Layer cache (main only)
+    needs: reuse
+    # `!cancelled()` replaces the default `success()`: `reuse` is skipped on a push, and a job that waits for a skipped one is
+    # skipped. The main-push condition is spelled as the writing step spells it.
+    if: ${{ !cancelled() && needs.reuse.outputs.full_run == '' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    # Measured (runs 44679947918, 44662830182, 44645190686): the test image's cold build and cache write took up to 373 s
+    # in `prepare`, the sidecars' builds and writes 12 to 43 s. 20 minutes is three times the worst and bounds a stalled
+    # registry or cache service.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Nothing here pushes: the token a checkout leaves in .git/config would be readable by every build step.
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Pull the BuildKit image (retried)
+        # As in `prepare`: the action pulls moby/buildkit on every run, so it is pulled first through the retry script.
+        run: node scripts/retry-on-registry-failure.mjs -- docker pull --quiet moby/buildkit:buildx-stable-1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:buildx-stable-1
+
+      - name: Expose GitHub Actions cache to Buildx
+        # Sets ACTIONS_CACHE_URL / ACTIONS_RUNTIME_TOKEN so `--cache-from/--cache-to type=gha` works from a script.
+        # Pinned to a commit (v3.1.0) because it hands a credential to the step after it, and a tag can be moved.
+        # Immediately before the one step that uses it; this job runs no install, so no install script holds it.
+        uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124
+
+      - name: Write the layer caches (test image, doc-render, doc-office)
+        # Each build reads and writes ONE scope (`mode=max`: every stage's layers). `cacheonly`: nothing is loaded or exported.
+        # Through the retry script, as every build is (Q-145). The step carries the main-push condition itself, so the write is
+        # guarded where it is written and not only on the job.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          node scripts/retry-on-registry-failure.mjs -- docker buildx build --cache-from type=gha,scope=ythril-test --cache-to type=gha,mode=max,scope=ythril-test --output type=cacheonly -f Dockerfile .
+          node scripts/retry-on-registry-failure.mjs -- docker buildx build --cache-from type=gha,scope=ythril-doc-render --cache-to type=gha,mode=max,scope=ythril-doc-render --output type=cacheonly sidecars/doc-render
+          node scripts/retry-on-registry-failure.mjs -- docker buildx build --cache-from type=gha,scope=ythril-doc-office --cache-to type=gha,mode=max,scope=ythril-doc-office --output type=cacheonly sidecars/doc-office
 
   standalone-instance:
     name: Standalone (instances)
@@ -606,7 +662,7 @@ jobs:
 
       - name: Build the doc-render sidecar (its own layer cache scope)
         # First-party, built in-repo (sidecars/doc-render), not in any registry. Built per job from its own scope and
-        # never shipped between jobs as a download. READ-only here: `prepare` fills the scope on main.
+        # never shipped between jobs as a download. READ-only here: `layer-cache` fills the scope on main.
         uses: docker/build-push-action@v6
         with:
           context: sidecars/doc-render
@@ -851,13 +907,15 @@ jobs:
   # red one. Every needed job must be `success` (a cancelled or failed one is not): a check for `failure` passes
   # exactly those. A SUITE job may also be `skipped`, and only beside a named run: when `reuse` output a Full run
   # (`FULL_RUN`, through env), the suites stood down on purpose, and `reuse` itself and `changelog` must have succeeded.
-  # With no run named a skipped job is a job that never ran, and fails. It needs every job of the file except
+  # With no run named a skipped job is a job that never ran, and fails; the one exception is `layer-cache`, which runs on a
+  # push to main only: it may also be skipped on any other event (`EVENT_NAME` and `REF`, through env), never on a push to
+  # main. It needs every job of the file except
   # `ci-advisory`, which is derived and held by `ci-workflow-is-sound`, so a job added tomorrow cannot be forgotten
   # here; the same file runs the verdict in a real bash for every cell, and holds that the jobs that carry the reuse
   # condition are exactly the ones the verdict lets be skipped.
   test:
     name: Build & Test
-    needs: [reuse, changelog, client-tests, standalone-pure, standalone-db, prepare, standalone-instance, integration, sync, redteam]
+    needs: [reuse, changelog, client-tests, standalone-pure, standalone-db, prepare, layer-cache, standalone-instance, integration, sync, redteam]
     if: always()
     runs-on: ubuntu-latest
     # A shell function over the results, a read of one run (the reused one's, again) and two node scripts over a few
@@ -876,17 +934,24 @@ jobs:
         env:
           # The reuse output reaches the shell through env, never inside the script text.
           FULL_RUN: ${{ needs.reuse.outputs.full_run }}
+          # The event reaches the shell through env too: a ref is a name a pusher chose (a Full run's `full-run/<bundle>`).
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
         run: |
           fail=0
           bad() { echo "::error::$1 finished: $2"; fail=1; }
           check() { [ "$2" = success ] || bad "$1" "$2"; }
           check_suite() { [ "$2" = success ] || { [ "$2" = skipped ] && [ -n "$FULL_RUN" ]; } || bad "$1" "$2"; }
+          # The job that writes the layer caches runs on a push to main only: skipped is right beside a reused run and on any
+          # other event, and wrong on a push to main with no run reused (the cache would silently stop being written).
+          check_main_only() { [ "$2" = success ] || { [ "$2" = skipped ] && { [ -n "$FULL_RUN" ] || [ "$EVENT_NAME" != push ] || [ "$REF" != refs/heads/main ]; }; } || bad "$1" "$2"; }
           [ -z "$FULL_RUN" ] || check reuse "${{ needs.reuse.result }}"
           check changelog "${{ needs.changelog.result }}"
           check_suite client-tests "${{ needs.client-tests.result }}"
           check_suite standalone-pure "${{ needs.standalone-pure.result }}"
           check_suite standalone-db "${{ needs.standalone-db.result }}"
           check_suite prepare "${{ needs.prepare.result }}"
+          check_main_only layer-cache "${{ needs.layer-cache.result }}"
           check_suite standalone-instance "${{ needs.standalone-instance.result }}"
           check_suite integration "${{ needs.integration.result }}"
           check_suite sync "${{ needs.sync.result }}"
