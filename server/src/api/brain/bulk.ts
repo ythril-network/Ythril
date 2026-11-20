@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
-import { bulkWrite, bulkWriteTotal, bulkBatchRefusal, bulkBodyRefusal, bulkStorageRefusal, BULK_BODY_KEYS, type BulkInput } from '../../brain/bulk.js';
+import { bulkWrite, bulkWriteTotal, bulkBatchRefusal, bulkBodyRefusal, bulkStorageRefusal, BULK_STORAGE_STATUS, BULK_BODY_KEYS, type BulkInput } from '../../brain/bulk.js';
 import { writeSpaceOf, answeredUnknownSpace } from '../write-target-answer.js';
 import { emitWebhookEvent } from '../../webhooks/dispatcher.js';
 import { webhookToken } from './_shared.js';
@@ -49,7 +49,7 @@ bulkRouter.post('/spaces/:spaceId/bulk', globalRateLimit, requireSpaceAuth, deny
 
   // The brain's hard storage limit, as the fact doors refuse it (the tool asks the same function).
   const storageRefused = await bulkStorageRefusal();
-  if (storageRefused) { res.status(507).json(storageRefused); return; }
+  if (storageRefused) { res.status(BULK_STORAGE_STATUS).json(storageRefused); return; }
 
   const result = await bulkWrite(targetSpace, {
     ...(body as BulkInput),
