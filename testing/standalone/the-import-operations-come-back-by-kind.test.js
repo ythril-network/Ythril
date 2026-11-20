@@ -32,7 +32,7 @@ async function readAll(ops, order) {
   return out;
 }
 
-describe('the import operations come back by kind', () => {
+describe('the import operations come back by kind', { timeout: 60_000 }, () => {
   it('operations appended in mixed order come back grouped by kind in the order asked, each kind in arrival order', async () => {
     const { ops } = await spoolIn('mixed');
     const appended = [];
@@ -84,7 +84,7 @@ describe('the import operations come back by kind', () => {
 
   it('an operation with any string comes back equal, and a read sees what was appended before any close', async () => {
     const { ops } = await spoolIn('values');
-    const op = { text: 'two\nlines\tand "quotes" \\ \u0000   \uD800', nested: [{ a: 1.5, b: null, c: true }], empty: '' };
+    const op = { text: `two\nlines\tand "quotes" \\ \u0000 ${String.fromCharCode(0x2028)} \uD800`, nested: [{ a: 1.5, b: null, c: true }], empty: '' };
     await ops.append('fact', op);
     await ops.append('fact', { n: 2 });
     assert.deepEqual(await readAll(ops, ['fact']), [{ kind: 'fact', op }, { kind: 'fact', op: { n: 2 } }]);

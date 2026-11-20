@@ -68,7 +68,7 @@ async function spoolOf(quads, label, bounds = SMALL_RUNS) {
   return { spool, folder, groups: await groupsOf(spool) };
 }
 
-describe('a scattered file groups as a contiguous one', () => {
+describe('a scattered file groups as a contiguous one', { timeout: 60_000 }, () => {
   it('the same quads in a shuffled and in a subject-contiguous order give the same groups, each subject once, every quad once', async () => {
     const quads = fixture();
     const contiguous = await spoolOf(quads, 'contiguous');
@@ -143,7 +143,7 @@ describe('a scattered file groups as a contiguous one', () => {
   });
 
   it('a literal that holds a newline, a tab, a quote, a backslash, a NUL, a line separator or a lone surrogate comes back as it went in', async () => {
-    const hard = ['two\nlines', 'a\ttab', 'a "quote"', 'back\\slash', 'nul\u0000here', 'line sep', 'lone \uD800 surrogate', '\r\n', '\t', ''];
+    const hard = ['two\nlines', 'a\ttab', 'a "quote"', 'back\\slash', 'nul\u0000here', `line${String.fromCharCode(0x2028)}sep`, 'lone \uD800 surrogate', '\r\n', '\t', ''];
     const quads = hard.map((value, i) => q(iri(`${BASE}entity/hard${i}\tx`), P(`p\n${i}`), lit(value, i % 2 ? { language: 'en' } : { datatype: 'https://dt.example.org/t\u0000' })));
     quads.push(q(iri(`${BASE}edge/r1`), P('reifies'), { kind: 'triple', subject: blank('in-a'), predicate: P('knows'), object: lit('x\ny') }));
     const { groups } = await spoolOf(quads, 'literals');

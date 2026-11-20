@@ -33,16 +33,16 @@ function liveHeap() { gc(); gc(); return process.memoryUsage().heapUsed; }
 
 async function bytesPerRecord(addressOf) {
   const { ImportIndex } = await indexModule();
-  const { subjectKey } = await spoolModule();
+  const { quadGroupKey } = await spoolModule();
   const before = liveHeap();
   const index = new ImportIndex();
-  for (let i = 0; i < 100_000; i += 1) index.set(subjectKey(iri(addressOf(i))), { kind: KINDS[i % 5], id: crypto.randomUUID(), stored: i % 2 === 0 });
+  for (let i = 0; i < 100_000; i += 1) index.set(quadGroupKey(iri(addressOf(i))), { kind: KINDS[i % 5], id: crypto.randomUUID(), stored: i % 2 === 0 });
   const per = (liveHeap() - before) / 100_000;
   assert.equal(index.size, 100_000);
   return per;
 }
 
-describe('the import index holds its bound', () => {
+describe('the import index holds its bound', { timeout: 60_000 }, () => {
   it(`stays under ${BYTES_PER_RECORD} bytes per record for 100 000 records with ordinary addresses`, async () => {
     const per = await bytesPerRecord(i => `https://data.example.org/ld/space/entity/${crypto.randomUUID()}-${i}`);
     console.log(`index: ${per.toFixed(1)} bytes per record (ordinary addresses)`);
@@ -68,15 +68,15 @@ describe('the import index holds its bound', () => {
 
   it('answers each subject\'s kind, id and stored flag, apart for two subjects and absent for one never set', async () => {
     const { ImportIndex } = await indexModule();
-    const { subjectKey } = await spoolModule();
+    const { quadGroupKey } = await spoolModule();
     const index = new ImportIndex();
-    const a = subjectKey(blank('in-x'));
-    const b = subjectKey(blank('in-x'), iri('https://graphs.example.org/g'));
+    const a = quadGroupKey(blank('in-x'));
+    const b = quadGroupKey(blank('in-x'), iri('https://graphs.example.org/g'));
     index.set(a, { kind: 'entity', id: 'one', stored: true });
     index.set(b, { kind: 'chrono', id: 'two', stored: false });
     assert.deepEqual(index.get(a), { kind: 'entity', id: 'one', stored: true });
     assert.deepEqual(index.get(b), { kind: 'chrono', id: 'two', stored: false });
-    assert.equal(index.get(subjectKey(blank('in-y'))), undefined);
+    assert.equal(index.get(quadGroupKey(blank('in-y'))), undefined);
     assert.throws(() => index.set('k', { kind: 'link', id: 'x', stored: false }), TypeError, 'a kind that is no record kind was taken');
     assert.throws(() => index.set('k', { kind: 'entity', id: '', stored: false }), TypeError, 'an empty id was taken');
   });

@@ -28,7 +28,7 @@ const FILE_CHARS = 64 * RUN_BYTES;
 const CEILING = 16 * RUN_BYTES + 16 * MiB;
 const BASE = 'https://data.example.org/ld/s5/';
 
-describe('the import sort holds its memory', () => {
+describe('the import sort holds its memory', { timeout: 120_000 }, () => {
   it(`sorts and reads back ${FILE_CHARS / MiB} MiB of quads with the live heap under ${CEILING / MiB} MiB above its start`, async () => {
     const { sortedSpool, openImportFolder } = await spoolModule();
     assert.equal(typeof sortedSpool, 'function', 'import-spool.ts exports no sortedSpool');
