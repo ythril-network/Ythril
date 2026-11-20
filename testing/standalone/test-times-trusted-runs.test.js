@@ -12,12 +12,15 @@
  * numbers is a flag nobody believes afterwards. Two things stop it, each tested here as a TRUTH TABLE rather than
  * as the one case that was thought of:
  *
- * 1. **`trustedRuns(runs)`** is the one function that turns the API's list into the runs worth reading. It admits a
- *    run only if ALL of: `event` is `push`; `head_repository.full_name` AND `repository.full_name` are both
- *    `ythril-network/Ythril` (a fork's push has a different head repository); `path` is exactly
- *    `.github/workflows/ci.yml` (a pull request's run reports `…ci.yml@refs/pull/N/merge`; another workflow
- *    reports its own file); `head_branch` is exactly `main`. The table is built by taking one admitted run and
- *    breaking ONE field at a time, so a missing row cannot hide a field.
+ * 1. **`trustedRuns(runs, kind?)`** is the one function that turns the API's list into the runs worth reading, by
+ *    **`ciRunKind(run)`** (Q-948): `push-main` when ALL of: `event` is `push`; `head_repository.full_name` AND
+ *    `repository.full_name` are both `ythril-network/Ythril` (a fork's push has a different head repository); `path` is
+ *    exactly `.github/workflows/ci.yml` (another workflow reports its own file); `head_branch` is exactly `main`.
+ *    `pull-request` for a `pull_request` run of `ci.yml` whose head repository is this one (a fork's pull request has the
+ *    fork as head repository and is refused, `ciRunRefusal` saying so by name); `full-run` for a push run of
+ *    `full-run.yml` on a `full-run/` ref of this repository. Everything else is refused. The push-main table is built by
+ *    taking one admitted run and breaking ONE field at a time, so a missing row cannot hide a field; the kinds table
+ *    uses runs shaped as the API serves a pull request run and a Full run.
  * 2. **`parseArtifact(zip)`** reads an artifact as hostile input: an entry over 20 MB, a total over 200 MB, a
  *    header that lies about the size, a name with a `..` segment or an absolute path (POSIX, drive-letter or UNC) — each
  *    refuses the WHOLE archive, and nothing is written to disk by it (it returns buffers).
@@ -28,7 +31,9 @@
  *
  * ## The interface this pins
  *
- * `trustedRuns(runs: object[]): object[]` (throws on a non-array — an absent list is an error, not "no runs");
+ * `trustedRuns(runs: object[], kind?: 'push-main'|'pull-request'|'full-run'): object[]` (throws on a non-array — an absent
+ * list is an error, not "no runs" — and on a kind it does not know); `ciRunKind(run): string|null`;
+ * `ciRunRefusal(run): string|null` (null for an accepted run);
  * `parseArtifact(zip: Buffer): Array<{name: string, data: Buffer}>` (throws on any refusal);
  * `recordKey({source, runId, attempt, job, suite}): string`. All exported from `scripts/test-times.mjs`.
  *
@@ -39,7 +44,7 @@ import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { buildZip } from '../_shared/zip-builder.mjs';
-import { REPO, githubRun } from '../_shared/test-times-harness.mjs';
+import { REPO, githubRun, githubPullRequestRun, githubFullRun } from '../_shared/test-times-harness.mjs';
 
 const MODULE = pathToFileURL(resolve(import.meta.dirname, '..', '..', 'scripts', 'test-times.mjs')).href;
 let loaded;
@@ -48,7 +53,10 @@ const load = () => (loaded ??= import(MODULE));
 /** One admitted run: the shape the fake Actions API serves (`githubRun`), under a real run's id. */
 const base = () => githubRun(36767121911);
 
-/** One admitted run with ONE field broken, per row. The label says what was broken. */
+/**
+ * One push to main with ONE field broken, per row. The label says what was broken. Every row is no push to main; the two rows whose
+ * break makes another accepted kind (a pull request of this repository, a Full run) say which, in {@link OTHER_KIND}.
+ */
 const REFUSED = [
   ['a pull_request run', r => { r.event = 'pull_request'; }],
   ['a pull_request_target run', r => { r.event = 'pull_request_target'; }],
@@ -70,7 +78,7 @@ const REFUSED = [
   ['a path that merely ends with ci.yml', r => { r.path = 'fork/.github/workflows/ci.yml'; }],
   ['a different case of the path', r => { r.path = '.github/workflows/CI.yml'; }],
   ['no path', r => { delete r.path; }],
-  ['a full run (the push of a full-run/ ref, run by full-run.yml: never recorded, its timings are not kept)', r => {
+  ['a full run (the push of a full-run/ ref, run by full-run.yml: recorded as a full-run, never a push to main)', r => {
     r.event = 'push';
     r.path = '.github/workflows/full-run.yml';
     r.head_branch = 'full-run/x';
@@ -82,6 +90,68 @@ const REFUSED = [
   ['a different case of main', r => { r.head_branch = 'Main'; }],
   ['no branch (null)', r => { r.head_branch = null; }],
 ];
+
+/** The rows of {@link REFUSED} whose one break makes a run of another accepted kind: what it is then. */
+const OTHER_KIND = Object.freeze({
+  'a pull_request run': 'pull-request',
+  'a full run (the push of a full-run/ ref, run by full-run.yml: recorded as a full-run, never a push to main)': 'full-run',
+});
+
+/**
+ * The kind of a run, decided from the run object alone (Q-948): runs shaped as the API serves a pull request run and a Full run
+ * (`githubPullRequestRun`, `githubFullRun`, read from the real API), each accepted or refused. `null` is refused; `why` is what the
+ * refusal must name.
+ */
+const KINDS = [
+  ['a push to main of this repository from ci.yml', () => base(), 'push-main'],
+  ['a pull request run from a branch of this repository', () => githubPullRequestRun(11), 'pull-request'],
+  ['a pull request run from a branch of this repository, failed', () => githubPullRequestRun(12, { conclusion: 'failure' }), 'pull-request'],
+  ['a pull request run of this repository whose branch is called main', () => githubPullRequestRun(13, { head_branch: 'main' }), 'pull-request'],
+  ['a Full run on a full-run/ ref of this repository', () => githubFullRun(14), 'full-run'],
+  ['a pull request run from a fork', () => githubPullRequestRun(21, { head_repository: { full_name: 'attacker/Ythril' } }), null, /pull request from another repository/],
+  ['a pull request run from a fork whose name only starts like ours', () => githubPullRequestRun(22, { head_repository: { full_name: `${REPO}-fork` } }), null, /pull request from another repository/],
+  ['a pull request run whose head repository was deleted', () => githubPullRequestRun(23, { head_repository: null }), null, /pull request from another repository/],
+  ['a pull_request_target run of this repository', () => githubPullRequestRun(24, { event: 'pull_request_target' }), null],
+  ['a pull request run of the Full run workflow', () => githubPullRequestRun(25, { path: '.github/workflows/full-run.yml' }), null],
+  ['a pull request run of another repository (both fields)', () => githubPullRequestRun(26, { repository: { full_name: 'attacker/Ythril' }, head_repository: { full_name: 'attacker/Ythril' } }), null],
+  ['a pull request run on a pull-request ref of ci.yml', () => githubPullRequestRun(27, { path: '.github/workflows/ci.yml@refs/pull/9/merge' }), null],
+  ['a Full run workflow push on another branch', () => githubFullRun(31, { head_branch: 'bundle-1' }), null],
+  ['a Full run workflow push on main', () => githubFullRun(32, { head_branch: 'main' }), null],
+  ['a Full run workflow push on a branch that only contains full-run/', () => githubFullRun(33, { head_branch: 'x/full-run/y' }), null],
+  ['a Full run workflow push from a fork', () => githubFullRun(34, { head_repository: { full_name: 'attacker/Ythril' } }), null],
+  ['a Full run workflow run dispatched by hand', () => githubFullRun(35, { event: 'workflow_dispatch' }), null],
+  ['a ci.yml push on a full-run/ ref (the caller is full-run.yml, never ci.yml)', () => githubRun(36, { head_branch: 'full-run/x' }), null],
+];
+
+describe('ciRunKind — the kind of a run, from the run object alone (Q-948)', () => {
+  for (const [what, make, kind, why] of KINDS) {
+    it(`${what}: ${kind ?? 'refused'}`, async () => {
+      const { ciRunKind, ciRunRefusal, trustedRuns } = await load();
+      const run = make();
+      assert.equal(ciRunKind(run), kind);
+      assert.deepEqual(trustedRuns([run]).map(r => r.id), kind ? [run.id] : [], 'trustedRuns admits exactly the runs of an accepted kind');
+      if (kind) {
+        assert.deepEqual(trustedRuns([run], kind).map(r => r.id), [run.id], `admitted as ${kind}`);
+        for (const other of ['push-main', 'pull-request', 'full-run'].filter(k => k !== kind)) assert.deepEqual(trustedRuns([run], other), [], `admitted as ${other} too`);
+        assert.equal(ciRunRefusal(run), null);
+      } else {
+        const said = ciRunRefusal(run);
+        assert.equal(typeof said, 'string', 'a refused run has a reason');
+        if (why) assert.match(said, why);
+      }
+    });
+  }
+
+  it('covers every kind and refuses a fork\'s pull request (the table means what it says)', () => {
+    assert.deepEqual([...new Set(KINDS.map(([, , k]) => k))].sort((a, b) => String(a).localeCompare(String(b))), ['full-run', null, 'pull-request', 'push-main'].sort((a, b) => String(a).localeCompare(String(b))));
+    assert.ok(KINDS.some(([, make, k]) => k === null && make().event === 'pull_request' && make().head_repository?.full_name !== REPO));
+  });
+
+  it('trustedRuns refuses a kind it does not know rather than admitting nothing quietly', async () => {
+    const { trustedRuns } = await load();
+    assert.throws(() => trustedRuns([base()], 'pushes'), /kind/);
+  });
+});
 
 describe('trustedRuns — which Actions runs may be read at all', () => {
   it('admits the one run that is a push to main of this repository, from ci.yml', async () => {
@@ -111,11 +181,13 @@ describe('trustedRuns — which Actions runs may be read at all', () => {
   });
 
   for (const [what, mutate] of REFUSED) {
-    it(`refuses ${what}`, async () => {
-      const { trustedRuns } = await load();
+    it(`refuses ${what} as a push to main`, async () => {
+      const { trustedRuns, ciRunKind } = await load();
       const run = base();
       mutate(run);
-      assert.deepEqual(trustedRuns([run]), [], `${what} must not be admitted`);
+      assert.deepEqual(trustedRuns([run], 'push-main'), [], `${what} must not be admitted as a push to main`);
+      assert.equal(ciRunKind(run), OTHER_KIND[what] ?? null, `${what}: its kind`);
+      assert.deepEqual(trustedRuns([run]).length, OTHER_KIND[what] ? 1 : 0, `${what}: admitted as some kind`);
     });
   }
 
@@ -123,7 +195,7 @@ describe('trustedRuns — which Actions runs may be read at all', () => {
     const { trustedRuns } = await load();
     const list = [];
     list.push({ ...base(), id: 1 });
-    for (const [, mutate] of REFUSED) { const r = base(); mutate(r); r.id = 100 + list.length; list.push(r); }
+    for (const [what, mutate] of REFUSED) { if (OTHER_KIND[what]) continue; const r = base(); mutate(r); r.id = 100 + list.length; list.push(r); }
     list.push({ ...base(), id: 2 });
     assert.deepEqual(trustedRuns(list).map(r => r.id), [1, 2]);
   });
@@ -132,7 +204,8 @@ describe('trustedRuns — which Actions runs may be read at all', () => {
     const { trustedRuns } = await load();
     const run = base();
     run.event = 'pull_request';
-    run.artifact = { branch: 'main', event: 'push', repository: REPO }; // what an uploaded file would say about itself
+    run.head_repository = { full_name: 'attacker/Ythril' }; // a fork's pull request
+    run.artifact = { branch: 'main', event: 'push', repository: REPO, head_repository: REPO }; // what an uploaded file would say about itself
     run.display_title = 'push to main of ythril-network/Ythril';
     assert.deepEqual(trustedRuns([run]), []);
   });

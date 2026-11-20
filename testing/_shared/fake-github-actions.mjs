@@ -47,7 +47,12 @@ export const FAKE_GH_TOKEN = 'ghp_fakeTestToken0123456789abcdefghijklmn';
  */
 export async function startFakeGithub({ runs, listings, pages, lagsUnderStatusFilter = [], jobsByRun = {}, artifactsByRun = {}, token = FAKE_GH_TOKEN }) {
   const requests = [];
-  let listingReads = 0;
+  // Reads of page 1 per listing (its workflow file and event): a pass reads each listing it asks for once per round, so the rounds
+  // are the most reads any one listing had, however many listings a pass reads.
+  const readsByListing = new Map();
+  const listingOf = (u) => `${u.pathname}?${u.searchParams.get('event') ?? ''}`;
+  const readsOf = (u) => readsByListing.get(listingOf(u)) ?? 0;
+  const countRead = (u) => readsByListing.set(listingOf(u), readsOf(u) + 1);
   const artifactById = new Map();
   for (const list of Object.values(artifactsByRun)) for (const a of list) artifactById.set(String(a.id), a);
 
@@ -66,14 +71,14 @@ export async function startFakeGithub({ runs, listings, pages, lagsUnderStatusFi
     let m;
     if ((m = u.pathname.match(/^\/repos\/[^/]+\/[^/]+\/actions\/(?:runs|workflows\/[^/]+\/runs)$/))) {
       if (pages) {
-        if (page === 1) listingReads++;
+        if (page === 1) countRead(u);
         const here = pages[page - 1] ?? [];
         return json(200, { total_count: here.length, workflow_runs: here });
       }
       if (page > 1) return json(200, { total_count: 0, workflow_runs: [] });
-      const listed = listings ? listings[Math.min(listingReads, listings.length - 1)] : runs;
+      const listed = listings ? listings[Math.min(readsOf(u), listings.length - 1)] : runs;
       const held = u.searchParams.has('status') ? listed.filter(r => !lagsUnderStatusFilter.includes(r.id)) : listed;
-      listingReads++;
+      countRead(u);
       return json(200, { total_count: held.length, workflow_runs: held });
     }
     if ((m = u.pathname.match(/\/actions\/runs\/(\d+)\/jobs$/))) {
@@ -99,8 +104,10 @@ export async function startFakeGithub({ runs, listings, pages, lagsUnderStatusFi
     url,
     token,
     requests,
-    /** How many times the first page of the runs listing was read: a read of the listing is its page 1. */
-    listingReads: () => listingReads,
+    /** How many times the first page of a runs listing was read, the most of any one listing (its path and `event`): a read of a listing is its page 1. */
+    listingReads: () => Math.max(0, ...readsByListing.values()),
+    /** Each listing asked for, as its path and `event` (`/repos/o/r/actions/workflows/ci.yml/runs?push`), with the reads of its page 1. */
+    listingsRead: () => Object.fromEntries(readsByListing),
     /** Run ids whose jobs, artifacts or artifact bytes were ever requested. */
     askedAbout() {
       const ids = new Set();

@@ -11,8 +11,10 @@
  *    run id), tested with a history that contains it.
  * 2. **The baseline is whatever was recorded.** A subset run, a `--files` run, a failed run, an incomplete run, a
  *    run of a feature branch — none of them is "how long main takes", and a failing run is short because it
- *    stopped. Baselines come ONLY from `scope: full`, `outcome: passed`, `branch: main`. A history with none of
- *    those gives no baseline and therefore no flag, rather than a comparison against the wrong population.
+ *    stopped. Baselines come ONLY from `scope: full`, `outcome: passed`, `branch: main`, and (Q-948) a CI push to main:
+ *    `source: ci` and `runKind` `push-main` or absent (a record written before the field); a pull request run, a Full
+ *    run or a laptop's run of main is not "how long main takes" either. A history with none of those gives no
+ *    baseline and therefore no flag, rather than a comparison against the wrong population.
  * 3. **The thresholds are one number.** A FILE is flagged over `max(p90 of its last 10 × 1.25, p90 + 30 s)` — the
  *    second term is what stops a 2 s file flagging at 2.6 s, the first what stops a 200 s file flagging at 231 s —
  *    and a SUITE over the max of its last 10 AND at least 20 % above the usual, so the fastest-ever-run's ceiling
@@ -25,7 +27,7 @@
  *
  * ## The interface this pins
  *
- * A run summary is `{runId, startsAt, branch, scope, outcome, suites: {<suite>: {ms, files: {<file>: ms}}}}`.
+ * A run summary is `{runId, startsAt, source, branch, scope, outcome, runKind?, suites: {<suite>: {ms, files: {<file>: ms}}}}`.
  * `flagFiles(judged, history)` returns `[{suite, file, ms}]`, `flagSuites(judged, history)` returns `[{suite, ms}]`;
  * both exported from `scripts/test-times.mjs`. `--trend` is the CLI, reading `YTHRIL_TEST_RUNS_URL` / `_TOKEN`.
  *
@@ -52,7 +54,7 @@ function run(n, { suite = 'standalone', suiteMs, files = {}, ...over } = {}) {
   return {
     runId: String(1000 + n),
     startsAt: new Date(Date.UTC(2026, 9, 1, 0, n)).toISOString(),
-    branch: 'main', scope: 'full', outcome: 'passed',
+    source: 'ci', branch: 'main', scope: 'full', outcome: 'passed',
     suites: { [suite]: { ms: suiteMs ?? Object.values(files).reduce((a, b) => a + b, 0), files } },
     ...over,
   };
@@ -137,9 +139,20 @@ describe('baselines come only from scope full, outcome passed, branch main', () 
     ['a cancelled run', { outcome: 'cancelled' }],
     ['a run of a feature branch', { branch: 'feature/x' }],
     ['a run of a release branch', { branch: 'release/5.6.x' }],
+    // Q-948: only a push to main's times are baseline material. Each of these says main, full and passed: the kind alone keeps it out.
+    ['a pull request run that passed', { runKind: 'pull-request' }],
+    ['a Full run that passed', { runKind: 'full-run' }],
+    ['a laptop\'s run of main that passed', { source: 'local' }],
+    ['a laptop\'s run of main that passed, its kind written', { source: 'local', runKind: 'local' }],
   ];
 
   it('has a table worth its name', () => { assert.ok(POPULATIONS.length >= 6); });
+
+  it('a run with no kind from CI is a push to main, and one that says push-main is too: both are baseline material', async () => {
+    const judged = run(50, { files: { [FILE]: 41 * S } });
+    assert.equal((await flagged(judged, constant(10, 10 * S, 1))).length, 1, 'a CI run without a kind (a record written before the field) gave no baseline');
+    assert.equal((await flagged(judged, constant(10, 10 * S, 1, { runKind: 'push-main' }))).length, 1, 'a push to main that says so gave no baseline');
+  });
 
   for (const [what, over] of POPULATIONS) {
     it(`ignores ${what} — its 500 s file does not raise the ceiling for a 41 s one`, async () => {
@@ -174,11 +187,17 @@ describe('--trend', () => {
     { commit: '9999991ddddddddddddddddddddddddddddddddd', day: '2026-09-04', ms: 30_000, scope: 'files' },
     { commit: '9999992eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', day: '2026-09-05', ms: 40_000, outcome: 'failed' },
     { commit: '9999993fffffffffffffffffffffffffffffffff', day: '2026-09-06', ms: 50_000, branch: 'feature/x' },
+    // Q-948: a pull request run and a Full run that passed are not a push to main, whatever branch they name (main here, so the
+    // kind alone keeps them out), and neither is a laptop's run of main.
+    { commit: '9999994aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', day: '2026-09-07', ms: 60_000, runKind: 'pull-request' },
+    { commit: '9999995bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', day: '2026-09-08', ms: 70_000, runKind: 'full-run' },
+    { commit: '9999996ccccccccccccccccccccccccccccccccc', day: '2026-09-09', ms: 80_000, source: 'local' },
   ];
   const seedRun = (server, r, i) => server.seed({
     title: 'standalone', startsAt: `${r.day}T10:00:00.000Z`, endsAt: `${r.day}T10:08:00.000Z`,
     properties: {
-      recordKey: `ci:${i}:1:standalone-pure:standalone`, source: 'ci', commit: r.commit, branch: r.branch ?? 'main', runId: String(i), attempt: 1,
+      ...(r.runKind ? { runKind: r.runKind } : {}),
+      recordKey: `${r.source ?? 'ci'}:${i}:1:standalone-pure:standalone`, source: r.source ?? 'ci', commit: r.commit, branch: r.branch ?? 'main', runId: String(i), attempt: 1,
       job: 'standalone-pure', suite: 'standalone', outcome: r.outcome ?? 'passed', scope: r.scope ?? 'full', layout: 'ci-parallel-v2', formatVersion: 1,
       ms: r.ms, files: 3, tests: 30, passed: 30, failed: 0, cancelled: 0, skipped: 0, todo: 0, dirty: false,
       measurements: JSON.stringify({ files: Array.from({ length: 3 }, (_, k) => ({ file: `f${k}.test.js`, ms: 1, pad: 'x'.repeat(30_000) })) }),

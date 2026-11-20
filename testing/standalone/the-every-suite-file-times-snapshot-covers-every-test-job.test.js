@@ -22,7 +22,7 @@
  *
  * - `allSuiteFileTimes(runs, { jobs })` (`scripts/_shared/all-suite-file-times.mjs`), a pure function over planted rows: every job's files
  *   present; the median over the runs that hold a file (the mean of the middle two for an even count); one key for a file of two shards;
- *   untrusted rows (source, branch, scope, job) and unusable files (a `__proto__` key, a time that is no count) contribute nothing; the
+ *   untrusted rows (source, branch, scope, job; a red run of main, a Full run or a pull request run, Q-948) and unusable files (a `__proto__` key, a time that is no count) contribute nothing; the
  *   newest five runs of a file only; a rerun's attempts once; no row, no trusted row, no file, or a job without a file THROWS.
  * - `node scripts/test-times.mjs --preflight-costs` writes `file-times.json` (the pure job, as before) and `file-times-all.json`, asking the
  *   server per job of `ci.yml`; both count five distinct RUNS per job, a rerun's attempts once (a newest run with three attempts takes
@@ -61,7 +61,7 @@ const PURE_JOB = PURE_JOBS_OF_CI[0];
 // ---- the builder, over planted rows ----------------------------------------------------------------------------------
 
 /** One recorded job of one run, as the builder is handed it: its identity, the run's start and the job's per-file times. */
-const row = (job, n, files, over = {}) => ({ job, source: 'ci', branch: 'main', scope: 'full', runId: String(n), startsAt: ciRunDay(n), files, ...over });
+const row = (job, n, files, over = {}) => ({ job, source: 'ci', branch: 'main', scope: 'full', outcome: 'passed', runId: String(n), startsAt: ciRunDay(n), files, ...over });
 
 describe('allSuiteFileTimes: one snapshot of every job\'s files', () => {
   const JOBS = ['pure', 'db-0', 'db-1', 'client'];
@@ -152,6 +152,27 @@ describe('allSuiteFileTimes: one snapshot of every job\'s files', () => {
     assert.equal(snap.runs, 1);
     assert.equal(snap.files[P], 100);
     assert.equal(snap.newestSourceAt, ciRunDay(1));
+  });
+
+  it('a red run of main sets no time, and neither does a Full run or a pull request run that passed: only green pushes to main (Q-948)', async () => {
+    const allSuiteFileTimes = await builder();
+    const poison = { 'testing/standalone/poison.test.js': 8_000_000, [P]: 8_000_000 };
+    const runs = [
+      ...everyJob(1), // no kind: a record written before the field, read as a push to main
+      row('pure', 2, { [P]: 300 }, { runKind: 'push-main' }),
+      row('pure', 6, poison, { outcome: 'failed' }),
+      row('pure', 7, poison, { outcome: 'incomplete' }),
+      row('pure', 8, poison, { runKind: 'full-run' }), // on main by name: the kind alone keeps it out
+      row('pure', 9, poison, { runKind: 'full-run', branch: 'full-run/bundle-1' }),
+      row('pure', 10, poison, { runKind: 'pull-request' }),
+      row('pure', 11, poison, { runKind: 'local' }),
+      row('pure', 12, poison, { outcome: undefined }), // no outcome at all: never vouched for
+    ];
+    const snap = allSuiteFileTimes(runs, { jobs: JOBS });
+    assert.deepEqual(Object.keys(snap.files).sort(), [C, D0, D1, P].sort(), 'a file of a red, Full or pull request run is in the snapshot');
+    assert.equal(snap.files[P], 200, `the pure file's time is not the median of the two green pushes to main (100, 300): ${snap.files[P]}`);
+    assert.equal(snap.runs, 2);
+    assert.equal(snap.newestSourceAt, ciRunDay(2));
   });
 
   it('a time that is no count and a file named __proto__ are left out; the file\'s other runs still count', async () => {
@@ -310,6 +331,29 @@ describe('test-times writes file-times-all.json beside file-times.json (a fake i
       assert.ok(!Object.keys(all.files).some(f => f.includes('poison')), 'a record that is not CI\'s full run of main, or of a job ci.yml has, set a time');
       assert.equal(all.runs, 5);
       assert.equal(Object.keys(all.files).length, JOBS_OF_CI.length * 2);
+    });
+  });
+
+  it('a red run of main, a passed Full run and a passed pull request run set no time in either snapshot, newer though they are (Q-948)', async () => {
+    assert.ok(PURE_JOB, `ci.yml uploads no pure shard results (${JOBS_OF_CI.join(' ')})`);
+    await withInstance(async ({ server, work, env }) => {
+      seedPreflightRun(server);
+      seedEveryJob(server);
+      const poison = [['testing/standalone/poison.test.js', 8_000_000]];
+      for (const job of [PURE_JOB, 'client-tests']) {
+        const suite = suiteOf(job);
+        seedCiTestRun(server, { n: 6, job, suite, rows: poison, over: { outcome: 'failed', failed: 1, passed: 2 } });
+        seedCiTestRun(server, { n: 7, job, suite, rows: poison, over: { runKind: 'full-run' } }); // on main by name: the kind alone keeps it out
+        seedCiTestRun(server, { n: 8, job, suite, rows: poison, over: { runKind: 'pull-request' } });
+      }
+      const r = await runTimes(['--preflight-costs'], { cwd: work.dir, env });
+      assert.equal(r.code, 0, everything(r));
+      for (const name of [PURE, ALL]) {
+        const snap = readJson(work.dir, name);
+        assert.ok(!Object.keys(snap.files).some(f => f.includes('poison')), `${name}: a red run of main, a Full run or a pull request run set a time`);
+        assert.equal(snap.runs, 5, `${name} rests on ${snap.runs} run(s), not the five green pushes to main`);
+        assert.equal(snap.newestSourceAt, ciRunDay(5), `${name}: its newest source is not the newest green push to main`);
+      }
     });
   });
 
