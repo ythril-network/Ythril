@@ -13,9 +13,11 @@
  * - **Memory the author chooses.** Each bound below is a named constant with its reason; exceeding one refuses with `rdf_bound_exceeded` and
  *   the constant's NAME in `bound`. A gzip body is counted after it inflates, against the bytes read so far and against an absolute cap.
  * - **A JSON-LD array the library would hold.** The library keeps the whole root object it reads, and holds a root `@graph` array's statements
- *   until the root closes, so the product's own export (`{"@context", "@graph": [nodes]}`) would be held whole. {@link GraphArrayScanner} takes such
- *   a root apart and {@link GraphReader} gives the library a few nodes at a time, each batch the document in miniature; any other shape is read
- *   whole under the bounds, and a root that cannot be streamed is refused by name over them (`rdf_jsonld_not_streamable`).
+ *   until the root closes, so the product's own export (`{"@context", "@graph": [nodes]}`) would be held whole. A document that ends within
+ *   `RDF_MAX_UNPARSED_CHARS` is read whole, whatever its shape and key order. One that passes it as a root of only a `@context`, an `@id` and a
+ *   `@graph` array is read again from its start: {@link GraphArrayScanner} takes the root apart and {@link GraphReader} gives the library a few
+ *   nodes at a time, each batch the document in miniature, and a key after the array is refused by name (`rdf_jsonld_not_streamable`); any
+ *   other shape stays whole under the bounds, and a root with properties of its own is refused by name over them.
  * - **A refusal that ends the process.** A parser's error is an event; nobody listening makes it an uncaught exception. Every failure of a
  *   library, of the source, of the UTF-8 decoding or of the gzip stream surfaces as one {@link RdfParseError} thrown from the iteration, with
  *   the line and column where the document is wrong when they can be told.
@@ -49,6 +51,7 @@ import { RDF_FORMATS, type RdfFormat } from './serialize.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
 import { DEFAULT_IMPORT_BODY_MAX_BYTES } from '../config/body-limits.js';
 import { GraphArrayScanner, GraphScanRefusal, placeAfter, type GraphEvent, type GraphPlace } from './jsonld-graph-scan.js';
+import { CHUNK_CHARS, Where, charIndexAtByte, type RdfPlace } from './parse-where.js';
 
 /** The longest literal value the reader takes: twice the longest text the store keeps (`MAX_FACT_LENGTH`, 50 000), so a text that fits is read and one that could never be stored is not buffered. */
 export const RDF_MAX_LITERAL_CHARS = 100_000;
@@ -66,18 +69,10 @@ export const RDF_INFLATE_RATIO_FLOOR_BYTES = 1_048_576;
 export const RDF_MAX_INFLATED_BYTES = DEFAULT_IMPORT_BODY_MAX_BYTES;
 /** The prefix of a blank node's id when the caller names none. */
 export const RDF_DEFAULT_BLANK_NODE_PREFIX = 'in-';
-/** The characters of a piece fed to a parser. */
-const CHUNK_CHARS = 65_536;
 /** The codes zlib gives a body that is not valid gzip: corrupt (`Z_DATA_ERROR`), cut short (`Z_BUF_ERROR`), or one the engine cannot inflate. Named, never matched by prefix or wording. */
 const ZLIB_FAILURES: ReadonlySet<string> = new Set(['Z_DATA_ERROR', 'Z_BUF_ERROR', 'Z_STREAM_ERROR', 'Z_NEED_DICT', 'Z_MEM_ERROR', 'Z_VERSION_ERROR']);
-/** The last code point a single UTF-16 unit holds; above it a character is a surrogate pair. */
-const LAST_BMP_CODE_POINT = 0xffff;
-/** The code of `\n`: the character a library counts lines by. */
-const LINE_FEED = 0x0a;
 /** The units that open a surrogate pair: a piece never ends on one, so a pair is never cut between two parsers' writes. */
 const HIGH_SURROGATES = Object.freeze({ first: 0xd800, last: 0xdbff });
-/** How much of the text fed is kept to turn a library's report (a line, a token, a byte offset) into a line and column: two pieces. */
-const TAIL_CHARS = 2 * CHUNK_CHARS;
 
 /** The bounds one reader holds, by the names of its options. */
 export interface RdfParseBounds {
@@ -107,8 +102,7 @@ export interface ParseRdfOptions {
   bounds?: Partial<RdfParseBounds>;
 }
 
-/** Where in the document: 1-based, columns in UTF-16 units. A column is left out when it cannot be told. */
-export interface RdfPlace { line: number; column?: number }
+export type { RdfPlace };
 
 export type RdfRefusalCode =
   | 'rdf_malformed' | 'rdf_relative_iri' | 'rdf_remote_context' | 'rdf_jsonld_not_streamable' | 'rdf_bound_exceeded'
@@ -157,101 +151,6 @@ function resolveBounds(given: Partial<RdfParseBounds> | undefined): RdfParseBoun
     if (!Number.isSafeInteger(merged[key]) || merged[key] <= 0) throw new TypeError(`parseRdf: bounds.${key} must be a positive whole number`);
   }
   return merged;
-}
-
-// ── Where in the document ────────────────────────────────────────────────────────────────────────────────────────────────
-
-/** The index of the character of `text` that starts `offset` bytes in, as UTF-8 (how the JSON tokenizer counts), or undefined when `text` ends before it. */
-function charIndexAtByte(text: string, offset: number): number | undefined {
-  let at = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    if (at >= offset) return i;
-    const code = text.codePointAt(i)!;
-    at += Buffer.byteLength(String.fromCodePoint(code), 'utf8');
-    if (code > LAST_BMP_CODE_POINT) i += 1;
-  }
-  return undefined;
-}
-
-/**
- * Tracks the text fed so far, so an error a library reports by line, token or byte offset becomes a line and column of the document. Only the
- * last few pieces are kept: a position further back, or inside a line longer than they hold, is answered with the line alone.
- */
-class Where {
-  private line = 1;
-  private column = 0;
-  /** The characters since the last line end of either kind (line feed or lone carriage return), across pieces: what the line bound measures. */
-  private run = 0;
-  /** The last {@link TAIL_CHARS} characters fed, and the line, column and byte offset of the first of them. */
-  private tail = '';
-  private tailLine = 1;
-  private tailColumn = 0;
-  /** How much of the tail the last piece is. */
-  private lastPiece = 0;
-  /** The longest line the last piece fed reached (its line end not counted), whether or not that line is complete, and its line number. */
-  longest = { length: 0, line: 1 };
-
-  feed(text: string): void {
-    this.tail += text;
-    this.lastPiece = text.length;
-    if (this.tail.length > TAIL_CHARS) {
-      const dropped = this.tail.slice(0, this.tail.length - TAIL_CHARS);
-      this.tail = this.tail.slice(dropped.length);
-      const lastEnd = dropped.lastIndexOf('\n');
-      for (let at = dropped.indexOf('\n'); at !== -1; at = dropped.indexOf('\n', at + 1)) this.tailLine += 1;
-      this.tailColumn = lastEnd === -1 ? this.tailColumn + dropped.length : dropped.length - lastEnd - 1;
-    }
-    // A line for the bound ends at a line feed OR a lone carriage return (white space in every text format, and the line end of old files);
-    // the line NUMBER a library reports counts line feeds only, as the libraries do.
-    this.longest = { length: 0, line: this.line };
-    let line = this.line;
-    let start = 0;
-    const lineEnd = /[\r\n]/g;
-    for (;;) {
-      lineEnd.lastIndex = start;
-      const found = lineEnd.exec(text);
-      const end = found === null ? -1 : found.index;
-      const length = (start === 0 ? this.run : 0) + ((end === -1 ? text.length : end) - start);
-      if (length > this.longest.length) this.longest = { length, line };
-      if (end === -1) break;
-      if (text.charCodeAt(end) === LINE_FEED) line += 1;
-      start = end + 1;
-    }
-    const lastEnd = text.lastIndexOf('\n');
-    const lastBreak = Math.max(lastEnd, text.lastIndexOf('\r'));
-    this.line = line;
-    this.column = lastEnd === -1 ? this.column + text.length : text.length - lastEnd - 1;
-    this.run = lastBreak === -1 ? this.run + text.length : text.length - lastBreak - 1;
-  }
-
-  /** The place just after the last text fed. */
-  now(): RdfPlace { return { line: this.line, column: this.column + 1 }; }
-
-  /** The place of the character at `index` in the last text fed. */
-  inLast(index: number): RdfPlace { return this.placeAt(this.tail.length - this.lastPiece + index); }
-
-  /** The place of the character `offset` bytes into the last piece fed: how the JSON tokenizer counts, from the start of the chunk it was given. */
-  inLastAtByte(offset: number): RdfPlace | undefined {
-    const first = this.tail.length - this.lastPiece;
-    const index = charIndexAtByte(this.tail.slice(first), offset);
-    return index === undefined ? undefined : this.placeAt(first + index);
-  }
-
-  /** The text of `line` as far as the tail reaches, and the column its first held character is at (`offset`). */
-  lineText(line: number): { text: string; offset: number } | undefined {
-    if (line < this.tailLine) return undefined;
-    const index = line - this.tailLine;
-    const text = this.tail.split('\n')[index];
-    return text === undefined ? undefined : { text, offset: index === 0 ? this.tailColumn : 0 };
-  }
-
-  /** The line and column of the character at `index` of the tail. */
-  private placeAt(index: number): RdfPlace {
-    let line = this.tailLine;
-    let lastEnd = -1;
-    for (let at = this.tail.indexOf('\n'); at !== -1 && at < index; at = this.tail.indexOf('\n', at + 1)) { line += 1; lastEnd = at; }
-    return { line, column: lastEnd === -1 ? this.tailColumn + index + 1 : index - lastEnd };
-  }
 }
 
 // ── Bytes to text ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -738,73 +637,126 @@ class GraphReader {
   }
 }
 
-async function* jsonLdQuads(pieces: AsyncIterable<string>, prefix: string, bounds: RdfParseBounds, where: Where): AsyncGenerator<Quad> {
+/** The library's own way: the whole document handed to one parser, piece by piece, under the unparsed-text bound. */
+class WholeRead {
+  private readonly parser: JsonLdSurface;
+  private readonly queue: RdfJsTerm[] = [];
+  private failure: Error | undefined;
+  private ended = false;
+  private quads = 0;
+  private seen = 0;
+  private unparsed = 0;
+  private holdsGraph = false;
+  private wake: (() => void) | undefined;
+  private readonly terms: Terms;
+  private readonly after = new AfterDocument();
+  /** Its own, fed in step with the parser: a document held and read again is placed by the pieces it is read in. */
+  private readonly where = new Where();
+
+  constructor(prefix: string, private readonly bounds: RdfParseBounds, private readonly refused: { address?: string }) {
+    this.parser = newJsonLdParser(blankFactory(true), refused);
+    const poke = (): void => { const resume = this.wake; this.wake = undefined; resume?.(); };
+    this.parser.on('data', (quad) => { this.queue.push(quad); this.quads += 1; poke(); });
+    this.parser.on('error', (error) => { this.failure ??= error; poke(); });
+    this.parser.on('end', () => { this.ended = true; poke(); });
+    this.parser.on('close', poke);
+    this.terms = new Terms(prefix, bounds, () => false, () => this.where.now());
+  }
+
+  private locate = (offset: number | undefined): RdfPlace => (offset === undefined ? undefined : this.where.inLastAtByte(offset)) ?? this.where.now();
+
+  async *piece(piece: string): AsyncGenerator<Quad> {
+    this.where.feed(piece);
+    const extra = this.after.feed(piece);
+    if (extra !== undefined) throw new RdfParseError('rdf_malformed', 'content follows the end of the JSON-LD document', { place: this.where.inLast(extra) });
+    if (!this.failure && !this.parser.write(Buffer.from(piece, 'utf8'))) await settled(this.parser);
+    // The library reports a failure, and finishes its asynchronous jobs, on later turns: wait for them, so a failure is seen against the piece it came from.
+    await yieldToEventLoop();
+    while (this.queue.length) yield this.terms.quad(this.queue.shift()!);
+    if (this.failure) throw jsonLdRefusal(this.failure, this.refused, this.locate);
+    if (this.quads !== this.seen) { this.seen = this.quads; this.unparsed = 0; return; }
+    this.unparsed += piece.length;
+    // The library holds the statements of a `@graph` array in a root of its own (properties, or an alias for `@graph`) until the root closes,
+    // so over the bound such a document is not "no statement yet" but one that cannot be read as a stream (review U6).
+    if (this.quads === 0 && !this.holdsGraph) this.holdsGraph = piece.includes('"@graph"');
+    if (this.unparsed <= this.bounds.maxUnparsedChars) return;
+    if (this.holdsGraph) {
+      throw new RdfParseError('rdf_jsonld_not_streamable', `the document's @graph array sits in a root that is more than a @context, an @id and the array (it has properties of its own, or @graph is an alias), so it is read whole before any statement is released, and it is over ${this.bounds.maxUnparsedChars} characters: split the data into several documents, or send it as Turtle, TriG or N-Quads`, { place: this.where.now() });
+    }
+    throw overBound('maxUnparsedChars', this.bounds.maxUnparsedChars, 'text that completes no statement', this.where.now());
+  }
+
+  async *finish(): AsyncGenerator<Quad> {
+    this.parser.end();
+    for (;;) {
+      while (this.queue.length) yield this.terms.quad(this.queue.shift()!);
+      if (this.failure) throw jsonLdRefusal(this.failure, this.refused, this.locate);
+      if (this.ended) return;
+      await new Promise<void>((resolve) => { this.wake = resolve; });
+    }
+  }
+
+  destroy(): void { this.parser.destroy(); }
+}
+
+/**
+ * Reads a JSON-LD document. A document that ends within `maxUnparsedChars` is read whole by the library, whatever its shape and key order. The
+ * text is held until it passes that bound (or the shape is known not to be a root `@graph` array); one that passes it as a root of only a
+ * `@context`, an `@id` and a `@graph` array is read again from its start by {@link GraphArrayScanner} and {@link GraphReader}, a node at a
+ * time, where a key after the array is refused by name. Anything else is read whole under the bound, as ever.
+ */
+async function* jsonLdQuads(pieces: AsyncIterable<string>, prefix: string, bounds: RdfParseBounds): AsyncGenerator<Quad> {
   const refused: { address?: string } = {};
-  const parser = newJsonLdParser(blankFactory(true), refused);
-  const queue: RdfJsTerm[] = [];
-  let failure: Error | undefined;
-  let ended = false;
-  let quads = 0;
-  let wake: (() => void) | undefined;
-  const changed = (): Promise<void> => new Promise<void>((resolve) => { wake = resolve; });
-  const poke = (): void => { const resume = wake; wake = undefined; resume?.(); };
-  parser.on('data', (quad) => { queue.push(quad); quads += 1; poke(); });
-  parser.on('error', (error) => { failure ??= error; poke(); });
-  parser.on('end', () => { ended = true; poke(); });
-  parser.on('close', poke);
-  const terms = new Terms(prefix, bounds, () => false, () => where.now());
-  const after = new AfterDocument();
-  let unparsed = 0;
-  let seen = 0;
-  let holdsGraph = false;
-  const locate = (offset: number | undefined): RdfPlace => (offset === undefined ? undefined : where.inLastAtByte(offset)) ?? where.now();
-  // A root object that is only a context, an @id and a `@graph` array is read a node at a time (GraphReader); anything else, as a whole.
-  const scan = new GraphArrayScanner(bounds.maxUnparsedChars);
-  let graph: GraphReader | undefined;
+  const probe = new GraphArrayScanner(bounds.maxUnparsedChars);
+  /** What the probe refused while the text was held (a key after the array): over the bound it is the refusal, within it the library decides. */
+  let probeRefusal: unknown;
+  const held: string[] = [];
+  let heldChars = 0;
+  let route = 'holding' as 'holding' | 'whole' | 'stream';
+  let whole = undefined as WholeRead | undefined;
+  let scan = undefined as GraphArrayScanner | undefined;
+  let reader = undefined as GraphReader | undefined;
+  /** Whether the route is `which`: asked through a function, since the generators below change it where a flow analysis cannot see. */
+  const routeIs = (which: typeof route): boolean => route === which;
+
+  const readWhole = async function* (): AsyncGenerator<Quad> {
+    route = 'whole';
+    whole = new WholeRead(prefix, bounds, refused);
+    for (const piece of held.splice(0)) yield* whole.piece(piece);
+  };
+  const readStream = async function* (piece: string): AsyncGenerator<Quad> {
+    scan ??= new GraphArrayScanner(bounds.maxUnparsedChars);
+    let events: GraphEvent[];
+    try { events = scan.feed(piece); } catch (err) { throw refusalOfScan(err, bounds); }
+    const head = events.find((event): event is Extract<GraphEvent, { kind: 'head' }> => event.kind === 'head');
+    if (head) reader = new GraphReader(head, prefix, bounds, refused);
+    // Pieces before the array begins complete no event: there is no reader yet, and nothing for it to take.
+    if (reader) { try { yield* reader.take(events); } catch (err) { throw refusalOfScan(err, bounds); } }
+  };
+
   try {
     for await (const piece of pieces) {
-      let events: GraphEvent[];
-      try { events = scan.feed(piece); } catch (err) { throw refusalOfScan(err, bounds); }
-      if (scan.mode === 'graph') {
-        const head = events.find((event): event is Extract<GraphEvent, { kind: 'head' }> => event.kind === 'head');
-        // What the library was given before the array began is only the root's first keys: nothing of it is wanted.
-        if (head) { parser.destroy(); graph = new GraphReader(head, prefix, bounds, refused); }
-        try { yield* graph!.take(events); } catch (err) { throw refusalOfScan(err, bounds); }
-        continue;
-      }
-      const extra = after.feed(piece);
-      if (extra !== undefined) throw new RdfParseError('rdf_malformed', 'content follows the end of the JSON-LD document', { place: where.inLast(extra) });
-      if (!failure && !parser.write(Buffer.from(piece, 'utf8'))) await settled(parser);
-      // The library reports a failure, and finishes its asynchronous jobs, on later turns: wait for them, so a failure is seen against the piece it came from.
-      await yieldToEventLoop();
-      while (queue.length) yield terms.quad(queue.shift()!);
-      if (failure) throw jsonLdRefusal(failure, refused, locate);
-      if (quads !== seen) { seen = quads; unparsed = 0; } else {
-        unparsed += piece.length;
-        // The library holds the statements of a `@graph` array in a root of its own (properties, or an alias for `@graph`) until the root closes,
-        // so over the bound such a document is not "no statement yet" but one that cannot be read as a stream (review U6).
-        if (quads === 0 && !holdsGraph) holdsGraph = piece.includes('"@graph"');
-        if (unparsed > bounds.maxUnparsedChars) {
-          if (holdsGraph) {
-            throw new RdfParseError('rdf_jsonld_not_streamable', `the document's @graph array sits in a root that is more than a @context, an @id and the array (it has properties of its own, or @graph is an alias), so it is read whole before any statement is released, and it is over ${bounds.maxUnparsedChars} characters: split the data into several documents, or send it as Turtle, TriG or N-Quads`, { place: where.now() });
-          }
-          throw overBound('maxUnparsedChars', bounds.maxUnparsedChars, 'text that completes no statement', where.now());
-        }
+      if (routeIs('whole')) { yield* whole!.piece(piece); continue; }
+      if (routeIs('stream')) { yield* readStream(piece); continue; }
+      held.push(piece);
+      heldChars += piece.length;
+      if (probeRefusal === undefined) { try { probe.feed(piece); } catch (err) { probeRefusal = err; } }
+      const isStream = probe.mode === 'graph' || probeRefusal !== undefined;
+      if (!isStream && probe.mode === 'library') yield* readWhole();
+      else if (heldChars > bounds.maxUnparsedChars) {
+        if (!isStream) { yield* readWhole(); continue; }
+        route = 'stream';
+        for (const text of held.splice(0)) yield* readStream(text);
       }
     }
-    if (graph) {
-      try { scan.finish(); } catch (err) { throw refusalOfScan(err, bounds); }
+    if (routeIs('holding')) yield* readWhole();
+    if (routeIs('stream')) {
+      try { scan!.finish(); } catch (err) { throw refusalOfScan(err, bounds); }
       return;
     }
-    parser.end();
-    for (;;) {
-      while (queue.length) yield terms.quad(queue.shift()!);
-      if (failure) throw jsonLdRefusal(failure, refused, locate);
-      if (ended) return;
-      await changed();
-    }
+    yield* whole!.finish();
   } finally {
-    parser.destroy();
+    whole?.destroy();
   }
 }
 
@@ -823,7 +775,7 @@ export async function* parseRdf(source: AsyncIterable<Uint8Array | string>, form
     const where = new Where();
     const text = textOf(documentBytes(source, bounds), where);
     if (format === 'jsonld') {
-      yield* jsonLdQuads(text, prefix, bounds, where);
+      yield* jsonLdQuads(text, prefix, bounds);
     } else {
       const lines = async function* (): AsyncGenerator<string> {
         for await (const piece of text) { checkLines(where, bounds); yield piece; }
