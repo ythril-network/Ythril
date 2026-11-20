@@ -17,7 +17,7 @@ import {
   ConvertRecordsZ, conversionStepIssues,
   type ConvertRecords, type ConversionStep, type ConversionMeta, type ConversionIssueCode,
 } from '@ythril-network/schema/internal';
-import { commitOwnMetaEdit, storeNetworkLayer } from '../spaces/effective-meta.js';
+import { applyDecidedOwnMetaEdit, storeNetworkLayer } from '../spaces/effective-meta.js';
 import { carriedLocalId } from './space-map.js';
 import { buildBraintreeAncestors } from '../util/braintree.js';
 import { sendNotice } from '../networks/notify-members.js';
@@ -64,6 +64,23 @@ export function localBraintreeRequiredVoters(
 }
 
 /**
+ * Run `apply`, the effect of a round just marked passed. When it throws, the round is not concluded: the conclusion fields are taken off again and the
+ * cause rethrown, so the settle that meets it counts a failure and the next settle concludes and applies it. A round left concluded and unapplied is
+ * skipped by every later settle, and the member holds a schema other than its network's for good.
+ */
+function applyOrReopen(round: VoteRound, apply: () => void): void {
+  try {
+    apply();
+  } catch (cause) {
+    round.concluded = false;
+    delete round.passed;
+    delete round.outcome;
+    delete round.concludedAt;
+    throw cause;
+  }
+}
+
+/**
  * Decide whether `round` is over at `now`, and conclude it if so. Returns whether it just PASSED.
  *
  * `now` is the ONE reading of the clock the caller took for this request: the deadline is judged against it, and it is the
@@ -103,6 +120,9 @@ export function concludeRoundIfReady(
     round.passed = true;
     round.outcome = 'passed';
     round.concludedAt = new Date(now).toISOString();
+    // A schema round is applied BEFORE it is recorded as concluded: an apply that throws leaves the round open, to be applied at the next settle
+    // (second review F3). It concluded first and applied after, and every later settle skips a concluded round, so a throw lost the change here.
+    if (round.type === 'meta_change') applyOrReopen(round, () => passedMetaChange.apply(net, round));
     // Before the passed round acts: a removal takes its subject off the roster, and the count belongs to the electorate that decided.
     recordRoundOutcome(net, round, now);
     // On join round pass: the candidate will call join again and get a 200 with member list
@@ -128,7 +148,7 @@ export function concludeRoundIfReady(
     // in the meantime, with no error and a correctly-recorded carried vote to hide it.
     // The round names the space by the NETWORK's id; this instance may carry it under another (F-39.4) — and acts
     // only on a space this network carries here (S-7). What is written, and that it is parsed first, is `passedMetaChange`'s.
-    if (round.type === 'meta_change') passedMetaChange.apply(net, round);
+    // (Done above, before the round was recorded.)
     return true;
   }
   return false;
@@ -306,7 +326,7 @@ export const passedMetaChange = {
       return;
     }
     const currentMeta = getConfig().spaces.find(s => s.id === plan.localSpace)?.meta;
-    if (plan.own) commitOwnMetaEdit(plan.localSpace, () => plan.own!);
+    if (plan.own) applyDecidedOwnMetaEdit(plan.localSpace, () => plan.own!);
     if (plan.layer) storeNetworkLayer(net.id, plan.localSpace, plan.layer);
     // The proposer offered another RDF base for the space: recorded beside the network under the proposer, as its served base would be.
     if (plan.rdfConflict) recordRdfConflict(net, plan.localSpace, plan.rdfConflict, round.subjectInstanceId);

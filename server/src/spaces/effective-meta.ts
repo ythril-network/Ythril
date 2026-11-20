@@ -26,7 +26,7 @@ import { effectiveMeta, replicatedMetaOf } from '../sync/replicated-meta.js';
 import { PER_TYPE_META_FIELD } from './meta-fields.js';
 import { derivedFromStored, type ParsedSpaceMeta, type ParsedTypeSchema } from './body-schemas.js';
 import { updateSpace } from './spaces.js';
-import { assertSchemaWritable } from './schema-write-gate.js';
+import { applyingWhatTheNetworkDecided, assertSchemaWritable } from './schema-write-gate.js';
 import { layersFor } from './network-layers.js';
 import { keepLayerSnapshot } from './schema-snapshot-store.js';
 import { heldRebaseEpochs, layerRdfConflict, recordRdfOffers } from './rdf-settle.js';
@@ -108,7 +108,9 @@ export function storeNetworkLayer(networkId: string, spaceId: string, meta: Pars
   // The same layer again — every cycle, for a network whose schema did not change — is nothing to do and nothing to write.
   if (isDeepStrictEqual(net.schemaLayers?.[spaceId], meta)) return false;
   (net.schemaLayers ??= {})[spaceId] = meta;
-  const changed = recomputeEffectiveMeta(spaceId, true);
+  // What the network sent is applied while an RDF import stands (second review F3): not a door's write, and a layer stored but not recomputed is
+  // found equal on the next pull and never applied.
+  const changed = applyingWhatTheNetworkDecided(() => recomputeEffectiveMeta(spaceId, true));
   // The layer as received is a schema version of its own: kept privately under its fingerprint (`origin: 'layer'`), which is also the
   // fingerprint this space stamps with while it adds nothing to the layer (Q-735). Detached; the housekeeping cycle repairs a miss.
   keepLayerSnapshot(networkId, spaceId, meta);
@@ -126,6 +128,30 @@ export function commitOwnMetaEdit(spaceId: string, edit: (base: SpaceMeta) => Pa
   const space = getConfig().spaces.find(s => s.id === spaceId);
   if (!space) return null;
   assertSchemaWritable(spaceId);
+  return writeOwnMetaEdit(spaceId, edit);
+}
+
+/**
+ * The same edit of the own definitions as `commitOwnMetaEdit` makes, for what the NETWORK decided (a passed `meta_change` round, the proposer's own
+ * edit): applied while an RDF import stands on the space, since a round that is not applied is lost on this member (second review F3). A door never
+ * calls this; its edit is `commitOwnMetaEdit`, which meets the import's gate.
+ */
+export function applyDecidedOwnMetaEdit(spaceId: string, edit: (base: SpaceMeta) => ParsedSpaceMeta): SpaceConfig | null {
+  return applyingWhatTheNetworkDecided(() => writeOwnMetaEdit(spaceId, edit));
+}
+
+/**
+ * Rebuild the effective meta of a space whose network membership changed (it left a network, which took its layer with it). What the network
+ * decided is applied while an RDF import stands, as a passed round is (second review F3); the operator's own reorder of the layers is
+ * `recomputeEffectiveMeta`, which meets the gate.
+ */
+export function recomputeAfterMembershipChange(spaceId: string): boolean {
+  return applyingWhatTheNetworkDecided(() => recomputeEffectiveMeta(spaceId, true));
+}
+
+function writeOwnMetaEdit(spaceId: string, edit: (base: SpaceMeta) => ParsedSpaceMeta): SpaceConfig | null {
+  const space = getConfig().spaces.find(s => s.id === spaceId);
+  if (!space) return null;
   if (!space.ownMeta) return updateSpace(spaceId, { meta: edit(space.meta ?? {}) });
   space.ownMeta = replicatedMetaOf(edit(space.ownMeta)) as SpaceMeta;
   recomputeEffectiveMeta(spaceId, true);
