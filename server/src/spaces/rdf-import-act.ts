@@ -158,7 +158,16 @@ interface RdfImportKnobs {
   window?: number;
   maxRecords?: number;
   bounds?: Partial<ImportSpoolBounds>;
-  hooks?: { beforeCommit?: () => unknown; afterCommitWindow?: (committed: number) => void };
+  hooks?: {
+    beforeCommit?: () => unknown;
+    afterCommitWindow?: (committed: number) => void;
+    /** After the translation read the store for one window of the file (a seam for a change made while the file is translated). */
+    duringTranslation?: () => unknown;
+    /** After the door sorted the file and before the act is registered. */
+    beforeRegister?: () => unknown;
+    /** In a commit window, after the window was planned and before its plans are committed. */
+    beforeCommitPlans?: () => unknown;
+  };
 }
 let knobs: RdfImportKnobs = {};
 /** Replace the figures and hooks a test sets, or all of them with `null`. */
@@ -379,6 +388,7 @@ async function translatePass(run: TranslateRun, index: ImportIndex, asserted: Di
         }
       }
       const stored = await loadStoredRecords(run.spaceId, wants);
+      await knobs.hooks?.duringTranslation?.();
       for (const group of window) {
         const ctx: QuadsToOpsContext = {
           names: names(group.graph?.value), meta: run.meta, mode: run.options.mode, blankNodes: run.options.blankNodes,
@@ -489,7 +499,7 @@ async function commitPass(run: Run, minted: Map<string, MintedEnd>): Promise<voi
     if (seen + w.length <= state.committed) { seen += w.length; continue; }
     const rest = w.slice(Math.max(0, state.committed - seen));
     seen += w.length;
-    await commitWindow(run.spaceId, rest, minted);
+    await commitWindow(run.spaceId, rest, minted, knobs.hooks?.beforeCommitPlans);
     knobs.hooks?.afterCommitWindow?.(state.committed + rest.length);
     state.committed += rest.length;
     await writeState(run.folder, state);
@@ -768,6 +778,7 @@ async function readAndRun(input: RdfImportInput, options: ImportOptions, meta: S
     await writeState(folder, { importId, space: input.spaceId, options, phase: 'translated', committed: 0, report: run.builder.report });
     await keepReport(run.builder.report);
     void sweepReports(Date.now()).catch(err => log.warn(`the RDF import report sweep failed: ${peerText(err)}`));
+    await knobs.hooks?.beforeRegister?.();
     let entryId: string;
     try {
       entryId = registerOwnSpaceAct({ kind: KIND, localId: input.spaceId, spoolId: importId });
