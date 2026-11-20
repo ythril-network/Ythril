@@ -49,7 +49,7 @@ import { build, PEER_TOKEN } from './_push-door.mjs';
 import { openPullDoor, PEER_AUTHOR } from './_pull-door.mjs';
 import { parkWrites, failWrites } from './_write-faults.mjs';
 import { failIndexBuild, storeIndexRefusal } from './_failing-index-build.mjs';
-import { restoreModules, restoreToTheEnd, takeBackup } from './_restore-act.mjs';
+import { restoreModules, restoreAsActs, settleRestoreActs, servingOnly, assertRestoreCovers, takeBackup } from './_restore-act.mjs';
 import { openWireProxy } from './_b81b-wire.mjs';
 import { clearPositionMarks, readMark, setMark, positioned, positionedTombstone } from './_b81b-positions.mjs';
 import { counterDoc, isReady, oweDirectly, runOwedJob } from './_b81b-owed.mjs';
@@ -255,7 +255,15 @@ describe('a space owes its positions until one write', { skip }, () => {
       await door.raiseVersionTo(space, 9);
       const backup = await takeBackup(SUITE, 'b81tB-owed-backup');
       await door.wipe(space);
-      await restoreToTheEnd(await restoreModules(), { backupId: backup.id });
+      // The rule is about this one space: the restore serves it alone (`servingOnly`), so the other ten are not dropped and built again,
+      // and `assertRestoreCovers` holds that it was this space that was restored, no more and no fewer.
+      const modules = await restoreModules();
+      await servingOnly(modules.loader, [space], async (leaveOut) => {
+        const answer = await restoreAsActs(modules, { backupId: backup.id, leaveOut });
+        const results = await settleRestoreActs(modules.runner, modules.loader);
+        assertRestoreCovers(answer, results, [space]);
+        for (const r of results) assert.equal(r.ok, true, `a restore act did not complete: ${JSON.stringify(r)}`);
+      });
       const rows = Object.fromEntries((await door.coll(space, 'facts').find({}).toArray()).map(d => [d._id, d]));
       assert.deepEqual(Object.keys(rows).sort(), ['owed-own', 'owed-relayed'], 'the restore did not bring the rows back');
       assert.deepEqual({ pos: rows['owed-own'].pos, posAtSeq: rows['owed-own'].posAtSeq }, { pos: 5, posAtSeq: 5 }, 'a restored pre-6.0 row has no identity position');

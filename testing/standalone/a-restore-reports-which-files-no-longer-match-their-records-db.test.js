@@ -50,6 +50,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { build } from './_push-door.mjs';
 import { bare } from './_bare.mjs';
+import { poolEach } from '../_shared/pool.mjs';
 import { clearActEntries, deferred, resetRunnerForTest } from './_space-act-harness.mjs';
 import {
   restoreModules, takeBackup, restoreThenReport, servingOnly, spaceRowsOfReport, classOf, reportedPaths, FILE_CLASSES, REPORT_PATHS_PER_CLASS,
@@ -60,6 +61,8 @@ const skip = await mongoSkipReason();
 const SUITE = 'restorefilesreport';
 const T = { timeout: 180_000 };
 const CAP_SPACES = ['rf-c1', 'rf-c2', 'rf-c3'];
+/** How many of the cap case's 36 (space, index) writes run at once: more than one so the 144 files are not written one at a time, a bound so the database is not asked for 144 at once. */
+const CAP_WRITE_WIDTH = 8;
 const SPACES = ['rf-a', 'rf-b', 'rf-n', 'rf-q', ...CAP_SPACES];
 const SPILL = (n) => `_tmp/graph-0000000${n}-0000-4000-8000-000000000000.json`;
 
@@ -268,14 +271,15 @@ describe('a restore reports which files no longer match their records (real Mong
       // Every space of the harness is restored: a space's share of the report's total cap is the cap divided by the spaces of the restore
       // set (`REPORT_PATHS_PER_RESTORE`), so the cap binds on these spaces only in a set as large as this suite's.
       const out = await scenario(async () => {
-        for (const S of CAP_SPACES) {
-          for (let i = 0; i < N; i++) {
-            await row(S, `gone-${i}.json`, `row ${S} ${i}`);          // row_without_bytes (bytes never written)
-            await file(S, `stale-${i}.json`, `one ${S} ${i}`);        // stale_row after the rewrite below
-            await file(S, `raw-${i}.pdf`, `%PDF ${S} ${i}`, { embeddingStatus: undefined });   // unprocessed
-            await row(S, `soft-${i}.json`, undefined, { deletedAt: '2026-10-01T00:00:00.000Z', sizeBytes: 3, sha256: sha('x') });
-          }
-        }
+        // The 3 x N units are independent (each names its own paths), so they are written CAP_WRITE_WIDTH at a time. What stays in order is
+        // the case's own sequence: every row here lands before the backup is taken, and the rewrite below only after it (`scenario`).
+        const units = CAP_SPACES.flatMap(S => Array.from({ length: N }, (_, i) => ({ S, i })));
+        await poolEach(units, CAP_WRITE_WIDTH, async ({ S, i }) => {
+          await row(S, `gone-${i}.json`, `row ${S} ${i}`);          // row_without_bytes (bytes never written)
+          await file(S, `stale-${i}.json`, `one ${S} ${i}`);        // stale_row after the rewrite below
+          await file(S, `raw-${i}.pdf`, `%PDF ${S} ${i}`, { embeddingStatus: undefined });   // unprocessed
+          await row(S, `soft-${i}.json`, undefined, { deletedAt: '2026-10-01T00:00:00.000Z', sizeBytes: 3, sha256: sha('x') });
+        });
         await row('rf-q', long, 'long name');           // alone in its class in its space, so it is always among the paths shown
         await row('rf-q', escaping, 'escaping name');
       }, async () => {
