@@ -36,6 +36,14 @@
  * the counter stalls an allocation that holds nothing — which is its own case at the end of this file: it ends within the bound and
  * the horizon is never held.
  *
+ * ## The cases run together, each in a space of its own
+ *
+ * A holder case is a lock held for the whole of the bound, so the cases run one after another were most of this file's time. They run
+ * eight at a time (`describe(..., { concurrency })`), each in a space it takes from a free list (`freeSpaces`) and gives back only
+ * after its lock is released and its request has answered, so no two running cases share a space and each reads only its own space's
+ * hold. The bound and the wait for it are the ones a case had alone. The fixture case, the pull case and the stalled allocation stay
+ * outside that block, one at a time: the first reads the process's unhandled rejections, which a case beside it would write into.
+ *
  * ## The bound is test-settable
  *
  * `setWriteBoundForTest({ writeTimeoutMs, holdDeadlineMs })` (plan §A1, `db/write-bound.ts`) sets both to 2 s here.
@@ -46,7 +54,7 @@
  *      node --test testing/standalone/a-write-inside-a-seq-hold-always-ends-db.test.js
  * (requires a prior `npm run build` in server/)
  */
-import { describe, it, before, after, beforeEach } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
@@ -60,9 +68,12 @@ import { holderCases, loadHolderModules, seedHolderSpace, heldPositionTaken, F }
 
 const skip = await mongoSkipReason();
 
-/** The space every holder case stalls in, and a second for the pull case (its counter row stays free). */
+/** The space the stalled-allocation case and the fixture case run in, and a second for the pull case (its counter row stays free). */
 const S = 'holdends';
 const R = 'holdresume';
+/** How many holder cases run at once, and the spaces they run in: one per running case, taken from a free list (below). */
+const WIDTH = 8;
+const CASE_SPACES = Array.from({ length: WIDTH }, (_, i) => `holdends${i + 1}`);
 const BOUND = { writeTimeoutMs: 2000, holdDeadlineMs: 2000 };
 const { SERVER_FIRST_MARGIN_MS, KILL_WAIT_MS } = await import('../../server/dist/db/write-bound.js');
 /** Headroom over the product's worst path, for a loaded runner: 1.5 s over the bound left 0.6 s and CI used it up (main run 44427408708). */
@@ -106,6 +117,32 @@ function holders() {
 const HOLDERS = holders();
 
 let door, mods;
+/**
+ * The spaces no running case holds: the question "which space may this case wipe, seed and stall in?".
+ *
+ * ## What it prevents
+ *
+ * Cases that run `WIDTH` at a time, each reading its own space's hold, stay independent only while no two of them hold one space. A pool
+ * "taken in turn" gives case i+8 the space of case i, which may still be running when the next slot frees (cases end at their own pace), so its
+ * wipe would take the rows from under a live case. A space leaves the list when a case takes it and returns only through `give`, which a
+ * case calls once its lock is released and its request has answered (`stalled` awaits both), so a wipe never meets a running case.
+ * `take` waits when every space is out, so a case never runs on a space another holds, whatever `WIDTH` and the runner's concurrency are.
+ *
+ * @param {string[]} ids  the spaces, all distinct
+ */
+function freeSpaces(ids) {
+  const free = [...ids];
+  const waiting = [];
+  return {
+    take: () => (free.length > 0 ? Promise.resolve(free.pop()) : new Promise(resolve => waiting.push(resolve))),
+    give(id) {
+      const next = waiting.shift();
+      if (next) next(id); else free.push(id);
+    },
+  };
+}
+const SPACES = freeSpaces(CASE_SPACES);
+
 /** The lowest record position a write of `space` holds right now (synchronous: the modules are loaded in `before`). */
 const lowestHeldRecordPositionNow = (space) => mods.clock.lowestOpenPosition(mods.recordStream.recordPositions, space);
 /** Filled by `before`; the cases (`_seq-hold-cases.mjs`) read it when they run. */
@@ -149,13 +186,12 @@ describe('a write inside a record-position hold always ends', { skip }, () => {
   before(async () => {
     // `completeLinkage`: the spaces' links are converted, as every space's are after its first boot — the cascade case
     // reads an entity's references through the link records, which refuse a space that was never converted.
-    door = await openPushDoor({ suite: 'holdends', spaces: [S, R].map(id => ({ id, label: id, folders: [], completeLinkage: true, meta: { suppressEmbeddings: true } })) });
+    door = await openPushDoor({ suite: 'holdends', spaces: [S, R, ...CASE_SPACES].map(id => ({ id, label: id, folders: [], completeLinkage: true, meta: { suppressEmbeddings: true } })) });
     mods = await loadHolderModules();
     Object.assign(ctx, { door, mods });
     try { restoreBound = await setWriteBoundForTest(BOUND); } catch (err) { seamError = err; }
   });
   after(async () => { restoreBound(); await door?.close(); });
-  beforeEach(async () => { await seedHolderSpace(door, S); });
 
   it('the derivation finds the holders, so an empty set cannot pass', () => {
     assert.ok(HOLDERS.size >= 10, `only ${HOLDERS.size} holder(s) of a record-position hold derived — the sweep is broken: ${[...HOLDERS.keys()]}`);
@@ -194,19 +230,36 @@ describe('a write inside a record-position hold always ends', { skip }, () => {
     assert.equal(r.entered, false, 'a run that never held a position is reported as not entered');
   });
 
-  for (const [holder, cases] of Object.entries(CASES)) {
-    for (const c of cases) {
-      it(`${holder}: ${c.label} — ends within the bound and releases the hold`, { timeout: ENTER_MS + CAP_MS + 30_000 }, async () => {
-        const r = await stalled(S, c);
-        assert.ok(r.entered, `fixture: ${c.label} never entered a position hold (it ${r.res.settled ? `settled first: ${r.res.ok ? 'ok' : r.res.error?.message}` : 'hung outside one'}) — re-anchor the case`);
-        assert.ok(r.res.settled,
-          `${c.label}: the write inside the hold on position ${r.heldAt} was still waiting ${r.res.elapsedMs} ms later — no bound `
-          + `(${BOUND.holdDeadlineMs} ms) ended it, so every position-paged pull of space '${S}' was held below position ${r.heldAt} for as long as the lock lived`);
-        assert.equal(r.after, undefined,
-          `${c.label}: the write ended after ${r.res.elapsedMs} ms but the hold on position ${r.after} was not released — the horizon is stuck`);
+  // The holder cases run WIDTH at a time, each in a space no running case holds (`freeSpaces`): a case is a lock held for the whole of the
+  // bound (about three seconds), so run one after another they were most of the file's time. Each reads its own space's hold only. The
+  // bound and `CAP_MS` are the ones a case ran under alone.
+  describe('the holder cases, each in a space of its own', { concurrency: WIDTH }, () => {
+    for (const [holder, cases] of Object.entries(CASES)) {
+      cases.forEach((own, index) => {
+        it(`${holder}: ${own.label} — ends within the bound and releases the hold`, { timeout: ENTER_MS + CAP_MS + 30_000 }, async () => {
+          const space = await SPACES.take();
+          let c, report;
+          try {
+            await seedHolderSpace(door, space);
+            // A space is free of holds when a case takes it: a hold a failed case left behind would otherwise be this case's "entered".
+            assert.deepEqual([lowestHeldRecordPositionNow(space), mods.fileTombstones.lowestUncommittedPosition(space)], [undefined, undefined],
+              `fixture: space '${space}' still holds a position from an earlier case, so this case could not tell its own hold from it`);
+            // The same table, built over this case's space: its locks, its fixture rows and its run name that space.
+            c = holderCases(ctx, space)[holder][index];
+            report = await stalled(space, c);
+          } finally {
+            SPACES.give(space);
+          }
+          assert.ok(report.entered, `fixture: ${c.label} never entered a position hold (it ${report.res.settled ? `settled first: ${report.res.ok ? 'ok' : report.res.error?.message}` : 'hung outside one'}) — re-anchor the case`);
+          assert.ok(report.res.settled,
+            `${c.label}: the write inside the hold on position ${report.heldAt} was still waiting ${report.res.elapsedMs} ms later — no bound `
+            + `(${BOUND.holdDeadlineMs} ms) ended it, so every position-paged pull of space '${space}' was held below position ${report.heldAt} for as long as the lock lived`);
+          assert.equal(report.after, undefined,
+            `${c.label}: the write ended after ${report.res.elapsedMs} ms but the hold on position ${report.after} was not released — the horizon is stuck`);
+        });
       });
     }
-  }
+  });
 
   it('a pull resumes past a hold whose write the bound ended, while the lock is still held', { timeout: ENTER_MS + CAP_MS + 30_000 }, async () => {
     await seedHolderSpace(door, R);
@@ -239,6 +292,7 @@ describe('a write inside a record-position hold always ends', { skip }, () => {
   // is outside every hold. It must still end within the bound — `versionsFor` runs inside `withinWriteBound` — and it must not have held
   // the horizon on the way, or a stalled counter would stop replication as a stalled record write does.
   it('a stalled version allocation (the counter row locked) ends within the bound and never holds the horizon', { timeout: ENTER_MS + CAP_MS + 30_000 }, async () => {
+    await seedHolderSpace(door, S);
     const lock = await holdCounterLock(door.mongo, S);
     let report;
     try {
