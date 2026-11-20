@@ -56,7 +56,7 @@ const DISMISS_ITEM_GROUP = 2;
 /*
  * THE SPACE SEGMENT OF A BRAIN RULE: `spaces\/([^/]+)`.
  *
- * The brain routes are `/api/brain/spaces/<space>/...` and nothing else (the short `/api/brain/<space>/...` is a 404 since 5.0). The rules
+ * The brain routes are `/api/brain/spaces/<space>/...` and nothing else (the short `/api/brain/<space>/...` is a 404 since 2.0, `04-brain-api.md`). The rules
  * once also read the short form, with the `spaces/` optional, and that optional part let the regex SKIP the literal `spaces` and take it for
  * the space: `GET /api/brain/spaces/files/export/rdf` (a space called `files`) was the file-list rule's prefix with the space `spaces`, and the
  * records export of that space left no row with `audit.logReads` off; `GET /api/brain/spills/facts` was the fact list of a space `spills`.

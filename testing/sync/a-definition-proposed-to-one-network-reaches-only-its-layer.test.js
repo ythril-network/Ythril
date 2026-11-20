@@ -119,6 +119,9 @@ describe('what a proposal to one network refuses, alike on both doors', () => {
     const rest = await patch(INSTANCES.a, tA, `/api/spaces/${SPACE}`, { targetNetwork: nets.one, label: 'renamed', meta: thing('odd', 'string') });
     assert.equal(rest.status, 400, JSON.stringify(rest.body));
     assert.match(rest.body.error, /label/);
-    assert.notEqual((await get(INSTANCES.a, tA, `/api/spaces/${SPACE}`)).body?.label, 'renamed', 'the refused body was partly applied');
+    // The label as the meta read names it (`spaceName`): no route serves `GET /api/spaces/:id`, so reading it compared undefined.
+    const after = await get(INSTANCES.a, tA, `/api/spaces/${SPACE}/meta`);
+    assert.equal(after.status, 200, JSON.stringify(after.body));
+    assert.notEqual(after.body?.spaceName, 'renamed', 'the refused body was partly applied');
   });
 });

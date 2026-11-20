@@ -249,7 +249,9 @@ describe('a failed tool call is audited as REST audits its twin', { skip }, () =
       app.use(auditMiddleware);
       const answer = (req, res) => { const s = Number(req.query.s); if (s === 500) throw new TypeError('q444: handler fault'); res.status(s).json({ error: 'stub' }); };
       app.post('/api/brain/filter', answer);
-      app.patch('/api/brain/:space/entities/:id', answer);
+      // The served route (`entities.ts`): the short `/api/brain/:space/...` is a 404 since 2.0, and a stub there holds the audit rules to a
+      // path nobody can request (a-test-asks-only-for-routes-the-server-serves).
+      app.patch('/api/brain/spaces/:spaceId/entities/:id', answer);
       server = await listenRouterApp(app);
       port = server.port;
     });
@@ -274,9 +276,9 @@ describe('a failed tool call is audited as REST audits its twin', { skip }, () =
       { tool: 'filter', status: 403, withSpace: false, restPath: '/api/brain/filter', method: 'POST', args: { space: SPACE, collection: 'entities' }, rights: NONE },
       { tool: 'filter', status: 404, withSpace: false, restPath: '/api/brain/filter', method: 'POST', args: { space: 'no-such-space', collection: 'entities' } },
       { tool: 'filter', status: 500, withSpace: false, restPath: '/api/brain/filter', method: 'POST', args: { space: SPACE, collection: 'entities' }, fault: true },
-      { tool: 'update_entity', status: 403, withSpace: true, restPath: `/api/brain/${SPACE}/entities/${existing}`, method: 'PATCH', args: { space: SPACE, id: existing, name: 'x' }, rights: NONE },
-      { tool: 'update_entity', status: 404, withSpace: true, restPath: `/api/brain/${SPACE}/entities/${existing}`, method: 'PATCH', args: { space: SPACE, id: existing, name: 'x' } },
-      { tool: 'update_entity', status: 500, withSpace: true, restPath: `/api/brain/${SPACE}/entities/${existing}`, method: 'PATCH', args: { space: SPACE, id: existing, name: 'x' }, fault: true },
+      { tool: 'update_entity', status: 403, withSpace: true, restPath: `/api/brain/spaces/${SPACE}/entities/${existing}`, method: 'PATCH', args: { space: SPACE, id: existing, name: 'x' }, rights: NONE },
+      { tool: 'update_entity', status: 404, withSpace: true, restPath: `/api/brain/spaces/${SPACE}/entities/${existing}`, method: 'PATCH', args: { space: SPACE, id: existing, name: 'x' } },
+      { tool: 'update_entity', status: 500, withSpace: true, restPath: `/api/brain/spaces/${SPACE}/entities/${existing}`, method: 'PATCH', args: { space: SPACE, id: existing, name: 'x' }, fault: true },
     ];
     for (const c of CASES) {
       for (const transport of TRANSPORTS) {
