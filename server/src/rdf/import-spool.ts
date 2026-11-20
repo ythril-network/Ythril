@@ -330,6 +330,8 @@ export interface SortedSpool {
   readonly quads: number;
   readonly subjects: number;
   readonly largestSubjectQuads: number;
+  /** The sorted file's name in the folder: what an act that was handed the folder reads its groups back with ({@link reopenSortedGroups}). */
+  readonly file: string;
   /** The groups in key order; may be read any number of times. */
   groups(): AsyncGenerator<QuadGroup, void, undefined>;
 }
@@ -456,12 +458,18 @@ export async function sortedSpool(quads: AsyncIterable<Quad>, folder: ImportFold
     });
     await finish(writer);
     for (const input of runs) await drop(input);
-    return { quads: total, subjects, largestSubjectQuads: largest, groups: () => groupsOf(folder, sorted) };
+    return { quads: total, subjects, largestSubjectQuads: largest, file: sorted, groups: () => groupsOf(folder, sorted) };
   } catch (err) {
     for (const writer of open) await writer.abort();
     for (const name of [...created]) await drop(name);
     throw err;
   }
+}
+
+/** The groups of a sorted file the door left in `folder` (`SortedSpool.file`), in key order: how the act, which the door hands the folder to, reads them. */
+export function reopenSortedGroups(folder: ImportFolder, file: string): () => AsyncGenerator<QuadGroup, void, undefined> {
+  fileIn(folder, file);
+  return () => groupsOf(folder, file);
 }
 
 async function* groupsOf(folder: ImportFolder, sorted: string): AsyncGenerator<QuadGroup, void, undefined> {

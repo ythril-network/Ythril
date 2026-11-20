@@ -16,11 +16,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { stripComments } from './_strip-comments.mjs';
 
 const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
 const read = (rel) => fs.readFileSync(`${root}/${rel}`, 'utf8').replaceAll('\r\n', '\n');
-/** Source with its comments blanked, so a code a comment mentions is not an answer. */
-const code = (rel) => read(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '');
+/** Source with its comments removed (the suite's one stripper), so a code a comment mentions is not an answer. */
+const code = (rel) => stripComments(read(rel));
 
 const ACT = 'server/src/spaces/rdf-import-act.ts';
 const act = code(ACT);
@@ -34,6 +35,11 @@ function answeredByTheAct() {
     if (m[1]) found.add(m[1]);
     else if (m[2]) { assert.ok(all[m[2]], `the constant ${m[2]} a refusal names is a string constant`); found.add(all[m[2]]); }
   }
+  // An act that ends for good (`gone(status, code, why)`) is answered by that status and code from its report.
+  for (const m of act.matchAll(/\bgone\(\s*[^,()]+,\s*(?:'([^']+)'|([A-Z][A-Z0-9_]*)(?=\s*,))/g)) {
+    if (m[1]) found.add(m[1]);
+    else if (m[2]) { assert.ok(all[m[2]], `the constant ${m[2]} an ended act names is a string constant`); found.add(all[m[2]]); }
+  }
   return found;
 }
 
@@ -44,7 +50,7 @@ function readerCodes() {
 
 function spaceStateCodes() {
   const src = code('server/src/rdf/rdf-space-state.ts');
-  const union = src.match(/code: (typeof [^;]+);/)?.[1] ?? '';
+  const union = src.match(/code: (typeof \w+(?: \| typeof \w+)+);/)?.[1] ?? '';
   return new Set([...union.matchAll(/typeof ([A-Z_]+)/g)].map(m => all[m[1]]).filter(Boolean));
 }
 

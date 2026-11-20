@@ -47,8 +47,9 @@ const isSeedKind = (k: string): k is SeedKind => (SEED_KINDS as readonly string[
  * The trusted arguments of an operation: always issued, so every item the import plans meets what a planner asks of a trusted caller only (the
  * chrono type list among it, review F2), a converge and an edge included; a minted id besides for an insert of a kind whose identity is minted.
  */
-function trustOf(spaceId: string, op: RecordOp): PlanTrust {
-  return trustedPlan(spaceId, op.op === 'insert' && op.kind !== 'edge' ? { mintedId: op.id } : {});
+function trustOf(spaceId: string, op: RecordOp, planMeta: object): PlanTrust {
+  // `planMeta`: the one schema the dry plan and every commit window of an import judge and stamp by (`planMetaFor`, read once under the hold).
+  return trustedPlan(spaceId, op.op === 'insert' && op.kind !== 'edge' ? { mintedId: op.id, planMeta } : { planMeta });
 }
 
 /** The id the read set is seeded with for an operation's record, when the import brings it: an insert of a kind that can be an end. */
@@ -57,8 +58,8 @@ export const seededIdOf = (op: RecordOp): string | undefined => (op.op === 'inse
 const text = (v: unknown): string => (typeof v === 'string' ? v : '');
 
 /** The planner call of one operation, as a dry-plan item: the same closure the commit calls. */
-export function opItem(spaceId: string, op: RecordOp): DryItem {
-  const trust = trustOf(spaceId, op);
+export function opItem(spaceId: string, op: RecordOp, planMeta: object): DryItem {
+  const trust = trustOf(spaceId, op, planMeta);
   const addressed = op.op === 'converge' ? { id: op.id } : {};
   switch (op.kind) {
     case 'entity': {
@@ -188,9 +189,9 @@ export interface DryWindow {
 }
 
 /** Dry-plan one window of operations against `view` (seeded here), writing nothing. */
-export async function dryPlanWindow(spaceId: string, ops: readonly RecordOp[], view: ReadSet, minted: MintedEnds): Promise<DryWindow> {
+export async function dryPlanWindow(spaceId: string, ops: readonly RecordOp[], view: ReadSet, minted: MintedEnds, planMeta: object): Promise<DryWindow> {
   await seedImported(view, ops, minted);
-  const { plans, refusals, unseeded } = await dryPlan(ops.map(op => opItem(spaceId, op)), view);
+  const { plans, refusals, unseeded } = await dryPlan(ops.map(op => opItem(spaceId, op, planMeta)), view);
   return { plans, refusals, unseeded };
 }
 
@@ -207,11 +208,11 @@ export class ImportCommitIncomplete extends Error {
  * operations inserted and how many converged; throws {@link ImportCommitIncomplete} when any did not land (nothing is reported landed then).
  */
 export async function commitWindow(
-  spaceId: string, ops: readonly RecordOp[], minted: MintedEnds, beforeCommitPlans?: () => unknown,
+  spaceId: string, ops: readonly RecordOp[], minted: MintedEnds, planMeta: object, beforeCommitPlans?: () => unknown,
 ): Promise<{ inserted: number; converged: number }> {
   const view = importReadSet(spaceId);
   await seedImported(view, ops, minted);
-  const items = ops.map(op => opItem(spaceId, op));
+  const items = ops.map(op => opItem(spaceId, op, planMeta));
   await view.load(mergeWants(items.map(i => i.want)));
   const plans: WritePlan[] = [];
   for (const item of items) plans.push((await item.plan(view)).plan);

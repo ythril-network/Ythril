@@ -344,7 +344,7 @@ function endOf(term: Term, ctx: QuadsToOpsContext): End {
 }
 
 /** The edge label a predicate names, `shared` when several labels share its address, or `null` when it is no edge label. */
-function edgeLabelOf(predicate: string, names: AddressNames): string | 'shared' | null {
+export function edgeLabelOf(predicate: string, names: AddressNames): string | 'shared' | null {
   const t = termOfIri(predicate, names);
   if (t.answer !== 'term' || t.owners.length === 0 || !t.owners.every(o => o.kind === 'edge' && o.prop === undefined && o.type !== null)) return null;
   return t.owners.length > 1 ? 'shared' : t.owners[0]!.type;
