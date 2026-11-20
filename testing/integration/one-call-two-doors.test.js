@@ -20,7 +20,7 @@
  *
  * Run: node --test testing/integration/one-call-two-doors.test.js
  */
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { INSTANCES, post } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
@@ -117,6 +117,9 @@ async function bothDoors(tool, args) {
   return { rest, mcp: mcpAnswer };
 }
 
+// Before the first hook: a file-level `before` runs the moment it is registered and reads `own`.
+const own = ownTokens();
+
 before(async () => {
   // Its own token: the emptying case below reaches the handler on both doors and is counted on the heavy-call rail per token.
   tokenA = await own.mint('two-doors');
@@ -125,7 +128,8 @@ before(async () => {
   assert.equal(created.status, 201, JSON.stringify(created.body));
 });
 
-after(async () => {
+// Through `own`, so the space is deleted with the token before the token is removed.
+own.after(async () => {
   await fetch(`${INSTANCES.a}/api/spaces/${SPACE}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${tokenA}`, 'Content-Type': 'application/json' },
@@ -133,9 +137,6 @@ after(async () => {
   }).catch(() => {});
   mcp?.close();
 });
-
-// After the hook above that deletes the space with this token: hooks run in registration order, and the token goes last.
-const own = ownTokens();
 
 describe('a read answers identically on both doors', () => {
   it('space_stats', async () => {

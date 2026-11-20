@@ -12,7 +12,7 @@
  *
  * Run: node --test testing/integration/ingest-writes-a-conversation.test.js
  */
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { INSTANCES, post, get, delWithBody, readCollection, waitFor } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
@@ -24,6 +24,9 @@ const WITHOUT_GROUP = `ingest-bare-${RUN}`;
 
 let token;
 let mcp;
+
+// Before the first hook: a file-level `before` runs the moment it is registered and reads `own`.
+const own = ownTokens();
 
 before(async () => {
   // Its own token: the starts below are counted on the heavy-call rail per token, and a file that shared the setup token spent slots another file's cases needed.
@@ -37,12 +40,10 @@ before(async () => {
   assert.equal(applied.status, 200, `the shipped conversation group is not in the library: ${JSON.stringify(applied.body)}`);
 });
 
-after(async () => {
+// Through `own`, so the spaces are deleted with the token before the token is removed.
+own.after(async () => {
   for (const id of [WITH_GROUP, WITHOUT_GROUP]) await delWithBody(INSTANCES.a, token, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
 });
-
-// After the hook above that deletes the spaces with this token: hooks run in the order they were registered, and the token goes last.
-const own = ownTokens();
 
 function extraction(conversationId) {
   return {

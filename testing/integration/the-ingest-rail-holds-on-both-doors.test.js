@@ -14,7 +14,7 @@
  *
  * Run: node --test testing/integration/the-ingest-rail-holds-on-both-doors.test.js
  */
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { INSTANCES, post, delWithBody } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
@@ -29,6 +29,10 @@ const ATTEMPTS = 12;
 let token;
 let mcp;
 
+// This file tests the limit itself, so it keeps counting on purpose: on a token of its own, which no other file's calls count on.
+// Before the first hook: a file-level `before` runs the moment it is registered and reads `own`.
+const own = ownTokens();
+
 before(async () => {
   token = await own.mint('ingest-rail');
   mcp = await openMcpSession(token);
@@ -40,13 +44,10 @@ before(async () => {
   assert.equal(applied.status, 200, JSON.stringify(applied.body));
 });
 
-after(async () => {
+// Through `own`, so the spaces are deleted with the token before the token is removed.
+own.after(async () => {
   for (const id of [WITH_GROUP, WITHOUT_GROUP]) await delWithBody(INSTANCES.a, token, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
 });
-
-// After the hook above that deletes the spaces with this token (hooks run in registration order, and the token goes last). This file tests the
-// limit itself, so it keeps counting on purpose: on a token of its own, which no other file's calls count on.
-const own = ownTokens();
 
 /** The smallest extraction the group accepts: it asks no model, so a started run costs the stack nothing. */
 const extraction = (conversationId) => ({
