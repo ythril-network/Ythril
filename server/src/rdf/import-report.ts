@@ -20,6 +20,8 @@ import type { OpKind, ReasonEntry } from './quads-to-ops.js';
 export const RDF_IMPORT_REASONS_NAMED_MAX = 100;
 /** The most statements one named reason shows. */
 export const STATEMENTS_PER_REASON_MAX = 20;
+/** The longest field name a refusal row may name in the report: a longer one is a value written into a name's place, and is left out. */
+const FIELD_NAME_MAX_CHARS = 200;
 /** The kinds an import writes, in the store's commit order (`brain/write-plan/types.ts`, `COMMIT_ORDER`: facts, entities, chrono, edges). */
 export const IMPORT_OP_ORDER: readonly OpKind[] = ['fact', 'entity', 'chrono', 'edge'];
 
@@ -91,7 +93,7 @@ function violationFields(v: Record<string, unknown>): string[] {
     if (row === null || typeof row !== 'object') continue;
     for (const k of ['field', 'key', 'path', 'property']) {
       const name = (row as Record<string, unknown>)[k];
-      if (typeof name === 'string' && name.length <= 200) names.add(name);
+      if (typeof name === 'string' && name.length <= FIELD_NAME_MAX_CHARS) names.add(name);
     }
   }
   return [...names].slice(0, STATEMENTS_PER_REASON_MAX);

@@ -52,12 +52,12 @@ rdfImportRouter.post('/spaces/:spaceId/import/rdf', globalRateLimit, requireSpac
   }
   if (answer.kind === 'report') {
     req.auditChangesExplicit = rdfImportAuditChanges(answer.report);
-    res.status(200).json(answer.report);
+    res.status(answer.status).json(answer.report);
     return;
   }
   if (answer.kind === 'running') {
     res.setHeader('Location', answer.location);
-    res.status(202).json({ importId: answer.importId, status: 'running', location: answer.location });
+    res.status(answer.status).json({ importId: answer.importId, status: 'running', location: answer.location });
     return;
   }
   const report = answer.detail?.['report'];
@@ -80,5 +80,5 @@ rdfImportRouter.get('/spaces/:spaceId/import/rdf/:importId', globalRateLimit, re
     sendRefusal(res, answer);
     return;
   }
-  res.status(200).json(answer.report);
+  res.status(answer.status).json(answer.report);
 });

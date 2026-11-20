@@ -72,7 +72,7 @@ import { ImportIndex, type IndexedRecord } from '../rdf/import-index.js';
 import {
   groupSubjectOf, quadsToOps, recordKey, recordKindOfGroup, tripletsOfGroup, type MintedRecord, type QuadsToOpsContext, type RecordOp,
 } from '../rdf/quads-to-ops.js';
-import { commitWindow, dryPlanWindow, importReadSet, readStored, type MintedEnd } from '../rdf/import-plan.js';
+import { commitWindow, dryPlanWindow, importReadSet, loadStoredRecords, type MintedEnd } from '../rdf/import-plan.js';
 
 const KIND = 'rdf-import' as const;
 
@@ -84,10 +84,17 @@ export const RDF_IMPORT_REPORT_DIR = 'rdf-import-reports';
 export const RDF_IMPORT_REPORT_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 /** Operations planned and committed per window. */
 const WINDOW_DEFAULT = 500;
-/** The longest address a parameter may carry. */
-const ADDRESS_MAX = 2048;
+/** The longest address a parameter may carry (the tool's input schema states the same bound). */
+export const RDF_IMPORT_ADDRESS_MAX = 2048;
 /** The most per-graph source bases one request names. */
-const GRAPH_BASES_MAX = 64;
+export const RDF_IMPORT_GRAPH_BASES_MAX = 64;
+/** A graph base is `"<graph address> <source base>"`: at least one character each side of the space, and at most two addresses and the space. */
+export const RDF_IMPORT_GRAPH_BASE_MIN_CHARS = 3;
+export const RDF_IMPORT_GRAPH_BASE_MAX_CHARS = RDF_IMPORT_ADDRESS_MAX * 2 + 1;
+/** The bytes of a record key's digest in the act's sets: 128 bits, so a collision is not a thing a file can plan. */
+const KEY_DIGEST_BYTES = 16;
+/** The HTTP statuses the act and its doors answer with, each named, so no refusal below carries a bare number. */
+const HTTP = { OK: 200, ACCEPTED: 202, BAD_REQUEST: 400, NOT_FOUND: 404, CONFLICT: 409, GONE: 410, TOO_LARGE: 413, UNSUPPORTED_MEDIA: 415, UNPROCESSABLE: 422, UNAVAILABLE: 503 } as const;
 const OP_ORDER = IMPORT_OP_ORDER;
 
 // ── Refusal codes ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -110,7 +117,7 @@ export const RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
 // ── Parameters ────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** A source base per graph: `"<graph address> <source base>"`, one value each. */
-const GRAPH_BASE = z.string().min(3).max(ADDRESS_MAX * 2 + 1).regex(/^\S+ \S+$/, 'a graph base is "<graph address> <source base>"');
+const GRAPH_BASE = z.string().min(RDF_IMPORT_GRAPH_BASE_MIN_CHARS).max(RDF_IMPORT_GRAPH_BASE_MAX_CHARS).regex(/^\S+ \S+$/, 'a graph base is "<graph address> <source base>"');
 
 /**
  * The parameters both doors take, judged before any logic runs. NOT strict: a door passes only these names. `schema` is named so that a
@@ -120,9 +127,9 @@ export const RdfImportParams = z.object({
   format: z.enum(RDF_FORMATS as unknown as [RdfFormat, ...RdfFormat[]]).optional(),
   dryRun: z.boolean().optional(),
   blankNodes: z.enum(['refuse', 'mint']).optional(),
-  sourceBase: z.string().min(1).max(ADDRESS_MAX).optional(),
-  sourceVocab: z.string().min(1).max(ADDRESS_MAX).optional(),
-  graphBase: z.array(GRAPH_BASE).max(GRAPH_BASES_MAX).optional(),
+  sourceBase: z.string().min(1).max(RDF_IMPORT_ADDRESS_MAX).optional(),
+  sourceVocab: z.string().min(1).max(RDF_IMPORT_ADDRESS_MAX).optional(),
+  graphBase: z.array(GRAPH_BASE).max(RDF_IMPORT_GRAPH_BASES_MAX).optional(),
   schema: z.unknown().optional(),
 });
 
@@ -236,7 +243,7 @@ function namesByGraph(meta: SpaceMeta, options: ImportOptions): (graph: string |
 /** A set of keys held as 128-bit digests: the triplets a file asserts and reifies, at a fixed cost per triplet. */
 class DigestSet extends Set<string> {
   private static digest(key: string): string {
-    return createHash('sha256').update(key).digest().subarray(0, 16).toString('latin1');
+    return createHash('sha256').update(key).digest().subarray(0, KEY_DIGEST_BYTES).toString('latin1');
   }
   override add(key: string): this { return super.add(DigestSet.digest(key)); }
   override has(key: string): boolean { return super.has(DigestSet.digest(key)); }
@@ -312,7 +319,7 @@ async function indexPass(run: Run): Promise<{ index: ImportIndex; asserted: Dige
       if (address && address.kind === kind) candidates.push({ key, kind, id: address.id });
       else fresh.push({ key, kind });
     }
-    const stored = await readStored(run.spaceId, candidates.map(c => ({ kind: c.kind, id: c.id })));
+    const stored = await loadStoredRecords(run.spaceId, candidates.map(c => ({ kind: c.kind, id: c.id })));
     for (const c of candidates) {
       if (stored.has(recordKey(c.kind, c.id))) index.set(c.key, { kind: c.kind, id: c.id, stored: true });
       else fresh.push({ key: c.key, kind: c.kind });
@@ -339,7 +346,7 @@ async function translatePass(run: Run, index: ImportIndex, asserted: DigestSet, 
         }
       }
     }
-    const stored = await readStored(run.spaceId, wants);
+    const stored = await loadStoredRecords(run.spaceId, wants);
     for (const group of window) {
       const ctx: QuadsToOpsContext = {
         names: names(group.graph?.value), meta: run.meta, mode: run.options.mode, blankNodes: run.options.blankNodes,
@@ -452,20 +459,20 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
     if (kept) await keepReport({ ...kept, status: 'failed', error: why, endedAt: new Date().toISOString() }).catch(() => undefined);
     return { failedFinally: { status, message: `The RDF import into space '${entry.localId}' cannot complete: ${why} Nothing more is written.` }, afterCompletion: forget };
   };
-  if (!dir) return gone(410, 'its files are not named by an id this instance minted.');
+  if (!dir) return gone(HTTP.GONE, 'its files are not named by an id this instance minted.');
   try { await fsp.access(dir); } catch (err) {
-    if (isMissingPath(err)) return gone(410, 'its files are no longer on disk.');
+    if (isMissingPath(err)) return gone(HTTP.GONE, 'its files are no longer on disk.');
     throw err;
   }
   const folder = await openImportFolder(dir);
   let state: ActState;
   try { state = await readState(folder); } catch (err) {
-    if (isMissingPath(err) || err instanceof SyntaxError) return gone(422, 'its state can no longer be read.');
+    if (isMissingPath(err) || err instanceof SyntaxError) return gone(HTTP.UNPROCESSABLE, 'its state can no longer be read.');
     throw err;
   }
   const cfg = getConfig();
   const space = rdfSpaceState(cfg, entry.localId, undefined, schemaFingerprintOf);
-  if (!space.ok) return gone(409, `RDF is no longer usable on the space (${space.code}).`);
+  if (!space.ok) return gone(HTTP.CONFLICT, `RDF is no longer usable on the space (${space.code}).`);
   const groups = await reopenSortedSpool(folder);
   const builder = new ReportBuilder(state.report);
   let outcome: Awaited<ReturnType<typeof runPasses>>;
@@ -476,14 +483,14 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
     // so the act ends and releases the space, as a refusal does (A11), and the door answers the bound.
     if (!(err instanceof RdfImportBoundExceeded)) throw err;
     await keepReport({ ...builder.report, status: 'refused', bound: { name: err.bound, limit: err.limit }, endedAt: new Date().toISOString() });
-    return { failedFinally: { status: 413, message: `The RDF import into space '${entry.localId}' was refused: ${err.message}` }, afterCompletion: forget };
+    return { failedFinally: { status: HTTP.TOO_LARGE, message: `The RDF import into space '${entry.localId}' was refused: ${err.message}` }, afterCompletion: forget };
   }
   const report = { ...builder.report, endedAt: new Date().toISOString() };
   if (outcome === 'refused') {
     await keepReport({ ...report, status: 'refused' });
     return {
       failedFinally: {
-        status: 409,
+        status: HTTP.CONFLICT,
         message: `The RDF import into space '${entry.localId}' was refused: ${report.reasonCount} reason(s), nothing was written; `
           + `its report is at GET /api/brain/spaces/${entry.localId}/import/rdf/${id}.`,
       },
@@ -551,11 +558,11 @@ export interface RdfImportInput {
 export interface RdfImportRefusal { kind: 'refused'; status: number; error: string; code: string; detail?: Record<string, unknown> }
 
 /** An import's report, finished (or a dry run's). */
-export interface RdfImportDone { kind: 'report'; status: 200; report: RdfImportReport }
+export interface RdfImportDone { kind: 'report'; status: typeof HTTP.OK; report: RdfImportReport }
 
 export type RdfImportAnswer =
   | RdfImportDone
-  | { kind: 'running'; status: 202; importId: string; location: string }
+  | { kind: 'running'; status: typeof HTTP.ACCEPTED; importId: string; location: string }
   | RdfImportRefusal;
 
 const refusal = (status: number, code: string, error: string, detail?: Record<string, unknown>): RdfImportRefusal =>
@@ -618,10 +625,10 @@ function graphsWithoutBase(seen: GraphsSeen, options: ImportOptions): string[] {
  */
 export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnswer> {
   const parsed = RdfImportParams.safeParse(paramsOf(input.params));
-  if (!parsed.success) return refusal(400, RDF_IMPORT_BAD_PARAM, refusalOfParse(parsed.error).error);
+  if (!parsed.success) return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_BAD_PARAM, refusalOfParse(parsed.error).error);
   const p = parsed.data;
   if (p.schema !== undefined) {
-    return refusal(400, RDF_IMPORT_SCHEMA_NOT_AVAILABLE, 'schema: building a schema from the file is not available yet; import the data into a space whose schema is set, and leave schema out');
+    return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_SCHEMA_NOT_AVAILABLE, 'schema: building a schema from the file is not available yet; import the data into a space whose schema is set, and leave schema out');
   }
   const cfg = getConfig();
   // The one existence rule: an id that is not a configured space (a view included: an import writes into a space) is answered as missing.
@@ -629,11 +636,11 @@ export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnsw
   if (unknown) return refusal(unknown.status, unknown.body.code ?? 'space_not_found', unknown.body.error);
   const format = p.format ?? formatOfMediaType(input.contentType);
   if (!format) {
-    return refusal(415, 'rdf_unsupported_format', `The document's format is not one the import reads: send ${RDF_FORMATS.map(f => RDF_MEDIA_TYPES[f]).join(', ')}, or name it in format`);
+    return refusal(HTTP.UNSUPPORTED_MEDIA, 'rdf_unsupported_format', `The document's format is not one the import reads: send ${RDF_FORMATS.map(f => RDF_MEDIA_TYPES[f]).join(', ')}, or name it in format`);
   }
   const encoding = (input.contentEncoding ?? 'identity').trim().toLowerCase();
   if (encoding !== 'identity' && encoding !== 'gzip' && encoding !== '') {
-    return refusal(415, RDF_IMPORT_UNSUPPORTED_ENCODING, 'The document is sent plain or gzipped (Content-Encoding: gzip); no other encoding is read');
+    return refusal(HTTP.UNSUPPORTED_MEDIA, RDF_IMPORT_UNSUPPORTED_ENCODING, 'The document is sent plain or gzipped (Content-Encoding: gzip); no other encoding is read');
   }
   const state = rdfSpaceState(cfg, input.spaceId, input.caller, schemaFingerprintOf);
   if (!state.ok) return refusal(state.status, state.code, state.error, state.detail);
@@ -648,10 +655,10 @@ export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnsw
     ...(p.sourceBase !== undefined ? { source: { base: p.sourceBase, ...(p.sourceVocab !== undefined ? { vocab: p.sourceVocab } : {}) } } : {}),
   };
   try { namesByGraph(state.meta, options); } catch (err) {
-    if (err instanceof TypeError) return refusal(400, RDF_IMPORT_BAD_PARAM, `sourceBase, sourceVocab or graphBase: ${err.message}`);
+    if (err instanceof TypeError) return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_BAD_PARAM, `sourceBase, sourceVocab or graphBase: ${err.message}`);
     throw err;
   }
-  if (doorHeld) return refusal(409, RDF_IMPORT_BUSY, 'Another RDF import is being read in on this instance: try again when it has been answered');
+  if (doorHeld) return refusal(HTTP.CONFLICT, RDF_IMPORT_BUSY, 'Another RDF import is being read in on this instance: try again when it has been answered');
   doorHeld = true;
   try {
     return await readAndRun(input, options, state.meta, p.dryRun === true);
@@ -672,8 +679,8 @@ async function readAndRun(input: RdfImportInput, options: ImportOptions, meta: S
     const sorted = await sortedSpool(noteGraphs(quads, seen), folder, { names: addressNames(meta, options.source), bounds: knobs.bounds ?? {} });
     const missing = graphsWithoutBase(seen, options);
     if (missing.length > 0) {
-      return refusal(400, RDF_IMPORT_SEVERAL_GRAPHS, `The file holds ${seen.order.length - seen.describing.size} data graphs and ${missing.length} of them have no source base: `
-        + 'name one per graph in graphBase ("<graph address> <source base>"), or import one graph at a time', { graphsWithoutBase: missing.slice(0, GRAPH_BASES_MAX) });
+      return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_SEVERAL_GRAPHS, `The file holds ${seen.order.length - seen.describing.size} data graphs and ${missing.length} of them have no source base: `
+        + 'name one per graph in graphBase ("<graph address> <source base>"), or import one graph at a time', { graphsWithoutBase: missing.slice(0, RDF_IMPORT_GRAPH_BASES_MAX) });
     }
     const report: RdfImportReport = {
       importId, space: input.spaceId, status: dryRun ? 'dry-run' : 'running', dryRun, format: options.format, mode: options.mode,
@@ -684,7 +691,7 @@ async function readAndRun(input: RdfImportInput, options: ImportOptions, meta: S
       const builder = new ReportBuilder(report);
       const outcome = await runPasses({ spaceId: input.spaceId, folder, meta, options, groups: sorted.groups, builder, state: null, commit: false });
       const done = { ...builder.report, endedAt: new Date().toISOString() };
-      return outcome === 'refused' ? refusedAnswer({ ...done, status: 'refused' }) : { kind: 'report', status: 200, report: done };
+      return outcome === 'refused' ? refusedAnswer({ ...done, status: 'refused' }) : { kind: 'report', status: HTTP.OK, report: done };
     }
     await writeState(folder, { importId, space: input.spaceId, options, phase: 'sorted', committed: 0, report });
     await keepReport(report);
@@ -710,24 +717,24 @@ async function readAndRun(input: RdfImportInput, options: ImportOptions, meta: S
 
 /** A strict refusal's answer: 409, the report beside it. */
 function refusedAnswer(report: RdfImportReport): RdfImportRefusal {
-  return refusal(409, RDF_IMPORT_REFUSED, `The import was refused and nothing was written: ${report.reasonCount} reason(s), each with its statements in the report`, { report });
+  return refusal(HTTP.CONFLICT, RDF_IMPORT_REFUSED, `The import was refused and nothing was written: ${report.reasonCount} reason(s), each with its statements in the report`, { report });
 }
 
 /** The answer to a fault of the door's own pass that is the file's, or null. */
 function doorRefusalOf(err: unknown, format: RdfFormat): RdfImportRefusal | null {
   if (err instanceof RdfImportBoundExceeded) {
-    return refusal(413, err.code, `The file is over the import's bound ${err.bound} (${err.limit}); nothing was imported`, { bound: err.bound, limit: err.limit });
+    return refusal(HTTP.TOO_LARGE, err.code, `The file is over the import's bound ${err.bound} (${err.limit}); nothing was imported`, { bound: err.bound, limit: err.limit });
   }
   if (err instanceof BodyTooLarge) {
-    return refusal(413, 'rdf_bound_exceeded', `The body is over the import body bound (${err.limit} bytes); nothing was imported`, { bound: RDF_IMPORT_BODY_TOO_LARGE_BOUND, limit: err.limit });
+    return refusal(HTTP.TOO_LARGE, 'rdf_bound_exceeded', `The body is over the import body bound (${err.limit} bytes); nothing was imported`, { bound: RDF_IMPORT_BODY_TOO_LARGE_BOUND, limit: err.limit });
   }
   if (err instanceof RdfParseError) {
     if (err.code === 'rdf_bound_exceeded') {
-      return refusal(413, err.code, `The file is over the reader's bound ${err.bound ?? ''}; nothing was imported`, { ...(err.bound ? { bound: err.bound } : {}), ...(err.place ? { place: err.place } : {}) });
+      return refusal(HTTP.TOO_LARGE, err.code, `The file is over the reader's bound ${err.bound ?? ''}; nothing was imported`, { ...(err.bound ? { bound: err.bound } : {}), ...(err.place ? { place: err.place } : {}) });
     }
     const where = err.place ? ` at line ${err.place.line}${err.place.column === undefined ? '' : `, column ${err.place.column}`}` : '';
     const why = err.code === 'rdf_malformed' ? `is not well-formed ${format}${where}` : `cannot be read${where} (${err.code})`;
-    return refusal(err.code === 'rdf_unsupported_format' ? 415 : 400, err.code, `The file ${why}; nothing was imported`, err.place ? { place: err.place } : undefined);
+    return refusal(err.code === 'rdf_unsupported_format' ? HTTP.UNSUPPORTED_MEDIA : HTTP.BAD_REQUEST, err.code, `The file ${why}; nothing was imported`, err.place ? { place: err.place } : undefined);
   }
   return null;
 }
@@ -736,15 +743,15 @@ function doorRefusalOf(err: unknown, format: RdfFormat): RdfImportRefusal | null
 async function waitForAct(spaceId: string, importId: string, entryId: string): Promise<RdfImportAnswer> {
   const location = `/api/brain/spaces/${encodeURIComponent(spaceId)}/import/rdf/${importId}`;
   const wait = await awaitDoorActs([entryId], [runSpaceAct(entryId, { waiter: true, via: 'door' }).then(r => [r])]);
-  if (!wait.finished) return { kind: 'running', status: 202, importId, location };
+  if (!wait.finished) return { kind: 'running', status: HTTP.ACCEPTED, importId, location };
   const settled = wait.results[0]!;
   const report = await readReport(importId);
-  if (settled.ok && report) return { kind: 'report', status: 200, report };
+  if (settled.ok && report) return { kind: 'report', status: HTTP.OK, report };
   if (report?.status === 'refused' && report.bound) {
-    return refusal(413, 'rdf_bound_exceeded', `The file is over the import's bound ${report.bound.name} (${report.bound.limit}); nothing was imported`, { ...report.bound, bound: report.bound.name, importId });
+    return refusal(HTTP.TOO_LARGE, 'rdf_bound_exceeded', `The file is over the import's bound ${report.bound.name} (${report.bound.limit}); nothing was imported`, { ...report.bound, bound: report.bound.name, importId });
   }
   if (report?.status === 'refused') return refusedAnswer(report);
-  if (settled.interrupted) return refusal(503, 'shutting down', 'shutting down; the import resumes after the next start', { importId });
+  if (settled.interrupted) return refusal(HTTP.UNAVAILABLE, 'shutting down', 'shutting down; the import resumes after the next start', { importId });
   const failure = spaceActFailureAnswer(settled.cause ?? new Error(settled.error ?? 'the import did not complete'), 'local', `rdf import '${spaceId}'`);
   return refusal(failure.status, String(failure.body.code ?? 'space_act_failed'), failure.body.error, { importId, ...(settled.retryAt ? { retryAt: settled.retryAt } : {}) });
 }
@@ -754,11 +761,11 @@ async function waitForAct(spaceId: string, importId: string, entryId: string): P
 /** What an import did or is doing, for a caller with the import's rung on its space. */
 export async function rdfImportStatusAct(input: { spaceId: string; params: Record<string, unknown> }): Promise<RdfImportDone | RdfImportRefusal> {
   const parsed = RdfImportStatusParams.safeParse({ importId: input.params['importId'] });
-  if (!parsed.success) return refusal(400, RDF_IMPORT_BAD_PARAM, refusalOfParse(parsed.error).error);
+  if (!parsed.success) return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_BAD_PARAM, refusalOfParse(parsed.error).error);
   const unknown = unknownSpaceAnswer(null, input.spaceId);
   if (unknown) return refusal(unknown.status, unknown.body.code ?? 'space_not_found', unknown.body.error);
   const report = await readReport(parsed.data.importId);
   // Another space's import is answered as one that does not exist: its id says nothing to a caller of this space.
-  if (!report || report.space !== input.spaceId) return refusal(404, RDF_IMPORT_NOT_FOUND, 'No import of this space has that id (a report is kept for seven days)');
-  return { kind: 'report', status: 200, report };
+  if (!report || report.space !== input.spaceId) return refusal(HTTP.NOT_FOUND, RDF_IMPORT_NOT_FOUND, 'No import of this space has that id (a report is kept for seven days)');
+  return { kind: 'report', status: HTTP.OK, report };
 }

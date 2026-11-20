@@ -86,14 +86,14 @@
   },
   {
     "id": "cycles:server/src:components",
-    "max": 4,
-    "reason": "the server's import graph has four cyclic sets today (a large core one, a 17-module one and two pairs); no bundle removes a cycle of this size alone, so the count may not grow while a design splits them",
+    "max": 3,
+    "reason": "the server's import graph has three cyclic sets today (a large core one, a 20-module one and a pair); no bundle removes a cycle of this size alone, so the count may not grow while a design splits them. Lowered from four to its measure by bundle-270 slice S6",
     "reviewBy": "2027-02-18"
   },
   {
     "id": "cycles:server/src:largest",
-    "max": 312,
-    "reason": "the largest cyclic set of server/src holds 312 modules (the brain, sync, spaces, files, config and db layers import each other); it may not grow while a design splits it. Lowered from 316 by bundle-284: the import totals' shape moved to a leaf (sync/import-totals.ts), so the audit allowlist no longer reaches the importer, which freed 11 modules while the conversion's 8 joined. Lowered from 313 by bundle-269 slice D: the WebhookActor type moved to a leaf (webhooks/webhook-actor.ts), cutting the edge mcp/tools/types.ts -> webhooks/dispatcher.ts that pulled the tool context into the set by a type alone, so the RDF tools joined nothing",
+    "max": 285,
+    "reason": "the largest cyclic set of server/src holds 285 modules (the brain, sync, spaces, files, config and db layers import each other); it may not grow while a design splits it. Lowered from 312 by bundle-270 slice S6 (the RDF import's act, planner module, tool and their dry-plan joined it, 317): the five recall result shapes moved to a leaf (brain/recall-types.ts), cutting the type edge recall-shape.ts -> recall.ts that held 32 modules in the set, so it fell to 285 with the import's modules in it. Lowered from 316 by bundle-284: the import totals' shape moved to a leaf (sync/import-totals.ts), so the audit allowlist no longer reaches the importer, which freed 11 modules while the conversion's 8 joined. Lowered from 313 by bundle-269 slice D: the WebhookActor type moved to a leaf (webhooks/webhook-actor.ts), cutting the edge mcp/tools/types.ts -> webhooks/dispatcher.ts that pulled the tool context into the set by a type alone, so the RDF tools joined nothing",
     "reviewBy": "2027-02-18"
   },
   {

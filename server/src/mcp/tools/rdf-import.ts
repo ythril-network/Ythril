@@ -16,6 +16,7 @@ import { JSON_BODY_MAX_BYTES } from '../../config/body-limits.js';
 import { RDF_FORMATS } from '../../rdf/serialize.js';
 import {
   rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, RDF_IMPORT_REASONS_NAMED_MAX, RDF_IMPORT_REFUSAL_CODES, type RdfImportRefusal,
+  RDF_IMPORT_ADDRESS_MAX, RDF_IMPORT_GRAPH_BASES_MAX, RDF_IMPORT_GRAPH_BASE_MIN_CHARS, RDF_IMPORT_GRAPH_BASE_MAX_CHARS,
 } from '../../spaces/rdf-import-act.js';
 
 /** The act's refusal as the tool's: its status and code, and what more it carries (a refused import's report) as structured content. */
@@ -50,10 +51,11 @@ export const import_rdfTool: ToolHandler = {
       format: { type: 'string', enum: [...RDF_FORMATS], description: 'turtle, trig, nquads or jsonld: the document\'s format (required here; REST reads Content-Type).' },
       dryRun: { type: 'boolean', description: 'true: read, translate and check everything, write nothing, and answer what would land and every reason. Default false.' },
       blankNodes: { type: 'string', enum: ['refuse', 'mint'], description: 'A subject that is a blank node: refused (the default), or a new record each.' },
-      sourceBase: { type: 'string', minLength: 1, maxLength: 2048, description: 'The base of the space the file was exported from, when it is another space: its addresses are then read as that space\'s records and terms (default: the file\'s one data graph\'s name).' },
-      sourceVocab: { type: 'string', minLength: 1, maxLength: 2048, description: 'The vocabulary of that space, when it is not <sourceBase>vocab/.' },
+      sourceBase: { type: 'string', minLength: 1, maxLength: RDF_IMPORT_ADDRESS_MAX, description: 'The base of the space the file was exported from, when it is another space: its addresses are then read as that space\'s records and terms (default: the file\'s one data graph\'s name).' },
+      sourceVocab: { type: 'string', minLength: 1, maxLength: RDF_IMPORT_ADDRESS_MAX, description: 'The vocabulary of that space, when it is not <sourceBase>vocab/.' },
       graphBase: {
-        type: 'array', maxItems: 64, items: { type: 'string', minLength: 3, maxLength: 4097 },
+        type: 'array', maxItems: RDF_IMPORT_GRAPH_BASES_MAX,
+        items: { type: 'string', minLength: RDF_IMPORT_GRAPH_BASE_MIN_CHARS, maxLength: RDF_IMPORT_GRAPH_BASE_MAX_CHARS },
         description: 'For a file of several data graphs (a view\'s export): one "<graph address> <source base>" per graph. A file of several graphs is refused without them.',
       },
       schema: { description: 'Not available yet: building a schema from the file is refused by name (rdf_import_schema_not_available).' },

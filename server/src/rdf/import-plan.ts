@@ -133,7 +133,7 @@ export async function seedImported(view: ReadSet, ops: readonly RecordOp[], mint
  * The stored records the translation of a window reads, by `recordKey`: each with its link rows when its kind holds links. Read through the
  * planners' own read set (one merged read), so the import reads the store the way its planners will; a fork row reads as absent.
  */
-export async function readStored(spaceId: string, wants: ReadonlyArray<{ kind: RecordKind; id: string }>): Promise<Map<string, StoredRecord>> {
+export async function loadStoredRecords(spaceId: string, wants: ReadonlyArray<{ kind: RecordKind; id: string }>): Promise<Map<string, StoredRecord>> {
   const found = new Map<string, StoredRecord>();
   if (wants.length === 0) return found;
   const view = importReadSet(spaceId);
