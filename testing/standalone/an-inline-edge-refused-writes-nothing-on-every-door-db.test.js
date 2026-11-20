@@ -40,6 +40,11 @@
  * Assertions are on identities (the ids found, the edges' `from/to/label`), never on a count alone: a count of `0` passes
  * a lookup that looked in the wrong place.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 36 s (measured 2026-11-20). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads about twice that: the time of the crowd, not of this file. Cutting it would add fixtures and shorten no run.
+ *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/an-inline-edge-refused-writes-nothing-on-every-door-db.test.js
  * (requires a prior `npm run build` in server/)

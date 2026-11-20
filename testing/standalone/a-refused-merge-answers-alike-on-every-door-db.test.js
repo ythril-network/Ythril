@@ -37,6 +37,11 @@
  * pair. The harness keeps the survivor's re-embed from downloading a model (`YTHRIL_MODELS_OFFLINE`, set in
  * `_mongo-harness.mjs`): the merge swallows an embed failure, which is the behaviour it has when the model is unavailable.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 23 s (measured 2026-11-20). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads several times that: the time of the crowd, not of this file. Cutting it would add fixtures and shorten no run.
+ *
  * Run: a Mongo the harness accepts (see `_mongo-harness.mjs`), then
  *      node --test testing/standalone/a-refused-merge-answers-alike-on-every-door-db.test.js
  * (requires a prior `npm run build` in server/)
