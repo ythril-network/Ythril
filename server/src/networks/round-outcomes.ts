@@ -93,6 +93,7 @@ function entryFor(net: NetworkConfig, round: VoteRound, now: number): RoundOutco
     veto: counted.veto,
     eligible: counted.eligible,
     ...(summary ? { summary } : {}),
+    ...(round.notAppliedHere === true ? { notApplied: true as const } : {}),
     ...(round.type === 'join' && hash ? { inviteKeyHash: hash, subjectInstanceId: clean(round.subjectInstanceId, LABEL_CHARS) } : {}),
   };
 }

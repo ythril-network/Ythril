@@ -76,8 +76,11 @@ function applyOrReopen(round: VoteRound, apply: () => void): void {
     round.passed = undefined;
     round.outcome = undefined;
     round.concludedAt = undefined;
+    // The votes passed it and this member could not apply it: kept, so a round that runs out its deadline is not called expired (R6).
+    round.notAppliedHere = true;
     throw cause;
   }
+  delete round.notAppliedHere;
 }
 
 /**
@@ -99,7 +102,9 @@ export function concludeRoundIfReady(
   if (verdict === 'vetoed' || verdict === 'expired') {
     round.concluded = true;
     round.passed = false;
-    round.outcome = verdict;
+    // A round the votes passed here and whose apply never took ran into its deadline: the network decided it, so the word is `passed`, marked not
+    // applied (`notAppliedHere`), and `passed` stays false because nothing was applied here. An unmarked round that ran out is `expired`.
+    round.outcome = verdict === 'expired' && round.type === 'meta_change' && round.notAppliedHere === true ? 'passed' : verdict;
     round.concludedAt = new Date(now).toISOString();
     recordRoundOutcome(net, round, now);
     // A failed JOIN leaves the candidate's provisioned credentials (peer PAT

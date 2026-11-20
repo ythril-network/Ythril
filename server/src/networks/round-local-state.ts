@@ -15,6 +15,8 @@
  * - `outcome` and `concludedAt`: how THIS instance's conclusion read the round, and when. An instance's own reading, unsigned, which
  *   no decision reads back (`a-round-outcome-decides-nothing-and-is-never-markup.test.js`); taken from a peer it would let one
  *   instance label another's round.
+ * - `notAppliedHere`: the votes passed a `meta_change` round here and the apply threw. What one member could not apply says nothing of another's, and
+ *   taken from a peer it would let one instance label another's round as not applied.
  * - `refusedHere`: why THIS instance did not read the schema a `meta_change` round carries (R6-6). What one member could not parse
  *   says nothing of another, and taken from a peer it would let one instance tell another's operator its own round is unreadable.
  *
@@ -30,7 +32,7 @@ import { hasRoundShape, canonicalRoundWipeTypes } from './round-shape.js';
 import { DEFAULT_STAMP_SKEW_WARN_MINUTES } from '../brain/stamp-skew.js';
 
 /** The fields that describe this instance, never the network. A peer never sends them and never receives them. */
-export const LOCAL_ROUND_FIELDS = ['appliedHere', 'proposedHere', 'outcome', 'concludedAt', 'refusedHere', 'actLocalId', 'peersConcluded', 'convertOwed'] as const;
+export const LOCAL_ROUND_FIELDS = ['appliedHere', 'proposedHere', 'outcome', 'concludedAt', 'notAppliedHere', 'refusedHere', 'actLocalId', 'peersConcluded', 'convertOwed'] as const;
 type LocalField = typeof LOCAL_ROUND_FIELDS[number];
 
 /** `round` with every local field removed. */
