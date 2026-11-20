@@ -14,7 +14,16 @@
  * that also carries local settings changes none of them). A refusal is the space write gate's own error with the act's own code, so every
  * door answers it as it answers a record write the act refuses (`spaceActAnswer`: 409 `space_being_rdf_imported`, the sentence naming the RDF import). The import's own body
  * passes by its scope (`space-act-scope.ts`), for the schema step a later slice adds.
+ *
+ * ## What it does not refuse: a schema the network decided (second review F3)
+ *
+ * The gate refuses what a caller STARTS at a door. A change the network decided and this member only applies (a passed `meta_change` round, a layer
+ * arriving by sync, a space leaving a network) is not a door: refusing it left the member on another schema than its network's for good (a round
+ * concluded before its apply threw, a layer stored and never recomputed). The import commits against the schema it was planned with (second review F2),
+ * so a schema arriving meanwhile governs the writes after the import and cannot break it. Those writers run their store writes inside
+ * {@link applyingWhatTheNetworkDecided}; no door does, and the scope lasts one synchronous write, never an await.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { getConfig, isConfigLoaded } from '../config/loader.js';
 import { SPACE_ACT_KINDS } from '../config/types-space-acts.js';
 import { spaceActsOfSpace } from './space-act-runner.js';
@@ -24,12 +33,25 @@ import { SpaceNotWritableError } from './space-write-gate.js';
 /** The act kind that closes its space to schema writes. */
 const HOLDS_THE_SCHEMA = 'rdf-import' as const;
 
+/** Set while one write of what the network decided runs. */
+const decided = new AsyncLocalStorage<true>();
+
+/**
+ * Run `write`, one synchronous store write of a schema the network decided, past the gate. Reached by the writers of a passed round, an arriving layer
+ * and a space leaving a network, never by a door: a door's write meets the gate whatever it follows. Nested calls are one scope; the gate is shut again
+ * when `write` returns or throws.
+ */
+export function applyingWhatTheNetworkDecided<T>(write: () => T): T {
+  return decided.run(true, write);
+}
+
 /**
  * Throw the act's refusal when an RDF import stands for `spaceId` (other than the act this call runs in); return quietly otherwise. Called by
  * every writer of a space's schema before it writes anything.
  */
 export function assertSchemaWritable(spaceId: string): void {
   if (!isConfigLoaded()) return;
+  if (decided.getStore()) return;
   const own = spaceActInScope();
   const standing = spaceActsOfSpace(getConfig(), spaceId).find(e => e.kind === HOLDS_THE_SCHEMA && e.id !== own);
   if (!standing) return;

@@ -243,7 +243,7 @@ export function removeSpaceFromNetwork(networkId: string, localId: string, why: 
   log.info(`Network ${networkId}: space '${localId}' left the network (${why}); this instance keeps it as a local space`);
   if (hadLayer) {
     void import('../spaces/effective-meta.js')
-      .then(({ recomputeEffectiveMeta }) => recomputeEffectiveMeta(localId, true))
+      .then(({ recomputeAfterMembershipChange }) => recomputeAfterMembershipChange(localId))
       .catch((err: unknown) => log.warn(`Network ${networkId}: schema of '${localId}' not rebuilt after it left: ${err}`));
   }
   return true;
