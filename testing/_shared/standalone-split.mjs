@@ -31,9 +31,11 @@
  * handled.
  */
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { trackedSources, TEST_FILE_SUFFIXES } from '../standalone/_sources.mjs';
 import { textOnlyFiles } from './text-only-test.mjs';
+import { packBySeconds } from './pack-by-seconds.mjs';
 
 /**
  * Anchored to a HEADER line, never a bare substring.
@@ -168,21 +170,75 @@ export function splitStandalone({ root = process.cwd() } = {}) {
  * classifier is asked only when `kinds` (the kinds the caller wants, default all three) holds `text` or `pure`, never by `splitStandalone`, so the database
  * and instance runs (`kinds: ['db']`, `kinds: []`) are not paid for it and are not broken by it.
  *
+ * `pureShard` (`{ index, count }`, 1-based) narrows the PURE kind to that shard's files (`pureShardFiles`), the way CI runs it as two jobs; the text and
+ * database kinds are the same with or without it. Without it every pure file runs, as it always did.
+ *
  * @returns {Array<{ kind: 'text' | 'pure' | 'db', args: string[], files: string[] }>} `args` go after `--test`
  */
-export function offlineRuns(split = splitStandalone(), { ciOnly = true, kinds = ['text', 'pure', 'db'] } = {}) {
+export function offlineRuns(split = splitStandalone(), { ciOnly = true, kinds = ['text', 'pure', 'db'], pureShard = null } = {}) {
   const path = (f) => `testing/standalone/${f}`;
   // Asked only when a kind that needs it is wanted (the pure kind is the rest, so it needs the text set to leave it out): a plan for the database kind alone,
   // or for none (the instance-only run), never reads a pure file's imports and cannot be broken by the classifier.
   const text = kinds.includes('text') || kinds.includes('pure') ? new Set(textOnlyFiles(split, { root: split.root ?? process.cwd() })) : new Set();
   const pure = split.offlinePure.filter(f => ciOnly || !split.ciOnly.includes(f)).map(path);
+  const pureKind = pure.filter(f => !text.has(f));
   return [
     ...(kinds.includes('text') ? batched(pure.filter(f => text.has(f))).map(files => ({ kind: 'text', args: [], files })) : []),
-    ...(kinds.includes('pure') ? batched(pure.filter(f => !text.has(f))).map(files => ({ kind: 'pure', args: [], files })) : []),
+    ...(kinds.includes('pure') ? batched(pureShard ? pureShardFiles(pureKind, pureShard) : pureKind).map(files => ({ kind: 'pure', args: [], files })) : []),
     ...(kinds.includes('db') ? batched(split.offlineDb.map(path))
       .map(files => ({ kind: 'db', args: [`--test-concurrency=${DB_TEST_CONCURRENCY}`], files })) : []),
   ];
 }
+
+/**
+ * The shards CI runs the PURE kind in (bundle-356, Q-947). Once Integration and Sync were split, the job with no services was the one a run
+ * waited for: nine `node --test` batches one after another, 545 s of tests in main run 44694257707. CI runs it as `PURE_SHARDS` jobs, each
+ * `run-standalone.mjs --only=pure --shard=<k>/<n>`; the text kind stays a step of the first job only.
+ *
+ * What a shard cannot do, each closed here so no caller can drop it:
+ *
+ *  - **Run everything or nothing when it is wrong.** A count that is not `PURE_SHARDS`, or an index outside 1 to it, THROWS: a wrong index
+ *    that ran every pure file would run them twice across the jobs, one that ran none would be a green job about nothing. The workflow's count
+ *    is held equal to this one by `ci-runs-every-standalone-pure-shard-exactly-once`.
+ *  - **Leave a file out, or put it in two shards.** The cut is `packBySeconds` (`pack-by-seconds.mjs`), which checks its own result is a
+ *    partition and throws otherwise; files are packed by their recorded seconds (`pure-file-seconds.json`, a file it does not name at the
+ *    table's `median`, the median of every file the run recorded), longest first into the emptier shard, alphabetical inside a shard.
+ *  - **Overwrite the other shard's results.** CI merges every job's `test-results/` into one folder; a shard's batches are named by
+ *   `pureShardKind` (`pure-<k>of<n>`), never the whole run's `pure`.
+ */
+export const PURE_SHARDS = 2;
+
+/** `pure-file-seconds.json`: the seconds each pure file took in one recorded CI run of main, by repository path. */
+export const PURE_FILE_SECONDS_PATH = join(dirname(fileURLToPath(import.meta.url)), 'pure-file-seconds.json');
+
+/**
+ * The recorded seconds of the pure files by repository path, and `median`, the weight of a file the table does not name: the table lists only
+ * the files at or above its floor (most pure files take a fifth of a second), so it carries the median of every file the run recorded.
+ * `{ seconds: {}, median: undefined }` when the table is not there (every file is then planned at one weight).
+ */
+export function loadPureFileSeconds(path = PURE_FILE_SECONDS_PATH) {
+  try {
+    const table = JSON.parse(readFileSync(path, 'utf8'));
+    return { seconds: table.seconds ?? {}, median: table.median };
+  } catch { return { seconds: {}, median: undefined }; }
+}
+
+/**
+ * The files of pure shard `index` of `count`: `packBySeconds` over `files` (the pure kind's repository paths) and the recorded seconds.
+ * THROWS when `count` is not `PURE_SHARDS` or `index` is outside 1 to `count`.
+ *
+ * @param {string[]} files
+ * @param {{ index: number, count: number }} shard
+ * @param {{ table?: { seconds: Record<string, number>, median?: number } }} [given] the table (read when not given)
+ */
+export function pureShardFiles(files, { index, count }, { table = loadPureFileSeconds() } = {}) {
+  if (count !== PURE_SHARDS) throw new Error(`standalone: the pure kind is planned in ${PURE_SHARDS} shards, so shard ${index}/${count} is none of them`);
+  if (!Number.isInteger(index) || index < 1 || index > count) throw new Error(`standalone: shard ${index}/${count} is not one of ${count}`);
+  return packBySeconds(files, count, table.seconds, { who: 'standalone pure', unnamed: table.median })[index - 1];
+}
+
+/** The results name of a pure shard's batches (`pure-<k>of<n>`, the files `standalone-pure-<k>of<n>-<b>.jsonl`): no shard and no whole run share one. */
+export const pureShardKind = ({ index, count }) => `pure-${index}of${count}`;
 
 /**
  * Split a path list into command lines under the Windows limit.
