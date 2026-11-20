@@ -491,6 +491,20 @@ async function* groupsOf(folder: ImportFolder, sorted: string): AsyncGenerator<Q
   if (current) yield groupOf(current);
 }
 
+/**
+ * `sorted` sorted again under other names, and its own file removed: the grouping of a subject's time nodes with their record depends on the names a
+ * file is read by, and the source a file names for itself is known only once the whole file has been read (`rdf/import-default-source.ts`). The quads
+ * are read back from the first sort, so the file is not parsed twice; the bounds hold again over the second.
+ */
+export async function resortedSpool(sorted: SortedSpool, folder: ImportFolder, options: SortedSpoolOptions): Promise<SortedSpool> {
+  async function* quadsOf(): AsyncGenerator<Quad, void, undefined> {
+    for await (const group of sorted.groups()) yield* group.quads;
+  }
+  const again = await sortedSpool(quadsOf(), folder, options);
+  await fsp.rm(fileIn(folder, sorted.file), { force: true });
+  return again;
+}
+
 // ── Operations, per kind ──────────────────────────────────────────────────────────────────────────────────────
 
 /** A kind's name: a plain lowercase word, so it can name a file. */

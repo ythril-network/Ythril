@@ -17,9 +17,20 @@
  * removed as `tags:<tag>`, a property key as `properties.<key>`. Link rows are compared when the caller hands the stored ones
  * (`ReadSet.storedLinks`): a stored link the plan's desired set leaves out of a class it names is taken away.
  */
-import type { DesiredLinks } from '../links.js';
-import type { RefKind } from '../../config/types-knowledge.js';
-import type { PlanKind, WritePlan } from './types.js';
+import type { KnowledgeType, RefKind } from '../../config/types-knowledge.js';
+import { canonicalJson } from '../../util/canonical-json.js';
+
+/** The record kinds a plan can be for (`write-plan/types.ts`, `PlanKind`). */
+export type PlanKind = KnowledgeType;
+/** A link set by the kind it points at (`brain/links.ts`, `DesiredLinks`). Declared here so this module is a leaf: it imports nothing of the planners' graph. */
+export type DesiredLinks = Partial<Record<RefKind, readonly string[]>>;
+/** What of a `WritePlan` this module reads: a plan of the planners is one (structurally). */
+export interface PlanLike {
+  readonly kind: PlanKind;
+  readonly op: 'insert' | 'converge';
+  readonly result: Readonly<Record<string, unknown>>;
+  readonly links?: { readonly desired: DesiredLinks };
+}
 
 /** The fields a write can state, per kind, in the order a change is reported. */
 export const STATED_FIELDS: Readonly<Record<PlanKind, readonly string[]>> = {
@@ -38,8 +49,12 @@ export interface ConvergeChanges {
   readonly linksTakenAway: DesiredLinks;
 }
 
-/** Order-sensitive structural equality of two stored values (strings, numbers, booleans, arrays, plain objects). */
-const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+/**
+ * Structural equality of two stored values (strings, numbers, booleans, arrays, plain objects): an array is compared in its order (a tag list is an
+ * ordered list), an object by its keys and values whatever order they were written in (a property bag, a recurrence), so the order a planner builds a
+ * bag in is never a change.
+ */
+const same = (a: unknown, b: unknown): boolean => canonicalJson(a) === canonicalJson(b);
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -47,7 +62,7 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> => v !== null &
  * What `plan` (a converge of `stored`) would change and take away. An insert changes no stored record, so it answers nothing.
  * `storedLinks`: the record's stored link rows (`ReadSet.storedLinks`), to judge what its link reconcile would take away.
  */
-export function convergeChanges(stored: Readonly<Record<string, unknown>>, plan: WritePlan, storedLinks?: DesiredLinks): ConvergeChanges {
+export function convergeChanges(stored: Readonly<Record<string, unknown>>, plan: PlanLike, storedLinks?: DesiredLinks): ConvergeChanges {
   if (plan.op !== 'converge') return { changed: [], removed: [], linksTakenAway: {} };
   const after = plan.result;
   const changed: string[] = [];
