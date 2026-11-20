@@ -20,7 +20,8 @@
  *   browsers; the budget used (`Ythril-Budget-Chars`, `Ythril-Budget-Bytes` when stated); the left-out values in the HTTP trailers declared
  *   up front (`Trailer:`) on a chunked answer only (`export/export-trailers.ts`: an HTTP/1.0 or a `HEAD` answer cannot carry them, and a
  *   declared one ended the server), beside the closing comment and the report node the document carries; `Retry-After` on a 429 and a 503.
- * - **A `HEAD`** is asked the `GET`'s rights (`export/export-head.ts`) and answered with the `GET`'s headers alone: no slot, no walk, no audit.
+ * - **A `HEAD`** is judged and audited as the `GET` it mirrors by the product's rule (`http/governed-method.ts`: its rights row, and an
+ *   `rdf.export` row with `method: 'HEAD'` that counts nothing as sent), and answered with the `GET`'s headers alone: no slot, no walk.
  * - **Nothing an answer meets ends the process**: a fault after the status line closes the connection, one before it is the caught answer.
  * - **A reader that stops reading.** The answer is written with backpressure; a reader that goes away frees the export slot at once,
  *   exactly once. A page whose reader takes nothing for the idle bound (`rdfExportIdleMs`) is cut; a whole export whose reader is under the
@@ -36,7 +37,6 @@ import {
   type RdfExportStream,
 } from '../../rdf/export-act.js';
 import { trailersFor } from '../../export/export-trailers.js';
-import { headAskedAsGet } from '../../export/export-head.js';
 import { closeUnlessFinished, pacedWriter, type ReaderPace } from '../../export/export-reader-pace.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
 import { sendCaughtFailure } from '../send-failure.js';
@@ -65,8 +65,8 @@ function setViewHeaders(res: Response, viewMembers: readonly string[] | undefine
 const ROUTE = 'GET /api/brain/spaces/:spaceId/export/rdf';
 
 // GET (and HEAD) /api/brain/spaces/:spaceId/export/rdf - the records of a space or of the caller's own view, as Turtle, TriG, N-Quads or JSON-LD.
-// A HEAD is asked the GET's rights (`headAskedAsGet`) and answered with the GET's headers alone: no slot, no walk, no audit row.
-rdfExportRouter.get('/spaces/:spaceId/export/rdf', globalRateLimit, headAskedAsGet(requireSpaceAuth), async (req, res) => {
+// A HEAD is judged and audited as this GET (`http/governed-method.ts`) and answered with the GET's headers alone: no slot, no walk.
+rdfExportRouter.get('/spaces/:spaceId/export/rdf', globalRateLimit, requireSpaceAuth, async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   if (answeredUnknownSpace(req, res, spaceId)) return;
   const token = req.authToken as { id?: string; admin?: boolean; rights?: TokenRights | null } | undefined;

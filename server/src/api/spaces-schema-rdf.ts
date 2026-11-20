@@ -15,13 +15,13 @@ import type { TokenRights } from '../config/rights-shape.js';
 import { EXPORT_OK, EXPORT_VARY } from '../export/export-statuses.js';
 import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
 import { sendCaughtFailure } from './send-failure.js';
-import { headAskedAsGet } from '../export/export-head.js';
 
 export const spaceSchemaRdfRouter = Router();
 
 // GET (and HEAD) /api/spaces/:id/schema-rdf[?format=turtle|jsonld] - the schema of the space as an OWL ontology and SHACL shapes. A HEAD is
-// asked the GET's rights (`headAskedAsGet`: the inventory keys on the method and has no HEAD row) and answered with its headers, unaudited.
-spaceSchemaRdfRouter.get('/:id/schema-rdf', globalRateLimit, headAskedAsGet(requireSpaceAuthScoped('id')), (req, res) => {
+// judged and audited as this GET (`http/governed-method.ts`: its rights row, a `schema.rdf.export` row with `method: 'HEAD'`) and answered
+// with its headers alone.
+spaceSchemaRdfRouter.get('/:id/schema-rdf', globalRateLimit, requireSpaceAuthScoped('id'), (req, res) => {
   const spaceId = req.params['id'] as string;
   res.setHeader('Vary', EXPORT_VARY);
   res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
