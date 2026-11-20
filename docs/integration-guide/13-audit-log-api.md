@@ -173,7 +173,7 @@ paths do not fill the audit log with content.
 
 ### Tracked operations
 
-Audit entries are recorded for all write operations and (when `logReads` is enabled) read operations across the API surface, each at the status answered — success, refusal or failure. A request is matched the way the server routes it: in any casing of its path and with or without a trailing slash (`POST /API/brain/spaces/s/facts` is `fact.create`). The entry's `path` and `spaceId` keep what the caller sent. A `HEAD` is recorded as the `GET` it mirrors, with `method: "HEAD"`; a `HEAD` of an export (`space.export`, `audit.export`, `rdf.export`, `schema.rdf.export`) reads and sends nothing, so its entry counts no documents as written.
+Audit entries are recorded for all write operations and (when `logReads` is enabled) read operations across the API surface, each at the status answered — success, refusal or failure. A request is matched the way the server routes it: in any casing of its path and with or without a trailing slash (`POST /API/brain/spaces/s/facts` is `fact.create`), and whatever the space is called: a space named `files`, `facts`, `entities`, `edges`, `chrono` or `spaces` is recorded under the operation of the route it was asked on, its records export (`rdf.export`) included. The entry's `path` and `spaceId` keep what the caller sent. A `HEAD` is recorded as the `GET` it mirrors, with `method: "HEAD"`; a `HEAD` of an export (`space.export`, `audit.export`, `rdf.export`, `schema.rdf.export`) reads and sends nothing, so its entry counts no documents as written.
 
 | Category | Operations |
 |----------|-----------|
