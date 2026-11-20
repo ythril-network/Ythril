@@ -42,7 +42,7 @@ import { getConfig, saveConfig, getDocumentProcessingConfig } from '../config/lo
 import { updateSpace, refuseRemovedDescription, unknownWriteFieldsMode } from './spaces.js';
 import { ensureTtlIndexes } from './space-indexes.js';
 import { proposedMetaFields } from '../sync/meta-round-merge.js';
-import { membersBehindNewKeys, type MemberSkew } from '../sync/meta-skew.js';
+import { membersBehindNewKeys, membersBehindRoundType, type MemberSkew } from '../sync/meta-skew.js';
 import { visibleNetworks } from '../auth/network-rights.js';
 import { proposeRound } from '../networks/propose-round.js';
 import { log, NAME_QUOTED, peerList, peerText, refusalOfParse } from '../util/log.js';
@@ -199,6 +199,22 @@ function memberSkewWarnings(skew: readonly MemberSkew[], caller: WriteCaller): R
   return skew.map(s => {
     const named = [...new Set(s.members.filter(m => seen.has(m.networkId)).map(m => peerText(m.label, { max: NAME_QUOTED })))];
     const unheard = s.members.filter(m => m.neverHeardFrom).length;
+    const count = `${s.members.length} member${s.members.length === 1 ? '' : 's'}`;
+    const behind = `${count} of the network${s.members.length === 1 ? '' : 's'} carrying this space run an older release `
+      + `or have not reported a version${unheard > 0 ? ` (${unheard} not yet heard from)` : ''}${named.length > 0 ? `: ${peerList(named, ', ')}` : ''}`;
+    // A round is not a key: an older member does not refuse a layer, it neither votes on the round nor applies it.
+    if (s.round !== undefined) {
+      return {
+        code: 'members_may_not_read_round',
+        keys: s.keys,
+        since: s.since,
+        memberCount: s.members.length,
+        ...(named.length > 0 ? { members: named } : {}),
+        message: `A ${s.round} round is only read by release ${s.since} and later. ${behind}, and neither vote on it nor apply it: on closed and `
+          + 'braintree networks the round cannot pass until they upgrade, and on democratic ones their missing yes counts against the majority. '
+          + 'The round is open regardless; upgrade every instance of the network.',
+      };
+    }
     return {
       code: 'members_may_refuse_new_keys',
       keys: s.keys,
@@ -874,7 +890,8 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
     const rebase = plan.rebaseProposal;
     const now = Date.now();
     const rounds: RoundAnswer[] = [];
-    for (const net of cfg.networks.filter(n => n.spaces.includes(id))) {
+    const reached = cfg.networks.filter(n => n.spaces.includes(id));
+    for (const net of reached) {
       const spaceId = localToRemote(net, id);
       const held = net.pendingRounds.find(r => r.proposedHere === true && r.type === 'space_rebase' && r.spaceId === spaceId
         && r.rebase?.base === rebase.base && (roundIsOpen(r, now) || rebaseRoundUnapplied(r)));
@@ -884,7 +901,9 @@ export async function applySpaceMetaUpdate(plan: MetaUpdatePlan): Promise<MetaUp
       }, { now }).answer);
     }
     saveConfig(cfg);
-    return { outcome: 'vote_pending', rounds };
+    // The members that cannot read the round, named as every write that sets what an earlier release cannot read names them (lens finding 10).
+    const behind = membersBehindRoundType('space_rebase', reached);
+    return { outcome: 'vote_pending', rounds, ...(behind.length > 0 ? { skew: behind } : {}) };
   }
 
   // Network voting: a networked space PROPOSES a meta change rather than applying it.
