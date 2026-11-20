@@ -17,6 +17,15 @@
  * 4. **An answer over less than it says.** The output names the kinds of run it rests on and the kinds absent (a CI record
  *    with no kind is a push to main, a local one local), the records and runs read, the span, and every record left out.
  *
+ * Two more lists (slice S5, the check `check-i-never-failed-slow-tests-examined`), asked for with `--list`:
+ *
+ * 5. **A slow file named as never failed that failed, or was barely seen.** The slowest tenth of the test files (by the
+ *    per-file times snapshot) less every file with a failure in the span; a file that ran in fewer than two runs of the span is
+ *    left out and COUNTED, never listed.
+ * 6. **A group of tests that did not fail together.** Groups of two or more tests that each failed at least twice and failed in
+ *    exactly the same runs every time, compared over the runs that ran both tests' files (a file that did not run in a shard is
+ *    not a pass there). No per-file times, or fewer than two runs, answer exit 2, never a pass.
+ *
  * The script is driven against the fake tool server (`testing/_shared/fake-ythril-tool-server.mjs`); no real instance.
  *
  * Run: node --test testing/standalone/the-failure-rate-reader-names-a-test-that-failed-on-a-passing-commit.test.js
@@ -24,8 +33,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { startFakeYthril } from '../_shared/fake-ythril-tool-server.mjs';
 import { cleanEnv, everything } from '../_shared/test-times-harness.mjs';
 
@@ -299,5 +310,207 @@ describe('the script answers by exit code over the recorded runs, reading only',
       const wrong = await runReader(['--since', 'soon'], env);
       assert.equal(wrong.code, 2, everything(wrong));
     });
+  });
+});
+
+// ── The two more lists: the slowest tenth that never failed, and the tests that only ever failed together ────────
+
+const FILES = Array.from({ length: 20 }, (_, i) => `testing/standalone/f${String(i).padStart(2, '0')}.test.js`);
+/** f00 is the slowest file, f19 the fastest: the slowest tenth of twenty is f00 and f01. */
+const SLOW = Object.fromEntries(FILES.map((f, i) => [f, (20 - i) * 1000]));
+const lists = async (rows, opts) => (await load()).failureLists(rows, opts);
+const listed = (r) => r.neverFailed.map(e => e.file);
+const groups = (r) => r.together.map(g => g.tests.map(t => `${t.file} :: ${t.test}`));
+/** A run of every file of FILES, `failing` naming the tests that failed in it by file. */
+const wholeRun = (runId, failing = {}, { without = [] } = {}) => record({
+  runId, files: FILES.filter(f => !without.includes(f)).map(f => [f, failing[f] ?? []]),
+});
+const X = 'x fails';
+const Y = 'y fails';
+
+describe('the slowest tenth of the files that never failed', () => {
+  it('a slowest-tenth file with a failure in the span is not listed, the others are, with their seconds and runs', async () => {
+    const control = await lists([wholeRun('1'), wholeRun('2'), wholeRun('3')], { fileTimes: { files: SLOW }, lists: ['never-failed'] });
+    assert.deepEqual(control.neverFailed.map(e => [e.file, e.ms, e.runs]), [[FILES[0], 20000, 3], [FILES[1], 19000, 3]]);
+    assert.equal(control.exit, 1);
+
+    const r = await lists([wholeRun('1'), wholeRun('2', { [FILES[0]]: [X] }), wholeRun('3')], { fileTimes: { files: SLOW }, lists: ['never-failed'] });
+    assert.deepEqual(listed(r), [FILES[1]], 'the slowest file failed once in the span');
+    assert.equal(r.exit, 1);
+    const lines = (await load()).failureListLines(r, { lists: ['never-failed'] }).join('\n');
+    assert.match(lines, new RegExp(`19000 ms\\s+3 runs\\s+${FILES[1].replace(/[.]/g, '\\.')}`));
+  });
+
+  it('a file that ran in one run only is left out and counted, never listed as never failed', async () => {
+    const seen = (runId, without) => wholeRun(runId, {}, { without });
+    const r = await lists([seen('1', []), seen('2', [FILES[1]]), seen('3', [FILES[1]])], { fileTimes: { files: SLOW }, lists: ['never-failed'] });
+    assert.deepEqual(listed(r), [FILES[0]]);
+    assert.equal(r.tooFew, 1);
+    const lines = (await load()).failureListLines(r, { lists: ['never-failed'] }).join('\n');
+    assert.match(lines, /1 left out: ran in fewer than two runs/);
+  });
+
+  it('a slow file no record lists at all is left out and counted too', async () => {
+    const r = await lists([wholeRun('1', {}, { without: [FILES[0]] }), wholeRun('2', {}, { without: [FILES[0]] })], { fileTimes: { files: SLOW }, lists: ['never-failed'] });
+    assert.deepEqual(listed(r), [FILES[1]]);
+    assert.equal(r.tooFew, 1);
+  });
+
+  it('when every file of the tenth failed, both lists are empty and the exit is 0', async () => {
+    const failing = { [FILES[0]]: [X], [FILES[1]]: [X] };
+    const r = await lists([wholeRun('1', failing), wholeRun('2', {}), wholeRun('3', {})], { fileTimes: { files: SLOW } });
+    assert.deepEqual(listed(r), []);
+    assert.deepEqual(groups(r), []);
+    assert.equal(r.exit, 0);
+  });
+
+  it('client files are ranked among themselves, their times are vitest\'s and not comparable with node files', async () => {
+    const node = FILES.slice(0, 10);
+    const client = Array.from({ length: 10 }, (_, i) => `client/src/c${i}.spec.ts`);
+    const fileTimes = { files: { ...Object.fromEntries(node.map((f, i) => [f, (10 - i) * 10])), ...Object.fromEntries(client.map((f, i) => [f, (10 - i) * 100_000])) } };
+    const run = (id) => record({ runId: id, files: [...node, ...client].map(f => [f, []]) });
+    const r = await lists([run('1'), run('2')], { fileTimes, lists: ['never-failed'] });
+    assert.deepEqual(listed(r).sort(), [client[0], node[0]].sort(), 'the slowest tenth of each, not the client files crowding the node files out');
+  });
+});
+
+describe('the tests that only ever failed together', () => {
+  const A2 = FILES[2];
+  const B2 = FILES[3];
+  const together = (runId, extra = {}) => wholeRun(runId, { [A2]: [X], [B2]: [Y], ...extra });
+
+  it('two tests failing in exactly the same two runs form one group, exit 1', async () => {
+    const r = await lists([together('1'), together('2'), wholeRun('3')], { fileTimes: { files: SLOW }, lists: ['together'] });
+    assert.deepEqual(groups(r), [[`${A2} :: ${X}`, `${B2} :: ${Y}`]]);
+    assert.equal(r.together[0].failures, 2);
+    assert.equal(r.together[0].runs, 3);
+    assert.equal(r.exit, 1);
+    const lines = (await load()).failureListLines(r, { lists: ['together'] }).join('\n');
+    assert.match(lines, /2 of 3/);
+  });
+
+  it('a test with one failure is never grouped, not even with another that failed in the same run', async () => {
+    const r = await lists([together('1'), wholeRun('2'), wholeRun('3')], { fileTimes: { files: SLOW }, lists: ['together'] });
+    assert.deepEqual(groups(r), []);
+    const alone = await lists([together('1'), together('2', { [FILES[4]]: [X] }), wholeRun('3')], { fileTimes: { files: SLOW }, lists: ['together'] });
+    assert.deepEqual(groups(alone), [[`${A2} :: ${X}`, `${B2} :: ${Y}`]], 'the one-failure test of the second run joins nothing');
+  });
+
+  it('two tests that failed together twice and one of them alone a third time are not a group', async () => {
+    const r = await lists([together('1'), together('2'), wholeRun('3', { [A2]: [X] })], { fileTimes: { files: SLOW }, lists: ['together'] });
+    assert.deepEqual(groups(r), []);
+    assert.equal(r.exit, 0);
+  });
+
+  it('a file that did not run in a shard is not a pass there: the runs that ran both files decide', async () => {
+    const r = await lists([together('1'), together('2'), wholeRun('3', { [A2]: [X] }, { without: [B2] })], { fileTimes: { files: SLOW }, lists: ['together'] });
+    assert.deepEqual(groups(r), [[`${A2} :: ${X}`, `${B2} :: ${Y}`]]);
+    assert.equal(r.together[0].runs, 2, 'only the two runs that ran both files');
+  });
+
+  it('a group holds only tests that all pair with each other; one name in two files is two tests', async () => {
+    const C2 = FILES[5];
+    const r = await lists([
+      together('1', { [C2]: [X] }), together('2', { [C2]: [X] }), wholeRun('3'),
+    ], { fileTimes: { files: SLOW }, lists: ['together'] });
+    assert.deepEqual(groups(r), [[`${A2} :: ${X}`, `${B2} :: ${Y}`, `${C2} :: ${X}`]]);
+  });
+
+  it('attempts are runs: attempt 1 and 2 of one run that both failed are two failures', async () => {
+    const attempt = (n) => record({ attempt: n, files: [[A2, [X]], [B2, [Y]]] });
+    const r = await lists([attempt(1), attempt(2), record({ runId: '101', files: [[A2, []], [B2, []]] })], { fileTimes: { files: SLOW }, lists: ['together'] });
+    assert.equal(r.together.length, 1);
+  });
+});
+
+describe('the two more lists answer exit 2 when they cannot answer, never a pass', () => {
+  it('no per-file times: exit 2 saying why, for the list that needs them', async () => {
+    const rows = [wholeRun('1'), wholeRun('2')];
+    const r = await lists(rows, { fileTimes: null, fileTimesWhy: 'no file-times-all.json yet', lists: ['never-failed', 'together'] });
+    assert.equal(r.exit, 2);
+    const lines = (await load()).failureListLines(r, { lists: ['never-failed', 'together'] }).join('\n');
+    assert.match(lines, /cannot answer: .*no file-times-all\.json yet/);
+    const withoutTheNeed = await lists(rows, { fileTimes: null, lists: ['together'] });
+    assert.equal(withoutTheNeed.exit, 0, 'the groups do not need the times');
+  });
+
+  it('fewer than two runs hold results: exit 2 with the counts', async () => {
+    const r = await lists([wholeRun('1')], { fileTimes: { files: SLOW } });
+    assert.equal(r.exit, 2);
+    assert.match((await load()).failureListLines(r, { lists: ['never-failed', 'together'] }).join('\n'), /1 records of 1 runs/);
+  });
+
+  it('records left out are counted in the lines of the lists, as in the first list', async () => {
+    const r = await lists([wholeRun('1'), wholeRun('2'), record({ runId: '3', measurements: 'none' })], { fileTimes: { files: SLOW } });
+    const lines = (await load()).failureListLines(r, { lists: ['never-failed', 'together'] }).join('\n');
+    assert.match(lines, /3 records of 2 runs/);
+    assert.match(lines, /1 without a file list/);
+    assert.match(lines, /absent: pull-request, full-run, preflight, local/);
+  });
+});
+
+describe('the script prints the lists it is asked for, and the first list stays the default', () => {
+  const snapshot = (dir, files = SLOW, over = {}) => writeFileSync(join(dir, 'file-times-all.json'), JSON.stringify({ generatedAt: new Date().toISOString(), runs: 5, files, ...over }));
+  async function withResults(body) {
+    const dir = mkdtempSync(join(tmpdir(), 'failure-rates-'));
+    try { return await body(dir); } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+  const seed = [together3('1'), together3('2'), wholeRun('3')];
+  function together3(runId) { return wholeRun(runId, { [FILES[2]]: [X], [FILES[3]]: [Y] }); }
+
+  it('--list never-failed,together prints both lists and exits 1 when one holds an entry', async () => {
+    await withResults(dir => withServer(seed, async (_s, env) => {
+      snapshot(dir);
+      const r = await runReader(['--list', 'never-failed,together'], { ...env, YTHRIL_TEST_RESULTS_DIR: dir });
+      assert.equal(r.code, 1, everything(r));
+      assert.match(r.stdout, new RegExp(`${FILES[0].replace(/[.]/g, '\\.')}`));
+      assert.match(r.stdout, new RegExp(`${FILES[2].replace(/[.]/g, '\\.')} {2}${X}`));
+      assert.match(r.stdout, /3 records of 3 runs/);
+      assert.ok(!r.stdout.includes('every test that failed in the span'), 'the first list is not asked for');
+    }));
+  });
+
+  it('--list all prints the first list as well; the default prints the first list only and never reads the snapshot', async () => {
+    await withResults(dir => withServer(seed, async (_s, env) => {
+      const all = { ...env, YTHRIL_TEST_RESULTS_DIR: dir };
+      const byDefault = await runReader([], all);
+      assert.equal(byDefault.code, 1, `no snapshot in the folder, and the default does not need one\n${everything(byDefault)}`);
+      assert.ok(!byDefault.stdout.includes('never failed'));
+      snapshot(dir);
+      const both = await runReader(['--list', 'all'], all);
+      assert.equal(both.code, 1, everything(both));
+      assert.match(both.stdout, /every test that failed in the span/);
+      assert.match(both.stdout, /slowest tenth/);
+    }));
+  });
+
+  it('both lists empty: exit 0', async () => {
+    await withResults(dir => withServer([wholeRun('1', { [FILES[0]]: [X], [FILES[1]]: [X] }), wholeRun('2'), wholeRun('3')], async (_s, env) => {
+      snapshot(dir);
+      const r = await runReader(['--list', 'never-failed,together'], { ...env, YTHRIL_TEST_RESULTS_DIR: dir });
+      assert.equal(r.code, 0, everything(r));
+    }));
+  });
+
+  it('a missing, stale or empty per-file times snapshot: exit 2 naming it, never a pass', async () => {
+    await withResults(dir => withServer(seed, async (_s, env) => {
+      const asked = { ...env, YTHRIL_TEST_RESULTS_DIR: dir };
+      const missing = await runReader(['--list', 'never-failed,together'], asked);
+      assert.equal(missing.code, 2, everything(missing));
+      assert.match(everything(missing), /file-times-all\.json/);
+      snapshot(dir, SLOW, { generatedAt: new Date(Date.now() - 40 * DAY).toISOString() });
+      const stale = await runReader(['--list', 'never-failed'], asked);
+      assert.equal(stale.code, 2, everything(stale));
+      assert.match(everything(stale), /stale/);
+      snapshot(dir, {});
+      const empty = await runReader(['--list', 'never-failed'], asked);
+      assert.equal(empty.code, 2, everything(empty));
+    }));
+  });
+
+  it('a list name it does not know is refused with exit 2', async () => {
+    const r = await runReader(['--list', 'rates,sometimes'], {});
+    assert.equal(r.code, 2, everything(r));
+    assert.match(r.stderr, /--list/);
   });
 });
