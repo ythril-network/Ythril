@@ -28,6 +28,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 import { openRdfExportDoors, rdfMeta, parseRdf } from './_rdf-export-doors.mjs';
 
 const skip = await mongoSkipReason();
@@ -37,6 +38,8 @@ const TOTAL = 6_000;
 const BLOB = 'x'.repeat(4_000);
 /** The window here; the production window, idle bound and rate are scaled by the factor that makes the window this. */
 const WINDOW_MS = 3_000;
+/** The idle bound here: production's stands to its window as one to one (asserted before the rows run), so the scaled one is the window. */
+const IDLE_MS = WINDOW_MS;
 /** How often a throttled reader takes what its rate allows. */
 const TICK_MS = 10;
 
@@ -113,9 +116,10 @@ describe('a trickling reader cannot hold an export slot', { skip, timeout: 600_0
     act.setRdfExportIdleMsForTest(null);
     const production = { ...act.rdfExportRate(), idleMs: act.rdfExportIdleMs() };
     const factor = production.windowMs / WINDOW_MS;
-    pace = { windowMs: WINDOW_MS, minBytesPerSecond: production.minBytesPerSecond * factor, idleMs: production.idleMs / factor };
-    act.setRdfExportRateForTest({ windowMs: pace.windowMs, minBytesPerSecond: pace.minBytesPerSecond });
-    act.setRdfExportIdleMsForTest(pace.idleMs);
+    assert.equal(production.idleMs / factor, IDLE_MS, 'the idle bound is scaled with the window, by the same factor (production\'s ratio)');
+    pace = { windowMs: WINDOW_MS, minBytesPerSecond: production.minBytesPerSecond * factor, idleMs: IDLE_MS };
+    act.setRdfExportRateForTest({ windowMs: WINDOW_MS, minBytesPerSecond: pace.minBytesPerSecond });
+    act.setRdfExportIdleMsForTest(IDLE_MS);
     // How long a reader judged too slow is given to take the ending (the build before this rule had none: the idle bound stood for it).
     endingWaitMs = act.rdfExportEndingWaitMs?.() ?? pace.idleMs;
   });
@@ -177,7 +181,7 @@ describe('a trickling reader cannot hold an export slot', { skip, timeout: 600_0
       await r.headed;
       await waitFor(slotFree, verdictWithin(), 100, () => 'a reader that takes nothing still holds its slot');
       // What it still takes after the ending's time is what its connection held when the server closed it: never a whole transfer.
-      await new Promise(resolve => setTimeout(resolve, endingWaitMs + 2_000));
+      await elapse(endingWaitMs + 2_000, 'ttl elapses: the ending\'s wait must run out before the reader takes anything');
     } finally { r.release(); }
     const got = await r.done;
     assert.equal(got.status, 200);

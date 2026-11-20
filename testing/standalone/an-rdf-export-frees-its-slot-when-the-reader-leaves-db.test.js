@@ -20,6 +20,7 @@ import http from 'node:http';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openRdfExportDoors, rdfMeta } from './_rdf-export-doors.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'rdfslots';
@@ -105,7 +106,7 @@ describe('an RDF export frees its slot when the reader leaves', { skip, timeout:
           () => 'the idle reader still holds the token\'s slot');
         // And the connection is cut once the incomplete ending had its time (export/export-reader-pace.ts): what the reader can still take
         // then ends aborted, never complete.
-        await new Promise(resolve => setTimeout(resolve, act.rdfExportEndingWaitMs() + 2_000));
+        await elapse(act.rdfExportEndingWaitMs() + 2_000, 'ttl elapses: the ending\'s wait must run out before the reader takes anything');
         const ended = await new Promise((resolve) => {
           let done = false;
           const finish = (how) => { if (!done) { done = true; resolve(how); } };
