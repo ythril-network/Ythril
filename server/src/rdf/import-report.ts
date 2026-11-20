@@ -22,11 +22,19 @@ export const RDF_IMPORT_REASONS_NAMED_MAX = 100;
 export const STATEMENTS_PER_REASON_MAX = 20;
 /** The longest field name a refusal row may name in the report: a longer one is a value written into a name's place, and is left out. */
 const FIELD_NAME_MAX_CHARS = 200;
-/** The kinds an import writes, in the store's commit order (`brain/write-plan/types.ts`, `COMMIT_ORDER`: facts, entities, chrono, edges). */
-export const IMPORT_OP_ORDER: readonly OpKind[] = ['fact', 'entity', 'chrono', 'edge'];
+/**
+ * The kinds an import writes, in the order its windows commit: what a record points at is stored before the record. NOT the planners' `COMMIT_ORDER`
+ * (facts, entities, chrono, edges): a fact's link rows are made straight after its stage and a row whose entity is not stored yet is taken back
+ * (`takeBackLinksToGoneEntities`), so with facts first every link a file states from a fact to an entity of the same file was lost (fix round 4, R1).
+ * A chrono entry's links name entities and facts, an edge's ends name entities, facts and chrono entries: all earlier here.
+ */
+export const IMPORT_OP_ORDER: readonly OpKind[] = ['entity', 'fact', 'chrono', 'edge'];
 
 /** The code of the reason a record of a commit window is left out for ({@link ReportBuilder.leftOutAtCommit}). */
 export const STORED_RECORD_GONE = 'stored_record_gone';
+
+/** The code of the reason a record was written without every link the file states for it ({@link ReportBuilder.linksNotWritten}). */
+export const LINKS_NOT_WRITTEN = 'links_not_written';
 
 /** One statement of a reason: its subject, predicate and object, a literal object shown by its datatype and length only. */
 export interface ReportStatement { subject: string; predicate: string; object: string; graph?: string }
@@ -57,6 +65,8 @@ export interface RdfImportReport {
   quads: number;
   subjects: number;
   kinds: Record<OpKind, { inserted: number; converged: number }>;
+  /** Per kind, the converged records that already said what the file states: nothing was written for them (a part of `converged`, never of `inserted`). */
+  unchanged?: Record<OpKind, number>;
   reasons: ReportReason[];
   reasonCount: number;
   reasonsByCode: Record<string, number>;
@@ -75,6 +85,9 @@ export interface RdfImportReport {
 export const emptyKinds = (): RdfImportReport['kinds'] =>
   Object.fromEntries(IMPORT_OP_ORDER.map(kind => [kind, { inserted: 0, converged: 0 }])) as RdfImportReport['kinds'];
 
+/** Every kind's unchanged count at zero. */
+export const emptyUnchanged = (): Record<OpKind, number> =>
+  Object.fromEntries(IMPORT_OP_ORDER.map(kind => [kind, 0])) as Record<OpKind, number>;
 /** A term as a statement shows it: an address, a blank node, a triple term by its parts, a literal by its datatype and length. */
 function termText(t: Term): string {
   switch (t.kind) {
@@ -147,6 +160,17 @@ export class ReportBuilder {
     });
     this.report.kinds[kind][op === 'insert' ? 'inserted' : 'converged'] -= 1;
   }
+  /**
+   * A record of a commit window that was written, but not with every link the file states for it: a record a link points at was no longer stored when
+   * the link rows were made (the row is taken back with it), or the store did not write them. The record itself stands, so the counts stay; the reason is
+   * RECORDED. A link the file states is never lost without a word.
+   */
+  linksNotWritten(kind: OpKind, subject: string): void {
+    this.add({
+      code: LINKS_NOT_WRITTEN, outcome: 'recorded', kind, subject, statements: [], statementCount: 0,
+      message: `The ${kind} this subject states was written, but not every link the file states for it: a record a link points at was no longer stored, or the store did not write the link rows.`,
+    });
+  }
   /** A statement left out on purpose. */
   notTaken(why: string, n = 1): void { this.report.notTaken[why] = (this.report.notTaken[why] ?? 0) + n; }
 }
@@ -157,7 +181,8 @@ export function rdfImportAuditChanges(r: RdfImportReport): Array<{ field: string
   return [
     { field: 'format', to: r.format }, { field: 'dryRun', to: r.dryRun }, { field: 'status', to: r.status },
     { field: 'quads', to: r.quads }, { field: 'subjects', to: r.subjects }, { field: 'inserted', to: sum('inserted') },
-    { field: 'converged', to: sum('converged') }, { field: 'reasons', to: r.reasonCount },
+    { field: 'converged', to: sum('converged') }, { field: 'unchanged', to: IMPORT_OP_ORDER.reduce((n, kind) => n + (r.unchanged?.[kind] ?? 0), 0) },
+    { field: 'reasons', to: r.reasonCount },
     { field: 'notTaken', to: Object.values(r.notTaken).reduce((n, v) => n + v, 0) },
   ];
 }

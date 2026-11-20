@@ -12,7 +12,8 @@
  *   included: 413 naming it), registers the act and answers with its `importId`. The act, which holds the space, builds the import's index
  *   (bare edges counted: each is a record of it), translates every group (`rdf/quads-to-ops.ts`; a refusal of the translation ends the act as an
  *   input failure that releases the space, read from the status door), then dry-plans every operation with the real planners
- *   (`rdf/import-plan.ts`), and only when nothing was refused commits, kind by kind in the store's order over the whole import (A1). Any refusal
+ *   (`rdf/import-plan.ts`), and only when nothing was refused commits, kind by kind over the whole import, what a record points at first (A1, `IMPORT_OP_ORDER`:
+ *   entities, facts, chrono entries, edges; the planners' own order writes facts first, which loses a fact's links to an entity of the same file). Any refusal
  *   of a planner refuses the whole import in every mode: nothing lands, every reason is answered with its statements (named up to
  *   {@link RDF_IMPORT_REASONS_NAMED_MAX}, the rest counted), and the act ends as an input failure that RELEASES the space (A11). A reason the
  *   mode records is answered, and the import goes on. A record the dry plan refuses is not written, so the plan runs again without it until no
@@ -69,7 +70,7 @@ import { addressNames, recordOfAddress, type AddressNames } from '../rdf/term-re
 import type { RecordKind } from '../rdf/term-iri.js';
 import { stdIri, type Quad, type Term } from '../rdf/literals.js';
 import {
-  IMPORT_OP_ORDER, ReportBuilder, emptyKinds, rdfImportAuditChanges, type RdfImportReport,
+  IMPORT_OP_ORDER, ReportBuilder, emptyKinds, emptyUnchanged, rdfImportAuditChanges, type RdfImportReport,
 } from '../rdf/import-report.js';
 import { unknownSpaceAnswer } from './unknown-space.js';
 
@@ -77,11 +78,12 @@ export { RDF_IMPORT_REASONS_NAMED_MAX, rdfImportAuditChanges, type RdfImportRepo
 export { RDF_IMPORT_DIR, RDF_IMPORT_REPORT_DIR, RDF_IMPORT_REPORT_KEEP_MS };
 import { ythrilIri } from '../rdf/ythril-vocabulary.js';
 import {
-  RdfImportBoundExceeded, openImportFolder, openOperationSpool, removeImportFolder, removeOperations, reopenSortedGroups, sortedSpool,
+  RdfImportBoundExceeded, openImportFolder, openOperationSpool, removeImportFolder, removeOperations, reopenSortedGroups, resortedSpool, sortedSpool,
   type ImportFolder, type ImportSpoolBounds, type QuadGroup,
 } from '../rdf/import-spool.js';
 import { ImportIndex, type IndexedRecord } from '../rdf/import-index.js';
 import { DigestSet, assertRecordsWithinBound } from '../rdf/import-count.js';
+import { defaultSourceBase } from '../rdf/import-default-source.js';
 import {
   groupSubjectOf, quadsToOps, recordKey, recordKindOfGroup, tripletsOfGroup, type MintedRecord, type QuadsToOpsContext, type RecordOp,
 } from '../rdf/quads-to-ops.js';
@@ -181,6 +183,8 @@ interface RdfImportKnobs {
     duringTranslation?: () => unknown;
     /** After the door sorted the file and before the act is registered. */
     beforeRegister?: () => unknown;
+    /** After the act is registered and before it runs (a seam for a change a network makes to the space in between). */
+    afterRegister?: () => unknown;
     /** In a commit window, after the window was planned and before its plans are committed. */
     beforeCommitPlans?: () => unknown;
   };
@@ -392,10 +396,12 @@ async function mintedEndsOf(folder: ImportFolder): Promise<Map<string, MintedEnd
 async function dryPlanOnce(run: Run, builder: ReportBuilder, seeds: ReadonlyMap<string, MintedEnd>): Promise<Set<string>> {
   const edges = importReadSet(run.spaceId);
   const kinds = emptyKinds();
+  const unchanged = emptyUnchanged();
   const refused = new Set<string>();
   for await (const w of opWindows(run.folder)) {
     const kind = w[0]!.kind;
     const result = await dryPlanWindow(run.spaceId, w, kind === 'edge' ? edges : importReadSet(run.spaceId), seeds, run.planMeta!);
+    result.unchanged.forEach((same, i) => { if (same && result.plans[i]) unchanged[kind] += 1; });
     for (const refusal of result.refusals) {
       const op = w[refusal.index]!;
       builder.planner(refusal.kind, op.correlation, refusal);
@@ -406,6 +412,7 @@ async function dryPlanOnce(run: Run, builder: ReportBuilder, seeds: ReadonlyMap<
     for (const plan of result.plans) if (plan) kinds[kind][plan.op === 'insert' ? 'inserted' : 'converged'] += 1;
   }
   builder.report.kinds = kinds;
+  builder.report.unchanged = unchanged;
   return refused;
 }
 
@@ -413,7 +420,8 @@ async function dryPlanOnce(run: Run, builder: ReportBuilder, seeds: ReadonlyMap<
  * Pass 3: every operation dry-planned with the real planners; refusals answered, the counts of what would land kept.
  *
  * A record the dry plan refuses is not written, so a record that names it must not be judged with it present. The records are planned in the
- * commit's order (facts, entities, chrono, edges), and a fact that links an entity was planned before the entity's refusal was known: the plan
+ * import's order (`IMPORT_OP_ORDER`: entities, facts, chrono, edges; what a record points at first), each window in a read set of its own and
+ * seeded from the whole import's seeds, and a record of a later window that names a record an earlier window refused was judged with it present: the plan
  * runs again, on a fresh read set and a fresh report, without the records it refused, until a run refuses none that it had still seeded. Each
  * run takes at least one id out of a finite set of seeds, so it ends; its last report is the one that names every record judged without the
  * refused ones (and holds the refusals of every earlier run too, since a refused record stays refused).
@@ -438,7 +446,9 @@ async function commitPass(run: Run, minted: Map<string, MintedEnd>): Promise<voi
     if (seen + w.length <= state.committed) { seen += w.length; continue; }
     const rest = w.slice(Math.max(0, state.committed - seen));
     seen += w.length;
-    const { leftOut } = await commitWindow(run.spaceId, rest, minted, run.planMeta!, knobs.hooks?.beforeCommitPlans);
+    const { leftOut, linksNotWritten } = await commitWindow(run.spaceId, rest, minted, run.planMeta!, knobs.hooks?.beforeCommitPlans);
+    // A record that landed without every link the file states for it (a record they point at went meanwhile) is named, never lost without a word.
+    for (const op of linksNotWritten) run.builder.linksNotWritten(op.kind, op.correlation);
     // A record the store no longer let be written is named in the report, and the windows after this one no longer find its minted id present.
     for (const { op } of leftOut) {
       run.builder.leftOutAtCommit(op.kind, op.correlation, op.op);
@@ -529,6 +539,11 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
     const space = rdfSpaceState(getConfig(), entry.localId, undefined, schemaFingerprintOf);
     if (!space.ok) return gone(space.status, space.code, `RDF is no longer usable on the space (${space.code}).`);
     if (state.phase === 'received') {
+      // What the door sorted the file by is compared with what the space says now: a schema the network decided can have moved the base after the act
+      // was registered. Before the first window that ends the act (the sort and the record count were made by the old addressing); after it nothing does.
+      if (state.sortedBy && (space.meta.rdf?.base !== state.sortedBy.base || space.meta.rdf?.vocab !== state.sortedBy.vocab)) {
+        return gone(HTTP.CONFLICT, RDF_IMPORT_SPACE_CHANGED, 'the space\'s RDF base or vocabulary changed after the file was read.');
+      }
       // The meta, the mode and the type schemas are read once, now that the space is held, and kept: the translation, the dry plan and every commit
       // window judge by this one read.
       state.options = { ...state.options, mode: space.meta.validationMode ?? 'off' };
@@ -648,14 +663,15 @@ const REPORT_CLASS = ythrilIri('ExportReport');
 const HAS_PART = stdIri('dcterms', 'hasPart').value;
 
 /** The graphs a file names, and which of them only describe the file (an export's description graph). */
-interface GraphsSeen { order: string[]; describing: Set<string> }
+interface GraphsSeen { order: string[]; describing: Set<string>; inDefaultGraph: boolean }
 
 /** `quads` passed on unchanged, with the graphs they name noted in `seen`. */
 async function* noteGraphs(quads: AsyncIterable<Quad>, seen: GraphsSeen): AsyncGenerator<Quad, void, undefined> {
   const known = new Set<string>();
   for await (const q of quads) {
     const g = q.graph?.value;
-    if (g !== undefined) {
+    if (g === undefined) seen.inDefaultGraph = true;
+    else {
       if (!known.has(g)) { known.add(g); seen.order.push(g); }
       if (q.predicate.value === HAS_PART || (q.predicate.value === RDF_TYPE && q.object.kind === 'iri' && q.object.value === REPORT_CLASS)) seen.describing.add(g);
     }
@@ -734,28 +750,36 @@ export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnsw
  * The door's own pass and what follows it: the file into its sorted spool and the bounds that need no store, then the dry run inline, or the state
  * written, the act registered and waited for within the runner's budget. The act reads the store; this reads none.
  */
-async function readAndRun(input: RdfImportInput, options: ImportOptions, meta: SpaceMeta, dryRun: boolean, releaseDoor: () => void): Promise<RdfImportAnswer> {
+async function readAndRun(input: RdfImportInput, given: ImportOptions, meta: SpaceMeta, dryRun: boolean, releaseDoor: () => void): Promise<RdfImportAnswer> {
   const importId = uuidv4();
   const dir = folderPathOf(importId)!;
   // The sweep at the start never removes a folder a door is filling.
   const releaseFolder = holdFolder(importId);
   let handedOver = false;
   let kept: RdfImportReport | undefined;
+  /** What the caller gave, and then the source the file names for itself when it gave none (R2): the one set of options the sort, the act and a dry run read. */
+  let options = given;
   try {
     const folder = await openImportFolder(dir);
-    const seen: GraphsSeen = { order: [], describing: new Set() };
+    const seen: GraphsSeen = { order: [], describing: new Set(), inDefaultGraph: false };
     const quads = parseRdf(counted(input.body, importBodyMaxBytes(getConfig())), options.format, { blankNodePrefix: `b${importId.slice(0, 8)}-` });
-    const sorted = await sortedSpool(noteGraphs(quads, seen), folder, { names: addressNames(meta, options.source), bounds: knobs.bounds ?? {} });
+    let sorted = await sortedSpool(noteGraphs(quads, seen), folder, { names: addressNames(meta, options.source), bounds: knobs.bounds ?? {} });
     const missing = graphsWithoutBase(seen, options);
     if (missing.length > 0) {
       return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_SEVERAL_GRAPHS, `The file holds ${seen.order.length - seen.describing.size} data graphs and ${missing.length} of them have no source base: `
         + 'name one per graph in graphBase ("<graph address> <source base>"), or import one graph at a time', { graphsWithoutBase: missing.slice(0, RDF_IMPORT_GRAPH_BASES_MAX) });
     }
+    // The file's one data graph is its source when none was given: known only now, so the file is sorted again by the addresses it is read by.
+    const fileBase = defaultSourceBase(options.format, seen, options, meta);
+    if (fileBase !== null) {
+      options = { ...options, source: { base: fileBase } };
+      sorted = await resortedSpool(sorted, folder, { names: addressNames(meta, options.source), bounds: knobs.bounds ?? {} });
+    }
     // The records the file will make, subjects and bare edges, counted from the spool alone: a file that cannot fit is answered 413 here.
     await assertRecordsWithinBound(sorted.groups(), namesByGraph(meta, options), sorted.subjects, knobs.maxRecords);
     const report: RdfImportReport = {
       importId, space: input.spaceId, status: dryRun ? 'dry-run' : 'running', dryRun, format: options.format, mode: options.mode,
-      quads: sorted.quads, subjects: sorted.subjects, kinds: emptyKinds(), reasons: [], reasonCount: 0, reasonsByCode: {}, notTaken: {},
+      quads: sorted.quads, subjects: sorted.subjects, kinds: emptyKinds(), unchanged: emptyUnchanged(), reasons: [], reasonCount: 0, reasonsByCode: {}, notTaken: {},
       startedAt: new Date().toISOString(),
     };
     if (dryRun) {
@@ -766,7 +790,10 @@ async function readAndRun(input: RdfImportInput, options: ImportOptions, meta: S
       const done = { ...run.builder.report, endedAt: new Date().toISOString() };
       return outcome === 'refused' ? refusedAnswer({ ...done, status: 'refused' }) : { kind: 'report', status: HTTP.OK, report: done };
     }
-    await writeState(folder, { importId, space: input.spaceId, options, sortedFile: sorted.file, phase: 'received', committed: 0, report });
+    await writeState(folder, {
+      importId, space: input.spaceId, options, sortedFile: sorted.file, phase: 'received', committed: 0, report,
+      sortedBy: { ...(meta.rdf?.base !== undefined ? { base: meta.rdf.base } : {}), ...(meta.rdf?.vocab !== undefined ? { vocab: meta.rdf.vocab } : {}) },
+    });
     await keepReport(report);
     kept = report;
     void sweepReports(Date.now()).catch(err => log.warn(`the RDF import report sweep failed: ${peerText(err)}`));
@@ -779,6 +806,7 @@ async function readAndRun(input: RdfImportInput, options: ImportOptions, meta: S
     handedOver = true;
     releaseFolder();
     releaseDoor();
+    await knobs.hooks?.afterRegister?.();
     return await waitForAct(input.spaceId, importId, entryId);
   } catch (err) {
     // Never registered (the door failed, or shutdown closed the runner): the report kept a moment ago must not say "running" for seven days.

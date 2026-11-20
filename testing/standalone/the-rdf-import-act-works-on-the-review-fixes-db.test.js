@@ -179,7 +179,8 @@ describe('the RDF import act works on top of the review fixes (real routes, real
 
   it('H6: a large JSON-LD document whose top level is @graph is refused with its code on both doors', async () => {
     const graph = Array.from({ length: 30_000 }, (_, i) => ({ '@id': `http://graph.example/s${i}`, 'http://graph.example/p': `value number ${i} of the graph` }));
-    const text = JSON.stringify({ '@graph': graph });
+    // A root of only an array under @graph is the export's shape and is read as a stream (the JSON-LD round); a root with a property of its own is read whole.
+    const text = JSON.stringify({ 'http://graph.example/about': 'a root with a property of its own', '@graph': graph });
     assert.ok(text.length > 2_097_152, 'the document is over the reader\'s unparsed bound');
     const r = await d.importRest(writer.key, H6, text, { format: 'jsonld' });
     assert.equal(r.body?.code, 'rdf_jsonld_not_streamable', `${r.status} ${r.text.slice(0, 400)}`);

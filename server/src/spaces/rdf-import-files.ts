@@ -62,6 +62,12 @@ export interface ActState {
   committed: number;
   report: RdfImportReport;
   /**
+   * The space's RDF base and vocabulary the door sorted the file by (a chrono entry's time nodes belong to their record by them, and the record count
+   * is made by them). The act reads them again under its hold and, before its first window, ends as an input failure when they differ (R4): a schema
+   * the network decided can change them after the act was registered. Absent in a state written before this was kept: nothing is compared then.
+   */
+  sortedBy?: { base?: string; vocab?: string };
+  /**
    * The type schemas the dry plan and every commit window judge by: read once under the hold (when the translation began) and kept here, so a
    * schema that arrives from a network meanwhile governs the writes after the import, never half of it.
    */

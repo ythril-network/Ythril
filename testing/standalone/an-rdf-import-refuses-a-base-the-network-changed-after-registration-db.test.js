@@ -45,7 +45,7 @@ describe('a base the network changed after the act registered (real routes, real
   };
 
   before(async () => {
-    d = await openRdfImportDoors({ suite: 'rdf_import_base', spaces: [EARLY, LATE].map(id => ({ id, meta: personMeta(id) })) });
+    d = await openRdfImportDoors({ suite: 'rdf_import_base_moved', spaces: [EARLY, LATE].map(id => ({ id, meta: personMeta(id) })) });
     writer = await d.mint('rdf-import-base-writer', Object.fromEntries([EARLY, LATE].map(s => [s, d.row({ knowledge: 'write', schema: 'admin' })])));
     act = await import('../../server/dist/spaces/rdf-import-act.js');
   });

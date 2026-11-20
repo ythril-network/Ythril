@@ -26,7 +26,8 @@
  */
 import type { RefKind } from '../config/types-knowledge.js';
 import type { ChronoStatus, ChronoType } from '../config/types.js';
-import { ReadSet, type SeedKind } from '../brain/write-plan/read-set.js';
+import { ReadSet, mergeWants, type SeedKind } from '../brain/write-plan/read-set.js';
+import { changesNothing, type ConvergeBefore } from './import-unchanged.js';
 import { trustedPlan, type PlanTrust } from '../brain/write-plan/trust.js';
 import { planEntity, entityWant, type EntityInput } from '../brain/write-plan/plan-entity.js';
 import { planFact, factWant, type FactInput } from '../brain/write-plan/plan-fact.js';
@@ -35,7 +36,7 @@ import { planEdge, edgeWant, type EdgeInput } from '../brain/write-plan/plan-edg
 import { dryPlan, type DryItem, type DryPlanResult, type DryRefusal } from '../brain/write-plan/dry-plan.js';
 import { RequestRefusal } from '../util/errors.js';
 import { commitPlans } from '../brain/write-plan/commit.js';
-import type { WritePlan } from '../brain/write-plan/types.js';
+import type { CommitOutcome, WritePlan } from '../brain/write-plan/types.js';
 import { recordKey, type RecordOp, type StoredRecord } from './quads-to-ops.js';
 import type { RecordKind } from './term-iri.js';
 
@@ -208,13 +209,52 @@ export interface DryWindow {
   refusals: readonly DryRefusal[];
   /** The seeds the dry plan took back for a record it refused (`DryPlanResult.unseeded`). */
   unseeded: DryPlanResult['unseeded'];
+  /** Per operation: its plan is a converge that changes nothing the stored record does not already say, so the commit writes nothing for it. */
+  unchanged: readonly boolean[];
+}
+
+/**
+ * The stored form of every record a window's operations converge onto, read BEFORE any of them is planned: once a plan is made the read set holds the
+ * record as planned. A record that is no converge (an insert of a new record) answers `null`; an edge is looked up by its triplet, since an edge
+ * written as new can be an edge that is stored. The link rows of a fact or chrono entry are read with it.
+ */
+async function convergesBefore(view: ReadSet, ops: readonly RecordOp[], items: readonly DryItem[]): Promise<Array<ConvergeBefore | null>> {
+  const links = ops.flatMap(op => (op.op === 'converge' && (op.kind === 'fact' || op.kind === 'chrono') ? [{ fromKind: op.kind as RefKind, id: op.id }] : []));
+  await view.load(mergeWants([...items.map(i => i.want), ...(links.length > 0 ? [{ links }] : [])]));
+  return ops.map((op): ConvergeBefore | null => {
+    if (op.kind === 'edge') {
+      const f = op.fields;
+      const doc = view.triplet({ from: f.from, to: f.to, label: f.label, fromKind: f.fromKind, toKind: f.toKind });
+      return doc === null ? null : { doc: doc as unknown as Readonly<Record<string, unknown>> };
+    }
+    if (op.op !== 'converge') return null;
+    const doc = view.stored(op.kind, op.id, 'unresolved');
+    if (doc === null) return null;
+    if (op.kind !== 'fact' && op.kind !== 'chrono') return { doc };
+    try { return { doc, links: view.storedLinks(op.kind, op.id) }; } catch (err) {
+      // Links over the bound cannot be known whole: such a record is never called unchanged (the translation refuses it first).
+      if (err instanceof RequestRefusal) return { doc };
+      throw err;
+    }
+  });
+}
+
+/**
+ * Plan a window's operations against `view` as the dry plan and the commit both do (the planners' own `dryPlan`, one item per operation), and judge
+ * each converge by what the stored record was before: the plans, the refusals, and which plans change nothing ({@link changesNothing}).
+ */
+async function planWindow(spaceId: string, ops: readonly RecordOp[], view: ReadSet, planMeta: object): Promise<DryPlanResult & { unchanged: boolean[] }> {
+  const items = ops.map(op => opItem(spaceId, op, planMeta));
+  const before = await convergesBefore(view, ops, items);
+  const planned = await dryPlan(items, view);
+  return { ...planned, unchanged: planned.plans.map((plan, i) => plan !== null && changesNothing(before[i] ?? null, plan)) };
 }
 
 /** Dry-plan one window of operations against `view` (seeded here), writing nothing. */
 export async function dryPlanWindow(spaceId: string, ops: readonly RecordOp[], view: ReadSet, minted: MintedEnds, planMeta: object): Promise<DryWindow> {
   await seedImported(view, ops, minted);
-  const { plans, refusals, unseeded } = await dryPlan(ops.map(op => opItem(spaceId, op, planMeta)), view);
-  return { plans, refusals, unseeded };
+  const { plans, refusals, unseeded, unchanged } = await planWindow(spaceId, ops, view, planMeta);
+  return { plans, refusals, unseeded, unchanged };
 }
 
 /** A read set for `spaceId`, as the dry plan and the commit plan against. */
@@ -236,16 +276,34 @@ export interface LeftOut { op: RecordOp; refusal: DryRefusal }
  */
 export async function commitWindow(
   spaceId: string, ops: readonly RecordOp[], minted: MintedEnds, planMeta: object, beforeCommitPlans?: () => unknown,
-): Promise<{ inserted: number; converged: number; leftOut: LeftOut[] }> {
+): Promise<{ inserted: number; converged: number; leftOut: LeftOut[]; linksNotWritten: RecordOp[] }> {
   const view = importReadSet(spaceId);
   await seedImported(view, ops, minted);
-  const planned = await dryPlan(ops.map(op => opItem(spaceId, op, planMeta)), view);
-  const plans = planned.plans.filter((p): p is WritePlan => p !== null);
+  const planned = await planWindow(spaceId, ops, view, planMeta);
+  // Each plan beside the operation it was made for: the outcome of a plan is read back to its operation. A converge that changes nothing is no
+  // write at all (R3): no position, no modified time, no embed job; the report counts it converged and unchanged.
+  const pairs = planned.plans.flatMap((plan, i) => (plan === null || planned.unchanged[i] ? [] : [{ plan, op: ops[i]! }]));
+  const plans = pairs.map(p => p.plan);
   const leftOut = planned.refusals.map(refusal => ({ op: ops[refusal.index]!, refusal }));
   await beforeCommitPlans?.();
   const outcomes = await commitPlans(spaceId, plans);
   const failed = outcomes.findIndex(o => !o.ok);
   // The outcome's own reason can quote a value of the record: it is never put in the sentence, which reaches the act's entry and the log.
   if (failed >= 0) throw new ImportCommitIncomplete(`a ${plans[failed]!.kind} of the import did not land; the import runs again and converges`);
-  return { inserted: plans.filter(p => p.op === 'insert').length, converged: plans.filter(p => p.op === 'converge').length, leftOut };
+  const planNow = planned.plans.filter((p): p is WritePlan => p !== null);
+  return {
+    inserted: planNow.filter(p => p.op === 'insert').length, converged: planNow.filter(p => p.op === 'converge').length, leftOut,
+    linksNotWritten: pairs.filter((p, i) => linksLost(p.plan, outcomes[i]!)).map(p => p.op),
+  };
+}
+
+/**
+ * Did the commit write the record of `plan` without every link row it states? Its link rows are reconciled straight after the record lands and never
+ * refuse it, so what did not land is only told by the outcome: a row taken back with an entity that went meanwhile (`linksTakenBack`), or no link count
+ * at all (the reconcile failed after the record was stored). A record that states no link has nothing to lose.
+ */
+function linksLost(plan: WritePlan, outcome: CommitOutcome): boolean {
+  if (!outcome.ok || plan.links === undefined) return false;
+  const stated = Object.values(plan.links.desired).reduce((n, ids) => n + (ids?.length ?? 0), 0);
+  return stated > 0 && ((outcome.linksTakenBack?.length ?? 0) > 0 || outcome.linksAdded === undefined);
 }
