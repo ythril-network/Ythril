@@ -13,6 +13,7 @@
 
 import { primitivePropertyError } from './property-values.js';
 import { shapeError } from './write-shape.js';
+import { factTextError, plannedInputError } from './record-checks.js';
 import { parseRecurrence } from './chrono.js';
 import { getConfig } from '../config/loader.js';
 import { resolveMetaRefs, getAllowedChronoTypes, type InstanceWrittenKeys } from '../spaces/schema-validation.js';
@@ -47,7 +48,6 @@ export const BULK_MAX_PER_TYPE = 500;
 import { UUID_V4_RE, edgeEndpointKind, isWellFormedRef } from './entity-refs.js';
 import { REF_KINDS, isRefKind } from '../config/types-knowledge.js';
 import type { RefKind } from '../config/types-knowledge.js';
-import { MAX_FACT_LENGTH } from '../util/request-bounds.js';
 import { retiredWriteFieldError } from './retired-write-fields.js';
 import { RequestRefusal } from '../util/errors.js';
 import { refuseForkRowsNamed } from './forks.js';
@@ -455,7 +455,8 @@ function prepareItems(
     if (unknown.refuses('facts', i)) continue;
     const fact = typeof item['fact'] === 'string' ? item['fact'].trim() : '';
     if (!fact) { reject('fact', i, item, 'missing required field: fact'); continue; }
-    if (fact.length > MAX_FACT_LENGTH) { reject('fact', i, item, '`fact` must not exceed 50 000 characters'); continue; }
+    const factErr = factTextError(fact);
+    if (factErr) { reject('fact', i, item, factErr); continue; }
     const c = common('fact', item, i);
     if (!c.ok) continue;
     const factInput: FactInput = {
@@ -466,6 +467,9 @@ function prepareItems(
       opts: { ...c.flags, onValidation: warn('fact', i) }, ttlDays: c.ttlDays, id: c.rawId,
       ...(instanceWrittenKeys?.fact ? { instanceWrittenKeys: instanceWrittenKeys.fact } : {}),
     };
+    // The record as it will be planned, through the checks the RDF import's dry plan asks too (A5): shape, link caps, size.
+    const factInputErr = plannedInputError({ kind: 'fact', input: factInput });
+    if (factInputErr) { reject('fact', i, item, factInputErr); continue; }
     out.push({
       kind: 'fact', index: i, item, desired: c.desired, addresses: c.rawId,
       plan: view => planFact(spaceId, factInput, view), want: factWant(factInput),
@@ -490,6 +494,8 @@ function prepareItems(
       id: c.rawId, opts: c.flags, ttlDays: c.ttlDays, onValidation: warn('entity', i),
       ...(instanceWrittenKeys?.entity ? { instanceWrittenKeys: instanceWrittenKeys.entity } : {}),
     };
+    const entityErr = plannedInputError({ kind: 'entity', input: entityInput });
+    if (entityErr) { reject('entity', i, item, entityErr); continue; }
     out.push({
       kind: 'entity', index: i, item, desired: c.desired, addresses: c.rawId,
       plan: view => planEntity(spaceId, entityInput, view), want: entityWant(entityInput),
@@ -525,6 +531,8 @@ function prepareItems(
       },
       ttlDays: c.ttlDays, opts: { ...c.flags, onValidation: warn('chrono', i) },
     };
+    const chronoErr = plannedInputError({ kind: 'chrono', input: chronoInput });
+    if (chronoErr) { reject('chrono', i, item, chronoErr); continue; }
     out.push({
       kind: 'chrono', index: i, item, desired: c.desired, addresses: c.rawId,
       plan: view => planChrono(spaceId, chronoInput, view), want: chronoWant(chronoInput),
@@ -755,6 +763,9 @@ function batchRun(
       opts: { ...edgeFlags.flags, fromKind, toKind, onValidation: warn('edge', i) },
       ...(instanceWrittenKeys?.edge ? { instanceWrittenKeys: instanceWrittenKeys.edge } : {}),
     };
+    // The edge as it will be planned, through the checks the RDF import's dry plan asks too (A5): shape and size.
+    const edgeErr = plannedInputError({ kind: 'edge', input: edgeInput });
+    if (edgeErr) return refuse(edgeErr);
     /*
      * What the edge asks of the read set, read now if the batch's one read did not (a `$ref` to a record addressed by
      * id), and then REFUSED by the one function every door asks — the schema and, under `strictLinkage`, both ends

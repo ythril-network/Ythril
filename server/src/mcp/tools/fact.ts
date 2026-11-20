@@ -24,6 +24,7 @@ import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
 import { connectionSchemas, applyConnections, assertConnections, connectionSubject } from '../../brain/write-connections.js';
 import { MAX_TAGS, MAX_DELETE_FIELDS, MAX_FACT_LENGTH } from '../../util/request-bounds.js';
+import { factTextOverCap } from '../../brain/record-checks.js';
 import { NotFoundError, notFoundSentence } from '../../util/errors.js';
 
 export const save_factTool: ToolHandler = {
@@ -83,7 +84,7 @@ export const save_factTool: ToolHandler = {
     const { args: a, callSpace } = ctx;
     const fact = String(a['fact'] ?? '');
     if (!fact.trim()) throw new Error('fact must not be empty');
-    if (fact.length > MAX_FACT_LENGTH) throw new Error('fact must not exceed 50 000 characters');
+    if (factTextOverCap(fact)) throw new Error('fact must not exceed 50 000 characters');
     const tags = Array.isArray(a['tags']) ? (a['tags'] as string[]) : [];
     const description = typeof a['description'] === 'string' ? a['description'] : undefined;
     const props = (a['properties'] != null && typeof a['properties'] === 'object' && !Array.isArray(a['properties']))
