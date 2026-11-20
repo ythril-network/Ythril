@@ -517,7 +517,7 @@ it): [Brain API](04-brain-api.md#a-create-tells-you-which-fields-it-did-not-unde
 Every field answers to the area that owns it rather than to the route, and a refusal is a `403` naming each field
 and its requirement. The table moved to [Tokens API → What each field of the space update body requires](07-tokens-api.md#what-each-field-of-the-space-update-body-requires);
 the schema fields in it (`meta.typeSchemas`, `meta.validationMode`, `meta.strictLinkage`, `meta.stampSkew`,
-`meta.rules`, `targetNetwork`) are described in the [schema guide](06a-schema-api.md).
+`meta.rules`, `targetNetwork`) are described in the [schema guide](06a-schema-api.md), `meta.rdf` in [Exports](06f-exports.md#rdf-names-metardf-and-iri).
 
 **Optimistic concurrency (`If-Match`).** Meta writes are last-write-wins by default: if two clients read a space, both edit it, and both save, the second save replaces the first in full. To make your write conditional, send the `meta.version` you read as an `If-Match` header:
 
