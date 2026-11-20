@@ -120,6 +120,8 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/turtle" \
 
 **What becomes of a subject.** A subject under the space's own base whose record is stored is updated in place, and nothing is taken away: a field the file does not state keeps its stored value, tags and links are joined. Every other subject is a **new** record with an id this instance mints: importing the same foreign file twice makes its records twice, so run it with `dryRun` first. A file exported by another space keeps its records apart from yours: name that space's base as `sourceBase` (TriG, N-Quads and JSON-LD default to the file's one data graph). A file of several data graphs (a view's export) needs one `graphBase` per graph; a paged export imported page by page does not keep the links between pages. Files are never imported (their bytes are not in RDF); a file statement is counted as not taken.
 
+**Large files.** The file is read as a stream and sorted on disk, so its size is bound by the import's own bounds and not by memory. One shape is the exception: the JSON-LD library holds a top-level `@graph` array whole, so a JSON-LD document over `RDF_MAX_UNPARSED_CHARS` characters whose top level is `@graph` (the shape of Ythril's own JSON-LD export) is refused with `400 rdf_jsonld_not_streamable`, on both doors. Split such data into several documents, or send it as Turtle, TriG or N-Quads: Turtle, TriG and N-Quads have no such limit.
+
 ### Parameters
 
 | Parameter | Values | Default |
@@ -133,7 +135,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/turtle" \
 
 ### The answer and the report
 
-`200` with the report when the import finished within the request, `202` with `importId`, `status: "running"` and `location` (also the `Location` header) while it runs on, `409 rdf_import_refused` with the report when it was refused. `GET /api/brain/spaces/:spaceId/import/rdf/:importId` and MCP `import_rdf_status` (`importId`) answer the report for seven days. The report holds `status` (`running`, `completed`, `refused`, `failed`, `dry-run`), `quads` and `subjects`, per kind the records `inserted` and `converged`, the `reasons` (each its `code`, `outcome` `refused` or `recorded`, its message and up to 20 of its statements; the first 100 reasons are named, `reasonCount` and `reasonsByCode` count them all) and `notTaken` (the statements left out on purpose, by why: server-owned, derived, a file, the export's own description). A statement shows a literal by its datatype and length, never its text.
+`200` with the report when the import finished within the request, `202` with `importId`, `status: "running"` and `location` (also the `Location` header) while it runs on, `409 rdf_import_refused` with the report when it was refused. `GET /api/brain/spaces/:spaceId/import/rdf/:importId` and MCP `import_rdf_status` (`importId`) answer the report for seven days. The report holds `status` (`running`, `completed`, `refused`, `failed`, `dry-run`), `quads` and `subjects`, per kind the records `inserted` and `converged`, the `reasons` (each its `code`, `outcome` `refused` or `recorded`, its message and up to 20 of its statements; the first 100 reasons are named, `reasonCount` and `reasonsByCode` count them all) and `notTaken` (the statements left out on purpose, by why: server-owned, derived, a file, the export's own description). A statement shows a literal by its datatype and length, never its text. A stored record the file names and that holds more link rows than an import reads (rows that arrived by sync are not held to the per-class cap) cannot be converged onto without taking links away: the import is refused with a reason coded `stored_record_links_over_bound`, naming the record's kind and id.
 
 ### While it runs
 
@@ -149,6 +151,7 @@ Both doors need `knowledge: write`, for a dry run and the status too: they answe
 | 400 | `rdf_import_schema_not_available` | `schema` was sent |
 | 400 | `rdf_import_several_graphs` | Several data graphs and one without its `graphBase` |
 | 400 | `rdf_malformed` (and the reader's other codes) | The file is not well-formed: the answer names the line and column (`place`) |
+| 400 | `rdf_jsonld_not_streamable` | A JSON-LD document over `RDF_MAX_UNPARSED_CHARS` characters whose top level is `@graph`, or one whose `@context`, `@id` or `@type` comes after the data it governs |
 | 403 | (the rights guard's) | No `knowledge: write` on the space |
 | 404 | `space_not_found` | A personal view: an import writes into a space |
 | 409 | `rdf_import_refused` | The import was refused; nothing was written |
