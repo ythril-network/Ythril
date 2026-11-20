@@ -28,7 +28,7 @@ import { connectionRefusalAnswer, writeWarningFields, type UpdateValidation } fr
 import type { SchemaViolation } from '../../spaces/schema-validation.js';
 import { parseRecordSuppression } from '../../brain/suppress-embeddings.js';
 import { parseRecordSuperseded } from '../../brain/record-flag.js';
-import { MAX_FACT_LENGTH } from '../../util/request-bounds.js';
+import { factTextError } from '../../brain/record-checks.js';
 
 export const memoriesRouter = Router();
 
@@ -51,8 +51,9 @@ memoriesRouter.post('/spaces/:spaceId/facts', globalRateLimit, requireSpaceAuth,
     res.status(400).json({ error: '`tags` must be an array of strings' });
     return;
   }
-  if ((fact as string).length > MAX_FACT_LENGTH) {
-    res.status(400).json({ error: '`fact` must not exceed 50 000 characters' });
+  const factErr = factTextError(fact as string);
+  if (factErr) {
+    res.status(400).json({ error: factErr });
     return;
   }
   // Quota check — reject with 507 if brain hard limit exceeded
