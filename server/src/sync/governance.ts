@@ -279,6 +279,13 @@ export type MetaRoundPlan =
   | { ok: true; localSpace: string; ownEdit: boolean; own?: ParsedSpaceMeta; layer?: ParsedSpaceMeta; conflicts: string[]; unknownFields: string[]; rdfConflict?: RdfBaseConflict }
   | { ok: false; localSpace: string; reason: string };
 
+let applyHookForTest: ((round: VoteRound) => void) | null = null;
+
+/** Test seam: `hook` runs first in every apply of a passed `meta_change` round, so a test makes the apply throw once, as any fault inside it would. `null` removes it. */
+export function setMetaChangeApplyHookForTest(hook: ((round: VoteRound) => void) | null): void {
+  applyHookForTest = hook;
+}
+
 /**
  * What a passed `meta_change` round DOES here: parse every part it writes, and write all of it or none of it.
  *
@@ -288,6 +295,7 @@ export type MetaRoundPlan =
  */
 export const passedMetaChange = {
   apply(net: NetworkConfig, round: VoteRound): void {
+    applyHookForTest?.(round);
     const plan = planPassedMetaChange(net, round);
     if (plan === null) return;
     if (!plan.ok) {
