@@ -129,7 +129,8 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
     await hung(db, [[K1, 'facts'], [K2, 'facts'], [K3, 'facts']], async () => {
       const started = Date.now();
       await sweepExpired(new Date());
-      assert.ok(Date.now() - started < 3 * BOUND_MS + 3000, `three bounds were expected, it took ${Date.now() - started} ms`);
+      // Told apart from the defect by its own duration: one of the three spaces waiting its stall out costs two bounds and a stall.
+      assert.ok(Date.now() - started < 2 * BOUND_MS + STALL_MS - 500, `three bounds were expected, it took ${Date.now() - started} ms: a space waited out its stall (${STALL_MS} ms)`);
     });
     const stops = lines.filter((l) => /^TTL sweep stopped: 3 spaces timed out in a row; the store looks stalled — retried next cycle$/.test(l));
     assert.equal(stops.length, 1, `one stop line, got ${stops.length}`);

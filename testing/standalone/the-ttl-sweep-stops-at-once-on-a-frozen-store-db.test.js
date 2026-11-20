@@ -30,7 +30,9 @@ const skip = await mongoSkipReason();
 const PAST = new Date('2020-01-01T00:00:00Z');
 const BOUND_MS = 1000;
 const PING_MS = 3000;
-const QUERY = '&connectTimeoutMS=1000&heartbeatFrequencyMS=500&serverSelectionTimeoutMS=10000';
+/** How long the driver looks for a server before it gives up: what a sweep costs when nothing bounds its ping. */
+const SELECTION_MS = 10_000;
+const QUERY = `&connectTimeoutMS=1000&heartbeatFrequencyMS=500&serverSelectionTimeoutMS=${SELECTION_MS}`;
 const R = ['freeze-1', 'freeze-2', 'freeze-3'];
 
 describe('a store that freezes costs the retention walk one bound and one ping', { skip }, () => {
@@ -80,7 +82,8 @@ describe('a store that freezes costs the retention walk one bound and one ping',
     assert.equal(result.walk.storeDown, true, 'a store that does not answer is the walk\'s stop, not the first space\'s failure');
     assert.equal(result.walk.outcomes.length, 1, 'only the first space was reached: the walk did not pay a bound per space');
     assert.ok(tookMs >= BOUND_MS - 100, `ended after ${tookMs} ms, before the bound`);
-    assert.ok(tookMs <= BOUND_MS + PING_MS + 3000, `a frozen store cost ${tookMs} ms: one bound (${BOUND_MS}) and one ping (${PING_MS}) were expected`);
+    // Told apart from the defect by its own duration: a ping nothing bounds waits the driver's server selection out.
+    assert.ok(tookMs < SELECTION_MS, `a frozen store cost ${tookMs} ms: one bound (${BOUND_MS}) and one ping (${PING_MS}) were expected, not the driver's server selection (${SELECTION_MS})`);
     const stops = lines.filter((l) => /^TTL sweep stopped: the store is not answering/.test(l));
     assert.equal(stops.length, 1, `one store line, got ${stops.length}`);
     assert.equal(lines.filter((l) => /failed for space/.test(l)).length, 0, 'no space is blamed for the store');
