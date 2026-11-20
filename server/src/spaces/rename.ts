@@ -218,6 +218,15 @@ export async function moveSpaceData(
     stepFailed(`Could not move chunk uploads directory ${oldId} → ${newId}`, err, errors);
   }
 
+  // 4. The RDF import reports and import folders name their space inside: they follow it (lens L4), or a space created later under the old id would
+  // read the old one's reports (subject addresses of its records). Its own step, so a failure keeps the marker and a resumed rename does the rest.
+  try {
+    const { renameRdfImportsOfSpace } = await import('./rdf-import-files.js');
+    await renameRdfImportsOfSpace(oldId, newId);
+  } catch (err) {
+    stepFailed(`Could not move the RDF imports of ${oldId} to ${newId}`, err, errors);
+  }
+
   // Usage history follows the space. `space_activity` is instance-wide and its bucket `_id` embeds the
   // space id, so the collection renames above cannot carry it: without this a renamed space starts with a
   // blank Usage panel while its old rows linger under an id that no longer exists.
