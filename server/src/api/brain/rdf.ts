@@ -183,7 +183,8 @@ async function sendStream(req: Request, res: Response, stream: RdfExportStream):
         await rest.return();
         const { windowMs, minBytesPerSecond, idleMs } = pace();
         const why = how === 'slow' ? `under ${minBytesPerSecond} bytes a second over ${windowMs} ms of waiting on it` : `nothing for ${idleMs} ms`;
-        res.write(stream.abandon(`the reader took the export too slowly (${why})`));
+        // The cut falls inside a record (a slice is not a line): the ending starts a line of its own, so a line-wise reader still reads it.
+        res.write(`\n${stream.abandon(`the reader took the export too slowly (${why})`)}`);
         release();
         closeUnlessFinished(res, rdfExportEndingWaitMs());
         break;

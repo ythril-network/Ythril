@@ -138,6 +138,10 @@ describe('a trickling reader cannot hold an export slot', { skip, timeout: 600_0
     assert.match(got.text, /INCOMPLETE[^\n]*too slowly/, 'the drive: no incomplete ending, the final chunk missing');
     assert.ok(got.text.endsWith('!ythril-export-incomplete\n'), 'the last line received is the one no parser accepts');
     assert.equal(got.trailers['ythril-export-complete'], 'false');
+    // The cut falls inside a record; the ending still starts on a line of its own (the slice G drive: its first statement, the graph's
+    // dcterms:isPartOf the report, was glued to the cut record's half line, so no line-wise reader could read it).
+    assert.match(got.text, /^<[^<>\s]+> <http:\/\/purl\.org\/dc\/terms\/isPartOf> <urn:ythril:export-report:[0-9a-f]+>/m,
+      'the ending of an export cut for its reader begins a line');
     await assert.rejects(parseRdf('nquads', got.text), 'a stream cut by the rate bound is never read as whole');
   }
 
