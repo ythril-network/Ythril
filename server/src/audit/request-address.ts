@@ -9,5 +9,12 @@ import type { Request } from 'express';
  * the key a limiter counts under: that is `clientAddressKey` (`rate-limit/middleware.ts`), which folds an IPv6 address to its subnet.
  */
 export function requestAddress(req: Request): string {
-  return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+  // `req.ip` is a getter that reads the request's socket, and it THROWS once the socket is gone: a client that left while its upload was being
+  // refused ends the response with `close`, and the audit row written then asked for the address of a request that had none (an uncaught
+  // TypeError in a response listener, found by the large-JSON-LD refusal of the RDF import, bundle-270 H6). The guard is inside so no caller drops it.
+  try {
+    return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }

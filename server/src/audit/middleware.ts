@@ -455,6 +455,8 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
    * context — it is mounted after the request-id middleware — so at THIS point the id is there.
    */
   const requestId = currentRequestId() ?? null;
+  // The address too, while the socket is there: a client that leaves ends the response with `close`, and the row written then has no socket to ask.
+  const ip = requestAddress(req);
 
   /*
    * ONE entry per request, from whichever of the two events comes first.
@@ -564,7 +566,7 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
       tokenLabel: token?.name ?? null,
       authMethod,
       oidcSubject: isOidc(token) ? token.id.replace(/^oidc:/, '') : null,
-      ip: requestAddress(req),
+      ip,
       method: req.method,
       // A read through a personal view: the view's id is its owner's own text, so the recorded path names `@view` and the row names the
       // MEMBERS read (`spaces`), never the view.
