@@ -59,3 +59,57 @@ describe('the RDF import section says what the import writes and reads by defaul
     assert.ok(section.includes('after the import was registered and before its first window'), 'the status table says the base is checked before the first window too');
   });
 });
+
+/**
+ * Lens findings L1 to L3 and L7 (bundle-270): what the other pages and the changelog say of the import and of the checks it brought, each read against the
+ * source that decides it, never a list kept here.
+ */
+describe('the pages say what the import and its shared checks do to existing callers', () => {
+  it('L2: the read-only list of the tool page holds no tool whose rung is above read, and import_rdf_status asks write', () => {
+    const rights = [...read('server/src/auth/space-rights.ts').matchAll(/\{ tool: '([a-z_]+)', area: '[a-z]+', needs: '([a-z]+)' \}/g)].map(m => [m[1], m[2]]);
+    const needs = Object.fromEntries(rights);
+    assert.equal(needs['import_rdf_status'], 'write', 'the tool asks the write rung');
+    assert.ok(Object.keys(needs).length > 30, `the tool rights were read (${Object.keys(needs).length})`);
+    const page = read('docs/integration-guide/16-mcp.md');
+    const list = /Read-only tools \(([^)]+)\) work normally/.exec(page)?.[1] ?? '';
+    const named = [...list.matchAll(/`([a-z_]+)`/g)].map(m => m[1]);
+    assert.ok(named.includes('recall'), 'the list was read');
+    assert.deepEqual(named.filter(t => needs[t] !== undefined && needs[t] !== 'read'), [], 'a tool above the read rung is listed as read-only');
+    assert.ok(page.includes('`import_rdf_status` is not among them: it asks `knowledge: write`'), 'the page says which rung it asks');
+  });
+
+  it('L3: the page of limits names the refusal code of every space act kind', () => {
+    const codes = [...read('server/src/config/types-space-acts.ts').matchAll(/writeRefusalCode: '([a-z_]+)'/g)].map(m => m[1]);
+    assert.ok(codes.includes('space_being_rdf_imported') && codes.length >= 7, `the codes read: ${codes.join(', ')}`);
+    const page = read('docs/integration-guide/03-auth-and-limits.md');
+    assert.deepEqual(codes.filter(c => !page.includes(`\`${c}\``)), [], 'a write refusal code of a space act is not on the page');
+  });
+
+  it('L1: the changelog and the pages say the shared checks reach existing callers', () => {
+    const bulk = read('server/src/brain/bulk.ts');
+    const status = /BULK_STORAGE_STATUS = (\d+);/.exec(bulk)?.[1];
+    assert.equal(status, '507');
+    const mib = /JSON_BODY_MAX_BYTES = (\d+) \* 1024 \* 1024;/.exec(read('server/src/config/body-limits.ts'))?.[1];
+    const size = `${mib} MiB`;
+    const changelog = read('CHANGELOG.md');
+    const unreleased = changelog.slice(changelog.indexOf('## [Unreleased]'));
+    const entry = unreleased.split('\n').find(l => l.startsWith('- **Brain:** a record over '));
+    assert.ok(entry, 'the changelog has the Brain entry that names the new refusals');
+    for (const word of [size, '`400`', '`507`', '`storage_exceeded`', '`save_bulk`']) assert.ok(entry.includes(word), `the changelog entry names ${word}`);
+    assert.ok(!unreleased.includes('no user-facing effect: the checks a record must pass'), 'the changelog still calls the change invisible');
+    const added = unreleased.split('\n').find(l => l.startsWith('- **RDF:** `POST /api/brain/spaces/:spaceId/import/rdf`'));
+    assert.ok(added?.includes('peer tokens get `403`'), 'the Added entry says a peer-bound token is refused');
+    const brain = read('docs/integration-guide/04-brain-api.md');
+    assert.ok(brain.includes('`507` with `storageExceeded: true`') && brain.includes(`A record over ${size} as JSON`), 'the brain guide says the bulk limit and the size bound');
+    const mcp = read('docs/integration-guide/16-mcp.md').split('\n').find(l => l.startsWith('| `save_bulk`')) ?? '';
+    assert.ok(mcp.includes('(REST answers `507`)') && mcp.includes(`over ${size} as JSON`), 'the tool page says the bulk limit and the size bound on the save_bulk row');
+  });
+
+  it('L7 and L5: the import section says the idle bound and the multiple of the record bound the code holds', () => {
+    assert.equal(/RDF_IMPORT_UPLOAD_IDLE_MS = 60_000;/.test(read('server/src/rdf/import-upload.ts')), true, 'the idle bound is a minute (the section says "a minute")');
+    assert.equal(/RDF_IMPORT_EDGE_STATEMENT_MULTIPLE = 2;/.test(read('server/src/rdf/import-count.ts')), true, 'the multiple is two (the section says "twice")');
+    const section = importSection();
+    assert.ok(section.includes('an upload that sends nothing for a minute is answered `400 rdf_import_upload_stalled`'), 'the section says the stalled upload is refused');
+    assert.ok(section.includes('edge statements pass twice the record bound'), 'the section says the multiple');
+  });
+});
