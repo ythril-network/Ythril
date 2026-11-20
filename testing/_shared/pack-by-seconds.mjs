@@ -9,7 +9,8 @@
  * caller hands them in) and reads no table (the caller hands in the seconds).
  *
  * Its callers: the stack-suite runner (`_init/run-suite.mjs`), which packs Integration and Sync into the shards CI runs as
- * separate jobs, and the database plan (`db-shard-plan.mjs`), which keeps its own name-hash placement (a file must stay on one
+ * separate jobs, the pure standalone plan (`pureShardFiles` in `standalone-split.mjs`, the two jobs of the standalone files that need
+ * no service), and the database plan (`db-shard-plan.mjs`), which keeps its own name-hash placement (a file must stay on one
  * Mongo whatever else is added) and checks its cut here.
  *
  * ## What it prevents
@@ -64,12 +65,14 @@ export function medianSeconds(seconds) {
  * @param {string[]} files
  * @param {number} count
  * @param {Record<string, number>} seconds recorded seconds by file, as the caller names its files
- * @param {{ who?: string }} [opts] the plan's name for a refusal
+ * @param {{ who?: string, unnamed?: number }} [opts] the plan's name for a refusal; `unnamed`, the weight of a file the table does not
+ *   name when the table itself says it (a table that lists only the files above a floor carries the median of every recorded file,
+ *   which the median of its own entries would overstate); without it, the table's median
  * @returns {string[][]} `count` shards, a partition of `files` (it throws otherwise, and on an empty shard)
  */
-export function packBySeconds(files, count, seconds, { who = 'packBySeconds' } = {}) {
+export function packBySeconds(files, count, seconds, { who = 'packBySeconds', unnamed } = {}) {
   if (!Number.isInteger(count) || count < 1) throw new Error(`${who}: ${count} is not a shard count of one or more`);
-  const fallback = medianSeconds(seconds);
+  const fallback = Number.isFinite(unnamed) && unnamed > 0 ? unnamed : medianSeconds(seconds);
   const weight = (f) => (Number.isFinite(seconds?.[f]) && seconds[f] > 0 ? seconds[f] : fallback);
   const order = [...files].sort((a, b) => weight(b) - weight(a) || (a < b ? -1 : a > b ? 1 : 0));
   const shards = Array.from({ length: count }, () => []);

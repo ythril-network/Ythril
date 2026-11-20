@@ -49,7 +49,8 @@
  */
 import { spawnSync } from 'node:child_process';
 import { staleBuilds } from '../_shared/stale-build.mjs';
-import { splitStandalone, batched, offlineRuns, DB_TEST_CONCURRENCY } from '../_shared/standalone-split.mjs';
+import { splitStandalone, batched, offlineRuns, DB_TEST_CONCURRENCY, PURE_SHARDS, pureShardKind } from '../_shared/standalone-split.mjs';
+import { parseShard } from './run-suite.mjs';
 import { timingReporterFlags, clearTimingResults } from '../_shared/timing-reporter-flags.mjs';
 import { testChildEnv } from '../_shared/test-child-env.mjs';
 import { boundedTestArgs, batchTimeoutMs } from '../_shared/test-file-bound.mjs';
@@ -96,6 +97,23 @@ const only = onlyArg ? onlyArg.slice('--only='.length) : null;
 if (only !== null && !THIRDS.includes(only)) {
   console.error(`standalone: --only=${only} is not one of ${THIRDS.join(', ')}`);
   process.exit(1);
+}
+
+/**
+ * `--shard=<k>/<n>` runs one shard of the PURE kind (bundle-356, Q-947): CI runs `--only=pure` as `PURE_SHARDS` jobs, each with its shard
+ * (`pureShardFiles` in `_shared/standalone-split.mjs` for the cut and why). REFUSED, before anything is cleared or run, unless it is one
+ * argument, with `--only=pure`, of the form `<k>/<n>` (`parseShard`, the suite runner's reading) with `n` the planned count: a wrong shard
+ * that ran every pure file would run them twice across the jobs, one that ran none would be a green job about nothing. Without it the
+ * pure kind runs whole, as `npm run test:standalone:pure` and the preflight always ran it.
+ */
+const shardArgs = process.argv.filter(a => a.startsWith('--shard='));
+let pureShard = null;
+if (shardArgs.length > 0) {
+  const refuse = (why) => { console.error(`standalone: ${shardArgs.join(' ')}: ${why}`); process.exit(1); };
+  if (shardArgs.length > 1) refuse('one shard per run');
+  if (only !== 'pure') refuse('a shard is of the pure kind, which only --only=pure runs');
+  try { pureShard = parseShard(shardArgs[0].slice('--shard='.length)); } catch (e) { refuse(e.message); }
+  if (pureShard.count !== PURE_SHARDS) refuse(`the pure kind is planned in ${PURE_SHARDS} shards, not ${pureShard.count}`);
 }
 if (only !== 'text') refuseStaleDist();
 const wants = (third) => only === null || only === third;
@@ -218,10 +236,11 @@ async function runDbSharded(shardCount, width, started) {
 /** The pure files at node's default width (one worker per core); the database-backed ones capped. */
 const dbShards = wants('db') ? await resolveDbShardConfig({ defaultWidth: DB_TEST_CONCURRENCY }) : { count: 1, width: DB_TEST_CONCURRENCY };
 // The plan for the offline kinds this run wants only: `--only=db` and `--only=instance` never ask the text-only classifier (`offlineRuns` asks it for text or pure).
-for (const run of offlineRuns(split, { kinds: ['text', 'pure', 'db'].filter(wants) })) {
+for (const run of offlineRuns(split, { kinds: ['text', 'pure', 'db'].filter(wants), pureShard })) {
   if (!wants(run.kind)) continue;
   if (run.kind === 'db' && (oneShardFiles !== null || dbShards.count > 1)) continue; // the paths below run the database-backed files
-  runBatch(run.kind, run.args, run.files);
+  // A pure shard's batches carry the shard in their results name, so the two CI jobs' merged results keep both.
+  runBatch(run.kind === 'pure' && pureShard ? pureShardKind(pureShard) : run.kind, run.args, run.files);
 }
 if (oneShardFiles !== null) {
   const index = Number(process.env['YTHRIL_TEST_DB_SHARD_INDEX']);
