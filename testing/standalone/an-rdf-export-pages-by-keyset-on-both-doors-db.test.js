@@ -5,7 +5,10 @@
  *
  * - REST: `limit` records a page; while records are left the answer carries `Link: <...after=X>; rel="next"` (RFC 8288), known before the
  *   status line; the last page carries none. Following the links reads every record exactly once.
- * - MCP: the same pages, `nextAfter` carrying the same cursors as the REST links, `complete` on the last.
+ * - MCP: the same pages, `nextAfter` carrying the same cursors as the REST links, and none on the last. The summary's `complete` is the
+ *   document's own `ythril:complete` (the vocabulary: whether the document is whole, false only on an export that could not finish), so a
+ *   page with more after it says `complete: true` beside its `nextAfter` (the second drive, finding B: the summary said false while the
+ *   document it summarised said true).
  * - Records written while the pages are read (ids before and after the cursor) are either wholly in or wholly out, and no record is read
  *   twice.
  * - The byte budget cuts a page at a whole record, the first record whole even above it; the budget used is disclosed on both doors
@@ -82,7 +85,8 @@ describe('an RDF export pages by keyset on both doors', { skip }, () => {
     for (;;) {
       const m = await d.exportMcp(admin.key, { space: SPACE, format: 'nquads', limit: 7, maxChars: BIG, ...(after ? { after } : {}) });
       assert.equal(m.isError, false, m.text.slice(0, 300));
-      if (m.structured.complete) { assert.equal(m.structured.nextAfter, undefined); break; }
+      assert.equal(m.structured.complete, true, 'every page answered is a whole document');
+      if (m.structured.nextAfter === undefined) break;
       mcpAfters.push(m.structured.nextAfter);
       after = m.structured.nextAfter;
     }
@@ -97,10 +101,27 @@ describe('an RDF export pages by keyset on both doors', { skip }, () => {
     assert.deepEqual(mcpAfters, restAgain, 'both doors page alike');
   });
 
+  it('MCP: the summary\'s complete is the document\'s ythril:complete, on a page with more after it and on the last', async () => {
+    const { YTHRIL_NS } = await import('../../server/dist/rdf/ythril-vocabulary.js');
+    const statedComplete = async (text) => (await parseRdf('nquads', text))
+      .filter(q => q.predicate.value === `${YTHRIL_NS}complete`).map(q => q.object.value);
+    const first = await d.exportMcp(admin.key, { space: SPACE, format: 'nquads', limit: 7, maxChars: BIG });
+    assert.equal(first.isError, false, first.text.slice(0, 300));
+    assert.ok(first.structured.nextAfter, 'the first page has more after it');
+    assert.deepEqual(await statedComplete(first.document), ['true'], 'the vocabulary: a page with more after it is whole');
+    assert.equal(first.structured.complete, true, 'the summary of a page with more after it says what its document says');
+    assert.equal(first.summary.complete, true, 'the summary text block says it too');
+    const last = await d.exportMcp(admin.key, { space: SPACE, format: 'nquads', maxChars: BIG });
+    assert.equal(last.structured.nextAfter, undefined);
+    assert.deepEqual(await statedComplete(last.document), ['true']);
+    assert.equal(last.structured.complete, true);
+  });
+
   it('the byte budget cuts at a whole record, the first one whole, and is disclosed', async () => {
     const m = await d.exportMcp(admin.key, { space: SPACE, format: 'nquads', maxChars: 1000 });
     assert.equal(m.isError, false, m.text.slice(0, 300));
-    assert.equal(m.structured.complete, false);
+    assert.equal(m.structured.complete, true, 'a page cut by its budget is a whole document; nextAfter says more is left');
+    assert.ok(m.structured.nextAfter);
     assert.equal(m.structured.truncated, true);
     assert.equal(m.structured.budgetChars, 1000);
     assert.deepEqual(m.structured.budgetBoundBy, ['maxChars']);
