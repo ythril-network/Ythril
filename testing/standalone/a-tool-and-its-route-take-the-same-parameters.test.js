@@ -50,6 +50,10 @@ const DIFFER_ON_PURPOSE = new Map([
     '`GET /api/spaces?counts=true` makes the per-space counts optional, REST\'s listing being often wanted cheap; the '
     + 'tool is the list an agent reads to choose a space, and ALWAYS carries the counts (its description says why: an '
     + 'empty space is not worth a recall). A tool argument for it would offer a listing the tool exists not to give.'],
+  ['import_rdf:document',
+    'the RDF document is the REST route\'s request BODY (a stream the act reads into its spool under its bounds, its media type in `Content-Type`), '
+    + 'so no key names it; an MCP call has no stream, so the tool takes the same bytes inline as `document`. Every other parameter is one name '
+    + 'on both doors, in the query on REST.'],
 ]);
 
 /**

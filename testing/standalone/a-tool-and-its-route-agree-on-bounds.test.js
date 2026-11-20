@@ -52,6 +52,9 @@ const DIFFER_ON_PURPOSE = new Map([
   ['schema_update:typeSchemas.required',
     'the tool is the meta door as a whole — it writes type schemas AND the other meta fields, and merges — while '
     + '`PUT /api/spaces/:id/schema` is the type-schema half alone; the meta-only half is `PATCH /api/spaces/:id`.'],
+  ['import_rdf:format.required',
+    'the REST route reads the document as its request body and takes its format from the body\'s `Content-Type` when `format` is not in the '
+    + 'query, so `format` is optional there; an MCP call has no media type, so the tool names the format of its inline `document` and says it is required.'],
 ]);
 
 /**

@@ -231,12 +231,12 @@ const ADMIN_DOMAINS = [
 /**
  * Operations that are transport plumbing rather than use. Currently just SSE ticket minting: one per stream
  * connection, so a browser tab reopening after a deploy would read as demand on a space nobody queried. And
- * polling an ingest run: one start is polled many times, so counting the polls would read one import as dozens
+ * polling an ingest run or an RDF import (`rdf.import.status`): one start is polled many times, so counting the polls would read one import as dozens
  * of questions asked of the space. The start itself counts, as a write.
  */
 // `.spill.read` (Q-92): reading a spill is the rest of an answer whose `recall`/`similar` was already counted —
 // counting it again would score a space twice for one question, once per page of a large one.
-const NON_USAGE_SUFFIXES = ['.ticket', '.ingest.status', '.spill.read'] as const;
+const NON_USAGE_SUFFIXES = ['.ticket', '.ingest.status', '.import.status', '.spill.read'] as const;
 
 /**
  * Verbs that mean something changed. `retry_embed_file` and `mkdir` are here because they are mutations whose
