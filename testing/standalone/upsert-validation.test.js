@@ -209,6 +209,8 @@ describe('upsert validation', () => {
       // itself — which is the property this list exists to hold every caller to, and the reason adding a
       // row here is cheap rather than a formality.
       'server/src/brain/write-connections.ts',
+      // bundle-270: the RDF import's planner calls (its dry plan and its commit build one item per operation and validate nothing themselves).
+      'server/src/rdf/import-plan.ts',
     ];
 
     const strip = src => src.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -221,7 +223,7 @@ describe('upsert validation', () => {
       // `upsertEdge` became doors over them. A batch now plans its items directly rather than calling the doors,
       // so a caller of EITHER spelling is a site where a merge happens. Listed through the shared git helper,
       // not readdir, so a gitignored scratch file cannot enter the set.
-      const roots = ['server/src/mcp/tools', 'server/src/api/brain', 'server/src/brain'];
+      const roots = ['server/src/mcp/tools', 'server/src/api/brain', 'server/src/brain', 'server/src/rdf'];
       const MERGING_WRITER_CALL = /\b(?:upsertEntity|upsertEdge|planEntity|planEdge)\(/;
       const found = trackedSources(roots, { specs: false, untracked: true, floor: 50 })
         .filter(p => MERGING_WRITER_CALL.test(strip(readFileSync(p, 'utf8'))));

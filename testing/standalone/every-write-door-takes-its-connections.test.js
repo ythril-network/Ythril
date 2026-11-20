@@ -52,8 +52,27 @@ const CREATORS = /\b(?:await saveFact\(|await createChrono\(|await upsertEntity\
 // A file that DEFINES a creator is the writer, not a door — it calls its own planner, and that is not a door
 // asking for a write on somebody's behalf.
 const DEFINES_CREATOR = /export async function (?:saveFact|createChrono|upsertEntity)\(/;
+// A file that calls a creator's planner and is NOT a door: it takes no caller's connections at all. Each entry says why and when it is
+// looked at again; the case below holds every entry to still calling a creator, with its reason and a review date not past.
+const NOT_A_DOOR = new Map([
+  ['server/src/rdf/import-plan.ts', {
+    reason: 'the RDF import plans the records a document states: a record\'s links come from the file\'s dcterms:references, translated and '
+      + 'checked by rdf/quads-to-ops.ts, and no caller argument named linkEntities or edges reaches it',
+    reviewBy: '2027-05-20',
+  }],
+]);
 const doors = trackedSources(SERVER_CODE_ROOTS, { floor: 100 })
-  .filter(f => CREATORS.test(code(f)) && !DEFINES_CREATOR.test(code(f)));
+  .filter(f => CREATORS.test(code(f)) && !DEFINES_CREATOR.test(code(f)) && !NOT_A_DOOR.has(f));
+
+describe('the files that call a creator and are not doors', () => {
+  it('each still calls a creator, says why it is not a door, and is not past its review date', () => {
+    for (const [file, { reason, reviewBy }] of NOT_A_DOOR) {
+      assert.ok(CREATORS.test(code(file)), `${file} no longer calls a creator: remove its entry`);
+      assert.ok(reason.length > 40, `${file}: its entry says why it is not a door`);
+      assert.ok(Date.parse(reviewBy) > Date.now(), `${file}: its entry is past its review date ${reviewBy}`);
+    }
+  });
+});
 
 describe('the create doors are found at all', () => {
   it('there are at least the seven known ones', () => {

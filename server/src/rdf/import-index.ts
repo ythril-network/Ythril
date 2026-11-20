@@ -24,12 +24,9 @@
  * - Only record kinds the reverse addressing reads are taken, and an id is never empty.
  */
 import crypto from 'node:crypto';
-import fsp from 'node:fs/promises';
-import path from 'node:path';
-import { renameOverSync } from '../util/rename-over.js';
 import type { RecordKind } from './term-iri.js';
 import { recordKindsRead } from './term-reverse.js';
-import { RDF_IMPORT_MAX_SUBJECTS, RdfImportBoundExceeded, openSpoolLineWriter, readSpoolLines, type ImportFolder } from './import-spool.js';
+import { RDF_IMPORT_MAX_SUBJECTS, RdfImportBoundExceeded, readSpoolLines, writeWholeSpoolFile, type ImportFolder } from './import-spool.js';
 
 /**
  * The records of one import: the plan's bound (question (b)), about 200 MB of index at 200 bytes per record. The door's subject bound, one
@@ -45,7 +42,6 @@ export interface ImportIndexOptions { maxRecords?: number; lookupDigest?: (key: 
 
 const KINDS: readonly RecordKind[] = recordKindsRead();
 const INDEX_FILE = 'index.spool';
-const INDEX_TMP = 'index-writing.spool';
 /** An entry's code is a printable character: `CODE_BASE + kind * KIND_STEP + STORED_BIT? + PACKED_BIT?`. */
 const CODE_BASE = 48;
 const KIND_STEP = 4;
@@ -137,17 +133,10 @@ export class ImportIndex {
 
   /** Write the whole index into `folder`, replacing an earlier one only once this one is whole. */
   async write(folder: ImportFolder): Promise<void> {
-    await fsp.rm(path.join(folder.dir, INDEX_TMP), { force: true });
-    const writer = openSpoolLineWriter(folder, INDEX_TMP);
-    try {
-      for (const [at, value] of this.#records) await writer.write(JSON.stringify([Buffer.from(at, 'latin1').toString('hex'), value]));
-      await writer.close();
-    } catch (err) {
-      await writer.abort();
-      await fsp.rm(path.join(folder.dir, INDEX_TMP), { force: true });
-      throw err;
-    }
-    renameOverSync(path.join(folder.dir, INDEX_TMP), path.join(folder.dir, INDEX_FILE));
+    const records = this.#records;
+    await writeWholeSpoolFile(folder, INDEX_FILE, (function* lines() {
+      for (const [at, value] of records) yield JSON.stringify([Buffer.from(at, 'latin1').toString('hex'), value]);
+    })());
   }
 
   /** The index written into `folder`; throws when there is none, and refuses one past the record bound. */

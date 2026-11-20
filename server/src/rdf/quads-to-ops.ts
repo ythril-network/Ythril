@@ -38,6 +38,7 @@ import { stdIri, temporalKind, type BlankTerm, type IriTerm, type LiteralTerm, t
 import type { RecordKind, TermOwner } from './term-iri.js';
 import { recordOfAddress, termOfIri, type AddressNames } from './term-reverse.js';
 import { ythrilIri } from './ythril-vocabulary.js';
+import { declaredTypeOf } from './literals.js';
 
 /** The record kinds an import writes. A file is never imported (its bytes are not in RDF). */
 export type OpKind = 'entity' | 'fact' | 'chrono' | 'edge';
@@ -207,8 +208,11 @@ const WRITABLE: Readonly<Record<OpKind, readonly string[]>> = Object.freeze({
   chrono: ['title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'description'],
   edge: ['type', 'weight', 'description'],
 });
-/** The kinds that hold link rows and the kinds they link to (`brain/link-adjacency.ts`, `LINK_CLASSES`, files aside: none is imported). */
-const LINKS_HELD: Readonly<Partial<Record<OpKind, readonly RefKind[]>>> = Object.freeze({ fact: ['entity'], chrono: ['entity', 'fact'] });
+/**
+ * The kinds that hold link rows and the kinds they link to (`brain/link-adjacency.ts`, `LINK_CLASSES`, files aside: none is imported). A copy,
+ * because this module reads no store and the store's module does; `the-rdf-import-writes-only-through-the-planners.test.js` holds the two equal.
+ */
+export const LINKS_HELD: Readonly<Partial<Record<OpKind, readonly RefKind[]>>> = Object.freeze({ fact: ['entity'], chrono: ['entity', 'fact'] });
 
 // ---------------------------------------------------------------------------------------------------------------------------------------
 // Literals
@@ -273,16 +277,9 @@ function readLiteral(object: Term, target: Target): Read {
 
 const isBag = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-/** The declared type of a property, read from own keys of the resolved meta, or `any` for an undeclared one. */
+/** The declared type of a property, read by the record form's own reader (`declaredTypeOf`), or `any` for an undeclared one. */
 function declaredTarget(meta: SpaceMeta, kind: OpKind, type: string | null, prop: string): Target {
-  if (type === null) return 'any';
-  const kinds = (meta.typeSchemas ?? {}) as Record<string, unknown>;
-  const types = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
-  const def = isBag(types) && Object.hasOwn(types, type) ? types[type] : undefined;
-  const props = isBag(def) && isBag(def['propertySchemas']) ? def['propertySchemas'] : undefined;
-  const own = props && Object.hasOwn(props, prop) ? props[prop] : undefined;
-  const declared = isBag(own) ? own['type'] : undefined;
-  return declared === 'string' || declared === 'number' || declared === 'boolean' || declared === 'date' ? declared : 'any';
+  return declaredTypeOf(meta, kind, type, prop) ?? 'any';
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------
@@ -636,6 +633,34 @@ function translate(L: Ledger, group: readonly Quad[], key: string, graph: string
   const probe = finish(kind, subject, graph, { fields: {}, properties: {}, tags: [] }, {}, ctx);
   const rel = relations(L, ownRef(probe), kind, graph, edgeQuads, linkQuads, ctx);
   return [finish(kind, subject, graph, read, rel.links, ctx), ...rel.ops];
+}
+
+/**
+ * The record kind a group's subject states, read exactly as {@link quadsToOps} reads it (its address, its types, a stated triple), or `null`
+ * when the group states no record: the export's description, a server-owned node, a refused address, a blank subject the import does not
+ * mint, two kinds. The importer asks it of every group before any is translated, to mint each new subject's id under the kind its
+ * translation will check (a blank reifier is an edge's group, so its id is minted as an edge's). Pure.
+ */
+export function recordKindOfGroup(group: readonly Quad[], ctx: Pick<QuadsToOpsContext, 'names' | 'mode' | 'blankNodes'>): RecordKind | null {
+  const head = group[0];
+  if (head === undefined) return null;
+  const key = groupSubjectOf(head.subject, ctx.names);
+  const own = group.filter(q => termKey(q.subject) === key);
+  const first = own[0];
+  if (first === undefined) return null;
+  // Only the names are read on the way to a kind; the rest of a context is the translation's.
+  const probe: QuadsToOpsContext = { ...ctx, meta: {}, stored: new Map(), minted: new Map(), asserted: new Set(), reified: new Set() };
+  const subject: Subject = { term: first.subject, key, address: null };
+  if (isDescription(own, subject, probe)) return null;
+  if (first.subject.kind === 'iri') {
+    const read = recordOfAddress(first.subject.value, ctx.names);
+    if (read.answer === 'other' || read.answer === 'refused') return null;
+    if (read.answer === 'record') subject.address = { of: read.of, kind: read.kind, id: read.id };
+  }
+  const statesStatement = own.some(q => STATEMENT_PARTS.has(q.predicate.value));
+  if (first.subject.kind === 'blank' && !statesStatement && ctx.blankNodes !== 'mint') return null;
+  const types = own.filter(q => q.predicate.value === RDF_TYPE);
+  return decideKind(new Ledger(group, ctx.mode), subject, types, statesStatement, probe)?.kind ?? null;
 }
 
 /**

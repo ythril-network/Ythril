@@ -1,5 +1,7 @@
 /**
- * An RDF import lands whole or not at all, through two doors that answer alike (bundle-270 slice S6, Q-753; plan amendments A6, A10, A11).
+ * An RDF import lands whole or not at all, through two doors that answer alike (bundle-270 slice S6, Q-753; plan amendments A6, A10, A11):
+ * `POST /api/brain/spaces/:spaceId/import/rdf` and MCP `import_rdf`, with `GET /api/brain/spaces/:spaceId/import/rdf/:importId` and MCP
+ * `import_rdf_status` for the report.
  *
  * ## What it holds
  *

@@ -16,21 +16,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { waitFor } from '../_shared/wait-for.mjs';
 import { openRdfImportDoors, personMeta, goodTurtle } from './_rdf-import-doors.mjs';
 
 const skip = await mongoSkipReason();
 const RESUME = 'rdfimpresume';
 const HELD = 'rdfimpheld';
 
-const until = async (what, fn, ms = 30_000) => {
-  const end = Date.now() + ms;
-  for (;;) {
-    const v = await fn();
-    if (v) return v;
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-    await new Promise(r => setTimeout(r, 50));
-  }
-};
+const until = (what, fn, ms = 30_000) => waitFor(fn, ms, 50, undefined, { what });
 
 describe('an RDF import act resumes and holds its space (real routes, real MongoDB)', { skip, timeout: 240_000 }, () => {
   let d, writer, act, runner;

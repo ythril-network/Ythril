@@ -26,8 +26,8 @@ import type { KnowledgeType, SpaceMeta } from '@ythril-network/schema';
 import { SCHEMA_FINGERPRINT_FIELD } from '@ythril-network/schema/internal';
 import { isRefKind, type RefKind } from '../config/types-knowledge.js';
 import {
-  iri, literalForBoolean, literalForDecimal, literalForInteger, literalForTemporal, literalForValue, plain, stdIri, temporalKind, triple,
-  type DeclaredType, type EdgeDetails, type IriTerm, type LeftOutReason, type LiteralTerm, type Quad, type Term, type TemporalKind,
+  declaredTypeOf, iri, literalForBoolean, literalForDecimal, literalForInteger, literalForTemporal, literalForValue, plain, stdIri, temporalKind, triple,
+  type EdgeDetails, type IriTerm, type LeftOutReason, type LiteralTerm, type Quad, type Term, type TemporalKind,
 } from './literals.js';
 import { agentIri, edgeClassIri, graphIri, recordAddressable, recordIri, resolveTermIri, versionIri, type TermKind } from './term-iri.js';
 import { ythrilIri } from './ythril-vocabulary.js';
@@ -111,17 +111,6 @@ const isBag = (v: unknown): v is Record<string, unknown> => v !== null && typeof
 const TYPE = (): IriTerm => stdIri('rdf', 'type');
 const CHRONO_INSTANT_PREDICATE: Record<TemporalKind, string> = { dateTimeStamp: 'inXSDDateTimeStamp', dateTime: 'inXSDDateTime', date: 'inXSDDate' };
 
-/** The declared type of a property of `kind`/`type`, read from own keys only. */
-function declaredTypeOf(meta: SpaceMeta, kind: TermKind, type: string | null, prop: string): DeclaredType | undefined {
-  if (kind === 'file' || type === null) return undefined;
-  const kinds = (meta.typeSchemas ?? {}) as Record<string, Record<string, unknown> | undefined>;
-  const types = Object.hasOwn(kinds, kind) ? kinds[kind] : undefined;
-  const def = types && Object.hasOwn(types, type) ? types[type] : undefined;
-  const props = isBag(def) && isBag(def['propertySchemas']) ? def['propertySchemas'] : undefined;
-  const own = props && Object.hasOwn(props, prop) ? props[prop] : undefined;
-  const declared = isBag(own) ? own['type'] : undefined;
-  return declared === 'string' || declared === 'number' || declared === 'boolean' || declared === 'date' ? declared : undefined;
-}
 
 /** The accumulator of one record: its quads, what it left out, the agents it states. */
 class Form {
