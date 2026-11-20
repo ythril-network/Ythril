@@ -14,14 +14,10 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, delWithBody, readCollection, waitFor } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
+import { ownTokens } from '../_shared/own-token.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 const RUN = Date.now();
 const WITH_GROUP = `ingest-group-${RUN}`;
 const WITHOUT_GROUP = `ingest-bare-${RUN}`;
@@ -30,7 +26,8 @@ let token;
 let mcp;
 
 before(async () => {
-  token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+  // Its own token: the starts below are counted on the heavy-call rail per token, and a file that shared the setup token spent slots another file's cases needed.
+  token = await own.mint('ingest-writes');
   mcp = await openMcpSession(token);
   for (const id of [WITH_GROUP, WITHOUT_GROUP]) {
     const r = await post(INSTANCES.a, token, '/api/spaces', { id, label: id });
@@ -43,6 +40,9 @@ before(async () => {
 after(async () => {
   for (const id of [WITH_GROUP, WITHOUT_GROUP]) await delWithBody(INSTANCES.a, token, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
 });
+
+// After the hook above that deletes the spaces with this token: hooks run in the order they were registered, and the token goes last.
+const own = ownTokens();
 
 function extraction(conversationId) {
   return {

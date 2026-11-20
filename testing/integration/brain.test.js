@@ -21,6 +21,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, del, delWithBody, patch, readRecord, readCollection, filterRest } from '../sync/helpers.js';
 import { legacyRights } from '../_shared/legacy-token-rights.mjs';
+import { ownTokens } from '../_shared/own-token.mjs';
 import { linkIdFor } from '../../server/dist/brain/link-id.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,8 +32,12 @@ let tokenA;
 function token() { return tokenA; }
 
 describe('Brain — memories', () => {
-  before(() => {
+  // The two emptying calls below reach the handler and are counted on the heavy-call rail, per token (`a-heavy-call-in-a-stack-test-spends-its-own-tokens-budget`).
+  const own = ownTokens();
+  let confirmToken;
+  before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+    confirmToken = await own.mint('brain-confirm');
   });
 
   it('Write a memory returns 201 with _id and seq', async () => {
@@ -76,11 +81,11 @@ describe('Brain — memories', () => {
   it('Emptying a space requires confirm:true, on the one door that does it', async () => {
     // The five per-collection DELETEs are gone (5.0). `POST /api/delete_space_data` is the tool's own
     // arguments as a body, and the same call an agent makes over MCP.
-    const noConfirm = await post(INSTANCES.a, token(), '/api/delete_space_data', { space: 'general' });
+    const noConfirm = await post(INSTANCES.a, confirmToken, '/api/delete_space_data', { space: 'general' });
     assert.equal(noConfirm.status, 400, `no confirm should 400, got ${noConfirm.status}`);
     assert.match(noConfirm.body.error, /confirm/, 'the refusal must name what is missing');
 
-    const falseConfirm = await post(INSTANCES.a, token(), '/api/delete_space_data', { space: 'general', confirm: false });
+    const falseConfirm = await post(INSTANCES.a, confirmToken, '/api/delete_space_data', { space: 'general', confirm: false });
     assert.equal(falseConfirm.status, 400, `confirm:false should 400, got ${falseConfirm.status}`);
   });
 
@@ -711,22 +716,18 @@ describe('Brain — bulk memory wipe', () => {
    * an operator is told to do anyway (`06-connecting-an-ai-assistant.md`), so the suite does it too.
    */
   let wipeToken;
+  const wipeOwn = ownTokens();
 
   before(async () => {
     tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
     // With the SPACE-ADMIN grant, because that is what emptying a space needs since 5.0 and a default mint
     // gets `write` everywhere and administers nothing. The floor form rather than a named list: the space
     // does not exist yet at this point, and a grant naming spaces is checked against the ones that do.
-    const minted = await post(INSTANCES.a, tokenA, '/api/tokens', {
-      name: `bulk-wipe-${RUN}`,
-      rights: {
-        instanceAdmin: false, createSpaces: false,
-        floor: { knowledge: 'admin', files: 'admin', schema: 'admin', dataQuality: 'admin' },
-        perSpace: {}, spaceAdmin: { floor: true, spaces: [] },
-      },
+    wipeToken = await wipeOwn.mint(`bulk-wipe-${RUN}`, {
+      instanceAdmin: false, createSpaces: false,
+      floor: { knowledge: 'admin', files: 'admin', schema: 'admin', dataQuality: 'admin' },
+      perSpace: {}, spaceAdmin: { floor: true, spaces: [] },
     });
-    assert.equal(minted.status, 201, `minting the wipe token: ${JSON.stringify(minted.body)}`);
-    wipeToken = minted.body.plaintext;
     await post(INSTANCES.a, tokenA, '/api/spaces', { id: WIPE_SPACE, label: 'Bulk Wipe Test' });
 
     // Seed 10 memories for the wipe test

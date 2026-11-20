@@ -10,21 +10,16 @@
  * same words; and a start refused BEFORE anything is paid for (a space missing the group's types) is still answered
  * with that refusal, never with the rate limit — the rail counts runs, not attempts.
  *
- * Named to run after `ingest-writes-a-conversation`, which starts runs with the same token and would otherwise find
- * the window full.
+ * It counts on a token of its own (`ownTokens`), so no other file's starts are in its window and its own burst is in no other file's.
  *
  * Run: node --test testing/integration/the-ingest-rail-holds-on-both-doors.test.js
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'url';
 import { INSTANCES, post, delWithBody } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
+import { ownTokens } from '../_shared/own-token.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 const RUN = Date.now();
 const WITH_GROUP = `ingest-rail-${RUN}`;
 const WITHOUT_GROUP = `ingest-rail-bare-${RUN}`;
@@ -35,7 +30,7 @@ let token;
 let mcp;
 
 before(async () => {
-  token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+  token = await own.mint('ingest-rail');
   mcp = await openMcpSession(token);
   for (const id of [WITH_GROUP, WITHOUT_GROUP]) {
     const r = await post(INSTANCES.a, token, '/api/spaces', { id, label: id });
@@ -48,6 +43,10 @@ before(async () => {
 after(async () => {
   for (const id of [WITH_GROUP, WITHOUT_GROUP]) await delWithBody(INSTANCES.a, token, `/api/spaces/${id}`, { confirm: true }).catch(() => {});
 });
+
+// After the hook above that deletes the spaces with this token (hooks run in registration order, and the token goes last). This file tests the
+// limit itself, so it keeps counting on purpose: on a token of its own, which no other file's calls count on.
+const own = ownTokens();
 
 /** The smallest extraction the group accepts: it asks no model, so a started run costs the stack nothing. */
 const extraction = (conversationId) => ({

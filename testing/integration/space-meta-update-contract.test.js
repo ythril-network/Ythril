@@ -41,13 +41,9 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, patch, delWithBody } from '../sync/helpers.js';
+import { ownTokens } from '../_shared/own-token.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 const RUN = Date.now();
 const SPACE = `meta-contract-${RUN}`;
 
@@ -61,7 +57,7 @@ async function metaNow() {
 }
 
 before(async () => {
-  token = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+  token = await own.mint('meta-contract');
   const r = await post(INSTANCES.a, token, '/api/spaces', { id: SPACE, label: `Meta contract ${RUN}` });
   assert.equal(r.status, 201, `could not create the test space: ${JSON.stringify(r.body)}`);
   // One real write, so `version` is not 0 for the whole file. A precondition test against version 0 cannot
@@ -73,6 +69,9 @@ before(async () => {
 after(async () => {
   await delWithBody(INSTANCES.a, token, `/api/spaces/${SPACE}`, { confirm: true }).catch(() => {});
 });
+
+// The file's token is its own (a save that names `convertRecords` is counted on the heavy-call rail per token). Registered after the hook above, which uses it: the token goes last.
+const own = ownTokens();
 
 describe('PATCH /api/spaces/:id — each refusal keeps its own status', () => {
   it('404 for a space that does not exist, ahead of every other check', async () => {

@@ -41,6 +41,7 @@ import { INSTANCES, post, patch, get, createTestSpace, syncUntil, patchContainer
 import {
   mirroredPair, tokenOf, entityType, text, oneOf, setOwnSchema, writeEntities, recordOn, holdsAll, metaOn, runEnds, runEndsHere, itemsOf,
 } from './_schema-convert-pair.mjs';
+import { ownTokens } from '../_shared/own-token.mjs';
 
 const RUN = Date.now();
 const A = INSTANCES.a;
@@ -53,11 +54,14 @@ const RENAME = { op: 'renameProperty', kind: 'entity', type: 'person', from: 'fu
 const MAP = { op: 'mapEnum', kind: 'entity', type: 'person', property: 'status', values: { a: 'x' } };
 const RECORD = { type: 'person', properties: { fullName: 'Ada', status: 'a' } };
 
-let tA, tB, one, two, net;
+let tSave, tA, tB, one, two, net;
+// The save that carries convertRecords is counted on the heavy-call rail per token: it is made with a token minted for this file (a-heavy-call-in-a-stack-test-spends-its-own-tokens-budget).
+const own = ownTokens();
 /** What each space holds: its id, the record's id and the round A opened in it. */
 const held = { one: {}, two: {} };
 
 before(async () => {
+  tSave = await own.mint('cvrelay');
   tA = tokenOf('a');
   tB = tokenOf('b');
   one = await createTestSpace('cvrelay1', [[A, tA], [B, tB]]);
@@ -92,7 +96,7 @@ describe('steps a relayer adds are not applied', () => {
     assert.equal(r1.status, 202, `${r1.status} ${JSON.stringify(r1.body)}`);
     assert.equal('convert' in r1.body, false, 'a save with no convertRecords answered a convert');
     held.one.round = r1.body.rounds[0].roundId;
-    const r2 = await patch(A, tA, `/api/spaces/${held.two.space}`, { meta: AFTER_TWO, convertRecords: { steps: [RENAME] } });
+    const r2 = await patch(A, tSave, `/api/spaces/${held.two.space}`, { meta: AFTER_TWO, convertRecords: { steps: [RENAME] } });
     assert.equal(r2.status, 202, `${r2.status} ${JSON.stringify(r2.body)}`);
     assert.equal(r2.body.convert?.state, 'after_vote');
     held.two.round = r2.body.rounds[0].roundId;

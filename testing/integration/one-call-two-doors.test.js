@@ -22,14 +22,10 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'url';
 import { INSTANCES, post } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
+import { ownTokens } from '../_shared/own-token.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 const RUN = Date.now();
 const SPACE = `two-doors-${RUN}`;
 
@@ -122,7 +118,8 @@ async function bothDoors(tool, args) {
 }
 
 before(async () => {
-  tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+  // Its own token: the emptying case below reaches the handler on both doors and is counted on the heavy-call rail per token.
+  tokenA = await own.mint('two-doors');
   mcp = await openMcpSession(tokenA);
   const created = await post(INSTANCES.a, tokenA, '/api/spaces', { id: SPACE, label: `Two doors ${RUN}` });
   assert.equal(created.status, 201, JSON.stringify(created.body));
@@ -136,6 +133,9 @@ after(async () => {
   }).catch(() => {});
   mcp?.close();
 });
+
+// After the hook above that deletes the space with this token: hooks run in registration order, and the token goes last.
+const own = ownTokens();
 
 describe('a read answers identically on both doors', () => {
   it('space_stats', async () => {

@@ -15,14 +15,10 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { INSTANCES, post, get, patch, put } from '../sync/helpers.js';
 import { openMcpSession } from '../sync/mcp-session.js';
+import { ownTokens } from '../_shared/own-token.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
 const RUN = Date.now();
 const TEST_SPACE = `schema-test-${RUN}`;
 
@@ -30,7 +26,8 @@ let tokenA;
 function token() { return tokenA; }
 
 before(async () => {
-  tokenA = fs.readFileSync(path.join(CONFIGS, 'a', 'token.txt'), 'utf8').trim();
+  // Its own token: the stored-data check below is counted on the heavy-call rail per token (main run 44736302108: a 429 from slots other files had spent).
+  tokenA = await own.mint('schema-validation');
   // Create a dedicated, non-networked space for schema validation tests
   const r = await post(INSTANCES.a, token(), '/api/spaces', { id: TEST_SPACE, label: `Schema Test ${RUN}`, meta: { strictLinkage: false } });
   assert.equal(r.status, 201, `Failed to create test space: ${JSON.stringify(r.body)}`);
@@ -44,6 +41,9 @@ after(async () => {
     body: JSON.stringify({ confirm: true }),
   }).catch(() => {});
 });
+
+// After the hook above that deletes the space with this token: hooks run in registration order, and the token goes last.
+const own = ownTokens();
 
 // ── Helper: PATCH meta on test space ───────────────────────────────────────
 async function setMeta(meta) {

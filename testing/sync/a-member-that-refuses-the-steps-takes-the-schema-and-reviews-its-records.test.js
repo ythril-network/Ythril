@@ -44,6 +44,7 @@ import { INSTANCES, post, patch, get, createTestSpace, syncUntil } from './helpe
 import {
   mirroredPair, tokenOf, entityType, text, oneOf, setOwnSchema, writeEntities, recordOn, holdsAll, fingerprintOn, metaOn, runEnds, runEndsHere, forksIn, itemsOf,
 } from './_schema-convert-pair.mjs';
+import { ownTokens } from '../_shared/own-token.mjs';
 
 const RUN = Date.now();
 const A = INSTANCES.a;
@@ -62,13 +63,16 @@ const ROWS = {
   plain: { name: `Plain ${RUN}`, type: 'person', properties: {} },
 };
 
-let tA, tB, space, net, SPACE;
+let tSave, tA, tB, space, net, SPACE;
+// The save that carries convertRecords is counted on the heavy-call rail per token: it is made with a token minted for this file (a-heavy-call-in-a-stack-test-spends-its-own-tokens-budget).
+const own = ownTokens();
 const ids = {};
 /** name -> `{ a, b }`: what each instance held after B received the records and before the vote. */
 const before_ = {};
 let roundId, aRun, bRun;
 
 before(async () => {
+  tSave = await own.mint('cvrefuse');
   tA = tokenOf('a');
   tB = tokenOf('b');
   space = await createTestSpace('cvrefuse', [[A, tA], [B, tB]]);
@@ -93,7 +97,7 @@ after(async () => {
 
 describe('a member that refuses the steps takes the schema and reviews its records', () => {
   it('A saves the change with the steps; the closed network opens a round and B reads the steps on its vote row', async () => {
-    const r = await patch(A, tA, `/api/spaces/${SPACE}`, { meta: AFTER, convertRecords: { steps: STEPS } });
+    const r = await patch(A, tSave, `/api/spaces/${SPACE}`, { meta: AFTER, convertRecords: { steps: STEPS } });
     assert.equal(r.status, 202, `the save on a two-member closed network opens a round: ${r.status} ${JSON.stringify(r.body)}`);
     assert.equal(r.body.status, 'vote_pending', JSON.stringify(r.body));
     assert.equal(r.body.convert?.state, 'after_vote', `the answer does not say the run waits for the vote: ${JSON.stringify(r.body.convert)}`);
