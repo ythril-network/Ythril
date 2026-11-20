@@ -26,7 +26,7 @@
  * Pure: the public URL, whether the space is networked and the epochs of the held rounds are handed in.
  */
 import { z } from 'zod';
-import { BaseIriZ, NamespaceIriZ, RDF_BASE_EPOCH_MAX, type RdfBaseConflict, type RdfSetting } from '@ythril-network/schema';
+import { BaseIriZ, NamespaceIriZ, RDF_BASE_EPOCH_MAX, RDF_ADOPTED_EPOCH_MAX, type RdfBaseConflict, type RdfSetting } from '@ythril-network/schema';
 import type { NetworkConfig, SpaceConfig, VoteRound } from '../config/types.js';
 import { defaultBaseFor, defaultVocabFor } from '../rdf/term-iri.js';
 import { localToRemote, remoteToLocal } from '../sync/space-map.js';
@@ -214,13 +214,10 @@ export function rdfBaseConflictOf(cfg: { networks: readonly NetworkConfig[] }, l
 }
 
 /**
- * The highest epoch an offer may name (review finding 8): half the schema's maximum, so a member that accepts the highest offer can still be
- * rebased that many times again. An offer above it is invalid and refused; a peer can never push the space to the maximum, where the next
- * rebase could not be proposed.
+ * An epoch above `RDF_ADOPTED_EPOCH_MAX` (the schema package's one bound, review finding 8 and lens finding 1) is invalid and refused, whether
+ * it comes as an offer, as the first enable of a shared space or in a `space_rebase` round: a peer can never push the space to the maximum,
+ * where the next rebase could not be proposed. Said once per network and member per window.
  */
-export const RDF_OFFERED_EPOCH_MAX = Math.floor(RDF_BASE_EPOCH_MAX / 2);
-
-/** An offer above the epoch bound: said once per network and member per window. */
 const offerRefused = warnOnce<string>({ max: 50, every: SAY_ONCE_WINDOW_MS });
 
 /** One offer, as {@link recordRdfOffers} takes it. */
@@ -229,7 +226,7 @@ type RdfOffer = { base: string; vocab?: string; epoch: number };
 /**
  * THE writer of a space's recorded base conflicts beside `net` (review finding 8). Replaces what `memberId` offered before (`undefined`: the
  * network's layer, which names no member) with `offers`, then keeps only offers that still stand against `held`, that a current member makes
- * (an offer naming no member is the layer's) and whose epoch is within {@link RDF_OFFERED_EPOCH_MAX}, in one stable order. Writes, and answers
+ * (an offer naming no member is the layer's) and whose epoch is within {@link RDF_ADOPTED_EPOCH_MAX}, in one stable order. Writes, and answers
  * true, only when what is stored changes: two members offering two bases do not cause a save per sync.
  */
 export function recordRdfOffers(net: NetworkConfig, localSpaceId: string, held: RdfSetting | undefined, memberId: string | undefined, offers: readonly RdfOffer[]): boolean {
@@ -238,15 +235,15 @@ export function recordRdfOffers(net: NetworkConfig, localSpaceId: string, held: 
   if (held?.base) {
     const members = new Set(net.members.map(m => m.instanceId));
     const fresh = offers.filter((o) => {
-      if (o.epoch <= RDF_OFFERED_EPOCH_MAX) return true;
+      if (o.epoch <= RDF_ADOPTED_EPOCH_MAX) return true;
       offerRefused(`${net.id}:${memberId ?? 'layer'}`, () => log.warn(`network ${peerText(net.id)}: ${memberId === undefined ? 'its layer' : `member ${peerText(memberId)}`} `
-        + `offers an RDF base at epoch ${o.epoch}, above the highest a network may offer (${RDF_OFFERED_EPOCH_MAX}); refused as invalid`));
+        + `offers an RDF base at epoch ${o.epoch}, above the highest a network may offer (${RDF_ADOPTED_EPOCH_MAX}); refused as invalid`));
       return false;
     });
     const offered = [
       ...(before?.offered ?? []).filter(o => o.memberId !== memberId),
       ...fresh.map(o => ({ networkId: net.id, ...(memberId !== undefined ? { memberId } : {}), base: o.base, vocab: vocabOf(o)!, epoch: o.epoch })),
-    ].filter(o => (o.memberId === undefined || members.has(o.memberId)) && o.epoch <= RDF_OFFERED_EPOCH_MAX && offerStands(o, held))
+    ].filter(o => (o.memberId === undefined || members.has(o.memberId)) && o.epoch <= RDF_ADOPTED_EPOCH_MAX && offerStands(o, held))
       .sort((a, b) => `${a.memberId ?? ''}|${a.base}|${a.vocab ?? ''}|${a.epoch}`.localeCompare(`${b.memberId ?? ''}|${b.base}|${b.vocab ?? ''}|${b.epoch}`));
     if (offered.length > 0) next = { held: { base: held.base, vocab: vocabOf(held)!, epoch: held.baseEpoch ?? 0 }, offered };
   }
@@ -313,7 +310,7 @@ export function servedRdfBasesOf(net: Pick<NetworkConfig, 'spaces' | 'spaceMap'>
  *   (review findings 2, 3). Nothing lands: the admin accepts the offered names (or a rebase round lands) and the conflict clears.
  * - Offers are kept PER MEMBER (review finding 8): what `memberId` serves replaces what it offered before, so a member that serves the held
  *   names again (or a lower epoch) withdraws its offer, and one that leaves the network takes it with it; the conflict stands while any
- *   offer stands. An epoch above {@link RDF_OFFERED_EPOCH_MAX} is refused as invalid. Nothing is written unless what is stored changes.
+ *   offer stands. An epoch above {@link RDF_ADOPTED_EPOCH_MAX} is refused as invalid. Nothing is written unless what is stored changes.
  * - A higher epoch for which a passed rebase round is still to land here is early, not a conflict.
  * - What is served is read by the setting's validators and bounded first; an entry no door would accept is left out, and a list that is not
  *   one (an older build serves none) is nothing.
@@ -413,7 +410,17 @@ function settleLocal(stored: RdfSetting | undefined, sent: Partial<RdfSetting> &
 }
 
 function settleArriving(stored: RdfSetting | undefined, sent: Partial<RdfSetting>, ctx: RdfSettleContext): RdfSettled {
-  if (!stored?.base) return { ok: true, rdf: clean({ ...sent, enabled: sent.enabled ?? stored?.enabled ?? false }) };
+  if (!stored?.base) {
+    const enabled = sent.enabled ?? stored?.enabled ?? false;
+    // The first enable adopts what arrives, and so is bounded as an offer is (lens finding 1): an epoch a peer could never have reached is
+    // not adopted, base and vocab with it, and the space stays as it was until a valid setting arrives.
+    if ((sent.baseEpoch ?? 0) > RDF_ADOPTED_EPOCH_MAX) {
+      offerRefused(`${ctx.networkId ?? 'settings'}:first-enable`, () => log.warn(`${ctx.networkId === undefined ? 'a settings round' : `network ${peerText(ctx.networkId)}`} `
+        + `sends a first RDF base at epoch ${sent.baseEpoch}, above the highest a member takes (${RDF_ADOPTED_EPOCH_MAX}); refused as invalid`));
+      return { ok: true, rdf: clean({ enabled }) };
+    }
+    return { ok: true, rdf: clean({ ...sent, enabled }) };
+  }
   const kept = clean({ ...stored, enabled: sent.enabled ?? stored.enabled });
   // The vocab travels with the base (review finding 3): the same base with another vocab differs too.
   if (sent.base === undefined || (sent.base === stored.base && vocabOf(sent) === vocabOf(stored))) return { ok: true, rdf: kept };

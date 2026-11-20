@@ -22,6 +22,13 @@ export const IRI_MAX = 2000;
 export const RDF_BASE_EPOCH_MAX = 1_000_000;
 
 /**
+ * The highest `baseEpoch` a member takes from a peer: an offered base, the first enable of a shared space, a `space_rebase` round's new
+ * epoch. Half {@link RDF_BASE_EPOCH_MAX}, so a space that took the highest one can still be rebased that many times again; a peer can never
+ * push a space to the maximum, where the next rebase could not be written. THE one bound: every place a peer's epoch enters asks it.
+ */
+export const RDF_ADOPTED_EPOCH_MAX = Math.floor(RDF_BASE_EPOCH_MAX / 2);
+
+/**
  * A character no address may hold: what IRIREF forbids (RDF 1.1 Turtle §6.4: the C0 controls, space, `<>"{}|^`\`) and what RFC 3987 leaves
  * out of every IRI (U+007F and the C1 controls U+0080 to U+009F are neither `iunreserved` nor `ucschar`).
  */

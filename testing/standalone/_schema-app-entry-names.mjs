@@ -26,7 +26,7 @@ export const APP_VALUES = [
   'takeBackLibraryDefinition', 'typeRuleIssues', 'typesOfSpaceMeta', 'unknownMetaFields', 'unrecognizedKeysIssue', 'validateSpaceMeta',
   'withSchemaLibrary',
   // Q-748 (bundle-269 slice A): the RDF names.
-  'IriZ', 'NamespaceIriZ', 'BaseIriZ', 'PrefixZ', 'RESERVED_PREFIXES', 'IRI_MAX', 'RDF_BASE_EPOCH_MAX', 'iriSegment', 'iriFragment',
+  'IriZ', 'NamespaceIriZ', 'BaseIriZ', 'PrefixZ', 'RESERVED_PREFIXES', 'IRI_MAX', 'RDF_BASE_EPOCH_MAX', 'RDF_ADOPTED_EPOCH_MAX', 'iriSegment', 'iriFragment',
 ];
 
 /**
