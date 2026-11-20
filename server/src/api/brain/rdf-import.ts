@@ -17,7 +17,9 @@ import { requireSpaceAuth, denyReadOnly } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
 import { sendCaughtFailure } from '../send-failure.js';
-import { rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, runningBodyOf, type RdfImportRefusal } from '../../spaces/rdf-import-act.js';
+import {
+  RDF_IMPORT_UPLOAD_STALLED, rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, runningBodyOf, type RdfImportRefusal,
+} from '../../spaces/rdf-import-act.js';
 import { peerBoundTo, peerTokenToolRefusal } from '../../auth/peer-bound.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 
@@ -32,6 +34,8 @@ const STATUS_ROUTE = 'GET /api/brain/spaces/:spaceId/import/rdf/:importId';
 
 /** A refusal of the act, with what more it carries. */
 function sendRefusal(res: Response, r: RdfImportRefusal): void {
+  // A sender that stalled still holds its end open: the answer ends the connection, or the sender keeps the socket (the tool has no upload to stall).
+  if (r.code === RDF_IMPORT_UPLOAD_STALLED) res.setHeader('Connection', 'close');
   res.status(r.status).json({ error: r.error, code: r.code, ...(r.detail ?? {}) });
 }
 

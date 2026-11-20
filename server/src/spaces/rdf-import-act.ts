@@ -82,10 +82,11 @@ import {
   type ImportFolder, type ImportSpoolBounds, type QuadGroup,
 } from '../rdf/import-spool.js';
 import { ImportIndex, type IndexedRecord } from '../rdf/import-index.js';
-import { DigestSet, assertRecordsWithinBound } from '../rdf/import-count.js';
+import { TripletSets, assertRecordsWithinBound, type DigestSet } from '../rdf/import-count.js';
+import { BodyTooLarge, UploadStalled, counted } from '../rdf/import-upload.js';
 import { defaultSourceBase } from '../rdf/import-default-source.js';
 import {
-  groupSubjectOf, quadsToOps, recordKey, recordKindOfGroup, tripletsOfGroup, type MintedRecord, type QuadsToOpsContext, type RecordOp,
+  groupSubjectOf, quadsToOps, recordKey, recordKindOfGroup, type MintedRecord, type QuadsToOpsContext, type RecordOp,
 } from '../rdf/quads-to-ops.js';
 import {
   STORED_RECORD_LINKS_OVER_BOUND, StoredRecordUnreadable, commitWindow, dryPlanWindow, importReadSet, loadStoredRecords, seededIdOf, type MintedEnd,
@@ -124,6 +125,8 @@ export const RDF_IMPORT_UNSUPPORTED_ENCODING = 'rdf_unsupported_encoding';
 export const RDF_IMPORT_FILES_LOST = 'rdf_import_files_lost';
 export const RDF_IMPORT_STATE_UNREADABLE = 'rdf_import_state_unreadable';
 export const RDF_IMPORT_STORAGE_EXCEEDED = 'storage_exceeded';
+/** An upload that sent nothing for `RDF_IMPORT_UPLOAD_IDLE_MS` (400; the connection is closed after the answer). */
+export const RDF_IMPORT_UPLOAD_STALLED = 'rdf_import_upload_stalled';
 /** The code every space-act door answers an act the closed runner interrupted with (`api/admin-space-transfer.ts`). */
 export const RDF_IMPORT_SHUTTING_DOWN = 'shutting_down';
 export const RDF_IMPORT_BODY_TOO_LARGE_BOUND = 'importBodyMaxBytes';
@@ -131,7 +134,7 @@ export const RDF_IMPORT_BODY_TOO_LARGE_BOUND = 'importBodyMaxBytes';
 /** Every code an import door or a status door answers: its own, the reader's, the space state's, and the existence rule's. */
 export const RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   RDF_IMPORT_REFUSED, RDF_IMPORT_BAD_PARAM, RDF_IMPORT_SCHEMA_NOT_AVAILABLE, RDF_IMPORT_SEVERAL_GRAPHS, RDF_IMPORT_NOT_FOUND, RDF_IMPORT_BUSY, RDF_IMPORT_SPACE_CHANGED,
-  RDF_IMPORT_UNSUPPORTED_ENCODING, RDF_IMPORT_FILES_LOST, RDF_IMPORT_STATE_UNREADABLE, RDF_IMPORT_STORAGE_EXCEEDED, RDF_IMPORT_SHUTTING_DOWN,
+  RDF_IMPORT_UNSUPPORTED_ENCODING, RDF_IMPORT_FILES_LOST, RDF_IMPORT_STATE_UNREADABLE, RDF_IMPORT_STORAGE_EXCEEDED, RDF_IMPORT_SHUTTING_DOWN, RDF_IMPORT_UPLOAD_STALLED,
   'rdf_malformed', 'rdf_relative_iri', 'rdf_remote_context', 'rdf_jsonld_not_streamable', 'rdf_bound_exceeded', 'rdf_gzip_invalid',
   'rdf_unsupported_format', 'rdf_unsupported', 'rdf_source_failed',
   'rdf_not_enabled', 'rdf_base_conflict', 'rdf_base_shared', 'rdf_term_clash', 'rdf_unwritable', 'space_not_found',
@@ -175,12 +178,16 @@ function paramsOf(raw: Record<string, unknown>): Record<string, unknown> {
 interface RdfImportKnobs {
   window?: number;
   maxRecords?: number;
+  /** Replaces `RDF_IMPORT_UPLOAD_IDLE_MS` (`rdf/import-upload.ts`; a test that waits for the idle bound). */
+  uploadIdleMs?: number;
   bounds?: Partial<ImportSpoolBounds>;
   hooks?: {
     beforeCommit?: () => unknown;
     afterCommitWindow?: (committed: number) => void;
     /** After the translation read the store for one window of the file (a seam for a change made while the file is translated). */
     duringTranslation?: () => unknown;
+    /** When a door has taken the one place to read an upload in (a seam for a second import that must meet it held). */
+    afterDoorTaken?: () => void;
     /** After the door sorted the file and before the act is registered. */
     beforeRegister?: () => unknown;
     /** After the act is registered and before it runs (a seam for a change a network makes to the space in between). */
@@ -270,16 +277,14 @@ interface Run {
 async function indexPass(run: TranslateRun): Promise<{ index: ImportIndex; asserted: DigestSet; reified: DigestSet }> {
   const names = namesByGraph(run.meta, run.options);
   const index = new ImportIndex(knobs.maxRecords !== undefined ? { maxRecords: knobs.maxRecords } : {});
-  const asserted = new DigestSet();
-  const reified = new DigestSet();
+  // The door's count held the same sets under the same bound before this act was registered, so they cannot pass it here.
+  const triplets = new TripletSets(knobs.maxRecords);
   for await (const window of windowsOf(run.groups(), windowSize())) {
     const candidates: Array<{ key: string; kind: RecordKind; id: string }> = [];
     const fresh: Array<{ key: string; kind: RecordKind }> = [];
     for (const group of window) {
       const n = names(group.graph?.value);
-      const t = tripletsOfGroup(group.quads);
-      t.asserted.forEach(k => asserted.add(k));
-      t.reified.forEach(k => reified.add(k));
+      triplets.addGroup(group.quads, n);
       const head = group.quads[0];
       if (!head) continue;
       const kind = recordKindOfGroup(group.quads, { names: n, mode: run.options.mode, blankNodes: run.options.blankNodes });
@@ -296,7 +301,7 @@ async function indexPass(run: TranslateRun): Promise<{ index: ImportIndex; asser
     }
     for (const f of fresh) if (!index.has(f.key)) index.set(f.key, { kind: f.kind, id: uuidv4(), stored: false });
   }
-  return { index, asserted, reified };
+  return { index, asserted: triplets.asserted, reified: triplets.reified };
 }
 
 /**
@@ -496,6 +501,16 @@ async function planAndCommit(run: Run): Promise<'refused' | 'planned' | 'complet
 /** The type schemas stored for `spaceId` now. */
 const storedTypeSchemas = (spaceId: string): SpaceMeta['typeSchemas'] => getConfig().spaces.find(s => s.id === spaceId)?.meta?.typeSchemas ?? {};
 
+/**
+ * The one line the end of an import leaves in the log (lens finding L6): the import, its space and counts, never an address or a value of a record (the
+ * report keeps those, behind the status door's rung). The act is counted by the runner (`ythril_space_acts_total{kind="rdf-import"}`: an import that wrote
+ * is `completed`, one that was refused or cannot go on is `failed`), so a metric of its own would count each end twice.
+ */
+function sayEnd(spaceId: string, importId: string, how: 'completed' | 'refused' | 'failed', report: RdfImportReport | null, code?: string): void {
+  const sum = (k: 'inserted' | 'converged'): number => (report ? OP_ORDER.reduce((n, kind) => n + report.kinds[kind][k], 0) : 0);
+  log.info(`RDF import ${importId} into space '${peerText(spaceId)}' ${how}${code ? ` (${code})` : ''}: ${sum('inserted')} inserted, ${sum('converged')} converged, ${report?.reasonCount ?? 0} reason(s)`);
+}
+
 /** The import's body: run the passes from its state, then (after the completion write) remove its folder. */
 async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Promise<SpaceActBodyOutcome> {
   const id = entry.spoolId ?? '';
@@ -505,12 +520,14 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
   const gone = async (status: number, code: string, why: string): Promise<SpaceActBodyOutcome> => {
     const kept = await readReport(id).catch(() => null);
     if (kept) await keepReport({ ...kept, status: 'failed', error: why, failure: { status, code }, endedAt: new Date().toISOString() }).catch(() => undefined);
+    sayEnd(entry.localId, id, 'failed', kept, code);
     return { failedFinally: { status, message: `The RDF import into space '${entry.localId}' cannot complete: ${why} Nothing more is written.` }, afterCompletion: forget };
   };
   /** The translation or the dry plan refused: nothing was written, the report says why, and the space is released. */
   const refused = async (run: Run): Promise<SpaceActBodyOutcome> => {
     const report = { ...run.builder.report, endedAt: new Date().toISOString(), status: 'refused' as const };
     await keepReport(report);
+    sayEnd(entry.localId, id, 'refused', report);
     return {
       failedFinally: {
         status: HTTP.CONFLICT,
@@ -568,6 +585,7 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
   if (outcome === 'refused') return refused(run);
   const report = { ...run.builder.report, endedAt: new Date().toISOString() };
   await keepReport({ ...report, status: 'completed' });
+  sayEnd(entry.localId, id, 'completed', report);
   emitWebhookEvent({
     event: 'bulk.write', spaceId: entry.localId,
     entry: { source: 'rdf.import', importId: id, inserted: countsOf(report, 'inserted'), updated: countsOf(report, 'converged'), errorCount: 0 },
@@ -637,26 +655,11 @@ function formatOfMediaType(contentType: string | undefined): RdfFormat | undefin
   return RDF_FORMATS.find(f => RDF_MEDIA_TYPES[f] === type);
 }
 
-/** The body is over the import body bound (`importBodyMaxBytes`): answered 413 naming it. */
-class BodyTooLarge extends Error {
-  constructor(readonly limit: number) { super('the body is over the import body bound'); }
-}
-
 /**
  * The space's RDF base or vocabulary is not what the door sorted the file by: the spool's grouping (a chrono's time nodes with their owner) and
  * the record count were made by the addressing the space had then, and the act reads the meta again under its hold.
  */
 class SpaceChangedUnderDoor extends Error {}
-
-/** `body` counted against `max` bytes as it arrives. */
-async function* counted(body: AsyncIterable<Uint8Array | string>, max: number): AsyncGenerator<Uint8Array | string, void, undefined> {
-  let n = 0;
-  for await (const chunk of body) {
-    n += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.byteLength;
-    if (n > max) throw new BodyTooLarge(max);
-    yield chunk;
-  }
-}
 
 const RDF_TYPE = stdIri('rdf', 'type').value;
 const REPORT_CLASS = ythrilIri('ExportReport');
@@ -737,6 +740,7 @@ export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnsw
   }
   if (doorHeld) return refusal(HTTP.CONFLICT, RDF_IMPORT_BUSY, 'Another RDF import is being read in on this instance: try again when it has been answered');
   doorHeld = true;
+  knobs.hooks?.afterDoorTaken?.();
   let released = false;
   const releaseDoor = (): void => { if (!released) { released = true; doorHeld = false; } };
   try {
@@ -762,7 +766,7 @@ async function readAndRun(input: RdfImportInput, given: ImportOptions, meta: Spa
   try {
     const folder = await openImportFolder(dir);
     const seen: GraphsSeen = { order: [], describing: new Set(), inDefaultGraph: false };
-    const quads = parseRdf(counted(input.body, importBodyMaxBytes(getConfig())), options.format, { blankNodePrefix: `b${importId.slice(0, 8)}-` });
+    const quads = parseRdf(counted(input.body, importBodyMaxBytes(getConfig()), knobs.uploadIdleMs), options.format, { blankNodePrefix: `b${importId.slice(0, 8)}-` });
     let sorted = await sortedSpool(noteGraphs(quads, seen), folder, { names: addressNames(meta, options.source), bounds: knobs.bounds ?? {} });
     const missing = graphsWithoutBase(seen, options);
     if (missing.length > 0) {
@@ -835,6 +839,9 @@ function doorRefusalOf(err: unknown, format: RdfFormat): RdfImportRefusal | null
   }
   if (err instanceof RdfImportBoundExceeded) {
     return refusal(HTTP.TOO_LARGE, err.code, `The file is over the import's bound ${err.bound} (${err.limit}); nothing was imported`, { bound: err.bound, limit: err.limit });
+  }
+  if (err instanceof UploadStalled) {
+    return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_UPLOAD_STALLED, `The upload sent nothing for ${Math.round(err.idleMs / 1000)} seconds and was cut off; nothing was imported: send the file again, without pauses`);
   }
   if (err instanceof BodyTooLarge) {
     return refusal(HTTP.TOO_LARGE, 'rdf_bound_exceeded', `The body is over the import body bound (${err.limit} bytes); nothing was imported`, { bound: RDF_IMPORT_BODY_TOO_LARGE_BOUND, limit: err.limit });
