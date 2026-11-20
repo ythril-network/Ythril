@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.5.6] — 2026-11-20
+
+**A security patch: a `HEAD` request is now checked and audited as the `GET` of its route, and the audit log records a request however its path is spelled.**
+
+| Changes on upgrade | Action |
+|---|---|
+| A request that no rights rule decides is refused `403` with `code: "route_unclassified"`; no route of this release meets it | None; report one if you see it |
+| A `HEAD` of a stored file, an event stream, a space's completeness or an export answers its headers only, and is recorded in the audit log | None |
+
+### Changed
+
+- **Docs:** changed: the tokens API and audit log API pages.
+
 ### Security
 
 - **Rights:** since 2.6.0 a `HEAD` skipped a space's area rung on path-scoped reads: a token reaching the space read an area's statuses and headers (file size, name, type), unaudited. `HEAD` is now checked and audited as `GET`; a request no rights row decides is refused `403 route_unclassified`.
