@@ -79,6 +79,9 @@ import { VoteConversionBlockComponent } from './vote-conversion-block.component'
       } @else if (round().summary) {
         <div class="vote-summary">{{ round().summary }}</div>
       }
+      @if (round().rebase; as rebase) {
+        <div class="vote-summary" data-testid="vote-rebase">{{ 'networks.network.votes.rebase' | transloco: { base: rebase.base, vocab: rebase.vocab, epoch: rebase.epoch } }}</div>
+      }
       @if (conversionSteps(); as steps) {
         <app-vote-conversion-block [steps]="steps" [localSpaceId]="round().localSpaceId" />
       }

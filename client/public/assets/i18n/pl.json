@@ -2194,6 +2194,7 @@
   "networks.network.votes.opened": "Otwarto",
   "networks.network.votes.yesAria": "Zagłosuj tak: {{type}}: {{subject}}",
   "networks.network.votes.vetoAria": "Zawetuj: {{type}}: {{subject}}",
+  "networks.network.votes.rebase": "Przenosi adres bazowy RDF na {{base}} (słownik {{vocab}}), zmiana bazy numer {{epoch}}. Wszystkie adresy, które ta przestrzeń nadała, zmieniają się razem z nim.",
   "networks.network.votes.recorded": "Głos został zapisany.",
   "networks.network.votes.concluded": "{{type}}: {{subject}} — wynik: {{outcome}}",
   "networks.network.votes.closed": "Głosowanie nad {{type}}: {{subject}} zakończyło się {{deadline}}. Głos nie został policzony.",

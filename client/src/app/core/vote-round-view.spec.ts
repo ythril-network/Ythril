@@ -56,6 +56,17 @@ describe('voteRoundFromServer', () => {
       expect(r[key], `${key} appeared on a round that did not send it`).toBeUndefined();
     }
   });
+  it('carries the base a space_rebase round moves to, as the server sent it', () => {
+    const rebase = { base: 'https://new.example.org/ld/notes/', vocab: 'https://new.example.org/vocab/notes/', epoch: 3 };
+    expect(voteRoundFromServer('n', server({ type: 'space_rebase', rebase })).rebase).toEqual(rebase);
+  });
+  it('drops a rebase that is not a base, a vocabulary and a whole epoch: a peer wrote it, and a half-shown base would be approved blind', () => {
+    const ok = { base: 'https://new.example.org/ld/notes/', vocab: 'https://new.example.org/vocab/notes/', epoch: 3 };
+    for (const rebase of [{ vocab: ok.vocab, epoch: 3 }, { ...ok, base: '' }, { ...ok, epoch: '3' }, { ...ok, epoch: 1.5 }, { ...ok, vocab: 7 }, ok.base, [ok], null]) {
+      expect(voteRoundFromServer('n', server({ type: 'space_rebase', rebase })).rebase, JSON.stringify(rebase)).toBeUndefined();
+    }
+    expect('rebase' in voteRoundFromServer('n', server()), 'a round that sends none carries no key').toBe(false);
+  });
   it('carries the network and the casts', () => {
     const r = voteRoundFromServer('net-1', server());
     expect(r.networkId).toBe('net-1');

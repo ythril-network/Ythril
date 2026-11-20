@@ -2194,6 +2194,7 @@
   "networks.network.votes.opened": "Opened",
   "networks.network.votes.yesAria": "Vote yes on {{type}}: {{subject}}",
   "networks.network.votes.vetoAria": "Veto {{type}}: {{subject}}",
+  "networks.network.votes.rebase": "Moves the RDF base to {{base}} (vocabulary {{vocab}}), base change number {{epoch}}. Every address this space has given out changes with it.",
   "networks.network.votes.recorded": "Your vote is recorded.",
   "networks.network.votes.concluded": "{{type}}: {{subject}} — result: {{outcome}}",
   "networks.network.votes.closed": "Voting on {{type}}: {{subject}} closed at {{deadline}}. Your vote was not counted.",

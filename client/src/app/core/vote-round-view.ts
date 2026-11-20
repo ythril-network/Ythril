@@ -43,7 +43,15 @@ export interface ServerVoteRound {
    * proposer's cast. Read by the vote row's conversion block, which binds every name in it as text.
    */
   convertRecords?: { steps?: ConversionStep[] };
+  /**
+   * What a `space_rebase` round moves the space's RDF base to (bundle-269): the base, its vocabulary and the epoch it lands at. Peer-authored,
+   * bound by every cast's signature; a voter approves exactly these names, so the row shows them.
+   */
+  rebase?: RoundRebase;
 }
+
+/** The names a `space_rebase` round moves a space to. */
+export interface RoundRebase { base: string; vocab: string; epoch: number }
 
 /**
  * A vote round as the pages read it: what `voteRoundFromServer` makes of a `ServerVoteRound`. Declared here, beside the shape it is made
@@ -68,6 +76,19 @@ export interface VoteRound {
   localSpaceId?: string;
   /** The conversion that rides with a schema round: the steps a voter approves with the schema (bundle-285). Absent when the round carries none. */
   convertRecords?: { steps?: ConversionStep[] };
+  /** What a `space_rebase` round moves the space's RDF base to. Absent for any other round, and for one whose names are not a base, a vocabulary and a whole epoch. */
+  rebase?: RoundRebase;
+}
+
+/**
+ * The rebase of a round, or nothing when what arrived is not a base, a vocabulary and a whole epoch. A peer wrote it: a half-shown base
+ * (no vocabulary, an epoch that is not a number) would ask a voter to approve names they cannot read.
+ */
+function rebaseOf(rebase: unknown): RoundRebase | undefined {
+  if (!isPlainObject(rebase)) return undefined;
+  const { base, vocab, epoch } = rebase;
+  if (!isName(base) || !isName(vocab) || typeof epoch !== 'number' || !Number.isInteger(epoch)) return undefined;
+  return { base, vocab, epoch };
 }
 
 /** What a round is about, as a voter reads it: the space first ("add notes" says more than "add brain-a"), then who. */
@@ -169,6 +190,7 @@ export function convertBlocksOfRound(steps: unknown): ConvertBlock[] {
 
 export function voteRoundFromServer(networkId: string, r: ServerVoteRound): VoteRound {
   const who = r.subjectLabel || r.subjectInstanceId || '';
+  const rebase = rebaseOf(r.rebase);
   return {
     id: r.roundId,
     networkId,
@@ -187,5 +209,7 @@ export function voteRoundFromServer(networkId: string, r: ServerVoteRound): Vote
     // The conversion and the name this instance holds the round's space under: the row's conversion block reads both (bundle-285).
     ...(r.localSpaceId !== undefined ? { localSpaceId: r.localSpaceId } : {}),
     ...(r.convertRecords !== undefined ? { convertRecords: r.convertRecords } : {}),
+    // The names a rebase round moves to: the row shows them, since a yes approves them (bundle-269 lens finding 3).
+    ...(rebase !== undefined ? { rebase } : {}),
   };
 }
