@@ -40,8 +40,8 @@ export type TermKind = KnowledgeType | 'file';
 /** What a record address is built for. */
 export type RecordKind = KnowledgeType | 'file';
 
-/** The base and vocab of a space with RDF on, or a throw. */
-function namesOf(meta: Pick<SpaceMeta, 'rdf'> | undefined): { base: string; vocab: string } {
+/** The base and vocab of a space with RDF on, or a throw. The one reading of a meta's names: the reverse rule (`term-reverse.ts`) takes them from here. */
+export function namesOf(meta: Pick<SpaceMeta, 'rdf'> | undefined): { base: string; vocab: string } {
   const rdf = meta?.rdf;
   if (!rdf || rdf.enabled !== true || typeof rdf.base !== 'string' || rdf.base === '') throw new RdfNotEnabled();
   return { base: rdf.base, vocab: rdf.vocab ?? defaultVocabFor(rdf.base) };
