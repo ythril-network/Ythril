@@ -73,9 +73,9 @@ function applyOrReopen(round: VoteRound, apply: () => void): void {
     apply();
   } catch (cause) {
     round.concluded = false;
-    delete round.passed;
-    delete round.outcome;
-    delete round.concludedAt;
+    round.passed = undefined;
+    round.outcome = undefined;
+    round.concludedAt = undefined;
     throw cause;
   }
 }
