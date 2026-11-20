@@ -34,6 +34,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertPartition } from './pack-by-seconds.mjs';
 
 /**
  * First port of the shard Mongos: `DB_SHARD_BASE_PORT + index`. Clear of 27117 (`ythril-mongo-a`) on purpose. The compose
@@ -202,13 +203,7 @@ export function planDbShards(files, count, seconds = loadDbFileWeights()) {
   const shards = Array.from({ length: count }, () => []);
   for (const f of files) shards[dbShardOf(f, count)].push(f);
   shards.forEach((s, i) => { shards[i] = heaviestFirst(s, seconds); });
-  const placed = shards.flat();
-  if (placed.length !== files.length || new Set(placed).size !== new Set(files).size || new Set(files).size !== files.length) {
-    throw new Error('planDbShards: the shards are not a partition of the files (a file is missing or listed twice)');
-  }
-  const empty = shards.map((s, i) => (s.length === 0 ? i : -1)).filter(i => i >= 0);
-  if (empty.length > 0) {
-    throw new Error(`planDbShards: shard(s) ${empty.join(', ')} hold no file out of ${files.length} — the count is larger than the work`);
-  }
+  // The partition check is the shared one (`pack-by-seconds.mjs`), which the stack suites' shard plan calls too.
+  assertPartition(files, shards, 'planDbShards');
   return shards;
 }
