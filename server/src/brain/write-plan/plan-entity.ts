@@ -5,7 +5,6 @@
  * entity's id (ID IS ID). Without one, a new entity is minted every time — a name is a non-unique label, which
  * is why the insert warns when the name and type are already taken.
  */
-import { v4 as uuidv4 } from 'uuid';
 import { authorRef } from '../../config/author.js';
 import { type ContradictionWarning } from '../insert-contradictions.js';
 import { entityEmbedText } from '../embed-text.js';
@@ -20,6 +19,7 @@ import type { DupeCheckOpts } from '../write-options.js';
 import type { EntityDoc } from '../../config/types.js';
 import type { ReadSet, ReadWant } from './read-set.js';
 import type { WritePlan } from './types.js';
+import { trustFor, mintedWant, mintedRecord, insertIdentity, type PlanTrust } from './trust.js';
 import { convergeResult, finishInsert, neighbourAdvisories, vectorBeforeWrite } from './plan-steps.js';
 
 export interface EntityInput {
@@ -48,23 +48,30 @@ export interface EntityPlanned {
 }
 
 /** What `planEntity` will ask the read set. */
-export function entityWant(input: EntityInput): ReadWant {
+export function entityWant(input: EntityInput, trust?: PlanTrust): ReadWant {
+  // A minted id (a trusted caller's, `trust.ts`) is a new record's identity: no name warning is asked for it.
+  if (trust?.mintedId !== undefined) return { records: mintedWant('entity', trust) };
   return input.id
     ? { records: { entity: [input.id] } }
     : { nameTypes: [{ name: input.name, type: input.type }] };
 }
 
-export async function planEntity(spaceId: string, input: EntityInput, view: ReadSet): Promise<EntityPlanned> {
+/**
+ * `trust`: what a trusted in-process caller hands the planner and no request can (`trust.ts`) — the id the instance minted for a new record,
+ * and the schema it proposes, judged and stamped in place of the stored one.
+ */
+export async function planEntity(spaceId: string, input: EntityInput, view: ReadSet, trust?: PlanTrust): Promise<EntityPlanned> {
   const { name, type, description, opts, ttlDays } = input;
   const tags = input.tags ?? [];
-  const existing = input.id ? view.stored('entity', input.id) as unknown as EntityDoc | null : null;
+  const trusted = trustFor(spaceId, trust, input.id);
+  const existing = (input.id ? view.stored('entity', input.id) : mintedRecord(view, 'entity', trusted)) as unknown as EntityDoc | null;
 
   /*
    * THE SCHEMA IS ENFORCED HERE, against the merged record. Declared defaults fill in what the caller omitted
    * BEFORE validation and only on an INSERT — on an update an absent property may be one just removed.
    */
   // The meta and the schema stamp in ONE read (Q-736): the stamp names the schema this check judged with, never a later one.
-  const write = readMetaForWrite(spaceId);
+  const write = readMetaForWrite(spaceId, trusted?.planMeta);
   const properties = (existing ? input.properties : applyPropertyDefaults(write.meta?.typeSchemas?.entity?.[type], input.properties))
     ?? input.properties ?? {};
   const check = classifyEntityUpsertAgainst(write.meta, existing, { name, type, description, properties, tags }, input.instanceWrittenKeys);
@@ -113,7 +120,7 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
 
   // Warn when inserting without an explicit id and entities with this name and type already exist.
   let warning: string | undefined;
-  if (!input.id) {
+  if (!input.id && trusted?.mintedId === undefined) {
     const existingCount = view.entitiesNamed(name, type);
     if (existingCount > 0) {
       warning = `${existingCount} existing entit${existingCount === 1 ? 'y' : 'ies'} with name '${name}' and type '${type}' already exist in this space. A new entity was created because no id was supplied. To update an existing entity, provide its id.`;
@@ -122,9 +129,9 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
 
   const advisories = await neighbourAdvisories(spaceId, 'entity', vector, opts, { properties });
 
-  // ID IS ID (owner ruling, 2026-08-12): the identity is ours to mint, always.
+  // ID IS ID (owner ruling, 2026-08-12): the identity is ours to mint, always (a trusted minted id is the instance's own).
   const doc: EntityDoc = {
-    _id: uuidv4(), spaceId, name, type, tags, properties, author: authorRef(),
+    _id: insertIdentity(trusted), spaceId, name, type, tags, properties, author: authorRef(),
     createdAt: now, updatedAt: now, seq: 0, ...derived.set,
   };
   if (description !== undefined) doc.description = description;

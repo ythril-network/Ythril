@@ -31,8 +31,10 @@ import { refuseForkEdit } from '../forks.js';
 import { SubjectEdges, functionalSubjectKey } from '../functional-subject.js';
 import { inChunks } from '../../util/chunks.js';
 import { missingRefs } from '../entity-refs.js';
-import { RECORD_COLLECTION, type RefKind } from '../../config/types-knowledge.js';
-import type { EdgeDoc } from '../../config/types.js';
+import { RECORD_COLLECTION, REF_KINDS, type RefKind } from '../../config/types-knowledge.js';
+import type { EdgeDoc, LinkDoc } from '../../config/types.js';
+import { MAX_LINKS_PER_KIND } from '../../util/request-bounds.js';
+import type { DesiredLinks } from '../links.js';
 import type { PlanKind } from './types.js';
 
 /** Any record the store holds, as the read returned it (never-returned fields projected away). */
@@ -58,7 +60,18 @@ export interface ReadWant {
   functional?: ReadonlyArray<{ from: string; label: string }>;
   /** Entity names whose existing copies the insert warning counts. */
   nameTypes?: ReadonlyArray<{ name: string; type: string }>;
+  /**
+   * Records whose stored LINK ROWS are read (`storedLinks`): what a converge that rewrites a record's link set would take away, so a caller that
+   * must take nothing away (an import, amendment A4) can pass the union.
+   */
+  links?: ReadonlyArray<{ fromKind: RefKind; id: string }>;
 }
+
+/** The kinds a read set can be seeded with: the records an import brings, which an edge or a link can name. */
+export type SeedKind = 'entity' | 'fact' | 'chrono';
+
+/** A record only the import holds, as much of it as a planner asks about an edge's or a link's end: its id, and an entity's type. */
+export interface SeedRecord { readonly _id: string; readonly type?: string | null }
 
 /** Per read, at most this many `$or` clauses (a by-id read is chunked by its reader). Well under every bound the probe measured. */
 const CHUNK = 500;
@@ -66,6 +79,7 @@ const CHUNK = 500;
 /** A triplet's key is the edge's own id — an end stated as `entity` and one left unstated are one key. */
 export const tripletKey = (t: Triplet) => edgeIdFor(t.from, t.to, t.label, t.fromKind, t.toKind);
 const nameTypeKey = (name: string, type: string) => `${name}\u0000${type}`;
+const linkOwnerKey = (fromKind: RefKind, id: string) => `${fromKind}\u0000${id}`;
 /**
  * Several wants as one — a batch's single `load`, and an inline edge set's.
  *
@@ -79,6 +93,7 @@ export function mergeWants(wants: readonly ReadWant[]): ReadWant {
   const triplets: NonNullable<ReadWant['triplets']>[number][] = [];
   const functional: NonNullable<ReadWant['functional']>[number][] = [];
   const nameTypes: NonNullable<ReadWant['nameTypes']>[number][] = [];
+  const links: NonNullable<ReadWant['links']>[number][] = [];
   for (const w of wants) {
     for (const [kind, ids] of Object.entries(w.records ?? {}) as Array<[keyof typeof records, readonly string[]]>) {
       records[kind] = [...(records[kind] ?? []), ...ids];
@@ -89,8 +104,9 @@ export function mergeWants(wants: readonly ReadWant[]): ReadWant {
     triplets.push(...(w.triplets ?? []));
     functional.push(...(w.functional ?? []));
     nameTypes.push(...(w.nameTypes ?? []));
+    links.push(...(w.links ?? []));
   }
-  return { records, exist, triplets, functional, nameTypes };
+  return { records, exist, triplets, functional, nameTypes, ...(links.length > 0 ? { links } : {}) };
 }
 
 /** What a read of a stored record does with a fork row: refuse it (a write's read), or answer it as unresolved (a look). */
@@ -108,6 +124,10 @@ export class ReadSet {
   private readonly nameTypeCounts = new Map<string, number>();
   /** Ids this batch minted — records that cannot appear in any stored edge or link. */
   private readonly mintedIds = new Set<string>();
+  /** Per kind: the records only the import holds (`seed`), until their own plan notes them written. */
+  private readonly seededIds = new Map<SeedKind, Set<string>>();
+  /** Per record (`linkOwnerKey`): its stored link rows' ends, by end kind — for the records `ReadWant.links` named. */
+  private readonly linkRows = new Map<string, Map<RefKind, string[]>>();
 
   constructor(readonly spaceId: string, private readonly read: RecordsById = readRecordsById) {}
 
@@ -141,10 +161,11 @@ export class ReadSet {
     // the commonest batch: records and the edges between them in one call.
     const tripletsWanted = (want.triplets ?? []).filter(t => !this.triplets.has(tripletKey(t))
       && !this.mintedIds.has(t.from) && !this.mintedIds.has(t.to));
-    const edges = col<EdgeDoc>(spaceCollection(this.spaceId, 'edges'));
+    // Each collection is reached only when something is read from it: a load that asks only about seeded or minted records reads nothing.
+    const edges = () => col<EdgeDoc>(spaceCollection(this.spaceId, 'edges'));
     for (const chunk of inChunks(tripletsWanted, CHUNK)) {
       // Exact clauses, the same one `findEdgeByTriplet` reads by. One clause per triplet is one index key each.
-      const found = await edges.find(asFilter<EdgeDoc>({
+      const found = await edges().find(asFilter<EdgeDoc>({
         spaceId: this.spaceId, $or: chunk.map(tripletClause),
       } as never), { projection: NEVER_RETURNED_PROJECTION }).toArray() as EdgeDoc[];
       for (const t of chunk) this.triplets.set(tripletKey(t), null);
@@ -155,7 +176,7 @@ export class ReadSet {
       && !this.mintedIds.has(s.from));
     for (const chunk of inChunks(subjectsWanted, CHUNK)) {
       // A fork edge under the label is not a second edge from the subject (`CHOSEN_VERSION_ROWS`, Q-624).
-      const found = await edges.find(asFilter<EdgeDoc>({
+      const found = await edges().find(asFilter<EdgeDoc>({
         $or: chunk.map(s => ({ from: s.from, label: s.label })), ...CHOSEN_VERSION_ROWS,
       } as never), { projection: { _id: 1, from: 1, to: 1, label: 1, fromKind: 1, toKind: 1 } }).toArray() as EdgeDoc[];
       for (const s of chunk) this.loadedSubjects.add(functionalSubjectKey(s.from, s.label));
@@ -163,10 +184,10 @@ export class ReadSet {
     }
 
     const namesWanted = (want.nameTypes ?? []).filter(n => !this.nameTypeCounts.has(nameTypeKey(n.name, n.type)));
-    const entities = col<{ name: string; type: string }>(spaceCollection(this.spaceId, 'entities'));
+    const entities = () => col<{ name: string; type: string }>(spaceCollection(this.spaceId, 'entities'));
     for (const chunk of inChunks(namesWanted, CHUNK)) {
       // An unchosen version carries its subject's name and type and is not another entity of them (`CHOSEN_VERSION_ROWS`, Q-624).
-      const found = await entities.find(asFilter<{ name: string; type: string }>({
+      const found = await entities().find(asFilter<{ name: string; type: string }>({
         spaceId: this.spaceId, $or: chunk.map(n => ({ name: n.name, type: n.type })), ...CHOSEN_VERSION_ROWS,
       } as never), { projection: { _id: 0, name: 1, type: 1 } }).toArray();
       for (const n of chunk) this.nameTypeCounts.set(nameTypeKey(n.name, n.type), 0);
@@ -175,6 +196,66 @@ export class ReadSet {
         this.nameTypeCounts.set(k, (this.nameTypeCounts.get(k) ?? 0) + 1);
       }
     }
+
+    // A record this batch minted (or seeded) has no stored link rows, so it is answered without a read, as its triplets are.
+    const ownersWanted = [...new Map((want.links ?? []).map(o => [linkOwnerKey(o.fromKind, o.id), o])).values()]
+      .filter(o => !this.linkRows.has(linkOwnerKey(o.fromKind, o.id)) && !this.mintedIds.has(o.id));
+    const links = () => col<LinkDoc>(spaceCollection(this.spaceId, 'links'));
+    for (const chunk of inChunks(ownersWanted, CHUNK)) {
+      // Bounded by its owners: each holds at most MAX_LINKS_PER_KIND rows per class, the bound every link writer refuses past.
+      const found = await links().find(asFilter<LinkDoc>({
+        spaceId: this.spaceId, $or: chunk.map(o => ({ from: o.id, fromKind: o.fromKind })),
+      } as never), { projection: { _id: 0, from: 1, fromKind: 1, to: 1, toKind: 1 } })
+        .limit(chunk.length * MAX_LINKS_PER_KIND * REF_KINDS.length).toArray() as Array<Pick<LinkDoc, 'from' | 'fromKind' | 'to' | 'toKind'>>;
+      for (const o of chunk) this.linkRows.set(linkOwnerKey(o.fromKind, o.id), new Map());
+      for (const row of found) {
+        const held = this.linkRows.get(linkOwnerKey(row.fromKind, row.from));
+        if (held) held.set(row.toKind, [...(held.get(row.toKind) ?? []), row.to]);
+      }
+    }
+  }
+
+  /**
+   * Hold `records` as records only the import brings: an edge or a link that names one is judged as naming a record that exists, an entity's
+   * `type` is its end's type, and nothing stored can be an edge from it. Anything neither stored nor seeded is still absent, and anything
+   * never loaded still throws.
+   *
+   * Refused (throws, holding nothing) when an id is STORED, or planned by this batch: a seed would hide the stored record from every plan that
+   * asks about it. The ids not already held are read once to know (through the read set's own reader, so the read is the planners' read).
+   * A seeded record's own plan inserts it (`trust.ts`, `mintedRecord`), and from then on it is held as written.
+   */
+  async seed(kind: SeedKind, records: readonly SeedRecord[]): Promise<void> {
+    const held = this.recordsOf(kind);
+    const planned = records.filter(r => held.get(r._id) && !this.seeded(kind, r._id));
+    if (planned.length > 0) throw new Error(`read set: cannot seed ${kind} '${planned[0]!._id}': it is stored or planned`);
+    const unread = [...new Set(records.map(r => r._id))].filter(id => !held.has(id));
+    if (unread.length > 0) {
+      const stored = await this.read<StoredRecord>(spaceCollection(this.spaceId, RECORD_COLLECTION[kind]), unread);
+      if (stored.length > 0) throw new Error(`read set: cannot seed ${kind} '${String(stored[0]!._id)}': it is stored`);
+    }
+    let ids = this.seededIds.get(kind);
+    if (!ids) { ids = new Set(); this.seededIds.set(kind, ids); }
+    for (const r of records) {
+      held.set(r._id, { _id: r._id, spaceId: this.spaceId, ...(r.type !== undefined ? { type: r.type } : {}) });
+      ids.add(r._id);
+      this.mintedIds.add(r._id);
+    }
+  }
+
+  /** Whether `id` is a record only the import brings, not yet planned (`seed`). */
+  seeded(kind: SeedKind, id: string): boolean {
+    return this.seededIds.get(kind)?.has(id) === true;
+  }
+
+  /**
+   * The ends of a record's stored link rows, by end kind (an empty map: none). A record this batch minted or seeded has none. Throws when the
+   * record was never named in `ReadWant.links`, as `stored` does.
+   */
+  storedLinks(fromKind: RefKind, id: string): DesiredLinks {
+    if (this.mintedIds.has(id) && !this.linkRows.has(linkOwnerKey(fromKind, id))) return {};
+    const held = this.linkRows.get(linkOwnerKey(fromKind, id));
+    if (!held) throw new Error(`read set: the links of ${fromKind} '${id}' were asked about but never loaded`);
+    return Object.fromEntries(held) as DesiredLinks;
   }
 
   /**
@@ -279,6 +360,8 @@ export class ReadSet {
   noteWritten(kind: PlanKind, written: { _id: string }, inserted: boolean): void {
     const doc = written as StoredRecord;
     this.recordsOf(kind).set(doc._id, doc);
+    // A seeded record that is now planned is held as written: a second plan of it converges.
+    this.seededIds.get(kind as SeedKind)?.delete(doc._id);
     if (inserted) this.mintedIds.add(doc._id);
     if (kind === 'edge') {
       const e = doc as unknown as EdgeDoc;
