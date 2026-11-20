@@ -13,7 +13,8 @@
  *
  * - **The bounds are counted in the pass that reads the file**, before it returns, so "too large" is the door's answer (413) and never an
  *   act's halfway through a held space. Over a bound the pass throws {@link RdfImportBoundExceeded} naming the bound, having removed every file
- *   it wrote; a reader that throws is cleaned up the same way and its own error comes through.
+ *   it wrote; a reader that throws is cleaned up the same way and its own error comes through. The bytes the pass writes are bounded as it
+ *   writes them ({@link RDF_IMPORT_MAX_SPOOL_BYTES}), since the subject bounds are only seen once every run is on disk.
  * - **One order on every machine**: graph, then subject, each compared by UTF-16 code unit (never by locale), and stable for equal keys (a run's
  *   sort is stable, a merge prefers the earlier run), so the quads of one subject keep the order they arrived in and two runs agree byte for byte.
  * - **A blank node is keyed with its graph**, so one label in two graphs is two subjects.
@@ -54,25 +55,37 @@ export const RDF_IMPORT_MAX_SUBJECTS = 1_000_000;
 export const RDF_IMPORT_MAX_SUBJECT_QUADS = 10_000;
 /** The characters of one subject's quads (every string they carry): a group is held whole in memory while it is translated. */
 export const RDF_IMPORT_MAX_SUBJECT_CHARS = 16_777_216;
+/**
+ * The bytes the first pass writes in all (every spool line and its line end): what bounds the sort's disk. A quad's line carries its subject
+ * twice and its predicate, object and graph once as JSON, so it is several times the quad's text, and a prefix declaration lets six input
+ * characters expand into a line of tens of thousands: a bound on the quads or on the input cannot hold the disk (review F1), and the subject
+ * bounds are only seen in the final merge, after every run is written. The file the parser admits is 1 GiB inflated, whose lines are about four
+ * times that; the sort holds its runs and its sorted file at once, so one import writes at most twice this bound.
+ */
+export const RDF_IMPORT_MAX_SPOOL_BYTES = 8 * 1024 ** 3;
 /** The characters of line text one sort run holds in memory before it is written: what bounds the sort's memory. */
 export const RDF_IMPORT_SORT_RUN_BYTES = 33_554_432;
 /** The runs one merge reads at once: one open file and one buffered line each. */
 export const SORT_FAN_IN = 32;
 
 /** The bounds of one pass over a file; `runBytes` bounds memory and refuses nothing. */
-export interface ImportSpoolBounds { maxQuads: number; maxSubjects: number; maxSubjectQuads: number; maxSubjectChars: number; runBytes: number }
+export interface ImportSpoolBounds {
+  maxQuads: number; maxSubjects: number; maxSubjectQuads: number; maxSubjectChars: number; maxSpoolBytes: number; runBytes: number;
+}
 
 export const DEFAULT_IMPORT_SPOOL_BOUNDS: Readonly<ImportSpoolBounds> = Object.freeze({
   maxQuads: RDF_IMPORT_MAX_QUADS,
   maxSubjects: RDF_IMPORT_MAX_SUBJECTS,
   maxSubjectQuads: RDF_IMPORT_MAX_SUBJECT_QUADS,
   maxSubjectChars: RDF_IMPORT_MAX_SUBJECT_CHARS,
+  maxSpoolBytes: RDF_IMPORT_MAX_SPOOL_BYTES,
   runBytes: RDF_IMPORT_SORT_RUN_BYTES,
 });
 
 /** The name of a bound an import refuses at: the constant's own name. */
 export type ImportBoundName =
-  | 'RDF_IMPORT_MAX_QUADS' | 'RDF_IMPORT_MAX_SUBJECTS' | 'RDF_IMPORT_MAX_SUBJECT_QUADS' | 'RDF_IMPORT_MAX_SUBJECT_CHARS' | 'RDF_IMPORT_MAX_RECORDS';
+  | 'RDF_IMPORT_MAX_QUADS' | 'RDF_IMPORT_MAX_SUBJECTS' | 'RDF_IMPORT_MAX_SUBJECT_QUADS' | 'RDF_IMPORT_MAX_SUBJECT_CHARS'
+  | 'RDF_IMPORT_MAX_SPOOL_BYTES' | 'RDF_IMPORT_MAX_RECORDS';
 
 /** A file, or the import's index, over a named bound: the door's 413. */
 export class RdfImportBoundExceeded extends Error {
@@ -331,6 +344,7 @@ export async function sortedSpool(quads: AsyncIterable<Quad>, folder: ImportFold
     let run: Entry[] = [];
     let runChars = 0;
     let total = 0;
+    let written = 0;
     const writeRun = async (): Promise<void> => {
       if (run.length === 0) return;
       run.sort(compare);
@@ -349,6 +363,9 @@ export async function sortedSpool(quads: AsyncIterable<Quad>, folder: ImportFold
       const s = JSON.stringify(owner === null ? subjectPart(quad.subject) : `i${owner}`);
       const chars = termChars(quad.subject) + termChars(quad.predicate) + termChars(quad.object) + termChars(quad.graph);
       const line = `${g}\t${s}\t${chars}\t${JSON.stringify(quad)}`;
+      // Charged as the line is made, before it is held or written: a quad whose line is far larger than its text meets the bound at its line.
+      written += Buffer.byteLength(line, 'utf8') + 1;
+      if (written > bounds.maxSpoolBytes) throw new RdfImportBoundExceeded('RDF_IMPORT_MAX_SPOOL_BYTES', bounds.maxSpoolBytes);
       run.push(entryOf(line));
       runChars += line.length;
       if (runChars >= bounds.runBytes) await writeRun();
