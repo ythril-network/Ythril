@@ -57,7 +57,7 @@ function bigStore(spec, afterId) {
  * that arrives), after taking nothing for `holdMs`; `0` takes nothing until `release()`. Answers the text, the trailers and whether the
  * transfer ended whole.
  */
-function readAt(url, key, { bytesPerSecond, holdMs = 0 }) {
+function readAt(url, key, { bytesPerSecond, holdMs = 0, headers = {} }) {
   let release;
   let started;
   let fast = false;
@@ -66,7 +66,7 @@ function readAt(url, key, { bytesPerSecond, holdMs = 0 }) {
   const headed = new Promise(r => { started = r; });
   const done = new Promise((resolve, reject) => {
     const t0 = Date.now();
-    const req = http.get(url, { headers: { Authorization: `Bearer ${key}` }, agent: false }, (res) => {
+    const req = http.get(url, { headers: { Authorization: `Bearer ${key}`, ...headers }, agent: false }, (res) => {
       started();
       const chunks = [];
       let got = 0;
@@ -91,7 +91,7 @@ function readAt(url, key, { bytesPerSecond, holdMs = 0 }) {
         if (settled) return;
         settled = true;
         clearInterval(tick);
-        resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString('utf8'), trailers: res.trailers, complete, ms: Date.now() - t0 });
+        resolve({ status: res.statusCode, encoding: res.headers['content-encoding'], text: Buffer.concat(chunks).toString('utf8'), trailers: res.trailers, complete, ms: Date.now() - t0 });
       };
       res.on('end', () => finish(true));
       res.on('aborted', () => finish(false));
@@ -165,6 +165,34 @@ describe('a trickling reader cannot hold an export slot', { skip, timeout: 600_0
       assert.ok(got.complete, `the reader ${label} was cut after ${got.ms} ms (last received: ${JSON.stringify(got.text.slice(-200))})`);
       assert.equal(got.trailers['ythril-export-complete'], 'true', got.text.slice(-300));
       assert.match(got.text, new RegExp(`# ythril-export: ${TOTAL} records; complete, nothing is left`));
+    });
+  }
+
+  // Lens finding 2. The application compresses Turtle and JSON-LD for a client that accepts gzip, and an export that was compressed was
+  // judged on compressed bytes (what the socket took) while the guide states the rate in the bytes of the export itself: a well-compressible
+  // export of a slow reader was measured at a fraction of its size. The stream is not compressed, whatever the reader accepts, so the rate
+  // the guide states is the rate measured.
+  for (const [label, share, whole] of [['at a tenth of the bound', 0.1, false], ['at twice the bound', 2, true]]) {
+    it(`a reader that accepts gzip ${label} is answered the text itself and judged by the bound as any other`, async () => {
+      // Turtle: a format the application compresses (N-Quads is not a compressible type, so it never showed).
+      const r = readAt(`${url.replace('format=nquads', 'format=turtle')}`, tok.key, { bytesPerSecond: pace.minBytesPerSecond * share, headers: { 'Accept-Encoding': 'gzip, deflate, br' } });
+      if (!whole) {
+        await r.headed;
+        await waitFor(slotFree, verdictWithin(), 100, () => `the gzip reader ${label} still holds its slot`);
+      }
+      const got = await r.done;
+      assert.equal(got.encoding, undefined, `the stream was sent as ${got.encoding}: the rate is then measured on compressed bytes`);
+      assert.equal(got.status, 200);
+      if (whole) {
+        assert.ok(got.complete, `the gzip reader ${label} was cut after ${got.ms} ms`);
+        assert.match(got.text, new RegExp(`# ythril-export: ${TOTAL} records; complete, nothing is left`));
+      } else {
+        assert.ok(got.complete, `the transfer itself ends whole: the ending reached the reader before the close (last received: ${JSON.stringify(got.text.slice(-200))})`);
+        assert.match(got.text, /INCOMPLETE[^\n]*too slowly/, 'a reader of compressed bytes was not told');
+        assert.ok(got.text.endsWith('!ythril-export-incomplete\n'));
+        assert.equal(got.trailers['ythril-export-complete'], 'false');
+        await assert.rejects(parseRdf('turtle', got.text), 'a stream cut by the rate bound is never read as whole');
+      }
     });
   }
 
