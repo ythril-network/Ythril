@@ -38,9 +38,10 @@ import type { BrainCollection } from '../config/types-knowledge.js';
 import { LIVE_FILE_ROW, NOT_A_FEED_MARKER } from '../files/live-file-row.js';
 import { budgetCeilingZ, defaultBudgetChars, queryInt, resolveBudget, budgetBoundBy, type ResolvedBudget } from '../brain/result-budget.js';
 import { storeFailureAnswer } from '../brain/store-failure.js';
-import { refusalOfParse, peerText, NAME_QUOTED } from '../util/log.js';
+import { log, refusalOfParse, peerText, NAME_QUOTED } from '../util/log.js';
+import { SAY_ONCE_WINDOW_MS, warnOnce } from '../util/warn-once.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
-import { takeExportSlot, EXPORT_RETRY_AFTER_SECONDS, type ExportSlot } from '../export/export-slots.js';
+import { takeExportSlot, EXPORT_RETRY_AFTER_SECONDS, EXPORT_SLOTS_INSTANCE, EXPORT_SLOTS_PER_CALLER, type ExportSlot } from '../export/export-slots.js';
 import {
   EXPORT_OK, EXPORT_BAD_REQUEST, EXPORT_FORBIDDEN, EXPORT_NOT_ACCEPTABLE, EXPORT_CONFLICT, EXPORT_BUSY, EXPORT_UNAVAILABLE,
 } from '../export/export-statuses.js';
@@ -332,12 +333,19 @@ export function rdfExportHeadAct(input: Omit<RdfExportInput, 'whole'>):
   };
 }
 
+/** A refusal for want of a slot, said once per space and window (a client that retries every second must not fill the log). */
+export const rdfExportBusySaid = warnOnce<string>({ max: 50, every: SAY_ONCE_WINDOW_MS });
+
 /** Run the export of one page. Never throws for a caller's mistake; a fault that is not the store's is thrown to the door. */
 export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutcome> {
   const prepared = prepareExport(input);
   if ('error' in prepared) return prepared;
   const slot = takeExportSlot(input.callerKey);
   if (!slot) {
+    // One line per space and window, naming the space and the rule and holding no record (lens finding 8): without it the refusal left only
+    // the audit row, and an operator saw nothing of a caller that kept being turned away.
+    rdfExportBusySaid(input.spaceId, () => log.warn(`RDF export of space ${peerText(input.spaceId, { max: NAME_QUOTED })} refused: no export slot is free `
+      + `(the instance runs ${EXPORT_SLOTS_INSTANCE} at once and ${EXPORT_SLOTS_PER_CALLER} per caller); the caller is told to retry in ${EXPORT_RETRY_AFTER_SECONDS} s`));
     return {
       status: EXPORT_BUSY, code: RDF_EXPORT_BUSY, retryAfterSeconds: EXPORT_RETRY_AFTER_SECONDS,
       error: 'An export is already running for this token, or as many exports as the instance runs at once: try again when it ends',

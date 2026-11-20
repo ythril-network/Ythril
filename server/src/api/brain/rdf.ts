@@ -40,6 +40,7 @@ import { trailersFor } from '../../export/export-trailers.js';
 import { closeUnlessFinished, pacedWriter, type ReaderPace } from '../../export/export-reader-pace.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
 import { sendCaughtFailure } from '../send-failure.js';
+import { log, peerText, NAME_QUOTED } from '../../util/log.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { EXPORT_OK, EXPORT_VARY } from '../../export/export-statuses.js';
 import { schemaFingerprintOf } from '../../spaces/schema-stamp.js';
@@ -189,6 +190,9 @@ async function sendStream(req: Request, res: Response, stream: RdfExportStream):
         const why = how === 'slow' ? `under ${minBytesPerSecond} bytes a second over ${windowMs} ms of waiting on it` : `nothing for ${idleMs} ms`;
         // The cut falls inside a record (a slice is not a line): the ending starts a line of its own, so a line-wise reader still reads it.
         res.write(`\n${stream.abandon(`the reader took the export too slowly (${why})`)}`);
+        // One line per cut, naming the space and the rule and holding no record (lens finding 8): the audit row alone left a reader that
+        // kept being cut invisible to an operator reading the log.
+        log.warn(`RDF export of space ${peerText(req.params['spaceId'] ?? '', { max: NAME_QUOTED })} cut: the reader took it too slowly (${why}); its slot is free`);
         release();
         closeUnlessFinished(res, rdfExportEndingWaitMs());
         break;
