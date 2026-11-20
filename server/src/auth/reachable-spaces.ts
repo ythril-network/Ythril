@@ -82,6 +82,18 @@ export function holdsRung(rights: TokenRights, space: string, area: SpaceArea, n
 }
 
 /**
+ * May `rights` read `area` of `space`: an instance administrator, or a token holding `read` there? THE one question an answer asks before it
+ * tells a caller what a space holds (the exports' file triples, the stored values a check reads, the facts a type's history reads from
+ * records, the spaces a refusal may name). It was written longhand four times, two of them by bundle-269, each with the administrator's
+ * short cut in its own place; a copy that dropped it refused an administrator, one that dropped the `!rights` guard threw on a call with none.
+ *
+ * Beside {@link holdsRung}, which it is not: `holdsRung` asks the matrix alone and takes rights that exist.
+ */
+export function mayReadArea(rights: TokenRights | null | undefined, space: string, area: SpaceArea): boolean {
+  return !!rights && (rights.instanceAdmin === true || holdsRung(rights, space, area, 'read'));
+}
+
+/**
  * The sentence a refusal gives when a token reaches a space but lacks the rung an act needs there — the one spelling of it, so a
  * door built on `holdsRung` says what the REST area guard says. `space` is omitted when the refusal is about the matrix itself:
  * a token that presented none holds nothing anywhere.

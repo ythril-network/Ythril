@@ -60,7 +60,7 @@ export type SchemaVersionsActResult =
 
 /**
  * Who is asking, as the acts need it: the networks a peer-bound token shares the space in (`undefined`: a local token), the door, and the
- * caller's rights (the type forms answer the facts read from records only to `knowledge: read` or an administrator: `mayReadRecordFacts`).
+ * caller's rights (the type forms answer the facts read from records only to `knowledge: read` or an administrator: `mayReadArea`).
  */
 export interface SchemaVersionsCaller {
   readonly shared: ReadonlySet<string> | undefined;

@@ -30,8 +30,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { SpaceMeta } from '@ythril-network/schema';
 import { getConfig } from '../config/loader.js';
-import type { TokenRights } from '../config/rights-shape.js';
-import { holdsRung } from '../auth/reachable-spaces.js';
+import { mayReadArea } from '../auth/reachable-spaces.js';
 import { idKeysetPage, type IdPage, type IdPageSpec } from '../db/id-keyset-page.js';
 import { spaceCollection } from '../db/space-collection.js';
 import type { BrainCollection } from '../config/types-knowledge.js';
@@ -299,9 +298,6 @@ export const rdfExportEndingWaitMs = (): number => idleMs * ENDING_WAIT_IDLE_BOU
 /** Replace the idle bound (a test that waits for it); `null` restores it. */
 export function setRdfExportIdleMsForTest(ms: number | null): void { idleMs = ms ?? IDLE_MS_DEFAULT; }
 
-const mayRead = (rights: TokenRights | null | undefined, space: string, area: 'knowledge' | 'files'): boolean =>
-  !!rights && (rights.instanceAdmin === true || holdsRung(rights, space, area, 'read'));
-
 /** A REST query value or a tool argument as the parameters take it: numbers from their strings, everything else as it is. */
 function paramsOf(raw: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -410,7 +406,7 @@ function prepareExport(input: Omit<RdfExportInput, 'whole'>): PreparedExport | R
   if (!resolved.ok) return { status: EXPORT_BAD_REQUEST, error: resolved.error, code: RDF_BAD_BUDGET };
   return {
     exported, withoutRdf, inConflict, format, edgeDetails, cursor, budget: resolved, limit: parsed.data.limit,
-    after: parsed.data.after, files: (m) => mayRead(rights, m, 'files'), view,
+    after: parsed.data.after, files: (m) => mayReadArea(rights, m, 'files'), view,
   };
 }
 

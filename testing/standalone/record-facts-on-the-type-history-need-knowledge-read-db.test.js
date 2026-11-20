@@ -4,7 +4,7 @@
  *
  * ## The contract (written before the code)
  *
- * - `mayReadRecordFacts(rights, spaceId)` = instance administrator, or `knowledge: read` on the space (spaces/type-history.js).
+ * - `mayReadArea(rights, spaceId, 'knowledge')` = instance administrator, or `knowledge: read` on the space (auth/reachable-spaces.js).
  * - A `schema: read` caller without it gets `recordFacts: 'withheld'` on the `kind` and `kind` + `type` answers, no `older` on any row
  *   and no `declared: 'none'` row; layer rows stay, and the definitions, spans and origins are answered in full.
  * - With it (or as an administrator) the same reads carry `older` on every own row and the record-only names, and no `recordFacts`.

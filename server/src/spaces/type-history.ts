@@ -11,7 +11,8 @@
  * - {@link typeHistoryOf}: *"what is T's history in this space, for this caller?"* The stamps T's records carry (R4) that the caller may have
  *   (for a caller denied the record facts: the versions whose texts declare T, so nothing is learned of the records), plus the current version
  *   when T is declared, grouped, with spans and origins.
- * - {@link mayReadRecordFacts}: *"may this caller be told facts read from the records?"* (the older mark, the record-only names, the Open links).
+ * - Whether a caller may be told facts read from the records (the older mark, the record-only names, the Open links) is `mayReadArea` on
+ *   `knowledge` (`auth/reachable-spaces.ts`), asked by the acts that call this module.
  *
  * ## What it prevents
  *
@@ -24,8 +25,6 @@
  * - **"Edited here" claimed blind.** When an own definitions text the origin needs is no longer held, `edited` is `null`, never a guess.
  */
 import { createHash } from 'node:crypto';
-import type { TokenRights } from '../config/rights-shape.js';
-import { holdsRung } from '../auth/reachable-spaces.js';
 import { COLLECTION_SUFFIX, type KnowledgeType } from '../config/types-knowledge.js';
 import { getConfig } from '../config/loader.js';
 import { col } from '../db/mongo.js';
@@ -117,13 +116,6 @@ export async function groupDefinitions(
   // Current's class holds current even when no record of the type carries it yet.
   if (current !== null) out.unshift({ rep: current, members: inOrder(currentMembers.includes(current) ? currentMembers : [...currentMembers, current]) });
   return { classes: out, unclassified, cut };
-}
-
-/** May `rights` be told facts read from `spaceId`'s records (the older mark, record-only names, Open links)? `knowledge: read` or an administrator. */
-export function mayReadRecordFacts(rights: TokenRights | null | undefined, spaceId: string): boolean {
-  if (!rights) return false;
-  if (rights.instanceAdmin) return true;
-  return holdsRung(rights, spaceId, 'knowledge', 'read');
 }
 
 /** Where a definition's oldest version came from, as it is held now. */

@@ -17,7 +17,7 @@
  *
  * The current version must be one the caller may have (`404 unknown_fingerprint` otherwise: no type is placed against a version a peer may
  * not read). The record facts (the older mark and the record-only names) need `knowledge: read` on the space or an administrator
- * (`mayReadRecordFacts`); without it they are left out and the answer says `recordFacts: 'withheld'`, and a type's definitions are read from the version texts alone
+ * (`mayReadArea` on `knowledge`); without it they are left out and the answer says `recordFacts: 'withheld'`, and a type's definitions are read from the version texts alone
  * (the versions that declare it), never from the stamps its records carry: a name no version declared answers the same whether or not a
  * record carries it. Nothing here answers a count.
  */
@@ -36,7 +36,8 @@ import { typeOnAnyOf, recordTypeNamesIn, stampPlanOf, unnamedFingerprintsIn, typ
 import {
   busyOnTimeout, kindStandingsIn, mayHave, notSameFor, notSameStanding, passTimeLeft, scopeKeyOf, standingsOf, type PassScope,
 } from './type-standing.js';
-import { mayReadRecordFacts, typeHistoryOf, declaredTypeNamesOf } from './type-history.js';
+import { mayReadArea } from '../auth/reachable-spaces.js';
+import { typeHistoryOf, declaredTypeNamesOf } from './type-history.js';
 import type { SchemaVersionsActResult, SchemaVersionsCaller } from './schema-versions-acts.js';
 
 /** The most fingerprints one `fps` read asks about: above the Brain's page of 20, well under any request bound. */
@@ -134,7 +135,7 @@ export async function typeListAct(
   for (const type of [...effective].filter(t => !ownSet.has(t)).sort()) {
     rows.set(type, { type, declared: 'layer', networks: cut(layers.filter(l => declaredTypeNamesOf(l.meta, kind).includes(type)).map(l => l.networkId)) });
   }
-  const facts = mayReadRecordFacts(caller.rights, spaceId);
+  const facts = mayReadArea(caller.rights, spaceId, 'knowledge');
   if (facts) {
     const { older, none } = await kindFactsOf(spaceId, kind, current, own, new Set(rows.keys()), scopeOf(spaceId, caller));
     for (const type of own) rows.get(type)!.older = older.get(type) === true;
@@ -152,7 +153,7 @@ export async function typeHistoryAct(
 ): Promise<SchemaVersionsActResult> {
   const current = await currentFor(spaceId, caller);
   if (typeof current !== 'string') return current;
-  const facts = mayReadRecordFacts(caller.rights, spaceId);
+  const facts = mayReadArea(caller.rights, spaceId, 'knowledge');
   const history = await typeHistoryOf(spaceId, kind, type, scopeOf(spaceId, caller), facts ? 'records' : 'texts');
   const rows = history.definitions.map(d => ({
     rep: d.rep, current: d.current, ...(d.since !== undefined ? { since: d.since } : {}), ...(d.until !== undefined ? { until: d.until } : {}),
@@ -179,7 +180,7 @@ export async function typeStandingsAct(
   const scope = scopeOf(spaceId, caller);
   const asked = [...new Set(fps)];
   // A version only records of an unnamed type carry is `unclassified`: a fact read from the records, so told only to a caller who may read them.
-  const facts = mayReadRecordFacts(caller.rights, spaceId);
+  const facts = mayReadArea(caller.rights, spaceId, 'knowledge');
   const standings = await busyOnTimeout(spaceId, async () => {
     const placed = (await standingsOf(spaceId, collection, current, 'any', scope, asked)).fps;
     const ask = facts ? [...placed].filter(([, s]) => s !== 'notHeld' && s !== 'unclassified').map(([fp]) => fp) : [];
