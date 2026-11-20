@@ -47,6 +47,12 @@ const EXEMPT = [
     why: 'the stored form of a constructed row (text bounded, code and params added when the row has them): a copy, not a row raised' },
   { file: 'server/src/spaces/unconverted-terms.ts', fn: 'listedUnconvertedViolations',
     why: 'the tolerant reading of a stored item: an item stored before violations had codes holds text only, and is listed so (no migration)' },
+  { file: 'server/src/rdf/schema-owl-shacl.ts', fn: 'literal',
+    why: 'a schema value the RDF schema export left out (`leftOut`, `{ where, field, reason }`): a note on the export\'s summary, no violation of the space\'s schema' },
+  { file: 'server/src/rdf/schema-owl-shacl.ts', fn: 'typeAnnotations',
+    why: 'a retention window the RDF schema export left out as not fitting its declared type: the same `leftOut` note' },
+  { file: 'server/src/mcp/tools/schema-rdf.ts', fn: 'RDF_SCHEMA_OUTPUT_SCHEMA',
+    why: 'the JSON Schema of `space_schema_rdf`\'s `leftOut` notes: it names the fields `field` and `reason`, and builds no row' },
 ];
 
 /** The name of the top-level function (or const) `node` sits in; `''` at module level. */
