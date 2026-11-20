@@ -13,17 +13,13 @@
  *
  * ## The import direction, and why it is not a cycle
  *
- * `recall.ts` imports these functions, and this module imports `RecallResult` and `RecallKnowledgeType` back
- * from it. That reads like a cycle and is not one: a type-only import is **erased** by TypeScript, so nothing
- * of it survives into the emitted JavaScript. At runtime the dependency is one-way.
- *
- * It is still the wrong shape to leave for ever. The repo already has the fix as precedent — `config/rights-shape.ts`
- * exists precisely because `types.ts` could not import from `auth/` while `auth/` imported `types.ts`, and a
- * leaf module both could import broke it. The follow-up is a `recall-types.ts` leaf holding `RecallResult`, its
- * five variants and `RecallKnowledgeType`; that is a change to every importer of those types and belongs on its
- * own, not bolted onto a file move.
+ * `recall.ts` imports these functions, and this module imports `RecallResult` and `RecallKnowledgeType` from
+ * `recall-types.ts`, a leaf holding them and the five variants (as `config/rights-shape.ts` is the leaf that
+ * `types.ts` and `auth/` both import). It used to import them back from `recall.ts`: erased at run time, but an
+ * edge the import-graph ratchet counted, and the one that held 32 modules in the server's largest cycle.
+ * `recall.ts` re-exports every name, so no importer changed.
  */
-import type { RecallResult, RecallKnowledgeType } from './recall.js';
+import type { RecallResult, RecallKnowledgeType } from './recall-types.js';
 import { WRITE_GUARD_FIELDS, POSITION_FIELDS, WRITTEN_HERE, BYTES_ABSENT_SINCE } from '../sync/local-only-fields.js';
 
 /**

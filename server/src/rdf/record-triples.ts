@@ -111,7 +111,6 @@ const isBag = (v: unknown): v is Record<string, unknown> => v !== null && typeof
 const TYPE = (): IriTerm => stdIri('rdf', 'type');
 const CHRONO_INSTANT_PREDICATE: Record<TemporalKind, string> = { dateTimeStamp: 'inXSDDateTimeStamp', dateTime: 'inXSDDateTime', date: 'inXSDDate' };
 
-
 /** The accumulator of one record: its quads, what it left out, the agents it states. */
 class Form {
   readonly quads: Quad[] = [];
