@@ -144,6 +144,7 @@ export interface RdfExportSummary {
   version: string | null;
   records: number;
   counts: Record<RdfRecordKind, number>;
+  /** Whether the document is whole, as its `ythril:complete` says: true on every page answered; `nextAfter` says whether more is left. */
   complete: boolean;
   nextAfter?: string;
   skippedValues: { count: number; named: NamedSkippedValue[]; unnamed: number };
@@ -583,8 +584,8 @@ class ExportWalk {
    * not finish (`incomplete`, the reason in words): then the report says `complete false` where it can still be written validly (TriG,
    * N-Quads), the comment says why, and {@link INCOMPLETE_LINE} makes every parser refuse the file; a JSON-LD document is left unterminated.
    * `ythril:complete` says the DOCUMENT is whole: a page with more after it is whole as a page and says `complete true` with its
-   * `ythril:nextAfter` (drive, finding 12: `complete false` on such a page read as a broken file); `complete` (the summary's word) is
-   * whether anything of the scope is left.
+   * `ythril:nextAfter` (drive, finding 12: `complete false` on such a page read as a broken file). `o.complete` here only words the
+   * closing comment (nothing left, or more after this page); the summary's and the audit row's `complete` are the document's, as this.
    */
   ending(o: { complete: boolean; whole: boolean; nextAfter?: string | undefined; incomplete?: string; namedLimit?: number }): string {
     const { p } = this;
@@ -684,6 +685,7 @@ async function buildPage(p: PageInput, cap?: number, cappedBy?: { chars: boolean
     if (p.limit !== undefined && w.records >= p.limit) { stoppedAt = { space: s.member.space, kind: s.kind, last: s.id }; break; }
   }
   if (stoppedAt && await anyAfter(p, stoppedAt)) next = stoppedAt;
+  /** Nothing of the scope is left after this page (it words the closing comment; the summary's `complete` is the document's). */
   const complete = next === undefined;
   const nextAfter = next ? encodeCursor(next) : undefined;
   // The ending names as many left-out values as fit what is left of the budget; the rest are counted ("and N more").
@@ -712,7 +714,9 @@ async function buildPage(p: PageInput, cap?: number, cappedBy?: { chars: boolean
     ...(p.withoutRdf.length > 0 ? { membersWithoutRdf: [...p.withoutRdf] } : {}),
     ...(p.inConflict.length > 0 ? { membersInConflict: [...p.inConflict] } : {}),
     format: p.format, mediaType: RDF_MEDIA_TYPES[p.format], edgeDetails: p.edgeDetails, version: w.writer.version ?? null,
-    records: w.records, counts: w.counts, complete, ...(nextAfter ? { nextAfter } : {}),
+    // `complete` is the document's own `ythril:complete` (the vocabulary: whether this document is whole), never "nothing left": a page
+    // is built whole or refused, so it is true on every page; `nextAfter` says more is left (the second drive, finding B).
+    records: w.records, counts: w.counts, complete: true, ...(nextAfter ? { nextAfter } : {}),
     skippedValues: { count: left.count, named: summaryNamed, unnamed: left.count - summaryNamed.length },
     fileTriplesWithheld: w.withheld, truncated: refused !== null, budgetChars, budgetBytes, charsReturned: sentChars, bytesReturned: sentBytes,
     ...(refused ? { budgetBoundBy: budgetBoundBy(refused, p.budget) } : {}),
@@ -722,7 +726,7 @@ async function buildPage(p: PageInput, cap?: number, cappedBy?: { chars: boolean
     contentType: rdfContentType(p.format, w.writer.version),
     disposition: rdfContentDisposition(p.input.spaceId, p.format),
     skippedRecords: [...new Set(left.named.map(v => v.recordId))],
-    auditChanges: w.auditChanges(complete, nextAfter),
+    auditChanges: w.auditChanges(true, nextAfter),
     ...(p.view ? { viewMembers: summary.members } : {}),
   };
 }
