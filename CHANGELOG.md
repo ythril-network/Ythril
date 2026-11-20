@@ -119,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing:** CI runs the pure standalone files as two jobs (`test:standalone:pure -- --shard=<k>/2`); `test-results/file-times.json` reads both shard jobs' records, a run's shards as one run. No change to what ships.
 - **Testing:** `--record-ci` records every attempt of a run and reads a run's artifact listing to its end; a record cut for size keeps every failed test's name and every file name, and says what it left out. Times still count a run once.
 - **Testing:** `--record-ci` also records pull request runs of this repository's branches and Full runs, each record saying its kind (`runKind`); a fork's pull request is refused. Recorded times count only green full runs of pushes to main.
+- **Testing:** a local preflight also records the tests it ran, every failed test by name, as `Test-Run` records of kind `preflight` (only results that run wrote), kept and sent like its stage times; a recording problem never changes its verdict, and they never enter a time baseline.
 - **Testing:** every `node --test` the standalone runner starts is time-bounded: a test or hook pending past 15 minutes fails, and a batch that never exits is ended and named.
 - **Testing:** the standalone harness no longer changes `setTimeout` after a close; it worked around the search-index check fixed below.
 - **Testing:** a test that waits on the media worker and times out says what the worker logged during the wait, and whether the queue was still checking the job's space or had set it aside.
