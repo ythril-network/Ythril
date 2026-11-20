@@ -74,7 +74,8 @@ describe('the proposer sees its own passed change', () => {
     const at = gov.indexOf('apply(net: NetworkConfig, round: VoteRound): void {');
     assert.ok(at > -1, 'the application of a passed round is gone — re-anchor this gate');
     const branch = gov.slice(at, gov.indexOf('\n  },', at));
-    assert.match(branch, /commitOwnMetaEdit\(plan\.localSpace, \(\) => plan\.own!\)/);
+    // The network's own edit, not a door's: `applyDecidedOwnMetaEdit` writes the same own definitions past the import's schema gate (second review F3).
+    assert.match(branch, /applyDecidedOwnMetaEdit\(plan\.localSpace, \(\) => plan\.own!\)/);
     assert.match(branch, /storeNetworkLayer\(net\.id, plan\.localSpace, plan\.layer\)/);
   });
 });
