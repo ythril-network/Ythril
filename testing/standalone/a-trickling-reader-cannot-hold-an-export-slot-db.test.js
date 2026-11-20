@@ -32,6 +32,7 @@ import { elapse } from '../_shared/sleep.mjs';
 import { openRdfExportDoors, rdfMeta, parseRdf } from './_rdf-export-doors.mjs';
 
 const skip = await mongoSkipReason();
+const log = await import('../../server/dist/util/log.js');
 const SPACE = 'rdftrickle';
 /** About 25 MB of N-Quads: several windows for the reader just over the bound, and far more than the loopback buffers hold. */
 const TOTAL = 6_000;
@@ -201,6 +202,55 @@ describe('a trickling reader cannot hold an export slot', { skip, timeout: 600_0
     await r.headed;
     await waitFor(slotFree, verdictWithin(), 100, () => 'a reader that took nothing still holds its slot: the buffers\' fill was counted as taken');
     await assertToldTooSlow(await r.done);
+  });
+
+  // Lens finding 8. A slow or idle cut and a refusal for want of a slot left only the audit row: an operator reading the log saw nothing
+  // of a reader that kept being cut or of a caller that kept being turned away. One line each, naming the space and the rule and holding
+  // no record (an export streams records: a name, a value, an id must never reach the log).
+  /** The log lines written while `work` runs. */
+  async function linesWhile(work) {
+    const lines = [];
+    const off = log.subscribeLogLines(l => lines.push(l));
+    try { await work(); } finally { off(); }
+    return lines;
+  }
+  const NO_RECORD = /Big \d|xxxx|b00\d{4}/;
+
+  it('a reader judged too slow leaves one log line naming the space and the rule, and no record', async () => {
+    const lines = await linesWhile(async () => {
+      const r = readAt(url, tok.key, { bytesPerSecond: pace.minBytesPerSecond * 0.1 });
+      await r.headed;
+      await waitFor(slotFree, verdictWithin(), 100, () => 'the slow reader still holds its slot');
+      await assertToldTooSlow(await r.done);
+    });
+    const cut = lines.filter(l => /RDF export of space .* cut/.test(l));
+    assert.equal(cut.length, 1, `the cut of a slow reader left ${cut.length} log lines: ${JSON.stringify(lines.slice(-5))}`);
+    assert.ok(cut[0].includes(SPACE), `the line does not name the space: ${cut[0]}`);
+    assert.match(cut[0], /too slowly/);
+    assert.doesNotMatch(lines.join('\n'), NO_RECORD, 'a record reached the log');
+  });
+
+  it('a refusal for want of a slot leaves one log line, whichever door was refused, and no record', async () => {
+    act.rdfExportBusySaid?.forgetAll();
+    const hold = readAt(url, tok.key, { bytesPerSecond: 0 });
+    try {
+      await hold.headed;
+      const lines = await linesWhile(async () => {
+        const rest = await d.exportRest(tok.key, SPACE, { format: 'nquads', limit: 1 });
+        assert.equal(rest.status, 429, `REST answered ${rest.status}: the slot is not held`);
+        const mcp = await d.exportMcp(tok.key, { space: SPACE, format: 'nquads', limit: 1 });
+        assert.equal(mcp.isError, true, `MCP answered: ${mcp.text.slice(0, 200)}`);
+        assert.match(mcp.text, /rdf_export_busy|429/);
+      });
+      const busy = lines.filter(l => /RDF export of space .* refused/.test(l));
+      assert.equal(busy.length, 1, `two refused calls (one per door) left ${busy.length} log lines (said once per window): ${JSON.stringify(lines.slice(-5))}`);
+      assert.ok(busy[0].includes(SPACE), `the line does not name the space: ${busy[0]}`);
+      assert.match(busy[0], /slot/);
+      assert.doesNotMatch(lines.join('\n'), NO_RECORD, 'a record reached the log');
+    } finally {
+      hold.release();
+      await hold.done;
+    }
   });
 
   it('a reader that takes nothing at all frees its slot, and its connection is cut once the ending had its time', async () => {
