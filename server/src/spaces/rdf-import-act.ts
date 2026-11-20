@@ -437,7 +437,13 @@ async function commitPass(run: Run, minted: Map<string, MintedEnd>): Promise<voi
     if (seen + w.length <= state.committed) { seen += w.length; continue; }
     const rest = w.slice(Math.max(0, state.committed - seen));
     seen += w.length;
-    await commitWindow(run.spaceId, rest, minted, run.planMeta!, knobs.hooks?.beforeCommitPlans);
+    const { leftOut } = await commitWindow(run.spaceId, rest, minted, run.planMeta!, knobs.hooks?.beforeCommitPlans);
+    // A record the store no longer let be written is named in the report, and the windows after this one no longer find its minted id present.
+    for (const { op } of leftOut) {
+      run.builder.leftOutAtCommit(op.kind, op.correlation, op.op);
+      const id = seededIdOf(op);
+      if (id !== undefined) minted.delete(id);
+    }
     knobs.hooks?.afterCommitWindow?.(state.committed + rest.length);
     state.committed += rest.length;
     await writeState(run.folder, state);

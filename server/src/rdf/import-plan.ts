@@ -13,6 +13,11 @@
  * - **An end that exists only in the file refused.** Before a window is planned, every record the window names that the import brings and the
  *   store does not hold yet is seeded into the read set (`ReadSet.seed`, with an entity's type for the endpoint rules), so an edge or a link to
  *   it is judged as one to a record that exists (A2). A record already stored is never seeded (the seed refuses that).
+ * - **A window that cannot land because the store moved under the hold.** A stored record the dry plan judged can go before its window commits
+ *   (the database's own expiry removes a record at any time): a converge onto it is refused ({@link StoredRecordGone}), and an edge or a link to
+ *   it is refused by its planner. Once earlier windows landed the import cannot be refused whole, and a retry would meet the same refusal for
+ *   ever, so the window lands every other operation and answers the ones it left out ({@link LeftOut}); the act names each in the report
+ *   (`ReportBuilder.leftOutAtCommit`) and takes its minted id back from the later windows' seeds.
  * - **A partial commit reported as a success.** A commit outcome that is not `ok` throws: the act stays owed and runs again, and a second run
  *   converges (A1: the commit never refuses, so a failure is the store's, and a retry meets it again or lands).
  *
@@ -21,7 +26,7 @@
  */
 import type { RefKind } from '../config/types-knowledge.js';
 import type { ChronoStatus, ChronoType } from '../config/types.js';
-import { ReadSet, mergeWants, type SeedKind } from '../brain/write-plan/read-set.js';
+import { ReadSet, type SeedKind } from '../brain/write-plan/read-set.js';
 import { trustedPlan, type PlanTrust } from '../brain/write-plan/trust.js';
 import { planEntity, entityWant, type EntityInput } from '../brain/write-plan/plan-entity.js';
 import { planFact, factWant, type FactInput } from '../brain/write-plan/plan-fact.js';
@@ -57,6 +62,23 @@ export const seededIdOf = (op: RecordOp): string | undefined => (op.op === 'inse
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : '');
 
+/**
+ * The stored record a converge addresses is not stored any more (its expiry removed it, say): the planners would plan the converge as an insert
+ * under a fresh id, bringing the record back as one nothing names. It is a refusal of that one operation instead.
+ */
+export class StoredRecordGone extends RequestRefusal {
+  override name = 'StoredRecordGone';
+  constructor(readonly kind: RecordKind, readonly id: string) {
+    super(`the ${kind} '${id}' the import converges onto is no longer stored`);
+  }
+}
+
+/** Plan a converge only onto a record that is stored (read into `view`), {@link StoredRecordGone} otherwise; an insert and an edge plan as they are. */
+async function plannedOnto<T>(op: RecordOp, view: ReadSet, plan: () => Promise<T>): Promise<T> {
+  if (op.op === 'converge' && op.kind !== 'edge' && view.stored(op.kind, op.id, 'unresolved') === null) throw new StoredRecordGone(op.kind, op.id);
+  return plan();
+}
+
 /** The planner call of one operation, as a dry-plan item: the same closure the commit calls. */
 export function opItem(spaceId: string, op: RecordOp, planMeta: object): DryItem {
   const trust = trustOf(spaceId, op, planMeta);
@@ -68,7 +90,7 @@ export function opItem(spaceId: string, op: RecordOp, planMeta: object): DryItem
         name: text(f.name), type: text(f.type), tags: f.tags, properties: f.properties,
         ...(f.description !== undefined ? { description: f.description } : {}), ...addressed,
       };
-      return { kind: 'entity', input, seededId: seededIdOf(op), want: entityWant(input, trust), plan: view => planEntity(spaceId, input, view, trust) };
+      return { kind: 'entity', input, seededId: seededIdOf(op), want: entityWant(input, trust), plan: view => plannedOnto(op, view, () => planEntity(spaceId, input, view, trust)) };
     }
     case 'fact': {
       const f = op.fields;
@@ -76,7 +98,7 @@ export function opItem(spaceId: string, op: RecordOp, planMeta: object): DryItem
         fact: text(f.fact), tags: f.tags, properties: f.properties, linkEntities: op.links.entity ?? [],
         ...(f.type !== undefined ? { type: f.type } : {}), ...(f.description !== undefined ? { description: f.description } : {}), ...addressed,
       };
-      return { kind: 'fact', input, seededId: seededIdOf(op), want: factWant(input, trust), plan: view => planFact(spaceId, input, view, trust) };
+      return { kind: 'fact', input, seededId: seededIdOf(op), want: factWant(input, trust), plan: view => plannedOnto(op, view, () => planFact(spaceId, input, view, trust)) };
     }
     case 'chrono': {
       const f = op.fields;
@@ -90,7 +112,7 @@ export function opItem(spaceId: string, op: RecordOp, planMeta: object): DryItem
           ...addressed,
         },
       };
-      return { kind: 'chrono', input, seededId: seededIdOf(op), want: chronoWant(input, trust), plan: view => planChrono(spaceId, input, view, trust) };
+      return { kind: 'chrono', input, seededId: seededIdOf(op), want: chronoWant(input, trust), plan: view => plannedOnto(op, view, () => planChrono(spaceId, input, view, trust)) };
     }
     case 'edge': {
       const f = op.fields;
@@ -203,23 +225,27 @@ export class ImportCommitIncomplete extends Error {
   override readonly name = 'ImportCommitIncomplete';
 }
 
+/** An operation of a window the commit did not write, and why (the planner's refusal against the store as it is at the commit). */
+export interface LeftOut { op: RecordOp; refusal: DryRefusal }
+
 /**
- * Plan and commit one window of operations, in the store's order of kinds, against a fresh read of the store. Answers how many of the window's
- * operations inserted and how many converged; throws {@link ImportCommitIncomplete} when any did not land (nothing is reported landed then).
+ * Plan and commit one window of operations, in the store's order of kinds, against a fresh read of the store. The window is planned by the dry
+ * plan's own call (`dryPlan`), so an operation the store now refuses is answered, not thrown: every other operation lands. Answers how many of
+ * the window's operations inserted and how many converged, and the operations it left out; throws {@link ImportCommitIncomplete} when a plan
+ * that was to land did not (nothing is reported landed then).
  */
 export async function commitWindow(
   spaceId: string, ops: readonly RecordOp[], minted: MintedEnds, planMeta: object, beforeCommitPlans?: () => unknown,
-): Promise<{ inserted: number; converged: number }> {
+): Promise<{ inserted: number; converged: number; leftOut: LeftOut[] }> {
   const view = importReadSet(spaceId);
   await seedImported(view, ops, minted);
-  const items = ops.map(op => opItem(spaceId, op, planMeta));
-  await view.load(mergeWants(items.map(i => i.want)));
-  const plans: WritePlan[] = [];
-  for (const item of items) plans.push((await item.plan(view)).plan);
+  const planned = await dryPlan(ops.map(op => opItem(spaceId, op, planMeta)), view);
+  const plans = planned.plans.filter((p): p is WritePlan => p !== null);
+  const leftOut = planned.refusals.map(refusal => ({ op: ops[refusal.index]!, refusal }));
   await beforeCommitPlans?.();
   const outcomes = await commitPlans(spaceId, plans);
   const failed = outcomes.findIndex(o => !o.ok);
   // The outcome's own reason can quote a value of the record: it is never put in the sentence, which reaches the act's entry and the log.
   if (failed >= 0) throw new ImportCommitIncomplete(`a ${plans[failed]!.kind} of the import did not land; the import runs again and converges`);
-  return { inserted: plans.filter(p => p.op === 'insert').length, converged: plans.filter(p => p.op === 'converge').length };
+  return { inserted: plans.filter(p => p.op === 'insert').length, converged: plans.filter(p => p.op === 'converge').length, leftOut };
 }
