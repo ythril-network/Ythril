@@ -256,8 +256,8 @@ export function bulkBatchRefusal(input: Record<string, unknown>): string | null 
 export const BULK_STORAGE_STATUS = 507;
 
 /**
- * Why this batch is refused before anything is written because the brain's hard storage limit is reached, or `null`: the body REST answers `507`
- * with (the fact doors' own: the sentence and `storageExceeded`) and the sentence the tool answers as an error. The one question both doors
+ * Why this batch is refused before anything is written because the brain's hard storage limit is reached, or `null`: the body REST answers
+ * {@link BULK_STORAGE_STATUS} with (the fact doors' own: the sentence and `storageExceeded`) and the sentence the tool answers as an error. The one question both doors
  * ask, so neither can drop it.
  */
 export async function bulkStorageRefusal(): Promise<{ error: string; storageExceeded: true } | null> {
