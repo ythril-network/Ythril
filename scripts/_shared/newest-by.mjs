@@ -17,3 +17,18 @@
  * @returns {(a: Record<string, any>, b: Record<string, any>) => number}
  */
 export const newestBy = (field) => (a, b) => (a[field] < b[field] ? 1 : a[field] > b[field] ? -1 : 0);
+
+/**
+ * {@link newestBy} with a tie broken by the higher attempt first: the order that picks ONE record of a run that has several.
+ *
+ * ## What it prevents
+ *
+ * The attempts of a run recorded in one pass carry the run's start, so they tie on `field`, and a collapse "one record per
+ * run, the newest" that returned 0 for a tie kept whichever the server listed first: the OLDER attempt, half the time. Every
+ * reader that counts a run once for its times asks this one question here.
+ *
+ * @param {string} field
+ * @param {(row: Record<string, any>) => number} attemptOf the row's attempt number (a record keeps it under `properties`)
+ * @returns {(a: Record<string, any>, b: Record<string, any>) => number}
+ */
+export const newestThenHigherAttempt = (field, attemptOf) => (a, b) => newestBy(field)(a, b) || (Number(attemptOf(b)) || 0) - (Number(attemptOf(a)) || 0);

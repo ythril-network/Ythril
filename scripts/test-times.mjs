@@ -60,6 +60,12 @@
  *   never be read (not a zip, past the size cap) is the stop and is said without failing the pass; a download that
  *   failed is tried again. A recorded run whose artifacts have all expired is recorded, and gets no `none` row. An
  *   older run past the horizon that was never recorded is reported once and written as nothing.
+ * - **Every attempt is recorded** (Q-948). "Recorded completely" is per (attempt, job): a run re-run after it was recorded gains
+ *   records of its new attempt on the next pass that reaches it (the bare pass stops at the first recorded run, so a re-run of a run
+ *   BEHIND one is reached by naming it, `--record-ci <runId>`). The records of a run's attempts all carry the run's start, so
+ *   every reader of TIMES counts a run once, by its higher attempt (`newestThenHigherAttempt`); the failure-rate reader keeps
+ *   the attempts apart. A run's artifact listing is read to its end (`listedArtifacts`). A record the size ceiling cut says so
+ *   (`truncated`, `dropped`) and a cut that left something out is said on the pass's output.
  * - **A named run** (`--record-ci <runId>`, Q-402) is the run a caller has just seen finish. The walk is the same; what the
  *   name adds is a failure: a run that is not among the trusted completed runs the listing held ends the pass with exit 1
  *   BEFORE anything is written, saying whether the listing never held it (a page older than the run: wait and ask again) or
@@ -96,7 +102,7 @@ import {
   TEST_RUN_SPEC, TEST_RUN_SCHEMA, TEST_RUN_RETENTION_DAYS, PREFLIGHT_RUN_SPEC, TELEMETRY_SPECS, telemetryTypeDeclaration, checkTelemetryProperties, upsertTelemetryRecord,
 } from './_shared/telemetry-record.mjs';
 import { withRecordLock, recordLockPath, lockWaitMs, LOCK_WAIT_ENV, LOCK_WAIT_MS } from './_shared/record-lock.mjs';
-import { newestBy } from './_shared/newest-by.mjs';
+import { newestBy, newestThenHigherAttempt } from './_shared/newest-by.mjs';
 import { workflowCommand } from './_shared/workflow-command.mjs';
 import { recordDestination, refuseRecordingUnderCi } from './_shared/record-destination.mjs';
 import { CI_WORKFLOW } from '../testing/_shared/ci-workflow-path.mjs';
@@ -113,7 +119,7 @@ import { maskText } from './_shared/mask-text.mjs';
 import { waitForReading, WaitTimeout } from '../testing/_shared/wait-for.mjs';
 import { isExpectedInCiSkip } from '../testing/_shared/expected-in-ci.mjs';
 import { CLIENT_RESULTS, parseClientReport, readClientReport } from './_shared/client-results.mjs';
-import { isCount, storedPath, measurementsText } from './_shared/measurements.mjs';
+import { isCount, storedPath, measurementsText, measurementsCutNote } from './_shared/measurements.mjs';
 import { testRunMeasurements } from './_shared/test-run-reads.mjs';
 import { renderRunSummary, seconds } from './_shared/run-summary.mjs';
 
@@ -438,6 +444,9 @@ const wallOf = (summary) => wallBetween(summary.startedAt, summary.endedAt);
 function buildPayload({ source, runId, attempt, job, suite, summary, commit, branch, layout, dirty, startsAt, endsAt, wallMs }) {
   const start = startsAt ?? summary.startedAt;
   const end = endsAt ?? summary.endedAt ?? start;
+  // A record the ceiling made leave failures or files out says so on the output of EVERY pass that builds one (here, so no caller can drop it).
+  const cutNote = measurementsCutNote(summary.measurements);
+  if (cutNote) console.log(`test-times: ${recordKey({ source, runId, attempt, job, suite })}: ${cutNote}`);
   const properties = assertConforms({
     recordKey: recordKey({ source, runId, attempt, job, suite }),
     formatVersion: FORMAT_VERSION, source, commit, branch, runId: String(runId), attempt: Number(attempt), job, suite,
@@ -453,6 +462,8 @@ function buildPayload({ source, runId, attempt, job, suite, summary, commit, bra
 
 // The one newest-first order of this script's rows (a run summary's `startsAt`) is `_shared/newest-by.mjs`'s, shared with the recorder.
 const newestStartFirst = newestBy('startsAt');
+/** Of the records of one run (its attempts, which start together): the one the run counts by for TIMES, the higher attempt. */
+const newestRecordFirst = newestThenHigherAttempt('startsAt', (r) => r.properties?.attempt);
 
 /**
  * Write one record: find by key, collapse duplicates to the newest, update it by id; insert when there is none: the shared upsert
@@ -782,11 +793,44 @@ const isSha = (s) => typeof s === 'string' && /^[0-9a-f]{40}$/.test(s);
  */
 function latestResultArtifacts(artifacts, run) {
   const latest = new Map();
-  for (const { job, attempt, artifact: a } of resultArtifacts(artifacts, run)) {
-    if (a.expired || !Number.isSafeInteger(a.id)) continue;
-    if (!latest.has(job) || latest.get(job).attempt < attempt) latest.set(job, { attempt, id: a.id, size: a.size_in_bytes });
+  for (const { job, attempt, id, size } of readableResultArtifacts(artifacts, run)) {
+    if (!latest.has(job) || latest.get(job).attempt < attempt) latest.set(job, { attempt, id, size });
   }
   return latest;
+}
+
+/**
+ * Every results artifact of a run that can be downloaded (named as {@link resultArtifacts} reads it, not expired, with an id
+ * that is a safe integer), one per (attempt, job), the earlier attempts first. What the recorder walks: every attempt of a run
+ * is recorded, because a test that failed in attempt 1 and passed in attempt 2 of one commit is what a failure rate is for.
+ * {@link latestResultArtifacts} is the same list cut to each job's newest attempt, for the readers of TIMES, where a run counts once.
+ *
+ * @returns {Array<{ job: string, attempt: number, id: number, size: number }>}
+ */
+function readableResultArtifacts(artifacts, run) {
+  return resultArtifacts(artifacts, run)
+    .filter(({ artifact: a }) => !a.expired && Number.isSafeInteger(a.id))
+    .map(({ job, attempt, artifact: a }) => ({ job, attempt, id: a.id, size: a.size_in_bytes }))
+    .sort((x, y) => x.attempt - y.attempt);
+}
+
+/** The most pages of a run's artifact listing that are read: a bound on a walk whose server may ignore what it is asked. */
+const ARTIFACT_PAGES = 10;
+
+/**
+ * Every artifact a run lists, read to its end: GitHub pages the listing (100 to a page), and results past the first page were
+ * not read when only the first page was. It stops at a page that is short, at the `total_count` the first page names, at a page
+ * that holds nothing, or at {@link ARTIFACT_PAGES}. The one reading of the listing, for the recorder and the summary's baseline.
+ */
+async function listedArtifacts(gh, runId) {
+  const out = [];
+  for (let page = 1; page <= ARTIFACT_PAGES; page++) {
+    const answer = await gh.json(`/repos/${REPO}/actions/runs/${runId}/artifacts?per_page=100&page=${page}`);
+    const held = answer?.artifacts ?? [];
+    out.push(...held);
+    if (held.length < 100 || (Number.isFinite(answer?.total_count) && out.length >= answer.total_count)) break;
+  }
+  return out;
 }
 
 /** Every artifact of a run that is named as a job's results (`test-results-<job>-<attempt>`, the attempt not later than the run's), expired or not: the ONE reading of that name. */
@@ -835,16 +879,18 @@ async function ciPayloads(gh, run, have = new Set()) {
     throw new Error(`run ${String(run.id)}: the run object lacks an id, a start, a commit or an attempt`);
   }
   const base = `/repos/${REPO}/actions/runs/${runId}`;
-  const artifacts = (await gh.json(`${base}/artifacts?per_page=100`)).artifacts ?? [];
+  const artifacts = await listedArtifacts(gh, runId);
   const common = { source: 'ci', runId, commit: run.head_sha, branch: run.head_branch, layout: layoutOfRun(artifacts, run), dirty: false, startsAt, endsAt };
 
-  const latest = latestResultArtifacts(artifacts, run);
+  // Every attempt's artifacts, the earlier attempts first: each (attempt, job) is one record, and one that is recorded is not downloaded.
+  const listed = readableResultArtifacts(artifacts, run);
 
   const payloads = [];
   const problems = [];
   const notes = [];
   const recordedJobs = recordedJobsOf(have);
-  for (const [job, found] of latest) {
+  for (const found of listed) {
+    const { job } = found;
     if (recordedJobs.has(JSON.stringify([String(found.attempt), job]))) continue;
     if (Number.isFinite(found.size) && found.size > GITHUB_ZIP_CAP) { problems.push({ text: `${job}: the artifact is larger than ${GITHUB_ZIP_CAP} bytes`, persistent: true }); continue; }
     let bytes;
@@ -881,7 +927,7 @@ async function ciPayloads(gh, run, have = new Set()) {
   // A run that left nothing measurable is recorded once as that, so it is not fetched again — unless the instance already
   // holds records of it: a run whose artifacts have since expired is recorded, and a row of "nothing" beside its real ones
   // would say it was never read.
-  if (!latest.size && have.size === 0) {
+  if (!listed.length && have.size === 0) {
     const summary = { outcome: outcomeOfConclusion(run.conclusion), scope: 'subset', ms: 0, fileCount: 0, tests: 0, passed: 0, failed: 0, cancelled: 0, skipped: 0, todo: 0, measurements: 'none' };
     const wall = wallBetween(startsAt, endsAt) ?? 0;
     payloads.push(buildPayload({ ...common, attempt: run.run_attempt, job: 'workflow', suite: 'ci', summary: { ...summary, ms: wall }, wallMs: wall }));
@@ -1144,8 +1190,24 @@ async function trendRows(api, { dir, limit, suite, except = [] }) {
   if (!Array.isArray(rows)) throw new YthrilApiError('filter: the answer carried no results', { tool: 'filter' });
   // The server's order and page size are asked for and checked again, like its predicate.
   const order = dir === 'asc' ? (a, b) => newestStartFirst(b, a) : newestStartFirst;
-  return rows.filter(isTrendRow).filter(r => (suite === undefined || r.properties.suite === suite) && !except.includes(r.properties.suite))
+  return onePerRun(rows.filter(isTrendRow).filter(r => (suite === undefined || r.properties.suite === suite) && !except.includes(r.properties.suite)))
     .sort(order).slice(0, limit);
+}
+
+/**
+ * One record of each (source, run, job, suite): the attempts of a run are records of their own, and a trend that drew both, or a
+ * baseline that held the run's other attempt as another run, would count one run twice. The newest start, then the higher attempt,
+ * is the one a run counts by.
+ */
+function onePerRun(rows) {
+  const byRun = new Map();
+  for (const r of rows) {
+    const p = r.properties;
+    const key = JSON.stringify([p.source, p.runId, p.job, p.suite]);
+    const held = byRun.get(key);
+    if (!held || newestRecordFirst(r, held) < 0) byRun.set(key, r);
+  }
+  return [...byRun.values()];
 }
 
 /** The most suites one `--trend` will discover: a bound on a walk whose server may ignore what it is asked. */
@@ -1306,7 +1368,7 @@ async function newestRunRows(api, where, qualifies) {
       if (r.type !== CHRONO_TYPE || typeof r.startsAt !== 'string' || !qualifies(r)) continue;
       const run = String(r.properties.runId ?? r.startsAt);
       const held = byRun.get(run);
-      if (!held || newestStartFirst(r, held) < 0) byRun.set(run, r);
+      if (!held || newestRecordFirst(r, held) < 0) byRun.set(run, r);
     }
     const total = answer.data.total;
     if (!fresh.length || rows.length < RUN_ROWS_PAGE || (Number.isFinite(total) && (page + 1) * RUN_ROWS_PAGE >= total)) break;
@@ -1378,8 +1440,8 @@ async function allSuiteRuns(api, jobs) {
   for (const job of jobs) {
     const ofJob = await newestRunRows(api, asProperties({ ...TRUSTED_RUN_KIND, job }), r => isTrustedRun({ ...r.properties }, [job]));
     for (const r of ofJob) {
-      const { source, branch, scope, runId } = r.properties;
-      runs.push({ job, source, branch, scope, runId, startsAt: r.startsAt, files: await filesOf(api, r) });
+      const { source, branch, scope, runId, attempt } = r.properties;
+      runs.push({ job, source, branch, scope, runId, attempt, startsAt: r.startsAt, files: await filesOf(api, r) });
     }
   }
   return runs;
@@ -1525,7 +1587,7 @@ async function summaryBaseline(figures) {
     for (const run of runs) {
       if (Date.now() > deadline) { warnings.push(annotate('baseline', `the time budget (${seconds(SUMMARY_BASELINE_BUDGET_MS)}) ended before run ${run.id}; the remaining runs were not read`)); break; }
       try {
-        const artifacts = (await gh.json(`/repos/${REPO}/actions/runs/${runIdOf(run)}/artifacts?per_page=100`)).artifacts ?? [];
+        const artifacts = await listedArtifacts(gh, runIdOf(run));
         const results = [];
         let clientText = null;
         for (const [job, found] of latestResultArtifacts(artifacts, run)) {

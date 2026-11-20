@@ -23,7 +23,7 @@
  * It reads no record and writes no file (`scripts/test-times.mjs` asks the instance, `stage-costs.mjs` writes the snapshot), and the list
  * of jobs is the caller's (derived from the workflow's uploads, never written here, so a job added tomorrow is required the day it exists).
  */
-import { newestBy } from './newest-by.mjs';
+import { newestThenHigherAttempt } from './newest-by.mjs';
 import { medianOf } from './preflight-run-record.mjs';
 import { isCount } from './measurements.mjs';
 
@@ -37,13 +37,15 @@ export const TRUSTED_RUN_KIND = Object.freeze({ source: 'ci', branch: 'main', sc
 export const isTrustedRun = (run, jobs) => run !== null && typeof run === 'object'
   && Object.entries(TRUSTED_RUN_KIND).every(([key, value]) => run[key] === value) && jobs.includes(run.job);
 
-const newestFirst = newestBy('startsAt');
+/** Newest start first; the attempts of one run start together, so the higher attempt first: the one a run is counted by. */
+const newestFirst = newestThenHigherAttempt('startsAt', (r) => r.attempt);
 
 /**
  * Per test file, the median of its time over the newest {@link FILE_TIMES_RUNS} trusted runs that hold it, across `jobs`.
  *
- * @param {Array<{ job: string, source: string, branch: string, scope: string, runId: string, startsAt: string, files: Record<string, number> | null }>} runs
- *   one row per recorded job of a run: its identity, when it started and its per-file times (null when its measurements could not be read)
+ * @param {Array<{ job: string, source: string, branch: string, scope: string, runId: string, attempt?: number, startsAt: string, files: Record<string, number> | null }>} runs
+ *   one row per recorded job of a run: its identity, when it started and its per-file times (null when its measurements could not be read);
+ *   the attempts of one run are rows of one `runId`, and the newest start (then the higher `attempt`) is the one the run counts by
  * @param {{ jobs: string[] }} options every job the snapshot must cover
  * @returns {{ newestSourceAt: string, runs: number, files: Record<string, number> }} `runs` is the number of distinct runs the times rest on
  * @throws {Error} with no job asked for, no usable file at all, or a job in `jobs` that holds no file
