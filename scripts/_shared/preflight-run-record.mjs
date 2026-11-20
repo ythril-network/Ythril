@@ -20,6 +20,13 @@
  *   from output; {@link buildPreflightRunPayload} refuses a stage without a name, an unknown kind or outcome, and a mode that is
  *   neither `full` nor `static`, and checks the properties against `PREFLIGHT_RUN_SPEC` before anything is written.
  *
+ * ## The tests of the run (Q-948)
+ *
+ * The same spool and drain carry the run's `Test-Run` records (kind `preflight`, built by `test-times.mjs` `preflightTestRunPayloads` from the
+ * results the run's own stages wrote, never another run's): {@link recordPreflightRun} takes them as `testRuns`, spools them beside the stage
+ * times and says on its one line how many were recorded. A failed test is recorded by file, name and message start, so a failure rate read from
+ * the records sees the failures a developer meets in a local preflight.
+ *
  * ## The report
  *
  * {@link preflightTrendLines} prints, for the records it is given (the newest N, from `test-times.mjs --preflight-trend`), each
@@ -111,31 +118,52 @@ const shown = (cwd, p) => { const r = relative(cwd, p).split(sep).join('/'); ret
  * Keep `payload` on disk and send it, within a bound, and say what happened in ONE line. Never throws and never waits longer than
  * `timeoutMs`; the payload is spooled before anything else, so every failure leaves it kept.
  *
+ * The run's `Test-Run` records (`testRuns`: its node suite and the client, kind `preflight`, built by `test-times.mjs`
+ * `preflightTestRunPayloads`) are spooled beside it and go through the same drain: the recording of the tests is the recording of the
+ * stage times, with the same bound and the same keeping. A `Test-Run` that cannot be spooled is counted on the line and costs the
+ * `Preflight-Run` nothing, nor the other way round; none of them is read for the verdict.
+ *
  * @param {object} payload from {@link buildPreflightRunPayload}
- * @param {{ cwd?: string, env?: NodeJS.ProcessEnv, timeoutMs?: number, script?: string }} [options] `script` is the recorder, for a test
+ * @param {{ cwd?: string, env?: NodeJS.ProcessEnv, timeoutMs?: number, script?: string, testRuns?: object[] }} [options] `script` is the recorder, for a test
  * @returns {string}
  */
-export function recordPreflightRun(payload, { cwd = process.cwd(), env = process.env, timeoutMs = RECORD_TIMEOUT_MS, script = TEST_TIMES } = {}) {
+export function recordPreflightRun(payload, { cwd = process.cwd(), env = process.env, timeoutMs = RECORD_TIMEOUT_MS, script = TEST_TIMES, testRuns = [] } = {}) {
+  let folder;
   let file;
   try {
-    file = spoolPayload(join(timingResultsDir(cwd, env), 'unrecorded'), payload);
+    folder = join(timingResultsDir(cwd, env), 'unrecorded');
+    file = spoolPayload(folder, payload);
   } catch (err) {
-    return `preflight: stage times not recorded: ${firstLine(err)}`;
+    return `preflight: stage times not recorded: ${firstLine(err)}${testRunNote(testRuns, [])}`;
   }
+  const spooled = [];
+  for (const run of testRuns) { try { spooled.push(spoolPayload(folder, run)); } catch { /* counted on the line: it is not in the spool */ } }
   try {
     const r = spawnSync(process.execPath, [script, '--drain-unrecorded'], {
       cwd, env: { ...env, [LOCK_WAIT_ENV]: env[LOCK_WAIT_ENV] ?? RECORD_LOCK_WAIT_MS },
       encoding: 'utf8', timeout: timeoutMs, killSignal: 'SIGKILL', windowsHide: true,
     });
-    if (!existsSync(file)) return `preflight: stage times recorded (${payload.properties.recordKey})`;
+    const note = testRunNote(testRuns, spooled);
+    if (!existsSync(file)) return `preflight: stage times recorded (${payload.properties.recordKey})${note}`;
     const said = `${r.stdout ?? ''}\n${r.stderr ?? ''}`.split(/\r?\n/).map(l => l.trim()).find(l => l.startsWith('test-times:'));
     const why = r.error?.code === 'ETIMEDOUT' ? `the recorder did not finish within ${Math.round(timeoutMs / 1000)} s`
       : r.error ? firstLine(r.error)
         : (said ?? 'the recorder left it').replace(/^test-times: (not recorded: )?/, '').replace(/; kept .*$/, '');
-    return `preflight: stage times not recorded: ${why}; kept ${shown(cwd, file)}`;
+    return `preflight: stage times not recorded: ${why}; kept ${shown(cwd, file)}${note}`;
   } catch (err) {
-    return `preflight: stage times not recorded: ${firstLine(err)}; kept ${shown(cwd, file)}`;
+    return `preflight: stage times not recorded: ${firstLine(err)}; kept ${shown(cwd, file)}${testRunNote(testRuns, spooled)}`;
   }
+}
+
+/**
+ * What became of the test-run records, as the tail of the one line: how many were recorded (their spool file is gone after the drain) and
+ * how many are not (still spooled, or never spooled). Empty when the run had none, so a run without test results says nothing about them.
+ */
+function testRunNote(testRuns, spooled) {
+  if (!testRuns.length) return '';
+  const sent = spooled.filter(f => !existsSync(f)).length;
+  const notSent = testRuns.length - sent;
+  return `; ${[sent ? `${sent} test-run record(s) recorded` : '', notSent ? `${notSent} test-run record(s) not recorded` : ''].filter(Boolean).join(', ')}`;
 }
 
 // ---- the report ----------------------------------------------------------------------------------------------------

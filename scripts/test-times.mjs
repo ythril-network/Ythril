@@ -92,7 +92,9 @@
  *   `*.jsonl`, `--record-ci` reads it from the client job's own artifact (`test-results-client-tests-<attempt>`, the entry
  *   named `client.json` and no other), both through `scripts/_shared/client-results.mjs`. Each suite is its own problem: a
  *   client report that is stale, unreadable or missing from its artifact is one line naming it and never costs the node
- *   records. The recorder is run by hand (`--record` after a local run, `--record-ci` for CI); nothing runs it for you.
+ *   records. The recorder is run by hand (`--record` after a local run, `--record-ci` for CI); nothing runs it for you, except that
+ *   a local preflight spools its own tests (`preflightTestRunPayloads`: kind `preflight`, only what that run wrote) beside its
+ *   `Preflight-Run`, and the drain below sends both.
  * - **A trusted run with no usable artifact** (none uploaded, or expired) is recorded once with
  *   `measurements: 'none'`, job `workflow`, suite `ci`, scope `subset` (so no baseline is drawn from it), its
  *   `ms` the run's wall time, so the walk never fetches it again.
@@ -657,6 +659,59 @@ function localPayloads() {
   if (hasClient) {
     try { payloads.push(localClientPayload({ root, commit, branch, dirty })); } catch (err) { problems.push(`client (${CLIENT_RESULTS}): ${firstLine(err)}`); }
   }
+  return { payloads, problems };
+}
+
+/**
+ * How far before a preflight's start a results file's modification time may lie and still be the preflight's own: a file system that
+ * stamps a file with a coarse clock can date a file written in the run's first moments a little before it. The preflight has cleared
+ * the earlier run's files before its first stage, so this only has to be smaller than the time between two preflights.
+ */
+const PREFLIGHT_CLOCK_SLACK_MS = 2000;
+
+/**
+ * The `Test-Run` payloads of ONE local preflight run (Q-948), kind `preflight`: its node suite (`suite: preflight`, the `preflight-*.jsonl`
+ * its test stages wrote) and the client's report, each only when this run wrote it. Never reads another suite's results (a `standalone-*`
+ * file an earlier manual run left is not this run's), and a file whose modification time is before the run began is not this run's
+ * whatever its name (the preflight clears its own files and the client report before its first stage; this holds the same when that
+ * clear did not happen). A suite that cannot be made into a payload is one problem line and costs no other suite its record.
+ *
+ * The scope is the one the run said: a node suite's own sentinel (`static` under `--static`, `subset` for the pure files of a full run),
+ * the client's whole suite `full`: so a reader never takes a static preflight for a full run, and `isTimeBaselineRun` refuses the kind
+ * whatever the scope. A run whose commit git could not name is recorded with uncommitted changes (`dirty`): no commit to pair it by.
+ *
+ * @param {{ resultsDir: string, startedAt: string, root: string, commit: string, branch: string, dirty: boolean }} run `startedAt` is the
+ *   preflight's own start (ISO), its identity in the run id and the line before which no results file is its own
+ * @returns {{ payloads: object[], problems: string[] }}
+ * @throws when `startedAt` is not an ISO time (a caller's mistake; the preflight's own call wraps every call in its try)
+ */
+export function preflightTestRunPayloads({ resultsDir, startedAt, root, commit, branch, dirty }) {
+  const since = Date.parse(startedAt) - PREFLIGHT_CLOCK_SLACK_MS;
+  if (!Number.isFinite(since)) throw new Error('preflightTestRunPayloads: startedAt must be an ISO time');
+  const ownDirty = dirty || commit === 'unknown';
+  const runId = `preflight-${startedAt.replace(/[-:.]/g, '')}-${commit.slice(0, 7)}`;
+  const written = (path) => statSync(path).mtimeMs >= since;
+  const payloads = [];
+  const problems = [];
+
+  try {
+    const mine = timingResultFiles(resultsDir).filter(f => f.name.startsWith('preflight-') && written(f.path) && suiteOf(f.text, f.name) === 'preflight');
+    if (mine.length) {
+      const summary = summariseSuite({ texts: mine.map(f => f.text), root });
+      const mtimes = mine.map(f => statSync(f.path).mtime.toISOString()).sort();
+      const start = summary.startedAt ?? mtimes[0];
+      const end = summary.endedAt ?? mtimes.at(-1);
+      payloads.push(buildPayload({ source: 'local', runKind: 'preflight', runId, attempt: 1, job: 'local', suite: 'preflight', summary, commit, branch, layout: 'local', dirty: ownDirty, startsAt: start, endsAt: end, wallMs: wallBetween(start, end) }));
+    }
+  } catch (err) { problems.push(`preflight: ${firstLine(err)}`); }
+
+  try {
+    if (existsSync(join(resultsDir, CLIENT_RESULTS)) && written(join(resultsDir, CLIENT_RESULTS))) {
+      // The preflight's client stage runs the whole client suite (no filter reaches it): the scope CI's client job has.
+      const summary = summariseClient({ report: readClientReport(resultsDir, { strictTimes: true }), root, trackedSpecs: null });
+      payloads.push(buildPayload({ source: 'local', runKind: 'preflight', runId, attempt: 1, job: 'local', suite: 'client', summary, commit, branch, layout: 'local', dirty: ownDirty, wallMs: wallOf(summary) }));
+    }
+  } catch (err) { problems.push(`client (${CLIENT_RESULTS}): ${firstLine(err)}`); }
   return { payloads, problems };
 }
 
@@ -1769,8 +1824,8 @@ export const HELP = `usage: node scripts/test-times.mjs <command>
                            variables below); the named run is walked wherever it sits, past the stop and past the
                            ${BACKFILL_RUNS} runs too. Only a green push-main record that ran in full is a time baseline.
                            Run by hand.
-  --drain-unrecorded       send what test-results/unrecorded/ holds (a Preflight-Run that scripts/preflight.mjs kept, a Test-Run
-                           an earlier --record kept), then refresh ${STAGE_COSTS_FILE} (also when nothing was kept) and, when missing
+  --drain-unrecorded       send what test-results/unrecorded/ holds (a Preflight-Run and the Test-Run records (runKind preflight) of
+                           its tests that scripts/preflight.mjs kept, a Test-Run an earlier --record kept), then refresh ${STAGE_COSTS_FILE} (also when nothing was kept) and, when missing
                            or over a day old, ${FILE_TIMES_FILE} and ${FILE_TIMES_ALL_FILE}; exits 0 whenever
                            it could not, the files stay. Run by scripts/preflight.mjs after its verdict, at a time bound
   --preflight-costs [--runner container|host]

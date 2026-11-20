@@ -35,6 +35,8 @@
  * failure on 2026-11-16 was one of those gates. The runner times each stage, and after the verdict the run records one `Preflight-Run`
  * (each stage's name, kind, time and outcome, and the runner that measured it; Q-864): spooled to test-results/unrecorded, sent through
  * `scripts/test-times.mjs` within a bound, and a recording that fails is one line and changes neither the verdict nor the exit status.
+ * The tests the run ran are recorded the same way (Q-948): one `Test-Run` of kind `preflight` per suite whose results this run's own stages wrote
+ * (the node suite `preflight`, the client), spooled beside the stage times and sent by the same drain.
  * `node scripts/test-times.mjs --preflight-trend` prints the stage times of the last runs. No caller asks for the old run-everything
  * behaviour (package.json, the in-container runner and `~/.claude/hooks/preflight-mark.js` all run it bare), so there is no flag for it.
  *
@@ -100,16 +102,32 @@ const failures = [];
 const STARTED_AT = new Date().toISOString();
 
 /**
+ * The builder of this run's `Test-Run` records, from the recorder script. Loaded here, once, in a try: a script that cannot be loaded
+ * (it is the recorder's, not the preflight's) costs the run the test records and a line at its end, never its verdict or its exit status.
+ */
+const testRunBuilder = await import('./test-times.mjs').then(m => m.preflightTestRunPayloads, (err) => () => { throw err; });
+
+/**
  * The record of this run (Q-864), made after the verdict is printed: the runner's own stage times, written to the spool and sent
  * within a bound. It never throws and its one line is all the run says about it: a recording that fails changes neither the verdict
  * nor the exit status, which are decided before this is called (`_shared/preflight-run-record.mjs`).
  */
 function recordRun() {
   try {
-    return recordPreflightRun(buildPreflightRunPayload({
-      stages: stages.timings(), mode: STATIC ? 'static' : 'full', startedAt: STARTED_AT, endedAt: new Date().toISOString(),
-      ...preflightRunIdentity(process.cwd()),
-    }));
+    const identity = preflightRunIdentity(process.cwd());
+    // The tests this run ran (Q-948): only what its own stages wrote into the results folder, spooled beside the stage times. A builder that
+    // cannot be loaded or that throws is a line here and nothing else: the stage times are recorded without them.
+    let testRuns = [];
+    const said = [];
+    try {
+      const built = testRunBuilder({ resultsDir: RESULTS_DIR, startedAt: STARTED_AT, root: process.cwd(), ...identity });
+      testRuns = built.payloads;
+      said.push(...built.problems.map(p => `preflight: test results not recorded: ${p}`));
+    } catch (err) { said.push(`preflight: test results not recorded: ${String(err?.message ?? err).split('\n')[0]}`); }
+    said.push(recordPreflightRun(buildPreflightRunPayload({
+      stages: stages.timings(), mode: STATIC ? 'static' : 'full', startedAt: STARTED_AT, endedAt: new Date().toISOString(), ...identity,
+    }), { testRuns }));
+    return said.join('\n');
   } catch (err) { return `preflight: stage times not recorded: ${String(err?.message ?? err).split('\n')[0]}`; }
 }
 
