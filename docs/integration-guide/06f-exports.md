@@ -157,6 +157,7 @@ Both doors need `knowledge: write`, for a dry run and the status too: they answe
 | 409 | `rdf_import_refused` | The import was refused; nothing was written |
 | 409 | `rdf_not_enabled` | The space has RDF off |
 | 409 | `rdf_import_busy` | Another RDF import is being read in |
+| 409 | `rdf_import_space_changed` | The space's RDF base or vocabulary changed while the file was being read (the file is sorted by them); nothing was imported, send it again |
 | 404 | `rdf_import_not_found` | The status door: no import of this space has that id, or its report is past seven days |
 | 409 | `rdf_base_conflict`, `rdf_base_shared`, `rdf_term_clash`, `rdf_unwritable` | The space's RDF names are not settled (a contested or shared base, a term clash, an address no document can carry), as for the exports |
 | 400 | `rdf_relative_iri`, `rdf_remote_context`, `rdf_gzip_invalid`, `rdf_unsupported`, `rdf_source_failed` | The reader's other refusals: a relative address with no base, a remote JSON-LD context, a gzip body that does not inflate, a construct the reader does not take, a source that failed while being read |
