@@ -26,8 +26,8 @@
  * - Every space the test makes is removed in `after`, also when a case fails.
  * - One source space is shared by every case, so the file stays under the project's per-file budget of 60 s.
  *
- * Three cases are red on purpose, each marked FINDING beside it: they state what the guide and the ticket promise and the import does not do
- * (fact link rows, the data-graph default of `sourceBase`, a re-import that leaves versions alone). They are not weakened.
+ * Three groups of cases were red as product findings (fact link rows, the data-graph default of `sourceBase`, a re-import that leaves versions
+ * alone); their causes are fixed (bundle-270, fix round 4, R1 to R3) and the cases stand as they were written.
  *
  * What it needs up: the integration stack (`npm run test:up`), with instance A built from this checkout.
  *
@@ -354,9 +354,8 @@ describe('an RDF export imports back into an empty strict space', () => {
     assertHoldsWhatSourceHeld(sourceSnapshot, await snapshot(target));
   });
 
-  // FINDING: the export states all six link rows, and the import brings back only the three that start at a chrono entry; the three that
-  // start at a fact (fact to entity) are lost, in every format, with the import completed and no reason named. Hypothesis, unproven: the
-  // commit writes a stage's link rows straight after the stage, and the facts' stage comes before the entities' stage in the store's order.
+  // The export states all six link rows and the import brings each back, in every format (it once lost the three that start at a fact: the
+  // import wrote facts before the entities they link, and a link row to an entity not yet stored is taken back).
   it('the export states every link row, and the import brings each back in every format', async () => {
     assert.equal((exportsOf.nquads.match(/<http:\/\/purl\.org\/dc\/terms\/references>/g) ?? []).length, EXPECTED.link, 'the export states one dcterms:references per link row');
     for (const key of [...DOCUMENTS.map(d => d.key), 'gzip']) {
@@ -380,9 +379,8 @@ describe('a dry run into an empty target', () => {
     await assertNothingLanded(target, 'a dry run');
   });
 
-  // FINDING (guide 06f, "What becomes of a subject" and the parameters table): TriG, N-Quads and JSON-LD "default to the file's one data
-  // graph", so an export of another space needs no sourceBase. The act reads an absent sourceBase as the target's own base, so the file's
-  // records are no records of this space and its types are no classes of it: the import is refused. A dry run shows it without landing anything.
+  // Guide 06f ("What becomes of a subject" and the parameters table): TriG, N-Quads and JSON-LD "default to the file's one data graph", so an
+  // export of another space needs no sourceBase. A dry run shows it without landing anything.
   for (const d of DOCUMENTS.filter(x => x.format !== 'turtle')) {
     it(`${d.key}: with no sourceBase the file's one data graph is the source, as the guide says`, async () => {
       const target = await emptyTarget('dry');
@@ -394,8 +392,8 @@ describe('a dry run into an empty target', () => {
   }
 });
 
-// FINDING: the ticket says a re-import into the source space changes nothing; the import converges every record onto itself (every count and
-// every field is as it was) but rewrites each one: a new `seq` and a new `updatedAt`, so a record's version moves with nothing changed.
+// The ticket says a re-import into the source space changes nothing: the import converges every record onto itself and writes none (a record's
+// version, `seq`, and `updatedAt` stay as they were).
 describe('an RDF export imported into its own source space changes nothing', () => {
   for (const d of DOCUMENTS) {
     it(`${d.key}: every record keeps its version, modified time and stamp, and no record or link is added`, async () => {
