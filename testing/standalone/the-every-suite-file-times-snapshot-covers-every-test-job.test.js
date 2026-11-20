@@ -124,6 +124,17 @@ describe('allSuiteFileTimes: one snapshot of every job\'s files', () => {
     assert.equal(snap.runs, 3, 'runs 1 (the other jobs\'), 6 and 7 are the runs the times rest on');
   });
 
+  it('two attempts of one run that started together (recorded in one pass, Q-948) count once, the higher attempt\'s time, whatever order the rows come in', async () => {
+    const allSuiteFileTimes = await builder();
+    for (const order of [[1, 2], [2, 1]]) {
+      const runs = everyJob(1).filter(r => r.job !== 'pure');
+      for (const attempt of order) runs.push(row('pure', 7, { [P]: attempt === 2 ? 100 : 5000 }, { attempt }));
+      runs.push(row('pure', 6, { [P]: 300 }));
+      const snap = allSuiteFileTimes(runs, { jobs: JOBS });
+      assert.equal(snap.files[P], 200, `order ${order}: two runs, 100 (attempt 2 of run 7) and 300; attempt 1's 5000 was counted`);
+    }
+  });
+
   it('a row that is not CI\'s run of main in full, or not of a job asked for, contributes nothing', async () => {
     const allSuiteFileTimes = await builder();
     const poison = { 'testing/standalone/poison.test.js': 8_000_000 };
@@ -325,6 +336,22 @@ describe('test-times writes file-times-all.json beside file-times.json (a fake i
       const pure = readJson(work.dir, PURE).files;
       assert.deepEqual({ [fileOf(PURE_JOB, 'a')]: pure[fileOf(PURE_JOB, 'a')], [fileOf(PURE_JOB, 'b')]: pure[fileOf(PURE_JOB, 'b')] }, expected, 'the pure snapshot has the same slots, and the same defect (file-times.json)');
       assert.equal(readJson(work.dir, PURE).runs, 5);
+    });
+  });
+
+  it('two attempts recorded in one pass (the same start) are one run, counted by the higher attempt, whichever the server lists first (Q-948)', async () => {
+    assert.ok(PURE_JOB, `ci.yml uploads no pure shard results (${JOBS_OF_CI.join(' ')}): the pure snapshot has no shard job to read`);
+    await withInstance(async ({ server, work, env }) => {
+      seedPreflightRun(server);
+      seedEveryJob(server);
+      // Run 5 of the shard holds `a` at 500 (scaled) in attempt 1; attempt 2 started at the same time and held 50.
+      seedCiTestRun(server, { n: 5, job: PURE_JOB, rows: [[fileOf(PURE_JOB, 'a'), 50]], over: { attempt: 2, recordKey: `ci:5:2:${PURE_JOB}:standalone` } });
+      const r = await runTimes(['--preflight-costs'], { cwd: work.dir, env });
+      assert.equal(r.code, 0, everything(r));
+      const scale = JOBS_OF_CI.indexOf(PURE_JOB) + 1;
+      // Five runs: 100..400 scaled and attempt 2's 50: the median is 200 scaled; with attempt 1's 500 it is 300 scaled.
+      assert.equal(readJson(work.dir, ALL).files[fileOf(PURE_JOB, 'a')], 200 * scale, 'attempt 1 was counted for run 5 (every-suite)');
+      assert.equal(readJson(work.dir, PURE).files[fileOf(PURE_JOB, 'a')], 200 * scale, 'attempt 1 was counted for run 5 (the pure snapshot)');
     });
   });
 
