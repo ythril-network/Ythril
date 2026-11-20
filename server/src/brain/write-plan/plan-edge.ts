@@ -40,6 +40,7 @@ import type { RefKind } from '../../config/types-knowledge.js';
 import { yieldToEventLoop } from '../../util/yield-to-event-loop.js';
 import { ReadSet, type ForkRows, type ReadWant, type Triplet } from './read-set.js';
 import type { WritePlan } from './types.js';
+import { trustFor, type PlanTrust } from './trust.js';
 import { convergeResult, finishInsert, vectorBeforeWrite } from './plan-steps.js';
 
 export interface EdgeInput {
@@ -96,8 +97,11 @@ export interface EdgeSubject { id: string; type: string | null; minted: boolean 
  * With a `subject`, the subject's own end is neither read nor looked up: the caller already says what it is, and for a
  * `minted` one nothing stored can match its triplet or share its functional label.
  */
-export function edgeWant(spaceId: string, input: EdgeInput, subject?: EdgeSubject): ReadWant {
+export function edgeWant(spaceId: string, input: EdgeInput, subject?: EdgeSubject, trust?: PlanTrust): ReadWant {
   const { from, to, label } = input;
+  const planMeta = edgeTrust(spaceId, trust)?.planMeta;
+  // The want asks what the plan will ask: under a plan schema, whether the label is one-only is the plan schema's answer.
+  const functional = planMeta ? functionalIn(readMetaForWrite(spaceId, planMeta).meta, label) : isFunctionalLabel(spaceId, label);
   const fromKind = input.opts?.fromKind;
   const toKind = input.opts?.toKind;
   const ends = [{ id: from, kind: edgeEndpointKind(fromKind) }, { id: to, kind: edgeEndpointKind(toKind) }]
@@ -112,7 +116,7 @@ export function edgeWant(spaceId: string, input: EdgeInput, subject?: EdgeSubjec
     ...(Object.keys(exist).length > 0 ? { exist } : {}),
     ...(subject?.minted ? {} : {
       triplets: [{ from, to, label, fromKind, toKind }],
-      ...(isFunctionalLabel(spaceId, label) ? { functional: [{ from, label }] } : {}),
+      ...(functional ? { functional: [{ from, label }] } : {}),
     }),
   };
 }
@@ -365,10 +369,21 @@ export function edgeRefusal(
   return { existing, withDefaults, check, write };
 }
 
-export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet): Promise<EdgePlanned> {
+/**
+ * The trust an edge plan was handed (`trust.ts`), checked: an edge takes a plan schema and never a minted id, because its identity is its
+ * triplet and end kinds (`edgeIdFor`), which no caller chooses.
+ */
+function edgeTrust(spaceId: string, trust: PlanTrust | undefined): PlanTrust | undefined {
+  const trusted = trustFor(spaceId, trust, undefined);
+  if (trusted?.mintedId !== undefined) throw new Error('an edge\'s identity is its triplet and end kinds: an edge plan takes no minted id');
+  return trusted;
+}
+
+/** `trust`: the plan schema a trusted in-process caller hands the planner, never a request (`trust.ts`). */
+export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet, trust?: PlanTrust): Promise<EdgePlanned> {
   const { from, to, label, weight, type, description, tags, ttlDays, properties, opts } = input;
   // The meta and the schema stamp in ONE read (Q-736): the refusal judges with it, and the guard and the stamp below come from it.
-  const write = readMetaForWrite(spaceId);
+  const write = readMetaForWrite(spaceId, edgeTrust(spaceId, trust)?.planMeta);
   // The refusal first: nothing below is decided, noted or embedded for an edge the space does not allow.
   const { existing, withDefaults, check } = edgeRefusal(spaceId, input, view, undefined, [], write);
   opts?.onValidation?.(check);

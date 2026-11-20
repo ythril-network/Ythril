@@ -4,7 +4,6 @@
  * The body of the old `saveFact` up to its write, moved here unchanged in what it decides; the commit writes
  * the plan and `saveFact` is the door that asks for one. See `types.ts` for why the two are apart.
  */
-import { v4 as uuidv4 } from 'uuid';
 import { authorRef } from '../../config/author.js';
 import { type ContradictionWarning } from '../insert-contradictions.js';
 import { factEmbedText } from '../embed-text.js';
@@ -20,6 +19,7 @@ import type { FactDoc } from '../../config/types.js';
 import { linkTargets, refuseLinks } from './plan-links.js';
 import type { ReadSet, ReadWant } from './read-set.js';
 import type { WritePlan } from './types.js';
+import { trustFor, mintedWant, mintedRecord, insertIdentity, type PlanTrust } from './trust.js';
 import { convergeResult, finishInsert, neighbourAdvisories, vectorBeforeWrite } from './plan-steps.js';
 
 export interface FactInput {
@@ -48,15 +48,17 @@ export interface FactPlanned {
 }
 
 /** What `planFact` will ask the read set. */
-export function factWant(input: FactInput): ReadWant {
-  return { records: { ...linkTargets({ entity: input.linkEntities ?? [] }), ...(input.id ? { fact: [input.id] } : {}) } };
+export function factWant(input: FactInput, trust?: PlanTrust): ReadWant {
+  return { records: { ...linkTargets({ entity: input.linkEntities ?? [] }), ...(input.id ? { fact: [input.id] } : mintedWant('fact', trust)) } };
 }
 
-export async function planFact(spaceId: string, input: FactInput, view: ReadSet): Promise<FactPlanned> {
+/** `trust`: the minted id and the plan schema a trusted in-process caller hands the planner, never a request (`trust.ts`). */
+export async function planFact(spaceId: string, input: FactInput, view: ReadSet, trust?: PlanTrust): Promise<FactPlanned> {
   const linkEntities = input.linkEntities ?? [];
   const tags = input.tags ?? [];
   const { fact, description, type, opts, ttlDays } = input;
-  const existing = input.id ? view.stored('fact', input.id) as unknown as FactDoc | null : null;
+  const trusted = trustFor(spaceId, trust, input.id);
+  const existing = (input.id ? view.stored('fact', input.id) : mintedRecord(view, 'fact', trusted)) as unknown as FactDoc | null;
 
   /*
    * THE LINKS ARE REFUSED BEFORE THE RECORD IS WRITTEN — a bad id after the insert would leave the fact
@@ -70,7 +72,7 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
    * may be one the caller has just removed.
    */
   // The meta and the schema stamp in ONE read (Q-736): the stamp names the schema this check judged with, never a later one.
-  const write = readMetaForWrite(spaceId);
+  const write = readMetaForWrite(spaceId, trusted?.planMeta);
   const properties = existing
     ? input.properties
     : applyPropertyDefaults(type ? write.meta?.typeSchemas?.fact?.[type] : undefined, input.properties);
@@ -136,9 +138,9 @@ export async function planFact(spaceId: string, input: FactInput, view: ReadSet)
     };
   }
 
-  // ID IS ID (owner ruling, 2026-08-12): the identity is ours to mint, always.
+  // ID IS ID (owner ruling, 2026-08-12): the identity is ours to mint, always (a trusted minted id is the instance's own).
   const doc: FactDoc = {
-    _id: uuidv4(), spaceId, fact, tags, author: authorRef(),
+    _id: insertIdentity(trusted), spaceId, fact, tags, author: authorRef(),
     createdAt: now, updatedAt: now, seq: 0,
     ...(await derivedFieldsForWrite({ text: () => embedText, vector, suppressed, onto: 'insert' })).set,
   };

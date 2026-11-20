@@ -5,7 +5,6 @@
  * QUEUES its re-embed (`Q-192`). The insert branch always did and the converge branch never did, so an entry
  * rewritten with new content kept the vector of the content it no longer had.
  */
-import { v4 as uuidv4 } from 'uuid';
 import { authorRef } from '../../config/author.js';
 import { type ContradictionWarning } from '../insert-contradictions.js';
 import { chronoEmbedText } from '../embed-text.js';
@@ -21,6 +20,7 @@ import type { ChronoEntry, ChronoType, ChronoStatus } from '../../config/types.j
 import { linkTargets, refuseLinks } from './plan-links.js';
 import type { ReadSet, ReadWant } from './read-set.js';
 import type { WritePlan } from './types.js';
+import { trustFor, mintedWant, mintedRecord, insertIdentity, type PlanTrust } from './trust.js';
 import { convergeResult, finishInsert, neighbourAdvisories, vectorBeforeWrite } from './plan-steps.js';
 
 export interface ChronoFields {
@@ -62,22 +62,25 @@ export interface ChronoPlanned {
 const desiredOf = (f: ChronoFields) => ({ entity: f.linkEntities ?? [], fact: f.linkFacts ?? [] });
 
 /** What `planChrono` will ask the read set. */
-export function chronoWant(input: ChronoInput): ReadWant {
-  return { records: { ...linkTargets(desiredOf(input.fields)), ...(input.fields.id ? { chrono: [input.fields.id] } : {}) } };
+export function chronoWant(input: ChronoInput, trust?: PlanTrust): ReadWant {
+  return { records: { ...linkTargets(desiredOf(input.fields)), ...(input.fields.id ? { chrono: [input.fields.id] } : mintedWant('chrono', trust)) } };
 }
 
-export async function planChrono(spaceId: string, input: ChronoInput, view: ReadSet): Promise<ChronoPlanned> {
+/** `trust`: the minted id and the plan schema a trusted in-process caller hands the planner, never a request (`trust.ts`). */
+export async function planChrono(spaceId: string, input: ChronoInput, view: ReadSet, trust?: PlanTrust): Promise<ChronoPlanned> {
   const { ttlDays, opts } = input;
   let fields = input.fields;
   const desired = desiredOf(fields);
+  const trusted = trustFor(spaceId, trust, fields.id);
   // THE LINKS ARE REFUSED BEFORE THE ENTRY IS WRITTEN — see `planFact`.
   await refuseLinks(view, 'chrono', desired);
 
-  const existing = fields.id ? view.stored('chrono', fields.id) as unknown as ChronoEntry | null : null;
+  const existing = fields.id ? view.stored('chrono', fields.id) as unknown as ChronoEntry | null
+    : mintedRecord(view, 'chrono', trusted) as unknown as ChronoEntry | null;
 
   // THE SCHEMA IS ENFORCED HERE, against the merged record; defaults on insert only.
   // The meta and the schema stamp in ONE read (Q-736): the stamp names the schema this check judged with, never a later one.
-  const write = readMetaForWrite(spaceId);
+  const write = readMetaForWrite(spaceId, trusted?.planMeta);
   const withDefaults = existing
     ? fields.properties
     : applyPropertyDefaults(write.meta?.typeSchemas?.chrono?.[fields.type], fields.properties);
@@ -141,9 +144,9 @@ export async function planChrono(spaceId: string, input: ChronoInput, view: Read
     };
   }
 
-  // ID IS ID (owner ruling, 2026-08-12): the identity is ours to mint, always.
+  // ID IS ID (owner ruling, 2026-08-12): the identity is ours to mint, always (a trusted minted id is the instance's own).
   const doc: ChronoEntry = {
-    _id: uuidv4(), spaceId, title: fields.title, type: fields.type, startsAt: fields.startsAt, status, tags,
+    _id: insertIdentity(trusted), spaceId, title: fields.title, type: fields.type, startsAt: fields.startsAt, status, tags,
     author: authorRef(), createdAt: now, updatedAt: now, seq: 0, ...derived.set,
   };
   if (fields.description !== undefined) doc.description = fields.description;

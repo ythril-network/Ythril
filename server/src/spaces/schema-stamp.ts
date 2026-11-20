@@ -127,10 +127,47 @@ const storedMetaOf = (spaceId: string): SpaceMeta | undefined => findSpace(space
  * The meta a write of `spaceId` validates with and the stamp it may write, from ONE synchronous read of the stored meta. `meta` is
  * `undefined` for a space with no schema, and the stamp is then the empty schema's.
  */
-export function readMetaForWrite(spaceId: string): MetaForWrite {
+export function readMetaForWrite(spaceId: string, planned?: object): MetaForWrite {
+  /*
+   * `planned`: a pair `planMetaFor` made for this space, handed in by a trusted planner caller (`brain/write-plan/trust.ts`). The write judges
+   * and stamps with it in place of the stored meta, through this one read, so every question of the write and its stamp come from one pair.
+   * A pair of another provenance or another space is refused, never used.
+   */
+  if (planned !== undefined) {
+    const made = plans.get(planned);
+    if (made?.spaceId !== spaceId) {
+      throw new Error(`readMetaForWrite: the plan schema handed in was made for ${made === undefined ? 'no known space' : `space '${made.spaceId}'`}, `
+        + `not for space '${spaceId}'; a plan schema comes from planMetaFor(spaceId, typeSchemas)`);
+    }
+    return made.write;
+  }
   const stored = storedMetaOf(spaceId);
   const write: MetaForWrite = { meta: stored ? resolveMetaRefs(stored) : undefined, stamp: stampOf(stored) };
   spaceOfWrite.set(write, spaceId);
+  return write;
+}
+
+/** The pairs {@link planMetaFor} made, each with the space it was proposed for: a pair of no known provenance is refused by its users. */
+const plans = new WeakMap<object, { readonly spaceId: string; readonly write: MetaForWrite }>();
+
+/**
+ * The pair a write judges and stamps with when an import PROPOSES type schemas that are not stored yet (bundle-270, slice S4): the space's
+ * stored meta with its `typeSchemas` replaced by `typeSchemas`, and the stamp of exactly that object, in one step, so a record judged by the
+ * proposed schema is stamped with the proposed schema's fingerprint and never with the stored one's.
+ *
+ * Only the type schemas are proposed: validation mode, strict linkage and every other space-level field stay the stored space's (amendment
+ * A7: the schema-from-RDF door writes type schemas only), so a planner that asks the stored space whether it is strict asks the same question
+ * this pair answers.
+ *
+ * The per-write snapshot backstop (`stampOp`) is armed only when the proposed schema IS the stored one (equal fingerprints): a dry plan judged
+ * by a schema that is not stored keeps no snapshot of it, and a commit after the schema was stored keeps one as any write does.
+ */
+export function planMetaFor(spaceId: string, typeSchemas: SpaceMeta['typeSchemas']): MetaForWrite {
+  const stored = storedMetaOf(spaceId);
+  const proposed: SpaceMeta = { ...(stored ?? {}), typeSchemas: typeSchemas ?? {} } as SpaceMeta;
+  const write: MetaForWrite = { meta: resolveMetaRefs(proposed), stamp: stampOf(proposed) };
+  plans.set(write, { spaceId, write });
+  if (write.stamp.fp === stampOf(stored).fp) spaceOfWrite.set(write, spaceId);
   return write;
 }
 
