@@ -10,7 +10,7 @@
  * the space to record writes while any act stands; nothing closed it to schema writes, which live in the config, not in a collection.
  *
  * So the store's schema writers ask this gate before they write: `updateSpace` when it is handed a meta, `commitOwnMetaEdit` (the per-type
- * writes and every own-definition edit), and the meta update before it writes anything (the space PATCH and MCP `schema_update`, so a write
+ * writes and every own-definition edit), `setNetworkPrecedenceAct` (an operator's reorder, before it stores the order), and the meta update before it writes anything (the space PATCH and MCP `schema_update`, so a write
  * that also carries local settings changes none of them). A refusal is the space write gate's own error with the act's own code, so every
  * door answers it as it answers a record write the act refuses (`spaceActAnswer`: 409 `space_being_rdf_imported`, the sentence naming the RDF import). The import's own body
  * passes by its scope (`space-act-scope.ts`), for the schema step a later slice adds.
