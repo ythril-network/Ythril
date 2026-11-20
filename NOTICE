@@ -445,6 +445,149 @@ port of Go's `regexp` package); the upstream projects are where the RE2 design a
 License: MIT
 Copyright (c) 2023 Alexey Vasiliev
 
+### n3
+
+The RDF reader for Turtle, TriG and N-Quads (the RDF import, `server/src/rdf/parse.ts`), a direct dependency of the server.
+
+License: MIT
+Copyright ©2012–present N3.js contributors
+
+### jsonld-streaming-parser
+
+The streaming JSON-LD reader of the RDF import, a direct dependency of the server. Ythril gives it a document loader that refuses every
+remote context, so it never fetches. It pulls in the packages below it, each attributed here.
+
+License: MIT
+Copyright © 2018 Ruben Taelman
+
+### jsonld-context-parser
+
+The JSON-LD context reader `jsonld-streaming-parser` is built on. Its own fetching document loader is never used (the import replaces it).
+
+License: MIT
+Copyright © 2018 Ruben Taelman
+
+### rdf-data-factory
+
+The RDF term factory `jsonld-streaming-parser` creates terms with.
+
+License: MIT
+Copyright © 2020 - now Ruben Taelman
+
+### relative-to-absolute-iri
+
+The IRI resolver of the JSON-LD context reader.
+
+License: MIT
+Copyright © 2018 Ruben Taelman
+
+### canonicalize
+
+The JSON canonicalizer (RFC 8785) the JSON-LD reader reads `@json` values with. It ships the Apache License 2.0 text with its template
+fields unfilled; its `package.json` names its authors.
+
+License: Apache License 2.0
+Copyright Samuel Erdtman and Anders Rundgren
+
+### http-link-header
+
+The `Link` header reader of the JSON-LD context reader (its HTTP entry is not used by the import).
+
+License: MIT
+Copyright (c) 2016-2026 Jonas Hermsmeier, and contributors
+
+### @bergos/jsonparse
+
+The streaming JSON tokenizer `jsonld-streaming-parser` reads a document with.
+
+License: MIT
+Copyright (c) 2012 Tim Caswell
+
+### @rdfjs/types
+
+The RDF/JS interface types the JSON-LD reader lists as a runtime dependency (type declarations only).
+
+License: MIT
+Copyright (c) 2020 RDF JavaScript Libraries
+
+### @types/http-link-header, @types/readable-stream, @types/node
+
+Type declarations that `jsonld-streaming-parser` and `jsonld-context-parser` list as runtime dependencies, so they sit in the production
+tree beside them (DefinitelyTyped).
+
+License: MIT
+Copyright (c) Microsoft Corporation.
+
+### readable-stream, string_decoder
+
+The stream and string-decoder implementations of the Node.js core, which `n3` and `jsonld-streaming-parser` use.
+
+License: MIT
+Copyright Node.js contributors. All rights reserved.
+
+### buffer
+
+The `Buffer` implementation for non-Node runtimes, which `n3`, `jsonld-streaming-parser` and `@bergos/jsonparse` list as a dependency.
+
+License: MIT
+Copyright (c) Feross Aboukhadijeh, and other contributors.
+
+### safe-buffer
+
+A `Buffer` compatibility layer, pulled in by `string_decoder`.
+
+License: MIT
+Copyright (c) Feross Aboukhadijeh
+
+### base64-js
+
+The Base64 codec of `buffer`.
+
+License: MIT
+Copyright (c) 2014 Jameson Little
+
+### ieee754
+
+The IEEE 754 floating-point codec of `buffer`.
+
+License: BSD-3-Clause
+Copyright 2008 Fair Oaks Labs, Inc.
+
+### abort-controller
+
+Pulled in by `readable-stream` for its abort handling.
+
+License: MIT
+Copyright (c) 2017 Toru Nagashima
+
+### event-target-shim
+
+The event-target implementation of `abort-controller`.
+
+License: MIT
+Copyright (c) 2015 Toru Nagashima
+
+### events
+
+The `EventEmitter` implementation pulled in by `readable-stream`.
+
+License: MIT
+Copyright Joyent, Inc. and other Node contributors.
+
+### process
+
+The `process` shim pulled in by `readable-stream`.
+
+License: MIT
+Copyright (c) 2013 Roman Shtylman
+
+### undici-types
+
+The type declarations of `undici`'s API, pulled in by `@types/node`; the package's own copy, not the HTTP client above.
+
+License: MIT
+Copyright (c) Matteo Collina and Undici contributors
+
 ### Runtime Dependency: FFmpeg (Debian `ffmpeg`, inside the Ythril image)
 
 The Ythril production image installs Debian’s `ffmpeg` package. It is used by the audio and video embedding

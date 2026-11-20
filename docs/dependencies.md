@@ -67,6 +67,33 @@ holds NOTICE to naming each package by its full scoped name:
 Because three of these are Apache-2.0 and ship no licence file, NOTICE carries the **full** text of the Apache License
 2.0 (it carried only the appendix's boilerplate before), which covers every Apache-2.0 component it lists.
 
+### The RDF readers and what they ship
+
+The RDF import reads a file a stranger made, so it reads it with two libraries: `n3` for Turtle, TriG and N-Quads (it also reads the
+RDF 1.2 triple terms the export writes), and `jsonld-streaming-parser` for JSON-LD, which reads in its streaming profile and so
+holds no document whole. Both are direct dependencies of the server (`n3` was a development dependency of the repository until the
+import needed it). The JSON-LD library fetches a remote `@context` by default; Ythril gives it a document loader that refuses
+every remote context, and a test refuses any other construction of it, so an upload cannot make the server request an address.
+`a-notice-names-every-package-the-rdf-parsers-ship.test.js` reads the production closure of both out of `package-lock.json`
+and holds NOTICE and this table to naming each package, and every licence in it to be a permissive one:
+
+| package | licence | why it is there |
+|---|---|---|
+| `n3` | MIT | the Turtle, TriG and N-Quads reader |
+| `jsonld-streaming-parser` | MIT | the streaming JSON-LD reader |
+| `jsonld-context-parser` | MIT | its context reader; the loader it fetches with is never used |
+| `rdf-data-factory` | MIT | the term factory of the JSON-LD reader |
+| `relative-to-absolute-iri` | MIT | the address resolver of the context reader |
+| `canonicalize` | Apache-2.0 | the JSON canonicalizer for `@json` values |
+| `http-link-header` | MIT | the `Link` header reader of the context reader (not used by the import) |
+| `@bergos/jsonparse` | MIT | the streaming JSON tokenizer |
+| `@rdfjs/types` | MIT | RDF/JS interface types, listed as a runtime dependency |
+| `@types/http-link-header`, `@types/readable-stream`, `@types/node` | MIT | type declarations the JSON-LD libraries list as runtime dependencies |
+| `readable-stream`, `string_decoder`, `buffer`, `safe-buffer`, `base64-js`, `ieee754`, `abort-controller`, `event-target-shim`, `events`, `process` | MIT, and `ieee754` BSD-3-Clause | the stream and buffer implementations of `n3` and the JSON-LD readers, and their children |
+| `undici-types` | MIT | the type declarations of `undici`'s API, pulled in by `@types/node` (not the HTTP client `undici` itself) |
+
+The rows group packages that NOTICE attributes under a heading of their own or in a list; the gate reads one name per heading.
+
 ---
 
 ## Vendored client assets
