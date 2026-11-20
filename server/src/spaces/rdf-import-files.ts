@@ -17,7 +17,8 @@
  * - **A report served past its life.** {@link readReport} answers `null` for a report older than the keep window, whether or not the sweep has
  *   run, so a caller never reads a file the sweep would remove.
  * - **A space's files that outlive it.** {@link dropRdfImportsOfSpace} removes the reports and folders of a deleted space; the space deletion's
- *   cleanup list calls it, so a space created later under the id shows nothing of the old one.
+ *   cleanup list calls it, so a space created later under the id shows nothing of the old one. {@link renameRdfImportsOfSpace} is its twin for a rename
+ *   (the rename's data move calls it): the files follow the space to its new id, by the same walk, so the old id is left with none.
  */
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -156,8 +157,14 @@ export async function sweepRdfImportOrphans(standing: (id: string) => boolean): 
   await sweepReports(Date.now());
 }
 
-/** Remove the reports and the import folders of `spaceId`: the space was deleted, and the files that name it go with it. */
-export async function dropRdfImportsOfSpace(spaceId: string): Promise<void> {
+/**
+ * What to do with each report and each import folder that names a space: the one walk the deletion and the rename share, so neither can miss a file
+ * the other finds (the walk reads a report at any age, a folder by its state, and skips what is not named by an id this instance minted).
+ */
+async function forEachImportOfSpace(spaceId: string, on: {
+  report: (file: string, report: RdfImportReport) => Promise<void>;
+  folder: (dir: string, state: ActState) => Promise<void>;
+}): Promise<void> {
   const reports = path.join(getDataRoot(), RDF_IMPORT_REPORT_DIR);
   let names: string[] = [];
   try { names = await fsp.readdir(reports); } catch (err) { if (!isMissingPath(err)) throw err; }
@@ -165,7 +172,7 @@ export async function dropRdfImportsOfSpace(spaceId: string): Promise<void> {
     const id = name.replace(/\.spool$/, '');
     if (!isUuid(id)) continue;
     const report = await readReport(id, 0).catch(() => null);
-    if (report?.space === spaceId) await fsp.rm(path.join(reports, name), { force: true });
+    if (report?.space === spaceId) await on.report(path.join(reports, name), report);
   }
   const root = path.join(getDataRoot(), RDF_IMPORT_DIR);
   try { names = await fsp.readdir(root); } catch (err) { if (isMissingPath(err)) return; throw err; }
@@ -173,6 +180,33 @@ export async function dropRdfImportsOfSpace(spaceId: string): Promise<void> {
     const dir = folderPathOf(name);
     if (!dir) continue;
     const state = await readState(await openImportFolder(dir)).catch(() => null);
-    if (state?.space === spaceId) await removeImportFolder(dir);
+    if (state?.space === spaceId) await on.folder(dir, state);
   }
+}
+
+/** Remove the reports and the import folders of `spaceId`: the space was deleted, and the files that name it go with it. */
+export async function dropRdfImportsOfSpace(spaceId: string): Promise<void> {
+  await forEachImportOfSpace(spaceId, {
+    report: (file) => fsp.rm(file, { force: true }),
+    folder: (dir) => removeImportFolder(dir),
+  });
+}
+
+/**
+ * Move the reports and the import folders of `oldId` to `newId`: the space was renamed, and its imports are its own history, as its files are. The
+ * id inside each is rewritten (a report keeps its age, so the keep window does not start again; a folder's state and the report it carries both
+ * name the space). Left under the old id, a space created later under it could read them. Idempotent: a file already rewritten names `newId`
+ * and is not walked again, so a resumed rename does the rest.
+ */
+export async function renameRdfImportsOfSpace(oldId: string, newId: string): Promise<void> {
+  await forEachImportOfSpace(oldId, {
+    report: async (file, report) => {
+      const { atime, mtime } = await fsp.stat(file);
+      await keepReport({ ...report, space: newId });
+      await fsp.utimes(file, atime, mtime);
+    },
+    folder: async (dir, state) => {
+      await writeState(await openImportFolder(dir), { ...state, space: newId, report: { ...state.report, space: newId } });
+    },
+  });
 }
