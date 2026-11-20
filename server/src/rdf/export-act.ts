@@ -267,8 +267,12 @@ export function setRdfExportPageReaderForTest(reader: PageReader | null): void {
  * how many run; this one any reader of a space reaches, and two run at once. How it is measured, and what cannot be: `export/export-reader-pace.ts`.
  */
 export const RDF_EXPORT_MIN_BYTES_PER_SECOND = 16_384;
-/** How much waiting on the reader one judgement of {@link RDF_EXPORT_MIN_BYTES_PER_SECOND} covers, in milliseconds. */
-export const RDF_EXPORT_RATE_WINDOW_MS = 60_000;
+/**
+ * How much waiting on the reader one judgement of {@link RDF_EXPORT_MIN_BYTES_PER_SECOND} covers at least, in milliseconds. Five minutes,
+ * not one (the second drive, finding A): the kernel shows a reader's progress only in steps of about a third of its send buffer (about
+ * 1.4 MiB at Linux's default ceiling), and a reader at the rate must be able to make one inside the idle bound, which is this window.
+ */
+export const RDF_EXPORT_RATE_WINDOW_MS = 300_000;
 let rate = { windowMs: RDF_EXPORT_RATE_WINDOW_MS, minBytesPerSecond: RDF_EXPORT_MIN_BYTES_PER_SECOND };
 /** The rate rule the REST door applies now. */
 export const rdfExportRate = (): Readonly<typeof rate> => rate;
@@ -277,11 +281,19 @@ export function setRdfExportRateForTest(r: { windowMs: number; minBytesPerSecond
   rate = r ?? { windowMs: RDF_EXPORT_RATE_WINDOW_MS, minBytesPerSecond: RDF_EXPORT_MIN_BYTES_PER_SECOND };
 }
 
-/** How long a REST reader may take nothing before its export is cut and its slot freed, in milliseconds. */
-const IDLE_MS_DEFAULT = 60_000;
+/** How long a REST reader may take nothing before it is judged (a whole export: too slow; a page: cut), in milliseconds: the window. */
+const IDLE_MS_DEFAULT = RDF_EXPORT_RATE_WINDOW_MS;
 let idleMs = IDLE_MS_DEFAULT;
 /** The idle bound the REST door applies now. */
 export const rdfExportIdleMs = (): number => idleMs;
+/** How many idle bounds a reader judged too slow is given to take the incomplete ending before its connection is cut. */
+const ENDING_WAIT_IDLE_BOUNDS = 6;
+/**
+ * How long a reader judged too slow is given to take the incomplete ending (half an hour in production): the ending reaches the kernel once
+ * the reader frees one more step of the send buffer, so a reader still taking about 1 KiB a second gets it; one taking less, or nothing, is
+ * cut after it. The slot is already free.
+ */
+export const rdfExportEndingWaitMs = (): number => idleMs * ENDING_WAIT_IDLE_BOUNDS;
 /** Replace the idle bound (a test that waits for it); `null` restores it. */
 export function setRdfExportIdleMsForTest(ms: number | null): void { idleMs = ms ?? IDLE_MS_DEFAULT; }
 

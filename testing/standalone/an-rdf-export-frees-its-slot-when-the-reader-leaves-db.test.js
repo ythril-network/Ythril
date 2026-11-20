@@ -5,8 +5,8 @@
  *
  * - At most two exports run on the instance and one per token: a second export by a token whose first is still being sent is 429
  *   `rdf_export_busy` with `Retry-After`, alike on MCP; a third token while two are held is 429 too.
- * - A reader that goes away frees its slot at once; a reader that stops reading the whole stream is cut after the idle bound and frees its
- *   slot, and what it can still take ends aborted, never complete (review finding 8: the cut itself is proven; a page fits in the loopback
+ * - A reader that goes away frees its slot at once; a reader that stops reading the whole stream frees its slot after the idle bound and is
+ *   cut once the incomplete ending had its wait, so what it can still take ends aborted, never complete (review finding 8: the cut itself is proven; a page fits in the loopback
  *   buffers, so its write never waits there).
  * - Never the whole space in memory: a page is held to the byte budget (here 5 000 000 characters over about 14 MB of records), and the
  *   rest is linked.
@@ -95,7 +95,7 @@ describe('an RDF export frees its slot when the reader leaves', { skip, timeout:
   // The whole stream only: a page (at most 5 000 000 characters) fits in what the loopback socket buffers absorb, so its write never waits and
   // an idle bound cannot be reached on loopback; the page path waits through the same `pacedWriter` (`export/export-reader-pace.ts`).
   for (const [path, query] of [['the whole stream', '']]) {
-    it(`${path}: a reader that stops reading is cut after the idle bound, and its slot is freed`, async () => {
+    it(`${path}: a reader that stops reading frees its slot after the idle bound, and is cut after the ending's wait`, async () => {
       act.setRdfExportIdleMsForTest(1_000);
       try {
         const stalled = await holdOpen(t1.key, query);
@@ -103,7 +103,9 @@ describe('an RDF export frees its slot when the reader leaves', { skip, timeout:
         // The reader takes nothing; within the bound (and a margin for the answer to be built) its slot is free again.
         await waitFor(async () => (await d.exportRest(t1.key, SPACE, { format: 'nquads', limit: 5 })).status === 200, 15_000, 200,
           () => 'the idle reader still holds the token\'s slot');
-        // And it was the cut that freed it, not an answer that ended: what the reader can still take ends aborted, never complete.
+        // And the connection is cut once the incomplete ending had its time (export/export-reader-pace.ts): what the reader can still take
+        // then ends aborted, never complete.
+        await new Promise(resolve => setTimeout(resolve, act.rdfExportEndingWaitMs() + 2_000));
         const ended = await new Promise((resolve) => {
           let done = false;
           const finish = (how) => { if (!done) { done = true; resolve(how); } };

@@ -1,25 +1,35 @@
 /**
  * How a streamed export answer waits on its reader, and when a reader is too slow to keep its export (bundle-269 review, finding 9; the first
- * drive with real requests, finding 7).
+ * drive with real requests, finding 7; the second drive, finding A).
  *
  * ## What it prevents
  *
- * - **A reader that holds a slot for ever.** Only two exports run on an instance. A reader that takes a little at a time never meets the idle
- *   bound, so a rate is asked of it: while the export WAITS on the reader (a write its connection did not take at once), the connection must
- *   accept at least `minBytesPerSecond` on average, judged over each `windowMs` of such waiting. A reader below it is told
- *   ({@link PacedWriter.deliver} answers `slow`, and the door writes the incomplete ending) and its slot is freed.
- * - **A rate that measures the wrong thing.** What a server can see of its reader is what the operating system accepted from the socket
- *   (`bytesWritten` less what still waits in the socket's own buffer); what the reader has actually received is not visible above the kernel,
- *   whose send buffer (a few MiB, sized by the kernel and not settable from Node for TCP) runs ahead of it. The drive measured an average of
- *   the bytes `write` had taken since the start: the first few MiB went into that buffer at once, so the bound saw nothing of a slow reader
- *   for minutes. Here the export is measured only while it waits, and it waits only once every buffer between it and the reader is full, so
- *   what the connection accepts during a wait is what the reader takes. A store that is slow to answer makes the export wait on the store,
- *   never on its reader, and is not counted against it.
+ * - **A reader that holds a slot for ever.** Only two exports run on an instance. A reader that takes a little at a time never meets an idle
+ *   bound, so a rate is asked of it: while the export waits on the reader, the reader must take at least `minBytesPerSecond` on average over
+ *   each `windowMs` of such waiting. A reader below it is told ({@link PacedWriter.deliver} answers `slow`; the door writes the incomplete
+ *   ending and frees the slot).
+ * - **Counting what the buffers took as what the reader took.** What a server sees of its reader is what the operating system accepted
+ *   (`bytesWritten` less what still waits in the socket's own buffer). The kernel's send buffer (and on loopback the reader's receive
+ *   buffer, a few MiB together, not settable from Node for TCP) runs ahead of the reader, so between two arbitrary moments the accepted
+ *   bytes are the reader's bytes plus whatever the buffers' fill changed by. The second drive measured over waits that began while the
+ *   buffers were still filling: a megabyte accepted in a millisecond of waiting, so a reader that took nothing was not judged slow. Here
+ *   the rate is measured only between FULL MOMENTS: a write the operating system refused in part (after the event-loop turn in which Node
+ *   hands it over, `socket.writableLength` is still above zero; a write taken whole is answered synchronously and leaves nothing). At two
+ *   full moments every buffer to the reader is full, so the bytes accepted between them are exactly what the reader took (within one
+ *   slice). The window opens at the first full moment, so the fill of the buffers is never counted; it closes at the first full moment
+ *   after `windowMs` of waiting. A store that is slow to answer makes the export wait on the store, never on its reader: that time is not
+ *   counted.
+ * - **Cutting a reader that is reading.** The kernel wakes a full socket only once a large part of its send buffer is free again (Linux:
+ *   a third of it, about 1.4 MiB at its default ceiling of 4 MiB), so a reader shows no progress at all for that long: at 20 KiB/s over a
+ *   minute, which is why the second drive's idle bound of 60 s cut readers above the rate. The idle bound (`idleMs`: no drain at all)
+ *   must therefore exceed what one such step takes at the rate asked; production sets it to the window, five minutes, which covers a step
+ *   of 4.7 MiB at 16 KiB/s. A reader that runs out the idle bound took less than one step in it, so it is below the rate: `idle` is
+ *   answered, and the stream door treats it as `slow`.
  * - **A cut that tells the reader nothing.** The text is written a slice at a time ({@link SLICE_BYTES}) and the next slice only once the
- *   last was taken, so little waits above the socket when a reader is judged too slow: the incomplete ending the door then writes reaches
- *   it behind what its connection already holds, instead of the drive's cut by the idle bound with the final chunk missing.
- * - **A reader that takes nothing.** No drain for `idleMs` answers `idle`: no ending can be written to a socket that takes nothing, so the
- *   door cuts the connection (a chunked answer without its final chunk, which every HTTP client reports as broken).
+ *   last was taken, so little waits above the socket when a reader is judged: the ending the door writes follows what the buffers hold.
+ *   It reaches the kernel once the reader frees one more step; the door keeps the connection that long, up to {@link closeUnlessFinished}'s
+ *   bound, and never destroys a connection whose ending is still in the server's own buffer before that bound (the drive's cut did: Node
+ *   drops its own buffer on `destroy`, while the kernel still delivers what it holds, so the reader got everything but the ending).
  */
 import type { Response } from 'express';
 
@@ -28,11 +38,11 @@ export const SLICE_BYTES = 16_384;
 
 /** The rule a streamed export applies to its reader. */
 export interface ReaderPace {
-  /** How much waiting on the reader one judgement covers, in milliseconds. */
+  /** How much waiting on the reader one judgement covers at least, in milliseconds (it closes at the first full moment after it). */
   windowMs: number;
-  /** The least the connection must accept while the export waits on it, on average over each `windowMs` of waiting. */
+  /** The least the reader must take while the export waits on it, on average over each window. */
   minBytesPerSecond: number;
-  /** How long a connection may take nothing at all before it is cut, in milliseconds. */
+  /** How long a connection may take nothing at all before the reader is judged, in milliseconds. */
   idleMs: number;
 }
 
@@ -53,48 +63,62 @@ function acceptedBytes(res: Response): number {
   return socket ? socket.bytesWritten - socket.writableLength : 0;
 }
 
-/** Whether `res` drained before `ms` passed (`drained`), closed first (`closed`), or neither (`waiting`); listeners and timer are removed. */
-function drainedWithin(res: Response, ms: number): Promise<'drained' | 'closed' | 'waiting'> {
+/**
+ * Whether `res` drained (`drained`) or closed (`closed`) before `ms` passed, or neither (`waiting`); `'turn'` waits one turn of the event
+ * loop instead (`setImmediate`: Node hands the corked slice to the operating system on the tick before it). Listeners and timer are removed.
+ */
+function drainedWithin(res: Response, ms: number | 'turn'): Promise<'drained' | 'closed' | 'waiting'> {
   return new Promise(resolve => {
     const settle = (how: 'drained' | 'closed' | 'waiting'): void => {
-      clearTimeout(timer);
+      if (ms === 'turn') clearImmediate(timer as NodeJS.Immediate); else clearTimeout(timer as NodeJS.Timeout);
       res.off('drain', onDrain);
       res.off('close', onClose);
       resolve(how);
     };
     const onDrain = (): void => settle('drained');
     const onClose = (): void => settle('closed');
-    const timer = setTimeout(() => settle('waiting'), ms);
+    const timer = ms === 'turn' ? setImmediate(() => settle('waiting')) : setTimeout(() => settle('waiting'), ms);
     res.once('drain', onDrain);
     res.once('close', onClose);
   });
 }
 
+/** A full moment: the bytes accepted so far and the waiting done so far. */
+interface Mark { bytes: number; waitedMs: number }
+
 /** A writer for `res` that applies `pace()` (read at each wait, so a test may change it). */
 export function pacedWriter(res: Response, pace: () => ReaderPace): PacedWriter {
+  /** All the time spent waiting on the reader, in milliseconds. */
   let waitedMs = 0;
-  let waitedBytes = 0;
+  /** The full moment the current window opened at; none until the buffers first fill. */
+  let opened: Mark | null = null;
+
+  /** Judge the window at the full moment `now`: `slow`, or nothing (the window goes on, or a new one opens here). */
+  function atFullMoment(now: Mark): 'slow' | undefined {
+    if (!opened) { opened = now; return undefined; }
+    const { windowMs, minBytesPerSecond } = pace();
+    const span = now.waitedMs - opened.waitedMs;
+    if (span < windowMs) return undefined;
+    if ((now.bytes - opened.bytes) * MS_PER_SECOND < minBytesPerSecond * span) return 'slow';
+    opened = now;
+    return undefined;
+  }
 
   async function waitForReader(): Promise<PutOutcome> {
     const started = Date.now();
-    for (;;) {
-      const { windowMs, minBytesPerSecond, idleMs } = pace();
-      const before = { at: Date.now(), bytes: acceptedBytes(res) };
-      const until = Math.min(windowMs - waitedMs, idleMs - (before.at - started));
-      const how = await drainedWithin(res, Math.max(until, 1));
-      const now = Date.now();
-      waitedMs += now - before.at;
-      waitedBytes += Math.max(0, acceptedBytes(res) - before.bytes);
-      if (how === 'closed' || res.destroyed) return 'gone';
-      if (waitedMs >= windowMs) {
-        const slow = waitedBytes * MS_PER_SECOND < minBytesPerSecond * waitedMs;
-        waitedMs = 0;
-        waitedBytes = 0;
-        if (slow) return 'slow';
-      }
-      if (how === 'drained') return 'taken';
-      if (now - started >= idleMs) return 'idle';
+    const done = (how: PutOutcome): PutOutcome => { waitedMs += Date.now() - started; return how; };
+    const first = await drainedWithin(res, 'turn');
+    if (first === 'closed' || res.destroyed) return done('gone');
+    if (first === 'drained') return done('taken');
+    // Refused in part: every buffer to the reader is full now.
+    if ((res.socket?.writableLength ?? 0) > 0) {
+      const verdict = atFullMoment({ bytes: acceptedBytes(res), waitedMs: waitedMs + (Date.now() - started) });
+      if (verdict) return done(verdict);
     }
+    const { idleMs } = pace();
+    const how = await drainedWithin(res, Math.max(1, idleMs - (Date.now() - started)));
+    if (how === 'closed' || res.destroyed) return done('gone');
+    return done(how === 'drained' ? 'taken' : 'idle');
   }
 
   return {
@@ -112,21 +136,13 @@ export function pacedWriter(res: Response, pace: () => ReaderPace): PacedWriter 
 }
 
 /**
- * After the door ended an answer it had to cut short, keep the connection only while the reader still takes something: no progress for
- * `idleMs` closes it. Stops when the answer is handed to the operating system whole (`finish`) or the connection closes.
+ * After the door ended an answer it had to cut short, give the reader `ms` to take the rest: the connection is destroyed only if the answer
+ * has not been handed to the operating system whole (`finish`) by then. Not sooner: progress shows only in the kernel's large steps, and a
+ * destroy drops what Node still holds, the ending first of all. Once handed over, the kernel delivers it even after the socket is closed.
  */
-export function closeIfStalled(res: Response, idleMs: number): void {
-  let last = acceptedBytes(res);
-  let timer: NodeJS.Timeout | undefined;
-  const stop = (): void => { if (timer) clearTimeout(timer); };
-  const check = (): void => {
-    if (res.writableFinished || res.destroyed) return;
-    const now = acceptedBytes(res);
-    if (now === last) { res.destroy(); return; }
-    last = now;
-    timer = setTimeout(check, idleMs);
-  };
+export function closeUnlessFinished(res: Response, ms: number): void {
+  const timer = setTimeout(() => { if (!res.writableFinished && !res.destroyed) res.destroy(); }, ms);
+  const stop = (): void => clearTimeout(timer);
   res.once('finish', stop);
   res.once('close', stop);
-  timer = setTimeout(check, idleMs);
 }

@@ -22,8 +22,9 @@
  *   declared one ended the server), beside the closing comment and the report node the document carries; `Retry-After` on a 429 and a 503.
  * - **A `HEAD`** is asked the `GET`'s rights (`export/export-head.ts`) and answered with the `GET`'s headers alone: no slot, no walk, no audit.
  * - **Nothing an answer meets ends the process**: a fault after the status line closes the connection, one before it is the caught answer.
- * - **A reader that stops reading.** The page is written with backpressure; a reader that goes away, or takes nothing for the idle bound
- *   (`rdfExportIdleMs`), ends the response and frees the export slot at once, exactly once.
+ * - **A reader that stops reading.** The answer is written with backpressure; a reader that goes away frees the export slot at once,
+ *   exactly once. A page whose reader takes nothing for the idle bound (`rdfExportIdleMs`) is cut; a whole export whose reader is under the
+ *   rate or takes nothing for the idle bound is told (`export/export-reader-pace.ts`).
  * - **An unaudited copy.** The audit rule (`rdf.export`, written when the response finishes or is cut off) takes the act's counts.
  */
 import { Router, type Request, type Response } from 'express';
@@ -31,12 +32,12 @@ import { requireSpaceAuth } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { viewReadOfRequest } from '../../spaces/read-scope.js';
 import {
-  rdfExportAct, rdfExportHeadAct, rdfExportIdleMs, rdfExportRate, type MembersLeftOut, type RdfExportPage, type RdfExportRefusal,
+  rdfExportAct, rdfExportEndingWaitMs, rdfExportHeadAct, rdfExportIdleMs, rdfExportRate, type MembersLeftOut, type RdfExportPage, type RdfExportRefusal,
   type RdfExportStream,
 } from '../../rdf/export-act.js';
 import { trailersFor } from '../../export/export-trailers.js';
 import { headAskedAsGet } from '../../export/export-head.js';
-import { closeIfStalled, pacedWriter, type ReaderPace } from '../../export/export-reader-pace.js';
+import { closeUnlessFinished, pacedWriter, type ReaderPace } from '../../export/export-reader-pace.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import type { TokenRights } from '../../config/rights-shape.js';
@@ -143,9 +144,9 @@ const PAGE_PARAMETERS = ['limit', 'after', 'maxChars', 'maxBytes', 'maxTokens'] 
 
 /**
  * The whole scope, a store page per chunk, written at the reader's pace (`export/export-reader-pace.ts`): the slot is released exactly once,
- * when the stream ends, when the reader goes, when it is judged too slow (then the incomplete ending is written behind what its connection
- * holds, and the connection is kept only while the reader still takes something), or when it takes nothing for the idle bound (then the
- * response is cut: its chunked body lacks the final chunk, RFC 9112 §7.1, which every HTTP client reports as a broken transfer). A store that
+ * when the stream ends, when the reader goes, or when it is judged too slow or takes nothing for the idle bound (then the incomplete ending
+ * is written behind what its connection holds, and the connection is given `rdfExportEndingWaitMs` to hand it to the operating system; if
+ * it has not, the response is cut: its chunked body lacks the final chunk, RFC 9112 §7.1, a broken transfer to every HTTP client). A store that
  * fails before the first byte is the clean 503; after it, the document ends in the act's incomplete form and the trailer
  * `Ythril-Export-Complete: false` says so. The audit row is kept current and written when it ends.
  */
@@ -176,18 +177,15 @@ async function sendStream(req: Request, res: Response, stream: RdfExportStream):
       const how = chunk === '' ? 'taken' : await writer.deliver(chunk);
       audit();
       if (how === 'gone') return;
-      if (how === 'idle') {
-        res.destroy();
-        return;
-      }
-      if (how === 'slow') {
-        // Told, not cut off: the ending follows what the connection holds, the slot is free now, and the connection stays only while the
-        // reader still takes something.
+      if (how === 'slow' || how === 'idle') {
+        // Told, not cut off: the ending follows what the connection holds, the slot is free now, and the connection is given the ending
+        // wait to hand the rest to the operating system (a reader that took nothing in the idle bound took less than the rate asks).
         await rest.return();
         const { windowMs, minBytesPerSecond, idleMs } = pace();
-        res.write(stream.abandon(`the reader took the export too slowly (under ${minBytesPerSecond} bytes a second over ${windowMs} ms of waiting on it)`));
+        const why = how === 'slow' ? `under ${minBytesPerSecond} bytes a second over ${windowMs} ms of waiting on it` : `nothing for ${idleMs} ms`;
+        res.write(stream.abandon(`the reader took the export too slowly (${why})`));
         release();
-        closeIfStalled(res, idleMs);
+        closeUnlessFinished(res, rdfExportEndingWaitMs());
         break;
       }
       const next = await rest.next();
