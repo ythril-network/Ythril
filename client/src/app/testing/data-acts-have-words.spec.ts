@@ -12,8 +12,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { aliasLiterals, readClientSource, readRepoSource } from './server-source';
-import { callArguments } from './call-arguments';
 import { trackedAppSources } from './tracked-sources';
 import { actRowView } from '../core/space-act-view';
 import { actSetVariant } from '../pages/settings/act-set-progress.component';
@@ -81,40 +81,16 @@ function dataRefusalCodes(): string[] {
  * write-closed codes (`space_being_deleted`, `_wiped`, `_renamed`, `_restored`, `_migrated`) and the files, conflicts and views screens
  * had words for none of them, the networks screen for two.
  *
- * Derived from the client source, never listed: the string constants named for refusals (`FILE_REFUSAL_PREFIX`, the module-local
- * `DATA_REFUSALS`), `refusalText`'s default prefix, and every literal (or such a constant) a call hands as the prefix argument of
- * `refusalText` / `describeRefusal` - which is how a screen that spells its prefix inline is found. A prefix argument that is
- * none of those is reported, not skipped.
+ * Derived from the client source, never listed, by `testing/standalone/_refusal-prefixes.mjs` (the module the unused-translation-keys check
+ * reads the same prefixes with, so no second list exists; loaded by path, as `call-arguments.ts` loads its own).
  */
+const REFUSAL_PREFIXES = resolve(__dirname, '../../../../testing/standalone/_refusal-prefixes.mjs');
+const { refusalPrefixes: readRefusalPrefixes } = await import(/* @vite-ignore */ pathToFileURL(REFUSAL_PREFIXES).href) as {
+  refusalPrefixes: (sources: Array<{ file: string; src: string }>) => { prefixes: string[]; unresolved: string[] };
+};
+
 function refusalPrefixes(): { prefixes: string[]; unresolved: string[] } {
-  const sources = trackedAppSources().map(file => ({ file, src: readClientSource(file) }));
-  const constants = new Map<string, string>();
-  for (const { src } of sources) {
-    // A string constant named for refusals, exported (`FILE_REFUSAL_PREFIX`) or module-local (`DATA_REFUSALS`).
-    for (const m of src.matchAll(/\bconst (\w*REFUSAL\w*)\s*=\s*'([a-z][a-zA-Z.]*)'/g)) constants.set(m[1]!, m[2]!);
-  }
-  const prefixes = new Set(constants.values());
-  const refusalText = sources.find(s => s.file.endsWith('core/refusal-text.ts'));
-  if (!refusalText) throw new Error('core/refusal-text.ts is not among the tracked sources: the module moved, and a check over its prefixes would report clean about nothing');
-  const defaults = [...refusalText.src.matchAll(/keyPrefix = '([a-z][a-zA-Z.]*)'/g)].map(m => m[1]!);
-  if (!defaults.length) throw new Error('refusalText has no default keyPrefix any more - the spelling changed');
-  for (const d of defaults) prefixes.add(d);
-  const unresolved: string[] = [];
-  const PREFIX_ARGUMENT = { refusalText: 3, describeRefusal: 4 } as const;
-  for (const { file, src } of sources) {
-    if (file === refusalText.file) continue;
-    for (const [fn, at] of Object.entries(PREFIX_ARGUMENT)) {
-      for (const m of src.matchAll(new RegExp(`(?<!function )\\b${fn}\\(`, 'g'))) {
-        const arg = callArguments(src, m.index! + m[0].length - 1)[at];
-        if (arg === undefined) continue; // the default prefix
-        const where = `${file}:${src.slice(0, m.index!).split('\n').length}`;
-        const literal = /^'([a-z][a-zA-Z.]*)'$/.exec(arg);
-        if (literal) prefixes.add(literal[1]!);
-        else if (!constants.has(arg)) unresolved.push(`${where}: ${fn} gets prefix \`${arg}\`, which is no literal and no *_REFUSAL_PREFIX constant`);
-      }
-    }
-  }
-  return { prefixes: [...prefixes].sort(), unresolved };
+  return readRefusalPrefixes(trackedAppSources().map(file => ({ file, src: readClientSource(file) })));
 }
 
 describe('every write-closed code has its sentence under every refusal prefix (bundle-162, Q-567)', () => {

@@ -8,24 +8,17 @@
  *
  * It throws on an unterminated call instead of returning what it had: a source that does not parse is not a call with no arguments.
  * Strings and template literals are skipped whole, so a parenthesis inside one does not end the call.
+ *
+ * The one implementation is `testing/standalone/_call-arguments.mjs`, because a tool under `tools/flow-checks/` asks the same question of the
+ * same sources (`_refusal-prefixes.mjs`) and cannot import TypeScript. It is loaded by PATH, as `server-act-codes.ts` loads the comment
+ * stripper: a client spec cannot import a file outside `src`, and the type-checker does not follow the path (`rootDir` is `src`).
  */
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const MODULE = resolve(__dirname, '../../../../testing/standalone/_call-arguments.mjs');
 
 /** The trimmed arguments of the call whose opening `(` is at `open` in `src`. */
-export function callArguments(src: string, open: number): string[] {
-  if (src[open] !== '(') throw new Error(`no call opens at index ${open}`);
-  const args: string[] = [];
-  let depth = 0;
-  let quote = '';
-  let from = open + 1;
-  for (let i = open; i < src.length; i++) {
-    const c = src[i]!;
-    if (quote) { if (c === quote && src[i - 1] !== '\\') quote = ''; continue; }
-    if (c === '\'' || c === '"' || c === '`') quote = c;
-    else if (c === '(' || c === '[' || c === '{') depth++;
-    else if (c === ')' || c === ']' || c === '}') {
-      depth--;
-      if (depth === 0) { args.push(src.slice(from, i).trim()); return args; }
-    } else if (c === ',' && depth === 1) { args.push(src.slice(from, i).trim()); from = i + 1; }
-  }
-  throw new Error(`the call opened at ${open} is never closed`);
-}
+export const { callArguments } = await import(/* @vite-ignore */ pathToFileURL(MODULE).href) as {
+  callArguments: (src: string, open: number) => string[];
+};

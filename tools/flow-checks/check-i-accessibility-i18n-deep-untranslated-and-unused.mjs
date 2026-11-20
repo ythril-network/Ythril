@@ -12,7 +12,10 @@
  *     placeholders and punctuation, `{{n}}` or `-`, reads the same in every language and is not a finding).
  *   - UNUSED: a source key that no tracked client source (specs out) holds, as text: the key quoted (`'a.b'`, `"a.b"`, a template literal),
  *     or reached by a prefix the code builds at run time (`'a.' + kind`, `` `a.${kind}` ``: a literal ending in a dot that is the start of the key).
- *     A key used only by a spec is unused: the product does not show it.
+ *     A key used only by a spec is unused: the product does not show it. A key under a REFUSAL PREFIX (`files.refusal.<code>`) is reached
+ *     too: `refusalText` builds it at run time from the code the server sends, so no file spells it; the prefixes are read from the client
+ *     by `testing/standalone/_refusal-prefixes.mjs`, the module the client's own spec (`data-acts-have-words.spec.ts`) reads them with, so no
+ *     second list exists (bundle-270 H7: each write-closed code had added seven keys this check called unused).
  *   - Each list is a MEASURE (`untranslated:<locale>`, `unused:<source>`), held to a ceiling in `check-i-accessibility-i18n-deep-untranslated-and-
  *     unused.allow.json` (`{ id, max, reason, reviewBy }`, through `_allow.mjs applyCeilings`): a count above its ceiling is a finding, a ceiling for
  *     a count of zero is a problem, and a count below its ceiling is said in the verdict so the owner lowers it (a ceiling only goes down).
@@ -26,6 +29,7 @@ import { readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { trackedSources, REPO_ROOT } from '../../testing/standalone/_sources.mjs';
 import { stripComments } from '../../testing/standalone/_strip-comments.mjs';
+import { refusalPrefixes } from '../../testing/standalone/_refusal-prefixes.mjs';
 import { holds, violated, CannotAnswer, answer, isMain } from './_verdict.mjs';
 import { allowFileFor, readAllow, applyCeilings, today } from './_allow.mjs';
 
@@ -62,10 +66,14 @@ export function dynamicPrefixes(code) {
   return out;
 }
 
-/** Source keys no client source holds, quoted or by a run-time prefix; `texts` are the sources, comments in. */
-export function unusedKeys(sourceDict, texts) {
+/**
+ * Source keys no client source holds, quoted or by a run-time prefix; `texts` are the sources, comments in. `refusalFamilies` are the refusal
+ * prefixes (`files.refusal`): every key under one is looked up by the code the server sends, which no file spells.
+ */
+export function unusedKeys(sourceDict, texts, refusalFamilies = []) {
   const code = texts.map(stripComments).join('\n');
   const prefixes = dynamicPrefixes(code);
+  for (const family of refusalFamilies) prefixes.add(`${family}.`);
   const quoted = new Set();
   for (const m of code.matchAll(/['"`]([A-Za-z][\w-]*(?:\.[\w-]+)+)['"`]/g)) quoted.add(m[1]);
   const reached = (k) => quoted.has(k) || [...prefixes].some((p) => k.startsWith(p));
@@ -77,14 +85,14 @@ export function unusedKeys(sourceDict, texts) {
 const PLURAL_FORM = /\.(?:zero|one|two|few|many|other)$/;
 
 /** `[{ id, value, text }]`: one measure per non-source locale and one for the source's unused keys. */
-export function measures({ source, dicts, texts }) {
+export function measures({ source, dicts, texts, refusalPrefixes: families }) {
   const out = [];
   for (const [locale, dict] of Object.entries(dicts)) {
     if (locale === source) continue;
     const keys = untranslatedKeys(dicts[source], dict);
     out.push({ id: `untranslated:${locale}`, value: keys.length, text: `${keys.length} key(s) of ${locale} equal the ${source} wording (${keys.slice(0, 3).join(', ')}${keys.length > 3 ? ', ...' : ''})` });
   }
-  const unused = unusedKeys(dicts[source], texts);
+  const unused = unusedKeys(dicts[source], texts, families);
   out.push({ id: `unused:${source}`, value: unused.length, text: `${unused.length} ${source} key(s) no client file refers to (${unused.slice(0, 3).join(', ')}${unused.length > 3 ? ', ...' : ''})` });
   return out;
 }
@@ -95,6 +103,8 @@ export function decide(input, ceilings, todayDate) {
   if (Object.keys(dicts).length < 2) throw new CannotAnswer('only one locale file found: there is nothing to compare');
   for (const [l, d] of Object.entries(dicts)) if (Object.keys(d).length < 500) throw new CannotAnswer(`${l} holds ${Object.keys(d).length} keys: the dictionary was not read`);
   if (texts.length < 50) throw new CannotAnswer(`only ${texts.length} client sources read: the listing was not read`);
+  // The floor the client's own spec asserts: a reader that found no refusal prefix would call every refusal sentence unused.
+  if (!Array.isArray(input.refusalPrefixes) || input.refusalPrefixes.length < 4) throw new CannotAnswer(`only ${input.refusalPrefixes?.length ?? 0} refusal prefixes read from the client: the refusal sentences cannot be told from unused ones`);
   const m = measures(input);
   const { problem, over, used, slack } = applyCeilings(m, ceilings, todayDate);
   if (problem) return violated(problem);
@@ -110,7 +120,10 @@ export function realInput() {
   const dicts = Object.fromEntries(files.map((f) => [posix.basename(f, '.json'), flatten(JSON.parse(readFileSync(join(REPO_ROOT, f), 'utf8')))]));
   const config = readFileSync(join(REPO_ROOT, CLIENT_CONFIG), 'utf8');
   const sources = trackedSources(['client/src'], { ext: ['.ts', '.html'], floor: 100, specs: false }).filter((f) => !/\.spec\.ts$|\/testing\//.test(f));
-  return { source: sourceLocale(config), dicts, texts: sources.map((f) => readFileSync(join(REPO_ROOT, f), 'utf8')) };
+  const app = trackedSources(['client/src/app'], { ext: ['.ts'], floor: 100 }).filter((f) => !/\.spec\.ts$/.test(f));
+  const read = refusalPrefixes(app.map((f) => ({ file: f, src: readFileSync(join(REPO_ROOT, f), 'utf8') })));
+  if (read.unresolved.length) throw new CannotAnswer(`a refusal prefix argument this reader cannot resolve: ${read.unresolved.join('; ')}`);
+  return { source: sourceLocale(config), dicts, texts: sources.map((f) => readFileSync(join(REPO_ROOT, f), 'utf8')), refusalPrefixes: read.prefixes };
 }
 
 if (isMain(import.meta.url)) {
