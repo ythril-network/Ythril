@@ -52,7 +52,7 @@ export class NotEmbeddedYetError extends NotFoundError {}
  * The statuses a {@link ToolRefusal} carries. 406 and 503 joined with the RDF export (Q-750): a format the scope cannot take, and a page the store
  * did not answer, answered alike on both doors.
  */
-export const TOOL_REFUSAL_STATUSES = Object.freeze([400, 403, 404, 406, 409, 410, 422, 429, 503] as const);
+export const TOOL_REFUSAL_STATUSES = Object.freeze([400, 403, 404, 406, 409, 410, 413, 415, 422, 429, 503] as const);
 export type ToolRefusalStatus = (typeof TOOL_REFUSAL_STATUSES)[number];
 
 export class ToolRefusal extends Error {

@@ -126,6 +126,10 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/brain/spaces/:spaceId/stats', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   // Q-750: the records as RDF, a data read that takes a view; file statements ask `files: read` per space inside the act.
   { route: '/api/brain/spaces/:spaceId/export/rdf', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
+  // Q-753: an RDF document into the space as ordinary writes, `save_bulk`'s rung; a dry run and the status answer which ids are stored and
+  // which values break the schema, so they ask the same rung (amendment A10).
+  { route: '/api/brain/spaces/:spaceId/import/rdf', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
+  { route: '/api/brain/spaces/:spaceId/import/rdf/:importId', method: 'GET', area: 'knowledge', needs: 'write', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/events', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/events/ticket', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/facts', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
@@ -401,6 +405,9 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'space_schema_rdf', area: 'schema', needs: 'read' },
   // Q-750: its REST twin's row; file statements ask `files: read` per space inside the act.
   { tool: 'export_rdf', area: 'knowledge', needs: 'read' },
+  // Q-753: their REST twins' rows.
+  { tool: 'import_rdf', area: 'knowledge', needs: 'write' },
+  { tool: 'import_rdf_status', area: 'knowledge', needs: 'write' },
   { tool: 'space_set_network_precedence', area: 'schema', needs: 'admin' },
   // Governed by a rung from the moment it stopped being an instance-admin tool. `admin: true` exempts a tool
   // from this inventory because an instance-level capability has no space to scope to; `spaceAdmin: true` is
