@@ -33,6 +33,7 @@ import { getConfig } from '../config/loader.js';
 import {
   planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice, convertNotice, type MetaUpdateOutcome, type MetaUpdatePlan, type WriteCaller,
 } from './meta-update.js';
+import { isPlainObject } from '../util/plain-object.js';
 import { schemaConvertPrice } from './schema-convert-acts.js';
 import { spaceWriteClosedAnswer } from './space-write-gate.js';
 
@@ -52,8 +53,12 @@ export interface SpaceMetaWriteCaller {
 /** What a door hands the act. */
 export interface SpaceMetaWriteInput {
   spaceId: string;
-  /** The update body as the door read it (`meta`, the space-level fields, `typeSchemasMode`, `targetNetwork`, `convertRecords`). */
-  body: Record<string, unknown>;
+  /**
+   * The update body as the door read it (`meta`, the space-level fields, `typeSchemasMode`, `targetNetwork`, `convertRecords`). A REST door hands
+   * the request's body as it came, a missing one included: the planner's parse refuses what is not an object, in its own words, as it did
+   * before the act existed.
+   */
+  body: unknown;
   /** How the body's `typeSchemas` combine with the stored ones, when the door decides it rather than the body (the body's own is kept otherwise). */
   typeSchemasMode?: 'merge' | 'replace';
   /** The precondition: REST's `If-Match`; a door with no header passes undefined (no precondition asked for). */
@@ -103,10 +108,11 @@ export function fieldRefusalsOf(spaceId: string, body: Record<string, unknown>, 
  */
 export async function writeSpaceMeta(input: SpaceMetaWriteInput): Promise<SpaceMetaWriteAnswer> {
   const { spaceId, caller } = input;
-  const body = input.typeSchemasMode === undefined ? input.body : { ...input.body, typeSchemasMode: input.typeSchemasMode };
+  const body = input.typeSchemasMode === undefined || !isPlainObject(input.body) ? input.body : { ...input.body, typeSchemasMode: input.typeSchemasMode };
 
-  // The field rungs first, every refused field at once: one save, one conversation with whoever grants rights.
-  const fields = fieldRefusalsOf(spaceId, body, caller);
+  // The field rungs first, every refused field at once: one save, one conversation with whoever grants rights. A body that is no object names
+  // no field; the planner refuses it below.
+  const fields = isPlainObject(body) ? fieldRefusalsOf(spaceId, body, caller) : [];
   if (fields.length > 0) return { kind: 'fields-refused', status: FORBIDDEN, fields };
 
   const space = getConfig().spaces.find(s => s.id === spaceId);
