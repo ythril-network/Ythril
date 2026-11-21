@@ -56,7 +56,7 @@ const PEER_REFUSED_TOOLS: ReadonlyMap<string, string> = new Map([
   ['import_rdf', 'writes records as this instance\'s own and holds the space as an act, and this token is bound to a peer (a sync credential), which delivers records through the sync door only'],
   // Q-754: the schema-from-RDF door writes this instance's own schema; a peer's schema arrives through the sync door and the network's rounds.
   ['import_schema_rdf', 'writes this instance\'s own schema of a space, and this token is bound to a peer (a sync credential), whose schema arrives through the sync door and the network\'s rounds only'],
-  ['write_file','stores a file as this instance\'s own upload, and this token is bound to a peer (a sync credential), which delivers files through the sync door only'],
+  ['write_file', 'stores a file as this instance\'s own upload, and this token is bound to a peer (a sync credential), which delivers files through the sync door only'],
   // bundle-255: the client file change feed lists deleted paths for the feed window; a peer reads deletions as file tombstones on its own protocol.
   ['file_changes', 'is the client file change feed, and this token is bound to a peer (a sync credential), which reads deletions as file tombstones through the sync door'],
 ]);
