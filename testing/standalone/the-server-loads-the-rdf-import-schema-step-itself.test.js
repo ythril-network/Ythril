@@ -19,7 +19,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { posix } from 'node:path';
-import { readTrackedSources } from './_sources.mjs';
+import { SERVER_SOURCE_ROOT, readTrackedSources } from './_sources.mjs';
 
 const ENTRY = 'server/src/index.ts';
 const STEP = 'server/src/spaces/rdf-import-schema-step.ts';
@@ -53,7 +53,7 @@ function reachedFrom(entry, files) {
 }
 
 describe('the server loads the RDF import schema step itself', () => {
-  const files = new Map(readTrackedSources('server/src', { floor: 300 }).map(f => [f.file, f.text]));
+  const files = new Map(readTrackedSources(SERVER_SOURCE_ROOT, { floor: 300 }).map(f => [f.file, f.text]));
 
   it('the walk reaches the files it is asked about (it reads something)', () => {
     const seen = reachedFrom(ENTRY, files);
