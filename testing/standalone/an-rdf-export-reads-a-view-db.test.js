@@ -23,6 +23,8 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { waitForValue } from '../_shared/wait-for.mjs';
+import { untilAuditWritesLanded } from './_audit-rows.mjs';
 import { openRdfExportDoors, rdfMeta, baseOf, parseRdf, reportGraphs } from './_rdf-export-doors.mjs';
 
 const skip = await mongoSkipReason();
@@ -109,8 +111,13 @@ describe('an RDF export reads a view', { skip }, () => {
     assert.equal(withoutName(JSON.stringify(mw.structured), wide), withoutName(JSON.stringify(mn.structured), narrow));
     assert.ok(!JSON.stringify(mw.structured).includes(B));
     // A view's row names no space (a view is not one, as on every view read) and carries the members exported: the rows of this case's
-    // exports are those written since it began.
-    const rows = await d.col('audit_log').find({ operation: 'rdf.export', timestamp: { $gte: started } }).toArray();
+    // exports are those written since it began. A REST export's row is written when its response finishes, a moment after the client
+    // read it (an insert not yet started is not on the wire), so the read waits for the writer and is taken again until the ten are there.
+    const rows = await waitForValue(async () => {
+      await untilAuditWritesLanded();
+      const found = await d.col('audit_log').find({ operation: 'rdf.export', timestamp: { $gte: started } }).toArray();
+      return found.length >= 10 ? found : undefined;
+    }, 10_000, 100, () => 'fewer than ten rdf.export rows landed for the ten exports');
     assert.ok(rows.length >= 10, `the exports are audited: ${rows.length}`);
     assert.ok(rows.every(row => !JSON.stringify(row).includes(B)), 'the audit row names only what the caller read');
   });

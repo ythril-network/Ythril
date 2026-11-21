@@ -17,6 +17,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { tempInstanceDir } from './_vote-round-instance.mjs';
 import { bootSchemaInstance } from './_schema-doors.mjs';
 import { P1, P2 } from './_vote-round-sites.mjs';
@@ -43,7 +44,7 @@ const round = (roundId, member, deadline, over = {}) => ({
 });
 
 describe('a rebase of a space in two networks', { skip }, () => {
-  let inst, mongo, expiry, auditMod;
+  let inst, mongo, expiry;
   before(async () => {
     mongo = await openTestMongo('rdf_two_networks');
     inst = await bootSchemaInstance(dir, {
@@ -51,7 +52,6 @@ describe('a rebase of a space in two networks', { skip }, () => {
       networks: [network('n1', P1), network('n2', P2)],
     });
     expiry = await import('../../server/dist/networks/round-expiry.js');
-    auditMod = await import('../../server/dist/audit/audit.js');
   });
   after(async () => {
     inst?.close();
@@ -60,13 +60,7 @@ describe('a rebase of a space in two networks', { skip }, () => {
 
   const nets = () => inst.loader.getConfig().networks;
   const rdfOf = () => inst.loader.getConfig().spaces.find(s => s.id === SPACE)?.meta?.rdf;
-  async function rows(operation) {
-    for (let i = 0; i < 4000 && auditMod.auditWritesPending() > 0; i++) {
-      // waits-differently: bounded by turns, every fiftieth a stated 15 ms timer, as the settle matrix waits for its inserts.
-      await new Promise(r => (i % 50 === 49 ? setTimeout(r, 15) : setImmediate(r)));
-    }
-    return mongo.getDb().collection('audit_log').find({ operation }).toArray();
-  }
+  const rows = (operation) => auditRowsOf(mongo, { operation });
   async function fresh(r1, r2) {
     inst.reset();
     nets()[0].pendingRounds = [r1];

@@ -33,6 +33,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { openPushDoor } from './_push-door.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
@@ -145,7 +146,7 @@ describe('the unknownWriteFields setting is reported and audited as an operator 
 
   describe('audited', () => {
   const spaceId = AUDITED;
-  const auditRows = () => door.mongo.getDb().collection('audit_log').find({ operation: 'space.update', spaceId }).sort({ timestamp: 1 }).toArray();
+  const auditRows = () => auditRowsOf(door.mongo, { operation: 'space.update', spaceId });
   /** The key's own entries in a row's recorded changes. */
   const keyChanges = (row) => (row.changes ?? []).filter(c => c.field === 'unknownWriteFields');
 

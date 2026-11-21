@@ -39,6 +39,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { adminRights } from './_cel-doors.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
@@ -391,7 +392,7 @@ describe('delete_file deletes a directory with confirm, as the same act on every
   });
 
   describe('the audit entry of a directory delete', () => {
-    const entries = () => acts.door.mongo.getDb().collection('audit_log').find({ spaceId: S, operation: 'file.delete' }).toArray();
+    const entries = () => auditRowsOf(acts.door.mongo, { spaceId: S, operation: 'file.delete' });
 
     for (const via of ['TOOL', 'MCP']) {
       it(`${via}: carries kind: directory, once for the call; a single file carries no change list`, async () => {

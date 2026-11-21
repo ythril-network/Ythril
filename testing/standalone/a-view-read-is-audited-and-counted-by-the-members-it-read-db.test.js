@@ -27,6 +27,7 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openViewDoors, viewOf } from './_view-doors.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
+import { untilAuditWritesLanded } from './_audit-rows.mjs';
 import { metricSeries, metricValue } from './_metric-series.mjs';
 
 const skip = await mongoSkipReason();
@@ -46,7 +47,7 @@ async function mustCreate(key, name, members) {
 }
 const both = () => ({ [QA]: d.row({ knowledge: 'read' }), [OPS]: d.row({ knowledge: 'read' }) });
 
-const auditRows = (tokenId, extra = {}) => d.col('audit_log').find({ tokenId, ...extra }).toArray();
+const auditRows = async (tokenId, extra = {}) => { await untilAuditWritesLanded(); return d.col('audit_log').find({ tokenId, ...extra }).toArray(); };
 /** The rows a token's calls left, once at least `min` have landed (the writer is fire-and-forget). */
 const rowsAfter = (tokenId, min = 1, extra = {}) => waitForValue(async () => { const r = await auditRows(tokenId, extra); return r.length >= min ? r : undefined; },
   10_000, 50, undefined, { what: `${min} audit row(s) for ${tokenId}` });

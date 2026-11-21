@@ -25,6 +25,7 @@ import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { goneOrMarker } from './_feed-marker-row.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { driverWriteFailures, failWrites } from './_write-faults.mjs';
@@ -107,7 +108,7 @@ describe('housekeeping finishes an owed move', { skip }, () => {
     assert.deepEqual((await acts.raw()).filter(t => !t.pending).map(t => t.path).sort(), ['hk/from.txt'], 'the path the move left is not tombstoned, once');
     assert.equal(await finishedCount(), before + 1, 'the finished move was not counted');
     // The audit entry is written after the act and not awaited by it (audit.ts logAuditEntry), so it is waited FOR, not read once.
-    const auditRows = () => acts.door.mongo.getDb().collection('audit_log').find({ spaceId: S, operation: 'file.move.finish' }).toArray();
+    const auditRows = () => auditRowsOf(acts.door.mongo, { spaceId: S, operation: 'file.move.finish' });
     await waitFor(async () => (await auditRows()).length >= 1, 5000, 50).catch(() => {});
     const audit = await auditRows();
     assert.equal(audit.length, 1, `the instance finished a move no request named and did not audit it: ${JSON.stringify(audit)}`);

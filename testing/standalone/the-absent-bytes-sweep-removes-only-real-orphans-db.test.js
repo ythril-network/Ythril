@@ -41,6 +41,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
@@ -56,7 +57,7 @@ const JSON_BODY = { 'content-type': 'application/json' };
 let acts, loader, meta, files, knownKeys, operation;
 const rows = () => acts.door.coll(S, 'files');
 const rowOf = (p) => rows().findOne({ _id: p });
-const auditRows = () => acts.door.mongo.getDb().collection('audit_log').find({ spaceId: S, operation }).toArray();
+const auditRows = () => auditRowsOf(acts.door.mongo, { spaceId: S, operation });
 const entryOf = async () => (await import('../../server/dist/config/loader.js')).getConfig().spaces.find(s => s.id === S);
 
 /** `n` healthy files: bytes on disk and a row with a hash. Exactly half the recorded rows absent is not mass loss, so a case seeds at least as many as it loses. */

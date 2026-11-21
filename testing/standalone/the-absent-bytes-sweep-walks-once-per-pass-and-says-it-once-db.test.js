@@ -31,6 +31,7 @@
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
@@ -45,7 +46,7 @@ let acts, loader, sweep, manifest, knownKeys, operation;
 const rows = () => acts.door.coll(S, 'files');
 const rowOf = (p) => rows().findOne({ _id: p });
 const entryOf = () => loader.getConfig().spaces.find(s => s.id === S);
-const auditRows = () => acts.door.mongo.getDb().collection('audit_log').find({ spaceId: S, operation }).toArray();
+const auditRows = () => auditRowsOf(acts.door.mongo, { spaceId: S, operation });
 
 async function healthy(n) { for (let i = 0; i < n; i++) await acts.seed(`ok${String(i).padStart(4, '0')}.txt`, { sha256: SHA_PRESENT, seq: 1 }); }
 async function lose(paths) { if (paths.length) await rows().insertMany(paths.map(p => orphan(S, p))); }

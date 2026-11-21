@@ -37,6 +37,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import {
   failWrites, withWriteBound, settleWithin, withCollectionAsView, withStalledReads, HUNG_READ_STALL_MS, hungReadLookMs,
@@ -266,7 +267,7 @@ describe('legacy read spills are swept from the space', { skip }, () => {
       } finally {
         await db.collection(`${FAILING}_src`).deleteMany({});
       }
-      const entries = () => mongo.col('audit_log').find({ operation: 'file.legacy_spill.sweep' }).toArray();
+      const entries = () => auditRowsOf(mongo, { operation: 'file.legacy_spill.sweep' });
       assert.ok(await holdsWithin(async () => (await entries()).length >= 2, 5_000, 50), 'the entries are written');
       await elapse(300, 'absence window: an extra audit entry would arrive after the two awaited above');   // time is the subject: an extra entry would arrive in this window
       const spaces = (await entries()).map(e => e.spaceId).sort();

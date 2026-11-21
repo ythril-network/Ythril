@@ -17,6 +17,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { tempInstanceDir } from './_vote-round-instance.mjs';
 import { bootSchemaInstance } from './_schema-doors.mjs';
 import { NET_ID, P1 } from './_vote-round-sites.mjs';
@@ -35,7 +36,7 @@ const network = () => ({
 });
 
 describe('a passed rebase lands at its deadline', { skip }, () => {
-  let inst, mongo, expiry, retention, roundState, auditMod;
+  let inst, mongo, expiry, retention, roundState;
   before(async () => {
     mongo = await openTestMongo('rdf_rebase_deadline');
     inst = await bootSchemaInstance(dir, {
@@ -45,7 +46,6 @@ describe('a passed rebase lands at its deadline', { skip }, () => {
     expiry = await import('../../server/dist/networks/round-expiry.js');
     retention = await import('../../server/dist/sync/vote-round-retention.js');
     roundState = await import('../../server/dist/networks/round-state.js');
-    auditMod = await import('../../server/dist/audit/audit.js');
   });
   after(async () => {
     inst?.close();
@@ -55,13 +55,7 @@ describe('a passed rebase lands at its deadline', { skip }, () => {
   const netOf = () => inst.loader.getConfig().networks.find(n => n.id === NET_ID);
   const rdfOf = () => inst.loader.getConfig().spaces.find(s => s.id === SPACE)?.meta?.rdf;
   const rebaseRound = () => netOf().pendingRounds.find(r => r.type === 'space_rebase');
-  async function auditRows() {
-    for (let i = 0; i < 4000 && auditMod.auditWritesPending() > 0; i++) {
-      // waits-differently: bounded by turns, every fiftieth a stated 15 ms timer, as the settle matrix waits for its inserts.
-      await new Promise(r => (i % 50 === 49 ? setTimeout(r, 15) : setImmediate(r)));
-    }
-    return mongo.getDb().collection('audit_log').find({ operation: 'space.rdf_rebase' }).toArray();
-  }
+  const auditRows = () => auditRowsOf(mongo, { operation: 'space.rdf_rebase' });
   async function propose() {
     inst.reset();
     netOf().pendingRounds = [];
@@ -149,7 +143,7 @@ describe('a passed rebase lands at its deadline', { skip }, () => {
     expiry.runRoundExpiryTick(deadline + 1);
     assert.deepEqual(rdfOf(), OLD);
     assert.equal((await auditRows()).length, 0, 'a failed landing was audited as a landing');
-    const failed = await mongo.getDb().collection('audit_log').find({ operation: 'space.rdf_rebase_failed' }).toArray();
+    const failed = await auditRowsOf(mongo, { operation: 'space.rdf_rebase_failed' });
     assert.equal(failed.length, 1, `the failed landing was not audited: ${JSON.stringify(failed)}`);
     assert.ok(String(failed[0].path).includes(round.roundId), failed[0].path);
   });

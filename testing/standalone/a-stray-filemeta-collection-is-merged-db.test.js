@@ -45,6 +45,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { parkWrites, withCollectionAsView } from './_write-faults.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
@@ -96,8 +97,7 @@ async function within(p, what) {
 
 /** The audit write is fire-and-forget, so wait for the entry rather than read once. */
 async function auditFor(space, operation) {
-  const audit = door.mongo.getDb().collection('audit_log');
-  return waitForValue(() => audit.findOne({ spaceId: space, operation }), 5000, 50, undefined,
+  return waitForValue(async () => (await auditRowsOf(door.mongo, { spaceId: space, operation }))[0], 5000, 50, undefined,
     { what: `an audit entry for ${operation} in ${space}` });
 }
 
@@ -375,7 +375,7 @@ describe('file metadata a 4.0-5.6.1 pull left in <space>_filemeta is recovered i
         'a failing space stopped the drain of the spaces after it');
       assert.equal(await strayExists(BAD), true, 'the failing space lost its collection');
       assert.ok(lines.some(l => l.includes('Stray file-metadata drain') && l.includes(BAD)), 'the failure line does not name the space');
-      assert.equal(await door.mongo.getDb().collection('audit_log').findOne({ spaceId: BAD, operation: 'file.stray_filemeta.drain' }), null);
+      assert.deepEqual(await auditRowsOf(door.mongo, { spaceId: BAD, operation: 'file.stray_filemeta.drain' }), []);
       // The line names the step the failure was in and when the space is tried again, and is said once per window: the
       // reporter's throttle (bundle-53 G12), not a hand-written one beside it.
       const said = (all) => all.filter(l => l.includes(`Stray file-metadata drain (write) failed for space '${BAD}'`));

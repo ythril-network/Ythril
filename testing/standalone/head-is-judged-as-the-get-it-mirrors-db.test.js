@@ -38,6 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { listenOnLoopback } from '../_shared/local-server.mjs';
 import { appRouter } from '../_shared/in-process-app.mjs';
@@ -247,8 +248,7 @@ describe('a HEAD is judged, answered and audited as the GET it mirrors (real rou
   });
 
   describe('4. audit', () => {
-    const auditColl = () => door.mongo.getDb().collection('audit_log');
-    const rowOf = (filter) => waitForValue(() => auditColl().findOne(filter), 5_000, 100, `no audit row for ${JSON.stringify(filter)}`);
+    const rowOf = (filter) => waitForValue(async () => (await auditRowsOf(door.mongo, filter))[0], 5_000, 100, `no audit row for ${JSON.stringify(filter)}`);
 
     it('an allowed HEAD leaves the GET\'s row, marked HEAD; a refused one is recorded as a refused GET is', async () => {
       loader.mutateConfig(c => { c.audit = { ...(c.audit ?? {}), logReads: true }; });

@@ -27,6 +27,7 @@ import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { seedClaim, jobOf } from './_media-claim.mjs';
@@ -41,7 +42,7 @@ const S = 'leakreport';
 let acts, SELF, knownKeys, loader;
 const files = () => acts.door.coll(S, 'files');
 const links = () => acts.door.coll(S, 'links');
-const auditRows = () => acts.door.mongo.getDb().collection('audit_log').find({ spaceId: S, operation: 'file.leaked_rows.repair' }).toArray();
+const auditRows = () => auditRowsOf(acts.door.mongo, { spaceId: S, operation: 'file.leaked_rows.repair' });
 
 describe('the leaked-rows repair reads and reports what it did (real MongoDB)', { skip }, () => {
   before(async () => {

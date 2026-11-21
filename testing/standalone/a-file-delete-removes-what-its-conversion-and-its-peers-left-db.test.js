@@ -51,6 +51,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { goneOrMarker } from './_feed-marker-row.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
@@ -233,7 +234,7 @@ describe('deleting a file removes what its conversion and its peers left, and on
       // Files no request named were removed: one audit entry for the space, with no token (as the stray drain's drop). The entry is written
       // without being awaited (`logInternalAudit`), so it is waited for; a second entry, had one been written, would be read with it.
       const audit = await waitForReading(
-        () => door.mongo.getDb().collection('audit_log').find({ spaceId: S, operation: 'file.peer_sidecar.retire' }).toArray(),
+        () => auditRowsOf(door.mongo, { spaceId: S, operation: 'file.peer_sidecar.retire' }),
         (rows) => rows.length > 0, 5000, 50, { what: 'the peer sidecar retirement audit entry' });
       assert.equal(audit.length, 1, `the retirement was audited ${audit.length} times (want once for the space): ${JSON.stringify(audit)}`);
       assert.equal(audit[0].tokenId ?? null, null, 'the retirement was audited as a token\'s act');
