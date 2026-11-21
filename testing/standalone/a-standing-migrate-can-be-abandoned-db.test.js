@@ -38,7 +38,7 @@ import dns from 'node:dns';
 import { emptyTarget } from './_migrate-target.mjs';
 import { mongoSkipReason, testMongoUri, TEST_MONGO_HOST } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
-import { clearActEntries, entriesOf, resetRunnerForTest, deferred, untilRunnerIdle, auditRowsOf } from './_space-act-harness.mjs';
+import { clearActEntries, entriesOf, resetRunnerForTest, deferred, untilRunnerIdle, auditRowsOfOperation } from './_space-act-harness.mjs';
 
 const skip = await mongoSkipReason();
 process.env['NODE_ENV'] = 'test';
@@ -148,7 +148,7 @@ describe('a standing migrate can be abandoned (real MongoDB)', { skip }, () => {
     const report = await door.request(door.routeHandler(dataRouter, 'get', '/migrate'));
     const rows = report.body?.migrate?.spaces ?? report.body?.spaces ?? [];
     assert.ok(rows.length >= SPACES.length && rows.every(r => r.state === 'migrate_abandoned'), `the report does not read migrate_abandoned per space: ${JSON.stringify(rows)}`);
-    const audit = await auditRowsOf(door.mongo, MIGRATE_FAILED);
+    const audit = await auditRowsOfOperation(door.mongo, MIGRATE_FAILED);
     assert.ok(audit.some(r => JSON.stringify(r).includes(migrateId)), `no ${MIGRATE_FAILED} audit row names the abandoned set: ${JSON.stringify(audit)}`);
 
     const again = await abandon();

@@ -28,7 +28,7 @@ import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { removeInstanceDir, settled, startFakePeer, allowEngineToDialPrivatePeers } from './_vote-round-instance.mjs';
 import { startVotesPeer } from './_vote-round-sites.mjs';
-import { auditRowsOf } from './_space-act-harness.mjs';
+import { auditRowsOfOperation } from './_space-act-harness.mjs';
 import { untilAuditWritesLanded } from './_audit-rows.mjs';
 import { SELF, M1, tempInstance, networkOf, boot, databaseTakesCollections, warmSpaceCreation } from './_round-open-fixtures.mjs';
 
@@ -94,7 +94,7 @@ describe('R3: a space deleted after its addition is not added back', { skip }, (
     const audit = await import('../../server/dist/audit/middleware.js');
     assert.equal(typeof audit.ROUND_ADDITION_RETIRED_OPERATION, 'string', 'server/src/audit/middleware.ts does not export ROUND_ADDITION_RETIRED_OPERATION (design v5 section 2.3: every retirement is audited)');
     // The audit write is queued, not awaited: poll for the entry (bounded by turns), then count — a read made at once is not a zero.
-    await auditRowsOf(mongo, audit.ROUND_ADDITION_RETIRED_OPERATION, { atLeast: 1 });
+    await auditRowsOfOperation(mongo, audit.ROUND_ADDITION_RETIRED_OPERATION, { atLeast: 1 });
     await untilAuditWritesLanded();
     const rows = (await mongo.col('audit_log').find({}).toArray()).filter(r => JSON.stringify(r).includes(audit.ROUND_ADDITION_RETIRED_OPERATION));
     assert.equal(rows.length, 1, 'one audit entry per retired addition');

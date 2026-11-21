@@ -34,7 +34,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openToolDoor } from './_tool-door.mjs';
-import { seedActEntry, clearActEntries, deferred, resetRunnerForTest, auditRowsOf } from './_space-act-harness.mjs';
+import { seedActEntry, clearActEntries, deferred, resetRunnerForTest, auditRowsOfOperation } from './_space-act-harness.mjs';
 import { restoreModules, takeBackup, restoreAsActs, callDataDoor, restoreEntries, startRestoreActs } from './_restore-act.mjs';
 
 const skip = await mongoSkipReason();
@@ -131,7 +131,7 @@ describe('the restore report, its abandon, and maintenance while a restore stand
     assert.ok(await writers.fact.saveFact('r-owed', 'after the abandon', [], [], undefined, undefined, 'note'), 'the abandon did not lift the hold');
     assert.equal(maintenance.isMaintenanceActive(), false, 'maintenance outlived the abandoned restore');
     assert.equal(perSpace(await report())['r-owed']?.state, 'restore_abandoned', 'the report does not say the space\'s restore was abandoned');
-    const audit = await auditRowsOf(door.mongo, 'data.restore.abandoned');
+    const audit = await auditRowsOfOperation(door.mongo, 'data.restore.abandoned');
     assert.ok(audit.some(r => JSON.stringify(r).includes(backup.id)), `no data.restore.abandoned audit row names the backup: ${JSON.stringify(audit)}`);
   });
 });
