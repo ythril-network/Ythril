@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Changes on upgrade | Action |
 |---|---|
+| An RDF data import takes `schema` (`generate`, `expand`, `update`) and `from`: the file's classes and shapes build or extend the space's schema, the data is judged by it, and the schema is written once from inside the import only when the data passes; it needs `schema: write` besides and, on REST, the second factor where the token needs one. `schema` was refused before; an import without it is unchanged | None |
 | With `softDeleteFileMeta` off, a deleted, moved or re-keyed file leaves a feed marker (path, deletion time, position; nothing else) for `fileChangeFeedWindowDays` (default 30) | None; set the key to change the window, 0 to purge at the next sweep |
 | A file deleted before this release has an old position: it is listed as deleted only to a feed read with no cursor | None |
 | A `config.json` that is there but empty, not JSON or unreadable stops the start, naming the file, instead of opening first-run setup | Repair or restore the file; delete it only to set the instance up anew |
