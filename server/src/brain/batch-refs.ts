@@ -27,15 +27,12 @@
  */
 import type { RefKind } from '../config/types-knowledge.js';
 import { dependencyFailed } from './write-plan/types.js';
+import { REF_USE_PREFIX, isRefUse } from './ref-use.js';
 
 /** How a caller declares a key on an item, and how they name it afterwards. */
 export const REF_DECLARE_FIELD = '$ref';
-const REF_USE_PREFIX = '$ref:';
-
-/** Is this value a reference to something the same call created, rather than a stored id? */
-export function isRefUse(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith(REF_USE_PREFIX);
-}
+// The prefix and the test for it live in `ref-use.ts` (no imports), which `entity-refs.ts` asks too; re-exported here for the callers of this module.
+export { isRefUse };
 
 /** The key a `"$ref:post-1"` names. Undefined for anything that is not a reference. */
 export function refKeyUsed(value: unknown): string | undefined {

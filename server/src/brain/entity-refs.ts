@@ -17,7 +17,7 @@
 import { readStoredById } from '../db/read-by-id.js';
 import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
-import { isRefUse } from './batch-refs.js';
+import { isRefUse } from './ref-use.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { SpacePart } from '../db/space-collection.js';
 import { REF_NOUN, quotedRefs, missingReferencesText } from '../spaces/schema-violation-codes.js';
