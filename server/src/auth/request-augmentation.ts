@@ -16,6 +16,13 @@ declare global {
   namespace Express {
     interface Request {
       authToken?: Omit<TokenRecord, 'hash'> | OidcTokenRecord;
+      /**
+       * The credential a guard resolved, set the moment it resolves and before the guard decides anything else. A guard that refuses
+       * (a rung the token lacks, a space it does not reach, a second factor) answers before it attaches `authToken`, which means "let in", so the
+       * audit row of a refused call read no token and said nobody called (Q-754 D1). The audit middleware names this one for the row; the
+       * activity counters and every other reader still ask `authToken` alone.
+       */
+      resolvedToken?: Omit<TokenRecord, 'hash'> | OidcTokenRecord;
       resolvedSpaceId?: string;
       /**
        * The personal view a path-scoped READ door accepted for this caller, and the spaces it reads (`viewReadMembers`, in the route's area, at

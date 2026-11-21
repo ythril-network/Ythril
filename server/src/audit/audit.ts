@@ -139,7 +139,12 @@ export function logAuditEntry(input: AuditEntryInput): Promise<void> {
   pendingWrites++;
   return write
     .then(() => undefined, (err: unknown) => { log.warn(`Audit log write failed: ${peerText(err)}`); })
-    .finally(() => { pendingWrites--; });
+    .finally(() => {
+      pendingWrites--;
+      // A row has landed: a total counted before it is a count of a log that is gone (Q-754 D2: entries that held two rows the cached
+      // total did not, `total: 5` beside 7 entries).
+      _totalCache.clear();
+    });
 }
 
 /**
@@ -348,7 +353,8 @@ export async function queryAuditLog(params: AuditQueryParams): Promise<AuditQuer
   // `total` is only used to render "showing N of M", so it does not need to be exact to the
   // millisecond — but it DID need a full scan. Cache it briefly per filter: paging through a
   // result set now counts once instead of once per page.
-  const total = await cachedTotal(filter);
+  // Never fewer than the page itself shows: a row that landed after the count was taken is in the entries and not in the total.
+  const total = Math.max(await cachedTotal(filter), offset + entries.length + (hasMore ? 1 : 0));
 
   return { entries, total, hasMore };
 }
