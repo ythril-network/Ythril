@@ -118,6 +118,8 @@ describe('a dry run of the schema-from-RDF door answers what its write answers (
       if (door === 'rest') assert.equal(answer.status, 412, answer.text.slice(0, 300));
       else assert.equal(answer.isError, true, answer.text.slice(0, 300));
       assert.equal(answer.code, 'schema_rdf_changed', `${door}: ${answer.text.slice(0, 300)}`);
+      // Q-754 R4: the tool carries the code as structured content, as it does for every other code it answers (REST has it in the body).
+      assert.equal(answer.body?.code, 'schema_rdf_changed', `${door}: the answer's body names no code: ${JSON.stringify(answer.body)}`);
       assert.deepEqual(d.heldTypes(id), {}, `${door}: the stale build was written`);
       assert.equal(d.heldMeta(id).purpose, 'changed meanwhile', `${door}: the change made meanwhile was lost`);
     }
