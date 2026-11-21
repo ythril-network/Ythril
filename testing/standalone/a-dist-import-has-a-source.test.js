@@ -28,6 +28,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { trackedSources, REPO_ROOT } from './_sources.mjs';
+import { ts, parseSource, walkEveryNode } from '../_shared/syntax-tree.mjs';
 
 /** `../../server/dist/brain/write-connections.js` → `server/src/brain/write-connections.ts` */
 const sourceFor = (distPath) =>
@@ -37,9 +38,23 @@ const sourceFor = (distPath) =>
  * An IMPORT, not any string that happens to contain the path. The first version matched a quoted path
  * anywhere, and reported `verify-line.test.js` — where the string is a FIXTURE, deliberately naming an
  * untracked file to prove a verify clause refuses one. A gate that cannot tell an import from an example
- * fails on correct code, which is how gates get switched off.
+ * fails on correct code, which is how gates get switched off. A regex over the text still could not: a
+ * fixture that spells a whole import inside a template string matched it (every-local-named-import-is-exported's
+ * own case), so the imports are read from the syntax tree: import and export declarations, `import()` and
+ * `require()` with a literal path.
  */
-const IMPORTS = /(?:from\s*|import\s*\(\s*|require\s*\(\s*)['"]([^'"]*server\/dist\/[^'"]+\.js)['"]/g;
+const DIST = /server\/dist\/.+\.js$/;
+function distImportsOf(file, text) {
+  const found = [];
+  walkEveryNode(parseSource(file, text), (node) => {
+    let spec = null;
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) spec = node.moduleSpecifier.text;
+    else if (ts.isCallExpression(node) && node.arguments[0] && ts.isStringLiteralLike(node.arguments[0])
+      && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))) spec = node.arguments[0].text;
+    if (spec && DIST.test(spec)) found.push(spec);
+  });
+  return found;
+}
 
 describe('a test that imports the build imports something that is still built', () => {
   it('every dist import resolves to a source file', () => {
@@ -48,8 +63,7 @@ describe('a test that imports the build imports something that is still built', 
     const orphans = [];
     for (const file of tests) {
       const text = readFileSync(join(REPO_ROOT, file), 'utf8');
-      for (const m of text.matchAll(IMPORTS)) {
-        const distPath = m[1];
+      for (const distPath of distImportsOf(file, text)) {
         const src = sourceFor(distPath);
         // `.d.ts`-only and index re-exports are still sources; anything with no `.ts` at all is the case.
         if (!existsSync(join(REPO_ROOT, src))) orphans.push(`${file} → ${distPath} (no ${src})`);
@@ -64,13 +78,21 @@ describe('a test that imports the build imports something that is still built', 
       + 'assertions pass against a version that no longer exists.');
   });
 
+  it('an import written inside a string is a fixture, not an import; a real import, a dynamic import and a require are', () => {
+    // Bought by every-local-named-import-is-exported.test.js: its case proving a server/dist import is not judged carries
+    // `import { x } from '../../server/dist/x.js'` inside a template string, and a regex over the text took it for an import.
+    const q = '\x27';
+    const fixture = `const files = { 'a.test.js': \`import { x } from ${q}../../server/dist/x.js${q};\` };\n`;
+    assert.deepEqual(distImportsOf('f.test.js', fixture), []);
+    const real = `import { a } from ${q}../../server/dist/a.js${q};\nconst b = await import(${q}../../server/dist/b.js${q});\nconst c = require(${q}../../server/dist/c.js${q});\nexport { d } from ${q}../../server/dist/d.js${q};\n`;
+    assert.deepEqual(distImportsOf('f.test.js', real), ['../../server/dist/a.js', '../../server/dist/b.js', '../../server/dist/c.js', '../../server/dist/d.js']);
+  });
+
   it('and the scan can actually see a dist import', () => {
-    // A FLOOR on the pattern itself. If `IMPORTS` ever stopped matching, the case above would report clean
+    // A FLOOR on the reader itself. If `distImportsOf` ever stopped finding imports, the case above would report clean
     // having examined nothing — the same defect it exists to catch, one level up.
     const tests = trackedSources(['testing'], { ext: ['.test.js', '.mjs'], floor: 100 });
-    // Built FRESH per file: a shared /g regex carries `lastIndex` between calls, so every other file would
-    // be skipped and the count would come back about half — and half of a floor still passes.
-    const withImports = tests.filter(f => new RegExp(IMPORTS.source).test(readFileSync(join(REPO_ROOT, f), 'utf8')));
+    const withImports = tests.filter(f => distImportsOf(f, readFileSync(join(REPO_ROOT, f), 'utf8')).length > 0);
     assert.ok(withImports.length > 10,
       `only ${withImports.length} test(s) appear to import from server/dist; the pattern is broken`);
   });
