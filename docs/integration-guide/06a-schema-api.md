@@ -51,7 +51,7 @@ whole type map, and `typeSchemasMode: "replace"` is how a type is DELETED — so
 operation. Editing a single type is `schema` `write`, on the two granular routes below. An instance
 administrator and a space administrator both still pass, because both hold `admin` on `schema`.
 
-Full-replace semantics for the entire `meta.typeSchemas` map. Use this when you want to overwrite all type definitions across all knowledge types in a single call (for example, restoring an exported schema). For incremental updates, prefer `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` (single type) or `PATCH /api/spaces/:id` (deep-merge).
+Full-replace semantics for the entire `meta.typeSchemas` map. Use this when you want to overwrite all type definitions across all knowledge types in a single call (for example, restoring an exported schema). For incremental updates, prefer `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` (single type) or `PATCH /api/spaces/:id` (deep-merge). A map that holds more than 200 types of one kind is refused `400` (the map replaces the stored one, so every name in it counts); two terms of an RDF space on one address are refused `422` `rdf_term_clash`; a schema the space's rules cannot be read together with is refused `400` with the parse's message. Nothing is written in any of them.
 
 On a space in no network, the previous `typeSchemas` (when it holds any type) is first backed up to `_schema-backup-<ISO-timestamp>.json` inside the space's file store, so a bad replacement can be recovered or re-imported, and the replacement is then applied at once. Backup write failures are logged but never block the replacement. On a networked space nothing is written until the round passes, so no backup file is made: the round is the review, and a passed round applies as a merge (below).
 
@@ -139,7 +139,7 @@ before it.
 - `:knowledgeType` must be one of `entity`, `fact`, `edge`, `chrono`.
 - The body is validated by the same `TypeSchema` rules as the full `PATCH /api/spaces/:id` endpoint (property schema `mergeFn`/`type` compatibility, field max lengths, rules, etc.), and refused as `{ "error", "issues" }`.
 - **A write to a space in a network is merged and priced against the space's own definitions**, never against the effective schema a network layer is laid under, so saving one type never turns a network's definition of it into yours.
-- At most 200 type definitions per knowledge type. Adding a 201st type returns `400`.
+- At most 200 type definitions per knowledge type. Adding a 201st type returns `400`. A type that would give two terms of an RDF space one address is refused `422` `rdf_term_clash`, and one the merged schema cannot be read with is refused `400`.
 - The meta version counter is incremented and the previous version is pushed to history (same as full PATCH).
 
 ---
