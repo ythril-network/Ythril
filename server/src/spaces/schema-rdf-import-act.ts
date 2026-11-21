@@ -36,6 +36,7 @@ import { parseRdf } from '../rdf/parse.js';
 import { counted, BodyTooLarge, RDF_IMPORT_UPLOAD_IDLE_MS } from '../rdf/import-upload.js';
 import {
   RDF_BOUND_EXCEEDED, RDF_UNSUPPORTED_ENCODING, RDF_UNSUPPORTED_FORMAT, RDF_UPLOAD_STALLED, rdfDocumentRefusalOf, rdfFormatOf, rdfParamBool, rdfParamList,
+  refusal, type RdfDocumentRefusal,
 } from '../rdf/rdf-document.js';
 import { addressNames, type SourceNames } from '../rdf/term-reverse.js';
 import type { Quad } from '../rdf/literals.js';
@@ -145,11 +146,8 @@ export function setSchemaRdfImportKnobsForTest(k: SchemaRdfImportKnobs | null): 
 
 // ── Answers ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** A refusal: its status, our sentence, its code, and what more a caller reads. */
-export interface SchemaRdfImportRefusal { kind: 'refused'; status: number; error: string; code: string; detail?: Record<string, unknown> }
-
-const refusal = (status: number, code: string, error: string, detail?: Record<string, unknown>): SchemaRdfImportRefusal =>
-  ({ kind: 'refused', status, code, error, ...(detail ? { detail } : {}) });
+/** A refusal: its status, our sentence, its code, and what more a caller reads (the shape the RDF document front half declares). */
+export type SchemaRdfImportRefusal = RdfDocumentRefusal;
 
 /** The changed types of a proposal, per kind: only the types the file adds or changes. */
 export type ChangedTypeSchemas = Partial<Record<KnowledgeType, Record<string, unknown>>>;
@@ -405,9 +403,9 @@ async function readAndBuild(input: SchemaRdfImportInput, p: SchemaRdfImportParam
   const verdict = planSpaceMetaUpdate({ spaceId: input.spaceId, space, body: writeBodyOf(proposal), ifMatch: String(proposal.version), caller: writeCallerOf(input.caller) });
   if (!verdict.ok) return chainRefusal(verdict.refusal.status, verdict.refusal.body as { error: string; code?: string }, proposed);
   // A dry run writes nothing, and a build that changes nothing writes nothing either (R3): a write raises the version and pushes a history
-  // snapshot, and a space in a network would be refused for a vote that has nothing to carry.
+  // snapshot, and a space in a network would be refused for a vote that has nothing to carry. Whether the space is in a network is asked once,
+  // by the settings write below (`refuseIfNetworked`), whose refusal `chainRefusal` answers with the proposal.
   if (dryRun || proposal.answer.changes.length === 0) return { kind: 'done', status: HTTP.OK, body: proposed, audit: auditOf(proposed, null) };
-  if (getConfig().networks.some(n => n.spaces.includes(input.spaceId))) return networkedRefusal(proposed);
 
   knobs.hooks?.beforeWrite?.();
   const written = await writeSpaceMeta({

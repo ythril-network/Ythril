@@ -66,7 +66,7 @@ import { rdfSpaceState, type RdfCaller } from '../rdf/rdf-space-state.js';
 import { RDF_FORMATS, type RdfFormat } from '../rdf/serialize.js';
 import { parseRdf } from '../rdf/parse.js';
 import {
-  RDF_UNSUPPORTED_ENCODING, RDF_UPLOAD_STALLED, rdfDocumentRefusalOf, rdfFormatOf, rdfParamBool, rdfParamList,
+  RDF_UNSUPPORTED_ENCODING, RDF_UPLOAD_STALLED, rdfDocumentRefusalOf, rdfFormatOf, rdfParamBool, rdfParamList, refusal, type RdfDocumentRefusal,
 } from '../rdf/rdf-document.js';
 import { addressNames, recordOfAddress, type AddressNames } from '../rdf/term-reverse.js';
 import type { RecordKind } from '../rdf/term-iri.js';
@@ -630,8 +630,8 @@ export interface RdfImportInput {
   caller: RdfCaller | undefined;
 }
 
-/** A refusal: its status, our sentence, its code, and what more a caller reads. */
-export interface RdfImportRefusal { kind: 'refused'; status: number; error: string; code: string; detail?: Record<string, unknown> }
+/** A refusal: its status, our sentence, its code, and what more a caller reads (the shape the RDF document front half declares). */
+export type RdfImportRefusal = RdfDocumentRefusal;
 
 /** An import's report, finished (or a dry run's). */
 export interface RdfImportDone { kind: 'report'; status: typeof HTTP.OK; report: RdfImportReport }
@@ -645,9 +645,6 @@ export type RdfImportAnswer = RdfImportDone | RdfImportRunning | RdfImportRefusa
 export function runningBodyOf(a: RdfImportRunning): { importId: string; status: 'running'; location: string; retryAt?: string } {
   return { importId: a.importId, status: 'running', location: a.location, ...(a.retryAt ? { retryAt: a.retryAt } : {}) };
 }
-
-const refusal = (status: number, code: string, error: string, detail?: Record<string, unknown>): RdfImportRefusal =>
-  ({ kind: 'refused', status, code, error, ...(detail ? { detail } : {}) });
 
 /**
  * The space's RDF base or vocabulary is not what the door sorted the file by: the spool's grouping (a chrono's time nodes with their owner) and
