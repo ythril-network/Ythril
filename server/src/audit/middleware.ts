@@ -17,10 +17,11 @@ import { isOidc } from '../auth/oidc-caller.js';
 import { requestAddress } from './request-address.js';
 import { governedMethod } from '../http/governed-method.js';
 import { caseBlind, routeSpelling, trimTrailingSlashes } from '../http/path-spelling.js';
-// `req.recallOutcome` below is declared by `auth/middleware.ts` (a global `Express.Request` augmentation). This file reads it, so it names
-// the file that declares it: a program that reaches this module without reaching that one (the metric registry reads `MCP_TOOL_OPERATIONS`
-// through `audit-map`, which imports this) must still compile. Type-only, so nothing is imported at run time.
-import type {} from '../auth/middleware.js';
+// `req.recallOutcome` below is declared by `auth/request-augmentation.ts` (a global `Express.Request` augmentation). This file reads it, so it
+// names the file that declares it: a program that reaches this module without reaching the guards (the metric registry reads
+// `MCP_TOOL_OPERATIONS` through `audit-map`, which imports this) must still compile. Type-only, so nothing is imported at run time; and the
+// leaf, not `auth/middleware.ts`, so this edge holds no module in the server's import cycle (Q-754).
+import type {} from '../auth/request-augmentation.js';
 
 // ── Operation mapping ──────────────────────────────────────────────────────
 

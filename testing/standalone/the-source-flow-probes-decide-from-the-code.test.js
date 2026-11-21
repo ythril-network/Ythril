@@ -392,16 +392,22 @@ describe('check-i-architecture-dependency-direction', () => {
     const { edges } = graphOf(byRoot[SERVER]);
     const sets = cyclicSets(edges).sort((x, y) => y.length - x.length);
     const inside = new Set(sets.flat());
-    const member = sets[0].find((m) => (edges.get(m) ?? []).some((t) => !inside.has(t)));
-    assert.ok(member, 'a module of the big cycle imports a module outside every cycle');
-    const outside = edges.get(member).find((t) => !inside.has(t));
+    // An outside module that reaches no cyclic module and that only one module imports: importing the member back then adds that one module to
+    // the set. One that reached another set would merge it in (the server has several sets since Q-754 split the core one), and one that other
+    // modules import (util/log.ts) would pull in every importer the member reaches.
+    const importers = new Map();
+    for (const [from, outs] of edges) for (const t of outs) importers.set(t, (importers.get(t) ?? 0) + 1);
+    const alone = (t) => !inside.has(t) && importers.get(t) === 1 && ![...reachableFrom(edges, [t])].some((r) => inside.has(r));
+    const member = sets[0].find((m) => (edges.get(m) ?? []).some(alone));
+    assert.ok(member, 'a module of the big cycle imports a module outside every cycle that reaches none');
+    const outside = edges.get(member).find(alone);
     const back = posix.relative(posix.dirname(outside), member).replace(/\.ts$/, '.js');
     const v = decide(plant(SERVER, outside, `import './${back}';`.replace("'./../", "'../")));
     assert.equal(v.holds, false);
     // The planted import adds one module to the set, so it measures one over the ceiling the allow file holds (the measure, since it only goes down).
     const ceiling = real.find((e) => e.id === 'cycles:server/src:largest').max;
     assert.equal(sets[0].length, ceiling, 'the largest set no longer measures its ceiling: lower the ceiling to the measure');
-    assert.match(v.reason, new RegExp(`a cyclic set of ${ceiling + 1} modules in server/src, above its ceiling`));
+    assert.match(v.reason, new RegExp(`a cyclic set of ${ceiling + 1} modules in server/src, above its ceiling`), `planted ${outside} -> ${member}`);
   });
 
   it('counts a cycle by its strongly connected set, a chain of imports as none', () => {
