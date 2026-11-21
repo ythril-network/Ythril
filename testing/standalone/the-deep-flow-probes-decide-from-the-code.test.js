@@ -584,7 +584,11 @@ describe('the door-parity probes (parameters and caps)', () => {
   it('is violated by the sanctioned differences the repository holds when they are not excepted', () => {
     const v = decideOf(params, pInput, [], TODAY);
     assert.equal(v.holds, false);
-    for (const e of pAllow) assert.ok(v.reason.includes(e.id.split('.')[0].split(':')[0]), `${e.id}: ${v.reason}`);
+    // Every sanctioned difference comes back unexcepted: the count is the allowlist's. The reason names the first five (the probe's own cap),
+    // so a name is asserted only for an entry the reason has room for.
+    assert.match(v.reason, new RegExp(`^[^:]*: ?${pAllow.length} door difference\\(s\\)|^${pAllow.length} door difference\\(s\\)`), v.reason);
+    const shown = pAllow.filter((e) => v.reason.includes(e.id.split('.')[0].split(':')[0]));
+    assert.ok(shown.length >= Math.min(pAllow.length, 5), `${shown.length} of ${pAllow.length} named: ${v.reason}`);
   });
 
   it('is violated when a route drops a key its tool declares (a real route with that key taken out)', () => {
