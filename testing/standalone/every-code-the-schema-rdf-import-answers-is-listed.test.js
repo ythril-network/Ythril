@@ -96,11 +96,11 @@ describe('every code the schema-from-RDF door answers is listed', () => {
     assert.deepEqual([...answered].filter(c => !guide.has(c)).sort(), [], 'answered but not in the guide');
   });
 
-  it('every status the act answers with is one the tool carries, or 412, which the tool answers as an error result naming its code', () => {
+  it('every status the act answers with is one the tool carries as a structured refusal (412 included: Q-754 R4)', () => {
     const table = Object.fromEntries([...act.matchAll(/\b([A-Z_]+): (\d{3})\b/g)].map(m => [m[1], Number(m[2])]));
     const used = new Set([...act.matchAll(/\brefusal\(\s*HTTP\.([A-Z_]+)/g)].map(m => table[m[1]]).filter(Boolean));
     const tool = new Set([...code('server/src/util/errors.ts').match(/TOOL_REFUSAL_STATUSES = Object\.freeze\(\[([^\]]+)\]/)?.[1].matchAll(/\d{3}/g) ?? []].map(m => Number(m[0])));
     assert.ok(tool.size > 5 && used.size > 3, `both sets were read (${tool.size}, ${used.size})`);
-    assert.deepEqual([...used].filter(s => !tool.has(s) && s !== 412).sort(), [], 'a status the tool cannot carry');
+    assert.deepEqual([...used].filter(s => !tool.has(s)).sort(), [], 'a status the tool cannot carry');
   });
 });
