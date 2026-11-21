@@ -21,6 +21,9 @@ import {
   RDF_IMPORT_UPLOAD_STALLED, rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, runningBodyOf, type RdfImportRefusal,
 } from '../../spaces/rdf-import-act.js';
 import { peerBoundTo, peerTokenToolRefusal } from '../../auth/peer-bound.js';
+// The import's schema step registers itself with the act when loaded (`RdfImportSchemaStep` in `spaces/rdf-import-files.ts` says why the act
+// does not import it); this route is part of every server's wiring, so both import doors find it registered.
+import '../../spaces/rdf-import-schema-step.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 
 export const rdfImportRouter = Router();

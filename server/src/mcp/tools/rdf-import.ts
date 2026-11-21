@@ -20,6 +20,9 @@ import {
   RDF_IMPORT_ADDRESS_MAX, RDF_IMPORT_GRAPH_BASES_MAX, RDF_IMPORT_GRAPH_BASE_MIN_CHARS, RDF_IMPORT_GRAPH_BASE_MAX_CHARS,
 } from '../../spaces/rdf-import-act.js';
 
+/** What `from` names (the act's parameters judge it; `data` is refused there until it exists). */
+const SCHEMA_SOURCES = ['declared', 'shacl', 'data'] as const;
+
 /** The act's refusal as the tool's: its status and code, and what more it carries (a refused import's report) as structured content. */
 function refusalOf(r: RdfImportRefusal): Error {
   // A status the tool does not carry (the storage limit's 507) is an error result in the act's own sentence and code, as the fact tool's is.
@@ -68,7 +71,7 @@ export const import_rdfTool: ToolHandler = {
           + 'shape subjects are not imported as records.',
       },
       from: {
-        type: 'array', minItems: 1, maxItems: 3, items: { type: 'string', enum: ['declared', 'shacl', 'data'] },
+        type: 'array', minItems: 1, maxItems: SCHEMA_SOURCES.length, items: { type: 'string', enum: [...SCHEMA_SOURCES] },
         description: 'With schema: which declarations to read: declared (OWL and RDFS), shacl (shapes); default both. data is not available yet '
           + '(rdf_import_schema_not_available). Refused without schema.',
       },

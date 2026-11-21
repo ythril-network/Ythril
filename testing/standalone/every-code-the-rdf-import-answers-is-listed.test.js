@@ -28,10 +28,16 @@ const ACT = 'server/src/spaces/rdf-import-act.ts';
 /** The RDF document's front half (format, encoding, the refusal of a body that cannot be read), which the act calls (Q-754). */
 const DOCUMENT = 'server/src/rdf/rdf-document.ts';
 const document = code(DOCUMENT);
-/** Every source whose refusals the import's doors answer, read as one: the act, and the front half it hands the body to. */
-const act = `${code(ACT)}\n${document}`;
+/** The schema step of an import with `schema` set (Q-955), whose refusals the import's doors answer too. */
+const SCHEMA_STEP = 'server/src/spaces/rdf-import-schema-step.ts';
+/** Every source whose refusals the import's doors answer, read as one: the act, its schema step, and the front half it hands the body to. */
+const act = `${code(ACT)}\n${code(SCHEMA_STEP)}\n${document}`;
 const consts = (src) => Object.fromEntries([...src.matchAll(/(?:export )?const ([A-Z][A-Z0-9_]*)\s*=\s*'([^']+)'/g)].map(m => [m[1], m[2]]));
-const all = { ...consts(act), ...consts(code('server/src/rdf/rdf-space-state.ts')), ...consts(code('server/src/spaces/rdf-settle.ts')) };
+/** The schema door's codes, which the schema step answers by name (`SCHEMA_RDF_*`). */
+const schemaDoor = code('server/src/spaces/schema-rdf-import-act.ts');
+const all = {
+  ...consts(act), ...consts(code('server/src/rdf/rdf-space-state.ts')), ...consts(code('server/src/spaces/rdf-settle.ts')), ...consts(schemaDoor),
+};
 
 /** What a `refusal(HTTP.X, <code>, ...)` call or a `code: <code>` of a refusal names, in `src` (the act and its front half by default). */
 function answeredByTheAct(src = act) {
@@ -71,7 +77,10 @@ function guideCodes() {
 }
 
 describe('every code the RDF import answers is listed', () => {
-  const answered = new Set([...answeredByTheAct(), ...readerCodes(), ...spaceStateCodes(), 'space_not_found']);
+  // With `schema` set (Q-955) the import answers the schema door's shared step's refusals as they come (the proposal, the judgement, the write):
+  // every code the schema door's act answers, but its own busy slot (the import's door has its own, `rdf_import_busy`).
+  const sharedStep = [...answeredByTheAct(schemaDoor)].filter(c => c !== 'schema_rdf_busy');
+  const answered = new Set([...answeredByTheAct(), ...readerCodes(), ...spaceStateCodes(), 'space_not_found', ...sharedStep]);
 
   it('the sources answer codes, and the derivation found them (a probe that cannot read answers nothing)', () => {
     for (const c of ['rdf_import_refused', 'rdf_malformed', 'rdf_not_enabled', 'rdf_base_conflict', 'rdf_gzip_invalid', 'space_not_found']) {

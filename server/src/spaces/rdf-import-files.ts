@@ -28,10 +28,13 @@ import { log, peerText } from '../util/log.js';
 import { isMissingPath } from '../util/path-present.js';
 import type { RdfFormat } from '../rdf/serialize.js';
 import type { ImportMode } from '../rdf/import-reasons.js';
-import type { RdfImportReport } from '../rdf/import-report.js';
-import { openImportFolder, readSpoolLines, removeImportFolder, writeWholeSpoolFile, type ImportFolder } from '../rdf/import-spool.js';
+import type { RdfImportReport, RdfImportSchemaReport } from '../rdf/import-report.js';
+import { openImportFolder, readSpoolLines, removeImportFolder, writeWholeSpoolFile, type ImportFolder, type QuadGroup } from '../rdf/import-spool.js';
 import type { SpaceMeta } from '@ythril-network/schema';
 import type { TokenRights } from '../config/rights-shape.js';
+import type { RdfCaller } from '../rdf/rdf-space-state.js';
+import type { RdfDocumentRefusal } from '../rdf/rdf-document.js';
+import type { SchemaMode, SchemaSource } from '../rdf/schema-from-rdf.js';
 
 /** The folder under the data root that holds the files of standing RDF imports. */
 export const RDF_IMPORT_DIR = 'rdf-import';
@@ -69,6 +72,59 @@ export async function writeSchemaStep(folder: ImportFolder, step: SchemaStepFile
 export async function readSchemaStep(folder: ImportFolder): Promise<SchemaStepFile> {
   for await (const line of readSpoolLines(folder, SCHEMA_STEP_FILE)) return JSON.parse(line) as SchemaStepFile;
   throw new Error('The import\'s schema step is empty.');
+}
+
+/** What an import with `schema` asks for: the schema door's mode, and the declarations it reads. */
+export interface SchemaAsked { kind: 'asked'; mode: SchemaMode; from: SchemaSource[] }
+
+/**
+ * The schema the door built: the changed types (what the write sends) and the version they were proposed against, how many changes they make,
+ * the type schemas the space holds after the write (stored form), the schema groups they came from, and what the report says of them.
+ */
+export interface DoorSchema {
+  kind: 'built';
+  changed: Record<string, Record<string, unknown>>;
+  version: number;
+  changes: number;
+  merged: SpaceMeta['typeSchemas'];
+  keys: Set<string>;
+  report: Omit<RdfImportSchemaReport, 'written'>;
+}
+
+/** How an act with a schema step ends for good: its status, code, sentence, and what more its answer carries. */
+export interface SchemaStepEnd { kind: 'ended'; status: number; code: string; why: string; detail?: Record<string, unknown> }
+/** A schema step done: the stored type schemas the planners judge and stamp by from now on, and what the report says of the step. */
+export interface SchemaStepDone { kind: 'done'; typeSchemas: SpaceMeta['typeSchemas']; report: RdfImportSchemaReport }
+
+/**
+ * The schema step's functions (`rdf-import-schema-step.ts`), as the import act calls them. The step reaches the settings write chain, whose
+ * modules sit in one import cycle with the tools; the act importing the step would pull the act and its tool into that cycle
+ * (`check-i-architecture-dependency-direction`), so the step registers itself here and the act asks for it ({@link rdfImportSchemaStep}).
+ */
+export interface RdfImportSchemaStep {
+  schemaAskedOf(schema: string | undefined, from: readonly string[] | undefined): SchemaAsked | null | RdfDocumentRefusal;
+  schemaRungRefusal(spaceId: string, caller: RdfCaller | undefined): RdfDocumentRefusal | null;
+  schemaAtDoor(input: {
+    spaceId: string; caller: RdfCaller | undefined; options: ImportOptions; groups: () => AsyncGenerator<QuadGroup, void, undefined>; schema: SchemaAsked;
+    dryRun: boolean; maxQuads: number | undefined;
+  }): Promise<DoorSchema | RdfDocumentRefusal>;
+  keepSchemaStep(folder: ImportFolder, built: DoorSchema, caller: RdfCaller | undefined): Promise<Pick<ActState, 'schemaStep' | 'caller'>>;
+  schemaStepOfFolder(folder: ImportFolder, state: ActState): Promise<(SchemaStepFile & { kind: 'file' }) | null | SchemaStepEnd>;
+  schemaStepBlocks(state: ActState, spaceId: string, rdfCode: string | null): SchemaStepEnd | null;
+  translationBy(merged: SpaceMeta['typeSchemas'], meta: SpaceMeta, groups: () => AsyncGenerator<QuadGroup, void, undefined>, keys?: Set<string>):
+    Promise<{ planSchema: SpaceMeta['typeSchemas']; meta: SpaceMeta; skip: Set<string> }>;
+  writeSchemaOfAct(input: { spaceId: string; state: ActState; step: SchemaStepFile; hooks?: { beforeSchemaWrite?: () => unknown; afterSchemaWrite?: () => unknown } }):
+    Promise<SchemaStepEnd | SchemaStepDone>;
+  storedVersion(spaceId: string): number;
+}
+
+let schemaStepImpl: RdfImportSchemaStep | null = null;
+/** Register the schema step (its own module does, when it is loaded: the import's REST route loads it). */
+export function defineRdfImportSchemaStep(step: RdfImportSchemaStep): void { schemaStepImpl = step; }
+/** The registered schema step; a server whose wiring never loaded it is a fault, thrown, never a refusal of the caller. */
+export function rdfImportSchemaStep(): RdfImportSchemaStep {
+  if (!schemaStepImpl) throw new Error('The RDF import\'s schema step is not wired: rdf-import-schema-step.ts was never loaded.');
+  return schemaStepImpl;
 }
 
 /** How an import reads its file: the space's mode, blank subjects, and the source bases (one for the file, one per graph). */
@@ -114,9 +170,9 @@ export interface ActState {
   schemaStep?: { version: number; fingerprint: string; changes: number };
   /**
    * Who started an import with `schema` set: the act writes the schema as that caller, reads its token again by `id` before the write
-   * (`stored`: the id was a stored token's when the door read it), and the audit names it. Absent with `schemaStep`.
+   * (`stored`: the id was a stored token's when the door read it), and the audit names it. Absent without `schemaStep`.
    */
-  caller?: { id?: string; rights?: TokenRights | null; admin?: boolean; stored: boolean };
+  caller?: { id?: string; rights?: TokenRights | null; stored: boolean };
 }
 
 /** The folder of import `id`, or null when the id is not one the door mints (so it cannot leave the import root). */
