@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { voteOnSchemaEditIfNetworked, type WriteCaller } from '../spaces/meta-update.js';
 import { commitOwnMetaEdit, withType, withoutType } from '../spaces/effective-meta.js';
 import { restartSchemaConvertInTurn, useSchemaConvertRuns } from '../sync/governance.js';
-import { schemaConvertPrice } from '../spaces/schema-convert-acts.js';
 import { schemaConvertCallerOf } from '../spaces/schema-convert-terms.js';
 import {
   startSchemaConvertRun, restartSchemaConvertRun, typesToConvert, schemaConvertStatus, wakeSchemaConvertWatcher,
@@ -57,7 +56,11 @@ import {
   DeleteSpaceBody, RenameSpaceBody, ReorderSpacesBody, PutSchemaBody,
 } from '../spaces/body-schemas.js';
 import { requireSettingsFields, singleTypeEditBody } from '../auth/require-settings-fields.js';
-import { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice, convertNotice } from '../spaces/meta-update.js';
+import { termClashRefusalOfOwnTypeEdit } from '../spaces/meta-update.js';
+import { writeSpaceMeta } from '../spaces/space-meta-write-act.js';
+import { describeFieldRequirement } from '../auth/space-field-rights.js';
+import { typesAddedPastCap } from '../spaces/types-added-past-cap.js';
+import { beginSchemaValidate } from '../spaces/schema-validate-door.js';
 import { refuseFaceWidthChange } from '../spaces/face-width-change.js';
 import { planSpaceCreate, applySpaceCreate } from '../spaces/space-create.js';
 import type { TokenRights } from '../config/rights-shape.js';
@@ -342,33 +345,36 @@ spacesRouter.patch('/:id', globalRateLimit, requireSpaceAuthMfaScoped('id'), den
     }
   }
 
-  const decision = planSpaceMetaUpdate({ spaceId: id, space, body: req.body, ifMatch: req.get('If-Match'), caller: req.authToken as WriteCaller | undefined });
-  if (!decision.ok) {
-    res.status(decision.refusal.status).json(decision.refusal.body);
+  // The chain (field rungs, plan, price, apply) is the settings write act's, the one MCP's doors run too; this door words what it answers.
+  const token = req.authToken as (WriteCaller & { rights?: TokenRights }) | undefined;
+  const answer = await writeSpaceMeta({
+    spaceId: id, body: (req.body ?? {}) as Record<string, unknown>, ifMatch: req.get('If-Match'),
+    caller: { record: token as WriteCaller, rights: token?.rights, instanceAdmin: !!(token && isInstanceAdmin(token)) },
+    rateKey: schemaConvertCallerOf(req).rateKey,
+  });
+  if (answer.kind === 'fields-refused') {
+    // Reached only if the middleware's table and the act's ever disagreed: the middleware answers the same fields first, in these words.
+    res.status(answer.status).json({ error: `Not allowed to change ${answer.fields.map(describeFieldRequirement).join(', ')}. Each of this space's settings is governed by the area that field belongs to.` });
     return;
   }
-  // A save that carries `convertRecords` starts the Convert act's mass rewrite, so it pays the act's price (`schemaConvertPrice`, the one function):
-  // asked after every other refusal and before anything is written.
-  const priced = decision.plan.convertRecords === undefined ? null : schemaConvertPrice(id, schemaConvertCallerOf(req));
-  if (priced) {
-    res.status(priced.status).json(priced.body);
+  if (answer.kind === 'refused') {
+    res.status(answer.status).json(answer.body);
     return;
   }
-  // The audit middleware records this only on a <400 response, so a request the planner refused above logs no
-  // change. The snapshot pair was taken before anything was applied, which is what makes the change list honest.
-  req.auditSnapshots = decision.plan.audit;
-
-  const result = await applySpaceMetaUpdate(decision.plan);
-  if (result.outcome === 'not_found') {
+  if (answer.kind === 'lost') {
     // Only reachable if the space was deleted between the plan and the write.
     sendLostSpace(req, res, id);
     return;
   }
-  if (result.outcome === 'vote_pending') {
-    res.status(202).json({ status: 'vote_pending', rounds: result.rounds, message: 'Meta change requires network vote', ...networkWriteNotice(result, req.authToken as WriteCaller), ...convertNotice(result) });
+  // The audit middleware records this only on a <400 response, so a refused request logs no change. The snapshot pair was taken before
+  // anything was applied, which is what makes the change list honest.
+  req.auditSnapshots = answer.audit;
+  const { outcome, notice } = answer;
+  if (outcome.outcome === 'vote_pending') {
+    res.status(202).json({ status: 'vote_pending', rounds: outcome.rounds, message: 'Meta change requires network vote', ...notice });
     return;
   }
-  res.json({ space: spaceForWire(result.space), ...networkWriteNotice(result, req.authToken as WriteCaller), ...convertNotice(result) });
+  res.json({ space: spaceForWire(outcome.space), ...notice });
 });
 
 // PUT /api/spaces/:id/schema — full replacement of the space's typeSchemas.
@@ -403,6 +409,13 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
   const refRefusal = libraryRefRefusal(parsed.data.typeSchemas as z.infer<typeof TypeSchemasZ>);
   if (refRefusal) {
     res.status(422).json({ error: refRefusal.message });
+    return;
+  }
+
+  // Two terms of an RDF space on one address are refused here as the planner refuses them for PATCH (Q-748 rule 5), before a round opens.
+  const clash = termClashRefusalOfOwnTypeEdit(space, parsed.data.typeSchemas as SpaceMeta['typeSchemas'], 'replace');
+  if (clash) {
+    res.status(clash.status).json(clash.body);
     return;
   }
 
@@ -502,7 +515,6 @@ const VALID_KNOWLEDGE_TYPES = new Set<string>(KNOWLEDGE_TYPES);
  */
 const knowledgeTypeRefusal = (got: string) =>
   `Invalid knowledgeType '${got}'. Must be one of: ${KNOWLEDGE_TYPES.join(', ')}`;
-const MAX_TYPES_PER_KIND = 200;
 
 // GET /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName
 spacesRouter.get('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLimit, requireSpaceAuthScoped('id'), (req, res) => {
@@ -572,14 +584,18 @@ spacesRouter.put('/:id/meta/typeSchemas/:knowledgeType/:typeName', globalRateLim
 
   const kt = knowledgeType as KnowledgeType;
   const existingMeta: SpaceMeta = space.meta ?? {};
-  const existingKtMap: Record<string, import('../config/types.js').TypeSchema> = { ...(existingMeta.typeSchemas?.[kt] ?? {}) };
 
-  // Enforce max 200 types per knowledge type (only for new types)
-  const isNew = !(typeName in existingKtMap);
-  if (isNew && Object.keys(existingKtMap).length >= MAX_TYPES_PER_KIND) {
-    res.status(400).json({
-      error: `Max ${MAX_TYPES_PER_KIND} type definitions per knowledge type reached for '${kt}'. Remove unused types before adding new ones.`,
-    });
+  // The cap on types per kind, counting only a type this write adds (the one check the schema-from-RDF door asks too).
+  const pastCap = typesAddedPastCap(existingMeta.typeSchemas, { [kt]: { [typeName]: parsed.schema } });
+  if (pastCap) {
+    res.status(pastCap.status).json({ error: pastCap.error });
+    return;
+  }
+
+  // Two terms of an RDF space on one address are refused here as the planner refuses them for PATCH (Q-748 rule 5), before a round opens.
+  const clash = termClashRefusalOfOwnTypeEdit(space, { [kt]: { [typeName]: parsed.schema } } as SpaceMeta['typeSchemas'], 'merge');
+  if (clash) {
+    res.status(clash.status).json(clash.body);
     return;
   }
 
@@ -687,9 +703,9 @@ spacesRouter.post('/:id/validate-schema', globalRateLimit, requireSpaceAuthMfaSc
    * F-46 (R6-12): the one sequence both doors run (`spaces/schema-validate-door.ts`) — `sample` mode, the stored-data walk paged by
    * `after` / `nextAfter` with a fixed projection, values only for a caller who may read the space's knowledge, the heavy-call rail
    * and the single flight. This door adds what it has always answered in stored mode: the meta it checked (the MCP tool never echoes
-   * it), except against the stamp, where no one meta was checked. The dynamic import keeps the validators out of this module's load.
+   * it), except against the stamp, where no one meta was checked. Imported at the top: a module loaded inside a handler fails at request time
+   * (`a-request-handler-loads-no-module-at-request-time`).
    */
-  const { beginSchemaValidate } = await import('../spaces/schema-validate-door.js');
   const rights = (req.authToken as { rights?: TokenRights } | undefined)?.rights;
   const outcome = await beginSchemaValidate({
     spaceId: id,

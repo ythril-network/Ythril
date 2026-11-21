@@ -115,12 +115,14 @@ describe('every door reports it', () => {
   it('PATCH /api/spaces/:id and every schema route through voteOnSchemaEditIfNetworked', () => {
     // The notice is `networkWriteNotice` since R5-1 (the merge note plus `layers` and the member warnings, one spread for every door): it
     // takes the caller, because a member's label is the networks area's to read.
-    assert.equal((read('server/src/api/spaces.ts').match(/\.\.\.networkWriteNotice\(result, /g) ?? []).length, 2, 'the 202 and the 200 of PATCH');
+    // PATCH and the tools take it from the settings write act (Q-754): built once there, spread in both of PATCH's answers.
+    assert.equal((read('server/src/spaces/space-meta-write-act.ts').match(/\.\.\.networkWriteNotice\(outcome, caller\.record\)/g) ?? []).length, 1, 'the one notice of the settings write act');
+    assert.equal((read('server/src/api/spaces.ts').match(/\.\.\.notice \}\)/g) ?? []).length, 2, 'the 202 and the 200 of PATCH');
     assert.equal((read('server/src/spaces/meta-update.ts').match(/\.\.\.networkWriteNotice\(result, /g) ?? []).length, 2, 'the 202 and the 200 of the schema routes');
   });
   it('MCP schema_update, in the text and the structured half', () => {
     const src = read('server/src/mcp/tools/spaces.ts');
-    assert.equal((src.match(/networkWriteNotice\(r, caller\)/g) ?? []).length, 1, 'the one notice both outcomes are answered with');
+    assert.match(src, /const \{ outcome: result, notice \} = answer;/, 'the one notice both outcomes are answered with, the settings write act\'s');
     assert.equal((src.match(/\.\.\.notice\b/g) ?? []).length, 2, 'the structured half of the 202 and the 200');
     assert.equal((src.match(/noticeText\(notice\)/g) ?? []).length, 2, 'the text of the 202 and the 200');
   });

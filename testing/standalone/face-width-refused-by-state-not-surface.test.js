@@ -87,7 +87,8 @@ describe('both doors call the SAME guard', () => {
   it('REST calls it, and before the planner', () => {
     const at = REST.indexOf('refuseFaceWidthChange(');
     assert.ok(at > -1, 'the REST door does not check the state — the field would apply unconditionally');
-    const planner = REST.indexOf('planSpaceMetaUpdate({');
+    // The planner runs inside the settings write act (`writeSpaceMeta`, Q-754), which the door calls after the check.
+    const planner = REST.indexOf('writeSpaceMeta({');
     assert.ok(planner > at,
       'the check must precede the planner, or a refused change is planned and audited before being declined');
   });

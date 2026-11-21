@@ -87,7 +87,7 @@ function importsOf(text, fromFile) {
  * The delegate is the called FUNCTION's body, not its module: a module whose other function calls the refusal does not make this one
  * refuse. One hop: at two, the gate would be asserting the shape of a call graph rather than "this route refuses".
  */
-function effectiveChecker(handlerBody, imports, read) {
+function effectiveChecker(handlerBody, imports, read, hops = 2) {
   if (CHECK.test(handlerBody)) return { where: 'the handler', text: handlerBody };
   for (const [name, imp] of imports) {
     if (imp.package) continue;
@@ -95,6 +95,12 @@ function effectiveChecker(handlerBody, imports, read) {
     let body;
     try { body = bodyOf(read(imp.file), imp.exported); } catch { continue; }
     if (CHECK.test(body)) return { where: `${imp.file}:${imp.exported}`, text: body };
+    // One hop further: a delegate that hands the body on to the function that checks (the settings write act hands it to the planner, Q-754).
+    // The function it calls must itself check; a neighbour in its file does not count, as above.
+    if (hops > 1) {
+      const further = effectiveChecker(body, importsOf(read(imp.file), imp.file), read, hops - 1);
+      if (further && further.where !== 'the handler') return further;
+    }
   }
   return null;
 }

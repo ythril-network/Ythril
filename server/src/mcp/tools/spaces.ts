@@ -1,5 +1,9 @@
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { refusalsForSpaceUpdate, describeFieldRequirement } from '../../auth/space-field-rights.js';
+import { describeFieldRequirement } from '../../auth/space-field-rights.js';
+import { writeSpaceMeta } from '../../spaces/space-meta-write-act.js';
+import { refuseFaceWidthChange } from '../../spaces/face-width-change.js';
+import { planSpaceCreate, applySpaceCreate } from '../../spaces/space-create.js';
+import { listTokens } from '../../auth/tokens.js';
 import { BRAIN_COLLECTIONS, UNKNOWN_WRITE_FIELD_ANSWERS } from '../../config/types.js';
 import { getConfig } from '../../config/loader.js';
 import { canWriteAnywhere } from '../../auth/write-anywhere.js';
@@ -20,7 +24,6 @@ import { ToolRefusal } from '../../util/errors.js';
 import { lostSpaceAnswer } from '../../spaces/unknown-space.js';
 import { forwardedArgNames } from '../../contract/write-accepts.js';
 import { CONVERT_RECORDS_PARAMETER, refusedMetaUpdate, metaUpdateNoticeText } from './schema-update-parts.js';
-import { schemaConvertPrice } from '../../spaces/schema-convert-acts.js';
 
 /** The status a refused or failed space write names in its text, as the REST door answers the same outcome. */
 const SPACE_WRITE_STATUS = { notAllowed: 403, conflict: 409, retry: 503, failed: 500 } as const;
@@ -300,7 +303,6 @@ export const update_spaceTool: ToolHandler = {
     // of the rule, called from both doors, rather than a second copy of the two queries. `runSpaceMetaUpdate`
     // below reports a refusal's status alongside its text, so an agent sees the same 409 a REST caller does.
     if (newDims !== undefined) {
-      const { refuseFaceWidthChange } = await import('../../spaces/face-width-change.js');
       const current = getConfig().spaces.find(sp => sp.id === callSpace);
       const refusal = await refuseFaceWidthChange(callSpace, newDims, current?.faceDescriptorDims);
       // A `ToolRefusal`, so the dispatcher answers the refusal's own status and writes the prefix once. Thrown as a plain
@@ -321,11 +323,11 @@ export const update_spaceTool: ToolHandler = {
 };
 
 /**
- * Plan → apply, and report the outcome in words.
+ * The settings write act, and its outcome in words.
  *
- * Both space-writing tools go through here so neither can drift from the REST route's rules: the same refusals, the
- * same normalisation, the same network vote. The refusal's HTTP status is reported alongside the message rather
- * than translated away — an agent that sees `412` can re-read and retry, where "it failed" leaves it guessing.
+ * Both space-writing tools go through here, and here through the act PATCH runs (`spaces/space-meta-write-act.ts`), so neither can drift
+ * from the REST route's rules: the same field rungs, refusals, normalisation, price and network vote. The refusal's HTTP status is reported
+ * alongside the message rather than translated away — an agent that sees `412` can re-read and retry, where "it failed" leaves it guessing.
  */
 async function runSpaceMetaUpdate(
   spaceId: string,
@@ -335,50 +337,40 @@ async function runSpaceMetaUpdate(
   recordChanges: ToolContext['recordChanges'] | undefined,
   rateKey: string,
 ): Promise<ToolResult> {
-  const { planSpaceMetaUpdate, applySpaceMetaUpdate, networkWriteNotice, convertNotice } = await import('../../spaces/meta-update.js');
-  // What the write says beyond its outcome, as REST's body carries it (`networkWriteNotice` and `convertNotice`, the two spreads): the structured
-  // half is the notice itself and the text says the same in words (`metaUpdateNoticeText`) — the merge note (Q-61), what became of the write in
-  // each network it reached (R5-1), the members that may refuse a key an earlier release does not know (R6-7), named only where this token may
-  // read networks, and what became of the conversion run the save chose (`Q-746`).
+  // The caller as the planner and the notices read it: the rights alone (a tool has no token record of its own here).
   const caller = { ...(rights ? { rights } : {}) };
-  const noticeOf = (r: Parameters<typeof networkWriteNotice>[0]) => ({ ...networkWriteNotice(r, caller), ...convertNotice(r) });
   const noticeText = metaUpdateNoticeText;
-  const space = getConfig().spaces.find(s => s.id === spaceId);
 
   /*
-   * THE SAME per-field table the REST door uses, and it is here rather than in each tool for the reason
-   * this function exists at all: two callers, one rule.
+   * The per-field table the REST door asks in its middleware is asked inside the act, for the reason this function exists at all: two
+   * callers, one rule. `PATCH /api/spaces/:id` stopped demanding Space-admin for its whole body on 2026-09-08 and now asks each field's own
+   * area; leaving these two tools on the four-area demand would have made a `files` writer able to set a media level through one door and
+   * refused through the other.
    *
-   * `PATCH /api/spaces/:id` stopped demanding Space-admin for its whole body on 2026-09-08 and now asks
-   * each field's own area. Leaving these two tools on the four-area demand would have made a `files` writer
-   * able to set a media level through one door and refused through the other -- with the MCP side being the
-   * stricter one, which is the shape the canary reports from outside and nobody sees from in here.
+   * No `If-Match`: MCP has no header to carry one, and absence means "no precondition asked for" — the same default a REST caller gets. A
+   * tool parameter for it would be inventing a concurrency protocol for a surface that has not asked for one.
    */
-  const refused = refusalsForSpaceUpdate(body, spaceId, !!rights?.instanceAdmin, rights);
-  if (refused.length) {
-    return toolErrorResult(`Not allowed to change ${refused.map(describeFieldRequirement).join(', ')}.`, SPACE_WRITE_STATUS.notAllowed);
+  const answer = await writeSpaceMeta({
+    spaceId, body, ifMatch: undefined, caller: { record: caller, rights, instanceAdmin: !!rights?.instanceAdmin }, rateKey,
+  });
+  if (answer.kind === 'fields-refused') {
+    return toolErrorResult(`Not allowed to change ${answer.fields.map(describeFieldRequirement).join(', ')}.`, SPACE_WRITE_STATUS.notAllowed);
   }
-
-  // No `If-Match`: MCP has no header to carry one, and absence means "no precondition asked for" — the same
-  // default a REST caller gets. A tool parameter for it would be inventing a concurrency protocol for a surface
-  // that has not asked for one.
-  const decision = planSpaceMetaUpdate({ spaceId, space, body, ifMatch: undefined, caller });
-  if (!decision.ok) {
+  if (answer.kind === 'refused') {
+    // The hold of an RDF import is answered as the dispatcher answers every act refusal a writer throws (its status, the body as structured
+    // content), as it was before the act caught it.
+    if (answer.held) throw answer.held;
     // The sentence, and the refusal's `code` and `step` as the REST body carries them (`schema-update-parts.ts`).
-    return refusedMetaUpdate(decision.refusal);
+    return refusedMetaUpdate({ status: answer.status, body: answer.body });
   }
-  // A save with `convertRecords` pays the Convert act's price, the one function REST asks too, after every other refusal and before anything is written.
-  const priced = decision.plan.convertRecords === undefined ? null : schemaConvertPrice(spaceId, { rights, rateKey });
-  if (priced) return refusedMetaUpdate({ status: priced.status, body: priced.body as { error: string; code?: string } });
-
-  // Q-50: the snapshot pair the REST route hands its audit entry, taken before anything is applied.
-  recordChanges?.(decision.plan.audit.before, decision.plan.audit.after);
-  const result = await applySpaceMetaUpdate(decision.plan);
-  if (result.outcome === 'not_found') {
+  if (answer.kind === 'lost') {
     const lost = lostSpaceAnswer(null, spaceId);
     return toolErrorResult(lost.body.error, lost.status);
   }
-  const notice = noticeOf(result);
+  // Q-50: the snapshot pair the REST route hands its audit entry, taken before anything was applied. What the write says beyond its outcome,
+  // as REST's body carries it: the structured half is the notice itself and the text says the same in words (`metaUpdateNoticeText`).
+  recordChanges?.(answer.audit.before, answer.audit.after);
+  const { outcome: result, notice } = answer;
   if (result.outcome === 'vote_pending') {
     // NOT reported as success. The space belongs to a network that votes on meta changes, so nothing is stored yet
     // and an agent that read this as "done" would build on a schema that does not exist.
@@ -710,7 +702,6 @@ export const save_spaceTool: ToolHandler = {
     // the deprecated name would be a new surface adopting an old one on the day it is written.
     if (a['purpose'] !== undefined) body['description'] = a['purpose'];
 
-    const { planSpaceCreate, applySpaceCreate } = await import('../../spaces/space-create.js');
     const decision = planSpaceCreate(body, { rights: ctx.rights ?? null });
     if (!decision.ok) {
       // The sentence, and the refusal's `code` beside it as the REST body carries it (as `schema_update` answers its refusals).
@@ -900,7 +891,6 @@ export const list_tokensTool: ToolHandler = {
   }),
   async handle(_ctx: ToolContext): Promise<ToolResult> {
     // Same call the REST route makes, and its return type is what guarantees no hash rides along.
-    const { listTokens } = await import('../../auth/tokens.js');
     const tokens = listTokens();
 
     const lines = tokens.map(t => {

@@ -155,6 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Audit:** a request to a brain route of a space called `files`, `facts`, `entities`, `edges` or `chrono` was recorded under another route's operation (the records export of such a space left no entry with read logging off); the audit rules read the one path form the server serves.
+- **RDF:** `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` and `PUT /api/spaces/:id/schema` refuse a type that would give two terms of the space one RDF address (`422 rdf_term_clash`), as `PATCH /api/spaces/:id` and `schema_update` do; they stored it.
 - **RDF:** a peer can no longer push a space's base epoch to the maximum: an epoch above half of it is refused as an offer, as a shared space's first enable (no base adopted) and as a `space_rebase` round's epoch.
 - **Schema library:** a group called `constructor`, `__proto__` or `toString` behaves as any other, and a group's namespace goes with its last entry instead of staying hidden and holding its prefix.
 - **Web:** the Brain Overview's pencil on a type opens the space's settings on that type for a token with the schema right; it was never drawn, and neither was the Usage panel's "Reset usage", which shows to the same tokens now.

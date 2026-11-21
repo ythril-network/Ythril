@@ -64,8 +64,10 @@ import {
 } from './rdf-import-files.js';
 import { rdfSpaceState, type RdfCaller } from '../rdf/rdf-space-state.js';
 import { RDF_FORMATS, type RdfFormat } from '../rdf/serialize.js';
-import { RDF_MEDIA_TYPES } from '../rdf/export-format.js';
-import { parseRdf, RdfParseError } from '../rdf/parse.js';
+import { parseRdf } from '../rdf/parse.js';
+import {
+  RDF_UNSUPPORTED_ENCODING, RDF_UPLOAD_STALLED, rdfDocumentRefusalOf, rdfFormatOf, rdfParamBool, rdfParamList,
+} from '../rdf/rdf-document.js';
 import { addressNames, recordOfAddress, type AddressNames } from '../rdf/term-reverse.js';
 import type { RecordKind } from '../rdf/term-iri.js';
 import { stdIri, type Quad, type Term } from '../rdf/literals.js';
@@ -84,7 +86,7 @@ import {
 } from '../rdf/import-spool.js';
 import { ImportIndex, type IndexedRecord } from '../rdf/import-index.js';
 import { TripletSets, assertRecordsWithinBound, type DigestSet } from '../rdf/import-count.js';
-import { BodyTooLarge, UploadStalled, counted } from '../rdf/import-upload.js';
+import { counted } from '../rdf/import-upload.js';
 import { defaultSourceBase } from '../rdf/import-default-source.js';
 import {
   groupSubjectOf, quadsToOps, recordKey, recordKindOfGroup, type MintedRecord, type QuadsToOpsContext, type RecordOp,
@@ -122,20 +124,20 @@ export const RDF_IMPORT_SEVERAL_GRAPHS = 'rdf_import_several_graphs';
 export const RDF_IMPORT_NOT_FOUND = 'rdf_import_not_found';
 export const RDF_IMPORT_BUSY = 'rdf_import_busy';
 export const RDF_IMPORT_SPACE_CHANGED = 'rdf_import_space_changed';
-export const RDF_IMPORT_UNSUPPORTED_ENCODING = 'rdf_unsupported_encoding';
 export const RDF_IMPORT_FILES_LOST = 'rdf_import_files_lost';
 export const RDF_IMPORT_STATE_UNREADABLE = 'rdf_import_state_unreadable';
 export const RDF_IMPORT_STORAGE_EXCEEDED = 'storage_exceeded';
-/** An upload that sent nothing for `RDF_IMPORT_UPLOAD_IDLE_MS` (400; the connection is closed after the answer). */
-export const RDF_IMPORT_UPLOAD_STALLED = 'rdf_import_upload_stalled';
+/** An upload that sent nothing for `RDF_IMPORT_UPLOAD_IDLE_MS` (400; the connection is closed after the answer): the document reader's code. */
+export const RDF_IMPORT_UPLOAD_STALLED = RDF_UPLOAD_STALLED;
 /** The code every space-act door answers an act the closed runner interrupted with (`api/admin-space-transfer.ts`). */
 export const RDF_IMPORT_SHUTTING_DOWN = 'shutting_down';
-export const RDF_IMPORT_BODY_TOO_LARGE_BOUND = 'importBodyMaxBytes';
+/** What the import answers when it reads a file: the reader's words for what it did not do. */
+const NOTHING_IMPORTED = 'nothing was imported';
 
-/** Every code an import door or a status door answers: its own, the reader's, the space state's, and the existence rule's. */
+/** Every code an import door or a status door answers: its own, the document reader's, the space state's, and the existence rule's. */
 export const RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   RDF_IMPORT_REFUSED, RDF_IMPORT_BAD_PARAM, RDF_IMPORT_SCHEMA_NOT_AVAILABLE, RDF_IMPORT_SEVERAL_GRAPHS, RDF_IMPORT_NOT_FOUND, RDF_IMPORT_BUSY, RDF_IMPORT_SPACE_CHANGED,
-  RDF_IMPORT_UNSUPPORTED_ENCODING, RDF_IMPORT_FILES_LOST, RDF_IMPORT_STATE_UNREADABLE, RDF_IMPORT_STORAGE_EXCEEDED, RDF_IMPORT_SHUTTING_DOWN, RDF_IMPORT_UPLOAD_STALLED,
+  RDF_UNSUPPORTED_ENCODING, RDF_IMPORT_FILES_LOST, RDF_IMPORT_STATE_UNREADABLE, RDF_IMPORT_STORAGE_EXCEEDED, RDF_IMPORT_SHUTTING_DOWN, RDF_UPLOAD_STALLED,
   'rdf_malformed', 'rdf_relative_iri', 'rdf_remote_context', 'rdf_jsonld_not_streamable', 'rdf_bound_exceeded', 'rdf_gzip_invalid',
   'rdf_unsupported_format', 'rdf_unsupported', 'rdf_source_failed',
   'rdf_not_enabled', 'rdf_base_conflict', 'rdf_base_shared', 'rdf_term_clash', 'rdf_unwritable', 'space_not_found',
@@ -163,14 +165,11 @@ export const RdfImportParams = z.object({
 /** The status doors' parameter. */
 export const RdfImportStatusParams = z.object({ importId: z.string().uuid() });
 
-const bool = (v: unknown): unknown => (v === 'true' ? true : v === 'false' ? false : v);
-const list = (v: unknown): unknown => (v === undefined ? undefined : Array.isArray(v) ? v : [v]);
-
 /** A REST query or a tool's arguments as the parameters take them: booleans from their strings, one graph base or several. */
 function paramsOf(raw: Record<string, unknown>): Record<string, unknown> {
   return {
-    format: raw['format'], dryRun: bool(raw['dryRun']), blankNodes: raw['blankNodes'], sourceBase: raw['sourceBase'],
-    sourceVocab: raw['sourceVocab'], graphBase: list(raw['graphBase']), schema: raw['schema'],
+    format: raw['format'], dryRun: rdfParamBool(raw['dryRun']), blankNodes: raw['blankNodes'], sourceBase: raw['sourceBase'],
+    sourceVocab: raw['sourceVocab'], graphBase: rdfParamList(raw['graphBase']), schema: raw['schema'],
   };
 }
 
@@ -650,12 +649,6 @@ export function runningBodyOf(a: RdfImportRunning): { importId: string; status: 
 const refusal = (status: number, code: string, error: string, detail?: Record<string, unknown>): RdfImportRefusal =>
   ({ kind: 'refused', status, code, error, ...(detail ? { detail } : {}) });
 
-/** The format a media type names (parameters such as `; version=1.2` and `; charset` aside), or undefined. */
-function formatOfMediaType(contentType: string | undefined): RdfFormat | undefined {
-  const type = (contentType ?? '').split(';')[0]!.trim().toLowerCase();
-  return RDF_FORMATS.find(f => RDF_MEDIA_TYPES[f] === type);
-}
-
 /**
  * The space's RDF base or vocabulary is not what the door sorted the file by: the spool's grouping (a chrono's time nodes with their owner) and
  * the record count were made by the addressing the space had then, and the act reads the meta again under its hold.
@@ -712,14 +705,9 @@ export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnsw
   // write door answers it, before a byte of the file is read. A dry run writes nothing and is not asked.
   const closed = p.dryRun === true ? null : spaceWriteClosedNow(input.spaceId);
   if (closed) return refusal(closed.status, closed.body.code, closed.body.error);
-  const format = p.format ?? formatOfMediaType(input.contentType);
-  if (!format) {
-    return refusal(HTTP.UNSUPPORTED_MEDIA, 'rdf_unsupported_format', `The document's format is not one the import reads: send ${RDF_FORMATS.map(f => RDF_MEDIA_TYPES[f]).join(', ')}, or name it in format`);
-  }
-  const encoding = (input.contentEncoding ?? 'identity').trim().toLowerCase();
-  if (encoding !== 'identity' && encoding !== 'gzip' && encoding !== '') {
-    return refusal(HTTP.UNSUPPORTED_MEDIA, RDF_IMPORT_UNSUPPORTED_ENCODING, 'The document is sent plain or gzipped (Content-Encoding: gzip); no other encoding is read');
-  }
+  const read = rdfFormatOf(p.format, input.contentType, input.contentEncoding, 'the import');
+  if (!read.ok) return read.refusal;
+  const format = read.format;
   const state = rdfSpaceState(cfg, input.spaceId, input.caller, schemaFingerprintOf);
   if (!state.ok) return refusal(state.status, state.code, state.error, state.detail);
   // No prototype: a graph named like an inherited key (`toString`, `__proto__`) is a graph like any other, never a base already given.
@@ -845,21 +833,8 @@ function doorRefusalOf(err: unknown, format: RdfFormat): RdfImportRefusal | null
   if (err instanceof RdfImportBoundExceeded) {
     return refusal(HTTP.TOO_LARGE, err.code, `The file is over the import's bound ${err.bound} (${err.limit}); nothing was imported`, { bound: err.bound, limit: err.limit });
   }
-  if (err instanceof UploadStalled) {
-    return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_UPLOAD_STALLED, `The upload sent nothing for ${Math.round(err.idleMs / 1000)} seconds and was cut off; nothing was imported: send the file again, without pauses`);
-  }
-  if (err instanceof BodyTooLarge) {
-    return refusal(HTTP.TOO_LARGE, 'rdf_bound_exceeded', `The body is over the import body bound (${err.limit} bytes); nothing was imported`, { bound: RDF_IMPORT_BODY_TOO_LARGE_BOUND, limit: err.limit });
-  }
-  if (err instanceof RdfParseError) {
-    if (err.code === 'rdf_bound_exceeded') {
-      return refusal(HTTP.TOO_LARGE, err.code, `The file is over the reader's bound ${err.bound ?? ''}; nothing was imported`, { ...(err.bound ? { bound: err.bound } : {}), ...(err.place ? { place: err.place } : {}) });
-    }
-    const where = err.place ? ` at line ${err.place.line}${err.place.column === undefined ? '' : `, column ${err.place.column}`}` : '';
-    const why = err.code === 'rdf_malformed' ? `is not well-formed ${format}${where}` : `cannot be read${where} (${err.code})`;
-    return refusal(err.code === 'rdf_unsupported_format' ? HTTP.UNSUPPORTED_MEDIA : HTTP.BAD_REQUEST, err.code, `The file ${why}; nothing was imported`, err.place ? { place: err.place } : undefined);
-  }
-  return null;
+  // A stalled upload, a body over the byte bound, a file the reader refuses: the document's own failures, answered as every RDF door answers them.
+  return rdfDocumentRefusalOf(err, format, NOTHING_IMPORTED);
 }
 
 /**
