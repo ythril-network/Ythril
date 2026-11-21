@@ -14,7 +14,8 @@
  * - Each declaring class the mapping reads (an ontology, a class, each property kind, an RDFS class, an RDF property, a node shape, a property
  *   shape) makes its subject schema, and so does a declaring predicate a shape states with no type.
  * - A subject typed `owl:NamedIndividual` or `owl:Thing` beside a data class, and a SHACL validation report, are not schema.
- * - With `from: [shacl]` an `owl:Class` subject is not schema and a shape is; with `from: [declared]` the reverse.
+ * - With `from: [shacl]` an `owl:Class` subject is skipped and named not asked, and only the shapes are mapped; with `from: [declared]` the
+ *   reverse (Q-755 test 33, design revision 3, which replaces how F4 kept such groups as data).
  * - A blank node a selected group reaches is followed; one only an unselected group reaches is not.
  *
  * Run: node --test testing/standalone/the-rdf-import-takes-as-schema-only-what-declares-one.test.js (requires a prior `npm run build:server`)
@@ -90,14 +91,23 @@ describe('the schema option takes as schema only what declares one', () => {
     ];
   };
 
-  it('with from: shacl only the shapes and what they reach are schema; the owl:Class subjects are not (F4)', async () => {
+  // Q-755 test 33 (design revision 3): with `schema` set a declaring group is never a record, whichever source `from` asks for. A group of a
+  // kind `from` does not ask for is skipped and named apart (`notAsked`), and its statements are not handed to the mapping.
+  const notAskedOf = async (quads, from) => [...((await schemaGroupsOf(groupsOf(quads), blankKey, null, from)).notAsked ?? [])].sort();
+  const quadsOf = async (quads, from) => (await schemaGroupsOf(groupsOf(quads), blankKey, 10_000, from)).quads;
+
+  it('with from: shacl every declaration is skipped; the owl:Class subjects are named not asked and not mapped (Q-755 test 33)', async () => {
     const keys = await keysOf(mixed(), ['shacl']);
-    assert.deepEqual(keys, ['b:p', `i:${NS.ex}PersonShape`], `the classes stay data: ${keys.join(', ')}`);
+    assert.deepEqual(keys, ['b:p', 'b:res', `i:${NS.ex}Person`, `i:${NS.ex}PersonShape`, `i:${NS.ex}Place`], `every declaration is skipped: ${keys.join(', ')}`);
+    assert.deepEqual(await notAskedOf(mixed(), ['shacl']), ['b:res', `i:${NS.ex}Person`, `i:${NS.ex}Place`], 'the classes are named not asked');
+    const mapped = await quadsOf(mixed(), ['shacl']);
+    assert.ok(mapped.length > 0 && mapped.every(x => keyOf(x.subject) === 'b:p' || keyOf(x.subject) === `i:${NS.ex}PersonShape`), 'only the shapes are mapped');
   });
 
-  it('with from: declared the classes and what they reach are schema; the shapes are not (F4)', async () => {
+  it('with from: declared every declaration is skipped; the shapes are named not asked and not mapped (Q-755 test 33)', async () => {
     const keys = await keysOf(mixed(), ['declared']);
-    assert.deepEqual(keys, ['b:res', `i:${NS.ex}Person`, `i:${NS.ex}Place`], `the shapes stay data: ${keys.join(', ')}`);
+    assert.deepEqual(keys, ['b:p', 'b:res', `i:${NS.ex}Person`, `i:${NS.ex}PersonShape`, `i:${NS.ex}Place`], `every declaration is skipped: ${keys.join(', ')}`);
+    assert.deepEqual(await notAskedOf(mixed(), ['declared']), ['b:p', `i:${NS.ex}PersonShape`], 'the shapes are named not asked');
   });
 
   it('with both sources every declaration is schema', async () => {

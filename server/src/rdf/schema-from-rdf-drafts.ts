@@ -109,7 +109,7 @@ export type TermReading =
   | { how: 'rejected'; why: 'no-field' | 'unreadable-value'; message: string };
 
 /** The address of a type or property term, read by the space's rules: derived from its vocabulary, foreign, or no term the schema can hold. */
-export function readTerm(ctx: ReadContext, address: string): TermReading {
+export function readTerm(ctx: Pick<ReadContext, 'names'>, address: string): TermReading {
   const read = termOfIri(address, ctx.names);
   switch (read.answer) {
     case 'foreign':

@@ -1,5 +1,5 @@
 /**
- * The RDF import over REST: `POST /api/brain/spaces/:spaceId/import/rdf[?format=&dryRun=&blankNodes=&sourceBase=&sourceVocab=&graphBase=&schema=&from=]`
+ * The RDF import over REST: `POST /api/brain/spaces/:spaceId/import/rdf[?format=&dryRun=&blankNodes=&sourceBase=&sourceVocab=&graphBase=&schema=&from=&inferFunctional=&inferMinSupport=&inferMinConfidence=]`
  * with the document as the body (its media type in `Content-Type`, plain or `Content-Encoding: gzip`), and its status at
  * `GET /api/brain/spaces/:spaceId/import/rdf/:importId` (bundle-270, slice S6, Q-753). The twins of MCP `import_rdf` and `import_rdf_status`.
  *
@@ -72,6 +72,7 @@ rdfImportRouter.post('/spaces/:spaceId/import/rdf', globalRateLimit, requireSpac
       params: {
         format: req.query['format'], dryRun: req.query['dryRun'], blankNodes: req.query['blankNodes'], sourceBase: req.query['sourceBase'],
         sourceVocab: req.query['sourceVocab'], graphBase: req.query['graphBase'], schema: req.query['schema'], from: req.query['from'],
+        inferFunctional: req.query['inferFunctional'], inferMinSupport: req.query['inferMinSupport'], inferMinConfidence: req.query['inferMinConfidence'],
       },
       body: req, contentType: req.headers['content-type'], contentEncoding: req.headers['content-encoding'],
       caller: token,

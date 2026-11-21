@@ -7,7 +7,7 @@
  * - `knowledge: write` without `schema: write` is refused 403 naming `schema: write`, a dry run too (3); shapes that give a type rules need
  *   `schema: admin` (4); both on both doors (17).
  * - A networked space answers 409 `schema_rdf_networked` carrying the proposed types; its dry run answers 200 and writes nothing (5, 17).
- * - `from` without `schema` is refused 400 `rdf_import_bad_param` (15); `from: data` answers `rdf_import_schema_not_available` (23).
+ * - `from` without `schema` is refused 400 `rdf_import_bad_param` (15); `from: data` is held to the same `schema: write` rung (23, Q-755).
  * - REST without the second factor is refused when `schema` is set, and passes as today when it is not (18).
  * - More schema statements than the bound answer 413 before the mapping runs (20).
  * - Nothing a refused call names is stored.
@@ -104,9 +104,9 @@ describe('an RDF import with a schema is held to its rungs on both doors (real r
     await refusedOnBoth(await d.importBoth(tokens.writer.key, TARGET, fileOf(), { schema: 'none', from: ['shacl'], dryRun: true }), TARGET, 'from with schema none', { status: 400, code: 'rdf_import_bad_param', text: /from/ });
   });
 
-  it('23: from: data answers rdf_import_schema_not_available on both doors, naming from: data', async () => {
-    const r = await d.importBoth(tokens.writer.key, TARGET, fileOf(), { schema: 'expand', from: ['data'] });
-    await refusedOnBoth(r, TARGET, 'from data', { status: 400, code: 'rdf_import_schema_not_available', text: /from: data/ });
+  it('23 (Q-755): from: data is held to the same rungs: knowledge: write without schema: write is refused 403 on both doors', async () => {
+    const r = await d.importBoth(tokens.reader.key, TARGET, fileOf(), { schema: 'expand', from: ['data'], dryRun: true });
+    await refusedOnBoth(r, TARGET, 'from data without schema: write', { status: 403, code: 'schema_rdf_rung', text: /schema: write/ });
   });
 
   it('18: REST without the second factor is refused when schema is set, and passes as today when it is not', async () => {

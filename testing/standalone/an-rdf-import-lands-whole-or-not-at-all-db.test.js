@@ -12,7 +12,7 @@
  * - A second import of the space's own export converges onto the stored records and inserts nothing.
  * - A token without `knowledge: write` is refused on both doors, for a dry run too; a view id and an unknown id answer as a missing space.
  * - The door answers a malformed file (400 with its place) and a file over a bound (413 naming the bound) itself, registering nothing.
- * - The schema flag is the next slice's: a request carrying it is refused, naming it as not available yet.
+ * - `from: data` is no longer answered as not available (Q-755): `rdf_import_schema_not_available` is gone from the answers and the code list.
  * - Both doors answer the same reasons and counts for the same file.
  * - One `rdf.import` audit row per import, with counts and no value of the file.
  *
@@ -190,11 +190,10 @@ describe('an RDF import lands whole or not at all (real routes, real MongoDB)', 
     assert.deepEqual(r.body?.graphsWithoutBase, ['http://graphs.example/a/']);
   });
 
-  it('a schema read from the data (from: data) is refused as not available yet (Q-755), naming it', async () => {
-    const r = await d.importRest(writer.key, BOUND, goodTurtle(BOUND), { params: { schema: 'generate', from: 'data' } });
-    assert.equal(r.status, 400, r.text.slice(0, 300));
-    assert.equal(r.body?.code, 'rdf_import_schema_not_available');
-    assert.match(r.body?.error ?? '', /from: data/);
+  it('a schema read from the data (from: data) is no longer refused as not available (Q-755): the code is gone', async () => {
+    const r = await d.importRest(writer.key, BOUND, goodTurtle(BOUND), { params: { schema: 'generate', from: 'data', dryRun: true } });
+    assert.notEqual(r.body?.code, 'rdf_import_schema_not_available', r.text.slice(0, 300));
+    assert.ok(!act.RDF_IMPORT_REFUSAL_CODES.includes('rdf_import_schema_not_available'), 'the code is no longer listed');
     assert.deepEqual(d.actsOf(BOUND), []);
   });
 

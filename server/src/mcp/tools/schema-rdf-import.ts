@@ -56,7 +56,8 @@ export const import_schema_rdfTool: ToolHandler = {
       mode: { type: 'string', enum: ['generate', 'expand', 'update'], description: 'generate: a whole schema into a space with no type (refused with schema_rdf_not_empty otherwise). expand: add what is absent. update: also change the stored values the file states.' },
       from: {
         type: 'array', minItems: 1, maxItems: SCHEMA_RDF_FROM_DEFAULT.length, items: { type: 'string', enum: ['declared', 'shacl'] },
-        description: 'Which declarations to read: declared (OWL and RDFS classes and properties), shacl (shapes). Default: both.',
+        description: 'Which declarations to read: declared (OWL and RDFS classes and properties), shacl (shapes). Default: both. A schema inferred '
+          + 'from records (data) is not read here: import_rdf with schema and from: data builds it.',
       },
       sourceBase: { type: 'string', minLength: 1, maxLength: RDF_IMPORT_ADDRESS_MAX, description: 'The base of the space the file was exported from, when it is another space: its vocabulary\'s addresses are then read as type and property names, with no address of their own.' },
       sourceVocab: { type: 'string', minLength: 1, maxLength: RDF_IMPORT_ADDRESS_MAX, description: 'The vocabulary of that space, when it is not <sourceBase>vocab/. Needs sourceBase.' },

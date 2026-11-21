@@ -42,8 +42,13 @@ import { addressNames, type SourceNames } from '../rdf/term-reverse.js';
 import type { Quad } from '../rdf/literals.js';
 import { RDF_IMPORT_REASONS_NAMED_MAX } from '../rdf/import-report.js';
 import {
-  schemaFromRdf, SCHEMA_RDF_MAX_QUADS, type SchemaFromRdfAnswer, type SchemaMode, type SchemaSource,
+  generateRefusal, schemaFromRdf, SCHEMA_RDF_MAX_QUADS, type SchemaChange, type SchemaFromRdfAnswer, type SchemaMode, type SchemaSource, type TakenEntry,
+  type TypeSchemasByKind,
 } from '../rdf/schema-from-rdf.js';
+import { meetStored, normalizedStored } from '../rdf/schema-from-rdf-modes.js';
+import { Ledger, Store } from '../rdf/schema-from-rdf-store.js';
+import type { InferredBlock, InferResult } from '../rdf/schema-from-data.js';
+import type { AddressNames } from '../rdf/term-reverse.js';
 import { schemaFingerprintOf } from './schema-stamp.js';
 import { inlineResolvableRefs } from './schema-validation.js';
 import { assertSchemaWritable } from './schema-write-gate.js';
@@ -103,6 +108,8 @@ export const SCHEMA_RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze(
 
 const MODES = ['generate', 'expand', 'update'] as const;
 const SOURCES = ['declared', 'shacl'] as const;
+/** What a `from` this door does not take is answered with: the sources it reads, and the door that infers a schema from records. */
+export const SCHEMA_RDF_FROM_TEXT = 'from names declared (OWL and RDFS) or shacl (shapes); a schema inferred from the records (data) is built by import_rdf with schema and from: data';
 /** What `from` reads when it is not given: the OWL and RDFS declarations and the shapes. */
 export const SCHEMA_RDF_FROM_DEFAULT: readonly SchemaSource[] = Object.freeze([...SOURCES]);
 
@@ -110,7 +117,8 @@ export const SCHEMA_RDF_FROM_DEFAULT: readonly SchemaSource[] = Object.freeze([.
 export const SchemaRdfImportParams = z.object({
   format: z.enum(RDF_FORMATS as unknown as [RdfFormat, ...RdfFormat[]]).optional(),
   mode: z.enum(MODES),
-  from: z.array(z.enum(SOURCES)).min(1).max(SOURCES.length).optional(),
+  // A file without data has no records to infer a schema from: `data` is the data import's (`import_rdf` with `schema` and `from: data`, Q-755).
+  from: z.array(z.enum(SOURCES, { error: SCHEMA_RDF_FROM_TEXT })).min(1).max(SOURCES.length).optional(),
   sourceBase: z.string().min(1).max(RDF_IMPORT_ADDRESS_MAX).optional(),
   sourceVocab: z.string().min(1).max(RDF_IMPORT_ADDRESS_MAX).optional(),
   dryRun: z.boolean().optional(),
@@ -161,11 +169,15 @@ export interface SchemaProposal {
   version: number;
   typesAdded: number;
   typesChanged: number;
+  /** A data import that infers its schema (Q-755): what the inference took and named, the pairs it leaves out, the label groups it skips. */
+  inferred?: InferredBlock;
+  leaveOut?: string[];
+  labelKeys?: string[];
 }
 
 /** The body both doors answer a build or a dry run with. */
 export interface SchemaRdfImportBody {
-  space: string; mode: SchemaMode; from: SchemaSource[]; format: RdfFormat; dryRun: boolean; written: boolean; version: number;
+  space: string; mode: SchemaMode; from: ProposalSource[]; format: RdfFormat; dryRun: boolean; written: boolean; version: number;
   typeSchemas: ChangedTypeSchemas;
   changes: SchemaFromRdfAnswer['changes']; taken: SchemaFromRdfAnswer['taken']; notTaken: SchemaFromRdfAnswer['notTaken'];
   counts: SchemaFromRdfAnswer['counts'] & { changes: number; typesAdded: number; typesChanged: number };
@@ -238,9 +250,9 @@ function changedTypesOf(answer: SchemaFromRdfAnswer): { changed: ChangedTypeSche
  * space's reverse names; writes nothing. A file the mapping refuses, a `generate` into a space with types, a source address that is not one, and
  * a write that would take a kind past the type cap counting only the types it adds, are answered as refusals.
  */
-export function proposeSchemaFromRdf(
-  spaceId: string, quads: Iterable<Quad>, options: { from: readonly SchemaSource[]; mode: SchemaMode; source?: SourceNames },
-): SchemaProposal | SchemaRdfImportRefusal {
+export async function proposeSchemaFromRdf(
+  spaceId: string, quads: Iterable<Quad>, options: { from: readonly SchemaSource[]; mode: SchemaMode; source?: SourceNames; infer?: InferStep },
+): Promise<SchemaProposal | SchemaRdfImportRefusal> {
   const space = getConfig().spaces.find(s => s.id === spaceId);
   if (!space) {
     const lost = lostSpaceAnswer(null, spaceId);
@@ -255,14 +267,49 @@ export function proposeSchemaFromRdf(
   knobs.hooks?.beforeMapping?.();
   // The mapping meets the types as they are STORED (R2): a type that is a reference to a library entry is kept whole there, and handed its
   // resolved copy it would be rebuilt as a concrete type that replaces the reference. The resolved meta serves the address names alone.
-  const answer = schemaFromRdf(quads, { from: options.from, mode: options.mode, names, stored: space.meta?.typeSchemas ?? {} });
-  if (answer.refusals.length > 0) return mappingRefusal(answer);
+  const stored = space.meta?.typeSchemas ?? {};
+  let answer: SchemaFromRdfAnswer;
+  if (options.from.length > 0) {
+    const read = schemaFromRdf(quads, { from: options.from, mode: options.mode, names, stored });
+    if (read.refusals.length > 0) return mappingRefusal(read);
+    answer = { ...read, changes: read.changes.map(c => ({ ...c, source: sourceOfChange(c, read.taken, options.from) })) };
+  } else {
+    // A schema inferred from the data alone reads no declaration: the mapping's own "space has types" question is asked all the same.
+    const notEmpty = generateRefusal(options.mode, stored);
+    answer = { typeSchemas: normalizedStored(stored), taken: [], notTaken: [], changes: [], refusals: notEmpty ? [notEmpty] : [], counts: { statements: 0, taken: 0, notTaken: 0, outside: 0 } };
+    if (notEmpty) return mappingRefusal(answer);
+  }
+  let inferred: InferResult | undefined;
+  if (options.infer) {
+    // The inference reads the names after the declared answer, so a declared term is the file's and never inferred again; its types meet that
+    // answer in `expand`, so a declared or stored definition stands (Q-755).
+    const first = answer;
+    const firstNames = addressNames(inlineResolvableRefs({ ...(space.meta ?? {}), typeSchemas: first.typeSchemas } as SpaceMeta), options.source);
+    inferred = await options.infer({ typeSchemas: first.typeSchemas, names: firstNames });
+    const met = meetStored('expand', inferred.built, first.typeSchemas, new Ledger(new Store([])));
+    answer = { ...first, typeSchemas: met.typeSchemas, changes: [...first.changes, ...met.changes.map(c => ({ ...c, source: 'data' as const }))] };
+  }
   const { changed, added, changedCount } = changedTypesOf(answer);
+  // One cap over the whole proposal: the declared and the inferred types a write adds are counted together.
   const capped = typesAddedPastCap(meta.typeSchemas, changed);
   if (capped) {
     return refusal(HTTP.UNPROCESSABLE, SCHEMA_RDF_REFUSED, `${capped.error} ${NOTHING_BUILT}`, { reasons: [{ code: 'type-cap', message: capped.error }], reasonCount: 1 });
   }
-  return { kind: 'proposed', changed, answer, version: space.meta?.version ?? 0, typesAdded: added, typesChanged: changedCount };
+  return {
+    kind: 'proposed', changed, answer, version: space.meta?.version ?? 0, typesAdded: added, typesChanged: changedCount,
+    ...(inferred ? { inferred: inferred.inferred, leaveOut: inferred.leaveOut, labelKeys: inferred.labelKeys } : {}),
+  };
+}
+
+/** The inference step a data import hands the proposal: run on the declared answer's types and names (`schema-from-data.ts`). */
+export type InferStep = (first: { typeSchemas: TypeSchemasByKind; names: AddressNames }) => Promise<InferResult>;
+
+/** Which declarations a change of the declared answer came from: the OWL and RDFS axioms when one of its statements is theirs, else the shapes. */
+function sourceOfChange(c: SchemaChange, taken: readonly TakenEntry[], from: readonly SchemaSource[]): 'declared' | 'shacl' {
+  const mine = taken.filter(t => t.where.kind === c.kind && t.where.type === c.type && (c.prop === undefined || t.where.prop === c.prop));
+  if (mine.some(t => t.source === 'declared')) return 'declared';
+  if (mine.some(t => t.source === 'shacl')) return 'shacl';
+  return from.includes('declared') ? 'declared' : 'shacl';
 }
 
 // ── The door ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -309,7 +356,7 @@ function auditOf(body: SchemaRdfImportBody, plan: MetaUpdatePlan['audit'] | null
 
 /** The body of a proposal, its lists capped: what a door answers, and what a networked refusal carries as `proposed`. */
 export function proposedBodyOf(
-  spaceId: string, how: { mode: SchemaMode; dryRun: boolean }, from: SchemaSource[], format: RdfFormat, proposal: SchemaProposal,
+  spaceId: string, how: { mode: SchemaMode; dryRun: boolean }, from: ProposalSource[], format: RdfFormat, proposal: SchemaProposal,
 ): SchemaRdfImportBody {
   const max = knobs.entriesNamedMax ?? SCHEMA_RDF_ENTRIES_NAMED_MAX;
   const a = proposal.answer;
@@ -317,8 +364,12 @@ export function proposedBodyOf(
     space: spaceId, mode: how.mode, from, format, dryRun: how.dryRun, written: false, version: proposal.version,
     typeSchemas: proposal.changed, changes: a.changes.slice(0, max), taken: a.taken.slice(0, max), notTaken: a.notTaken.slice(0, max),
     counts: { ...a.counts, changes: a.changes.length, typesAdded: proposal.typesAdded, typesChanged: proposal.typesChanged },
+    ...(proposal.inferred ? { inferred: proposal.inferred } : {}),
   };
 }
+
+/** What a proposal is read from: the declarations a file states, and for a data import the records themselves (`data`, Q-755). */
+export type ProposalSource = SchemaSource | 'data';
 
 /** The caller as the planner and the notices read it: its id, rights and legacy admin flag, nothing else. */
 function writeCallerOf(caller: SchemaRdfImportInput['caller']): WriteCaller {
@@ -449,7 +500,7 @@ async function readAndBuild(input: SchemaRdfImportInput, p: SchemaRdfImportParam
   }
   const from = [...(p.from ?? SCHEMA_RDF_FROM_DEFAULT)];
   const source: SourceNames | undefined = p.sourceBase === undefined ? undefined : { base: p.sourceBase, ...(p.sourceVocab !== undefined ? { vocab: p.sourceVocab } : {}) };
-  const proposal = proposeSchemaFromRdf(input.spaceId, quads, { from, mode: p.mode, ...(source ? { source } : {}) });
+  const proposal = await proposeSchemaFromRdf(input.spaceId, quads, { from, mode: p.mode, ...(source ? { source } : {}) });
   if (proposal.kind === 'refused') return proposal;
   const proposed = proposedBodyOf(input.spaceId, { mode: p.mode, dryRun }, from, format, proposal);
 
