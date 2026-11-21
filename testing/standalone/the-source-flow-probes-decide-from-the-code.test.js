@@ -410,11 +410,33 @@ describe('check-i-architecture-dependency-direction', () => {
     assert.match(v.reason, new RegExp(`a cyclic set of ${ceiling + 1} modules in server/src, above its ceiling`), `planted ${outside} -> ${member}`);
   });
 
+  it('is violated when the total of modules in cycles grows inside a small set (the count and the largest set stay put)', () => {
+    const { edges } = graphOf(byRoot[SERVER]);
+    const sets = cyclicSets(edges).sort((x, y) => y.length - x.length);
+    const inside = new Set(sets.flat());
+    // As in the case above, but the member belongs to a set that is not the largest and has room to grow: the planted import adds one module
+    // to that small set, so only the total of modules in cycles measures over its ceiling.
+    const importers = new Map();
+    for (const [, outs] of edges) for (const t of outs) importers.set(t, (importers.get(t) ?? 0) + 1);
+    const alone = (t) => !inside.has(t) && importers.get(t) === 1 && ![...reachableFrom(edges, [t])].some((r) => inside.has(r));
+    const small = sets.slice(1).find((s) => s.length + 1 < sets[0].length && s.some((m) => (edges.get(m) ?? []).some(alone)));
+    assert.ok(small, 'a set that is not the largest has a member importing a module outside every cycle that reaches none');
+    const member = small.find((m) => (edges.get(m) ?? []).some(alone));
+    const outside = edges.get(member).find(alone);
+    const back = posix.relative(posix.dirname(outside), member).replace(/\.ts$/, '.js');
+    const v = decide(plant(SERVER, outside, `import './${back}';`.replace("'./../", "'../")));
+    assert.equal(v.holds, false);
+    const ceiling = real.find((e) => e.id === 'cycles:server/src:modules').max;
+    assert.equal(sets.flat().length, ceiling, 'the modules in cycles no longer measure their ceiling: lower the ceiling to the measure');
+    assert.match(v.reason, new RegExp(`${ceiling + 1} module\\(s\\) in cyclic sets in server/src, above its ceiling`), `planted ${outside} -> ${member}`);
+    assert.doesNotMatch(v.reason, /cyclic set\(s\) in server\/src, above|a cyclic set of \d+ modules in server\/src, above/, 'only the total moved');
+  });
+
   it('counts a cycle by its strongly connected set, a chain of imports as none', () => {
     const g = graphOf([{ file: 'a.ts', code: "import './b'" }, { file: 'b.ts', code: "import './c'" }, { file: 'c.ts', code: '' }]);
-    assert.deepEqual(arch.cycleMeasures('r', g).map((m) => m.value), [0, 0]);
+    assert.deepEqual(arch.cycleMeasures('r', g).map((m) => m.value), [0, 0, 0]);
     const loop = graphOf([{ file: 'a.ts', code: "import './b'" }, { file: 'b.ts', code: "import './a'" }]);
-    assert.deepEqual(arch.cycleMeasures('r', loop).map((m) => m.value), [1, 2]);
+    assert.deepEqual(arch.cycleMeasures('r', loop).map((m) => m.value), [1, 2, 2]);
   });
 
   it('fails an exception that excuses nothing: a real transport import fixed', () => {

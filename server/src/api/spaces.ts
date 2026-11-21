@@ -348,7 +348,7 @@ spacesRouter.patch('/:id', globalRateLimit, requireSpaceAuthMfaScoped('id'), den
   // The chain (field rungs, plan, price, apply) is the settings write act's, the one MCP's doors run too; this door words what it answers.
   const token = req.authToken as (WriteCaller & { rights?: TokenRights }) | undefined;
   const answer = await writeSpaceMeta({
-    spaceId: id, body: (req.body ?? {}) as Record<string, unknown>, ifMatch: req.get('If-Match'),
+    spaceId: id, body: req.body, ifMatch: req.get('If-Match'),
     caller: { record: token as WriteCaller, rights: token?.rights, instanceAdmin: !!(token && isInstanceAdmin(token)) },
     rateKey: schemaConvertCallerOf(req).rateKey,
   });

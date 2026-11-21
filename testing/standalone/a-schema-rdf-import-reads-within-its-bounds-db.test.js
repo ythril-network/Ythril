@@ -10,6 +10,7 @@
  * - A gzip body that inflates past the reader's ratio is 413 `rdf_bound_exceeded`.
  * - A file over the quad bound is 413 `rdf_bound_exceeded` naming it (`schemaRdfMaxQuads`), before the mapping runs, on both doors.
  * - The answer names at most the door's entries bound of taken and not-taken statements, and counts them all.
+ * - The changes list is capped alike; a refusal names at most the reasons bound, each text at 300 characters, and counts every reason.
  * - A body sent as form data (what curl sends by default) is read as the document.
  *
  * Run: node --test testing/standalone/a-schema-rdf-import-reads-within-its-bounds-db.test.js (server build and the test MongoDB)
@@ -131,8 +132,37 @@ describe('the schema-from-RDF door reads within its bounds (real routes, real Mo
         assert.ok(a.body.taken.length <= 2, `${door}: ${a.body.taken.length} taken entries named`);
         assert.ok(a.body.notTaken.length <= 2, `${door}: ${a.body.notTaken.length} not-taken entries named`);
         assert.ok(a.body.counts.taken > 2, `${door}: the count is of every entry (${a.body.counts.taken})`);
+        // The changes list is capped the same way and counted whole (P2 of the pre-ship sweep).
+        assert.ok(a.body.changes.length <= 2, `${door}: ${a.body.changes.length} changes named`);
+        assert.ok(a.body.counts.changes > 2, `${door}: the changes count is of every change (${a.body.counts.changes})`);
       }
     } finally { knobs(null); }
+  });
+
+  it('a refusal names at most the reasons bound, each text at 300 characters, and counts every reason, on both doors', async () => {
+    // Two addresses that give one name are a name collision whose message carries both addresses: long ones put the sentence past its cap.
+    // More pairs than the reasons bound put the list past it.
+    const PAIRS = 105;
+    const pad = 'x'.repeat(200);
+    const lines = ['@prefix owl: <http://www.w3.org/2002/07/owl#> .'];
+    for (let i = 0; i < PAIRS; i++) {
+      lines.push(`<http://a.example/${pad}/Thing${i}> a owl:Class .`);
+      lines.push(`<http://b.example/${pad}/Thing${i}> a owl:Class .`);
+    }
+    const { rest, mcp } = await d.both(admin.key, TARGET, lines.join('\n'), params({ sourceBase: undefined, dryRun: false }));
+    assert.equal(rest.status, 422, rest.text.slice(0, 300));
+    assert.equal(rest.code, 'schema_rdf_refused', rest.text.slice(0, 300));
+    for (const [door, a] of [['rest', rest], ['mcp', mcp]]) {
+      assert.ok(a.body, `${door}: ${a.text.slice(0, 300)}`);
+      assert.equal(a.body.reasons.length, 100, `${door}: the reasons named`);
+      assert.equal(a.body.reasonCount, PAIRS, `${door}: the count is of every reason`);
+      // A sentence over its cap is cut at 300 characters and says how many it left out; every sentence of the fixture is over it.
+      for (const r of a.body.reasons) {
+        const cut = /^([\s\S]*)…\(\+\d+ chars\)$/.exec(r.message);
+        assert.ok(cut, `${door}: a reason text of ${r.message.length} characters was not cut: ${r.message.slice(0, 80)}`);
+        assert.equal(cut[1].length, 300, `${door}: a reason text is cut at its cap`);
+      }
+    }
   });
 
   it('a body sent as form data is read as the document', async () => {
