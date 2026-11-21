@@ -49,7 +49,7 @@ import { Collection, MongoNetworkError } from 'mongodb';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openImportDoor } from './_import-door.mjs';
-import { auditRowsOf, metricSample, deferred, resetRunnerForTest, untilRunnerIdle, clearActEntries } from './_space-act-harness.mjs';
+import { auditRowsOfOperation, metricSample, deferred, resetRunnerForTest, untilRunnerIdle, clearActEntries } from './_space-act-harness.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { clone } from './_schema-fingerprint.mjs';
 import { REPO_ROOT } from './_sources.mjs';
@@ -119,7 +119,7 @@ function watchWrites(seen) {
   }
   return () => { for (const [m, original] of originals) Collection.prototype[m] = original; };
 }
-const lastAuditRow = async (operation) => (await auditRowsOf(door.mongo, operation)).sort((x, y) => String(x.timestamp ?? x._id).localeCompare(String(y.timestamp ?? y._id))).at(-1);
+const lastAuditRow = async (operation) => (await auditRowsOfOperation(door.mongo, operation)).sort((x, y) => String(x.timestamp ?? x._id).localeCompare(String(y.timestamp ?? y._id))).at(-1);
 const changeOf = (row, field) => (row?.changes ?? []).find(c => c.field === field)?.to;
 
 describe('a schema snapshot travels in the export and lands on import (real MongoDB, real routes)', { skip }, () => {
@@ -250,7 +250,7 @@ describe('a schema snapshot travels in the export and lands on import (real Mong
       assert.equal(r.status, 202, `the door did not answer queued: ${r.status} ${r.text?.slice(0, 200)}`);
       hold.release();
       await untilRunnerIdle(runner, door.loader);
-      const rows = (await auditRowsOf(door.mongo, 'space.act_completed')).filter(x => String(x.path).startsWith('internal:space-act:import:'));
+      const rows = (await auditRowsOfOperation(door.mongo, 'space.act_completed')).filter(x => String(x.path).startsWith('internal:space-act:import:'));
       const own = rows.at(-1);
       assert.equal(changeOf(own, 'snapshotsLanded'), 3, `the completion row of a queued import does not count its snapshots: ${JSON.stringify(own?.changes)}`);
     });

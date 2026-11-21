@@ -153,7 +153,7 @@ export async function metricSample(name, labels = {}) {
  * insert not yet started), bounded by turns. The wait comes first: `atLeast` alone is met by a row an earlier test of the file left,
  * and the read then misses the row of the act under test (CI run 41329371938).
  */
-export async function auditRowsOf(mongo, operation, { atLeast = 1, maxTurns = 3000 } = {}) {
+export async function auditRowsOfOperation(mongo, operation, { atLeast = 1, maxTurns = 3000 } = {}) {
   await untilAuditWritesLanded();
   let rows = [];
   for (let i = 0; i < maxTurns; i++) {

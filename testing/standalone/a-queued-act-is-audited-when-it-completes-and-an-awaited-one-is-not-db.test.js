@@ -38,7 +38,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { removeInstanceDir } from './_vote-round-instance.mjs';
-import { deferred, untilRunnerIdle, resetRunnerForTest, auditRowsOf } from './_space-act-harness.mjs';
+import { deferred, untilRunnerIdle, resetRunnerForTest, auditRowsOfOperation } from './_space-act-harness.mjs';
 import { M1, tempInstance, networkOf, boot, seedFacts, factCount, doors, requireRunner, databaseTakesCollections, warmSpaceCreation } from './_round-open-fixtures.mjs';
 
 const dir = tempInstance('ythril-act-audit-');
@@ -78,7 +78,7 @@ describe('a queued act is audited when it completes, an awaited one is not', { s
     await untilRunnerIdle(runner, loader);
     assert.equal(await factCount(mongo, 'notes'), 0, 'the queued act never completed');
 
-    const rows = await auditRowsOf(mongo, 'network.round.space_act', { atLeast: 1 });
+    const rows = await auditRowsOfOperation(mongo, 'network.round.space_act', { atLeast: 1 });
     const spacesNamed = rows.map(r => ['notes', 'other'].filter(s => JSON.stringify(r).includes(s)));
     assert.deepEqual(spacesNamed, [['notes']], `the completion entries name ${JSON.stringify(spacesNamed)}: exactly the act the door had already answered is audited, and an awaited one is the route's own entry`);
     resetRunnerForTest(runner);

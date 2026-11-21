@@ -43,7 +43,7 @@ import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { ADMIN_TOKEN, build } from './_push-door.mjs';
 import { openImportDoor, exportText, fact, idsOf, paddedFacts } from './_import-door.mjs';
-import { clearActEntries, deferred, resetRunnerForTest, untilRunnerIdle, auditRowsOf } from './_space-act-harness.mjs';
+import { clearActEntries, deferred, resetRunnerForTest, untilRunnerIdle, auditRowsOfOperation } from './_space-act-harness.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { withBlockedPaths } from './_unreadable-paths.mjs';
 
@@ -121,7 +121,7 @@ describe('an import is a space act: it holds its space, resumes from its spool a
     assert.deepEqual(await rowsOf(), landed, 'the resumed import did not land the same rows from its spool');
     assert.deepEqual(door.spoolFiles(), [], 'a completed import left its spool on disk');
     // Nobody waited for this import, so its completion row is the only place its result is told: it carries the import's totals.
-    const own = (await auditRowsOf(door.mongo, 'space.act_completed')).filter(r => String(r.path).includes(actId));
+    const own = (await auditRowsOfOperation(door.mongo, 'space.act_completed')).filter(r => String(r.path).includes(actId));
     assert.equal(own.length, 1, `want one completion row for the resumed import ${actId}: ${JSON.stringify(own.map(r => r.path))}`);
     const inserted = (own[0].changes ?? []).find(c => c.field === 'inserted');
     assert.equal(inserted?.to, IDS.length, `the resumed import's completion row does not say how many records it stored: ${JSON.stringify(own[0].changes)}`);
@@ -141,7 +141,7 @@ describe('an import is a space act: it holds its space, resumes from its spool a
     const retried = lines.filter(l => l.includes('Resume of space acts failed'));
     assert.deepEqual(retried, [], `the resume reported an act that ended as a failure it retries: ${JSON.stringify(retried)}`);
     assert.deepEqual(await idsOf(door, SPACE), [], 'an import with no spool landed rows');
-    const rows = (await auditRowsOf(door.mongo, 'space.act_completed')).filter(r => String(r.path).startsWith('internal:space-act:import:'));
+    const rows = (await auditRowsOfOperation(door.mongo, 'space.act_completed')).filter(r => String(r.path).startsWith('internal:space-act:import:'));
     assert.ok(rows.some(r => String(r.path).includes(actId)), `no completion row names the import act ${actId}: ${JSON.stringify(rows.map(r => r.path))}`);
     // It was failed, not completed: the row says so by its status. Only THIS act's rows: the audit log of the file's database also holds the
     // successful completion of the resumed import the test before this one ran.
@@ -169,7 +169,7 @@ describe('an import is a space act: it holds its space, resumes from its spool a
       assert.deepEqual(door.importActs().map(e => [e.id, e.state]), [[actId, 'owed']], 'an import whose spool could not be looked at was completed or dropped instead of being retried');
       assert.deepEqual(door.spoolFiles(), [spool], 'an import whose spool could not be looked at had its spool removed');
       assert.deepEqual(await idsOf(door, SPACE), [], 'fixture check: nothing may land while the spool cannot be read');
-      const failed = (await auditRowsOf(door.mongo, 'space.act_completed', { atLeast: 0 })).filter(r => String(r.path).includes(actId));
+      const failed = (await auditRowsOfOperation(door.mongo, 'space.act_completed', { atLeast: 0 })).filter(r => String(r.path).includes(actId));
       assert.deepEqual(failed, [], 'the import act was reported completed (as failed) for a spool that was only unreadable for a while');
     });
     // The permission comes back: the retry finds the spool and lands the import.
@@ -210,7 +210,7 @@ describe('an import is a space act: it holds its space, resumes from its spool a
         assert.deepEqual(door.importActs().map(e => [e.state, e.lastError]), [], 'an import whose spool cannot be read stays standing: it is retried for ever and its space stays held');
         assert.deepEqual(door.spoolFiles(), [], 'the unreadable spool of a failed import was left on disk');
         assert.deepEqual(await idsOf(door, SPACE), [], 'an import whose spool cannot be read landed rows');
-        const own = (await auditRowsOf(door.mongo, 'space.act_completed')).filter(r => String(r.path).includes(actId));
+        const own = (await auditRowsOfOperation(door.mongo, 'space.act_completed')).filter(r => String(r.path).includes(actId));
         assert.deepEqual(own.map(r => r.status), [422], `want one completion row with status 422 for ${actId}: ${JSON.stringify(own.map(r => [r.path, r.status]))}`);
       });
     }
