@@ -248,6 +248,8 @@ export type MetaUpdateRefusal = {
 const BAD_BODY = 400 as const;
 /** The status of a schema whose terms would share one RDF address (Q-748): understood, and not storable. */
 const TERM_CLASH_STATUS = 422 as const;
+/** The status a merged meta the store's parse refuses is answered with by the routes that write named types (as the planner answers it). */
+const META_PARSE_REFUSED_STATUS = 400 as const;
 
 /**
  * The refusal of a body whose `convertRecords` does not parse, said as `bad_conversion_step` with the index of the step (`Q-745`), or `undefined` when
@@ -377,7 +379,7 @@ export function termClashRefusalOfOwnTypeEdit(space: SpaceConfig, typeSchemas: S
   const base: Partial<SpaceMeta> = metaWriteBase(space, undefined, []) ?? {};
   const incoming: Partial<SpaceMeta> = { typeSchemas };
   const minted = parseSpaceMeta(mergeSpaceMeta(base, incoming, mode), { against: base });
-  if (!minted.ok) return { status: 400, body: { error: minted.message } };
+  if (!minted.ok) return { status: META_PARSE_REFUSED_STATUS, body: { error: minted.message } };
   return termClashRefusalAfterEdit(space, { base, incoming, mode, merged: minted.meta, targetNetwork: undefined });
 }
 
