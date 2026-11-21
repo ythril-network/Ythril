@@ -89,7 +89,7 @@ and the two are identical by construction. The REST routes with no tool are in
 | | `space_schema_layers` | `POST /api/space_schema_layers` · legacy: `GET /api/spaces/:id/schema-layers` | read `schema` |
 | | `space_schema_versions` | `POST /api/space_schema_versions` · legacy: `GET /api/spaces/:id/schema-versions` | read `schema` |
 | | `space_schema_rdf` | `POST /api/space_schema_rdf` · legacy: `GET /api/spaces/:id/schema-rdf` | read `schema` |
-| | `import_schema_rdf` | `POST /api/import_schema_rdf` · legacy: `POST /api/spaces/:id/schema-rdf` | read `schema` |
+| | `import_schema_rdf` | `POST /api/import_schema_rdf` · legacy: `POST /api/spaces/:id/schema-rdf` | write `schema` |
 | | `space_set_network_precedence` | `POST /api/space_set_network_precedence` · legacy: `PUT /api/spaces/:id/network-precedence` | admin `schema` |
 | | `space_reembed` | `POST /api/space_reembed` · legacy: `POST /api/spaces/:id/reembed` | admin `knowledge` |
 | | `space_schema_convert` | `POST /api/space_schema_convert` · legacy: `POST /api/spaces/:id/schema-convert` | admin `knowledge` |
