@@ -40,6 +40,8 @@ const IMPORT_TOTAL_LIST = ['inserted', 'updated', 'refused', 'deletedOnRestore',
 /** The keys of {@link ImportTotals} the list leaves out: none, or the assignment below fails the type check, so a new total cannot miss the allowlist. */
 type UnlistedImportTotal = Exclude<keyof ImportTotals, (typeof IMPORT_TOTAL_LIST)[number]>;
 const IMPORT_TOTAL_FIELDS: [UnlistedImportTotal] extends [never] ? typeof IMPORT_TOTAL_LIST : { unlisted: UnlistedImportTotal } = IMPORT_TOTAL_LIST;
+/** The schema step's fields of an RDF import's audit rows (Q-955), the one list of the `rdf.import` row and of the completion row of an act nobody waits for. */
+const RDF_IMPORT_SCHEMA_FIELDS = ['schemaWritten', 'schemaFingerprintBefore', 'schemaFingerprintAfter', 'schemaTypesAdded', 'schemaTypesChanged'] as const;
 
 /**
  * Fields each operation may record, by `operation` name from `audit/middleware.ts`.
@@ -143,15 +145,15 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // the records inserted and converged (and, of those, the ones that changed nothing), the reasons answered and the statements not taken. With
   // `schema` set (Q-955), the schema step's before and after: whether it wrote, the stored schema's fingerprints, the types added and changed.
   'rdf.import': [
-    'format', 'dryRun', 'status', 'quads', 'subjects', 'inserted', 'converged', 'unchanged', 'reasons', 'notTaken',
-    'schemaWritten', 'schemaFingerprintBefore', 'schemaFingerprintAfter', 'schemaTypesAdded', 'schemaTypesChanged',
+    'format', 'dryRun', 'status', 'quads', 'subjects', 'inserted', 'converged', 'unchanged', 'reasons', 'notTaken', ...RDF_IMPORT_SCHEMA_FIELDS,
   ],
   // What a space import landed, in totals: records stored new, records replaced, records refused, records the restore left out because this
   // instance deleted them after the backup, and records that were already past their expiry when they landed (the next sweep takes them).
   // Beside them the schema versions it kept and skipped, and how many keys of the body it did not read: counts only, never a key's name.
   'space.import': [...IMPORT_TOTAL_FIELDS],
-  // A queued space act's completion row: the totals its body reports (an import's, the same as above), the only place nobody waiting is told.
-  'space.act_completed': [...IMPORT_TOTAL_FIELDS],
+  // A queued space act's completion row: the totals its body reports (an import's, the same as above), the only place nobody waiting is told. An RDF
+  // import with `schema` set (Q-955) adds the schema step's fields, as its `rdf.import` row has them.
+  'space.act_completed': [...IMPORT_TOTAL_FIELDS, ...RDF_IMPORT_SCHEMA_FIELDS],
   // The new signing key's fingerprint and never the key itself: a peer that pinned the old one compares fingerprints.
   'signing.rotate': ['fingerprint'],
   // What a TTL sweep took from a space: one change per record collection, `to` the number deleted this cycle (`field` is the collection's name).

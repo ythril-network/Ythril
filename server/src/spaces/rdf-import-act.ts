@@ -639,15 +639,19 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
     event: 'bulk.write', spaceId: entry.localId,
     entry: { source: 'rdf.import', importId: id, inserted: countsOf(report, 'inserted'), updated: countsOf(report, 'converged'), errorCount: 0 },
   });
-  return { counts: countsForAudit(report), afterCompletion: forget };
+  return { ...auditOf(report), afterCompletion: forget };
 }
 
 const countsOf = (r: RdfImportReport, k: 'inserted' | 'converged'): Record<string, number> =>
   Object.fromEntries(OP_ORDER.map(kind => [kind, r.kinds[kind][k]]));
 
-/** The completion row's counts (written when nobody waits for the act). */
-function countsForAudit(r: RdfImportReport): Record<string, number> {
-  return Object.fromEntries(rdfImportAuditChanges(r).filter(c => typeof c.to === 'number').map(c => [c.field, c.to as number]));
+/** The completion row's counts, and the schema step's fingerprints and flag (written when nobody waits for the act; the row's allowlist keeps what it names). */
+function auditOf(r: RdfImportReport): { counts: Record<string, number>; auditFields: Record<string, string | boolean> } {
+  const changes = rdfImportAuditChanges(r);
+  return {
+    counts: Object.fromEntries(changes.flatMap((c): Array<[string, number]> => (typeof c.to === 'number' ? [[c.field, c.to]] : []))),
+    auditFields: Object.fromEntries(changes.flatMap((c): Array<[string, string | boolean]> => (typeof c.to !== 'number' && c.field.startsWith('schema') ? [[c.field, c.to]] : []))),
+  };
 }
 
 /** Is an RDF import standing now that names the folder `id`. */
