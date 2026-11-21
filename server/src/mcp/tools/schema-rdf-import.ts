@@ -8,8 +8,8 @@
  * and every refusal's sentence and code. This module hands it the inline document (bounded by the MCP body limit before it reaches here) and
  * shapes the answer: the body as JSON in the text block and in `structuredContent`; a refusal as the act's status and code, its detail (a
  * networked refusal's `proposed`) as structured content. A status the tool does not carry (412 `schema_rdf_changed`) is an error result in the
- * act's own sentence and code. Registered in `mcp/tools/index.ts`, priced in `TOOL_RIGHTS` (`schema: read`; the act raises a build to
- * `write`), refused to a peer-bound token (`PEER_REFUSED_TOOLS`), recorded as `schema.rdf.import` (`MCP_TOOL_OPERATIONS`).
+ * act's own sentence and code. Registered in `mcp/tools/index.ts`, priced in `TOOL_RIGHTS` (`schema: write`, a dry run
+ * too), refused to a peer-bound token (`PEER_REFUSED_TOOLS`), recorded as `schema.rdf.import` (`MCP_TOOL_OPERATIONS`).
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { TOOL_REFUSAL_STATUSES, toolRefusalOfAct } from '../../util/errors.js';
@@ -37,7 +37,7 @@ export const import_schema_rdfTool: ToolHandler = {
     + `${SCHEMA_RDF_ENTRIES_NAMED_MAX} of each and all counted. A file that contradicts itself, a name collision, an address clash or a `
     + 'reference to a missing library entry refuses the whole file and writes nothing; run with dryRun first to see what it would build. '
     + 'Same as POST /api/spaces/:id/schema-rdf.\n\n'
-    + 'COST: a dry run needs `schema: read`, a build `schema: write`, and a file whose shapes give a type rules `schema: admin`. A space in a '
+    + 'COST: needs `schema: write`, for a dry run too, and a file whose shapes give a type rules `schema: admin`. A space in a '
     + 'network is refused: there a schema change is the network\'s to vote on through schema_update, and the refusal '
     + 'carries the proposed types to send there. The space needs RDF switched on. The document is at most the MCP body limit; a larger file '
     + `goes through the REST route. Every refusal carries its code (${SCHEMA_RDF_IMPORT_REFUSAL_CODES.length} of them, listed in the guide's `

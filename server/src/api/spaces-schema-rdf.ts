@@ -61,8 +61,8 @@ spaceSchemaRdfRouter.get('/:id/schema-rdf', globalRateLimit, requireSpaceAuthSco
 });
 
 // POST /api/spaces/:id/schema-rdf?mode=&from=&format=&sourceBase=&sourceVocab=&dryRun= - the space's type schemas built or extended from an
-// RDF file of OWL, RDFS and SHACL, the twin of MCP `import_schema_rdf` (Q-754). The act owns the parameters, the rungs past the route's
-// `schema: read` row (`write` unless dryRun), the bounds and every refusal; this door hands it the body as it arrives (marked before the
+// RDF file of OWL, RDFS and SHACL, the twin of MCP `import_schema_rdf` (Q-754). The route's row asks `schema: write`, a dry run too;
+// the act owns the parameters, the `admin` rung of a file with rules, the bounds and every refusal; this door hands it the body as it arrives (marked before the
 // global parsers, `SCHEMA_RDF_PATH`) and puts the answer on HTTP. A schema write: the second factor and the read-only refusal, as PATCH has.
 spaceSchemaRdfRouter.post('/:id/schema-rdf', globalRateLimit, requireSpaceAuthMfaScoped('id'), denyReadOnly, async (req: Request, res: Response) => {
   const spaceId = req.params['id'] as string;

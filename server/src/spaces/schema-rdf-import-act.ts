@@ -29,7 +29,6 @@ import type { SpaceMeta, KnowledgeType } from '@ythril-network/schema';
 import { getConfig } from '../config/loader.js';
 import { peerText, refusalOfParse } from '../util/log.js';
 import { isInstanceAdmin } from '../auth/instance-admin.js';
-import { holdsRung, rungRefusal } from '../auth/reachable-spaces.js';
 import { describeFieldRequirement } from '../auth/space-field-rights.js';
 import { rdfSpaceState, RDF_TERM_CLASH, type RdfCaller } from '../rdf/rdf-space-state.js';
 import { RDF_FORMATS, type RdfFormat } from '../rdf/serialize.js';
@@ -79,7 +78,7 @@ const HTTP = {
 // ── Refusal codes ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export const SCHEMA_RDF_BAD_PARAM = 'schema_rdf_bad_param';
-/** A caller below the rung the call needs: `schema: read` for a dry run, `write` for a build, `admin` for rules. */
+/** A caller below the rung a file with rules needs (`schema: admin`, the settings write's field rungs); `schema: write` is the guard's. */
 export const SCHEMA_RDF_RUNG = 'schema_rdf_rung';
 export const SCHEMA_RDF_NETWORKED = 'schema_rdf_networked';
 export const SCHEMA_RDF_NOT_EMPTY = 'schema_rdf_not_empty';
@@ -320,13 +319,6 @@ function writeCallerOf(caller: SchemaRdfImportInput['caller']): WriteCaller {
   return { ...(caller.id ? { id: caller.id } : {}), ...(caller.rights ? { rights: caller.rights } : {}) };
 }
 
-/** Does the caller hold `needs` on the space's schema (an instance administrator holds every rung). */
-function holdsSchemaRung(caller: SchemaRdfImportInput['caller'], spaceId: string, needs: 'read' | 'write'): boolean {
-  if (!caller) return false;
-  if (isInstanceAdmin(caller)) return true;
-  return !!caller.rights && holdsRung(caller.rights, spaceId, 'schema', needs);
-}
-
 /**
  * Build or dry-run a schema from an RDF file for a door. Never throws for a caller's mistake or the space's state: every refusal is an answer.
  * A fault that is neither (the store, the disk) is thrown to the door.
@@ -339,10 +331,8 @@ export async function schemaRdfImportAct(input: SchemaRdfImportInput): Promise<S
   const cfg = getConfig();
   const unknown = unknownSpaceAnswer(null, input.spaceId, false, cfg);
   if (unknown) return refusal(unknown.status, unknown.body.code ?? SPACE_NOT_FOUND, unknown.body.error);
-  const needs = dryRun ? 'read' : 'write';
-  if (!holdsSchemaRung(input.caller, input.spaceId, needs)) {
-    return refusal(HTTP.FORBIDDEN, SCHEMA_RDF_RUNG, `${rungRefusal(needs, 'schema', input.spaceId)}: ${dryRun ? 'a dry run reads the schema' : 'a build writes the schema'}`);
-  }
+  // The rung (`schema: write`, a dry run too, amendment A10) is the doors' guard's: the route's `ROUTE_RIGHTS` row and the tool's
+  // `TOOL_RIGHTS` row. The settings write's field rungs raise a file with rules to `admin` (`schema_rdf_rung` below).
   const state = rdfSpaceState(cfg, input.spaceId, input.caller, schemaFingerprintOf);
   if (!state.ok) return refusal(state.status, state.code, state.error, state.detail);
   // The import's hold, asked on every path before a byte is read: a dry run would answer by a schema the import may yet see change.
