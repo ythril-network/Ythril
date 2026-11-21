@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A file whose run finds the embedder unavailable no longer ends `failed`: it reads `processing` while its job waits; an alert on failed media jobs stays quiet during an outage | None; alert on `ythril_media_embedder_probes_total{outcome="unavailable"}` as well |
 | An importer below 6.6.0 skips the `schemaSnapshots` of a 6.6 export: the records land without their schema versions, which are then fetched from members or stay unheld | Import a 6.6 export into 6.6.0 or later to keep the versions |
 | A member below 6.6.0 keeps a schema vote's conversion steps, takes the schema and converts nothing | After it upgrades, run `POST /api/spaces/:id/schema-convert` on the types the change reached |
+| `PUT /api/spaces/:id/schema` and the schema library's group apply refuse a write that takes a knowledge type past 200 type definitions (`400`), as the single-type route does; a single-type write that fails the whole schema's parse (more rules apply to a record than may) is refused `400` where it was stored | Keep a kind under 200 types, and within the rule limits |
+| The audit row of a call a guard refused (a missing rung, a space the token does not reach, a second factor) names the token it refused; it was empty | None; read `tokenId` on `403` and `429` rows |
 
 ### Added
 

@@ -334,7 +334,7 @@ retry; `curl -f` plus a line count is enough to notice.
 |-------|------|-------------|
 | `_id` | `string` | UUID v4 — unique entry identifier |
 | `timestamp` | `string` | ISO-8601 timestamp |
-| `tokenId` | `string \| null` | Token ID (null for auth failures) |
+| `tokenId` | `string \| null` | Token ID. A call a guard refused (a missing rung, a space the token does not reach, a second factor) names the token it refused; null for a credential that did not resolve (auth failures) |
 | `tokenLabel` | `string \| null` | Human-readable token label |
 | `authMethod` | `"pat" \| "oidc" \| null` | Authentication method used |
 | `oidcSubject` | `string \| null` | OIDC subject claim when auth method is OIDC |

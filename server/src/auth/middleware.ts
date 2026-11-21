@@ -222,6 +222,8 @@ async function resolveAuthOrFail(
     res.status(401).json({ error: 'Invalid or expired token' });
     return null;
   }
+  // Named for the audit row of whatever this request is then refused for, before any refusal can be written (D1).
+  req.resolvedToken = record;
   return { record, bearer };
 }
 
