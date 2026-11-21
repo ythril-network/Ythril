@@ -7,8 +7,8 @@
  * Both doors run `spaces/schema-rdf-import-act.ts`, which owns the parameters (the same names on both doors), the rungs, the bounds, the answer
  * and every refusal's sentence and code. This module hands it the inline document (bounded by the MCP body limit before it reaches here) and
  * shapes the answer: the body as JSON in the text block and in `structuredContent`; a refusal as the act's status and code, its detail (a
- * networked refusal's `proposed`) as structured content. A status the tool does not carry (412 `schema_rdf_changed`) is an error result in the
- * act's own sentence and code. Registered in `mcp/tools/index.ts`, priced in `TOOL_RIGHTS` (`schema: write`, a dry run
+ * networked refusal's `proposed`) as structured content, 412 `schema_rdf_changed` included. A status the tool does not carry is an error
+ * result in the act's own sentence and code. Registered in `mcp/tools/index.ts`, priced in `TOOL_RIGHTS` (`schema: write`, a dry run
  * too), refused to a peer-bound token (`PEER_REFUSED_TOOLS`), recorded as `schema.rdf.import` (`MCP_TOOL_OPERATIONS`).
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
