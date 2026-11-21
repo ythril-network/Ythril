@@ -31,6 +31,11 @@
  * - a malformed node names its place (line and column of the character the tokenizer stopped at, in a node of a later batch), and so does a node
  *   whose address is relative.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 39 s (measured 2026-11-21). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads more than that: the time of the crowd, not of this file.
+ *
  * Run: node --test testing/standalone/the-rdf-import-parser-reads-a-graph-array-as-its-whole-document.test.js (requires a prior `npm run build:server`)
  */
 import { describe, it } from 'node:test';

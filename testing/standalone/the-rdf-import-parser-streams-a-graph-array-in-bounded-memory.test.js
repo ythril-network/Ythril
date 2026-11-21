@@ -24,6 +24,11 @@
  * The bound is the option a caller with a lower ceiling passes (`BOUND`, an eighth of the default), so that the file takes seconds: the rule is the
  * bound's, whatever its value; the default itself is held by the cases of the other two files that read a document over it.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 33 s (measured 2026-11-21). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads more than that: the time of the crowd, not of this file.
+ *
  * Run: node --test testing/standalone/the-rdf-import-parser-streams-a-graph-array-in-bounded-memory.test.js (requires a prior `npm run build:server`)
  */
 import { describe, it } from 'node:test';

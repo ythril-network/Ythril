@@ -38,6 +38,11 @@
  * On 3a117862 no space row carries `files`: every case below that reads it fails on "the space's report carries no files". The cases that
  * hold what the pass must NOT do (controls, the pull's reasons, report-only) are green there and say so in their titles.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 25 s (measured 2026-11-21). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads more than that: the time of the crowd, not of this file.
+ *
  * Run: `node --test testing/standalone/a-restore-reports-which-files-no-longer-match-their-records-db.test.js` (a Mongo the harness
  * accepts; a prior `npm run build` in server/).
  */

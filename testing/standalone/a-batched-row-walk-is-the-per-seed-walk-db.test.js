@@ -44,6 +44,11 @@
  * with the shared read's own bound ignored (`whole` forced true), `ent-back` and `ent-fan-dst` differed in
  * windows of 3; with a cached record handed out uncopied, the no-shared-object assertion fired.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 25 s (measured 2026-11-21). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads more than that: the time of the crowd, not of this file.
+ *
  * Run: `npm run test:up` first, then
  *      node --test testing/standalone/a-batched-row-walk-is-the-per-seed-walk-db.test.js
  * (requires a prior `npm run build` in server/). Against a developer's own mongod with no users:

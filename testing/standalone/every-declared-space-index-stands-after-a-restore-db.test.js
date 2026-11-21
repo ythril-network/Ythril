@@ -25,6 +25,11 @@
  * `ttl_deletedAt` are on the fresh space and not on the restored one); the second on the declaration (`spaces/space-indexes.ts` is
  * not built); the third on the failure's words (the act is owed, but its error is the store's text and names no index).
  *
+ * ## Its time alone
+ *
+ * Alone it takes 20 s (measured 2026-11-21). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads more than that: the time of the crowd, not of this file.
+ *
  * Run: a Mongo the harness accepts, then `node --test testing/standalone/every-declared-space-index-stands-after-a-restore-db.test.js`
  * (a prior `npm run build` in server/).
  */
