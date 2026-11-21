@@ -48,6 +48,11 @@
  * `validationMode`): those cases are held with a declared violation too, and are red on the base for that reason. The pull door
  * has no recording of any kind on the base.
  *
+ * ## Its time alone
+ *
+ * Alone it takes 17 s (measured 2026-11-21). In a database job it runs beside the other files of its shard on one Mongo, and a
+ * recorded run reads more than that: the time of the crowd, not of this file.
+ *
  * Run: a Mongo the harness accepts, then
  *      node --test testing/standalone/an-arrival-records-an-undeclared-key-once-and-only-what-it-added-db.test.js
  */
