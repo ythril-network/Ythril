@@ -187,11 +187,7 @@ class NameBook {
   claim(kind: string, wanted: string, valid: (name: string) => boolean): string | null {
     const held = this.held.get(kind) ?? new Set<string>();
     this.held.set(kind, held);
-    let name = wanted;
-    for (let n = 2; held.has(name); n++) name = `${wanted}_${n}`;
-    if (!valid(name)) return null;
-    held.add(name);
-    return name;
+    return numbered(held, wanted, valid);
   }
 }
 
@@ -217,7 +213,23 @@ function majorityOf(counts: Record<Category, number>): { majority: Datatype | nu
   return { majority: best, share: best === null || total === 0 ? 0 : counts[best] / total };
 }
 
-const share = (n: number, of: number): number => (of === 0 ? 0 : Math.round((n / of) * 1e6) / 1e6);
+/** The steps a share is rounded to, so a confidence reads as the share it is (0.3, not 0.30000000000000004). */
+const SHARE_STEPS = 1_000_000;
+const share = (n: number, of: number): number => (of === 0 ? 0 : Math.round((n / of) * SHARE_STEPS) / SHARE_STEPS);
+
+/** The number a clashing name's first renamed spelling takes (`Item_2`): the name itself is the first. */
+const FIRST_NUMBER = 2;
+/**
+ * The one numbering rule of the inference: `wanted`, or the first `wanted_<n>` that `held` does not hold, checked again by `valid` (a number
+ * can take a name past its length limit); `null` when that spelling is not valid. Adds the spelling to `held`.
+ */
+function numbered(held: Set<string>, wanted: string, valid: (name: string) => boolean): string | null {
+  let name = wanted;
+  for (let n = FIRST_NUMBER; held.has(name); n++) name = `${wanted}_${n}`;
+  if (!valid(name)) return null;
+  held.add(name);
+  return name;
+}
 const capped = <T>(list: T[]): T[] => list.slice(0, INFERRED_NAMED_MAX);
 
 /**
@@ -355,11 +367,7 @@ export async function inferFromData(
       held = new Set(Object.keys(stored));
       keysHeld.set(key, held);
     }
-    let name = wanted;
-    for (let n = 2; held.has(name); n++) name = `${wanted}_${n}`;
-    if (!validPropertyKey(name)) return null;
-    held.add(name);
-    return name;
+    return numbered(held, wanted, validPropertyKey);
   };
 
   for (const p of [...pairs.keys()].sort(byCodeUnit)) {
