@@ -131,7 +131,14 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/turtle" \
 | `blankNodes` | `refuse`, `mint` (a blank subject becomes a new record) | `refuse` |
 | `sourceBase`, `sourceVocab` | The base (and vocabulary, default `<sourceBase>vocab/`) of the space the file came from | TriG, N-Quads, JSON-LD: the file's one data graph; Turtle: none |
 | `graphBase` | `"<graph address> <source base>"`, once per data graph (REST: repeat the parameter; MCP: an array) | none |
-| `schema` | Not available here yet: refused by name (`rdf_import_schema_not_available`); build the schema first with [Schema from RDF](#rdf-schema-import) | |
+| `schema` | `none`: import the data alone. `generate`, `expand`, `update`: build or extend the space's type schemas from the file's classes and shapes first, as [Schema from RDF](#rdf-schema-import)'s `mode` does (below) | `none` |
+| `from` | With `schema`: which declarations to read, `declared` (OWL and RDFS), `shacl` (shapes), or both (REST: repeat the parameter; MCP: an array). `from: data` (a schema read from the records) is not available yet and is refused with `rdf_import_schema_not_available` (400); `from` without `schema` is `400 rdf_import_bad_param` | `declared` and `shacl` |
+
+### A schema built from the file (`schema`)
+
+With `schema` set, the file's OWL and RDFS classes and properties and its SHACL shapes are read as [Schema from RDF](#rdf-schema-import) reads them, under the file's one source base (a file whose graphs need several bases is refused `400 rdf_import_several_graphs`), and the data is judged by the schema they build. The import writes the schema it built from inside its own act, once, after the data passed the dry plan by it and before the first record: a file whose data fails writes neither the schema nor the data, and every imported record carries the fingerprint of the schema stored after the write. A file that changes no type writes no schema (the version stays as it was). The schema's own subjects (the ontology header, the classes, the shapes and the blank nodes they reach) are not imported as records: their statements are counted in `notTaken` as `schema`. Without `schema` the import is as it always was: such subjects are translated like any other, so a file of shapes is better imported with `schema` set. A data edge whose object is one of those subjects is refused under strict linkage, as an edge to a record that is not there is. The schema's statements are at most 500 000 (`413 rdf_bound_exceeded`, `bound: schemaRdfMaxQuads`, before anything is built).
+
+The proposal is judged at the door as its write would be: `schema: write` besides `knowledge: write`, for a dry run too, and `schema: admin` for a file whose shapes give a type rules (`403 schema_rdf_rung`); the planner's checks (`422 schema_rdf_refused`, `422 rdf_term_clash`); `409 schema_rdf_not_empty` for `generate` into a space with types. The act writes with the version the door read: a schema stored between the door and the act ends it `409 rdf_import_space_changed`, one stored after it read the data `412 schema_rdf_changed`; a space in a network is refused `409 schema_rdf_networked`, carrying the proposed types as `proposed` (send them through `PATCH /api/spaces/:id` or `schema_update`), and opens no round; its dry run is answered as anywhere. The act reads the caller's token again before the write: a token revoked or narrowed meanwhile ends it `403 schema_rdf_rung`. Each of these ends the act with nothing written. A dry run builds the schema, judges the data by it and writes neither; its report carries the schema step too. The report's `schema` says whether the schema was written, the types added and changed (`kind:type`, each list named up to 500 and counted whole), the stored schema's fingerprint before and after, the caller's token id and the notices a `PATCH` of the same change answers (`notice`).
 
 ### The answer and the report
 
@@ -143,13 +150,19 @@ The import is a space act. From the moment it is registered until it ends, the s
 
 ### Rights and audit
 
-Both doors need `knowledge: write`, for a dry run and the status too: they answer which records are stored and which values break the schema. Any writer of the space reads another caller's report of that space (an id of another space's import is answered as not found), a report is not served after seven days, and deleting the space removes its reports. The import asks the brain's hard storage limit as the fact doors do (`507 storage_exceeded`, the tool an error result), a dry run excepted. Every import is audited as `rdf.import` with its counts (never a value of the file), and sends one `bulk.write` webhook summary.
+Both doors need `knowledge: write`, for a dry run and the status too: they answer which records are stored and which values break the schema. With `schema` set they need `schema: write` besides (rules: `schema: admin`), and REST asks the second factor where the token needs one, as `PATCH /api/spaces/:id` does; without it the import asks what it always asked. Any writer of the space reads another caller's report of that space (an id of another space's import is answered as not found), a report is not served after seven days, and deleting the space removes its reports. The import asks the brain's hard storage limit as the fact doors do (`507 storage_exceeded`, the tool an error result), a dry run excepted. Every import is audited as `rdf.import` with its counts (never a value of the file), with `schema` also whether it wrote the schema, the schema's fingerprint before and after and the counts of types added and changed, and sends one `bulk.write` webhook summary.
 
 | Status | Code | When |
 |---|---|---|
 | 400 | `rdf_import_bad_param` | A parameter that is not one the import takes, or a source base that is not an absolute address ending in `/` |
-| 400 | `rdf_import_schema_not_available` | `schema` was sent |
-| 400 | `rdf_import_several_graphs` | Several data graphs and one without its `graphBase` |
+| 400 | `rdf_import_schema_not_available` | `from: data` was sent: a schema read from the records is not available yet |
+| 400 | `rdf_import_several_graphs` | Several data graphs and one without its `graphBase`; with `schema`, graphs read under several source bases |
+| 400 | `schema_rdf_bad_param` | With `schema`: a source address the schema reader cannot read names by |
+| 403 | `schema_rdf_rung` | With `schema`: below `schema: write`, or below `schema: admin` for a file whose shapes give rules; also a token revoked or narrowed before the act wrote the schema |
+| 409 | `schema_rdf_networked` | With `schema`: the space is in a network (the proposed types as `proposed`) |
+| 409 | `schema_rdf_not_empty` | With `schema=generate`: the space has types |
+| 412 | `schema_rdf_changed` | With `schema`: the space's schema changed before the act wrote it, or the schema stored after the write is not the one the data was judged by |
+| 422 | `schema_rdf_refused` | With `schema`: the file's schema contradicts itself, two names collide, a type is invalid or past its cap, or the planner refuses it |
 | 400 | `rdf_malformed` (and the reader's other codes) | The file is not well-formed: the answer names the line and column (`place`) |
 | 400 | `rdf_jsonld_not_streamable` | A JSON-LD document longer than the reader holds unparsed whose top level is not an `@context`, an `@id` and a `@graph` array in that order, or one whose `@context`, `@id` or `@type` comes after the data it governs |
 | 400 | `rdf_import_upload_stalled` | The upload sent nothing for a minute (REST only); nothing was imported, the connection is closed, and the next import is taken |
@@ -158,7 +171,7 @@ Both doors need `knowledge: write`, for a dry run and the status too: they answe
 | 409 | `rdf_import_refused` | The import was refused; nothing was written |
 | 409 | `rdf_not_enabled` | The space has RDF off |
 | 409 | `rdf_import_busy` | Another RDF import is being read in |
-| 409 | `space_being_restored`, `space_being_rdf_imported` and the other `space_being_*` codes | Another act holds the space (a restore, a migration, a conversion, an import): the import is refused with that act's code before the file is read, as every write is; a dry run is not |
+| 409 | `space_being_restored`, `space_being_rdf_imported` and the other `space_being_*` codes | Another act holds the space (a restore, a migration, a conversion, an import): the import is refused with that act's code before the file is read, as every write is; a dry run is not, unless it builds a schema |
 | 409 | `rdf_import_space_changed` | The space's RDF base or vocabulary changed while the file was being read, or after the import was registered and before its first window (a schema the network decided; the file is sorted by them); nothing was imported, send it again. Once the first window has landed nothing ends the import: it finishes by the base it began with |
 | 404 | `rdf_import_not_found` | The status door: no import of this space has that id, or its report is past seven days |
 | 409 | `rdf_base_conflict`, `rdf_base_shared`, `rdf_term_clash`, `rdf_unwritable` | The space's RDF names are not settled (a contested or shared base, a term clash, an address no document can carry), as for the exports |
