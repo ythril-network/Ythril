@@ -46,7 +46,7 @@ import { openToolDoor } from './_tool-door.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import {
   actEntry, seedActEntry, clearActEntries, entriesOf, deferred, eventLog, untilRunnerIdle, resetRunnerForTest,
-  netFixture, passedSpaceRound, roundOf, metricSample, auditRowsOf,
+  netFixture, passedSpaceRound, roundOf, metricSample, auditRowsOfOperation,
 } from './_space-act-harness.mjs';
 
 const skip = await mongoSkipReason();
@@ -344,7 +344,7 @@ describe('the space-act runner registers, runs once, completes in one write, ret
     hold.release();
     await untilRunnerIdle(runner, loader);
     assert.equal(await factCount('wipe-a'), 0, 'the queued wipe did not complete');
-    const audited = await auditRowsOf(door.mongo, 'space.act_completed');
+    const audited = await auditRowsOfOperation(door.mongo, 'space.act_completed');
     assert.ok(audited.length >= 1, 'a completion after the door answered was not audited as space.act_completed');
     // The row names its kind (bundle-157 R4.3): a restore's per-space rows and a wipe's would otherwise read alike.
     assert.ok(audited.some(r => String(r.path).startsWith('internal:space-act:wipe:wipe-a:')),
@@ -460,7 +460,7 @@ describe('the space-act runner registers, runs once, completes in one write, ret
     await untilRunnerIdle(runner, loader);
     assert.equal(await factCount('wipe-a'), 0, 'the fresh boot did not finish the wipe');
     assert.deepEqual(entriesOf(loader), []);
-    assert.ok((await auditRowsOf(door.mongo, 'space.act_completed')).length >= 1, 'the completion at boot was not audited');
+    assert.ok((await auditRowsOfOperation(door.mongo, 'space.act_completed')).length >= 1, 'the completion at boot was not audited');
   });
 
   it('R-X9d: a door retry of an owed act before its retryAt is answered 202 queued with retryAt and starts no body', T, async () => {
