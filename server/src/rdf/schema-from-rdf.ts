@@ -282,6 +282,83 @@ function buildTypes(ctx: ReadContext): BuiltType[] {
   return built.sort((a, b) => KNOWLEDGE_TYPES.indexOf(a.kind) - KNOWLEDGE_TYPES.indexOf(b.kind) || byName(a.name, b.name));
 }
 
+// -- the schema groups of a data file (Q-955) ------------------------------------------------------------------------------------------------
+
+const OWL_NS = 'http://www.w3.org/2002/07/owl#';
+const SH_NS = 'http://www.w3.org/ns/shacl#';
+const RDF_TYPE_IRI = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+/** The RDFS and RDF classes a declaration is typed with, beside every OWL and SHACL class. */
+const DECLARING_CLASSES: ReadonlySet<string> = new Set([
+  'http://www.w3.org/2000/01/rdf-schema#Class', 'http://www.w3.org/2000/01/rdf-schema#Datatype', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#Property',
+]);
+/** The RDFS predicates only a declaration states. */
+const DECLARING_PREDICATES: ReadonlySet<string> = new Set([
+  'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'http://www.w3.org/2000/01/rdf-schema#subPropertyOf',
+  'http://www.w3.org/2000/01/rdf-schema#domain', 'http://www.w3.org/2000/01/rdf-schema#range',
+]);
+
+/**
+ * Is the subject of `quads` a schema construct the mapping reads: typed with an OWL or SHACL class (an ontology header, a class, a property, a
+ * restriction, a shape), with `rdfs:Class`, `rdfs:Datatype` or `rdf:Property`, or stating a SHACL predicate or an RDFS declaration of its own
+ * (a shape with no type, a property with only a domain). A data record is typed with a class of a vocabulary, never with one of these.
+ */
+export function isSchemaGroup(quads: readonly Quad[]): boolean {
+  for (const q of quads) {
+    const p = q.predicate.value;
+    if (p.startsWith(SH_NS) || DECLARING_PREDICATES.has(p)) return true;
+    if (p === RDF_TYPE_IRI && q.object.kind === 'iri') {
+      const o = q.object.value;
+      if (o.startsWith(OWL_NS) || o.startsWith(SH_NS) || DECLARING_CLASSES.has(o)) return true;
+    }
+  }
+  return false;
+}
+
+/** A group of a sorted file as the selector reads it: its key, its graph, its subject and its quads. */
+export interface SchemaGroupInput { key: string; graph?: { value: string }; subject: { kind: string }; quads: Quad[] }
+
+/** The schema groups of a file: their keys and their quads, or `over` when their quads pass the bound. */
+export type SchemaGroups = { kind: 'groups'; keys: Set<string>; quads: Quad[] } | { kind: 'over'; limit: number };
+
+/**
+ * The groups of a data file the schema option builds from (Q-955), read in two passes over `groups` (a sorted file, read again for each pass):
+ * every {@link isSchemaGroup}, and every blank node such a group reaches through its objects, followed through blank nodes to any depth (a
+ * blank-node property shape, `sh:property [ ... ]`, its `sh:in` list, an OWL restriction). `keyOfBlank` gives a blank object's group key in its
+ * graph (the spool's own key). Their quads are collected up to `max`; one more answers `over`, before anything maps them. `max` null: the keys
+ * alone, in one pass (an act that skips the groups a door already bounded).
+ */
+export async function schemaGroupsOf(
+  groups: () => AsyncIterable<SchemaGroupInput>, keyOfBlank: (id: string, graph: { value: string } | undefined) => string, max: number | null,
+): Promise<SchemaGroups> {
+  const keys = new Set<string>();
+  const reached: string[] = [];
+  /** A blank subject's blank objects, by key: only these edges are kept, so a file of records holds nothing here. */
+  const blankEdges = new Map<string, string[]>();
+  const blankObjectsOf = (g: SchemaGroupInput): string[] =>
+    g.quads.filter(q => q.object.kind === 'blank').map(q => keyOfBlank((q.object as { id: string }).id, g.graph));
+  for await (const g of groups()) {
+    if (isSchemaGroup(g.quads)) { keys.add(g.key); reached.push(...blankObjectsOf(g)); continue; }
+    if (g.subject.kind === 'blank') {
+      const objects = blankObjectsOf(g);
+      if (objects.length > 0) blankEdges.set(g.key, objects);
+    }
+  }
+  while (reached.length > 0) {
+    const key = reached.pop()!;
+    if (keys.has(key)) continue;
+    keys.add(key);
+    reached.push(...(blankEdges.get(key) ?? []));
+  }
+  const quads: Quad[] = [];
+  if (keys.size === 0 || max === null) return { kind: 'groups', keys, quads };
+  for await (const g of groups()) {
+    if (!keys.has(g.key)) continue;
+    if (quads.length + g.quads.length > max) return { kind: 'over', limit: max };
+    quads.push(...g.quads);
+  }
+  return { kind: 'groups', keys, quads };
+}
+
 // -- the entry -------------------------------------------------------------------------------------------------------------------------------
 
 function checkOptions(options: SchemaFromRdfOptions): void {

@@ -62,8 +62,11 @@ export function unwritableRefusal(err: RdfUnwritable): { status: typeof EXPORT_C
   };
 }
 
-/** Who asks: what decides which networks a refusal may name. */
-export interface RdfCaller { admin?: boolean; rights?: TokenRights | null }
+/**
+ * Who asks: what decides which networks a refusal may name; `id`, the token's, by which an act that writes later (the data import's schema step,
+ * Q-955) reads the token again.
+ */
+export interface RdfCaller { id?: string; admin?: boolean; rights?: TokenRights | null }
 
 // `RDF_BASE_SHARED` (the code of a space whose base another space of this instance holds too) is the save doors' code as well: it lives with
 // the one comparison in `spaces/rdf-settle.ts` and is re-exported here for the exports.
