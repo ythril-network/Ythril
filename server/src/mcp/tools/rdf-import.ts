@@ -11,7 +11,8 @@
  * run and a status answer what is stored), recorded as `rdf.import` (`MCP_TOOL_OPERATIONS`).
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { TOOL_REFUSAL_STATUSES, toolRefusalOfAct } from '../../util/errors.js';
+import { TOOL_REFUSAL_STATUSES, ToolRefusal, toolRefusalOfAct } from '../../util/errors.js';
+import { callerIsAskedForMfa } from '../../auth/mfa-asked.js';
 import { JSON_BODY_MAX_BYTES } from '../../config/body-limits.js';
 import { RDF_FORMATS } from '../../rdf/serialize.js';
 import { inlineRdfDocument } from '../../rdf/rdf-document.js';
@@ -19,6 +20,8 @@ import {
   rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, runningBodyOf, RDF_IMPORT_REASONS_NAMED_MAX, RDF_IMPORT_REFUSAL_CODES, type RdfImportRefusal,
   RDF_IMPORT_ADDRESS_MAX, RDF_IMPORT_GRAPH_BASES_MAX, RDF_IMPORT_GRAPH_BASE_MIN_CHARS, RDF_IMPORT_GRAPH_BASE_MAX_CHARS,
 } from '../../spaces/rdf-import-act.js';
+
+const FORBIDDEN = 403;
 
 /** What `from` names (the act's parameters judge it; `data` is refused there until it exists). */
 const SCHEMA_SOURCES = ['declared', 'shacl', 'data'] as const;
@@ -42,7 +45,7 @@ export const import_rdfTool: ToolHandler = {
     + 'With schema set (generate, expand, update) the file\'s classes and shapes build or extend the space\'s schema first: the data is judged by '
     + 'it, and the schema is written once, only when the data passes.\n\n'
     + 'COST: needs `knowledge: write`, for a dry run too, and with schema set `schema: write` as well (`schema: admin` when its shapes give a '
-    + 'type rules); a space in a network is refused a schema build. While the import writes, the space takes no other writes, no schema change and no '
+    + 'type rules); a space in a network is refused a schema build, and a caller the REST route would ask for a second factor is refused 403 when schema is set (this door has no channel for a code). While the import writes, the space takes no other writes, no schema change and no '
     + 'sync; a large file holds it for minutes. When it does not finish within the call the answer is `status: running` with its `importId`: '
     + 'ask import_rdf_status. The document is at most the MCP body limit; a larger file goes through the REST route. '
     + `Every refusal carries its code (${RDF_IMPORT_REFUSAL_CODES.length} of them, listed in the guide's RDF import section).`,
@@ -80,6 +83,13 @@ export const import_rdfTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
+    // With `schema` set the import writes the space's type schemas, which REST asks the second factor for (`POST .../import/rdf` guards it when `schema` is set
+    // and not `none`). This door has no channel for a code, so a caller who would be asked is refused first, before the document is read or the space's
+    // hold is taken; an import without `schema` asks what it always asked. The precedent's rule (`network_reread`, `view_copy`); the tool door reaches it too.
+    const schema = ctx.args['schema'];
+    if (schema !== undefined && schema !== 'none' && callerIsAskedForMfa(ctx.callerRecord)) {
+      throw new ToolRefusal(FORBIDDEN, 'Building a schema from an RDF import needs MFA step-up, which this door cannot present; use the web UI or POST /api/brain/spaces/:spaceId/import/rdf');
+    }
     const { document, ...params } = ctx.args as Record<string, unknown>;
     const answer = await rdfImportAct({
       spaceId: ctx.callSpace, params, body: inlineRdfDocument(typeof document === 'string' ? document : ''), caller: ctx.callerRecord ?? { rights: ctx.rights ?? null },

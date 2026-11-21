@@ -12,7 +12,8 @@
  * too), refused to a peer-bound token (`PEER_REFUSED_TOOLS`), recorded as `schema.rdf.import` (`MCP_TOOL_OPERATIONS`).
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
-import { TOOL_REFUSAL_STATUSES, toolRefusalOfAct } from '../../util/errors.js';
+import { TOOL_REFUSAL_STATUSES, ToolRefusal, toolRefusalOfAct } from '../../util/errors.js';
+import { callerIsAskedForMfa } from '../../auth/mfa-asked.js';
 import { JSON_BODY_MAX_BYTES } from '../../config/body-limits.js';
 import { RDF_FORMATS } from '../../rdf/serialize.js';
 import { inlineRdfDocument } from '../../rdf/rdf-document.js';
@@ -20,6 +21,8 @@ import { RDF_IMPORT_ADDRESS_MAX } from '../../spaces/rdf-import-act.js';
 import {
   schemaRdfImportAct, SCHEMA_RDF_IMPORT_REFUSAL_CODES, SCHEMA_RDF_ENTRIES_NAMED_MAX, SCHEMA_RDF_FROM_DEFAULT, type SchemaRdfImportRefusal,
 } from '../../spaces/schema-rdf-import-act.js';
+
+const FORBIDDEN = 403;
 
 /** The act's refusal as the tool's: its status and code, and what more it carries as structured content. */
 function refusalOf(r: SchemaRdfImportRefusal): Error {
@@ -39,7 +42,7 @@ export const import_schema_rdfTool: ToolHandler = {
     + 'Same as POST /api/spaces/:id/schema-rdf.\n\n'
     + 'COST: needs `schema: write`, for a dry run too, and a file whose shapes give a type rules `schema: admin`. A space in a '
     + 'network is refused: there a schema change is the network\'s to vote on through schema_update, and the refusal '
-    + 'carries the proposed types to send there. The space needs RDF switched on. The document is at most the MCP body limit; a larger file '
+    + 'carries the proposed types to send there. A caller the REST route would ask for a second factor is refused 403 here, a dry run too: this door has no channel for a code. The space needs RDF switched on. The document is at most the MCP body limit; a larger file '
     + `goes through the REST route. Every refusal carries its code (${SCHEMA_RDF_IMPORT_REFUSAL_CODES.length} of them, listed in the guide's `
     + '"RDF schema import" section).',
   mutating: true,
@@ -63,6 +66,12 @@ export const import_schema_rdfTool: ToolHandler = {
     additionalProperties: false,
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
+    // The second factor, answered honestly and first: this door has no channel for a code, so a caller who would be asked for one on REST (the route's
+    // `requireSpaceAuthMfaScoped`, a dry run too) is told where to go, before the document is read or the one-at-a-time slot is taken. The precedent's
+    // rule (`network_reread`, `view_copy`), not a third divergence; the tool door (`POST /api/<tool>`) reaches this handler too, so it is closed here.
+    if (callerIsAskedForMfa(ctx.callerRecord)) {
+      throw new ToolRefusal(FORBIDDEN, 'Building a schema from an RDF file needs MFA step-up, which this door cannot present; use the web UI or POST /api/spaces/:id/schema-rdf');
+    }
     const { document, space: _space, ...params } = ctx.args as Record<string, unknown>;
     const caller = ctx.callerRecord ?? { rights: ctx.rights ?? null };
     const answer = await schemaRdfImportAct({
