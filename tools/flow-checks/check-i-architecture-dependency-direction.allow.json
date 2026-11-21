@@ -97,9 +97,21 @@
     "reviewBy": "2027-02-18"
   },
   {
+    "id": "cycles:server/src:modules",
+    "max": 192,
+    "reason": "the modules in any cyclic set of server/src total 192 today, in seven sets, the largest of 107; the total may not grow while a design splits them, whichever set the growth lands in. Added by bundle-270 Q-754 (pre-ship sweep P5): the count and the largest set were ceilinged and the total was not, so growth spread over small sets passed",
+    "reviewBy": "2027-02-18"
+  },
+  {
     "id": "cycles:client/src/app:components",
     "max": 3,
     "reason": "the client has three cyclic sets of three modules today; the count may not grow while each is split",
+    "reviewBy": "2027-02-18"
+  },
+  {
+    "id": "cycles:client/src/app:modules",
+    "max": 9,
+    "reason": "the modules in any cyclic set of the client total nine today (three sets of three); the total may not grow while each is split",
     "reviewBy": "2027-02-18"
   },
   {

@@ -12,10 +12,10 @@
  *   - `util`:       a utility does not import half the app: no module under `server/src/util/` imports from more than half of the other top-level
  *                   folders of `server/src/` (the count of folders is read from the tree).
  *   - cycles:       the import graph of each root has strongly connected sets (cycles). A cycle cannot be fixed in one bundle, so the number of
- *                   cyclic sets and the size of the largest are held to ceilings that only go down.
+ *                   cyclic sets, the size of the largest and the total of modules in any cycle are held to ceilings that only go down.
  *
  * Findings are `boundary:<file>-><target>`, `transport:<file>-><area>`, `converter:<file>`, `util:<file>`; exceptions live only in
- * `check-i-architecture-dependency-direction.allow.json`: `{ id, reason, reviewBy }`, and a ceiling `{ id: "cycles:<root>:components|largest", max,
+ * `check-i-architecture-dependency-direction.allow.json`: `{ id, reason, reviewBy }`, and a ceiling `{ id: "cycles:<root>:components|largest|modules", max,
  * reason, reviewBy }`. An entry with no reason, past its reviewBy, or that excuses nothing any more fails the probe; the verdict says how many it used.
  *
  * The failure that bought it (Q-875): the check was named by the plan and verify phases and answered "cannot answer" from a placeholder, so a
@@ -67,12 +67,19 @@ export function directionFindings(graph, rootDir, serverFolders) {
   return [...new Map(out.map((f) => [f.id, f])).values()];
 }
 
-/** Cycle measures per root: the number of cyclic sets and the size of the largest. */
+/**
+ * Cycle measures per root: the number of cyclic sets, the size of the largest, and the total of modules in any cycle. The total is the one
+ * that growth spread over several small sets cannot slip past: each of those sets stays under the other two ceilings while the modules caught
+ * in cycles go up.
+ */
 export function cycleMeasures(rootDir, graph) {
   const sets = cyclicSets(graph.edges);
+  const largest = sets.reduce((m, s) => Math.max(m, s.length), 0);
+  const total = sets.reduce((n, s) => n + s.length, 0);
   return [
     { id: `cycles:${rootDir}:components`, value: sets.length, text: `${sets.length} cyclic set(s) in ${rootDir}` },
-    { id: `cycles:${rootDir}:largest`, value: sets.reduce((m, s) => Math.max(m, s.length), 0), text: `a cyclic set of ${sets.reduce((m, s) => Math.max(m, s.length), 0)} modules in ${rootDir}` },
+    { id: `cycles:${rootDir}:largest`, value: largest, text: `a cyclic set of ${largest} modules in ${rootDir}` },
+    { id: `cycles:${rootDir}:modules`, value: total, text: `${total} module(s) in cyclic sets in ${rootDir}` },
   ];
 }
 
