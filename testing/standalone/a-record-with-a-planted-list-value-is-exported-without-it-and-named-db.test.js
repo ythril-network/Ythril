@@ -18,6 +18,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { untilAuditWritesLanded } from './_audit-rows.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
 import { openRdfExportDoors, rdfMeta, baseOf, parseRdf, reportGraphs } from './_rdf-export-doors.mjs';
 
@@ -91,6 +92,7 @@ describe('a planted list value is exported without it and named', { skip }, () =
     await d.exportMcp(admin.key, { space: SPACE, maxChars: BIG });
     // The REST entry is written when the response finishes, a moment after the client read it.
     const rows = await waitForValue(async () => {
+      await untilAuditWritesLanded();
       const found = await col('audit_log').find({ operation: 'rdf.export' }).toArray();
       return found.length >= 2 ? found : undefined;
     }, 10_000, 100, () => 'two rdf.export rows were not written');

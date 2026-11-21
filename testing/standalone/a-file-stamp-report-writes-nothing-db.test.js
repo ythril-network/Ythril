@@ -44,6 +44,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { build } from './_push-door.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
@@ -236,7 +237,7 @@ describe('file_stamp_report writes nothing on this instance', { skip }, () => {
         it(`${scenario.name}: the space, the counter, the files tree and the configuration are the same after`, async () => {
           const original = { url: door.member().url };
           const injected = scenario.arrange() ?? {};
-          const auditedBefore = await door.mongo.col('audit_log').countDocuments({ operation: AUDIT_OPERATION });
+          const auditedBefore = (await auditRowsOf(door.mongo, { operation: AUDIT_OPERATION })).length;
           const before = await snapshot();
           let answer, after;
           // The arrangement stays in force until AFTER the second snapshot: it is part of the state both snapshots hold.
@@ -249,9 +250,9 @@ describe('file_stamp_report writes nothing on this instance', { skip }, () => {
           assert.ok(Array.isArray(answer.rows) && answer.rows.length >= 10, `the run reported ${answer.rows?.length} rows: it did not look at the space`);
           for (const r of answer.rows) seen.add(r.reason);
           if (d.audited) {
-            await waitFor(async () => (await door.mongo.col('audit_log').countDocuments({ operation: AUDIT_OPERATION })) === auditedBefore + 1,
+            await waitFor(async () => (await auditRowsOf(door.mongo, { operation: AUDIT_OPERATION })).length === auditedBefore + 1,
               10_000, 100, `no ${AUDIT_OPERATION} entry for the call`, { what: 'the audit entry of the call' });
-            assert.equal(await door.mongo.col('audit_log').countDocuments({ operation: AUDIT_OPERATION }), auditedBefore + 1,
+            assert.equal((await auditRowsOf(door.mongo, { operation: AUDIT_OPERATION })).length, auditedBefore + 1,
               'more than one audit entry for one call');
           }
         });

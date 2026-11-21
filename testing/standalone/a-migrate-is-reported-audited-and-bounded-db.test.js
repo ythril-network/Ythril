@@ -43,6 +43,7 @@ import assert from 'node:assert/strict';
 import dns from 'node:dns';
 import { emptyTarget } from './_migrate-target.mjs';
 import { mongoSkipReason, testMongoUri, TEST_MONGO_HOST } from './_mongo-harness.mjs';
+import { auditRowsOf as landedAuditRows } from './_audit-rows.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { clearActEntries, entriesOf, resetRunnerForTest } from './_space-act-harness.mjs';
 import { driverWriteFailures, failWrites, holdDocumentLock } from './_write-faults.mjs';
@@ -138,7 +139,7 @@ describe('a migrate is reported, audited and bounded like a restore', { skip }, 
     assert.equal(out.status, 200, `GET /migrate answered ${out.status}: ${JSON.stringify(out.body)}`);
     return out.body;
   };
-  const auditRows = async (client, db, operation) => client.db(db).collection('audit_log').find({ operation }).toArray();
+  const auditRows = async (client, db, operation) => landedAuditRows({ getDb: () => client.db(db) }, { operation });
 
   it('row 1: GET /migrate answers null before any migrate, then the set in the restore report\'s shape, without the target URI', T, async () => {
     assert.deepEqual(await report(), { migrate: null }, 'before any migrate the report must say there is none');

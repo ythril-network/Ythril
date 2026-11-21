@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
@@ -69,7 +70,7 @@ const row = (rel, space = SPACE) => ({
 });
 const present = (rel, space = SPACE) => fs.existsSync(abs(rel, space));
 const rowIds = async (space = SPACE) => (await mongo.col(`${space}_files`).find({}, { projection: { _id: 1 } }).toArray()).map(d => d._id).sort();
-const sweeps = (space) => mongo.col('audit_log').countDocuments({ method: 'SWEEP', spaceId: space });
+const sweeps = async (space) => (await auditRowsOf(mongo, { method: 'SWEEP', spaceId: space })).length;
 
 describe('retired per-type schema files are swept from the space', { skip }, () => {
   before(async () => {

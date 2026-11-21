@@ -27,6 +27,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { failWrites, setWriteBoundForTest, settleWithin, withCollectionAsView, withStalledReads } from './_write-faults.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
@@ -194,7 +195,7 @@ describe('the stray file-metadata drain walks each space on its own, bounded, na
     assert.equal(first.result.includes(DROP), false, 'the drain reports a drop that did not happen');
     const said = lineFor(first.lines, 'drop', DROP);
     assert.equal(said.length, 1, `one line under \`drop\`: ${first.lines.join(' | ')}`);
-    assert.equal(await door.mongo.getDb().collection('audit_log').findOne({ spaceId: DROP, operation: 'file.stray_filemeta.drain' }), null,
+    assert.deepEqual(await auditRowsOf(door.mongo, { spaceId: DROP, operation: 'file.stray_filemeta.drain' }), [],
       'a drop that did not happen is not audited');
 
     failing.dropCollection.clear();

@@ -35,6 +35,7 @@ import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { tempInstanceDir, removeInstanceDir } from './_vote-round-instance.mjs';
 import { startVotesPeer } from './_vote-round-sites.mjs';
@@ -186,15 +187,7 @@ describe('every via audits what it did, but the one that is the operator\'s requ
    * read 0, and the next row (after its own deleteMany) read 2 (Full run 39078417297).
    */
   async function auditCount(operation) {
-    const { auditWritesPending } = await import('../../server/dist/audit/audit.js');
-    assert.equal(typeof auditWritesPending, 'function', 'server/src/audit/audit.ts exports no auditWritesPending (or the build predates it)');
-    for (let i = 0; i < 4000 && auditWritesPending() > 0; i++) {
-      // waits-differently: bounded by turns like the runner's idle wait; every fiftieth turn is a stated 15 ms timer, because a store round
-      // trip outlasts thousands of setImmediate turns, so a wait for an insert that never answers still ends in about a second.
-      await new Promise(r => (i % 50 === 49 ? setTimeout(r, 15) : setImmediate(r)));
-    }
-    assert.equal(auditWritesPending(), 0, 'audit inserts were still on the wire after 4000 turns');
-    return mongo.col('audit_log').countDocuments({ operation });
+    return (await auditRowsOf(mongo, { operation })).length;
   }
 
   it('the audit table covers the vias the matrix covers, and REQUEST_VIAS is a subset of them', () => {

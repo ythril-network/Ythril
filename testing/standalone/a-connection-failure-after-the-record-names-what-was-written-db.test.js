@@ -46,6 +46,7 @@
 import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf as landedAuditRows } from './_audit-rows.mjs';
 import { withValidator, parkWrites } from './_write-faults.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
 import {
@@ -238,12 +239,12 @@ describe('a failure of the connections after the record landed is answered `writ
 
   describe('a `written` answer is audited as a write of that record, on both surfaces', () => {
     /** Audit rows are written fire-and-forget, so a row is waited for; the ones this call left are told by door, space and time. */
-    const auditRowsOf = (d, answer, since) => env.door.mongo.getDb().collection('audit_log').find({
+    const auditRowsOfCall = (d, answer, since) => landedAuditRows(env.door.mongo, {
       spaceId: STRICT,
       method: d.channel === 'mcp' ? 'MCP' : d.method,
       path: answer.path,
       timestamp: { $gte: since },
-    }).toArray();
+    });
 
     for (const d of SINGLES) {
       it(d.name, async () => {
@@ -252,19 +253,19 @@ describe('a failure of the connections after the record landed is answered `writ
         const sinceControl = new Date().toISOString();
         const control = await call(d, fieldsFor(d, `audit control ${d.name}`, [edge(LABELS.plain, FAR_ENDS.entity.exists)]));
         assert.ok(control.status < 400, `${d.name} refused a clean write (${control.status}): ${control.text.slice(0, 300)}`);
-        assert.ok(await holdsWithin(async () => (await auditRowsOf(d, control, sinceControl)).length > 0, 3000),
+        assert.ok(await holdsWithin(async () => (await auditRowsOfCall(d, control, sinceControl)).length > 0, 3000),
           `${d.name}: a clean write left no audit row — the oracle for this case is gone`);
-        const operation = (await auditRowsOf(d, control, sinceControl))[0].operation;
+        const operation = (await auditRowsOfCall(d, control, sinceControl))[0].operation;
 
         await fresh();
         const marker = `audit ${d.name}`;
         const since = new Date().toISOString();
         const answer = await withEdgeWritesRefused(REFUSE_EVERY_EDGE, () => call(d, fieldsFor(d, marker, [edge(LABELS.plain, FAR_ENDS.entity.exists)])));
         const id = await subjectOf(d, marker);
-        const named = async () => (await auditRowsOf(d, answer, since)).filter(r => r.entryId === id && r.operation === operation);
+        const named = async () => (await auditRowsOfCall(d, answer, since)).filter(r => r.entryId === id && r.operation === operation);
         const found = await holdsWithin(async () => (await named()).length > 0, 3000);
         assert.ok(found, `${d.name}: no audit row names the written record ${id} under \`${operation}\` — rows left: ${
-          JSON.stringify((await auditRowsOf(d, answer, since)).map(r => ({ operation: r.operation, entryId: r.entryId, status: r.status })))}`);
+          JSON.stringify((await auditRowsOfCall(d, answer, since)).map(r => ({ operation: r.operation, entryId: r.entryId, status: r.status })))}`);
       });
     }
   });

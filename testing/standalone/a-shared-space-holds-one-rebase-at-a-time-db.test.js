@@ -15,6 +15,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { tempInstanceDir } from './_vote-round-instance.mjs';
 import { bootSchemaInstance } from './_schema-doors.mjs';
 import { NET_ID, P1 } from './_vote-round-sites.mjs';
@@ -42,12 +43,11 @@ const passedRound = (roundId, base, deadline) => ({
 });
 
 describe('a shared space holds one rebase at a time', { skip }, () => {
-  let inst, mongo, expiry, auditMod;
+  let inst, mongo, expiry;
   before(async () => {
     mongo = await openTestMongo('rdf_one_rebase');
     inst = await bootSchemaInstance(dir, { spaces: [{ id: SPACE, label: 'Shared', folders: [], meta: { rdf: OLD } }], networks: [network()] });
     expiry = await import('../../server/dist/networks/round-expiry.js');
-    auditMod = await import('../../server/dist/audit/audit.js');
   });
   after(async () => {
     inst?.close();
@@ -57,13 +57,7 @@ describe('a shared space holds one rebase at a time', { skip }, () => {
   const netOf = () => inst.loader.getConfig().networks.find(n => n.id === NET_ID);
   const rdfOf = () => inst.loader.getConfig().spaces.find(s => s.id === SPACE)?.meta?.rdf;
   const rebaseRounds = () => netOf().pendingRounds.filter(r => r.type === 'space_rebase');
-  async function rows(operation) {
-    for (let i = 0; i < 4000 && auditMod.auditWritesPending() > 0; i++) {
-      // waits-differently: bounded by turns, every fiftieth a stated 15 ms timer, as the settle matrix waits for its inserts.
-      await new Promise(r => (i % 50 === 49 ? setTimeout(r, 15) : setImmediate(r)));
-    }
-    return mongo.getDb().collection('audit_log').find({ operation }).toArray();
-  }
+  const rows = (operation) => auditRowsOf(mongo, { operation });
   async function fresh(rounds = []) {
     inst.reset();
     netOf().pendingRounds = rounds;

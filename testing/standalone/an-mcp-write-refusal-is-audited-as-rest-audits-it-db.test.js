@@ -39,6 +39,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 import { waitForValue, holdsWithin } from '../_shared/wait-for.mjs';
 
@@ -88,7 +89,7 @@ const REFUSED = {
   update_chrono: () => ({ id: IDS.chrono, properties: { priority: 'urgent' } }),
 };
 
-const rowsOf = (tokenId) => door.mongo.getDb().collection('audit_log').find({ tokenId }).toArray();
+const rowsOf = (tokenId) => auditRowsOf(door.mongo, { tokenId });
 /** The rows a call left, once at least one has landed (the writer is fire-and-forget, so the row arrives after the answer). */
 const rowsAfter = async (tokenId) => waitForValue(async () => { const r = await rowsOf(tokenId); return r.length > 0 ? r : undefined; }, 10_000, 50, undefined,
   { what: `an audit row for ${tokenId}` });

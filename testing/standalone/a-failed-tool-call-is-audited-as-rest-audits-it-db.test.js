@@ -43,6 +43,7 @@ import express from 'express';
 import { elapse } from '../_shared/sleep.mjs';
 import { listenRouterApp } from '../_shared/in-process-app.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 
 const skip = await mongoSkipReason();
@@ -63,12 +64,12 @@ const auditColl = () => door.mongo.getDb().collection('audit_log');
 async function settledRows() {
   let last = -1, still = 0;
   for (let i = 0; i < 200 && still < 3; i++) {
-    const n = await auditColl().countDocuments({});
+    const n = (await auditRowsOf(door.mongo, {})).length;
     still = n === last ? still + 1 : 0;
     last = n;
     await sleep(120);
   }
-  const rows = await auditColl().find({}).toArray();
+  const rows = await auditRowsOf(door.mongo, {});
   const byToken = new Map();
   for (const r of rows) byToken.set(r.tokenId, [...(byToken.get(r.tokenId) ?? []), r]);
   return byToken;

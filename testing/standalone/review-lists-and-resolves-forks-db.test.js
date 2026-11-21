@@ -34,6 +34,7 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
+import { auditRowsOf } from './_audit-rows.mjs';
 import { openPushDoor, build } from './_push-door.mjs';
 import { handlerFor, fakeRes } from './_vote-round-instance.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
@@ -360,13 +361,13 @@ describe('Review lists and resolves forks, on both doors', { skip }, () => {
       const k = fx.FORK_KINDS.entity;
       const parent = await subjectOf('entity');
       const fork = await fx.seedFork(door, S, 'entity', parent, 5, k.alt);
-      const before = await door.mongo.col('audit_log').countDocuments({});
+      const before = (await auditRowsOf(door.mongo, {})).length;
       const r = await rd.resolve.MCP('entity', fork._id, 'parent');
       assert.ok(r.ok, r.sentence);
       // The audit row is written after the call answers (`logAuditEntry` is not awaited by the door), so it is read until it lands.
       let entry;
       await waitFor(async () => {
-        const rows = (await door.mongo.col('audit_log').find({}).toArray()).slice(before);
+        const rows = (await auditRowsOf(door.mongo, {})).slice(before);
         entry = rows.find(x => JSON.stringify(x).includes('fork.resolve'));
         return entry !== undefined;
       }, 3000, 50).catch(() => undefined);

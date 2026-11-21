@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { waitFor, waitForValue } from '../_shared/wait-for.mjs';
+import { untilAuditWritesLanded } from './_audit-rows.mjs';
 import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
 import { openRdfExportDoors, rdfMeta, baseOf, parseRdf } from './_rdf-export-doors.mjs';
 
@@ -102,7 +103,10 @@ describe('an RDF export streams the whole scope in one request', { skip, timeout
       return idKeysetPage(spec, after);
     });
     try { await d.exportRest(admin.key, SPACE, { format: 'nquads' }); } finally { act.setRdfExportPageReaderForTest(null); }
-    const row = await waitForValue(async () => (await d.col('audit_log').find({ operation: 'rdf.export' }).toArray())[0], 10_000, 100, () => 'no rdf.export row');
+    const row = await waitForValue(async () => {
+      await untilAuditWritesLanded();
+      return (await d.col('audit_log').find({ operation: 'rdf.export' }).toArray())[0];
+    }, 10_000, 100, () => 'no rdf.export row');
     const changes = Object.fromEntries(row.changes.map(c => [c.field, c.to]));
     assert.equal(changes.complete, false);
   });
