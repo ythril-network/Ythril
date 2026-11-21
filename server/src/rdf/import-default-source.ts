@@ -20,6 +20,8 @@ import type { SpaceMeta } from '@ythril-network/schema';
 import type { RdfFormat } from './serialize.js';
 import { addressNames } from './term-reverse.js';
 import { graphIri } from './term-iri.js';
+import { stdIri, type Quad } from './literals.js';
+import { ythrilIri } from './ythril-vocabulary.js';
 
 /** What the door saw of the file's graphs: the named ones in order of appearance, which of them only describe the file, and whether a statement sat in no graph. */
 export interface GraphsOfFile {
@@ -45,4 +47,32 @@ export function defaultSourceBase(format: RdfFormat, graphs: GraphsOfFile, given
     throw err;
   }
   return graph;
+}
+
+const RDF_TYPE = stdIri('rdf', 'type').value;
+const REPORT_CLASS = ythrilIri('ExportReport');
+const HAS_PART = stdIri('dcterms', 'hasPart').value;
+
+/** The graphs a file names as the door notes them while it reads (the import's door; moved here beside the default it feeds, Q-955). */
+export interface GraphsSeen { order: string[]; describing: Set<string>; inDefaultGraph: boolean }
+
+/** `quads` passed on unchanged, with the graphs they name noted in `seen` (a graph holding an export's report or its parts only describes the file). */
+export async function* noteGraphs(quads: AsyncIterable<Quad>, seen: GraphsSeen): AsyncGenerator<Quad, void, undefined> {
+  const known = new Set<string>();
+  for await (const q of quads) {
+    const g = q.graph?.value;
+    if (g === undefined) seen.inDefaultGraph = true;
+    else {
+      if (!known.has(g)) { known.add(g); seen.order.push(g); }
+      if (q.predicate.value === HAS_PART || (q.predicate.value === RDF_TYPE && q.object.kind === 'iri' && q.object.value === REPORT_CLASS)) seen.describing.add(g);
+    }
+    yield q;
+  }
+}
+
+/** The data graphs a file names that have no source base, when it names several (a view's export): refused unless each has its base (A8). */
+export function graphsWithoutBase(seen: GraphsOfFile, given: CallerSource): string[] {
+  const data = seen.order.filter(g => !seen.describing.has(g));
+  if (data.length <= 1) return [];
+  return data.filter(g => !Object.hasOwn(given.graphBases, g));
 }
