@@ -34,7 +34,7 @@ import type { SpaceMeta } from '@ythril-network/schema';
 import type { TokenRights } from '../config/rights-shape.js';
 import type { RdfCaller } from '../rdf/rdf-space-state.js';
 import type { RdfDocumentRefusal } from '../rdf/rdf-document.js';
-import type { SchemaMode, SchemaSource } from '../rdf/schema-from-rdf.js';
+import type { SchemaChange, SchemaFromRdfAnswer, SchemaMode, SchemaSource } from '../rdf/schema-from-rdf.js';
 
 /** The folder under the data root that holds the files of standing RDF imports. */
 export const RDF_IMPORT_DIR = 'rdf-import';
@@ -63,6 +63,11 @@ export interface SchemaStepFile {
   typesAdded: string[];
   typesChanged: string[];
   fingerprintBefore: string;
+  /** What the import asked for and what the mapping said of the file: the proposal a networked refusal carries as `proposed`. */
+  mode: SchemaMode;
+  from: SchemaSource[];
+  counts: SchemaFromRdfAnswer['counts'];
+  changes: SchemaChange[];
 }
 
 export async function writeSchemaStep(folder: ImportFolder, step: SchemaStepFile): Promise<void> {
@@ -88,6 +93,10 @@ export interface DoorSchema {
   changes: number;
   merged: SpaceMeta['typeSchemas'];
   keys: Set<string>;
+  /** What the import asked for, and the mapping's counts and changes: kept in the step's file (`SchemaStepFile`). */
+  asked: SchemaAsked;
+  counts: SchemaFromRdfAnswer['counts'];
+  changeList: SchemaChange[];
   report: Omit<RdfImportSchemaReport, 'written'>;
 }
 
@@ -111,7 +120,7 @@ export interface RdfImportSchemaStep {
   keepSchemaStep(folder: ImportFolder, built: DoorSchema, caller: RdfCaller | undefined): Promise<Pick<ActState, 'schemaStep' | 'caller'>>;
   schemaStepOfFolder(folder: ImportFolder, state: ActState): Promise<(SchemaStepFile & { kind: 'file' }) | null | SchemaStepEnd>;
   schemaStepBlocks(state: ActState, spaceId: string, rdfCode: string | null): SchemaStepEnd | null;
-  translationBy(merged: SpaceMeta['typeSchemas'], meta: SpaceMeta, groups: () => AsyncGenerator<QuadGroup, void, undefined>, keys?: Set<string>):
+  translationBy(merged: SpaceMeta['typeSchemas'], meta: SpaceMeta, groups: () => AsyncGenerator<QuadGroup, void, undefined>, from: readonly SchemaSource[], keys?: Set<string>):
     Promise<{ planSchema: SpaceMeta['typeSchemas']; meta: SpaceMeta; skip: Set<string> }>;
   writeSchemaOfAct(input: { spaceId: string; state: ActState; step: SchemaStepFile; hooks?: { beforeSchemaWrite?: () => unknown; afterSchemaWrite?: () => unknown } }):
     Promise<SchemaStepEnd | SchemaStepDone>;

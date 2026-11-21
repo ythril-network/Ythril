@@ -132,7 +132,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/turtle" \
 | `sourceBase`, `sourceVocab` | The base (and vocabulary, default `<sourceBase>vocab/`) of the space the file came from | TriG, N-Quads, JSON-LD: the file's one data graph; Turtle: none |
 | `graphBase` | `"<graph address> <source base>"`, once per data graph (REST: repeat the parameter; MCP: an array) | none |
 | `schema` | `none`: import the data alone. `generate`, `expand`, `update`: build or extend the space's type schemas from the file's classes and shapes first, as [Schema from RDF](#rdf-schema-import)'s `mode` does (below) | `none` |
-| `from` | With `schema`: which declarations to read, `declared` (OWL and RDFS), `shacl` (shapes), or both (REST: repeat the parameter; MCP: an array). `from: data` (a schema read from the records) is not available yet and is refused with `rdf_import_schema_not_available` (400); `from` without `schema` is `400 rdf_import_bad_param` | `declared` and `shacl` |
+| `from` | With `schema`: which declarations to read, `declared` (OWL and RDFS), `shacl` (shapes), or both (REST: repeat the parameter; MCP: an array). Only the subjects that declare something of a source named are read as schema, and the rest are records: an `owl:NamedIndividual`, an `owl:Thing` instance and a SHACL validation report always are, and with `from: shacl` the file's `owl:Class` subjects are too. `from: data` (a schema read from the records) is not available yet and is refused with `rdf_import_schema_not_available` (400); `from` without `schema` is `400 rdf_import_bad_param` | `declared` and `shacl` |
 
 ### A schema built from the file (`schema`)
 
