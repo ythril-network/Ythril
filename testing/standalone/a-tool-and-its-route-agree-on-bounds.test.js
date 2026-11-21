@@ -55,6 +55,9 @@ const DIFFER_ON_PURPOSE = new Map([
   ['import_rdf:format.required',
     'the REST route reads the document as its request body and takes its format from the body\'s `Content-Type` when `format` is not in the '
     + 'query, so `format` is optional there; an MCP call has no media type, so the tool names the format of its inline `document` and says it is required.'],
+  ['import_schema_rdf:format.required',
+    'the same shape as `import_rdf` (Q-754): `POST /api/spaces/:id/schema-rdf` reads the document as its body and its format from `Content-Type` '
+    + 'when `format` is not in the query; the tool has no media type, so its inline `document` needs `format`.'],
 ]);
 
 /**

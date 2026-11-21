@@ -142,5 +142,7 @@ export const AUDIT_SCHEMA_SUMMARY: Readonly<Record<string, (before: unknown, aft
   // PATCH /api/spaces/:id, `schema_update` and `update_space` all record `space.update`, and each can change a type, a property or a rule
   // as well as a scalar setting, so the three doors say so in one place (R6-13).
   'space.update': summariseSchemaEdit,
+  // Q-754: a schema built from an RDF file hands the planner's snapshot pair, so it says which types, properties and rules it left.
+  'schema.rdf.import': summariseSchemaEdit,
   'schema_library.update': summariseLibraryEntry,
 };

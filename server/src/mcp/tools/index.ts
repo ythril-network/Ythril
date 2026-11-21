@@ -2,6 +2,7 @@ import type { ToolHandler } from './types.js';
 import { space_schema_layersTool, space_set_network_precedenceTool } from './schema-layers.js';
 import { space_schema_versionsTool } from './schema-versions.js';
 import { space_schema_rdfTool } from './schema-rdf.js';
+import { import_schema_rdfTool } from './schema-rdf-import.js';
 import { export_rdfTool } from './rdf.js';
 import { import_rdfTool, import_rdf_statusTool } from './rdf-import.js';
 import { space_schema_convertTool, space_schema_conversionTool } from './schema-convert.js';
@@ -56,6 +57,7 @@ export const ALL_TOOLS: ToolHandler[] = [
   space_set_network_precedenceTool,
   space_schema_versionsTool,
   space_schema_rdfTool,
+  import_schema_rdfTool,
   export_rdfTool,
   import_rdfTool,
   import_rdf_statusTool,

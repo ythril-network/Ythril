@@ -695,7 +695,7 @@ export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnsw
   if (!parsed.success) return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_BAD_PARAM, refusalOfParse(parsed.error).error);
   const p = parsed.data;
   if (p.schema !== undefined) {
-    return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_SCHEMA_NOT_AVAILABLE, 'schema: building a schema from the file is not available yet; import the data into a space whose schema is set, and leave schema out');
+    return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_SCHEMA_NOT_AVAILABLE, 'schema: building a schema from the file is not available in the data import yet; build it first with import_schema_rdf (POST /api/spaces/:id/schema-rdf), then import the data and leave schema out');
   }
   const cfg = getConfig();
   // The one existence rule: an id that is not a configured space (a view included: an import writes into a space) is answered as missing.

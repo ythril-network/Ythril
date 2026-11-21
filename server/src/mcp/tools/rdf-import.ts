@@ -57,7 +57,7 @@ export const import_rdfTool: ToolHandler = {
         items: { type: 'string', minLength: RDF_IMPORT_GRAPH_BASE_MIN_CHARS, maxLength: RDF_IMPORT_GRAPH_BASE_MAX_CHARS },
         description: 'For a file of several data graphs (a view\'s export): one "<graph address> <source base>" per graph. A file of several graphs is refused without them.',
       },
-      schema: { description: 'Not available yet: building a schema from the file is refused by name (rdf_import_schema_not_available).' },
+      schema: { description: 'Not available here yet: building a schema from the file is refused by name (rdf_import_schema_not_available). Build the schema first with import_schema_rdf (POST /api/spaces/:id/schema-rdf), then import the data.' },
     },
     required: ['space', 'document', 'format'],
     additionalProperties: false,

@@ -172,6 +172,12 @@ A rule the instance could not apply is refused when saved; a property the rule
 reads that a record lacks makes it not apply. Try a schema on one record you type,
 or over the stored records, with schema_validate before saving it.
 
+An ontology you already have (OWL classes and properties, RDFS, SHACL shapes) can
+become the space's types through the schema-from-RDF door (the guide's "RDF schema
+import"): it builds only the types the file adds or changes, never a space-level
+field, answers a dry run first, and refuses a space in a network, whose schema is
+the network's vote.
+
 A space in a network runs on its own definitions with each network's laid under
 them, and the network first in the order wins a clash: an edit of something a
 network supplies is stored and may not take effect. space_schema_layers says which

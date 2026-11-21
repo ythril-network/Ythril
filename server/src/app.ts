@@ -20,7 +20,7 @@ import { spaceSchemaLayersRouter } from './api/spaces-schema-layers.js';
 import { spaceSchemaVersionsRouter } from './api/spaces-schema-versions.js';
 import { spaceSchemaConvertRouter } from './api/spaces-schema-convert.js';
 import { spaceUnconvertedRouter } from './api/spaces-unconverted.js';
-import { spaceSchemaRdfRouter } from './api/spaces-schema-rdf.js';
+import { spaceSchemaRdfRouter, SCHEMA_RDF_PATH } from './api/spaces-schema-rdf.js';
 import { linkedDataPlaceholderRouter } from './api/linked-data-placeholder.js';
 import { fileStoreRouter } from './api/files.js';
 import { toolsRouter } from './api/tools.js';
@@ -129,6 +129,8 @@ export function createApp() {
   app.post(IMPORT_PATH, markImportBody);
   // The RDF import reads its body off the wire itself (any media type: curl sends form data by default, a client may send JSON), under its own bounds.
   app.post(RDF_IMPORT_PATH, markImportBody);
+  // The schema import (Q-754) likewise, on its own path: a POST to the schema export's path is the only one there, and only it is marked.
+  app.post(SCHEMA_RDF_PATH, markImportBody);
   app.use(express.json({ limit: JSON_BODY_MAX_BYTES, type: (req) => !skipsGlobalParsers(req) && Boolean((req as express.Request).is('application/json')) }));
   app.use(express.urlencoded({ extended: true, limit: JSON_BODY_MAX_BYTES, type: (req) => !skipsGlobalParsers(req) && Boolean((req as express.Request).is('application/x-www-form-urlencoded')) }));
 

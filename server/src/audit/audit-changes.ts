@@ -135,6 +135,10 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // counts, the values left out and the records they belong to, whether file statements were withheld, and where the page started and ends.
   'rdf.export': ['format', 'edgeDetails', 'members', 'records', 'complete', 'skippedValues', 'skippedNamed', 'fileTriplesWithheld', 'after', 'nextAfter'],
   'schema.rdf.export': ['format', 'fingerprint', 'leftOut'],
+  // Q-754: what a schema build from an RDF file did, never a value of the file: whether it was a dry run, the format and mode, the file's
+  // statements, how many were taken and not, and the types added and changed. The type, property and rule names of a build are the schema
+  // summary's (`audit-schema-summary.ts`), as for every schema write; a dry run hands no schema snapshot, so it records none.
+  'schema.rdf.import': ['dryRun', 'format', 'mode', 'statements', 'taken', 'notTaken', 'typesAdded', 'typesChanged'],
   // Q-753: what an RDF import did, never the data: the format, whether it was a dry run, how it ended, the file's statements and subjects,
   // the records inserted and converged (and, of those, the ones that changed nothing), the reasons answered and the statements not taken.
   'rdf.import': ['format', 'dryRun', 'status', 'quads', 'subjects', 'inserted', 'converged', 'unchanged', 'reasons', 'notTaken'],
