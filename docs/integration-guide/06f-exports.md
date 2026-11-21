@@ -208,7 +208,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/turtle" --
 
 **A space in a network.** There a schema change is the network's to vote on, and this door opens no round: a build is refused `409 schema_rdf_networked`, carrying the dry-run answer as `proposed`; send `proposed.typeSchemas` through `PATCH /api/spaces/:id` or `schema_update`. A dry run is answered there as anywhere.
 
-**Rights and audit.** A dry run needs `schema: read`, a build `schema: write`, and a file whose shapes give a type rules `schema: admin` (the field rights of `PATCH`). REST asks the second factor where it is required and refuses a read-only token, a dry run too; a peer-bound token is refused on both doors. Audited as `schema.rdf.import`: a build records the type, property and rule names it changed, as every schema write does, and its counts; a dry run its counts only; a refusal no change.
+**Rights and audit.** Both doors need `schema: write`, for a dry run too (as the data import's dry run needs its own rung), and a file whose shapes give a type rules `schema: admin` (the field rights of `PATCH`). REST asks the second factor where it is required and refuses a read-only token, a dry run too; a peer-bound token is refused on both doors. Audited as `schema.rdf.import`: a build records the type, property and rule names it changed, as every schema write does, and its counts; a dry run its counts only; a refusal no change.
 
 **Bounds.** The body is at most 32 MiB (gzip inflated at most four times that, and within the reader's ratio), an upload that sends nothing for 60 seconds is cut off, and a file holds at most 500 000 statements. One schema file is read at a time per instance.
 
@@ -217,7 +217,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/turtle" --
 | 400 | `schema_rdf_bad_param` | A parameter is not one the door takes, or `sourceVocab` without `sourceBase` |
 | 400 | `rdf_malformed`, `rdf_relative_iri`, `rdf_remote_context`, `rdf_jsonld_not_streamable`, `rdf_gzip_invalid`, `rdf_unsupported`, `rdf_source_failed` | The reader refuses the file, with its place |
 | 400 | `rdf_import_upload_stalled` | The upload sent nothing for the idle bound |
-| 403 | `schema_rdf_rung` | Below the rung the call needs (`read` for a dry run, `write` for a build, `admin` for rules) |
+| 403 | `schema_rdf_rung` | A file whose shapes give a type rules, below `schema: admin` (below `schema: write` the rights guard refuses first, in its own words) |
 | 404 | `space_not_found` | No such space |
 | 409 | `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_unwritable` | The space's RDF names are not settled |
 | 409 | `schema_rdf_networked` | The space is in a network (the dry-run answer as `proposed`) |
