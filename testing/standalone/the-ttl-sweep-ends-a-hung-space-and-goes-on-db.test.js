@@ -113,7 +113,9 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
    */
   async function assertSwept(space, msg) {
     if (await door.coll(space, 'facts').countDocuments({}) === 0) return;
-    const ownBound = lines.filter((l) => l.startsWith(`TTL sweep: facts failed for space '${space}'`) && l.includes(`time bound of ${BOUND_MS} ms`));
+    // Any step, not only facts: the sweep reads a space's collections in TTL_COLLECTIONS order, and a healthy space whose first,
+    // empty read passed the bound is said under that step and its facts are never read.
+    const ownBound = lines.filter((l) => /^TTL sweep: \S+ failed for space '/.test(l) && l.includes(`failed for space '${space}'`) && l.includes(`time bound of ${BOUND_MS} ms`));
     assert.ok(ownBound.length > 0, `${msg}: it holds its expired facts and the sweep said nothing about it, so it was never reached`);
     console.log(`# retry: ${space} was ended at its own ${BOUND_MS} ms bound on this runner; swept once more alone`);
     walkMod.liftQuarantine(space);
@@ -131,7 +133,7 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
       assert.ok(tookMs >= BOUND_MS - 100, `ended after ${tookMs} ms, before the bound`);
       assert.ok(tookMs < STALL_MS - 500, `the sweep took ${tookMs} ms: it waited out the stall (${STALL_MS} ms) instead of ending at the ${BOUND_MS} ms bound`);
     });
-    await assertSwept(OK1,'the healthy space behind the hung one');
+    await assertSwept(OK1, 'the healthy space behind the hung one');
     const said1 = said('TTL sweep: facts', H1);
     assert.equal(said1.length, 1, `space 1 is said once, got ${said1.length}`);
     assert.match(said1[0], new RegExp(`time bound of ${BOUND_MS} ms`));
@@ -148,7 +150,7 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
     const [first, second] = ['facts', 'entities'].sort((a, b) => TTL_COLLECTIONS.indexOf(a) - TTL_COLLECTIONS.indexOf(b));
     assert.equal(said(`TTL sweep: ${first}`, H2).length, 1);
     assert.equal(said(`TTL sweep: ${second}`, H2).length, 0, 'the second collection was read: a timeout did not end the space');
-    await assertSwept(OK2,'the healthy space behind the space with two stalled collections');
+    await assertSwept(OK2, 'the healthy space behind the space with two stalled collections');
   });
 
   it('three spaces in a row that time out end the walk once; the space behind waits, and the next cycle sweeps it', { timeout: 180_000 }, async () => {
@@ -166,6 +168,6 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
     assert.equal(await door.coll(TAIL, 'facts').countDocuments({}), 1, 'the walk stopped before the space behind the three');
 
     await sweepExpired(new Date());
-    await assertSwept(TAIL,'the next cycle sweeps the space behind the three (they are in quarantine)');
+    await assertSwept(TAIL, 'the next cycle sweeps the space behind the three (they are in quarantine)');
   });
 });
