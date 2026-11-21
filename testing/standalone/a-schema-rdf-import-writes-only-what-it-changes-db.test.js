@@ -110,7 +110,7 @@ describe('the schema-from-RDF door writes only what the file changes (real route
     }
   });
 
-  it('a file of only statements the mapping does not take writes nothing, names them as not taken, and its audit row claims no schema change', async () => {
+  it('a file of only statements the mapping does not take writes nothing, takes none of them, and its audit row claims no schema change', async () => {
     const tokens = {};
     for (const door of ['rest', 'mcp']) tokens[door] = await d.mint(`schema-rdf-writes-${door}`, {}, { admin: true });
     for (const [door, id] of Object.entries(NOT_TAKEN)) {
@@ -120,7 +120,7 @@ describe('the schema-from-RDF door writes only what the file changes (real route
         : await d.buildMcp(tokens[door].key, { space: id, document: NOT_A_SCHEMA, format: 'turtle', mode: 'expand' });
       assert.ok(answer.body, `${door}: ${answer.text.slice(0, 300)}`);
       assert.equal(answer.body.written, false, `${door}: says it wrote`);
-      assert.ok(answer.body.counts.notTaken > 0, `${door}: the statement is not named as not taken: ${JSON.stringify(answer.body.counts)}`);
+      assert.deepEqual([answer.body.counts.statements, answer.body.counts.taken], [1, 0], `${door}: the statement was read and taken: ${JSON.stringify(answer.body.counts)}`);
       assert.equal(versionOf(id), was.version, `${door}: the version moved`);
       assert.equal(snapshotsOf(id), was.snapshots, `${door}: a history snapshot was pushed`);
       assert.deepEqual(d.heldTypes(id), was.types, `${door}: the schema changed`);

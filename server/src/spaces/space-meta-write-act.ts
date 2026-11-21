@@ -88,6 +88,16 @@ export type SpaceMetaWriteAnswer =
   | SpaceMetaWriteRefused;
 
 /**
+ * The fields of the settings body `body` that `caller`'s rungs do not reach, in the order they arrived: the one place the field rungs are
+ * asked. The write below asks it before anything else, and a door that answers a dry run asks it too, so a dry run is refused the rungs its
+ * write is refused (Q-754 R1: a `schema: write` token's dry run of a file whose shapes give a type rules answered 200 where the build
+ * answered 403).
+ */
+export function fieldRefusalsOf(spaceId: string, body: Record<string, unknown>, caller: Pick<SpaceMetaWriteCaller, 'instanceAdmin' | 'rights'>): string[] {
+  return refusalsForSpaceUpdate(body, spaceId, caller.instanceAdmin, caller.rights);
+}
+
+/**
  * Write a space's settings for a door. Never throws for a caller's mistake or the space's state: every refusal is an answer. A fault that is
  * neither (the store, the disk) is thrown to the door.
  */
@@ -96,7 +106,7 @@ export async function writeSpaceMeta(input: SpaceMetaWriteInput): Promise<SpaceM
   const body = input.typeSchemasMode === undefined ? input.body : { ...input.body, typeSchemasMode: input.typeSchemasMode };
 
   // The field rungs first, every refused field at once: one save, one conversation with whoever grants rights.
-  const fields = refusalsForSpaceUpdate(body, spaceId, caller.instanceAdmin, caller.rights);
+  const fields = fieldRefusalsOf(spaceId, body, caller);
   if (fields.length > 0) return { kind: 'fields-refused', status: FORBIDDEN, fields };
 
   const space = getConfig().spaces.find(s => s.id === spaceId);

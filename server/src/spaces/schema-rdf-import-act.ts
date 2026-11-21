@@ -48,7 +48,7 @@ import { inlineResolvableRefs } from './schema-validation.js';
 import { assertSchemaWritable } from './schema-write-gate.js';
 import { spaceWriteClosedAnswer } from './space-write-gate.js';
 import { planSpaceMetaUpdate, type MetaUpdatePlan, type WriteCaller } from './meta-update.js';
-import { writeSpaceMeta, SPACE_META_WRITE_NETWORKED } from './space-meta-write-act.js';
+import { writeSpaceMeta, fieldRefusalsOf, SPACE_META_WRITE_NETWORKED } from './space-meta-write-act.js';
 import { typesAddedPastCap } from './types-added-past-cap.js';
 import { unknownSpaceAnswer, lostSpaceAnswer } from './unknown-space.js';
 import { RDF_IMPORT_ADDRESS_MAX } from './rdf-import-act.js';
@@ -255,7 +255,9 @@ export function proposeSchemaFromRdf(
     throw err;
   }
   knobs.hooks?.beforeMapping?.();
-  const answer = schemaFromRdf(quads, { from: options.from, mode: options.mode, names, stored: meta.typeSchemas ?? {} });
+  // The mapping meets the types as they are STORED (R2): a type that is a reference to a library entry is kept whole there, and handed its
+  // resolved copy it would be rebuilt as a concrete type that replaces the reference. The resolved meta serves the address names alone.
+  const answer = schemaFromRdf(quads, { from: options.from, mode: options.mode, names, stored: space.meta?.typeSchemas ?? {} });
   if (answer.refusals.length > 0) return mappingRefusal(answer);
   const { changed, added, changedCount } = changedTypesOf(answer);
   const capped = typesAddedPastCap(meta.typeSchemas, changed);
@@ -285,6 +287,11 @@ function chainRefusal(status: number, body: { error: string; code?: string }, pr
   return refusal(HTTP.UNPROCESSABLE, SCHEMA_RDF_REFUSED, `The schema the file builds is refused by the space's rules; ${NOTHING_BUILT}`, {
     reasons: [{ code: body.code ?? 'invalid-schema', message: peerText(body.error, { max: REASON_TEXT_MAX }) }], reasonCount: 1,
   });
+}
+
+/** The refusal of a caller whose rungs do not reach `fields` of the settings write (a type's rules need `schema: admin`). */
+function rungRefusal(fields: readonly string[]): SchemaRdfImportRefusal {
+  return refusal(HTTP.FORBIDDEN, SCHEMA_RDF_RUNG, `Not allowed to change ${fields.map(describeFieldRequirement).join(', ')}: ${NOTHING_BUILT}`);
 }
 
 function networkedRefusal(proposed: SchemaRdfImportBody): SchemaRdfImportRefusal {
@@ -389,23 +396,26 @@ async function readAndBuild(input: SchemaRdfImportInput, p: SchemaRdfImportParam
   if (proposal.kind === 'refused') return proposal;
   const proposed = bodyOf(input.spaceId, p, from, format, proposal);
 
-  // The planner's verdict, for the dry run as for the build: what the write would refuse, the dry run refuses.
+  // What the write would refuse, the dry run refuses: the field rungs first (a file whose shapes give a type rules needs `schema: admin`), asked
+  // by the write act's one function for the dry run as for the build, then the planner's verdict.
+  const instanceAdmin = !!input.caller && isInstanceAdmin(input.caller);
+  const fields = fieldRefusalsOf(input.spaceId, writeBodyOf(proposal), { rights: input.caller?.rights, instanceAdmin });
+  if (fields.length > 0) return rungRefusal(fields);
   const space = getConfig().spaces.find(s => s.id === input.spaceId);
   const verdict = planSpaceMetaUpdate({ spaceId: input.spaceId, space, body: writeBodyOf(proposal), ifMatch: String(proposal.version), caller: writeCallerOf(input.caller) });
   if (!verdict.ok) return chainRefusal(verdict.refusal.status, verdict.refusal.body as { error: string; code?: string }, proposed);
-  if (dryRun) return { kind: 'done', status: HTTP.OK, body: proposed, audit: auditOf(proposed, null) };
+  // A dry run writes nothing, and a build that changes nothing writes nothing either (R3): a write raises the version and pushes a history
+  // snapshot, and a space in a network would be refused for a vote that has nothing to carry.
+  if (dryRun || proposal.answer.changes.length === 0) return { kind: 'done', status: HTTP.OK, body: proposed, audit: auditOf(proposed, null) };
   if (getConfig().networks.some(n => n.spaces.includes(input.spaceId))) return networkedRefusal(proposed);
 
   knobs.hooks?.beforeWrite?.();
-  const instanceAdmin = !!input.caller && isInstanceAdmin(input.caller);
   const written = await writeSpaceMeta({
     spaceId: input.spaceId, body: writeBodyOf(proposal), ifMatch: String(proposal.version),
     caller: { record: writeCallerOf(input.caller), rights: input.caller?.rights, instanceAdmin },
     rateKey: input.rateKey, refuseIfNetworked: true,
   });
-  if (written.kind === 'fields-refused') {
-    return refusal(HTTP.FORBIDDEN, SCHEMA_RDF_RUNG, `Not allowed to change ${written.fields.map(describeFieldRequirement).join(', ')}: ${NOTHING_BUILT}`);
-  }
+  if (written.kind === 'fields-refused') return rungRefusal(written.fields);
   if (written.kind === 'lost') {
     const lost = lostSpaceAnswer(null, input.spaceId);
     return refusal(lost.status, lost.body.code ?? SPACE_NOT_FOUND, lost.body.error);
