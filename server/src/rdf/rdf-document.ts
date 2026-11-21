@@ -36,7 +36,11 @@ export const RDF_BODY_BOUND = 'importBodyMaxBytes';
 /** A refusal of the document: its status, our sentence, its code, and what more a caller reads. The shape the import's refusals have. */
 export interface RdfDocumentRefusal { kind: 'refused'; status: number; error: string; code: string; detail?: Record<string, unknown> }
 
-const refusal = (status: number, code: string, error: string, detail?: Record<string, unknown>): RdfDocumentRefusal =>
+/**
+ * The one constructor of a refusal answer of the RDF imports: the data import's act, the schema import's act and this module's front half all
+ * build theirs with it, so the answer's shape has one declaration (`RdfDocumentRefusal`) and no act keeps a copy that could drift.
+ */
+export const refusal = (status: number, code: string, error: string, detail?: Record<string, unknown>): RdfDocumentRefusal =>
   ({ kind: 'refused', status, code, error, ...(detail ? { detail } : {}) });
 
 /** The format a media type names (parameters such as `; version=1.2` and `; charset` aside), or undefined. */
