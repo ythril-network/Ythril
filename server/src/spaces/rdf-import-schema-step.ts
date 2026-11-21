@@ -23,14 +23,14 @@ import { effectiveRung } from '../auth/mint-cap.js';
 import { satisfies } from '../auth/required-rung.js';
 import type { RdfCaller } from '../rdf/rdf-space-state.js';
 import { refusal, type RdfDocumentRefusal } from '../rdf/rdf-document.js';
-import type { RdfImportSchemaReport } from '../rdf/import-report.js';
 import { quadGroupKey, type ImportFolder, type QuadGroup } from '../rdf/import-spool.js';
 import { schemaGroupsOf, SCHEMA_RDF_MAX_QUADS, type SchemaMode, type SchemaSource } from '../rdf/schema-from-rdf.js';
 import { isMissingPath } from '../util/path-present.js';
 import { schemaFingerprintOf } from './schema-stamp.js';
 import { inlineResolvableRefs } from './schema-validation.js';
 import {
-  RDF_IMPORT_ADDRESS_MAX, readSchemaStep, writeSchemaStep, type ActState, type ImportOptions, type SchemaStepFile,
+  RDF_IMPORT_ADDRESS_MAX, defineRdfImportSchemaStep, readSchemaStep, writeSchemaStep, type ActState, type DoorSchema, type ImportOptions, type SchemaAsked,
+  type SchemaStepDone, type SchemaStepEnd, type SchemaStepFile,
 } from './rdf-import-files.js';
 import {
   proposeSchemaFromRdf, judgeSchemaProposal, writeSchemaProposal, proposedBodyOf, SCHEMA_RDF_FROM_DEFAULT, SCHEMA_RDF_CHANGED, SCHEMA_RDF_RUNG,
@@ -61,18 +61,6 @@ export const storedVersion = (spaceId: string): number => getConfig().spaces.fin
 export const blankGroupKey = (id: string, graph: { value: string } | undefined): string =>
   quadGroupKey({ kind: 'blank', id }, graph ? { kind: 'iri', value: graph.value } : undefined);
 
-/** What an import with `schema` asks for: the schema door's mode, and the declarations it reads. */
-export interface SchemaAsked { kind: 'asked'; mode: SchemaMode; from: SchemaSource[] }
-
-/** The schema the door built: the proposal, the type schemas the space holds after it (stored form), the groups it came from, what the report says. */
-export interface DoorSchema {
-  kind: 'built';
-  proposal: SchemaProposal;
-  merged: SpaceMeta['typeSchemas'];
-  keys: Set<string>;
-  report: Omit<RdfImportSchemaReport, 'written'>;
-}
-
 /**
  * The refusal of a caller below `schema: write` on `spaceId`, or null: an import with `schema` set writes the space's type schemas, which the
  * settings write's field rungs price at `schema: write` (rules at `admin`, asked by the shared judgement). Asked at the door before a byte is read,
@@ -88,7 +76,7 @@ export function schemaRungRefusal(spaceId: string, caller: RdfCaller | undefined
 export function callerSnapshotOf(caller: RdfCaller | undefined): NonNullable<ActState['caller']> {
   const id = caller?.id;
   return {
-    ...(id !== undefined ? { id } : {}), ...(caller?.rights !== undefined ? { rights: caller.rights } : {}), ...(caller?.admin === true ? { admin: true } : {}),
+    ...(id !== undefined ? { id } : {}), ...(caller?.rights !== undefined ? { rights: caller.rights } : {}),
     stored: id !== undefined && getConfig().tokens.some(t => t.id === id),
   };
 }
@@ -100,9 +88,9 @@ export function callerSnapshotOf(caller: RdfCaller | undefined): NonNullable<Act
 function callerNow(snapshot: ActState['caller']): RdfCaller | null {
   if (!snapshot) return null;
   if (!snapshot.stored || snapshot.id === undefined) return { ...snapshot };
-  const token = getConfig().tokens.find(t => t.id === snapshot.id) as { id: string; rights?: RdfCaller['rights']; admin?: boolean; expiresAt?: string | null } | undefined;
+  const token = getConfig().tokens.find(t => t.id === snapshot.id) as { id: string; rights?: RdfCaller['rights']; expiresAt?: string | null } | undefined;
   if (!token || (token.expiresAt && Date.parse(token.expiresAt) <= Date.now())) return null;
-  return { id: token.id, rights: token.rights ?? null, ...(token.admin === true ? { admin: true } : {}) };
+  return { id: token.id, rights: token.rights ?? null };
 }
 
 /** The `kind:type` names of the types `proposal` adds, and of those it changes. */
@@ -148,7 +136,8 @@ export async function schemaAtDoor(input: {
   if (judged.kind === 'refused') return judged;
   const names = typeNamesOf(proposal);
   return {
-    kind: 'built', proposal, merged: judged.merged, keys: found.keys,
+    kind: 'built', changed: proposal.changed as DoorSchema['changed'], version: proposal.version, changes: proposal.answer.changes.length,
+    merged: judged.merged, keys: found.keys,
     report: {
       typesAdded: names.added.slice(0, SCHEMA_TYPES_NAMED_MAX), typesChanged: names.changed.slice(0, SCHEMA_TYPES_NAMED_MAX),
       typesAddedCount: names.added.length, typesChangedCount: names.changed.length,
@@ -177,11 +166,10 @@ export function schemaAskedOf(schema: string | undefined, from: readonly string[
 export async function keepSchemaStep(folder: ImportFolder, built: DoorSchema, caller: RdfCaller | undefined): Promise<Pick<ActState, 'schemaStep' | 'caller'>> {
   const { report } = built;
   await writeSchemaStep(folder, {
-    changed: built.proposal.changed as SchemaStepFile['changed'], merged: built.merged, typesAdded: report.typesAdded, typesChanged: report.typesChanged,
-    fingerprintBefore: report.fingerprintBefore,
+    changed: built.changed, merged: built.merged, typesAdded: report.typesAdded, typesChanged: report.typesChanged, fingerprintBefore: report.fingerprintBefore,
   });
   return {
-    schemaStep: { version: built.proposal.version, fingerprint: report.fingerprintAfter, changes: built.proposal.answer.changes.length },
+    schemaStep: { version: built.version, fingerprint: report.fingerprintAfter, changes: built.changes },
     caller: callerSnapshotOf(caller),
   };
 }
@@ -231,11 +219,6 @@ function proposalOfStep(step: SchemaStepFile, version: number): SchemaProposal {
   };
 }
 
-/** How the act ends for good: its status, code, sentence, and what more its answer carries. */
-export interface SchemaStepEnd { kind: 'ended'; status: number; code: string; why: string; detail?: Record<string, unknown> }
-/** The step done: the stored type schemas the planners judge and stamp by from now on, and what the report says of the step. */
-export interface SchemaStepDone { kind: 'done'; typeSchemas: SpaceMeta['typeSchemas']; report: RdfImportSchemaReport }
-
 const ended = (status: number, code: string, why: string, detail?: Record<string, unknown>): SchemaStepEnd =>
   ({ kind: 'ended', status, code, why, ...(detail ? { detail } : {}) });
 
@@ -281,3 +264,8 @@ export async function writeSchemaOfAct(input: {
     },
   };
 }
+
+// The import act asks for these through `rdfImportSchemaStep()` (see `RdfImportSchemaStep` for why it does not import them).
+defineRdfImportSchemaStep({
+  schemaAskedOf, schemaRungRefusal, schemaAtDoor, keepSchemaStep, schemaStepOfFolder, schemaStepBlocks, translationBy, writeSchemaOfAct, storedVersion,
+});

@@ -67,15 +67,8 @@ import {
 import { awaitDoorActs } from './door-acts.js';
 import {
   RDF_IMPORT_ADDRESS_MAX, RDF_IMPORT_DIR, RDF_IMPORT_REPORT_DIR, RDF_IMPORT_REPORT_KEEP_MS, folderPathOf, holdFolder, keepReport, readReport,
-  readState, sweepRdfImportOrphans, sweepReports, writeState, type ActState, type ImportOptions,
+  rdfImportSchemaStep, readState, sweepRdfImportOrphans, sweepReports, writeState, type ActState, type ImportOptions, type SchemaAsked,
 } from './rdf-import-files.js';
-import {
-  SCHEMA_RDF_BAD_PARAM, SCHEMA_RDF_CHANGED, SCHEMA_RDF_NETWORKED, SCHEMA_RDF_NOT_EMPTY, SCHEMA_RDF_REFUSED, SCHEMA_RDF_RUNG,
-} from './schema-rdf-import-act.js';
-import {
-  keepSchemaStep, schemaAskedOf, schemaAtDoor, schemaRungRefusal, schemaStepBlocks, schemaStepOfFolder, storedVersion, translationBy, writeSchemaOfAct,
-  type SchemaAsked,
-} from './rdf-import-schema-step.js';
 import { rdfSpaceState, type RdfCaller } from '../rdf/rdf-space-state.js';
 import { RDF_FORMATS, type RdfFormat } from '../rdf/serialize.js';
 import { parseRdf } from '../rdf/parse.js';
@@ -154,7 +147,7 @@ export const RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   'rdf_unsupported_format', 'rdf_unsupported', 'rdf_source_failed',
   'rdf_not_enabled', 'rdf_base_conflict', 'rdf_base_shared', 'rdf_term_clash', 'rdf_unwritable', 'space_not_found',
   // With `schema` set (Q-955): the schema door's own codes, answered by the shared step for the same causes.
-  SCHEMA_RDF_BAD_PARAM, SCHEMA_RDF_RUNG, SCHEMA_RDF_NETWORKED, SCHEMA_RDF_NOT_EMPTY, SCHEMA_RDF_CHANGED, SCHEMA_RDF_REFUSED,
+  'schema_rdf_bad_param', 'schema_rdf_rung', 'schema_rdf_networked', 'schema_rdf_not_empty', 'schema_rdf_changed', 'schema_rdf_refused',
 ]);
 /** What an import with `schema` reads the schema from; `data` (a schema inferred from the records) is refused until it exists. */
 const IMPORT_SCHEMA_SOURCES = ['declared', 'shacl', 'data'] as const;
@@ -591,12 +584,13 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
   };
   // An import with `schema` set (Q-955) carries its proposal in its own file; a state written before the schema step existed carries none.
   // An import with `schema` set (Q-955) carries its proposal in its own file (`rdf-import-schema-step.ts`); a state written before had none.
-  const step = await schemaStepOfFolder(folder, state);
+  const wired = state.schemaStep ? rdfImportSchemaStep() : null;
+  const step = wired ? await wired.schemaStepOfFolder(folder, state) : null;
   if (step?.kind === 'ended') return gone(step.status, step.code, step.why);
   // The space's RDF state is asked before the dry plan only: once the first window is committed nothing ends the act but finishing.
   if (state.phase === 'received' || state.phase === 'translated') {
     const space = rdfSpaceState(getConfig(), entry.localId, undefined, schemaFingerprintOf);
-    const blocked = schemaStepBlocks(state, entry.localId, space.ok ? null : space.code);
+    const blocked = wired?.schemaStepBlocks(state, entry.localId, space.ok ? null : space.code) ?? null;
     if (blocked) return gone(blocked.status, blocked.code, blocked.why);
     if (!space.ok) return gone(space.status, space.code, `RDF is no longer usable on the space (${space.code}).`);
     if (state.phase === 'received') {
@@ -609,7 +603,7 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
       // window judge by this one read. With a schema step they are the proposal's (stored form for the planners; resolved for the translation's names).
       state.options = { ...state.options, mode: space.meta.validationMode ?? 'off' };
       const groups = reopenSortedGroups(folder, state.sortedFile);
-      const by = step ? await translationBy(step.merged, space.meta, groups) : { planSchema: structuredClone(space.meta.typeSchemas ?? {}), meta: space.meta };
+      const by = step ? await wired!.translationBy(step.merged, space.meta, groups) : { planSchema: structuredClone(space.meta.typeSchemas ?? {}), meta: space.meta };
       state.planSchema = by.planSchema;
       run.planSchema = state.planSchema;
       try {
@@ -627,7 +621,7 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
   }
   // The schema written once after the dry plan passed; the planners then judge and stamp by the stored schema.
   if (step) run.schemaStep = async () => {
-    const done = await writeSchemaOfAct({ spaceId: entry.localId, state, step, ...(knobs.hooks ? { hooks: knobs.hooks } : {}) });
+    const done = await wired!.writeSchemaOfAct({ spaceId: entry.localId, state, step, ...(knobs.hooks ? { hooks: knobs.hooks } : {}) });
     if (done.kind === 'ended') return gone(done.status, done.code, done.why, done.detail);
     run.planSchema = state.planSchema = done.typeSchemas;
     run.planMeta = planMetaFor(entry.localId, run.planSchema);
@@ -720,14 +714,14 @@ export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnsw
   if (!parsed.success) return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_BAD_PARAM, refusalOfParse(parsed.error).error);
   const p = parsed.data;
   // `schema` and `from` (Q-955): `from` without `schema`, and `from: data`, are refused by the step's one judgement.
-  const schema = schemaAskedOf(p.schema, p.from);
+  const schema = (p.schema ?? 'none') === 'none' && p.from === undefined ? null : rdfImportSchemaStep().schemaAskedOf(p.schema, p.from);
   if (schema?.kind === 'refused') return schema;
   const cfg = getConfig();
   // The one existence rule: an id that is not a configured space (a view included: an import writes into a space) is answered as missing.
   const unknown = unknownSpaceAnswer(null, input.spaceId, false, cfg);
   if (unknown) return refusal(unknown.status, unknown.body.code ?? 'space_not_found', unknown.body.error);
   // With `schema` set the import writes the space's type schemas: `schema: write` besides the import's own rung, a dry run too, before a byte is read.
-  const rung = schema ? schemaRungRefusal(input.spaceId, input.caller) : null;
+  const rung = schema ? rdfImportSchemaStep().schemaRungRefusal(input.spaceId, input.caller) : null;
   if (rung) return rung;
   // A space another act holds (a restore, a migration, a conversion, an import) takes no import: answered with that act's own code, as every
   // write door answers it, before a byte of the file is read. A dry run writes nothing and is not asked, unless it builds a schema: it would
@@ -806,7 +800,7 @@ async function readAndRun(
     // The schema the file builds (Q-955), proposed now that the source base is settled, and judged as its write would be: a refusal here writes
     // nothing and registers nothing.
     const built = schema
-      ? await schemaAtDoor({ spaceId: input.spaceId, caller: input.caller, options, groups: sorted.groups, schema, dryRun, maxQuads: knobs.schemaMaxQuads })
+      ? await rdfImportSchemaStep().schemaAtDoor({ spaceId: input.spaceId, caller: input.caller, options, groups: sorted.groups, schema, dryRun, maxQuads: knobs.schemaMaxQuads })
       : null;
     if (built?.kind === 'refused') return built;
     // The records the file will make, subjects and bare edges, counted from the spool alone: a file that cannot fit is answered 413 here.
@@ -819,7 +813,7 @@ async function readAndRun(
     if (dryRun) {
       // Inline: a dry run registers no act and holds nothing, so its translation reads the store as it is when it reads it.
       if (built) report.schema = { ...built.report, written: false };
-      const by = built ? await translationBy(built.merged, meta, sorted.groups, built.keys) : { planSchema: meta.typeSchemas ?? {}, meta };
+      const by = built ? await rdfImportSchemaStep().translationBy(built.merged, meta, sorted.groups, built.keys) : { planSchema: meta.typeSchemas ?? {}, meta };
       const run: Run = { spaceId: input.spaceId, folder, builder: new ReportBuilder(report), state: null, commit: false, planSchema: by.planSchema, planMeta: null };
       await translateStage({ spaceId: input.spaceId, folder, meta: by.meta, options, groups: sorted.groups, builder: run.builder, ...('skip' in by ? { skip: by.skip } : {}) });
       const outcome = run.builder.refused ? 'refused' : await planAndCommit(run);
@@ -829,7 +823,7 @@ async function readAndRun(
     await writeState(folder, {
       importId, space: input.spaceId, options, sortedFile: sorted.file, phase: 'received', committed: 0, report,
       sortedBy: { ...(meta.rdf?.base !== undefined ? { base: meta.rdf.base } : {}), ...(meta.rdf?.vocab !== undefined ? { vocab: meta.rdf.vocab } : {}) },
-      ...(built ? await keepSchemaStep(folder, built, input.caller) : {}),
+      ...(built ? await rdfImportSchemaStep().keepSchemaStep(folder, built, input.caller) : {}),
     });
     await keepReport(report);
     kept = report;
@@ -840,7 +834,7 @@ async function readAndRun(
     const now = rdfSpaceState(getConfig(), input.spaceId, input.caller, schemaFingerprintOf);
     if (now.ok && (now.meta.rdf?.base !== meta.rdf?.base || now.meta.rdf?.vocab !== meta.rdf?.vocab)) throw new SpaceChangedUnderDoor('base');
     // The schema the proposal was built on is the one stored now, asked in the same step: from the registration on no caller's schema write lands.
-    if (built && storedVersion(input.spaceId) !== built.proposal.version) throw new SpaceChangedUnderDoor('schema');
+    if (built && rdfImportSchemaStep().storedVersion(input.spaceId) !== built.version) throw new SpaceChangedUnderDoor('schema');
     const entryId = registerOwnSpaceAct({ kind: KIND, localId: input.spaceId, spoolId: importId });
     handedOver = true;
     releaseFolder();
