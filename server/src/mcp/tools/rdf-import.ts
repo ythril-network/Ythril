@@ -36,7 +36,10 @@ export const import_rdfTool: ToolHandler = {
     + 'answered and the import lands. Records stated under this space\'s own addresses are updated in place and nothing is taken away; every '
     + 'other subject becomes a NEW record with an id this instance mints, so importing the same foreign file twice makes the records twice '
     + '(run it with dryRun first to see the counts). Same as POST /api/brain/spaces/:spaceId/import/rdf.\n\n'
-    + 'COST: needs `knowledge: write`, for a dry run too. While the import writes, the space takes no other writes, no schema change and no '
+    + 'With schema set (generate, expand, update) the file\'s classes and shapes build or extend the space\'s schema first: the data is judged by '
+    + 'it, and the schema is written once, only when the data passes.\n\n'
+    + 'COST: needs `knowledge: write`, for a dry run too, and with schema set `schema: write` as well (`schema: admin` when its shapes give a '
+    + 'type rules); a space in a network is refused a schema build. While the import writes, the space takes no other writes, no schema change and no '
     + 'sync; a large file holds it for minutes. When it does not finish within the call the answer is `status: running` with its `importId`: '
     + 'ask import_rdf_status. The document is at most the MCP body limit; a larger file goes through the REST route. '
     + `Every refusal carries its code (${RDF_IMPORT_REFUSAL_CODES.length} of them, listed in the guide's RDF import section).`,
@@ -57,7 +60,18 @@ export const import_rdfTool: ToolHandler = {
         items: { type: 'string', minLength: RDF_IMPORT_GRAPH_BASE_MIN_CHARS, maxLength: RDF_IMPORT_GRAPH_BASE_MAX_CHARS },
         description: 'For a file of several data graphs (a view\'s export): one "<graph address> <source base>" per graph. A file of several graphs is refused without them.',
       },
-      schema: { description: 'Not available here yet: building a schema from the file is refused by name (rdf_import_schema_not_available). Build the schema first with import_schema_rdf (POST /api/spaces/:id/schema-rdf), then import the data.' },
+      schema: {
+        type: 'string', enum: ['none', 'generate', 'expand', 'update'],
+        description: 'none (the default): import the data alone. generate, expand, update: build or extend the space\'s type schemas from the file\'s '
+          + 'OWL and RDFS classes and SHACL shapes first, as import_schema_rdf\'s mode does; the data is judged by that schema, the schema is written once '
+          + 'only when the data passes, and every record carries its fingerprint. Needs schema: write besides (rules: schema: admin); the class and '
+          + 'shape subjects are not imported as records.',
+      },
+      from: {
+        type: 'array', minItems: 1, maxItems: 3, items: { type: 'string', enum: ['declared', 'shacl', 'data'] },
+        description: 'With schema: which declarations to read: declared (OWL and RDFS), shacl (shapes); default both. data is not available yet '
+          + '(rdf_import_schema_not_available). Refused without schema.',
+      },
     },
     required: ['space', 'document', 'format'],
     additionalProperties: false,

@@ -140,8 +140,12 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // summary's (`audit-schema-summary.ts`), as for every schema write; a dry run hands no schema snapshot, so it records none.
   'schema.rdf.import': ['dryRun', 'format', 'mode', 'statements', 'taken', 'notTaken', 'typesAdded', 'typesChanged'],
   // Q-753: what an RDF import did, never the data: the format, whether it was a dry run, how it ended, the file's statements and subjects,
-  // the records inserted and converged (and, of those, the ones that changed nothing), the reasons answered and the statements not taken.
-  'rdf.import': ['format', 'dryRun', 'status', 'quads', 'subjects', 'inserted', 'converged', 'unchanged', 'reasons', 'notTaken'],
+  // the records inserted and converged (and, of those, the ones that changed nothing), the reasons answered and the statements not taken. With
+  // `schema` set (Q-955), the schema step's before and after: whether it wrote, the stored schema's fingerprints, the types added and changed.
+  'rdf.import': [
+    'format', 'dryRun', 'status', 'quads', 'subjects', 'inserted', 'converged', 'unchanged', 'reasons', 'notTaken',
+    'schemaWritten', 'schemaFingerprintBefore', 'schemaFingerprintAfter', 'schemaTypesAdded', 'schemaTypesChanged',
+  ],
   // What a space import landed, in totals: records stored new, records replaced, records refused, records the restore left out because this
   // instance deleted them after the backup, and records that were already past their expiry when they landed (the next sweep takes them).
   // Beside them the schema versions it kept and skipped, and how many keys of the body it did not read: counts only, never a key's name.

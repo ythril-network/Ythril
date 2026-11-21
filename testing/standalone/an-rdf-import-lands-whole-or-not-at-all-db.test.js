@@ -190,10 +190,11 @@ describe('an RDF import lands whole or not at all (real routes, real MongoDB)', 
     assert.deepEqual(r.body?.graphsWithoutBase, ['http://graphs.example/a/']);
   });
 
-  it('the schema flag is refused as not available yet', async () => {
-    const r = await d.importRest(writer.key, BOUND, goodTurtle(BOUND), { params: { schema: 'generate' } });
+  it('a schema read from the data (from: data) is refused as not available yet (Q-755), naming it', async () => {
+    const r = await d.importRest(writer.key, BOUND, goodTurtle(BOUND), { params: { schema: 'generate', from: 'data' } });
     assert.equal(r.status, 400, r.text.slice(0, 300));
     assert.equal(r.body?.code, 'rdf_import_schema_not_available');
+    assert.match(r.body?.error ?? '', /from: data/);
     assert.deepEqual(d.actsOf(BOUND), []);
   });
 

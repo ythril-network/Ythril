@@ -13,7 +13,8 @@
  * writes and every own-definition edit), `setNetworkPrecedenceAct` (an operator's reorder, before it stores the order), and the meta update before it writes anything (the space PATCH and MCP `schema_update`, so a write
  * that also carries local settings changes none of them). A refusal is the space write gate's own error with the act's own code, so every
  * door answers it as it answers a record write the act refuses (`spaceActAnswer`: 409 `space_being_rdf_imported`, the sentence naming the RDF import). The import's own body
- * passes by its scope (`space-act-scope.ts`), for the schema step a later slice adds.
+ * passes by its scope (`space-act-scope.ts`): an import with `schema` set (Q-955) writes the schema it built from inside its act, once, after its
+ * dry plan judged the data by that schema and before its first record, while a caller's write during the act is still refused here.
  *
  * ## What it does not refuse: a schema the network decided (second review F3)
  *

@@ -46,6 +46,16 @@ describe('the guides say which schema writes an RDF import refuses', () => {
     assert.ok(!section.includes('no schema write a caller starts'), 'the section still says the space takes no schema write at all');
   });
 
+  it('the import section says an import with schema writes the schema it builds from inside its own act, and that from: data is refused (Q-955)', () => {
+    const section = importSection();
+    assert.ok(!section.includes('Not available here yet'), 'the section still says the schema option is not available');
+    assert.ok(
+      section.includes('The import writes the schema it built from inside its own act, once, after the data passed the dry plan by it and before the first record'),
+      'the section says where and when the import writes the schema it built',
+    );
+    assert.match(section, /`from: data`[^\n]*`rdf_import_schema_not_available`/, 'the section names from: data as refused, with its code');
+  });
+
   it('the MCP page and the data-management page do not say a bare "no schema write"', () => {
     for (const page of ['docs/integration-guide/16-mcp.md', 'docs/integration-guide/12a-data-management-api.md']) {
       const text = read(page);

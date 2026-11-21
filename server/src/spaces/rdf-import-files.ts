@@ -31,6 +31,7 @@ import type { ImportMode } from '../rdf/import-reasons.js';
 import type { RdfImportReport } from '../rdf/import-report.js';
 import { openImportFolder, readSpoolLines, removeImportFolder, writeWholeSpoolFile, type ImportFolder } from '../rdf/import-spool.js';
 import type { SpaceMeta } from '@ythril-network/schema';
+import type { TokenRights } from '../config/rights-shape.js';
 
 /** The folder under the data root that holds the files of standing RDF imports. */
 export const RDF_IMPORT_DIR = 'rdf-import';
@@ -38,6 +39,37 @@ export const RDF_IMPORT_DIR = 'rdf-import';
 export const RDF_IMPORT_REPORT_DIR = 'rdf-import-reports';
 /** How long an import's report is kept for the status doors. */
 export const RDF_IMPORT_REPORT_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The longest address a parameter of an RDF import door may carry (the tools' input schemas state the same bound). Here, in the leaf both import
+ * acts read, so the schema door and the data import (which calls the schema door's shared step) import no act of the other's.
+ */
+export const RDF_IMPORT_ADDRESS_MAX = 2048;
+
+/** The file name of an import's schema step in its folder (`SchemaStepFile`). */
+const SCHEMA_STEP_FILE = 'schema.spool';
+
+/**
+ * The schema an import with `schema` set builds (Q-955), kept in its own file beside the spool so the state stays small: the types the file
+ * changes (what the write sends), the type schemas the space would hold after it in their stored form (`$ref`s kept: what the dry plan judges by),
+ * and what the report names of it.
+ */
+export interface SchemaStepFile {
+  changed: Record<string, Record<string, unknown>>;
+  merged: SpaceMeta['typeSchemas'];
+  typesAdded: string[];
+  typesChanged: string[];
+  fingerprintBefore: string;
+}
+
+export async function writeSchemaStep(folder: ImportFolder, step: SchemaStepFile): Promise<void> {
+  await writeWholeSpoolFile(folder, SCHEMA_STEP_FILE, [JSON.stringify(step)]);
+}
+
+export async function readSchemaStep(folder: ImportFolder): Promise<SchemaStepFile> {
+  for await (const line of readSpoolLines(folder, SCHEMA_STEP_FILE)) return JSON.parse(line) as SchemaStepFile;
+  throw new Error('The import\'s schema step is empty.');
+}
 
 /** How an import reads its file: the space's mode, blank subjects, and the source bases (one for the file, one per graph). */
 export interface ImportOptions {
@@ -73,6 +105,18 @@ export interface ActState {
    * schema that arrives from a network meanwhile governs the writes after the import, never half of it.
    */
   planSchema?: SpaceMeta['typeSchemas'];
+  /**
+   * An import with `schema` set (Q-955): the version of the meta the door's proposal read (the act ends when it moved before the translation),
+   * the fingerprint the space's schema has once the proposal is written (a resume that finds it stored writes nothing again), and how many
+   * changes the proposal makes (none: nothing is written). The proposal itself is in its own file ({@link readSchemaStep}). Absent in a state
+   * written before the schema step existed, and in an import without `schema`: the act runs as it always did.
+   */
+  schemaStep?: { version: number; fingerprint: string; changes: number };
+  /**
+   * Who started an import with `schema` set: the act writes the schema as that caller, reads its token again by `id` before the write
+   * (`stored`: the id was a stored token's when the door read it), and the audit names it. Absent with `schemaStep`.
+   */
+  caller?: { id?: string; rights?: TokenRights | null; admin?: boolean; stored: boolean };
 }
 
 /** The folder of import `id`, or null when the id is not one the door mints (so it cannot leave the import root). */

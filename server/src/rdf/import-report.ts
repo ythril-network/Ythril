@@ -76,9 +76,28 @@ export interface RdfImportReport {
   /** Our sentence when the import failed for good (its folder was lost or cannot be read, or the space can no longer hold it). */
   error?: string;
   /** The status and code a door answers a failure for good by: the same on both doors, kept so the status door and a later reader see it. */
-  failure?: { status: number; code: string };
+  failure?: { status: number; code: string; detail?: Record<string, unknown> };
   /** When an owed act (one that failed and will be tried again) is retried: said by the status door, from the act. */
   retryAt?: string;
+  /** An import with `schema` set (Q-955): what its schema step built and wrote. Absent without `schema`. */
+  schema?: RdfImportSchemaReport;
+}
+
+/**
+ * The schema step of an import with `schema` set: whether it wrote the schema (a no-change file writes nothing), the types it added and changed
+ * (`kind:type`, named up to a bound, counted whole), the stored schema's fingerprint before the import and the one its records carry, who wrote it,
+ * and the notices a `PATCH` of the same change answers (`networkWriteNotice`, `convertNotice`).
+ */
+export interface RdfImportSchemaReport {
+  written: boolean;
+  typesAdded: string[];
+  typesChanged: string[];
+  typesAddedCount: number;
+  typesChangedCount: number;
+  fingerprintBefore: string;
+  fingerprintAfter: string;
+  caller?: string;
+  notice: Record<string, unknown>;
 }
 
 /** Every kind at zero. */
@@ -184,5 +203,11 @@ export function rdfImportAuditChanges(r: RdfImportReport): Array<{ field: string
     { field: 'converged', to: sum('converged') }, { field: 'unchanged', to: IMPORT_OP_ORDER.reduce((n, kind) => n + (r.unchanged?.[kind] ?? 0), 0) },
     { field: 'reasons', to: r.reasonCount },
     { field: 'notTaken', to: Object.values(r.notTaken).reduce((n, v) => n + v, 0) },
+    // The schema step's before and after (Q-955): fingerprints and counts, never a name the file chose; the row's token names the caller.
+    ...(r.schema ? [
+      { field: 'schemaWritten', to: r.schema.written }, { field: 'schemaFingerprintBefore', to: r.schema.fingerprintBefore },
+      { field: 'schemaFingerprintAfter', to: r.schema.fingerprintAfter }, { field: 'schemaTypesAdded', to: r.schema.typesAddedCount },
+      { field: 'schemaTypesChanged', to: r.schema.typesChangedCount },
+    ] : []),
   ];
 }

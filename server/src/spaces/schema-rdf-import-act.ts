@@ -52,7 +52,7 @@ import { planSpaceMetaUpdate, type MetaUpdatePlan, type WriteCaller } from './me
 import { writeSpaceMeta, fieldRefusalsOf, SPACE_META_WRITE_NETWORKED } from './space-meta-write-act.js';
 import { typesAddedPastCap } from './types-added-past-cap.js';
 import { unknownSpaceAnswer, lostSpaceAnswer } from './unknown-space.js';
-import { RDF_IMPORT_ADDRESS_MAX } from './rdf-import-act.js';
+import { RDF_IMPORT_ADDRESS_MAX } from './rdf-import-files.js';
 
 export { SCHEMA_RDF_MAX_QUADS };
 
@@ -307,12 +307,14 @@ function auditOf(body: SchemaRdfImportBody, plan: MetaUpdatePlan['audit'] | null
   return plan ? { before: { ...plan.before }, after: { ...plan.after, ...facts } } : { before: {}, after: facts };
 }
 
-/** The body of a proposal, its lists capped. */
-function bodyOf(spaceId: string, p: SchemaRdfImportParamsT, from: SchemaSource[], format: RdfFormat, proposal: SchemaProposal): SchemaRdfImportBody {
+/** The body of a proposal, its lists capped: what a door answers, and what a networked refusal carries as `proposed`. */
+export function proposedBodyOf(
+  spaceId: string, how: { mode: SchemaMode; dryRun: boolean }, from: SchemaSource[], format: RdfFormat, proposal: SchemaProposal,
+): SchemaRdfImportBody {
   const max = knobs.entriesNamedMax ?? SCHEMA_RDF_ENTRIES_NAMED_MAX;
   const a = proposal.answer;
   return {
-    space: spaceId, mode: p.mode, from, format, dryRun: p.dryRun === true, written: false, version: proposal.version,
+    space: spaceId, mode: how.mode, from, format, dryRun: how.dryRun, written: false, version: proposal.version,
     typeSchemas: proposal.changed, changes: a.changes.slice(0, max), taken: a.taken.slice(0, max), notTaken: a.notTaken.slice(0, max),
     counts: { ...a.counts, changes: a.changes.length, typesAdded: proposal.typesAdded, typesChanged: proposal.typesChanged },
   };
@@ -322,6 +324,63 @@ function bodyOf(spaceId: string, p: SchemaRdfImportParamsT, from: SchemaSource[]
 function writeCallerOf(caller: SchemaRdfImportInput['caller']): WriteCaller {
   if (!caller) return {};
   return { ...(caller.id ? { id: caller.id } : {}), ...(caller.rights ? { rights: caller.rights } : {}) };
+}
+
+/** A proposal the write would take: the type schemas the space holds after it (stored form, `$ref`s kept), and its whole merged meta. */
+export interface JudgedProposal {
+  kind: 'judged';
+  /** What the space's type schemas are after the write: the planner's merge, or the mapping's own on a space whose write would be a vote. */
+  merged: SpaceMeta['typeSchemas'];
+  /** The planner's merged meta, from which the stored schema's fingerprint after the write is read; `undefined` where the write would be a vote. */
+  mergedMeta: SpaceMeta | undefined;
+}
+
+/**
+ * Judge `proposal` as its write would, without writing: the field rungs first (a file whose shapes give a type rules needs `schema: admin`), asked
+ * by the write act's one function, then the planner's verdict. The step the schema door and the data import's schema option (Q-955) share, so a
+ * dry run of either is refused what its write is refused. `proposed` is the body a networked refusal carries.
+ */
+export function judgeSchemaProposal(
+  spaceId: string, proposal: SchemaProposal, caller: SchemaRdfImportInput['caller'], proposed: () => SchemaRdfImportBody,
+): JudgedProposal | SchemaRdfImportRefusal {
+  const instanceAdmin = !!caller && isInstanceAdmin(caller);
+  const fields = fieldRefusalsOf(spaceId, writeBodyOf(proposal), { rights: caller?.rights, instanceAdmin });
+  if (fields.length > 0) return rungRefusal(fields);
+  const space = getConfig().spaces.find(s => s.id === spaceId);
+  const verdict = planSpaceMetaUpdate({ spaceId, space, body: writeBodyOf(proposal), ifMatch: String(proposal.version), caller: writeCallerOf(caller) });
+  if (!verdict.ok) return chainRefusal(verdict.refusal.status, verdict.refusal.body as { error: string; code?: string }, proposed());
+  const mergedMeta = verdict.plan.mergedMeta as SpaceMeta | undefined;
+  const merged = (mergedMeta?.typeSchemas ?? proposal.answer.typeSchemas) as SpaceMeta['typeSchemas'];
+  return { kind: 'judged', merged: structuredClone(merged), mergedMeta };
+}
+
+/** A proposal written: the outcome's version, the audit pair the planner took, and the notices a PATCH of the same change answers. */
+export interface WrittenProposal { kind: 'written'; version: number; audit: MetaUpdatePlan['audit']; notice: Record<string, unknown> }
+
+/**
+ * Write `proposal` through the settings write act, with the version it read as `ifMatch` and a networked space refused rather than voted on.
+ * Every answer of the write other than an applied one is a refusal with the schema door's codes: the rungs (`schema_rdf_rung`), a lost space,
+ * a moved version (`schema_rdf_changed`), a networked space or an outcome that is not applied (`schema_rdf_networked`), the hold, the planner.
+ * A caller cannot leave an answer unmapped: there is no other way out of this function.
+ */
+export async function writeSchemaProposal(input: {
+  spaceId: string; proposal: SchemaProposal; caller: SchemaRdfImportInput['caller']; rateKey: string; proposed: () => SchemaRdfImportBody;
+}): Promise<WrittenProposal | SchemaRdfImportRefusal> {
+  const { spaceId, proposal, caller } = input;
+  const instanceAdmin = !!caller && isInstanceAdmin(caller);
+  const written = await writeSpaceMeta({
+    spaceId, body: writeBodyOf(proposal), ifMatch: String(proposal.version),
+    caller: { record: writeCallerOf(caller), rights: caller?.rights, instanceAdmin },
+    rateKey: input.rateKey, refuseIfNetworked: true,
+  });
+  if (written.kind === 'fields-refused') return rungRefusal(written.fields);
+  if (written.kind === 'lost') {
+    const lost = lostSpaceAnswer(null, spaceId);
+    return refusal(lost.status, lost.body.code ?? SPACE_NOT_FOUND, lost.body.error);
+  }
+  if (written.kind === 'refused') return chainRefusal(written.status, written.body, input.proposed());
+  if (written.outcome.outcome !== 'applied') return networkedRefusal(input.proposed());
+  return { kind: 'written', version: written.outcome.space.meta?.version ?? proposal.version, audit: written.audit, notice: written.notice };
 }
 
 /**
@@ -392,34 +451,19 @@ async function readAndBuild(input: SchemaRdfImportInput, p: SchemaRdfImportParam
   const source: SourceNames | undefined = p.sourceBase === undefined ? undefined : { base: p.sourceBase, ...(p.sourceVocab !== undefined ? { vocab: p.sourceVocab } : {}) };
   const proposal = proposeSchemaFromRdf(input.spaceId, quads, { from, mode: p.mode, ...(source ? { source } : {}) });
   if (proposal.kind === 'refused') return proposal;
-  const proposed = bodyOf(input.spaceId, p, from, format, proposal);
+  const proposed = proposedBodyOf(input.spaceId, { mode: p.mode, dryRun }, from, format, proposal);
 
-  // What the write would refuse, the dry run refuses: the field rungs first (a file whose shapes give a type rules needs `schema: admin`), asked
-  // by the write act's one function for the dry run as for the build, then the planner's verdict.
-  const instanceAdmin = !!input.caller && isInstanceAdmin(input.caller);
-  const fields = fieldRefusalsOf(input.spaceId, writeBodyOf(proposal), { rights: input.caller?.rights, instanceAdmin });
-  if (fields.length > 0) return rungRefusal(fields);
-  const space = getConfig().spaces.find(s => s.id === input.spaceId);
-  const verdict = planSpaceMetaUpdate({ spaceId: input.spaceId, space, body: writeBodyOf(proposal), ifMatch: String(proposal.version), caller: writeCallerOf(input.caller) });
-  if (!verdict.ok) return chainRefusal(verdict.refusal.status, verdict.refusal.body as { error: string; code?: string }, proposed);
+  // What the write would refuse, the dry run refuses (the shared judgement: the field rungs, then the planner's verdict).
+  const judged = judgeSchemaProposal(input.spaceId, proposal, input.caller, () => proposed);
+  if (judged.kind === 'refused') return judged;
   // A dry run writes nothing, and a build that changes nothing writes nothing either (R3): a write raises the version and pushes a history
   // snapshot, and a space in a network would be refused for a vote that has nothing to carry. Whether the space is in a network is asked once,
   // by the settings write below (`refuseIfNetworked`), whose refusal `chainRefusal` answers with the proposal.
   if (dryRun || proposal.answer.changes.length === 0) return { kind: 'done', status: HTTP.OK, body: proposed, audit: auditOf(proposed, null) };
 
   knobs.hooks?.beforeWrite?.();
-  const written = await writeSpaceMeta({
-    spaceId: input.spaceId, body: writeBodyOf(proposal), ifMatch: String(proposal.version),
-    caller: { record: writeCallerOf(input.caller), rights: input.caller?.rights, instanceAdmin },
-    rateKey: input.rateKey, refuseIfNetworked: true,
-  });
-  if (written.kind === 'fields-refused') return rungRefusal(written.fields);
-  if (written.kind === 'lost') {
-    const lost = lostSpaceAnswer(null, input.spaceId);
-    return refusal(lost.status, lost.body.code ?? SPACE_NOT_FOUND, lost.body.error);
-  }
-  if (written.kind === 'refused') return chainRefusal(written.status, written.body, proposed);
-  const version = written.outcome.outcome === 'applied' ? (written.outcome.space.meta?.version ?? proposal.version) : proposal.version;
-  const body: SchemaRdfImportBody = { ...proposed, written: true, version, ...written.notice };
+  const written = await writeSchemaProposal({ spaceId: input.spaceId, proposal, caller: input.caller, rateKey: input.rateKey, proposed: () => proposed });
+  if (written.kind === 'refused') return written;
+  const body: SchemaRdfImportBody = { ...proposed, written: true, version: written.version, ...written.notice };
   return { kind: 'done', status: HTTP.OK, body, audit: auditOf(body, written.audit) };
 }
