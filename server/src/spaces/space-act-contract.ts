@@ -141,6 +141,8 @@ export interface SpaceActBodyOutcome {
   /** This instance's own copy was removed (a deletion). */
   removedHere?: boolean;
   counts?: Record<string, number>;
+  /** What the completion row says beside the counts, where it is no number (a fingerprint, a flag): never a value of the data. */
+  auditFields?: Record<string, string | boolean>;
   renamed?: SpaceConfig;
   /** The act was refused before it changed anything; the entry is removed and nothing is retried. */
   refusal?: Error;
@@ -210,11 +212,14 @@ export function actEntryView(e: SpaceActEntry): ActEntryView {
 
 /**
  * The audit row of an act with no round that nobody is told of: the kind is in the path, so a restore's rows read apart from a wipe's.
- * The body's counts ride as changes (an import's totals), since this row is the only place a queued act's result is told.
+ * The body's counts ride as changes (an import's totals), since this row is the only place a queued act's result is told, and so do its audit fields
+ * (the facts that are no number, an import's schema fingerprints): both pass the operation's allowlist (`audit-changes.ts`), so a field it does not
+ * name is dropped.
  */
-export function spaceActCompletionRow(entry: SpaceActEntry, id: string, counts?: Record<string, number>) {
+export function spaceActCompletionRow(entry: SpaceActEntry, id: string, counts?: Record<string, number>, auditFields?: Record<string, string | boolean>) {
+  const changes = [...Object.entries(counts ?? {}), ...Object.entries(auditFields ?? {})].map(([field, to]) => ({ field, to }));
   return {
     method: 'DELETE', path: `internal:space-act:${entry.kind}:${entry.localId}:${id}`, operation: SPACE_ACT_COMPLETED_OPERATION, spaceId: entry.localId,
-    ...(counts ? { changes: Object.entries(counts).map(([field, to]) => ({ field, to })) } : {}),
+    ...(changes.length > 0 ? { changes } : {}),
   };
 }
