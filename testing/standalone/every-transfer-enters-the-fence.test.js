@@ -58,6 +58,9 @@ const REFUSAL_AHEAD_OF_ADMITTED_WRITES ='it asks the gate to refuse early, befor
  * its writes go through (`via`).
  */
 const EXEMPT_FUNCTIONS = new Map([
+  // The gate's own early answer for a door (bundle-270: the RDF import's door): it asks, answers the standing act's 409 or null, and writes nothing.
+  // The import's writes are admitted and counted later by the planners' commit, under the import's own act.
+  ['server/src/spaces/space-write-gate.ts:spaceWriteClosedNow', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/files/files.ts:ensureSpaceFilesDir', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/files/chunks.ts:(anonymous)', { why: ONLY_REMOVES_OR_REFUSES }],
   ['server/src/files/converters/pipeline.ts:removeSidecarRows', { why: ONLY_REMOVES_OR_REFUSES }],

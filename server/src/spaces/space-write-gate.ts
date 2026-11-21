@@ -148,7 +148,7 @@ export function spaceWriteClosedAnswer(err: unknown): { status: 409; body: { err
  * The same answer for a door that refuses EARLY, before it reads its input or registers work of its own: null when `spaceId` may take a write
  * now. A check that writes and counts nothing (see {@link assertSpaceTakesWrites}); a refusal with no act behind it is thrown on, as there.
  */
-export function spaceWriteClosedNow(spaceId: string): { status: 409; body: { error: string; code: SpaceWriteClosedCode } } | null {
+export function spaceWriteClosedNow(spaceId: string): ReturnType<typeof spaceWriteClosedAnswer> {
   try { assertSpaceTakesWrites(spaceId); return null; } catch (err) {
     const closed = spaceWriteClosedAnswer(err);
     if (!closed) throw err;
