@@ -17,6 +17,7 @@
 import { readStoredById } from '../db/read-by-id.js';
 import { notFlaggedIfFile } from '../files/live-file-row.js';
 import { REF_KINDS } from '../config/types-knowledge.js';
+import { isRefUse } from './batch-refs.js';
 import type { RefKind } from '../config/types-knowledge.js';
 import type { SpacePart } from '../db/space-collection.js';
 import { REF_NOUN, quotedRefs, missingReferencesText } from '../spaces/schema-violation-codes.js';
@@ -107,6 +108,13 @@ export function invalidRefsMessage(field: string, kind: RefKind, values: readonl
   if (kind === 'file') {
     return `\`${field}\` expects ${REF_NOUN[kind]}s (space-relative, forward slashes), got ${shown}. ` +
       `A file is referenced by its path inside the space, without a leading slash and without '..'.`;
+  }
+  // A `$ref:key` is not a name the caller got wrong: it is a correlation key that bulk resolves only at the two ends of a top-level
+  // edge. Saying "a name is not a reference" hid that (Q-952), and the remedy is another one.
+  if (bad.some(isRefUse)) {
+    return `\`${field}\` expects ${REF_NOUN[kind]}s (UUID v4), got ${shown}. ` +
+      `A \`$ref:\` key is resolved only at an edge's \`from\` or \`to\`, never in a link field: ` +
+      `save the ${kind} first and pass its id, or connect the records by an edge.`;
   }
   return `\`${field}\` expects ${REF_NOUN[kind]}s (UUID v4), got ${shown}. ` +
     `Look the record up by name first and pass its id — a name is not a reference.`;

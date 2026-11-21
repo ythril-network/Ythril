@@ -548,7 +548,7 @@ rules, including what a key means on a space that uses link records.
 
 **An item also carries its own `link*` fields and `edges`**, the same ones its single-record endpoint takes
 and through the same code. Those name records that already exist; a `$ref` in an item's `edges` is refused
-and points you at the top-level array, which runs late enough to resolve one. A connection that cannot be
+and points you at the top-level array, which runs late enough to resolve one. A `$ref:` key is resolved only at the two ends of a top-level edge: a `link*` field takes stored ids, and a `"$ref:n"` there is refused with a row that says so. A connection that cannot be
 honoured — a refused edge, or on a `strictLinkage` space a far end that does not exist — is refused before the
 record is written: it is reported against the item's index, the reason names the entry (`edges[1]`), and the record
 is not written. If the record was written and its edges then failed, the `errors` row carries `written`
