@@ -50,9 +50,10 @@ export class NotEmbeddedYetError extends NotFoundError {}
  */
 /**
  * The statuses a {@link ToolRefusal} carries. 406 and 503 joined with the RDF export (Q-750): a format the scope cannot take, and a page the store
- * did not answer, answered alike on both doors.
+ * did not answer, answered alike on both doors. 412 joined with the schema-from-RDF door (Q-754): a schema changed while its file was read,
+ * which REST answers with its code and the tool would otherwise have answered as a plain 400 with no structured body.
  */
-export const TOOL_REFUSAL_STATUSES = Object.freeze([400, 403, 404, 406, 409, 410, 413, 415, 422, 429, 503] as const);
+export const TOOL_REFUSAL_STATUSES = Object.freeze([400, 403, 404, 406, 409, 410, 412, 413, 415, 422, 429, 503] as const);
 export type ToolRefusalStatus = (typeof TOOL_REFUSAL_STATUSES)[number];
 
 export class ToolRefusal extends Error {
