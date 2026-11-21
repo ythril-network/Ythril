@@ -167,6 +167,28 @@ describe('a space in a closed network and a club: pending in one, applied in the
     assertLayers(r.body, mixed(), 'update_space');
   });
 
+  // The schema-from-RDF door (Q-754) is the one schema write that opens no round: on a networked space it refuses (409, no layers, nothing
+  // written). These spaces have RDF off, which the door answers first with its own 409; either way no round opens and no layer is answered.
+  const RDF_DOC = '<https://e.example/T> a <http://www.w3.org/2002/07/owl#Class> .\n';
+  const refusedWithoutLayers = (status, body, door) => {
+    assert.equal(status, 409, `${door}: ${JSON.stringify(body)}`);
+    assert.ok(['schema_rdf_networked', 'rdf_not_enabled'].includes(body.code), `${door}: ${JSON.stringify(body)}`);
+    assert.equal(body.layers, undefined, `${door}: a refusal answered layers`);
+  };
+
+  it('POST /api/spaces/:id/schema-rdf', async () => {
+    const r = await fetch(`${INSTANCES.a}/api/spaces/${BOTH}/schema-rdf?mode=expand&format=turtle`, {
+      method: 'POST', headers: { Authorization: `Bearer ${admin}`, 'Content-Type': 'text/turtle' }, body: RDF_DOC, signal: AbortSignal.timeout(30_000),
+    });
+    refusedWithoutLayers(r.status, await r.json(), 'POST /schema-rdf');
+  });
+
+  it('MCP import_schema_rdf', async () => {
+    const r = await tool('import_schema_rdf', { space: BOTH, document: RDF_DOC, format: 'turtle', mode: 'expand' });
+    assert.equal(r.isError, true, r.text);
+    refusedWithoutLayers(409, { code: r.body.code ?? r.text.match(/\(([a-z_]+)\)\s*$/)?.[1], layers: r.body.layers }, 'import_schema_rdf');
+  });
+
   it('the entries are the same on both doors for the same write', async () => {
     const rest = await patch(INSTANCES.a, admin, `/api/spaces/${BOTH}`, { meta: { usageNotes: `notes ${RUN} a` } });
     const viaMcp = await tool('schema_update', { space: BOTH, usageNotes: `notes ${RUN} b` });

@@ -218,6 +218,9 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/spaces/:id/schema-versions', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
   // Q-751: the schema as OWL and SHACL, read like its meta (a view has no schema of its own).
   { route: '/api/spaces/:id/schema-rdf', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
+  // Q-754: the schema built from an RDF file. `read` lets a dry run in; the act raises a build to `write` (and the settings write's field
+  // rungs a file with rules to `admin`), so the row is the floor every call needs, not the build's rung.
+  { route: '/api/spaces/:id/schema-rdf', method: 'POST', area: 'schema', needs: 'read', scope: 'path' },
   { route: '/api/spaces/:id/network-precedence', method: 'PUT', area: 'schema', needs: 'admin', scope: 'path' },
   // `PATCH /api/spaces/:id` and `DELETE /api/spaces/:id` used to sit here as `schema` rows. They are not
   // views of one area's data, so they moved to `NOT_AREA_SCOPED` below with their reasons.
@@ -403,6 +406,8 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'space_schema_layers', area: 'schema', needs: 'read' },
   { tool: 'space_schema_versions', area: 'schema', needs: 'read' },
   { tool: 'space_schema_rdf', area: 'schema', needs: 'read' },
+  // Q-754: its REST twin's row; the act raises a build to `write`.
+  { tool: 'import_schema_rdf', area: 'schema', needs: 'read' },
   // Q-750: its REST twin's row; file statements ask `files: read` per space inside the act.
   { tool: 'export_rdf', area: 'knowledge', needs: 'read' },
   // Q-753: their REST twins' rows.

@@ -54,6 +54,9 @@ const DIFFER_ON_PURPOSE = new Map([
     'the RDF document is the REST route\'s request BODY (a stream the act reads into its spool under its bounds, its media type in `Content-Type`), '
     + 'so no key names it; an MCP call has no stream, so the tool takes the same bytes inline as `document`. Every other parameter is one name '
     + 'on both doors, in the query on REST.'],
+  ['import_schema_rdf:document',
+    'the same shape as `import_rdf` (Q-754): the schema file is the REST route\'s request body, read under the door\'s bounds with its media type '
+    + 'in `Content-Type`; the tool takes the same bytes inline as `document`. Every other parameter is one name on both doors, in the query on REST.'],
 ]);
 
 /**

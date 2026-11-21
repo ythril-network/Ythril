@@ -108,6 +108,8 @@ export const CAPABILITIES = [
   // Q-742: one route with the tool's parameters - no `fp` the list, `fp` the version, `fp` and `against` the comparison.
   ['Spaces', 'space_schema_versions', 'GET /api/spaces/:id/schema-versions'],
   ['Spaces', 'space_schema_rdf', 'GET /api/spaces/:id/schema-rdf'],
+  // Q-754: the schema built from an RDF file, on the export's path.
+  ['Spaces', 'import_schema_rdf', 'POST /api/spaces/:id/schema-rdf'],
   ['Spaces', 'space_set_network_precedence', 'PUT /api/spaces/:id/network-precedence'],
   // The PER-TYPE write is NOT `schema_update` and mapping it here overstated the coverage.
   // `schema_update` replaces the whole map at `schema: admin`; this route edits ONE type at

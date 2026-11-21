@@ -165,6 +165,8 @@ export const ROUTE_RULES: RouteRule[] = [
   // Q-751: the schema as OWL and SHACL is a read of the schema, like the library's export of one (`schema_library.export`). Above the
   // `GET /api/spaces` prefix rule, which would take it as `space.list` (audit-route-coverage: no anchored rule is shadowed).
   { method: 'GET',    pattern: /^\/api\/spaces\/([^/]+)\/schema-rdf$/,                operation: 'schema.rdf.export', spaceGroup: 1, read: true },
+  // Q-754: a schema built from an RDF file, a build or a dry run; the planner's snapshot pair on a build, the counts alone on a dry run.
+  { method: 'POST',   pattern: /^\/api\/spaces\/([^/]+)\/schema-rdf$/,                operation: 'schema.rdf.import', spaceGroup: 1 },
   { method: 'POST',   pattern: /^\/api\/spaces\/([^/]+)\/schema-convert\/items\/dismiss$/, operation: 'unconverted.dismiss_shown', spaceGroup: 1 },
   { method: 'POST',   pattern: /^\/api\/spaces\/([^/]+)\/schema-convert\/items\/([^/]+)\/dismiss$/, operation: 'unconverted.dismiss', spaceGroup: 1, entryGroup: DISMISS_ITEM_GROUP },
   // An ACT and not a read (no `read: true`): the report contacts every peer holding the space with this instance's
