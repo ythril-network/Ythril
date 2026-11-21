@@ -24,24 +24,28 @@ import { satisfies } from '../auth/required-rung.js';
 import type { RdfCaller } from '../rdf/rdf-space-state.js';
 import { refusal, type RdfDocumentRefusal } from '../rdf/rdf-document.js';
 import { quadGroupKey, type ImportFolder, type QuadGroup } from '../rdf/import-spool.js';
-import { schemaGroupsOf, SCHEMA_RDF_MAX_QUADS, type SchemaMode, type SchemaSource } from '../rdf/schema-from-rdf.js';
+import { schemaGroupsOf, SCHEMA_RDF_MAX_QUADS, type SchemaChange, type SchemaMode, type SchemaSource } from '../rdf/schema-from-rdf.js';
+import {
+  gatherClasses, inferFromData, INFER_MIN_CONFIDENCE_DEFAULT, INFER_MIN_SUPPORT_DEFAULT, SCHEMA_INFER_MAX_PREDICATES, type DataSource, type InferredBlock,
+} from '../rdf/schema-from-data.js';
+import type { RdfImportSchemaReport } from '../rdf/import-report.js';
+import { addressNames } from '../rdf/term-reverse.js';
 import { isMissingPath } from '../util/path-present.js';
 import { schemaFingerprintOf } from './schema-stamp.js';
 import { inlineResolvableRefs } from './schema-validation.js';
 import {
-  RDF_IMPORT_ADDRESS_MAX, defineRdfImportSchemaStep, readSchemaStep, writeSchemaStep, type ActState, type DoorSchema, type ImportOptions, type SchemaAsked,
-  type SchemaStepDone, type SchemaStepEnd, type SchemaStepFile,
+  RDF_IMPORT_ADDRESS_MAX, defineRdfImportSchemaStep, readSchemaStep, writeSchemaStep, type ActState, type DoorDecided, type DoorSchema, type ImportOptions,
+  type ImportSchemaSource, type SchemaAsked, type SchemaStepDone, type SchemaStepEnd, type SchemaStepFile,
 } from './rdf-import-files.js';
 import {
   proposeSchemaFromRdf, judgeSchemaProposal, writeSchemaProposal, proposedBodyOf, SCHEMA_RDF_FROM_DEFAULT, SCHEMA_RDF_RUNG,
-  type SchemaProposal,
+  type InferStep, type SchemaProposal,
 } from './schema-rdf-import-act.js';
 
 /** The statuses this step answers with, each named. */
 const HTTP = { BAD_REQUEST: 400, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, TOO_LARGE: 413, UNPROCESSABLE: 422 } as const;
 /** The import's own codes this step answers (`RDF_IMPORT_*` in `rdf-import-act.ts`, which lists them). */
 const BAD_PARAM = 'rdf_import_bad_param';
-const SCHEMA_NOT_AVAILABLE = 'rdf_import_schema_not_available';
 const SPACE_CHANGED = 'rdf_import_space_changed';
 const STATE_UNREADABLE = 'rdf_import_state_unreadable';
 /** The import's code for graphs read under several source bases (its own, `RDF_IMPORT_SEVERAL_GRAPHS`). */
@@ -49,6 +53,8 @@ const SEVERAL_GRAPHS = 'rdf_import_several_graphs';
 const BOUND_EXCEEDED = 'rdf_bound_exceeded';
 /** The name of the bound a schema option's 413 names (the schema door's own). */
 const SCHEMA_QUAD_BOUND = 'schemaRdfMaxQuads';
+/** The name of the bound an inference's 413 names: the distinct predicates a file's records may use (Q-755). */
+const INFER_PREDICATE_BOUND = 'schemaInferMaxPredicates';
 /** The most graph addresses a refusal names (the import's `RDF_IMPORT_GRAPH_BASES_MAX`). */
 const GRAPHS_NAMED_MAX = 64;
 /** The most type names a report's schema step names of each list (all are counted). */
@@ -113,7 +119,7 @@ function typeNamesOf(proposal: SchemaProposal): { added: string[]; changed: stri
  */
 export async function schemaAtDoor(input: {
   spaceId: string; caller: RdfCaller | undefined; options: ImportOptions; groups: () => AsyncGenerator<QuadGroup, void, undefined>; schema: SchemaAsked;
-  dryRun: boolean; maxQuads: number | undefined;
+  dryRun: boolean; maxQuads: number | undefined; maxPredicates?: number | undefined;
 }): Promise<DoorSchema | RdfDocumentRefusal> {
   const { spaceId, options, schema } = input;
   const bases = new Set(Object.values(options.graphBases));
@@ -125,41 +131,80 @@ export async function schemaAtDoor(input: {
     });
   }
   const max = input.maxQuads ?? SCHEMA_RDF_MAX_QUADS;
-  const found = await schemaGroupsOf(input.groups, blankGroupKey, max, schema.from);
+  const declaring = declaringOf(schema.from);
+  const found = await schemaGroupsOf(input.groups, blankGroupKey, max, declaring);
   if (found.kind === 'over') {
     return refusal(HTTP.TOO_LARGE, BOUND_EXCEEDED, `The file holds more than ${max} schema statements, the most a schema holds; nothing was imported`, { bound: SCHEMA_QUAD_BOUND, limit: max });
   }
-  const proposal = proposeSchemaFromRdf(spaceId, found.quads, { from: schema.from, mode: schema.mode, ...(options.source ? { source: options.source } : {}) });
+  // With `data` (Q-755): the first pass over the records, bounded by the distinct predicates they use, before anything is proposed.
+  let infer: InferStep | undefined;
+  if (schema.from.includes('data')) {
+    const space = getConfig().spaces.find(s => s.id === spaceId);
+    const names = addressNames(inlineResolvableRefs((space?.meta ?? {}) as SpaceMeta), options.source);
+    const source: DataSource = { groups: input.groups, skip: found.keys, namesOf: () => names, blankNodes: options.blankNodes };
+    const width = input.maxPredicates ?? SCHEMA_INFER_MAX_PREDICATES;
+    const classes = await gatherClasses(source, width);
+    if (classes.kind === 'over') {
+      return refusal(HTTP.TOO_LARGE, BOUND_EXCEEDED, `The file's records use more than ${width} distinct predicates, the most a schema is inferred from; type it by hand (from: declared, shacl); nothing was imported`, { bound: INFER_PREDICATE_BOUND, limit: width });
+    }
+    const thresholds = schema.infer ?? { minSupport: INFER_MIN_SUPPORT_DEFAULT, minConfidence: INFER_MIN_CONFIDENCE_DEFAULT, functional: false };
+    infer = (first) => inferFromData(source, classes, first, { ...thresholds, maxPredicates: width });
+  }
+  const proposal = await proposeSchemaFromRdf(spaceId, found.quads, { from: declaring, mode: schema.mode, ...(options.source ? { source: options.source } : {}), ...(infer ? { infer } : {}) });
   if (proposal.kind === 'refused') return proposal;
   const proposed = (): ReturnType<typeof proposedBodyOf> => proposedBodyOf(spaceId, { mode: schema.mode, dryRun: input.dryRun }, schema.from, options.format, proposal);
   const judged = judgeSchemaProposal(spaceId, proposal, input.caller, proposed);
   if (judged.kind === 'refused') return judged;
   const names = typeNamesOf(proposal);
+  const changeList = proposal.answer.changes;
   return {
-    kind: 'built', changed: proposal.changed as DoorSchema['changed'], version: proposal.version, changes: proposal.answer.changes.length,
-    merged: judged.merged, keys: found.keys, asked: schema, counts: proposal.answer.counts, changeList: proposal.answer.changes,
+    kind: 'built', changed: proposal.changed as DoorSchema['changed'], version: proposal.version, changes: changeList.length,
+    merged: judged.merged, keys: new Set([...found.keys, ...(proposal.labelKeys ?? [])]), notAsked: found.notAsked, leaveOut: new Set(proposal.leaveOut ?? []),
+    ...(proposal.inferred ? { inferred: proposal.inferred } : {}),
+    asked: schema, counts: proposal.answer.counts, changeList,
     report: {
       typesAdded: names.added.slice(0, SCHEMA_TYPES_NAMED_MAX), typesChanged: names.changed.slice(0, SCHEMA_TYPES_NAMED_MAX),
       typesAddedCount: names.added.length, typesChangedCount: names.changed.length,
       fingerprintBefore: storedFingerprint(spaceId),
       fingerprintAfter: judged.mergedMeta ? schemaFingerprintOf({ meta: judged.mergedMeta }) : storedFingerprint(spaceId),
-      notice: {},
+      notice: {}, ...stepNamesOf(schema.from, changeList, proposal.inferred),
     },
   };
 }
 
+/** The declarations a schema is read from: the asked sources but the records (`data` is the inference's, never the mapping's). */
+const declaringOf = (from: readonly ImportSchemaSource[]): SchemaSource[] => from.filter((s): s is SchemaSource => s !== 'data');
+
+/** What a report and a step file name of the step: the sources asked, the changes with their source (capped, counted whole), the inference. */
+function stepNamesOf(from: readonly ImportSchemaSource[], changes: readonly SchemaChange[], inferred: InferredBlock | undefined): Pick<RdfImportSchemaReport, 'from' | 'changes' | 'changesCount' | 'inferred'> {
+  return { from: [...from], changes: changes.slice(0, SCHEMA_TYPES_NAMED_MAX), changesCount: changes.length, ...(inferred ? { inferred } : {}) };
+}
+
+/** The inference's thresholds as a door sends them (Q-755); each needs `data` in `from`. */
+export interface InferAsked { functional?: boolean | undefined; minSupport?: number | undefined; minConfidence?: number | undefined }
+
 /**
- * What a door's `schema` and `from` ask for, or the refusal of a pair the import does not take: `from` without `schema` (or with `none`), and
- * `from: data` (a schema inferred from the records, not available yet). `null`: an import of data alone, as it always was.
+ * What a door's `schema`, `from` and inference thresholds ask for, or the refusal of a combination the import does not take: `from` without
+ * `schema` (or with `none`), and a threshold without `data` in `from` (each tunes a schema inferred from the records). `null`: an import of
+ * data alone, as it always was.
  */
-export function schemaAskedOf(schema: string | undefined, from: readonly string[] | undefined): SchemaAsked | null | RdfDocumentRefusal {
+export function schemaAskedOf(schema: string | undefined, from: readonly string[] | undefined, infer: InferAsked = {}): SchemaAsked | null | RdfDocumentRefusal {
+  const tuned = infer.functional !== undefined || infer.minSupport !== undefined || infer.minConfidence !== undefined;
+  if (tuned && !from?.includes('data')) {
+    return refusal(HTTP.BAD_REQUEST, BAD_PARAM, 'inferFunctional, inferMinSupport and inferMinConfidence tune a schema inferred from the records, and are sent with schema and from: data');
+  }
   if (schema === undefined || schema === 'none') {
     return from === undefined ? null : refusal(HTTP.BAD_REQUEST, BAD_PARAM, 'from: names what a schema is read from, and is sent with schema (generate, expand or update); leave it out to import the data alone');
   }
-  if (from?.includes('data')) {
-    return refusal(HTTP.BAD_REQUEST, SCHEMA_NOT_AVAILABLE, 'from: data: a schema read from the records themselves is not available yet; read it from the file\'s classes and shapes (from: declared, shacl, the default)');
-  }
-  return { kind: 'asked', mode: schema as SchemaMode, from: [...(from ?? SCHEMA_RDF_FROM_DEFAULT)] as SchemaSource[] };
+  const sources = [...(from ?? SCHEMA_RDF_FROM_DEFAULT)] as ImportSchemaSource[];
+  return {
+    kind: 'asked', mode: schema as SchemaMode, from: sources,
+    ...(sources.includes('data') ? {
+      infer: {
+        minSupport: infer.minSupport ?? INFER_MIN_SUPPORT_DEFAULT, minConfidence: infer.minConfidence ?? INFER_MIN_CONFIDENCE_DEFAULT, functional: infer.functional === true,
+      },
+    } : {}),
+  };
 }
 
 /** What the door keeps of a built schema: its file beside the spool, and the state's fields (the version, the fingerprint after, the caller). */
@@ -168,6 +213,7 @@ export async function keepSchemaStep(folder: ImportFolder, built: DoorSchema, ca
   await writeSchemaStep(folder, {
     changed: built.changed, merged: built.merged, typesAdded: report.typesAdded, typesChanged: report.typesChanged, fingerprintBefore: report.fingerprintBefore,
     mode: built.asked.mode, from: built.asked.from, counts: built.counts, changes: built.changeList,
+    skip: [...built.keys], notAsked: [...built.notAsked], leaveOut: [...built.leaveOut], ...(built.inferred ? { inferred: built.inferred } : {}),
   });
   return {
     schemaStep: { version: built.version, fingerprint: report.fingerprintAfter, changes: built.changes },
@@ -208,10 +254,22 @@ export function schemaStepBlocks(state: ActState, spaceId: string, rdfCode: stri
  * (`keys`; read again from the sorted file when not given).
  */
 export async function translationBy(
-  merged: SpaceMeta['typeSchemas'], meta: SpaceMeta, groups: () => AsyncGenerator<QuadGroup, void, undefined>, from: readonly SchemaSource[], keys?: Set<string>,
-): Promise<{ planSchema: SpaceMeta['typeSchemas']; meta: SpaceMeta; skip: Set<string> }> {
-  const skip = keys ?? (await schemaGroupsOf(groups, blankGroupKey, null, from) as { keys: Set<string> }).keys;
-  return { planSchema: structuredClone(merged ?? {}), meta: inlineResolvableRefs({ ...meta, typeSchemas: merged } as SpaceMeta), skip };
+  merged: SpaceMeta['typeSchemas'], meta: SpaceMeta, groups: () => AsyncGenerator<QuadGroup, void, undefined>, from: readonly ImportSchemaSource[], decided?: DoorDecided,
+): Promise<{ planSchema: SpaceMeta['typeSchemas']; meta: SpaceMeta } & DoorDecided> {
+  // A step written before the door kept its decisions (Q-955) reads the groups again; one that kept them is never read again (Q-755), so a
+  // resumed act skips and leaves out exactly what the door decided and infers nothing anew.
+  let given = decided;
+  if (given === undefined) {
+    const found = await schemaGroupsOf(groups, blankGroupKey, null, declaringOf(from)) as { keys: Set<string>; notAsked: Set<string> };
+    given = { skip: found.keys, notAsked: found.notAsked, leaveOut: new Set() };
+  }
+  return { planSchema: structuredClone(merged ?? {}), meta: inlineResolvableRefs({ ...meta, typeSchemas: merged } as SpaceMeta), ...given };
+}
+
+/** The decisions a step file kept, or `undefined` for one written before they were kept. */
+export function decidedOfStep(step: SchemaStepFile): DoorDecided | undefined {
+  if (step.skip === undefined || step.notAsked === undefined || step.leaveOut === undefined) return undefined;
+  return { skip: new Set(step.skip), notAsked: new Set(step.notAsked), leaveOut: new Set(step.leaveOut) };
 }
 
 /**
@@ -222,6 +280,7 @@ function proposalOfStep(step: SchemaStepFile, version: number): SchemaProposal {
   return {
     kind: 'proposed', changed: step.changed, version, typesAdded: step.typesAdded.length, typesChanged: step.typesChanged.length,
     answer: { typeSchemas: (step.merged ?? {}) as SchemaProposal['answer']['typeSchemas'], taken: [], notTaken: [], changes: step.changes, refusals: [], counts: step.counts },
+    ...(step.inferred ? { inferred: step.inferred } : {}),
   };
 }
 
@@ -269,11 +328,12 @@ export async function writeSchemaOfAct(input: {
       typesAddedCount: step.typesAdded.length, typesChangedCount: step.typesChanged.length,
       fingerprintBefore: step.fingerprintBefore, fingerprintAfter: schemaFingerprintOf(space), notice,
       ...(state.caller?.id !== undefined ? { caller: state.caller.id } : {}),
+      ...stepNamesOf(step.from, step.changes, step.inferred),
     },
   };
 }
 
 // The import act asks for these through `rdfImportSchemaStep()` (see `RdfImportSchemaStep` for why it does not import them).
 defineRdfImportSchemaStep({
-  schemaAskedOf, schemaRungRefusal, schemaAtDoor, keepSchemaStep, schemaStepOfFolder, schemaStepBlocks, translationBy, writeSchemaOfAct, storedVersion,
+  schemaAskedOf, schemaRungRefusal, schemaAtDoor, keepSchemaStep, schemaStepOfFolder, schemaStepBlocks, translationBy, decidedOfStep, writeSchemaOfAct, storedVersion,
 });

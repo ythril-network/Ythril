@@ -324,48 +324,73 @@ export function isSchemaGroup(quads: readonly Quad[], from: readonly SchemaSourc
 /** A group of a sorted file as the selector reads it: its key, its graph, its subject and its quads. */
 export interface SchemaGroupInput { key: string; graph?: { value: string }; subject: { kind: string }; quads: Quad[] }
 
-/** The schema groups of a file: their keys and their quads, or `over` when their quads pass the bound. */
-export type SchemaGroups = { kind: 'groups'; keys: Set<string>; quads: Quad[] } | { kind: 'over'; limit: number };
+/**
+ * The schema groups of a file: the keys of every declaring group (never a record with `schema` set), those of a source `from` did not ask for
+ * (`notAsked`: skipped, never mapped), and the quads of the asked ones; or `over` when those quads pass the bound.
+ */
+export type SchemaGroups = { kind: 'groups'; keys: Set<string>; notAsked: Set<string>; quads: Quad[] } | { kind: 'over'; limit: number };
 
 /**
- * The groups of a data file the schema option builds from (Q-955), read in two passes over `groups` (a sorted file, read again for each pass):
- * every {@link isSchemaGroup}, and every blank node such a group reaches through its objects, followed through blank nodes to any depth (a
- * blank-node property shape, `sh:property [ ... ]`, its `sh:in` list, an OWL restriction). `keyOfBlank` gives a blank object's group key in its
- * graph (the spool's own key). Their quads are collected up to `max`; one more answers `over`, before anything maps them. `max` null: the keys
- * alone, in one pass (an act that skips the groups a door already bounded).
+ * The groups of a data file the schema option skips and builds from (Q-955; Q-755 design revision 3), read in two passes over `groups` (a
+ * sorted file, read again for each pass): every {@link isSchemaGroup} of either source, and every blank node such a group reaches through its
+ * objects, followed through blank nodes to any depth (a blank-node property shape, `sh:property [ ... ]`, its `sh:in` list, an OWL restriction).
+ * A declaring group is never a record, whichever source `from` asks for: the groups (and the blank nodes only they reach) of a source `from`
+ * does not ask for are `notAsked`, skipped and never mapped. `keyOfBlank` gives a blank object's group key in its graph (the spool's own key).
+ * The asked groups' quads are collected up to `max`; one more answers `over`, before anything maps them. `max` null: the keys alone, in one
+ * pass (an act that skips the groups a door already bounded).
  */
 export async function schemaGroupsOf(
   groups: () => AsyncIterable<SchemaGroupInput>, keyOfBlank: (id: string, graph: { value: string } | undefined) => string, max: number | null,
   from: readonly SchemaSource[] = SOURCES as readonly SchemaSource[],
 ): Promise<SchemaGroups> {
-  const declares = declaringTest(from);
-  const keys = new Set<string>();
-  const reached: string[] = [];
-  /** A blank subject's blank objects, by key: only these edges are kept, so a file of records holds nothing here. */
+  const asked = declaringTest(from);
+  const declares = declaringTest(SOURCES as readonly SchemaSource[]);
+  const askedRoots: string[] = [];
+  const otherRoots: string[] = [];
+  /** A declaring group's or a blank subject's blank objects, by key: only these edges are kept, so a file of records holds nothing here. */
   const blankEdges = new Map<string, string[]>();
   const blankObjectsOf = (g: SchemaGroupInput): string[] =>
     g.quads.filter(q => q.object.kind === 'blank').map(q => keyOfBlank((q.object as { id: string }).id, g.graph));
   for await (const g of groups()) {
-    if (declares(g.quads)) { keys.add(g.key); reached.push(...blankObjectsOf(g)); continue; }
-    if (g.subject.kind === 'blank') {
+    const declaring = declares(g.quads);
+    if (declaring) (asked(g.quads) ? askedRoots : otherRoots).push(g.key);
+    if (declaring || g.subject.kind === 'blank') {
       const objects = blankObjectsOf(g);
       if (objects.length > 0) blankEdges.set(g.key, objects);
     }
   }
-  while (reached.length > 0) {
-    const key = reached.pop()!;
-    if (keys.has(key)) continue;
-    keys.add(key);
-    reached.push(...(blankEdges.get(key) ?? []));
-  }
+  const reach = (roots: readonly string[], into: Set<string>, besides: ReadonlySet<string>): void => {
+    const todo = [...roots];
+    while (todo.length > 0) {
+      const key = todo.pop()!;
+      if (into.has(key) || besides.has(key)) continue;
+      into.add(key);
+      todo.push(...(blankEdges.get(key) ?? []));
+    }
+  };
+  const askedKeys = new Set<string>();
+  reach(askedRoots, askedKeys, new Set());
+  const notAsked = new Set<string>();
+  reach(otherRoots, notAsked, askedKeys);
+  const keys = new Set([...askedKeys, ...notAsked]);
   const quads: Quad[] = [];
-  if (keys.size === 0 || max === null) return { kind: 'groups', keys, quads };
+  if (askedKeys.size === 0 || max === null) return { kind: 'groups', keys, notAsked, quads };
   for await (const g of groups()) {
-    if (!keys.has(g.key)) continue;
+    if (!askedKeys.has(g.key)) continue;
     if (quads.length + g.quads.length > max) return { kind: 'over', limit: max };
     quads.push(...g.quads);
   }
-  return { kind: 'groups', keys, quads };
+  return { kind: 'groups', keys, notAsked, quads };
+}
+
+/**
+ * The refusal of `generate` into a space that already holds a type, or null: the one "space has types" question the mapping asks, and the
+ * inference asks it through here too when no declaration is read (Q-755), never a copy.
+ */
+export function generateRefusal(mode: SchemaMode, stored: StoredTypeSchemas | undefined): SchemaRefusal | null {
+  if (mode !== 'generate') return null;
+  const have = firstStoredType(normalizedStored(stored));
+  return have === undefined ? null : { code: 'schema-not-empty', message: `generate builds into a space with no type, and this one has ${have}: use expand or update`, statements: [] };
 }
 
 // -- the entry -------------------------------------------------------------------------------------------------------------------------------
@@ -412,10 +437,8 @@ export function schemaFromRdf(quads: Iterable<Quad>, options: SchemaFromRdfOptio
   ledger.sweep(ctx.owned, leftoverWhy);
 
   const stored = normalizedStored(options.stored);
-  if (options.mode === 'generate') {
-    const have = firstStoredType(stored);
-    if (have !== undefined) ctx.refusals.push({ code: 'schema-not-empty', message: `generate builds into a space with no type, and this one has ${have}: use expand or update`, statements: [] });
-  }
+  const notEmpty = generateRefusal(options.mode, options.stored);
+  if (notEmpty) ctx.refusals.push(notEmpty);
   let result: { typeSchemas: TypeSchemasByKind; changes: SchemaChange[] };
   if (ctx.refusals.length > 0) result = { typeSchemas: stored, changes: [] };
   else if (options.mode === 'generate') result = buildWhole(built);

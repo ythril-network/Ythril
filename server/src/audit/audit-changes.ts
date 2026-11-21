@@ -41,7 +41,11 @@ const IMPORT_TOTAL_LIST = ['inserted', 'updated', 'refused', 'deletedOnRestore',
 type UnlistedImportTotal = Exclude<keyof ImportTotals, (typeof IMPORT_TOTAL_LIST)[number]>;
 const IMPORT_TOTAL_FIELDS: [UnlistedImportTotal] extends [never] ? typeof IMPORT_TOTAL_LIST : { unlisted: UnlistedImportTotal } = IMPORT_TOTAL_LIST;
 /** The schema step's fields of an RDF import's audit rows (Q-955), the one list of the `rdf.import` row and of the completion row of an act nobody waits for. */
-const RDF_IMPORT_SCHEMA_FIELDS = ['schemaWritten', 'schemaFingerprintBefore', 'schemaFingerprintAfter', 'schemaTypesAdded', 'schemaTypesChanged'] as const;
+const RDF_IMPORT_SCHEMA_FIELDS = [
+  'schemaWritten', 'schemaFingerprintBefore', 'schemaFingerprintAfter', 'schemaTypesAdded', 'schemaTypesChanged',
+  // Q-755: the sources the schema was read from and how many terms the inference took (counts and source names, never a name of the file).
+  'schemaFrom', 'schemaInferred',
+] as const;
 
 /**
  * Fields each operation may record, by `operation` name from `audit/middleware.ts`.

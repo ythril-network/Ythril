@@ -31,6 +31,8 @@ export interface BuiltType { kind: KnowledgeType; name: string; def: Record<stri
 export interface SchemaChange {
   change: 'add-type' | 'add-property' | 'add-field' | 'change-field';
   kind: KnowledgeType; type: string; prop?: string; field?: string; from?: unknown; to?: unknown;
+  /** What the change was read from (Q-755): the OWL and RDFS declarations, the shapes, or the data (an inferred term). Set by the proposal. */
+  source?: 'declared' | 'shacl' | 'data';
 }
 
 type Path = [string] | [string, string];

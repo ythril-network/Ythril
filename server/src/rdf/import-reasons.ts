@@ -69,6 +69,7 @@ export const NOT_TAKEN = Object.freeze({
   derived: 'The statement is derived from a field the operation states (a time node, the event status, the kind of a time value).',
   file: 'Files are not imported: their bytes are not in RDF, and an edge or link to a file this space does not hold cannot land.',
   'export-description': 'The statement describes the export document, not a record.',
+  'not-inferred': 'The schema read from the data does not hold this predicate for the subject\'s type (too few subjects, several values on one, mixed objects, or a term the schema cannot take), so the statement is left out; the answer names why.',
 } as const);
 
 /** The code of a quad left out on purpose. */

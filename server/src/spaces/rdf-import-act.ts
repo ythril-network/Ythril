@@ -87,8 +87,8 @@ import { spaceWriteClosedNow } from './space-write-gate.js';
 export { RDF_IMPORT_REASONS_NAMED_MAX, rdfImportAuditChanges, type RdfImportReport } from '../rdf/import-report.js';
 export { RDF_IMPORT_DIR, RDF_IMPORT_REPORT_DIR, RDF_IMPORT_REPORT_KEEP_MS };
 import {
-  RdfImportBoundExceeded, openImportFolder, openOperationSpool, removeImportFolder, removeOperations, reopenSortedGroups, resortedSpool, sortedSpool,
-  type ImportFolder, type ImportSpoolBounds, type QuadGroup,
+  RDF_IMPORT_MAX_SUBJECTS, RdfImportBoundExceeded, openImportFolder, openOperationSpool, removeImportFolder, removeOperations, reopenSortedGroups, resortedSpool,
+  sortedSpool, type ImportFolder, type ImportSpoolBounds, type QuadGroup,
 } from '../rdf/import-spool.js';
 import { ImportIndex, type IndexedRecord } from '../rdf/import-index.js';
 import { TripletSets, assertRecordsWithinBound, type DigestSet } from '../rdf/import-count.js';
@@ -124,7 +124,6 @@ const OP_ORDER = IMPORT_OP_ORDER;
 
 export const RDF_IMPORT_REFUSED = 'rdf_import_refused';
 export const RDF_IMPORT_BAD_PARAM = 'rdf_import_bad_param';
-export const RDF_IMPORT_SCHEMA_NOT_AVAILABLE = 'rdf_import_schema_not_available';
 export const RDF_IMPORT_SEVERAL_GRAPHS = 'rdf_import_several_graphs';
 export const RDF_IMPORT_NOT_FOUND = 'rdf_import_not_found';
 export const RDF_IMPORT_BUSY = 'rdf_import_busy';
@@ -141,7 +140,7 @@ const NOTHING_IMPORTED = 'nothing was imported';
 
 /** Every code an import door or a status door answers: its own, the document reader's, the space state's, and the existence rule's. */
 export const RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
-  RDF_IMPORT_REFUSED, RDF_IMPORT_BAD_PARAM, RDF_IMPORT_SCHEMA_NOT_AVAILABLE, RDF_IMPORT_SEVERAL_GRAPHS, RDF_IMPORT_NOT_FOUND, RDF_IMPORT_BUSY, RDF_IMPORT_SPACE_CHANGED,
+  RDF_IMPORT_REFUSED, RDF_IMPORT_BAD_PARAM, RDF_IMPORT_SEVERAL_GRAPHS, RDF_IMPORT_NOT_FOUND, RDF_IMPORT_BUSY, RDF_IMPORT_SPACE_CHANGED,
   RDF_UNSUPPORTED_ENCODING, RDF_IMPORT_FILES_LOST, RDF_IMPORT_STATE_UNREADABLE, RDF_IMPORT_STORAGE_EXCEEDED, RDF_IMPORT_SHUTTING_DOWN, RDF_UPLOAD_STALLED,
   'rdf_malformed', 'rdf_relative_iri', 'rdf_remote_context', 'rdf_jsonld_not_streamable', 'rdf_bound_exceeded', 'rdf_gzip_invalid',
   'rdf_unsupported_format', 'rdf_unsupported', 'rdf_source_failed',
@@ -149,10 +148,14 @@ export const RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   // With `schema` set (Q-955): the schema door's own codes, answered by the shared step for the same causes.
   'schema_rdf_bad_param', 'schema_rdf_rung', 'schema_rdf_networked', 'schema_rdf_not_empty', 'schema_rdf_changed', 'schema_rdf_refused',
 ]);
-/** What an import with `schema` reads the schema from; `data` (a schema inferred from the records) is refused until it exists. */
+/** What an import with `schema` reads the schema from: the file's OWL and RDFS declarations, its shapes, and its records (`data`, Q-755). */
 const IMPORT_SCHEMA_SOURCES = ['declared', 'shacl', 'data'] as const;
 /** The not-taken reason of a schema construct's statements, which an import with `schema` builds the schema from and does not import as records. */
 export const RDF_IMPORT_SCHEMA_NOT_TAKEN = 'schema';
+/** The not-taken reason of a declaring group of a source `from` did not ask for: never a record, never built (Q-755, design revision 3). */
+export const RDF_IMPORT_SCHEMA_NOT_ASKED = 'schema-not-asked';
+/** The largest support threshold a caller may ask: the most subjects an import holds (`RDF_IMPORT_MAX_SUBJECTS`). */
+export const RDF_IMPORT_INFER_SUPPORT_MAX = RDF_IMPORT_MAX_SUBJECTS;
 
 // ── Parameters ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -173,16 +176,31 @@ export const RdfImportParams = z.object({
   graphBase: z.array(GRAPH_BASE).max(RDF_IMPORT_GRAPH_BASES_MAX).optional(),
   schema: z.enum(['none', 'generate', 'expand', 'update']).optional(),
   from: z.array(z.enum(IMPORT_SCHEMA_SOURCES)).min(1).max(IMPORT_SCHEMA_SOURCES.length).optional(),
+  // With `data` in `from` (Q-755): the inference's thresholds, as shape-extraction tools take them, and whether an edge label no subject states
+  // twice is one-only. Each without `data` is refused by the schema step's one judgement.
+  inferFunctional: z.boolean().optional(),
+  inferMinSupport: z.number().int().min(1).max(RDF_IMPORT_INFER_SUPPORT_MAX).optional(),
+  inferMinConfidence: z.number().min(0).max(1).optional(),
 });
+
+/** The door's decisions a translation run takes, when a schema step made them: the groups to skip, those not asked for, the pairs to leave out. */
+const decidedOf = (by: object): Pick<TranslateRun, 'skip' | 'notAsked' | 'leaveOut'> =>
+  ('skip' in by && 'notAsked' in by && 'leaveOut' in by
+    ? { skip: by.skip as ReadonlySet<string>, notAsked: by.notAsked as ReadonlySet<string>, leaveOut: by.leaveOut as ReadonlySet<string> }
+    : {});
 
 /** The status doors' parameter. */
 export const RdfImportStatusParams = z.object({ importId: z.string().uuid() });
 
-/** A REST query or a tool's arguments as the parameters take them: booleans from their strings, one graph base or several. */
+/** A REST query's number as the parameters take it: a decimal text read as a number, anything else passed on for the schema to judge. */
+const paramNumber = (v: unknown): unknown => (typeof v === 'string' && /^\s*[+-]?(\d+(\.\d*)?|\.\d+)\s*$/.test(v) ? Number(v) : v);
+
+/** A REST query or a tool's arguments as the parameters take them: booleans and numbers from their strings, one graph base or several. */
 function paramsOf(raw: Record<string, unknown>): Record<string, unknown> {
   return {
     format: raw['format'], dryRun: rdfParamBool(raw['dryRun']), blankNodes: raw['blankNodes'], sourceBase: raw['sourceBase'],
     sourceVocab: raw['sourceVocab'], graphBase: rdfParamList(raw['graphBase']), schema: raw['schema'], from: rdfParamList(raw['from']),
+    inferFunctional: rdfParamBool(raw['inferFunctional']), inferMinSupport: paramNumber(raw['inferMinSupport']), inferMinConfidence: paramNumber(raw['inferMinConfidence']),
   };
 }
 
@@ -193,6 +211,8 @@ interface RdfImportKnobs {
   maxRecords?: number;
   /** Replaces `SCHEMA_RDF_MAX_QUADS` as the bound of the schema groups an import with `schema` collects. */
   schemaMaxQuads?: number;
+  /** Replaces `SCHEMA_INFER_MAX_PREDICATES` as the most distinct predicates a file's records may use for a schema to be inferred (Q-755). */
+  schemaInferMaxPredicates?: number;
   /** Replaces `RDF_IMPORT_UPLOAD_IDLE_MS` (`rdf/import-upload.ts`; a test that waits for the idle bound). */
   uploadIdleMs?: number;
   bounds?: Partial<ImportSpoolBounds>;
@@ -275,6 +295,10 @@ interface TranslateRun {
   builder: ReportBuilder;
   /** The groups an import with `schema` builds the schema from (by key): not records, each statement counted as not taken. */
   skip?: ReadonlySet<string>;
+  /** Of `skip`, the declaring groups of a source `from` did not ask for: counted apart (`schema-not-asked`), Q-755. */
+  notAsked?: ReadonlySet<string>;
+  /** The (kind, type, predicate) pairs a schema inferred from the data left out (`leaveOutKey`): their statements are `not-inferred`. */
+  leaveOut?: ReadonlySet<string>;
 }
 
 /** What the act's passes work with: the operations the translation left in the folder, and where the act stands (`null`: a dry run). */
@@ -353,7 +377,9 @@ async function translatePass(run: TranslateRun, index: ImportIndex, asserted: Di
   try {
     for await (const all of windowsOf(run.groups(), windowSize())) {
       const window = run.skip ? all.filter(g => !run.skip!.has(g.key)) : all;
-      for (const g of all) if (run.skip?.has(g.key)) run.builder.notTaken(RDF_IMPORT_SCHEMA_NOT_TAKEN, g.quads.length);
+      for (const g of all) {
+        if (run.skip?.has(g.key)) run.builder.notTaken(run.notAsked?.has(g.key) ? RDF_IMPORT_SCHEMA_NOT_ASKED : RDF_IMPORT_SCHEMA_NOT_TAKEN, g.quads.length);
+      }
       const wants: Array<{ kind: RecordKind; id: string }> = [];
       for (const group of window) {
         const n = names(group.graph?.value);
@@ -369,7 +395,7 @@ async function translatePass(run: TranslateRun, index: ImportIndex, asserted: Di
       for (const group of window) {
         const ctx: QuadsToOpsContext = {
           names: names(group.graph?.value), meta: run.meta, mode: run.options.mode, blankNodes: run.options.blankNodes,
-          stored, minted, asserted, reified,
+          stored, minted, asserted, reified, ...(run.leaveOut ? { leaveOut: run.leaveOut } : {}),
         };
         const out = quadsToOps(group.quads, ctx);
         for (const op of out.ops) await ops.append(op.kind, op);
@@ -604,11 +630,12 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
       // window judge by this one read. With a schema step they are the proposal's (stored form for the planners; resolved for the translation's names).
       state.options = { ...state.options, mode: space.meta.validationMode ?? 'off' };
       const groups = reopenSortedGroups(folder, state.sortedFile);
-      const by = step ? await wired!.translationBy(step.merged, space.meta, groups, step.from) : { planSchema: structuredClone(space.meta.typeSchemas ?? {}), meta: space.meta };
+      // The door's decisions are read from the step file (Q-755): the groups it skipped and the pairs it left out, never inferred again.
+      const by = step ? await wired!.translationBy(step.merged, space.meta, groups, step.from, wired!.decidedOfStep(step)) : { planSchema: structuredClone(space.meta.typeSchemas ?? {}), meta: space.meta };
       state.planSchema = by.planSchema;
       run.planSchema = state.planSchema;
       try {
-        await translateStage({ spaceId: entry.localId, folder, meta: by.meta, options: state.options, groups, builder: run.builder, ...('skip' in by ? { skip: by.skip } : {}) });
+        await translateStage({ spaceId: entry.localId, folder, meta: by.meta, options: state.options, groups, builder: run.builder, ...decidedOf(by) });
       } catch (err) {
         if (err instanceof RdfImportBoundExceeded) return gone(HTTP.TOO_LARGE, err.code, `the file is over the import's bound ${err.bound} (${err.limit}).`);
         throw err;
@@ -718,8 +745,11 @@ export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnsw
   const parsed = RdfImportParams.safeParse(paramsOf(input.params));
   if (!parsed.success) return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_BAD_PARAM, refusalOfParse(parsed.error).error);
   const p = parsed.data;
-  // `schema` and `from` (Q-955): `from` without `schema`, and `from: data`, are refused by the step's one judgement.
-  const schema = (p.schema ?? 'none') === 'none' && p.from === undefined ? null : rdfImportSchemaStep().schemaAskedOf(p.schema, p.from);
+  // `schema`, `from` and the inference's thresholds (Q-955, Q-755): `from` without `schema`, and a threshold without `data` in `from`, are
+  // refused by the step's one judgement. An import that names none of them is an import of data alone, as it always was.
+  const infer = { functional: p.inferFunctional, minSupport: p.inferMinSupport, minConfidence: p.inferMinConfidence };
+  const asksSchema = (p.schema ?? 'none') !== 'none' || p.from !== undefined || Object.values(infer).some(v => v !== undefined);
+  const schema = asksSchema ? rdfImportSchemaStep().schemaAskedOf(p.schema, p.from, infer) : null;
   if (schema?.kind === 'refused') return schema;
   const cfg = getConfig();
   // The one existence rule: an id that is not a configured space (a view included: an import writes into a space) is answered as missing.
@@ -805,11 +835,18 @@ async function readAndRun(
     // The schema the file builds (Q-955), proposed now that the source base is settled, and judged as its write would be: a refusal here writes
     // nothing and registers nothing.
     const built = schema
-      ? await rdfImportSchemaStep().schemaAtDoor({ spaceId: input.spaceId, caller: input.caller, options, groups: sorted.groups, schema, dryRun, maxQuads: knobs.schemaMaxQuads })
+      ? await rdfImportSchemaStep().schemaAtDoor({
+        spaceId: input.spaceId, caller: input.caller, options, groups: sorted.groups, schema, dryRun, maxQuads: knobs.schemaMaxQuads, maxPredicates: knobs.schemaInferMaxPredicates,
+      })
       : null;
     if (built?.kind === 'refused') return built;
-    // The records the file will make, subjects and bare edges, counted from the spool alone: a file that cannot fit is answered 413 here.
-    await assertRecordsWithinBound(sorted.groups(), namesByGraph(meta, options), sorted.subjects, knobs.maxRecords);
+    // What the translation reads by: with a schema, the proposal's names and the door's decisions (the groups skipped, the pairs left out).
+    const by = built
+      ? await rdfImportSchemaStep().translationBy(built.merged, meta, sorted.groups, built.asked.from, { skip: built.keys, notAsked: built.notAsked, leaveOut: built.leaveOut })
+      : { planSchema: meta.typeSchemas ?? {}, meta };
+    // The records the file will make, subjects and bare edges, counted from the spool alone: a file that cannot fit is answered 413 here. With a
+    // schema the edges are counted under the names the proposal gives (Q-755 F8): a label the file declares or infers is a label here too.
+    await assertRecordsWithinBound(sorted.groups(), namesByGraph(by.meta, options), sorted.subjects, knobs.maxRecords);
     const report: RdfImportReport = {
       importId, space: input.spaceId, status: dryRun ? 'dry-run' : 'running', dryRun, format: options.format, mode: options.mode,
       quads: sorted.quads, subjects: sorted.subjects, kinds: emptyKinds(), unchanged: emptyUnchanged(), reasons: [], reasonCount: 0, reasonsByCode: {}, notTaken: {},
@@ -818,9 +855,8 @@ async function readAndRun(
     if (dryRun) {
       // Inline: a dry run registers no act and holds nothing, so its translation reads the store as it is when it reads it.
       if (built) report.schema = { ...built.report, written: false };
-      const by = built ? await rdfImportSchemaStep().translationBy(built.merged, meta, sorted.groups, built.asked.from, built.keys) : { planSchema: meta.typeSchemas ?? {}, meta };
       const run: Run = { spaceId: input.spaceId, folder, builder: new ReportBuilder(report), state: null, commit: false, planSchema: by.planSchema, planMeta: null };
-      await translateStage({ spaceId: input.spaceId, folder, meta: by.meta, options, groups: sorted.groups, builder: run.builder, ...('skip' in by ? { skip: by.skip } : {}) });
+      await translateStage({ spaceId: input.spaceId, folder, meta: by.meta, options, groups: sorted.groups, builder: run.builder, ...decidedOf(by) });
       const outcome = run.builder.refused ? 'refused' : await planAndCommit(run);
       const done = { ...run.builder.report, endedAt: new Date().toISOString() };
       return outcome === 'refused' ? refusedAnswer({ ...done, status: 'refused' }) : { kind: 'report', status: HTTP.OK, report: done };

@@ -92,6 +92,16 @@ export interface QuadsToOpsContext {
   /** {@link tripletKey}s the file asserts, and those a reifier in it names: from {@link tripletsOfGroup} over every group. */
   asserted: ReadonlySet<string>;
   reified: ReadonlySet<string>;
+  /**
+   * The (kind, type, predicate) pairs an import that infers its schema from its data names and does not infer ({@link leaveOutKey}, Q-755):
+   * their statements are left out (`not-inferred`), never refused as a predicate of no term. Absent: nothing is left out.
+   */
+  leaveOut?: ReadonlySet<string>;
+}
+
+/** The key of a (kind, type, predicate) pair in {@link QuadsToOpsContext.leaveOut}. */
+export function leaveOutKey(kind: string, type: string, predicate: string): string {
+  return JSON.stringify([kind, type, predicate]);
 }
 
 /** A reason a quad could not be taken. `kept`: recorded, and the value went into the operation in its plain form. */
@@ -201,6 +211,21 @@ const FIELDS: Readonly<Record<OpKind, Readonly<Record<string, FieldSpec>>>> = Ob
   },
   edge: { ...COMMON_FIELDS, [ythrilIri('weight')]: { field: 'weight', target: 'number' }, [ythrilIri('edgeType')]: { field: 'type', target: 'string' } },
 });
+/**
+ * What a predicate is on a record of `kind` before any term of a schema is asked: the server's own statement, one derived from a field, a
+ * writable field of the record form, a part of an edge's statement, its type, a link, or none of these (a term of a schema, or of none). The one
+ * reader the translation's field reader and the schema inference (`schema-from-data.ts`) share, so the inference never infers a property the
+ * translation would read as a field or leave out.
+ */
+export function predicateRole(predicate: string, kind: OpKind): 'server-owned' | 'derived' | 'field' | 'statement' | 'type' | 'link' | 'other' {
+  if (SERVER_OWNED.has(predicate)) return 'server-owned';
+  if (DERIVED.has(predicate)) return 'derived';
+  if (Object.hasOwn(FIELDS[kind], predicate)) return 'field';
+  if (predicate === RDF_TYPE) return 'type';
+  if (STATEMENT_PARTS.has(predicate)) return 'statement';
+  return predicate === REFERENCES ? 'link' : 'other';
+}
+
 /** The writable fields of each kind, which a converge fills from the stored record when the file does not state them. */
 const WRITABLE: Readonly<Record<OpKind, readonly string[]>> = Object.freeze({
   entity: ['name', 'type', 'description'],
@@ -247,6 +272,27 @@ function numberOf(l: LiteralTerm, integer: boolean): number | null {
   return Number.isFinite(n) && (!isInteger || Number.isSafeInteger(n)) ? n : null;
 }
 
+/** What a statement's object is to a property of no declared type: the plain value it reads to, a node, or `other` (a value none holds). */
+export type LiteralCategory = 'string' | 'number' | 'boolean' | 'date' | 'other' | 'node';
+
+/**
+ * The category of an object as {@link readLiteral} reads it for a property of no declared type: a plain or language-tagged text is a `string`
+ * (the tag is the translation's own refusal), a well-formed date a `date`, a well-formed boolean a `boolean`, a number of a numeric datatype a
+ * `number`, any other literal `other`, and an address or blank node a `node`. The one reader both the translation and the schema inference
+ * (`schema-from-data.ts`) ask, so an inferred datatype is the one the translation then reads by.
+ */
+export function literalCategory(object: Term): LiteralCategory {
+  if (object.kind !== 'literal') return 'node';
+  if (object.language !== undefined) return 'string';
+  if (temporalOf(object)) return 'date';
+  if (isPlain(object)) return 'string';
+  if (object.datatype === BOOLEAN_TYPE) {
+    const v = object.value.trim();
+    return v === 'true' || v === '1' || v === 'false' || v === '0' ? 'boolean' : 'other';
+  }
+  return numberOf(object, false) === null ? 'other' : 'number';
+}
+
 /** One literal as the value of a field or property of `target`. A refusal carries the lexical form a looser mode may keep, where one fits. */
 function readLiteral(object: Term, target: Target): Read {
   if (object.kind !== 'literal') return { ok: false, code: 'object-not-a-plain-value' };
@@ -267,10 +313,10 @@ function readLiteral(object: Term, target: Target): Read {
       return v === 'true' || v === '1' ? { ok: true, value: true } : v === 'false' || v === '0' ? { ok: true, value: false } : refused;
     }
     case 'any': {
-      if (isPlain(object) || temporalOf(object)) return { ok: true, value: object.value };
-      if (object.datatype === BOOLEAN_TYPE) return readLiteral(object, 'boolean');
-      const n = numberOf(object, false);
-      return n === null ? refused : { ok: true, value: n };
+      const category = literalCategory(object);
+      if (category === 'string' || category === 'date') return { ok: true, value: object.value };
+      if (category === 'boolean') return readLiteral(object, 'boolean');
+      return category === 'number' ? { ok: true, value: numberOf(object, false)! } : refused;
     }
   }
 }
@@ -353,10 +399,32 @@ export function edgeLabelOf(predicate: string, names: AddressNames): string | 's
 // ---------------------------------------------------------------------------------------------------------------------------------------
 // The translation of one group
 
-interface Subject { term: IriTerm | BlankTerm; key: string; address: { of: 'space' | 'source'; kind: RecordKind; id: string } | null }
+export interface Subject { term: IriTerm | BlankTerm; key: string; address: { of: 'space' | 'source'; kind: RecordKind; id: string } | null }
 interface TypeCandidate { quad: Quad; owners: TermOwner[]; how: 'schema' | 'vocabulary' }
 /** The kind and type a subject's types settle, and the type quads that settle them: taken by the caller only once the record is read. */
 interface Decided { kind: RecordKind | null; type: string | null | undefined; settling: Quad[] }
+
+/**
+ * What one `rdf:type` object says of its subject: no address (a blank class or a literal), a kind marker of the record form, the untyped
+ * entity's class, a class derived from a field (a time node, an event) or the server's own (an agent), or a class address of the file.
+ */
+export type ClassReading =
+  | { as: 'not-an-address' } | { as: 'marker'; kind: RecordKind } | { as: 'untyped' } | { as: 'derived' } | { as: 'server-owned' } | { as: 'class'; iri: string };
+
+/**
+ * The one reader of a subject's `rdf:type` objects: the translation decides a subject's kind and type by it ({@link decideKind}), and the
+ * schema inference (`schema-from-data.ts`) reads which classes a subject is typed with by it, so the two never disagree about which classes
+ * are a file's own and which the record form or the server owns.
+ */
+export function classOfType(object: Term): ClassReading {
+  if (object.kind !== 'iri') return { as: 'not-an-address' };
+  const kind = Object.hasOwn(KIND_CLASSES, object.value) ? KIND_CLASSES[object.value] : undefined;
+  if (kind !== undefined) return { as: 'marker', kind };
+  if (object.value === UNTYPED) return { as: 'untyped' };
+  if (DERIVED_CLASSES.has(object.value)) return { as: 'derived' };
+  if (object.value === AGENT_CLASS) return { as: 'server-owned' };
+  return { as: 'class', iri: object.value };
+}
 
 /** Reads the subject's types: its kind and type, or answers the group (two kinds, a contradiction) and says so with `null`. */
 function decideKind(L: Ledger, subject: Subject, types: readonly Quad[], statesStatement: boolean, ctx: QuadsToOpsContext): Decided | null {
@@ -364,14 +432,13 @@ function decideKind(L: Ledger, subject: Subject, types: readonly Quad[], statesS
   const markerQuads: Quad[] = [];
   const candidates: TypeCandidate[] = [];
   for (const q of types) {
-    const o = q.object;
-    if (o.kind !== 'iri') { L.reason('class-without-term', [q]); continue; }
-    const kind = Object.hasOwn(KIND_CLASSES, o.value) ? KIND_CLASSES[o.value] : undefined;
-    if (kind !== undefined) { markers.add(kind); markerQuads.push(q); continue; }
-    if (o.value === UNTYPED) { candidates.push({ quad: q, owners: [{ kind: 'entity', type: null }], how: 'schema' }); continue; }
-    if (DERIVED_CLASSES.has(o.value)) { L.skip(q, 'derived'); continue; }
-    if (o.value === AGENT_CLASS) { L.skip(q, 'server-owned'); continue; }
-    const t = termOfIri(o.value, ctx.names);
+    const read = classOfType(q.object);
+    if (read.as === 'not-an-address') { L.reason('class-without-term', [q]); continue; }
+    if (read.as === 'marker') { markers.add(read.kind); markerQuads.push(q); continue; }
+    if (read.as === 'untyped') { candidates.push({ quad: q, owners: [{ kind: 'entity', type: null }], how: 'schema' }); continue; }
+    if (read.as === 'derived') { L.skip(q, 'derived'); continue; }
+    if (read.as === 'server-owned') { L.skip(q, 'server-owned'); continue; }
+    const t = termOfIri(read.iri, ctx.names);
     if (t.answer === 'term' && t.owners.every(w => w.prop === undefined)) candidates.push({ quad: q, owners: t.owners, how: t.how });
     else L.reason('class-without-term', [q]);
   }
@@ -436,9 +503,9 @@ function readFields(L: Ledger, kind: OpKind, type: string | null | undefined, qu
   const tags: string[] = [];
   const recurrence: Recurrence = {};
   for (const [p, qs] of byPredicate) {
-    if (SERVER_OWNED.has(p)) { qs.forEach(q => L.skip(q, 'server-owned')); continue; }
-    if (DERIVED.has(p)) { qs.forEach(q => L.skip(q, 'derived')); continue; }
-    const spec = Object.hasOwn(FIELDS[kind], p) ? FIELDS[kind][p] : undefined;
+    const role = predicateRole(p, kind);
+    if (role === 'server-owned' || role === 'derived') { qs.forEach(q => L.skip(q, role)); continue; }
+    const spec = role === 'field' ? FIELDS[kind][p] : undefined;
     if (spec !== undefined) {
       const values = readValues(L, qs, spec.target, spec.multi === true, spec.target === 'string');
       if (spec.field === 'tags') tags.push(...values.filter((v): v is string => typeof v === 'string'));
@@ -446,6 +513,7 @@ function readFields(L: Ledger, kind: OpKind, type: string | null | undefined, qu
       else if (values[0] !== undefined) fields[spec.field] = values[0];
       continue;
     }
+    if (typeof type === 'string' && ctx.leaveOut?.has(leaveOutKey(kind, type, p))) { qs.forEach(q => L.skip(q, 'not-inferred')); continue; }
     const t = termOfIri(p, ctx.names);
     if (t.answer === 'term' && t.owners.some(w => w.prop !== undefined)) {
       const mine = t.owners.filter(w => w.prop !== undefined && w.kind === kind && type !== undefined && w.type === type);
@@ -581,32 +649,53 @@ function relations(L: Ledger, from: End, fromKind: OpKind | null, graph: string 
 }
 
 /** Is the group the export's description: its report node, a left-out node of it, or the data graph speaking of itself? */
-function isDescription(own: readonly Quad[], subject: Subject, ctx: QuadsToOpsContext): boolean {
+function isDescription(own: readonly Quad[], subject: Subject, names: AddressNames): boolean {
   if (subject.term.kind === 'iri') {
-    const read = recordOfAddress(subject.term.value, ctx.names);
+    const read = recordOfAddress(subject.term.value, names);
     if (read.answer === 'other' && read.what === 'graph') return true;
   }
   if (own.some(q => q.predicate.value === RDF_TYPE && q.object.kind === 'iri' && q.object.value === REPORT_CLASS)) return true;
   return own.every(q => REPORT_PREDICATES.has(q.predicate.value));
 }
 
-function translate(L: Ledger, group: readonly Quad[], key: string, graph: string | null, ctx: QuadsToOpsContext): RecordOp[] {
+/** A group's subject as the translation reads it, or why it states no record of its own before its types are read. */
+export type SubjectRead =
+  | { read: 'empty' }
+  | { read: 'left-out'; why: 'export-description' | 'server-owned' }
+  | { read: 'refused'; why: 'not-an-address-the-export-writes' | 'blank-node-subject' }
+  | { read: 'subject'; subject: Subject; own: Quad[]; statesStatement: boolean; types: Quad[] };
+
+/**
+ * The one reader of a group's subject: its own statements (those of the nodes that hang on it are not its own), whether it is the export's
+ * description, a server-owned node, an address the export never writes, a blank subject the import does not mint, or a subject with its
+ * address, its statement parts and its types. The translation, the kind pass ({@link recordKindOfGroup}) and the schema inference
+ * (`schema-from-data.ts`) read subjects through it, so the three skip and keep the same subjects.
+ */
+export function readSubject(group: readonly Quad[], key: string, names: AddressNames, blankNodes: 'refuse' | 'mint'): SubjectRead {
   const own = group.filter(q => termKey(q.subject) === key);
-  group.filter(q => termKey(q.subject) !== key).forEach(q => L.skip(q, 'derived'));
   const first = own[0];
-  if (first === undefined) return [];
+  if (first === undefined) return { read: 'empty' };
   const subject: Subject = { term: first.subject, key, address: null };
-  if (isDescription(own, subject, ctx)) { L.skipRest('export-description'); return []; }
+  if (isDescription(own, subject, names)) return { read: 'left-out', why: 'export-description' };
   if (first.subject.kind === 'iri') {
-    const read = recordOfAddress(first.subject.value, ctx.names);
-    if (read.answer === 'other') { L.skipRest('server-owned'); return []; }
-    if (read.answer === 'refused') { L.rest('not-an-address-the-export-writes'); return []; }
+    const read = recordOfAddress(first.subject.value, names);
+    if (read.answer === 'other') return { read: 'left-out', why: 'server-owned' };
+    if (read.answer === 'refused') return { read: 'refused', why: 'not-an-address-the-export-writes' };
     if (read.answer === 'record') subject.address = { of: read.of, kind: read.kind, id: read.id };
   }
   const statesStatement = own.some(q => STATEMENT_PARTS.has(q.predicate.value));
-  if (first.subject.kind === 'blank' && !statesStatement && ctx.blankNodes !== 'mint') { L.rest('blank-node-subject'); return []; }
+  if (first.subject.kind === 'blank' && !statesStatement && blankNodes !== 'mint') return { read: 'refused', why: 'blank-node-subject' };
+  return { read: 'subject', subject, own, statesStatement, types: own.filter(q => q.predicate.value === RDF_TYPE) };
+}
 
-  const types = own.filter(q => q.predicate.value === RDF_TYPE);
+function translate(L: Ledger, group: readonly Quad[], key: string, graph: string | null, ctx: QuadsToOpsContext): RecordOp[] {
+  group.filter(q => termKey(q.subject) !== key).forEach(q => L.skip(q, 'derived'));
+  const at = readSubject(group, key, ctx.names, ctx.blankNodes);
+  if (at.read === 'empty') return [];
+  if (at.read === 'left-out') { L.skipRest(at.why); return []; }
+  if (at.read === 'refused') { L.rest(at.why); return []; }
+  const { subject, own, statesStatement, types } = at;
+  const first = own[0]!;
   const decided = decideKind(L, subject, types, statesStatement, ctx);
   if (decided === null) return [];
   const { kind, type, settling } = decided;
@@ -645,22 +734,11 @@ export function recordKindOfGroup(group: readonly Quad[], ctx: Pick<QuadsToOpsCo
   const head = group[0];
   if (head === undefined) return null;
   const key = groupSubjectOf(head.subject, ctx.names);
-  const own = group.filter(q => termKey(q.subject) === key);
-  const first = own[0];
-  if (first === undefined) return null;
+  const at = readSubject(group, key, ctx.names, ctx.blankNodes);
+  if (at.read !== 'subject') return null;
   // Only the names are read on the way to a kind; the rest of a context is the translation's.
   const probe: QuadsToOpsContext = { ...ctx, meta: {}, stored: new Map(), minted: new Map(), asserted: new Set(), reified: new Set() };
-  const subject: Subject = { term: first.subject, key, address: null };
-  if (isDescription(own, subject, probe)) return null;
-  if (first.subject.kind === 'iri') {
-    const read = recordOfAddress(first.subject.value, ctx.names);
-    if (read.answer === 'other' || read.answer === 'refused') return null;
-    if (read.answer === 'record') subject.address = { of: read.of, kind: read.kind, id: read.id };
-  }
-  const statesStatement = own.some(q => STATEMENT_PARTS.has(q.predicate.value));
-  if (first.subject.kind === 'blank' && !statesStatement && ctx.blankNodes !== 'mint') return null;
-  const types = own.filter(q => q.predicate.value === RDF_TYPE);
-  return decideKind(new Ledger(group, ctx.mode), subject, types, statesStatement, probe)?.kind ?? null;
+  return decideKind(new Ledger(group, ctx.mode), at.subject, at.types, at.statesStatement, probe)?.kind ?? null;
 }
 
 /**

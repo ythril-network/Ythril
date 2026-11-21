@@ -35,6 +35,7 @@ import type { TokenRights } from '../config/rights-shape.js';
 import type { RdfCaller } from '../rdf/rdf-space-state.js';
 import type { RdfDocumentRefusal } from '../rdf/rdf-document.js';
 import type { SchemaChange, SchemaFromRdfAnswer, SchemaMode, SchemaSource } from '../rdf/schema-from-rdf.js';
+import type { InferredBlock } from '../rdf/schema-from-data.js';
 
 /** The folder under the data root that holds the files of standing RDF imports. */
 export const RDF_IMPORT_DIR = 'rdf-import';
@@ -65,22 +66,68 @@ export interface SchemaStepFile {
   fingerprintBefore: string;
   /** What the import asked for and what the mapping said of the file: the proposal a networked refusal carries as `proposed`. */
   mode: SchemaMode;
-  from: SchemaSource[];
+  from: ImportSchemaSource[];
   counts: SchemaFromRdfAnswer['counts'];
   changes: SchemaChange[];
+  /**
+   * What the door decided of the file's groups and statements (Q-755), so a resumed act skips and leaves out exactly what the door did and
+   * infers nothing again: the groups skipped as schema (`skip`, label groups of inferred terms among them), those of a source `from` did not
+   * ask for (`notAsked`), and the (kind, type, predicate) pairs the inference left out (`leaveOut`). Absent in a step written before them: the
+   * act reads the groups again.
+   */
+  skip?: string[];
+  notAsked?: string[];
+  leaveOut?: string[];
+  /** The inference's block, as the report names it (capped, counted whole). */
+  inferred?: InferredBlock;
 }
 
+/** One line per skip key, not-asked key and left-out pair after the head line, so the head stays small whatever the file's width. */
+type StepLine = { skip: string } | { notAsked: string } | { leaveOut: string };
+
 export async function writeSchemaStep(folder: ImportFolder, step: SchemaStepFile): Promise<void> {
-  await writeWholeSpoolFile(folder, SCHEMA_STEP_FILE, [JSON.stringify(step)]);
+  const { skip = [], notAsked = [], leaveOut = [], ...head } = step;
+  const lines = function* (): Generator<string> {
+    yield JSON.stringify({ ...head, lineCounts: { skip: skip.length, notAsked: notAsked.length, leaveOut: leaveOut.length } });
+    for (const key of skip) yield JSON.stringify({ skip: key } satisfies StepLine);
+    for (const key of notAsked) yield JSON.stringify({ notAsked: key } satisfies StepLine);
+    for (const key of leaveOut) yield JSON.stringify({ leaveOut: key } satisfies StepLine);
+  };
+  await writeWholeSpoolFile(folder, SCHEMA_STEP_FILE, lines());
 }
 
 export async function readSchemaStep(folder: ImportFolder): Promise<SchemaStepFile> {
-  for await (const line of readSpoolLines(folder, SCHEMA_STEP_FILE)) return JSON.parse(line) as SchemaStepFile;
-  throw new Error('The import\'s schema step is empty.');
+  let head: (SchemaStepFile & { lineCounts?: Record<string, number> }) | null = null;
+  for await (const line of readSpoolLines(folder, SCHEMA_STEP_FILE)) {
+    if (head === null) {
+      head = JSON.parse(line) as SchemaStepFile & { lineCounts?: Record<string, number> };
+      if (head.lineCounts) Object.assign(head, { skip: [], notAsked: [], leaveOut: [] });
+      continue;
+    }
+    const entry = JSON.parse(line) as StepLine;
+    if ('skip' in entry) head.skip!.push(entry.skip);
+    else if ('notAsked' in entry) head.notAsked!.push(entry.notAsked);
+    else head.leaveOut!.push(entry.leaveOut);
+  }
+  if (head === null) throw new Error('The import\'s schema step is empty.');
+  const { lineCounts, ...step } = head;
+  if (lineCounts && (lineCounts['skip'] !== step.skip?.length || lineCounts['notAsked'] !== step.notAsked?.length || lineCounts['leaveOut'] !== step.leaveOut?.length)) {
+    throw new SyntaxError('The import\'s schema step is cut short: its lines do not match the counts its head names.');
+  }
+  return step;
 }
 
-/** What an import with `schema` asks for: the schema door's mode, and the declarations it reads. */
-export interface SchemaAsked { kind: 'asked'; mode: SchemaMode; from: SchemaSource[] }
+/** What an import's schema is read from: the file's declarations, and its records (`data`, Q-755). */
+export type ImportSchemaSource = SchemaSource | 'data';
+
+/**
+ * What an import with `schema` asks for: the schema door's mode, the sources it reads, and with `data` the inference's thresholds (Q-755:
+ * `inferMinSupport`, `inferMinConfidence`, `inferFunctional`).
+ */
+export interface SchemaAsked {
+  kind: 'asked'; mode: SchemaMode; from: ImportSchemaSource[];
+  infer?: { minSupport: number; minConfidence: number; functional: boolean };
+}
 
 /**
  * The schema the door built: the changed types (what the write sends) and the version they were proposed against, how many changes they make,
@@ -92,13 +139,20 @@ export interface DoorSchema {
   version: number;
   changes: number;
   merged: SpaceMeta['typeSchemas'];
+  /** The groups skipped as schema (label groups of inferred terms among them), those of a source not asked for, and the pairs left out. */
   keys: Set<string>;
+  notAsked: Set<string>;
+  leaveOut: Set<string>;
+  inferred?: InferredBlock;
   /** What the import asked for, and the mapping's counts and changes: kept in the step's file (`SchemaStepFile`). */
   asked: SchemaAsked;
   counts: SchemaFromRdfAnswer['counts'];
   changeList: SchemaChange[];
   report: Omit<RdfImportSchemaReport, 'written'>;
 }
+
+/** What the door decided of the file for its translation: the groups to skip, those of them no asked source declares, the pairs to leave out. */
+export interface DoorDecided { skip: Set<string>; notAsked: Set<string>; leaveOut: Set<string> }
 
 /** How an act with a schema step ends for good: its status, code, sentence, and what more its answer carries. */
 export interface SchemaStepEnd { kind: 'ended'; status: number; code: string; why: string; detail?: Record<string, unknown> }
@@ -111,17 +165,21 @@ export interface SchemaStepDone { kind: 'done'; typeSchemas: SpaceMeta['typeSche
  * (`check-i-architecture-dependency-direction`), so the step registers itself here and the act asks for it ({@link rdfImportSchemaStep}).
  */
 export interface RdfImportSchemaStep {
-  schemaAskedOf(schema: string | undefined, from: readonly string[] | undefined): SchemaAsked | null | RdfDocumentRefusal;
+  schemaAskedOf(
+    schema: string | undefined, from: readonly string[] | undefined,
+    infer?: { functional?: boolean | undefined; minSupport?: number | undefined; minConfidence?: number | undefined },
+  ): SchemaAsked | null | RdfDocumentRefusal;
   schemaRungRefusal(spaceId: string, caller: RdfCaller | undefined): RdfDocumentRefusal | null;
   schemaAtDoor(input: {
     spaceId: string; caller: RdfCaller | undefined; options: ImportOptions; groups: () => AsyncGenerator<QuadGroup, void, undefined>; schema: SchemaAsked;
-    dryRun: boolean; maxQuads: number | undefined;
+    dryRun: boolean; maxQuads: number | undefined; maxPredicates?: number | undefined;
   }): Promise<DoorSchema | RdfDocumentRefusal>;
+  decidedOfStep(step: SchemaStepFile): DoorDecided | undefined;
   keepSchemaStep(folder: ImportFolder, built: DoorSchema, caller: RdfCaller | undefined): Promise<Pick<ActState, 'schemaStep' | 'caller'>>;
   schemaStepOfFolder(folder: ImportFolder, state: ActState): Promise<(SchemaStepFile & { kind: 'file' }) | null | SchemaStepEnd>;
   schemaStepBlocks(state: ActState, spaceId: string, rdfCode: string | null): SchemaStepEnd | null;
-  translationBy(merged: SpaceMeta['typeSchemas'], meta: SpaceMeta, groups: () => AsyncGenerator<QuadGroup, void, undefined>, from: readonly SchemaSource[], keys?: Set<string>):
-    Promise<{ planSchema: SpaceMeta['typeSchemas']; meta: SpaceMeta; skip: Set<string> }>;
+  translationBy(merged: SpaceMeta['typeSchemas'], meta: SpaceMeta, groups: () => AsyncGenerator<QuadGroup, void, undefined>, from: readonly ImportSchemaSource[], decided?: DoorDecided):
+    Promise<{ planSchema: SpaceMeta['typeSchemas']; meta: SpaceMeta } & DoorDecided>;
   writeSchemaOfAct(input: { spaceId: string; state: ActState; step: SchemaStepFile; hooks?: { beforeSchemaWrite?: () => unknown; afterSchemaWrite?: () => unknown } }):
     Promise<SchemaStepEnd | SchemaStepDone>;
   storedVersion(spaceId: string): number;

@@ -53,7 +53,11 @@ describe('the guides say which schema writes an RDF import refuses', () => {
       section.includes('The import writes the schema it built from inside its own act, once, after the data passed the dry plan by it and before the first record'),
       'the section says where and when the import writes the schema it built',
     );
-    assert.match(section, /`from: data`[^\n]*`rdf_import_schema_not_available`/, 'the section names from: data as refused, with its code');
+    // Q-755: `from: data` infers the schema from the records; the code that refused it is gone, and the guide says what the inference does.
+    assert.ok(!section.includes('rdf_import_schema_not_available'), 'the section still names the retired code');
+    assert.match(section, /`from: data`[^\n]*infer/, 'the section says from: data infers the schema from the data');
+    assert.match(section, /`inferMinSupport`/, 'the section names the support threshold');
+    assert.match(section, /`inferMinConfidence`/, 'the section names the confidence threshold');
   });
 
   it('the MCP page and the data-management page do not say a bare "no schema write"', () => {

@@ -15,6 +15,11 @@ import type { RdfFormat } from './serialize.js';
 import type { ImportMode } from './import-reasons.js';
 import type { Quad, Term } from './literals.js';
 import type { OpKind, ReasonEntry } from './quads-to-ops.js';
+import type { SchemaChange } from './schema-from-rdf-modes.js';
+import type { InferredBlock } from './schema-from-data.js';
+
+/** How many terms an inference took: types, properties and edge labels, counted whole (the audit row's `schemaInferred`). */
+export const inferredTermCount = (block: InferredBlock): number => (block.counts['types'] ?? 0) + (block.counts['properties'] ?? 0) + (block.counts['edges'] ?? 0);
 
 /** The most reasons an answer names one by one; the rest are counted (`reasonCount`, `reasonsByCode`). */
 export const RDF_IMPORT_REASONS_NAMED_MAX = 100;
@@ -98,6 +103,13 @@ export interface RdfImportSchemaReport {
   fingerprintAfter: string;
   caller?: string;
   notice: Record<string, unknown>;
+  /** The sources the schema was read from (Q-755): `declared`, `shacl`, `data`. */
+  from?: string[];
+  /** The changes the step makes, each with the `source` it was read from (named up to a bound, counted whole). */
+  changes?: SchemaChange[];
+  changesCount?: number;
+  /** With `data` in `from`: what the inference took, with its support and confidence, and what it named and did not infer. */
+  inferred?: InferredBlock;
 }
 
 /** Every kind at zero. */
@@ -208,6 +220,9 @@ export function rdfImportAuditChanges(r: RdfImportReport): Array<{ field: string
       { field: 'schemaWritten', to: r.schema.written }, { field: 'schemaFingerprintBefore', to: r.schema.fingerprintBefore },
       { field: 'schemaFingerprintAfter', to: r.schema.fingerprintAfter }, { field: 'schemaTypesAdded', to: r.schema.typesAddedCount },
       { field: 'schemaTypesChanged', to: r.schema.typesChangedCount },
+      // Q-755: the sources asked and how many terms the inference took; counts and source names only, never a name the file chose.
+      ...(r.schema.from ? [{ field: 'schemaFrom', to: r.schema.from.join(',') }] : []),
+      ...(r.schema.inferred ? [{ field: 'schemaInferred', to: inferredTermCount(r.schema.inferred) }] : []),
     ] : []),
   ];
 }

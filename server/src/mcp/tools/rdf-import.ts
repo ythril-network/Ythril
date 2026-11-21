@@ -18,12 +18,12 @@ import { RDF_FORMATS } from '../../rdf/serialize.js';
 import { inlineRdfDocument } from '../../rdf/rdf-document.js';
 import {
   rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, runningBodyOf, RDF_IMPORT_REASONS_NAMED_MAX, RDF_IMPORT_REFUSAL_CODES, type RdfImportRefusal,
-  RDF_IMPORT_ADDRESS_MAX, RDF_IMPORT_GRAPH_BASES_MAX, RDF_IMPORT_GRAPH_BASE_MIN_CHARS, RDF_IMPORT_GRAPH_BASE_MAX_CHARS,
+  RDF_IMPORT_ADDRESS_MAX, RDF_IMPORT_GRAPH_BASES_MAX, RDF_IMPORT_GRAPH_BASE_MIN_CHARS, RDF_IMPORT_GRAPH_BASE_MAX_CHARS, RDF_IMPORT_INFER_SUPPORT_MAX,
 } from '../../spaces/rdf-import-act.js';
 
 const FORBIDDEN = 403;
 
-/** What `from` names (the act's parameters judge it; `data` is refused there until it exists). */
+/** What `from` names (the act's parameters judge it; `data` infers the schema from the records, Q-755). */
 const SCHEMA_SOURCES = ['declared', 'shacl', 'data'] as const;
 
 /** The act's refusal as the tool's: its status and code, and what more it carries (a refused import's report) as structured content. */
@@ -69,14 +69,26 @@ export const import_rdfTool: ToolHandler = {
       schema: {
         type: 'string', enum: ['none', 'generate', 'expand', 'update'],
         description: 'none (the default): import the data alone. generate, expand, update: build or extend the space\'s type schemas from the file\'s '
-          + 'OWL and RDFS classes and SHACL shapes first, as import_schema_rdf\'s mode does; the data is judged by that schema, the schema is written once '
+          + 'OWL and RDFS classes and SHACL shapes (or, with from: data, from the records themselves) first, as import_schema_rdf\'s mode does; the data is judged by that schema, the schema is written once '
           + 'only when the data passes, and every record carries its fingerprint. Needs schema: write besides (rules: schema: admin); the class and '
           + 'shape subjects are not imported as records.',
       },
       from: {
         type: 'array', minItems: 1, maxItems: SCHEMA_SOURCES.length, items: { type: 'string', enum: [...SCHEMA_SOURCES] },
-        description: 'With schema: which declarations to read: declared (OWL and RDFS), shacl (shapes); default both. data is not available yet '
-          + '(rdf_import_schema_not_available). Refused without schema.',
+        description: 'With schema: what the schema is read from: declared (OWL and RDFS), shacl (shapes), data (inferred from the records: their types, '
+          + 'each property with its column\'s majority datatype, edge labels with the types at their ends); default declared and shacl. A declared or '
+          + 'stored term always wins over an inferred one; every inferred term is answered with its support and confidence, and a predicate the '
+          + 'inference cannot type safely is named and its statements left out. Refused without schema.',
+      },
+      inferFunctional: { type: 'boolean', description: 'With from: data: an edge label no subject states twice is one-only. Default false. Refused without data in from.' },
+      inferMinSupport: {
+        type: 'integer', minimum: 1, maximum: RDF_IMPORT_INFER_SUPPORT_MAX,
+        description: 'With from: data: a type, a property of a type or an edge label seen on fewer subjects is not inferred, and is named with its support. Default 2. Refused without data in from.',
+      },
+      inferMinConfidence: {
+        type: 'number', minimum: 0, maximum: 1,
+        description: 'With from: data: a property is attached to a type only when at least this share of the type\'s subjects carry it, and a column\'s '
+          + 'majority datatype is taken only when it holds at least this share of its values (else it is named as mixed). Default 0. Refused without data in from.',
       },
     },
     required: ['space', 'document', 'format'],
