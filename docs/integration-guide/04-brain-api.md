@@ -243,6 +243,11 @@ is still minted by the write. The response answers with what each key was given,
 **Every record array is written before any edge**, so an edge can reference any record in the payload.
 Within a single array a reference cannot point forwards: an item can only name something declared above it.
 
+**A `$ref:` key is resolved only at the two ends of a top-level edge** (`from`, `to`). An item's link fields
+(`linkEntities`, `linkFacts`, `linkChronos`) take stored ids, so a fact whose `linkEntities` names `"$ref:n"` is
+refused with a row saying so, while the rest of the call is written. To attach a fact to an entity the same call
+creates, connect them with a top-level edge, or save the entity first and pass its id.
+
 **The KIND comes from the array, not from you.** `fromKind`/`toKind` exist because a bare UUID can name
 records in two collections and a wrong guess stores a relationship that reads as correct and points at
 nothing. A `$ref` cannot be ambiguous, so stating a kind becomes a CHECK — one that disagrees with the array
