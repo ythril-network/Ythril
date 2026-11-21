@@ -10,12 +10,22 @@
  *
  * ## What is held
  *
- *  - space 1's facts stall (a view whose read sleeps far longer than the bound, `withStalledReads`), the housekeeping bound is 1 s: the sweep ends in
+ *  - space 1's facts stall (a view whose read sleeps far longer than the bound, `withStalledReads`), the housekeeping bound is 2.5 s: the sweep ends in
  *    about one bound, says space 1 once under its own step with the bound in the line, and still sweeps space 2;
  *  - a timeout ends the SPACE, not just the collection: a space with two stalled collections costs one bound and says one line
  *    (the second collection is never read);
  *  - three spaces in a row that time out end the walk once ("the store looks stalled"), the space after them waits for the next
  *    cycle, and the next cycle sweeps it (the three are in quarantine).
+ *
+ * ## Why a healthy space that passed the bound is swept once more (`Q-954`)
+ *
+ * The bound is the housekeeping bound, and it binds every space the sweep walks, the healthy ones too. At 1 s a loaded shard ran
+ * the healthy space's own call past it (main run 44845573169: "TTL sweep: facts failed for space hang-ok-1: a database operation
+ * ran past its time bound of 1000 ms"), the space was quarantined instead of swept, and the case failed on a product that had not
+ * changed. The bound is 2.5 s now (the file takes about 46 s alone against 37 s at 1 s: the third case waits three bounds), and a
+ * healthy space the sweep ended at its OWN bound, in this case or an earlier one, is a space the sweep went on to. Such a space is let out of quarantine
+ * and swept once more alone, and that sweep must empty it. The planted defect (the sweep stopping at the hung space) never reaches
+ * the healthy space, so it neither empties it nor says it, and the case still fails on it.
  *
  * ## What the stall costs, and why the fixture is given the reader's filter and its own seeds
  *
@@ -36,7 +46,8 @@ import { setWriteBoundForTest, withStalledReadsMany } from './_write-faults.mjs'
 
 const skip = await mongoSkipReason();
 const PAST = new Date('2020-01-01T00:00:00Z');
-const BOUND_MS = 1000;
+// 2.5 s, not 1: the bound binds the healthy spaces too, and a loaded shard ran one past 1 s (`Q-954`, see the header).
+const BOUND_MS = 2500;
 // Far above the bound: "the sweep ended at the bound, not at the stall" is told apart by STALL_MS - 500, and the sweep's own work on
 // the healthy spaces counts into the same clock. At 3000 the margin was 1.5 s and four -db files running at once used it up
 // (2820 ms, bundle-211). The fixture's guard waits the stall out once per case, however many views the case stalls
@@ -93,6 +104,23 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
 
   const said = (step, space) => lines.filter((l) => l.startsWith(`${step} failed for space '${space}'`));
 
+  /**
+   * Hold that the sweep went on to the healthy `space` and swept it. Swept at once is the usual answer; a space the sweep ended at its
+   * own bound (a line naming the space and the bound; an earlier case's sweep counts, since it left the space in quarantine) was reached too, on a runner too slow for the bound, and is
+   * let out of quarantine and swept once more alone, which must empty it (the slow-load pitfall: a unit that missed a time bound is
+   * tried once more before it is reported; the retry is printed so a space that keeps needing one is seen). A space the sweep never
+   * reached has neither, and fails here.
+   */
+  async function assertSwept(space, msg) {
+    if (await door.coll(space, 'facts').countDocuments({}) === 0) return;
+    const ownBound = lines.filter((l) => l.startsWith(`TTL sweep: facts failed for space '${space}'`) && l.includes(`time bound of ${BOUND_MS} ms`));
+    assert.ok(ownBound.length > 0, `${msg}: it holds its expired facts and the sweep said nothing about it, so it was never reached`);
+    console.log(`# retry: ${space} was ended at its own ${BOUND_MS} ms bound on this runner; swept once more alone`);
+    walkMod.liftQuarantine(space);
+    await sweepExpired(new Date());
+    assert.equal(await door.coll(space, 'facts').countDocuments({}), 0, `${msg}: the sweep ended it at its own bound, and a second sweep alone did not sweep it either`);
+  }
+
   it('space 1 stalled, space 2 healthy: ends in about one bound, says space 1 once, sweeps space 2', { timeout: 120_000 }, async () => {
     const db = door.mongo.getDb();
     await door.coll(OK1, 'facts').insertMany([0, 1, 2].map((i) => factDoc(OK1, `ok1-${i}`)));
@@ -103,10 +131,10 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
       assert.ok(tookMs >= BOUND_MS - 100, `ended after ${tookMs} ms, before the bound`);
       assert.ok(tookMs < STALL_MS - 500, `the sweep took ${tookMs} ms: it waited out the stall (${STALL_MS} ms) instead of ending at the ${BOUND_MS} ms bound`);
     });
-    assert.equal(await door.coll(OK1, 'facts').countDocuments({}), 0, 'the healthy space behind the hung one was swept');
+    await assertSwept(OK1,'the healthy space behind the hung one');
     const said1 = said('TTL sweep: facts', H1);
     assert.equal(said1.length, 1, `space 1 is said once, got ${said1.length}`);
-    assert.match(said1[0], /time bound of 1000 ms/);
+    assert.match(said1[0], new RegExp(`time bound of ${BOUND_MS} ms`));
     assert.ok(walkMod.quarantinedSpaces().includes(H1), 'the hung space is passed over for a while');
   });
 
@@ -120,7 +148,7 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
     const [first, second] = ['facts', 'entities'].sort((a, b) => TTL_COLLECTIONS.indexOf(a) - TTL_COLLECTIONS.indexOf(b));
     assert.equal(said(`TTL sweep: ${first}`, H2).length, 1);
     assert.equal(said(`TTL sweep: ${second}`, H2).length, 0, 'the second collection was read: a timeout did not end the space');
-    assert.equal(await door.coll(OK2, 'facts').countDocuments({}), 0);
+    await assertSwept(OK2,'the healthy space behind the space with two stalled collections');
   });
 
   it('three spaces in a row that time out end the walk once; the space behind waits, and the next cycle sweeps it', { timeout: 180_000 }, async () => {
@@ -138,6 +166,6 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
     assert.equal(await door.coll(TAIL, 'facts').countDocuments({}), 1, 'the walk stopped before the space behind the three');
 
     await sweepExpired(new Date());
-    assert.equal(await door.coll(TAIL, 'facts').countDocuments({}), 0, 'the next cycle sweeps it (the three are in quarantine)');
+    await assertSwept(TAIL,'the next cycle sweeps the space behind the three (they are in quarantine)');
   });
 });
