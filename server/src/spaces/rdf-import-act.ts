@@ -582,13 +582,14 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
   const run: Run = {
     spaceId: entry.localId, folder, builder: new ReportBuilder(state.report), state, commit: true, planSchema: state.planSchema ?? {}, planMeta: null,
   };
-  // An import with `schema` set (Q-955) carries its proposal in its own file; a state written before the schema step existed carries none.
-  // An import with `schema` set (Q-955) carries its proposal in its own file (`rdf-import-schema-step.ts`); a state written before had none.
+  // An import with `schema` set (Q-955) carries its proposal in its own file (`rdf-import-schema-step.ts`); a state written before had none. The file
+  // is read only where the step is still used (the translation and the dry plan, then the write): past them the schema is written and the file is not needed.
+  const beforeCommit = state.phase === 'received' || state.phase === 'translated';
   const wired = state.schemaStep ? rdfImportSchemaStep() : null;
-  const step = wired ? await wired.schemaStepOfFolder(folder, state) : null;
+  const step = wired && beforeCommit ? await wired.schemaStepOfFolder(folder, state) : null;
   if (step?.kind === 'ended') return gone(step.status, step.code, step.why);
   // The space's RDF state is asked before the dry plan only: once the first window is committed nothing ends the act but finishing.
-  if (state.phase === 'received' || state.phase === 'translated') {
+  if (beforeCommit) {
     const space = rdfSpaceState(getConfig(), entry.localId, undefined, schemaFingerprintOf);
     const blocked = wired?.schemaStepBlocks(state, entry.localId, space.ok ? null : space.code) ?? null;
     if (blocked) return gone(blocked.status, blocked.code, blocked.why);
@@ -603,7 +604,7 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
       // window judge by this one read. With a schema step they are the proposal's (stored form for the planners; resolved for the translation's names).
       state.options = { ...state.options, mode: space.meta.validationMode ?? 'off' };
       const groups = reopenSortedGroups(folder, state.sortedFile);
-      const by = step ? await wired!.translationBy(step.merged, space.meta, groups) : { planSchema: structuredClone(space.meta.typeSchemas ?? {}), meta: space.meta };
+      const by = step ? await wired!.translationBy(step.merged, space.meta, groups, step.from) : { planSchema: structuredClone(space.meta.typeSchemas ?? {}), meta: space.meta };
       state.planSchema = by.planSchema;
       run.planSchema = state.planSchema;
       try {
@@ -813,7 +814,7 @@ async function readAndRun(
     if (dryRun) {
       // Inline: a dry run registers no act and holds nothing, so its translation reads the store as it is when it reads it.
       if (built) report.schema = { ...built.report, written: false };
-      const by = built ? await rdfImportSchemaStep().translationBy(built.merged, meta, sorted.groups, built.keys) : { planSchema: meta.typeSchemas ?? {}, meta };
+      const by = built ? await rdfImportSchemaStep().translationBy(built.merged, meta, sorted.groups, built.asked.from, built.keys) : { planSchema: meta.typeSchemas ?? {}, meta };
       const run: Run = { spaceId: input.spaceId, folder, builder: new ReportBuilder(report), state: null, commit: false, planSchema: by.planSchema, planMeta: null };
       await translateStage({ spaceId: input.spaceId, folder, meta: by.meta, options, groups: sorted.groups, builder: run.builder, ...('skip' in by ? { skip: by.skip } : {}) });
       const outcome = run.builder.refused ? 'refused' : await planAndCommit(run);

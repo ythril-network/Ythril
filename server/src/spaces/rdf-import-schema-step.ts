@@ -33,7 +33,7 @@ import {
   type SchemaStepDone, type SchemaStepEnd, type SchemaStepFile,
 } from './rdf-import-files.js';
 import {
-  proposeSchemaFromRdf, judgeSchemaProposal, writeSchemaProposal, proposedBodyOf, SCHEMA_RDF_FROM_DEFAULT, SCHEMA_RDF_CHANGED, SCHEMA_RDF_RUNG,
+  proposeSchemaFromRdf, judgeSchemaProposal, writeSchemaProposal, proposedBodyOf, SCHEMA_RDF_FROM_DEFAULT, SCHEMA_RDF_RUNG,
   type SchemaProposal,
 } from './schema-rdf-import-act.js';
 
@@ -125,7 +125,7 @@ export async function schemaAtDoor(input: {
     });
   }
   const max = input.maxQuads ?? SCHEMA_RDF_MAX_QUADS;
-  const found = await schemaGroupsOf(input.groups, blankGroupKey, max);
+  const found = await schemaGroupsOf(input.groups, blankGroupKey, max, schema.from);
   if (found.kind === 'over') {
     return refusal(HTTP.TOO_LARGE, BOUND_EXCEEDED, `The file holds more than ${max} schema statements, the most a schema holds; nothing was imported`, { bound: SCHEMA_QUAD_BOUND, limit: max });
   }
@@ -137,7 +137,7 @@ export async function schemaAtDoor(input: {
   const names = typeNamesOf(proposal);
   return {
     kind: 'built', changed: proposal.changed as DoorSchema['changed'], version: proposal.version, changes: proposal.answer.changes.length,
-    merged: judged.merged, keys: found.keys,
+    merged: judged.merged, keys: found.keys, asked: schema, counts: proposal.answer.counts, changeList: proposal.answer.changes,
     report: {
       typesAdded: names.added.slice(0, SCHEMA_TYPES_NAMED_MAX), typesChanged: names.changed.slice(0, SCHEMA_TYPES_NAMED_MAX),
       typesAddedCount: names.added.length, typesChangedCount: names.changed.length,
@@ -167,6 +167,7 @@ export async function keepSchemaStep(folder: ImportFolder, built: DoorSchema, ca
   const { report } = built;
   await writeSchemaStep(folder, {
     changed: built.changed, merged: built.merged, typesAdded: report.typesAdded, typesChanged: report.typesChanged, fingerprintBefore: report.fingerprintBefore,
+    mode: built.asked.mode, from: built.asked.from, counts: built.counts, changes: built.changeList,
   });
   return {
     schemaStep: { version: built.version, fingerprint: report.fingerprintAfter, changes: built.changes },
@@ -184,13 +185,15 @@ export async function schemaStepOfFolder(folder: ImportFolder, state: ActState):
 }
 
 /**
- * The checks an act with a schema step makes before its dry plan. The space's RDF state refusing (`rdfCode`) after the schema was written (a
- * resume) throws, so the act is owed, never ended with the schema written and no data. Before the translation (`received`), a schema stored since
- * the door read it (a round passed, a layer arrived) ends the act: the proposal was built against the old one.
+ * The checks an act with a schema step makes before its dry plan. The space's RDF state refusing (`rdfCode`) after this act wrote its schema (a
+ * resume past `received`, a step with changes, the stored schema the proposal's) throws, so the act is owed, never ended with the schema written
+ * and no data. A step with no changes wrote nothing, and in `received` nothing was written yet: the refusal ends the act as any import's. Before
+ * the translation (`received`), a schema stored since the door read it (a round passed, a layer arrived) ends the act: the proposal was built
+ * against the old one.
  */
 export function schemaStepBlocks(state: ActState, spaceId: string, rdfCode: string | null): SchemaStepEnd | null {
   if (!state.schemaStep) return null;
-  if (rdfCode !== null && storedFingerprint(spaceId) === state.schemaStep.fingerprint) {
+  if (rdfCode !== null && state.phase !== 'received' && state.schemaStep.changes > 0 && storedFingerprint(spaceId) === state.schemaStep.fingerprint) {
     throw new Error(`RDF is not usable on space '${spaceId}' now (${rdfCode}), and the import already wrote its schema: it is tried again.`);
   }
   if (rdfCode === null && state.phase === 'received' && storedVersion(spaceId) !== state.schemaStep.version) {
@@ -205,17 +208,20 @@ export function schemaStepBlocks(state: ActState, spaceId: string, rdfCode: stri
  * (`keys`; read again from the sorted file when not given).
  */
 export async function translationBy(
-  merged: SpaceMeta['typeSchemas'], meta: SpaceMeta, groups: () => AsyncGenerator<QuadGroup, void, undefined>, keys?: Set<string>,
+  merged: SpaceMeta['typeSchemas'], meta: SpaceMeta, groups: () => AsyncGenerator<QuadGroup, void, undefined>, from: readonly SchemaSource[], keys?: Set<string>,
 ): Promise<{ planSchema: SpaceMeta['typeSchemas']; meta: SpaceMeta; skip: Set<string> }> {
-  const skip = keys ?? (await schemaGroupsOf(groups, blankGroupKey, null) as { keys: Set<string> }).keys;
+  const skip = keys ?? (await schemaGroupsOf(groups, blankGroupKey, null, from) as { keys: Set<string> }).keys;
   return { planSchema: structuredClone(merged ?? {}), meta: inlineResolvableRefs({ ...meta, typeSchemas: merged } as SpaceMeta), skip };
 }
 
-/** The proposal the write sends, made again from the act's schema step (the changed types and the version it was proposed against). */
+/**
+ * The proposal the write sends, made again from the act's schema step (the changed types, their changes and counts, and the version it was
+ * proposed against). The statements it took and left are the door's report, not kept: a networked refusal's `proposed` names none.
+ */
 function proposalOfStep(step: SchemaStepFile, version: number): SchemaProposal {
   return {
     kind: 'proposed', changed: step.changed, version, typesAdded: step.typesAdded.length, typesChanged: step.typesChanged.length,
-    answer: { typeSchemas: (step.merged ?? {}) as SchemaProposal['answer']['typeSchemas'], taken: [], notTaken: [], changes: [], refusals: [], counts: { statements: 0, taken: 0, notTaken: 0, outside: 0 } },
+    answer: { typeSchemas: (step.merged ?? {}) as SchemaProposal['answer']['typeSchemas'], taken: [], notTaken: [], changes: step.changes, refusals: [], counts: step.counts },
   };
 }
 
@@ -242,14 +248,16 @@ export async function writeSchemaOfAct(input: {
     const proposal = proposalOfStep(step, plan.version);
     const written = await writeSchemaProposal({
       spaceId, proposal, caller, rateKey: caller.id ?? state.importId,
-      proposed: () => proposedBodyOf(spaceId, { mode: 'expand', dryRun: false }, [...SCHEMA_RDF_FROM_DEFAULT], state.options.format, proposal),
+      proposed: () => proposedBodyOf(spaceId, { mode: step.mode, dryRun: false }, step.from, state.options.format, proposal),
     });
     // A networked refusal carries the proposed types (`proposed`), as the schema door's does: the one asker of that question is the write.
     if (written.kind === 'refused') return ended(written.status, written.code, `${peerText(written.error, { max: RDF_IMPORT_ADDRESS_MAX })}.`, written.detail);
     notice = written.notice;
     await input.hooks?.afterSchemaWrite?.();
+    // Thrown, so the act stays owed: the write was applied, and ending the act here would leave the schema written with none of the data. The
+    // retry meets the schema stored now, and its write is refused by its version (`schema_rdf_changed`) when the schema really moved.
     if (storedFingerprint(spaceId) !== plan.fingerprint) {
-      return ended(HTTP.CONFLICT, SCHEMA_RDF_CHANGED, 'the schema stored after its write is not the one the data was judged by.');
+      throw new Error('the schema stored after the import\'s write is not the one its data was judged by: it is tried again.');
     }
   }
   const space = getConfig().spaces.find(s => s.id === spaceId);

@@ -43,7 +43,7 @@ import { buildWhole, firstStoredType, meetStored, normalizedStored, type BuiltTy
 import { discoverDeclared, readDeclared } from './schema-from-rdf-owl.js';
 import { discoverShapes, readShapes } from './schema-from-rdf-shacl.js';
 import {
-  Ledger, SCHEMA_RDF_MAX_QUADS, Store, type NotTakenEntry, type Place, type SchemaSource, type Stmt, type TakenEntry,
+  Ledger, OWL, RDF, RDFS, SCHEMA_RDF_MAX_QUADS, SH, Store, type NotTakenEntry, type Place, type SchemaSource, type Stmt, type TakenEntry,
 } from './schema-from-rdf-store.js';
 
 export { SHACL_CONSTRAINTS, SCHEMA_RDF_MAX_QUADS };
@@ -284,34 +284,41 @@ function buildTypes(ctx: ReadContext): BuiltType[] {
 
 // -- the schema groups of a data file (Q-955) ------------------------------------------------------------------------------------------------
 
-const OWL_NS = 'http://www.w3.org/2002/07/owl#';
-const SH_NS = 'http://www.w3.org/ns/shacl#';
-const RDF_TYPE_IRI = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
-/** The RDFS and RDF classes a declaration is typed with, beside every OWL and SHACL class. */
-const DECLARING_CLASSES: ReadonlySet<string> = new Set([
-  'http://www.w3.org/2000/01/rdf-schema#Class', 'http://www.w3.org/2000/01/rdf-schema#Datatype', 'http://www.w3.org/1999/02/22-rdf-syntax-ns#Property',
-]);
-/** The RDFS predicates only a declaration states. */
-const DECLARING_PREDICATES: ReadonlySet<string> = new Set([
-  'http://www.w3.org/2000/01/rdf-schema#subClassOf', 'http://www.w3.org/2000/01/rdf-schema#subPropertyOf',
-  'http://www.w3.org/2000/01/rdf-schema#domain', 'http://www.w3.org/2000/01/rdf-schema#range',
-]);
+/**
+ * The classes a subject is typed with when it declares something the mapping reads, by the source that reads it: the one list, never a namespace
+ * prefix (an `owl:NamedIndividual` or an `owl:Thing` instance is a record, and so is a SHACL validation report). The classes the mapping asks the
+ * file for (`withType` in `schema-from-rdf-owl.ts` and `-shacl.ts`) are all here, which `the-rdf-import-takes-as-schema-only-what-declares-one`
+ * holds against their source, so the selector and the mapping cannot drift apart. `owl:Restriction` and `rdfs:Datatype` are the nodes a class or a
+ * range is built from; the other OWL property kinds are declarations a file states beside the two the mapping builds from.
+ */
+export const SCHEMA_DECLARING_CLASSES: Readonly<Record<SchemaSource, readonly string[]>> = Object.freeze({
+  declared: Object.freeze([
+    OWL('Ontology'), OWL('Class'), OWL('ObjectProperty'), OWL('DatatypeProperty'), OWL('AnnotationProperty'), OWL('FunctionalProperty'), OWL('Restriction'),
+    RDFS('Class'), RDFS('Datatype'), RDF('Property'),
+  ]),
+  shacl: Object.freeze([SH('NodeShape'), SH('PropertyShape')]),
+});
+/** The predicates only a declaration states, by source: an RDFS declaration of a class or property, and what makes a shape of one with no type. */
+export const SCHEMA_DECLARING_PREDICATES: Readonly<Record<SchemaSource, readonly string[]>> = Object.freeze({
+  declared: Object.freeze([RDFS('subClassOf'), RDFS('subPropertyOf'), RDFS('domain'), RDFS('range')]),
+  shacl: Object.freeze([SH('targetClass'), SH('targetSubjectsOf'), SH('targetObjectsOf'), SH('targetNode'), SH('path'), SH('property')]),
+});
+
+/** The test of a declaring group for the sources asked: the sets are made once, the test is called per group. */
+function declaringTest(from: readonly SchemaSource[]): (quads: readonly Quad[]) => boolean {
+  const classes = new Set(from.flatMap(source => SCHEMA_DECLARING_CLASSES[source]));
+  const predicates = new Set(from.flatMap(source => SCHEMA_DECLARING_PREDICATES[source]));
+  const type = RDF('type');
+  return (quads) => quads.some(q => predicates.has(q.predicate.value) || (q.predicate.value === type && q.object.kind === 'iri' && classes.has(q.object.value)));
+}
 
 /**
- * Is the subject of `quads` a schema construct the mapping reads: typed with an OWL or SHACL class (an ontology header, a class, a property, a
- * restriction, a shape), with `rdfs:Class`, `rdfs:Datatype` or `rdf:Property`, or stating a SHACL predicate or an RDFS declaration of its own
- * (a shape with no type, a property with only a domain). A data record is typed with a class of a vocabulary, never with one of these.
+ * Is the subject of `quads` a declaration of a source in `from` (both by default): typed with one of {@link SCHEMA_DECLARING_CLASSES}, or stating
+ * one of {@link SCHEMA_DECLARING_PREDICATES} of its own (a shape with no type, a property with only a domain). A data record is typed with a
+ * class of a vocabulary, never with one of these.
  */
-export function isSchemaGroup(quads: readonly Quad[]): boolean {
-  for (const q of quads) {
-    const p = q.predicate.value;
-    if (p.startsWith(SH_NS) || DECLARING_PREDICATES.has(p)) return true;
-    if (p === RDF_TYPE_IRI && q.object.kind === 'iri') {
-      const o = q.object.value;
-      if (o.startsWith(OWL_NS) || o.startsWith(SH_NS) || DECLARING_CLASSES.has(o)) return true;
-    }
-  }
-  return false;
+export function isSchemaGroup(quads: readonly Quad[], from: readonly SchemaSource[] = SOURCES as readonly SchemaSource[]): boolean {
+  return declaringTest(from)(quads);
 }
 
 /** A group of a sorted file as the selector reads it: its key, its graph, its subject and its quads. */
@@ -329,7 +336,9 @@ export type SchemaGroups = { kind: 'groups'; keys: Set<string>; quads: Quad[] } 
  */
 export async function schemaGroupsOf(
   groups: () => AsyncIterable<SchemaGroupInput>, keyOfBlank: (id: string, graph: { value: string } | undefined) => string, max: number | null,
+  from: readonly SchemaSource[] = SOURCES as readonly SchemaSource[],
 ): Promise<SchemaGroups> {
+  const declares = declaringTest(from);
   const keys = new Set<string>();
   const reached: string[] = [];
   /** A blank subject's blank objects, by key: only these edges are kept, so a file of records holds nothing here. */
@@ -337,7 +346,7 @@ export async function schemaGroupsOf(
   const blankObjectsOf = (g: SchemaGroupInput): string[] =>
     g.quads.filter(q => q.object.kind === 'blank').map(q => keyOfBlank((q.object as { id: string }).id, g.graph));
   for await (const g of groups()) {
-    if (isSchemaGroup(g.quads)) { keys.add(g.key); reached.push(...blankObjectsOf(g)); continue; }
+    if (declares(g.quads)) { keys.add(g.key); reached.push(...blankObjectsOf(g)); continue; }
     if (g.subject.kind === 'blank') {
       const objects = blankObjectsOf(g);
       if (objects.length > 0) blankEdges.set(g.key, objects);
