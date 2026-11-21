@@ -472,4 +472,15 @@ This tab lets you link to other Ythril instances' public schema libraries and im
 
 **Removing a catalog link:** Click the trash icon on the catalog card. Previously imported entries stay in your library.
 
+### A schema from an ontology file
+
+A space's types can also come from an ontology you already have: a file of OWL classes and properties, RDFS or SHACL shapes, in
+Turtle, TriG, N-Quads or JSON-LD. There is no screen for it yet; an agent calls the MCP tool `import_schema_rdf`, or a script posts
+the file to `POST /api/spaces/:id/schema-rdf` ([Schema from RDF](../integration-guide/06f-exports.md#rdf-schema-import)). Choose
+**generate** for a space with no types yet, **expand** to add only what is missing, or **update** to also change what the file
+states; nothing is ever deleted, and a type the file does not mention stays as it is. The space's own settings (purpose,
+validation mode, rules) are never taken from the file. Run it with a dry run first: the answer lists every change and every
+statement of the file it could not read, and why. RDF must be switched on for the space, and a space shared in a network is
+refused, because there a schema change is the network's vote: the refusal hands back the types to propose instead.
+
 ---

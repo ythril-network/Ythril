@@ -8,7 +8,7 @@
 > delete below, and the schema library's apply open a `meta_change` round exactly as `PATCH /api/spaces/:id` does
 > and answer `202 { "status": "vote_pending", "rounds": [{ "networkId", "networkLabel", "roundId", "round" }] }`; nothing is written until the round passes. Where
 > this instance's own yes already carries it (a club organiser, a publisher, a network with no other member) the
-> answer is `200 { "space": … }`. A space in no network is written at once, as before.
+> answer is `200 { "space": … }`. A space in no network is written at once, as before. The one exception, the [schema from an RDF file](06f-exports.md#rdf-schema-import) (`POST /api/spaces/:id/schema-rdf`, MCP `import_schema_rdf`), opens no round: it refuses a networked space (`409 schema_rdf_networked`), handing back the proposed types.
 
 ### Get Single Type Definition
 
@@ -58,7 +58,7 @@ On a space in no network, the previous `typeSchemas` (when it holds any type) is
 `$ref` values inside any property schema are validated against the instance's schema library — unknown refs return `422` with the list of missing entries.
 
 **On a space in a network, a replace removes nothing, and the answer says so.** A networked space's schema is
-the network's: the edit opens a `meta_change` round (`202`, or `200` where this instance's own yes passes it), and
+the network's: the edit (every schema write but the [schema from RDF](06f-exports.md#rdf-schema-import), which refuses a networked space) opens a `meta_change` round (`202`, or `200` where this instance's own yes passes it), and
 a passed round is applied as a **merge** on every member and here — deleting a type across a network could break a
 member's customisation, its reuse of the type, or another network the space is in. So a type the replacement
 leaves out is kept, and the answer (`PUT /:id/schema`, `DELETE /:id/meta/typeSchemas/:kt/:type`, `PATCH /:id` with

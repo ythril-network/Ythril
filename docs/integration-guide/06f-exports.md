@@ -131,7 +131,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/turtle" \
 | `blankNodes` | `refuse`, `mint` (a blank subject becomes a new record) | `refuse` |
 | `sourceBase`, `sourceVocab` | The base (and vocabulary, default `<sourceBase>vocab/`) of the space the file came from | TriG, N-Quads, JSON-LD: the file's one data graph; Turtle: none |
 | `graphBase` | `"<graph address> <source base>"`, once per data graph (REST: repeat the parameter; MCP: an array) | none |
-| `schema` | Not available yet: refused by name (`rdf_import_schema_not_available`) | |
+| `schema` | Not available here yet: refused by name (`rdf_import_schema_not_available`); build the schema first with [Schema from RDF](#rdf-schema-import) | |
 
 ### The answer and the report
 
@@ -184,6 +184,51 @@ The ontology is `<base>schema` with `owl:versionIRI <base>schema/<fingerprint>`:
 MCP answers the document in its first text block and the summary (`ontology`, `version`, `fingerprint`, `leftOut`) in the second and in `structuredContent`. The export needs `schema: read`; a personal view has no schema and is answered as every schema door answers a view. It refuses `rdf_bad_format`, `rdf_format_not_acceptable`, `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_term_clash` and `rdf_unwritable` (409, naming the setting, type or property whose stored address cannot be written), the rights guard's 403 without `schema: read`, and is audited as `schema.rdf.export` when reads are logged. `HEAD` answers its headers after the same rights check, and is audited as the `GET` is, with `method: "HEAD"`.
 
 The shapes carry no `sh:message`: a SHACL validator words its own results, and the product's own words for a rule travel as `ythril:ruleMessage` on the ontology (a rule is a CEL expression, not a shape). To canonicalise the JSON-LD with RDF Dataset Canonicalization (RDFC-1.0, formerly URDNA2015), allow a work factor of 2 (`maxWorkFactor: 2` in `rdf-canonize`, which `jsonld` uses): the shapes repeat blank-node structures that look alike from property to property (the lists and helper shapes of a value rule), which the default factor of 1 refuses as a possible poison graph; with 2 a space's schema canonicalises in milliseconds.
+
+## RDF schema import
+
+`POST /api/spaces/:id/schema-rdf` and MCP `import_schema_rdf` build or extend a space's **type schemas** from an RDF file of OWL classes and properties, RDFS and SHACL shapes, without importing any data. A schema the [schema export](#rdf-schema-export) wrote reads back as an equal schema; a foreign ontology is read as far as a type schema holds it exactly, and every other statement is named. The body is the document (`text/turtle`, `application/trig`, `application/n-quads`, `application/ld+json`, plain or `Content-Encoding: gzip`; a body sent as form data is read as the document too).
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/turtle" --data-binary @ontology.ttl \
+  "https://ythril.example/api/spaces/research/schema-rdf?mode=expand&dryRun=true"
+```
+
+| Parameter | Meaning | Default |
+|---|---|---|
+| `mode` | `generate`: a whole schema into a space with no type. `expand`: add the types and properties that are absent. `update`: also change the stored values the file states | required |
+| `from` | Which declarations to read, repeatable: `declared` (OWL and RDFS classes and properties), `shacl` (shapes) | both |
+| `format` | `turtle`, `trig`, `nquads`, `jsonld` (required on MCP; REST reads `Content-Type`) | |
+| `sourceBase`, `sourceVocab` | The base (and vocabulary, when it is not `<sourceBase>vocab/`) of the space the file was exported from: its addresses read as type and property names with no address of their own | |
+| `dryRun` | `true`: read, build and check everything, write nothing | `false` |
+
+**What it writes.** Only the types the file adds or changes, merged over the stored ones: a type the file does not name is left as it is, and nothing is deleted. Only type schemas: the ontology's purpose, validation mode, strict linkage and rules are named as not taken and never written. The build goes through the same checks as `PATCH /api/spaces/:id` (validation, library references, term clashes), and a dry run runs them too, so it answers what the build would. The door writes with the version it read as its precondition: a schema changed while the file was read is refused `412 schema_rdf_changed`.
+
+**The answer** (`200`, MCP `structuredContent`): `space`, `mode`, `from`, `format`, `dryRun`, `written`, `version`, `typeSchemas` (the types added or changed), `changes` (each `add-type`, `add-property`, `add-field` or `change-field`), `taken` (the field each statement set) and `notTaken` (each statement not read, and why), each list named up to 500 entries, and `counts` (`statements`, `taken`, `notTaken`, `outside`, `changes`, `typesAdded`, `typesChanged`) over all of them.
+
+**A space in a network.** There a schema change is the network's to vote on, and this door opens no round: a build is refused `409 schema_rdf_networked`, carrying the dry-run answer as `proposed`; send `proposed.typeSchemas` through `PATCH /api/spaces/:id` or `schema_update`. A dry run is answered there as anywhere.
+
+**Rights and audit.** A dry run needs `schema: read`, a build `schema: write`, and a file whose shapes give a type rules `schema: admin` (the field rights of `PATCH`). REST asks the second factor where it is required and refuses a read-only token, a dry run too; a peer-bound token is refused on both doors. Audited as `schema.rdf.import`: a build records the type, property and rule names it changed, as every schema write does, and its counts; a dry run its counts only; a refusal no change.
+
+**Bounds.** The body is at most 32 MiB (gzip inflated at most four times that, and within the reader's ratio), an upload that sends nothing for 60 seconds is cut off, and a file holds at most 500 000 statements. One schema file is read at a time per instance.
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `schema_rdf_bad_param` | A parameter is not one the door takes, or `sourceVocab` without `sourceBase` |
+| 400 | `rdf_malformed`, `rdf_relative_iri`, `rdf_remote_context`, `rdf_jsonld_not_streamable`, `rdf_gzip_invalid`, `rdf_unsupported`, `rdf_source_failed` | The reader refuses the file, with its place |
+| 400 | `rdf_import_upload_stalled` | The upload sent nothing for the idle bound |
+| 403 | `schema_rdf_rung` | Below the rung the call needs (`read` for a dry run, `write` for a build, `admin` for rules) |
+| 404 | `space_not_found` | No such space |
+| 409 | `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_unwritable` | The space's RDF names are not settled |
+| 409 | `schema_rdf_networked` | The space is in a network (the dry-run answer as `proposed`) |
+| 409 | `space_being_rdf_imported` | An RDF import holds the space (a dry run too) |
+| 409 | `schema_rdf_not_empty` | `generate` into a space with types |
+| 409 | `schema_rdf_busy` | Another schema file is being read on this instance |
+| 412 | `schema_rdf_changed` | The space's schema changed while the file was read (MCP: an error result naming the code) |
+| 413 | `rdf_bound_exceeded` | Over a bound, named in `bound` (`schemaRdfBodyMaxBytes`, `schemaRdfMaxQuads`, a reader bound) |
+| 415 | `rdf_unsupported_format`, `rdf_unsupported_encoding` | A format or encoding the reader does not take |
+| 422 | `schema_rdf_refused` | The file contradicts itself, two names collide, a type is invalid, a kind would pass its type cap, or the space's checks refuse it; every reason in `reasons` |
+| 422 | `rdf_term_clash` | Two terms of the space would have one RDF address |
 
 ## RDF names: `meta.rdf` and `iri`
 
