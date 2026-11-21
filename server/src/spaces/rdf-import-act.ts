@@ -51,7 +51,6 @@
  */
 import fsp from 'node:fs/promises';
 import { v4 as uuidv4 } from 'uuid';
-import { z } from 'zod';
 import type { SpaceMeta } from '@ythril-network/schema';
 import { getConfig } from '../config/loader.js';
 import type { SpaceActEntry } from '../config/types.js';
@@ -70,11 +69,15 @@ import {
   rdfImportSchemaStep, readState, sweepRdfImportOrphans, sweepReports, writeState, type ActState, type ImportOptions, type SchemaAsked,
 } from './rdf-import-files.js';
 import { rdfSpaceState, type RdfCaller } from '../rdf/rdf-space-state.js';
-import { RDF_FORMATS, type RdfFormat } from '../rdf/serialize.js';
+import type { RdfFormat } from '../rdf/serialize.js';
 import { parseRdf } from '../rdf/parse.js';
 import {
-  RDF_UNSUPPORTED_ENCODING, RDF_UPLOAD_STALLED, rdfDocumentRefusalOf, rdfFormatOf, rdfParamBool, rdfParamList, refusal, type RdfDocumentRefusal,
+  RDF_UNSUPPORTED_ENCODING, RDF_UPLOAD_STALLED, rdfDocumentRefusalOf, rdfFormatOf, refusal, type RdfDocumentRefusal,
 } from '../rdf/rdf-document.js';
+import {
+  RDF_IMPORT_GRAPH_BASES_MAX, RDF_IMPORT_GRAPH_BASE_MIN_CHARS, RDF_IMPORT_GRAPH_BASE_MAX_CHARS, RDF_IMPORT_INFER_SUPPORT_MAX, RdfImportParams, RdfImportStatusParams,
+  rdfImportParamsOf,
+} from './rdf-import-params.js';
 import { addressNames, recordOfAddress, type AddressNames } from '../rdf/term-reverse.js';
 import type { RecordKind } from '../rdf/term-iri.js';
 import type { Quad, Term } from '../rdf/literals.js';
@@ -87,8 +90,8 @@ import { spaceWriteClosedNow } from './space-write-gate.js';
 export { RDF_IMPORT_REASONS_NAMED_MAX, rdfImportAuditChanges, type RdfImportReport } from '../rdf/import-report.js';
 export { RDF_IMPORT_DIR, RDF_IMPORT_REPORT_DIR, RDF_IMPORT_REPORT_KEEP_MS };
 import {
-  RDF_IMPORT_MAX_SUBJECTS, RdfImportBoundExceeded, openImportFolder, openOperationSpool, removeImportFolder, removeOperations, reopenSortedGroups, resortedSpool,
-  sortedSpool, type ImportFolder, type ImportSpoolBounds, type QuadGroup,
+  RdfImportBoundExceeded, openImportFolder, openOperationSpool, removeImportFolder, removeOperations, reopenSortedGroups, resortedSpool, sortedSpool,
+  type ImportFolder, type ImportSpoolBounds, type QuadGroup,
 } from '../rdf/import-spool.js';
 import { ImportIndex, type IndexedRecord } from '../rdf/import-index.js';
 import { TripletSets, assertRecordsWithinBound, type DigestSet } from '../rdf/import-count.js';
@@ -106,11 +109,9 @@ const KIND = 'rdf-import' as const;
 /** Operations planned and committed per window. */
 const WINDOW_DEFAULT = 500;
 export { RDF_IMPORT_ADDRESS_MAX };
-/** The most per-graph source bases one request names (and the most graph addresses a refusal names). */
-export const RDF_IMPORT_GRAPH_BASES_MAX = 64;
-/** A graph base is `"<graph address> <source base>"`: at least one character each side of the space, and at most two addresses and the space. */
-export const RDF_IMPORT_GRAPH_BASE_MIN_CHARS = 3;
-export const RDF_IMPORT_GRAPH_BASE_MAX_CHARS = RDF_IMPORT_ADDRESS_MAX * 2 + 1;
+export {
+  RDF_IMPORT_GRAPH_BASES_MAX, RDF_IMPORT_GRAPH_BASE_MIN_CHARS, RDF_IMPORT_GRAPH_BASE_MAX_CHARS, RDF_IMPORT_INFER_SUPPORT_MAX, RdfImportParams, RdfImportStatusParams,
+};
 /** The HTTP statuses the act and its doors answer with, each named, so no refusal below carries a bare number. */
 const HTTP = {
   OK: 200, ACCEPTED: 202, BAD_REQUEST: 400, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409, GONE: 410, TOO_LARGE: 413, UNSUPPORTED_MEDIA: 415, UNPROCESSABLE: 422,
@@ -148,61 +149,16 @@ export const RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   // With `schema` set (Q-955): the schema door's own codes, answered by the shared step for the same causes.
   'schema_rdf_bad_param', 'schema_rdf_rung', 'schema_rdf_networked', 'schema_rdf_not_empty', 'schema_rdf_changed', 'schema_rdf_refused',
 ]);
-/** What an import with `schema` reads the schema from: the file's OWL and RDFS declarations, its shapes, and its records (`data`, Q-755). */
-const IMPORT_SCHEMA_SOURCES = ['declared', 'shacl', 'data'] as const;
 /** The not-taken reason of a schema construct's statements, which an import with `schema` builds the schema from and does not import as records. */
 export const RDF_IMPORT_SCHEMA_NOT_TAKEN = 'schema';
 /** The not-taken reason of a declaring group of a source `from` did not ask for: never a record, never built (Q-755, design revision 3). */
 export const RDF_IMPORT_SCHEMA_NOT_ASKED = 'schema-not-asked';
-/** The largest support threshold a caller may ask: the most subjects an import holds (`RDF_IMPORT_MAX_SUBJECTS`). */
-export const RDF_IMPORT_INFER_SUPPORT_MAX = RDF_IMPORT_MAX_SUBJECTS;
-
-// ── Parameters ────────────────────────────────────────────────────────────────────────────────────────────────
-
-/** A source base per graph: `"<graph address> <source base>"`, one value each. */
-const GRAPH_BASE = z.string().min(RDF_IMPORT_GRAPH_BASE_MIN_CHARS).max(RDF_IMPORT_GRAPH_BASE_MAX_CHARS).regex(/^\S+ \S+$/, 'a graph base is "<graph address> <source base>"');
-
-/**
- * The parameters both doors take, judged before any logic runs. NOT strict: a door passes only these names. `schema` (Q-955): `none` (the
- * default) imports the data alone; `generate`, `expand` and `update` build or extend the space's type schemas from the file's classes and shapes,
- * as the schema door's `mode`, read from `from` (the schema door's default when absent).
- */
-export const RdfImportParams = z.object({
-  format: z.enum(RDF_FORMATS as unknown as [RdfFormat, ...RdfFormat[]]).optional(),
-  dryRun: z.boolean().optional(),
-  blankNodes: z.enum(['refuse', 'mint']).optional(),
-  sourceBase: z.string().min(1).max(RDF_IMPORT_ADDRESS_MAX).optional(),
-  sourceVocab: z.string().min(1).max(RDF_IMPORT_ADDRESS_MAX).optional(),
-  graphBase: z.array(GRAPH_BASE).max(RDF_IMPORT_GRAPH_BASES_MAX).optional(),
-  schema: z.enum(['none', 'generate', 'expand', 'update']).optional(),
-  from: z.array(z.enum(IMPORT_SCHEMA_SOURCES)).min(1).max(IMPORT_SCHEMA_SOURCES.length).optional(),
-  // With `data` in `from` (Q-755): the inference's thresholds, as shape-extraction tools take them, and whether an edge label no subject states
-  // twice is one-only. Each without `data` is refused by the schema step's one judgement.
-  inferFunctional: z.boolean().optional(),
-  inferMinSupport: z.number().int().min(1).max(RDF_IMPORT_INFER_SUPPORT_MAX).optional(),
-  inferMinConfidence: z.number().min(0).max(1).optional(),
-});
 
 /** The door's decisions a translation run takes, when a schema step made them: the groups to skip, those not asked for, the pairs to leave out. */
 const decidedOf = (by: object): Pick<TranslateRun, 'skip' | 'notAsked' | 'leaveOut'> =>
   ('skip' in by && 'notAsked' in by && 'leaveOut' in by
     ? { skip: by.skip as ReadonlySet<string>, notAsked: by.notAsked as ReadonlySet<string>, leaveOut: by.leaveOut as ReadonlySet<string> }
     : {});
-
-/** The status doors' parameter. */
-export const RdfImportStatusParams = z.object({ importId: z.string().uuid() });
-
-/** A REST query's number as the parameters take it: a decimal text read as a number, anything else passed on for the schema to judge. */
-const paramNumber = (v: unknown): unknown => (typeof v === 'string' && /^\s*[+-]?(\d+(\.\d*)?|\.\d+)\s*$/.test(v) ? Number(v) : v);
-
-/** A REST query or a tool's arguments as the parameters take them: booleans and numbers from their strings, one graph base or several. */
-function paramsOf(raw: Record<string, unknown>): Record<string, unknown> {
-  return {
-    format: raw['format'], dryRun: rdfParamBool(raw['dryRun']), blankNodes: raw['blankNodes'], sourceBase: raw['sourceBase'],
-    sourceVocab: raw['sourceVocab'], graphBase: rdfParamList(raw['graphBase']), schema: raw['schema'], from: rdfParamList(raw['from']),
-    inferFunctional: rdfParamBool(raw['inferFunctional']), inferMinSupport: paramNumber(raw['inferMinSupport']), inferMinConfidence: paramNumber(raw['inferMinConfidence']),
-  };
-}
 
 // ── Test knobs ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -742,7 +698,7 @@ let doorHeld = false;
  * the disk) is thrown to the door.
  */
 export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnswer> {
-  const parsed = RdfImportParams.safeParse(paramsOf(input.params));
+  const parsed = RdfImportParams.safeParse(rdfImportParamsOf(input.params));
   if (!parsed.success) return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_BAD_PARAM, refusalOfParse(parsed.error).error);
   const p = parsed.data;
   // `schema`, `from` and the inference's thresholds (Q-955, Q-755): `from` without `schema`, and a threshold without `data` in `from`, are
