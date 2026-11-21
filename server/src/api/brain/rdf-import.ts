@@ -43,19 +43,18 @@ function sendRefusal(res: Response, r: RdfImportRefusal): void {
 const requireSpaceAuthMfa = requireSpaceAuthMfaScoped('spaceId');
 
 /**
- * The route's guard: an import that builds a schema from the file (`schema` set and not `none`, Q-955) writes the space's type schemas, so it
- * asks the second factor where the token needs one, as `PATCH /api/spaces/:id` and the schema door do; an import of data alone asks what it
- * always asked. The parameter is read here only to pick the guard; the act judges it.
+ * After the route's guard: an import that builds a schema from the file (`schema` set and not `none`, Q-955) writes the space's type schemas,
+ * so it asks the second factor where the token needs one, as `PATCH /api/spaces/:id` and the schema door do (the guard with the factor in it,
+ * run again over the same request); an import of data alone asks what it always asked. The parameter is read here only to pick; the act judges it.
  */
-function requireImportAuth(req: Request, res: Response, next: NextFunction): void {
+function askSecondFactorForSchema(req: Request, res: Response, next: NextFunction): void {
   const schema = req.query['schema'];
-  const buildsSchema = schema !== undefined && schema !== 'none';
-  if (buildsSchema) void requireSpaceAuthMfa(req, res, next);
-  else void requireSpaceAuth(req, res, next);
+  if (schema !== undefined && schema !== 'none') void requireSpaceAuthMfa(req, res, next);
+  else next();
 }
 
 // POST /api/brain/spaces/:spaceId/import/rdf - an RDF document into the space, all or nothing.
-rdfImportRouter.post('/spaces/:spaceId/import/rdf', globalRateLimit, requireImportAuth, denyReadOnly, async (req: Request, res: Response) => {
+rdfImportRouter.post('/spaces/:spaceId/import/rdf', globalRateLimit, requireSpaceAuth, askSecondFactorForSchema, denyReadOnly, async (req: Request, res: Response) => {
   const spaceId = req.params['spaceId'] as string;
   if (answeredUnknownSpace(req, res, spaceId)) return;
   const token = req.authToken as { id?: string; admin?: boolean; rights?: TokenRights | null } | undefined;

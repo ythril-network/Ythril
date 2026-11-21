@@ -66,18 +66,16 @@ import {
 } from './space-act-runner.js';
 import { awaitDoorActs } from './door-acts.js';
 import {
-  RDF_IMPORT_ADDRESS_MAX, RDF_IMPORT_DIR, RDF_IMPORT_REPORT_DIR, RDF_IMPORT_REPORT_KEEP_MS, folderPathOf, holdFolder, keepReport, readReport, readSchemaStep,
-  readState, sweepRdfImportOrphans, sweepReports, writeSchemaStep, writeState, type ActState, type ImportOptions, type SchemaStepFile,
+  RDF_IMPORT_ADDRESS_MAX, RDF_IMPORT_DIR, RDF_IMPORT_REPORT_DIR, RDF_IMPORT_REPORT_KEEP_MS, folderPathOf, holdFolder, keepReport, readReport,
+  readState, sweepRdfImportOrphans, sweepReports, writeState, type ActState, type ImportOptions,
 } from './rdf-import-files.js';
-import { inlineResolvableRefs } from './schema-validation.js';
-import { isInstanceAdmin } from '../auth/instance-admin.js';
-import { effectiveRung } from '../auth/mint-cap.js';
-import { satisfies } from '../auth/required-rung.js';
-import { schemaGroupsOf, SCHEMA_RDF_MAX_QUADS, type SchemaMode, type SchemaSource } from '../rdf/schema-from-rdf.js';
 import {
-  proposeSchemaFromRdf, judgeSchemaProposal, writeSchemaProposal, proposedBodyOf, SCHEMA_RDF_FROM_DEFAULT, SCHEMA_RDF_BAD_PARAM, SCHEMA_RDF_CHANGED,
-  SCHEMA_RDF_NETWORKED, SCHEMA_RDF_NOT_EMPTY, SCHEMA_RDF_REFUSED, SCHEMA_RDF_RUNG, type SchemaProposal,
+  SCHEMA_RDF_BAD_PARAM, SCHEMA_RDF_CHANGED, SCHEMA_RDF_NETWORKED, SCHEMA_RDF_NOT_EMPTY, SCHEMA_RDF_REFUSED, SCHEMA_RDF_RUNG,
 } from './schema-rdf-import-act.js';
+import {
+  keepSchemaStep, schemaAskedOf, schemaAtDoor, schemaRungRefusal, schemaStepBlocks, schemaStepOfFolder, storedVersion, translationBy, writeSchemaOfAct,
+  type SchemaAsked,
+} from './rdf-import-schema-step.js';
 import { rdfSpaceState, type RdfCaller } from '../rdf/rdf-space-state.js';
 import { RDF_FORMATS, type RdfFormat } from '../rdf/serialize.js';
 import { parseRdf } from '../rdf/parse.js';
@@ -86,24 +84,23 @@ import {
 } from '../rdf/rdf-document.js';
 import { addressNames, recordOfAddress, type AddressNames } from '../rdf/term-reverse.js';
 import type { RecordKind } from '../rdf/term-iri.js';
-import { stdIri, type Quad, type Term } from '../rdf/literals.js';
+import type { Quad, Term } from '../rdf/literals.js';
 import {
-  IMPORT_OP_ORDER, ReportBuilder, emptyKinds, emptyUnchanged, rdfImportAuditChanges, type RdfImportReport, type RdfImportSchemaReport,
+  IMPORT_OP_ORDER, ReportBuilder, emptyKinds, emptyUnchanged, rdfImportAuditChanges, type RdfImportReport,
 } from '../rdf/import-report.js';
 import { unknownSpaceAnswer } from './unknown-space.js';
 import { spaceWriteClosedNow } from './space-write-gate.js';
 
 export { RDF_IMPORT_REASONS_NAMED_MAX, rdfImportAuditChanges, type RdfImportReport } from '../rdf/import-report.js';
 export { RDF_IMPORT_DIR, RDF_IMPORT_REPORT_DIR, RDF_IMPORT_REPORT_KEEP_MS };
-import { ythrilIri } from '../rdf/ythril-vocabulary.js';
 import {
-  RdfImportBoundExceeded, openImportFolder, openOperationSpool, quadGroupKey, removeImportFolder, removeOperations, reopenSortedGroups, resortedSpool, sortedSpool,
+  RdfImportBoundExceeded, openImportFolder, openOperationSpool, removeImportFolder, removeOperations, reopenSortedGroups, resortedSpool, sortedSpool,
   type ImportFolder, type ImportSpoolBounds, type QuadGroup,
 } from '../rdf/import-spool.js';
 import { ImportIndex, type IndexedRecord } from '../rdf/import-index.js';
 import { TripletSets, assertRecordsWithinBound, type DigestSet } from '../rdf/import-count.js';
 import { counted } from '../rdf/import-upload.js';
-import { defaultSourceBase } from '../rdf/import-default-source.js';
+import { defaultSourceBase, graphsWithoutBase, noteGraphs, type GraphsSeen } from '../rdf/import-default-source.js';
 import {
   groupSubjectOf, quadsToOps, recordKey, recordKindOfGroup, type MintedRecord, type QuadsToOpsContext, type RecordOp,
 } from '../rdf/quads-to-ops.js';
@@ -157,11 +154,8 @@ export const RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   'rdf_unsupported_format', 'rdf_unsupported', 'rdf_source_failed',
   'rdf_not_enabled', 'rdf_base_conflict', 'rdf_base_shared', 'rdf_term_clash', 'rdf_unwritable', 'space_not_found',
   // With `schema` set (Q-955): the schema door's own codes, answered by the shared step for the same causes.
-  SCHEMA_RDF_BAD_PARAM, SCHEMA_RDF_RUNG, SCHEMA_RDF_NETWORKED, SCHEMA_RDF_NOT_EMPTY, SCHEMA_RDF_CHANGED, SCHEMA_RDF_REFUSED, 'space_being_rdf_imported',
+  SCHEMA_RDF_BAD_PARAM, SCHEMA_RDF_RUNG, SCHEMA_RDF_NETWORKED, SCHEMA_RDF_NOT_EMPTY, SCHEMA_RDF_CHANGED, SCHEMA_RDF_REFUSED,
 ]);
-
-/** The name of the bound a schema option's 413 names (the schema door's own). */
-const SCHEMA_QUAD_BOUND = 'schemaRdfMaxQuads';
 /** What an import with `schema` reads the schema from; `data` (a schema inferred from the records) is refused until it exists. */
 const IMPORT_SCHEMA_SOURCES = ['declared', 'shacl', 'data'] as const;
 /** The not-taken reason of a schema construct's statements, which an import with `schema` builds the schema from and does not import as records. */
@@ -544,92 +538,6 @@ async function planAndCommit(run: Run): Promise<'refused' | 'planned' | 'complet
 
 /** The type schemas stored for `spaceId` now. */
 const storedTypeSchemas = (spaceId: string): SpaceMeta['typeSchemas'] => getConfig().spaces.find(s => s.id === spaceId)?.meta?.typeSchemas ?? {};
-/** The fingerprint and the meta version stored for `spaceId` now. */
-const storedFingerprint = (spaceId: string): string => schemaFingerprintOf(getConfig().spaces.find(s => s.id === spaceId));
-const storedVersion = (spaceId: string): number => getConfig().spaces.find(s => s.id === spaceId)?.meta?.version ?? 0;
-/** The group key of a blank node in its graph: the sorted spool's own. */
-const blankGroupKey = (id: string, graph: { value: string } | undefined): string =>
-  quadGroupKey({ kind: 'blank', id }, graph ? { kind: 'iri', value: graph.value } : undefined);
-
-/** The most type names a report's schema step names of each list (all are counted). */
-const SCHEMA_TYPES_NAMED_MAX = 500;
-
-/**
- * The refusal of a caller below `schema: write` on `spaceId`, or null: an import with `schema` set writes the space's type schemas, which the
- * settings write's field rungs price at `schema: write` (rules at `admin`, asked by the shared judgement). Asked at the door before a byte is read,
- * a dry run too (A10), and again by the act before its write, with the token read again.
- */
-function schemaRungRefusal(spaceId: string, caller: RdfCaller | undefined): RdfImportRefusal | null {
-  if (caller && isInstanceAdmin(caller)) return null;
-  if (caller?.rights && satisfies(effectiveRung(caller.rights, spaceId, 'schema'), 'write')) return null;
-  return refusal(HTTP.FORBIDDEN, SCHEMA_RDF_RUNG, `Token needs 'write' on schema in space '${peerText(spaceId, { max: RDF_IMPORT_ADDRESS_MAX })}' to build a schema from the file (schema: write); nothing was imported`);
-}
-
-/**
- * The caller of an act with a schema step as it is now: a stored token read again by its id (`null` when it is gone or expired, so a revoked
- * token writes nothing after a resume), else the door's snapshot (a session that is no stored token).
- */
-function callerNow(snapshot: ActState['caller']): RdfCaller | null {
-  if (!snapshot) return null;
-  if (!snapshot.stored || snapshot.id === undefined) return { ...snapshot };
-  const token = getConfig().tokens.find(t => t.id === snapshot.id) as { id: string; rights?: RdfCaller['rights']; admin?: boolean; expiresAt?: string | null } | undefined;
-  if (!token || (token.expiresAt && Date.parse(token.expiresAt) <= Date.now())) return null;
-  return { id: token.id, rights: token.rights ?? null, ...(token.admin === true ? { admin: true } : {}) };
-}
-
-/** The proposal the write sends, made again from the act's schema step (the changed types and the version it was proposed against). */
-function proposalOfStep(step: SchemaStepFile, version: number): SchemaProposal {
-  return {
-    kind: 'proposed', changed: step.changed, version, typesAdded: step.typesAdded.length, typesChanged: step.typesChanged.length,
-    answer: { typeSchemas: (step.merged ?? {}) as SchemaProposal['answer']['typeSchemas'], taken: [], notTaken: [], changes: [], refusals: [], counts: { statements: 0, taken: 0, notTaken: 0, outside: 0 } },
-  };
-}
-
-type Gone = (status: number, code: string, why: string, detail?: Record<string, unknown>) => Promise<SpaceActBodyOutcome>;
-
-/**
- * The act's schema step (Q-955), after the dry plan judged the data by the proposed schema and before `planned` is kept: the schema written once,
- * through the settings write act, as the caller read again, with the version the door read as `ifMatch` and a networked space refused. Every
- * refusal ends the act with the schema door's code and nothing is written; a resume that finds the schema already stored writes nothing again.
- * Then the planners judge and stamp by the schema stored now, which must be the one the data was judged by.
- */
-async function schemaStepOfAct(run: Run, state: ActState, step: SchemaStepFile, gone: Gone): Promise<SpaceActBodyOutcome | null> {
-  const plan = state.schemaStep!;
-  const spaceId = run.spaceId;
-  let notice: Record<string, unknown> = {};
-  if (plan.changes > 0 && storedFingerprint(spaceId) !== plan.fingerprint) {
-    await knobs.hooks?.beforeSchemaWrite?.();
-    const caller = callerNow(state.caller);
-    if (!caller) return gone(HTTP.FORBIDDEN, SCHEMA_RDF_RUNG, 'the token that started it is gone, so the schema it builds is not written.');
-    const rung = schemaRungRefusal(spaceId, caller);
-    if (rung) return gone(rung.status, rung.code, `${rung.error}.`);
-    const proposal = proposalOfStep(step, plan.version);
-    const written = await writeSchemaProposal({
-      spaceId, proposal, caller, rateKey: caller.id ?? state.importId,
-      proposed: () => proposedBodyOf(spaceId, { mode: 'expand', dryRun: false }, [...SCHEMA_RDF_FROM_DEFAULT], state.options.format, proposal),
-    });
-    // A networked refusal carries the proposed types (`proposed`), as the schema door's does: the one asker of that question is the write.
-    if (written.kind === 'refused') return gone(written.status, written.code, `${peerText(written.error, { max: RDF_IMPORT_ADDRESS_MAX })}.`, written.detail);
-    notice = written.notice;
-    await knobs.hooks?.afterSchemaWrite?.();
-    if (storedFingerprint(spaceId) !== plan.fingerprint) {
-      return gone(HTTP.CONFLICT, SCHEMA_RDF_CHANGED, 'the schema stored after its write is not the one the data was judged by.');
-    }
-  }
-  const space = getConfig().spaces.find(s => s.id === spaceId);
-  if (!space) return gone(HTTP.NOT_FOUND, 'space_not_found', 'the space is gone.');
-  run.planSchema = structuredClone(space.meta?.typeSchemas ?? {});
-  state.planSchema = run.planSchema;
-  run.planMeta = planMetaFor(spaceId, run.planSchema);
-  run.builder.report.schema = {
-    written: plan.changes > 0, typesAdded: step.typesAdded.slice(0, SCHEMA_TYPES_NAMED_MAX), typesChanged: step.typesChanged.slice(0, SCHEMA_TYPES_NAMED_MAX),
-    typesAddedCount: step.typesAdded.length, typesChangedCount: step.typesChanged.length,
-    fingerprintBefore: step.fingerprintBefore, fingerprintAfter: schemaFingerprintOf(space), notice,
-    ...(state.caller?.id !== undefined ? { caller: state.caller.id } : {}),
-  };
-  return null;
-}
-
 /**
  * The one line the end of an import leaves in the log (lens finding L6): the import, its space and counts, never an address or a value of a record (the
  * report keeps those, behind the status door's rung). The act is counted by the runner (`ythril_space_acts_total{kind="rdf-import"}`: an import that wrote
@@ -682,45 +590,30 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
     spaceId: entry.localId, folder, builder: new ReportBuilder(state.report), state, commit: true, planSchema: state.planSchema ?? {}, planMeta: null,
   };
   // An import with `schema` set (Q-955) carries its proposal in its own file; a state written before the schema step existed carries none.
-  let step: SchemaStepFile | null = null;
-  if (state.schemaStep) {
-    try { step = await readSchemaStep(folder); } catch (err) {
-      if (isMissingPath(err) || err instanceof SyntaxError) return gone(HTTP.UNPROCESSABLE, RDF_IMPORT_STATE_UNREADABLE, 'its schema step can no longer be read.');
-      throw err;
-    }
-  }
+  // An import with `schema` set (Q-955) carries its proposal in its own file (`rdf-import-schema-step.ts`); a state written before had none.
+  const step = await schemaStepOfFolder(folder, state);
+  if (step?.kind === 'ended') return gone(step.status, step.code, step.why);
   // The space's RDF state is asked before the dry plan only: once the first window is committed nothing ends the act but finishing.
   if (state.phase === 'received' || state.phase === 'translated') {
     const space = rdfSpaceState(getConfig(), entry.localId, undefined, schemaFingerprintOf);
-    if (!space.ok) {
-      // The schema step already wrote its schema (a resume): ending the act now would leave the schema written and no data, so it is owed.
-      if (state.schemaStep && storedFingerprint(entry.localId) === state.schemaStep.fingerprint) {
-        throw new Error(`RDF is not usable on space '${entry.localId}' now (${space.code}), and the import already wrote its schema: it is tried again.`);
-      }
-      return gone(space.status, space.code, `RDF is no longer usable on the space (${space.code}).`);
-    }
+    const blocked = schemaStepBlocks(state, entry.localId, space.ok ? null : space.code);
+    if (blocked) return gone(blocked.status, blocked.code, blocked.why);
+    if (!space.ok) return gone(space.status, space.code, `RDF is no longer usable on the space (${space.code}).`);
     if (state.phase === 'received') {
       // What the door sorted the file by is compared with what the space says now: a schema the network decided can have moved the base after the act
       // was registered. Before the first window that ends the act (the sort and the record count were made by the old addressing); after it nothing does.
       if (state.sortedBy && (space.meta.rdf?.base !== state.sortedBy.base || space.meta.rdf?.vocab !== state.sortedBy.vocab)) {
         return gone(HTTP.CONFLICT, RDF_IMPORT_SPACE_CHANGED, 'the space\'s RDF base or vocabulary changed after the file was read.');
       }
-      // The proposal was built on the schema of one version: a schema stored since (a round passed, a layer arrived) ends the act before it reads a record.
-      if (state.schemaStep && storedVersion(entry.localId) !== state.schemaStep.version) {
-        return gone(HTTP.CONFLICT, RDF_IMPORT_SPACE_CHANGED, 'the space\'s schema changed after the file was read, and the schema the file builds was proposed against the old one.');
-      }
       // The meta, the mode and the type schemas are read once, now that the space is held, and kept: the translation, the dry plan and every commit
       // window judge by this one read. With a schema step they are the proposal's (stored form for the planners; resolved for the translation's names).
       state.options = { ...state.options, mode: space.meta.validationMode ?? 'off' };
-      state.planSchema = structuredClone(step ? step.merged : space.meta.typeSchemas ?? {});
-      run.planSchema = state.planSchema;
       const groups = reopenSortedGroups(folder, state.sortedFile);
-      const meta = step ? inlineResolvableRefs({ ...space.meta, typeSchemas: step.merged } as SpaceMeta) : space.meta;
-      const skip = step ? (await schemaGroupsOf(groups, blankGroupKey, null) as { keys: Set<string> }).keys : undefined;
+      const by = step ? await translationBy(step.merged, space.meta, groups) : { planSchema: structuredClone(space.meta.typeSchemas ?? {}), meta: space.meta };
+      state.planSchema = by.planSchema;
+      run.planSchema = state.planSchema;
       try {
-        await translateStage({
-          spaceId: entry.localId, folder, meta, options: state.options, groups, builder: run.builder, ...(skip ? { skip } : {}),
-        });
+        await translateStage({ spaceId: entry.localId, folder, meta: by.meta, options: state.options, groups, builder: run.builder, ...('skip' in by ? { skip: by.skip } : {}) });
       } catch (err) {
         if (err instanceof RdfImportBoundExceeded) return gone(HTTP.TOO_LARGE, err.code, `the file is over the import's bound ${err.bound} (${err.limit}).`);
         throw err;
@@ -732,7 +625,15 @@ async function rdfImportBody({ entry }: { entry: Readonly<SpaceActEntry> }): Pro
       run.planSchema = state.planSchema;
     }
   }
-  if (step && state.schemaStep) run.schemaStep = () => schemaStepOfAct(run, state, step, gone);
+  // The schema written once after the dry plan passed; the planners then judge and stamp by the stored schema.
+  if (step) run.schemaStep = async () => {
+    const done = await writeSchemaOfAct({ spaceId: entry.localId, state, step, ...(knobs.hooks ? { hooks: knobs.hooks } : {}) });
+    if (done.kind === 'ended') return gone(done.status, done.code, done.why, done.detail);
+    run.planSchema = state.planSchema = done.typeSchemas;
+    run.planMeta = planMetaFor(entry.localId, run.planSchema);
+    run.builder.report.schema = done.report;
+    return null;
+  };
   const outcome = await planAndCommit(run);
   if (outcome === 'refused') return refused(run);
   if (typeof outcome === 'object') return outcome.ended;
@@ -807,111 +708,8 @@ class SpaceChangedUnderDoor extends Error {
   constructor(readonly what: 'base' | 'schema') { super(`the space's ${what} changed under the door`); }
 }
 
-/** What an import with `schema` asks for: the schema door's mode, and the declarations it reads. */
-interface SchemaAsked { mode: SchemaMode; from: SchemaSource[] }
-
-/** The schema the door built: the proposal, the type schemas the space holds after it (stored form), the groups it came from, what the report says. */
-interface DoorSchema {
-  kind: 'built';
-  proposal: SchemaProposal;
-  merged: SpaceMeta['typeSchemas'];
-  keys: Set<string>;
-  report: Omit<RdfImportSchemaReport, 'written'>;
-}
-
-/** The `kind:type` names of the types `proposal` adds, and of those it changes. */
-function typeNamesOf(proposal: SchemaProposal): { added: string[]; changed: string[] } {
-  const added = new Set<string>();
-  const all = new Set<string>();
-  for (const c of proposal.answer.changes) {
-    const name = `${c.kind}:${c.type}`;
-    all.add(name);
-    if (c.change === 'add-type') added.add(name);
-  }
-  return { added: [...added], changed: [...all].filter(n => !added.has(n)) };
-}
-
-/** The caller as an act with a schema step keeps it: its id (and whether that is a stored token's), its rights, its legacy admin flag. */
-function callerSnapshotOf(caller: RdfCaller | undefined): NonNullable<ActState['caller']> {
-  const id = caller?.id;
-  return {
-    ...(id !== undefined ? { id } : {}), ...(caller?.rights !== undefined ? { rights: caller.rights } : {}), ...(caller?.admin === true ? { admin: true } : {}),
-    stored: id !== undefined && getConfig().tokens.some(t => t.id === id),
-  };
-}
-
-/**
- * The door's half of the schema option (Q-955): the file's schema groups collected within the schema door's quad bound (413 past it, before the
- * mapping), the proposal made under the file's one source base, and judged as its write would be (the rungs, the planner); a space whose write
- * would be a vote is refused carrying the proposal, its dry run answered. Graph addresses a refusal names are capped and said as peer text.
- */
-async function schemaAtDoor(
-  spaceId: string, caller: RdfCaller | undefined, options: ImportOptions, groups: () => AsyncGenerator<QuadGroup, void, undefined>, schema: SchemaAsked,
-  dryRun: boolean,
-): Promise<DoorSchema | RdfImportRefusal> {
-  const bases = new Set(Object.values(options.graphBases));
-  if (options.source) bases.add(options.source.base);
-  if (bases.size > 1) {
-    return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_SEVERAL_GRAPHS, `schema: the file's graphs are read under ${bases.size} source bases, and a schema is built under one: `
-      + 'import its schema with one base, or one graph at a time; nothing was imported', {
-      graphBases: Object.keys(options.graphBases).slice(0, RDF_IMPORT_GRAPH_BASES_MAX).map(g => peerText(g, { max: RDF_IMPORT_ADDRESS_MAX })),
-    });
-  }
-  const max = knobs.schemaMaxQuads ?? SCHEMA_RDF_MAX_QUADS;
-  const found = await schemaGroupsOf(groups, blankGroupKey, max);
-  if (found.kind === 'over') {
-    return refusal(HTTP.TOO_LARGE, 'rdf_bound_exceeded', `The file holds more than ${max} schema statements, the most a schema holds; nothing was imported`, { bound: SCHEMA_QUAD_BOUND, limit: max });
-  }
-  const proposal = proposeSchemaFromRdf(spaceId, found.quads, { from: schema.from, mode: schema.mode, ...(options.source ? { source: options.source } : {}) });
-  if (proposal.kind === 'refused') return proposal;
-  const proposed = (): ReturnType<typeof proposedBodyOf> => proposedBodyOf(spaceId, { mode: schema.mode, dryRun }, schema.from, options.format, proposal);
-  // Whether the space is in a network is not asked here: the act's write asks it, in the step that applies (`refuseIfNetworked`), and its refusal
-  // carries the proposal; a dry run, which writes nothing, is answered on a networked space as anywhere.
-  const judged = judgeSchemaProposal(spaceId, proposal, caller, proposed);
-  if (judged.kind === 'refused') return judged;
-  const names = typeNamesOf(proposal);
-  return {
-    kind: 'built', proposal, merged: judged.merged, keys: found.keys,
-    report: {
-      typesAdded: names.added.slice(0, SCHEMA_TYPES_NAMED_MAX), typesChanged: names.changed.slice(0, SCHEMA_TYPES_NAMED_MAX),
-      typesAddedCount: names.added.length, typesChangedCount: names.changed.length,
-      fingerprintBefore: storedFingerprint(spaceId),
-      fingerprintAfter: judged.mergedMeta ? schemaFingerprintOf({ meta: judged.mergedMeta }) : storedFingerprint(spaceId),
-      notice: {},
-    },
-  };
-}
-
-const RDF_TYPE = stdIri('rdf', 'type').value;
-const REPORT_CLASS = ythrilIri('ExportReport');
-const HAS_PART = stdIri('dcterms', 'hasPart').value;
-
-/** The graphs a file names, and which of them only describe the file (an export's description graph). */
-interface GraphsSeen { order: string[]; describing: Set<string>; inDefaultGraph: boolean }
-
-/** `quads` passed on unchanged, with the graphs they name noted in `seen`. */
-async function* noteGraphs(quads: AsyncIterable<Quad>, seen: GraphsSeen): AsyncGenerator<Quad, void, undefined> {
-  const known = new Set<string>();
-  for await (const q of quads) {
-    const g = q.graph?.value;
-    if (g === undefined) seen.inDefaultGraph = true;
-    else {
-      if (!known.has(g)) { known.add(g); seen.order.push(g); }
-      if (q.predicate.value === HAS_PART || (q.predicate.value === RDF_TYPE && q.object.kind === 'iri' && q.object.value === REPORT_CLASS)) seen.describing.add(g);
-    }
-    yield q;
-  }
-}
-
 /** A door is reading a file into its spool: one at a time, instance-wide, from before the first byte until its act is registered or it answered. */
 let doorHeld = false;
-
-/** The data graphs a file names that have no source base, when it names several (a view's export): refused unless each has its base (A8). */
-function graphsWithoutBase(seen: GraphsSeen, options: ImportOptions): string[] {
-  const data = seen.order.filter(g => !seen.describing.has(g));
-  if (data.length <= 1) return [];
-  return data.filter(g => !Object.hasOwn(options.graphBases, g));
-}
 
 /**
  * Run an RDF import for a door. Never throws for a caller's mistake: every refusal is an answer. A fault that is not the caller's (the store,
@@ -921,13 +719,9 @@ export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnsw
   const parsed = RdfImportParams.safeParse(paramsOf(input.params));
   if (!parsed.success) return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_BAD_PARAM, refusalOfParse(parsed.error).error);
   const p = parsed.data;
-  const schema = p.schema === undefined || p.schema === 'none' ? null : { mode: p.schema as SchemaMode, from: [...(p.from ?? SCHEMA_RDF_FROM_DEFAULT)] };
-  if (p.from !== undefined && schema === null) {
-    return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_BAD_PARAM, 'from: names what a schema is read from, and is sent with schema (generate, expand or update); leave it out to import the data alone');
-  }
-  if (schema?.from.includes('data')) {
-    return refusal(HTTP.BAD_REQUEST, RDF_IMPORT_SCHEMA_NOT_AVAILABLE, 'from: data: a schema read from the records themselves is not available yet; read it from the file\'s classes and shapes (from: declared, shacl, the default)');
-  }
+  // `schema` and `from` (Q-955): `from` without `schema`, and `from: data`, are refused by the step's one judgement.
+  const schema = schemaAskedOf(p.schema, p.from);
+  if (schema?.kind === 'refused') return schema;
   const cfg = getConfig();
   // The one existence rule: an id that is not a configured space (a view included: an import writes into a space) is answered as missing.
   const unknown = unknownSpaceAnswer(null, input.spaceId, false, cfg);
@@ -972,7 +766,7 @@ export async function rdfImportAct(input: RdfImportInput): Promise<RdfImportAnsw
   let released = false;
   const releaseDoor = (): void => { if (!released) { released = true; doorHeld = false; } };
   try {
-    return await readAndRun(input, options, state.meta, p.dryRun === true, releaseDoor, schema as SchemaAsked | null);
+    return await readAndRun(input, options, state.meta, p.dryRun === true, releaseDoor, schema);
   } finally {
     releaseDoor();
   }
@@ -1011,7 +805,9 @@ async function readAndRun(
     }
     // The schema the file builds (Q-955), proposed now that the source base is settled, and judged as its write would be: a refusal here writes
     // nothing and registers nothing.
-    const built = schema ? await schemaAtDoor(input.spaceId, input.caller, options, sorted.groups, schema, dryRun) : null;
+    const built = schema
+      ? await schemaAtDoor({ spaceId: input.spaceId, caller: input.caller, options, groups: sorted.groups, schema, dryRun, maxQuads: knobs.schemaMaxQuads })
+      : null;
     if (built?.kind === 'refused') return built;
     // The records the file will make, subjects and bare edges, counted from the spool alone: a file that cannot fit is answered 413 here.
     await assertRecordsWithinBound(sorted.groups(), namesByGraph(meta, options), sorted.subjects, knobs.maxRecords);
@@ -1022,31 +818,18 @@ async function readAndRun(
     };
     if (dryRun) {
       // Inline: a dry run registers no act and holds nothing, so its translation reads the store as it is when it reads it.
-      const run: Run = {
-        spaceId: input.spaceId, folder, builder: new ReportBuilder(report), state: null, commit: false, planSchema: built ? built.merged : meta.typeSchemas ?? {}, planMeta: null,
-      };
       if (built) report.schema = { ...built.report, written: false };
-      await translateStage({
-        spaceId: input.spaceId, folder, meta: built ? inlineResolvableRefs({ ...meta, typeSchemas: built.merged } as SpaceMeta) : meta, options,
-        groups: sorted.groups, builder: run.builder, ...(built ? { skip: built.keys } : {}),
-      });
+      const by = built ? await translationBy(built.merged, meta, sorted.groups, built.keys) : { planSchema: meta.typeSchemas ?? {}, meta };
+      const run: Run = { spaceId: input.spaceId, folder, builder: new ReportBuilder(report), state: null, commit: false, planSchema: by.planSchema, planMeta: null };
+      await translateStage({ spaceId: input.spaceId, folder, meta: by.meta, options, groups: sorted.groups, builder: run.builder, ...('skip' in by ? { skip: by.skip } : {}) });
       const outcome = run.builder.refused ? 'refused' : await planAndCommit(run);
       const done = { ...run.builder.report, endedAt: new Date().toISOString() };
       return outcome === 'refused' ? refusedAnswer({ ...done, status: 'refused' }) : { kind: 'report', status: HTTP.OK, report: done };
     }
-    if (built) {
-      await writeSchemaStep(folder, {
-        changed: built.proposal.changed as SchemaStepFile['changed'], merged: built.merged, typesAdded: built.report.typesAdded,
-        typesChanged: built.report.typesChanged, fingerprintBefore: built.report.fingerprintBefore,
-      });
-    }
     await writeState(folder, {
       importId, space: input.spaceId, options, sortedFile: sorted.file, phase: 'received', committed: 0, report,
       sortedBy: { ...(meta.rdf?.base !== undefined ? { base: meta.rdf.base } : {}), ...(meta.rdf?.vocab !== undefined ? { vocab: meta.rdf.vocab } : {}) },
-      ...(built ? {
-        schemaStep: { version: built.proposal.version, fingerprint: built.report.fingerprintAfter, changes: built.proposal.answer.changes.length },
-        caller: callerSnapshotOf(input.caller),
-      } : {}),
+      ...(built ? await keepSchemaStep(folder, built, input.caller) : {}),
     });
     await keepReport(report);
     kept = report;
