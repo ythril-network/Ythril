@@ -6,6 +6,8 @@
  *
  * - A dry run and a build need `schema: write` (amendment A10, as the data import's dry run): below it the rights guard refuses, naming the
  *   rung. A file whose shapes give a type rules needs `schema: admin` (the settings write's field rungs, `schema_rdf_rung`), naming the rules.
+ * - A dry run is refused what its build is refused (Q-754 R1): a file whose shapes give a type rules is `schema_rdf_rung` by a `schema: write`
+ *   token for a dry run as for a build, so a dry run never promises a build the write then refuses.
  * - A read-only token is turned away on a dry run too (both doors are writes); a peer-bound token is refused on both doors as `import_rdf`
  *   refuses it; a token of another space reaches nothing.
  * - Nothing a refused call names is stored.
@@ -28,7 +30,8 @@ const SOURCE_TYPES = { entity: { person: { propertySchemas: { age: { type: 'numb
 const RULED_TYPES = { entity: { person: { propertySchemas: { age: { type: 'number' } }, rules: { described: { rule: 'size(self.description) > 0', message: 'a description is needed' } } } } };
 /** The write rung of the schema area named, in either door's words. */
 const WRITE_RUNG = /'write' on schema|schema: write/;
-const TARGETS = [TARGET, ...Object.values(WRITE), ...Object.values(RULES)];
+const DRY = { rest: 'srdfrungdr', mcp: 'srdfrungdm' };
+const TARGETS = [TARGET, ...Object.values(WRITE), ...Object.values(RULES), ...Object.values(DRY)];
 
 describe('the schema-from-RDF door is held to its rungs on both doors (real routes, real MongoDB)', { skip, timeout: 300_000 }, () => {
   let d, admin, file, ruledFile;
@@ -98,6 +101,15 @@ describe('the schema-from-RDF door is held to its rungs on both doors (real rout
     assert.equal(ruled.rest.code, 'schema_rdf_rung');
     const byAdmin = await d.buildRest(admin.key, RULES.rest, ruledFile, { params: params({ sourceBase: baseOf(RULED) }) });
     assert.equal(byAdmin.status, 200, `the same file by an administrator: ${byAdmin.text.slice(0, 300)}`);
+  });
+
+  it('with schema: write, a dry run of a file whose shapes give rules is refused as its build is (schema_rdf_rung); an administrator\'s is answered', async () => {
+    const dry = await d.both(tokens.writer.key, [DRY.rest, DRY.mcp], ruledFile, params({ sourceBase: baseOf(RULED), dryRun: true }));
+    refusedOnBoth(dry, DRY.rest, 'ruled dry run with schema: write', { text: /rules/ });
+    assert.equal(dry.rest.code, 'schema_rdf_rung', `REST: ${dry.rest.text.slice(0, 300)}`);
+    assert.equal(dry.mcp.code, 'schema_rdf_rung', `MCP: ${dry.mcp.text.slice(0, 300)}`);
+    const byAdmin = await d.buildRest(admin.key, DRY.rest, ruledFile, { params: params({ sourceBase: baseOf(RULED), dryRun: true }) });
+    assert.equal(byAdmin.status, 200, `the same dry run by an administrator: ${byAdmin.text.slice(0, 300)}`);
   });
 
   it('a read-only token is refused on a dry run, on both doors', async () => {
