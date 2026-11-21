@@ -348,6 +348,38 @@ function effectiveMetaAfterEdit(cfg: Config, space: SpaceConfig, edit: {
 }
 
 /**
+ * The refusal (422 `rdf_term_clash`) of a schema edit that would give two terms of an RDF space one address, both named (Q-748 rule 5), or
+ * undefined. Asked of the schema the space RUNS after the edit, resolved as the resolver names it: its own definitions laid under each
+ * network's layer, so an own type cannot take an address a layer's type already has (the review's suspicion, proven). A space with RDF off
+ * names nothing, so nothing is asked, and the config (the layers, the library's namespaces) is read only for a space with RDF on.
+ *
+ * The one check every schema write asks before it stores: the planner, and the routes that write named types through `commitOwnMetaEdit`
+ * ({@link termClashRefusalOfOwnTypeEdit}), which stored a clash the planner refused until they asked it (Q-754).
+ */
+export function termClashRefusalAfterEdit(space: SpaceConfig, edit: {
+  base: Partial<SpaceMeta>; incoming: Partial<SpaceMeta>; mode: 'merge' | 'replace'; merged: ParsedSpaceMeta; targetNetwork: string | undefined;
+}): MetaUpdateRefusal | undefined {
+  const runs = edit.merged.rdf?.enabled === true || space.meta?.rdf?.enabled === true ? effectiveMetaAfterEdit(getConfig(), space, edit) : undefined;
+  if (runs?.rdf?.enabled !== true || !runs.rdf.base) return undefined;
+  const clashes = termClashes(inlineResolvableRefs(runs), Object.values(getConfig().schemaLibraryNamespaces ?? {}));
+  if (clashes.length === 0) return undefined;
+  return { status: TERM_CLASH_STATUS, body: { error: `two terms of this space would have one RDF address: ${clashes.map(c => c.message).join('; ')}`, code: 'rdf_term_clash' } };
+}
+
+/**
+ * {@link termClashRefusalAfterEdit} for a write of named types to this instance's own definitions (`PUT /api/spaces/:id/schema` in `replace`: the
+ * map replaces the stored one; the per-type upsert in `merge`: its type is laid over it), merged over the base the planner merges over. A map the
+ * store's parse refuses is answered by the route's own parse, never here: undefined.
+ */
+export function termClashRefusalOfOwnTypeEdit(space: SpaceConfig, typeSchemas: SpaceMeta['typeSchemas'], mode: 'merge' | 'replace'): MetaUpdateRefusal | undefined {
+  const base: Partial<SpaceMeta> = metaWriteBase(space, undefined, []) ?? {};
+  const incoming: Partial<SpaceMeta> = { typeSchemas };
+  const minted = parseSpaceMeta(mergeSpaceMeta(base, incoming, mode), { against: base });
+  if (!minted.ok) return undefined;
+  return termClashRefusalAfterEdit(space, { base, incoming, mode, merged: minted.meta, targetNetwork: undefined });
+}
+
+/**
  * The effective meta of `space` on the proposer once the round a networked edit opens has passed here (`Q-745`, lens sweep S2): the schema a
  * conversion step is held to as the proposer's own conclusion holds it (`planPassedMetaChange`), so the save refuses exactly what that conclusion
  * would refuse.
@@ -610,21 +642,10 @@ export function planSpaceMetaUpdate(input: {
     const minted = parseSpaceMeta(mergeSpaceMeta(base, parsed.data.meta, parsed.data.typeSchemasMode ?? 'merge'), { against: base });
     if (!minted.ok) return { ok: false, refusal: { status: 400, body: { error: minted.message } } };
     mergedMeta = minted.meta;
-    // Q-748 rule 5: on a space with RDF on, two terms with one address are refused, both named. Asked of the schema the space RUNS after the
-    // edit, resolved as the resolver names it: its own definitions laid under each network's layer, so an own type cannot take an address a
-    // layer's type already has (the review's suspicion, proven). A space with RDF off names nothing, so nothing is asked.
-    // The layers are read only for a space with RDF on (its own setting is what the effective meta keeps): any other write asks nothing of the config.
-    const runs = mergedMeta.rdf?.enabled === true || space.meta?.rdf?.enabled === true
-      ? effectiveMetaAfterEdit(getConfig(), space, {
-        base, incoming: parsed.data.meta as Partial<SpaceMeta>, mode: parsed.data.typeSchemasMode ?? 'merge', merged: mergedMeta, targetNetwork,
-      })
-      : undefined;
-    if (runs?.rdf?.enabled === true && runs.rdf.base) {
-      const clashes = termClashes(inlineResolvableRefs(runs), Object.values(getConfig().schemaLibraryNamespaces ?? {}));
-      if (clashes.length > 0) {
-        return { ok: false, refusal: { status: TERM_CLASH_STATUS, body: { error: `two terms of this space would have one RDF address: ${clashes.map(c => c.message).join('; ')}`, code: 'rdf_term_clash' } } };
-      }
-    }
+    const clash = termClashRefusalAfterEdit(space, {
+      base, incoming: parsed.data.meta as Partial<SpaceMeta>, mode: parsed.data.typeSchemasMode ?? 'merge', merged: mergedMeta, targetNetwork,
+    });
+    if (clash) return { ok: false, refusal: clash };
   }
   /*
    * What the audit log says about the schema (R6-13): the types, properties and rules as the edit LEAVES them against what it was merged

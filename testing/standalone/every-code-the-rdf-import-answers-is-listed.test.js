@@ -6,8 +6,9 @@
  *
  * The list (`RDF_IMPORT_REFUSAL_CODES`, which the tool's description counts) and the guide's table were written by hand beside the answers, and
  * nine codes the doors answer were in neither, and one answer was a code with a space in it. The codes are derived here from the sources that
- * can answer them, never from the list under test: the act's own `refusal(...)` calls (a literal, or a constant it names), the reader's refusal
- * codes (`RdfRefusalCode`), the space state's codes (`RdfSpaceState`) and the existence rule's. A code the sources answer and the list lacks
+ * can answer them, never from the list under test: the `refusal(...)` calls (a literal, or a constant it names) of the act and of the RDF
+ * document front half it shares with the schema-from-RDF door (`rdf/rdf-document.ts`, Q-754: a code that moved there and left the list
+ * fails here as one the act still answers), the reader's refusal codes (`RdfRefusalCode`), the space state's codes (`RdfSpaceState`) and the existence rule's. A code the sources answer and the list lacks
  * fails; so does a code in the list that no source answers, one spelled with a space or capitals, and one the guide's import section omits.
  *
  * Run: node --test testing/standalone/every-code-the-rdf-import-answers-is-listed.test.js
@@ -24,19 +25,23 @@ const read = (rel) => fs.readFileSync(`${root}/${rel}`, 'utf8').replaceAll('\r\n
 const code = (rel) => stripComments(read(rel));
 
 const ACT = 'server/src/spaces/rdf-import-act.ts';
-const act = code(ACT);
+/** The RDF document's front half (format, encoding, the refusal of a body that cannot be read), which the act calls (Q-754). */
+const DOCUMENT = 'server/src/rdf/rdf-document.ts';
+const document = code(DOCUMENT);
+/** Every source whose refusals the import's doors answer, read as one: the act, and the front half it hands the body to. */
+const act = `${code(ACT)}\n${document}`;
 const consts = (src) => Object.fromEntries([...src.matchAll(/(?:export )?const ([A-Z][A-Z0-9_]*)\s*=\s*'([^']+)'/g)].map(m => [m[1], m[2]]));
 const all = { ...consts(act), ...consts(code('server/src/rdf/rdf-space-state.ts')), ...consts(code('server/src/spaces/rdf-settle.ts')) };
 
-/** What a `refusal(HTTP.X, <code>, ...)` call or a `code: <code>` of a refusal names, in the act. */
-function answeredByTheAct() {
+/** What a `refusal(HTTP.X, <code>, ...)` call or a `code: <code>` of a refusal names, in `src` (the act and its front half by default). */
+function answeredByTheAct(src = act) {
   const found = new Set();
-  for (const m of act.matchAll(/\brefusal\(\s*[^,()]+,\s*(?:'([^']+)'|([A-Z][A-Z0-9_]*)(?=\s*,)|([a-z][\w.]*(?:\([^)]*\))?))/g)) {
+  for (const m of src.matchAll(/\brefusal\(\s*[^,()]+,\s*(?:'([^']+)'|([A-Z][A-Z0-9_]*)(?=\s*,)|([a-z][\w.]*(?:\([^)]*\))?))/g)) {
     if (m[1]) found.add(m[1]);
     else if (m[2]) { assert.ok(all[m[2]], `the constant ${m[2]} a refusal names is a string constant`); found.add(all[m[2]]); }
   }
   // An act that ends for good (`gone(status, code, why)`) is answered by that status and code from its report.
-  for (const m of act.matchAll(/\bgone\(\s*[^,()]+,\s*(?:'([^']+)'|([A-Z][A-Z0-9_]*)(?=\s*,))/g)) {
+  for (const m of src.matchAll(/\bgone\(\s*[^,()]+,\s*(?:'([^']+)'|([A-Z][A-Z0-9_]*)(?=\s*,))/g)) {
     if (m[1]) found.add(m[1]);
     else if (m[2]) { assert.ok(all[m[2]], `the constant ${m[2]} an ended act names is a string constant`); found.add(all[m[2]]); }
   }
@@ -73,6 +78,14 @@ describe('every code the RDF import answers is listed', () => {
       assert.ok(answered.has(c), `${c} is among the codes derived from the sources`);
     }
     assert.ok(answered.size >= 14, `the derivation found ${answered.size} codes`);
+  });
+
+  it('the front half the act shares answers its own refusals, and they are among the codes derived (a source not read answers nothing)', () => {
+    const own = answeredByTheAct(document);
+    for (const c of ['rdf_unsupported_format', 'rdf_unsupported_encoding', 'rdf_import_upload_stalled', 'rdf_bound_exceeded']) {
+      assert.ok(own.has(c), `${c} is answered by ${DOCUMENT}`);
+      assert.ok(answered.has(c), `${c} is among the codes derived from the sources`);
+    }
   });
 
   it('every answered code is in RDF_IMPORT_REFUSAL_CODES, and the list names nothing nobody answers', () => {

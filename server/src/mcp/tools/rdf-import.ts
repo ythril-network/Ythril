@@ -14,6 +14,7 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { TOOL_REFUSAL_STATUSES, toolRefusalOfAct } from '../../util/errors.js';
 import { JSON_BODY_MAX_BYTES } from '../../config/body-limits.js';
 import { RDF_FORMATS } from '../../rdf/serialize.js';
+import { inlineRdfDocument } from '../../rdf/rdf-document.js';
 import {
   rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, runningBodyOf, RDF_IMPORT_REASONS_NAMED_MAX, RDF_IMPORT_REFUSAL_CODES, type RdfImportRefusal,
   RDF_IMPORT_ADDRESS_MAX, RDF_IMPORT_GRAPH_BASES_MAX, RDF_IMPORT_GRAPH_BASE_MIN_CHARS, RDF_IMPORT_GRAPH_BASE_MAX_CHARS,
@@ -24,10 +25,6 @@ function refusalOf(r: RdfImportRefusal): Error {
   // A status the tool does not carry (the storage limit's 507) is an error result in the act's own sentence and code, as the fact tool's is.
   if (!(TOOL_REFUSAL_STATUSES as readonly number[]).includes(r.status)) return new Error(`${r.error} (${r.code})`);
   return toolRefusalOfAct(r.status as Parameters<typeof toolRefusalOfAct>[0], r.error, { error: r.error, code: r.code, ...(r.detail ?? {}) });
-}
-
-async function* inline(text: string): AsyncGenerator<string, void, undefined> {
-  yield text;
 }
 
 export const import_rdfTool: ToolHandler = {
@@ -68,7 +65,7 @@ export const import_rdfTool: ToolHandler = {
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const { document, ...params } = ctx.args as Record<string, unknown>;
     const answer = await rdfImportAct({
-      spaceId: ctx.callSpace, params, body: inline(typeof document === 'string' ? document : ''), caller: ctx.callerRecord ?? { rights: ctx.rights ?? null },
+      spaceId: ctx.callSpace, params, body: inlineRdfDocument(typeof document === 'string' ? document : ''), caller: ctx.callerRecord ?? { rights: ctx.rights ?? null },
     });
     if (answer.kind === 'running') {
       const running = runningBodyOf(answer);

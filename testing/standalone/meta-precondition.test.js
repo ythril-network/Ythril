@@ -126,11 +126,16 @@ describe('If-Match — both meta-writing routes check it, and check it FIRST', (
   const DELEGATES = (() => {
     const names = [];
     const re = /import\s+\{([^}]+)\}\s+from\s+'(\.\.?\/[^']+)\.js'/g;
+    // A module checks the precondition itself, or hands the caller's If-Match to the planner, which does (the settings write act, Q-754:
+    // PATCH reaches the planner through it, so it is a delegate only while it passes `ifMatch` on to `planSpaceMetaUpdate`).
+    const checks = (text) => /checkMetaPrecondition\(/.test(text)
+      || (/import\s+\{[^}]*\bplanSpaceMetaUpdate\b[^}]*\}\s+from\s+'\.\/meta-update\.js'/.test(text)
+        && /planSpaceMetaUpdate\(\{[^}]*\bifMatch: input\.ifMatch\b/.test(text));
     let m;
     while ((m = re.exec(src)) !== null) {
       let text;
       try { text = readFileSync(new URL(`../../server/src/api/${m[2]}.ts`, import.meta.url), 'utf8'); } catch { continue; }
-      if (!/checkMetaPrecondition\(/.test(text)) continue;
+      if (!checks(text)) continue;
       for (const raw of m[1].split(',')) {
         const name = raw.trim().split(/\s+as\s+/).pop().trim();
         if (name) names.push(name);
@@ -144,7 +149,7 @@ describe('If-Match — both meta-writing routes check it, and check it FIRST', (
     ['checkMetaPrecondition\\(', ...DELEGATES.map(n => `\\b${n}\\s*\\(`)].join('|'), 'g');
 
   it('the delegate that owns the chain was found — or every check below is vacuous', () => {
-    assert.ok(DELEGATES.includes('planSpaceMetaUpdate'),
+    assert.ok(DELEGATES.includes('writeSpaceMeta'),
       `no imported module checks the precondition; found ${JSON.stringify(DELEGATES)}. If the planner was `
       + 're-pointed or stopped checking, fix that rather than this list.');
   });
@@ -248,8 +253,9 @@ describe('If-Match — both meta-writing routes check it, and check it FIRST', (
     // point — a delegation that reordered either half would fail here rather than in whichever suite noticed the
     // audit log had grown an entry for a write that never happened.
     const patchAt = src.indexOf("spacesRouter.patch('/:id',");
-    const planAt = src.indexOf('planSpaceMetaUpdate(', patchAt);
-    const refusalAt = src.indexOf('decision.refusal.status', patchAt);
+    // The plan is the settings write act's (`writeSpaceMeta`, which plans before it applies and answers a refusal as a value).
+    const planAt = src.indexOf('writeSpaceMeta(', patchAt);
+    const refusalAt = src.indexOf("answer.kind === 'refused'", patchAt);
     const snapshotAt = src.indexOf('req.auditSnapshots', patchAt);
     assert.ok(planAt > 0 && refusalAt > 0 && snapshotAt > 0, 'the PATCH handler no longer has the shape this reads');
     assert.ok(planAt < refusalAt && refusalAt < snapshotAt,

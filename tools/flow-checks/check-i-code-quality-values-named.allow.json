@@ -1,8 +1,8 @@
 [
   {
     "id": "unnamed-literals:server/src",
-    "max": 2235,
-    "reason": "the server carries 2235 number literals other than 0 and 1 outside a named declaration (status codes, byte sizes, retry counts); naming them is its own large change, so the count may not grow while it is done. Lowered from main's 2241 to its measure on bundle-269 rebased onto main 3930734f8: the RDF exports name their statuses (export/export-statuses.ts) and ToolRefusal's statuses are one named list",
+    "max": 2234,
+    "reason": "the server carries 2234 number literals other than 0 and 1 outside a named declaration (status codes, byte sizes, retry counts); naming them is its own large change, so the count may not grow while it is done. Lowered from 2235 to its measure by bundle-270 Q-754 slice A: the per-type route's type cap moved into spaces/types-added-past-cap.ts with its status named. Lowered from main's 2241 to its measure on bundle-269 rebased onto main 3930734f8: the RDF exports name their statuses (export/export-statuses.ts) and ToolRefusal's statuses are one named list",
     "reviewBy": "2027-02-18"
   },
   {
