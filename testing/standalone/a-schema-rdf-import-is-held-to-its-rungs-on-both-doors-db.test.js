@@ -26,6 +26,8 @@ const WRITE = { rest: 'srdfrungwr', mcp: 'srdfrungwm' };
 const RULES = { rest: 'srdfrungrr', mcp: 'srdfrungrm' };
 const SOURCE_TYPES = { entity: { person: { propertySchemas: { age: { type: 'number' } } } } };
 const RULED_TYPES = { entity: { person: { propertySchemas: { age: { type: 'number' } }, rules: { described: { rule: 'size(self.description) > 0', message: 'a description is needed' } } } } };
+/** The write rung of the schema area named, in either door's words. */
+const WRITE_RUNG = /'write' on schema|schema: write/;
 const TARGETS = [TARGET, ...Object.values(WRITE), ...Object.values(RULES)];
 
 describe('the schema-from-RDF door is held to its rungs on both doors (real routes, real MongoDB)', { skip, timeout: 300_000 }, () => {
@@ -70,9 +72,10 @@ describe('the schema-from-RDF door is held to its rungs on both doors (real rout
 
   it('with schema: read, a dry run and a build are both refused, naming schema: write (amendment A10: a dry run needs the write rung)', async () => {
     const dry = await d.both(tokens.reader.key, TARGET, file, params({ dryRun: true }));
-    refusedOnBoth(dry, TARGET, 'dry run with schema: read', { text: /'write' on schema/ });
+    // REST's guard says "needs 'write' on schema", the tool dispatcher "needs schema: write": both name the rung.
+    refusedOnBoth(dry, TARGET, 'dry run with schema: read', { text: WRITE_RUNG });
     const build = await d.both(tokens.reader.key, TARGET, file, params());
-    refusedOnBoth(build, TARGET, 'build with schema: read', { text: /'write' on schema/ });
+    refusedOnBoth(build, TARGET, 'build with schema: read', { text: WRITE_RUNG });
   });
 
   it('with schema: write, a dry run is answered and writes nothing', async () => {
