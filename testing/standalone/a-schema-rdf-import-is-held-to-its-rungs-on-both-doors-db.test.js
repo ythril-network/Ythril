@@ -4,8 +4,8 @@
  *
  * ## What it holds
  *
- * - A dry run needs `schema: read`; a build needs `schema: write`, and the refusal names the rung (`schema_rdf_rung`). A file whose shapes give
- *   a type rules needs `schema: admin` (the settings write's field rungs), and is refused naming the rules.
+ * - A dry run and a build need `schema: write` (amendment A10, as the data import's dry run): below it the rights guard refuses, naming the
+ *   rung. A file whose shapes give a type rules needs `schema: admin` (the settings write's field rungs, `schema_rdf_rung`), naming the rules.
  * - A read-only token is turned away on a dry run too (both doors are writes); a peer-bound token is refused on both doors as `import_rdf`
  *   refuses it; a token of another space reaches nothing.
  * - Nothing a refused call names is stored.
@@ -63,21 +63,25 @@ describe('the schema-from-RDF door is held to its rungs on both doors (real rout
     assert.deepEqual(d.heldTypes(space), {}, `${what}: something was stored`);
   }
 
-  it('without schema: read, a dry run and a build are refused on both doors, naming the read rung', async () => {
-    refusedOnBoth(await d.both(tokens.noSchema.key, TARGET, file, params({ dryRun: true })), TARGET, 'dry run without schema: read', { text: /read/ });
+  it('without schema: read, a dry run and a build are refused on both doors, naming the write rung', async () => {
+    refusedOnBoth(await d.both(tokens.noSchema.key, TARGET, file, params({ dryRun: true })), TARGET, 'dry run without schema: read', { text: /write/ });
     refusedOnBoth(await d.both(tokens.noSchema.key, TARGET, file, params()), TARGET, 'build without schema: read', { text: /schema/ });
   });
 
-  it('with schema: read, a dry run is answered and a build is refused naming the write rung (schema_rdf_rung)', async () => {
+  it('with schema: read, a dry run and a build are both refused, naming schema: write (amendment A10: a dry run needs the write rung)', async () => {
     const dry = await d.both(tokens.reader.key, TARGET, file, params({ dryRun: true }));
+    refusedOnBoth(dry, TARGET, 'dry run with schema: read', { text: /'write' on schema/ });
+    const build = await d.both(tokens.reader.key, TARGET, file, params());
+    refusedOnBoth(build, TARGET, 'build with schema: read', { text: /'write' on schema/ });
+  });
+
+  it('with schema: write, a dry run is answered and writes nothing', async () => {
+    const dry = await d.both(tokens.writer.key, TARGET, file, params({ dryRun: true }));
     assert.equal(dry.rest.status, 200, `REST dry run: ${dry.rest.text.slice(0, 300)}`);
     assert.equal(dry.mcp.isError, false, `MCP dry run: ${dry.mcp.text.slice(0, 300)}`);
     assert.equal(dry.rest.body.dryRun, true);
     assert.equal(dry.rest.body.written, false);
-    const build = await d.both(tokens.reader.key, TARGET, file, params());
-    refusedOnBoth(build, TARGET, 'build with schema: read', { text: /'write' on schema/ });
-    assert.equal(build.rest.code, 'schema_rdf_rung');
-    assert.equal(build.mcp.code, 'schema_rdf_rung');
+    assert.deepEqual(d.heldTypes(TARGET), {});
   });
 
   it('with schema: write, a build is written; a file whose shapes give rules is refused naming them (schema: admin)', async () => {
