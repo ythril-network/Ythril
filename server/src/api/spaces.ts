@@ -412,6 +412,13 @@ spacesRouter.put('/:id/schema', globalRateLimit, requireSpaceAuthMfaScoped('id')
     return;
   }
 
+  // The cap on types per kind (R5): the map replaces the stored one, so it is held to the cap whole, every name in it counted as a new one.
+  const pastCap = typesAddedPastCap({}, parsed.data.typeSchemas);
+  if (pastCap) {
+    res.status(pastCap.status).json({ error: pastCap.error });
+    return;
+  }
+
   // Two terms of an RDF space on one address are refused here as the planner refuses them for PATCH (Q-748 rule 5), before a round opens.
   const clash = termClashRefusalOfOwnTypeEdit(space, parsed.data.typeSchemas as SpaceMeta['typeSchemas'], 'replace');
   if (clash) {

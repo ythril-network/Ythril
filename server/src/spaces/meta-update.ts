@@ -369,13 +369,15 @@ export function termClashRefusalAfterEdit(space: SpaceConfig, edit: {
 /**
  * {@link termClashRefusalAfterEdit} for a write of named types to this instance's own definitions (`PUT /api/spaces/:id/schema` in `replace`: the
  * map replaces the stored one; the per-type upsert in `merge`: its type is laid over it), merged over the base the planner merges over. A map the
- * store's parse refuses is answered by the route's own parse, never here: undefined.
+ * store's parse refuses is refused as the planner refuses it, 400 with the parse's own message, and never let through unasked (Q-754 R6): the
+ * routes parse a type alone, and the merged meta's parse judges more (the rules that apply to a record, together), so a write that passed
+ * the route's parse can fail this one, and answering "no clash" for a meta that could not be read would store what was never asked.
  */
 export function termClashRefusalOfOwnTypeEdit(space: SpaceConfig, typeSchemas: SpaceMeta['typeSchemas'], mode: 'merge' | 'replace'): MetaUpdateRefusal | undefined {
   const base: Partial<SpaceMeta> = metaWriteBase(space, undefined, []) ?? {};
   const incoming: Partial<SpaceMeta> = { typeSchemas };
   const minted = parseSpaceMeta(mergeSpaceMeta(base, incoming, mode), { against: base });
-  if (!minted.ok) return undefined;
+  if (!minted.ok) return { status: 400, body: { error: minted.message } };
   return termClashRefusalAfterEdit(space, { base, incoming, mode, merged: minted.meta, targetNetwork: undefined });
 }
 
