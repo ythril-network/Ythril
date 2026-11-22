@@ -295,6 +295,8 @@ export async function proposeSchemaFromRdf(
   if (capped) {
     return refusal(HTTP.UNPROCESSABLE, SCHEMA_RDF_REFUSED, `${capped.error} ${NOTHING_BUILT}`, { reasons: [{ code: 'type-cap', message: capped.error }], reasonCount: 1 });
   }
+  // The inference stops as soon as its types pass the cap, with what it had built: that is over the cap here too, or the two counted differently.
+  if (inferred?.overCap !== undefined) throw new Error(`the inference stopped at the type cap of '${inferred.overCap}' and the proposal is under it`);
   return {
     kind: 'proposed', changed, answer, version: space.meta?.version ?? 0, typesAdded: added, typesChanged: changedCount,
     ...(inferred ? { inferred: inferred.inferred, leaveOut: inferred.leaveOut, labelKeys: inferred.labelKeys } : {}),

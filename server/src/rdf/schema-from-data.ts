@@ -9,7 +9,8 @@
  * - **An inferred schema the same file's data then breaks.** A predicate the inference cannot type safely (several literals on one subject, both
  *   literals and nodes, an address that is also a class, a reserved or product term, an edge to an address the file does not describe, a column
  *   whose majority is under the confidence threshold) is named under `notInferred` and its (kind, type, predicate) pairs are handed back as the
- *   leave-out set: the translation leaves those statements out (`not-inferred`) instead of refusing them as statements of no term.
+ *   leave-out set: the translation leaves those statements out (`not-inferred`) instead of refusing them as statements of no term. A class the
+ *   inference names and does not take is in that set too, with the label groups that describe it: a subject typed only by it is left out whole.
  * - **A declared or stored term renamed or overridden.** The inference reads the space's names after the declared answer: a class or
  *   predicate the space or the file's declarations already hold is theirs, and an inferred name never takes one of their names (a clash is
  *   numbered, `_2`, `_3`, and listed under `renamed`). A term under the space's or the source's vocabulary claims its derived name and is never
@@ -30,7 +31,8 @@ import type { RecordKind } from './term-iri.js';
 import { recordOfAddress, termOfIri, type AddressNames } from './term-reverse.js';
 import { digestOfKey } from './import-count.js';
 import type { QuadGroup } from './import-spool.js';
-import { classOfType, edgeLabelOf, groupSubjectOf, leaveOutKey, literalCategory, predicateRole, readSubject, type OpKind } from './quads-to-ops.js';
+import { classOfType, edgeLabelOf, groupSubjectOf, leaveOutClassKey, leaveOutKey, literalCategory, predicateRole, readSubject, type OpKind } from './quads-to-ops.js';
+import { MAX_TYPES_PER_KIND } from '../spaces/types-added-past-cap.js';
 import { localPart, readTerm, validPropertyKey, validTypeName } from './schema-from-rdf-drafts.js';
 import type { BuiltType, TypeSchemasByKind } from './schema-from-rdf-modes.js';
 
@@ -90,8 +92,13 @@ export interface DataClasses {
   subjects: Map<string, number[]>;
   count: number[];
   markers: Map<number, Set<RecordKind>>;
-  /** The plain labels of addresses whose group states only labels and comments, and that group's key (skipped when its address is inferred). */
-  labelGroups: Map<string, { key: string; labels: string[] }>;
+  /**
+   * The plain labels of addresses whose groups state only labels and comments (one group per graph), and those groups' keys (skipped when the
+   * address is a class that is inferred or one that is not: a label group is no record either way).
+   */
+  labelGroups: Map<string, { keys: string[]; labels: string[] }>;
+  /** The digests of subjects stated by more than one group (a graph each): counted once, not once per group. */
+  repeated: Set<string>;
   predicates: Set<string>;
 }
 
@@ -124,12 +131,15 @@ function subjectOf(group: QuadGroup, source: DataSource): { iri: string; own: Qu
  * them, the labels of addresses described by labels alone, and the distinct predicates the subjects use, refused past `maxPredicates`.
  */
 export async function gatherClasses(source: DataSource, maxPredicates: number): Promise<DataClassesOrOver> {
-  const out: DataClasses = { kind: 'classes', classes: [], subjects: new Map(), count: [], markers: new Map(), labelGroups: new Map(), predicates: new Set() };
+  const out: DataClasses = { kind: 'classes', classes: [], subjects: new Map(), count: [], markers: new Map(), labelGroups: new Map(), repeated: new Set(), predicates: new Set() };
   const index = new Map<string, number>();
+  const seen = new Set<string>();
   for await (const group of source.groups()) {
     if (source.skip.has(group.key)) continue;
     const at = subjectOf(group, source);
     if (at === null) continue;
+    const digest = digestOfKey(at.iri);
+    if (seen.has(digest)) out.repeated.add(digest); else seen.add(digest);
     for (const q of at.own) {
       if (q.predicate.value === RDFS_LABEL || q.predicate.value === RDFS_COMMENT || at.types.includes(q)) continue;
       if (!out.predicates.has(q.predicate.value)) {
@@ -149,15 +159,19 @@ export async function gatherClasses(source: DataSource, maxPredicates: number): 
     }
     if (mine.length === 0) {
       if (at.types.length === 0 && at.own.every(q => q.predicate.value === RDFS_LABEL || q.predicate.value === RDFS_COMMENT)) {
-        out.labelGroups.set(at.iri, { key: group.key, labels: at.own.map(plainLabel).filter((l): l is string => l !== null) });
+        const labels = at.own.map(plainLabel).filter((l): l is string => l !== null);
+        const held = out.labelGroups.get(at.iri);
+        if (held === undefined) out.labelGroups.set(at.iri, { keys: [group.key], labels }); else { held.keys.push(group.key); held.labels.push(...labels); }
       }
       continue;
     }
+    // A subject is counted once for a class however many groups (graphs) type it with it.
+    const have = out.subjects.get(digest) ?? [];
     for (const n of mine) {
-      out.count[n] = (out.count[n] ?? 0) + 1;
+      if (!have.includes(n)) { have.push(n); out.count[n] = (out.count[n] ?? 0) + 1; }
       if (marks.size > 0) { const set = out.markers.get(n) ?? new Set(); marks.forEach(k => set.add(k)); out.markers.set(n, set); }
     }
-    out.subjects.set(digestOfKey(at.iri), mine);
+    out.subjects.set(digest, have);
   }
   return out;
 }
@@ -172,28 +186,88 @@ interface TypeOf { kind: KnowledgeType; name: string; iri: string; vocabulary: b
 export interface InferFirst { typeSchemas: TypeSchemasByKind; names: AddressNames; onClaim?: (probes: number) => void }
 
 /** What the inference hands the proposal: the types to meet the declared answer with, the answer's block, the pairs left out, the label groups. */
-export interface InferResult { built: BuiltType[]; inferred: InferredBlock; leaveOut: string[]; labelKeys: string[] }
+export interface InferResult {
+  built: BuiltType[]; inferred: InferredBlock; leaveOut: string[]; labelKeys: string[];
+  /** The kind whose types the inference had taken past the cap on type definitions when it stopped (what it had built is not a schema): the proposal refuses. */
+  overCap?: KnowledgeType;
+}
 
 interface PairStats { kind: KnowledgeType; type: string; subjects: number; literals: number; multi: number; nodes: number; maxNodes: number; ends: Set<string>; open: Set<string> }
 
-/** Names held in one kind (stored, declared, inferred so far), numbered past a clash. */
-class NameBook {
-  private readonly held = new Map<string, Set<string>>();
-  constructor(typeSchemas: TypeSchemasByKind, private readonly onClaim?: (probes: number) => void) {
-    for (const kind of Object.keys(typeSchemas) as KnowledgeType[]) this.held.set(kind, new Set(Object.keys(typeSchemas[kind] ?? {})));
-    this.held.get('entity')?.add(UNTYPED_MEMBER);
+/** The number a clashing name's first renamed spelling takes (`Item_2`): the name itself is the first. */
+const FIRST_NUMBER = 2;
+
+/**
+ * The names of one scope (a kind's types, a type's property keys) held so far. The one numbering rule of the inference: `wanted`, or the first
+ * `wanted_<n>` that is not held, checked again by `valid` (a number can take a name past its length limit). Each base name is numbered from where
+ * its last claim left off (held names are never released, so no spelling before it can be free), which makes a claim cost a constant number of
+ * probes however many names of one base were claimed.
+ */
+class NameSet {
+  private readonly held: Set<string>;
+  private readonly next = new Map<string, number>();
+  /** `reserved`: names held that no schema holds (they do not count toward the type cap). */
+  constructor(initial: Iterable<string>, private readonly reserved: number, private readonly onClaim?: (probes: number) => void) {
+    this.held = new Set(initial);
   }
-  /** A derived name: held as it is, never numbered (the vocabulary gives it, and a number would name another address). */
-  hold(kind: string, name: string): void {
-    const held = this.held.get(kind) ?? new Set<string>();
-    held.add(name);
-    this.held.set(kind, held);
+  /** How many names the scope holds that a schema holds. */
+  get taken(): number { return this.held.size - this.reserved; }
+  /** A derived name: held as it is, never numbered (the vocabulary gives it, and a number would name another address). `false` when another address took it. */
+  hold(name: string): boolean {
+    if (this.held.has(name)) return false;
+    this.held.add(name);
+    return true;
+  }
+  /** `wanted` or its first free numbered spelling, held now; `null` when that spelling is not valid. */
+  claim(wanted: string, valid: (name: string) => boolean): string | null {
+    let name = wanted;
+    let probes = 1;
+    let n = this.held.has(wanted) ? this.next.get(wanted) ?? FIRST_NUMBER : 0;
+    while (n > 0) {
+      name = `${wanted}_${n}`;
+      probes += 1;
+      if (!this.held.has(name)) break;
+      n += 1;
+    }
+    this.onClaim?.(probes);
+    if (!valid(name)) return null;
+    this.held.add(name);
+    if (n > 0) this.next.set(wanted, n + 1);
+    return name;
+  }
+}
+
+/** The names held per kind (stored, declared, inferred so far), and the first kind that holds more types than a kind may. */
+class NameBook {
+  private readonly sets = new Map<string, NameSet>();
+  /** The first kind whose held names passed the type cap, or `undefined`. */
+  over: KnowledgeType | undefined;
+  constructor(typeSchemas: TypeSchemasByKind, private readonly onClaim?: (probes: number) => void) {
+    for (const kind of Object.keys(typeSchemas) as KnowledgeType[]) {
+      const names = Object.keys(typeSchemas[kind] ?? {});
+      const reserved = kind === 'entity' && !names.includes(UNTYPED_MEMBER) ? 1 : 0;
+      this.sets.set(kind, new NameSet(reserved === 1 ? [...names, UNTYPED_MEMBER] : names, reserved, onClaim));
+    }
+  }
+  private scope(kind: KnowledgeType): NameSet {
+    let set = this.sets.get(kind);
+    if (set === undefined) { set = new NameSet([], 0, this.onClaim); this.sets.set(kind, set); }
+    return set;
+  }
+  private checked(kind: KnowledgeType): void {
+    if (this.over === undefined && this.scope(kind).taken > MAX_TYPES_PER_KIND) this.over = kind;
+  }
+  /** A derived name held as it is; `false` when another address took it. */
+  hold(kind: KnowledgeType, name: string): boolean {
+    const held = this.scope(kind).hold(name);
+    this.checked(kind);
+    return held;
   }
   /** `wanted`, or the first `wanted_<n>` free in `kind` that is still a valid name; `null` when none is. */
-  claim(kind: string, wanted: string, valid: (name: string) => boolean): string | null {
-    const held = this.held.get(kind) ?? new Set<string>();
-    this.held.set(kind, held);
-    return numbered(held, wanted, valid, this.onClaim);
+  claim(kind: KnowledgeType, wanted: string, valid: (name: string) => boolean): string | null {
+    const name = this.scope(kind).claim(wanted, valid);
+    this.checked(kind);
+    return name;
   }
 }
 
@@ -223,22 +297,16 @@ function majorityOf(counts: Record<Category, number>): { majority: Datatype | nu
 const SHARE_STEPS = 1_000_000;
 const share = (n: number, of: number): number => (of === 0 ? 0 : Math.round((n / of) * SHARE_STEPS) / SHARE_STEPS);
 
-/** The number a clashing name's first renamed spelling takes (`Item_2`): the name itself is the first. */
-const FIRST_NUMBER = 2;
-/**
- * The one numbering rule of the inference: `wanted`, or the first `wanted_<n>` that `held` does not hold, checked again by `valid` (a number
- * can take a name past its length limit); `null` when that spelling is not valid. Adds the spelling to `held`.
- */
-function numbered(held: Set<string>, wanted: string, valid: (name: string) => boolean, onClaim?: (probes: number) => void): string | null {
-  let name = wanted;
-  let probes = 1;
-  for (let n = FIRST_NUMBER; held.has(name); n++) { name = `${wanted}_${n}`; probes += 1; }
-  onClaim?.(probes);
-  if (!valid(name)) return null;
-  held.add(name);
-  return name;
-}
 const capped = <T>(list: T[]): T[] => list.slice(0, INFERRED_NAMED_MAX);
+
+const LISTS = ['types', 'properties', 'edges', 'mixed', 'multiValued', 'renamed', 'openEndpoints', 'notInferred', 'multiTyped'] as const;
+/** The block as the answer names it: every list counted whole, then capped. */
+function countedBlock(block: InferredBlock): InferredBlock {
+  for (const list of LISTS) block.counts[list] = block[list].length;
+  const out = { ...block } as InferredBlock;
+  for (const list of LISTS) (out as unknown as Record<string, unknown[]>)[list] = capped(block[list] as unknown[]);
+  return out;
+}
 
 /**
  * Decide the types (from pass 1, against the names after the declared answer), read pass 2 (properties and edges per type, the ends of
@@ -253,10 +321,19 @@ export async function inferFromData(
   const builtTypes = new Map<string, BuiltType>();
   const typeOfClass = new Map<number, TypeOf>();
   const ctx = { names };
+  /** The classes the inference named and did not take: their subjects, and the label groups that describe them, are left out of the data. */
+  const prunedClasses: string[] = [];
+  const builtOf = (): BuiltType[] => {
+    const typed = new Set(block.types.map(t => `${t.kind}\u0000${t.type}`));
+    return [...builtTypes.values()].filter(b => b.kind === 'edge' || Object.keys(b.def).length > 0 || typed.has(`${b.kind}\u0000${b.name}`));
+  };
+  /** The inference stopped: a kind holds more types than the cap allows, whatever else the file says, so the proposal refuses and reads nothing more. */
+  const stoppedAt = (kind: KnowledgeType): InferResult => ({ built: builtOf(), inferred: countedBlock(block), leaveOut: [], labelKeys: [], overCap: kind });
 
   // -- the types -----------------------------------------------------------------------------------------------------------------------
+  const derivedOf = new Map(classes.classes.map(iri => [iri, readTerm(ctx, iri).how === 'derived'] as const));
   const order = classes.classes.map((iri, n) => ({ iri, n })).sort((a, b) => byCodeUnit(a.iri, b.iri));
-  const derivedFirst = [...order].sort((a, b) => Number(readTerm(ctx, b.iri).how === 'derived') - Number(readTerm(ctx, a.iri).how === 'derived'));
+  const derivedFirst = [...order].sort((a, b) => Number(derivedOf.get(b.iri)) - Number(derivedOf.get(a.iri)));
   for (const { iri, n } of derivedFirst) {
     // A class the space or the file's declarations hold is theirs; one only the vocabulary reads is inferred under its derived name.
     const t = termOfIri(iri, names);
@@ -267,7 +344,7 @@ export async function inferFromData(
     }
     const support = classes.count[n] ?? 0;
     const marks = classes.markers.get(n) ?? new Set<RecordKind>();
-    const notInferred = (why: string): void => { block.notInferred.push({ iri, why, support }); };
+    const notInferred = (why: string): void => { block.notInferred.push({ iri, why, support }); prunedClasses.push(iri); };
     if (t.answer === 'term' && t.how === 'schema') { notInferred('term-clash'); continue; }
     if (support < options.minSupport) { notInferred('support'); continue; }
     if (marks.size > 1 || [...marks].some(k => k !== 'entity' && k !== 'fact')) { notInferred('two-kinds'); continue; }
@@ -278,7 +355,7 @@ export async function inferFromData(
     if (read.how === 'derived') {
       if (read.prop !== undefined || read.kind !== kind || read.type === null) { notInferred('not-a-term'); continue; }
       name = read.type;
-      book.hold(kind, name);
+      if (!book.hold(kind, name)) { notInferred('term-clash'); continue; }
     } else {
       const wanted = wantedName(iri, classes.labelGroups, validTypeName);
       if (wanted === null) { notInferred('no-name'); continue; }
@@ -289,6 +366,7 @@ export async function inferFromData(
     typeOfClass.set(n, { kind, name, iri, vocabulary: false });
     builtTypes.set(`${kind}\u0000${name}`, { kind, name, def: read.how === 'foreign' ? { iri } : {} });
     block.types.push({ kind, type: name, iri, support, confidence: 1 });
+    if (book.over !== undefined) return stoppedAt(book.over);
   }
 
   /** The type a subject settles on, as the translation's kind reader settles it: the schema's before the vocabulary's, then the first address. */
@@ -314,11 +392,14 @@ export async function inferFromData(
   const pairs = new Map<string, Map<string, PairStats>>();
   const columns = new Map<string, Record<Category, number>>();
   const nodesOf = new Map<string, number>();
+  // A subject stated by several groups (a graph each) is one subject of a pair: only those subjects are remembered per pair.
+  const countedPairs = new Set<string>();
   for await (const group of source.groups()) {
     if (source.skip.has(group.key)) continue;
     const at = subjectOf(group, source);
     if (at === null) continue;
-    const pick = pickOf(digestOfKey(at.iri));
+    const digest = digestOfKey(at.iri);
+    const pick = pickOf(digest);
     if (pick === null || (pick.kind !== 'entity' && pick.kind !== 'fact')) continue;
     const groupNames = source.namesOf(group.graph?.value);
     const byPredicate = new Map<string, Quad[]>();
@@ -333,7 +414,11 @@ export async function inferFromData(
       pairs.set(p, perType);
       const stats = perType.get(typeKey) ?? { kind: pick.kind, type: pick.name, subjects: 0, literals: 0, multi: 0, nodes: 0, maxNodes: 0, ends: new Set(), open: new Set() };
       perType.set(typeKey, stats);
-      stats.subjects += 1;
+      if (!classes.repeated.has(digest)) stats.subjects += 1;
+      else {
+        const counted = `${digest}\u0000${p}\u0000${typeKey}`;
+        if (!countedPairs.has(counted)) { countedPairs.add(counted); stats.subjects += 1; }
+      }
       const column = columns.get(p) ?? { string: 0, number: 0, boolean: 0, date: 0, other: 0 };
       columns.set(p, column);
       let literals = 0;
@@ -366,19 +451,21 @@ export async function inferFromData(
     if (built === undefined) { built = { kind, name: type, def: {} }; builtTypes.set(key, built); }
     return ((built.def['propertySchemas'] as Record<string, unknown> | undefined) ?? (built.def['propertySchemas'] = {})) as Record<string, unknown>;
   };
-  const keysHeld = new Map<string, Set<string>>();
-  const claimKey = (kind: KnowledgeType, type: string, wanted: string): string | null => {
+  const keysHeld = new Map<string, NameSet>();
+  /** The property keys of one type held so far: the stored ones, then the derived and inferred ones. */
+  const keysOf = (kind: KnowledgeType, type: string): NameSet => {
     const key = `${kind}\u0000${type}`;
     let held = keysHeld.get(key);
     if (held === undefined) {
       const stored = (first.typeSchemas[kind]?.[type] as { propertySchemas?: Record<string, unknown> } | undefined)?.propertySchemas ?? {};
-      held = new Set(Object.keys(stored));
+      held = new NameSet(Object.keys(stored), 0, first.onClaim);
       keysHeld.set(key, held);
     }
-    return numbered(held, wanted, validPropertyKey, first.onClaim);
+    return held;
   };
-
-  for (const p of [...pairs.keys()].sort(byCodeUnit)) {
+  // A derived address takes its own name before any foreign address asks for one, so a foreign predicate is the one numbered.
+  const derivedPredicate = new Map([...pairs.keys()].map(p => [p, readTerm(ctx, p).how === 'derived'] as const));
+  for (const p of [...pairs.keys()].sort((a, b) => Number(derivedPredicate.get(b)) - Number(derivedPredicate.get(a)) || byCodeUnit(a, b))) {
     const perType = pairs.get(p)!;
     // Held terms are the space's or the declarations' (`how: schema`); an address only the vocabulary reads is inferred under its derived name.
     const t = termOfIri(p, names);
@@ -401,6 +488,8 @@ export async function inferFromData(
     if (literals > 0 && nodes > 0) { notInferred('literal-and-node'); leave(perType, p); continue; }
 
     if (nodes > 0) {
+      // A predicate the space holds as a property of a type is not also an edge label: the two would share one address.
+      if (knownProp.length > 0) { notInferred('term-clash'); leave(perType, p); continue; }
       // An edge label: its ends must be the file's typed subjects, or records the space stores (which leave a side open).
       const all = [...perType.values()];
       if (all.some(s => s.open.has('end-not-described') || s.open.has('end-untyped'))) { notInferred('end-not-described'); leave(perType, p); continue; }
@@ -412,7 +501,7 @@ export async function inferFromData(
       if (read.how === 'derived') {
         if (read.kind !== 'edge' || read.prop !== undefined || read.type === null) { notInferred('not-a-term'); leave(perType, p); continue; }
         name = read.type;
-        book.hold('edge', name);
+        if (!book.hold('edge', name)) { notInferred('term-clash'); leave(perType, p); continue; }
       } else {
         const wanted = wantedName(p, classes.labelGroups, validTypeName);
         name = wanted === null ? null : book.claim('edge', wanted, validTypeName);
@@ -436,6 +525,7 @@ export async function inferFromData(
       if (!TypeSchemaZ.safeParse(def).success) { notInferred('invalid'); leave(perType, p); continue; }
       builtTypes.set(`edge\u0000${name}`, { kind: 'edge', name, def });
       block.edges.push({ kind: 'edge', type: name, iri: p, support, confidence });
+      if (book.over !== undefined) return stoppedAt(book.over);
       continue;
     }
 
@@ -454,16 +544,19 @@ export async function inferFromData(
         block.notInferred.push({ iri: p, why, kind: s.kind, type: s.type, support: s.subjects, confidence });
         leaveOut.push(leaveOutKey(s.kind, s.type, p));
       };
+      // A stored type that is a library reference holds no property of its own: it is kept whole, so nothing is written to it.
+      if (isLibraryReference(first.typeSchemas[s.kind]?.[s.type])) { pairNot('library-reference'); continue; }
       if (s.multi > 0) { block.multiValued.push({ kind: s.kind, type: s.type, predicate: p, subjects: s.multi }); pairNot('multi-valued'); continue; }
       if (s.subjects < options.minSupport) { pairNot('support'); continue; }
       if (confidence < options.minConfidence) { pairNot('confidence'); continue; }
       let key: string | null;
       if (read.how === 'derived') {
         if (read.prop === undefined || read.kind !== s.kind || read.type !== s.type) { pairNot('vocabulary-property'); continue; }
+        if (!keysOf(s.kind, s.type).hold(read.prop)) { pairNot('term-clash'); continue; }
         key = read.prop;
       } else {
         const wanted = wantedName(p, classes.labelGroups, validPropertyKey);
-        key = wanted === null ? null : claimKey(s.kind, s.type, wanted);
+        key = wanted === null ? null : keysOf(s.kind, s.type).claim(wanted, validPropertyKey);
         if (wanted === null || key === null) { pairNot('no-name'); continue; }
         if (key !== wanted) block.renamed.push({ iri: p, name: key, wanted, kind: s.kind, type: s.type });
       }
@@ -473,13 +566,15 @@ export async function inferFromData(
   }
 
   // -- the answer ------------------------------------------------------------------------------------------------------------------------
-  const built = [...builtTypes.values()].filter(b => b.kind === 'edge' || Object.keys(b.def).length > 0 || block.types.some(t => t.kind === b.kind && t.type === b.name));
-  const inferredIris = new Set([...block.types, ...block.properties, ...block.edges].map(t => t.iri));
-  const labelKeys = [...classes.labelGroups].filter(([iri]) => inferredIris.has(iri)).map(([, g]) => g.key);
-  const lists = ['types', 'properties', 'edges', 'mixed', 'multiValued', 'renamed', 'openEndpoints', 'notInferred', 'multiTyped'] as const;
-  for (const list of lists) block.counts[list] = block[list].length;
-  const cappedBlock = { ...block } as InferredBlock;
-  for (const list of lists) (cappedBlock as unknown as Record<string, unknown[]>)[list] = capped(block[list] as unknown[]);
-  return { built, inferred: cappedBlock, leaveOut, labelKeys };
+  // A class not inferred is left out whole, and the label groups of an address described and not inferred are no record either.
+  for (const iri of prunedClasses) leaveOut.push(leaveOutClassKey(iri));
+  const leftOutIris = new Set([...block.types, ...block.properties, ...block.edges].map(t => t.iri).concat(prunedClasses));
+  const labelKeys = [...classes.labelGroups].filter(([iri]) => leftOutIris.has(iri)).flatMap(([, g]) => g.keys);
+  return { built: builtOf(), inferred: countedBlock(block), leaveOut, labelKeys };
+}
+
+/** Is `def`, a stored type definition, a reference to a library entry (kept whole, holding no field of its own)? */
+function isLibraryReference(def: unknown): boolean {
+  return def !== null && typeof def === 'object' && Object.hasOwn(def, '$ref');
 }
 
