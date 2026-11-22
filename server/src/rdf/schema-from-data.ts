@@ -165,6 +165,12 @@ export async function gatherClasses(source: DataSource, maxPredicates: number): 
 /** A type a subject can settle on: its kind, its name after the merge, its class address, and whether only the vocabulary reads it. */
 interface TypeOf { kind: KnowledgeType; name: string; iri: string; vocabulary: boolean }
 
+/**
+ * What the proposal hands the inference: the declared answer's type schemas and names, and (a test's seam) a call made once per name claimed,
+ * with the number of spellings the claim probed.
+ */
+export interface InferFirst { typeSchemas: TypeSchemasByKind; names: AddressNames; onClaim?: (probes: number) => void }
+
 /** What the inference hands the proposal: the types to meet the declared answer with, the answer's block, the pairs left out, the label groups. */
 export interface InferResult { built: BuiltType[]; inferred: InferredBlock; leaveOut: string[]; labelKeys: string[] }
 
@@ -173,7 +179,7 @@ interface PairStats { kind: KnowledgeType; type: string; subjects: number; liter
 /** Names held in one kind (stored, declared, inferred so far), numbered past a clash. */
 class NameBook {
   private readonly held = new Map<string, Set<string>>();
-  constructor(typeSchemas: TypeSchemasByKind) {
+  constructor(typeSchemas: TypeSchemasByKind, private readonly onClaim?: (probes: number) => void) {
     for (const kind of Object.keys(typeSchemas) as KnowledgeType[]) this.held.set(kind, new Set(Object.keys(typeSchemas[kind] ?? {})));
     this.held.get('entity')?.add(UNTYPED_MEMBER);
   }
@@ -187,7 +193,7 @@ class NameBook {
   claim(kind: string, wanted: string, valid: (name: string) => boolean): string | null {
     const held = this.held.get(kind) ?? new Set<string>();
     this.held.set(kind, held);
-    return numbered(held, wanted, valid);
+    return numbered(held, wanted, valid, this.onClaim);
   }
 }
 
@@ -223,9 +229,11 @@ const FIRST_NUMBER = 2;
  * The one numbering rule of the inference: `wanted`, or the first `wanted_<n>` that `held` does not hold, checked again by `valid` (a number
  * can take a name past its length limit); `null` when that spelling is not valid. Adds the spelling to `held`.
  */
-function numbered(held: Set<string>, wanted: string, valid: (name: string) => boolean): string | null {
+function numbered(held: Set<string>, wanted: string, valid: (name: string) => boolean, onClaim?: (probes: number) => void): string | null {
   let name = wanted;
-  for (let n = FIRST_NUMBER; held.has(name); n++) name = `${wanted}_${n}`;
+  let probes = 1;
+  for (let n = FIRST_NUMBER; held.has(name); n++) { name = `${wanted}_${n}`; probes += 1; }
+  onClaim?.(probes);
   if (!valid(name)) return null;
   held.add(name);
   return name;
@@ -237,10 +245,10 @@ const capped = <T>(list: T[]): T[] => list.slice(0, INFERRED_NAMED_MAX);
  * edges), and decide the properties and edge labels. Pure but for reading `source` again.
  */
 export async function inferFromData(
-  source: DataSource, classes: DataClasses, first: { typeSchemas: TypeSchemasByKind; names: AddressNames }, options: InferOptions,
+  source: DataSource, classes: DataClasses, first: InferFirst, options: InferOptions,
 ): Promise<InferResult> {
   const block: InferredBlock = { types: [], properties: [], edges: [], mixed: [], multiValued: [], renamed: [], openEndpoints: [], notInferred: [], multiTyped: [], counts: {} };
-  const book = new NameBook(first.typeSchemas);
+  const book = new NameBook(first.typeSchemas, first.onClaim);
   const names = first.names;
   const builtTypes = new Map<string, BuiltType>();
   const typeOfClass = new Map<number, TypeOf>();
@@ -367,7 +375,7 @@ export async function inferFromData(
       held = new Set(Object.keys(stored));
       keysHeld.set(key, held);
     }
-    return numbered(held, wanted, validPropertyKey);
+    return numbered(held, wanted, validPropertyKey, first.onClaim);
   };
 
   for (const p of [...pairs.keys()].sort(byCodeUnit)) {

@@ -43,12 +43,10 @@ import type { Quad } from '../rdf/literals.js';
 import { RDF_IMPORT_REASONS_NAMED_MAX } from '../rdf/import-report.js';
 import {
   generateRefusal, schemaFromRdf, SCHEMA_RDF_MAX_QUADS, type SchemaChange, type SchemaFromRdfAnswer, type SchemaMode, type SchemaSource, type TakenEntry,
-  type TypeSchemasByKind,
 } from '../rdf/schema-from-rdf.js';
 import { meetStored, normalizedStored } from '../rdf/schema-from-rdf-modes.js';
 import { Ledger, Store } from '../rdf/schema-from-rdf-store.js';
-import type { InferredBlock, InferResult } from '../rdf/schema-from-data.js';
-import type { AddressNames } from '../rdf/term-reverse.js';
+import type { InferFirst, InferredBlock, InferResult } from '../rdf/schema-from-data.js';
 import { schemaFingerprintOf } from './schema-stamp.js';
 import { inlineResolvableRefs } from './schema-validation.js';
 import { assertSchemaWritable } from './schema-write-gate.js';
@@ -146,6 +144,8 @@ interface SchemaRdfImportKnobs {
     beforeMapping?: () => void;
     /** After the planner's verdict and before the write (a seam for a change made to the space meanwhile). Synchronous. */
     beforeWrite?: () => void;
+    /** After each name the inference of a data import claims (a seam that counts the spellings it probed). */
+    afterNameClaim?: (probes: number) => void;
   };
 }
 let knobs: SchemaRdfImportKnobs = {};
@@ -285,7 +285,7 @@ export async function proposeSchemaFromRdf(
     // answer in `expand`, so a declared or stored definition stands (Q-755).
     const first = answer;
     const firstNames = addressNames(inlineResolvableRefs({ ...(space.meta ?? {}), typeSchemas: first.typeSchemas } as SpaceMeta), options.source);
-    inferred = await options.infer({ typeSchemas: first.typeSchemas, names: firstNames });
+    inferred = await options.infer({ typeSchemas: first.typeSchemas, names: firstNames, ...(knobs.hooks?.afterNameClaim ? { onClaim: knobs.hooks.afterNameClaim } : {}) });
     const met = meetStored('expand', inferred.built, first.typeSchemas, new Ledger(new Store([])));
     answer = { ...first, typeSchemas: met.typeSchemas, changes: [...first.changes, ...met.changes.map(c => ({ ...c, source: 'data' as const }))] };
   }
@@ -302,7 +302,7 @@ export async function proposeSchemaFromRdf(
 }
 
 /** The inference step a data import hands the proposal: run on the declared answer's types and names (`schema-from-data.ts`). */
-export type InferStep = (first: { typeSchemas: TypeSchemasByKind; names: AddressNames }) => Promise<InferResult>;
+export type InferStep = (first: InferFirst) => Promise<InferResult>;
 
 /** Which declarations a change of the declared answer came from: the OWL and RDFS axioms when one of its statements is theirs, else the shapes. */
 function sourceOfChange(c: SchemaChange, taken: readonly TakenEntry[], from: readonly SchemaSource[]): 'declared' | 'shacl' {
