@@ -206,15 +206,24 @@ const FIRST_NUMBER = 2;
 class NameSet {
   private readonly held: Set<string>;
   private readonly next = new Map<string, number>();
-  /** `reserved`: names held that no schema holds (they do not count toward the type cap). */
-  constructor(initial: Iterable<string>, private readonly reserved: number, private readonly onClaim?: (probes: number) => void) {
-    this.held = new Set(initial);
+  /** The held names whose address is not the derived one: a stored name with an explicit `iri`, a reserved name, a name claimed for a foreign address. */
+  private readonly foreign = new Set<string>();
+  private readonly reserved: number;
+  /** `defs`: the stored definitions by name; `reserved`: names held that no schema holds (they do not count toward the type cap). */
+  constructor(defs: Record<string, unknown> | undefined, reserved: readonly string[], private readonly onClaim?: (probes: number) => void) {
+    this.held = new Set(Object.keys(defs ?? {}));
+    for (const name of this.held) if (hasExplicitIri(defs?.[name])) this.foreign.add(name);
+    this.reserved = reserved.filter(name => !this.held.has(name)).length;
+    for (const name of reserved) { this.held.add(name); this.foreign.add(name); }
   }
   /** How many names the scope holds that a schema holds. */
   get taken(): number { return this.held.size - this.reserved; }
-  /** A derived name: held as it is, never numbered (the vocabulary gives it, and a number would name another address). `false` when another address took it. */
+  /**
+   * A derived name: held as it is, never numbered (the vocabulary gives it, and a number would name another address). A name a stored or declared
+   * term already holds under its derived address is the same term; `false` when another address took it.
+   */
   hold(name: string): boolean {
-    if (this.held.has(name)) return false;
+    if (this.foreign.has(name)) return false;
     this.held.add(name);
     return true;
   }
@@ -232,6 +241,7 @@ class NameSet {
     this.onClaim?.(probes);
     if (!valid(name)) return null;
     this.held.add(name);
+    this.foreign.add(name);
     if (n > 0) this.next.set(wanted, n + 1);
     return name;
   }
@@ -244,14 +254,12 @@ class NameBook {
   over: KnowledgeType | undefined;
   constructor(typeSchemas: TypeSchemasByKind, private readonly onClaim?: (probes: number) => void) {
     for (const kind of Object.keys(typeSchemas) as KnowledgeType[]) {
-      const names = Object.keys(typeSchemas[kind] ?? {});
-      const reserved = kind === 'entity' && !names.includes(UNTYPED_MEMBER) ? 1 : 0;
-      this.sets.set(kind, new NameSet(reserved === 1 ? [...names, UNTYPED_MEMBER] : names, reserved, onClaim));
+      this.sets.set(kind, new NameSet(typeSchemas[kind] as Record<string, unknown> | undefined, kind === 'entity' ? [UNTYPED_MEMBER] : [], onClaim));
     }
   }
   private scope(kind: KnowledgeType): NameSet {
     let set = this.sets.get(kind);
-    if (set === undefined) { set = new NameSet([], 0, this.onClaim); this.sets.set(kind, set); }
+    if (set === undefined) { set = new NameSet(undefined, [], this.onClaim); this.sets.set(kind, set); }
     return set;
   }
   private checked(kind: KnowledgeType): void {
@@ -458,7 +466,7 @@ export async function inferFromData(
     let held = keysHeld.get(key);
     if (held === undefined) {
       const stored = (first.typeSchemas[kind]?.[type] as { propertySchemas?: Record<string, unknown> } | undefined)?.propertySchemas ?? {};
-      held = new NameSet(Object.keys(stored), 0, first.onClaim);
+      held = new NameSet(stored, [], first.onClaim);
       keysHeld.set(key, held);
     }
     return held;
@@ -571,6 +579,11 @@ export async function inferFromData(
   const leftOutIris = new Set([...block.types, ...block.properties, ...block.edges].map(t => t.iri).concat(prunedClasses));
   const labelKeys = [...classes.labelGroups].filter(([iri]) => leftOutIris.has(iri)).flatMap(([, g]) => g.keys);
   return { built: builtOf(), inferred: countedBlock(block), leaveOut, labelKeys };
+}
+
+/** Does a stored type or property definition give its term an address of its own (an explicit `iri`) instead of the derived one? */
+function hasExplicitIri(def: unknown): boolean {
+  return def !== null && typeof def === 'object' && typeof (def as { iri?: unknown }).iri === 'string';
 }
 
 /** Is `def`, a stored type definition, a reference to a library entry (kept whole, holding no field of its own)? */
