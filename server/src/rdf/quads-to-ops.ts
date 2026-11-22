@@ -93,8 +93,9 @@ export interface QuadsToOpsContext {
   asserted: ReadonlySet<string>;
   reified: ReadonlySet<string>;
   /**
-   * The (kind, type, predicate) pairs an import that infers its schema from its data names and does not infer ({@link leaveOutKey}, Q-755):
-   * their statements are left out (`not-inferred`), never refused as a predicate of no term. Absent: nothing is left out.
+   * What an import that infers its schema from its data names and does not infer (Q-755): the (kind, type, predicate) pairs
+   * ({@link leaveOutKey}) and the classes ({@link leaveOutClassKey}). Their statements are left out (`not-inferred`), never refused as a
+   * predicate or a class of no term; a subject typed only by classes left out is left out whole. Absent: nothing is left out.
    */
   leaveOut?: ReadonlySet<string>;
 }
@@ -102,6 +103,11 @@ export interface QuadsToOpsContext {
 /** The key of a (kind, type, predicate) pair in {@link QuadsToOpsContext.leaveOut}. */
 export function leaveOutKey(kind: string, type: string, predicate: string): string {
   return JSON.stringify([kind, type, predicate]);
+}
+
+/** The key of a class address in {@link QuadsToOpsContext.leaveOut}: a class the inference named and did not take. */
+export function leaveOutClassKey(iri: string): string {
+  return JSON.stringify(['class', iri]);
 }
 
 /** A reason a quad could not be taken. `kept`: recorded, and the value went into the operation in its plain form. */
@@ -402,7 +408,7 @@ export function edgeLabelOf(predicate: string, names: AddressNames): string | 's
 export interface Subject { term: IriTerm | BlankTerm; key: string; address: { of: 'space' | 'source'; kind: RecordKind; id: string } | null }
 interface TypeCandidate { quad: Quad; owners: TermOwner[]; how: 'schema' | 'vocabulary' }
 /** The kind and type a subject's types settle, and the type quads that settle them: taken by the caller only once the record is read. */
-interface Decided { kind: RecordKind | null; type: string | null | undefined; settling: Quad[] }
+interface Decided { kind: RecordKind | null; type: string | null | undefined; settling: Quad[]; leftOut: number }
 
 /**
  * What one `rdf:type` object says of its subject: no address (a blank class or a literal), a kind marker of the record form, the untyped
@@ -431,6 +437,7 @@ function decideKind(L: Ledger, subject: Subject, types: readonly Quad[], statesS
   const markers = new Set<RecordKind>();
   const markerQuads: Quad[] = [];
   const candidates: TypeCandidate[] = [];
+  let leftOut = 0;
   for (const q of types) {
     const read = classOfType(q.object);
     if (read.as === 'not-an-address') { L.reason('class-without-term', [q]); continue; }
@@ -440,6 +447,7 @@ function decideKind(L: Ledger, subject: Subject, types: readonly Quad[], statesS
     if (read.as === 'server-owned') { L.skip(q, 'server-owned'); continue; }
     const t = termOfIri(read.iri, ctx.names);
     if (t.answer === 'term' && t.owners.every(w => w.prop === undefined)) candidates.push({ quad: q, owners: t.owners, how: t.how });
+    else if (ctx.leaveOut?.has(leaveOutClassKey(read.iri))) { L.skip(q, 'not-inferred'); leftOut += 1; }
     else L.reason('class-without-term', [q]);
   }
   if (statesStatement) markers.add('edge');
@@ -458,7 +466,7 @@ function decideKind(L: Ledger, subject: Subject, types: readonly Quad[], statesS
   const settling = [...markerQuads];
   if (kind === null) {
     candidates.forEach(c => L.reason('shared-term-unsettled', [c.quad]));
-    return { kind, type: undefined, settling };
+    return { kind, type: undefined, settling, leftOut };
   }
   const resolved: { quad: Quad; type: string | null; how: 'schema' | 'vocabulary' }[] = [];
   for (const c of candidates) {
@@ -474,7 +482,7 @@ function decideKind(L: Ledger, subject: Subject, types: readonly Quad[], statesS
     if (r.type === first!.type) settling.push(r.quad);
     else L.reason('several-types-of-one-kind', [r.quad]);
   }
-  return { kind, type: first === undefined ? undefined : first.type, settling };
+  return { kind, type: first === undefined ? undefined : first.type, settling, leftOut };
 }
 
 /** The values a field or property takes from its quads, with the reasons the rest earn. */
@@ -698,8 +706,10 @@ function translate(L: Ledger, group: readonly Quad[], key: string, graph: string
   const first = own[0]!;
   const decided = decideKind(L, subject, types, statesStatement, ctx);
   if (decided === null) return [];
-  const { kind, type, settling } = decided;
+  const { kind, type, settling, leftOut } = decided;
   if (kind === 'file') { L.skipRest('file'); return []; }
+  // A subject typed by a class the inference left out and by no class that settles a type has no record to be: it is left out whole.
+  if (leftOut > 0 && type === undefined && kind !== 'edge') { L.skipRest('not-inferred'); return []; }
   if (kind === 'edge') {
     const op = edgeOp(L, subject, graph, type, settling, own.filter(q => q.predicate.value !== RDF_TYPE), ctx);
     return op === null ? [] : [op];

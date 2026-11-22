@@ -71,8 +71,8 @@ export interface SchemaStepFile {
   changes: SchemaChange[];
   /**
    * What the door decided of the file's groups and statements (Q-755), so a resumed act skips and leaves out exactly what the door did and
-   * infers nothing again: the groups skipped as schema (`skip`, label groups of inferred terms among them), those of a source `from` did not
-   * ask for (`notAsked`), and the (kind, type, predicate) pairs the inference left out (`leaveOut`). Absent in a step written before them: the
+   * infers nothing again: the groups skipped as schema (`skip`, label groups of inferred terms and of classes left out among them), those of a
+   * source `from` did not ask for (`notAsked`), and the (kind, type, predicate) pairs and the classes the inference left out (`leaveOut`). Absent in a step written before them: the
    * act reads the groups again.
    */
   skip?: string[];
