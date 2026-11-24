@@ -82,6 +82,24 @@ category 4 (−7.7 F1).
 The run is reproducible from `tier0.mjs` (`prepare`, `record`, `score`, `judge-export`, `judge-import`,
 `report`); the extractions it ingests are committed under `locomo/extractions/`.
 
+## RDF: BSBM against Oxigraph
+
+`rdf/` is a different kind of benchmark: not a memory question but a speed one. It generates the Berlin SPARQL
+Benchmark's data at three sizes (1 000, 5 000 and 20 000 products), loads each into a scratch Ythril and into a
+pinned Oxigraph, runs the 11 Explore queries against both SPARQL endpoints (3 warm-up and 20 measured runs each)
+and writes one result record per run. Everything it fetches is pinned (archive by sha256, images by digest) and
+everything it generates lives outside the repository.
+
+```text
+node benchmarks/rdf/generate.mjs --sizes 1000
+node benchmarks/rdf/load.mjs oxigraph-up --size 1000
+node benchmarks/rdf/run.mjs --engine oxigraph --size 1000
+node benchmarks/rdf/load.mjs oxigraph-down --size 1000
+```
+
+The Ythril side (`load.mjs ythril-up`, `load.mjs ythril`, `run.mjs --engine ythril`), the record's fields and what a
+refused load looks like are in [`rdf/README.md`](rdf/README.md).
+
 ## Using this without any benchmark
 
 The loader is the only benchmark-specific part. Give the prompt any conversation in the shape it asks for —
