@@ -31,7 +31,7 @@
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
@@ -93,6 +93,7 @@ describe('the absent-bytes sweep walks once per pass and says it once (real Mong
   after(async () => { await resetSweepSteps(); await acts?.close(); });
   beforeEach(async () => {
     await acts.reset();
+    await untilAuditWritesLanded();
     await acts.door.mongo.getDb().collection('audit_log').deleteMany({ spaceId: S }).catch(() => {});
     const entry = entryOf();
     for (const k of Object.keys(entry).filter(k => !knownKeys.includes(k))) delete entry[k];

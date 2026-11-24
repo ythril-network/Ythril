@@ -34,7 +34,7 @@ import path from 'node:path';
 import express from 'express';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenRouterApp } from '../_shared/in-process-app.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -82,7 +82,7 @@ describe('an audit entry records only the changes its operation allows (real Mon
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 
-  beforeEach(async () => { await mongo.getDb().collection('audit_log').deleteMany({}); });
+  beforeEach(async () => { await untilAuditWritesLanded(); await mongo.getDb().collection('audit_log').deleteMany({}); });
 
   it('the fixture: the operations used are as the allowlist has them', () => {
     assert.ok(allow.AUDIT_CHANGE_FIELDS[LISTED.operation]?.includes(LISTED.field), `${LISTED.operation} does not list ${LISTED.field}`);

@@ -17,7 +17,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { tempInstanceDir } from './_vote-round-instance.mjs';
 import { bootSchemaInstance } from './_schema-doors.mjs';
 import { P1, P2 } from './_vote-round-sites.mjs';
@@ -65,6 +65,7 @@ describe('a rebase of a space in two networks', { skip }, () => {
     inst.reset();
     nets()[0].pendingRounds = [r1];
     nets()[1].pendingRounds = r2 ? [r2] : [];
+    await untilAuditWritesLanded();
     await mongo.getDb().collection('audit_log').deleteMany({});
   }
 

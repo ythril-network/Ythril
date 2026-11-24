@@ -37,7 +37,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import {
   failWrites, withWriteBound, settleWithin, withCollectionAsView, withStalledReads, HUNG_READ_STALL_MS, hungReadLookMs,
@@ -105,6 +105,7 @@ describe('legacy read spills are swept from the space', { skip }, () => {
       fs.rmSync(path.join(tmpDir, 'files', space), { recursive: true, force: true });
       for (const c of ['files', 'fileTombstones', 'file_hashes']) await mongo.col(`${space}_${c}`).deleteMany({});
     }
+    await untilAuditWritesLanded();
     await mongo.col('audit_log').deleteMany({});
     put(BOTH, '{"kind":"graph-traversal"}');
     put(BLOB_ONLY, '{"kind":"recall-results"}');

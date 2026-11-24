@@ -36,7 +36,7 @@ import { mongoSkipReason } from './_mongo-harness.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openPullDoor, PEER } from './_pull-door.mjs';
 import { listenApp } from '../_shared/in-process-app.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { bodyOf } from './_structural-window.mjs';
 import { SERVER_CODE_ROOTS } from './_sources.mjs';
@@ -92,6 +92,7 @@ describe('a peer-bound token cannot call write_file', { skip }, () => {
   beforeEach(async () => {
     await door.reset();
     fs.rmSync(path.join(process.env['DATA_ROOT'], 'files', S), { recursive: true, force: true });
+    await untilAuditWritesLanded();
     await mongo.getDb().collection('audit_log').deleteMany({});
   });
 

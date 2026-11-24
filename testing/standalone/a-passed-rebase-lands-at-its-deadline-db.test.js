@@ -17,7 +17,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { tempInstanceDir } from './_vote-round-instance.mjs';
 import { bootSchemaInstance } from './_schema-doors.mjs';
 import { NET_ID, P1 } from './_vote-round-sites.mjs';
@@ -59,6 +59,7 @@ describe('a passed rebase lands at its deadline', { skip }, () => {
   async function propose() {
     inst.reset();
     netOf().pendingRounds = [];
+    await untilAuditWritesLanded();
     await mongo.getDb().collection('audit_log').deleteMany({});
     const answer = await inst.doors['space-patch'](SPACE, { rdf: { enabled: true, base: NEW_BASE, rebase: true } });
     assert.equal(answer.refused, false, answer.text.slice(0, 300));

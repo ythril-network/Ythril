@@ -34,7 +34,7 @@ import http from 'node:http';
 import express from 'express';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
 import { listenRouterApp } from '../_shared/in-process-app.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 
 const skip = await mongoSkipReason();
 
@@ -89,7 +89,7 @@ describe('an export writes exactly one audit entry, finished or cut off (real Mo
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }
   });
 
-  beforeEach(async () => { await mongo.getDb().collection('audit_log').deleteMany({}); });
+  beforeEach(async () => { await untilAuditWritesLanded(); await mongo.getDb().collection('audit_log').deleteMany({}); });
 
   /** The entries of every export operation, by operation name. */
   const entriesOf = async () => {

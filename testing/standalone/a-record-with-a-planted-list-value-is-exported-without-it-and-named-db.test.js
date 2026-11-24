@@ -87,13 +87,14 @@ describe('a planted list value is exported without it and named', { skip }, () =
 
   it('the rdf.export audit row of each door names the count and the records', async () => {
     const { col } = d;
-    await col('audit_log').deleteMany({ operation: 'rdf.export' });
-    await d.exportRest(admin.key, SPACE, { format: 'nquads', maxChars: BIG });
-    await d.exportMcp(admin.key, { space: SPACE, maxChars: BIG });
+    // A token of its own: the rows an earlier subtest's exports are still writing carry the shared admin token, so they are not counted.
+    const own = await d.mint('audit-own', {}, { admin: true });
+    await d.exportRest(own.key, SPACE, { format: 'nquads', maxChars: BIG });
+    await d.exportMcp(own.key, { space: SPACE, maxChars: BIG });
     // The REST entry is written when the response finishes, a moment after the client read it.
     const rows = await waitForValue(async () => {
       await untilAuditWritesLanded();
-      const found = await col('audit_log').find({ operation: 'rdf.export' }).toArray();
+      const found = await col('audit_log').find({ operation: 'rdf.export', tokenId: own.id }).toArray();
       return found.length >= 2 ? found : undefined;
     }, 10_000, 100, () => 'two rdf.export rows were not written');
     assert.equal(rows.length, 2, JSON.stringify(rows.map(r => r.operation)));

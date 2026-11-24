@@ -25,7 +25,7 @@ import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { goneOrMarker } from './_feed-marker-row.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { driverWriteFailures, failWrites } from './_write-faults.mjs';
@@ -88,7 +88,7 @@ describe('housekeeping finishes an owed move', { skip }, () => {
     faults = failWrites(Object.getPrototypeOf(acts.door.mongo.col('probe')), ['insertMany', 'deleteOne', 'deleteMany']);
   });
   after(async () => { faults?.restore(); await acts?.close(); });
-  beforeEach(async () => { faults.clear(); await acts.reset(); await acts.door.coll(S, 'audit_log').deleteMany({}).catch(() => {}); });
+  beforeEach(async () => { faults.clear(); await acts.reset(); await untilAuditWritesLanded(); await acts.door.coll(S, 'audit_log').deleteMany({}).catch(() => {}); });
   afterEach(() => faults.clear());
 
   it('leaves a move inside the settle window to its own request, and the TTL sweep finishes it once it is past it', async () => {
