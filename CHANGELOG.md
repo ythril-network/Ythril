@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Changes on upgrade | Action |
 |---|---|
 | An RDF import with `schema` set builds the space's schema from the file's classes and shapes and writes it only when the data passes; it needs `schema: write` | None; without `schema` an import is unchanged |
+| A space import (`POST /api/admin/spaces/:spaceId/import`) sent slower than 16 KiB/s over a minute, or silent for a minute, is refused `408`; the caller then waits a minute (`429`, `Retry-After`) | Send a backup over a link faster than 16 KiB/s, without pauses |
 | With `softDeleteFileMeta` off, a deleted, moved or re-keyed file leaves a feed marker (path, deletion time, position; nothing else) for `fileChangeFeedWindowDays` (default 30) | None; set the key to change the window, 0 to purge at the next sweep |
 | A file deleted before this release has an old position: it is listed as deleted only to a feed read with no cursor | None |
 | A `config.json` that is there but empty, not JSON or unreadable stops the start, naming the file, instead of opening first-run setup | Repair or restore the file; delete it only to set the instance up anew |
@@ -86,6 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Import:** an upload to the space import, RDF import or schema-from-RDF door silent for a minute, or under 16 KiB/s over one, is refused `408`; its caller then gets `429` with `Retry-After` for a minute. Send uploads without pauses.
 - **Brain:** a record over 10 MiB as JSON is refused `400` at the single-record doors (none checked its size before); `POST .../bulk` and `save_bulk` answer `507` `storage_exceeded` at the brain's hard storage limit, as the fact doors do.
 - **Licence:** releases from the next one on are under the Ythril License: passing on the source, changed versions or images is no longer licensed, and the free small-business tier is under 50 people. Releases already published keep their terms.
 - **Schema:** type rows in the schema tab show only the name: the property, rules, pattern, library and retention pills are gone; retention and the library link stay in the type's pane.
