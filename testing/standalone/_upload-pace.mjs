@@ -94,11 +94,18 @@ export function resetLingerBounds() { lingerModule.setLingerBoundsForTest?.(null
  * POST to `url` with `headers` as a sender that never waits for the server: a chunked body of `totalBytes`, a `chunkBytes` piece every
  * `everyMs` at full speed, written while the server's answer is still unread (the sender reads nothing until its body has ended), so a door that
  * ends the connection while the body is unread resets this sender. `answer` resolves when the server ended its side: `{ status, headers, text,
- * json, reset, error, sentBytes, wroteAll }`; `reset` is true when the socket failed (a write that met a closed server, a reset) or the answer was
- * not read whole. `stayOpen` is a sender that never ends its body or closes: it sends a byte a tick and reads the answer at once, and `closed`
- * resolves with the milliseconds from the first byte to the server closing the connection.
+ * json, reset, error, sentBytes, wroteAll, pipelinedAfterAnswer }`; `reset` is true when the socket failed (a write that met a closed server, a
+ * reset) or the answer was not read whole. `stayOpen` is a sender that never ends its body or closes: it sends a byte a tick and reads the answer
+ * at once, and `closed` resolves with the milliseconds from the first byte to the server closing the connection.
+ *
+ * - `readWhileSending`: the sender reads as it writes, so the answer that came before a cut is read too: a socket that failed after the
+ *   refusal's head was read answers `status` of that head (with `reset` true), never 0.
+ * - `pipelined`: the raw text of a next request. The sender reads as it writes, sends pieces until the refusal's head has been read (`totalBytes`
+ *   is only the most it sends), then ends its body and writes `pipelined` straight after it, on the same socket, while the server still reads and
+ *   drops what the sender sends. `pipelinedAfterAnswer` says it was written after the answer was read: a case that asserts on the next request
+ *   must also assert that it was sent.
  */
-export function floodedSender(url, { headers = {}, first = '', totalBytes = 0, chunkBytes = 64 * 1024, everyMs = 16, stayOpen = false }) {
+export function floodedSender(url, { headers = {}, first = '', totalBytes = 0, chunkBytes = 64 * 1024, everyMs = 16, stayOpen = false, readWhileSending = false, pipelined = null }) {
   const target = new URL(url);
   const started = Date.now();
   const socket = net.connect({ host: target.hostname, port: Number(target.port), allowHalfOpen: true });
@@ -108,39 +115,54 @@ export function floodedSender(url, { headers = {}, first = '', totalBytes = 0, c
   let ticker = null;
   let failure = null;
   let finished = false;
+  let pipelinedAfterAnswer = false;
   const stopTicker = () => { if (ticker !== null) { clearInterval(ticker); ticker = null; } };
   const head = [
     `POST ${target.pathname}${target.search} HTTP/1.1`, `Host: ${target.host}`, 'Transfer-Encoding: chunked',
     ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`), '', '',
   ].join('\r\n');
   const chunk = (data) => Buffer.concat([Buffer.from(`${data.length.toString(16)}\r\n`), data, Buffer.from('\r\n')]);
+  let collecting = false;
+  /** Collect what the server sends from now on: from the first byte for a sender that reads while it writes, else once its body has ended. */
+  const collect = () => { if (!collecting) { collecting = true; socket.on('data', c => received.push(c)); } };
+  /** The status of the answer read so far, or 0 when no head has been read. */
+  const statusRead = () => Number(/^HTTP\/1\.1 (\d+)/.exec(Buffer.concat(received).toString('latin1'))?.[1] ?? 0);
+  const headRead = () => Buffer.concat(received).includes('\r\n\r\n');
   let answered;
   const answer = new Promise((resolve) => { answered = resolve; });
   let closedAt;
   const closed = new Promise((resolve) => { closedAt = resolve; });
+  let serverEnded = false;
+  let bodyEnded = false;
+  /** The answer is whole once the server has ended its side and this side's body has ended: a sender that reads while it writes sees the end early. */
+  const answerWhole = () => {
+    if (!serverEnded || !bodyEnded || finished) return;
+    finished = true;
+    const raw = Buffer.concat(received);
+    const split = raw.indexOf('\r\n\r\n');
+    const lines = split < 0 ? [] : raw.subarray(0, split).toString('latin1').split('\r\n');
+    const status = Number(/^HTTP\/1\.1 (\d+)/.exec(lines[0] ?? '')?.[1] ?? 0);
+    const responseHeaders = Object.fromEntries(lines.slice(1).map(l => [l.slice(0, l.indexOf(':')).toLowerCase(), l.slice(l.indexOf(':') + 1).trim()]));
+    const text = split < 0 ? '' : raw.subarray(split + 4).toString('utf8');
+    const whole = status !== 0 && Buffer.byteLength(text) >= Number(responseHeaders['content-length'] ?? 0);
+    let json = null; try { json = JSON.parse(text); } catch { /* not JSON */ }
+    answered({ status, headers: responseHeaders, text, json, reset: failure !== null || !whole, error: failure ? String(failure.message ?? failure) : undefined, sentBytes, wroteAll: sentBytes >= totalBytes, pipelinedAfterAnswer });
+    if (!stayOpen) socket.end();
+  };
+  socket.once('end', () => { serverEnded = true; answerWhole(); });
   /** Read what the server answered, now that this side's body has ended. */
   const readAnswer = () => {
-    socket.on('data', c => received.push(c));
-    socket.once('end', () => {
-      finished = true;
-      const raw = Buffer.concat(received);
-      const split = raw.indexOf('\r\n\r\n');
-      const lines = split < 0 ? [] : raw.subarray(0, split).toString('latin1').split('\r\n');
-      const status = Number(/^HTTP\/1\.1 (\d+)/.exec(lines[0] ?? '')?.[1] ?? 0);
-      const responseHeaders = Object.fromEntries(lines.slice(1).map(l => [l.slice(0, l.indexOf(':')).toLowerCase(), l.slice(l.indexOf(':') + 1).trim()]));
-      const text = split < 0 ? '' : raw.subarray(split + 4).toString('utf8');
-      const whole = status !== 0 && Buffer.byteLength(text) >= Number(responseHeaders['content-length'] ?? 0);
-      let json = null; try { json = JSON.parse(text); } catch { /* not JSON */ }
-      answered({ status, headers: responseHeaders, text, json, reset: failure !== null || !whole, error: failure ? String(failure.message ?? failure) : undefined, sentBytes, wroteAll: sentBytes >= totalBytes });
-      if (!stayOpen) socket.end();
-    });
+    collect();
+    bodyEnded = true;
+    answerWhole();
   };
   socket.on('error', (err) => {
     failure ??= err;
     stopTicker();
-    if (!finished) { finished = true; answered({ status: 0, headers: {}, text: '', json: null, reset: true, error: String(err?.message ?? err), sentBytes, wroteAll: false }); }
+    if (!finished) { finished = true; answered({ status: statusRead(), headers: {}, text: '', json: null, reset: true, error: String(err?.message ?? err), sentBytes, wroteAll: false, pipelinedAfterAnswer }); }
   });
-  socket.on('close', () => { stopTicker(); if (!finished) { finished = true; answered({ status: 0, headers: {}, text: '', json: null, reset: true, error: 'closed before an answer', sentBytes, wroteAll: false }); } closedAt(Date.now() - started); });
+  socket.on('close', () => { stopTicker(); if (!finished) { finished = true; answered({ status: statusRead(), headers: {}, text: '', json: null, reset: true, error: 'closed before an answer', sentBytes, wroteAll: false, pipelinedAfterAnswer }); } closedAt(Date.now() - started); });
+  if (readWhileSending || pipelined !== null) collect();
   socket.write(head);
   if (first) socket.write(chunk(Buffer.from(first)));
   // The tick is the sender's pace of writing, never a wait for the server: a body of `totalBytes` ends the sender's side, then it reads.
@@ -148,9 +170,12 @@ export function floodedSender(url, { headers = {}, first = '', totalBytes = 0, c
     if (socket.destroyed) { stopTicker(); return; }
     // A sender that stays open sends a byte a tick and never ends: only the server's own bounds close the connection, and its next write meets it.
     if (stayOpen) { socket.write(chunk(Buffer.from(' '))); sentBytes += 1; return; }
-    if (sentBytes < totalBytes) { socket.write(chunk(piece)); sentBytes += chunkBytes; return; }
+    // A sender with a next request keeps sending until the refusal has been read: that is the moment the server's close has begun.
+    const refused = pipelined === null || headRead();
+    if (sentBytes < totalBytes && !(pipelined !== null && refused)) { socket.write(chunk(piece)); sentBytes += chunkBytes; return; }
     stopTicker();
     socket.write('0\r\n\r\n');
+    if (pipelined !== null) { pipelinedAfterAnswer = refused; socket.write(pipelined); }
     readAnswer();
   }, everyMs);
   if (stayOpen) readAnswer();

@@ -10,6 +10,10 @@
  *   of every upload door ({@link closeUnreadBody}: the 408s, 413, 415, 429, 409, 507 and a fault) reached a sender that had stopped sending, never
  *   one still sending at full speed. A lingering close ends our side only (the sender reads the answer, then the end of it) and keeps reading
  *   until the sender's body ends, so no reset is sent while it writes.
+ * - **A request run on a socket that has answered its last.** Node's HTTP parser stays attached to the socket during the linger, and a request the
+ *   sender pipelines behind its refused upload (after the end of the body, inside the window) would be parsed and run, with all its side effects, its
+ *   answer lost on the ended socket: the sender may then retry a call that must run once (Q-953, review F1). The drain takes the socket's bytes
+ *   from the parser: the lingering socket reads, counts and drops, and no byte of it reaches a request.
  * - **A socket held for a sender that never stops.** The drain is bounded twice: it reads no more than {@link LINGER_MAX_BYTES} after the answer
  *   and holds the socket no longer than {@link LINGER_MAX_MS}; a sender past either is cut as before. Both bounds are read when a drain starts
  *   (a test narrows them with {@link setLingerBoundsForTest}).
@@ -60,7 +64,11 @@ function lingerThenDestroy(socket: Socket): void {
   };
   const timer = setTimeout(() => socket.destroy(), maxMs);
   timer.unref();
+  // Our listener first, then the server's removed. Node feeds its parser straight from the socket's handle until a 'data' listener is added; adding
+  // one hands the socket back, and the server's own listener then feeds every byte to the parser. Without the removal the parser goes on to
+  // parse a request pipelined behind the refused one and runs it, its answer lost on the ended socket.
   socket.on('data', onData);
+  for (const listener of socket.listeners('data') as Array<(...args: unknown[]) => void>) if (listener !== onData) socket.removeListener('data', listener);
   socket.once('close', () => { clearTimeout(timer); socket.off('data', onData); });
   // The answer is flushed first, then the end of our side is sent; the sender's end of its body (or the bound) closes the rest.
   socket.end();
