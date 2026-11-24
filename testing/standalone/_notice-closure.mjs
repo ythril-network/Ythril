@@ -108,6 +108,63 @@ export function isApacheLicenceText(text) {
   return lines[0] === 'Apache License' && /^Version 2\.0\b/.test(lines[1] ?? '') && lines.includes(APACHE_TEXT);
 }
 
+/**
+ * The licences a closure gate admits without an election: the permissive ones, as SPDX ids. `BlueOak-1.0.0` and `FreeBSD` (the FreeBSD
+ * two-clause text, which `negotiate` names in a `licenses` array) joined with the SPARQL engine's closure (bundle-271, R7).
+ */
+export const PERMISSIVE_LICENCES = Object.freeze(['MIT', 'ISC', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0', '0BSD', 'BlueOak-1.0.0', 'FreeBSD']);
+
+/**
+ * The licence a package record declares, as one SPDX expression, from any of the forms npm has seen: a `license` string, a `license`
+ * object (`{ type }`), or a `licenses` array (each `{ type }`, offered together, so joined by `OR`). `null` when it declares none.
+ */
+export function licenceOfRecord(record) {
+  const l = record?.license;
+  if (typeof l === 'string' && l.trim() !== '') return l.trim();
+  if (l && typeof l === 'object' && typeof l.type === 'string') return l.type;
+  if (Array.isArray(record?.licenses)) {
+    const types = record.licenses.map(x => (typeof x === 'string' ? x : x?.type)).filter(t => typeof t === 'string' && t !== '');
+    if (types.length === 1) return types[0];
+    if (types.length > 1) return `(${types.join(' OR ')})`;
+  }
+  return null;
+}
+
+/** The arm NOTICE records Ythril elects for `name` (`... elects the MIT License` in the entry under a heading naming it), or null. */
+export function electionIn(noticeText, name) {
+  const lines = noticeText.split(/\r?\n/);
+  const start = lines.findIndex(line => /^#{3,4}\s/.test(line) && line.replace(/^#{3,4}\s+/, '').split(',').map(p => p.trim().replace(/^`|`$/g, '').toLowerCase()).includes(name.toLowerCase()));
+  if (start < 0) return null;
+  const end = lines.findIndex((line, i) => i > start && /^#{2,4}\s/.test(line));
+  const section = lines.slice(start, end < 0 ? undefined : end).join('\n');
+  const m = /elects the (\S+) Licen[cs]e/i.exec(section) ?? /elects (\S+)/i.exec(section);
+  return m ? m[1] : null;
+}
+
+/**
+ * Whether a licence expression may ship: a permissive id alone, or a choice (`A OR B`) whose elected arm is permissive and is the arm NOTICE
+ * records. An `AND`, a `WITH`, a copyleft id, an unknown one or none at all may not. Answers `{ ok, why }`.
+ */
+export function licenceVerdict(licence, election) {
+  if (licence === null || licence === undefined) return { ok: false, why: 'declares no licence' };
+  const arms = String(licence).replace(/^\(|\)$/g, '').split(/\s+OR\s+/);
+  if (arms.some(a => /\s(AND|WITH)\s|[()]/.test(a))) return { ok: false, why: `${licence} is not a plain choice of licences` };
+  if (arms.length === 1) return PERMISSIVE_LICENCES.includes(arms[0]) ? { ok: true } : { ok: false, why: `${licence} is not a permissive licence` };
+  if (election === null || election === undefined) return { ok: false, why: `${licence} is a choice and NOTICE records no election` };
+  if (!arms.includes(election)) return { ok: false, why: `NOTICE elects ${election}, which ${licence} does not offer` };
+  return PERMISSIVE_LICENCES.includes(election) ? { ok: true } : { ok: false, why: `the elected arm ${election} is not permissive` };
+}
+
+/**
+ * Whether a lock entry is installed in the Linux image: an optional package limited to other systems (`fsevents`, `os: ["darwin"]`) is
+ * never installed there, so it ships nothing and owes no heading.
+ */
+export function installedOnLinux(entry) {
+  if (entry?.optional !== true) return true;
+  const os = entry.os;
+  return !Array.isArray(os) || os.some(o => o === 'linux') || (os.every(o => o.startsWith('!')) && !os.includes('!linux'));
+}
+
 /** The package names the headings of a NOTICE list (`### a, b` gives both), full scoped names only. */
 export function noticeHeadingNames(noticeText) {
   const names = new Set();

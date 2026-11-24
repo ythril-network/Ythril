@@ -588,6 +588,898 @@ The type declarations of `undici`'s API, pulled in by `@types/node`; the package
 License: MIT
 Copyright (c) Matteo Collina and Undici contributors
 
+### @comunica/query-sparql-rdfjs
+
+The SPARQL 1.1 query engine the quad source runs (`server/src/rdf/sparql-engine.ts`), a direct dependency of the server, pinned to
+5.5.0. Ythril runs it over its own records only: it parses every query first and refuses SERVICE, LOAD and every update, and runs the
+engine with a fetch that refuses, so none of the HTTP packages below is ever asked to fetch. It pulls in the packages below it, each
+attributed here.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-abstract-mediatyped, @comunica/actor-abstract-parse, @comunica/actor-abstract-path, @comunica/actor-bindings-aggregator-factory-average, @comunica/actor-bindings-aggregator-factory-count, @comunica/actor-bindings-aggregator-factory-extensions
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-bindings-aggregator-factory-group-concat, @comunica/actor-bindings-aggregator-factory-max, @comunica/actor-bindings-aggregator-factory-min, @comunica/actor-bindings-aggregator-factory-sample, @comunica/actor-bindings-aggregator-factory-sum, @comunica/actor-bindings-aggregator-factory-wildcard-count
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-context-preprocess-convert-shortcuts, @comunica/actor-context-preprocess-set-defaults, @comunica/actor-context-preprocess-source-to-destination, @comunica/actor-expression-evaluator-factory-default, @comunica/actor-function-factory-expression-bnode, @comunica/actor-function-factory-expression-bound
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-expression-coalesce, @comunica/actor-function-factory-expression-concat, @comunica/actor-function-factory-expression-extensions, @comunica/actor-function-factory-expression-if, @comunica/actor-function-factory-expression-in, @comunica/actor-function-factory-expression-logical-and
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-expression-logical-or, @comunica/actor-function-factory-expression-not-in, @comunica/actor-function-factory-expression-same-term, @comunica/actor-function-factory-term-abs, @comunica/actor-function-factory-term-addition, @comunica/actor-function-factory-term-ceil
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-contains, @comunica/actor-function-factory-term-datatype, @comunica/actor-function-factory-term-day, @comunica/actor-function-factory-term-division, @comunica/actor-function-factory-term-encode-for-uri, @comunica/actor-function-factory-term-equality
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-floor, @comunica/actor-function-factory-term-greater-than, @comunica/actor-function-factory-term-greater-than-equal, @comunica/actor-function-factory-term-has-lang, @comunica/actor-function-factory-term-has-langdir, @comunica/actor-function-factory-term-hours
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-inequality, @comunica/actor-function-factory-term-iri, @comunica/actor-function-factory-term-is-blank, @comunica/actor-function-factory-term-is-iri, @comunica/actor-function-factory-term-is-literal, @comunica/actor-function-factory-term-is-numeric
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-is-triple, @comunica/actor-function-factory-term-lang, @comunica/actor-function-factory-term-langdir, @comunica/actor-function-factory-term-langmatches, @comunica/actor-function-factory-term-lcase, @comunica/actor-function-factory-term-lesser-than
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-lesser-than-equal, @comunica/actor-function-factory-term-md5, @comunica/actor-function-factory-term-minutes, @comunica/actor-function-factory-term-month, @comunica/actor-function-factory-term-multiplication, @comunica/actor-function-factory-term-not
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-now, @comunica/actor-function-factory-term-object, @comunica/actor-function-factory-term-predicate, @comunica/actor-function-factory-term-rand, @comunica/actor-function-factory-term-regex, @comunica/actor-function-factory-term-replace
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-round, @comunica/actor-function-factory-term-seconds, @comunica/actor-function-factory-term-sha1, @comunica/actor-function-factory-term-sha256, @comunica/actor-function-factory-term-sha384, @comunica/actor-function-factory-term-sha512
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-str, @comunica/actor-function-factory-term-str-after, @comunica/actor-function-factory-term-str-before, @comunica/actor-function-factory-term-str-dt, @comunica/actor-function-factory-term-str-ends, @comunica/actor-function-factory-term-str-lang
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-str-langdir, @comunica/actor-function-factory-term-str-len, @comunica/actor-function-factory-term-str-starts, @comunica/actor-function-factory-term-str-uuid, @comunica/actor-function-factory-term-sub-str, @comunica/actor-function-factory-term-subject
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-subtraction, @comunica/actor-function-factory-term-timezone, @comunica/actor-function-factory-term-triple, @comunica/actor-function-factory-term-tz, @comunica/actor-function-factory-term-ucase, @comunica/actor-function-factory-term-unary-minus
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-unary-plus, @comunica/actor-function-factory-term-uuid, @comunica/actor-function-factory-term-xsd-to-boolean, @comunica/actor-function-factory-term-xsd-to-date, @comunica/actor-function-factory-term-xsd-to-datetime, @comunica/actor-function-factory-term-xsd-to-day-time-duration
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-xsd-to-decimal, @comunica/actor-function-factory-term-xsd-to-double, @comunica/actor-function-factory-term-xsd-to-duration, @comunica/actor-function-factory-term-xsd-to-float, @comunica/actor-function-factory-term-xsd-to-integer, @comunica/actor-function-factory-term-xsd-to-string
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-function-factory-term-xsd-to-time, @comunica/actor-function-factory-term-xsd-to-year-month-duration, @comunica/actor-function-factory-term-year, @comunica/actor-hash-bindings-murmur, @comunica/actor-hash-quads-murmur, @comunica/actor-http-fetch
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-http-proxy, @comunica/actor-init-query, @comunica/actor-optimize-query-operation-annotate-union-order, @comunica/actor-optimize-query-operation-assign-sources-exhaustive, @comunica/actor-optimize-query-operation-bgp-to-join, @comunica/actor-optimize-query-operation-construct-distinct
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-optimize-query-operation-describe-to-constructs-subject, @comunica/actor-optimize-query-operation-distinct-terms-pushdown, @comunica/actor-optimize-query-operation-filter-pushdown, @comunica/actor-optimize-query-operation-group-file-sources, @comunica/actor-optimize-query-operation-group-sources, @comunica/actor-optimize-query-operation-join-bgp
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-optimize-query-operation-join-connected, @comunica/actor-optimize-query-operation-leftjoin-expression-pushdown, @comunica/actor-optimize-query-operation-path-to-patterns, @comunica/actor-optimize-query-operation-prune-empty-source-operations, @comunica/actor-optimize-query-operation-query-source-identify, @comunica/actor-optimize-query-operation-query-source-skolemize
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-optimize-query-operation-rewrite-add, @comunica/actor-optimize-query-operation-rewrite-copy, @comunica/actor-optimize-query-operation-rewrite-move, @comunica/actor-optimize-query-operation-set-sources-from-dataset, @comunica/actor-optimize-query-operation-sort-limit-pushdown, @comunica/actor-query-operation-ask
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-query-operation-bgp-join, @comunica/actor-query-operation-construct, @comunica/actor-query-operation-distinct-identity, @comunica/actor-query-operation-extend, @comunica/actor-query-operation-filter, @comunica/actor-query-operation-from-quad
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-query-operation-group, @comunica/actor-query-operation-join, @comunica/actor-query-operation-leftjoin, @comunica/actor-query-operation-minus, @comunica/actor-query-operation-nodes, @comunica/actor-query-operation-nop
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-query-operation-orderby, @comunica/actor-query-operation-path-alt, @comunica/actor-query-operation-path-inv, @comunica/actor-query-operation-path-link, @comunica/actor-query-operation-path-nps, @comunica/actor-query-operation-path-one-or-more
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-query-operation-path-seq, @comunica/actor-query-operation-path-zero-or-more, @comunica/actor-query-operation-path-zero-or-one, @comunica/actor-query-operation-project, @comunica/actor-query-operation-reduced-hash, @comunica/actor-query-operation-slice
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-query-operation-source, @comunica/actor-query-operation-union, @comunica/actor-query-operation-union-ordered, @comunica/actor-query-operation-update-clear, @comunica/actor-query-operation-update-compositeupdate, @comunica/actor-query-operation-update-create
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-query-operation-update-deleteinsert, @comunica/actor-query-operation-update-drop, @comunica/actor-query-operation-update-load, @comunica/actor-query-operation-values, @comunica/actor-query-parse-graphql, @comunica/actor-query-parse-sparql
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-query-process-explain-logical, @comunica/actor-query-process-explain-parsed, @comunica/actor-query-process-explain-physical, @comunica/actor-query-process-explain-query, @comunica/actor-query-process-sequential, @comunica/actor-query-result-serialize-json
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-query-result-serialize-rdf, @comunica/actor-query-result-serialize-simple, @comunica/actor-query-result-serialize-sparql-csv, @comunica/actor-query-result-serialize-sparql-json, @comunica/actor-query-result-serialize-sparql-tsv, @comunica/actor-query-result-serialize-sparql-xml
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-query-result-serialize-stats, @comunica/actor-query-result-serialize-table, @comunica/actor-query-result-serialize-tree, @comunica/actor-query-serialize-sparql, @comunica/actor-query-source-identify-hypermedia, @comunica/actor-query-source-identify-hypermedia-sparql
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-query-source-identify-rdfjs, @comunica/actor-query-source-identify-service-executor, @comunica/actor-rdf-join-entries-sort-cardinality, @comunica/actor-rdf-join-entries-sort-selectivity, @comunica/actor-rdf-join-inner-hash, @comunica/actor-rdf-join-inner-merge
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-rdf-join-inner-multi-bind, @comunica/actor-rdf-join-inner-multi-bind-source, @comunica/actor-rdf-join-inner-multi-empty, @comunica/actor-rdf-join-inner-multi-index-nested-loop, @comunica/actor-rdf-join-inner-multi-merge, @comunica/actor-rdf-join-inner-multi-smallest
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-rdf-join-inner-multi-smallest-filter-bindings, @comunica/actor-rdf-join-inner-nestedloop, @comunica/actor-rdf-join-inner-none, @comunica/actor-rdf-join-inner-single, @comunica/actor-rdf-join-inner-symmetrichash, @comunica/actor-rdf-join-minus-hash
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-rdf-join-optional-bind, @comunica/actor-rdf-join-optional-hash, @comunica/actor-rdf-join-optional-index-nested-loop, @comunica/actor-rdf-join-optional-nestedloop, @comunica/actor-rdf-join-selectivity-variable-counting, @comunica/actor-rdf-metadata-accumulate-cardinality
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-rdf-metadata-accumulate-pagesize, @comunica/actor-rdf-metadata-accumulate-requesttime, @comunica/actor-rdf-parse-html, @comunica/actor-rdf-parse-html-microdata, @comunica/actor-rdf-parse-html-rdfa, @comunica/actor-rdf-parse-html-script
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-rdf-parse-jsonld, @comunica/actor-rdf-parse-n3, @comunica/actor-rdf-parse-rdfxml, @comunica/actor-rdf-parse-shaclc, @comunica/actor-rdf-parse-xml-rdfa, @comunica/actor-rdf-serialize-jsonld
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/actor-rdf-serialize-n3, @comunica/actor-rdf-serialize-shaclc, @comunica/actor-rdf-update-quads-rdfjs-store, @comunica/actor-term-comparator-factory-expression-evaluator, @comunica/actor-warmup-queries-sampled, @comunica/bus-bindings-aggregator-factory
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/bus-context-preprocess, @comunica/bus-expression-evaluator-factory, @comunica/bus-function-factory, @comunica/bus-hash-bindings, @comunica/bus-hash-quads, @comunica/bus-http
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/bus-http-invalidate, @comunica/bus-init, @comunica/bus-merge-bindings-context, @comunica/bus-optimize-query-operation, @comunica/bus-query-operation, @comunica/bus-query-parse
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/bus-query-process, @comunica/bus-query-result-serialize, @comunica/bus-query-serialize, @comunica/bus-query-source-dereference-link, @comunica/bus-query-source-identify, @comunica/bus-query-source-identify-hypermedia
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/bus-rdf-join, @comunica/bus-rdf-join-entries-sort, @comunica/bus-rdf-join-selectivity, @comunica/bus-rdf-metadata-accumulate, @comunica/bus-rdf-parse, @comunica/bus-rdf-parse-html
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/bus-rdf-resolve-hypermedia-links, @comunica/bus-rdf-resolve-hypermedia-links-queue, @comunica/bus-rdf-serialize, @comunica/bus-rdf-update-quads, @comunica/bus-term-comparator-factory, @comunica/bus-warmup
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/config-query-sparql, @comunica/context-entries, @comunica/core, @comunica/logger-pretty, @comunica/logger-void, @comunica/mediator-all
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/mediator-combine-pipeline, @comunica/mediator-combine-union, @comunica/mediator-join-coefficients-fixed, @comunica/mediator-number, @comunica/mediator-race, @comunica/mediatortype-accuracy
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/mediatortype-join-coefficients, @comunica/mediatortype-time, @comunica/runner, @comunica/types, @comunica/utils-algebra
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/utils-bindings-factory, @comunica/utils-bindings-index, @comunica/utils-data-factory, @comunica/utils-expression-evaluator, @comunica/utils-iterator, @comunica/utils-metadata
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @comunica/utils-query-operation
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017–now Ruben Taelman, Joachim Van Herwegen
+
+### @traqula/algebra-sparql-1-1, @traqula/algebra-sparql-1-2, @traqula/algebra-transformations-1-1, @traqula/algebra-transformations-1-2, @traqula/core, @traqula/generator-sparql-1-1
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2024–now Jitse De Smet
+
+### @traqula/generator-sparql-1-2, @traqula/parser-sparql-1-1, @traqula/parser-sparql-1-2, @traqula/rules-sparql-1-1, @traqula/rules-sparql-1-2
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2024–now Jitse De Smet
+
+### graphql-to-sparql, jsonld-streaming-serializer, rdf-isomorphic, rdf-object, rdf-parse, rdfxml-streaming-parser
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2018 Ruben Taelman
+
+### sparqljson-parse, sparqljson-parse, sparqljson-to-tree, sparqlxml-parse
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2018 Ruben Taelman
+
+### @types/http-cache-semantics, @types/imurmurhash, @types/minimist, @types/n3, @types/semver, @types/spark-md5
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) Microsoft Corporation.
+
+### @types/triple-beam, @types/yargs, @types/yargs-parser
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) Microsoft Corporation.
+
+### ansi-regex, ansi-regex, ansi-styles, is-fullwidth-code-point, is-fullwidth-code-point, string-width
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
+
+### string-width, strip-ansi, strip-ansi
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
+
+### arrayify-stream, componentsjs, fetch-sparql-endpoint, rdf-quad, rdf-string, rdf-string-ttl
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017 Ruben Taelman
+
+### rdf-terms, streamify-array
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2017 Ruben Taelman
+
+### lru-cache, lru-cache, lru-cache, lru-cache, lru-cache, lru-cache
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: BlueOak-1.0.0
+copyright in it.
+
+### lru-cache
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: BlueOak-1.0.0
+copyright in it.
+
+### domelementtype, domhandler, domutils, entities, entities
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: BSD-2-Clause
+Copyright (c) Felix Böhm
+
+### @dabh/diagnostics, @so-ric/colorspace, enabled, fn.name
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2015 Arnout Kazemier, Martijn Swaagman, the Contributors.
+
+### cliui, cliui, y18n
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: ISC
+Copyright (c) 2015, Contributors
+
+### color-name, color-name, color-name
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2015 Dmitry Ivanov
+
+### is-stream, wrap-ansi, wrap-ansi
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
+
+### rdf-literal, rdf-literal, rdfa-streaming-parser
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2019 Ruben Taelman
+
+### yargs-parser, yargs-parser
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: ISC
+Copyright (c) 2016, Contributors
+
+### shaclc-parse, shaclc-write
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2020 Jesse Wright
+
+### @colors/colors, @colors/colors
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) DABH
+
+### yargs, yargs
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright 2010 James Halliday (mail@substack.net); Modified work Copyright 2014 Contributors (ben@npmjs.com)
+
+### emoji-regex, emoji-regex
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright Mathias Bynens <https://mathiasbynens.be/>
+
+### spark-md5
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: WTFPL OR MIT. Ythril elects the MIT License.
+Copyright (C) 2015 André Cruz <amdfcruz@gmail.com>
+
+### @traqula/chevrotain
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: Apache-2.0
+Copyright the @traqula/chevrotain authors
+
+### webidl-conversions
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: BSD-2-Clause
+Copyright (c) 2014, Domenic Denicola
+
+### http-cache-semantics
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: BSD-2-Clause
+Copyright 2016-2018 Kornel Lesiński
+
+### negotiate
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: FreeBSD
+Copyright (c) Gary Court
+
+### inherits
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: ISC
+Copyright (c) Isaac Z. Schlueter
+
+### semver
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: ISC
+Copyright (c) Isaac Z. Schlueter and Contributors
+
+### @rubensworks/saxes
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: ISC
+Copyright (c) Louis-Dominique Dubeau
+
+### minimalistic-assert
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: ISC
+Copyright 2015 Calvin Metcalf
+
+### get-caller-file
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: ISC
+Copyright 2018 Stefan Penner
+
+### winston
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2010 Charlie Robbins
+
+### async
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2010-2018 Caolan McMahon
+
+### stack-trace
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2011 Felix Geisendörfer (felix@debuggable.com)
+
+### color-string
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2011 Heather Arthur <fayearthur@gmail.com>
+
+### require-directory
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2011 Troy Goode <troygoode@gmail.com>
+
+### color-convert
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2011-2016 Heather Arthur <fayearthur@gmail.com>
+
+### color-convert
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2011-2016 Heather Arthur <fayearthur@gmail.com>.
+
+### color
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2012 Heather Arthur
+
+### object-inspect
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2013 James Halliday
+
+### stream-to-string
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2014 Jason Pincin
+
+### util-deprecate
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2014 Nathan Rajlich <nathan@tootallnate.net>
+
+### promise-polyfill
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2014 Taylor Hakes
+
+### dom-serializer
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2014 The cheeriojs contributors
+
+### text-hex
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2014-2015 Arnout Kazemier <opensource@3rd-Eden.com>
+
+### winston-transport
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2015 Charlie Robbins & the contributors.
+
+### fecha
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2015 Taylor Hakes
+
+### one-time
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2015 Unshift.io, Arnout Kazemier, the Contributors.
+
+### whatwg-url
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2015–2016 Sebastian Mayr
+
+### readable-stream-node-to-web
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2016 Austin Middleton
+
+### node-fetch
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2016 David Frank
+
+### logform
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2017 Charlie Robbins & the Contributors.
+
+### fast-deep-equal
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2017 Evgeny Poberezkin
+
+### cross-fetch
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2017 Leonardo Quixadá
+
+### triple-beam
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2017 winstonjs
+
+### ms
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2020 Vercel, Inc.
+
+### tiny-set-immediate
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2021 4Catalyzer
+
+### event-emitter-promisify
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2021 Jesse Wright
+
+### @jeswr/prefixcc
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2022 Jesse Wright
+
+### @jeswr/stream-to-string
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) 2024 Jesse Wright
+
+### hash.js
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) Fedor Indutny
+
+### graphql
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) GraphQL Contributors
+
+### minimist
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) James Halliday
+
+### imurmurhash
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) Jens Taylor
+
+### escalade
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) Luke Edwards <luke.edwards05@gmail.com> (lukeed.com)
+
+### safe-stable-stringify
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) Ruben Bridgewater
+
+### tr46
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright (c) Sebastian Mayr
+
+### bignumber.js
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © `<2026>` `Michael Mclaughlin`
+
+### microdata-rdf-streaming-parser
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2020-now Ruben Taelman
+
+### validate-iri
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright © 2021 - now Comunica Association
+
+### asynciterator
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright ©2014–2020 Ruben Verborgh
+
+### htmlparser2
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright 2010, 2011, Chris Winberry <chris@winberry.net>. All rights reserved.
+
+### kuler
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright 2014 Arnout Kazemier
+
+### xmlchars
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright Louis-Dominique Dubeau and contributors to xmlchars
+
+### asyncjoin
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright the asyncjoin authors
+
+### readable-from-web
+
+Part of the production closure of the SPARQL engine `@comunica/query-sparql-rdfjs`.
+
+License: MIT
+Copyright the readable-from-web authors
+
 ### Runtime Dependency: FFmpeg (Debian `ffmpeg`, inside the Ythril image)
 
 The Ythril production image installs Debian’s `ffmpeg` package. It is used by the audio and video embedding
