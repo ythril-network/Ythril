@@ -5,7 +5,8 @@
  * ## The rule
  *
  * - I2: a subject with many types and many predicates costs a number of comparisons that grows with its quads, not with their product. The
- *   work is counted, never timed: every scan of a wide array (the membership checks `includes` makes) adds the array's length to a tally, and the
+ *   work is counted, never timed: every scan of a wide array (a lookup by `includes`, `indexOf`, `lastIndexOf`, `some`, `every`, `find`, `findIndex`,
+ *   `findLast` or `findLastIndex`) adds the array's length to a tally, and the
  *   tally of a subject with 600 types and 600 other statements stays far under what one scan per statement would cost (600 times 600).
  * - I1: the classes a file's subjects are typed with are bounded like its predicates: one class past the bound answers `over` naming the bound,
  *   and the reading stops at the group that passed it, so a file of millions of classes never builds its maps.
@@ -20,6 +21,8 @@ const BASE = 'https://data.example.org/ld/infer/';
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const iri = (value) => ({ kind: 'iri', value });
 const WIDE = 200;
+/** Every array method that looks an element up by walking the array: a scan written with any of them counts, not only `includes`. */
+const SEARCHES = ['includes', 'indexOf', 'lastIndexOf', 'some', 'every', 'find', 'findIndex', 'findLast', 'findLastIndex'];
 
 /** The quads of one subject: `types` class statements and `others` statements of distinct predicates, each with a plain literal. */
 function wideSubject(types, others) {
@@ -43,18 +46,20 @@ describe('the schema inference reads a subject in linear work and stops at its c
   const ROOMY = { predicates: 1000, classes: 1000 };
 
   it('I2: a subject with 600 types and 600 other statements costs far fewer comparisons than one scan per statement', async () => {
-    const original = Array.prototype.includes;
+    const originals = SEARCHES.map(name => [name, Array.prototype[name]]);
     let scanned = 0;
-    Array.prototype.includes = function (...args) {
-      if (this.length >= WIDE) scanned += this.length;
-      return original.apply(this, args);
-    };
+    for (const [name, original] of originals) {
+      Array.prototype[name] = function (...args) {
+        if (this.length >= WIDE) scanned += this.length;
+        return original.apply(this, args);
+      };
+    }
     let read;
-    try { read = await gatherClasses(sourceOf([wideSubject(600, 600)]), ROOMY); } finally { Array.prototype.includes = original; }
+    try { read = await gatherClasses(sourceOf([wideSubject(600, 600)]), ROOMY); } finally { for (const [name, original] of originals) Array.prototype[name] = original; }
     assert.equal(read.kind, 'classes', JSON.stringify(read).slice(0, 200));
     assert.equal(read.classes.length, 600, 'every class is read');
     assert.equal(read.predicates.size, 600, 'every predicate is read');
-    assert.ok(scanned <= 12_000, `${scanned} elements scanned by membership checks over wide arrays; one scan per statement is 360000 and more`);
+    assert.ok(scanned <= 12_000, `${scanned} elements scanned by lookups over wide arrays; one scan per statement is 360000 and more`);
   });
 
   it('I1: a file typing subjects with one class past the bound is over, naming the bound, and is read no further than that class', async () => {
