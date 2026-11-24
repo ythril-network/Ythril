@@ -20,6 +20,8 @@
  * - 15: a Ythril export read under its source builds its vocabulary's type once (no `_2`).
  * - 18, 30, 33: declaring groups are never records with `schema` set; a kind `from` does not ask for is counted apart.
  * - 34, 35, 37: support and confidence prune, and every inferred term carries both.
+ * - I4: each threshold is pinned at its edge, one case each for a property's support, an edge label's support, an edge label's confidence
+ *   and a property's confidence: a term under the threshold is left out and named with its reason, one exactly at it is attached.
  *
  * Run: node --test testing/standalone/an-rdf-import-infers-its-schema-from-its-data-db.test.js (server build and the test MongoDB)
  */
@@ -36,7 +38,7 @@ const id = (n) => `rdfinf${n}`;
 const SRC_BASE = 'https://src.example/ld/s/';
 
 /** Every space this file imports into: strict unless named here, one per case. */
-const WARN_IDS = ['2', '34', '35', '36', '25b', '37'];
+const WARN_IDS = ['2', '34', '35', '36', '25b', '37', 'i4'];
 const STRICT_IDS = ['1r', '1m', '3', '4', '5', '6a', '6b', '7', '12', '13', '14', '15', '16', '17', '18', '21', '23', '25', '26', '27', '30', '33'];
 
 describe('an RDF import infers its schema from its data (real routes, real MongoDB)', { skip, timeout: 600_000 }, () => {
@@ -340,6 +342,46 @@ describe('an RDF import infers its schema from its data (real routes, real Mongo
     ok(at7);
     assert.equal(named(inferredOf(at7).properties, p => p.iri === `${EX}code`), undefined, JSON.stringify(inferredOf(at7)));
     assert.equal(named(inferredOf(at7).notInferred, n => n.iri === `${EX}code`)?.why, 'mixed', JSON.stringify(inferredOf(at7)));
+  });
+
+  /** The dry run's inferred block for `file` under `params`. */
+  const inferredFor = async (file, params = {}) => {
+    const r = await rest(id('i4'), file, { ...DATA, dryRun: true, ...params });
+    ok(r);
+    return inferredOf(r);
+  };
+
+  it('I4: a property on one subject is left out at the default support and named support; on two subjects, exactly the support, it is attached', async () => {
+    const under = await inferredFor(ttl(people(2, { extra: (i) => (i === 0 ? 'ex:nick "n"' : '') })));
+    assert.equal(named(under.properties, p => p.iri === `${EX}nick`), undefined, JSON.stringify(under));
+    const left = named(under.notInferred, n => n.iri === `${EX}nick`);
+    assert.deepEqual([left?.why, left?.type, left?.support], ['support', 'Person', 1], JSON.stringify(under));
+    const at = await inferredFor(ttl(people(2, { extra: () => 'ex:nick "n"' })));
+    assert.equal(named(at.properties, p => p.iri === `${EX}nick`)?.support, 2, JSON.stringify(at));
+  });
+
+  it('I4: an edge label on one subject is left out at the default support and named support; on two subjects it is attached', async () => {
+    const under = await inferredFor(ttl(people(2, { extra: (i) => (i === 0 ? 'ex:knows p:person1' : '') })));
+    assert.equal(named(under.edges, e => e.iri === `${EX}knows`), undefined, JSON.stringify(under));
+    const left = named(under.notInferred, n => n.iri === `${EX}knows`);
+    assert.deepEqual([left?.why, left?.support, left?.confidence], ['support', 1, 0.5], JSON.stringify(under));
+    const at = await inferredFor(ttl(people(2, { extra: (i) => `ex:knows p:person${1 - i}` })));
+    assert.equal(named(at.edges, e => e.iri === `${EX}knows`)?.support, 2, JSON.stringify(at));
+  });
+
+  it('I4: an edge label on half of its subjects is left out at inferMinConfidence 0.6 and named confidence; at exactly 0.5 it is attached', async () => {
+    const file = ttl(people(4, { extra: (i) => (i < 2 ? 'ex:knows p:person3' : '') }));
+    const under = await inferredFor(file, { inferMinConfidence: 0.6 });
+    assert.equal(named(under.edges, e => e.iri === `${EX}knows`), undefined, JSON.stringify(under));
+    const left = named(under.notInferred, n => n.iri === `${EX}knows`);
+    assert.deepEqual([left?.why, left?.support, left?.confidence], ['confidence', 2, 0.5], JSON.stringify(under));
+    const at = await inferredFor(file, { inferMinConfidence: 0.5 });
+    assert.equal(named(at.edges, e => e.iri === `${EX}knows`)?.confidence, 0.5, JSON.stringify(at));
+  });
+
+  it('I4: a property on exactly 30% of its type\'s subjects is attached at inferMinConfidence 0.3', async () => {
+    const at = await inferredFor(ttl(people(10, { extra: (i) => (i < 3 ? `ex:nick "n${i}"` : '') })), { inferMinConfidence: 0.3 });
+    assert.equal(named(at.properties, p => p.iri === `${EX}nick`)?.confidence, 0.3, JSON.stringify(at));
   });
 
   it('37: every inferred term in the answer carries support and confidence', async () => {
