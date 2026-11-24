@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { logLinesDuring } from './_log-lines.mjs';
 import { stripComments } from './_strip-comments.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
@@ -91,6 +91,7 @@ describe('retired per-type schema files are swept from the space', { skip }, () 
       fs.rmSync(path.join(tmpDir, 'files', space), { recursive: true, force: true });
       for (const c of ['files', 'fileTombstones', 'file_hashes', 'embed_jobs']) await mongo.col(`${space}_${c}`).deleteMany({});
     }
+    await untilAuditWritesLanded();
     await mongo.col('audit_log').deleteMany({});
     for (const rel of RETIRED) put(rel, '{"propertySchemas":{}}');
     put(OPERATORS_UPLOAD, '{"uploaded":"by a person"}');

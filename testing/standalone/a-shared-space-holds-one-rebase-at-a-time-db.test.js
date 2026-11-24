@@ -15,7 +15,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { tempInstanceDir } from './_vote-round-instance.mjs';
 import { bootSchemaInstance } from './_schema-doors.mjs';
 import { NET_ID, P1 } from './_vote-round-sites.mjs';
@@ -61,6 +61,7 @@ describe('a shared space holds one rebase at a time', { skip }, () => {
   async function fresh(rounds = []) {
     inst.reset();
     netOf().pendingRounds = rounds;
+    await untilAuditWritesLanded();
     await mongo.getDb().collection('audit_log').deleteMany({});
   }
 

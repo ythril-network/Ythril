@@ -27,7 +27,7 @@ import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { seedClaim, jobOf } from './_media-claim.mjs';
@@ -55,6 +55,7 @@ describe('the leaked-rows repair reads and reports what it did (real MongoDB)', 
   beforeEach(async () => {
     await acts.reset();
     for (const part of ['links', 'media_jobs', 'tombstones']) await acts.door.coll(S, part).deleteMany({});
+    await untilAuditWritesLanded();
     await acts.door.mongo.getDb().collection('audit_log').deleteMany({ spaceId: S }).catch(() => {});
     const entry = await spaceEntry(S);
     for (const k of addedKeys(entry, knownKeys)) delete entry[k];

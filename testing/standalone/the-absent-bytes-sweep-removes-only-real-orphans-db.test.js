@@ -41,7 +41,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
@@ -83,6 +83,7 @@ describe('the absent-bytes sweep removes only real orphans (real MongoDB)', { sk
   beforeEach(async () => {
     await acts.reset();
     for (const part of ['links', 'media_jobs', 'tombstones']) await acts.door.coll(S, part).deleteMany({});
+    await untilAuditWritesLanded();
     await acts.door.mongo.getDb().collection('audit_log').deleteMany({ spaceId: S }).catch(() => {});
     const entry = await entryOf();
     for (const k of Object.keys(entry).filter(k => !knownKeys.includes(k))) delete entry[k];   // the cursors the last case's passes wrote: this case's scan starts afresh

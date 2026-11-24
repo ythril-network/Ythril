@@ -95,6 +95,7 @@ describe('an RDF export streams the whole scope in one request', { skip, timeout
   }
 
   it('the audit row of a stream that could not finish says complete: false', async () => {
+    await untilAuditWritesLanded();
     await d.col('audit_log').deleteMany({ operation: 'rdf.export' });
     let calls = 0;
     act.setRdfExportPageReaderForTest(async (spec, after) => {

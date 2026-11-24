@@ -39,7 +39,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { adminRights } from './_cel-doors.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { openFileActDoors } from './_file-act-doors.mjs';
@@ -119,6 +119,7 @@ describe('delete_file deletes a directory with confirm, as the same act on every
     faults.clear();
     await acts.reset();
     for (const part of ['links', 'media_jobs', 'tombstones']) await acts.door.coll(S, part).deleteMany({});
+    await untilAuditWritesLanded();
     await acts.door.mongo.getDb().collection('audit_log').deleteMany({ spaceId: S });
   });
 

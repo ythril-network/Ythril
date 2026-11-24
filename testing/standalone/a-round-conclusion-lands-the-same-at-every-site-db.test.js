@@ -35,7 +35,7 @@ import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { openTestMongo, closeTestMongo, mongoSkipReason } from './_mongo-harness.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { privateAddressSkipReason } from './_private-address.mjs';
 import { tempInstanceDir, removeInstanceDir } from './_vote-round-instance.mjs';
 import { startVotesPeer } from './_vote-round-sites.mjs';
@@ -198,6 +198,7 @@ describe('every via audits what it did, but the one that is the operator\'s requ
   for (const via of vias) {
     for (const { roundType, operation } of EFFECTS) {
       it(`${via}: a passing ${roundType} writes ${requestVias.includes(via) ? 'no' : 'exactly one'} ${operation} entry`, async () => {
+        await untilAuditWritesLanded();
         await mongo.col('audit_log').deleteMany({});
         await mongo.col('notes_facts').deleteMany({});   // a join's row leaves the seed in place: each row seeds its own
         if (requestVias.includes(via)) {

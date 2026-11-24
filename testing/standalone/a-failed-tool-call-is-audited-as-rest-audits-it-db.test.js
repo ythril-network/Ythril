@@ -43,7 +43,7 @@ import express from 'express';
 import { elapse } from '../_shared/sleep.mjs';
 import { listenRouterApp } from '../_shared/in-process-app.mjs';
 import { mongoSkipReason } from './_mongo-harness.mjs';
-import { auditRowsOf } from './_audit-rows.mjs';
+import { auditRowsOf, untilAuditWritesLanded } from './_audit-rows.mjs';
 import { openToolDoor } from './_tool-door.mjs';
 
 const skip = await mongoSkipReason();
@@ -176,7 +176,7 @@ describe('a failed tool call is audited as REST audits its twin', { skip }, () =
   });
   after(async () => { await door?.close(); });
   const logReads = (on) => loader.mutateConfig(c => { c.audit = { ...(c.audit ?? {}), logReads: on }; });
-  beforeEach(async () => { await auditColl().deleteMany({}); logReads(true); });
+  beforeEach(async () => { await untilAuditWritesLanded(); await auditColl().deleteMany({}); logReads(true); });
 
   it('the audited tools are derived from the registry, with floors', () => {
     const tools = derivedTools();
@@ -285,6 +285,7 @@ describe('a failed tool call is audited as REST audits its twin', { skip }, () =
       for (const transport of TRANSPORTS) {
         it(`${c.tool} answered ${c.status} over ${transport}`, async () => {
           const rest = await restRow(c.method, c.restPath, c.status);
+          await untilAuditWritesLanded();
           await auditColl().deleteMany({});
           const run = () => door.call(c.tool, c.args, { transport, ...(c.rights ? { rights: c.rights } : {}) });
           const out = c.fault ? await withFaultingHandler(c.tool, run) : await run();
