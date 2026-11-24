@@ -171,16 +171,28 @@ first. Its bounds are two config keys, read live:
 | `importMaxDocuments` | 5 000 000 | `413`: documents in every family together, the elements of `schemaSnapshots` counted with them |
 
 Both must be positive whole numbers; any other value refuses the config at load or reload. A reverse proxy's own
-body limit (nginx `client_max_body_size`, [Hosting](02-hosting.md)) is the outer cap, and the body must arrive within the
-server's request timeout (5 minutes), so the largest body a client can send is about its bandwidth times that.
+body limit (nginx `client_max_body_size`, [Hosting](02-hosting.md)) is the outer cap. The body is read at a pace, as
+the RDF export asks of its reader ([Exports](06f-exports.md)): an upload that sends nothing for a minute, or less than
+16 KiB/s over a minute of the server waiting on it, is cut off, so one slow sender cannot hold the instance's one import.
+Time the server spends spooling does not count against the sender.
 
-**Refused before anything is written, and nothing is kept:** a body that is not JSON (`415`: the content type must be
-`application/json`, and the encoding one of the three above); a malformed body, anywhere in it — not one object, a
-family (or `schemaSnapshots`) that is not an array or appears twice, a document or element over 10 MB or nested deeper
-than 64 levels, a body cut off or never closed (`400`); either ceiling (`413`); a disk without room for the body
-(`507`); another import standing on this instance, or another import still being received (`409`,
-`code: "space_being_imported"`: one import runs at a time). A well-formed schema snapshot element whose text is not
-the version its fingerprint names refuses nothing: that element alone is skipped and counted (below).
+**Refused before anything is written, and nothing is kept** (each with `Connection: close`, read whole by a client still
+sending):
+
+| Status | Code | When |
+|---|---|---|
+| 415 | (none) | A body that is not JSON: the content type must be `application/json`, and the encoding one of the three above |
+| 400 | (none) | A malformed body, anywhere in it: not one object, a family (or `schemaSnapshots`) that is not an array or appears twice, a document or element over 10 MB or nested deeper than 64 levels, a body cut off or never closed; or a compressed body that does not inflate |
+| 408 | `space_import_upload_stalled` | The upload sent nothing for a minute |
+| 408 | `space_import_upload_too_slow` | The upload sent less than 16 KiB/s over a minute of the server waiting on it |
+| 409 | `space_being_imported` | Another import standing on this instance, or another import still being received: one import runs at a time |
+| 413 | (none) | Either ceiling |
+| 429 | `space_import_upload_cooldown` | The same caller (its token) was refused `408` within the last minute: `Retry-After` says when to send again; other callers are not held back |
+| 503 | `shutting_down` | The instance is stopping; a registered import resumes after the next start |
+| 507 | (none) | A disk without room for the body |
+
+A well-formed schema snapshot element whose text is not the version its fingerprint names refuses nothing: that element
+alone is skipped and counted (below).
 
 **The import is a space act.** Once the body is valid it is registered as an act of kind `import` on the space, and
 while it stands the space takes no local write and no peer's push (`409`, `code: "space_being_imported"`), as during a
