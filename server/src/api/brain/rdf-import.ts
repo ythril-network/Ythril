@@ -18,10 +18,10 @@ import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import {
-  rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, runningBodyOf, type RdfImportRefusal,
+  rdfImportAct, rdfImportAuditChanges, rdfImportStatusAct, runningBodyOf,
 } from '../../spaces/rdf-import-act.js';
 import { RDF_UPLOAD_PACE_CODES, rdfUploadCooldownRefusal } from '../../rdf/rdf-document.js';
-import { uploadCallerKey, uploadCooldown } from '../../util/upload-cooldown.js';
+import { uploadCooldown } from '../../util/upload-cooldown.js';
 import { closeUnreadBody, sendRdfRefusal } from '../rdf-upload-refusal.js';
 import { peerBoundTo, peerTokenToolRefusal } from '../../auth/peer-bound.js';
 // The import's schema step registers itself with the act when loaded (`RdfImportSchemaStep` in `spaces/rdf-import-files.ts` says why the act
@@ -39,10 +39,7 @@ const FORBIDDEN = 403;
 const STATUS_ROUTE = 'GET /api/brain/spaces/:spaceId/import/rdf/:importId';
 
 /** The callers this door refused for their upload's pace, answered 429 for one window (`util/upload-cooldown.ts`). */
-const cooldown = uploadCooldown();
-
-/** A refusal of the act, with what more it carries, on HTTP (`api/rdf-upload-refusal.ts`: the closing set, the drain, `Retry-After`). */
-const sendRefusal = (req: Request, res: Response, r: RdfImportRefusal): void => sendRdfRefusal(req, res, r);
+const cooldown = uploadCooldown(RDF_UPLOAD_PACE_CODES);
 
 /** The second factor's guard of a schema write, on this route's `spaceId`. */
 const requireSpaceAuthMfa = requireSpaceAuthMfaScoped('spaceId');
@@ -67,9 +64,8 @@ rdfImportRouter.post('/spaces/:spaceId/import/rdf', globalRateLimit, requireSpac
   // transfers of its space, and a request a peer's token made is one of them.
   const peerRefusal = peerTokenToolRefusal(peerBoundTo(req.authToken as object | undefined), 'import_rdf');
   if (peerRefusal) { closeUnreadBody(req, res); res.status(FORBIDDEN).json({ error: peerRefusal }); return; }
-  const caller = uploadCallerKey(req);
-  const wait = cooldown.retryAfterSeconds(caller);
-  if (wait !== undefined) { sendRefusal(req, res, rdfUploadCooldownRefusal(wait, 'nothing was imported')); return; }
+  const wait = cooldown.waitOf(req);
+  if (wait !== undefined) { sendRdfRefusal(req, res, rdfUploadCooldownRefusal(wait, 'nothing was imported')); return; }
   let answer;
   try {
     answer = await rdfImportAct({
@@ -99,8 +95,8 @@ rdfImportRouter.post('/spaces/:spaceId/import/rdf', globalRateLimit, requireSpac
   }
   const report = answer.detail?.['report'];
   if (report && typeof report === 'object') req.auditChangesExplicit = rdfImportAuditChanges(report as Parameters<typeof rdfImportAuditChanges>[0]);
-  if (RDF_UPLOAD_PACE_CODES.has(answer.code)) cooldown.note(caller);
-  sendRefusal(req, res, answer);
+  cooldown.noteRefusal(req, answer.code);
+  sendRdfRefusal(req, res, answer);
 });
 
 // GET /api/brain/spaces/:spaceId/import/rdf/:importId - what an import of this space did or is doing.
@@ -115,7 +111,7 @@ rdfImportRouter.get('/spaces/:spaceId/import/rdf/:importId', globalRateLimit, re
     return;
   }
   if (answer.kind === 'refused') {
-    sendRefusal(req, res, answer);
+    sendRdfRefusal(req, res, answer);
     return;
   }
   res.status(answer.status).json(answer.report);

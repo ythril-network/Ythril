@@ -18,13 +18,12 @@ import { RDF_FORMATS, type RdfFormat } from './serialize.js';
 import { RDF_MEDIA_TYPES } from './export-format.js';
 import { RdfParseError } from './parse.js';
 import { BodyTooLarge, RdfUploadStalled, RdfUploadTooSlow } from './import-upload.js';
+import { uploadPaceRefusal, type UploadPaceOutcome, type UploadPaceRefusal } from '../util/upload-pace-refusal.js';
 
 /**
- * The HTTP statuses of a document refusal, each named. An upload's pace is answered 408 (RFC 9110 section 15.5.9: the body did not arrive in
- * time; the owner's choice, Q-953), and a caller refused for it is answered 429 for one window.
+ * The HTTP statuses of a document refusal, each named. The statuses of an upload's pace (408 and 429, Q-953) are `util/upload-pace-refusal.ts`'s.
  */
-const HTTP = { BAD_REQUEST: 400, REQUEST_TIMEOUT: 408, TOO_LARGE: 413, UNSUPPORTED_MEDIA: 415, TOO_MANY_REQUESTS: 429 } as const;
-const MS_PER_SECOND = 1_000;
+const HTTP = { BAD_REQUEST: 400, TOO_LARGE: 413, UNSUPPORTED_MEDIA: 415 } as const;
 
 /** A format that is not one the reader takes (415), named neither by `format` nor by a known `Content-Type`. */
 export const RDF_UNSUPPORTED_FORMAT = 'rdf_unsupported_format';
@@ -48,9 +47,13 @@ export const RDF_BODY_BOUND = 'importBodyMaxBytes';
  */
 export const RDF_UPLOAD_CLOSE_CODES: ReadonlySet<string> = new Set([RDF_UPLOAD_STALLED, RDF_UPLOAD_TOO_SLOW, RDF_UPLOAD_COOLDOWN, RDF_BOUND_EXCEEDED]);
 
+/** The status and the sentence of an upload's pace as the RDF doors word it (`util/upload-pace-refusal.ts` owns both); `what` is what the door did not do. */
+const paceOf = (outcome: UploadPaceOutcome, what: string): UploadPaceRefusal => uploadPaceRefusal(outcome, { sent: 'file', ending: '', what });
+
 /** The answer to a caller refused for its upload's pace that uploads again within `retryAfter` seconds; `what` is what the door did not do. */
 export function rdfUploadCooldownRefusal(retryAfter: number, what: string): RdfDocumentRefusal {
-  return refusal(HTTP.TOO_MANY_REQUESTS, RDF_UPLOAD_COOLDOWN, `Your last upload here was too slow or stalled; ${what}: send the file again in ${retryAfter} seconds, without pauses`, { retryAfter });
+  const pace = paceOf({ kind: 'cooldown', retryAfter }, what);
+  return refusal(pace.status, RDF_UPLOAD_COOLDOWN, pace.error, { retryAfter });
 }
 
 /** A refusal of the document: its status, our sentence, its code, and what more a caller reads. The shape the import's refusals have. */
@@ -93,10 +96,12 @@ export function rdfFormatOf(
  */
 export function rdfDocumentRefusalOf(err: unknown, format: RdfFormat, what: string): RdfDocumentRefusal | null {
   if (err instanceof RdfUploadStalled) {
-    return refusal(HTTP.REQUEST_TIMEOUT, RDF_UPLOAD_STALLED, `The upload sent nothing for ${Math.round(err.idleMs / MS_PER_SECOND)} seconds and was cut off; ${what}: send the file again, without pauses`);
+    const pace = paceOf({ kind: 'stalled', idleMs: err.idleMs }, what);
+    return refusal(pace.status, RDF_UPLOAD_STALLED, pace.error);
   }
   if (err instanceof RdfUploadTooSlow) {
-    return refusal(HTTP.REQUEST_TIMEOUT, RDF_UPLOAD_TOO_SLOW, `The upload sent less than ${err.minBytesPerSecond} bytes a second over ${Math.round(err.windowMs / MS_PER_SECOND)} seconds and was cut off; ${what}: send the file again over a faster link`);
+    const pace = paceOf({ kind: 'too-slow', minBytesPerSecond: err.minBytesPerSecond, windowMs: err.windowMs }, what);
+    return refusal(pace.status, RDF_UPLOAD_TOO_SLOW, pace.error);
   }
   if (err instanceof BodyTooLarge) {
     return refusal(HTTP.TOO_LARGE, RDF_BOUND_EXCEEDED, `The body is over the import body bound (${err.limit} bytes); ${what}`, { bound: RDF_BODY_BOUND, limit: err.limit });

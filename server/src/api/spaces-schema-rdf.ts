@@ -19,7 +19,7 @@ import { EXPORT_OK, EXPORT_VARY } from '../export/export-statuses.js';
 import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
 import { schemaRdfImportAct } from '../spaces/schema-rdf-import-act.js';
 import { RDF_UPLOAD_PACE_CODES, rdfUploadCooldownRefusal } from '../rdf/rdf-document.js';
-import { uploadCallerKey, uploadCooldown } from '../util/upload-cooldown.js';
+import { uploadCooldown } from '../util/upload-cooldown.js';
 import { closeUnreadBody, sendRdfRefusal } from './rdf-upload-refusal.js';
 import { peerBoundTo, peerTokenToolRefusal } from '../auth/peer-bound.js';
 import { schemaConvertCallerOf } from '../spaces/schema-convert-terms.js';
@@ -34,9 +34,7 @@ const IMPORT_ROUTE = 'POST /api/spaces/:id/schema-rdf';
 /** The status a peer-bound token's build is refused with. */
 const FORBIDDEN = 403;
 /** The callers this door refused for their upload's pace, answered 429 for one window (`util/upload-cooldown.ts`). */
-const cooldown = uploadCooldown();
-/** A refusal of the build, on HTTP (`rdf-upload-refusal.ts`: the closing set, the drain, `Retry-After`). */
-const sendRefusal = sendRdfRefusal;
+const cooldown = uploadCooldown(RDF_UPLOAD_PACE_CODES);
 
 // GET (and HEAD) /api/spaces/:id/schema-rdf[?format=turtle|jsonld] - the schema of the space as an OWL ontology and SHACL shapes. A HEAD is
 // judged and audited as this GET (`http/governed-method.ts`: its rights row, a `schema.rdf.export` row with `method: 'HEAD'`) and answered
@@ -76,9 +74,8 @@ spaceSchemaRdfRouter.post('/:id/schema-rdf', globalRateLimit, requireSpaceAuthMf
   // The one set of what a peer-bound token may not call, asked by the tool's dispatcher too.
   const peerRefusal = peerTokenToolRefusal(peerBoundTo(req.authToken as object | undefined), 'import_schema_rdf');
   if (peerRefusal) { closeUnreadBody(req, res); res.status(FORBIDDEN).json({ error: peerRefusal }); return; }
-  const caller = uploadCallerKey(req);
-  const wait = cooldown.retryAfterSeconds(caller);
-  if (wait !== undefined) { sendRefusal(req, res, rdfUploadCooldownRefusal(wait, 'no schema was built')); return; }
+  const wait = cooldown.waitOf(req);
+  if (wait !== undefined) { sendRdfRefusal(req, res, rdfUploadCooldownRefusal(wait, 'no schema was built')); return; }
   let answer;
   try {
     answer = await schemaRdfImportAct({
@@ -97,8 +94,8 @@ spaceSchemaRdfRouter.post('/:id/schema-rdf', globalRateLimit, requireSpaceAuthMf
     return;
   }
   if (answer.kind === 'refused') {
-    if (RDF_UPLOAD_PACE_CODES.has(answer.code)) cooldown.note(caller);
-    sendRefusal(req, res, answer);
+    cooldown.noteRefusal(req, answer.code);
+    sendRdfRefusal(req, res, answer);
     return;
   }
   // Recorded only on a <400 answer: the planner's snapshot pair on a build, the counts alone on a dry run.

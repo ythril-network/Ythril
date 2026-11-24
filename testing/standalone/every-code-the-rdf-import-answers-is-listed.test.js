@@ -115,6 +115,8 @@ describe('every code the RDF import answers is listed', () => {
   it('every status the act answers with is one the tool carries, or the storage limit\'s 507, which the tool answers as the fact tool does, or 408, which no tool call meets', () => {
     const table = Object.fromEntries([...act.matchAll(/\b([A-Z_]+): (\d{3})\b/g)].map(m => [m[1], Number(m[2])]));
     const used = new Set([...act.matchAll(/\brefusal\(\s*HTTP\.([A-Z_]+)/g)].map(m => table[m[1]]).filter(Boolean));
+    // The statuses of an upload's pace (408, 429) are the one builder's (`util/upload-pace-refusal.ts`, lens finding D1), not a `refusal(HTTP.X` call's.
+    for (const m of code('server/src/util/upload-pace-refusal.ts').matchAll(/\b[A-Z_]+: (\d{3})\b/g)) used.add(Number(m[1]));
     const tool = new Set([...code('server/src/util/errors.ts').match(/TOOL_REFUSAL_STATUSES = Object\.freeze\(\[([^\]]+)\]/)?.[1].matchAll(/\d{3}/g) ?? []].map(m => Number(m[0])));
     assert.ok(tool.size > 5 && used.size > 3, 'both sets were read');
     // 408 is an upload's pace (Q-953): the tool takes its document inline, as one chunk already in hand, so no pace refusal reaches it.
