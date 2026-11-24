@@ -56,7 +56,8 @@ import { SPACE_ACT_KINDS } from '../config/types-space-acts.js';
 import { ImportBusyError, ensureSpoolRoot, holdImportDoor, indexSpool, registerImport, removeSpool, spoolPathOf, takeImportResult } from '../spaces/import-act.js';
 import { importTotals, type ImportResult } from '../sync/space-import.js';
 import { UploadGone, UploadStalled, UploadTooSlow, uploadReadable } from '../util/upload-reader.js';
-import { uploadCallerKey, uploadCooldown } from '../util/upload-cooldown.js';
+import { uploadCooldown } from '../util/upload-cooldown.js';
+import { uploadPaceRefusal } from '../util/upload-pace-refusal.js';
 import { closeUnreadBody } from './rdf-upload-refusal.js';
 
 /** The import route's full path, for the parser marker `app.ts` mounts before the global parsers (the router serves it under its mount). */
@@ -181,11 +182,13 @@ export const SPACE_IMPORT_SHUTTING_DOWN = 'shutting_down';
 export const SPACE_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   SPACE_ACT_KINDS.import.writeRefusalCode, SPACE_IMPORT_SHUTTING_DOWN, SPACE_IMPORT_UPLOAD_STALLED, SPACE_IMPORT_UPLOAD_TOO_SLOW, SPACE_IMPORT_UPLOAD_COOLDOWN,
 ]);
+/** The refusals of an upload's pace: the caller is cooled down after one (the cooldown answer is no pace refusal of its own). */
+export const SPACE_IMPORT_PACE_CODES: ReadonlySet<string> = new Set([SPACE_IMPORT_UPLOAD_STALLED, SPACE_IMPORT_UPLOAD_TOO_SLOW]);
 /** The callers this door refused for their upload's pace, answered 429 for one window (`util/upload-cooldown.ts`). */
-const importCooldown = uploadCooldown();
-/** The statuses of an upload's pace: the body did not arrive in time (RFC 9110 section 15.5.9), and a cooled-down caller. */
-const PACE_STATUS = { REQUEST_TIMEOUT: 408, TOO_MANY_REQUESTS: 429 } as const;
-const MS_PER_SECOND = 1_000;
+const importCooldown = uploadCooldown(SPACE_IMPORT_PACE_CODES);
+/** How this door words an upload's pace refusal (`util/upload-pace-refusal.ts`): it takes a body and writes nothing. */
+const PACE_VOICE = { sent: 'body', ending: '.' } as const;
+const NOTHING_WRITTEN = 'nothing was written';
 
 /** The body inflated past `importBodyMaxBytes`. */
 class OverCeiling extends Error { override readonly name = 'OverCeiling'; }
@@ -211,10 +214,12 @@ function ceilingOf(max: number): Transform {
 /** What a refused import answers, by what refused it; the spool is already gone. Only an upload's pace is answered with a code. */
 function refusalOf(err: unknown, encoding: string): { status: number; error: string; code?: string } | null {
   if (err instanceof UploadStalled) {
-    return { status: PACE_STATUS.REQUEST_TIMEOUT, error: `The upload sent nothing for ${Math.round(err.idleMs / MS_PER_SECOND)} seconds and was cut off; nothing was written: send the body again, without pauses.`, code: SPACE_IMPORT_UPLOAD_STALLED };
+    const r = uploadPaceRefusal({ kind: 'stalled', idleMs: err.idleMs }, { ...PACE_VOICE, what: NOTHING_WRITTEN });
+    return { status: r.status, error: r.error, code: SPACE_IMPORT_UPLOAD_STALLED };
   }
   if (err instanceof UploadTooSlow) {
-    return { status: PACE_STATUS.REQUEST_TIMEOUT, error: `The upload sent less than ${err.minBytesPerSecond} bytes a second over ${Math.round(err.windowMs / MS_PER_SECOND)} seconds and was cut off; nothing was written: send the body again over a faster link.`, code: SPACE_IMPORT_UPLOAD_TOO_SLOW };
+    const r = uploadPaceRefusal({ kind: 'too-slow', minBytesPerSecond: err.minBytesPerSecond, windowMs: err.windowMs }, { ...PACE_VOICE, what: NOTHING_WRITTEN });
+    return { status: r.status, error: r.error, code: SPACE_IMPORT_UPLOAD_TOO_SLOW };
   }
   if (err instanceof OverCeiling || err instanceof ExportBodyTooLarge) return { status: 413, error: err.message };
   if (err instanceof ExportBodyMalformed) return { status: 400, error: err.message };
@@ -274,13 +279,13 @@ function importChanges(result: ImportResult): Array<{ field: string; to: number 
 spaceTransferRouter.post('/:spaceId/import', globalRateLimit, requireAdminMfaScoped('spaceId'), async (req, res) => {
   const spaceId = req.params['spaceId'] as string;
   if (answeredUnknownSpace(req, res, spaceId)) return;
-  const caller = uploadCallerKey(req);
-  const wait = importCooldown.retryAfterSeconds(caller);
+  const wait = importCooldown.waitOf(req);
   if (wait !== undefined) {
     // Answered before the body is read: the rest is drained and the connection ends.
     closeUnreadBody(req, res);
+    const cooled = uploadPaceRefusal({ kind: 'cooldown', retryAfter: wait }, PACE_VOICE);
     res.setHeader('Retry-After', String(wait));
-    res.status(PACE_STATUS.TOO_MANY_REQUESTS).json({ error: `Your last upload here was too slow or stalled: send the body again in ${wait} seconds, without pauses.`, code: SPACE_IMPORT_UPLOAD_COOLDOWN });
+    res.status(cooled.status).json({ error: cooled.error, code: SPACE_IMPORT_UPLOAD_COOLDOWN });
     return;
   }
   if (!JSON_TYPE.test(req.headers['content-type'] ?? '')) {
@@ -300,16 +305,16 @@ spaceTransferRouter.post('/:spaceId/import', globalRateLimit, requireAdminMfaSco
     closeUnreadBody(req, res);
     res.status(409).json({ error: `Space '${spaceId}' takes no import now: ${SPACE_ACT_KINDS.import.writeRefusalWhy()}.`, code: SPACE_ACT_KINDS.import.writeRefusalCode });
   };
-  const door = await holdImportDoor(() => importThroughDoor(req, res, spaceId, encoding, busy, () => importCooldown.note(caller)));
+  const door = await holdImportDoor(() => importThroughDoor(req, res, spaceId, encoding, busy));
   if (!door.held) busy();
 });
 
 /**
- * The import door past its one-at-a-time check: spool, validate, register, wait and answer. Never throws. `refusedForPace` is called when the
- * upload is refused for its pace (the caller's cooldown).
+ * The import door past its one-at-a-time check: spool, validate, register, wait and answer. Never throws. A refusal for the upload's pace
+ * cools its caller down (`importCooldown`).
  */
 async function importThroughDoor(
-  req: Request, res: Response, spaceId: string, encoding: string, busy: () => void, refusedForPace: () => void,
+  req: Request, res: Response, spaceId: string, encoding: string, busy: () => void,
 ): Promise<void> {
   const where = 'POST /api/admin/spaces/:spaceId/import';
   const spoolId = crypto.randomUUID();
@@ -347,7 +352,7 @@ async function importThroughDoor(
     if (err instanceof ImportBusyError) { busy(); return; }
     const refused = refusalOf(err, encoding);
     if (refused) {
-      if (err instanceof UploadStalled || err instanceof UploadTooSlow) refusedForPace();
+      importCooldown.noteRefusal(req, refused.code);
       res.status(refused.status).json({ error: refused.error, ...(refused.code ? { code: refused.code } : {}) });
       return;
     }
