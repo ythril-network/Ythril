@@ -13,11 +13,19 @@
  * - 24: the networked refusal's `proposed` lists hold no statement the file does not hold.
  * - 28, 38: `inferFunctional`, `inferMinSupport` and `inferMinConfidence` without `data` in `from` are refused 400 on both doors.
  * - 31: the audit row of an inferring import carries `schemaInferred` and the sources asked, and no name the file chose.
+ * - I1: a file whose subjects are typed with more distinct classes than the inference's bound answers 413 `rdf_bound_exceeded`
+ *   (`schemaInferMaxClasses`) on both doors, writes nothing and leaves no import folder; a file at the bound is let through.
+ * - I2: a file whose subjects of several graphs add more distinct (subject, predicate) pairs than the pair bound answers 413
+ *   (`schemaInferMaxPairs`) the same way; a file at the bound is let through.
+ * - I3: an edge label whose built definition is invalid releases its name, so it does not count toward the type cap: a file that brings a kind
+ *   to exactly the cap with such a label is written, never answered 500.
  *
  * Run: node --test testing/standalone/an-rdf-import-inferring-a-schema-is-bounded-and-judged-on-both-doors-db.test.js (server build and the test MongoDB)
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { untilAuditWritesLanded } from './_audit-rows.mjs';
 import { openRdfImportSchemaDoors, spaceWith } from './_rdf-import-schema-doors.mjs';
@@ -26,7 +34,7 @@ import { ttl, people, TICKET_FILE, TICKET_TYPES, stepOf } from './_rdf-import-in
 const skip = await mongoSkipReason();
 const STRICT = { validationMode: 'strict' };
 const id = (n) => `rdfinfd${n}`;
-const PLAIN = ['8r', '8m', '9', '11', '20a', '20b', '24', '28r', '28m', '31'];
+const PLAIN = ['8r', '8m', '9', '11', '20a', '20b', '24', '28r', '28m', '31', 'i1r', 'i1m', 'i1ok', 'i2r', 'i2m', 'i2ok'];
 const MANY = Object.fromEntries(Array.from({ length: 199 }, (_, i) => [`held${i}`, {}]));
 
 describe('an RDF import inferring a schema is bounded and judged on both doors (real routes, real MongoDB)', { skip, timeout: 300_000 }, () => {
@@ -34,9 +42,9 @@ describe('an RDF import inferring a schema is bounded and judged on both doors (
   before(async () => {
     d = await openRdfImportSchemaDoors({
       suite: 'rdf_import_infer_doors',
-      spaces: [...PLAIN.map(n => spaceWith(id(n), undefined, STRICT)), spaceWith(id('22'), { entity: MANY }, { validationMode: 'warn' })],
+      spaces: [...PLAIN.map(n => spaceWith(id(n), undefined, STRICT)), spaceWith(id('22'), { entity: MANY }, { validationMode: 'warn' }), spaceWith(id('i3'), { edge: MANY }, { validationMode: 'warn' })],
     });
-    writer = await d.mint('rdf-import-infer-doors-writer', Object.fromEntries([...PLAIN, '22'].map(n => [id(n), d.row({ knowledge: 'write', schema: 'write' })])));
+    writer = await d.mint('rdf-import-infer-doors-writer', Object.fromEntries([...PLAIN, '22', 'i3'].map(n => [id(n), d.row({ knowledge: 'write', schema: 'write' })])));
     act = await import('../../server/dist/spaces/rdf-import-act.js');
   });
   after(async () => { act?.setRdfImportKnobsForTest?.(null); await d?.close(); });
@@ -140,5 +148,60 @@ describe('an RDF import inferring a schema is bounded and judged on both doors (
     assert.equal(changes.find(c => c.field === 'schemaInferred')?.to, 3, `a type, a property, an edge label: ${JSON.stringify(changes)}`);
     assert.equal(changes.find(c => c.field === 'schemaFrom')?.to, 'data', JSON.stringify(changes));
     assert.ok(!/Person|knows|data\.example|people\.example/.test(JSON.stringify(changes)), `a name the file chose: ${JSON.stringify(changes)}`);
+  });
+
+  const folders = () => { const dir = path.join(d.loader.getDataRoot(), 'rdf-import'); return fs.existsSync(dir) ? fs.readdirSync(dir).sort() : []; };
+  /** A refused import wrote no schema, no record and no file: `spaces` hold nothing and the import folders are as they were. */
+  async function assertNothingKept(spaces, before) {
+    for (const space of spaces) {
+      assert.deepEqual(d.heldTypes(space), {}, space);
+      assert.deepEqual(await d.records(space, 'entities'), [], space);
+    }
+    assert.deepEqual(folders(), before, 'the refused import left its spool and step file behind');
+  }
+
+  it('I1: one class more than the bound answers 413 on both doors, writes nothing and removes the import\'s files; a file at the bound is let through', async () => {
+    const classes = (n) => ttl(...Array.from({ length: n }, (_, c) => people(2, { cls: `ex:Kind${c}`, prefix: `k${c}x` })));
+    const before = folders();
+    const { rest, mcp } = await withKnobs({ schemaInferMaxClasses: 3 }, () => d.importBoth(writer.key, [id('i1r'), id('i1m')], classes(4), DATA));
+    assert.equal(rest.status, 413, rest.text.slice(0, 400));
+    assert.equal(rest.code, 'rdf_bound_exceeded');
+    assert.equal(rest.body?.bound, 'schemaInferMaxClasses', rest.text.slice(0, 400));
+    assert.equal(rest.body?.limit, 3, rest.text.slice(0, 400));
+    assert.equal(mcp.code, 'rdf_bound_exceeded', mcp.text.slice(0, 400));
+    await assertNothingKept([id('i1r'), id('i1m')], before);
+    const at = await withKnobs({ schemaInferMaxClasses: 3 }, () => d.importRestOne(writer.key, id('i1ok'), classes(3), { ...DATA, dryRun: true }));
+    assert.equal(at.status, 200, `a file with exactly as many classes as the bound is inferred from: ${at.text.slice(0, 400)}`);
+  });
+
+  it('I2: one counted (subject, predicate) pair more than the bound answers 413 on both doors and writes nothing; a file at the bound is let through', async () => {
+    // Three subjects stated in the default graph and in a named graph, two predicates each: six pairs, each counted once.
+    const lines = (n) => Array.from({ length: n }, (_, i) => `p:s${i} a ex:Person ; ex:a "1" ; ex:b "2" .`);
+    const file = ttl(lines(3), '<http://g.example/one> {', lines(3), '}');
+    const before = folders();
+    const opts = { format: 'trig' };
+    const { rest, mcp } = await withKnobs({ schemaInferMaxPairs: 5 }, () => d.importBoth(writer.key, [id('i2r'), id('i2m')], file, DATA, opts));
+    assert.equal(rest.status, 413, rest.text.slice(0, 400));
+    assert.equal(rest.code, 'rdf_bound_exceeded');
+    assert.equal(rest.body?.bound, 'schemaInferMaxPairs', rest.text.slice(0, 400));
+    assert.equal(rest.body?.limit, 5, rest.text.slice(0, 400));
+    assert.equal(mcp.code, 'rdf_bound_exceeded', mcp.text.slice(0, 400));
+    await assertNothingKept([id('i2r'), id('i2m')], before);
+    const at = await withKnobs({ schemaInferMaxPairs: 6 }, () => d.importRestOne(writer.key, id('i2ok'), file, { ...DATA, dryRun: true }, opts));
+    assert.notEqual(at.status, 413, `a file with exactly as many pairs as the bound is inferred from: ${at.text.slice(0, 400)}`);
+  });
+
+  it('I3: an edge label whose definition turns out invalid does not count toward the cap, so a kind brought to exactly the cap is written, never a 500', async () => {
+    // The space holds 199 edge types. `knows` is the 200th; the other label's address is past the schema's IRI length, so its definition is refused
+    // after its name was claimed. Sorted by address it is claimed first: a name held but never built would take the count to 201 at `knows`.
+    const LONG = `http://data.example/${'a'.repeat(2100)}`;
+    const file = ttl(`<${LONG}> rdfs:label "linkedTo" .`, people(2, { extra: (i) => `ex:knows p:person${1 - i} ; <${LONG}> p:person${1 - i}` }));
+    const r = await d.importRestOne(writer.key, id('i3'), file, { schema: 'expand', from: ['data'] });
+    assert.equal(r.status, 200, r.text.slice(0, 600));
+    const edges = Object.keys(d.heldTypes(id('i3')).edge ?? {});
+    assert.equal(edges.length, 200, 'the 199 held edge types and `knows`');
+    assert.ok(edges.includes('knows') && !edges.includes('linkedTo'), edges.filter(e => !e.startsWith('held')).join());
+    const left = (stepOf(r)?.inferred?.notInferred ?? []).find(n => n.iri === LONG);
+    assert.equal(left?.why, 'invalid', JSON.stringify(stepOf(r)?.inferred?.notInferred ?? []).slice(0, 600));
   });
 });

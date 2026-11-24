@@ -19,8 +19,9 @@
  *   predicates by its own role reader (`predicateRole`), values by its own category reader (`literalCategory`), addresses by the mapping's own
  *   term reader (`readTerm`), names by the mapping's own name checks (`validTypeName`, `validPropertyKey`), definitions by the schema package's
  *   parse: the inference and the import cannot disagree about what a statement is.
- * - **An unbounded read.** The distinct predicates of a file's subjects are counted while it is read and the file is refused past
- *   {@link SCHEMA_INFER_MAX_PREDICATES}; the map of subjects to their classes holds a 128-bit digest and a few class indices per subject, bounded
+ * - **An unbounded read.** The distinct predicates and the distinct classes of a file's subjects are counted while it is read and the file is
+ *   refused past {@link SCHEMA_INFER_MAX_PREDICATES} and {@link SCHEMA_INFER_MAX_CLASSES}, and the pairs the second pass remembers for subjects
+ *   stated by several graphs past {@link SCHEMA_INFER_MAX_PAIRS}, each at the statement that passes it; the map of subjects to their classes holds a 128-bit digest and a few class indices per subject, bounded
  *   by the door's own subject bound; every list the answer names is capped at {@link INFERRED_NAMED_MAX} and counted whole.
  *
  * Two passes over the sorted spool, read again for each ({@link gatherClasses}, then {@link inferFromData}'s second pass), at the door.
@@ -38,6 +39,31 @@ import type { BuiltType, TypeSchemasByKind } from './schema-from-rdf-modes.js';
 
 /** The most distinct predicates a file's subjects may use for a schema to be inferred from it: wider is a dump to type by hand. */
 export const SCHEMA_INFER_MAX_PREDICATES = 1000;
+/**
+ * The most distinct classes a file's subjects may be typed with for a schema to be inferred from it. A space holds at most
+ * {@link MAX_TYPES_PER_KIND} types of a kind and the inference builds the kinds `entity` and `fact`, so a schema takes at most twice that many
+ * classes; the rest of the bound is room for the classes a threshold prunes (named, never built). Wider is a dump to type by hand, and the
+ * refusal comes while the first pass reads, before a map or a step file holds an entry per class.
+ */
+export const SCHEMA_INFER_MAX_CLASSES = 1000;
+/**
+ * The most distinct (subject, predicate) pairs of subjects stated by several graphs the second pass remembers, so each is one subject of its
+ * pair. The set holds a short string per pair (about 100 bytes with its entry), so the bound is about 100 MB at most; the import's own subject
+ * bound (a million) is the number of subjects that can repeat, and a pair is at least one statement of one of them.
+ */
+export const SCHEMA_INFER_MAX_PAIRS = 1_000_000;
+/** The knob (and `bound` a refusal names) of each bound a schema inferred from data is refused at. */
+export const INFER_BOUND_KNOB = { predicates: 'schemaInferMaxPredicates', classes: 'schemaInferMaxClasses', pairs: 'schemaInferMaxPairs' } as const;
+export type InferBound = keyof typeof INFER_BOUND_KNOB;
+
+/** The door's words for a file over one of the inference's bounds. */
+export function inferBoundText(bound: InferBound, limit: number): string {
+  const what = bound === 'predicates' ? `use more than ${limit} distinct predicates`
+    : bound === 'classes' ? `are typed with more than ${limit} distinct classes`
+      : `state more than ${limit} distinct (subject, predicate) pairs in several graphs`;
+  return `The file's records ${what}, the most a schema is inferred from; type it by hand (from: declared, shacl); nothing was imported`;
+}
+
 /** The support a term needs by default: a single stray record is not a type (the shape-extraction tools' reason for a support floor). */
 export const INFER_MIN_SUPPORT_DEFAULT = 2;
 /** The confidence a property needs by default: none, so the column's majority datatype is taken as the ticket asks. */
@@ -65,6 +91,8 @@ export interface InferOptions {
   /** An edge label no subject states twice is one-only (`functional`). */
   functional: boolean;
   maxPredicates: number;
+  /** The most distinct (subject, predicate) pairs of subjects stated by several graphs the second pass remembers ({@link SCHEMA_INFER_MAX_PAIRS}). */
+  maxPairs: number;
 }
 
 /** What the inference says of one term it took, or why it took none. */
@@ -102,7 +130,8 @@ export interface DataClasses {
   predicates: Set<string>;
 }
 
-export type DataClassesOrOver = DataClasses | { kind: 'over'; limit: number };
+/** The first pass's answer: what it read, or the bound (`predicates` or `classes`) the file passed and how far that bound reaches. */
+export type DataClassesOrOver = DataClasses | { kind: 'over'; bound: 'predicates' | 'classes'; limit: number };
 
 /** The door's view of the file: its groups (read again for each pass), the schema groups to skip, and the names each graph is read under. */
 export interface DataSource {
@@ -128,9 +157,11 @@ function subjectOf(group: QuadGroup, source: DataSource): { iri: string; own: Qu
 
 /**
  * Pass 1: the classes each subject is typed with (by the translation's class reader), how many subjects carry each, the kind markers beside
- * them, the labels of addresses described by labels alone, and the distinct predicates the subjects use, refused past `maxPredicates`.
+ * them, the labels of addresses described by labels alone, and the distinct predicates the subjects use. A file whose subjects use more distinct
+ * predicates than `bounds.predicates`, or are typed with more distinct classes than `bounds.classes`, is `over` at the statement that passed it:
+ * nothing after it is read. A subject's own statements are checked for membership through sets, so the work is linear in what the subject states.
  */
-export async function gatherClasses(source: DataSource, maxPredicates: number): Promise<DataClassesOrOver> {
+export async function gatherClasses(source: DataSource, bounds: { predicates: number; classes: number }): Promise<DataClassesOrOver> {
   const out: DataClasses = { kind: 'classes', classes: [], subjects: new Map(), count: [], markers: new Map(), labelGroups: new Map(), repeated: new Set(), predicates: new Set() };
   const index = new Map<string, number>();
   const seen = new Set<string>();
@@ -140,24 +171,28 @@ export async function gatherClasses(source: DataSource, maxPredicates: number): 
     if (at === null) continue;
     const digest = digestOfKey(at.iri);
     if (seen.has(digest)) out.repeated.add(digest); else seen.add(digest);
+    const typeStatements = new Set(at.types);
     for (const q of at.own) {
-      if (q.predicate.value === RDFS_LABEL || q.predicate.value === RDFS_COMMENT || at.types.includes(q)) continue;
+      if (q.predicate.value === RDFS_LABEL || q.predicate.value === RDFS_COMMENT || typeStatements.has(q)) continue;
       if (!out.predicates.has(q.predicate.value)) {
         out.predicates.add(q.predicate.value);
-        if (out.predicates.size > maxPredicates) return { kind: 'over', limit: maxPredicates };
+        if (out.predicates.size > bounds.predicates) return { kind: 'over', bound: 'predicates', limit: bounds.predicates };
       }
     }
     const marks = new Set<RecordKind>();
-    const mine: number[] = [];
+    const mine = new Set<number>();
     for (const q of at.types) {
       const read = classOfType(q.object);
       if (read.as === 'marker') marks.add(read.kind);
       if (read.as !== 'class') continue;
       let n = index.get(read.iri);
-      if (n === undefined) { n = out.classes.length; index.set(read.iri, n); out.classes.push(read.iri); out.count.push(0); }
-      if (!mine.includes(n)) mine.push(n);
+      if (n === undefined) {
+        n = out.classes.length; index.set(read.iri, n); out.classes.push(read.iri); out.count.push(0);
+        if (out.classes.length > bounds.classes) return { kind: 'over', bound: 'classes', limit: bounds.classes };
+      }
+      mine.add(n);
     }
-    if (mine.length === 0) {
+    if (mine.size === 0) {
       if (at.types.length === 0 && at.own.every(q => q.predicate.value === RDFS_LABEL || q.predicate.value === RDFS_COMMENT)) {
         const labels = at.own.map(plainLabel).filter((l): l is string => l !== null);
         const held = out.labelGroups.get(at.iri);
@@ -167,8 +202,9 @@ export async function gatherClasses(source: DataSource, maxPredicates: number): 
     }
     // A subject is counted once for a class however many groups (graphs) type it with it.
     const have = out.subjects.get(digest) ?? [];
+    const haveSet = new Set(have);
     for (const n of mine) {
-      if (!have.includes(n)) { have.push(n); out.count[n] = (out.count[n] ?? 0) + 1; }
+      if (!haveSet.has(n)) { have.push(n); haveSet.add(n); out.count[n] = (out.count[n] ?? 0) + 1; }
       if (marks.size > 0) { const set = out.markers.get(n) ?? new Set(); marks.forEach(k => set.add(k)); out.markers.set(n, set); }
     }
     out.subjects.set(digest, have);
@@ -190,6 +226,8 @@ export interface InferResult {
   built: BuiltType[]; inferred: InferredBlock; leaveOut: string[]; labelKeys: string[];
   /** The kind whose types the inference had taken past the cap on type definitions when it stopped (what it had built is not a schema): the proposal refuses. */
   overCap?: KnowledgeType;
+  /** The second pass met more distinct pairs than `maxPairs` and stopped: the proposal refuses 413 and nothing it holds is a schema. */
+  over?: { bound: 'pairs'; limit: number };
 }
 
 interface PairStats { kind: KnowledgeType; type: string; subjects: number; literals: number; multi: number; nodes: number; maxNodes: number; ends: Set<string>; open: Set<string> }
@@ -200,8 +238,8 @@ const FIRST_NUMBER = 2;
 /**
  * The names of one scope (a kind's types, a type's property keys) held so far. The one numbering rule of the inference: `wanted`, or the first
  * `wanted_<n>` that is not held, checked again by `valid` (a number can take a name past its length limit). Each base name is numbered from where
- * its last claim left off (held names are never released, so no spelling before it can be free), which makes a claim cost a constant number of
- * probes however many names of one base were claimed.
+ * its last claim left off (a name is released only by {@link NameSet.release}, never reused for another claim of its base, so no spelling before
+ * the counter can be free for a later claim to take), which makes a claim cost a constant number of probes however many names of one base were claimed.
  */
 class NameSet {
   private readonly held: Set<string>;
@@ -245,13 +283,24 @@ class NameSet {
     if (n > 0) this.next.set(wanted, n + 1);
     return name;
   }
+  /**
+   * Give back a name `claim` returned that no type was built under (its definition turned out invalid), so the scope counts only built names
+   * toward the type cap. A numbered name's number stays used: the next claim of its base goes on from there.
+   */
+  release(name: string): void {
+    this.held.delete(name);
+    this.foreign.delete(name);
+  }
 }
 
 /** The names held per kind (stored, declared, inferred so far), and the first kind that holds more types than a kind may. */
 class NameBook {
   private readonly sets = new Map<string, NameSet>();
-  /** The first kind whose held names passed the type cap, or `undefined`. */
-  over: KnowledgeType | undefined;
+  /** The first kind whose held names now pass the type cap, or `undefined` (a released name no longer counts). */
+  get over(): KnowledgeType | undefined {
+    for (const [kind, set] of this.sets) if (set.taken > MAX_TYPES_PER_KIND) return kind as KnowledgeType;
+    return undefined;
+  }
   constructor(typeSchemas: TypeSchemasByKind, private readonly onClaim?: (probes: number) => void) {
     for (const kind of Object.keys(typeSchemas) as KnowledgeType[]) {
       this.sets.set(kind, new NameSet(typeSchemas[kind] as Record<string, unknown> | undefined, kind === 'entity' ? [UNTYPED_MEMBER] : [], onClaim));
@@ -262,20 +311,17 @@ class NameBook {
     if (set === undefined) { set = new NameSet(undefined, [], this.onClaim); this.sets.set(kind, set); }
     return set;
   }
-  private checked(kind: KnowledgeType): void {
-    if (this.over === undefined && this.scope(kind).taken > MAX_TYPES_PER_KIND) this.over = kind;
-  }
   /** A derived name held as it is; `false` when another address took it. */
   hold(kind: KnowledgeType, name: string): boolean {
-    const held = this.scope(kind).hold(name);
-    this.checked(kind);
-    return held;
+    return this.scope(kind).hold(name);
   }
   /** `wanted`, or the first `wanted_<n>` free in `kind` that is still a valid name; `null` when none is. */
   claim(kind: KnowledgeType, wanted: string, valid: (name: string) => boolean): string | null {
-    const name = this.scope(kind).claim(wanted, valid);
-    this.checked(kind);
-    return name;
+    return this.scope(kind).claim(wanted, valid);
+  }
+  /** Give back a name `claim` returned for a type that is not built after all. */
+  release(kind: KnowledgeType, name: string): void {
+    this.scope(kind).release(name);
   }
 }
 
@@ -424,8 +470,13 @@ export async function inferFromData(
       perType.set(typeKey, stats);
       if (!classes.repeated.has(digest)) stats.subjects += 1;
       else {
-        const counted = `${digest}\u0000${p}\u0000${typeKey}`;
-        if (!countedPairs.has(counted)) { countedPairs.add(counted); stats.subjects += 1; }
+        // The subject settles on one type, so (subject, predicate) names the pair.
+        const counted = `${digest}\u0000${p}`;
+        if (!countedPairs.has(counted)) {
+          countedPairs.add(counted);
+          if (countedPairs.size > options.maxPairs) return { built: [], inferred: countedBlock(block), leaveOut: [], labelKeys: [], over: { bound: 'pairs', limit: options.maxPairs } };
+          stats.subjects += 1;
+        }
       }
       const column = columns.get(p) ?? { string: 0, number: 0, boolean: 0, date: 0, other: 0 };
       columns.set(p, column);
@@ -530,7 +581,11 @@ export async function inferFromData(
       side('to', [...new Set(all.flatMap(s => [...s.ends]))], toOpen.includes('end-stored') ? 'end-stored' : toOpen.includes('not-an-entity') ? 'not-an-entity' : null);
       if (Object.keys(endpoints).length > 0) def['endpoints'] = endpoints;
       if (options.functional && all.every(s => s.maxNodes <= 1)) def['functional'] = true;
-      if (!TypeSchemaZ.safeParse(def).success) { notInferred('invalid'); leave(perType, p); continue; }
+      if (!TypeSchemaZ.safeParse(def).success) {
+        // The name was claimed for a type that is not built: it is given back, so the cap counts built names only.
+        if (read.how !== 'derived') book.release('edge', name);
+        notInferred('invalid'); leave(perType, p); continue;
+      }
       builtTypes.set(`edge\u0000${name}`, { kind: 'edge', name, def });
       block.edges.push({ kind: 'edge', type: name, iri: p, support, confidence });
       if (book.over !== undefined) return stoppedAt(book.over);

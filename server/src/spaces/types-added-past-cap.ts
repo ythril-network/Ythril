@@ -18,7 +18,12 @@ export const MAX_TYPES_PER_KIND = 200;
 /** The status a write past the cap is refused with: the request is understood and asks for more than a space holds. */
 const BAD_REQUEST = 400 as const;
 
-type TypeMaps = Partial<Record<KnowledgeType, Record<string, TypeSchema | unknown> | undefined>>;
+/** The refusal text of a write that would take `kind` past {@link MAX_TYPES_PER_KIND}: the one wording every door and the inference answer with. */
+export function typeCapError(kind: string): string {
+  return `Max ${MAX_TYPES_PER_KIND} type definitions per knowledge type reached for '${kind}'. Remove unused types before adding new ones.`;
+}
+
+type TypeMaps =Partial<Record<KnowledgeType, Record<string, TypeSchema | unknown> | undefined>>;
 
 /**
  * The refusal (400) of a write whose new types would take a kind of `stored` past {@link MAX_TYPES_PER_KIND}, naming the first such kind, or
@@ -29,10 +34,7 @@ export function typesAddedPastCap(stored: TypeMaps | undefined, incoming: TypeMa
     const held = stored?.[kind] ?? {};
     const added = Object.keys(names ?? {}).filter(name => !Object.hasOwn(held, name)).length;
     if (added > 0 && Object.keys(held).length + added > MAX_TYPES_PER_KIND) {
-      return {
-        status: BAD_REQUEST,
-        error: `Max ${MAX_TYPES_PER_KIND} type definitions per knowledge type reached for '${kind}'. Remove unused types before adding new ones.`,
-      };
+      return { status: BAD_REQUEST, error: typeCapError(kind) };
     }
   }
   return null;

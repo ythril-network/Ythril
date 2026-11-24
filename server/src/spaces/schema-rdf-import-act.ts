@@ -46,14 +46,14 @@ import {
 } from '../rdf/schema-from-rdf.js';
 import { meetStored, normalizedStored } from '../rdf/schema-from-rdf-modes.js';
 import { Ledger, Store } from '../rdf/schema-from-rdf-store.js';
-import type { InferFirst, InferredBlock, InferResult } from '../rdf/schema-from-data.js';
+import { inferBoundText, INFER_BOUND_KNOB, type InferFirst, type InferredBlock, type InferResult } from '../rdf/schema-from-data.js';
 import { schemaFingerprintOf } from './schema-stamp.js';
 import { inlineResolvableRefs } from './schema-validation.js';
 import { assertSchemaWritable } from './schema-write-gate.js';
 import { spaceWriteClosedAnswer } from './space-write-gate.js';
 import { planSpaceMetaUpdate, type MetaUpdatePlan, type WriteCaller } from './meta-update.js';
 import { writeSpaceMeta, fieldRefusalsOf, SPACE_META_WRITE_NETWORKED } from './space-meta-write-act.js';
-import { typesAddedPastCap } from './types-added-past-cap.js';
+import { typeCapError, typesAddedPastCap } from './types-added-past-cap.js';
 import { unknownSpaceAnswer, lostSpaceAnswer } from './unknown-space.js';
 import { RDF_IMPORT_ADDRESS_MAX } from './rdf-import-files.js';
 
@@ -286,17 +286,19 @@ export async function proposeSchemaFromRdf(
     const first = answer;
     const firstNames = addressNames(inlineResolvableRefs({ ...(space.meta ?? {}), typeSchemas: first.typeSchemas } as SpaceMeta), options.source);
     inferred = await options.infer({ typeSchemas: first.typeSchemas, names: firstNames, ...(knobs.hooks?.afterNameClaim ? { onClaim: knobs.hooks.afterNameClaim } : {}) });
+    if (inferred.over) {
+      return refusal(HTTP.TOO_LARGE, RDF_BOUND_EXCEEDED, inferBoundText(inferred.over.bound, inferred.over.limit), { bound: INFER_BOUND_KNOB[inferred.over.bound], limit: inferred.over.limit });
+    }
     const met = meetStored('expand', inferred.built, first.typeSchemas, new Ledger(new Store([])));
     answer = { ...first, typeSchemas: met.typeSchemas, changes: [...first.changes, ...met.changes.map(c => ({ ...c, source: 'data' as const }))] };
   }
   const { changed, added, changedCount } = changedTypesOf(answer);
   // One cap over the whole proposal: the declared and the inferred types a write adds are counted together.
-  const capped = typesAddedPastCap(meta.typeSchemas, changed);
-  if (capped) {
-    return refusal(HTTP.UNPROCESSABLE, SCHEMA_RDF_REFUSED, `${capped.error} ${NOTHING_BUILT}`, { reasons: [{ code: 'type-cap', message: capped.error }], reasonCount: 1 });
+  // The inference stops as soon as its built types pass the cap, with what it had built: that is the same refusal, whichever count meets it first.
+  const capped = typesAddedPastCap(meta.typeSchemas, changed)?.error ?? (inferred?.overCap !== undefined ? typeCapError(inferred.overCap) : null);
+  if (capped !== null) {
+    return refusal(HTTP.UNPROCESSABLE, SCHEMA_RDF_REFUSED, `${capped} ${NOTHING_BUILT}`, { reasons: [{ code: 'type-cap', message: capped }], reasonCount: 1 });
   }
-  // The inference stops as soon as its types pass the cap, with what it had built: that is over the cap here too, or the two counted differently.
-  if (inferred?.overCap !== undefined) throw new Error(`the inference stopped at the type cap of '${inferred.overCap}' and the proposal is under it`);
   return {
     kind: 'proposed', changed, answer, version: space.meta?.version ?? 0, typesAdded: added, typesChanged: changedCount,
     ...(inferred ? { inferred: inferred.inferred, leaveOut: inferred.leaveOut, labelKeys: inferred.labelKeys } : {}),

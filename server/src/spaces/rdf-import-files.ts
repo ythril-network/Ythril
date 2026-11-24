@@ -172,7 +172,7 @@ export interface RdfImportSchemaStep {
   schemaRungRefusal(spaceId: string, caller: RdfCaller | undefined): RdfDocumentRefusal | null;
   schemaAtDoor(input: {
     spaceId: string; caller: RdfCaller | undefined; options: ImportOptions; groups: () => AsyncGenerator<QuadGroup, void, undefined>; schema: SchemaAsked;
-    dryRun: boolean; maxQuads: number | undefined; maxPredicates?: number | undefined;
+    dryRun: boolean; maxQuads: number | undefined; maxPredicates?: number | undefined; maxClasses?: number | undefined; maxPairs?: number | undefined;
   }): Promise<DoorSchema | RdfDocumentRefusal>;
   decidedOfStep(step: SchemaStepFile): DoorDecided | undefined;
   keepSchemaStep(folder: ImportFolder, built: DoorSchema, caller: RdfCaller | undefined): Promise<Pick<ActState, 'schemaStep' | 'caller'>>;
