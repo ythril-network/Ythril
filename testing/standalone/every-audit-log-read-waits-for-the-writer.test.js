@@ -17,6 +17,15 @@
  * has it. An exception is listed in `every-audit-log-read-waits-for-the-writer.allow.json` with a reason of three words or more and a
  * `reviewBy` date; an entry past its date, or one for a file that no longer breaks the rule, fails here.
  *
+ * ## The second rule: a clear is not a fence (bundle-270, Full run re-run 45431865235)
+ *
+ * A test that empties `audit_log` to count "only the rows this step wrote" is racing the writer too: an insert an EARLIER step started
+ * can land after the clear and be counted (`a-record-with-a-planted-list-value-is-exported-...-db` read 3 `rdf.export` rows for 2 exports).
+ * A function that clears the collection (`deleteMany` or `drop` on a handle of it) must call `untilAuditWritesLanded` or `auditRowsOf`
+ * before the clear, in the same function. Otherwise every read of the collection in that file must filter by `tokenId` or `requestId` (a
+ * token the test minted for its own calls, or one request), so a row another step left cannot be counted; a file that never reads the
+ * collection after clearing it breaks nothing. An exception goes in the same allow file under `clearEntries`.
+ *
  * Run: node --test testing/standalone/every-audit-log-read-waits-for-the-writer.test.js
  */
 import { describe, it } from 'node:test';
@@ -27,12 +36,15 @@ import { parseSource, lineOf, ts, walkEveryNode } from '../_shared/syntax-tree.m
 
 const ALLOW = JSON.parse(readFileSync(new URL('./every-audit-log-read-waits-for-the-writer.allow.json', import.meta.url), 'utf8'));
 const ENTRIES = ALLOW.entries;
+const CLEAR_ENTRIES = ALLOW.clearEntries;
 const FILE_FLOOR = 300;
 const READER_FLOOR = 5;
 const WAITERS_MODULE = '_audit-rows.mjs';
 const WAITERS = ['auditRowsOf', 'untilAuditWritesLanded'];
 const HANDLE_CALLS = new Set(['collection', 'col', 'coll']);
 const READ_METHODS = new Set(['find', 'findOne', 'countDocuments', 'aggregate', 'distinct']);
+const CLEAR_METHODS = new Set(['deleteMany', 'drop']);
+const OWN_KEYS = new Set(['tokenId', 'requestId']);
 
 const isAuditName = (n) => (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) && n.text === 'audit_log';
 const calleeNameOf = (call) => {
@@ -40,15 +52,15 @@ const calleeNameOf = (call) => {
   return ts.isPropertyAccessExpression(e) ? e.name.text : ts.isIdentifier(e) ? e.text : '';
 };
 
-/** The local names this file imported from `_audit-rows.mjs` (an alias counts), for the waits it knows. */
-function importedWaiters(sf) {
-  const names = new Set();
+/** The local names this file imported from `_audit-rows.mjs` (an alias counts), for the waits it knows, each with the name it has there. */
+function importedWaiterNames(sf) {
+  const names = new Map();
   for (const st of sf.statements) {
     if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier)) continue;
     if (!st.moduleSpecifier.text.endsWith(WAITERS_MODULE)) continue;
     const bindings = st.importClause?.namedBindings;
     if (!bindings || !ts.isNamedImports(bindings)) continue;
-    for (const el of bindings.elements) if (WAITERS.includes((el.propertyName ?? el.name).text)) names.add(el.name.text);
+    for (const el of bindings.elements) if (WAITERS.includes((el.propertyName ?? el.name).text)) names.set(el.name.text, (el.propertyName ?? el.name).text);
   }
   return names;
 }
@@ -63,39 +75,103 @@ function boundNameOf(handle) {
 }
 
 /**
+ * The property-access nodes (`<handle>.<method>`) that call one of `methods` on a handle of `audit_log`, directly or through a name the
+ * file bound to it. One copy for the read rule and the clear rule.
+ */
+function auditHandleUses(sf, methods) {
+  const handles = [];
+  const bound = new Map();
+  walkEveryNode(sf, (n) => {
+    if (ts.isCallExpression(n) && HANDLE_CALLS.has(calleeNameOf(n)) && n.arguments.some(isAuditName)) handles.push(n);
+    if (!ts.isPropertyAccessExpression(n) || !methods.has(n.name.text)) return;
+    const target = ts.isCallExpression(n.expression) && ts.isIdentifier(n.expression.expression) ? n.expression.expression : n.expression;
+    if (ts.isIdentifier(target)) bound.set(target.text, [...(bound.get(target.text) ?? []), n]);
+  });
+  const uses = new Set();
+  for (const h of handles) {
+    const p = h.parent;
+    if (ts.isPropertyAccessExpression(p) && p.expression === h && methods.has(p.name.text)) uses.add(p);
+    const name = boundNameOf(h);
+    if (name) for (const n of bound.get(name) ?? []) uses.add(n);
+  }
+  return [...uses];
+}
+
+/**
  * The 1-based lines at which `text` reads `audit_log`, and whether it imports and calls a wait from `_audit-rows.mjs`. `file` only picks
  * the language the file is parsed in.
  */
 export function auditReadSites({ file, text }) {
   const sf = parseSource(file, text.replace(/\r\n/g, '\n'));
-  const handles = [];
-  walkEveryNode(sf, (n) => {
-    if (ts.isCallExpression(n) && HANDLE_CALLS.has(calleeNameOf(n)) && n.arguments.some(isAuditName)) handles.push(n);
-  });
-  if (handles.length === 0) return { reads: [], waits: false };
-  const waiters = importedWaiters(sf);
+  const uses = auditHandleUses(sf, READ_METHODS);
+  if (uses.length === 0) return { reads: [], waits: false };
+  const waiters = importedWaiterNames(sf);
   let waits = false;
-  const boundReads = new Map();
   walkEveryNode(sf, (n) => {
     if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && waiters.has(n.expression.text)) waits = true;
-    if (!ts.isPropertyAccessExpression(n) || !READ_METHODS.has(n.name.text)) return;
-    const target = ts.isCallExpression(n.expression) && ts.isIdentifier(n.expression.expression) ? n.expression.expression : n.expression;
-    if (ts.isIdentifier(target)) boundReads.set(target.text, [...(boundReads.get(target.text) ?? []), lineOf(sf, n)]);
   });
-  const lines = new Set();
-  for (const h of handles) {
-    const p = h.parent;
-    if (ts.isPropertyAccessExpression(p) && p.expression === h && READ_METHODS.has(p.name.text)) lines.add(lineOf(sf, p));
-    const bound = boundNameOf(h);
-    if (bound) for (const l of boundReads.get(bound) ?? []) lines.add(l);
-  }
-  return { reads: [...lines].sort((a, b) => a - b), waits };
+  return { reads: [...new Set(uses.map(n => lineOf(sf, n)))].sort((a, b) => a - b), waits };
 }
 
 /** The lines of the reads of `audit_log` in a file that waits for no insert first; `[]` for a file that waits, or reads nothing. */
 export function unguardedAuditReads(source) {
   const { reads, waits } = auditReadSites(source);
   return waits ? [] : reads;
+}
+
+/** The nearest function around a node, or the file itself at module level. */
+const functionAround = (node) => {
+  for (let n = node.parent; n; n = n.parent) if (ts.isFunctionLike(n) || ts.isSourceFile(n)) return n;
+  return node.getSourceFile();
+};
+
+/** True when an argument names `tokenId` or `requestId` as a key, directly or through a `const` of the file it names. */
+function filtersByOwnKey(sf, arg) {
+  if (!arg) return false;
+  let found = false;
+  const look = (node) => walkEveryNode(node, (n) => {
+    if (ts.isShorthandPropertyAssignment(n) && OWN_KEYS.has(n.name.text)) found = true;
+    if (ts.isPropertyAssignment(n) && (ts.isIdentifier(n.name) || ts.isStringLiteral(n.name)) && OWN_KEYS.has(n.name.text)) found = true;
+  });
+  look(arg);
+  if (!found && ts.isIdentifier(arg)) {
+    walkEveryNode(sf, (n) => {
+      if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === arg.text && n.initializer) look(n.initializer);
+    });
+  }
+  return found;
+}
+
+/**
+ * The 1-based lines at which `text` clears `audit_log` (`deleteMany` or `drop`) without a wait before the clear in its own function,
+ * while the file reads the collection in a way a row another step left could reach: a read that does not filter by `tokenId` or
+ * `requestId`. `[]` for a clear that waited first, or for a file whose every read is filtered.
+ */
+export function unfencedAuditClears({ file, text }) {
+  const sf = parseSource(file, text.replace(/\r\n/g, '\n'));
+  const clears = auditHandleUses(sf, CLEAR_METHODS);
+  if (clears.length === 0) return [];
+  const waiters = importedWaiterNames(sf);
+  const waitCalls = [];
+  const reads = [];
+  walkEveryNode(sf, (n) => {
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && waiters.has(n.expression.text)) {
+      waitCalls.push(n);
+      if (waiters.get(n.expression.text) === 'auditRowsOf') reads.push(n.arguments[1]);
+    }
+  });
+  for (const use of auditHandleUses(sf, READ_METHODS)) {
+    const call = use.parent;
+    reads.push(ts.isCallExpression(call) ? call.arguments[use.name.text === 'distinct' ? 1 : 0] : undefined);
+  }
+  if (reads.every(arg => filtersByOwnKey(sf, arg))) return [];
+  const lines = [];
+  for (const clear of clears) {
+    const fn = functionAround(clear);
+    if (waitCalls.some(w => functionAround(w) === fn && w.getStart(sf) < clear.getStart(sf))) continue;
+    lines.push(lineOf(sf, clear));
+  }
+  return [...new Set(lines)].sort((a, b) => a - b);
 }
 
 const flagged = (text, file = 'planted.test.js') => unguardedAuditReads({ file, text });
@@ -147,6 +223,52 @@ describe('the gate recognises a read of the audit log that does not wait', () =>
   });
 });
 
+describe('the gate recognises a clear of the audit log that is not a fence', () => {
+  const unfenced = (text) => unfencedAuditClears({ file: 'planted.test.js', text });
+  const CLEAR = `await mongo.col('audit_log').deleteMany({ operation: 'rdf.export' });`;
+  const READ = `const rows = await mongo.col('audit_log').find({ operation: 'rdf.export' }).toArray();`;
+  const WAIT = `import { untilAuditWritesLanded } from './_audit-rows.mjs';\n`;
+  const ROWS = `import { auditRowsOf } from './_audit-rows.mjs';\n`;
+
+  it('flags a clear followed by a read filtered by operation alone, and reports the clear line', () => {
+    assert.deepEqual(unfenced(`it('y', async () => {\n  ${CLEAR}\n  ${READ}\n});\n`), [2]);
+    assert.deepEqual(unfenced(`it('y', async () => { await mongo.col('audit_log').drop(); ${READ} });\n`), [1]);
+  });
+
+  it('flags a clear in a hook whose reads sit in the tests, and a read through the shared reader with no own key', () => {
+    assert.deepEqual(unfenced(`${ROWS}beforeEach(async () => { ${CLEAR} });\nit('y', async () => { const rows = await auditRowsOf(mongo, { operation: 'a' }); });\n`), [2]);
+  });
+
+  it('passes a clear that waited first in its own function, by either wait', () => {
+    assert.deepEqual(unfenced(`${WAIT}it('y', async () => { await untilAuditWritesLanded(); ${CLEAR} ${READ} });\n`), []);
+    assert.deepEqual(unfenced(`${ROWS}it('y', async () => { await auditRowsOf(mongo); ${CLEAR} ${READ} });\n`), []);
+  });
+
+  it('flags a clear whose wait comes after it, sits in another function, or is a local function of the same name', () => {
+    assert.deepEqual(unfenced(`${WAIT}it('y', async () => { ${CLEAR} await untilAuditWritesLanded(); ${READ} });\n`), [2]);
+    assert.deepEqual(unfenced(`${WAIT}it('a', async () => { await untilAuditWritesLanded(); });\nit('y', async () => { ${CLEAR} ${READ} });\n`), [3]);
+    assert.deepEqual(unfenced(`const untilAuditWritesLanded = async () => {};\nit('y', async () => { await untilAuditWritesLanded(); ${CLEAR} ${READ} });\n`), [2]);
+  });
+
+  it('passes a clear whose every read filters by tokenId or requestId, directly, shorthand or through a const', () => {
+    assert.deepEqual(unfenced(`it('y', async () => { ${CLEAR} await mongo.col('audit_log').find({ operation: 'a', tokenId: t.id }).toArray(); });\n`), []);
+    assert.deepEqual(unfenced(`it('y', async () => { ${CLEAR} await mongo.col('audit_log').countDocuments({ requestId }); });\n`), []);
+    assert.deepEqual(unfenced(`const own = { tokenId: t.id };\nit('y', async () => { ${CLEAR} await mongo.col('audit_log').find(own).toArray(); });\n`), []);
+    assert.deepEqual(unfenced(`${ROWS}it('y', async () => { ${CLEAR} await auditRowsOf(mongo, { tokenId: t.id }); });\n`), []);
+  });
+
+  it('flags a clear when one of two reads is unfiltered, and passes a clear in a file that never reads', () => {
+    assert.deepEqual(unfenced(`it('y', async () => { ${CLEAR} await mongo.col('audit_log').find({ tokenId: t.id }).toArray(); ${READ} });\n`), [1]);
+    assert.deepEqual(unfenced(`it('y', async () => { ${CLEAR} await mongo.col('audit_log').insertOne({}); });\n`), []);
+  });
+
+  it('ignores a comment, a quoted fixture and the clear of another collection', () => {
+    assert.deepEqual(unfenced(`// ${CLEAR}\nit('y', async () => { ${READ} });\n`), []);
+    assert.deepEqual(unfenced(`const src = "${CLEAR.replace(/"/g, '')}";\nit('y', async () => { ${READ} });\n`), []);
+    assert.deepEqual(unfenced(`it('y', async () => { await mongo.col('records').deleteMany({}); ${READ} });\n`), []);
+  });
+});
+
 describe('the repository', () => {
   const files = readTrackedSources('testing', { ext: ['.test.js', '.mjs'], floor: FILE_FLOOR });
   const open = files.filter(f => !f.file.endsWith(`/${WAITERS_MODULE}`)).map(f => ({ file: f.file, lines: unguardedAuditReads(f) })).filter(f => f.lines.length);
@@ -167,13 +289,28 @@ describe('the repository', () => {
   });
 });
 
-describe(`the allowlist (${ENTRIES.length} exceptions)`, () => {
+describe('the repository clears the audit log only behind a wait, or reads it by its own key', () => {
+  const files = readTrackedSources('testing', { ext: ['.test.js', '.mjs'], floor: FILE_FLOOR });
+  const open = files.filter(f => !f.file.endsWith(`/${WAITERS_MODULE}`)).map(f => ({ file: f.file, lines: unfencedAuditClears(f) })).filter(f => f.lines.length);
+
+  it('no clear of audit_log lacks a wait before it or an own-key filter on the file reads, unless the allowlist names the file', () => {
+    const bad = open.filter(f => !CLEAR_ENTRIES.some(e => e.file === f.file));
+    assert.deepEqual(bad.map(f => `${f.file}:${f.lines.join(',')}`), [],
+      `${bad.length} file(s) clear audit_log while an earlier step's insert may still be on the wire, then read rows another step could have left (Full run re-run 45431865235). `
+      + 'Mint a token for the test and filter every read by tokenId (or requestId), or await untilAuditWritesLanded() in the same function before the clear; '
+      + 'an exception goes in every-audit-log-read-waits-for-the-writer.allow.json under clearEntries with a reason and a reviewBy date.');
+  });
+});
+
+describe(`the allowlist (${ENTRIES.length + CLEAR_ENTRIES.length} exceptions)`, () => {
   const today = new Date().toISOString().slice(0, 10);
   const files = readTrackedSources('testing', { ext: ['.test.js', '.mjs'], floor: FILE_FLOOR });
   const stillOpen = new Set(files.filter(f => unguardedAuditReads(f).length).map(f => f.file));
+  const stillUnfenced = new Set(files.filter(f => unfencedAuditClears(f).length).map(f => f.file));
+  const ALL = [...ENTRIES, ...CLEAR_ENTRIES];
 
   it('every entry has a file, a reason of three words or more and a reviewBy date', () => {
-    const bad = ENTRIES.filter(e => !(typeof e.file === 'string' && e.file
+    const bad = ALL.filter(e => !(typeof e.file === 'string' && e.file
       && typeof e.reason === 'string' && e.reason.trim().split(/\s+/).length >= 3
       && typeof e.reviewBy === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(e.reviewBy)
       && !Number.isNaN(Date.parse(e.reviewBy)) && new Date(e.reviewBy).toISOString().slice(0, 10) === e.reviewBy));
@@ -181,12 +318,14 @@ describe(`the allowlist (${ENTRIES.length} exceptions)`, () => {
   });
 
   it('no entry is past its reviewBy date', () => {
-    const late = ENTRIES.filter(e => typeof e.reviewBy === 'string' && e.reviewBy < today);
+    const late = ALL.filter(e => typeof e.reviewBy === 'string' && e.reviewBy < today);
     assert.deepEqual(late.map(e => `${e.file} (reviewBy ${e.reviewBy}, today ${today})`), [], 'review the entry: make the file wait, or renew the date with a reason');
   });
 
   it('every entry still names a file that reads the audit log without waiting', () => {
     const gone = ENTRIES.filter(e => !stillOpen.has(e.file));
     assert.deepEqual(gone.map(e => e.file), [], 'the file waits now, or is gone: delete the entry');
+    const goneClears = CLEAR_ENTRIES.filter(e => !stillUnfenced.has(e.file));
+    assert.deepEqual(goneClears.map(e => e.file), [], 'the file fences its clears now, or is gone: delete the clearEntries entry');
   });
 });
