@@ -7,7 +7,7 @@
  *   asked (no record, an OIDC session, a token exempt from the second factor). The four tools that refuse (`import_rdf` with `schema`,
  *   `import_schema_rdf`, `network_reread`, `view_copy`) get their sentences word for word, pinned here: the action, the step-up the door cannot
  *   present, and the REST route or the page of the web UI to use.
- * - **No second copy.** The words "needs MFA step-up" are a string literal of that module and of no other server source, and each of the four
+ * - **No second copy.** The clause "needs MFA step-up, which this door cannot present" is a string literal of that module and of no other server source, and each of the four
  *   tools calls the helper, so a fifth tool that spells it again fails here.
  *
  * Whether a real caller is asked (an instance with the second factor on, a token inheriting it) is held by the tools' own specs: the
@@ -25,6 +25,8 @@ import { parseSource, walkEveryNode, ts } from '../_shared/syntax-tree.mjs';
 const built = await import('../../server/dist/auth/mfa-asked.js').catch(() => ({}));
 const MODULE = 'server/src/auth/mfa-asked.ts';
 const TOOLS = ['rdf-import', 'schema-rdf-import', 'networks', 'views'].map(t => `server/src/mcp/tools/${t}.ts`);
+/** The words every refusal shares (a tool's description says "it needs MFA step-up" in its own words, so the whole clause is read). */
+const SENTENCE = 'needs MFA step-up, which this door cannot present';
 /** A token that sets the second factor `required` is asked whatever the instance's switch says. */
 const ASKED = { mfa: 'required' };
 
@@ -57,10 +59,10 @@ describe('the refusal for a caller asked for a second factor is built once', () 
     const holders = [];
     for (const file of trackedSources(SERVER_CODE_ROOTS)) {
       const text = readFileSync(join(REPO_ROOT, file), 'utf8');
-      if (!text.includes('needs MFA step-up')) continue;
+      if (!text.includes(SENTENCE)) continue;
       walkEveryNode(parseSource(file, text), (n) => {
         const literal = ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n);
-        if (literal && n.text.includes('needs MFA step-up')) holders.push(file);
+        if (literal && n.text.includes(SENTENCE)) holders.push(file);
       });
     }
     assert.deepEqual([...new Set(holders)], [MODULE], `the sentence is spelled in ${MODULE} alone: ${JSON.stringify(holders)}`);

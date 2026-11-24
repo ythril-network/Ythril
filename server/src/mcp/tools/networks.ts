@@ -18,7 +18,7 @@ import { changeNotesAct } from '../../sync/change-notes.js';
 import { forkNetworkAct, inviteKeyAct } from '../../networks/network-acts.js';
 import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
 import { rereadNetworkAct, REREAD_COST } from '../../networks/reread-act.js';
-import { callerIsAskedForMfa } from '../../auth/mfa-asked.js';
+import { mfaStepUpRefusalFor } from '../../auth/mfa-asked.js';
 import { ToolRefusal } from '../../util/errors.js';
 import { toolErrorResult } from '../tool-error-text.js';
 
@@ -322,10 +322,8 @@ export const network_rereadTool: ToolHandler = {
   async handle(ctx: ToolContext): Promise<ToolResult> {
     // The second factor, answered honestly: MCP has no channel for a code, so a caller who would need one on REST is told to use the web UI. The same rule as REST's
     // (`mfaRequiredFor`), the personal-view copy's precedent (`mcp/tools/views.ts`), not a third divergence.
-    const record = ctx.callerRecord;
-    if (callerIsAskedForMfa(record)) {
-      throw new ToolRefusal(403, 'Re-reading a network needs MFA step-up, which this door cannot present; use the web UI (Settings > Networks)');
-    }
+    const stepUp = mfaStepUpRefusalFor(ctx.callerRecord, 'Re-reading a network', { page: 'Settings > Networks' });
+    if (stepUp) throw new ToolRefusal(403, stepUp);
     const { id, ...body } = ctx.args;
     return toResult(rereadNetworkAct(callerOf(ctx), String(id), body), '');
   },
