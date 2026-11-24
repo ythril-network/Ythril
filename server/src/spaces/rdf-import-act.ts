@@ -72,7 +72,7 @@ import { rdfSpaceState, type RdfCaller } from '../rdf/rdf-space-state.js';
 import type { RdfFormat } from '../rdf/serialize.js';
 import { parseRdf } from '../rdf/parse.js';
 import {
-  RDF_UNSUPPORTED_ENCODING, RDF_UPLOAD_STALLED, rdfDocumentRefusalOf, rdfFormatOf, refusal, type RdfDocumentRefusal,
+  RDF_UNSUPPORTED_ENCODING, RDF_UPLOAD_COOLDOWN, RDF_UPLOAD_STALLED, RDF_UPLOAD_TOO_SLOW, rdfDocumentRefusalOf, rdfFormatOf, refusal, type RdfDocumentRefusal,
 } from '../rdf/rdf-document.js';
 import {
   RDF_IMPORT_GRAPH_BASES_MAX, RDF_IMPORT_GRAPH_BASE_MIN_CHARS, RDF_IMPORT_GRAPH_BASE_MAX_CHARS, RDF_IMPORT_INFER_SUPPORT_MAX, RdfImportParams, RdfImportStatusParams,
@@ -132,7 +132,7 @@ export const RDF_IMPORT_SPACE_CHANGED = 'rdf_import_space_changed';
 export const RDF_IMPORT_FILES_LOST = 'rdf_import_files_lost';
 export const RDF_IMPORT_STATE_UNREADABLE = 'rdf_import_state_unreadable';
 export const RDF_IMPORT_STORAGE_EXCEEDED = 'storage_exceeded';
-/** An upload that sent nothing for `RDF_IMPORT_UPLOAD_IDLE_MS` (400; the connection is closed after the answer): the document reader's code. */
+/** An upload that sent nothing for the upload's idle bound (408; the connection is closed after the answer): the document reader's code. */
 export const RDF_IMPORT_UPLOAD_STALLED = RDF_UPLOAD_STALLED;
 /** The code every space-act door answers an act the closed runner interrupted with (`api/admin-space-transfer.ts`). */
 export const RDF_IMPORT_SHUTTING_DOWN = 'shutting_down';
@@ -143,6 +143,7 @@ const NOTHING_IMPORTED = 'nothing was imported';
 export const RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   RDF_IMPORT_REFUSED, RDF_IMPORT_BAD_PARAM, RDF_IMPORT_SEVERAL_GRAPHS, RDF_IMPORT_NOT_FOUND, RDF_IMPORT_BUSY, RDF_IMPORT_SPACE_CHANGED,
   RDF_UNSUPPORTED_ENCODING, RDF_IMPORT_FILES_LOST, RDF_IMPORT_STATE_UNREADABLE, RDF_IMPORT_STORAGE_EXCEEDED, RDF_IMPORT_SHUTTING_DOWN, RDF_UPLOAD_STALLED,
+  RDF_UPLOAD_TOO_SLOW, RDF_UPLOAD_COOLDOWN,
   'rdf_malformed', 'rdf_relative_iri', 'rdf_remote_context', 'rdf_jsonld_not_streamable', 'rdf_bound_exceeded', 'rdf_gzip_invalid',
   'rdf_unsupported_format', 'rdf_unsupported', 'rdf_source_failed',
   'rdf_not_enabled', 'rdf_base_conflict', 'rdf_base_shared', 'rdf_term_clash', 'rdf_unwritable', 'space_not_found',
@@ -169,7 +170,7 @@ interface RdfImportKnobs {
   schemaMaxQuads?: number;
   /** Replaces `SCHEMA_INFER_MAX_PREDICATES` as the most distinct predicates a file's records may use for a schema to be inferred (Q-755). */
   schemaInferMaxPredicates?: number;
-  /** Replaces `RDF_IMPORT_UPLOAD_IDLE_MS` (`rdf/import-upload.ts`; a test that waits for the idle bound). */
+  /** Replaces the upload's idle bound for this door alone (`util/upload-reader.ts`, whose pace knob reaches every door; a test that waits for it). */
   uploadIdleMs?: number;
   bounds?: Partial<ImportSpoolBounds>;
   hooks?: {
@@ -775,7 +776,7 @@ async function readAndRun(
   try {
     const folder = await openImportFolder(dir);
     const seen: GraphsSeen = { order: [], describing: new Set(), inDefaultGraph: false };
-    const quads = parseRdf(counted(input.body, importBodyMaxBytes(getConfig()), knobs.uploadIdleMs), options.format, { blankNodePrefix: `b${importId.slice(0, 8)}-` });
+    const quads = parseRdf(counted(input.body, importBodyMaxBytes(getConfig()), 'rdf-import', knobs.uploadIdleMs), options.format, { blankNodePrefix: `b${importId.slice(0, 8)}-` });
     let sorted = await sortedSpool(noteGraphs(quads, seen), folder, { names: addressNames(meta, options.source), bounds: knobs.bounds ?? {} });
     const missing = graphsWithoutBase(seen, options);
     if (missing.length > 0) {

@@ -15,6 +15,7 @@
  * - The parameters table says TriG, N-Quads and JSON-LD default `sourceBase` to the file's one data graph and Turtle to none, and the section says when the
  *   default applies; the section says an unchanged record is not written and is counted in `unchanged`; the status table says the base check is also made
  *   before the first window.
+ * - The section says the upload's idle bound and its rate, as the reader holds them, and that both are answered 408 (Q-953).
  *
  * Run: node --test testing/standalone/the-rdf-import-guide-says-what-the-import-writes-and-reads-by-default.test.js
  */
@@ -24,7 +25,8 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const read = (p) => fs.readFileSync(root + p, 'utf8').replaceAll('\r\n', '\n');
+/** A file of the repository, or '' where it does not exist (a module a case names and the tree lacks fails that case's assertion). */
+const read = (p) => (fs.existsSync(root + p) ? fs.readFileSync(root + p, 'utf8').replaceAll('\r\n', '\n') : '');
 
 function importSection() {
   const page = read('docs/integration-guide/06f-exports.md');
@@ -105,11 +107,15 @@ describe('the pages say what the import and its shared checks do to existing cal
     assert.ok(mcp.includes('(REST answers `507`)') && mcp.includes(`over ${size} as JSON`), 'the tool page says the bulk limit and the size bound on the save_bulk row');
   });
 
-  it('L7 and L5: the import section says the idle bound and the multiple of the record bound the code holds', () => {
-    assert.equal(/RDF_IMPORT_UPLOAD_IDLE_MS = 60_000;/.test(read('server/src/rdf/import-upload.ts')), true, 'the idle bound is a minute (the section says "a minute")');
+  it('L7, L5 and Q-953: the import section says the idle bound, the rate, and the multiple of the record bound the code holds', () => {
+    const reader = read('server/src/util/upload-reader.ts');
+    assert.equal(/UPLOAD_IDLE_MS = 60_000;/.test(reader), true, 'the idle bound is a minute (the section says "a minute")');
+    assert.equal(/UPLOAD_RATE_WINDOW_MS = 60_000;/.test(reader), true, 'the rate window is a minute (the section says "over a minute")');
+    assert.equal(/MIN_TRANSFER_BYTES_PER_SECOND = 16_384;/.test(read('server/src/util/pace-window.ts')), true, 'the rate is 16 KiB/s (the section says so)');
     assert.equal(/RDF_IMPORT_EDGE_STATEMENT_MULTIPLE = 2;/.test(read('server/src/rdf/import-count.ts')), true, 'the multiple is two (the section says "twice")');
     const section = importSection();
-    assert.ok(section.includes('an upload that sends nothing for a minute is answered `400 rdf_import_upload_stalled`'), 'the section says the stalled upload is refused');
+    assert.ok(section.includes('an upload that sends nothing for a minute is answered `408 rdf_import_upload_stalled`'), 'the section says the stalled upload is refused 408');
+    assert.ok(section.includes('one that sends less than 16 KiB/s over a minute of waiting is answered `408 rdf_import_upload_too_slow`'), 'the section says the slow upload is refused 408');
     assert.ok(section.includes('edge statements pass twice the record bound'), 'the section says the multiple');
   });
 });

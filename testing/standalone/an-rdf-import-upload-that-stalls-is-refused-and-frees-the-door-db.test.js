@@ -7,8 +7,9 @@
  * The door reads one file at a time, instance-wide (`doorHeld`), from before the first byte until its act is registered or it answered, and the body
  * was counted but never timed: a slow authenticated upload held it for every other caller (each answered 409 `rdf_import_busy`) until Node's own
  * request timeout, five minutes. The body now has an idle bound (`RDF_IMPORT_UPLOAD_IDLE_MS`, lowered here through the knob, never waited for at
- * its default): a body that gives nothing for that long is refused 400 `rdf_import_upload_stalled`, a code of the import's list, and the connection
- * is closed after the answer so the stalled sender does not keep the socket.
+ * its default): a body that gives nothing for that long is refused `rdf_import_upload_stalled`, a code of the import's list, and the connection
+ * is closed after the answer so the stalled sender does not keep the socket. The status is 408 (Q-953: the owner chose the standard's answer to a
+ * body that does not arrive in time, RFC 9110 section 15.5.9; it was 400).
  *
  * - while the upload stalls, a second import is refused as busy (the premise: the door is held);
  * - the stalled upload is answered with the stalled code, listed, with `Connection: close`, and nothing was written;
@@ -25,6 +26,7 @@ import http from 'node:http';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { waitFor } from '../_shared/wait-for.mjs';
 import { openRdfImportDoors, personMeta, goodTurtle } from './_rdf-import-doors.mjs';
+import { resetPace } from './_upload-pace.mjs';
 
 const skip = await mongoSkipReason();
 const SPACE = 'rdfimpstall';
@@ -71,12 +73,17 @@ describe('an upload that stalls is refused and frees the import door (real route
       let answered;
       void stalled.answer.then(a => { answered = a; }, () => undefined);
       await waitFor(() => answered !== undefined, 10_000, 25, undefined, { what: `the stalled upload to be answered (the idle bound is ${IDLE_MS} ms here)` });
-      assert.equal(answered.status, 400, answered.text.slice(0, 300));
+      assert.equal(answered.status, 408, answered.text.slice(0, 300));
       const body = JSON.parse(answered.text);
       assert.equal(body.code, 'rdf_import_upload_stalled');
       assert.ok(act.RDF_IMPORT_REFUSAL_CODES.includes(body.code), 'the stalled code is not in the import\'s refusal list');
       assert.match(String(answered.headers.connection ?? ''), /close/i, 'the stalled sender keeps its connection');
-    } finally { stalled.abort(); act.setRdfImportKnobsForTest({ uploadIdleMs: IDLE_MS }); }
+    } finally {
+      stalled.abort();
+      act.setRdfImportKnobsForTest({ uploadIdleMs: IDLE_MS });
+      // The refused caller is cooled down for a window (Q-953, its own case in the trickle file); this case is about the door being free.
+      resetPace();
+    }
     assert.deepEqual(await d.records(SPACE, 'entities'), [], 'the stalled upload wrote something');
     const next = await d.importRest(writer.key, SPACE, goodTurtle(SPACE));
     assert.equal(next.status, 200, `the door is still held after the stalled upload was refused: ${next.status} ${next.text.slice(0, 200)}`);

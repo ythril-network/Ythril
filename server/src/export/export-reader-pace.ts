@@ -32,6 +32,7 @@
  *   drops its own buffer on `destroy`, while the kernel still delivers what it holds, so the reader got everything but the ending).
  */
 import type { Response } from 'express';
+import { paceWindow, type PaceMark } from '../util/pace-window.js';
 
 /** The text is handed to the connection in slices of this many bytes: Node's own buffer then holds at most about two of them. */
 export const SLICE_BYTES = 16_384;
@@ -55,7 +56,6 @@ export interface PacedWriter {
   deliver(text: string): Promise<PutOutcome>;
 }
 
-const MS_PER_SECOND = 1_000;
 
 /** What the connection under `res` has accepted: the bytes written to the socket less those still in its buffer. */
 function acceptedBytes(res: Response): number {
@@ -83,26 +83,16 @@ function drainedWithin(res: Response, ms: number | 'turn'): Promise<'drained' | 
   });
 }
 
-/** A full moment: the bytes accepted so far and the waiting done so far. */
-interface Mark { bytes: number; waitedMs: number }
-
 /** A writer for `res` that applies `pace()` (read at each wait, so a test may change it). */
 export function pacedWriter(res: Response, pace: () => ReaderPace): PacedWriter {
   /** All the time spent waiting on the reader, in milliseconds. */
   let waitedMs = 0;
-  /** The full moment the current window opened at; none until the buffers first fill. */
-  let opened: Mark | null = null;
-
-  /** Judge the window at the full moment `now`: `slow`, or nothing (the window goes on, or a new one opens here). */
-  function atFullMoment(now: Mark): 'slow' | undefined {
-    if (!opened) { opened = now; return undefined; }
-    const { windowMs, minBytesPerSecond } = pace();
-    const span = now.waitedMs - opened.waitedMs;
-    if (span < windowMs) return undefined;
-    if ((now.bytes - opened.bytes) * MS_PER_SECOND < minBytesPerSecond * span) return 'slow';
-    opened = now;
-    return undefined;
-  }
+  /**
+   * The window over the full moments (the one rule an upload's sender is judged by too, `util/pace-window.ts`): it opens at the first full
+   * moment, so the fill of the buffers is never counted.
+   */
+  const window = paceWindow(pace);
+  const atFullMoment = (now: PaceMark): 'slow' | undefined => window.observe(now);
 
   async function waitForReader(): Promise<PutOutcome> {
     const started = Date.now();

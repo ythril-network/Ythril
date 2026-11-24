@@ -33,9 +33,9 @@ import { describeFieldRequirement } from '../auth/space-field-rights.js';
 import { rdfSpaceState, RDF_TERM_CLASH, type RdfCaller } from '../rdf/rdf-space-state.js';
 import { RDF_FORMATS, type RdfFormat } from '../rdf/serialize.js';
 import { parseRdf } from '../rdf/parse.js';
-import { counted, BodyTooLarge, RDF_IMPORT_UPLOAD_IDLE_MS } from '../rdf/import-upload.js';
+import { counted, BodyTooLarge } from '../rdf/import-upload.js';
 import {
-  RDF_BOUND_EXCEEDED, RDF_UNSUPPORTED_ENCODING, RDF_UNSUPPORTED_FORMAT, RDF_UPLOAD_STALLED, rdfDocumentRefusalOf, rdfFormatOf, rdfParamBool, rdfParamList,
+  RDF_BOUND_EXCEEDED, RDF_UNSUPPORTED_ENCODING, RDF_UNSUPPORTED_FORMAT, RDF_UPLOAD_COOLDOWN, RDF_UPLOAD_STALLED, RDF_UPLOAD_TOO_SLOW, rdfDocumentRefusalOf, rdfFormatOf, rdfParamBool, rdfParamList,
   refusal, type RdfDocumentRefusal,
 } from '../rdf/rdf-document.js';
 import { addressNames, type SourceNames } from '../rdf/term-reverse.js';
@@ -97,7 +97,7 @@ const NOTHING_BUILT = 'no schema was built';
 /** Every code either door answers: its own, the document reader's, the space state's, the existence rule's and the import hold's. */
 export const SCHEMA_RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
   SCHEMA_RDF_BAD_PARAM, SCHEMA_RDF_RUNG, SCHEMA_RDF_NETWORKED, SCHEMA_RDF_NOT_EMPTY, SCHEMA_RDF_BUSY, SCHEMA_RDF_CHANGED, SCHEMA_RDF_REFUSED,
-  RDF_TERM_CLASH, RDF_UNSUPPORTED_FORMAT, RDF_UNSUPPORTED_ENCODING, RDF_UPLOAD_STALLED, RDF_BOUND_EXCEEDED,
+  RDF_TERM_CLASH, RDF_UNSUPPORTED_FORMAT, RDF_UNSUPPORTED_ENCODING, RDF_UPLOAD_STALLED, RDF_UPLOAD_TOO_SLOW, RDF_UPLOAD_COOLDOWN, RDF_BOUND_EXCEEDED,
   'rdf_malformed', 'rdf_relative_iri', 'rdf_remote_context', 'rdf_jsonld_not_streamable', 'rdf_gzip_invalid', 'rdf_unsupported', 'rdf_source_failed',
   'rdf_not_enabled', 'rdf_base_conflict', 'rdf_base_shared', 'rdf_unwritable', SPACE_NOT_FOUND, 'space_being_rdf_imported',
 ]);
@@ -474,7 +474,8 @@ export async function schemaRdfImportAct(input: SchemaRdfImportInput): Promise<S
 
 /** The quads of the body, collected up to the quad bound; `null` past it. */
 async function quadsWithin(input: SchemaRdfImportInput, format: RdfFormat, max: number): Promise<Quad[] | null> {
-  const body = counted(input.body, knobs.bodyMaxBytes ?? SCHEMA_RDF_BODY_MAX_BYTES, knobs.uploadIdleMs ?? RDF_IMPORT_UPLOAD_IDLE_MS);
+  // No idle bound of the door's own unless a test sets one: the upload pace (and its test knob) applies, as at every door (Q-953, F5).
+  const body = counted(input.body, knobs.bodyMaxBytes ?? SCHEMA_RDF_BODY_MAX_BYTES, 'schema-rdf', knobs.uploadIdleMs);
   const held: Quad[] = [];
   for await (const q of parseRdf(body, format, { bounds: { maxInflatedBytes: SCHEMA_RDF_INFLATED_MAX_BYTES } })) {
     held.push(q);
