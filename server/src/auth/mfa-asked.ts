@@ -19,3 +19,24 @@ import type { TokenRecord } from '../config/types.js';
 export function callerIsAskedForMfa(record: (Pick<TokenRecord, 'mfa'> & { source?: string }) | undefined | null): boolean {
   return !!record && !isOidc(record) && mfaRequiredFor({ mfa: record.mfa }, isMfaEnabled());
 }
+
+/** Where a caller the MCP door refuses goes instead: the REST route that takes a code, or the page of the web UI that asks for one. */
+export type MfaStepUpPlace = { route: string } | { page: string };
+
+/**
+ * The sentence an MCP door refuses a caller with who REST would ask for a second factor, or null when the caller would not be asked.
+ *
+ * ## What it prevents
+ *
+ * Four tools (`import_rdf` with `schema`, `import_schema_rdf`, `network_reread`, `view_copy`) each asked {@link callerIsAskedForMfa} and wrote
+ * the sentence out; a fifth that wrote it differently, or asked a different question, would refuse one caller in two voices or let one through.
+ * The question and the sentence are written here: `action` is what the caller asked for ("Re-reading a network"), `place` where to go instead.
+ * The door decides the status and the error type it throws.
+ */
+export function mfaStepUpRefusalFor(
+  record: (Pick<TokenRecord, 'mfa'> & { source?: string }) | undefined | null, action: string, place: MfaStepUpPlace,
+): string | null {
+  if (!callerIsAskedForMfa(record)) return null;
+  const instead = 'route' in place ? ` or ${place.route}` : ` (${place.page})`;
+  return `${action} needs MFA step-up, which this door cannot present; use the web UI${instead}`;
+}

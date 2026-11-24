@@ -15,7 +15,7 @@ import {
   purgeRetiredSpaceId, refuseCopyByNonManager, updateView, viewsMigrationReport, type ViewActor, type ViewAuditDoor,
 } from '../../spaces/view-acts.js';
 import { VIEW_OPERATIONS } from '../../audit/middleware.js';
-import { callerIsAskedForMfa } from '../../auth/mfa-asked.js';
+import { mfaStepUpRefusalFor } from '../../auth/mfa-asked.js';
 import { ToolRefusal } from '../../util/errors.js';
 
 const json = (data: Record<string, unknown>, text?: string): ToolResult => ({
@@ -154,9 +154,8 @@ export const view_copyTool: ToolHandler = {
     refuseCopyByNonManager(record ?? undefined);
     // The second factor token management asks, answered honestly: this door has no place for a code, so a caller who would need one on REST
     // is told to use the web UI. The same rule as REST's (`mfaRequiredFor`), not a third divergence.
-    if (callerIsAskedForMfa(record)) {
-      throw new ViewRefusal('copyNeedsMfa', 'Giving a view to a token needs MFA step-up, which this door cannot present; use the web UI (Settings > Tokens)');
-    }
+    const stepUp = mfaStepUpRefusalFor(record, 'Giving a view to a token', { page: 'Settings > Tokens' });
+    if (stepUp) throw new ViewRefusal('copyNeedsMfa', stepUp);
     const given = copyViewTo(actorOf(ctx), String(ctx.args['view'] ?? ''), ctx.args['toTokenId'], ctx.args['fromTokenId']);
     await auditViewAct(doorOf(ctx), VIEW_OPERATIONS.copied, given);
     return json({ view: given.view, created: given.created }, `${given.created ? 'Copied' : 'Refreshed the earlier copy of'} the view to the token as ${given.view.id}.`);

@@ -12,7 +12,8 @@
  */
 import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.js';
 import { TOOL_REFUSAL_STATUSES, ToolRefusal, toolRefusalOfAct } from '../../util/errors.js';
-import { callerIsAskedForMfa } from '../../auth/mfa-asked.js';
+import { mfaStepUpRefusalFor } from '../../auth/mfa-asked.js';
+import { IMPORT_SCHEMA_SOURCES } from '../../spaces/rdf-import-params.js';
 import { JSON_BODY_MAX_BYTES } from '../../config/body-limits.js';
 import { RDF_FORMATS } from '../../rdf/serialize.js';
 import { inlineRdfDocument } from '../../rdf/rdf-document.js';
@@ -22,9 +23,6 @@ import {
 } from '../../spaces/rdf-import-act.js';
 
 const FORBIDDEN = 403;
-
-/** What `from` names (the act's parameters judge it; `data` infers the schema from the records, Q-755). */
-const SCHEMA_SOURCES = ['declared', 'shacl', 'data'] as const;
 
 /** The act's refusal as the tool's: its status and code, and what more it carries (a refused import's report) as structured content. */
 function refusalOf(r: RdfImportRefusal): Error {
@@ -74,7 +72,7 @@ export const import_rdfTool: ToolHandler = {
           + 'shape subjects are not imported as records.',
       },
       from: {
-        type: 'array', minItems: 1, maxItems: SCHEMA_SOURCES.length, items: { type: 'string', enum: [...SCHEMA_SOURCES] },
+        type: 'array', minItems: 1, maxItems: IMPORT_SCHEMA_SOURCES.length, items: { type: 'string', enum: [...IMPORT_SCHEMA_SOURCES] },
         description: 'With schema: what the schema is read from: declared (OWL and RDFS), shacl (shapes), data (inferred from the records: their types, '
           + 'each property with its column\'s majority datatype, edge labels with the types at their ends); default declared and shacl. A declared or '
           + 'stored term always wins over an inferred one; every inferred term is answered with its support and confidence, and a predicate the '
@@ -99,9 +97,10 @@ export const import_rdfTool: ToolHandler = {
     // and not `none`). This door has no channel for a code, so a caller who would be asked is refused first, before the document is read or the space's
     // hold is taken; an import without `schema` asks what it always asked. The precedent's rule (`network_reread`, `view_copy`); the tool door reaches it too.
     const schema = ctx.args['schema'];
-    if (schema !== undefined && schema !== 'none' && callerIsAskedForMfa(ctx.callerRecord)) {
-      throw new ToolRefusal(FORBIDDEN, 'Building a schema from an RDF import needs MFA step-up, which this door cannot present; use the web UI or POST /api/brain/spaces/:spaceId/import/rdf');
-    }
+    const stepUp = schema !== undefined && schema !== 'none'
+      ? mfaStepUpRefusalFor(ctx.callerRecord, 'Building a schema from an RDF import', { route: 'POST /api/brain/spaces/:spaceId/import/rdf' })
+      : null;
+    if (stepUp) throw new ToolRefusal(FORBIDDEN, stepUp);
     const { document, ...params } = ctx.args as Record<string, unknown>;
     const answer = await rdfImportAct({
       spaceId: ctx.callSpace, params, body: inlineRdfDocument(typeof document === 'string' ? document : ''), caller: ctx.callerRecord ?? { rights: ctx.rights ?? null },

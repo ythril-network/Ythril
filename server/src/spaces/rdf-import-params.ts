@@ -23,7 +23,7 @@ export const RDF_IMPORT_GRAPH_BASES_MAX = 64;
 export const RDF_IMPORT_GRAPH_BASE_MIN_CHARS = 3;
 export const RDF_IMPORT_GRAPH_BASE_MAX_CHARS = RDF_IMPORT_ADDRESS_MAX * 2 + 1;
 /** What an import with `schema` reads the schema from: the file's OWL and RDFS declarations, its shapes, and its records (`data`, Q-755). */
-const IMPORT_SCHEMA_SOURCES = ['declared', 'shacl', 'data'] as const;
+export const IMPORT_SCHEMA_SOURCES =['declared', 'shacl', 'data'] as const;
 /** The largest support threshold a caller may ask: the most subjects an import holds (`RDF_IMPORT_MAX_SUBJECTS`). */
 export const RDF_IMPORT_INFER_SUPPORT_MAX = RDF_IMPORT_MAX_SUBJECTS;
 
