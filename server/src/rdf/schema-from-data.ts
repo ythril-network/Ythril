@@ -247,6 +247,8 @@ class NameSet {
   /** The held names whose address is not the derived one: a stored name with an explicit `iri`, a reserved name, a name claimed for a foreign address. */
   private readonly foreign = new Set<string>();
   private readonly reserved: number;
+  /** The names this run added to the scope (held or claimed that the scope did not hold before, and not released since). */
+  private added = 0;
   /** `defs`: the stored definitions by name; `reserved`: names held that no schema holds (they do not count toward the type cap). */
   constructor(defs: Record<string, unknown> | undefined, reserved: readonly string[], private readonly onClaim?: (probes: number) => void) {
     this.held = new Set(Object.keys(defs ?? {}));
@@ -257,12 +259,17 @@ class NameSet {
   /** How many names the scope holds that a schema holds. */
   get taken(): number { return this.held.size - this.reserved; }
   /**
+   * Does the scope hold more names than `cap` through names this run added? A scope an earlier release filled past the cap is not over for a run
+   * that adds nothing to it, as a write is refused only for the types it adds (`typesAddedPastCap`).
+   */
+  addedPast(cap: number): boolean { return this.added > 0 && this.taken > cap; }
+  /**
    * A derived name: held as it is, never numbered (the vocabulary gives it, and a number would name another address). A name a stored or declared
    * term already holds under its derived address is the same term; `false` when another address took it.
    */
   hold(name: string): boolean {
     if (this.foreign.has(name)) return false;
-    this.held.add(name);
+    if (!this.held.has(name)) { this.held.add(name); this.added += 1; }
     return true;
   }
   /** `wanted` or its first free numbered spelling, held now; `null` when that spelling is not valid. */
@@ -280,6 +287,7 @@ class NameSet {
     if (!valid(name)) return null;
     this.held.add(name);
     this.foreign.add(name);
+    this.added += 1;
     if (n > 0) this.next.set(wanted, n + 1);
     return name;
   }
@@ -288,7 +296,7 @@ class NameSet {
    * toward the type cap. A numbered name's number stays used: the next claim of its base goes on from there.
    */
   release(name: string): void {
-    this.held.delete(name);
+    if (this.held.delete(name)) this.added -= 1;
     this.foreign.delete(name);
   }
 }
@@ -296,9 +304,9 @@ class NameSet {
 /** The names held per kind (stored, declared, inferred so far), and the first kind that holds more types than a kind may. */
 class NameBook {
   private readonly sets = new Map<string, NameSet>();
-  /** The first kind whose held names now pass the type cap, or `undefined` (a released name no longer counts). */
+  /** The first kind this run added names to whose held names now pass the type cap, or `undefined` (a released name no longer counts; a kind already past it is over only through what is added). */
   get over(): KnowledgeType | undefined {
-    for (const [kind, set] of this.sets) if (set.taken > MAX_TYPES_PER_KIND) return kind as KnowledgeType;
+    for (const [kind, set] of this.sets) if (set.addedPast(MAX_TYPES_PER_KIND)) return kind as KnowledgeType;
     return undefined;
   }
   constructor(typeSchemas: TypeSchemasByKind, private readonly onClaim?: (probes: number) => void) {
