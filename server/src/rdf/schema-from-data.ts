@@ -578,6 +578,10 @@ function inferEdges(st: InferState, c: PredicateCase): InferResult | null {
   const confidence = share(support, subjectsOfTypes);
   if (support < options.minSupport) { refuse('support', { confidence }); return null; }
   if (confidence < options.minConfidence) { refuse('confidence', { confidence }); return null; }
+  // What the answer says about this edge (its renaming, its open sides) is kept apart until its definition is known valid: a name given back
+  // below is taken by a later edge, and an entry left in the block under it would be read as that edge's.
+  const renamed: InferredBlock['renamed'] = [];
+  const open: InferredBlock['openEndpoints'] = [];
   let name: string | null;
   if (read.how === 'derived') {
     if (read.kind !== 'edge' || read.prop !== undefined || read.type === null) { refuse('not-a-term'); return null; }
@@ -587,7 +591,7 @@ function inferEdges(st: InferState, c: PredicateCase): InferResult | null {
     const wanted = wantedName(p, classes.labelGroups, validTypeName);
     name = wanted === null ? null : book.claim('edge', wanted, validTypeName);
     if (wanted === null || name === null) { refuse('no-name'); return null; }
-    if (name !== wanted) block.renamed.push({ iri: p, name, wanted, kind: 'edge' });
+    if (name !== wanted) renamed.push({ iri: p, name, wanted, kind: 'edge' });
   }
   const def: Record<string, unknown> = read.how === 'foreign' ? { iri: p } : {};
   const endpoints: Record<string, string[]> = {};
@@ -595,7 +599,7 @@ function inferEdges(st: InferState, c: PredicateCase): InferResult | null {
     const members = typesOn.map(memberOf);
     if (why === null && typesOn.length > ENDPOINT_TYPES_MAX) why = 'too-many-types';
     if (why === null && members.some(m => m === null)) why = 'name-too-long';
-    if (why !== null || typesOn.length === 0) { block.openEndpoints.push({ type: name!, side: which, why: why ?? 'no-end' }); return; }
+    if (why !== null || typesOn.length === 0) { open.push({ type: name!, side: which, why: why ?? 'no-end' }); return; }
     endpoints[which] = (members as string[]).sort(byCodeUnit);
   };
   side('from', [...new Set(all.map(s => s.type))], all.some(s => s.kind !== 'entity') ? 'not-an-entity' : null);
@@ -609,6 +613,8 @@ function inferEdges(st: InferState, c: PredicateCase): InferResult | null {
     refuse('invalid');
     return null;
   }
+  block.renamed.push(...renamed);
+  block.openEndpoints.push(...open);
   builtTypes.set(nameKey('edge', name), { kind: 'edge', name, def });
   block.edges.push({ kind: 'edge', type: name, iri: p, support, confidence });
   return book.over !== undefined ? stoppedAt(st, book.over) : null;
