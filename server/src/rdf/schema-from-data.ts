@@ -34,7 +34,7 @@ import { digestOfKey } from './import-count.js';
 import type { QuadGroup } from './import-spool.js';
 import { classOfType, edgeLabelOf, groupSubjectOf, leaveOutClassKey, leaveOutKey, literalCategory, predicateRole, readSubject, type OpKind } from './quads-to-ops.js';
 import { MAX_TYPES_PER_KIND } from '../spaces/types-added-past-cap.js';
-import { localPart, readTerm, validPropertyKey, validTypeName } from './schema-from-rdf-drafts.js';
+import { localPart, nameKey, readTerm, validPropertyKey, validTypeName, type TermReading } from './schema-from-rdf-drafts.js';
 import type { BuiltType, TypeSchemasByKind } from './schema-from-rdf-modes.js';
 
 /** The most distinct predicates a file's subjects may use for a schema to be inferred from it: wider is a dump to type by hand. */
@@ -69,7 +69,7 @@ export const INFER_MIN_SUPPORT_DEFAULT = 2;
 /** The confidence a property needs by default: none, so the column's majority datatype is taken as the ticket asks. */
 export const INFER_MIN_CONFIDENCE_DEFAULT = 0;
 /** The most entries each list of the answer's `inferred` block names; each is counted whole. */
-export const INFERRED_NAMED_MAX = 500;
+const INFERRED_NAMED_MAX =500;
 /** The most types one endpoint side lists (the schema's own bound on `endpoints.from` and `endpoints.to`). */
 const ENDPOINT_TYPES_MAX = 50;
 /** The longest endpoint member the schema holds. */
@@ -362,35 +362,76 @@ function countedBlock(block: InferredBlock): InferredBlock {
   return out;
 }
 
-/**
- * Decide the types (from pass 1, against the names after the declared answer), read pass 2 (properties and edges per type, the ends of
- * edges), and decide the properties and edge labels. Pure but for reading `source` again.
- */
-export async function inferFromData(
-  source: DataSource, classes: DataClasses, first: InferFirst, options: InferOptions,
-): Promise<InferResult> {
-  const block: InferredBlock = { types: [], properties: [], edges: [], mixed: [], multiValued: [], renamed: [], openEndpoints: [], notInferred: [], multiTyped: [], counts: {} };
-  const book = new NameBook(first.typeSchemas, first.onClaim);
-  const names = first.names;
-  const builtTypes = new Map<string, BuiltType>();
-  const typeOfClass = new Map<number, TypeOf>();
-  const ctx = { names };
-  /** The classes the inference named and did not take: their subjects, and the label groups that describe them, are left out of the data. */
-  const prunedClasses: string[] = [];
-  const builtOf = (): BuiltType[] => {
-    const typed = new Set(block.types.map(t => `${t.kind}\u0000${t.type}`));
-    return [...builtTypes.values()].filter(b => b.kind === 'edge' || Object.keys(b.def).length > 0 || typed.has(`${b.kind}\u0000${b.name}`));
-  };
-  /** The inference stopped: a kind holds more types than the cap allows, whatever else the file says, so the proposal refuses and reads nothing more. */
-  const stoppedAt = (kind: KnowledgeType): InferResult => ({ built: builtOf(), inferred: countedBlock(block), leaveOut: [], labelKeys: [], overCap: kind });
+/** The owners of a term the space or the file's declarations hold. */
+type Owners = Extract<ReturnType<typeof termOfIri>, { answer: 'term' }>['owners'];
 
-  // -- the types -----------------------------------------------------------------------------------------------------------------------
+/**
+ * What the steps of {@link inferFromData} share: the file, the names, and what each step decides for the next (the types for the second pass,
+ * the pairs and columns for the properties and edge labels). Built by `inferFromData` alone; a step reads and fills it, never holds a copy.
+ */
+interface InferState {
+  source: DataSource; classes: DataClasses; first: InferFirst; options: InferOptions;
+  block: InferredBlock;
+  book: NameBook;
+  ctx: { names: AddressNames };
+  builtTypes: Map<string, BuiltType>;
+  typeOfClass: Map<number, TypeOf>;
+  /** The classes the inference named and did not take: their subjects, and the label groups that describe them, are left out of the data. */
+  prunedClasses: string[];
+  /** The subjects each type (by {@link nameKey}) settled on. */
+  typeSubjects: Map<string, number>;
+  /** Per predicate, per type (by {@link nameKey}): what the subjects state. */
+  pairs: Map<string, Map<string, PairStats>>;
+  columns: Map<string, Record<Category, number>>;
+  nodesOf: Map<string, number>;
+  /** The (kind, type, predicate) pairs the translation leaves out of the data. */
+  leaveOut: string[];
+  /** The property keys of each type (by {@link nameKey}) held so far. */
+  keysHeld: Map<string, NameSet>;
+}
+
+/** What the decision on one predicate shares between the checks every predicate meets and the property or edge label it turns out to be. */
+interface PredicateCase {
+  p: string;
+  perType: Map<string, PairStats>;
+  support: number;
+  /** The owners of `p` that are a property of a type. */
+  knownProp: Owners;
+  read: Exclude<TermReading, { how: 'rejected' }>;
+  column: Record<Category, number>;
+  literals: number;
+  /** Name the predicate not inferred, and leave its statements out of the data. */
+  refuse: (why: string, extra?: Partial<NotInferred>) => void;
+}
+
+/** The types the inference built: an edge label, a type with a definition, and a type it named (a type with no definition is still a type). */
+function builtOf(st: InferState): BuiltType[] {
+  const typed = new Set(st.block.types.map(t => nameKey(t.kind, t.type)));
+  return [...st.builtTypes.values()].filter(b => b.kind === 'edge' || Object.keys(b.def).length > 0 || typed.has(nameKey(b.kind, b.name)));
+}
+
+/** The inference stopped: a kind holds more types than the cap allows, whatever else the file says, so the proposal refuses and reads nothing more. */
+const stoppedAt = (st: InferState, kind: KnowledgeType): InferResult => ({ built: builtOf(st), inferred: countedBlock(st.block), leaveOut: [], labelKeys: [], overCap: kind });
+
+/** The type a subject settles on, as the translation's kind reader settles it: the schema's before the vocabulary's, then the first address. */
+function pickOf(st: InferState, digest: string): TypeOf | null {
+  const mine = (st.classes.subjects.get(digest) ?? []).map(n => st.typeOfClass.get(n)).filter((t): t is TypeOf => t !== undefined);
+  if (mine.length === 0 || new Set(mine.map(t => t.kind)).size > 1) return null;
+  return [...mine].sort((a, b) => Number(a.vocabulary) - Number(b.vocabulary) || byCodeUnit(a.iri, b.iri))[0]!;
+}
+
+/**
+ * Step 1, the types: decide each class of pass 1 against the names after the declared answer, then count the subjects each type settles on and
+ * give each type its confidence. `null`, or the answer the inference stopped with (a kind past the type cap).
+ */
+function inferTypes(st: InferState): InferResult | null {
+  const { classes, options, block, book, builtTypes, typeOfClass, ctx, prunedClasses } = st;
   const derivedOf = new Map(classes.classes.map(iri => [iri, readTerm(ctx, iri).how === 'derived'] as const));
   const order = classes.classes.map((iri, n) => ({ iri, n })).sort((a, b) => byCodeUnit(a.iri, b.iri));
   const derivedFirst = [...order].sort((a, b) => Number(derivedOf.get(b.iri)) - Number(derivedOf.get(a.iri)));
   for (const { iri, n } of derivedFirst) {
     // A class the space or the file's declarations hold is theirs; one only the vocabulary reads is inferred under its derived name.
-    const t = termOfIri(iri, names);
+    const t = termOfIri(iri, ctx.names);
     if (t.answer === 'term' && t.how === 'schema' && t.owners.length > 0 && t.owners.every(w => w.prop === undefined)) {
       const owner = t.owners.length === 1 ? t.owners[0]! : undefined;
       if (owner && owner.kind !== 'file' && owner.type !== null) typeOfClass.set(n, { kind: owner.kind, name: owner.type, iri, vocabulary: false });
@@ -418,34 +459,28 @@ export async function inferFromData(
       if (name !== wanted) block.renamed.push({ iri, name, wanted, kind });
     }
     typeOfClass.set(n, { kind, name, iri, vocabulary: false });
-    builtTypes.set(`${kind}\u0000${name}`, { kind, name, def: read.how === 'foreign' ? { iri } : {} });
+    builtTypes.set(nameKey(kind, name), { kind, name, def: read.how === 'foreign' ? { iri } : {} });
     block.types.push({ kind, type: name, iri, support, confidence: 1 });
-    if (book.over !== undefined) return stoppedAt(book.over);
+    if (book.over !== undefined) return stoppedAt(st, book.over);
   }
-
-  /** The type a subject settles on, as the translation's kind reader settles it: the schema's before the vocabulary's, then the first address. */
-  const pickOf = (digest: string): TypeOf | null => {
-    const mine = (classes.subjects.get(digest) ?? []).map(n => typeOfClass.get(n)).filter((t): t is TypeOf => t !== undefined);
-    if (mine.length === 0 || new Set(mine.map(t => t.kind)).size > 1) return null;
-    return [...mine].sort((a, b) => Number(a.vocabulary) - Number(b.vocabulary) || byCodeUnit(a.iri, b.iri))[0]!;
-  };
-  const typeSubjects = new Map<string, number>();
   const multi = new Map<number, number>();
   for (const [digest, list] of classes.subjects) {
-    const pick = pickOf(digest);
-    if (pick) typeSubjects.set(`${pick.kind}\u0000${pick.name}`, (typeSubjects.get(`${pick.kind}\u0000${pick.name}`) ?? 0) + 1);
+    const pick = pickOf(st, digest);
+    if (pick) st.typeSubjects.set(nameKey(pick.kind, pick.name), (st.typeSubjects.get(nameKey(pick.kind, pick.name)) ?? 0) + 1);
     if (list.length > 1) for (const n of list) multi.set(n, (multi.get(n) ?? 0) + 1);
   }
   for (const [n, subjects] of multi) block.multiTyped.push({ iri: classes.classes[n]!, subjects });
-  for (const t of block.types) {
-    const settled = typeSubjects.get(`${t.kind}\u0000${t.type}`) ?? 0;
-    t.confidence = share(settled, t.support);
-  }
+  for (const t of block.types) t.confidence = share(st.typeSubjects.get(nameKey(t.kind, t.type)) ?? 0, t.support);
+  return null;
+}
 
-  // -- pass 2: properties and edges, per type --------------------------------------------------------------------------------------------
-  const pairs = new Map<string, Map<string, PairStats>>();
-  const columns = new Map<string, Record<Category, number>>();
-  const nodesOf = new Map<string, number>();
+/**
+ * Step 2, pass 2 over the file: per predicate and type, what the subjects state (their count, the literals and node objects, the ends of
+ * edges), and per predicate the column of value categories. `null`, or the answer the inference stopped with (more distinct repeated pairs than
+ * `maxPairs`).
+ */
+async function tallyPairs(st: InferState): Promise<InferResult | null> {
+  const { source, classes, options, block, pairs, columns, nodesOf } = st;
   // A subject stated by several groups (a graph each) is one subject of a pair: only those subjects are remembered per pair.
   const countedPairs = new Set<string>();
   for await (const group of source.groups()) {
@@ -453,7 +488,7 @@ export async function inferFromData(
     const at = subjectOf(group, source);
     if (at === null) continue;
     const digest = digestOfKey(at.iri);
-    const pick = pickOf(digest);
+    const pick = pickOf(st, digest);
     if (pick === null || (pick.kind !== 'entity' && pick.kind !== 'fact')) continue;
     const groupNames = source.namesOf(group.graph?.value);
     const byPredicate = new Map<string, Quad[]>();
@@ -463,7 +498,7 @@ export async function inferFromData(
       if (list === undefined) byPredicate.set(q.predicate.value, [q]); else list.push(q);
     }
     for (const [p, qs] of byPredicate) {
-      const typeKey = `${pick.kind}\u0000${pick.name}`;
+      const typeKey = nameKey(pick.kind, pick.name);
       const perType = pairs.get(p) ?? new Map<string, PairStats>();
       pairs.set(p, perType);
       const stats = perType.get(typeKey) ?? { kind: pick.kind, type: pick.name, subjects: 0, literals: 0, multi: 0, nodes: 0, maxNodes: 0, ends: new Set(), open: new Set() };
@@ -488,7 +523,7 @@ export async function inferFromData(
         nodes += 1;
         nodesOf.set(p, (nodesOf.get(p) ?? 0) + 1);
         if (q.object.kind !== 'iri') { stats.open.add('end-not-described'); continue; }
-        const end = pickOf(digestOfKey(q.object.value));
+        const end = pickOf(st, digestOfKey(q.object.value));
         if (end !== null) { if (end.kind === 'entity') stats.ends.add(end.name); else stats.open.add('not-an-entity'); continue; }
         if (classes.subjects.has(digestOfKey(q.object.value))) { stats.open.add('end-untyped'); continue; }
         stats.open.add(recordOfAddress(q.object.value, groupNames).answer === 'record' ? 'end-stored' : 'end-not-described');
@@ -499,141 +534,194 @@ export async function inferFromData(
       stats.maxNodes = Math.max(stats.maxNodes, nodes);
     }
   }
+  return null;
+}
 
-  // -- the properties and edge labels ----------------------------------------------------------------------------------------------------
-  const leaveOut: string[] = [];
-  const leave = (perType: Map<string, PairStats>, p: string): void => { for (const s of perType.values()) leaveOut.push(leaveOutKey(s.kind, s.type, p)); };
-  const classSet = new Set(classes.classes);
-  const propertiesOf = (kind: KnowledgeType, type: string): Record<string, unknown> => {
-    const key = `${kind}\u0000${type}`;
-    let built = builtTypes.get(key);
-    if (built === undefined) { built = { kind, name: type, def: {} }; builtTypes.set(key, built); }
-    return ((built.def['propertySchemas'] as Record<string, unknown> | undefined) ?? (built.def['propertySchemas'] = {})) as Record<string, unknown>;
+/** The (kind, type, `p`) pairs of every type that states `p` are left out of the data. */
+function leaveAll(st: InferState, perType: Map<string, PairStats>, p: string): void {
+  for (const s of perType.values()) st.leaveOut.push(leaveOutKey(s.kind, s.type, p));
+}
+
+/** The definition under construction for a type, creating the type when the inference only now gives it a property. */
+function propertiesOf(st: InferState, kind: KnowledgeType, type: string): Record<string, unknown> {
+  const key = nameKey(kind, type);
+  let built = st.builtTypes.get(key);
+  if (built === undefined) { built = { kind, name: type, def: {} }; st.builtTypes.set(key, built); }
+  return ((built.def['propertySchemas'] as Record<string, unknown> | undefined) ?? (built.def['propertySchemas'] = {})) as Record<string, unknown>;
+}
+
+/** The property keys of one type held so far: the stored ones, then the derived and inferred ones. */
+function keysOf(st: InferState, kind: KnowledgeType, type: string): NameSet {
+  const key = nameKey(kind, type);
+  let held = st.keysHeld.get(key);
+  if (held === undefined) {
+    const stored = (st.first.typeSchemas[kind]?.[type] as { propertySchemas?: Record<string, unknown> } | undefined)?.propertySchemas ?? {};
+    held = new NameSet(stored, [], st.first.onClaim);
+    st.keysHeld.set(key, held);
+  }
+  return held;
+}
+
+/**
+ * Step 4, one predicate that is an edge label (its objects are nodes): its name, its endpoints, `functional`, and whether the definition is valid.
+ * `null`, or the answer the inference stopped with (a kind past the type cap).
+ */
+function inferEdges(st: InferState, c: PredicateCase): InferResult | null {
+  const { classes, options, block, book, builtTypes, typeSubjects } = st;
+  const { p, perType, support, knownProp, read, refuse } = c;
+  // A predicate the space holds as a property of a type is not also an edge label: the two would share one address.
+  if (knownProp.length > 0) { refuse('term-clash'); return null; }
+  // An edge label: its ends must be the file's typed subjects, or records the space stores (which leave a side open).
+  const all = [...perType.values()];
+  if (all.some(s => s.open.has('end-not-described') || s.open.has('end-untyped'))) { refuse('end-not-described'); return null; }
+  const subjectsOfTypes = all.reduce((n, s) => n + (typeSubjects.get(nameKey(s.kind, s.type)) ?? 0), 0);
+  const confidence = share(support, subjectsOfTypes);
+  if (support < options.minSupport) { refuse('support', { confidence }); return null; }
+  if (confidence < options.minConfidence) { refuse('confidence', { confidence }); return null; }
+  let name: string | null;
+  if (read.how === 'derived') {
+    if (read.kind !== 'edge' || read.prop !== undefined || read.type === null) { refuse('not-a-term'); return null; }
+    name = read.type;
+    if (!book.hold('edge', name)) { refuse('term-clash'); return null; }
+  } else {
+    const wanted = wantedName(p, classes.labelGroups, validTypeName);
+    name = wanted === null ? null : book.claim('edge', wanted, validTypeName);
+    if (wanted === null || name === null) { refuse('no-name'); return null; }
+    if (name !== wanted) block.renamed.push({ iri: p, name, wanted, kind: 'edge' });
+  }
+  const def: Record<string, unknown> = read.how === 'foreign' ? { iri: p } : {};
+  const endpoints: Record<string, string[]> = {};
+  const side = (which: 'from' | 'to', typesOn: string[], why: string | null): void => {
+    const members = typesOn.map(memberOf);
+    if (why === null && typesOn.length > ENDPOINT_TYPES_MAX) why = 'too-many-types';
+    if (why === null && members.some(m => m === null)) why = 'name-too-long';
+    if (why !== null || typesOn.length === 0) { block.openEndpoints.push({ type: name!, side: which, why: why ?? 'no-end' }); return; }
+    endpoints[which] = (members as string[]).sort(byCodeUnit);
   };
-  const keysHeld = new Map<string, NameSet>();
-  /** The property keys of one type held so far: the stored ones, then the derived and inferred ones. */
-  const keysOf = (kind: KnowledgeType, type: string): NameSet => {
-    const key = `${kind}\u0000${type}`;
-    let held = keysHeld.get(key);
-    if (held === undefined) {
-      const stored = (first.typeSchemas[kind]?.[type] as { propertySchemas?: Record<string, unknown> } | undefined)?.propertySchemas ?? {};
-      held = new NameSet(stored, [], first.onClaim);
-      keysHeld.set(key, held);
+  side('from', [...new Set(all.map(s => s.type))], all.some(s => s.kind !== 'entity') ? 'not-an-entity' : null);
+  const toOpen = all.flatMap(s => [...s.open]);
+  side('to', [...new Set(all.flatMap(s => [...s.ends]))], toOpen.includes('end-stored') ? 'end-stored' : toOpen.includes('not-an-entity') ? 'not-an-entity' : null);
+  if (Object.keys(endpoints).length > 0) def['endpoints'] = endpoints;
+  if (options.functional && all.every(s => s.maxNodes <= 1)) def['functional'] = true;
+  if (!TypeSchemaZ.safeParse(def).success) {
+    // The name was claimed for a type that is not built: it is given back, so the cap counts built names only.
+    if (read.how !== 'derived') book.release('edge', name);
+    refuse('invalid');
+    return null;
+  }
+  builtTypes.set(nameKey('edge', name), { kind: 'edge', name, def });
+  block.edges.push({ kind: 'edge', type: name, iri: p, support, confidence });
+  return book.over !== undefined ? stoppedAt(st, book.over) : null;
+}
+
+/** Step 3, one predicate whose objects are plain values: one datatype across every type, and its key and confidence on each type that states it. */
+function inferProperties(st: InferState, c: PredicateCase): void {
+  const { classes, options, block, first, typeSubjects, leaveOut } = st;
+  const { p, perType, knownProp, read, column, literals, refuse } = c;
+  // A property: one datatype for the predicate across every type (the term-clash rule holds one address to one declared type).
+  const storedType = knownProp.map(w => (first.typeSchemas[w.kind as KnowledgeType]?.[w.type!] as { propertySchemas?: Record<string, { type?: unknown }> } | undefined)?.propertySchemas?.[w.prop!]?.type)[0];
+  if (knownProp.length > 0 && (read.how === 'derived' || storedType === undefined)) { refuse('vocabulary-property'); return; }
+  const { majority, share: held } = majorityOf(column);
+  const kinds = (Object.keys(column) as Category[]).filter(k => column[k] > 0);
+  if (kinds.length > 1) block.mixed.push({ predicate: p, counts: { ...column }, majority, share: share(column[majority ?? 'other'] ?? 0, literals) });
+  if (majority === null) { refuse('other-only'); return; }
+  if (held < options.minConfidence) { refuse('mixed', { confidence: share(column[majority], literals) }); return; }
+  const datatype = (typeof storedType === 'string' ? storedType : majority) as Datatype;
+  for (const s of [...perType.values()].sort((a, b) => byCodeUnit(a.type, b.type))) {
+    const confidence = share(s.subjects, typeSubjects.get(nameKey(s.kind, s.type)) ?? 0);
+    const pairNot = (why: string): void => {
+      block.notInferred.push({ iri: p, why, kind: s.kind, type: s.type, support: s.subjects, confidence });
+      leaveOut.push(leaveOutKey(s.kind, s.type, p));
+    };
+    // A stored type that is a library reference holds no property of its own: it is kept whole, so nothing is written to it.
+    if (isLibraryReference(first.typeSchemas[s.kind]?.[s.type])) { pairNot('library-reference'); continue; }
+    if (s.multi > 0) { block.multiValued.push({ kind: s.kind, type: s.type, predicate: p, subjects: s.multi }); pairNot('multi-valued'); continue; }
+    if (s.subjects < options.minSupport) { pairNot('support'); continue; }
+    if (confidence < options.minConfidence) { pairNot('confidence'); continue; }
+    let key: string | null;
+    if (read.how === 'derived') {
+      if (read.prop === undefined || read.kind !== s.kind || read.type !== s.type) { pairNot('vocabulary-property'); continue; }
+      if (!keysOf(st, s.kind, s.type).hold(read.prop)) { pairNot('term-clash'); continue; }
+      key = read.prop;
+    } else {
+      const wanted = wantedName(p, classes.labelGroups, validPropertyKey);
+      key = wanted === null ? null : keysOf(st, s.kind, s.type).claim(wanted, validPropertyKey);
+      if (wanted === null || key === null) { pairNot('no-name'); continue; }
+      if (key !== wanted) block.renamed.push({ iri: p, name: key, wanted, kind: s.kind, type: s.type });
     }
-    return held;
-  };
+    propertiesOf(st, s.kind, s.type)[key] = { ...(read.how === 'foreign' ? { iri: p } : {}), type: datatype };
+    block.properties.push({ kind: s.kind, type: s.type, prop: key, iri: p, datatype, support: s.subjects, confidence });
+  }
+}
+
+/**
+ * Steps 3 and 4: decide each predicate the second pass saw, in an order that gives a derived address its own name before a foreign one asks for it.
+ * The checks every predicate meets come first; then it is an edge label ({@link inferEdges}) or a property ({@link inferProperties}).
+ * `null`, or the answer the inference stopped with.
+ */
+function inferPredicates(st: InferState): InferResult | null {
+  const { classes, block, pairs, columns, nodesOf, ctx } = st;
+  const classSet = new Set(classes.classes);
   // A derived address takes its own name before any foreign address asks for one, so a foreign predicate is the one numbered.
   const derivedPredicate = new Map([...pairs.keys()].map(p => [p, readTerm(ctx, p).how === 'derived'] as const));
   for (const p of [...pairs.keys()].sort((a, b) => Number(derivedPredicate.get(b)) - Number(derivedPredicate.get(a)) || byCodeUnit(a, b))) {
     const perType = pairs.get(p)!;
     // Held terms are the space's or the declarations' (`how: schema`); an address only the vocabulary reads is inferred under its derived name.
-    const t = termOfIri(p, names);
+    const t = termOfIri(p, ctx.names);
     const holders = t.answer === 'term' && t.how === 'schema' ? t.owners : [];
     const knownProp = holders.filter(w => w.prop !== undefined);
-    if (holders.length > 0 && edgeLabelOf(p, names) !== null) continue;
+    if (holders.length > 0 && edgeLabelOf(p, ctx.names) !== null) continue;
     for (const [typeKey, s] of perType) if (knownProp.some(w => w.kind === s.kind && w.type === s.type)) perType.delete(typeKey);
     if (perType.size === 0) continue;
     const support = [...perType.values()].reduce((n, s) => n + s.subjects, 0);
-    const notInferred = (why: string, extra: Partial<NotInferred> = {}): void => { block.notInferred.push({ iri: p, why, support, ...extra }); };
-    if (t.answer === 'mapper-predicate') { notInferred('reserved'); leave(perType, p); continue; }
-    if (t.answer === 'product') { notInferred('product'); leave(perType, p); continue; }
-    if (t.answer === 'refused') { notInferred('not-a-term'); leave(perType, p); continue; }
-    if (classSet.has(p) || holders.some(w => w.prop === undefined)) { notInferred('used-as-class'); leave(perType, p); continue; }
+    const refuse = (why: string, extra: Partial<NotInferred> = {}): void => { block.notInferred.push({ iri: p, why, support, ...extra }); leaveAll(st, perType, p); };
+    if (t.answer === 'mapper-predicate') { refuse('reserved'); continue; }
+    if (t.answer === 'product') { refuse('product'); continue; }
+    if (t.answer === 'refused') { refuse('not-a-term'); continue; }
+    if (classSet.has(p) || holders.some(w => w.prop === undefined)) { refuse('used-as-class'); continue; }
     const read = readTerm(ctx, p);
-    if (read.how === 'rejected') { notInferred('not-a-term'); leave(perType, p); continue; }
+    if (read.how === 'rejected') { refuse('not-a-term'); continue; }
     const column = columns.get(p)!;
-    const literals = TIE_ORDER.reduce((n, c) => n + column[c], column.other);
+    const literals = TIE_ORDER.reduce((n, k) => n + column[k], column.other);
     const nodes = nodesOf.get(p) ?? 0;
-    if (literals > 0 && nodes > 0) { notInferred('literal-and-node'); leave(perType, p); continue; }
-
+    if (literals > 0 && nodes > 0) { refuse('literal-and-node'); continue; }
+    const asked: PredicateCase = { p, perType, support, knownProp, read, column, literals, refuse };
     if (nodes > 0) {
-      // A predicate the space holds as a property of a type is not also an edge label: the two would share one address.
-      if (knownProp.length > 0) { notInferred('term-clash'); leave(perType, p); continue; }
-      // An edge label: its ends must be the file's typed subjects, or records the space stores (which leave a side open).
-      const all = [...perType.values()];
-      if (all.some(s => s.open.has('end-not-described') || s.open.has('end-untyped'))) { notInferred('end-not-described'); leave(perType, p); continue; }
-      const subjectsOfTypes = all.reduce((n, s) => n + (typeSubjects.get(`${s.kind}\u0000${s.type}`) ?? 0), 0);
-      const confidence = share(support, subjectsOfTypes);
-      if (support < options.minSupport) { notInferred('support', { confidence }); leave(perType, p); continue; }
-      if (confidence < options.minConfidence) { notInferred('confidence', { confidence }); leave(perType, p); continue; }
-      let name: string | null;
-      if (read.how === 'derived') {
-        if (read.kind !== 'edge' || read.prop !== undefined || read.type === null) { notInferred('not-a-term'); leave(perType, p); continue; }
-        name = read.type;
-        if (!book.hold('edge', name)) { notInferred('term-clash'); leave(perType, p); continue; }
-      } else {
-        const wanted = wantedName(p, classes.labelGroups, validTypeName);
-        name = wanted === null ? null : book.claim('edge', wanted, validTypeName);
-        if (wanted === null || name === null) { notInferred('no-name'); leave(perType, p); continue; }
-        if (name !== wanted) block.renamed.push({ iri: p, name, wanted, kind: 'edge' });
-      }
-      const def: Record<string, unknown> = read.how === 'foreign' ? { iri: p } : {};
-      const endpoints: Record<string, string[]> = {};
-      const side = (which: 'from' | 'to', typesOn: string[], why: string | null): void => {
-        const members = typesOn.map(memberOf);
-        if (why === null && typesOn.length > ENDPOINT_TYPES_MAX) why = 'too-many-types';
-        if (why === null && members.some(m => m === null)) why = 'name-too-long';
-        if (why !== null || typesOn.length === 0) { block.openEndpoints.push({ type: name!, side: which, why: why ?? 'no-end' }); return; }
-        endpoints[which] = (members as string[]).sort(byCodeUnit);
-      };
-      side('from', [...new Set(all.map(s => s.type))], all.some(s => s.kind !== 'entity') ? 'not-an-entity' : null);
-      const toOpen = all.flatMap(s => [...s.open]);
-      side('to', [...new Set(all.flatMap(s => [...s.ends]))], toOpen.includes('end-stored') ? 'end-stored' : toOpen.includes('not-an-entity') ? 'not-an-entity' : null);
-      if (Object.keys(endpoints).length > 0) def['endpoints'] = endpoints;
-      if (options.functional && all.every(s => s.maxNodes <= 1)) def['functional'] = true;
-      if (!TypeSchemaZ.safeParse(def).success) {
-        // The name was claimed for a type that is not built: it is given back, so the cap counts built names only.
-        if (read.how !== 'derived') book.release('edge', name);
-        notInferred('invalid'); leave(perType, p); continue;
-      }
-      builtTypes.set(`edge\u0000${name}`, { kind: 'edge', name, def });
-      block.edges.push({ kind: 'edge', type: name, iri: p, support, confidence });
-      if (book.over !== undefined) return stoppedAt(book.over);
-      continue;
-    }
-
-    // A property: one datatype for the predicate across every type (the term-clash rule holds one address to one declared type).
-    const storedType = knownProp.map(w => (first.typeSchemas[w.kind as KnowledgeType]?.[w.type!] as { propertySchemas?: Record<string, { type?: unknown }> } | undefined)?.propertySchemas?.[w.prop!]?.type)[0];
-    if (knownProp.length > 0 && (read.how === 'derived' || storedType === undefined)) { notInferred('vocabulary-property'); leave(perType, p); continue; }
-    const { majority, share: held } = majorityOf(column);
-    const kinds = (Object.keys(column) as Category[]).filter(c => column[c] > 0);
-    if (kinds.length > 1) block.mixed.push({ predicate: p, counts: { ...column }, majority, share: share(column[majority ?? 'other'] ?? 0, literals) });
-    if (majority === null) { notInferred('other-only'); leave(perType, p); continue; }
-    if (held < options.minConfidence) { notInferred('mixed', { confidence: share(column[majority], literals) }); leave(perType, p); continue; }
-    const datatype = (typeof storedType === 'string' ? storedType : majority) as Datatype;
-    for (const s of [...perType.values()].sort((a, b) => byCodeUnit(a.type, b.type))) {
-      const confidence = share(s.subjects, typeSubjects.get(`${s.kind}\u0000${s.type}`) ?? 0);
-      const pairNot = (why: string): void => {
-        block.notInferred.push({ iri: p, why, kind: s.kind, type: s.type, support: s.subjects, confidence });
-        leaveOut.push(leaveOutKey(s.kind, s.type, p));
-      };
-      // A stored type that is a library reference holds no property of its own: it is kept whole, so nothing is written to it.
-      if (isLibraryReference(first.typeSchemas[s.kind]?.[s.type])) { pairNot('library-reference'); continue; }
-      if (s.multi > 0) { block.multiValued.push({ kind: s.kind, type: s.type, predicate: p, subjects: s.multi }); pairNot('multi-valued'); continue; }
-      if (s.subjects < options.minSupport) { pairNot('support'); continue; }
-      if (confidence < options.minConfidence) { pairNot('confidence'); continue; }
-      let key: string | null;
-      if (read.how === 'derived') {
-        if (read.prop === undefined || read.kind !== s.kind || read.type !== s.type) { pairNot('vocabulary-property'); continue; }
-        if (!keysOf(s.kind, s.type).hold(read.prop)) { pairNot('term-clash'); continue; }
-        key = read.prop;
-      } else {
-        const wanted = wantedName(p, classes.labelGroups, validPropertyKey);
-        key = wanted === null ? null : keysOf(s.kind, s.type).claim(wanted, validPropertyKey);
-        if (wanted === null || key === null) { pairNot('no-name'); continue; }
-        if (key !== wanted) block.renamed.push({ iri: p, name: key, wanted, kind: s.kind, type: s.type });
-      }
-      propertiesOf(s.kind, s.type)[key] = { ...(read.how === 'foreign' ? { iri: p } : {}), type: datatype };
-      block.properties.push({ kind: s.kind, type: s.type, prop: key, iri: p, datatype, support: s.subjects, confidence });
-    }
+      const stopped = inferEdges(st, asked);
+      if (stopped !== null) return stopped;
+    } else inferProperties(st, asked);
   }
+  return null;
+}
 
-  // -- the answer ------------------------------------------------------------------------------------------------------------------------
+/** The answer: the types built, the block, the pairs left out, and the label groups left out with them. */
+function answerOf(st: InferState): InferResult {
+  const { block, classes, prunedClasses, leaveOut } = st;
   // A class not inferred is left out whole, and the label groups of an address described and not inferred are no record either.
   for (const iri of prunedClasses) leaveOut.push(leaveOutClassKey(iri));
   const leftOutIris = new Set([...block.types, ...block.properties, ...block.edges].map(t => t.iri).concat(prunedClasses));
   const labelKeys = [...classes.labelGroups].filter(([iri]) => leftOutIris.has(iri)).flatMap(([, g]) => g.keys);
-  return { built: builtOf(), inferred: countedBlock(block), leaveOut, labelKeys };
+  return { built: builtOf(st), inferred: countedBlock(block), leaveOut, labelKeys };
+}
+
+/**
+ * Decide the types (from pass 1, against the names after the declared answer), read pass 2 (properties and edges per type, the ends of
+ * edges), and decide the properties and edge labels: {@link inferTypes}, {@link tallyPairs}, {@link inferPredicates} (which asks
+ * {@link inferEdges} or {@link inferProperties} of each predicate), then {@link answerOf}. A step that stops the inference (the type cap, the
+ * pair bound) answers at once. Pure but for reading `source` again.
+ */
+export async function inferFromData(
+  source: DataSource, classes: DataClasses, first: InferFirst, options: InferOptions,
+): Promise<InferResult> {
+  const st: InferState = {
+    source, classes, first, options,
+    block: { types: [], properties: [], edges: [], mixed: [], multiValued: [], renamed: [], openEndpoints: [], notInferred: [], multiTyped: [], counts: {} },
+    book: new NameBook(first.typeSchemas, first.onClaim),
+    ctx: { names: first.names },
+    builtTypes: new Map(), typeOfClass: new Map(), prunedClasses: [],
+    typeSubjects: new Map(), pairs: new Map(), columns: new Map(), nodesOf: new Map(), leaveOut: [], keysHeld: new Map(),
+  };
+  return inferTypes(st) ?? await tallyPairs(st) ?? inferPredicates(st) ?? answerOf(st);
 }
 
 /** Does a stored type or property definition give its term an address of its own (an explicit `iri`) instead of the derived one? */

@@ -60,10 +60,10 @@ const GRAPHS_NAMED_MAX = 64;
 const SCHEMA_TYPES_NAMED_MAX = 500;
 
 /** The fingerprint and the meta version stored for `spaceId` now. */
-export const storedFingerprint = (spaceId: string): string => schemaFingerprintOf(getConfig().spaces.find(s => s.id === spaceId));
+const storedFingerprint =(spaceId: string): string => schemaFingerprintOf(getConfig().spaces.find(s => s.id === spaceId));
 export const storedVersion = (spaceId: string): number => getConfig().spaces.find(s => s.id === spaceId)?.meta?.version ?? 0;
 /** The group key of a blank node in its graph: the sorted spool's own. */
-export const blankGroupKey = (id: string, graph: { value: string } | undefined): string =>
+const blankGroupKey =(id: string, graph: { value: string } | undefined): string =>
   quadGroupKey({ kind: 'blank', id }, graph ? { kind: 'iri', value: graph.value } : undefined);
 
 /**
@@ -78,7 +78,7 @@ export function schemaRungRefusal(spaceId: string, caller: RdfCaller | undefined
 }
 
 /** The caller as an act with a schema step keeps it: its id (and whether that is a stored token's), its rights, its legacy admin flag. */
-export function callerSnapshotOf(caller: RdfCaller | undefined): NonNullable<ActState['caller']> {
+function callerSnapshotOf(caller: RdfCaller | undefined): NonNullable<ActState['caller']> {
   const id = caller?.id;
   return {
     ...(id !== undefined ? { id } : {}), ...(caller?.rights !== undefined ? { rights: caller.rights } : {}),
