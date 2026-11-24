@@ -64,6 +64,19 @@ const OPERATION_BOUND_FLOOR_MS = 1000;
 const ANSWER_OR_WAIT = /ANSWER|WAIT|DRAIN|SLOW|GRACE/i;
 
 /**
+ * Setters whose every figure is a SENDER's pace, not a bound on an operation (Q-953): matched by setter and its module, each with its reason.
+ * A figure of such a setter is measured only while the server waits on its client, so a slow store or a loaded host lengthens no figure it
+ * judges; it ends no store operation. A setter moved out of its module is judged as an operation bound again.
+ */
+const SENDER_PACE_SETTERS = [
+  {
+    setter: 'setUploadPaceForTest', file: 'server/src/util/upload-reader.ts',
+    why: 'the idle bound and the rate window count only the time the upload reader waits on the sender for its next chunk; the sort, the spool and the store run between waits and are never counted',
+  },
+];
+const senderPace = (setter, file) => SENDER_PACE_SETTERS.some(r => r.setter === setter && r.file === file);
+
+/**
  * Sub-floor operation bounds on a real store, each holding ONE operation and saying why nothing else meets it.
  * Matched by file, figure and value; a row that matches nothing is itself a failure (it outlived its site).
  */
@@ -336,7 +349,7 @@ function deriveSites(setters) {
       found.set(key, {
         file, line, setter, figure, value: v, via: site,
         store: reachesStore(file) || reachesStore(site.split(':')[0]),
-        axis: ANSWER_OR_WAIT.test(figure) ? 'answer-or-wait' : 'operation',
+        axis: ANSWER_OR_WAIT.test(figure) ? 'answer-or-wait' : senderPace(setter, setters.get(setter)?.file) ? 'sender-pace' : 'operation',
       });
     }
   };
@@ -411,6 +424,10 @@ describe('a test bounds only the operation it holds: no operation bound on a rea
     for (const r of REASONED) {
       assert.ok(r.holds && r.why, `row ${r.file} ${r.figure} gives no reason`);
       assert.ok(subFloor.some(s => rowFor(s) === r), `row ${r.file} ${r.figure} = ${r.value} matches no sub-floor site: remove it`);
+    }
+    for (const r of SENDER_PACE_SETTERS) {
+      assert.ok(r.why, `sender-pace setter ${r.setter} gives no reason`);
+      assert.equal(setters.get(r.setter)?.file, r.file, `sender-pace setter ${r.setter} is not a setter of ${r.file}: remove or move its row`);
     }
   });
 });

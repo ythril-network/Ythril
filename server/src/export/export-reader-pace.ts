@@ -56,7 +56,6 @@ export interface PacedWriter {
   deliver(text: string): Promise<PutOutcome>;
 }
 
-
 /** What the connection under `res` has accepted: the bytes written to the socket less those still in its buffer. */
 function acceptedBytes(res: Response): number {
   const socket = res.socket;

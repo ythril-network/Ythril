@@ -71,7 +71,10 @@ export function pacedSender(url, { headers = {}, first, piece = '', everyMs = nu
  * sender, and the case fails on that rule, not on the file's timeout.
  */
 export function answeredWithin(sender, ms, what) {
-  return raceDeadline(sender.answer, ms, `race timeout: ${what}`, () => { sender.stop(); throw new Error(`no answer within ${ms} ms: ${what}`); });
+  return raceDeadline(sender.answer, ms, 'race timeout: a door without the bound under test never answers the sender', () => {
+    sender.stop();
+    throw new Error(`no answer within ${ms} ms: ${what}`);
+  });
 }
 
 /** The `Retry-After` of an answer in whole seconds, or NaN. */

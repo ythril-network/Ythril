@@ -15,6 +15,7 @@
  */
 import type { Request } from 'express';
 import { uploadPace } from './upload-reader.js';
+import { requestAddress } from '../audit/request-address.js';
 
 /** The most callers one door remembers as cooled down. */
 export const UPLOAD_COOLDOWN_CALLERS_MAX = 10_000;
@@ -61,7 +62,7 @@ export function uploadCooldown(): UploadCooldown {
 export function uploadCallerKey(req: Request): string {
   const id = (req.authToken as { id?: unknown } | undefined)?.id;
   if (typeof id === 'string' && id.length > 0) return `token:${id}`;
-  return `address:${req.ip ?? req.socket?.remoteAddress ?? 'unknown'}`;
+  return `address:${requestAddress(req)}`;
 }
 
 /** Forget every door's cooldowns (a test whose refusal must not reach the next case). */
