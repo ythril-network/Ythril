@@ -24,6 +24,7 @@ import { BodyTooLarge, RdfUploadStalled, RdfUploadTooSlow } from './import-uploa
  * time; the owner's choice, Q-953), and a caller refused for it is answered 429 for one window.
  */
 const HTTP = { BAD_REQUEST: 400, REQUEST_TIMEOUT: 408, TOO_LARGE: 413, UNSUPPORTED_MEDIA: 415, TOO_MANY_REQUESTS: 429 } as const;
+const MS_PER_SECOND = 1_000;
 
 /** A format that is not one the reader takes (415), named neither by `format` nor by a known `Content-Type`. */
 export const RDF_UNSUPPORTED_FORMAT = 'rdf_unsupported_format';
@@ -92,10 +93,10 @@ export function rdfFormatOf(
  */
 export function rdfDocumentRefusalOf(err: unknown, format: RdfFormat, what: string): RdfDocumentRefusal | null {
   if (err instanceof RdfUploadStalled) {
-    return refusal(HTTP.REQUEST_TIMEOUT, RDF_UPLOAD_STALLED, `The upload sent nothing for ${Math.round(err.idleMs / 1000)} seconds and was cut off; ${what}: send the file again, without pauses`);
+    return refusal(HTTP.REQUEST_TIMEOUT, RDF_UPLOAD_STALLED, `The upload sent nothing for ${Math.round(err.idleMs / MS_PER_SECOND)} seconds and was cut off; ${what}: send the file again, without pauses`);
   }
   if (err instanceof RdfUploadTooSlow) {
-    return refusal(HTTP.REQUEST_TIMEOUT, RDF_UPLOAD_TOO_SLOW, `The upload sent less than ${err.minBytesPerSecond} bytes a second over ${Math.round(err.windowMs / 1000)} seconds and was cut off; ${what}: send the file again over a faster link`);
+    return refusal(HTTP.REQUEST_TIMEOUT, RDF_UPLOAD_TOO_SLOW, `The upload sent less than ${err.minBytesPerSecond} bytes a second over ${Math.round(err.windowMs / MS_PER_SECOND)} seconds and was cut off; ${what}: send the file again over a faster link`);
   }
   if (err instanceof BodyTooLarge) {
     return refusal(HTTP.TOO_LARGE, RDF_BOUND_EXCEEDED, `The body is over the import body bound (${err.limit} bytes); ${what}`, { bound: RDF_BODY_BOUND, limit: err.limit });

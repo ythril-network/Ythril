@@ -50,6 +50,7 @@ async function drain(gen, each = async () => undefined) {
 
 /** Write `piece` to `source` `times` times, every `everyMs`, then end it unless `end` is false. */
 async function feed(source, piece, times, everyMs, { end = true } = {}) {
+  // waits-differently: the sender's own pace is the subject; it waits for no condition, it sends at the rate the case is about.
   for (let i = 0; i < times; i++) {
     if (source.destroyed) return;
     source.write(piece);

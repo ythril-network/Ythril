@@ -182,6 +182,9 @@ export const SPACE_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze([
 ]);
 /** The callers this door refused for their upload's pace, answered 429 for one window (`util/upload-cooldown.ts`). */
 const importCooldown = uploadCooldown();
+/** The statuses of an upload's pace: the body did not arrive in time (RFC 9110 section 15.5.9), and a cooled-down caller. */
+const PACE_STATUS = { REQUEST_TIMEOUT: 408, TOO_MANY_REQUESTS: 429 } as const;
+const MS_PER_SECOND = 1_000;
 
 /** The body inflated past `importBodyMaxBytes`. */
 class OverCeiling extends Error { override readonly name = 'OverCeiling'; }
@@ -207,10 +210,10 @@ function ceilingOf(max: number): Transform {
 /** What a refused import answers, by what refused it; the spool is already gone. Only an upload's pace is answered with a code. */
 function refusalOf(err: unknown, encoding: string): { status: number; error: string; code?: string } | null {
   if (err instanceof UploadStalled) {
-    return { status: 408, error: `The upload sent nothing for ${Math.round(err.idleMs / 1000)} seconds and was cut off; nothing was written: send the body again, without pauses.`, code: SPACE_IMPORT_UPLOAD_STALLED };
+    return { status: PACE_STATUS.REQUEST_TIMEOUT, error: `The upload sent nothing for ${Math.round(err.idleMs / MS_PER_SECOND)} seconds and was cut off; nothing was written: send the body again, without pauses.`, code: SPACE_IMPORT_UPLOAD_STALLED };
   }
   if (err instanceof UploadTooSlow) {
-    return { status: 408, error: `The upload sent less than ${err.minBytesPerSecond} bytes a second over ${Math.round(err.windowMs / 1000)} seconds and was cut off; nothing was written: send the body again over a faster link.`, code: SPACE_IMPORT_UPLOAD_TOO_SLOW };
+    return { status: PACE_STATUS.REQUEST_TIMEOUT, error: `The upload sent less than ${err.minBytesPerSecond} bytes a second over ${Math.round(err.windowMs / MS_PER_SECOND)} seconds and was cut off; nothing was written: send the body again over a faster link.`, code: SPACE_IMPORT_UPLOAD_TOO_SLOW };
   }
   if (err instanceof OverCeiling || err instanceof ExportBodyTooLarge) return { status: 413, error: err.message };
   if (err instanceof ExportBodyMalformed) return { status: 400, error: err.message };
@@ -277,7 +280,7 @@ spaceTransferRouter.post('/:spaceId/import', globalRateLimit, requireAdminMfaSco
     res.setHeader('Connection', 'close');
     res.setHeader('Retry-After', String(wait));
     req.resume();
-    res.status(429).json({ error: `Your last upload here was too slow or stalled: send the body again in ${wait} seconds, without pauses.`, code: SPACE_IMPORT_UPLOAD_COOLDOWN });
+    res.status(PACE_STATUS.TOO_MANY_REQUESTS).json({ error: `Your last upload here was too slow or stalled: send the body again in ${wait} seconds, without pauses.`, code: SPACE_IMPORT_UPLOAD_COOLDOWN });
     return;
   }
   if (!JSON_TYPE.test(req.headers['content-type'] ?? '')) {
