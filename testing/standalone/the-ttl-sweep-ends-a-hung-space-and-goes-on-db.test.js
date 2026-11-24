@@ -76,6 +76,7 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
   const H2 = 'hang-2'; const OK2 = 'hang-ok-2';
   const K1 = 'hang-k1'; const K2 = 'hang-k2'; const K3 = 'hang-k3'; const TAIL = 'hang-tail';
   let door; let sweepExpired; let walkMod; let restoreBound; let TTL_COLLECTIONS;
+  /** Every line the sweep logged, with the clock at the moment it was logged: `{ at, text }`. */
   const lines = [];
   const undo = [];
 
@@ -92,7 +93,7 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
     const logMod = await import('../../server/dist/util/log.js');
     for (const level of ['info', 'warn', 'error']) {
       const orig = logMod.log[level];
-      logMod.log[level] = (m, ...rest) => { lines.push(String(m)); return orig(m, ...rest); };
+      logMod.log[level] = (m, ...rest) => { lines.push({ at: Date.now(), text: String(m) }); return orig(m, ...rest); };
       undo.push(() => { logMod.log[level] = orig; });
     }
   });
@@ -102,7 +103,8 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
     await door?.close();
   });
 
-  const said = (step, space) => lines.filter((l) => l.startsWith(`${step} failed for space '${space}'`));
+  const STOP_LINE = /^TTL sweep stopped: 3 spaces timed out in a row; the store looks stalled — retried next cycle$/;
+  const said = (step, space) => lines.filter((l) => l.text.startsWith(`${step} failed for space '${space}'`));
 
   /**
    * Hold that the sweep went on to the healthy `space` and swept it. Swept at once is the usual answer; a space the sweep ended at its
@@ -115,7 +117,7 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
     if (await door.coll(space, 'facts').countDocuments({}) === 0) return;
     // Any step, not only facts: the sweep reads a space's collections in TTL_COLLECTIONS order, and a healthy space whose first,
     // empty read passed the bound is said under that step and its facts are never read.
-    const ownBound = lines.filter((l) => /^TTL sweep: \S+ failed for space '/.test(l) && l.includes(`failed for space '${space}'`) && l.includes(`time bound of ${BOUND_MS} ms`));
+    const ownBound = lines.filter(({ text }) => /^TTL sweep: \S+ failed for space '/.test(text) && text.includes(`failed for space '${space}'`) && text.includes(`time bound of ${BOUND_MS} ms`));
     assert.ok(ownBound.length > 0, `${msg}: it holds its expired facts and the sweep said nothing about it, so it was never reached`);
     console.log(`# retry: ${space} was ended at its own ${BOUND_MS} ms bound on this runner; swept once more alone`);
     walkMod.liftQuarantine(space);
@@ -129,14 +131,19 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
     await hung(db, [[H1, 'facts']], async () => {
       const started = Date.now();
       await sweepExpired(new Date());
-      const tookMs = Date.now() - started;
-      assert.ok(tookMs >= BOUND_MS - 100, `ended after ${tookMs} ms, before the bound`);
-      assert.ok(tookMs < STALL_MS - 500, `the sweep took ${tookMs} ms: it waited out the stall (${STALL_MS} ms) instead of ending at the ${BOUND_MS} ms bound`);
+      // The hung space's own end, from the sweep's start to the line that says it: the work the sweep does on the healthy spaces after
+      // it is not the hung space's, and a loaded shard made that cost seconds (Full run 45431865235).
+      const hungLine = lines.find((l) => l.at >= started && l.text.startsWith(`TTL sweep: facts failed for space '${H1}'`));
+      assert.ok(hungLine, `the sweep never said space ${H1} was ended`);
+      const endedMs = hungLine.at - started;
+      console.log(`# ${H1} ended ${endedMs} ms after the sweep started (the whole sweep: ${Date.now() - started} ms)`);
+      assert.ok(endedMs >= BOUND_MS - 100, `space ${H1} was ended after ${endedMs} ms, before the bound`);
+      assert.ok(endedMs < STALL_MS - 500, `space ${H1} was ended after ${endedMs} ms: the sweep waited out the stall (${STALL_MS} ms) instead of ending it at the ${BOUND_MS} ms bound`);
     });
     await assertSwept(OK1, 'the healthy space behind the hung one');
     const said1 = said('TTL sweep: facts', H1);
     assert.equal(said1.length, 1, `space 1 is said once, got ${said1.length}`);
-    assert.match(said1[0], new RegExp(`time bound of ${BOUND_MS} ms`));
+    assert.match(said1[0].text, new RegExp(`time bound of ${BOUND_MS} ms`));
     assert.ok(walkMod.quarantinedSpaces().includes(H1), 'the hung space is passed over for a while');
   });
 
@@ -159,10 +166,15 @@ describe('the TTL sweep ends a hung space at its bound and goes on', { skip }, (
     await hung(db, [[K1, 'facts'], [K2, 'facts'], [K3, 'facts']], async () => {
       const started = Date.now();
       await sweepExpired(new Date());
-      // Told apart from the defect by its own duration: one of the three spaces waiting its stall out costs two bounds and a stall.
-      assert.ok(Date.now() - started < 2 * BOUND_MS + STALL_MS - 500, `three bounds were expected, it took ${Date.now() - started} ms: a space waited out its stall (${STALL_MS} ms)`);
+      // Told apart from the defect by its own duration, from the sweep's start to the line that stops the walk: one of the three spaces
+      // waiting its stall out costs two bounds and a stall. The passes the sweep runs after the walk are not part of it.
+      const stopLine = lines.find((l) => l.at >= started && STOP_LINE.test(l.text));
+      assert.ok(stopLine, 'the sweep never said the walk stopped');
+      const stoppedMs = stopLine.at - started;
+      console.log(`# the walk over ${K1}, ${K2}, ${K3} stopped ${stoppedMs} ms after the sweep started (the whole sweep: ${Date.now() - started} ms)`);
+      assert.ok(stoppedMs < 2 * BOUND_MS + STALL_MS - 500, `three bounds were expected, the walk stopped after ${stoppedMs} ms: a space waited out its stall (${STALL_MS} ms)`);
     });
-    const stops = lines.filter((l) => /^TTL sweep stopped: 3 spaces timed out in a row; the store looks stalled — retried next cycle$/.test(l));
+    const stops = lines.filter((l) => STOP_LINE.test(l.text));
     assert.equal(stops.length, 1, `one stop line, got ${stops.length}`);
     for (const k of [K1, K2, K3]) assert.equal(said('TTL sweep: facts', k).length, 1, `${k} is said once`);
     assert.equal(await door.coll(TAIL, 'facts').countDocuments({}), 1, 'the walk stopped before the space behind the three');
