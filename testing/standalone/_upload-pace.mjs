@@ -17,6 +17,7 @@
  * Pace is set through the knob with short windows, never waited for at production figures.
  */
 import http from 'node:http';
+import net from 'node:net';
 import { raceDeadline } from '../_shared/sleep.mjs';
 
 /** The reader module, or `{}` where it does not exist (a missing module fails the case on its rule, not the file at import). */
@@ -75,6 +76,85 @@ export function answeredWithin(sender, ms, what) {
     sender.stop();
     throw new Error(`no answer within ${ms} ms: ${what}`);
   });
+}
+
+/** The lingering-close module of the doors, or `{}` where it does not exist. */
+export const lingerModule = await import('../../server/dist/util/lingering-close.js').catch(() => ({}));
+
+/** Narrow the bounds of the doors' lingering close (`{ maxBytes, maxMs }`), or fail naming the missing knob. */
+export function setLingerBounds(bounds) {
+  if (typeof lingerModule.setLingerBoundsForTest !== 'function') throw new Error('setLingerBoundsForTest is not exported by server/src/util/lingering-close.ts');
+  lingerModule.setLingerBoundsForTest(bounds);
+}
+
+/** Restore the production bounds of the lingering close: called after every case that narrowed them. */
+export function resetLingerBounds() { lingerModule.setLingerBoundsForTest?.(null); }
+
+/**
+ * POST to `url` with `headers` as a sender that never waits for the server: a chunked body of `totalBytes`, a `chunkBytes` piece every
+ * `everyMs` at full speed, written while the server's answer is still unread (the sender reads nothing until its body has ended), so a door that
+ * ends the connection while the body is unread resets this sender. `answer` resolves when the server ended its side: `{ status, headers, text,
+ * json, reset, error, sentBytes, wroteAll }`; `reset` is true when the socket failed (a write that met a closed server, a reset) or the answer was
+ * not read whole. `stayOpen` is a sender that never ends its body or closes: it sends a byte a tick and reads the answer at once, and `closed`
+ * resolves with the milliseconds from the first byte to the server closing the connection.
+ */
+export function floodedSender(url, { headers = {}, first = '', totalBytes = 0, chunkBytes = 64 * 1024, everyMs = 16, stayOpen = false }) {
+  const target = new URL(url);
+  const started = Date.now();
+  const socket = net.connect({ host: target.hostname, port: Number(target.port), allowHalfOpen: true });
+  const piece = Buffer.alloc(chunkBytes, 0x20);
+  const received = [];
+  let sentBytes = 0;
+  let ticker = null;
+  let failure = null;
+  let finished = false;
+  const stopTicker = () => { if (ticker !== null) { clearInterval(ticker); ticker = null; } };
+  const head = [
+    `POST ${target.pathname}${target.search} HTTP/1.1`, `Host: ${target.host}`, 'Transfer-Encoding: chunked',
+    ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`), '', '',
+  ].join('\r\n');
+  const chunk = (data) => Buffer.concat([Buffer.from(`${data.length.toString(16)}\r\n`), data, Buffer.from('\r\n')]);
+  let answered;
+  const answer = new Promise((resolve) => { answered = resolve; });
+  let closedAt;
+  const closed = new Promise((resolve) => { closedAt = resolve; });
+  /** Read what the server answered, now that this side's body has ended. */
+  const readAnswer = () => {
+    socket.on('data', c => received.push(c));
+    socket.once('end', () => {
+      finished = true;
+      const raw = Buffer.concat(received);
+      const split = raw.indexOf('\r\n\r\n');
+      const lines = split < 0 ? [] : raw.subarray(0, split).toString('latin1').split('\r\n');
+      const status = Number(/^HTTP\/1\.1 (\d+)/.exec(lines[0] ?? '')?.[1] ?? 0);
+      const responseHeaders = Object.fromEntries(lines.slice(1).map(l => [l.slice(0, l.indexOf(':')).toLowerCase(), l.slice(l.indexOf(':') + 1).trim()]));
+      const text = split < 0 ? '' : raw.subarray(split + 4).toString('utf8');
+      const whole = status !== 0 && Buffer.byteLength(text) >= Number(responseHeaders['content-length'] ?? 0);
+      let json = null; try { json = JSON.parse(text); } catch { /* not JSON */ }
+      answered({ status, headers: responseHeaders, text, json, reset: failure !== null || !whole, error: failure ? String(failure.message ?? failure) : undefined, sentBytes, wroteAll: sentBytes >= totalBytes });
+      if (!stayOpen) socket.end();
+    });
+  };
+  socket.on('error', (err) => {
+    failure ??= err;
+    stopTicker();
+    if (!finished) { finished = true; answered({ status: 0, headers: {}, text: '', json: null, reset: true, error: String(err?.message ?? err), sentBytes, wroteAll: false }); }
+  });
+  socket.on('close', () => { stopTicker(); if (!finished) { finished = true; answered({ status: 0, headers: {}, text: '', json: null, reset: true, error: 'closed before an answer', sentBytes, wroteAll: false }); } closedAt(Date.now() - started); });
+  socket.write(head);
+  if (first) socket.write(chunk(Buffer.from(first)));
+  // The tick is the sender's pace of writing, never a wait for the server: a body of `totalBytes` ends the sender's side, then it reads.
+  ticker = setInterval(() => {
+    if (socket.destroyed) { stopTicker(); return; }
+    // A sender that stays open sends a byte a tick and never ends: only the server's own bounds close the connection, and its next write meets it.
+    if (stayOpen) { socket.write(chunk(Buffer.from(' '))); sentBytes += 1; return; }
+    if (sentBytes < totalBytes) { socket.write(chunk(piece)); sentBytes += chunkBytes; return; }
+    stopTicker();
+    socket.write('0\r\n\r\n');
+    readAnswer();
+  }, everyMs);
+  if (stayOpen) readAnswer();
+  return { answer, closed, stop: () => { stopTicker(); socket.destroy(); } };
 }
 
 /** The `Retry-After` of an answer in whole seconds, or NaN. */
