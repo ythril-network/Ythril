@@ -53,6 +53,7 @@ import {
   rdfSpaceState, RDF_BASE_SHARED, RDF_NOT_ENABLED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
 } from './rdf-space-state.js';
 import { ythrilIri } from './ythril-vocabulary.js';
+import { MIN_TRANSFER_BYTES_PER_SECOND } from '../util/pace-window.js';
 
 /** The most records one page holds. */
 export const RDF_EXPORT_LIMIT_MAX = 10_000;
@@ -266,8 +267,9 @@ export function setRdfExportPageReaderForTest(reader: PageReader | null): void {
  * reader taking a little at a time meets the idle bound for ever, and two such readers held the instance's two slots. The product's other
  * long downloads (the audit-log export, the space backup) have no such bound because an administrator alone reaches them and nothing caps
  * how many run; this one any reader of a space reaches, and two run at once. How it is measured, and what cannot be: `export/export-reader-pace.ts`.
+ * The figure is the one an import's sender is held to too (`util/pace-window.ts`, Q-953), so the guides state one rate.
  */
-export const RDF_EXPORT_MIN_BYTES_PER_SECOND = 16_384;
+export const RDF_EXPORT_MIN_BYTES_PER_SECOND = MIN_TRANSFER_BYTES_PER_SECOND;
 /**
  * How much waiting on the reader one judgement of {@link RDF_EXPORT_MIN_BYTES_PER_SECOND} covers at least, in milliseconds. Five minutes,
  * not one (the second drive, finding A): the kernel shows a reader's progress only in steps of about a third of its send buffer (about

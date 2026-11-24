@@ -5,7 +5,7 @@
  * ## What it holds
  *
  * - A body over the door's own byte bound is 413 `rdf_bound_exceeded` naming it (`schemaRdfBodyMaxBytes`), on both doors.
- * - An upload that sends nothing for the idle bound is 400 `rdf_import_upload_stalled`, and the door's slot is free again after it.
+ * - An upload that sends nothing for the idle bound is 408 `rdf_import_upload_stalled` (400 before Q-953), and the door's slot is free again after it.
  * - While one build reads its upload, a second is 409 `schema_rdf_busy` (one slot per instance).
  * - A gzip body that inflates past the reader's ratio is 413 `rdf_bound_exceeded`.
  * - A file over the quad bound is 413 `rdf_bound_exceeded` naming it (`schemaRdfMaxQuads`), before the mapping runs, on both doors.
@@ -21,6 +21,7 @@ import http from 'node:http';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { waitForValue } from '../_shared/wait-for.mjs';
 import { openSchemaRdfImportDoors, spaceWith, baseOf, knobs, actModule, MEDIA } from './_schema-rdf-import-doors.mjs';
+import { resetPace } from './_upload-pace.mjs';
 
 const skip = await mongoSkipReason();
 const SRC = 'srdfboundsrc';
@@ -73,15 +74,19 @@ describe('the schema-from-RDF door reads within its bounds (real routes, real Mo
     } finally { knobs(null); }
   });
 
-  it('an upload that stalls is 400 rdf_import_upload_stalled, and the slot is free after it', async () => {
+  it('an upload that stalls is 408 rdf_import_upload_stalled, and the slot is free after it', async () => {
     knobs({ uploadIdleMs: 1_000 });
     try {
       const up = stallingUpload(file.slice(0, 40));
       const answer = await up.answered;
       up.release();
-      assert.equal(answer.status, 400, answer.text.slice(0, 300));
+      assert.equal(answer.status, 408, answer.text.slice(0, 300));
       assert.equal(answer.code, 'rdf_import_upload_stalled');
-    } finally { knobs(null); }
+    } finally {
+      knobs(null);
+      // The refused caller is cooled down for a window (Q-953, its own case in the trickle file); this case is about the slot being free.
+      resetPace();
+    }
     const after = await d.buildRest(admin.key, TARGET, file, { params: params() });
     assert.equal(after.status, 200, `the slot was not freed: ${after.text.slice(0, 300)}`);
   });
@@ -100,6 +105,7 @@ describe('the schema-from-RDF door reads within its bounds (real routes, real Mo
       up.release();
       await up.answered.catch(() => undefined);
       knobs(null);
+      resetPace();
     }
   });
 

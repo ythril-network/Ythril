@@ -76,6 +76,9 @@ describe('every code the schema-from-RDF door answers is listed', () => {
       assert.ok(own.has(c), `${c} is answered by ${ACT}`);
     }
     assert.equal(holdCode(), 'space_being_rdf_imported', 'the hold\'s code is read from the act kinds\' table');
+    for (const c of ['rdf_import_upload_stalled', 'rdf_import_upload_too_slow', 'rdf_import_upload_cooldown']) {
+      assert.ok(answered.has(c), `${c} (the upload's pace, Q-953) is among the codes derived from the sources`);
+    }
   });
 
   it('every answered code is in SCHEMA_RDF_IMPORT_REFUSAL_CODES, and the list names nothing nobody answers', () => {
@@ -101,6 +104,8 @@ describe('every code the schema-from-RDF door answers is listed', () => {
     const used = new Set([...act.matchAll(/\brefusal\(\s*HTTP\.([A-Z_]+)/g)].map(m => table[m[1]]).filter(Boolean));
     const tool = new Set([...code('server/src/util/errors.ts').match(/TOOL_REFUSAL_STATUSES = Object\.freeze\(\[([^\]]+)\]/)?.[1].matchAll(/\d{3}/g) ?? []].map(m => Number(m[0])));
     assert.ok(tool.size > 5 && used.size > 3, `both sets were read (${tool.size}, ${used.size})`);
-    assert.deepEqual([...used].filter(s => !tool.has(s)).sort(), [], 'a status the tool cannot carry');
+    // 408 is an upload's pace (Q-953): the tool takes its document inline, as one chunk already in hand, so no pace refusal reaches it.
+    assert.ok(used.has(408), 'the pace refusals are answered 408 (the owner\'s choice, RFC 9110 section 15.5.9)');
+    assert.deepEqual([...used].filter(s => !tool.has(s) && s !== 408).sort(), [], 'a status the tool cannot carry');
   });
 });

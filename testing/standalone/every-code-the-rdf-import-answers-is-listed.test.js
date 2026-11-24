@@ -91,7 +91,7 @@ describe('every code the RDF import answers is listed', () => {
 
   it('the front half the act shares answers its own refusals, and they are among the codes derived (a source not read answers nothing)', () => {
     const own = answeredByTheAct(document);
-    for (const c of ['rdf_unsupported_format', 'rdf_unsupported_encoding', 'rdf_import_upload_stalled', 'rdf_bound_exceeded']) {
+    for (const c of ['rdf_unsupported_format', 'rdf_unsupported_encoding', 'rdf_import_upload_stalled', 'rdf_import_upload_too_slow', 'rdf_import_upload_cooldown', 'rdf_bound_exceeded']) {
       assert.ok(own.has(c), `${c} is answered by ${DOCUMENT}`);
       assert.ok(answered.has(c), `${c} is among the codes derived from the sources`);
     }
@@ -112,11 +112,13 @@ describe('every code the RDF import answers is listed', () => {
     assert.deepEqual([...answered].filter(c => !guide.has(c)).sort(), [], 'answered but not in the guide');
   });
 
-  it('every status the act answers with is one the tool carries, or the storage limit\'s 507, which the tool answers as the fact tool does', () => {
+  it('every status the act answers with is one the tool carries, or the storage limit\'s 507, which the tool answers as the fact tool does, or 408, which no tool call meets', () => {
     const table = Object.fromEntries([...act.matchAll(/\b([A-Z_]+): (\d{3})\b/g)].map(m => [m[1], Number(m[2])]));
     const used = new Set([...act.matchAll(/\brefusal\(\s*HTTP\.([A-Z_]+)/g)].map(m => table[m[1]]).filter(Boolean));
     const tool = new Set([...code('server/src/util/errors.ts').match(/TOOL_REFUSAL_STATUSES = Object\.freeze\(\[([^\]]+)\]/)?.[1].matchAll(/\d{3}/g) ?? []].map(m => Number(m[0])));
     assert.ok(tool.size > 5 && used.size > 3, 'both sets were read');
-    assert.deepEqual([...used].filter(s => !tool.has(s) && s !== 507).sort(), [], 'a status the tool cannot carry');
+    // 408 is an upload's pace (Q-953): the tool takes its document inline, as one chunk already in hand, so no pace refusal reaches it.
+    assert.ok(used.has(408), 'the pace refusals are answered 408 (the owner\'s choice, RFC 9110 section 15.5.9)');
+    assert.deepEqual([...used].filter(s => !tool.has(s) && s !== 507 && s !== 408).sort(), [], 'a status the tool cannot carry');
   });
 });
