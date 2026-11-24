@@ -22,7 +22,7 @@ import {
 } from '../../spaces/rdf-import-act.js';
 import { RDF_UPLOAD_PACE_CODES, rdfUploadCooldownRefusal } from '../../rdf/rdf-document.js';
 import { uploadCallerKey, uploadCooldown } from '../../util/upload-cooldown.js';
-import { sendRdfRefusal } from '../rdf-upload-refusal.js';
+import { closeUnreadBody, sendRdfRefusal } from '../rdf-upload-refusal.js';
 import { peerBoundTo, peerTokenToolRefusal } from '../../auth/peer-bound.js';
 // The import's schema step registers itself with the act when loaded (`RdfImportSchemaStep` in `spaces/rdf-import-files.ts` says why the act
 // does not import it); this route is part of every server's wiring, so both import doors find it registered.
@@ -66,7 +66,7 @@ rdfImportRouter.post('/spaces/:spaceId/import/rdf', globalRateLimit, requireSpac
   // The one set of what a peer-bound token may not call (the tool's twin asks it too): the import registers a space act, which stops the
   // transfers of its space, and a request a peer's token made is one of them.
   const peerRefusal = peerTokenToolRefusal(peerBoundTo(req.authToken as object | undefined), 'import_rdf');
-  if (peerRefusal) { res.status(FORBIDDEN).json({ error: peerRefusal }); return; }
+  if (peerRefusal) { closeUnreadBody(req, res); res.status(FORBIDDEN).json({ error: peerRefusal }); return; }
   const caller = uploadCallerKey(req);
   const wait = cooldown.retryAfterSeconds(caller);
   if (wait !== undefined) { sendRefusal(req, res, rdfUploadCooldownRefusal(wait, 'nothing was imported')); return; }
@@ -83,6 +83,7 @@ rdfImportRouter.post('/spaces/:spaceId/import/rdf', globalRateLimit, requireSpac
       caller: token,
     });
   } catch (err) {
+    closeUnreadBody(req, res);
     sendCaughtFailure(res, ROUTE, err);
     return;
   }

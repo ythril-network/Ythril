@@ -20,7 +20,7 @@ import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
 import { schemaRdfImportAct } from '../spaces/schema-rdf-import-act.js';
 import { RDF_UPLOAD_PACE_CODES, rdfUploadCooldownRefusal } from '../rdf/rdf-document.js';
 import { uploadCallerKey, uploadCooldown } from '../util/upload-cooldown.js';
-import { sendRdfRefusal } from './rdf-upload-refusal.js';
+import { closeUnreadBody, sendRdfRefusal } from './rdf-upload-refusal.js';
 import { peerBoundTo, peerTokenToolRefusal } from '../auth/peer-bound.js';
 import { schemaConvertCallerOf } from '../spaces/schema-convert-terms.js';
 import { answeredUnknownSpace } from './write-target-answer.js';
@@ -75,7 +75,7 @@ spaceSchemaRdfRouter.post('/:id/schema-rdf', globalRateLimit, requireSpaceAuthMf
   if (answeredUnknownSpace(req, res, spaceId)) return;
   // The one set of what a peer-bound token may not call, asked by the tool's dispatcher too.
   const peerRefusal = peerTokenToolRefusal(peerBoundTo(req.authToken as object | undefined), 'import_schema_rdf');
-  if (peerRefusal) { res.status(FORBIDDEN).json({ error: peerRefusal }); return; }
+  if (peerRefusal) { closeUnreadBody(req, res); res.status(FORBIDDEN).json({ error: peerRefusal }); return; }
   const caller = uploadCallerKey(req);
   const wait = cooldown.retryAfterSeconds(caller);
   if (wait !== undefined) { sendRefusal(req, res, rdfUploadCooldownRefusal(wait, 'no schema was built')); return; }
@@ -92,6 +92,7 @@ spaceSchemaRdfRouter.post('/:id/schema-rdf', globalRateLimit, requireSpaceAuthMf
       rateKey: schemaConvertCallerOf(req).rateKey,
     });
   } catch (err) {
+    closeUnreadBody(req, res);
     sendCaughtFailure(res, IMPORT_ROUTE, err);
     return;
   }

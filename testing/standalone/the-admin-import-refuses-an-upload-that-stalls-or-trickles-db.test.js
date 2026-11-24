@@ -12,7 +12,10 @@
  *   neither leaves a spool or an act (test 10), and an import right after, by another caller, lands;
  * - the refused caller's next import within one window is `429` with `Retry-After`; another caller's is not (test 13);
  * - a client that goes away mid-upload gets no answer, no 500 is logged, the spool is removed and the door is free (test 7);
- * - a body over the inflated ceiling, from a client still sending, is still answered `413` (test 8: the reader never destroys the request).
+ * - a body over the inflated ceiling, from a client still sending, is still answered `413` (test 8: the reader never destroys the request);
+ * - every other refusal that comes before the body is read, and a server fault partway through reading it, closes the connection of a client
+ *   still sending as the pace refusals do (F1, F2): both 415s, the 409 of a door held, the 507, a fault; the guide's table says every refusal;
+ * - only a pace refusal starts the cooldown: a caller refused 413 or 400 sends again at once and is answered by the door, not 429 (F4).
  *
  * The pace is set through the knob (`setUploadPaceForTest`), windows of a few hundred milliseconds, and reset after every case.
  *
@@ -29,6 +32,8 @@ import { pacedSender, setPace, resetPace, retryAfterOf, answeredWithin } from '.
 const skip = await mongoSkipReason();
 const SPACE = 'importpace';
 const T = { timeout: 60_000 };
+/** A pace no case of the closing set meets: the sender is refused for the rule under test, never for its pace. */
+const UNHURRIED = { idleMs: 60_000, windowMs: 60_000, minBytesPerSecond: 1 };
 
 let door, other, runner, logs;
 
@@ -46,6 +51,23 @@ function upload(token, { everyMs = null, piece = ' '.repeat(8) } = {}) {
   return pacedSender(`${door.base}/api/admin/spaces/${SPACE}/import`, {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, first: '{"facts":[', piece, everyMs,
   });
+}
+
+/** An upload by `token` that keeps sending (a few bytes every 40 ms) with `headers` over a JSON upload's. */
+function sending(token, headers = {}) {
+  return pacedSender(`${door.base}/api/admin/spaces/${SPACE}/import`, {
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...headers }, first: '{"facts":[', piece: ' '.repeat(8), everyMs: 40,
+  });
+}
+
+/** The answer of a sender still sending: its status, `Connection: close`, and that the sender read it whole. */
+async function closedAnswer(sender, status, what) {
+  const answer = await answeredWithin(sender, 15_000, what);
+  sender.stop();
+  assert.equal(answer.reset, false, `the sender still sending never read the answer: ${answer.error}`);
+  assert.equal(answer.status, status, `${what}: ${answer.status} ${answer.text.slice(0, 200)}`);
+  assert.match(String(answer.headers.connection ?? ''), /close/i, 'the refused sender keeps its connection');
+  return answer;
 }
 
 describe('the admin import refuses an upload that stalls or trickles (real route, real MongoDB)', { skip }, () => {
@@ -129,5 +151,57 @@ describe('the admin import refuses an upload that stalls or trickles (real route
       assert.equal(answer.json?.code, undefined, 'the ceiling\'s refusal gained a code');
     } finally { door.loader.mutateConfig(cfg => { delete cfg.importBodyMaxBytes; }); }
     await waitFor(() => door.spoolFiles().length === 0, 5_000, 25, undefined, { what: 'the spool of a body over the ceiling to be removed' });
+  });
+
+  it('a body that is not JSON is 415 with Connection: close, read whole by a client still sending (F1)', T, async () => {
+    setPace(UNHURRIED);
+    await closedAnswer(sending(door.adminKey, { 'Content-Type': 'text/plain' }), 415, 'the upload of another content type to be answered');
+  });
+
+  it('an encoding no import inflates is 415 with Connection: close, read whole by a client still sending (F1)', T, async () => {
+    setPace(UNHURRIED);
+    await closedAnswer(sending(door.adminKey, { 'Content-Encoding': 'zstd' }), 415, 'the upload of another encoding to be answered');
+  });
+
+  it('an import while another is being received is 409 space_being_imported with Connection: close, read whole by a client still sending (F1)', T, async () => {
+    setPace(UNHURRIED);
+    const first = upload(door.adminKey, { everyMs: 40 });
+    try {
+      await waitFor(() => door.spoolFiles().length === 1, 10_000, 15, undefined, { what: 'the first upload to hold the door and begin a spool' });
+      const answer = await closedAnswer(sending(other), 409, 'the second upload to be answered');
+      assert.equal(answer.json?.code, 'space_being_imported');
+    } finally { first.stop(); }
+  });
+
+  it('a disk without room is 507 with Connection: close, read whole by a client still sending (F1)', T, async () => {
+    setPace(UNHURRIED);
+    const transfer = await import('../../server/dist/api/admin-space-transfer.js');
+    // A chunked body declares no length, so the reader reports less than nothing: any body is refused.
+    transfer.setImportFreeSpaceForTest(() => -1);
+    try { await closedAnswer(sending(door.adminKey), 507, 'the upload to a full disk to be answered'); } finally { transfer.setImportFreeSpaceForTest(null); }
+  });
+
+  it('a fault while the body is still arriving is 500 with Connection: close, read whole by a client still sending (F2)', T, async () => {
+    setPace(UNHURRIED);
+    const transfer = await import('../../server/dist/api/admin-space-transfer.js');
+    transfer.setImportFreeSpaceForTest(() => { throw new Error('injected fault before the body is read'); });
+    try { await closedAnswer(sending(door.adminKey), 500, 'the upload met by a fault to be answered'); } finally { transfer.setImportFreeSpaceForTest(null); }
+  });
+
+  it('a caller refused 413 or 400 is answered by the door at once again, not 429: only a pace refusal cools a caller down (F4)', T, async () => {
+    door.loader.mutateConfig(cfg => { cfg.importBodyMaxBytes = 64 * 1024; });
+    try {
+      for (const round of [1, 2]) {
+        const over = upload(door.adminKey, { everyMs: 5, piece: ' '.repeat(16 * 1024) });
+        const answer = await answeredWithin(over, 15_000, `the upload over the ceiling to be answered (round ${round})`);
+        over.stop();
+        assert.equal(answer.status, 413, `round ${round} of the same caller over the ceiling: ${answer.status} ${answer.text.slice(0, 200)}`);
+      }
+    } finally { door.loader.mutateConfig(cfg => { delete cfg.importBodyMaxBytes; }); }
+    for (const round of [1, 2]) {
+      const malformed = await door.post(SPACE, '[1,2');
+      assert.equal(malformed.status, 400, `round ${round} of the same caller with a malformed body: ${malformed.status} ${malformed.text.slice(0, 200)}`);
+    }
+    await waitFor(() => door.spoolFiles().length === 0, 5_000, 25, undefined, { what: 'the spools of the refused bodies to be removed' });
   });
 });

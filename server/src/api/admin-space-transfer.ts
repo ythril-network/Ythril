@@ -57,6 +57,7 @@ import { ImportBusyError, ensureSpoolRoot, holdImportDoor, indexSpool, registerI
 import { importTotals, type ImportResult } from '../sync/space-import.js';
 import { UploadGone, UploadStalled, UploadTooSlow, uploadReadable } from '../util/upload-reader.js';
 import { uploadCallerKey, uploadCooldown } from '../util/upload-cooldown.js';
+import { closeUnreadBody } from './rdf-upload-refusal.js';
 
 /** The import route's full path, for the parser marker `app.ts` mounts before the global parsers (the router serves it under its mount). */
 export const IMPORT_PATH = '/api/admin/spaces/:spaceId/import';
@@ -277,24 +278,26 @@ spaceTransferRouter.post('/:spaceId/import', globalRateLimit, requireAdminMfaSco
   const wait = importCooldown.retryAfterSeconds(caller);
   if (wait !== undefined) {
     // Answered before the body is read: the rest is drained and the connection ends.
-    res.setHeader('Connection', 'close');
+    closeUnreadBody(req, res);
     res.setHeader('Retry-After', String(wait));
-    req.resume();
     res.status(PACE_STATUS.TOO_MANY_REQUESTS).json({ error: `Your last upload here was too slow or stalled: send the body again in ${wait} seconds, without pauses.`, code: SPACE_IMPORT_UPLOAD_COOLDOWN });
     return;
   }
   if (!JSON_TYPE.test(req.headers['content-type'] ?? '')) {
+    closeUnreadBody(req, res);
     res.status(415).json({ error: 'An import body is an export: send it as application/json.' });
     return;
   }
   const encoding = String(req.headers['content-encoding'] ?? 'identity').trim().toLowerCase() || 'identity';
   if (!(encoding in INFLATERS)) {
+    closeUnreadBody(req, res);
     res.status(415).json({ error: `Content-Encoding '${peerText(encoding)}' is not one an import inflates (gzip, deflate, br).` });
     return;
   }
   // One import at a time, instance-wide, held from before the body is spooled until the door answered (`holdImportDoor`). An act already
   // standing for the space runs first: the import waits behind it in the space's queue.
   const busy = (): void => {
+    closeUnreadBody(req, res);
     res.status(409).json({ error: `Space '${spaceId}' takes no import now: ${SPACE_ACT_KINDS.import.writeRefusalWhy()}.`, code: SPACE_ACT_KINDS.import.writeRefusalCode });
   };
   const door = await holdImportDoor(() => importThroughDoor(req, res, spaceId, encoding, busy, () => importCooldown.note(caller)));
@@ -316,6 +319,7 @@ async function importThroughDoor(
     const root = ensureSpoolRoot();
     const declared = Number(req.headers['content-length'] ?? 0) || 0;
     if (!roomFor(root, declared)) {
+      closeUnreadBody(req, res);
       res.status(507).json({ error: 'The disk holding the import spool has no room for this body; nothing was written.' });
       return;
     }
@@ -337,13 +341,13 @@ async function importThroughDoor(
     if (!registered) removeSpool(spoolId);
     // A client that went away is answered nothing and is no failure of ours (the stage's own refusal, the reader's, or the socket's error).
     if (err instanceof ClientGone || err instanceof UploadGone || (req.destroyed && !req.complete)) return;
+    // Whatever answers from here (a refusal, a closed runner, a fault): the rest of a body this door will not read is drained, so the answer
+    // reaches a client still sending, and the connection then closes.
+    closeUnreadBody(req, res);
     if (err instanceof ImportBusyError) { busy(); return; }
     const refused = refusalOf(err, encoding);
     if (refused) {
       if (err instanceof UploadStalled || err instanceof UploadTooSlow) refusedForPace();
-      // The rest of a body this door will not read is drained, so the answer reaches a client still sending, and the connection then closes.
-      res.setHeader('Connection', 'close');
-      req.resume();
       res.status(refused.status).json({ error: refused.error, ...(refused.code ? { code: refused.code } : {}) });
       return;
     }
