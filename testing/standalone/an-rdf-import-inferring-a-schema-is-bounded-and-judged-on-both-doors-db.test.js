@@ -19,6 +19,8 @@
  *   (`schemaInferMaxPairs`) the same way; a file at the bound is let through.
  * - I3: an edge label whose built definition is invalid releases its name, so it does not count toward the type cap: a file that brings a kind
  *   to exactly the cap with such a label is written, never answered 500.
+ * - R1: the released name's open sides go with it: an edge that takes the name afterwards is reported with the sides it has, not the released one's.
+ * - R2: a space an earlier release filled past the cap on one kind still receives types of another kind; only a kind the file adds to is judged.
  *
  * Run: node --test testing/standalone/an-rdf-import-inferring-a-schema-is-bounded-and-judged-on-both-doors-db.test.js (server build and the test MongoDB)
  */
@@ -28,7 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { untilAuditWritesLanded } from './_audit-rows.mjs';
-import { openRdfImportSchemaDoors, spaceWith } from './_rdf-import-schema-doors.mjs';
+import { openRdfImportSchemaDoors, spaceWith, baseOf } from './_rdf-import-schema-doors.mjs';
 import { ttl, people, TICKET_FILE, TICKET_TYPES, stepOf } from './_rdf-import-infer.mjs';
 
 const skip = await mongoSkipReason();
@@ -36,15 +38,17 @@ const STRICT = { validationMode: 'strict' };
 const id = (n) => `rdfinfd${n}`;
 const PLAIN = ['8r', '8m', '9', '11', '20a', '20b', '24', '28r', '28m', '31', 'i1r', 'i1m', 'i1ok', 'i2r', 'i2m', 'i2ok'];
 const MANY = Object.fromEntries(Array.from({ length: 199 }, (_, i) => [`held${i}`, {}]));
+/** What an earlier release left in a space: 201 edge types, one more than the cap that now stands. */
+const PAST_CAP = Object.fromEntries(Array.from({ length: 201 }, (_, i) => [`old${i}`, {}]));
 
 describe('an RDF import inferring a schema is bounded and judged on both doors (real routes, real MongoDB)', { skip, timeout: 300_000 }, () => {
   let d, writer, act;
   before(async () => {
     d = await openRdfImportSchemaDoors({
       suite: 'rdf_import_infer_doors',
-      spaces: [...PLAIN.map(n => spaceWith(id(n), undefined, STRICT)), spaceWith(id('22'), { entity: MANY }, { validationMode: 'warn' }), spaceWith(id('i3'), { edge: MANY }, { validationMode: 'warn' })],
+      spaces: [...PLAIN.map(n => spaceWith(id(n), undefined, STRICT)), spaceWith(id('22'), { entity: MANY }, { validationMode: 'warn' }), spaceWith(id('i3'), { edge: MANY }, { validationMode: 'warn' }), spaceWith(id('r2'), { edge: PAST_CAP }, { validationMode: 'warn' }), spaceWith(id('r1'), undefined, { validationMode: 'warn' })],
     });
-    writer = await d.mint('rdf-import-infer-doors-writer', Object.fromEntries([...PLAIN, '22', 'i3'].map(n => [id(n), d.row({ knowledge: 'write', schema: 'write' })])));
+    writer = await d.mint('rdf-import-infer-doors-writer', Object.fromEntries([...PLAIN, '22', 'i3', 'r2', 'r1'].map(n => [id(n), d.row({ knowledge: 'write', schema: 'write' })])));
     act = await import('../../server/dist/spaces/rdf-import-act.js');
   });
   after(async () => { act?.setRdfImportKnobsForTest?.(null); await d?.close(); });
@@ -203,5 +207,31 @@ describe('an RDF import inferring a schema is bounded and judged on both doors (
     assert.ok(edges.includes('knows') && !edges.includes('linkedTo'), edges.filter(e => !e.startsWith('held')).join());
     const left = (stepOf(r)?.inferred?.notInferred ?? []).find(n => n.iri === LONG);
     assert.equal(left?.why, 'invalid', JSON.stringify(stepOf(r)?.inferred?.notInferred ?? []).slice(0, 600));
+  });
+
+  it('R1: the open side of an edge label whose definition turned out invalid is not carried to the edge that takes its released name', async () => {
+    // A (an address past the schema's IRI length, labelled `rel`) has an end the space stores, so its `to` side is open, and its definition is invalid.
+    // B (`http://z.example/rel`) is claimed after it and takes the released `rel`, with both ends typed.
+    const LONG = `http://data.example/${'b'.repeat(2100)}`;
+    await d.seed(id('r1'), 'entity', [{ _id: 'stored1', name: 'Stored', type: null, properties: {} }]);
+    const file = ttl(
+      `<${LONG}> rdfs:label "rel" .`,
+      people(2, { extra: (i) => `<${LONG}> <${baseOf(id('r1'))}entity/stored1> ; <http://z.example/rel> p:org${i}` }),
+      people(2, { cls: 'ex:Org', prefix: 'org' }),
+    );
+    const r = await d.importRestOne(writer.key, id('r1'), file, { schema: 'expand', from: ['data'] });
+    assert.equal(r.status, 200, r.text.slice(0, 600));
+    const inferred = stepOf(r)?.inferred ?? {};
+    assert.equal((inferred.notInferred ?? []).find(n => n.iri === LONG)?.why, 'invalid', JSON.stringify(inferred.notInferred ?? []).slice(0, 600));
+    assert.deepEqual(d.heldTypes(id('r1')).edge?.rel?.endpoints, { from: ['Person'], to: ['Org'] }, JSON.stringify(d.heldTypes(id('r1')).edge ?? {}));
+    assert.deepEqual((inferred.openEndpoints ?? []).filter(o => o.type === 'rel'), [], `the released name's open side: ${JSON.stringify(inferred.openEndpoints ?? [])}`);
+  });
+
+  it('R2: a space an earlier release filled past the cap on one kind still receives types of another kind', async () => {
+    // 201 edge types are stored; the file adds one entity type and no edge, so only `entity` is judged against the cap.
+    const r = await d.importRestOne(writer.key, id('r2'), ttl(people(2)), { schema: 'expand', from: ['data'] });
+    assert.equal(r.status, 200, r.text.slice(0, 600));
+    assert.deepEqual(Object.keys(d.heldTypes(id('r2')).entity ?? {}), ['Person'], 'the entity type the file adds is written');
+    assert.equal(Object.keys(d.heldTypes(id('r2')).edge ?? {}).length, 201, 'the stored edge types are untouched');
   });
 });
