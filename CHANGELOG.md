@@ -162,6 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Audit:** a request to a brain route of a space called `files`, `facts`, `entities`, `edges` or `chrono` was recorded under another route's operation (the records export of such a space left no entry with read logging off); the audit rules read the one path form the server serves.
+- **Brain:** a `$ref:` key in a bulk item's link field (`linkEntities`, `linkFacts`, `linkChronos`) is refused with its cause and the two remedies: a key is resolved only at an edge's `from` or `to`, so save the record first and pass its id, or connect the records by an edge. The refusal read "a name is not a reference" before; the `save_bulk` tool text and the guides, which said a link field takes a key too, say the same.
 - **RDF:** `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` and `PUT /api/spaces/:id/schema` refuse a type that would give two terms of the space one RDF address (`422 rdf_term_clash`), as `PATCH /api/spaces/:id` and `schema_update` do; they stored it.
 - **RDF:** a peer can no longer push a space's base epoch to the maximum: an epoch above half of it is refused as an offer, as a shared space's first enable (no base adopted) and as a `space_rebase` round's epoch.
 - **Schema library:** a group called `constructor`, `__proto__` or `toString` behaves as any other, and a group's namespace goes with its last entry instead of staying hidden and holding its prefix.
