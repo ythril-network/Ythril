@@ -12,7 +12,7 @@
  *   by another caller, lands;
  * - the refused upload leaves no folder under the import's data (test 10);
  * - the refused caller's next import within one window is `429 rdf_import_upload_cooldown` with `Retry-After`; another caller's is taken
- *   (test 13).
+ *   (test 13); a caller refused for anything but its pace (413, 400) is not cooled down, and is answered by the door again at once (F4).
  *
  * The stalled upload's own case (`408 rdf_import_upload_stalled`) is `an-rdf-import-upload-that-stalls-is-refused-and-frees-the-door-db.test.js`.
  * The MCP tool takes its document inline, one chunk, and has no upload to pace.
@@ -92,5 +92,25 @@ describe('an RDF import upload that trickles is refused and frees the door (real
     assert.ok(Number.isInteger(seconds) && seconds >= 1 && seconds <= 20, `Retry-After: ${cooled.headers['retry-after']}`);
     const another = await d.importRest(other.key, SPACE, goodTurtle(SPACE), { params: { dryRun: true } });
     assert.equal(another.status, 200, `another caller was cooled down too: ${another.status} ${another.text.slice(0, 200)}`);
+  });
+
+  // F4: every case's afterEach forgets the cooldowns, so a door that noted every refusal for a cooldown would still pass the cases above.
+  it('a caller refused 413 or 400 is answered by the door at once again, not 429: only a pace refusal cools a caller down (F4)', async () => {
+    const cfg = d.loader.getConfig();
+    const before = cfg.importBodyMaxBytes;
+    cfg.importBodyMaxBytes = 64;
+    try {
+      for (const round of [1, 2]) {
+        const over = await d.importRest(writer.key, SPACE, goodTurtle(SPACE));
+        assert.equal(over.status, 413, `round ${round} of the same caller over the bound: ${over.status} ${over.text.slice(0, 200)}`);
+        assert.equal(over.body.bound, 'importBodyMaxBytes');
+      }
+    } finally {
+      if (before === undefined) delete cfg.importBodyMaxBytes; else cfg.importBodyMaxBytes = before;
+    }
+    for (const round of [1, 2]) {
+      const bad = await d.importRest(writer.key, SPACE, goodTurtle(SPACE), { params: { dryRun: 'maybe' } });
+      assert.equal(bad.status, 400, `round ${round} of the same caller with a bad parameter: ${bad.status} ${bad.text.slice(0, 200)}`);
+    }
   });
 });

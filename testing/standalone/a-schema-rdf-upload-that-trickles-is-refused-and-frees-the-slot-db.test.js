@@ -10,7 +10,8 @@
  * - an upload under the rate is `408 rdf_import_upload_too_slow` with `Connection: close`, read whole by the sender still sending, and the next
  *   build is taken (tests 4, 9, 16);
  * - the pace knob's idle bound reaches the door: an upload silent for it is `408 rdf_import_upload_stalled` (F5);
- * - the refused caller's next build within one window is `429 rdf_import_upload_cooldown` with `Retry-After`; another caller's is taken (test 13).
+ * - the refused caller's next build within one window is `429 rdf_import_upload_cooldown` with `Retry-After`; another caller's is taken (test 13);
+ * - a caller refused for anything but its pace (413, 400) is not cooled down, and is answered by the door again at once (F4).
  *
  * Run: node --test testing/standalone/a-schema-rdf-upload-that-trickles-is-refused-and-frees-the-slot-db.test.js (server build and the test MongoDB)
  */
@@ -81,5 +82,20 @@ describe('a schema-from-RDF upload that trickles is refused and frees the slot (
     assert.ok(Number.isInteger(seconds) && seconds >= 1 && seconds <= 20, `Retry-After: ${cooled.headers['retry-after']}`);
     const another = await d.buildRest(other.key, TARGET, file, { params: { mode: 'generate', sourceBase: baseOf(SRC), dryRun: true } });
     assert.equal(another.status, 200, `another caller was cooled down too: ${another.text.slice(0, 300)}`);
+  });
+
+  // F4: every case's afterEach forgets the cooldowns, so a door that noted every refusal for a cooldown would still pass the cases above.
+  it('a caller refused 413 or 400 is answered by the door at once again, not 429: only a pace refusal cools a caller down (F4)', async () => {
+    actModule.setSchemaRdfImportKnobsForTest({ bodyMaxBytes: 64 });
+    try {
+      for (const round of [1, 2]) {
+        const over = await d.buildRest(admin.key, TARGET, file, { params: { mode: 'generate', sourceBase: baseOf(SRC), dryRun: true } });
+        assert.equal(over.status, 413, `round ${round} of the same caller over the bound: ${over.status} ${over.text.slice(0, 300)}`);
+      }
+    } finally { actModule.setSchemaRdfImportKnobsForTest(null); }
+    for (const round of [1, 2]) {
+      const bad = await d.buildRest(admin.key, TARGET, file, { params: { mode: 'sideways', sourceBase: baseOf(SRC), dryRun: true } });
+      assert.equal(bad.status, 400, `round ${round} of the same caller with a bad parameter: ${bad.status} ${bad.text.slice(0, 300)}`);
+    }
   });
 });
