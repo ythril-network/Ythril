@@ -170,10 +170,11 @@ interface RdfImportKnobs {
   schemaMaxQuads?: number;
   /** Replaces `SCHEMA_INFER_MAX_PREDICATES` as the most distinct predicates a file's records may use for a schema to be inferred (Q-755). */
   schemaInferMaxPredicates?: number;
-  /** Replaces `SCHEMA_INFER_MAX_CLASSES` as the most distinct classes a file's subjects may be typed with for a schema to be inferred. */
-  schemaInferMaxClasses?: number;
-  /** Replaces `SCHEMA_INFER_MAX_PAIRS` as the most (subject, predicate) pairs of subjects stated by several graphs the inference remembers. */
-  schemaInferMaxPairs?: number;
+  /**
+   * Replace `SCHEMA_INFER_MAX_CLASSES` (the most distinct classes a file's subjects may be typed with for a schema to be inferred) and
+   * `SCHEMA_INFER_MAX_PAIRS` (the most (subject, predicate) pairs of subjects stated by several graphs the inference remembers).
+   */
+  schemaInferMaxClasses?: number; schemaInferMaxPairs?: number;
   /** Replaces the upload's idle bound for this door alone (`util/upload-reader.ts`, whose pace knob reaches every door; a test that waits for it). */
   uploadIdleMs?: number;
   bounds?: Partial<ImportSpoolBounds>;
