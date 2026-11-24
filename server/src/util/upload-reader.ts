@@ -187,12 +187,12 @@ export async function* readUpload(body: Readable | AsyncIterable<Chunk>, options
       const next = await nextOf(stream, silentSince + idleMs, left === undefined ? undefined : started + left, options.signal);
       waitedMs += Date.now() - started;
       if (next.kind === 'end') return;
-      if (next.kind === 'idle') refuse(new UploadStalled(idleMs, bytes, waitedMs));
+      // `refuse` throws; returning it is what tells the compiler that nothing but a chunk is left in `next` below.
+      if (next.kind === 'idle') return refuse(new UploadStalled(idleMs, bytes, waitedMs));
       if (next.kind === 'window') {
         if (window.observe({ bytes, waitedMs }) === 'slow') tooSlow();
         continue;
       }
-      if (next.kind !== 'chunk') continue;
       silentSince = Date.now();
       bytes += bytesOf(next.chunk);
       if (options.max !== undefined && bytes > options.max) throw new UploadOverBound(options.max);
