@@ -7,6 +7,8 @@
  *   asked (no record, an OIDC session, a token exempt from the second factor). The four tools that refuse (`import_rdf` with `schema`,
  *   `import_schema_rdf`, `network_reread`, `view_copy`) get their sentences word for word, pinned here: the action, the step-up the door cannot
  *   present, and the REST route or the page of the web UI to use.
+ * - **What each tool passes.** Each tool's call of the helper is read from its source (the action and the place, as plain literals), and the
+ *   sentence they build is the one the tool always answered with: a changed action or place in one tool fails here, not only in a spec that needs the stack.
  * - **No second copy.** The clause "needs MFA step-up, which this door cannot present" is a string literal of that module and of no other server source, and each of the four
  *   tools calls the helper, so a fifth tool that spells it again fails here.
  *
@@ -30,6 +32,30 @@ const SENTENCE = 'needs MFA step-up, which this door cannot present';
 /** A token that sets the second factor `required` is asked whatever the instance's switch says. */
 const ASKED = { mfa: 'required' };
 
+/** What each tool answers a caller who is asked for a second factor, word for word as the tools wrote it before the helper took the sentence over (9282e322f). */
+const TOOL_SENTENCES = {
+  'server/src/mcp/tools/rdf-import.ts': 'Building a schema from an RDF import needs MFA step-up, which this door cannot present; use the web UI or POST /api/brain/spaces/:spaceId/import/rdf',
+  'server/src/mcp/tools/schema-rdf-import.ts': 'Building a schema from an RDF file needs MFA step-up, which this door cannot present; use the web UI or POST /api/spaces/:id/schema-rdf',
+  'server/src/mcp/tools/networks.ts': 'Re-reading a network needs MFA step-up, which this door cannot present; use the web UI (Settings > Networks)',
+  'server/src/mcp/tools/views.ts': 'Giving a view to a token needs MFA step-up, which this door cannot present; use the web UI (Settings > Tokens)',
+};
+
+/** The action and the place a tool's calls of the helper pass, read from its source; `null` for an argument that is not a plain literal. */
+function helperCallsOf(file) {
+  const literal = (x) => (x !== undefined && (ts.isStringLiteral(x) || ts.isNoSubstitutionTemplateLiteral(x)) ? x.text : null);
+  const calls = [];
+  walkEveryNode(parseSource(file, readFileSync(join(REPO_ROOT, file), 'utf8')), (n) => {
+    if (!(ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'mfaStepUpRefusalFor')) return;
+    const [, action, place] = n.arguments;
+    const members = place !== undefined && ts.isObjectLiteralExpression(place)
+      ? place.properties.map(p => (ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) ? [p.name.text, literal(p.initializer)] : [null, null]))
+      : [];
+    const plain = members.length === 1 && members[0][0] !== null && members[0][1] !== null;
+    calls.push({ action: literal(action), place: plain ? Object.fromEntries(members) : null });
+  });
+  return calls;
+}
+
 const sentence = (record, action, place) => {
   assert.equal(typeof built.mfaStepUpRefusalFor, 'function', 'mfaStepUpRefusalFor is not exported by server/src/auth/mfa-asked.ts');
   return built.mfaStepUpRefusalFor(record, action, place);
@@ -45,6 +71,17 @@ describe('the refusal for a caller asked for a second factor is built once', () 
       'Re-reading a network needs MFA step-up, which this door cannot present; use the web UI (Settings > Networks)');
     assert.equal(sentence(ASKED, 'Giving a view to a token', { page: 'Settings > Tokens' }),
       'Giving a view to a token needs MFA step-up, which this door cannot present; use the web UI (Settings > Tokens)');
+  });
+
+  it('each of the four tools passes the helper the action and the place that make its sentence', () => {
+    // R3: the case above pins the helper for arguments chosen here; what a tool passes is read from its source, so a changed action or place fails.
+    for (const [file, expected] of Object.entries(TOOL_SENTENCES)) {
+      const calls = helperCallsOf(file);
+      assert.equal(calls.length, 1, `${file} calls mfaStepUpRefusalFor ${calls.length} times`);
+      const [call] = calls;
+      assert.ok(call.action !== null && call.place !== null, `${file} passes an action or a place that is not a plain literal: ${JSON.stringify(call)}`);
+      assert.equal(sentence(ASKED, call.action, call.place), expected, file);
+    }
   });
 
   it('a caller who is not asked gets no refusal: no record, an OIDC session, a token exempt from the second factor', () => {
