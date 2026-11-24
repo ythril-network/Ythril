@@ -1,0 +1,14 @@
+{
+  "entries": [
+    { "name": "COMPOSE_PROJECT_NAME", "reviewBy": "2027-06-30", "reason": "Docker Compose's own environment variable; the stack-down helper explains why it must not aim the default project, and our code never spells it" },
+    { "name": "ERR_SERVER_NOT_RUNNING", "reviewBy": "2027-06-30", "reason": "A Node.js error code, owned by Node; the local-server helper says closing a stopped server is a no-op and not this error" },
+    { "name": "ERR_STREAM_DESTROYED", "reviewBy": "2027-06-30", "reason": "A Node.js error code, owned by Node; the TCP relay test names the failure a late write to a dead upstream raises" },
+    { "name": "SORT_MERGE", "reviewBy": "2027-06-30", "reason": "A MongoDB query-plan stage name, owned by the database; the test says it is streaming and passes the position-read gate" },
+    { "name": "SCREAMING_SNAKE", "reviewBy": "2027-06-30", "reason": "The name of an identifier shape the docs gate measured and ruled out, written in code font as a label and not a constant" },
+    { "name": "PROXY_SYMBOL", "reviewBy": "2027-06-30", "reason": "A placeholder for the proxy-era symbols the classification derives by its own scan; there is no constant of the name, the docblock names the derived set" },
+    { "name": "MAX_TOMBSTONE_PATH", "reviewBy": "2027-06-30", "reason": "History: the docblock says the one bound a peer's path had before the fix was the tombstone's, a constant since removed; the sentence describes the defect the test was written for" },
+    { "name": "NAMED_INSTANCES", "reviewBy": "2027-06-30", "reason": "History: the docblock says what the version it replaces named, a list the rewrite deleted; the sentence describes the defect the test was written for" },
+    { "name": "SECRET_PATTERNS", "reviewBy": "2027-06-30", "reason": "History: the docblock lists the three copies of the secret-pattern families that the one list replaced; the replaced copies are gone by design" },
+    { "name": "DISCARDED_BY_DESIGN", "reviewBy": "2027-06-30", "reason": "The name the docblock gives an exemption class of the gate; the gate holds the class as a `discarded` flag on a site, and no constant has the name" }
+  ]
+}

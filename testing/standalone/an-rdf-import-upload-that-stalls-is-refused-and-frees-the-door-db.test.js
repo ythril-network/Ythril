@@ -6,8 +6,8 @@
  *
  * The door reads one file at a time, instance-wide (`doorHeld`), from before the first byte until its act is registered or it answered, and the body
  * was counted but never timed: a slow authenticated upload held it for every other caller (each answered 409 `rdf_import_busy`) until Node's own
- * request timeout, five minutes. The body now has an idle bound (`RDF_IMPORT_UPLOAD_IDLE_MS`, lowered here through the knob, never waited for at
- * its default): a body that gives nothing for that long is refused `rdf_import_upload_stalled`, a code of the import's list, and the connection
+ * request timeout, five minutes. The body now has an idle bound (`uploadPace().idleMs`, lowered here through the act's `uploadIdleMs` knob, never
+ * waited for at its default): a body that gives nothing for that long is refused `rdf_import_upload_stalled`, a code of the import's list, and the connection
  * is closed after the answer so the stalled sender does not keep the socket. The status is 408 (Q-953: the owner chose the standard's answer to a
  * body that does not arrive in time, RFC 9110 section 15.5.9; it was 400).
  *
