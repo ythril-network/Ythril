@@ -1,0 +1,47 @@
+{
+  "$comment": [
+    "Everything the BSBM harness takes from outside this repository is pinned here, and nothing is vendored.",
+    "The BSBM Tools archive is fetched by URL and refused unless its sha256 matches (benchmarks/dataset-pin.mjs).",
+    "Container images are named by digest, never by tag: a tag moves, and a benchmark against a moved image is",
+    "a number nobody can reproduce (design R7).",
+    "",
+    "Verified 2026-11-25: the archive was downloaded twice (sourceforge redirect and the direct mirror URL) and",
+    "both copies hash alike; the temurin and oxigraph digests were read from `docker image inspect` after a",
+    "pull of the tag named in `tag`; oxigraph 0.5.13 prints `oxigraph 0.5.13`."
+  ],
+  "datasets": {
+    "bsbmtools": {
+      "url": "https://downloads.sourceforge.net/project/bsbmtools/bsbmtools/bsbmtools-0.2/bsbmtools-v0.2.zip",
+      "sha256": "40f5e59baadec3af0014b7647989d3e0fc0476af25e84a4bc9d7f8cd81520aaa",
+      "bytes": 2492911,
+      "cachePath": "dl/bsbmtools-v0.2.zip",
+      "licence": "Apache-2.0 per the project page https://sourceforge.net/projects/bsbmtools/ (the archive carries no licence file)"
+    }
+  },
+  "images": {
+    "temurin": {
+      "tag": "eclipse-temurin:17-jre",
+      "ref": "eclipse-temurin@sha256:541b08fc7f494edf14e436ff6bfb55767e4a115c87bfc547b8c5de957b58737f",
+      "use": "runs the BSBM generator and the BSBM test driver (Java, prebuilt jars from the archive)"
+    },
+    "oxigraph": {
+      "tag": "ghcr.io/oxigraph/oxigraph:0.5.13",
+      "ref": "ghcr.io/oxigraph/oxigraph@sha256:260454ee29c091d2cdb99dd156212594ff3127850627adb4cfdcd9b1e425d480",
+      "use": "the reference SPARQL engine (licence Apache-2.0 OR MIT)"
+    },
+    "mongo": {
+      "tag": "mongodb/mongodb-atlas-local:latest",
+      "ref": "mongodb/mongodb-atlas-local@sha256:1cd040bb201bb7f910c7c6ab7f6cb8ab9dd79331f6a213f37025adc6804e96aa",
+      "use": "the scratch Ythril instance's database, the digest docker-compose.yml pins"
+    }
+  },
+  "seeds": {
+    "generator": 53223436,
+    "generatorNote": "fixed in the generator's source (Generator.seedGenerator), not an option: the same product count gives the same dataset",
+    "driver": 808080,
+    "driverNote": "the test driver's default -seed, passed explicitly; it chooses every query parameter"
+  },
+  "sizes": [1000, 5000, 20000],
+  "explore": [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12],
+  "exploreNote": "BSBM removed Q6 from the Explore mix; the ticket's 12 is 11 in practice"
+}
