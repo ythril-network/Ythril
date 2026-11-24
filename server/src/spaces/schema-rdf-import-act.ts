@@ -60,10 +60,10 @@ import { RDF_IMPORT_ADDRESS_MAX } from './rdf-import-files.js';
 export { SCHEMA_RDF_MAX_QUADS };
 
 /** The most bytes a schema file's body may hold: a schema of a few thousand types is a few megabytes; the data import's bound is for records. */
-export const SCHEMA_RDF_BODY_MAX_BYTES = 33_554_432;
+const SCHEMA_RDF_BODY_MAX_BYTES =33_554_432;
 /** How many times the plain bound a gzip schema body may inflate to, so a compressed file is never refused for being compressed. */
 const INFLATED_TIMES_PLAIN = 4;
-export const SCHEMA_RDF_INFLATED_MAX_BYTES = INFLATED_TIMES_PLAIN * SCHEMA_RDF_BODY_MAX_BYTES;
+const SCHEMA_RDF_INFLATED_MAX_BYTES =INFLATED_TIMES_PLAIN * SCHEMA_RDF_BODY_MAX_BYTES;
 /** The statements a refusal reason names: a contradiction or collision is between two. */
 const STATEMENTS_PER_REASON = 2;
 /** The most taken, not-taken and change entries an answer names, each list; the counts are of every entry. */
@@ -81,15 +81,15 @@ const HTTP = {
 
 // ── Refusal codes ─────────────────────────────────────────────────────────────────────────────────────────────
 
-export const SCHEMA_RDF_BAD_PARAM = 'schema_rdf_bad_param';
+const SCHEMA_RDF_BAD_PARAM ='schema_rdf_bad_param';
 /** A caller below the rung a file with rules needs (`schema: admin`, the settings write's field rungs); `schema: write` is the guard's. */
 export const SCHEMA_RDF_RUNG = 'schema_rdf_rung';
-export const SCHEMA_RDF_NETWORKED = 'schema_rdf_networked';
-export const SCHEMA_RDF_NOT_EMPTY = 'schema_rdf_not_empty';
-export const SCHEMA_RDF_BUSY = 'schema_rdf_busy';
-export const SCHEMA_RDF_CHANGED = 'schema_rdf_changed';
+const SCHEMA_RDF_NETWORKED = 'schema_rdf_networked';
+const SCHEMA_RDF_NOT_EMPTY = 'schema_rdf_not_empty';
+const SCHEMA_RDF_BUSY = 'schema_rdf_busy';
+const SCHEMA_RDF_CHANGED = 'schema_rdf_changed';
 /** The file's schema refused: a contradiction, a name collision, an invalid type, a type cap, or the planner's verdict; every reason listed. */
-export const SCHEMA_RDF_REFUSED = 'schema_rdf_refused';
+const SCHEMA_RDF_REFUSED ='schema_rdf_refused';
 const SPACE_NOT_FOUND = 'space_not_found';
 /** What the door says it did not do because of a document refusal. */
 const NOTHING_BUILT = 'no schema was built';
@@ -107,7 +107,7 @@ export const SCHEMA_RDF_IMPORT_REFUSAL_CODES: readonly string[] = Object.freeze(
 const MODES = ['generate', 'expand', 'update'] as const;
 const SOURCES = ['declared', 'shacl'] as const;
 /** What a `from` this door does not take is answered with: the sources it reads, and the door that infers a schema from records. */
-export const SCHEMA_RDF_FROM_TEXT = 'from names declared (OWL and RDFS) or shacl (shapes); a schema inferred from the records (data) is built by import_rdf with schema and from: data';
+const SCHEMA_RDF_FROM_TEXT ='from names declared (OWL and RDFS) or shacl (shapes); a schema inferred from the records (data) is built by import_rdf with schema and from: data';
 /** What `from` reads when it is not given: the OWL and RDFS declarations and the shapes. */
 export const SCHEMA_RDF_FROM_DEFAULT: readonly SchemaSource[] = Object.freeze([...SOURCES]);
 
