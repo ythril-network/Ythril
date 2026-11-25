@@ -30,7 +30,9 @@ import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { openRdfExportDoors, rdfMeta, baseOf } from './_rdf-export-doors.mjs';
 import { drain } from './_quad-source-fixture.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
+import { elapse } from '../_shared/sleep.mjs';
 
+const OPEN_BATCH_MS = 1_500;
 const CLOSE_WITHIN_MS = 2_000;
 const CLOSE_PROBE_MS = 50;
 
@@ -126,5 +128,23 @@ describe('the quad source read is bounded and its estimate is never a false empt
     // Closed at once: the server's own idle timeout is ten minutes, so two seconds can only pass through the source's close.
     const closed = await holdsWithin(async () => (await openCursors()) <= baseline, CLOSE_WITHIN_MS, CLOSE_PROBE_MS);
     assert.ok(closed, `the cursor stayed open after its stream was destroyed: ${(await idleCursors()).join(' ')}`);
+  });
+
+  it('a stream destroyed as its first read starts, before its find has answered, leaves no cursor open (S1 review)', async () => {
+    const baseline = await openCursors();
+    // The destroy comes in the tick of the first read, and then a little later each round, so that some round lands while the find is on
+    // its way to the server: there the cursor has no id to kill yet, and only a close after the first batch has arrived ends it.
+    for (const offsetMs of [0, 0, 1, 2, 3, 5, 8, 13, 21]) {
+      const stream = source().match(undefined, RDF_TYPE, BULK_CLASS, undefined);
+      const closed = new Promise((resolve) => stream.once('close', resolve));
+      stream.read();
+      if (offsetMs > 0) await elapse(offsetMs, 'pacing: the destroy follows the first read by this long, to land in the find\'s flight');
+      stream.destroy();
+      await closed;
+    }
+    // The first batch of each find arrives after its stream is gone; a cursor that was closed too early stays open until the server's own
+    // ten-minute idle timeout, so the window is the time the batches need, and the cursors must be back at the baseline at its end.
+    await elapse(OPEN_BATCH_MS, 'absence window: the batches of the destroyed finds arrive, and a cursor left open shows idle');
+    assert.ok(await openCursors() <= baseline, `a cursor stayed open after its stream was destroyed with its find in flight: ${(await idleCursors()).join(' ')}`);
   });
 });
