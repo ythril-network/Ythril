@@ -32,7 +32,7 @@ export async function openWriteGroupFixture(suite) {
   const mongo = await openTestMongo(suite);
   fs.writeFileSync(process.env['CONFIG_PATH'], JSON.stringify({
     instanceId: AUTHOR.instanceId, instanceLabel: AUTHOR.instanceLabel, tokens: [], networks: [],
-    spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], meta: {} }],
+    spaces: [{ id: SPACE, label: 'General', builtIn: true, folders: [], meta: {}, completeLinkage: true }],
   }, null, 2), { mode: 0o600 });
   const loader = await import('../../server/dist/config/loader.js');
   loader.loadConfig();
@@ -86,8 +86,37 @@ export function convergeFact(id, text, expectSeq, { enqueue = false } = {}) {
 
 /** An insert plan of an entity. */
 export function insertEntity(id, name) {
-  const doc = { _id: id, spaceId: SPACE, name, type: 'person', tags: [], properties: {}, author: AUTHOR, createdAt: NOW, updatedAt: NOW };
+  const doc = entityDoc(id, name);
   return { kind: 'entity', spaceId: SPACE, id, op: 'insert', doc, result: doc, enqueue: false, minted: true, dupeRules: false };
+}
+
+/** The stored body of an entity, `seq` aside. */
+export function entityDoc(id, name) {
+  return { _id: id, spaceId: SPACE, name, type: 'person', tags: [], properties: {}, author: AUTHOR, createdAt: NOW, updatedAt: NOW };
+}
+
+/**
+ * The stored body of an edge between two entities, `seq` aside, under the id the store derives from its identity (`edgeIdFor`, passed in
+ * as `idFor` so this module loads no server code). `guard`: the functional write guard a planner stamps on an edge of a functional label.
+ */
+export function edgeDoc(idFor, from, to, label, { guard } = {}) {
+  return {
+    _id: idFor(from, to, label, 'entity', 'entity'), spaceId: SPACE, from, to, label, fromKind: 'entity', toKind: 'entity',
+    tags: [], properties: {}, author: AUTHOR, createdAt: NOW, updatedAt: NOW, ...(guard ? { _functionalGuard: guard } : {}),
+  };
+}
+
+/** An insert plan of an edge whose body is `doc` (`edgeDoc`). */
+export function insertEdge(doc) {
+  return { kind: 'edge', spaceId: SPACE, id: doc._id, op: 'insert', doc, result: doc, enqueue: false, minted: true, dupeRules: false };
+}
+
+/**
+ * A delete plan of a stored record, in the shape `planDelete` hands the group: it lands only while the record still has `expectSeq`, the
+ * version it was planned against.
+ */
+export function deleteRecord(kind, id, expectSeq) {
+  return { kind, spaceId: SPACE, id, op: 'delete', expectSeq, result: { _id: id }, enqueue: false, minted: false, dupeRules: false };
 }
 
 /** Settle `promise` to `{ value }` or `{ error }`, so a test asserts on what the writer did rather than on an exception's path. */
