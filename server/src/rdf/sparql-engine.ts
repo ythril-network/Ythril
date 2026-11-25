@@ -258,7 +258,9 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
 
   /** Collect at most `limit` items of an engine stream, mapping each. */
   const collect = <T>(stream: EngineStream, limit: number, map: (item: unknown) => T): Promise<T[]> => new Promise((resolve, reject) => {
-    if (ended) { reject(refusalOf(ended, source)); return; }
+    // A stream the engine opened after the query ended (the deadline or an abort landed while it planned) is closed here: `end` destroyed only
+    // the streams it knew, and this one holds the source's cursors.
+    if (ended) { stream.destroy(); reject(refusalOf(ended, source)); return; }
     streams.add(stream);
     const out: T[] = [];
     let done = false;
