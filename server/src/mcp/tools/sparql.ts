@@ -21,7 +21,7 @@ import type { ToolHandler, ToolContext, ToolResult, ToolSchemas } from './types.
 import { readSpacesOfCall, viewReadOfCall } from '../../spaces/read-scope.js';
 import { toolRefusalOfAct, type ToolRefusalStatus } from '../../util/errors.js';
 import { budgetSizeSchema } from './_page-budget-schema.js';
-import { applyBudget, budgetBoundBy, carriagesFor, defaultBudgetChars, resolveBudget, ROW_PAGER, type ResolvedBudget, type BudgetOutcome } from '../../brain/result-budget.js';
+import { applyBudget, budgetBoundBy, defaultBudgetChars, resolveBudget, ROW_PAGER, type ResolvedBudget, type BudgetOutcome } from '../../brain/result-budget.js';
 import { spillResultSet } from '../../brain/graph-spill.js';
 import { schemaFingerprintOf } from '../../spaces/schema-stamp.js';
 import { SPARQL_LIMIT_BOUNDS } from '../../config/sparql-limits.js';
@@ -34,10 +34,20 @@ import {
 
 const STRINGS = { type: 'array', items: { type: 'string' } } as const;
 
-/** The summary every answer carries in its second text block and in `structuredContent`. */
+/** How many times this tool carries an answer's body: once (see `carriagesFor`, which holds the other tools to half for the second copy). */
+const SPARQL_CARRIAGES = 1;
+
+/**
+ * The summary every answer carries in its second text block and in `structuredContent`. `head`, `results` and `boolean` are the keys of the
+ * SPARQL results JSON a SELECT or ASK answers in its FIRST text block (`{head, results}` or `{head, boolean}`); they are declared here so the
+ * schema names every key of the answer, and `structuredContent` does not repeat them: the rows are sent once.
+ */
 export const SPARQL_QUERY_OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
+    head: { type: 'object', description: 'SELECT and ASK, in the first text block: the SPARQL results JSON `head` (`vars` for a SELECT).' },
+    results: { type: 'object', description: 'SELECT, in the first text block: the SPARQL results JSON `results` (`bindings`).' },
+    boolean: { type: 'boolean', description: 'ASK, in the first text block: the answer.' },
     space: { type: 'string' }, members: STRINGS, form: { type: 'string', enum: ['select', 'ask', 'construct', 'describe'] }, mediaType: { type: 'string' },
     rows: { type: 'integer' }, returned: { type: 'integer' }, truncated: { type: 'boolean' },
     budgetChars: { type: 'integer' }, budgetBytes: { type: ['integer', 'null'] }, charsReturned: { type: 'integer' }, bytesReturned: { type: 'integer' },
@@ -86,6 +96,9 @@ async function spillCut(ctx: ToolContext, members: readonly string[], cut: reado
   return 'spillRefused' in kept ? { spillRefused: kept.spillRefused } : { remainder: kept };
 }
 
+/** What a graph answer (CONSTRUCT, DESCRIBE) is written as: the admitted statements, one N-Quads line each. */
+const GRAPH_MEDIA_TYPE = 'application/n-quads';
+
 /** One statement as an N-Quads line, the unit a graph answer's budget admits and a spill keeps. */
 function statementLine(q: Quad): string {
   const writer = createRdfWriter('nquads', { edgeDetails: holdsTriple(q) ? 'rdf12' : 'reification' });
@@ -96,9 +109,6 @@ export const sparql_queryTool: ToolHandler = {
   name: 'sparql_query',
   description: 'Ask a SPARQL 1.1 query (SELECT, ASK, CONSTRUCT, DESCRIBE) of the records of a space, read at query time. Name a personal view '
     + 'as `space` to query several spaces at once: the default graph is the union of the member spaces you read, and each member is its own '
-/** What a graph answer (CONSTRUCT, DESCRIBE) is written as: the admitted statements, one N-Quads line each. */
-const GRAPH_MEDIA_TYPE = 'application/n-quads';
-
     + 'named graph (`GRAPH ?g`). Same as GET/POST /api/brain/spaces/:spaceId/sparql.\n\n'
     + 'ANSWER: the first text block is the answer body, sent once: SPARQL results JSON for SELECT and ASK (`head`, and `results` or '
     + '`boolean`), the statements as N-Quads, one per line, for CONSTRUCT and DESCRIBE (`mediaType: application/n-quads`). The second block '
@@ -132,7 +142,8 @@ const GRAPH_MEDIA_TYPE = 'application/n-quads';
   }),
   async handle(ctx: ToolContext): Promise<ToolResult> {
     const a = ctx.args;
-    const budget = resolveBudget(a, defaultBudgetChars(ctx.transport), carriagesFor(ctx.transport));
+    // One carriage: the answer is sent once (`structuredContent` is the summary alone), so the ceiling the caller states is the one the text is held to.
+    const budget = resolveBudget(a, defaultBudgetChars(ctx.transport), SPARQL_CARRIAGES);
     if (!budget.ok) throw new Error(budget.error);
     const spaces = readSpacesOfCall(ctx, ctx.callSpace);
     const input: SparqlQueryInput = {
@@ -153,16 +164,16 @@ const GRAPH_MEDIA_TYPE = 'application/n-quads';
     const warnings = warningsOf(prepared);
     const head = { space: ctx.callSpace, members: prepared.members, form: prepared.form, rows: answered.rows, ...(warnings.length > 0 ? { warnings } : {}) };
     const request = { space: ctx.callSpace, form: prepared.form, rows: answered.rows };
+    // The answer body is the first text block, once: `structuredContent` is the summary alone, so no row is sent twice.
     if (c.form === 'ask') {
-      const body = resultsJson(c);
       const summary = { ...head, mediaType: 'application/sparql-results+json', returned: 1, truncated: false };
-      return { content: [{ type: 'text' as const, text: JSON.stringify(body) }, { type: 'text' as const, text: JSON.stringify(summary) }], structuredContent: { ...body, ...summary } };
+      return { content: [{ type: 'text' as const, text: JSON.stringify(resultsJson(c)) }, { type: 'text' as const, text: JSON.stringify(summary) }], structuredContent: { ...summary } };
     }
     if (c.form === 'select') {
       const outcome = applyBudget(c.rows, budget);
       const body = resultsJson({ form: 'select', vars: c.vars, rows: outcome.returned });
       const summary = { ...head, mediaType: 'application/sparql-results+json', ...budgetSummary(outcome, budget), ...(await spillCut(ctx, spaces, outcome.remainder, request)) };
-      return { content: [{ type: 'text' as const, text: JSON.stringify(body) }, { type: 'text' as const, text: JSON.stringify(summary) }], structuredContent: { ...body, ...summary } };
+      return { content: [{ type: 'text' as const, text: JSON.stringify(body) }, { type: 'text' as const, text: JSON.stringify(summary) }], structuredContent: { ...summary } };
     }
     let lines: string[];
     try {
@@ -171,6 +182,9 @@ const GRAPH_MEDIA_TYPE = 'application/n-quads';
       if (err instanceof RdfWriteError) throw refused(unwritable());
       throw err;
     }
+    // The answer is the admitted N-Quads lines and nothing else (a Turtle document carries a prefix block no ceiling was measured against):
+    // the budget admits whole lines, with the JSON quoting each is metered with, so the text stays under the ceiling, and the sizes the summary
+    // states are those of the text returned.
     const outcome = applyBudget(lines, budget);
     const document = outcome.returned.map(line => `${line}\n`).join('');
     const summary = {
@@ -181,6 +195,3 @@ const GRAPH_MEDIA_TYPE = 'application/n-quads';
     return { content: [{ type: 'text' as const, text: document }, { type: 'text' as const, text: JSON.stringify(summary) }], structuredContent: { ...summary } };
   },
 };
-    // The answer is the admitted N-Quads lines and nothing else (a Turtle document carries a prefix block no ceiling was measured against):
-    // the budget admits whole lines, with the JSON quoting each is metered with, so the text stays under the ceiling, and the sizes the summary
-    // states are those of the text returned.
