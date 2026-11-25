@@ -3,11 +3,14 @@
  * Runs the 11 BSBM Explore queries against one engine's SPARQL endpoint and writes one result record.
  *
  *   node benchmarks/rdf/run.mjs --engine oxigraph|ythril --size 1000 [--results <dir>] [--warmups 3] [--runs 20]
- *                               [--ythril-commit <sha>] [--against <oxigraph record>]
+ *                               [--ythril-commit <sha>] [--against <oxigraph record>] [--embed-wait-minutes 30]
  *
- * A Ythril run maps the parameters to the records Ythril minted (ythril-params.mjs) before any run, and is judged
- * against the Oxigraph record named by `--against` (required): the record's `valid` says whether every query, on
- * every run, answered Oxigraph's row count; graph answers (Q9, Q12) count their statements by parsing.
+ * A Ythril run first reads the SPARQL limits in effect from the instance's config, waits for the embed queue to drain
+ * (up to `--embed-wait-minutes`, then measures anyway and records what was left), maps the parameters to the records
+ * Ythril minted (ythril-params.mjs), and counts per predicate what the instance holds against what the variant states
+ * (not-taken.mjs). It is judged against the Oxigraph record named by `--against` (required), one query at a time
+ * (comparability.mjs): each query is comparable (its row count is Oxigraph's on every run) or names one reason; the
+ * record's `valid` is false only for a `rows-differ` query. Graph answers (Q9, Q12) count their statements by parsing.
  *
  * The endpoint, and for a scratch Ythril its token, come from the state file `load.mjs` wrote. Parameters are the
  * ones the BSBM test driver chose (`params.json`, from `generate.mjs`): run k of every query uses parameter set k,
@@ -29,10 +32,20 @@ import { substitute } from './params.mjs';
 import { acceptFor, loadTemplates } from './queries.mjs';
 import { buildRecord, writeRecord } from './result-record.mjs';
 import { summarize } from './stats.mjs';
-import { judgeValidity } from './validity.mjs';
+import { judgeComparability } from './comparability.mjs';
+import { waitForDrain } from './embed-wait.mjs';
+import { countPredicatesOfFile, countQuery, notTakenOf } from './not-taken.mjs';
+import { predicatesOf } from './query-shape.mjs';
+import { limitsOf, CEILINGS } from './sparql-limits.mjs';
+import { readInstanceConfig, spaceCounts } from './ythril.mjs';
+import { sleep } from './env.mjs';
 import { lookupQueries, mapParameters, parameterAddresses, tableFromBindings } from './ythril-params.mjs';
 
-const REQUEST_TIMEOUT_MS = 120_000;
+// Past the server's own longest timeout (sparql.timeoutMs ceiling, five minutes), so a query the server may still answer is not
+// recorded as the client's timeout.
+const REQUEST_TIMEOUT_MS = CEILINGS.timeoutMs + 30_000;
+/** How long a Ythril run waits for the embed queue to drain before it measures anyway (minutes, `--embed-wait-minutes`). */
+const EMBED_WAIT_MINUTES = 30;
 
 async function ask(endpoint, token, query, accept) {
   const t0 = performance.now();
@@ -106,17 +119,43 @@ async function mapForYthril(endpoint, token, paramsFile) {
   return mapParameters(paramsFile, tableFromBindings(rows));
 }
 
+/**
+ * The distinct predicates the variant states that some query names, counted on the variant and then asked of the instance one at a
+ * time; answers `{ iri: { statements, held } }` for the ones the instance holds fewer statements of (not-taken.mjs).
+ */
+async function notTakenPredicates({ endpoint, token, variantFile, templates }) {
+  const stated = await countPredicatesOfFile(variantFile);
+  const named = new Set(Object.values(templates).flatMap((t) => predicatesOf(t.text)));
+  const statements = Object.fromEntries(Object.entries(stated).filter(([iri]) => named.has(iri)));
+  const held = {};
+  for (const iri of Object.keys(statements)) {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/sparql-query', accept: 'application/sparql-results+json', authorization: `Bearer ${token}` },
+      body: countQuery(iri),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`counting ${iri} answered ${res.status}: ${text.slice(0, 200)}`);
+    held[iri] = Number(JSON.parse(text).results.bindings[0]?.n?.value);
+  }
+  return { statements, held, notTaken: notTakenOf(statements, held) };
+}
+
 function table(record) {
   const lines = [
-    ...(record.valid === false ? [`INVALID: other row counts than Oxigraph on ${record.invalidQueries.map((d) => `${d.query} (${d.oxigraph} vs ${d.ythril})`).join(', ')}`, ''] : []),
+    ...(record.valid === false ? [`INVALID: rows-differ on ${record.invalidQueries.map((d) => `${d.query} (${d.oxigraph} vs ${d.ythril})`).join(', ')}`, ''] : []),
     `Engine ${record.engine}, ${record.size} products, outcome ${record.outcome}, ${record.runs} measured runs after ${record.warmups} warm-up`,
+    ...(record.sparqlLimits ? [`SPARQL limits: ${Object.entries(record.sparqlLimits).map(([k, v]) => `${k} ${v}`).join(', ')}`] : []),
+    ...(record.embedQueue ? [`embed queue: waited ${record.embedQueue.waitedMs} ms, ${record.embedQueue.pending} pending, ${record.embedQueue.drained ? 'drained' : 'not drained'}`] : []),
     '',
-    '| query | median ms | p95 ms | rows | errors |',
-    '|---|---:|---:|---:|---|',
+    '| query | median ms | p95 ms | rows | errors | comparable |',
+    '|---|---:|---:|---:|---|---|',
   ];
   for (const [name, q] of Object.entries(record.queries)) {
-    if (typeof q.median !== 'number') lines.push(`| ${name} | - | - | - | error ${q.error.code}: ${q.error.message.slice(0, 60)} (${q.errors}) |`);
-    else lines.push(`| ${name} | ${q.median.toFixed(2)} | ${q.p95.toFixed(2)} | ${q.rows ?? '-'} | ${q.errors ? `${q.errors} (first: ${q.error.code})` : '0'} |`);
+    const verdict = q.comparable === undefined ? '' : q.comparable ? 'yes' : q.reason;
+    if (typeof q.median !== 'number') lines.push(`| ${name} | - | - | - | error ${q.error.code}: ${q.error.message.slice(0, 60)} (${q.errors}) | ${verdict} |`);
+    else lines.push(`| ${name} | ${q.median.toFixed(2)} | ${q.p95.toFixed(2)} | ${q.rows ?? '-'} | ${q.errors ? `${q.errors} (first: ${q.error.code})` : '0'} | ${verdict} |`);
   }
   return lines.join('\n');
 }
@@ -153,16 +192,35 @@ async function main() {
   // Ythril minted its own addresses: the parameters are bound to its records before any run. Oxigraph keeps the generator's.
   let runParams = paramsFile;
   let mappedParameters;
+  let sparqlLimits;
+  let embedQueue;
+  let notTaken;
   if (engine === 'ythril') {
+    // The limits the run is measured under are read from the instance, not from a flag: the record says what was in effect.
+    sparqlLimits = limitsOf(readInstanceConfig(state.app));
+    console.log(`sparql limits in effect: ${JSON.stringify(sparqlLimits)}`);
+    // Embedding a freshly imported space competes with the queries: wait for the queue to drain, up to the deadline.
+    const waitMinutes = Number(flags['embed-wait-minutes'] ?? EMBED_WAIT_MINUTES);
+    embedQueue = await waitForDrain({
+      // `state.url` is the space's SPARQL endpoint; the stats call wants the instance's base.
+      probe: async () => (await spaceCounts({ ...state, url: new URL(state.url).origin }, state.spaceId)).embedQueue,
+      sleep, pollMs: 15_000, deadlineMs: waitMinutes * 60_000,
+    });
+    console.log(`embed queue: waited ${embedQueue.waitedMs} ms, ${embedQueue.pending} pending, ${embedQueue.drained ? 'drained' : 'not drained'}`);
     const m = await mapForYthril(state.url, state.token, paramsFile);
     runParams = m.file;
     mappedParameters = m.mapped;
     console.log(`mapped ${m.mapped} parameter addresses to Ythril's records`);
+    const found = await notTakenPredicates({ endpoint: state.url, token: state.token, variantFile: variant.file, templates });
+    notTaken = found.notTaken;
+    console.log(`predicates a query names that the instance holds fewer statements of than the variant states: ${Object.keys(notTaken).length}`);
   }
 
   const startedAt = new Date();
   const queries = await runQueries({ engine, endpoint: state.url, token: state.token, templates, paramsFile: runParams, warmups, runs });
-  const verdict = reference ? judgeValidity(reference.queries, queries) : { valid: true, differing: [] };
+  // Each query is judged on its own against Oxigraph's rows; the verdict goes into the query's own entry.
+  const verdict = reference ? judgeComparability({ oxigraph: reference.queries, ythril: queries, templates, notTaken }) : null;
+  if (verdict) for (const [name, v] of Object.entries(verdict.queries)) if (queries[name]) Object.assign(queries[name], v);
   const timed = Object.values(queries).filter((q) => typeof q.median === 'number');
   const clean = timed.length === Object.keys(queries).length && timed.every((q) => q.errors === 0);
   const outcome = clean ? 'ok' : timed.length ? 'partial' : 'failed';
@@ -179,7 +237,8 @@ async function main() {
     dataset: { variant: variant.name, triples: variant.triples, sha256: variant.sha256 },
     loadMs: engine === 'ythril' ? (load?.ok ? load.loadMs : null) : state.loadMs,
     ...(engine === 'ythril' && !load?.ok ? { loadRefusal: { status: load?.status ?? 0, code: load?.code ?? 'no-load-recorded', message: load?.message ?? '' } } : {}),
-    valid: verdict.valid, ...(verdict.valid ? {} : { invalidQueries: verdict.differing }),
+    valid: verdict?.valid ?? true, ...(verdict && !verdict.valid ? { invalidQueries: verdict.differing } : {}),
+    ...(engine === 'ythril' ? { sparqlLimits, embedQueue, notTaken } : {}),
     ...(mappedParameters !== undefined ? { mappedParameters } : {}),
     ...(engine === 'ythril' && load?.chunks ? { loadChunks: load.chunks } : {}),
     warmups, runs, queries,

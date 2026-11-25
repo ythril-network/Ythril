@@ -9,18 +9,43 @@
  *   that was already there, ends in an error and the earlier bytes stay. There is no overwrite mode.
  * - **A truncated record read as a whole one.** The last key is `end`, with a fixed marker, and the writer
  *   checks the text it is about to write ends with it.
- * - **A run that answered something else reading as a run.** `valid` is required; a Ythril run whose row counts differ
- *   from Oxigraph's is `valid: false` with `invalidQueries` naming each, and the comparison refuses it.
+ * - **A run that answered something else reading as a run.** `valid` is required; a Ythril query is comparable or names
+ *   one reason (`data-not-held`, `system-statements`, `rows-differ`), and `valid` is false exactly when a query is
+ *   `rows-differ`, with `invalidQueries` naming each; the comparison refuses such a record.
+ * - **Limits nobody wrote down.** A Ythril record carries the three SPARQL limits it ran under (`sparqlLimits`) and,
+ *   when the run waited for it, the embed queue's wait and what was left (`embedQueue`).
  * - **A failed query reading as a fast one.** A query holds timings or an `error`, never neither, so an
  *   engine that answered 404 for a query is a row saying so.
  */
 import { mkdirSync, openSync, writeSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
+import { REASONS } from './comparability.mjs';
 
 export const END_MARKER = 'END-OF-RECORD';
 
 const OUTCOMES = ['ok', 'partial', 'failed'];
 const REQUIRED = ['outcome', 'engine', 'size', 'ythrilCommit', 'oxigraphDigest', 'bsbmSeed', 'dataset', 'queries'];
+
+/**
+ * What only a Ythril record carries: the three SPARQL limits it was measured under, and every query's own verdict
+ * (comparable, or one reason of the fixed list), with `valid` agreeing with them: false exactly when a query is `rows-differ`.
+ */
+function checkYthrilJudgement(input) {
+  for (const key of ['timeoutMs', 'maxRecordsRead', 'maxResults']) {
+    if (!Number.isInteger(input.sparqlLimits?.[key])) throw new Error(`a ythril record needs sparqlLimits.${key}, a whole number: the limits it was measured under`);
+  }
+  let finding = false;
+  for (const [name, q] of Object.entries(input.queries)) {
+    if (typeof q.comparable !== 'boolean') throw new Error(`query ${name} has no comparable: a ythril query is judged one by one`);
+    if (q.comparable) {
+      if (q.reason !== undefined) throw new Error(`query ${name} is comparable and names a reason`);
+      continue;
+    }
+    if (!REASONS.includes(q.reason)) throw new Error(`query ${name} is not comparable and needs a reason of ${REASONS.join(', ')}, got ${JSON.stringify(q.reason)}`);
+    if (q.reason === 'rows-differ') finding = true;
+  }
+  if (input.valid === finding) throw new Error(`valid is ${input.valid} but the queries ${finding ? 'hold a rows-differ' : 'hold none'}: valid is false exactly when a query is rows-differ`);
+}
 
 export function buildRecord(input) {
   for (const key of REQUIRED) {
@@ -49,6 +74,13 @@ export function buildRecord(input) {
   }
   if (input.valid === true && invalidQueries !== undefined && invalidQueries.length > 0) {
     throw new Error('a valid result record has no invalidQueries');
+  }
+  if (input.engine === 'ythril') checkYthrilJudgement(input);
+  if (input.embedQueue !== undefined) {
+    const { waitedMs, pending, drained } = input.embedQueue;
+    if (!Number.isInteger(waitedMs) || !Number.isInteger(pending) || typeof drained !== 'boolean') {
+      throw new Error('embedQueue must be { waitedMs, pending, drained }: whole numbers and a boolean');
+    }
   }
   const hasLoad = typeof input.loadMs === 'number';
   if (!hasLoad && !input.loadRefusal) {

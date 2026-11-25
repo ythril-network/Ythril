@@ -106,12 +106,55 @@ test('a second write to the same name throws and leaves the earlier file as it w
   rmSync(dir, { recursive: true, force: true });
 });
 
+const LIMITS = { timeoutMs: 300000, maxRecordsRead: 10000000, maxResults: 100000 };
+const judged = {
+  Q1: { median: 2.5, p95: 4, n: 20, errors: 0, comparable: true },
+  Q2: { median: 9, p95: 12, n: 20, errors: 0, comparable: false, reason: 'data-not-held' },
+};
+const ythril = (over = {}) => input({ engine: 'ythril', sparqlLimits: LIMITS, queries: judged, ...over });
+
+test('a Ythril record carries the three SPARQL limits it ran under, and the queue wait when it has one', () => {
+  const rec = buildRecord(ythril({ embedQueue: { waitedMs: 5000, pending: 0, drained: true } }));
+  assert.deepEqual(rec.sparqlLimits, LIMITS);
+  assert.deepEqual(rec.embedQueue, { waitedMs: 5000, pending: 0, drained: true });
+  assert.throws(() => buildRecord(input({ engine: 'ythril' })), /sparqlLimits/);
+  for (const key of Object.keys(LIMITS)) {
+    assert.throws(() => buildRecord(ythril({ sparqlLimits: { ...LIMITS, [key]: undefined } })), new RegExp(key), `${key} required`);
+    assert.throws(() => buildRecord(ythril({ sparqlLimits: { ...LIMITS, [key]: 1.5 } })), new RegExp(key), `${key} whole number`);
+  }
+  assert.doesNotThrow(() => buildRecord(input()), 'an Oxigraph record has no SPARQL limits');
+  assert.throws(() => buildRecord(ythril({ queries: { Q1: { median: 2, p95: 3, n: 20, errors: 0 } } })), /Q1 has no comparable/);
+});
+
+test('a Ythril query is judged one by one: comparable, or one reason from the fixed list', () => {
+  const q = { median: 2, p95: 3, n: 20, errors: 0 };
+  const rec = buildRecord(ythril({ queries: { Q1: { ...q, comparable: true }, Q2: { ...q, comparable: false, reason: 'data-not-held' } } }));
+  assert.equal(rec.queries.Q2.reason, 'data-not-held');
+  assert.throws(() => buildRecord(ythril({ queries: { Q1: { ...q, comparable: false } } })), /Q1.*reason/);
+  assert.throws(() => buildRecord(ythril({ queries: { Q1: { ...q, comparable: false, reason: 'it is slow' } } })), /Q1.*reason/);
+  assert.throws(() => buildRecord(ythril({ queries: { Q1: { ...q, comparable: true, reason: 'rows-differ' } } })), /Q1/);
+});
+
+test('valid agrees with the queries: false exactly when one is rows-differ', () => {
+  const q = { median: 2, p95: 3, n: 20, errors: 0 };
+  const differing = [{ query: 'Q1', oxigraph: 5, ythril: 6 }];
+  const named = { Q1: { ...q, comparable: false, reason: 'system-statements' }, Q2: { ...q, comparable: false, reason: 'data-not-held' } };
+  assert.doesNotThrow(() => buildRecord(ythril({ queries: named })));
+  assert.throws(() => buildRecord(ythril({ queries: { Q1: { ...q, comparable: false, reason: 'rows-differ' } } })), /valid/);
+  assert.doesNotThrow(() => buildRecord(ythril({ valid: false, invalidQueries: differing, queries: { Q1: { ...q, comparable: false, reason: 'rows-differ' } } })));
+  assert.throws(() => buildRecord(ythril({ valid: false, invalidQueries: differing, queries: named })), /valid/);
+});
+
 test('a record says whether it is valid: a Ythril run whose row counts differ from Oxigraph\'s names the queries', () => {
   assert.equal(buildRecord(input()).valid, true);
   assert.throws(() => buildRecord(input({ valid: undefined })), /valid/);
   assert.throws(() => buildRecord(input({ valid: 'yes' })), /valid/);
   const differing = [{ query: 'Q1', oxigraph: 10, ythril: 0 }];
-  const bad = buildRecord(input({ engine: 'ythril', valid: false, invalidQueries: differing }));
+  const rowsDiffer = { comparable: false, reason: 'rows-differ' };
+  const bad = buildRecord(ythril({
+    valid: false, invalidQueries: differing,
+    queries: { Q1: { median: 2.5, p95: 4, n: 20, errors: 0, ...rowsDiffer }, Q2: { error: { code: 404, message: 'Not Found' }, n: 0, errors: 23, ...rowsDiffer } },
+  }));
   assert.equal(bad.valid, false);
   assert.deepEqual(bad.invalidQueries, differing);
   assert.throws(() => buildRecord(input({ valid: false })), /invalidQueries/);

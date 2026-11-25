@@ -90,15 +90,15 @@ test('the table lists queries in number order and shows both engines side by sid
   assert.match(line, /20\.0x/);
   assert.match(line, />10x slower/);
   assert.doesNotMatch(text.split('\n').find((l) => l.startsWith('| Q1 ')), /slower/);
-  assert.match(text, /more than 10x slower than Oxigraph: Q10 \(1 of 5\)/);
+  assert.match(text, /more than 10x slower than Oxigraph: Q10 \(1 of 5 comparable\)/);
 });
 
 test('with none marked the summary says none, and the factor can be changed', () => {
   const ox = record('oxigraph', { Q1: q(2) });
   const yt = record('ythril', { Q1: q(6) });
-  assert.match(renderComparison(ox, yt), /more than 10x slower than Oxigraph: none \(0 of 1\)/);
+  assert.match(renderComparison(ox, yt), /more than 10x slower than Oxigraph: none \(0 of 1 comparable\)/);
   const strict = renderComparison(ox, yt, { factor: 2 });
-  assert.match(strict, /more than 2x slower than Oxigraph: Q1 \(1 of 1\)/);
+  assert.match(strict, /more than 2x slower than Oxigraph: Q1 \(1 of 1 comparable\)/);
 });
 
 test('the header carries the size, the variant with its sha256 and both load times, or the load refusal', () => {
@@ -145,4 +145,96 @@ test('the table shows the rows each engine answered, beside the times', () => {
   const line = renderComparison(ox, yt).split('\n').find((l) => l.startsWith('| Q1 '));
   assert.match(line, /\| 10 \| 10 \|/);
   assert.match(renderComparison(ox, yt), /Oxigraph rows \| Ythril rows/);
+});
+
+// Per-query comparability (Q-759): a ratio only where the query answered Oxigraph's rows.
+const notComparable = (reason, over = {}) => ({ ...q(500), rows: 9, comparable: false, reason, ...over });
+const mixed = () => ({
+  ox: record('oxigraph', { Q1: q(2), Q2: q(2), Q9: q(2), Q12: q(2) }),
+  yt: record('ythril', {
+    Q1: { ...q(6), comparable: true },
+    Q2: notComparable('data-not-held', { predicates: ['http://purl.org/dc/elements/1.1/publisher', 'http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/price'] }),
+    Q9: notComparable('system-statements'),
+    Q12: notComparable('rows-differ', { differing: { query: 'Q12', oxigraph: 8, ythril: 9 } }),
+  }, { valid: false, invalidQueries: [{ query: 'Q12', oxigraph: 8, ythril: 9 }] }),
+});
+
+test('a query that is not comparable has no ratio, is never marked slower, and keeps its reason', () => {
+  const { ox, yt } = mixed();
+  const cmp = compareRecords(ox, yt, { showInvalid: true });
+  for (const name of ['Q2', 'Q9', 'Q12']) {
+    const r = rowOf(cmp, name);
+    assert.equal(r.ratioMedian, null, `${name} median ratio`);
+    assert.equal(r.ratioP95, null, `${name} p95 ratio`);
+    assert.equal(r.slower, false, `${name} slower`);
+    assert.equal(r.comparable, false);
+  }
+  assert.equal(rowOf(cmp, 'Q2').reason, 'data-not-held');
+  assert.equal(rowOf(cmp, 'Q9').reason, 'system-statements');
+  assert.equal(rowOf(cmp, 'Q12').reason, 'rows-differ');
+  assert.equal(rowOf(cmp, 'Q1').comparable, true);
+  assert.equal(rowOf(cmp, 'Q1').ratioMedian, 3);
+  assert.deepEqual(cmp.slower, []);
+  assert.deepEqual(cmp.notComparable, ['Q2', 'Q9', 'Q12']);
+});
+
+test('the table shows the times and ratios of comparable queries and, for the others, the reason and no time', () => {
+  const { ox, yt } = mixed();
+  const lines = renderComparison(ox, yt, { showInvalid: true }).split('\n');
+  const q1 = lines.find((l) => l.startsWith('| Q1 '));
+  assert.match(q1, /2\.00/);
+  assert.match(q1, /6\.00/);
+  assert.match(q1, /3\.0x/);
+  const q2 = lines.find((l) => l.startsWith('| Q2 '));
+  assert.match(q2, /not comparable: data-not-held \(dc:publisher, bsbm:price\)/);
+  assert.doesNotMatch(q2, /500\.00|x \|/, 'no Ythril time and no ratio');
+  assert.match(lines.find((l) => l.startsWith('| Q9 ')), /not comparable: system-statements/);
+  const q12 = lines.find((l) => l.startsWith('| Q12 '));
+  assert.match(q12, /not comparable: rows-differ \(Oxigraph 8 rows, Ythril 9\)/);
+  assert.doesNotMatch(q12, /Q12 \(/, 'the query is named once');
+});
+
+test('the summary counts only the comparable queries and names the others by reason', () => {
+  const { ox, yt } = mixed();
+  const text = renderComparison(ox, yt, { showInvalid: true });
+  assert.match(text, /Comparable queries: 1 of 4/);
+  assert.match(text, /more than 10x slower than Oxigraph: none \(0 of 1 comparable\)/);
+  assert.match(text, /data-not-held: Q2/);
+  assert.match(text, /system-statements: Q9/);
+  assert.match(text, /rows-differ: Q12/);
+});
+
+test('data-not-held and system-statements do not make the record invalid; rows-differ does', () => {
+  const { ox, yt } = mixed();
+  assert.throws(() => compareRecords(ox, yt), /invalid.*Q12/);
+  const named = record('ythril', { Q1: { ...q(6), comparable: true }, Q2: notComparable('data-not-held'), Q9: notComparable('system-statements') });
+  const oxNamed = record('oxigraph', { Q1: q(2), Q2: q(2), Q9: q(2) });
+  assert.doesNotThrow(() => compareRecords(oxNamed, named));
+  assert.doesNotMatch(renderComparison(oxNamed, named), /INVALID/);
+});
+
+test('a row that is empty on every run is marked: its time is the time of an empty answer', () => {
+  const ox = record('oxigraph', { Q3: { ...q(2), rows: 0, rowsPerRun: [0, 0, 0] } });
+  const yt = record('ythril', { Q3: { ...q(4), rows: 0, rowsPerRun: [0, 0, 0], comparable: true } });
+  assert.match(renderComparison(ox, yt).split('\n').find((l) => l.startsWith('| Q3 ')), /empty answer on every run/);
+});
+
+test('a row that answered something on some run is not marked empty', () => {
+  const ox = record('oxigraph', { Q3: { ...q(2), rows: 0, rowsPerRun: [0, 2, 0] }, Q4: { ...q(2), rows: 5, rowsPerRun: [5, 5, 5] }, Q5: { ...q(2), rows: 0 } });
+  const yt = record('ythril', { Q3: { ...q(4), rows: 0, rowsPerRun: [0, 2, 0], comparable: true }, Q4: { ...q(4), rows: 5, rowsPerRun: [5, 5, 5], comparable: true }, Q5: { ...q(4), rows: 0 } });
+  const lines = renderComparison(ox, yt).split('\n');
+  for (const name of ['Q3', 'Q4', 'Q5']) assert.doesNotMatch(lines.find((l) => l.startsWith(`| ${name} `)), /empty answer/, name);
+});
+
+test('the header names the SPARQL limits and the embed-queue wait the Ythril run was measured under', () => {
+  const ox = record('oxigraph', { Q1: q(2) });
+  const yt = record('ythril', { Q1: q(3) }, {
+    sparqlLimits: { timeoutMs: 300000, maxRecordsRead: 10000000, maxResults: 100000 },
+    embedQueue: { waitedMs: 1800000, pending: 4200, drained: false },
+  });
+  const text = renderComparison(ox, yt);
+  assert.match(text, /timeoutMs 300000, maxRecordsRead 10000000, maxResults 100000/);
+  assert.match(text, /embed queue: waited 1800000 ms, 4200 pending, not drained/);
+  const drained = renderComparison(ox, record('ythril', { Q1: q(3) }, { sparqlLimits: yt.sparqlLimits, embedQueue: { waitedMs: 60000, pending: 0, drained: true } }));
+  assert.match(drained, /embed queue: waited 60000 ms, 0 pending, drained/);
 });

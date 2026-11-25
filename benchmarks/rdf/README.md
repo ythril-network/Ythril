@@ -31,7 +31,7 @@ exists (`DOCKER_BOOKING`, else `~/.claude/hooks/docker-booking.js`).
 | 2a. Oxigraph | `node benchmarks/rdf/load.mjs oxigraph-up --size 1000` | a store loaded by `oxigraph load` from `variant.nt`, served on loopback; `<work>/state/oxigraph-1000.json` with the load time and the variant's sha256 |
 | 2b. Ythril | `node benchmarks/rdf/load.mjs ythril-up --ythril-image <image>` then `node benchmarks/rdf/load.mjs ythril --size 1000 --import-query "schema=generate&from=data&inferMinSupport=1"` | a scratch instance with its own database, a strict space with RDF on, `variant.nt` sent through the RDF import door; `<work>/state/ythril-1000.json` with the load time, or the refusal, its code and its reason counts |
 | 3. Run | `node benchmarks/rdf/run.mjs --engine oxigraph --size 1000`, then `--engine ythril --against <the oxigraph record>` | `<results>/<UTC stamp>-<engine>-<size>.json` and a markdown table on stdout; refused unless the store was loaded from the variant in the manifest. A Ythril run first maps every parameter address to the record Ythril minted (see [Binding the parameters](#binding-the-parameters)) and is judged against the Oxigraph record |
-| 4. Compare | `node benchmarks/rdf/compare.mjs <oxigraph record> <ythril record> [--show-invalid]` | a side-by-side markdown table (median and p95 per query, Ythril over Oxigraph, rows on both sides) marking every query more than 10x slower on the median; refused unless both records name one size, one variant and one variant sha256, and refused for a record that is not valid unless `--show-invalid` (the table then opens with an `INVALID` line) |
+| 4. Compare | `node benchmarks/rdf/compare.mjs <oxigraph record> <ythril record> [--show-invalid]` | a side-by-side markdown table (median and p95 per query, Ythril over Oxigraph, rows on both sides) with a ratio only for comparable queries, each other query naming its reason, every comparable query more than 10x slower on the median marked, and the SPARQL limits and embed-queue wait in the header; refused unless both records name one size, one variant and one variant sha256, and refused for a record with a `rows-differ` query unless `--show-invalid` (the table then opens with an `INVALID` line) |
 | 5. Clean up | `node benchmarks/rdf/load.mjs oxigraph-down --size 1000` and `node benchmarks/rdf/load.mjs ythril-down` | no container, volume or network left |
 
 `--results <dir>` on `run.mjs` names the results folder (default `<work>/results/`). The committed
@@ -65,12 +65,43 @@ addresses (one query per class: Product, ProductFeature, Review, Offer; product 
 address), maps every parameter and prints how many it mapped. An address that maps to nothing stops the run; it is
 never recorded as a 0-row answer. Oxigraph keeps the generator's addresses.
 
-### Valid runs
+### Comparable queries
 
 Run `k` of a query asks both engines the same question, so a query whose row count differs on any run means one
-engine answered something else. A Ythril record is `valid: false` when any query's count differs from the Oxigraph
-record's on any run (a query that errored has no count and differs); `invalidQueries` names each, and `compare.mjs`
-refuses such a record unless `--show-invalid`. The Oxigraph record is the reference and is valid.
+engine answered something else, and its time is not a time for the same work. Each Ythril query is judged on its own
+(`comparability.mjs`) against the Oxigraph record, on every run:
+
+- **comparable**: its row count is Oxigraph's on every run. Only these get a ratio.
+- **not comparable**, with one reason of a fixed list, derived and never typed per query:
+  - `data-not-held`: the query names a predicate the import does not keep and Ythril answered fewer rows on every
+    differing run. The record names the predicates. They are found by counting: `run.mjs` counts, per predicate some
+    query names, the statements the variant holds (`not-taken.mjs`) and asks the instance for its count of that
+    predicate; a predicate the instance holds fewer statements of is not taken (`notTaken` in the record, with both
+    counts). The import's own report gives only a count per reason, not the predicates.
+  - `system-statements`: the query reads a whole record (a DESCRIBE, or a pattern with a variable predicate on a bound
+    subject or object, read from its text by `query-shape.mjs`) and Ythril answered more rows on every differing run:
+    the statements the server adds to every record are counted.
+  - `rows-differ`: any other mismatch, a query that errored included. This is a finding about the engine, not about
+    the data shape, and is reported.
+
+Every query of a Ythril record carries `comparable` and, when it is not, its `reason` (`predicates` for
+`data-not-held`, `differing` for `rows-differ`). The record's `valid` stays, defined as: every query comparable or
+named `data-not-held` or `system-statements`. It is false exactly when a query is `rows-differ`; `invalidQueries`
+names each, and `compare.mjs` refuses such a record unless `--show-invalid`. The Oxigraph record is the reference and
+is valid. A query that is comparable but empty on every run (nothing in the variant matches) is marked in the table:
+its time is the time of an empty answer.
+
+### Limits and the embed queue
+
+The instance's SPARQL limits (`sparql.timeoutMs`, `sparql.maxRecordsRead`, `sparql.maxResults`, read live) bound what
+a query may do, and the defaults (30 s, 200 000 records, 10 000 results) stop the 4 641-product parameter lookup.
+`load.mjs ythril-limits --timeout-ms 300000 --max-records-read 10000000 --max-results 100000` sets them on the scratch
+instance (the server's own ceilings for the first two; refused past them). A Ythril run reads the limits in effect
+from the instance and records all three (`sparqlLimits`); the table header prints them.
+
+A freshly imported space is embedded in the background and that competes with the queries. A Ythril run waits until
+the space's embed queue reports nothing pending or processing, at most `--embed-wait-minutes` (30), then measures
+anyway; the record's `embedQueue` holds the wait in ms, the jobs left and whether it drained.
 
 ### Sizes over the import body bound
 
@@ -129,8 +160,9 @@ of exactly that type, since nothing is forward-chained.
 
 ## What Ythril does not answer like Oxigraph (measured on the 1 000-product run, 2026-11-25)
 
-With the parameters bound, Q1, Q3, Q4, Q5, Q7 and Q8 answer Oxigraph's row counts on every run. The others differ, for
-reasons in the data model and not in the harness, so their records are `valid: false` and name them:
+With the parameters bound, Q1, Q3, Q4, Q5, Q7 and Q8 answered Oxigraph's row counts on every run. The others differ, for
+reasons in the data model and not in the harness; they are the `data-not-held` and `system-statements` queries of the
+section above (the first valid-data run judged them as one whole-record `valid: false`):
 
 - **Statements the import does not hold** (`notTaken: not-inferred`): a literal with a custom datatype
   (`bsbm:price`, `"7956.65"^^bsbm:USD`), an IRI object that is no subject of the file (`bsbm:offerWebpage`,
@@ -140,13 +172,14 @@ reasons in the data model and not in the harness, so their records are `valid: f
   `dcterms:conformsTo`, `prov:wasAttributedTo`, and the name as `rdfs:label` for an unlabelled subject): Q9 (DESCRIBE of
   a reviewer) and Q11 (every property of an offer) count them, so they answer more rows than Oxigraph.
 
-A variant rule that makes the data representable (or a decision that these two queries are not comparable) is for
-the owner of the benchmark; until one exists the tables of a Ythril run open with `INVALID`.
+These queries are not comparable and say why; a variant rule that makes the data representable is for the owner of the
+benchmark.
 
 ## Tests
 
 `stats`, `params`, `queries`, `result-record`, `prepare`, `compare`, `ythril` (the refusal wording), `ythril-params`,
-`chunk`, `answer-rows`, `validity` and `typecap` have `node:test` files next to them. Run them in a container, not on
+`chunk`, `answer-rows`, `validity`, `typecap`, `comparability`, `query-shape`, `not-taken`, `sparql-limits` and
+`embed-wait` have `node:test` files next to them. Run them in a container, not on
 the host, with `node_modules` of an `npm ci` (for `n3`) at the root of what is mounted:
 
 ```text
@@ -164,4 +197,6 @@ docker run --rm -v <checkout>:/w:ro -w /w node:24 sh -c 'node --test benchmarks/
 | `run.mjs` | runs the queries, maps Ythril's parameters, judges validity, writes the record and the table |
 | `compare.mjs` | two records side by side, the queries more than 10x slower marked, invalid records refused |
 | `env.mjs`, `oxigraph.mjs`, `ythril.mjs`, `unzip.mjs` | plumbing: booked docker, the two engines, a zip reader |
+| `comparability.mjs`, `query-shape.mjs`, `not-taken.mjs` | the per-query judge, what a query's text needs, and the predicates the import does not keep (counted) |
+| `sparql-limits.mjs`, `embed-wait.mjs` | the instance's SPARQL limits (read, raised within the server's ceilings) and the bounded wait for the embed queue |
 | `stats.mjs`, `params.mjs`, `queries.mjs`, `result-record.mjs`, `prepare.mjs`, `ythril-params.mjs`, `chunk.mjs`, `answer-rows.mjs`, `validity.mjs`, `typecap.mjs` | the pure parts, each with a test |

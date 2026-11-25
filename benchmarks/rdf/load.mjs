@@ -7,6 +7,7 @@
  *   node benchmarks/rdf/load.mjs oxigraph-down --size 1000
  *   node benchmarks/rdf/load.mjs ythril-up     [--ythril-image <ref>]   a scratch instance (own database)
  *   node benchmarks/rdf/load.mjs ythril        --size 1000       a space with RDF on, then the RDF import door
+ *   node benchmarks/rdf/load.mjs ythril-limits --timeout-ms 300000 --max-records-read 10000000 --max-results 100000
  *   node benchmarks/rdf/load.mjs ythril-down
  *
  * Each step writes `<work>/state/<engine>[-<size>].json`, which `run.mjs` reads: the endpoint, the token for a
@@ -18,7 +19,7 @@ import { join } from 'node:path';
 import { chunkFile } from './chunk.mjs';
 import { parseArgs, variantOf, workDir } from './env.mjs';
 import { oxigraphDown, oxigraphUp, statePath } from './oxigraph.mjs';
-import { createRdfSpace, deleteSpace, loadChunks, loadInto, spaceCounts, ythrilDown, ythrilUp } from './ythril.mjs';
+import { createRdfSpace, deleteSpace, loadChunks, loadInto, setSparqlLimits, spaceCounts, ythrilDown, ythrilUp } from './ythril.mjs';
 
 /** The import door's body bound (`rdf_bound_exceeded`), and the size a chunk is cut to: well under it. */
 const IMPORT_BODY_BOUND = 1024 ** 3;
@@ -47,6 +48,10 @@ async function main() {
       ...(flags['ythril-commit'] ? { commit: String(flags['ythril-commit']) } : {}),
     });
     console.log(`scratch ythril at ${s.url} (${s.image})`);
+  } else if (cmd === 'ythril-limits') {
+    // Raises the SPARQL limits of the scratch instance (read live); the values are refused when the server would refuse them.
+    const asked = { timeoutMs: Number(flags['timeout-ms']), maxRecordsRead: Number(flags['max-records-read']), maxResults: Number(flags['max-results']) };
+    console.log(`sparql limits now: ${JSON.stringify(setSparqlLimits(asked))}`);
   } else if (cmd === 'ythril-down') {
     ythrilDown();
     console.log('scratch ythril removed');
@@ -76,7 +81,7 @@ async function main() {
     if (result.ok) console.log(`ythril ${size}: imported in ${result.loadMs} ms (${JSON.stringify(result.report.kinds)})`);
     else console.log(`ythril ${size}: the import was refused after ${result.loadMs} ms: ${result.status} ${result.code}: ${result.message}; reasons ${JSON.stringify(result.report.reasonsByCode)}`);
   } else {
-    throw new Error('usage: load.mjs oxigraph-up|oxigraph-down|ythril-up|ythril|ythril-down [--size N] [--work dir]');
+    throw new Error('usage: load.mjs oxigraph-up|oxigraph-down|ythril-up|ythril|ythril-limits|ythril-down [--size N] [--work dir]');
   }
 }
 
