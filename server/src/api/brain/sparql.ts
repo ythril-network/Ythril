@@ -140,7 +140,12 @@ async function answer(req: Request, res: Response): Promise<void> {
       return;
     }
     const answered = await answerSparql(input, prepared);
-    if (isRefusal(answered)) { sendRefusal(res, answered); return; }
+    if (isRefusal(answered)) {
+      // A refusal of the run is audited by the counts of the query it ended, with its code as the outcome.
+      if (answered.auditChanges) req.auditChangesExplicit = answered.auditChanges;
+      sendRefusal(res, answered);
+      return;
+    }
     const rendered = renderSparql(prepared, answered.collected);
     if (isRefusal(rendered)) { sendRefusal(res, rendered); return; }
     req.auditChangesExplicit = answered.auditChanges;

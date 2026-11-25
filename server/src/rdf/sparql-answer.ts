@@ -79,9 +79,16 @@ type ResultType = (typeof SPARQL_RESULT_TYPES)[number];
 export const SPARQL_GRAPH_FORMATS: readonly RdfFormat[] = Object.freeze(['turtle', 'nquads', 'jsonld']);
 const JSON_TYPE = 'application/sparql-results+json';
 
-/** A refusal: its status, code and words, a parse error's position, and the wait a 503 tells. */
+/** The audit row's `changes` of a query: counts and the outcome, never the text. */
+export type SparqlAuditChanges = Array<{ field: string; to: string | number | boolean }>;
+
+/**
+ * A refusal: its status, code and words, a parse error's position, and the wait a 503 tells. A refusal of the run itself (a bound, a slot, an
+ * unwritable term) carries the audit changes of the query it ended, with its code as the outcome; a refusal of the parameters has none.
+ */
 export interface SparqlAnswerRefusal {
   status: number; code: string; error: string; line?: number; column?: number; retryAfterSeconds?: number; detail?: Record<string, unknown>;
+  auditChanges?: SparqlAuditChanges;
 }
 
 /** What a door hands the act. */
@@ -144,8 +151,19 @@ export interface SparqlAnswer {
   rows: number;
   recordsRead: number;
   /** The audit row's `changes`. */
-  auditChanges: Array<{ field: string; to: string | number | boolean }>;
+  auditChanges: SparqlAuditChanges;
 }
+
+/** The audit changes of a query on any path: its form, length, member count, records read, rows answered and how it ended. */
+function auditChangesOf(p: PreparedSparql, recordsRead: number, rows: number, outcome: string): SparqlAuditChanges {
+  return [
+    { field: 'form', to: p.form }, { field: 'length', to: p.length }, { field: 'members', to: p.members.length },
+    { field: 'recordsRead', to: recordsRead }, { field: 'rows', to: rows }, { field: 'outcome', to: outcome },
+  ];
+}
+
+/** The outcome of a query that was answered. */
+export const SPARQL_OUTCOME_ANSWERED = 'answered';
 
 const XSD_STRING = 'http://www.w3.org/2001/XMLSchema#string';
 const RDF_LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
@@ -288,19 +306,23 @@ function jsonTerm(t: { termType: string; value: string; language?: string; datat
 /** The answer to a query the door has judged: run once, collected whole up to the bound, in a slot. */
 export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): Promise<SparqlAnswer | SparqlAnswerRefusal> {
   const n = input.spaces.length;
+  let source: ReturnType<typeof createQuadSource> | null = null;
+  /** Every refusal of the run is logged and carries the audit changes of the query it ended: the counts so far, no row answered, its code. */
+  const refuseRun = (r: SparqlAnswerRefusal): SparqlAnswerRefusal => said({ ...r, auditChanges: auditChangesOf(p, source?.recordsRead() ?? 0, 0, r.code) }, n);
   const slot = takeSlot('sparql', input.callerKey);
   if (!slot) {
     const { retryAfterSeconds, instance, perCaller } = SLOT_FAMILIES.sparql;
-    return said(refusal(SPARQL_UNAVAILABLE, SPARQL_BUSY,
+    return refuseRun(refusal(SPARQL_UNAVAILABLE, SPARQL_BUSY,
       `A query is already running for this caller, or as many as the instance runs at once (${instance}, ${perCaller} per caller): try again when it ends`,
-      { retryAfterSeconds }), n);
+      { retryAfterSeconds }));
   }
   let result: SparqlResult | null = null;
   let onAbort: (() => void) | null = null;
   try {
     const { timeoutMs } = sparqlLimits(getConfig());
     const deadline = Date.now() + timeoutMs;
-    const source = createQuadSource({ members: input.spaces, caller: input.caller, fingerprintOf: input.fingerprintOf }, { deadline, ...(input.signal ? { signal: input.signal } : {}) });
+    const made = createQuadSource({ members: input.spaces, caller: input.caller, fingerprintOf: input.fingerprintOf }, { deadline, ...(input.signal ? { signal: input.signal } : {}) });
+    source = made;
     if (input.signal?.aborted) throw new CallerGone();
     result = await runSparql(p.algebra, source, { deadline, ...(input.signal ? { signal: input.signal } : {}) });
     const running = result;
@@ -318,8 +340,8 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
       rows = 1;
     } else {
       if (taken.length > p.bound) {
-        return said(refusal(SPARQL_TOO_LARGE, SPARQL_TOO_MANY_RESULTS,
-          `The answer holds more than ${p.bound} ${p.form === 'select' ? 'rows' : 'statements'} (sparql.maxResults, or the limit you sent), so none of it is answered: narrow the query or add LIMIT`), n);
+        return refuseRun(refusal(SPARQL_TOO_LARGE, SPARQL_TOO_MANY_RESULTS,
+          `The answer holds more than ${p.bound} ${p.form === 'select' ? 'rows' : 'statements'} (sparql.maxResults, or the limit you sent), so none of it is answered: narrow the query or add LIMIT`));
       }
       rows = taken.length;
       if (p.form === 'select') {
@@ -330,24 +352,18 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
         try {
           for (const q of taken) quads.push(fromRdfJs(q as never));
         } catch {
-          return said(unwritable(), n);
+          return refuseRun(unwritable());
         }
         collected = { form: p.form === 'describe' ? 'describe' : 'construct', quads };
       }
     }
-    const recordsRead = source.recordsRead();
-    return {
-      prepared: p, collected, rows, recordsRead,
-      auditChanges: [
-        { field: 'form', to: p.form }, { field: 'length', to: p.length }, { field: 'members', to: p.members.length },
-        { field: 'recordsRead', to: recordsRead }, { field: 'rows', to: rows }, { field: 'outcome', to: 'answered' },
-      ],
-    };
+    const recordsRead = made.recordsRead();
+    return { prepared: p, collected, rows, recordsRead, auditChanges: auditChangesOf(p, recordsRead, rows, SPARQL_OUTCOME_ANSWERED) };
   } catch (err) {
     if (err instanceof CallerGone) throw err;
     const named = sparqlRefusalOf(err);
     if (named) {
-      return said(refusal(named.status, named.code, named.message, named.retryAfterSeconds !== undefined ? { retryAfterSeconds: named.retryAfterSeconds } : {}), n);
+      return refuseRun(refusal(named.status, named.code, named.message, named.retryAfterSeconds !== undefined ? { retryAfterSeconds: named.retryAfterSeconds } : {}));
     }
     if (input.signal?.aborted) throw new CallerGone();
     throw err;

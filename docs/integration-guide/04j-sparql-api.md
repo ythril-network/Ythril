@@ -110,4 +110,6 @@ text, and a `503` adds `retryAfterSeconds` and `Retry-After`.
 ## Audit
 
 Every query is recorded as `brain.sparql_query` ([Audit Log API](13-audit-log-api.md)), whatever `logReads` says: its form, the text's
-length, the members read, the records read, the rows and the outcome, never the text.
+length, the members read, the records read, the rows and the outcome, never the text. A query refused after it ran is recorded by the same counts
+(`rows` 0) with the refusal's code as the outcome; an answered one has the outcome `answered`. An engine error no code names is answered `500` and
+logged by its class only, never its message, which may hold the query.
