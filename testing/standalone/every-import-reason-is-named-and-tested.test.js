@@ -23,7 +23,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { META, BASE } from './_rdf-writer-fixtures.mjs';
-import { fn, reasonTable, reverse, contextFor, assertAccounted, iri, blank, lit, tagged, q, RDF, XSD, SCHEMA_ORG } from './_quads-to-ops-doors.mjs';
+import { fn, reasonTable, reasons, reverse, contextFor, assertAccounted, iri, blank, lit, tagged, q, RDF, XSD, SCHEMA_ORG } from './_quads-to-ops-doors.mjs';
 
 const vocabulary = await import('../../server/dist/rdf/ythril-vocabulary.js');
 const Y = vocabulary.YTHRIL_NS;
@@ -100,7 +100,11 @@ function valuesOf(quads) {
 describe('every import reason is named and tested', () => {
   it('the table and the cases name the same codes', () => {
     const table = reasonTable();
-    assert.deepEqual(Object.keys(table).sort(), Object.keys(CASES).sort(), 'each reason of IMPORT_REASONS has a case here, and each case a reason');
+    // The reasons only a change set answers (`UPDATE_REASONS`, Q-964) join the table and have their cases in the change set's own spec
+    // (a-change-set-becomes-record-writes-or-a-named-reason.test.js), which names every one; the translator of a file never answers them.
+    const ofChangeSets = Object.keys(reasons.UPDATE_REASONS ?? {});
+    assert.deepEqual(Object.keys(table).filter(c => !ofChangeSets.includes(c)).sort(), Object.keys(CASES).sort(), 'each reason of IMPORT_REASONS has a case here, and each case a reason');
+    for (const code of ofChangeSets) assert.ok(table[code], `${code} (a reason of a change set) is a row of IMPORT_REASONS`);
   });
 
   it('every reason refuses in strict and its message names no value', () => {
