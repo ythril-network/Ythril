@@ -283,6 +283,8 @@ const READ_SHAPED_POSTS = [
   // read-only tokens — "watching is a read"), so it must not be blocked for a read-only token.
   '/api/brain/spaces/:spaceId/events/ticket',
   '/api/brain/recall',
+  // Q-757: the SPARQL protocol's POST carries the query text a GET would carry in its URL; it reads.
+  '/api/brain/spaces/:spaceId/sparql',
   '/api/spaces/:id/validate-schema',
   '/api/schema-library/export-space',
   '/api/admin/data/config/test',

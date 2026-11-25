@@ -224,6 +224,11 @@ export const ROUTE_RULES: RouteRule[] = [
   // Q-750: a space's (or a view's) records leaving as RDF are the same act, recorded whatever `logReads` says, with the page's scope, format,
   // counts and left-out values (never the data), through `req.auditChangesExplicit`; MCP `export_rdf` records the same act (`MCP_ACT_OPERATIONS`).
   { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/export\/rdf$/,        operation: 'rdf.export', spaceGroup: 1, writtenWhenCutOff: true },
+  // Q-757: a SPARQL query reads a space's records out as the export does, so it is the same kind of act (r2 R5): recorded whatever `logReads`
+  // says and when cut off, with its form, length, members, records read, rows and outcome through `req.auditChangesExplicit`, never its
+  // text. The POST only carries the text. MCP `sparql_query` records the same act (`MCP_ACT_OPERATIONS`).
+  { method: 'GET',    pattern: /^\/api\/brain\/spaces\/([^/]+)\/sparql$/,             operation: 'brain.sparql_query', spaceGroup: 1, writtenWhenCutOff: true },
+  { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/sparql$/,             operation: 'brain.sparql_query', spaceGroup: 1, writtenWhenCutOff: true },
   // Q-753: an RDF import is one row per request with its counts (never a value of the file), through `req.auditChangesExplicit`; MCP
   // `import_rdf` records the same operation. Its status is a read.
   { method: 'POST',   pattern: /^\/api\/brain\/spaces\/([^/]+)\/import\/rdf$/,        operation: 'rdf.import', spaceGroup: 1 },

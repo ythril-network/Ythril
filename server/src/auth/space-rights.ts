@@ -126,6 +126,10 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/brain/spaces/:spaceId/stats', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   // Q-750: the records as RDF, a data read that takes a view; file statements ask `files: read` per space inside the act.
   { route: '/api/brain/spaces/:spaceId/export/rdf', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
+  // Q-757: a SPARQL query over a space or a view, by the protocol's GET and POST (a read: the POST only carries the text); file statements
+  // ask `files: read` per member inside the act.
+  { route: '/api/brain/spaces/:spaceId/sparql', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
+  { route: '/api/brain/spaces/:spaceId/sparql', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
   // Q-753: an RDF document into the space as ordinary writes, `save_bulk`'s rung; a dry run and the status answer which ids are stored and
   // which values break the schema, so they ask the same rung (amendment A10).
   { route: '/api/brain/spaces/:spaceId/import/rdf', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
@@ -410,6 +414,8 @@ export const TOOL_RIGHTS: readonly ToolRight[] = [
   { tool: 'import_schema_rdf', area: 'schema', needs: 'write' },
   // Q-750: its REST twin's row; file statements ask `files: read` per space inside the act.
   { tool: 'export_rdf', area: 'knowledge', needs: 'read' },
+  // Q-757: its REST twin's rows.
+  { tool: 'sparql_query', area: 'knowledge', needs: 'read' },
   // Q-753: their REST twins' rows.
   { tool: 'import_rdf', area: 'knowledge', needs: 'write' },
   { tool: 'import_rdf_status', area: 'knowledge', needs: 'write' },

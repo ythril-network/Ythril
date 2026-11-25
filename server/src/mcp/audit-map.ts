@@ -89,6 +89,8 @@ export const MCP_TOOL_OPERATIONS: Record<string, string | string[] | null> = {
   file_stamp_report: null,
   // Audited as the act `rdf.export` through `MCP_ACT_OPERATIONS`, every call: a space's records leaving the instance are not a read.
   export_rdf: null,
+  // Audited as the act `brain.sparql_query` through `MCP_ACT_OPERATIONS`, every call, as its REST twin is.
+  sparql_query: null,
   write_file: 'file.create',
   move_file: 'file.update',
   delete_file: 'file.delete',
@@ -273,6 +275,8 @@ export const MCP_ACT_OPERATIONS: Readonly<Record<string, string>> = {
   file_stamp_report: 'file.stamps.reported',
   // Q-750: a space's records leaving as RDF, an act on both doors (the route's rule carries no `read: true`).
   export_rdf: 'rdf.export',
+  // Q-757: a space's records read out by a query, an act on both doors (the route's rule carries no `read: true`).
+  sparql_query: 'brain.sparql_query',
 };
 
 /** The act a non-mutating tool's call is recorded as (always, never gated by `logReads`), or `null` when it is not one. */
