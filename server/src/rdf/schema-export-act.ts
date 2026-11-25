@@ -94,8 +94,12 @@ function aboutTermWhole(quads: readonly Quad[], term: string): Quad[] {
   };
   for (const q of quads) if (q.subject.kind === 'iri' && aboutTerm(q.subject.value, term)) reach(q);
   const bySubject = new Map<string, Quad[]>();
-  for (const q of quads) if (q.subject.kind === 'blank') bySubject.set(q.subject.id, [...(bySubject.get(q.subject.id) ?? []), q]);
-  for (let id = queue.shift(); id !== undefined; id = queue.shift()) for (const q of bySubject.get(id) ?? []) reach(q);
+  for (const q of quads) {
+    if (q.subject.kind !== 'blank') continue;
+    const held = bySubject.get(q.subject.id);
+    if (held) held.push(q); else bySubject.set(q.subject.id, [q]);
+  }
+  for (let i = 0; i < queue.length; i++) for (const q of bySubject.get(queue[i]!) ?? []) reach(q);
   return quads.filter(q => (q.subject.kind === 'iri' ? aboutTerm(q.subject.value, term) : reached.has(q.subject.id)));
 }
 
