@@ -27,11 +27,14 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
-import { openQuadSourceFixture, A, B, FILE_PATH, baseOf, quadText, patternOf, drain } from './_quad-source-fixture.mjs';
+import { openQuadSourceFixture, A, B, AGENT_ID, FILE_PATH, baseOf, quadText, patternOf, drain } from './_quad-source-fixture.mjs';
 
 const skip = await mongoSkipReason();
 const MASKS = [...Array(16).keys()];
 const YTHRIL_PATH = 'https://w3id.org/ythril/ns#path';
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+const PROV_AGENT = 'http://www.w3.org/ns/prov#Agent';
+const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
 
 let fx, quadSource;
 /** The records each full run read: the narrowed one and the walk. */
@@ -43,6 +46,7 @@ async function judge(make, oracle) {
   const allowed = new Set(oracle.map(quadText));
   const misses = [];
   const extras = new Set();
+  const twice = new Set();
   let read = 0;
   for (const q of oracle) {
     for (const mask of MASKS) {
@@ -50,11 +54,13 @@ async function judge(make, oracle) {
       const got = await drain(source.match(...patternOf(q, mask)));
       read += source.recordsRead();
       const texts = new Set(got.map(quadText));
+      // Counted, not compared as a set: a statement answered twice is one in a set (S1 review m3).
+      if (got.length !== texts.size) twice.add(`mask ${mask.toString(2).padStart(4, '0')}: ${got.map(quadText).find((t, i, all) => all.indexOf(t) !== i)}`);
       if (!texts.has(quadText(q))) misses.push(`mask ${mask.toString(2).padStart(4, '0')}: ${quadText(q)}`);
       for (const t of texts) if (!allowed.has(t)) extras.add(t);
     }
   }
-  return { misses, extras: [...extras], read };
+  return { misses, extras: [...extras], twice: [...twice], read };
 }
 
 describe('a quad pattern answers what the export writes, no more and no less', { skip }, () => {
@@ -74,13 +80,31 @@ describe('a quad pattern answers what the export writes, no more and no less', {
     assert.ok(!texts.some(t => t.includes('fork-1') || t.includes('old.txt')), 'the export carries a fork row or a deleted file');
   });
 
+  it('an agent is typed once per space, however many labels its records carry, in the export and in the source (S1 review m3)', async () => {
+    const { createQuadSource } = needModule(quadSource, ['createQuadSource'], 'the quad source');
+    const isAgentType = (q) => q.predicate.value === RDF_TYPE && q.object.value === PROV_AGENT && q.subject.value.endsWith(`/agent/${AGENT_ID}`);
+    const typed = fx.exported.filter(isAgentType);
+    assert.deepEqual(typed.map(q => q.graph.value).sort(), [baseOf(A), baseOf(B)], `the export types the agent once per space: ${typed.map(quadText).join(' | ')}`);
+    const labelsOf = (quads) => quads.filter(q => q.predicate.value === RDFS_LABEL && q.graph.value === baseOf(A) && q.subject.value === typed.find(t => t.graph.value === baseOf(A)).subject.value).map(q => q.object.value).sort();
+    assert.deepEqual(labelsOf(fx.exported), ['Agent one', 'Agent two'], 'the agent\'s labels are each written once');
+    for (const narrow of [true, false]) {
+      const source = createQuadSource({ members: [A, B], caller: fx.reader }, { deadline: Date.now() + 60_000, narrow });
+      const got = (await drain(source.match(undefined, { termType: 'NamedNode', value: RDF_TYPE }, { termType: 'NamedNode', value: PROV_AGENT }, undefined))).filter(isAgentType);
+      assert.deepEqual(got.map(q => q.graph.value).sort(), [baseOf(A), baseOf(B)], `narrow ${narrow}: ${got.map(quadText).join(' | ')}`);
+      const all = await drain(createQuadSource({ members: [A], caller: fx.reader }, { deadline: Date.now() + 60_000, narrow }).match(typed.find(t => t.graph.value === baseOf(A)).subject, undefined, undefined, undefined));
+      assert.deepEqual(labelsOf(all), ['Agent one', 'Agent two'], `narrow ${narrow}: the agent's labels`);
+      assert.equal(all.filter(isAgentType).length, 1, `narrow ${narrow}: the agent's own statements carry its type once`);
+    }
+  });
+
   for (const narrow of [true, false]) {
     it(`with narrowing ${narrow ? 'on' : 'off (the walk)'}: every statement under all 16 patterns, and nothing the export does not write`, async () => {
       const { createQuadSource } = needModule(quadSource, ['createQuadSource'], 'the quad source');
       const make = () => createQuadSource({ members: [A, B], caller: fx.reader }, { deadline: Date.now() + 60_000, narrow });
-      const { misses, extras, read } = await judge(make, fx.exported);
+      const { misses, extras, twice, read } = await judge(make, fx.exported);
       assert.deepEqual(misses.slice(0, 20), [], `${misses.length} of ${fx.exported.length * 16} patterns miss their statement`);
       assert.deepEqual(extras.slice(0, 20), [], `${extras.length} statements answered that the export does not write`);
+      assert.deepEqual(twice.slice(0, 20), [], `${twice.length} patterns answer a statement twice`);
       (narrow ? reads : walks).push(read);
     });
   }

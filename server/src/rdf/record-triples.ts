@@ -234,11 +234,17 @@ class Form {
       const label = isText(author['instanceLabel']) ? author['instanceLabel'] : null;
       const agent = iri(agentIri(this.meta, id));
       this.add(subject, stdIri('prov', 'wasAttributedTo'), agent);
-      const key = JSON.stringify([id, label]);
-      if (!this.opts.agentsSeen?.has(key)) {
-        this.opts.agentsSeen?.add(key);
+      // The type is stated once per agent id; each label once per (agent, label): one agent under two labels is one Agent with two labels.
+      const seen = this.opts.agentsSeen;
+      const typeKey = JSON.stringify([id]);
+      if (!seen?.has(typeKey)) {
+        seen?.add(typeKey);
         this.add(agent, TYPE(), stdIri('prov', 'Agent'));
-        if (label !== null) this.add(agent, stdIri('rdfs', 'label'), plain(label));
+      }
+      const labelKey = JSON.stringify([id, label]);
+      if (label !== null && !seen?.has(labelKey)) {
+        seen?.add(labelKey);
+        this.add(agent, stdIri('rdfs', 'label'), plain(label));
       }
     }
     if (d['superseded'] === true) this.add(subject, iri(ythrilIri('superseded')), literalForBoolean(true));
