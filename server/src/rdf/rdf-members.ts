@@ -1,0 +1,81 @@
+/**
+ * The members of an RDF read, each with the state its records are read in: which of the spaces a caller reads can be read as RDF, under
+ * which names, with which rights, and through which row filter (bundle-271, Q-756; design r2 R1.1, R1.2). The records export, the quad
+ * source and the Linked Data addresses ask it, so the three read one scope alike.
+ *
+ * ## What it prevents
+ *
+ * - **A read that shows file statements to a token without `files: read`.** `files` is decided here, per member, once; a reader that walks
+ *   the file kind asks it, so no door can forget the right.
+ * - **A member read under unsettled names.** A member with RDF off, a contested or shared base, a term clash or an address no document can
+ *   carry is left out and named with the code and status the export answers for it, never read under names that are not its own.
+ * - **A row that is not a record read as one.** {@link rdfRowFilter} is the filter every reader applies to a kind's collection: a file row
+ *   that is a chunk, a deleted file or a feed marker is no file (the mapper refuses it too, so a reader that forgets it reads more, never
+ *   more statements).
+ */
+import type { SpaceMeta } from '@ythril-network/schema';
+import { getConfig } from '../config/loader.js';
+import { mayReadArea } from '../auth/reachable-spaces.js';
+import { LIVE_FILE_ROW, NOT_A_FEED_MARKER } from '../files/live-file-row.js';
+import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
+import type { RdfRecordKind } from './record-triples.js';
+import { rdfSpaceState, type RdfCaller, type FingerprintOf } from './rdf-space-state.js';
+import type { EXPORT_CONFLICT } from '../export/export-statuses.js';
+import type { BrainCollection } from '../config/types-knowledge.js';
+
+/** One member read as RDF: its space, its resolved meta, its schema fingerprint, and whether the caller reads its files. */
+export interface RdfMember {
+  space: string;
+  meta: SpaceMeta;
+  fingerprint: string;
+  /** The caller holds `files: read` here: without it the file kind is never read. */
+  files: boolean;
+}
+
+/** A member the caller reads that is not read as RDF, with the refusal the export answers for it alone. */
+export interface RdfMemberLeftOut {
+  space: string;
+  code: string;
+  status: typeof EXPORT_CONFLICT;
+  error: string;
+  detail?: Record<string, unknown>;
+}
+
+/** The members of a read, in the order given, and the ones left out. */
+export interface RdfMembers { members: RdfMember[]; leftOut: RdfMemberLeftOut[] }
+
+/**
+ * The members of `spaces` (the spaces the caller's guard accepted: one space, or a view's readable members) as RDF, for `caller`.
+ * `fingerprintOf` is the door's schema fingerprint (`rdf-space-state.ts` says why it is handed in); the stamp's own by default.
+ */
+export function rdfMembers(spaces: readonly string[], caller: RdfCaller | undefined, fingerprintOf: FingerprintOf = schemaFingerprintOf): RdfMembers {
+  const cfg = getConfig();
+  const rights = caller?.rights ?? undefined;
+  const members: RdfMember[] = [];
+  const leftOut: RdfMemberLeftOut[] = [];
+  for (const space of spaces) {
+    const state = rdfSpaceState(cfg, space, caller, fingerprintOf);
+    if (state.ok) {
+      members.push({ space, meta: state.meta, fingerprint: state.fingerprint, files: mayReadArea(rights, space, 'files') });
+      continue;
+    }
+    leftOut.push({ space, code: state.code, status: state.status, error: state.error, ...(state.detail ? { detail: state.detail } : {}) });
+  }
+  return { members, leftOut };
+}
+
+/** The kinds a member's records are read in, in walk order, each with its collection. */
+export const RDF_KIND_COLLECTIONS: ReadonlyArray<{ readonly kind: RdfRecordKind; readonly collection: BrainCollection }> = Object.freeze([
+  { kind: 'entity', collection: 'entities' }, { kind: 'fact', collection: 'facts' }, { kind: 'chrono', collection: 'chrono' },
+  { kind: 'edge', collection: 'edges' }, { kind: 'link', collection: 'links' }, { kind: 'file', collection: 'files' },
+] as const);
+
+/** The collection the records of `kind` live in. */
+export function rdfKindCollection(kind: RdfRecordKind): BrainCollection {
+  return RDF_KIND_COLLECTIONS.find(w => w.kind === kind)!.collection;
+}
+
+/** The filter every reader applies to the collection of `kind`: a file row must be a live file, not a chunk, a deleted file or a feed marker. */
+export function rdfRowFilter(kind: RdfRecordKind): Record<string, unknown> {
+  return kind === 'file' ? { ...LIVE_FILE_ROW, ...NOT_A_FEED_MARKER } : {};
+}

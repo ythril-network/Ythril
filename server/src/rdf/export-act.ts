@@ -30,11 +30,9 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { SpaceMeta } from '@ythril-network/schema';
 import { getConfig } from '../config/loader.js';
-import { mayReadArea } from '../auth/reachable-spaces.js';
 import { idKeysetPage, type IdPage, type IdPageSpec } from '../db/id-keyset-page.js';
 import { spaceCollection } from '../db/space-collection.js';
-import type { BrainCollection } from '../config/types-knowledge.js';
-import { LIVE_FILE_ROW, NOT_A_FEED_MARKER } from '../files/live-file-row.js';
+import { RDF_KIND_COLLECTIONS, rdfMembers, rdfRowFilter } from './rdf-members.js';
 import { budgetCeilingZ, defaultBudgetChars, queryInt, resolveBudget, budgetBoundBy, type ResolvedBudget } from '../brain/result-budget.js';
 import { storeFailureAnswer } from '../brain/store-failure.js';
 import { log, refusalOfParse, peerText, NAME_QUOTED } from '../util/log.js';
@@ -50,7 +48,7 @@ import { graphIri, prefixesFor, recordAddressable, recordIri, versionIri } from 
 import { createRdfWriter, rdfVersionOf, RdfWriteError, type RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES, RDF_BAD_FORMAT } from './export-format.js';
 import {
-  rdfSpaceState, RDF_BASE_SHARED, RDF_NOT_ENABLED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
+  RDF_BASE_SHARED, RDF_NOT_ENABLED, RDF_UNWRITABLE, RdfUnwritable, unwritableRefusal, type RdfCaller, type FingerprintOf,
 } from './rdf-space-state.js';
 import { ythrilIri } from './ythril-vocabulary.js';
 import { MIN_TRANSFER_BYTES_PER_SECOND } from '../util/pace-window.js';
@@ -117,11 +115,8 @@ const FIELD_CODES: Readonly<Record<string, string>> = {
   edgeDetails: RDF_BAD_EDGE_DETAILS, after: RDF_BAD_AFTER, limit: RDF_BAD_LIMIT, maxChars: RDF_BAD_BUDGET, maxBytes: RDF_BAD_BUDGET, maxTokens: RDF_BAD_BUDGET,
 };
 
-/** The kinds a member is walked in, each with its collection. */
-const WALK: ReadonlyArray<{ kind: RdfRecordKind; collection: BrainCollection }> = [
-  { kind: 'entity', collection: 'entities' }, { kind: 'fact', collection: 'facts' }, { kind: 'chrono', collection: 'chrono' },
-  { kind: 'edge', collection: 'edges' }, { kind: 'link', collection: 'links' }, { kind: 'file', collection: 'files' },
-];
+/** The kinds a member is walked in, each with its collection (`rdf-members.ts`, shared with the quad source). */
+const WALK = RDF_KIND_COLLECTIONS;
 
 /** The words of each reason a value is left out, in the closing comment and the report node. */
 const REASON_WORDS: Readonly<Record<LeftOutReason, string>> = {
@@ -368,7 +363,6 @@ export async function rdfExportAct(input: RdfExportInput): Promise<RdfExportOutc
 /** The parameters, the scope's members, the format and the bounds of an export, or the refusal a caller gets for them. */
 function prepareExport(input: Omit<RdfExportInput, 'whole'>): PreparedExport | RdfExportRefusal {
   const { spaceId, caller, transport } = input;
-  const rights = caller?.rights ?? undefined;
   const parsed = RdfExportParams.safeParse(paramsOf(input.params));
   if (!parsed.success) {
     const refusal = refusalOfParse(parsed.error);
@@ -379,19 +373,13 @@ function prepareExport(input: Omit<RdfExportInput, 'whole'>): PreparedExport | R
   // answer a token without it with their 403, which is the refusal a caller gets (bundle-269 review, suspicion a: a code of this act's own
   // there was never reached).
   const view = input.viewMembers !== undefined;
-  const cfg = getConfig();
-  const members = view ? [...input.viewMembers!] : [spaceId];
-  const exported: { space: string; meta: SpaceMeta; fingerprint: string }[] = [];
-  const withoutRdf: string[] = [];
-  const inConflict: string[] = [];
-  let firstRefusal: RdfExportRefusal | null = null;
-  for (const m of members) {
-    const state = rdfSpaceState(cfg, m, caller, input.fingerprintOf);
-    if (state.ok) { exported.push({ space: m, meta: state.meta, fingerprint: state.fingerprint }); continue; }
-    firstRefusal ??= { status: state.status, error: state.error, code: state.code, ...(state.detail ? { detail: state.detail } : {}) };
-    (state.code === RDF_NOT_ENABLED ? withoutRdf : inConflict).push(m);
-  }
-  if (firstRefusal && exported.length === 0) return firstRefusal;
+  const scope = rdfMembers(view ? [...input.viewMembers!] : [spaceId], caller, input.fingerprintOf);
+  const exported = scope.members.map(({ space, meta, fingerprint }) => ({ space, meta, fingerprint }));
+  const readsFiles = new Set(scope.members.filter(m => m.files).map(m => m.space));
+  const withoutRdf = scope.leftOut.filter(l => l.code === RDF_NOT_ENABLED).map(l => l.space);
+  const inConflict = scope.leftOut.filter(l => l.code !== RDF_NOT_ENABLED).map(l => l.space);
+  const first = scope.leftOut[0];
+  if (first && exported.length === 0) return { status: first.status, error: first.error, code: first.code, ...(first.detail ? { detail: first.detail } : {}) };
 
   const choice = chooseRdfFormat({ format: parsed.data.format, accept: input.accept, members: exported.length });
   if (!choice.ok) return { status: choice.status, error: choice.error, code: choice.code, detail: { formats: choice.formats } };
@@ -408,7 +396,7 @@ function prepareExport(input: Omit<RdfExportInput, 'whole'>): PreparedExport | R
   if (!resolved.ok) return { status: EXPORT_BAD_REQUEST, error: resolved.error, code: RDF_BAD_BUDGET };
   return {
     exported, withoutRdf, inConflict, format, edgeDetails, cursor, budget: resolved, limit: parsed.data.limit,
-    after: parsed.data.after, files: (m) => mayReadArea(rights, m, 'files'), view,
+    after: parsed.data.after, files: (m) => readsFiles.has(m), view,
   };
 }
 
@@ -460,7 +448,7 @@ async function anyAfter(p: PageInput, from: Cursor): Promise<boolean> {
   }
 }
 
-const filterOf = (kind: RdfRecordKind): Record<string, unknown> => (kind === 'file' ? { ...LIVE_FILE_ROW, ...NOT_A_FEED_MARKER } : {});
+const filterOf = rdfRowFilter;
 const projectionOf = (kind: RdfRecordKind): Record<string, 1> => Object.fromEntries(RDF_READ_FIELDS[kind].map(f => [f, 1 as const]));
 
 /** One member of the scope, with the names its records are built from. */
