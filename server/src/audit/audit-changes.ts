@@ -143,6 +143,8 @@ export const AUDIT_CHANGE_FIELDS: Readonly<Record<string, readonly string[]>> = 
   // Q-757: what a SPARQL query did, never its text: the form, the text's length in bytes, the members read, the records read, the rows (or
   // statements) answered and the outcome; `complete: false` when the client went away first.
   'brain.sparql_query': ['form', 'length', 'members', 'recordsRead', 'rows', 'outcome', 'complete'],
+  // Q-758: a Linked Data read names its kind and counts; the address is never a field.
+  'ld.read': ['kind', 'statements', 'truncated'],
   'schema.rdf.export': ['format', 'fingerprint', 'leftOut'],
   // Q-754: what a schema build from an RDF file did, never a value of the file: whether it was a dry run, the format and mode, the file's
   // statements, how many were taken and not, and the types added and changed. The type, property and rule names of a build are the schema

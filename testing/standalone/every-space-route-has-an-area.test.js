@@ -29,27 +29,15 @@ import { SPACE_AREAS } from '../../server/dist/config/rights-shape.js';
 import { rungFor } from '../../server/dist/auth/required-rung.js';
 import { stripComments } from './_strip-comments.mjs';
 import { trackedSources, SERVER_CODE_ROOTS } from './_sources.mjs';
-import { bodyOf, argumentsOf } from './_structural-window.mjs';
+import { argumentsOf } from './_structural-window.mjs';
+// The exported guards that ask the area rung, derived from the module that defines them (shared with the gate for routes outside `/api`).
+import { areaGuards } from './_area-guards.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = process.cwd();
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 
-/**
- * The exported guards that ask the area rung, DERIVED from the module that defines them: every exported function whose body calls
- * `enforceAreaRung(`, and every exported const bound to one of those (`requireSpaceAuth = requireSpaceAuthScoped('spaceId')`). A list
- * written here would miss the next guard, which is exactly the route this walk exists to see.
- */
-function areaGuards() {
-  const src = stripComments(read('server/src/auth/middleware.ts'));
-  const names = new Set();
-  for (const m of src.matchAll(/^export (?:async )?function (\w+)\s*\(/gm)) {
-    if (/\benforceAreaRung\(/.test(bodyOf(src, m[1]))) names.add(m[1]);
-  }
-  for (const m of src.matchAll(/^export const (\w+)\s*=\s*(\w+)\(/gm)) if (names.has(m[2])) names.add(m[1]);
-  return names;
-}
 
 /** Express runs a GET route for a HEAD (the body is left out), so a GET route answers both; every other route answers its own verb. */
 const methodsAnswered = (method) => (method === 'GET' ? ['GET', 'HEAD'] : [method]);
@@ -67,7 +55,9 @@ const INVENTORY = 'server/src/auth/space-rights.ts';
  *   by taking one in the path — the reason `scope` exists on a `RouteRight` at all), the spaces router (some routes address the
  *   COLLECTION, `GET /api/spaces`, and are exempted with reasons, not left unasked), the networks router (a network carries spaces),
  *   the personal views and webhooks routers (each names spaces and is owner- or instance-scoped, exempted with a reason);
- * - the tool door, `POST /api/:tool`, whose space is a BODY parameter (see `TOOL_DOOR`).
+ * - the tool door, `POST /api/:tool`, whose space is a BODY parameter (see `TOOL_DOOR`);
+ * - the Linked Data addresses, `/ld` (bundle-271, Q-758): every route there reads a space, the one whose base holds the address, and its
+ *   rows are `scope: 'resolved'`. A route that names no `:spaceId` under it would otherwise be out of this gate's view.
  *
  * A route outside these mounts is space-scoped too when it NAMES a space in its path (`:spaceId`): that is how the instance-admin
  * doors on the app itself (`/api/admin/spaces/:spaceId/wipe`, `/export`, `/import`) were in no gate's view — this file scanned
@@ -75,7 +65,7 @@ const INVENTORY = 'server/src/auth/space-rights.ts';
  */
 const SPACE_MOUNTS = [
   '/api/brain', '/api/files', '/api/duplicates', '/api/contradictions', '/api/conflicts', '/api/spaces', '/api/networks',
-  '/api/views', '/api/admin/views', '/api/admin/webhooks',
+  '/api/views', '/api/admin/views', '/api/admin/webhooks', '/ld',
 ];
 
 /**
@@ -143,7 +133,8 @@ describe('every space-scoped route is classified', () => {
     assert.ok(found.size >= 100, `expected the space routers to yield many routes, found ${found.size}`);
     assert.ok([...found].some(r => r.includes(':spaceId')), 'no :spaceId route found — re-point SPACE_MOUNTS');
     // A whole KIND of registration a scan can stop seeing, which a count cannot tell: the routes declared on the app, by their space param.
-    for (const r of ['POST /api/admin/spaces/:spaceId/wipe', 'GET /api/admin/spaces/:spaceId/export', 'POST /api/admin/spaces/:spaceId/import']) {
+    // And the Linked Data addresses, outside `/api` (Q-758).
+    for (const r of ['POST /api/admin/spaces/:spaceId/wipe', 'GET /api/admin/spaces/:spaceId/export', 'POST /api/admin/spaces/:spaceId/import', 'GET /ld/:spaceId/:kind/:id']) {
       assert.ok(found.has(r), `${r} is a route that names a space and was not derived`);
     }
   });

@@ -13,6 +13,10 @@
  *   uses is neither declared nor named. The version address it writes is the one each records export names as its shapes graph. No
  *   standard term states the reverse (which data graphs a shapes graph checks), so none is written.
  * - **A silent drop.** A schema value the graph leaves out (`SchemaLeftOut`) is named in the closing comment and the summary.
+ * - **A second site that builds or writes a schema graph** (bundle-271, Q-758, r2 R1.4 [M3]). The Linked Data addresses of a schema version
+ *   (`/ld/<space>/schema/<fp>`) and of a vocabulary term (`/ld/<space>/vocab/...`) are answered by this act: `version` builds the graph of a
+ *   held version (its types and rules, under the space's current RDF names) in place of the current one, `term` keeps only the statements
+ *   about that term (its address, and its properties' `<address>#...`), and `formats` names the formats the door offers.
  */
 import { z } from 'zod';
 import { refusalOfParse } from '../util/log.js';
@@ -44,23 +48,40 @@ export interface RdfSchemaSummary {
 }
 
 export type RdfSchemaOutcome =
-  | { status: typeof EXPORT_OK; text: string; summary: RdfSchemaSummary; contentType: string; disposition: string; auditChanges: Array<{ field: string; to: string | number }> }
+  | {
+    status: typeof EXPORT_OK; text: string; summary: RdfSchemaSummary; contentType: string; disposition: string;
+    auditChanges: Array<{ field: string; to: string | number }>;
+    /** The statements written (after `term` kept its own). */
+    statements: number;
+  }
   | { status: typeof EXPORT_BAD_REQUEST | typeof EXPORT_NOT_ACCEPTABLE | typeof EXPORT_CONFLICT; error: string; code: string; detail?: Record<string, unknown> };
 
-/** Export the schema of `spaceId`. */
+/** A held schema version: its fingerprint and the schema it holds (`versionMetaOf`), built under the space's current RDF names. */
+export interface SchemaVersionInput { fingerprint: string; typeSchemas: Record<string, unknown>; rules: Record<string, unknown> }
+
+/** Does `subject` speak about the term at `term`: the term itself, or one of its properties (`<term>#<prop>`)? */
+const aboutTerm = (subject: string, term: string): boolean => subject === term || subject.startsWith(`${term}#`);
+
+/** Export the schema of `spaceId`: the current one, or the held `version`; whole, or only the statements about `term`. */
 export function rdfSchemaExportAct(input: {
   spaceId: string; format?: unknown; accept?: string | undefined; caller: RdfCaller | undefined; fingerprintOf: FingerprintOf;
+  version?: SchemaVersionInput; term?: string; formats?: readonly RdfFormat[];
 }): RdfSchemaOutcome {
   // The rung (`schema: read`) is asked before this act on every door: the route's guard and the dispatcher answer a token without it.
   const { spaceId, caller } = input;
   const parsed = RdfSchemaParams.safeParse({ format: input.format });
   if (!parsed.success) return { status: EXPORT_BAD_REQUEST, error: refusalOfParse(parsed.error).error, code: RDF_BAD_FORMAT };
-  const choice = chooseRdfFormat({ format: parsed.data.format, accept: input.accept, members: 1, offered: RDF_SCHEMA_FORMATS });
+  const choice = chooseRdfFormat({ format: parsed.data.format, accept: input.accept, members: 1, offered: input.formats ?? RDF_SCHEMA_FORMATS });
   if (!choice.ok) return { status: choice.status, error: choice.error, code: choice.code, detail: { formats: choice.formats } };
   const cfg = getConfig();
   const state = rdfSpaceState(cfg, spaceId, caller, input.fingerprintOf);
   if (!state.ok) return { status: state.status, error: state.error, code: state.code, ...(state.detail ? { detail: state.detail } : {}) };
-  const graph = schemaGraph(state.meta, state.fingerprint, { namespaces: Object.values(cfg.schemaLibraryNamespaces ?? {}) });
+  const meta = input.version ? { ...state.meta, typeSchemas: input.version.typeSchemas, rules: input.version.rules } as typeof state.meta : state.meta;
+  const fingerprint = input.version?.fingerprint ?? state.fingerprint;
+  const whole = schemaGraph(meta, fingerprint, { namespaces: Object.values(cfg.schemaLibraryNamespaces ?? {}) });
+  const term = input.term;
+  const graph = term === undefined ? whole
+    : { ...whole, quads: whole.quads.filter(q => q.subject.kind === 'iri' && aboutTerm(q.subject.value, term)) };
   const comment = graph.leftOut.length === 0 ? undefined
     : `ythril-schema-export: ${graph.leftOut.length} schema values left out: ${graph.leftOut.map(l => `${l.where} ${l.field} (${l.reason})`).join(', ')}`;
   let writer: ReturnType<typeof createRdfWriter>;
@@ -74,12 +95,13 @@ export function rdfSchemaExportAct(input: {
   }
   const summary: RdfSchemaSummary = {
     space: spaceId, format: choice.format, mediaType: RDF_MEDIA_TYPES[choice.format], ontology: graph.ontology, version: graph.version,
-    fingerprint: state.fingerprint, leftOut: graph.leftOut,
+    fingerprint, leftOut: graph.leftOut,
   };
   return {
     status: EXPORT_OK, text, summary,
     contentType: rdfContentType(choice.format, writer.version),
     disposition: rdfContentDisposition(spaceId, choice.format, '-schema'),
-    auditChanges: [{ field: 'format', to: choice.format }, { field: 'fingerprint', to: state.fingerprint }, { field: 'leftOut', to: graph.leftOut.length }],
+    auditChanges: [{ field: 'format', to: choice.format }, { field: 'fingerprint', to: fingerprint }, { field: 'leftOut', to: graph.leftOut.length }],
+    statements: graph.quads.length,
   };
 }

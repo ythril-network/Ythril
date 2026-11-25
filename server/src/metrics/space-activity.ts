@@ -207,6 +207,9 @@ export function classifyOperation(operation: string): CallClass | null {
   // who converts blind.
   if (/\.(list|get|stats|er_model|traverse|export|search|validate|cascade_preview|convert_preflight)$/.test(operation)) return 'read';
 
+  // A Linked Data address read (Q-758) reads a record as `entity.get` does.
+  if (operation === 'ld.read') return 'read';
+
   // Anything unrecognised counts as nothing rather than guessing. `space-activity-classes.test.js` enumerates
   // every operation the audit middleware defines and fails on one that lands here undeclared, so a new route
   // cannot become invisible by accident — it has to be added to the deny-list on purpose.

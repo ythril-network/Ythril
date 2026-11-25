@@ -276,4 +276,28 @@ The base is set once: a different `base` or `vocab` answers `409 rdf_base_frozen
 
 ## Record addresses
 
-Every address an export writes is a name under the space's base, by default `<public url>/ld/<space>/`. Ythril does not resolve these addresses yet: a request for one answers `404` with a problem body (`application/problem+json`) that says where the export is, never the web app. Choose a persistent base (a w3id.org or purl.org address, or a domain of your own) when you first switch RDF on, because others keep the addresses an export gives out.
+Every address an export writes is a name under the space's base, by default `<public url>/ld/<space>/`. Addresses under the default base only resolve: Ythril answers a request for `<public url>/ld/...` and nothing else, so a space whose base is elsewhere (a w3id.org address, a domain of your own) is resolved by whatever serves that base, typically a redirect to this instance's export. Choose a persistent base when you first switch RDF on, because others keep the addresses an export gives out.
+
+The address resolves by its base, never by the space id in the path: the instance's public URL followed by the request path is read against the bases of the spaces with RDF on, and the space whose base holds it is read, with that space's rights. A renamed space keeps its base, so its records are still at the old id's addresses; a space that holds `<public url>/ld/<other>/` as its base answers there.
+
+| Address | Rights on the space whose base holds it | Answer |
+|---|---|---|
+| `<base>entity/<id>`, `fact/<id>`, `chrono/<id>`, `edge/<id>` | `knowledge: read` | the record's statements (a chrono entry's `#start` and `#end` time nodes with it), then the statements pointing at it |
+| `<base>file/<path>` | `knowledge: read` and `files: read` | the file's, likewise |
+| `<base>agent/<instance id>` | `knowledge: read` | the statements about the instance that wrote records |
+| `<base>schema/<fingerprint>` | `schema: read` | that schema version as OWL and SHACL (a peer-bound token has only the versions the sync door serves it) |
+| `<base>vocab/<kind>/<type>` (and any other term under the vocab) | `schema: read` | the term's statements in the current schema, its properties' (`#<property>`) with it |
+
+A machine read sends `Authorization: Bearer <token>` and picks the format by `Accept`: Turtle (the default), N-Quads or JSON-LD (an edge's statements hold a triple term, which JSON-LD cannot carry: `409 rdf_unwritable`). The statements are in the default graph. Every answer says `Vary: Accept`. A browser (an `Accept` that prefers `text/html`) is sent on before any token is asked: `303 See Other` to `/brain?space=<id in the path>&tab=<the kind's tab>`, reading nothing. A record's answer holds at most `sparql.maxResults` statements: its own first, then the pointing ones up to the cap, with `X-Ythril-Truncated: inbound` when the cap or the read bound (`sparql.maxRecordsRead`) cut them. A read takes a query slot (`sparql`, as a SPARQL query does) and is audited as `ld.read` ([Audit Log](13-audit-log-api.md)), a read.
+
+Every refusal is a problem body (`application/problem+json`, RFC 9457) with a `code`, except `401` (no token, or one not valid), which is the server's own:
+
+| Status | Code | When |
+|---|---|---|
+| 404 | `ld_not_found` | No space's base holds the address, the token has no read on that space, the record is not there, a file without `files: read`, or any other path under `/ld/`: one answer, byte for byte |
+| 406 | `rdf_format_not_acceptable` | `Accept` names none of the formats |
+| 409 | `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_term_clash`, `rdf_unwritable` | The space's RDF names are not settled, or a term no document of the format can carry |
+| 413 | `sparql_too_many_results` | The address has more statements of its own than `sparql.maxResults` |
+| 413 | `sparql_too_much_read` | Reading its own statements passed `sparql.maxRecordsRead` (an agent's are read over every record) |
+| 503 | `sparql_timeout`, `sparql_store_unavailable` | The read passed `sparql.timeoutMs`, or the store failed; `Retry-After` |
+| 503 | `sparql_busy` | As many reads and queries run as the instance or this token may run at once; `Retry-After` |

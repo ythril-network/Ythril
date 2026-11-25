@@ -28,6 +28,7 @@ import { argumentsOf } from './_structural-window.mjs';
 import { routerMounts } from './_router-mounts.mjs';
 import { mountedRoutes } from './_routes.mjs';
 import { stripComments } from './_strip-comments.mjs';
+import { resolvedRungGuards } from './_area-guards.mjs';
 import fs from 'node:fs';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -516,6 +517,9 @@ describe('Route guards — every mutating route must be protected', () => {
       const chain = effectiveChain(r);
       if (chain.includes('requireSpaceAuth') || chain.includes('requireAdminMfaScoped')) continue;
       if (chain.includes('requireAdmin')) continue; // full admin — not space-scoped by design
+      // A Linked Data address (Q-758) reads the space whose BASE holds it, not the one its `:spaceId` names: its scope is the file's own
+      // guard that asks the rights row of that resolved space (derived, `_area-guards.mjs`), never `requireSpaceAuth` on the segment.
+      if ([...resolvedRungGuards(`server/src/${r.file}`)].some(g => new RegExp(`\\b${g}\\b`).test(chain))) continue;
       unscoped.push(`${r.method.toUpperCase()} ${r.routePath}  (${r.file}: ${r.router})`);
     }
     assert.deepEqual(

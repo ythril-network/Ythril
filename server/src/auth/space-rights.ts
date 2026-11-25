@@ -48,7 +48,15 @@ export const RUNGS = ['none', 'read', 'write', 'admin'] as const;
 export type Rung = (typeof RUNGS)[number];
 
 /** How a route learns which space it is acting on. See the note above — this is not cosmetic. */
-export type ScopeShape = 'path' | 'iterates' | 'body';
+export type ScopeShape = 'path' | 'iterates' | 'body' | 'resolved';
+
+/*
+ * `resolved` arrived with the Linked Data addresses (bundle-271, Q-758, r2 R1.3). The space is the one whose RDF base holds the address
+ * asked for, which a renamed space's old segment, or another space's explicit `<public url>/ld/<other>/` base, makes different from the URL
+ * segment. `enforceAreaRung` leaves such a row alone, as it leaves `body`; the door resolves the address and asks the row's area and rung
+ * of that space (`api/linked-data.ts`, `requireResolvedRung`), and `every-space-route-outside-the-api-has-auth-and-an-area-rung` holds every
+ * such route to carrying that guard.
+ */
 
 /*
  * `body` arrived at 5.0, when the search family dropped its `/spaces/:spaceId` segment so a caller could
@@ -130,6 +138,11 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // ask `files: read` per member inside the act.
   { route: '/api/brain/spaces/:spaceId/sparql', method: 'GET', area: 'knowledge', needs: 'read', scope: 'path' },
   { route: '/api/brain/spaces/:spaceId/sparql', method: 'POST', area: 'knowledge', needs: 'read', scope: 'path' },
+  // Q-758: a Linked Data address, the twin of the export it is a name in: knowledge read on the space whose BASE holds the address
+  // (`resolved`, never the URL segment, DEC-2); a file's address asks `files: read` as well inside the door, as the export does.
+  { route: '/ld/:spaceId/:kind/:id', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },
+  { route: '/ld/:spaceId/file/*path', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },
+  { route: '/ld/:spaceId/agent/:id', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },
   // Q-753: an RDF document into the space as ordinary writes, `save_bulk`'s rung; a dry run and the status answer which ids are stored and
   // which values break the schema, so they ask the same rung (amendment A10).
   { route: '/api/brain/spaces/:spaceId/import/rdf', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
@@ -222,6 +235,9 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/api/spaces/:id/schema-versions', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
   // Q-751: the schema as OWL and SHACL, read like its meta (a view has no schema of its own).
   { route: '/api/spaces/:id/schema-rdf', method: 'GET', area: 'schema', needs: 'read', scope: 'path' },
+  // Q-758: a schema version's and a vocabulary term's Linked Data address, the twins of the schema export, on the space whose base holds it.
+  { route: '/ld/:spaceId/schema/:fp', method: 'GET', area: 'schema', needs: 'read', scope: 'resolved' },
+  { route: '/ld/:spaceId/vocab/*path', method: 'GET', area: 'schema', needs: 'read', scope: 'resolved' },
   // Q-754: the schema built from an RDF file, a dry run too (as amendment A10 prices the data import's dry run); the settings write's field
   // rungs raise a file with rules to `admin`.
   { route: '/api/spaces/:id/schema-rdf', method: 'POST', area: 'schema', needs: 'write', scope: 'path' },
