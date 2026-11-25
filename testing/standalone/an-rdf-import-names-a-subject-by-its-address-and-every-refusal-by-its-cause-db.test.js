@@ -17,6 +17,8 @@
  * - A fact with no `schema:text` stays refused (a fact has no sensible default), as `missing-required-field` naming `fact`, and its message
  *   is the planner's own sentence.
  * - An edge whose end was refused in this import is reported as `end-refused`, naming that end's subject, never as a schema violation.
+ * - The default name is the address's local name, trimmed; an address that gives none (a trailing slash, blanks, a control character) is
+ *   refused as `address-gives-no-name`, naming the subject, and an edge that ends at it is `end-refused` (review F4, F5).
  * - A fact whose stored link points at a record that does not exist is refused as `stored-link-dangling`, in a generic sentence that quotes
  *   no stored id, and so is a fact that also links a record this import refused (review F1, F5).
  *
@@ -38,7 +40,8 @@ const REFERENCES = '<http://purl.org/dc/terms/references>';
 const STORED_FACT = '66666666-6666-4666-8666-666666666666';
 /** The id a stored link points at, which no record holds: the file never says it, so no answer may. */
 const GHOST = '77777777-7777-4777-8777-777777777777';
-const SPACES = [LANDS, REFUSES, DANGLES, MIXED];
+const NONAME = 'rdfnoname';
+const SPACES = [LANDS, REFUSES, NONAME, DANGLES, MIXED];
 const SCHEMA_TEXT = '<http://schema.org/text>';
 const SCHEMA_START = '<http://schema.org/startDate>';
 const RDFS_LABEL = '<http://www.w3.org/2000/01/rdf-schema#label>';
@@ -119,6 +122,44 @@ describe('a subject with no label is named by its address, and every refusal nam
       assert.match(edge[0].message, /refused in this import/);
       assert.doesNotMatch(edge[0].message, /schema/);
       assert.equal(report.reasonsByCode.schema_violation, undefined, 'no reason is a schema violation');
+    });
+  });
+
+  describe('an address that gives no name', () => {
+    const v = `${baseOf(NONAME)}vocab/`;
+    const KNOWN = 'http://people.example/known';
+    /** Import one typed, unlabelled subject at `address`, with an edge to it from a labelled one; answers the report. */
+    async function importAt(address, status) {
+      const file = [
+        `<${address}> a <${v}entity/person> .`,
+        `<${KNOWN}> a <${v}entity/person> ; ${RDFS_LABEL} "Known" .`,
+        `<${KNOWN}> <${v}edge/knows> <${address}> .`,
+        '',
+      ].join('\n');
+      const r = await d.importRest(writer.key, NONAME, file);
+      assert.equal(r.status, status, r.text.slice(0, 500));
+      return reportOf(r);
+    }
+
+    for (const [title, address] of [
+      ['a trailing slash', 'http://people.example/folder/'],
+      ['a tail of blanks only', 'http://people.example/%20%20'],
+      ['a control character in the tail', 'http://people.example/a%0Ab'],
+    ]) {
+      it(`${title} is refused as address-gives-no-name, naming the subject; the edge to it is end-refused`, async () => {
+        const report = await importAt(address, 409);
+        const entity = report.reasons.filter(x => x.kind === 'entity');
+        assert.deepEqual(entity.map(x => [x.code, x.subject]), [['address-gives-no-name', address]], JSON.stringify(report.reasons).slice(0, 600));
+        assert.doesNotMatch(entity[0].message, /http|%/, 'the sentence is generic: it quotes no part of the address');
+        assert.deepEqual(report.reasons.filter(x => x.kind === 'edge').map(x => [x.code, x.end]), [['end-refused', address]]);
+        assert.equal(report.reasonsByCode['missing-required-field'], undefined, 'it is not the generic required-field refusal');
+      });
+    }
+
+    it('the local name is trimmed: blanks around it are not part of the name', async () => {
+      const report = await importAt('http://people.example/%20padded%20', 200);
+      assert.equal(report.status, 'completed', JSON.stringify(report.reasons).slice(0, 400));
+      assert.deepEqual((await d.records(NONAME, 'entities')).map(e => e.name).sort(), ['Known', 'padded']);
     });
   });
 

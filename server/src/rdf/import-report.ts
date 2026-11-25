@@ -56,6 +56,9 @@ export const MISSING_REQUIRED_FIELD = 'missing-required-field';
 /** The code of an edge or link refused under strict linkage because a record it ends at was itself refused in this import (Q-759). */
 export const END_REFUSED = 'end-refused';
 
+/** The code of a new entity or chrono entry refused because its subject states no label and its address gives no name to take (Q-759, review F4). */
+export const ADDRESS_GIVES_NO_NAME = 'address-gives-no-name';
+
 /**
  * The code of a record refused under strict linkage because a link it already holds points at a record that does not exist, and that end is not
  * one this import refused (Q-759, review F1). The end is the store's, not the file's: its id is never named.
@@ -73,6 +76,7 @@ export interface PlannerRefusal {
   seededId?: string;
   missingField?: string;
   missingEnds?: readonly string[];
+  addressGivesNoName?: true;
 }
 
 /** One statement of a reason: its subject, predicate and object, a literal object shown by its datatype and length only. */
@@ -207,7 +211,7 @@ export class ReportBuilder {
   }
   /**
    * A planner's refusal of the record `subject` states, named by its cause (Q-759): an edge or link whose end this import refused is
-   * {@link END_REFUSED}, naming that end's subject, unless an end it lacks was not refused here ({@link STORED_LINK_DANGLING}, naming none); a missing required field is {@link MISSING_REQUIRED_FIELD} with the field; a schema
+   * {@link END_REFUSED}, naming that end's subject, unless an end it lacks was not refused here ({@link STORED_LINK_DANGLING}, naming none); a missing required field is {@link MISSING_REQUIRED_FIELD} with the field, or {@link ADDRESS_GIVES_NO_NAME} when the record was to be named by an address that gives no name; a schema
    * refusal is its body's own code; any other carries the planner's code and sentence. {@link PLAN_REFUSED} only when the planner gave neither.
    */
   planner(kind: string, subject: string, refusal: PlannerRefusal): void {
@@ -229,6 +233,13 @@ export class ReportBuilder {
     // The planner's own sentence wherever it gave one; the generic one names only the code.
     const sentence = (code: string): string =>
       refusal.reason ?? `The ${kind} this subject states would not be written (${code}): a bound, a link, a reference or its version refuses it.`;
+    if (refusal.missingField !== undefined && refusal.addressGivesNoName) {
+      this.add({
+        ...base, code: ADDRESS_GIVES_NO_NAME, fields: [refusal.missingField],
+        message: `The ${kind} this subject states has no name: it states no label, and its address's last part is blank, empty or holds a control character, so no name was taken from it. State an rdfs:label for it, or use an address with a name at its end.`,
+      });
+      return;
+    }
     if (refusal.missingField !== undefined) {
       this.add({ ...base, code: MISSING_REQUIRED_FIELD, fields: [refusal.missingField], message: sentence(MISSING_REQUIRED_FIELD) });
       return;
