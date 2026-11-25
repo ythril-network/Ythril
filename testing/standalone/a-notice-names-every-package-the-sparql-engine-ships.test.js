@@ -19,7 +19,9 @@
  * ## Seen red
  *
  * On 2bfffd806: the server does not depend on the engine and the lock holds no closure. Mutation (seen red once it does): the `spark-md5`
- * election removed from NOTICE.
+ * election removed from NOTICE. On d78b20280 (lens-1 L1): NOTICE held no BSD-2-Clause and no BlueOak-1.0.0 text, though 6 packages ship under
+ * the first (negotiate's FreeBSD among them) and 7 copies of `lru-cache` under the second, whose terms require the text or its URL: the
+ * licence-text check below names both. Mutation: the `### BlueOak-1.0.0` heading removed.
  *
  * Run: node --test testing/standalone/a-notice-names-every-package-the-sparql-engine-ships.test.js
  */
@@ -44,6 +46,14 @@ const licenceOf = (pkg) => {
   if (pkg.license) return pkg.license;
   const file = `${pkg.key}/package.json`;
   return existsSync(file) ? licenceOfRecord(JSON.parse(readFileSync(file, 'utf8'))) : null;
+};
+
+/** The License Texts heading of a License line: the elected arm of a choice, SPDX spellings as the headings spell them, FreeBSD as BSD-2-Clause. */
+const ALIASES = { 'Apache-2.0': 'Apache License 2.0', FreeBSD: 'BSD-2-Clause' };
+const textOf = (line) => {
+  const elected = /^WTFPL OR MIT\. Ythril elects the (\S+) License\.?$/.exec(line);
+  const id = elected ? elected[1] : line.replace(/\.$/, '');
+  return ALIASES[id] ?? id;
 };
 
 describe('the licence judge, before it is trusted with the closure', () => {
@@ -102,6 +112,21 @@ describe('everything the SPARQL engine ships is attributed and may ship', () => 
       .filter(c => !c.verdict.ok)
       .map(c => `${c.name}@${c.version}: ${c.verdict.why}`);
     assert.deepEqual(bad, [], 'a licence in the closure may not ship as recorded (run npm ci when the lock records none)');
+  });
+
+  it('every licence a closure entry of NOTICE names has its text under License Texts', () => {
+    const texts = notice.slice(notice.indexOf('## License Texts'), notice.indexOf('## Bundled Components'));
+    const headings = new Set([...texts.matchAll(/^### (.+)$/gm)].map(m => m[1].trim()));
+    const entries = notice.slice(notice.indexOf('## Bundled Components')).split(/\n### /).slice(1)
+      .filter(block => block.includes('production closure of the SPARQL engine'));
+    assert.ok(entries.length >= 100, `only ${entries.length} closure entries`);
+    const missing = new Set();
+    for (const block of entries) {
+      const raw = /^License: (.+)$/m.exec(block)?.[1];
+      assert.ok(raw, `an entry has no License line: ${block.slice(0, 80)}`);
+      if (!headings.has(textOf(raw))) missing.add(`${textOf(raw)} (${raw})`);
+    }
+    assert.deepEqual([...missing], [], 'a licence a package ships under has no text under License Texts');
   });
 
   it('the spark-md5 election is MIT in NOTICE and in docs/dependencies.md', () => {
