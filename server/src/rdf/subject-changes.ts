@@ -120,7 +120,7 @@ type Owner =
 /** The stored record's own form, and what the form leaves out of it. */
 interface Form { quads: Quad[]; sigs: Set<string>; skipped: Set<string>; own: IriTerm; identity: Quad[] }
 
-interface Group { key: string; kind: OpKind; id: string; subjectKey: string; removed: Quad[]; inserted: Quad[]; graph: string | null }
+interface Group { key: string; kind: OpKind; id: string; addressKey: string; removed: Quad[]; inserted: Quad[]; graph: string | null }
 
 const graphOf = (q: Quad): string | null => q.graph?.value ?? null;
 
@@ -252,7 +252,7 @@ class Run {
     for (const [set, keys] of [[this.workAsserted, triplets.asserted], [this.workReified, triplets.reified]] as const) {
       for (const k of keys) if (!set.has(k)) { set.add(k); addedTriplets.push([set, k]); }
     }
-    const minted = hide ? new Map([...this.ctx.minted, [g.subjectKey, { kind: g.kind, id: g.id }]]) : this.ctx.minted;
+    const minted = hide ? new Map([...this.ctx.minted, [g.addressKey, { kind: g.kind, id: g.id }]]) : this.ctx.minted;
     try {
       if (hide) {
         swap(g.key, undefined);
@@ -280,7 +280,7 @@ class Run {
   /** The fields, properties, tags and link a removed statement names on its record, read by the translator itself; `null` when it names none (it is left out or refused). */
   private namedBy(r: Quad, g: Group, form: Form): { fields: string[]; properties: string[]; tags: boolean } | null {
     const result = this.translate([...form.identity, r], g, true);
-    const op = result.ops.find(o => o.correlation === g.subjectKey && o.kind === g.kind);
+    const op = result.ops.find(o => o.correlation === g.addressKey && o.kind === g.kind);
     if (op === undefined || result.reasons.some(x => x.quads.includes(r)) || result.notTaken.some(x => x.quad === r)) return null;
     const body = op.fields as unknown as Record<string, unknown>;
     const fields: string[] = [];
@@ -319,7 +319,7 @@ class Run {
       }
       let g = groups.get(owner.key);
       if (g === undefined) {
-        g = { key: owner.key, kind: owner.kind, id: owner.id, subjectKey: recordIri(this.ctx.meta, owner.kind, owner.id), removed: [], inserted: [], graph: graphOf(q) };
+        g = { key: owner.key, kind: owner.kind, id: owner.id, addressKey: recordIri(this.ctx.meta, owner.kind, owner.id), removed: [], inserted: [], graph: graphOf(q) };
         groups.set(owner.key, g);
       }
       g[side].push(q);
@@ -357,8 +357,8 @@ class Run {
   private unstored(g: Group): ChangedOp[] {
     g.removed.forEach(q => this.notStored(q));
     if (g.inserted.length === 0) return [];
-    const subjectKey = groupSubjectOf(g.inserted[0]!.subject, this.ctx.names);
-    const result = this.translate(g.inserted, { ...g, subjectKey }, false);
+    const addressKey = groupSubjectOf(g.inserted[0]!.subject, this.ctx.names);
+    const result = this.translate(g.inserted, { ...g, addressKey }, false);
     this.absorb(result, new Set(g.inserted));
     this.take(g.inserted);
     return result.ops;
@@ -418,20 +418,20 @@ class Run {
       if (left.length === 0) {
         this.take(removedHeld);
         this.refuse('no-kind', added);
-        return [{ op: 'delete', kind: g.kind, id: g.id, correlation: g.subjectKey, graph: g.graph }];
+        return [{ op: 'delete', kind: g.kind, id: g.id, correlation: g.addressKey, graph: g.graph }];
       }
       this.refuse('field-not-removable', typeRemoved);
     }
     this.refuse('server-owned-removed', serverOwned);
 
     // The target, read by the translator with nothing taken from the stored record.
-    const target = [...form.quads.filter(q => !removedSigs.has(quadSig(q)) && groupSubjectOf(q.subject, this.ctx.names) === g.subjectKey), ...added];
+    const target = [...form.quads.filter(q => !removedSigs.has(quadSig(q)) && groupSubjectOf(q.subject, this.ctx.names) === g.addressKey), ...added];
     const result = this.translate(target, g, true);
     this.absorb(result, new Set(added));
     // What the translator did not answer for is taken; a relation it carried with a reifier is taken too.
     const taken = this.unplaced(added);
     this.take(taken);
-    const record = result.ops.find(o => o.correlation === g.subjectKey && o.kind === g.kind);
+    const record = result.ops.find(o => o.correlation === g.addressKey && o.kind === g.kind);
     const extra = result.ops.filter(o => o !== record);
 
     // An edge keeps its ends and label.
@@ -524,7 +524,7 @@ class Run {
     }
     const wanted = 'links' in record ? record.links : {};
     for (const [k, ids] of Object.entries(wanted)) if (isRefKind(k) && ids !== undefined) allLinks[k] = [...new Set([...(allLinks[k] ?? []), ...ids])].sort();
-    const base = { op: 'converge' as const, id: g.id, correlation: g.subjectKey, graph: g.graph };
+    const base = { op: 'converge' as const, id: g.id, correlation: g.addressKey, graph: g.graph };
     const fieldsOut = { ...fields, tags: replaceTags ?? tagsThen, properties: props };
     const extras = {
       ...(unique.length > 0 ? { deleteFields: unique } : {}),
