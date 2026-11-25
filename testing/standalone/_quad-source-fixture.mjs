@@ -32,6 +32,8 @@ export { baseOf };
 export const SHARED_IRI = 'https://terms.example.org/q756/nickname';
 /** The explicit address of the `about` edge label. */
 export const ABOUT_IRI = 'https://terms.example.org/q756/about';
+/** The agent (an instance id) that wrote the seeded rows of both spaces. */
+export const AGENT_ID = 'qsrc-agent-instance';
 /** The file row's path, which is its id. */
 export const FILE_PATH = 'docs/plan.txt';
 
@@ -65,6 +67,10 @@ export async function openQuadSourceFixture(suite) {
   await d.seed(A, 'entity', [
     { _id: 'org-2', name: 'Difference Works', type: 'Org', properties: { alias: 'DW', size: 3 }, createdAt: STAMP, updatedAt: STAMP },
     { _id: 'untyped-1', name: 'Nobody in particular', createdAt: STAMP, updatedAt: STAMP },
+    // One agent under two labels and none: its type statement is written once, its labels each once (S1 review m3).
+    { _id: 'agent-1', name: 'By the agent', type: 'Person', author: { instanceId: AGENT_ID, instanceLabel: 'Agent one' }, createdAt: STAMP, updatedAt: STAMP },
+    { _id: 'agent-2', name: 'By the agent again', type: 'Person', author: { instanceId: AGENT_ID, instanceLabel: 'Agent two' }, createdAt: STAMP, updatedAt: STAMP },
+    { _id: 'agent-3', name: 'By the agent unlabelled', type: 'Person', author: { instanceId: AGENT_ID }, createdAt: STAMP, updatedAt: STAMP },
     { _id: 'fork-1', name: 'Ada (fork)', type: 'Person', forkOf: ids.ada },
   ]);
   await d.seed(A, 'edge', [
@@ -76,7 +82,7 @@ export async function openQuadSourceFixture(suite) {
     { _id: FILE_PATH, path: FILE_PATH, sizeBytes: 42, sha256: 'ab'.repeat(32), description: 'a plan', tags: ['plan'], properties: { owner: 'ada' }, createdAt: STAMP, updatedAt: STAMP },
     { _id: 'old.txt', path: 'old.txt', sizeBytes: 1, deletedAt: STAMP },
   ]);
-  await d.seed(B, 'entity', [{ _id: 'b-1', name: 'Bea', type: 'Person', createdAt: STAMP, updatedAt: STAMP }]);
+  await d.seed(B, 'entity', [{ _id: 'b-1', name: 'Bea', type: 'Person', author: { instanceId: AGENT_ID, instanceLabel: 'Agent one' }, createdAt: STAMP, updatedAt: STAMP }]);
   ids.org2 = 'org-2';
 
   const reader = await d.mint(`${suite}-reader`, { [A]: d.row({ knowledge: 'read', files: 'read' }), [B]: d.row({ knowledge: 'read', files: 'read' }) });
