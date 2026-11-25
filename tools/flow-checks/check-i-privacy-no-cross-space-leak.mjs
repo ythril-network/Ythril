@@ -12,6 +12,9 @@
  *                                                                     space by definition, or the handler calls the peer's own space refusal
  *       a `ROUTE_RIGHTS` row scoped by the body's `space`          the chain names the body-scoped guard (it calls `spacesForBodyScopedRequest`)
  *       a row that iterates the reachable spaces                   the chain names a guard that attaches the token (the handler filters by it)
+ *       a row scoped `resolved` (a Linked Data address)            the space is the one whose base holds the address, not the path's: the chain
+ *                                                                     authenticates (attaches the token) and names a guard of the route's own
+ *                                                                     file that asks the inventory (`rungFor(`) and the rung (`mayReadArea(`)
  *     A read with none of these (an instance-level route: tokens, settings, health) names no space and is outside the rule.
  *   - Tools: every tool whose input schema takes a `space` is priced in `TOOL_RIGHTS`, or carries the flag (`admin`, `spaceAdmin`,
  *     `createsSpaces`, `ownerScoped`) that has the dispatcher refuse it per named space. A tool that takes a space and has neither is
@@ -31,6 +34,7 @@ import { allowFileFor, readAllow, applyAllow, today } from './_allow.mjs';
 import { routesWithChains, guardFacts, limiterNames, chainFacts, serverSources, middlewareText, dispatchesThroughCallTool } from './_route-chains.mjs';
 import { builtRegistry, SPACE_SCHEMAS } from './_built-registry.mjs';
 import { stripComments } from '../../testing/standalone/_strip-comments.mjs';
+import { resolvedRungGuards } from '../../testing/standalone/_area-guards.mjs';
 
 /** A space in the path: `/spaces/:x`, or a parameter named for one. */
 export const hasSpaceParam = (path) => /\/spaces\/:\w+/.test(path) || /\/:space\w*(?:\/|$)/.test(path);
@@ -57,6 +61,15 @@ export function leakyRoutes({ routes, guards, limiters, ROUTE_RIGHTS, peerRefusa
     const handlerRefuses = [...peerRefusals].some((n) => new RegExp(`\\b${n}\\s*\\(`).test(r.source ?? ''));
     const fail = (why) => out.push({ id: `route ${r.method} ${r.path}`, text: `${r.method} ${r.path} (${r.file}): ${why}` });
     if (row?.scope === 'body') { if (!f.spaceScope) fail('its row scopes by the body space and no guard in its chain refuses a space the token lacks'); continue; }
+    if (row?.scope === 'resolved') {
+      // The path names no space the rung could be asked of (the door resolves it from the address), so a path guard decides nothing here: the
+      // route's own file names the guard that asks the inventory and the rung, and the chain has the token before it.
+      const door = resolvedRungGuards(r.file);
+      const asksRung = door.size > 0 && new RegExp(`\\b(${[...door].join('|')})\\b`).test(r.all);
+      if (!f.metered) fail('its row is resolved from the address and its chain does not authenticate (no guard that attaches the token)');
+      else if (!asksRung) fail('its row is resolved from the address and its chain names no guard of its own file that asks the inventory and the rung');
+      continue;
+    }
     if (row?.scope === 'iterates') { if (!f.metered) fail('it iterates the reachable spaces and its chain names no guard that attaches the token'); continue; }
     if (row?.scope === 'path' || hasSpaceParam(r.path)) {
       if (!f.spaceScope && !f.instanceAdmin && !handlerRefuses) fail('it reads a space named in the path and nothing in its chain or handler refuses a token without that space');
