@@ -19,6 +19,8 @@
  * On c647bd24f: the ASK cases run past their deadline and past their caller going (the answer never comes inside the window); `serialize`
  * is a function of the result; the planning error is the engine's own; the aborted signal is ignored and the source is read. The SELECT
  * deadline case passes there (it is the control a SELECT is ended by the same timer), and is seen red once its timer is not armed.
+ * On d78b20280 (lens-1 R1): an abort or a deadline that lands while the engine plans rejected `rows()` without closing the stream the engine
+ * then opened ("a stream obtained after the query had ended is left open: 2 open").
  *
  * Run: node --test testing/standalone/a-sparql-query-ends-with-its-deadline-and-its-caller.test.js (a prior `npm run build:server`).
  */
@@ -172,6 +174,24 @@ describe('a SPARQL query ends with its deadline and its caller, whatever its for
     );
     assert.ok(got.error, `the query answered: ${JSON.stringify(got)}`);
     assert.equal(got.error, recorded, `the error is ${got.error?.name}: ${got.error?.message}, not the source's recorded refusal`);
+  });
+
+  it('an abort that lands while the engine plans ends the query when its rows are asked for, and closes the stream it opened (lens-1 R1)', async () => {
+    const ctl = new AbortController();
+    // The engine asks the source for counts while it plans: the caller goes at that moment, after the run began and before any read.
+    const source = slowSource(5, { countQuads: async () => { ctl.abort(); return 5; } });
+    const result = await run('SELECT ?s WHERE { ?s ?p ?o . ?o ?q ?r }', source, { deadline: Date.now() + 60_000, signal: ctl.signal });
+    const got = await answerOf(result);
+    assert.ok(got.error, `the query answered for a caller that went while it planned: ${JSON.stringify(got).slice(0, 200)}`);
+    assert.ok(await readClosed(source), `a stream obtained after the query had ended is left open: ${source.state.open.size} open`);
+  });
+
+  it('a deadline that passes while the engine plans ends the query with 503 sparql_timeout and closes the stream it opened (lens-1 R1)', async () => {
+    const source = slowSource(5, { countQuads: async () => { await new Promise(r => setTimeout(r, DEADLINE_MS + SETTLE_MS)); return 5; } });
+    const result = await run('SELECT ?s WHERE { ?s ?p ?o . ?o ?q ?r }', source, { deadline: Date.now() + DEADLINE_MS });
+    const got = await answerOf(result);
+    assert.equal(got.error?.code, 'sparql_timeout', JSON.stringify(got).slice(0, 200));
+    assert.ok(await readClosed(source), `a stream obtained after the deadline is left open: ${source.state.open.size} open`);
   });
 
   it('a signal aborted before the query begins ends it at once and reads nothing (S1 review m2)', async () => {
