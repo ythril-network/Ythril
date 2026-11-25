@@ -9,7 +9,7 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import { logAuditEntry } from './audit.js';
-import { auditChanges, explicitChanges, type AuditChange } from './audit-changes.js';
+import { auditChanges, explicitChanges, recordsChangesAtStatus, type AuditChange } from './audit-changes.js';
 import { getConfig } from '../config/loader.js';
 import { classifyOperation, recordSpaceCall } from '../metrics/space-activity.js';
 import { currentRequestId } from '../util/log.js';
@@ -605,7 +605,7 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
       durationMs: Math.round(durationMs),
       // Only for a request that actually succeeded: a rejected PATCH changed nothing, and recording its
       // intended values would make the log claim an edit that never happened.
-      ...(res.statusCode < 400 && (req.auditChangesExplicit || !finished)
+      ...(recordsChangesAtStatus(matched.operation, res.statusCode) && (req.auditChangesExplicit || !finished)
         // A list the act handed over itself goes through the operation's allowlist like a diff does (`explicitChanges`); a response cut off
         // says so, whatever counts the act had reached.
         ? { changes: explicitChanges(matched.operation, [...(req.auditChangesExplicit ?? []), ...(finished ? [] : [CUT_OFF])]) }

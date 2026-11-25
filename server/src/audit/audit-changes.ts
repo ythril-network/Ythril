@@ -321,6 +321,18 @@ export function dismissShownChanges(given: Record<string, unknown>, dismissed: n
 }
 
 /**
+ * The operations whose entry keeps its changes when the call was refused. A refused write changed nothing, so its intended values are never
+ * recorded (the entry would claim an edit that did not happen); a SPARQL query that a bound refused after it ran HAS read what its counts
+ * say, so its entry says how far it got and the code it ended with (`recordsRead`, `rows`, `outcome`).
+ */
+const CHANGES_WHEN_REFUSED: ReadonlySet<string> = new Set(['brain.sparql_query']);
+
+/** Does the entry of `operation` that ended with `status` carry the changes the act handed over? Both doors (REST, MCP) ask this. */
+export function recordsChangesAtStatus(operation: string, status: number): boolean {
+  return status < 400 || CHANGES_WHEN_REFUSED.has(operation);
+}
+
+/**
  * The changes an act handed over ITSELF (a route's `req.auditChangesExplicit`, a tool's explicit list, a server act's `changes`), cut to what the
  * operation's allowlist names: the other door to the same store, so it holds the same line `auditChanges` does.
  *

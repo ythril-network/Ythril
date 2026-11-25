@@ -139,7 +139,11 @@ export const sparql_queryTool: ToolHandler = {
     const prepared = await prepareSparql(input);
     if (isRefusal(prepared)) throw refused(prepared);
     const answered = await answerSparql(input, prepared);
-    if (isRefusal(answered)) throw refused(answered);
+    // A refusal of the run is audited too, by the counts of the query it ended and its code as the outcome.
+    if (isRefusal(answered)) {
+      if (answered.auditChanges) ctx.recordAuditChanges?.(answered.auditChanges);
+      throw refused(answered);
+    }
     ctx.recordAuditChanges?.(answered.auditChanges);
     const c = answered.collected;
     const warnings = warningsOf(prepared);
