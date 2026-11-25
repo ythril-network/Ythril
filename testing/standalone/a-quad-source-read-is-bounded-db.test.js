@@ -36,6 +36,7 @@ const EMPTY = 'qboundempty';
 const ROWS = 300;
 const RDF_TYPE = { termType: 'NamedNode', value: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' };
 const named = (value) => ({ termType: 'NamedNode', value });
+const LABEL = named('http://www.w3.org/2000/01/rdf-schema#label');
 const BULK_CLASS = named(`${baseOf(BULK)}vocab/entity/Bulk`);
 
 let d, caller, quadSource, sparql;
@@ -43,13 +44,14 @@ let d, caller, quadSource, sparql;
 const source = (opts = {}, members = [BULK]) => needModule(quadSource, ['createQuadSource'], 'the quad source')
   .createQuadSource({ members, caller }, { deadline: Date.now() + 60_000, ...opts });
 
-/** The idle server cursors open on the bulk entities collection. */
-async function openCursors() {
+/** The idle server cursors open on the bulk entities collection: each one's filter and the documents it has handed out. */
+async function idleCursors() {
   const { getMongo, getDb } = d.door.mongo;
   const ns = `${getDb().databaseName}.${d.spaceCollection(BULK, 'entities')}`;
   const ops = await getMongo().db('admin').aggregate([{ $currentOp: { idleCursors: true, allUsers: true } }, { $match: { type: 'idleCursor', ns } }]).toArray();
-  return ops.length;
+  return ops.map(op => JSON.stringify({ filter: op.cursor?.originatingCommand?.filter, returned: op.cursor?.nDocsReturned, batches: op.cursor?.nBatchesReturned }));
 }
+const openCursors = async () => (await idleCursors()).length;
 
 describe('the quad source read is bounded and its estimate is never a false empty', { skip }, () => {
   before(async () => {
@@ -96,7 +98,8 @@ describe('the quad source read is bounded and its estimate is never a false empt
     const empty = source({}, [EMPTY]);
     assert.ok(await empty.countQuads(undefined, undefined, undefined, undefined) >= 1, 'an empty space answered 0 for an unbound pattern');
     assert.ok(await s.countQuads(undefined, RDF_TYPE, named(`${baseOf(BULK)}vocab/entity/Ghost`), undefined) >= 1, 'a type with no rows answered 0');
-    assert.ok(await s.countQuads(undefined, RDF_TYPE, BULK_CLASS, undefined) >= ROWS, 'the type count is not the rows of the type');
+    assert.ok(await empty.countQuads(undefined, named(`${baseOf(EMPTY)}vocab/entity/Ghost#name`), undefined, undefined) >= 1, 'a property of a type with no rows answered 0');
+    assert.ok(await s.countQuads(undefined, LABEL, undefined, undefined) >= ROWS, 'the label count (a walk of the kinds that write it) is not at least the rows');
     const before = s.recordsRead();
     assert.equal(await s.countQuads(named(`${baseOf(BULK)}entity/b-0001`), undefined, undefined, undefined), 1);
     assert.equal(s.recordsRead(), before, 'countQuads read records');
@@ -105,7 +108,7 @@ describe('the quad source read is bounded and its estimate is never a false empt
 
   it('a count or a match after the deadline is sparql_timeout (503), never 0 and never an empty end', async () => {
     const late = source({ deadline: Date.now() - 1 });
-    await assert.rejects(Promise.resolve().then(() => late.countQuads(undefined, RDF_TYPE, BULK_CLASS, undefined)), (err) => err.code === 'sparql_timeout' && err.status === 503);
+    await assert.rejects(Promise.resolve().then(() => late.countQuads(undefined, LABEL, undefined, undefined)), (err) => err.code === 'sparql_timeout' && err.status === 503);
     await assert.rejects(drain(late.match(undefined, RDF_TYPE, BULK_CLASS, undefined)), (err) => err.code === 'sparql_timeout');
   });
 
@@ -121,6 +124,6 @@ describe('the quad source read is bounded and its estimate is never a false empt
       await new Promise(r => setTimeout(r, 50));
       open = await openCursors();
     }
-    assert.equal(open, baseline, 'the cursor stayed open after its stream was destroyed');
+    assert.equal(open, baseline, `the cursor stayed open after its stream was destroyed: ${(await idleCursors()).join(' ')}`);
   });
 });
