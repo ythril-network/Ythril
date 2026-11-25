@@ -1,13 +1,15 @@
 /**
  * The result record: one file per run, carrying everything a later reader needs to know which run it was
  * (design R10), written once and never over an earlier file.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-result-record.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildRecord, recordFileName, writeRecord, END_MARKER } from './result-record.mjs';
+import { buildRecord, recordFileName, writeRecord, END_MARKER } from '../../benchmarks/rdf/result-record.mjs';
 
 function input(over = {}) {
   return {

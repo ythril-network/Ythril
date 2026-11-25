@@ -2,10 +2,12 @@
  * What a query's text says about the data it needs (Q-759): the predicates it names, expanded through its own
  * PREFIX lines, and whether it reads a whole record. The reason a query is not comparable is derived from these,
  * never typed per query.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-query-shape.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { predicatesOf, readsWholeRecord } from './query-shape.mjs';
+import { predicatesOf, readsWholeRecord } from '../../benchmarks/rdf/query-shape.mjs';
 
 const BSBM = 'http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/';
 const DC = 'http://purl.org/dc/elements/1.1/';

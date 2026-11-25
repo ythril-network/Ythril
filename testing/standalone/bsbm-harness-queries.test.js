@@ -3,10 +3,12 @@
  * SELECT answers result rows, DESCRIBE (Q9) and CONSTRUCT (Q12) answer a graph. Asking a graph query for
  * `application/sparql-results+json` makes an engine answer 406 for two of the eleven queries, and the
  * table then shows two errors that are the harness's, not the engine's.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-queries.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { queryForm, acceptFor, EXPLORE_NUMBERS } from './queries.mjs';
+import { queryForm, acceptFor, EXPLORE_NUMBERS } from '../../benchmarks/rdf/queries.mjs';
 
 test('the form is the first keyword after the prologue, whatever the prefixes and comments say', () => {
   assert.equal(queryForm('PREFIX a: <http://a/>\nSELECT ?x WHERE { ?x ?p ?o }'), 'SELECT');

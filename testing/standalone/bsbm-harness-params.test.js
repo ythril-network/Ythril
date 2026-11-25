@@ -4,10 +4,12 @@
  *
  * A placeholder left in a query makes both engines answer a parse error, and the run still "completes";
  * a value that is itself read as a placeholder changes the query. Each case guards one of those.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-params.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { placeholders, substitute, extractParams } from './params.mjs';
+import { placeholders, substitute, extractParams } from '../../benchmarks/rdf/params.mjs';
 
 const TEMPLATE = [
   'SELECT ?product WHERE {',

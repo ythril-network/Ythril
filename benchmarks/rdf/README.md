@@ -179,11 +179,12 @@ benchmark.
 
 `stats`, `params`, `queries`, `result-record`, `prepare`, `compare`, `ythril` (the refusal wording), `ythril-params`,
 `chunk`, `answer-rows`, `validity`, `typecap`, `comparability`, `query-shape`, `not-taken`, `sparql-limits` and
-`embed-wait` have `node:test` files next to them. Run them in a container, not on
+`embed-wait` have `node:test` files in `testing/standalone/bsbm-harness-<module>.test.js`, so the standalone runner (and the
+pure standalone part of CI) runs them with the repository's tests, and no workflow or script names them. Run one in a container, not on
 the host, with `node_modules` of an `npm ci` (for `n3`) at the root of what is mounted:
 
 ```text
-docker run --rm -v <checkout>:/w:ro -w /w node:24 sh -c 'node --test benchmarks/rdf/*.test.mjs'
+docker run --rm -v <checkout>:/w:ro -w /w node:24 node --test testing/standalone/bsbm-harness-stats.test.js
 ```
 
 ## Files

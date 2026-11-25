@@ -2,6 +2,8 @@
  * The Ythril-loadable variant of a BSBM dataset (Q-759): what `prepare.mjs` changes, and that it changes nothing
  * else. Every case drives the transform over an N-Triples text and reads the OUTPUT, never the transform's own
  * bookkeeping, so a wrong decision shows in the lines that come out.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-prepare.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +11,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { prepareText, prepareFile, VARIANT } from './prepare.mjs';
+import { prepareText, prepareFile, VARIANT } from '../../benchmarks/rdf/prepare.mjs';
 
 const RDF_TYPE = '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>';
 const SUB = '<http://www.w3.org/2000/01/rdf-schema#subClassOf>';

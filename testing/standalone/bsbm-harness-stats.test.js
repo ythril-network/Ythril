@@ -4,10 +4,12 @@
  * The harness reports these two numbers per query, and the owner decides on a triple cache from them, so a
  * median that is quietly the wrong element (unsorted input, the lower of two middles, the mean) moves every
  * table row. Each case below states the one rule it guards.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-stats.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { median, percentile, summarize } from './stats.mjs';
+import { median, percentile, summarize } from '../../benchmarks/rdf/stats.mjs';
 
 test('the median of an odd count is the middle value of the sorted values, whatever the input order', () => {
   assert.equal(median([5, 1, 3]), 3);

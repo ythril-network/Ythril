@@ -2,10 +2,12 @@
  * What the result record says when the RDF import door does not take the file. A refusal that is polled to its end
  * answers `200` with a report whose status is `refused`; the record must still carry the door's own refusal code
  * and the reasons with their counts, not the word "refused" and a clipped JSON string.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-ythril.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { describeRefusal } from './ythril.mjs';
+import { describeRefusal } from '../../benchmarks/rdf/ythril.mjs';
 
 test('a polled refusal is recorded as rdf_import_refused with every reason code and its count', () => {
   const report = { status: 'refused', reasonCount: 90503, reasonsByCode: { plan_refused: 30503, schema_violation: 60000 } };

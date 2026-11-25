@@ -1,10 +1,12 @@
 /**
  * The side-by-side table of an Oxigraph record and a Ythril record of the same size and variant, with every query
  * more than 10 times slower than Oxigraph marked. Cases build two records and read the rendered text and rows.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-compare.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compareRecords, renderComparison } from './compare.mjs';
+import { compareRecords, renderComparison } from '../../benchmarks/rdf/compare.mjs';
 
 const SHA = 'c'.repeat(64);
 const q = (median, p95 = median * 2) => ({ median, p95, n: 20, errors: 0, rows: 5 });

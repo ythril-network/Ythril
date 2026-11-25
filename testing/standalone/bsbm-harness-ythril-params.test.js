@@ -2,10 +2,13 @@
  * The parameter mapper (Q-759): the BSBM driver's parameters name the generator's addresses, the import minted new
  * ones, and the run must ask Ythril about the records Ythril holds. Cases give the mapper a lookup table (what the
  * lookup queries answered) and read what comes out; none needs an engine.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-ythril-params.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ADDRESS_PREDICATE, lookupQueries, mapParameters, parameterAddresses, tableFromBindings } from './ythril-params.mjs';
+import { escapeRegExp } from '../../scripts/_shared/escape-regexp.mjs';
+import { ADDRESS_PREDICATE, lookupQueries, mapParameters, parameterAddresses, tableFromBindings } from '../../benchmarks/rdf/ythril-params.mjs';
 
 const I = 'http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/';
 const iri = (tail) => `${I}${tail}`;
@@ -84,7 +87,7 @@ test('there is one lookup query per class, a single read of the stated addresses
   const qs = lookupQueries(parameterAddresses(file()));
   assert.deepEqual(qs.map((q) => q.class).sort(), ['Offer', 'Product', 'ProductFeature', 'Review']);
   const by = Object.fromEntries(qs.map((q) => [q.class, q.query]));
-  assert.match(by.Product, new RegExp(ADDRESS_PREDICATE.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')));
+  assert.match(by.Product, new RegExp(escapeRegExp(ADDRESS_PREDICATE)));
   assert.ok(by.Product.includes(`"${iri('dataFromProducer6/Product272')}"`) && by.Product.includes(`"${iri('dataFromProducer17/Product801')}"`));
   assert.ok(by.ProductFeature.includes(`"${iri('ProductFeature3')}"`) && by.ProductFeature.includes(`"${iri('ProductFeature1967')}"`));
   assert.ok(!by.Product.includes('ProductFeature'), 'a feature is not looked up as a product');

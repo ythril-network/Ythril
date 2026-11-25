@@ -2,10 +2,12 @@
  * The size under the type cap (Q-759): the import refuses a kind with more than 200 types, so the largest product
  * count whose generated data keeps its type count under the cap is found by a binary search over the generator's
  * output, not by loading. The search is driven with a counting function; the counter reads N-Triples.
+ *
+ * Run: node --test testing/standalone/bsbm-harness-typecap.test.js
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { countTypes, largestUnderCap } from './typecap.mjs';
+import { countTypes, largestUnderCap } from '../../benchmarks/rdf/typecap.mjs';
 
 test('the largest size whose type count is under the cap is found, and the count function is asked only O(log) times', () => {
   const calls = [];
