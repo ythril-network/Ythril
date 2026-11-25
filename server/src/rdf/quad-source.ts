@@ -18,6 +18,8 @@
  *   past the query's deadline a read ends with `503 sparql_timeout`. A narrowed find is limited to cap+1 rows; a walk pages by `_id`.
  * - **A cursor held after its reader left.** Destroying a match stream closes every cursor it holds at once, and one whose find has not
  *   answered yet the moment it answers ({@link HeldCursors}).
+ * - **A refusal for a read the consumer ended.** A read still on its way when its stream is destroyed ends with the driver's own error;
+ *   that is no failure of the store and never the query's (`failure()` stays empty, the query's other matches read on).
  * - **A false empty.** `countQuads` answers from estimates, and the engine skips a pattern it is told is empty: it answers 0 only when no
  *   find can answer the pattern at all, at least 1 otherwise, and a count it cannot make throws, never 0.
  * - **A statement twice.** An agent's statements are written once per member and match (`agentsSeen`), an edge statement once per
@@ -164,6 +166,12 @@ class HeldCursors {
   private readonly held = new Set<FindCursor<Document>>();
   private readonly pending = new Set<FindCursor<Document>>();
   private gone = false;
+
+  /**
+   * True from the moment the consumer destroyed the stream, set before anything is closed. A read that ends after it is the consumer's doing
+   * (a session ended under a batch in flight), never a failure of the store: {@link quadsOf} asks it before it records a failure.
+   */
+  get destroyedByConsumer(): boolean { return this.gone; }
 
   /** Start no find once the stream is destroyed: a read already past its caller ends here. */
   open(): void { if (this.gone) throw new ReadAborted(); }
@@ -340,6 +348,8 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
         }
       }
     } catch (err) {
+      // A read that ends because its consumer left is no failure of the store, and is never the query's (the next match must read on).
+      if (cursors.destroyedByConsumer) throw new ReadAborted();
       fail(err);
     }
   }
