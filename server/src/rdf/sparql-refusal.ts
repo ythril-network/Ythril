@@ -39,7 +39,7 @@ const CAUSE_DEPTH_MAX = 8;
 
 /**
  * The wait a query ended by its deadline, a store that did not answer or a slot that is spent is told to keep before trying again, in
- * seconds: the slot family's own (`util/slots.ts`), the one constant every SPARQL read's 503 says.
+ * seconds: the slot family's own (`util/slots.ts`), the one constant every SPARQL read's unavailable answer says.
  */
 export const SPARQL_RETRY_AFTER_SECONDS: number = SLOT_FAMILIES.sparql.retryAfterSeconds;
 
@@ -71,7 +71,7 @@ export const timeoutRefusal = (): SparqlRefusal => new SparqlRefusal(SPARQL_UNAV
   'The query did not finish inside the server\'s time bound (sparql.timeoutMs), so nothing of it is answered: narrow it or try again', SPARQL_RETRY_AFTER_SECONDS);
 
 /**
- * The refusal of a read whose slot is spent (`503 sparql_busy`, with the family's wait): the one sentence the query endpoint and the Linked Data
+ * The refusal of a read whose slot is spent (`sparql_busy`, an unavailable answer with the family's wait): the one sentence the query endpoint and the Linked Data
  * door both answer. A plain object, for a door that answers a refusal it did not throw.
  */
 export function busyRefusal(family: SlotFamilyName): { status: number; code: string; error: string; retryAfterSeconds: number } {
