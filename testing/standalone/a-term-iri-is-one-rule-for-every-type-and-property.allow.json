@@ -1,0 +1,5 @@
+{
+  "entries": [
+    { "file": "server/src/api/linked-data.ts", "contains": "Under /ld/ an address in a space", "reviewBy": "2027-05-25", "reason": "the not-found answer's sentence tells a caller where addresses live (<public url>/ld/<space>/); it joins nothing to a value and names no record" }
+  ]
+}
