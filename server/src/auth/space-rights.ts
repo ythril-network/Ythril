@@ -53,9 +53,9 @@ export type ScopeShape = 'path' | 'iterates' | 'body' | 'resolved';
 /*
  * `resolved` arrived with the Linked Data addresses (bundle-271, Q-758, r2 R1.3). The space is the one whose RDF base holds the address
  * asked for, which a renamed space's old segment, or another space's explicit `<public url>/ld/<other>/` base, makes different from the URL
- * segment. `enforceAreaRung` leaves such a row alone, as it leaves `body`; the door resolves the address and asks the row's area and rung
- * of that space (`api/linked-data.ts`, `requireResolvedRung`), and `every-space-route-outside-the-api-has-auth-and-an-area-rung` holds every
- * such route to carrying that guard.
+ * segment. `enforceAreaRung` REFUSES such a row (no path guard may meet one: it has no space to ask); the door resolves the address and asks
+ * the row's area and rung of that space (`api/linked-data.ts`, `requireResolvedRung`), `every-space-route-outside-the-api-has-auth-and-an-area-rung`
+ * holds every route under `/ld` to carrying that guard, and `every-resolved-rights-row-is-a-linked-data-route` holds every such row to `/ld/`.
  */
 
 /*

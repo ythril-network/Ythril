@@ -364,6 +364,17 @@ function enforceAreaRung(
   // same area and rung against the space the body named — or, when it named none, against every space the
   // token may read, KEEPING the ones where the rung is held instead of refusing because one it never asked
   // about is missing. Neither is unchecked; both are checked somewhere this function cannot see.
+  // A `resolved` row is asked by the door that resolves its space (`requireResolvedRung`, `/ld/`), never here: no path guard may meet one. It
+  // is refused, not waved on: waving it on (as `body` and `iterates` are, for their own guards) dropped the route's area rung with every gate
+  // green (bundle-271, Q-758, review of S3 finding 2). `every-resolved-rights-row-is-a-linked-data-route` holds the rows to `/ld/`.
+  if (need.scope === 'resolved') {
+    log.warn(`Space rights: the row of '${peerText(req.method)} ${peerText(routePath)}' is scoped 'resolved', which no path guard can ask — refused.`);
+    res.status(UNCLASSIFIED_REFUSED).json({
+      error: `No path guard decides '${peerText(req.method)} ${peerText(routePath)}', so it is refused`,
+      code: 'route_unclassified',
+    });
+    return false;
+  }
   if (need.scope !== 'path') return true;
 
   /*
