@@ -110,7 +110,12 @@ describe('every entity removal settles what was written to the entity meanwhile'
   it('the writers check their entity ends after they wrote', () => {
     const { raw } = serverSources();
     assert.match(bodyOf(raw.get('server/src/brain/write-plan/commit.ts'), 'afterStage'), /refuseEdgesToGoneEntities\(/, 'the commit does not check the entity ends of the edges it wrote');
-    assert.match(bodyOf(raw.get('server/src/brain/write-plan/commit.ts'), 'refuseEdgesToGoneEntities'), /takeBackEdgesToGoneEntities\(/, 'the commit\'s edge check does not take back an edge');
+    // The take-backs run after the records landed, in the one runner of what follows a write (`after-commit.ts`, Q-760): both commits hand it their edges.
+    assert.match(bodyOf(raw.get('server/src/brain/write-plan/commit.ts'), 'refuseEdgesToGoneEntities'), /runAfterCommit\(\s*spaceId,\s*\{\s*edges:/, 'the commit\'s edge check does not hand its edges to the take-back');
+    assert.match(bodyOf(raw.get('server/src/brain/write-plan/after-commit.ts'), 'runAfterCommit'), /takeBackEdgesToGoneEntities\(/, 'the after-commit runner does not take back an edge');
+    assert.match(bodyOf(raw.get('server/src/brain/write-plan/after-commit.ts'), 'runAfterCommit'), /takeBackLinksToGoneEntities\(/, 'the after-commit runner does not take back a link row');
+    const group = bodyOf(raw.get('server/src/brain/write-plan/write-group.ts'), 'commitWriteGroup');
+    assert.match(group, /runAfterCommit\(spaceId,\s*\{\s*edges:[^}]*linkRows:/, 'the write group does not check the entity ends of its edges and link rows after its commit');
     assert.match(bodyOf(raw.get('server/src/brain/write-plan/commit.ts'), 'reconcileLinkRows'), /takeBackLinksToGoneEntities\(/, 'the link-row writer does not check the entities its rows point at');
     assert.match(bodyOf(raw.get('server/src/brain/edges.ts'), 'updateEdgeById'), /refuseEdgeToGoneEntity\(/, 'the edge kind patch does not check its entity ends');
   });

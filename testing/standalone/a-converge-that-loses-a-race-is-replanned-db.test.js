@@ -18,6 +18,9 @@
  * Seen red: with the seq predicate removed from the commit's update (`opFor` in `write-plan/commit.ts`), the
  * parked converge overwrites the other write's tags and the merge assertion fails.
  *
+ * The stage write itself (`writeStage`) is shared with the write group since `Q-760`; `commitPlans` maps what it reports to these
+ * outcomes (`stageOutcomes`). A group does not re-plan: its lost race aborts it whole (`two-write-groups-on-one-record-the-loser-aborts-stale-db`).
+ *
  * ## What hangs off a record that lost its race (`Q-201`)
  *
  * A batch's edge follows its record's FINAL outcome, not the first commit's: an edge whose record (or either end) was set

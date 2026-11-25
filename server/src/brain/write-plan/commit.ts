@@ -21,6 +21,14 @@
  * write bound ended) still throws: nothing is known written and there is nothing to report but the error — for a
  * timeout, the store-timeout every door answers 503 for.
  *
+ * ## The stage writer is shared with the group commit (`Q-760`)
+ *
+ * `writeStage` — one kind's versions, its position block and its one `bulkWrite`, with the counts — is the one write of a planned record. Both
+ * commits call it: this one maps what it reports to item outcomes (`stageOutcomes`); the group commit (`write-group.ts`) runs it inside one
+ * transaction, where every error is thrown as it came (its labels kept, so a write conflict re-runs the transaction) and a short count aborts
+ * the group. So this file stays the one place a create or converge reaches a record collection. What follows a landed stage (take-backs,
+ * embed jobs, duplicate rules) is `after-commit.ts`'s, asked per stage here and once after the commit there.
+ *
  * ## What it is not
  *
  * Not the update or delete paths, not merge, re-key, redaction, sync ingest or file metadata — those keep their
@@ -28,31 +36,28 @@
  * the exception that proves the rule: the update paths call it too (`reconcileLinks`), so there is one writer of
  * link rows rather than two.
  */
+import type { ClientSession } from 'mongodb';
 import { col, asFilter, asBulk, asUpdate } from '../../db/mongo.js';
 import { spaceCollection } from '../../db/space-collection.js';
-import { versionsFor, versionsForRows, type VersionAllocation } from '../../util/version-stamp.js';
+import { versionsFor, versionsForRows, type RefusedVersion, type VersionAllocation } from '../../util/version-stamp.js';
 import { withLandingStamp, localRow, type LocalLanding } from '../../sync/record-position-stream.js';
 import { inChunks } from '../../util/chunks.js';
 import { readStoredById, READ_CHUNK } from '../../db/read-by-id.js';
-import { mapLimit } from '../../util/map-limit.js';
 import { log, peerText } from '../../util/log.js';
 import { bulkWriteFailures, phraseWriteFailure, onlyDuplicateKeys, DUPLICATE_KEY } from '../../db/write-errors.js';
 import { FUNCTIONAL_GUARD, UNSET_GUARD } from '../../sync/local-only-fields.js';
 import { isWriteTimeout } from '../../db/write-timeout.js';
 import { writeFilterFor, RecordVersionAtCeiling, RECORD_VERSION_AT_CEILING } from '../write-precondition.js';
-import { enqueueWriteEmbedJobs, EMBED_PRIORITY } from '../embed-queue.js';
 import { linkIdFor } from '../link-id.js';
 import { removeWithTombstones } from '../tombstones.js';
-import { takeBackEdgesToGoneEntities, takeBackLinksToGoneEntities } from '../gone-entity-references.js';
+import { takeBackLinksToGoneEntities } from '../gone-entity-references.js';
 import { EndpointRemoved, ENDPOINT_REMOVED } from '../../util/errors.js';
 import type { AuthorRef, EdgeDoc, LinkDoc, TombstoneDoc } from '../../config/types.js';
 import type { RefKind } from '../../config/types-knowledge.js';
 import type { DesiredLinks } from '../links.js';
 import { COMMIT_ORDER, PLAN_KINDS, dependencyFailed, type CommitOutcome, type PlanKind, type WritePlan } from './types.js';
 import { admitSpaceWrite, admitSpaceWriteUnit, assertSpaceTakesWrites, isSpaceNotWritable } from '../../spaces/space-write-gate.js';
-
-/** Insert-time duplicate rules run at most this many at once — each is a vector search. */
-const DUPE_RULE_CONCURRENCY = 4;
+import { runAfterCommit, type LandedEdge, type LandedLinkRow } from './after-commit.js';
 
 /**
  * Write `plans` (all for `spaceId`) and say what happened to each, in the order given.
@@ -97,76 +102,115 @@ export async function commitPlans(
     }
     let stageLanded: number[];
     try {
-      stageLanded = await writeStage(spaceId, kind, plans, ready, outcomes, landed.length > 0 || landedBefore);
+      stageLanded = await stageOutcomes(spaceId, kind, plans, ready, outcomes, landed.length > 0 || landedBefore);
     } finally {
       leaveWriteUnit();
     }
     landed.push(...await afterStage(spaceId, plans, stageLanded, outcomes));
   }
 
-  runDupeRules(spaceId, landed.map(i => plans[i]!).filter(p => p.dupeRules));
+  await runAfterCommit(spaceId, { dupeRules: landed.map(i => plans[i]!).filter(p => p.dupeRules) }, 'write commit');
   return outcomes.map(o => o ?? { ok: false, reason: 'not written' });
 }
 
-/** One kind's block write. Returns the indexes whose record landed; sets every index's outcome. */
-async function writeStage(
+/** What one kind's stage write did (`writeStage`). Indexes are into the plans it was handed. */
+export interface StageWrite {
+  /** Per plan, in order: the version it took, or refused because its record's version is at the ceiling (that plan was not sent). */
+  readonly rows: ReadonlyArray<VersionAllocation | RefusedVersion>;
+  /** The plans sent to the write, and the version each carried (`stamps[k]` is `sent[k]`'s). */
+  readonly sent: readonly number[];
+  readonly stamps: readonly VersionAllocation[];
+  /** The driver's counts: converges whose filter matched, and inserts made. */
+  readonly matched: number;
+  readonly inserted: number;
+  /** Outside a session only: the write's own failure, handed back for the caller to map (`stageOutcomes`). Inside one it is thrown. */
+  readonly writeError?: { readonly error: unknown };
+}
+
+/**
+ * One kind's stage — every plan in `plans` is of `kind` — as ONE write: the versions (`versionsForRows`), one position block held around the
+ * write (`withLandingStamp`), and one unordered `bulkWrite`; returns what the driver counted. The one write of a planned record (see the
+ * module docblock).
+ *
+ * `session`: the group's transaction. Every read and the write carry it, and every error is thrown as it came, its labels kept: the transaction
+ * is re-run on a transient one, and a duplicate key or a short count is the group's to abort on. Without one, a failure of the write itself is
+ * handed back in `writeError`; a failure to take the versions or the position block is thrown.
+ */
+export async function writeStage(
+  spaceId: string, kind: PlanKind, plans: readonly WritePlan[], opts: { session?: ClientSession } = {},
+): Promise<StageWrite> {
+  const { session } = opts;
+  const coll = col<{ _id: string; seq?: number }>(spaceCollection(spaceId, PLAN_KINDS[kind].collection));
+  // Versions first, then the position block and the write under its hold (`withLandingStamp`): a version needs no hold, a position does.
+  const rows = await versionsForRows(spaceId, plans.map(p => p.id), { parts: [PLAN_KINDS[kind].collection], ...(session ? { session } : {}) });
+  const sent: number[] = [];
+  const stamps: VersionAllocation[] = [];
+  rows.forEach((row, k) => { if (!('refused' in row)) { sent.push(k); stamps.push(row); } });
+  let matched = 0;
+  let inserted = 0;
+  let writeError: { error: unknown } | undefined;
+  if (sent.length > 0) {
+    await withLandingStamp(spaceId, stamps.map(s => localRow(s.version)), async (patches) => {
+      try {
+        const res = await coll.bulkWrite(asBulk(sent.map((i, k) => opFor(plans[i]!, stamps[k]!, patches[k]!))),
+          { ordered: false, ...(session ? { session } : {}) });
+        matched = res.matchedCount;
+        inserted = res.insertedCount;
+      } catch (error) {
+        if (session) throw error;
+        writeError = { error };
+      }
+    }, `write.${kind}`);
+  }
+  return { rows, sent, stamps, matched, inserted, ...(writeError ? { writeError } : {}) };
+}
+
+/** One kind's stage for `commitPlans`: written by `writeStage`, then mapped to item outcomes. Returns the indexes whose record landed; sets every index's outcome. */
+async function stageOutcomes(
   spaceId: string, kind: PlanKind, plans: readonly WritePlan[], candidates: readonly number[],
   outcomes: Array<CommitOutcome | undefined>, somethingLanded: boolean,
 ): Promise<number[]> {
-  const coll = col<{ _id: string; seq?: number }>(spaceCollection(spaceId, PLAN_KINDS[kind].collection));
-  // The rows that take a version: every candidate but a record whose own version is at the ceiling (refused alone, below).
-  let ready: readonly number[] = candidates;
-  let stamps: readonly VersionAllocation[] = [];
-  let failures: ReturnType<typeof bulkWriteFailures> = null;
-  let ambiguous = false;
-  let matched = 0;
+  let stage: StageWrite;
   try {
-    // Versions first, then the position block and the write under its hold (`withLandingStamp`): a version needs no hold, a position does.
-    const rows = await versionsForRows(spaceId, candidates.map(i => plans[i]!.id), { parts: [PLAN_KINDS[kind].collection] });
-    const live: number[] = [];
-    const liveStamps: VersionAllocation[] = [];
-    candidates.forEach((i, k) => {
-      const row = rows[k]!;
-      if ('refused' in row) {
-        // The record's version is at the highest number sync accepts: this item is refused with its code, the other rows land.
-        outcomes[i] = { ok: false, reason: new RecordVersionAtCeiling(row.id).message, code: RECORD_VERSION_AT_CEILING };
-      } else { live.push(i); liveStamps.push(row); }
-    });
-    ready = live;
-    stamps = liveStamps;
-    if (live.length === 0) return [];
-    await withLandingStamp(spaceId, stamps.map(s => localRow(s.version)), async (patches) => {
-      try {
-        const res = await coll.bulkWrite(asBulk(ready.map((i, k) => opFor(plans[i]!, stamps[k]!, patches[k]!))), { ordered: false });
-        matched = res.matchedCount;
-      } catch (err) {
-        /*
-         * A write the bound ENDED is the store's failure, not an item's: rethrown, so the door answers the
-         * store-timeout 503 every door answers (`brain/store-failure.ts`) rather than "did not complete" per item.
-         * Only while nothing of this request has landed — after that the module's promise below wins (a stored
-         * record reported failed invites a duplicating resend), so the stage is read back as any ambiguous one.
-         */
-        if (isWriteTimeout(err) && !somethingLanded) throw err;
-        failures = bulkWriteFailures(err);
-        if (!failures) ambiguous = true;
-        /*
-         * A duplicate key on an item is a LOST RACE, not a fault: the item is reported stale and re-planned against the
-         * winner, so a busy functional subject would otherwise fill the log with a warning per loser. It is said at debug,
-         * with the code, so that the one place a reader looks for why an item went stale still names it (`Q-439`).
-         */
-        const lostRace = failures !== null && onlyDuplicateKeys(failures);
-        const detail = failures
-          ? `${failures.length} item(s), code ${[...new Set(failures.map(f => f.code ?? 'none'))].join('/')}`
-          : 'no per-item detail';
-        (lostRace ? log.debug : log.warn)(`write commit: the ${kind} write to '${peerText(spaceId)}' reported a failure: ${detail}`);
-      }
-    }, `write.${kind}`);
+    stage = await writeStage(spaceId, kind, candidates.map(i => plans[i]!));
   } catch (err) {
-    // The versions or the position block failed, or the write timed out: nothing of this stage is known to be written.
+    // The versions or the position block failed: nothing of this stage is known to be written.
     if (!somethingLanded) throw err;
-    for (const i of ready) outcomes[i] = { ok: false, reason: phraseWriteFailure(undefined) };
+    for (const i of candidates) outcomes[i] ??= { ok: false, reason: phraseWriteFailure(undefined) };
     log.warn(`write commit: the ${kind} stage for '${peerText(spaceId)}' could not start after earlier stages landed: ${peerText(String(err))}`);
     return [];
+  }
+  stage.rows.forEach((row, k) => {
+    // The record's version is at the highest number sync accepts: this item is refused with its code, the other rows land.
+    if ('refused' in row) outcomes[candidates[k]!] = { ok: false, reason: new RecordVersionAtCeiling(row.id).message, code: RECORD_VERSION_AT_CEILING };
+  });
+  const ready = stage.sent.map(k => candidates[k]!);
+  const stamps = stage.stamps;
+  if (ready.length === 0) return [];
+  const matched = stage.matched;
+  let failures: ReturnType<typeof bulkWriteFailures> = null;
+  let ambiguous = false;
+  if (stage.writeError) {
+    const err = stage.writeError.error;
+    /*
+     * A write the bound ENDED is the store's failure, not an item's: rethrown, so the door answers the
+     * store-timeout 503 every door answers (`brain/store-failure.ts`) rather than "did not complete" per item.
+     * Only while nothing of this request has landed — after that the module's promise below wins (a stored
+     * record reported failed invites a duplicating resend), so the stage is read back as any ambiguous one.
+     */
+    if (isWriteTimeout(err) && !somethingLanded) throw err;
+    failures = bulkWriteFailures(err);
+    if (!failures) ambiguous = true;
+    /*
+     * A duplicate key on an item is a LOST RACE, not a fault: the item is reported stale and re-planned against the
+     * winner, so a busy functional subject would otherwise fill the log with a warning per loser. It is said at debug,
+     * with the code, so that the one place a reader looks for why an item went stale still names it (`Q-439`).
+     */
+    const lostRace = failures !== null && onlyDuplicateKeys(failures);
+    const detail = failures
+      ? `${failures.length} item(s), code ${[...new Set(failures.map(f => f.code ?? 'none'))].join('/')}`
+      : 'no per-item detail';
+    (lostRace ? log.debug : log.warn)(`write commit: the ${kind} write to '${peerText(spaceId)}' reported a failure: ${detail}`);
   }
 
   const seqOf = (k: number) => stamps[k]!.version;
@@ -254,21 +298,21 @@ async function refuseEdgesToGoneEntities(
   spaceId: string, plans: readonly WritePlan[], landed: readonly number[], outcomes: Array<CommitOutcome | undefined>,
 ): Promise<Set<number>> {
   const taken = new Set<number>();
-  try {
-    const refused = await takeBackEdgesToGoneEntities(spaceId, landed.map(i => {
-      const r = plans[i]!.result as { from: string; to: string; fromKind?: RefKind; toKind?: RefKind };
-      return { _id: plans[i]!.id, from: r.from, to: r.to, fromKind: r.fromKind, toKind: r.toKind };
-    }));
-    for (const i of landed) {
-      const end = refused.get(plans[i]!.id);
-      if (!end) continue;
-      taken.add(i);
-      outcomes[i] = { ok: false, reason: new EndpointRemoved(end.id, end.side).message, code: ENDPOINT_REMOVED, removedEnd: end };
-    }
-  } catch (err) {
-    log.warn(`write commit: ${landed.length} edge(s) written to '${peerText(spaceId)}' could not be checked against entities removed meanwhile: ${peerText(err)}`);
+  // A failure to check is said by `runAfterCommit` and the edges keep their outcomes.
+  const { edgesTakenBack } = await runAfterCommit(spaceId, { edges: landed.map(i => landedEdgeOf(plans[i]!)) }, 'write commit');
+  for (const i of landed) {
+    const end = edgesTakenBack.get(plans[i]!.id);
+    if (!end) continue;
+    taken.add(i);
+    outcomes[i] = { ok: false, reason: new EndpointRemoved(end.id, end.side).message, code: ENDPOINT_REMOVED, removedEnd: end };
   }
   return taken;
+}
+
+/** The ends of a landed edge plan, as the take-back reads them. */
+export function landedEdgeOf(plan: WritePlan): LandedEdge {
+  const r = plan.result as { from: string; to: string; fromKind?: RefKind; toKind?: RefKind };
+  return { _id: plan.id, from: r.from, to: r.to, fromKind: r.fromKind, toKind: r.toKind };
 }
 
 /** A landed stage's link rows and embed jobs. Returns the indexes that still stand. Never throws: the records are stored, and saying otherwise lies. */
@@ -297,24 +341,9 @@ async function afterStage(
         + `${peerText(err)}. Re-sending the same write (with its id) repairs them.`);
     }
   }
-  const toQueue = landed.filter(i => plans[i]!.enqueue).map(i => ({ recordType: plans[i]!.kind, recordId: plans[i]!.id }));
-  // The write lane never throws by contract; this holds the commit to its own promise whatever the lane does.
-  if (toQueue.length > 0) {
-    await enqueueWriteEmbedJobs(spaceId, toQueue, { priority: EMBED_PRIORITY.write }).catch((err: unknown) => {
-      log.warn(`write commit: ${toQueue.length} record(s) in '${peerText(spaceId)}' were written but not queued for embedding: ${peerText(String(err))}`);
-    });
-  }
+  // Never throws: a job not queued is said by `runAfterCommit`, and the records stay written.
+  await runAfterCommit(spaceId, { embed: landed.filter(i => plans[i]!.enqueue).map(i => ({ recordType: plans[i]!.kind, recordId: plans[i]!.id })) }, 'write commit');
   return landed;
-}
-
-/** Insert-time duplicate rules for the landed records that asked for them — bounded, and never awaited by the write. */
-function runDupeRules(spaceId: string, plans: readonly WritePlan[]): void {
-  if (plans.length === 0) return;
-  // The dynamic import avoids a static cycle with dupe-scanner.js.
-  void import('../dupe-scanner.js').then(m => mapLimit(plans, DUPE_RULE_CONCURRENCY, async (p) => {
-    try { await m.evaluateRecordForDuplicates(spaceId, p.kind as Parameters<typeof m.evaluateRecordForDuplicates>[1], p.id); }
-    catch { /* best-effort: a duplicate rule never fails the write it follows */ }
-  })).catch(() => { /* best-effort */ });
 }
 
 /** One record's link reconcile: what it should link to, and whether it was minted this instant. */
@@ -339,11 +368,20 @@ export interface LinkReconcile {
  * still holds it — and a re-created link clears the tombstone that retired it, or the next pull would delete it
  * again on the strength of a deletion the caller has since reversed.
  *
+ * ## Inside a transaction (`Q-760`)
+ *
+ * Given `opts.session` (a write group's), every read and write here carries it, and the take-back of rows naming an entity removed meanwhile
+ * does NOT run: it reads what is committed, and these rows are not until the group commits. Their rows are pushed onto `opts.owed` instead,
+ * for the caller to check after its commit (`runAfterCommit`); `takenBack` stays empty.
+ *
  * @param opts.additive create and never delete — the link conversion's question, see `reconcileLinks`.
  */
 export async function reconcileLinkRows(
-  spaceId: string, records: readonly LinkReconcile[], opts: { additive?: boolean } = {},
+  spaceId: string, records: readonly LinkReconcile[],
+  opts: { additive?: boolean } & ({ session?: undefined; owed?: undefined } | { session: ClientSession; owed: LandedLinkRow[] }) = {},
 ): Promise<Array<{ added: number; removed: number; takenBack: string[] }>> {
+  const { session } = opts;
+  const inSession = session ? { session } : {};
   // Refused before the rows are read; the removals and additions below are admitted and counted again, at the instant they are made.
   assertSpaceTakesWrites(spaceId, 'links');
   const wantedBy = records.map(r => {
@@ -364,7 +402,7 @@ export async function reconcileLinkRows(
       spaceId,
       // Only the classes each write TOUCHED: a patch naming `linkEntities` alone must not disturb fact links.
       $or: chunk.map(({ r }) => ({ from: r.from, fromKind: r.fromKind, toKind: { $in: Object.keys(r.desired) } })),
-    }), { projection: { _id: 1, from: 1, fromKind: 1, toKind: 1, seq: 1 } }).toArray() as Array<Pick<LinkDoc, '_id' | 'from' | 'fromKind' | 'toKind' | 'seq'>>;
+    }), { projection: { _id: 1, from: 1, fromKind: 1, toKind: 1, seq: 1 }, ...inSession }).toArray() as Array<Pick<LinkDoc, '_id' | 'from' | 'fromKind' | 'toKind' | 'seq'>>;
     for (const { r, i } of chunk) {
       const classes = new Set(Object.keys(r.desired));
       const mine = rows.filter(row => row.from === r.from && row.fromKind === r.fromKind && classes.has(row.toKind));
@@ -392,11 +430,11 @@ export async function reconcileLinkRows(
     if (removals.length > 0) {
       // The rows go, then their tombstones — stamped first (a link at the ceiling refuses the removal whole) and each carrying the row's seq.
       await removeWithTombstones(spaceId, 'links',
-        removals.map(_id => ({ _id, type: 'link' as const, deletedAt: now, originalSeq: seqOfExisting.get(_id) })), { filter: { spaceId } });
+        removals.map(_id => ({ _id, type: 'link' as const, deletedAt: now, originalSeq: seqOfExisting.get(_id) })), { filter: { spaceId }, ...inSession });
     }
     if (additions.length > 0) {
       // Each row's version above any tombstone held for its id (a re-created link clears the one that retired it, below).
-      const versions = await versionsFor(spaceId, additions.map(a => a._id), { parts: ['links'] });
+      const versions = await versionsFor(spaceId, additions.map(a => a._id), { parts: ['links'], ...inSession });
       await withLandingStamp(spaceId, versions.map(v => localRow(v.version)), async (patches) => {
         await linksColl.bulkWrite(asBulk(additions.map(({ _id, r, to, toKind }, i) => ({
           replaceOne: {
@@ -407,11 +445,14 @@ export async function reconcileLinkRows(
             } satisfies LinkDoc,
             upsert: true,
           },
-        }))), { ordered: false });
-        await tombstones.deleteMany(asFilter<TombstoneDoc>({ _id: { $in: additions.map(a => a._id) } }));
+        }))), { ordered: false, ...inSession });
+        await tombstones.deleteMany(asFilter<TombstoneDoc>({ _id: { $in: additions.map(a => a._id) } }), inSession);
       }, 'link.reconcile.add');
+      const landedRows = additions.map((a, i) => ({ _id: a._id, to: a.to, toKind: a.toKind, seq: versions[i]!.version }));
+      // Inside a transaction the rows are not visible yet: the take-back is the caller's, after its commit (see the docblock).
+      if (opts.owed) { opts.owed.push(...landedRows); return; }
       // The writer's half of the two-sided check (Q-305): a row that names an entity deleted meanwhile is taken back, and the record that carried it keeps its write.
-      const taken = await takeBackLinksToGoneEntities(spaceId, additions.map((a, i) => ({ _id: a._id, to: a.to, toKind: a.toKind, seq: versions[i]!.version })));
+      const taken = await takeBackLinksToGoneEntities(spaceId, landedRows);
       for (const a of additions) {
         const entityId = taken.get(a._id);
         if (entityId === undefined) continue;
