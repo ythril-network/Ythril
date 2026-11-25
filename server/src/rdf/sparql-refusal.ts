@@ -65,10 +65,10 @@ export function sparqlRefusalOf(err: unknown): SparqlRefusal | null {
   return null;
 }
 
-/** The deadline passed: 503, try again. */
+/** The deadline passed: unavailable, try again. */
 export const timeoutRefusal = (): SparqlRefusal => new SparqlRefusal(SPARQL_UNAVAILABLE, SPARQL_TIMEOUT,
   'The query did not finish inside the server\'s time bound (sparql.timeoutMs), so nothing of it is answered: narrow it or try again', SPARQL_RETRY_AFTER_SECONDS);
 
-/** The read cap passed: 413. */
+/** The read cap passed: too large. */
 export const tooMuchReadRefusal = (cap: number): SparqlRefusal => new SparqlRefusal(SPARQL_TOO_LARGE, SPARQL_TOO_MUCH_READ,
   `The query reads more than ${cap} records (sparql.maxRecordsRead), so nothing of it is answered: bind more of its patterns`);
