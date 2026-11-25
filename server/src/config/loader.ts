@@ -17,6 +17,7 @@ import { settledWithin } from '../util/time-bound.js';
 import { migrateProxiesToViews, holdsLegacyProxies } from './migrate-proxies-to-views.js';
 import { validateViews } from './view-shape.js';
 import { validateImportLimits } from './body-limits.js';
+import { validateSparqlLimits } from './sparql-limits.js';
 import { effectiveMongoUri, readConfiguredMongoUriFrom } from './mongo-uri.js';
 import { countConfigFlushFailure } from '../metrics/config-flush-count.js';
 
@@ -480,6 +481,7 @@ export function loadConfig(): Config {
   // A malformed `views` list refuses the boot, naming the entry: a view nobody can name or delete must not be served (Q-531).
   validateViews(parsed.views);
   validateImportLimits(parsed);
+  validateSparqlLimits(parsed);
   _config = parsed;
   applyConfigOverlays(_config);
   validateOidcBlock(_config);
@@ -616,6 +618,7 @@ export function reloadConfig(): Config {
   normaliseLoadedConfig(parsed);
   validateViews(parsed.views);
   validateImportLimits(parsed);
+  validateSparqlLimits(parsed);
   validateOidcBlock(parsed);
   // A restored 5.x config brings its proxies back as writable spaces unless it is converted here too. The config is not saved (this
   // function's contract): the next write, or the next boot, persists the result, so the file is copied aside first, by the step the boot
