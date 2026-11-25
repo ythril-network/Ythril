@@ -17,6 +17,8 @@
  * - A fact with no `schema:text` stays refused (a fact has no sensible default), as `missing-required-field` naming `fact`, and its message
  *   is the planner's own sentence.
  * - An edge whose end was refused in this import is reported as `end-refused`, naming that end's subject, never as a schema violation.
+ * - A fact whose stored link points at a record that does not exist is refused as `stored-link-dangling`, in a generic sentence that quotes
+ *   no stored id, and so is a fact that also links a record this import refused (review F1, F5).
  *
  * Run: node --test testing/standalone/an-rdf-import-names-a-subject-by-its-address-and-every-refusal-by-its-cause-db.test.js (server build
  * and the test MongoDB)
@@ -29,13 +31,21 @@ import { openRdfImportDoors, rdfMeta, baseOf } from './_rdf-import-doors.mjs';
 const skip = await mongoSkipReason();
 const LANDS = 'rdfnolabel';
 const REFUSES = 'rdfnotext';
+const DANGLES = 'rdfdangle';
+const MIXED = 'rdfmixed';
+const YTHRIL = 'https://w3id.org/ythril/ns#';
+const REFERENCES = '<http://purl.org/dc/terms/references>';
+const STORED_FACT = '66666666-6666-4666-8666-666666666666';
+/** The id a stored link points at, which no record holds: the file never says it, so no answer may. */
+const GHOST = '77777777-7777-4777-8777-777777777777';
+const SPACES = [LANDS, REFUSES, DANGLES, MIXED];
 const SCHEMA_TEXT = '<http://schema.org/text>';
 const SCHEMA_START = '<http://schema.org/startDate>';
 const RDFS_LABEL = '<http://www.w3.org/2000/01/rdf-schema#label>';
 
 /** A strict space with a type of each kind the file states, and the edge labels between them: nothing in the file is a term it lacks. */
 const strictMeta = (id) => rdfMeta(id, {
-  validationMode: 'strict',
+  validationMode: 'strict', strictLinkage: true,
   typeSchemas: {
     entity: { person: {} }, fact: { note: {} }, chrono: { event: {} },
     edge: { knows: {}, attends: {}, cites: {} },
@@ -53,8 +63,8 @@ const NOTE = 'http://notes.example/n1';
 describe('a subject with no label is named by its address, and every refusal names its cause (real routes, real MongoDB)', { skip, timeout: 300_000 }, () => {
   let d, writer;
   before(async () => {
-    d = await openRdfImportDoors({ suite: 'rdf_import_nolabel', spaces: [LANDS, REFUSES].map(id => ({ id, meta: strictMeta(id) })) });
-    writer = await d.mint('rdf-import-nolabel-writer', { [LANDS]: d.row({ knowledge: 'write' }), [REFUSES]: d.row({ knowledge: 'write' }) });
+    d = await openRdfImportDoors({ suite: 'rdf_import_nolabel', spaces: SPACES.map(id => ({ id, meta: strictMeta(id) })) });
+    writer = await d.mint('rdf-import-nolabel-writer', Object.fromEntries(SPACES.map(s => [s, d.row({ knowledge: 'write' })])));
   });
   after(async () => { await d?.close(); });
 
@@ -109,6 +119,38 @@ describe('a subject with no label is named by its address, and every refusal nam
       assert.match(edge[0].message, /refused in this import/);
       assert.doesNotMatch(edge[0].message, /schema/);
       assert.equal(report.reasonsByCode.schema_violation, undefined, 'no reason is a schema violation');
+    });
+  });
+
+  describe('a stored fact whose link points at a record that is not there (strict linkage turned on after the link was written)', () => {
+    /** Seed the stored fact and its dangling link row in `space`; answers the import of the fact said again, with `more` statements added. */
+    async function reimport(space, more = []) {
+      await d.seed(space, 'fact', [{ _id: STORED_FACT, fact: 'a stored fact' }]);
+      await d.seed(space, 'link', [{ _id: `dangling-${space}`, spaceId: space, from: STORED_FACT, fromKind: 'fact', to: GHOST, toKind: 'entity' }]);
+      const v = `${baseOf(space)}vocab/`;
+      const file = [`<${baseOf(space)}fact/${STORED_FACT}> a <${YTHRIL}Fact> ; ${SCHEMA_TEXT} "a stored fact, said again" .`, ...more.map(m => m(v)), ''].join('\n');
+      const r = await d.importRest(writer.key, space, file);
+      assert.equal(r.status, 409, r.text.slice(0, 500));
+      return reportOf(r);
+    }
+
+    it('is stored-link-dangling in a generic sentence that quotes no id the file did not send', async () => {
+      const report = await reimport(DANGLES);
+      const fact = report.reasons.filter(x => x.kind === 'fact');
+      assert.deepEqual(fact.map(x => x.code), ['stored-link-dangling'], JSON.stringify(report.reasons).slice(0, 600));
+      assert.match(fact[0].message, /link this record already holds points at a record that does not exist; remove that link or turn strict linkage off/i);
+      assert.equal(fact[0].end, undefined, 'no end is named: the end is not one the file sent');
+      assert.ok(!JSON.stringify(report).includes(GHOST), 'the stored id appears nowhere in the report');
+    });
+
+    it('is still stored-link-dangling when the fact also links a record this import refused', async () => {
+      const report = await reimport(MIXED, [
+        (v) => `<http://people.example/blank-label> a <${v}entity/person> ; ${RDFS_LABEL} "" .`,
+        () => `<${baseOf(MIXED)}fact/${STORED_FACT}> ${REFERENCES} <http://people.example/blank-label> .`,
+      ]);
+      const fact = report.reasons.filter(x => x.kind === 'fact');
+      assert.deepEqual(fact.map(x => x.code), ['stored-link-dangling'], `the stored link is the cause that stays after the refused end is fixed: ${JSON.stringify(report.reasons).slice(0, 700)}`);
+      assert.ok(!JSON.stringify(report).includes(GHOST), 'the stored id appears nowhere in the report');
     });
   });
 });
