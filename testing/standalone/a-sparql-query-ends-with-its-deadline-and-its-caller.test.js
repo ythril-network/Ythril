@@ -28,6 +28,7 @@ import { Readable } from 'node:stream';
 import { DataFactory } from 'n3';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
+import { settleWithin } from './_write-faults.mjs';
 
 const { namedNode, literal, quad } = DataFactory;
 const G = namedNode('https://rdf.example.org/ld/deadline/');
@@ -87,11 +88,10 @@ async function run(text, source, opts) {
 
 /** `rows()` of the query, or what it did not answer inside {@link ANSWER_WITHIN_MS}: `{ rows }`, `{ error }` or `{ pending: true }`. */
 async function answerOf(result) {
-  const timer = { id: null };
-  const pending = new Promise((resolve) => { timer.id = setTimeout(() => resolve({ pending: true }), ANSWER_WITHIN_MS); });
-  try {
-    return await Promise.race([result.rows().then((rows) => ({ rows }), (error) => ({ error })), pending]);
-  } finally { clearTimeout(timer.id); }
+  // `settleWithin` clears its own timer, so the one that loses the race does not keep the process alive.
+  const answered = await settleWithin(result.rows(), ANSWER_WITHIN_MS);
+  if (!answered.settled) return { pending: true };
+  return answered.ok ? { rows: answered.value } : { error: answered.error };
 }
 
 const readClosed = (source) => holdsWithin(() => source.state.open.size === 0, ANSWER_WITHIN_MS, SETTLE_MS);
