@@ -186,8 +186,6 @@ export interface SparqlResult {
    * quads are read and the engine is stopped (a door asks for one more than it answers, to know there were more).
    */
   rows(limit?: number): Promise<SparqlRow[] | boolean | unknown[]>;
-  /** The answer in one of the engine's result formats (SPARQL results JSON, CSV, TSV), as a stream. */
-  serialize(mediaType: string): Promise<NodeJS.ReadableStream>;
   /** Stop the engine and release its reads. */
   destroy(): void;
 }
@@ -207,28 +205,56 @@ function refusalOf(err: unknown, source: unknown): unknown {
 }
 
 /**
+ * The algebra of an ASK as the SELECT of at most one row (its ASK node replaced by a slice of length 1), or null when `algebra` is no ASK.
+ * The engine answers an ASK with one promise that nothing can end; a stream of at most one row is read through {@link runSparql}'s
+ * `collect`, so the deadline and the caller's abort destroy it like any other read.
+ */
+function askAsOneRow(algebra: SparqlAlgebra): SparqlAlgebra | null {
+  const node: unknown = algebra;
+  if (!isRecord(node)) return null;
+  if (node['type'] === 'ask') return { type: 'slice', input: node['input'], start: 0, length: 1 } as unknown as SparqlAlgebra;
+  if (node['type'] === 'from' && isRecord(node['input'])) {
+    const inner = askAsOneRow(node['input'] as unknown as SparqlAlgebra);
+    return inner ? { ...node, input: inner } as unknown as SparqlAlgebra : null;
+  }
+  return null;
+}
+
+/** What ends a query that its caller left. */
+const callerLeft = (): Error => new Error('The query was ended by its caller');
+
+/**
  * Run `algebra` (from {@link checkSparqlAlgebra}) over `source` (an RDF/JS source: the quad source) by `deadline` (epoch milliseconds); a
- * `signal` that aborts ends it. The engine is the process's one engine, with a context that cannot reach the network.
+ * `signal` that aborts ends it, one already aborted ends it before the engine starts. The engine is the process's one engine, with a
+ * context that cannot reach the network. Every form is read as a stream the deadline and the abort destroy (an ASK as a SELECT of one row).
  */
 export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: { deadline: number; signal?: AbortSignal }): Promise<SparqlResult> {
   if (opts.deadline - Date.now() <= 0) throw timeoutRefusal();
+  if (opts.signal?.aborted) throw callerLeft();
   const context = contextFor(source);
-  const raw = await engineOf().query(algebra, context);
   const streams = new Set<EngineStream>();
-  let timer: NodeJS.Timeout | null = null;
   let ended: Error | null = null;
   const end = (cause: Error): void => {
     ended ??= cause;
     for (const s of streams) s.destroy(cause);
   };
-  timer = setTimeout(() => end(timeoutRefusal()), Math.max(0, opts.deadline - Date.now()));
+  // Armed before the engine plans, so a deadline or an abort that comes while it plans is seen by the first read.
+  let timer: NodeJS.Timeout | null = setTimeout(() => end(timeoutRefusal()), Math.max(0, opts.deadline - Date.now()));
   timer.unref();
-  const onAbort = (): void => end(new Error('The query was ended by its caller'));
+  const onAbort = (): void => end(callerLeft());
   opts.signal?.addEventListener('abort', onAbort, { once: true });
   const finish = (): void => {
     if (timer) { clearTimeout(timer); timer = null; }
     opts.signal?.removeEventListener('abort', onAbort);
   };
+  const oneRow = askAsOneRow(algebra);
+  let raw: Awaited<ReturnType<QueryEngine['query']>>;
+  try {
+    raw = await engineOf().query(oneRow ?? algebra, context);
+  } catch (err) {
+    finish();
+    throw refusalOf(err, source);
+  }
 
   /** Collect at most `limit` items of an engine stream, mapping each. */
   const collect = <T>(stream: EngineStream, limit: number, map: (item: unknown) => T): Promise<T[]> => new Promise((resolve, reject) => {
@@ -246,16 +272,19 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
     stream.on('end', () => settle(() => resolve(out)));
   });
 
-  const kind = raw.resultType === 'bindings' ? 'bindings' : raw.resultType === 'boolean' ? 'boolean' : raw.resultType === 'quads' ? 'quads' : null;
+  const kind = oneRow ? 'boolean' : raw.resultType === 'bindings' ? 'bindings' : raw.resultType === 'boolean' ? 'boolean' : raw.resultType === 'quads' ? 'quads' : null;
   if (kind === null) { finish(); throw new SparqlRefusal(SPARQL_BAD_REQUEST,SPARQL_UPDATE_NOT_HERE, 'This endpoint answers queries only'); }
   return {
     kind,
     async rows(limit = Infinity) {
       try {
+        if (oneRow) {
+          if (raw.resultType !== 'bindings') throw new Error('The engine answered an ASK that is no stream of rows');
+          return (await collect(await raw.execute() as unknown as EngineStream, 1, () => true)).length > 0;
+        }
         if (raw.resultType === 'boolean') {
-          const value = await raw.execute();
-          if (ended) throw ended;
-          return value;
+          // Not reached: an ASK runs as one row above. Kept so an engine form that is boolean and no ASK is not answered as rows.
+          return await raw.execute();
         }
         if (raw.resultType === 'bindings') {
           const stream = await raw.execute();
@@ -275,10 +304,6 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
       } finally {
         finish();
       }
-    },
-    async serialize(mediaType) {
-      const { data } = await engineOf().resultToString(raw, mediaType, context);
-      return data;
     },
     destroy() { end(new Error('The query was stopped')); finish(); },
   };
