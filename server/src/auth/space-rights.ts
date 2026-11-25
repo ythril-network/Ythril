@@ -143,6 +143,8 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   { route: '/ld/:spaceId/:kind/:id', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },
   { route: '/ld/:spaceId/file/*path', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },
   { route: '/ld/:spaceId/agent/:id', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },
+  // S3b: the base root, the graph the records export describes, read like the export.
+  { route: '/ld/:spaceId/', method: 'GET', area: 'knowledge', needs: 'read', scope: 'resolved' },
   // Q-753: an RDF document into the space as ordinary writes, `save_bulk`'s rung; a dry run and the status answer which ids are stored and
   // which values break the schema, so they ask the same rung (amendment A10).
   { route: '/api/brain/spaces/:spaceId/import/rdf', method: 'POST', area: 'knowledge', needs: 'write', scope: 'path' },
@@ -238,6 +240,9 @@ export const ROUTE_RIGHTS: readonly RouteRight[] = [
   // Q-758: a schema version's and a vocabulary term's Linked Data address, the twins of the schema export, on the space whose base holds it.
   { route: '/ld/:spaceId/schema/:fp', method: 'GET', area: 'schema', needs: 'read', scope: 'resolved' },
   { route: '/ld/:spaceId/vocab/*path', method: 'GET', area: 'schema', needs: 'read', scope: 'resolved' },
+  // Q-758 (S3b): the ontology and a SHACL shape the schema export writes, read like the schema export.
+  { route: '/ld/:spaceId/schema', method: 'GET', area: 'schema', needs: 'read', scope: 'resolved' },
+  { route: '/ld/:spaceId/schema/shape/*path', method: 'GET', area: 'schema', needs: 'read', scope: 'resolved' },
   // Q-754: the schema built from an RDF file, a dry run too (as amendment A10 prices the data import's dry run); the settings write's field
   // rungs raise a file with rules to `admin`.
   { route: '/api/spaces/:id/schema-rdf', method: 'POST', area: 'schema', needs: 'write', scope: 'path' },

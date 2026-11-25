@@ -285,8 +285,13 @@ The address resolves by its base, never by the space id in the path: the instanc
 | `<base>entity/<id>`, `fact/<id>`, `chrono/<id>`, `edge/<id>` | `knowledge: read` | the record's statements (a chrono entry's `#start` and `#end` time nodes with it), then the statements pointing at it |
 | `<base>file/<path>` | `knowledge: read` and `files: read` | the file's, likewise |
 | `<base>agent/<instance id>` | `knowledge: read` | the statements about the instance that wrote records |
+| `<base>` (the base root) | `knowledge: read` | the graph's description, as a whole export of the space writes it: `dcterms:isPartOf` that export's report and `sh:shapesGraph` the current schema version |
+| `<base>schema` | `schema: read` | the ontology's statements, as the schema export writes them |
+| `<base>schema/shape/<kind>/<type>` | `schema: read` | that SHACL shape and its property shapes (`#<property>`), as the schema export writes them |
 | `<base>schema/<fingerprint>` | `schema: read` | that schema version as OWL and SHACL (a peer-bound token has only the versions the sync door serves it) |
-| `<base>vocab/<kind>/<type>` (and any other term under the vocab) | `schema: read` | the term's statements in the current schema, its properties' (`#<property>`) with it |
+| `<base>vocab/<kind>/<type>` (and any other term under the vocab) | `schema: read` | the term's statements in the current schema, its properties' (`#<property>`) with it. A type records use and the schema does not declare answers `rdf:type rdfs:Class` (an edge label `owl:ObjectProperty`) and `rdfs:label` its name, to a token that also holds `knowledge: read`; a type no record uses is `404` |
+
+A fragment never travels in a request, so an address with one (`#start`, `#<property>`) is read at its document. The namespaces `<base>vocab/` and `<base>vocab/<kind>/` are no address and answer `404`.
 
 A machine read sends `Authorization: Bearer <token>` and picks the format by `Accept`: Turtle (the default), N-Quads or JSON-LD (an edge's statements hold a triple term, which JSON-LD cannot carry: `409 rdf_unwritable`). The statements are in the default graph. Every answer says `Vary: Accept`. A browser (an `Accept` that prefers `text/html`) is sent on before any token is asked: `303 See Other` to `/brain?space=<id in the path>&tab=<the kind's tab>`, reading nothing. A record's answer holds at most `sparql.maxResults` statements: its own first, then the pointing ones up to the cap, with `X-Ythril-Truncated: inbound` when the cap, the read bound (`sparql.maxRecordsRead`) or the deadline (`sparql.timeoutMs`) cut them (the record's own statements are then answered whole; the cap counts statements about other records, a statement of the record about itself is not one of them). A read takes a query slot (`sparql`, as a SPARQL query does) and is audited as `ld.read` ([Audit Log](13-audit-log-api.md)), a read.
 

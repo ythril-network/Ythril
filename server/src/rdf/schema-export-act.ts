@@ -16,13 +16,17 @@
  * - **A second site that builds or writes a schema graph** (bundle-271, Q-758, r2 R1.4 [M3]). The Linked Data addresses of a schema version
  *   (`/ld/<space>/schema/<fp>`) and of a vocabulary term (`/ld/<space>/vocab/...`) are answered by this act: `version` builds the graph of a
  *   held version (its types and rules, under the space's current RDF names) in place of the current one, `term` keeps only the statements
- *   about that term (its address, and its properties' `<address>#...`), and `formats` names the formats the door offers.
+ *   about that document (its address, and its fragments' `<address>#...`, with the blank nodes they reach), and `formats` names the formats
+ *   the door offers. The same `term` answers the ontology (`<base>schema`) and a shape (`<base>schema/shape/<kind>/<type>`, its property
+ *   shapes with it); `used` gives a type records use and the schema does not declare its definition (S3b).
  */
 import { z } from 'zod';
 import { refusalOfParse } from '../util/log.js';
 import { EXPORT_OK, EXPORT_BAD_REQUEST, EXPORT_NOT_ACCEPTABLE, EXPORT_CONFLICT } from '../export/export-statuses.js';
 import { getConfig } from '../config/loader.js';
-import { schemaGraph, type SchemaLeftOut } from './schema-owl-shacl.js';
+import type { KnowledgeType } from '@ythril-network/schema';
+import { schemaGraph, usedTypeDefinition, type SchemaLeftOut } from './schema-owl-shacl.js';
+import type { Quad, Term } from './literals.js';
 import { createRdfWriter, RdfWriteError, type RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES, RDF_BAD_FORMAT } from './export-format.js';
 import {
@@ -69,10 +73,43 @@ function aboutTerm(subject: string, term: string): boolean {
   return (fragment < 0 ? subject : subject.slice(0, fragment)) === term;
 }
 
-/** Export the schema of `spaceId`: the current one, or the held `version`; whole, or only the statements about `term`. */
+/** The blank nodes a term holds: itself, a list's members, a triple term's parts. */
+function blanksIn(t: Term, into: string[]): void {
+  if (t.kind === 'blank') into.push(t.id);
+  else if (t.kind === 'list') for (const item of t.items) blanksIn(item, into);
+  else if (t.kind === 'triple') { blanksIn(t.subject, into); blanksIn(t.object, into); }
+}
+
+/**
+ * The statements about the document `term` (its subjects whose document it is), with every blank node they reach and that node's own
+ * statements, so a range, a guard or a rule is answered whole and no answer names a blank node it does not describe. In graph order.
+ */
+function aboutTermWhole(quads: readonly Quad[], term: string): Quad[] {
+  const reached = new Set<string>();
+  const queue: string[] = [];
+  const reach = (q: Quad): void => {
+    const found: string[] = [];
+    blanksIn(q.object, found);
+    for (const id of found) if (!reached.has(id)) { reached.add(id); queue.push(id); }
+  };
+  for (const q of quads) if (q.subject.kind === 'iri' && aboutTerm(q.subject.value, term)) reach(q);
+  const bySubject = new Map<string, Quad[]>();
+  for (const q of quads) if (q.subject.kind === 'blank') bySubject.set(q.subject.id, [...(bySubject.get(q.subject.id) ?? []), q]);
+  for (let id = queue.shift(); id !== undefined; id = queue.shift()) for (const q of bySubject.get(id) ?? []) reach(q);
+  return quads.filter(q => (q.subject.kind === 'iri' ? aboutTerm(q.subject.value, term) : reached.has(q.subject.id)));
+}
+
+/** A type a record of the space uses, which the door names when it asks for that type's vocab address (`term`). */
+export interface UsedType { kind: KnowledgeType; type: string }
+
+/**
+ * Export the schema of `spaceId`: the current one, or the held `version`; whole, or only the statements about `term`. With `used`, the
+ * type `term` names that records use: when the schema writes nothing about it (the schema does not declare it), its definition is
+ * `usedTypeDefinition`'s, so the vocab address of a type records use always answers (bundle-271, S3b).
+ */
 export function rdfSchemaExportAct(input: {
   spaceId: string; format?: unknown; accept?: string | undefined; caller: RdfCaller | undefined; fingerprintOf: FingerprintOf;
-  version?: SchemaVersionInput; term?: string; formats?: readonly RdfFormat[];
+  version?: SchemaVersionInput; term?: string; formats?: readonly RdfFormat[]; used?: UsedType;
 }): RdfSchemaOutcome {
   // The rung (`schema: read`) is asked before this act on every door: the route's guard and the dispatcher answer a token without it.
   const { spaceId, caller } = input;
@@ -87,8 +124,12 @@ export function rdfSchemaExportAct(input: {
   const fingerprint = input.version?.fingerprint ?? state.fingerprint;
   const whole = schemaGraph(meta, fingerprint, { namespaces: Object.values(cfg.schemaLibraryNamespaces ?? {}) });
   const term = input.term;
-  const graph = term === undefined ? whole
-    : { ...whole, quads: whole.quads.filter(q => q.subject.kind === 'iri' && aboutTerm(q.subject.value, term)) };
+  let graph = term === undefined ? whole : { ...whole, quads: aboutTermWhole(whole.quads, term) };
+  if (term !== undefined && input.used !== undefined && graph.quads.length === 0) {
+    const defined = usedTypeDefinition(meta, input.used.kind, input.used.type);
+    // Only the type `term` names: a `used` that names another type adds nothing.
+    if (defined.every(q => q.subject.kind === 'iri' && q.subject.value === term)) graph = { ...graph, quads: defined };
+  }
   const comment = graph.leftOut.length === 0 ? undefined
     : `ythril-schema-export: ${graph.leftOut.length} schema values left out: ${graph.leftOut.map(l => `${l.where} ${l.field} (${l.reason})`).join(', ')}`;
   let writer: ReturnType<typeof createRdfWriter>;
