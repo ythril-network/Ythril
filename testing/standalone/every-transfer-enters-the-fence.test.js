@@ -149,8 +149,10 @@ function nameOf(fn) {
  * Calls that may leave the turn out, each with its reason. A row that no longer matches a call fails, so it cannot go stale into a hole.
  */
 const TURNLESS_CALLS = [
-  { caller: 'exchangeSpacesWithMember', callee: 'pullSpaceMetaFromUpstream',
+  { caller: 'exchangeSpacesWithMember', callee: 'pullNetworkSchema',
     why: 'the schema pull of a HELD space runs outside the fence on purpose (design v5 X17): a wipe changes no schema, and that space has no turn to hand' },
+  { caller: 'joinRemoteAct', callee: 'fetchNetworkLayer',
+    why: 'the join takes a voted network\'s schema (Q-966) before any exchange of the network exists: no turn is in flight to hand, and a schema read moves no record an act could wait for' },
 ];
 /** The push doors alone, at a638e702: `pushAllowed` callers (docs.ts: five, tombstones.ts: two). */
 const FLOOR = 7;

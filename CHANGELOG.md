@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | A file deleted before this release has an old position: it is listed as deleted only to a feed read with no cursor | None |
 | A `config.json` that is there but empty, not JSON or unreadable stops the start, naming the file, instead of opening first-run setup | Repair or restore the file; delete it only to set the instance up anew |
 | Irreversible: records of files whose bytes this instance lost are removed here only, with no tombstone, once their window has passed and every peer we pull from completed a sync | Put lost bytes back before upgrading to keep their records |
+| A joined club, closed or democratic member takes the network's schema per space at the join or its next cycle; under `validationMode: strict` it then refuses what that schema refuses | None |
 | `GET /api/sync/meta` now asks `schema: read` on the space (`knowledge: write` implies it); a peer token without it is answered `403 schema_rung` | Give peer tokens `schema: read` where a member reads the schema |
 | The per-type files `schemas/<space>_<kind>_<type>.json` are no longer written, and the housekeeping cycle removes the ones this instance wrote (a file you uploaded at such a path is kept) | Read the schema from `GET /api/spaces/:id/meta` or MCP `space_meta` instead |
 | Members below 6.6.0 drop `schemaFingerprint` on arrival and forward records without it | None; a record is stamped again on its next write on a newer member |
@@ -203,6 +204,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Database:** that holds too when the database ends a write or a single-document read inside a transaction and answers a moment before Ythril's own clock reads the deadline.
 - **Workstation:** `npm run local-connector:dev` builds the schema package it imports first and starts the local connector from a fresh clone, as the guide says.
 - **Testing:** the source-hygiene gates read the schema package's source with the server's, and the standalone runner refuses a schema build older than its source or missing.
+- **Sync:** a member that joins a club, closed or democratic network holds each joined space with the network's types and validation mode, as that network's layer; one that joined without them takes them on its next cycle.
 - **Sync:** an unreadable file or folder is named in the sync manifest (`unreadable`) instead of looking absent to peers, the hash cache and the restore check; a push over it answers `409 path_unreadable`, and the sender offers it again an hour later.
 - **Sync:** a sync run queued behind a running one for a network that is deleted before it starts ends with one info line; it used to end as an unhandled rejection.
 
