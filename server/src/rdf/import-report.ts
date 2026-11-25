@@ -6,7 +6,12 @@
  *
  * - **A value of the file repeated.** A statement is shown by its subject, its predicate and its object; a literal object by its datatype (or
  *   language) and its length, never its text. A planner's refusal is shown by its code, the record's kind and subject, and the field names a
- *   schema refusal lists, never the planner's sentence (which can quote the value). The audit row takes counts only.
+ *   schema refusal lists. A refusal without a schema body carries the planner's own sentence (Q-759, lead's decision: the generic sentence
+ *   left a caller unable to tell what to change); a schema refusal's sentence, which quotes values, is never shown. The audit row takes
+ *   counts only.
+ * - **A refusal named for the wrong cause.** A record that lacks a required field is `missing-required-field` with the field, never the
+ *   generic `plan_refused`; an edge or link refused because a record it ends at was itself refused is `end-refused` naming that end, never
+ *   the schema violation its dangling end reads as (bundle-271: 30 503 records and 60 000 edges of the benchmark were named for neither).
  * - **An answer as large as the file.** At most {@link RDF_IMPORT_REASONS_NAMED_MAX} reasons are named, each with at most
  *   {@link STATEMENTS_PER_REASON_MAX} statements; every reason is counted (`reasonCount`, `reasonsByCode`), and a refusing reason past the cap
  *   still refuses.
@@ -41,6 +46,28 @@ export const STORED_RECORD_GONE = 'stored_record_gone';
 /** The code of the reason a record was written without every link the file states for it ({@link ReportBuilder.linksNotWritten}). */
 export const LINKS_NOT_WRITTEN = 'links_not_written';
 
+/** The code of a planner's refusal the planner gave no code or cause for ({@link ReportBuilder.planner}). */
+export const PLAN_REFUSED = 'plan_refused';
+
+/** The code of a record refused because it lacks a required field (`name`, `title`, `fact`, ...); the reason names the field (Q-759). */
+export const MISSING_REQUIRED_FIELD = 'missing-required-field';
+
+/** The code of an edge or link refused under strict linkage because a record it ends at was itself refused in this import (Q-759). */
+export const END_REFUSED = 'end-refused';
+
+/**
+ * A planner's refusal as the report reads it: the planner's code, sentence and schema body, and what names its cause (`ImportRefusal` of
+ * `import-plan.ts`): the id the record was seeded under, the required field it lacks, the ends strict linkage found missing.
+ */
+export interface PlannerRefusal {
+  code?: string;
+  reason?: string;
+  violation?: Record<string, unknown>;
+  seededId?: string;
+  missingField?: string;
+  missingEnds?: readonly string[];
+}
+
 /** One statement of a reason: its subject, predicate and object, a literal object shown by its datatype and length only. */
 export interface ReportStatement { subject: string; predicate: string; object: string; graph?: string }
 
@@ -56,6 +83,8 @@ export interface ReportReason {
   kind?: string;
   subject?: string;
   fields?: string[];
+  /** An {@link END_REFUSED} reason: the subject of the end that was refused in this import. */
+  end?: string;
 }
 
 export type RdfImportStatus = 'running' | 'completed' | 'refused' | 'failed' | 'dry-run';
@@ -151,6 +180,8 @@ function violationFields(v: Record<string, unknown>): string[] {
 /** The report as it grows: reasons named up to the cap, every reason counted. */
 export class ReportBuilder {
   private refusedBeyondNamed = false;
+  /** The records a planner refused, by the id the import seeded them under: an edge or link ending at one is {@link END_REFUSED}. */
+  private readonly refusedSubjects = new Map<string, string>();
   constructor(readonly report: RdfImportReport) {}
   /** Whether any reason refuses the import. */
   get refused(): boolean { return this.refusedBeyondNamed || this.report.reasons.some(r => r.outcome === 'refused'); }
@@ -167,17 +198,36 @@ export class ReportBuilder {
       statements: r.quads.slice(0, STATEMENTS_PER_REASON_MAX).map(statementOf),
     });
   }
-  /** A planner's refusal of the record `subject` states. */
-  planner(kind: string, subject: string, refusal: { code?: string; violation?: Record<string, unknown> }): void {
-    // A schema refusal's code is its body's own `error` (`toStructured`), never spelled here.
-    const code = refusal.code ?? (refusal.violation ? String(refusal.violation['error'] ?? 'plan_refused') : 'plan_refused');
-    this.add({
-      code, outcome: 'refused', kind, subject, statements: [], statementCount: 0,
-      message: refusal.violation
-        ? `The ${kind} this subject states breaks the space's schema; the fields named are the ones it breaks.`
-        : `The ${kind} this subject states would not be written (${code}): a bound, a link, a reference or its version refuses it.`,
-      ...(refusal.violation ? { fields: violationFields(refusal.violation) } : {}),
-    });
+  /**
+   * A planner's refusal of the record `subject` states, named by its cause (Q-759): an edge or link whose end this import refused is
+   * {@link END_REFUSED}, naming that end's subject; a missing required field is {@link MISSING_REQUIRED_FIELD} with the field; a schema
+   * refusal is its body's own code; any other carries the planner's code and sentence. {@link PLAN_REFUSED} only when the planner gave neither.
+   */
+  planner(kind: string, subject: string, refusal: PlannerRefusal): void {
+    if (refusal.seededId !== undefined) this.refusedSubjects.set(refusal.seededId, subject);
+    const end = refusal.missingEnds?.map(id => this.refusedSubjects.get(id)).find(s => s !== undefined);
+    const base = { outcome: 'refused' as const, kind, subject, statements: [], statementCount: 0 };
+    if (end !== undefined) {
+      this.add({ ...base, code: END_REFUSED, end, message: `The ${kind} this subject states ends at a record that was refused in this import; the end named is that record's subject.` });
+      return;
+    }
+    // The planner's own sentence wherever it gave one; the generic one names only the code.
+    const sentence = (code: string): string =>
+      refusal.reason ?? `The ${kind} this subject states would not be written (${code}): a bound, a link, a reference or its version refuses it.`;
+    if (refusal.missingField !== undefined) {
+      this.add({ ...base, code: MISSING_REQUIRED_FIELD, fields: [refusal.missingField], message: sentence(MISSING_REQUIRED_FIELD) });
+      return;
+    }
+    if (refusal.violation) {
+      // A schema refusal's code is its body's own `error` (`toStructured`), never spelled here.
+      this.add({
+        ...base, code: String(refusal.violation['error'] ?? PLAN_REFUSED), fields: violationFields(refusal.violation),
+        message: `The ${kind} this subject states breaks the space's schema; the fields named are the ones it breaks.`,
+      });
+      return;
+    }
+    const code = refusal.code ?? PLAN_REFUSED;
+    this.add({ ...base, code, message: sentence(code) });
   }
   /**
    * A record of a commit window the store no longer let be written, though the dry plan passed it (a stored record it converges onto, links to

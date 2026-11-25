@@ -288,7 +288,12 @@ describe('the translator holds no second address rule and reads no store', () =>
   it('imports nothing that reads a store, the network or a file', () => {
     const specifiers = [...src.matchAll(/from\s*'([^']+)'/g)].map(m => m[1]);
     assert.ok(specifiers.length > 0, 'the import lines were read');
-    const allowed = new Set(['./term-reverse.js', './literals.js', './ythril-vocabulary.js', './import-reasons.js', './term-iri.js', SCHEMA_PACKAGE_NAME, '../config/types-knowledge.js']);
+    // `./schema-from-rdf-drafts.js` (Q-759): the schema reader's `localPart`, the one rule a subject with no label is named by. It reads no
+    // store: its own imports are the schema package, `literals`, `term-reverse` and the in-memory statement store `schema-from-rdf-store`.
+    const allowed = new Set([
+      './term-reverse.js', './literals.js', './ythril-vocabulary.js', './import-reasons.js', './term-iri.js', './schema-from-rdf-drafts.js',
+      SCHEMA_PACKAGE_NAME, '../config/types-knowledge.js',
+    ]);
     for (const s of specifiers) assert.ok(allowed.has(s), `quads-to-ops.ts imports ${s}: the translator is pure and asks nothing`);
   });
 });

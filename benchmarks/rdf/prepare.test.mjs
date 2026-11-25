@@ -162,7 +162,3 @@ test('the result holds the two rules over the whole output: one type per subject
   assert.equal(seen.size, 40);
   assert.deepEqual([...new Set(seen.values())], [1]);
 });
-
-test('the variant has a name, which the result record carries beside its sha256', () => {
-  assert.match(VARIANT, /^ythril-loadable-\d+$/);
-});

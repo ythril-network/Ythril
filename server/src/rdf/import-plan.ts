@@ -24,7 +24,9 @@
  * Edges are planned in one read set across the whole import's dry plan, so an edge under a functional label in one window sees the edges the
  * other windows planned; records of the other kinds are planned in a fresh read set per window, which bounds what the dry plan holds.
  */
-import type { RefKind } from '../config/types-knowledge.js';
+import { LINK_INPUT_FIELDS, type RefKind } from '../config/types-knowledge.js';
+import { missingRefsRefusal } from '../brain/entity-refs.js';
+import { plannedMissingField } from '../brain/record-checks.js';
 import type { ChronoStatus, ChronoType } from '../config/types.js';
 import { ReadSet, mergeWants, type SeedKind } from '../brain/write-plan/read-set.js';
 import { changesNothing, type ConvergeBefore } from './import-unchanged.js';
@@ -206,7 +208,7 @@ export async function loadStoredRecords(spaceId: string, wants: ReadonlyArray<{ 
 /** What a dry plan of a window answers: per operation its plan (`null` when refused), and every refusal by operation index. */
 export interface DryWindow {
   plans: ReadonlyArray<WritePlan | null>;
-  refusals: readonly DryRefusal[];
+  refusals: readonly ImportRefusal[];
   /** The seeds the dry plan took back for a record it refused (`DryPlanResult.unseeded`). */
   unseeded: DryPlanResult['unseeded'];
   /** Per operation: its plan is a converge that changes nothing the stored record does not already say, so the commit writes nothing for it. */
@@ -243,18 +245,68 @@ async function convergesBefore(view: ReadSet, ops: readonly RecordOp[], items: r
  * Plan a window's operations against `view` as the dry plan and the commit both do (the planners' own `dryPlan`, one item per operation), and judge
  * each converge by what the stored record was before: the plans, the refusals, and which plans change nothing ({@link changesNothing}).
  */
-async function planWindow(spaceId: string, ops: readonly RecordOp[], view: ReadSet, planMeta: object): Promise<DryPlanResult & { unchanged: boolean[] }> {
+async function planWindow(spaceId: string, ops: readonly RecordOp[], view: ReadSet, planMeta: object): Promise<DryPlanResult & { unchanged: boolean[]; items: DryItem[] }> {
   const items = ops.map(op => opItem(spaceId, op, planMeta));
   const before = await convergesBefore(view, ops, items);
   const planned = await dryPlan(items, view);
-  return { ...planned, unchanged: planned.plans.map((plan, i) => plan !== null && changesNothing(before[i] ?? null, plan)) };
+  return { ...planned, items, unchanged: planned.plans.map((plan, i) => plan !== null && changesNothing(before[i] ?? null, plan)) };
+}
+
+/**
+ * A dry plan's refusal as the import's report names it by its cause (Q-759): beside the planner's own answer, the id the refused record was
+ * seeded under, the required field whose absence refused it, and the ends of an edge or a link whose absence refused it under strict linkage.
+ * Read from the operation and the read set the plan ran in, never back out of the refusal's sentence.
+ */
+export interface ImportRefusal extends DryRefusal {
+  /** The id the refused record was seeded under: a record of this import an edge or a link of it can end at. */
+  readonly seededId?: string;
+  /** The required field the record lacks, when that is what refused it. */
+  readonly missingField?: string;
+  /** The ids of the ends the space does not hold, when strict linkage refused the edge or link for them. */
+  readonly missingEnds?: readonly string[];
+}
+
+/** Whether a schema refusal's body is strict linkage's: a row `reference_not_found` (`danglingReferenceCheck`), the rule a missing edge end breaks. */
+function isDanglingBody(violation: Record<string, unknown>): boolean {
+  const rows = Array.isArray(violation['introduced']) ? violation['introduced'] : [];
+  return rows.some(row => row !== null && typeof row === 'object' && (row as Record<string, unknown>)['code'] === 'reference_not_found');
+}
+
+/**
+ * The ends of `op` that `view` does not hold, when strict linkage is what refused it: an edge's refusal body is a missing reference, or a
+ * link's refusal is the sentence the link check gives for exactly those ends (`missingRefsRefusal`). Empty otherwise.
+ */
+function danglingEnds(spaceId: string, op: RecordOp, refusal: DryRefusal, view: ReadSet): string[] {
+  const missing = endsOf(op).filter(e => view.missing(e.kind, [e.id]).length > 0);
+  if (missing.length === 0 || refusal.code !== undefined) return [];
+  if (refusal.violation) return isDanglingBody(refusal.violation) ? missing.map(e => e.id) : [];
+  for (const kind of new Set(missing.map(e => e.kind))) {
+    const ids = missing.filter(e => e.kind === kind).map(e => e.id);
+    if (missingRefsRefusal(spaceId, LINK_INPUT_FIELDS[kind], kind, ids)?.message === refusal.reason) return ids;
+  }
+  return [];
+}
+
+/** Each refusal of a window with what names its cause ({@link ImportRefusal}). */
+function causesOf(spaceId: string, ops: readonly RecordOp[], items: readonly DryItem[], refusals: readonly DryRefusal[], view: ReadSet): ImportRefusal[] {
+  return refusals.map(refusal => {
+    const op = ops[refusal.index]!;
+    const item = items[refusal.index]!;
+    const seededId = seededIdOf(op);
+    const missingField = refusal.violation || refusal.code !== undefined ? null : plannedMissingField(item, refusal.reason);
+    const ends = danglingEnds(spaceId, op, refusal, view);
+    return {
+      ...refusal, ...(seededId !== undefined ? { seededId } : {}), ...(missingField !== null ? { missingField } : {}),
+      ...(ends.length > 0 ? { missingEnds: ends } : {}),
+    };
+  });
 }
 
 /** Dry-plan one window of operations against `view` (seeded here), writing nothing. */
 export async function dryPlanWindow(spaceId: string, ops: readonly RecordOp[], view: ReadSet, minted: MintedEnds, planMeta: object): Promise<DryWindow> {
   await seedImported(view, ops, minted);
-  const { plans, refusals, unseeded, unchanged } = await planWindow(spaceId, ops, view, planMeta);
-  return { plans, refusals, unseeded, unchanged };
+  const { plans, refusals, unseeded, unchanged, items } = await planWindow(spaceId, ops, view, planMeta);
+  return { plans, refusals: causesOf(spaceId, ops, items, refusals, view), unseeded, unchanged };
 }
 
 /** A read set for `spaceId`, as the dry plan and the commit plan against. */
