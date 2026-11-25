@@ -238,8 +238,8 @@ export function predicateRole(predicate: string, kind: OpKind): 'server-owned' |
   return predicate === REFERENCES ? 'link' : 'other';
 }
 
-/** The writable fields of each kind, which a converge fills from the stored record when the file does not state them. */
-const WRITABLE: Readonly<Record<OpKind, readonly string[]>> = Object.freeze({
+/** The writable fields of each kind, which a converge fills from the stored record when the file does not state them (a change set's converge too, `subject-changes.ts`). */
+export const WRITABLE: Readonly<Record<OpKind, readonly string[]>> = Object.freeze({
   entity: ['name', 'type', 'description'],
   fact: ['fact', 'type', 'description'],
   chrono: ['title', 'type', 'startsAt', 'endsAt', 'status', 'confidence', 'description'],

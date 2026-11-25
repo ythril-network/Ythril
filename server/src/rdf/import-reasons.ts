@@ -32,6 +32,20 @@ export interface ImportReasonRow {
 
 const row = (code: string, refusesIn: readonly ImportMode[], message: string): ImportReasonRow => Object.freeze({ code, message, refusesIn });
 
+/**
+ * The reasons only a change set answers (`subject-changes.ts`, Q-964): the statements a SPARQL Update removes and inserts are read by the rules
+ * of an import, and these name what a removal or an insert of a stored record adds to them. Each refuses in every mode: a write that would
+ * take away a value nobody named, change an edge's ends, or write a record that is no field of the form has no looser reading. They join
+ * {@link IMPORT_REASONS}, so one list names every reason a statement can be refused by, and no file's translation answers them.
+ */
+export const UPDATE_REASONS = Object.freeze({
+  'server-owned-removed': row('server-owned-removed', ALL, 'The statement is the server\'s own or derived from a field (created, modified, author, schema version, superseded, redaction, a time node), or states a value the record form does not carry; a removal cannot take it away.'),
+  'edge-ends-change': row('edge-ends-change', ALL, 'The change would give a stored edge other ends or another label; an edge keeps both, and a new edge is a new record.'),
+  'not-writable-here': row('not-writable-here', ALL, 'The subject is a record of a kind a change set cannot write (a file), not a fact, a chrono entry, an entity or an edge.'),
+  'field-not-removable': row('field-not-removable', ALL, 'The removal names a field the record must keep, a type, or a property whose key is not one plain path segment, so it cannot be removed.'),
+  'subject-not-an-address-here': row('subject-not-an-address-here', ALL, 'The subject is stored nowhere and is no address of this space\'s records, and a change set creates a record only under such an address.'),
+} satisfies Record<string, ImportReasonRow>);
+
 /** Every reason the translator answers, by code. */
 export const IMPORT_REASONS = Object.freeze({
   'types-of-two-kinds': row('types-of-two-kinds', ALL, 'The subject is typed as records of two different kinds; a record has one kind.'),
@@ -53,6 +67,7 @@ export const IMPORT_REASONS = Object.freeze({
   'property-of-another-type': row('property-of-another-type', STRICT, 'The predicate is a property of another type than the subject\'s.'),
   'link-has-no-class': row('link-has-no-class', STRICT, 'A record of this kind cannot link to a record of that kind.'),
   'edge-without-statement': row('edge-without-statement', ALL, 'The edge details state no complete triple of the edge they belong to.'),
+  ...UPDATE_REASONS,
 } satisfies Record<string, ImportReasonRow>);
 
 /** The code of a reason. */
