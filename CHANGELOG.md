@@ -165,6 +165,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **RDF:** the RDF import lands a file whose typed entities and chrono entries state no `rdfs:label`: each takes its address's local name as its `name` or `title`; they were refused. A record a planner still refuses is named by its cause: `missing-required-field` with the field and the planner's sentence, and `end-refused` naming the refused end for an edge or link that ends at it; they were all `plan_refused` and `schema_violation`.
 - **Audit:** a request to a brain route of a space called `files`, `facts`, `entities`, `edges` or `chrono` was recorded under another route's operation (the records export of such a space left no entry with read logging off); the audit rules read the one path form the server serves.
 - **Brain:** a `$ref:` key in a bulk item's link field is refused saying a key is resolved only at an edge's `from` or `to`: save the record first and pass its id, or connect the records by an edge. `save_bulk` and the guides no longer say a link field takes a key.
 - **RDF:** `PUT /api/spaces/:id/meta/typeSchemas/:knowledgeType/:typeName` and `PUT /api/spaces/:id/schema` refuse a type that would give two terms of the space one RDF address (`422 rdf_term_clash`), as `PATCH /api/spaces/:id` and `schema_update` do; they stored it.
