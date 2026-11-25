@@ -37,7 +37,8 @@
 import { stripComments } from './_strip-comments.mjs';
 
 /** A statement is "headed for a store write" when it names one of these. */
-const STORE_WRITE = /\b(?:insertOne|insertMany|replaceOne|updateOne|updateMany|bulkWrite|findOneAndUpdate|findOneAndReplace)\b|\$set(?:OnInsert)?\b/;
+// `foldRemovals(` is one: the planners hand it the fields their converge STATES, and what it returns is spread into the plan's `$set`.
+const STORE_WRITE = /\b(?:insertOne|insertMany|replaceOne|updateOne|updateMany|bulkWrite|findOneAndUpdate|findOneAndReplace|foldRemovals)\b|\$set(?:OnInsert)?\b/;
 
 /** A call that IS the merge rule. */
 const MERGE_CALL = /\bmergeProperties(?:OrKeep)?\s*\(|\bmergeTagsAndProperties\s*\(/;
@@ -61,10 +62,8 @@ export const PROPERTIES_WRITE_EXCEPTIONS = Object.freeze([
   { file: 'server/src/mcp/tools/shared.ts', statement: "common['properties'] = r.properties", reviewed: REVIEWED, reason: 'builds a tool answer, writes no store' },
   { file: 'server/src/mcp/tools/chrono.ts', statement: "updates['properties'] = a['properties']", reviewed: REVIEWED, reason: 'collects the tool\'s arguments; the store function it calls merges' },
   // The deleteFields path: the bag is re-read from the merged copy AFTER the merge, with the deleted keys already removed from it.
-  { file: 'server/src/brain/entities.ts', statement: "newProps = merged['properties']", reviewed: REVIEWED, reason: 'deleteFields re-assignment: `merged` is the merge result with the deleted paths removed' },
-  { file: 'server/src/brain/entities.ts', statement: 'newProps = {}', reviewed: REVIEWED, reason: 'deleteFields removed the whole bag (the `$unset` beside it)' },
-  { file: 'server/src/brain/edges.ts', statement: "newProps = merged['properties']", reviewed: REVIEWED, reason: 'deleteFields re-assignment: `merged` is the merge result with the deleted paths removed' },
-  { file: 'server/src/brain/edges.ts', statement: 'newProps = undefined', reviewed: REVIEWED, reason: 'deleteFields removed the whole bag (the `$unset` beside it)' },
+  { file: 'server/src/brain/entities.ts', statement: "newProps = 'properties' in merged", reviewed: REVIEWED, reason: 'deleteFields re-assignment: `merged` is the merge result with the deleted paths removed (the bag is `{}` when the whole field was removed, the `$unset` beside it)' },
+  { file: 'server/src/brain/edges.ts', statement: "newProps = 'properties' in merged", reviewed: REVIEWED, reason: 'deleteFields re-assignment: `merged` is the merge result with the deleted paths removed (the bag is `undefined` when the whole field was removed, the `$unset` beside it)' },
 ]);
 
 const collapse = (s) => s.replace(/\s+/g, ' ').trim();

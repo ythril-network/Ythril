@@ -95,10 +95,14 @@ describe('the writer handles EVERY optional field', () => {
     const at = SRC.indexOf('if (deleteFieldsPaths && deleteFieldsPaths.length > 0)');
     assert.ok(at > 0, 'the deleteFields block was not found — the scanner is wrong, not the code');
     const block = SRC.slice(at, SRC.indexOf('\n  //', at + 10));
-    assert.match(block, /for \(const field of DELETABLE_CHRONO_FIELDS\)/,
-      'the unset loop names its fields again instead of walking the declared list');
+    assert.match(block, /reflectDeleteFields\(merged, deleteFieldsPaths, DELETABLE_FIELDS\.chrono, \$set, \$unset\)/,
+      'the writer reflects through the shared helper over the declared chrono list, not a list or a loop of its own');
 
-    const declared = SRC.slice(SRC.indexOf('DELETABLE_CHRONO_FIELDS'), SRC.indexOf('];', SRC.indexOf('DELETABLE_CHRONO_FIELDS')));
+    // The list is the one table the four writers and the four planners share (`delete-fields.ts`), its chrono row.
+    const TABLE = stripComments(readFileSync('server/src/brain/delete-fields.ts', 'utf8'));
+    const row = TABLE.indexOf('chrono: [', TABLE.indexOf('export const DELETABLE_FIELDS'));
+    assert.ok(row > 0, 'the chrono row of DELETABLE_FIELDS was not found — the scanner is wrong, not the code');
+    const declared = TABLE.slice(row, TABLE.indexOf(']', row));
     for (const f of ['description', 'tags', 'properties', 'recurrence', 'endsAt', 'confidence',
       'suppressEmbeddings']) {
       assert.match(declared, new RegExp(`'${f}'`), `${f} is optional and settable but cannot be deleted`);
@@ -110,7 +114,7 @@ describe('the writer handles EVERY optional field', () => {
   });
   it('and applies them AFTER the merge, or a deletion would be undone by it', () => {
     const at = SRC.indexOf('mergePropertiesOrKeep(existing.properties');
-    const del = SRC.indexOf('applyDeleteFields(merged, deleteFieldsPaths)');
+    const del = SRC.indexOf('reflectDeleteFields(merged, deleteFieldsPaths');
     assert.ok(at > 0 && del > at, 'deleteFields must run after the property merge, not before');
   });
 });

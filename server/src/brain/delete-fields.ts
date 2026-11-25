@@ -10,7 +10,9 @@
 
 import { MAX_DELETE_FIELDS, countError } from '../util/request-bounds.js';
 import { isObjectInternalKey } from '../util/object-internal-keys.js';
+import { RequestRefusal } from '../util/errors.js';
 import { SCHEMA_FINGERPRINT_FIELD } from '../spaces/schema-stamp.js';
+import type { KnowledgeType } from '../config/types-knowledge.js';
 
 const SYSTEM_FIELDS = new Set([
   'id', '_id', 'name', 'type', 'spaceId', 'createdAt', 'updatedAt',
@@ -105,6 +107,62 @@ export function applyDeleteFields(
   }
 
   return affected;
+}
+
+/**
+ * The top-level fields a `deleteFields` path may name on each record kind, in the order a removal is reflected. One table, for the four update
+ * writers and the four planners: a path under a field that is not listed is accepted and does nothing, which is the failure this file exists to
+ * remove, so a kind's list is the writer's whole answer for it. The chrono list is the one `updateChrono` has always had (its required fields
+ * `title`, `startsAt` and `status` are refused by {@link validateDeleteFields}); the link sets are not fields since 5.0.
+ */
+export const DELETABLE_FIELDS = {
+  entity: ['description', 'tags', 'properties'],
+  fact: ['description', 'tags', 'properties'],
+  edge: ['description', 'tags', 'properties', 'weight'],
+  chrono: ['description', 'tags', 'properties', 'recurrence', 'endsAt', 'confidence', 'suppressEmbeddings'],
+} as const satisfies Record<KnowledgeType, readonly string[]>;
+
+/**
+ * Apply `paths` to `merged` (the record's merged view, mutated) and reflect the result into `$set` and `$unset`: a listed field that is gone from
+ * the view is `$unset` and taken out of `$set`, a listed field a path reached that remains is re-`$set` from the view (a pruned bag, a pruned
+ * element list). A field no path reached is left to the caller.
+ *
+ * ## What it prevents
+ *
+ * The block was written inline in `updateEntityById`, `updateEdgeById`, `updateFact` and `updateChrono`, each a little different, and the
+ * planners would have been a fifth and sixth copy decided by whichever writer their author read last. A field that is `undefined` in the view is
+ * never re-`$set`: the driver stores it as `null`, which the record's `Incoming*` schema refuses on push (the rule `setUnlessDeleted` keeps for
+ * the writers' own `$set`).
+ *
+ * The paths are NOT validated here: a door validates a request's (`validateDeleteFields`), and the planners refuse a bad path where they take
+ * it (`refuseUndeletableFields`).
+ */
+export function reflectDeleteFields(
+  merged: Record<string, unknown>,
+  paths: readonly string[],
+  fields: readonly string[],
+  $set: Record<string, unknown>,
+  $unset: Record<string, unknown>,
+): void {
+  applyDeleteFields(merged, [...paths]);
+  for (const field of fields) {
+    if (!(field in merged)) {
+      $unset[field] = '';
+      delete $set[field];
+    } else if (merged[field] !== undefined && paths.some(p => p === field || p.startsWith(field + '.'))) {
+      $set[field] = merged[field];
+    }
+  }
+}
+
+/**
+ * Refuse `paths` when {@link validateDeleteFields} would, as a request refusal naming the path. For a caller that is not a door and so has no
+ * `400` to answer with: a planner takes paths built by code (an RDF Update's, from the triples it removes) and must refuse a system field, an
+ * empty segment or an object-internal key by name, never write it.
+ */
+export function refuseUndeletableFields(paths: readonly string[]): void {
+  const verdict = validateDeleteFields([...paths]);
+  if (!verdict.ok) throw new RequestRefusal(verdict.error);
 }
 
 /**

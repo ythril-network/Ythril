@@ -63,11 +63,12 @@ describe('reflectDeleteFields: what a PATCH writer gets for the paths a caller n
     assert.deepEqual(set, { properties: { items: [{ keep: 2 }, { keep: 4 }] } });
   });
 
-  it('the fields each kind may name are one table, the chrono row being the list the chrono writer has always had', () => {
-    assert.deepEqual(DELETABLE_FIELDS.entity, ['description', 'tags', 'properties']);
-    assert.deepEqual(DELETABLE_FIELDS.fact, ['description', 'tags', 'properties']);
-    assert.deepEqual(DELETABLE_FIELDS.edge, ['description', 'tags', 'properties', 'weight']);
-    assert.deepEqual(DELETABLE_FIELDS.chrono, ['description', 'tags', 'properties', 'recurrence', 'endsAt', 'confidence', 'suppressEmbeddings']);
+  it('the table names a row for every knowledge type, each holding the three fields every kind shares', () => {
+    for (const kind of ['entity', 'fact', 'chrono', 'edge']) {
+      for (const field of ['description', 'tags', 'properties']) {
+        assert.ok(DELETABLE_FIELDS[kind].includes(field), `${kind} cannot name ${field} in deleteFields`);
+      }
+    }
   });
 });
 

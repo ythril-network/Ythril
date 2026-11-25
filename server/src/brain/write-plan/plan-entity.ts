@@ -12,7 +12,7 @@ import { derivedFieldsForWrite } from '../derived-text-on-write.js';
 import { stampExpiryOnCreate, applyExpiryToUpdate } from '../ttl.js';
 import { applyPropertyDefaults } from '../../spaces/schema-validation.js';
 import { readMetaForWrite, stampOp, stampSetOf, stampUnsetOf } from '../../spaces/schema-stamp.js';
-import { classifyEntityUpsertAgainst, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
+import { classifyEntityUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from '../write-validation.js';
 import { mergeTagsAndProperties } from '../merge-fields.js';
 import { type SimilarMatch } from '../recall.js';
 import type { DupeCheckOpts } from '../write-options.js';
@@ -20,7 +20,7 @@ import type { EntityDoc } from '../../config/types.js';
 import type { ReadSet, ReadWant } from './read-set.js';
 import type { WritePlan } from './types.js';
 import { trustFor, mintedWant, mintedRecord, insertIdentity, type PlanTrust } from './trust.js';
-import { convergeResult, finishInsert, neighbourAdvisories, vectorBeforeWrite } from './plan-steps.js';
+import { convergeResult, finishInsert, foldRemovals, neighbourAdvisories, vectorBeforeWrite } from './plan-steps.js';
 
 export interface EntityInput {
   name: string;
@@ -38,6 +38,10 @@ export interface EntityInput {
    * owns them (the extractor, through `bulkWrite`'s trusted argument) and by nothing that reads a request.
    */
   instanceWrittenKeys?: readonly string[];
+  /** Dot paths removed from the stored entity after the merge (`foldRemovals`); refused on an insert, and a system field or a malformed path is refused by name. */
+  deleteFields?: readonly string[];
+  /** The target tag array, written as it is in place of the union (`foldRemovals`): how a caller takes one tag away. */
+  replaceTags?: readonly string[];
 }
 
 export interface EntityPlanned {
@@ -62,9 +66,10 @@ export function entityWant(input: EntityInput, trust?: PlanTrust): ReadWant {
  */
 export async function planEntity(spaceId: string, input: EntityInput, view: ReadSet, trust?: PlanTrust): Promise<EntityPlanned> {
   const { name, type, description, opts, ttlDays } = input;
-  const tags = input.tags ?? [];
   const trusted = trustFor(spaceId, trust, input.id);
   const existing = (input.id ? view.stored('entity', input.id) : mintedRecord(view, 'entity', trusted)) as unknown as EntityDoc | null;
+  // A new entity has nothing to replace: the target IS its tags.
+  const tags = existing === null && input.replaceTags ? [...input.replaceTags] : input.tags ?? [];
 
   /*
    * THE SCHEMA IS ENFORCED HERE, against the merged record. Declared defaults fill in what the caller omitted
@@ -74,14 +79,22 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
   const write = readMetaForWrite(spaceId, trusted?.planMeta);
   const properties = (existing ? input.properties : applyPropertyDefaults(write.meta?.typeSchemas?.entity?.[type], input.properties))
     ?? input.properties ?? {};
-  const check = classifyEntityUpsertAgainst(write.meta, existing, { name, type, description, properties, tags }, input.instanceWrittenKeys);
+  const merged = mergeTagsAndProperties(existing, { tags, properties });
+  // The removals, after the merge: what the record is LEFT with, and what the converge sets and unsets (`foldRemovals`).
+  const folded = foldRemovals('entity', existing, {
+    tags: merged.tags, properties: merged.properties, ...(description !== undefined ? { description } : {}),
+  }, input);
+  // A removal is judged on the record it leaves, as a PATCH is; every other write on the merge of what it states over what is stored.
+  const check = folded.removing
+    ? classifyEntityUpsertAgainst(write.meta, existing, recordAfterPatch(existing!, { name, type, ...folded.data }, folded.unset), input.instanceWrittenKeys)
+    : classifyEntityUpsertAgainst(write.meta, existing, { name, type, description, properties, tags }, input.instanceWrittenKeys);
   if (check.blocked) throw new SchemaViolationError(check);
   input.onValidation?.(check);
 
   const now = new Date().toISOString();
   // The text is exactly what the queued job will embed; what a write stores of it is `derivedFieldsForWrite`'s to say.
-  const merged = mergeTagsAndProperties(existing, { tags, properties });
-  const embedText = entityEmbedText(name, type, merged.tags, description ?? existing?.description, merged.properties);
+  const left = folded.left as { tags: string[]; description?: string; properties: Record<string, string | number | boolean> };
+  const embedText = entityEmbedText(name, type, left.tags, left.description, left.properties);
 
   /*
    * The duplicate/contradiction checks compare THIS record's vector against its neighbours, so they imply the
@@ -100,11 +113,11 @@ export async function planEntity(spaceId: string, input: EntityInput, view: Read
   if (existing) {
     // Stamped when the converged record conforms, unstamped when it does not (a stamp means "conforms as stored").
     const stamp = stampOp(write, check);
+    // `folded.data` is the merged tags and properties (and a stated description), with the removals applied; `folded.unset` the fields they took away.
     const $set: Record<string, unknown> = {
-      name, type, tags: merged.tags, properties: merged.properties, updatedAt: now, ...derived.set, ...stampSetOf(stamp),
+      name, type, ...folded.data, updatedAt: now, ...derived.set, ...stampSetOf(stamp),
     };
-    if (description !== undefined) $set['description'] = description;
-    const $unset: Record<string, unknown> = { ...derived.unset, ...stampUnsetOf(stamp) };
+    const $unset: Record<string, unknown> = { ...folded.unset, ...derived.unset, ...stampUnsetOf(stamp) };
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
       { collection: 'entity', existing: existing as unknown as Record<string, unknown> }); // F10
     const result = convergeResult(existing, $set, $unset);

@@ -10,7 +10,7 @@ import { refuseForkEdit, remintForks } from './forks.js';
 import { classifyEdgeUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { applyExpiryToUpdate } from './ttl.js';
 import { readMetaForWrite, stampOp, stampOpIfUnmoved, stampSetOf, stampUnsetOf, foldStampOp, carryStamp } from '../spaces/schema-stamp.js';
-import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
+import { applyDeleteFields, reflectDeleteFields, setUnlessDeleted, DELETABLE_FIELDS } from './delete-fields.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, retireEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { foldEdgeKinds } from './entity-refs.js';
@@ -182,32 +182,12 @@ export async function updateEdgeById(
       properties: newProps,
       weight: newWeight,
     };
-    applyDeleteFields(merged, deleteFieldsPaths);
-
-    if (!('description' in merged)) {
-      newDesc = undefined;
-      $unset['description'] = '';
-    } else {
-      newDesc = merged['description'] as string | undefined;
-    }
-    if (!('tags' in merged)) {
-      newTags = [];
-      $unset['tags'] = '';
-    } else {
-      newTags = merged['tags'] as string[];
-    }
-    if (!('properties' in merged)) {
-      newProps = undefined;
-      $unset['properties'] = '';
-    } else {
-      newProps = merged['properties'] as Record<string, string | number | boolean>;
-    }
-    if (!('weight' in merged)) {
-      newWeight = undefined;
-      $unset['weight'] = '';
-    } else {
-      newWeight = merged['weight'] as number;
-    }
+    // Reflect deletions back: the one helper the other writers and the planners share.
+    reflectDeleteFields(merged, deleteFieldsPaths, DELETABLE_FIELDS.edge, $set, $unset);
+    newDesc = 'description' in merged ? merged['description'] as string | undefined : undefined;
+    newTags = 'tags' in merged ? merged['tags'] as string[] : [];
+    newProps = 'properties' in merged ? merged['properties'] as Record<string, string | number | boolean> : undefined;
+    newWeight = 'weight' in merged ? merged['weight'] as number : undefined;
   }
 
   if (updates.label !== undefined) $set['label'] = newLabel;

@@ -27,7 +27,7 @@ import { functionalSubjectKey } from '../functional-subject.js';
 import { FUNCTIONAL_GUARD } from '../../sync/local-only-fields.js';
 import { isStrictLinkage } from '../../spaces/space-lookup.js';
 import {
-  classifyEdgeUpsertAgainst, danglingReferenceCheck, EdgeSchemaViolation, type UpdateValidation,
+  classifyEdgeUpsertAgainst, danglingReferenceCheck, EdgeSchemaViolation, recordAfterPatch, type UpdateValidation,
 } from '../write-validation.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from '../merge-fields.js';
 import { type RecordFlags } from '../record-flag.js';
@@ -41,7 +41,7 @@ import { yieldToEventLoop } from '../../util/yield-to-event-loop.js';
 import { ReadSet, type ForkRows, type ReadWant, type Triplet } from './read-set.js';
 import type { WritePlan } from './types.js';
 import { trustFor, type PlanTrust } from './trust.js';
-import { convergeResult, finishInsert, vectorBeforeWrite } from './plan-steps.js';
+import { convergeResult, finishInsert, foldRemovals, vectorBeforeWrite, type FoldedRemovals } from './plan-steps.js';
 
 export interface EdgeInput {
   from: string;
@@ -64,6 +64,10 @@ export interface EdgeInput {
    * owns them (the extractor, through `bulkWrite`'s trusted argument) and by nothing that reads a request.
    */
   instanceWrittenKeys?: readonly string[];
+  /** Dot paths removed from the stored edge after the merge (`foldRemovals`); refused on an insert, and a system field or a malformed path is refused by name. */
+  deleteFields?: readonly string[];
+  /** The target tag array, written as it is in place of the union (`foldRemovals`): how a caller takes one tag away. */
+  replaceTags?: readonly string[];
 }
 
 // Declared in `write-validation.ts`, beside the `SchemaViolationError` it extends; re-exported because this is where the
@@ -307,6 +311,8 @@ export interface EdgeAllowed {
   check: UpdateValidation;
   /** The pair the classification judged with, handed back so the planner stamps from the very meta the check read (Q-736). */
   write: MetaForWrite;
+  /** The removals the write asked, applied to the stored edge's merged fields: the record the check judged is the one the planner writes. */
+  folded: FoldedRemovals;
 }
 
 /**
@@ -363,10 +369,21 @@ export function edgeRefusal(
   const functional = functionalIn(write.meta, label);
   const passed = sameBody.map(e => ({ from: e.from, to: e.to, label: e.label, fromKind: e.opts?.fromKind, toKind: e.opts?.toKind }));
   const ends = resolvedEnds(view, input, functional, subject, passed);
-  const check = classifyEdgeUpsertAgainst(write.meta, existing,
-    { label, description: input.description, tags: input.tags, properties: withDefaults }, ends, input.instanceWrittenKeys);
+  // The removals, after the merge: what the edge is LEFT with, and what the converge sets and unsets (`foldRemovals`).
+  const folded = foldRemovals('edge', existing, existing ? {
+    ...(input.tags !== undefined ? { tags: mergeTagsOrKeep(existing.tags, input.tags) } : {}),
+    ...(input.description !== undefined ? { description: input.description } : {}),
+    ...(input.weight !== undefined ? { weight: input.weight } : {}),
+    ...(properties !== undefined ? { properties: mergePropertiesOrKeep(existing.properties, withDefaults) } : {}),
+  } : {}, input);
+  // A removal is judged on the edge it leaves, as a PATCH is; every other write on the merge of what it states over what is stored.
+  const check = folded.removing
+    ? classifyEdgeUpsertAgainst(write.meta, existing,
+      recordAfterPatch(existing!, { ...(input.type !== undefined ? { type: input.type } : {}), ...folded.data }, folded.unset), ends, input.instanceWrittenKeys)
+    : classifyEdgeUpsertAgainst(write.meta, existing,
+      { label, description: input.description, tags: existing === null && input.replaceTags ? [...input.replaceTags] : input.tags, properties: withDefaults }, ends, input.instanceWrittenKeys);
   if (check.blocked) throw new EdgeSchemaViolation(check);
-  return { existing, withDefaults, check, write };
+  return { existing, withDefaults, check, write, folded };
 }
 
 /**
@@ -381,20 +398,23 @@ function edgeTrust(spaceId: string, trust: PlanTrust | undefined): PlanTrust | u
 
 /** `trust`: the plan schema a trusted in-process caller hands the planner, never a request (`trust.ts`). */
 export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet, trust?: PlanTrust): Promise<EdgePlanned> {
-  const { from, to, label, weight, type, description, tags, ttlDays, properties, opts } = input;
+  const { from, to, label, weight, type, description, tags, ttlDays, opts } = input;
   // The meta and the schema stamp in ONE read (Q-736): the refusal judges with it, and the guard and the stamp below come from it.
   const trusted = edgeTrust(spaceId, trust);
   const write = readMetaForWrite(spaceId, trusted?.planMeta);
   // The refusal first: nothing below is decided, noted or embedded for an edge the space does not allow.
-  const { existing, withDefaults, check } = edgeRefusal(spaceId, input, view, undefined, [], write);
+  const { existing, withDefaults, check, folded } = edgeRefusal(spaceId, input, view, undefined, [], write);
   opts?.onValidation?.(check);
 
   const now = new Date().toISOString();
-  const effectiveDesc = description ?? existing?.description;
+  // What the edge is LEFT with: the merge with the removals applied (`foldRemovals`); a new edge has nothing to replace, its tags are the target.
+  const left = folded.left as { tags?: string[]; description?: string; properties?: Record<string, string | number | boolean> };
+  const insertTags = input.replaceTags ? [...input.replaceTags] : tags;
+  const effectiveDesc = existing ? left.description : description;
   const effectiveType = type ?? existing?.type;
-  const effectiveTags = mergeTagsOrKeep(existing?.tags, tags);
+  const effectiveTags = existing ? left.tags ?? [] : mergeTagsOrKeep(undefined, insertTags);
   // `withDefaults`, not `properties` — the defaults were validated above and must be the values STORED.
-  const effectiveProps = mergePropertiesOrKeep(existing?.properties, withDefaults);
+  const effectiveProps = existing ? left.properties : mergePropertiesOrKeep(undefined, withDefaults);
 
   // Suppression wins over `waitForEmbedding`, on the record the write LEAVES (`Q-194`). An edge keys its schema
   // on `label`, not `type`, which `schemaKeyFor` already encodes.
@@ -418,14 +438,11 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet,
   if (existing) {
     // Stamped when the converged edge conforms, unstamped when it does not (a stamp means "conforms as stored").
     const stamp = stampOp(write, check);
-    const $set: Record<string, unknown> = { updatedAt: now, ...derived.set, ...stampSetOf(stamp) };
-    if (weight !== undefined) $set['weight'] = weight;
+    // `folded.data` is every stated field (tags only when stated, properties merged), with the removals applied: a replacement or a pruned bag
+    // is set, a field taken away whole is in `folded.unset`. A tag list nobody stated leaves the stored one unchanged.
+    const $set: Record<string, unknown> = { updatedAt: now, ...folded.data, ...derived.set, ...stampSetOf(stamp) };
     if (type !== undefined) $set['type'] = type;
-    if (description !== undefined) $set['description'] = description;
-    // When tags are provided, persist the merged result; otherwise leave existing tags unchanged.
-    if (tags !== undefined) $set['tags'] = effectiveTags;
-    if (properties !== undefined) $set['properties'] = effectiveProps;
-    const $unset: Record<string, unknown> = { ...derived.unset, ...stampUnsetOf(stamp) };
+    const $unset: Record<string, unknown> = { ...folded.unset, ...derived.unset, ...stampUnsetOf(stamp) };
     // Correcting a kind back to `entity` must UNSET it (`foldEdgeKinds`).
     foldEdgeKinds({ fromKind: opts?.fromKind, toKind: opts?.toKind }, $set, $unset);
     applyExpiryToUpdate(spaceId, ttlDays, existing._expireAt != null, $set, $unset,
@@ -460,7 +477,7 @@ export async function planEdge(spaceId: string, input: EdgeInput, view: ReadSet,
     ...(fromKind ? { fromKind } : {}),
     ...(toKind ? { toKind } : {}),
     label,
-    tags: tags ?? [],
+    tags: insertTags ?? [],
     ...(type !== undefined ? { type } : {}),
     ...(weight !== undefined ? { weight } : {}),
     ...(description !== undefined ? { description } : {}),

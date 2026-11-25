@@ -12,7 +12,7 @@ import { applyExpiryToUpdate } from './ttl.js';
 import { readMetaForWrite, stampOpIfUnmoved, foldStampOp, carryStamp } from '../spaces/schema-stamp.js';
 import { classifyEntityUpsertAgainst, recordAfterPatch, resultingEntityType, SchemaViolationError, type UpdateValidation } from './write-validation.js';
 import { writeFilterFor, writeOutcome } from './write-precondition.js';
-import { applyDeleteFields, setUnlessDeleted } from './delete-fields.js';
+import { applyDeleteFields, reflectDeleteFields, setUnlessDeleted, DELETABLE_FIELDS } from './delete-fields.js';
 import { mergePropertiesOrKeep, mergeTagsOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { LINK_CLASSES, assertLinkRecords, linksPointingAt, docsFromCollection, type LinkClass }
@@ -234,24 +234,10 @@ export async function updateEntityById(
       tags: newTags,
       properties: newProps,
     };
-    applyDeleteFields(merged, deleteFieldsPaths);
-
-    // Reflect deletions back
-    if (!('description' in merged)) {
-      $unset['description'] = '';
-    }
-    if (!('tags' in merged)) {
-      newTags = [];
-      $unset['tags'] = '';
-    } else {
-      newTags = merged['tags'] as string[];
-    }
-    if (!('properties' in merged)) {
-      newProps = {} as Record<string, string | number | boolean>;
-      $unset['properties'] = '';
-    } else {
-      newProps = merged['properties'] as Record<string, string | number | boolean>;
-    }
+    // Reflect deletions back: the one helper the other writers and the planners share.
+    reflectDeleteFields(merged, deleteFieldsPaths, DELETABLE_FIELDS.entity, $set, $unset);
+    newTags = 'tags' in merged ? merged['tags'] as string[] : [];
+    newProps = 'properties' in merged ? merged['properties'] as Record<string, string | number | boolean> : {};
   }
 
   if (updates.suppressEmbeddings !== undefined) $set['suppressEmbeddings'] = updates.suppressEmbeddings;

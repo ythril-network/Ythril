@@ -16,7 +16,7 @@ import { toMongoSort, LANDING_ORDER, type SortSpec } from './list-sort.js';
 import { applyExpiryToUpdate } from './ttl.js';
 import { readMetaForWrite, stampOpIfUnmoved, foldStampOp, carryStamp } from '../spaces/schema-stamp.js';
 import { classifyFactUpsertAgainst, recordAfterPatch, SchemaViolationError, type UpdateValidation } from './write-validation.js';
-import { applyDeleteFields } from './delete-fields.js';
+import { applyDeleteFields, reflectDeleteFields, DELETABLE_FIELDS } from './delete-fields.js';
 import { mergePropertiesOrKeep } from './merge-fields.js';
 import { enqueueEmbedJob, EMBED_PRIORITY } from './embed-queue.js';
 import { emitWebhookEvent } from '../webhooks/dispatcher.js';
@@ -178,17 +178,8 @@ export async function updateFact(
       description: updates.description !== undefined ? updates.description : existing.description,
       properties: mergedUpdateProps ?? {},
     };
-    applyDeleteFields(merged, deleteFieldsPaths);
-
-    // Reflect deletions into $set/$unset
-    for (const field of ['description', 'tags', 'properties']) {
-      if (!(field in merged)) {
-        $unset[field] = '';
-        delete $set[field];
-      } else if (deleteFieldsPaths.some(p => p === field || p.startsWith(field + '.'))) {
-        $set[field] = merged[field];
-      }
-    }
+    // Reflect deletions into $set/$unset: the one helper the other writers and the planners share.
+    reflectDeleteFields(merged, deleteFieldsPaths, DELETABLE_FIELDS.fact, $set, $unset);
   }
 
   /*
