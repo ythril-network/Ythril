@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { INSTANCES, post, patch } from '../sync/helpers.js';
+import { INSTANCES, post, patch, del } from '../sync/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIGS = path.join(__dirname, '..', 'sync', 'configs');
@@ -103,11 +103,24 @@ before(async () => {
 });
 
 after(async () => {
+  // What the run made besides its spaces goes too: each view by its own owner's token (a view is its owner's), then the token. Deleted
+  // before the spaces, so no view is left naming a space that is gone. A delete that fails is a failure of this file, not a leak of the stack.
+  const leaked = [];
+  const drop = async (what, call) => {
+    const r = await call().catch(err => ({ status: 0, body: String(err) }));
+    if (r.status !== 204 && r.status !== 200) leaked.push(`${what}: ${r.status} ${JSON.stringify(r.body)}`);
+  };
+  if (admin) await drop(`view @${VIEW}`, () => del(INSTANCES.a, admin, `/api/views/${encodeURIComponent(`@${VIEW}`)}`));
+  if (narrowed) {
+    await drop(`view @${VIEW}n`, () => del(INSTANCES.a, narrowed.key, `/api/views/${encodeURIComponent(`@${VIEW}n`)}`));
+    await drop(`token ${narrowed.id}`, () => del(INSTANCES.a, admin, `/api/tokens/${narrowed.id}`));
+  }
   for (const s of [SA, SB]) {
     await fetch(`${INSTANCES.a}/api/spaces/${s}`, {
       method: 'DELETE', headers: { Authorization: `Bearer ${admin}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true }),
     }).catch(() => {});
   }
+  assert.deepEqual(leaked, [], 'the run left a view or a token on the instance');
 });
 
 describe('the ticket\'s ten SPARQL queries answer exactly', () => {
