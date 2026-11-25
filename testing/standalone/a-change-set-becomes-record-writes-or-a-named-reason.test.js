@@ -60,9 +60,9 @@ const DOCS = {
   file: ['file', { _id: 'docs/a.pdf', path: 'docs/a.pdf', tags: [], sizeBytes: 10, sha256: 'ab'.repeat(32), createdAt: WHEN.createdAt, updatedAt: WHEN.updatedAt }],
 };
 
-function ask(removed, inserted, { meta = META, minted = new Map(), mode = 'strict', stated, docs = Object.values(DOCS) } = {}) {
+function ask(removed, inserted, { meta = META, minted = new Map(), mode = 'strict', stated, docs = Object.values(DOCS), links = {} } = {}) {
   const recordKey = fn('recordKey');
-  const stored = new Map(docs.map(([kind, doc]) => [recordKey(kind, doc._id), { doc, links: {} }]));
+  const stored = new Map(docs.map(([kind, doc]) => [recordKey(kind, doc._id), { doc, links: links[doc._id] ?? {} }]));
   const names = reverse.addressNames(meta);
   assert.equal(typeof changes.subjectChanges, 'function', 'subjectChanges is not exported by server/src/rdf/subject-changes.ts: a change set cannot become record writes');
   const out = changes.subjectChanges({ meta, names, mode, stored, minted }, removed, inserted, stated === undefined ? {} : { stated });
@@ -146,6 +146,17 @@ describe('a change set becomes record writes or a named reason', () => {
     assert.deepEqual(codes(out), ['field-not-removable']);
   });
 
+  it('removing a link statement takes that link out of the fact\'s set and keeps the others; a stated link is added', () => {
+    const links = { f1: { entity: ['e1', 'e2'] } };
+    const toE2 = { subject: iri(at('fact', 'f1')), predicate: iri(`${DCT}references`), object: iri(at('entity', 'e2')) };
+    const out = ask([toE2], [], { links, stated: () => true });
+    assert.deepEqual(writes(out), ['converge fact f1']);
+    assert.deepEqual(out.ops[0].links, { entity: ['e1'] });
+    const added = ask([], [q(at('fact', 'f1'), `${DCT}references`, at('entity', 'e3'))], { links });
+    assert.deepEqual(added.ops[0].links, { entity: ['e1', 'e2', 'e3'] });
+    assert.equal(added.ops[0].fields.fact, 'A fact', 'the stored text is carried');
+  });
+
   describe('each refusal answers its reason and writes nothing', () => {
     const CASES = {
       'server-owned-removed': () => ask([stored('e1', `${DCT}modified`)], []),
@@ -153,7 +164,7 @@ describe('a change set becomes record writes or a named reason', () => {
         [stored('k1', `${RDF}reifies`)],
         [q(at('edge', 'k1'), `${RDF}reifies`, { kind: 'triple', subject: iri(at('entity', 'e1')), predicate: iri(`${V}edge/knows`), object: iri(at('entity', 'e3')) }), q(at('entity', 'e1'), `${V}edge/knows`, at('entity', 'e3'))],
       ),
-      'not-writable-here': () => ask([stored('file', `${Y}path`)], [q(at('file', 'docs%2Fb.pdf'), `${Y}path`, lit('docs/b.pdf'))]),
+      'not-writable-here': () => ask([stored('file', `${Y}path`)], [q(termIri.recordIri(META, 'file', 'docs/b.pdf'), `${Y}path`, lit('docs/b.pdf'))]),
       'field-not-removable': () => ask([stored('e1', prop('entity', 'person', 'a.b'))], [], { stated: () => true }),
       'subject-not-an-address-here': () => ask([], [q('http://ex.org/x', TYPE, `${Y}Entity`), q('http://ex.org/x', LABEL, lit('X'))]),
     };
@@ -256,7 +267,7 @@ describe('a change set becomes record writes or a named reason', () => {
     const c = at('chrono', 'c1');
     const out = ask(
       [stored('c1', DESCRIPTION)],
-      [q(c, DESCRIPTION, lit('new')), q(`${c}#start`, `${RDF}type`, 'http://www.w3.org/2006/time#Instant')],
+      [q(c, DESCRIPTION, lit('new')), q(`${c}#start`, 'http://www.w3.org/2006/time#inXSDDate', lit('2026-03-01', `${XSD}date`))],
     );
     assert.deepEqual(writes(out), ['converge chrono c1']);
     assert.equal(out.ops[0].fields.description, 'new');
