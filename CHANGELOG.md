@@ -80,7 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** the stream of a whole export is sent uncompressed, whatever `Accept-Encoding` asks; a slow or idle cut and a refusal for want of an export slot each leave one log line (space and rule, no record).
 - **RDF:** the user guide describes the "RDF namespaces of schema groups" card of the Schema Library page.
 - **RDF:** the Ythril vocabulary is published under `docs/rdf/`, with decision record 23: a property holds one plain value; structure is an edge or a link.
-- **MCP:** a tool may declare an `outputSchema` in `tools/list`; `export_rdf` and `space_schema_rdf` do.
+- **RDF:** SPARQL 1.1 over a space's records or your own view: `GET`/`POST /api/brain/spaces/:spaceId/sparql` and MCP `sparql_query`, read at query time with your rights; an answer is whole or refused ([SPARQL API](docs/integration-guide/04j-sparql-api.md)).
+- **RDF:** config keys `sparql.timeoutMs`, `sparql.maxRecordsRead` and `sparql.maxResults`, read live; two queries at once per instance, one per token (`503 sparql_busy`).
+- **RDF:** audit event `brain.sparql_query`, written whatever `logReads` says, with a query's counts and outcome, never its text.
+- **RDF:** the SPARQL engine `@comunica/query-sparql-rdfjs` (MIT) ships, listed in `NOTICE`; it reaches no network.
+- **MCP:** a tool may declare an `outputSchema` in `tools/list`; `export_rdf`, `space_schema_rdf` and `sparql_query` do.
 - **Server:** an address under `/ld/` answers `404` with a problem body naming the export, instead of the web app.
 - **Testing:** `node scripts/test-failure-rates.mjs` prints each test's failures over the runs that ran it from the recorded runs, and exits 1 naming each test that failed on a commit that also passed; 2 when the records hold no result per test.
 - **Testing:** `node scripts/test-failure-rates.mjs --list never-failed,together` also prints the slowest tenth of the test files with no recorded failure and the tests that only ever failed together; 2 when the per-file times cannot be read.

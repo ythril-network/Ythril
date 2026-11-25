@@ -73,6 +73,8 @@ export const HELP_DOCS = [
       // change lands here rather than on a page already at its ceiling.
       'integration-guide/04h-graph-augmented-recall.md',
       'integration-guide/04i-ingest-api.md',
+      // Q-757: the SPARQL endpoint, a query door of the Brain API beside recall and filter.
+      'integration-guide/04j-sparql-api.md',
       'integration-guide/05-files-api.md',
       // The three pipelines a file can go through are their own parts. They are read by different people
       // for different reasons — an operator sizing a document converter, an integrator wiring vision/STT

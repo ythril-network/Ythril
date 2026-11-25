@@ -669,6 +669,10 @@ Example — find facts tagged `infra`:
 { "tags": "infra" }
 ```
 
+#### SPARQL
+
+A space with RDF switched on can also be asked in SPARQL 1.1 from any SPARQL client (`GET` or `POST /api/brain/spaces/<space>/sparql`) or by an assistant (MCP `sparql_query`): the query sees the statements the RDF export writes, read from the records at query time, and a personal view queries several spaces at once, each member its own named graph. What it sees follows your token's rights (without `files: read` the file statements are left out, and the answer says so). An answer is whole or refused: over `sparql.maxResults` rows (default 10 000) it is refused, so page with `LIMIT` and `OFFSET`; a query also stops at `sparql.timeoutMs` (default 30 000 ms) and `sparql.maxRecordsRead` (default 200 000), which an operator sets in `config.json`. `SERVICE`, `LOAD` and SPARQL Update are not offered. Every query is audited as `brain.sparql_query`, never with its text; a `GET` carries the query in its URL, which a web server in front of the instance may log, so prefer `POST`. The protocol, formats and refusal codes are in [SPARQL API](../integration-guide/04j-sparql-api.md).
+
 ---
 
 ### File metadata (merged into Files)
