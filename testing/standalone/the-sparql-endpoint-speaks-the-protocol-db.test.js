@@ -28,8 +28,11 @@ import assert from 'node:assert/strict';
 import { Parser } from 'n3';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { openSparqlDoors, baseOf, rowTexts, RESULTS_JSON } from './_sparql-doors.mjs';
+import { recordProcessFaults } from './_quad-source-faults.mjs';
 
 const skip = await mongoSkipReason();
+/** Every unhandled rejection and uncaught exception of the file's run: the server ends its process on either, so none may be raised. */
+const faults = recordProcessFaults();
 const S = 'spq-protocol';
 const OTHER = 'spq-protocol-other';
 const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
@@ -51,7 +54,7 @@ describe('the SPARQL endpoint speaks the protocol', { skip }, () => {
     await d.seed(OTHER, 'entity', [{ _id: 'o-1', name: 'Outside', type: 'Person', createdAt: STAMP, updatedAt: STAMP }]);
     reader = await d.mint('spq-reader', { [S]: d.row({ knowledge: 'read', files: 'read' }) });
   });
-  after(async () => { await d?.close(); });
+  after(async () => { faults.stop(); await d?.close(); });
 
   it('GET, POST sparql-query, POST form and MCP answer one SELECT with the same results JSON', async () => {
     const get = await d.sparqlGet(reader.key, S, SELECT);
@@ -178,4 +181,6 @@ describe('the SPARQL endpoint speaks the protocol', { skip }, () => {
       assert.ok(!quads.some(x => x.predicate.value === 'https://evil.example.org/p'), `${accept}: an injected statement is in the document`);
     }
   });
+
+  it('raised no unhandled rejection and no uncaught exception', async () => { await faults.quiet(); });
 });

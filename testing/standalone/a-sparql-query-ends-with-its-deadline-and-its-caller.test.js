@@ -32,6 +32,7 @@ import { elapse } from '../_shared/sleep.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { holdsWithin } from '../_shared/wait-for.mjs';
 import { settleWithin } from './_write-faults.mjs';
+import { recordProcessFaults } from './_quad-source-faults.mjs';
 
 const { namedNode, literal, quad } = DataFactory;
 const G = namedNode('https://rdf.example.org/ld/deadline/');
@@ -42,6 +43,8 @@ const DEADLINE_MS = 250;
 /** The longest a query that is ended may take to answer, past its deadline or its caller going. */
 const ANSWER_WITHIN_MS = 3_000;
 const SETTLE_MS = 50;
+/** Every unhandled rejection and uncaught exception of the file's run: the server ends its process on either, so none may be raised. */
+const faults = recordProcessFaults();
 
 const NEVER_TRUE = 'FILTER(STRLEN(STR(?o)) < 0)';
 
@@ -107,7 +110,7 @@ describe('a SPARQL query ends with its deadline and its caller, whatever its for
     const warm = await run('SELECT ?s WHERE { ?s ?p ?o }', slowSource(1), { deadline: Date.now() + 60_000 });
     await warm.rows();
   });
-  after(() => { for (const s of made) for (const stream of s.state.open) stream.destroy(); });
+  after(() => { faults.stop(); for (const s of made) for (const stream of s.state.open) stream.destroy(); });
 
   it('a SELECT that only its deadline can end is ended by it, mid-run, with 503 sparql_timeout, and its source is no longer read', async () => {
     const source = slowSource();
@@ -206,4 +209,6 @@ describe('a SPARQL query ends with its deadline and its caller, whatever its for
     assert.ok(got.error, `the query answered for a caller that had already gone: ${JSON.stringify(got).slice(0, 200)}`);
     assert.equal(source.state.matches, 0, 'the source was read for a caller that had already gone');
   });
+
+  it('raised no unhandled rejection and no uncaught exception', async () => { await faults.quiet(); });
 });

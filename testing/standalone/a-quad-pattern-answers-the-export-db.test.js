@@ -28,8 +28,11 @@ import assert from 'node:assert/strict';
 import { mongoSkipReason } from './_mongo-harness.mjs';
 import { loadDistModule, needModule } from './_load-dist-module.mjs';
 import { openQuadSourceFixture, A, B, AGENT_ID, FILE_PATH, baseOf, quadText, patternOf, drain } from './_quad-source-fixture.mjs';
+import { recordProcessFaults } from './_quad-source-faults.mjs';
 
 const skip = await mongoSkipReason();
+/** Every unhandled rejection and uncaught exception of the file's run: the server ends its process on either, so none may be raised. */
+const faults = recordProcessFaults();
 const MASKS = [...Array(16).keys()];
 const YTHRIL_PATH = 'https://w3id.org/ythril/ns#path';
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
@@ -68,7 +71,7 @@ describe('a quad pattern answers what the export writes, no more and no less', {
     fx = await openQuadSourceFixture('qsrc-complete');
     quadSource = await loadDistModule('../../server/dist/rdf/quad-source.js', import.meta.url);
   });
-  after(async () => { await fx?.d.close(); });
+  after(async () => { faults.stop(); await fx?.d.close(); });
 
   it('the fixture exports what the rules can get wrong (a floor, so an empty export cannot pass)', () => {
     const texts = fx.exported.map(quadText);
@@ -128,4 +131,6 @@ describe('a quad pattern answers what the export writes, no more and no less', {
     assert.deepEqual(own.map(quadText), [], `the file row ${file} was read for a token without files: read`);
     assert.deepEqual(source.filesWithheld(), [A, B], 'the members whose file statements were withheld');
   });
+
+  it('raised no unhandled rejection and no uncaught exception', async () => { await faults.quiet(); });
 });
