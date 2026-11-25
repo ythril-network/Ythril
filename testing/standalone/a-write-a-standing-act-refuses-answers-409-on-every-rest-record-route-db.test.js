@@ -82,6 +82,7 @@ const REQUESTS = {
 /** Derived routes under the prefix that are not one write of a record, each with why. */
 const NOT_A_RECORD_WRITE = new Map([
   ['POST /api/brain/spaces/:spaceId/traverse', 'a graph read sent as POST for its body; it writes nothing'],
+  ['POST /api/brain/spaces/:spaceId/sparql', 'a SPARQL query sent as POST for its body; the endpoint refuses SPARQL Update, so it writes nothing'],
   ['POST /api/brain/spaces/:spaceId/events/ticket', 'issues a short-lived ticket for the space\'s event stream; it writes no record'],
   ['POST /api/brain/spaces/:spaceId/reindex', 'rebuilds the space\'s search index; it writes no record'],
   ['POST /api/brain/spaces/:spaceId/embedding-queue/records/retry', 'requeues embedding jobs; a record\'s content is not written'],
