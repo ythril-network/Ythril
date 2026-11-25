@@ -28,6 +28,7 @@ import { openQuadSourceFixture, A, patternOf } from './_quad-source-fixture.mjs'
 
 const skip = await mongoSkipReason();
 const CAP = 1000;
+const PAGER_ORDER = { _id: 1 };
 
 let fx, candidates, source, members;
 
@@ -51,7 +52,7 @@ function findShapes() {
     for (let mask = 0; mask < 16; mask++) {
       for (const find of quadCandidates(patternOf(q, mask), member)) {
         const query = candidateQuery(A, find, CAP);
-        const key = JSON.stringify([query.collection, query.filter, query.sort ?? null]);
+        const key = JSON.stringify([query.collection, query.filter, query.walk]);
         if (!shapes.has(key)) shapes.set(key, { find, query });
       }
     }
@@ -94,8 +95,9 @@ describe('every quad pattern read is served by an index', { skip }, () => {
   it('a walk pages in _id order on the _id index, with no sort stage', async () => {
     const wrong = [];
     for (const { query } of findShapes().filter(s => s.find.walk)) {
-      assert.deepEqual(query.sort, { _id: 1 }, `the walk of ${query.collection} is not in _id order`);
-      const plan = await fx.d.col(query.collection).find(query.filter, { projection: query.projection, sort: query.sort, limit: query.limit }).explain('executionStats');
+      assert.equal(query.walk, true, `the walk of ${query.collection} is not read by the _id pager`);
+      // The page the one `_id` pager (`idKeysetPage`) sends: the walk's filter, in `_id` order, the walk's page size.
+      const plan = await fx.d.col(query.collection).find(query.filter, { projection: query.projection, sort: PAGER_ORDER, limit: query.limit }).explain('executionStats');
       const stages = stagesOf(plan.queryPlanner.winningPlan);
       if (!stages.some(s => s.includes('IXSCAN(_id_)')) || stages.includes('SORT')) wrong.push(`${query.collection}: ${stages.join('<-')}`);
     }

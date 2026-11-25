@@ -40,7 +40,7 @@ import { xsd } from './literals.js';
 import { rdfKindCollection, rdfMembers, rdfRowFilter, type RdfMember } from './rdf-members.js';
 import { isBound, quadCandidates, type CandidateFind, type PatternSlot, type PatternTerm, type QuadPattern } from './quad-candidates.js';
 import { toRdfJs } from './rdf-js-terms.js';
-import { SPARQL_RETRY_AFTER_SECONDS, SPARQL_STORE_UNAVAILABLE, SparqlRefusal, sparqlRefusalOf, timeoutRefusal, tooMuchReadRefusal } from './sparql-refusal.js';
+import { SPARQL_RETRY_AFTER_SECONDS, SPARQL_STORE_UNAVAILABLE, SPARQL_UNAVAILABLE, SparqlRefusal, sparqlRefusalOf, timeoutRefusal, tooMuchReadRefusal } from './sparql-refusal.js';
 import type { RdfCaller, FingerprintOf } from './rdf-space-state.js';
 
 /** The longest server deadline one find carries, in milliseconds, whatever time the query has left (as `brain/query.ts`). */
@@ -91,7 +91,8 @@ export interface CandidateQuery {
   collection: string;
   filter: Record<string, unknown>;
   projection: Record<string, 1>;
-  sort?: Record<string, 1>;
+  /** A walk is read page by page by the one `_id` pager (`idKeysetPage`), `limit` rows a page; a narrowed find in one cursor of `limit` rows. */
+  walk: boolean;
   limit: number;
 }
 
@@ -101,8 +102,8 @@ const projectionOf = (kind: RdfRecordKind): Record<string, 1> => Object.fromEntr
 export function candidateQuery(space: string, find: CandidateFind, cap: number): CandidateQuery {
   const collection = spaceCollection(space, rdfKindCollection(find.kind));
   const row = rdfRowFilter(find.kind);
-  if (find.walk) return { collection, filter: row, projection: projectionOf(find.kind), sort: { _id: 1 }, limit: QUAD_WALK_PAGE };
-  return { collection, filter: { ...find.filter, ...row }, projection: projectionOf(find.kind), limit: cap + 1 };
+  if (find.walk) return { collection, filter: row, projection: projectionOf(find.kind), walk: true, limit: QUAD_WALK_PAGE };
+  return { collection, filter: { ...find.filter, ...row }, projection: projectionOf(find.kind), walk: false, limit: cap + 1 };
 }
 
 /** The datatype a literal is compared by. */
@@ -205,7 +206,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
     if (isMaxTimeExpired(err)) return timeoutRefusal();
     if (isStoreSide(err)) {
       const f = classifyReadFailure(err);
-      return new SparqlRefusal(503, SPARQL_STORE_UNAVAILABLE, f.error, f.retryAfterSeconds ?? SPARQL_RETRY_AFTER_SECONDS);
+      return new SparqlRefusal(SPARQL_UNAVAILABLE, SPARQL_STORE_UNAVAILABLE, f.error, f.retryAfterSeconds ?? SPARQL_RETRY_AFTER_SECONDS);
     }
     return err;
   };
@@ -226,7 +227,7 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
       let after: string | undefined;
       for (;;) {
         checkCaller();
-        const page = await idKeysetPage<{ _id: string } & Document>({ collection: query.collection, filter: query.filter, projection: query.projection, size: QUAD_WALK_PAGE, maxTimeMS: findMs() }, after);
+        const page = await idKeysetPage<{ _id: string } & Document>({ collection: query.collection, filter: query.filter, projection: query.projection, size: query.limit, maxTimeMS: findMs() }, after);
         for (const doc of page.rows) { countRead(); yield doc; }
         await yieldToEventLoop();
         if (page.end || page.last === undefined) return;

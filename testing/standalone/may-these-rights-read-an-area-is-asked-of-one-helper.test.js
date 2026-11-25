@@ -71,7 +71,8 @@ describe('the question "may these rights read an area of a space" has one asker'
   });
 
   it('the helper is asked: every place that told a caller what a space holds reads through it', () => {
-    for (const file of ['server/src/rdf/export-act.ts', 'server/src/spaces/rdf-settle.ts', 'server/src/spaces/schema-validate-door.ts', 'server/src/spaces/schema-type-acts.ts']) {
+    // The RDF export asks it through the member helper it shares with the quad source (bundle-271, Q-756).
+    for (const file of ['server/src/rdf/rdf-members.ts', 'server/src/spaces/rdf-settle.ts', 'server/src/spaces/schema-validate-door.ts', 'server/src/spaces/schema-type-acts.ts']) {
       const s = sources.find(x => x.file === file);
       assert.ok(s, `${file} is not among the sources`);
       assert.match(s.text, /\bmayReadArea\(/, `${file} no longer asks mayReadArea`);

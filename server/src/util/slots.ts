@@ -18,11 +18,16 @@
 /** A family's budget, and the wait a refused caller is told to keep before trying again (`Retry-After`), in seconds. */
 export interface SlotFamily { readonly instance: number; readonly perCaller: number; readonly retryAfterSeconds: number }
 
-/** Every family and its budget. */
-export const SLOT_FAMILIES = Object.freeze({
-  export: Object.freeze({ instance: 2, perCaller: 1, retryAfterSeconds: 5 }),
-  sparql: Object.freeze({ instance: 2, perCaller: 1, retryAfterSeconds: 5 }),
-} satisfies Record<string, SlotFamily>);
+/** Reads of one family running at once on the instance. */
+const SLOTS_PER_INSTANCE = 2;
+/** Reads of one family running at once per caller. */
+const SLOTS_PER_CALLER = 1;
+/** The wait a refused caller is told to keep, in seconds. */
+const RETRY_AFTER_SECONDS = 5;
+const BUDGET: SlotFamily = Object.freeze({ instance: SLOTS_PER_INSTANCE, perCaller: SLOTS_PER_CALLER, retryAfterSeconds: RETRY_AFTER_SECONDS });
+
+/** Every family and its budget: today both hold the same one. */
+export const SLOT_FAMILIES = Object.freeze({ export: BUDGET, sparql: BUDGET } satisfies Record<string, SlotFamily>);
 
 export type SlotFamilyName = keyof typeof SLOT_FAMILIES;
 
