@@ -20,6 +20,11 @@
  * of the subject rule (the narrowed run misses the edge statements of a bound subject); dropping the files predicate (file statements reach
  * the knowledge-only token).
  *
+ * ## Its time alone
+ *
+ * Alone it takes 31 s (measured 2026-11-25). The 16 patterns of a statement run at once; one after another the file took 54 s alone and
+ * 86 s in CI beside other files (Q-960). Planting a miss for one pattern (an empty answer for mask 15) fails 4 of its 7 cases.
+ *
  * Run: a Mongo the harness accepts, then node --test testing/standalone/a-quad-pattern-answers-the-export-db.test.js (a prior
  * `npm run build:server`).
  */
@@ -52,10 +57,15 @@ async function judge(make, oracle) {
   const twice = new Set();
   let read = 0;
   for (const q of oracle) {
-    for (const mask of MASKS) {
+    // The 16 patterns of one statement run at once, each on its own source, and are judged in mask order: the run finds what it found
+    // one pattern after another, in a fraction of the time (Q-960: the file ran 86 s in CI, over the per-file budget).
+    const answers = await Promise.all(MASKS.map(async (mask) => {
       const source = make();
       const got = await drain(source.match(...patternOf(q, mask)));
-      read += source.recordsRead();
+      return { mask, got, recordsRead: source.recordsRead() };
+    }));
+    for (const { mask, got, recordsRead } of answers) {
+      read += recordsRead;
       const texts = new Set(got.map(quadText));
       // Counted, not compared as a set: a statement answered twice is one in a set (S1 review m3).
       if (got.length !== texts.size) twice.add(`mask ${mask.toString(2).padStart(4, '0')}: ${got.map(quadText).find((t, i, all) => all.indexOf(t) !== i)}`);
