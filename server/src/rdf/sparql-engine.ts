@@ -21,6 +21,19 @@
  *   engine is doing; the quad source bounds every find by the same deadline.
  * - **The query in an answer.** A parse error names its line and column, never the text.
  * - **An engine per query.** One engine per process, made on first use; each query gets its own context.
+ *
+ * ## The update path (bundle-272, Q-965; design f, r2 R11, vet-1 S4)
+ *
+ * {@link checkSparqlUpdateAlgebra} and {@link runSparqlUpdatePart} are the update path's check and runner, beside the query's. They share
+ * every wall above: the text cap, the one parse, the one walk (SERVICE refused, the REGEX and REPLACE check, the node bound), the refusing
+ * fetch, the 1 ms HTTP timeout, the deadline and the abort. What differs is said once each:
+ * - **An allowlist, not a denylist.** The update check admits the update operations `compositeupdate` and `deleteinsert` only: CLEAR, DROP,
+ *   CREATE, ADD, MOVE, COPY and LOAD, and any GRAPH, USING, WITH or `using-graph-uri` naming a graph other than the space's own, are
+ *   `400 sparql_graph_management_refused`; a text that is no update is `400 sparql_not_an_update`. The runner runs one `deleteinsert` at a
+ *   time and refuses any other operation, so a composite reaches the engine only part by part.
+ * - **`readOnly` stays on the query path.** The update context is the one without it, and it names its destination (the change set store),
+ *   so the engine never writes into the source it reads. The query context keeps `readOnly`, so an update's algebra handed to
+ *   {@link runSparql} is refused by the engine and writes nothing.
  */
 import { Readable } from 'node:stream';
 import { QueryEngine } from '@comunica/query-sparql-rdfjs';
@@ -32,6 +45,7 @@ import {
   SPARQL_BAD_REQUEST, SPARQL_TOO_LARGE, SPARQL_FEDERATION_REFUSED, SPARQL_MALFORMED, SPARQL_PATTERN_REFUSED, SPARQL_QUERY_TOO_LARGE, SPARQL_UPDATE_NOT_HERE, SparqlRefusal, sparqlRefusalOf,
   timeoutRefusal,
 } from './sparql-refusal.js';
+import { SPARQL_GRAPH_MANAGEMENT_REFUSED, SPARQL_NOT_AN_UPDATE, graphManagementRefusal } from './change-set-store.js';
 
 /** The longest query text, in UTF-8 bytes. */
 export const SPARQL_QUERY_MAX_BYTES = 64 * 1024;
@@ -60,12 +74,23 @@ const refuseFetch = (): Promise<never> => Promise.reject(new Error('This server\
 /** The context the engine takes for a text and for an algebra. */
 type TextContext = Parameters<QueryEngine['explain']>[1] & Parameters<QueryEngine['query']>[1];
 
+/** The walls every context carries, the query's and the update's alike: a fetch that refuses, a 1 ms HTTP timeout, no dereferenced FROM NAMED. */
+const NETWORK_WALLS = Object.freeze({ fetch: refuseFetch, httpTimeout: 1, dereferenceFromNamed: false });
+
 /**
  * The context every query runs with. The source is the caller's RDF/JS source (the quad source), which the engine's source type, a union of
  * every source form it can identify, does not name: it is handed over as one.
  */
 const contextFor = (source: unknown): TextContext => ({
-  sources: [source], unionDefaultGraph: true, readOnly: true, fetch: refuseFetch, httpTimeout: 1, dereferenceFromNamed: false,
+  sources: [source], unionDefaultGraph: true, readOnly: true, ...NETWORK_WALLS,
+}) as unknown as TextContext;
+
+/**
+ * The context an update part runs with: the query's, without `readOnly`, writing into `destination` (the change set store). Only
+ * {@link runSparqlUpdatePart} takes it.
+ */
+const updateContextFor = (source: unknown, destination: unknown): TextContext => ({
+  sources: [source], destination, unionDefaultGraph: true, ...NETWORK_WALLS,
 }) as unknown as TextContext;
 
 /** A source that holds nothing, for the parse alone. */
@@ -122,8 +147,47 @@ function patternRefusal(node: Record<string, unknown>): { refusal: SparqlCheckRe
   return null;
 }
 
-/** The first refusal anywhere in the algebra (operations and expressions alike), or null. */
-function walkRefusal(root: unknown): { refusal: SparqlCheckRefusal } | null {
+/** What a path refuses of one algebra node beyond the walls every path shares, or null. */
+type NodeRule = (node: Record<string, unknown>) => { refusal: SparqlCheckRefusal } | null;
+
+/** The query path's rule: every update operation, LOAD included, is refused. */
+const queryNodeRule: NodeRule = (node) => {
+  const type = node['type'];
+  if (typeof type === 'string' && UPDATE_OPERATIONS.has(type)) {
+    return refused(SPARQL_BAD_REQUEST, SPARQL_UPDATE_NOT_HERE, 'This endpoint answers queries only: an update (INSERT, DELETE, LOAD, CLEAR, CREATE, DROP, ADD, MOVE, COPY) is not offered here');
+  }
+  return null;
+};
+
+/** The update operations the update path runs: INSERT DATA, DELETE DATA, DELETE/INSERT and their composites. */
+const UPDATE_OPERATIONS_ADMITTED: ReadonlySet<string> = new Set(['compositeupdate', 'deleteinsert']);
+
+/** The graph names one algebra node carries: a GRAPH's name, a pattern's or a template quad's graph, a FROM's (USING's) lists. */
+function graphNamesOf(node: Record<string, unknown>): unknown[] {
+  const names: unknown[] = [node['graph']];
+  if (node['type'] === 'graph') names.push(node['name']);
+  if (node['type'] === 'from') {
+    for (const key of ['default', 'named']) if (Array.isArray(node[key])) names.push(...(node[key] as unknown[]));
+  }
+  return names;
+}
+
+/** The update path's rule for the space whose graph is `ownGraph`: the allowlist of operations, and no graph named but the space's own. */
+const updateNodeRule = (ownGraph: string): NodeRule => (node) => {
+  const type = node['type'];
+  if (typeof type === 'string' && UPDATE_OPERATIONS.has(type) && !UPDATE_OPERATIONS_ADMITTED.has(type)) {
+    return refused(SPARQL_BAD_REQUEST, SPARQL_GRAPH_MANAGEMENT_REFUSED, 'An Update changes statements only: CLEAR, DROP, CREATE, ADD, MOVE, COPY and LOAD are not offered');
+  }
+  for (const name of graphNamesOf(node)) {
+    if (isRecord(name) && name['termType'] === 'NamedNode' && name['value'] !== ownGraph) {
+      return refused(SPARQL_BAD_REQUEST, SPARQL_GRAPH_MANAGEMENT_REFUSED, 'An Update reads and changes its own space\'s graph only: GRAPH, USING and WITH may name no other graph');
+    }
+  }
+  return null;
+};
+
+/** The first refusal anywhere in the algebra (operations and expressions alike), by the walls every path shares and the path's `rule`, or null. */
+function walkRefusal(root: unknown, rule: NodeRule): { refusal: SparqlCheckRefusal } | null {
   const stack: unknown[] = [root];
   const seen = new Set<object>();
   let visited = 0;
@@ -134,14 +198,30 @@ function walkRefusal(root: unknown): { refusal: SparqlCheckRefusal } | null {
     if (++visited > WALK_NODES_MAX) return refused(SPARQL_TOO_LARGE, SPARQL_QUERY_TOO_LARGE, 'The query is too large to check');
     const type = node['type'];
     if (type === 'service') return refused(SPARQL_BAD_REQUEST, SPARQL_FEDERATION_REFUSED, 'SERVICE is not offered: this endpoint answers from this server\'s own records and never queries another');
-    if (typeof type === 'string' && UPDATE_OPERATIONS.has(type)) {
-      return refused(SPARQL_BAD_REQUEST, SPARQL_UPDATE_NOT_HERE, 'This endpoint answers queries only: an update (INSERT, DELETE, LOAD, CLEAR, CREATE, DROP, ADD, MOVE, COPY) is not offered here');
-    }
+    const own = rule(node);
+    if (own) return own;
     const pattern = patternRefusal(node);
     if (pattern) return pattern;
     for (const value of Object.values(node)) if (isRecord(value)) stack.push(value);
   }
   return null;
+}
+
+/** The algebra of `text`, parsed once with the engine's own parser and walked whole under `rule`; or the refusal. Never runs anything. */
+async function parsedAndWalked(text: string, rule: NodeRule): Promise<{ algebra: SparqlAlgebra } | { refusal: SparqlCheckRefusal }> {
+  if (Buffer.byteLength(text, 'utf8') > SPARQL_QUERY_MAX_BYTES) {
+    return refused(SPARQL_TOO_LARGE, SPARQL_QUERY_TOO_LARGE, `The query is longer than ${SPARQL_QUERY_MAX_BYTES} bytes`);
+  }
+  let algebra: SparqlAlgebra;
+  try {
+    const explained = await engineOf().explain(text, contextFor(EMPTY_SOURCE), 'parsed');
+    algebra = explained.data as SparqlAlgebra;
+  } catch (err) {
+    return { refusal: malformedRefusal(err) };
+  }
+  const refusal = walkRefusal(algebra, rule);
+  if (refusal) return refusal;
+  return { algebra };
 }
 
 /** The algebra with the protocol's dataset in place of the query's FROM and FROM NAMED, when the protocol names one. */
@@ -162,19 +242,30 @@ function withDataset(algebra: SparqlAlgebra, dataset: SparqlProtocolDataset): Sp
  * Never runs anything.
  */
 export async function checkSparqlAlgebra(text: string, dataset: SparqlProtocolDataset = {}): Promise<{ algebra: SparqlAlgebra } | { refusal: SparqlCheckRefusal }> {
-  if (Buffer.byteLength(text, 'utf8') > SPARQL_QUERY_MAX_BYTES) {
-    return refused(SPARQL_TOO_LARGE, SPARQL_QUERY_TOO_LARGE, `The query is longer than ${SPARQL_QUERY_MAX_BYTES} bytes`);
+  const checked = await parsedAndWalked(text, queryNodeRule);
+  if ('refusal' in checked) return checked;
+  return { algebra: withDataset(checked.algebra, dataset) };
+}
+
+/** The dataset the SPARQL protocol's update parameters name (`using-graph-uri`, `using-named-graph-uri`). */
+export interface SparqlUpdateDataset { defaultGraphUri?: readonly string[]; namedGraphUri?: readonly string[] }
+
+/**
+ * The algebra of the Update `text` for the space whose graph is `ownGraph`, parsed once and checked whole by the walls every path shares
+ * and the update path's allowlist; or the refusal. `using` is the protocol's dataset: a graph it names other than `ownGraph` is refused, and
+ * `ownGraph` itself is the whole dataset already. Never runs anything.
+ */
+export async function checkSparqlUpdateAlgebra(text: string, ownGraph: string, using: SparqlUpdateDataset = {}): Promise<{ algebra: SparqlAlgebra } | { refusal: SparqlCheckRefusal }> {
+  if ([...(using.defaultGraphUri ?? []), ...(using.namedGraphUri ?? [])].some(g => g !== ownGraph)) {
+    return refused(SPARQL_BAD_REQUEST, SPARQL_GRAPH_MANAGEMENT_REFUSED, 'An Update reads its own space\'s graph only: using-graph-uri and using-named-graph-uri may name no other graph');
   }
-  let algebra: SparqlAlgebra;
-  try {
-    const explained = await engineOf().explain(text, contextFor(EMPTY_SOURCE), 'parsed');
-    algebra = explained.data as SparqlAlgebra;
-  } catch (err) {
-    return { refusal: malformedRefusal(err) };
+  const checked = await parsedAndWalked(text, updateNodeRule(ownGraph));
+  if ('refusal' in checked) return checked;
+  const root: unknown = checked.algebra;
+  if (!isRecord(root) || typeof root['type'] !== 'string' || !UPDATE_OPERATIONS_ADMITTED.has(root['type'])) {
+    return refused(SPARQL_BAD_REQUEST, SPARQL_NOT_AN_UPDATE, 'This is the update path: a query (SELECT, ASK, CONSTRUCT, DESCRIBE) is asked at the query endpoint');
   }
-  const refusal = walkRefusal(algebra);
-  if (refusal) return refusal;
-  return { algebra: withDataset(algebra, dataset) };
+  return checked;
 }
 
 /** A row of a SELECT answer: each bound variable's term, by name. */
@@ -218,7 +309,7 @@ function recordedRefusal(source: unknown): SparqlRefusal | null {
  * refusal, which the source ended its stream without raising, for the same reason). The result stream that ends rejects with it, so the
  * act answers it as it answers any error of the engine: a defect is the generic 500, never a short result answered as a whole one.
  */
-function recordedEnd(source: unknown): { error: unknown } | null {
+export function recordedEnd(source: unknown): { error: unknown } | null {
   const refusal = recordedRefusal(source);
   if (refusal) return { error: refusal };
   const defect = isRecord(source) && typeof source['defect'] === 'function' ? (source['defect'] as () => unknown)() : null;
@@ -354,6 +445,49 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
   }
   finish();
   throw new SparqlRefusal(SPARQL_BAD_REQUEST, SPARQL_UPDATE_NOT_HERE, 'This endpoint answers queries only');
+}
+
+/** The change set an update part writes into: an RDF/JS store whose writes still to come `end` stops. */
+export interface UpdateDestination { end(cause: Error): void }
+
+/**
+ * Run one update part (a `deleteinsert` from {@link checkSparqlUpdateAlgebra}; any other operation is refused) over `source`, writing its
+ * DELETE and INSERT into `destination`, by `deadline`; a `signal` that aborts ends it. The context is the query's walls without `readOnly`.
+ * The part ends when the engine has handed the destination every statement; the deadline and the abort end it sooner, the destination
+ * refusing every statement after. A source whose read failed ended its streams early, so its recorded refusal or defect is the part's
+ * failure, never a short change set answered as a whole one.
+ */
+export async function runSparqlUpdatePart(part: SparqlAlgebra, source: unknown, destination: UpdateDestination, opts: { deadline: number; signal?: AbortSignal }): Promise<void> {
+  const node: unknown = part;
+  if (!isRecord(node) || node['type'] !== 'deleteinsert') throw graphManagementRefusal('An update operation other than INSERT DATA, DELETE DATA and DELETE/INSERT');
+  if (opts.deadline - Date.now() <= 0) throw timeoutRefusal();
+  if (opts.signal?.aborted) throw callerLeft();
+  let stop: ((cause: Error) => void) | null = null;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    stop = (cause) => { destination.end(cause); reject(cause); };
+  });
+  stopped.catch(() => undefined);
+  const timer = setTimeout(() => stop?.(timeoutRefusal()), Math.max(0, opts.deadline - Date.now()));
+  timer.unref();
+  const onAbort = (): void => stop?.(callerLeft());
+  opts.signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    const planned = engineOf().query(part, updateContextFor(source, destination));
+    // A plan that fails after the deadline or the abort won the race rejects with nobody waiting: it is let go here, never unhandled.
+    planned.catch(() => undefined);
+    const raw = await Promise.race([planned, stopped]);
+    if (raw.resultType !== 'void') throw new Error(`The engine answered an update part with ${String(raw.resultType)}, not with its changes`);
+    const executed = raw.execute();
+    executed.catch(() => undefined);
+    await Promise.race([executed, stopped]);
+  } catch (err) {
+    throw refusalOf(err, source);
+  } finally {
+    clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', onAbort);
+  }
+  const failed = recordedEnd(source);
+  if (failed) throw failed.error;
 }
 
 /**

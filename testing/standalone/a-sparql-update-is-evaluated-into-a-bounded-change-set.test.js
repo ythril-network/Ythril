@@ -19,8 +19,11 @@
  * ## Seen red
  *
  * On 3f48206ac: `server/src/rdf/sparql-update-eval.ts` does not exist, and `sparql-engine.ts` exports no `checkSparqlUpdateAlgebra`.
- * Mutations after: `readOnly` dropped from the query context (rule 5: the source gains the statement); the change set fed to each part as
- * its destination (rule 2's DELETE case); the meter's cap check removed (rule 3).
+ * Mutations of the built server after, each seen red: `readOnly` dropped from the query context together with `runSparql`'s refusal of a
+ * void result made to execute it (rule 5: "the query runner wrote an update into its source"; either wall alone holds the rule, and with
+ * only the second removed the rule stays green); each part reading the source without the earlier parts laid over it (rule 2); the fold
+ * recording a taken-back insert as removed (rule 2's DELETE case); the meter's statement cap check removed (rule 3); the graph-name check
+ * of the update walk removed (rule 4).
  *
  * Run: npm run build:server, then node --test testing/standalone/a-sparql-update-is-evaluated-into-a-bounded-change-set.test.js
  */
