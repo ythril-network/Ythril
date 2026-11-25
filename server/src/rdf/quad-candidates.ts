@@ -28,15 +28,15 @@
  * every knowledge kind writes from an unindexed field (`author.instanceLabel`), so it walks; and an agent subject walks for the same reason.
  */
 import type { SpaceMeta } from '@ythril-network/schema';
-import { RDF_MAPPER_CLASS_KINDS, RDF_MAPPER_PREDICATE_KINDS, type RdfRecordKind } from './record-triples.js';
+import { RDF_MAPPER_CLASS_KINDS, RDF_MAPPER_PREDICATE_KINDS, RDF_RECORD_KINDS, AUTHORED_RDF_KINDS, type RdfRecordKind } from './record-triples.js';
 import { recordOfAddress, termOfIri, addressNames, type AddressNames } from './term-reverse.js';
 import { edgeClassIri, graphIri, namesOf, type TermOwner } from './term-iri.js';
 import { STANDARD_PREFIXES } from './ythril-vocabulary.js';
 
-/** Every kind a member's statements come from, in walk order. */
-export const QUAD_KINDS: readonly RdfRecordKind[] = Object.freeze(['entity', 'fact', 'chrono', 'edge', 'link', 'file']);
-/** The kinds that carry an author, so an agent's statements. */
-const KNOWLEDGE_KINDS: readonly RdfRecordKind[] = Object.freeze(['entity', 'fact', 'chrono', 'edge']);
+/** Every kind a member's statements come from, in walk order (owned by the mapper: `RDF_RECORD_KINDS`). */
+export const QUAD_KINDS: readonly RdfRecordKind[] = RDF_RECORD_KINDS;
+/** The kinds that carry an author, so an agent's statements (owned by the mapper: `AUTHORED_RDF_KINDS`). */
+const KNOWLEDGE_KINDS: readonly RdfRecordKind[] = AUTHORED_RDF_KINDS;
 
 const RDF = STANDARD_PREFIXES['rdf']!;
 const RDF_TYPE = `${RDF}type`;

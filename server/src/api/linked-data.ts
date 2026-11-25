@@ -40,36 +40,29 @@
  *   (`entryId`), and counts only: the kind, the statements answered and whether the pointing half was cut.
  */
 import { Router, type NextFunction, type Request, type Response } from 'express';
-import { DataFactory } from 'n3';
 import { requireAuth, refuseHeldPeer } from '../auth/middleware.js';
 import { rungFor } from '../auth/required-rung.js';
 import { mayReadArea } from '../auth/reachable-spaces.js';
 import type { TokenRights } from '../config/rights-shape.js';
-import { getConfig } from '../config/loader.js';
 import { getPublicBaseUrl } from '../config/public-url.js';
-import { sparqlLimits } from '../config/sparql-limits.js';
 import { globalRateLimit } from '../rate-limit/middleware.js';
 import { registeredPathOf } from '../http/route-map.js';
 import { preferredByAccept } from '../http/accept-weigh.js';
-import { log, peerText } from '../util/log.js';
-import { takeSlot, SLOT_FAMILIES } from '../util/slots.js';
+import { abortWhenClientGoes, slotCallerKey } from '../http/read-caller.js';
+import { log, peerText, NAME_QUOTED } from '../util/log.js';
 import { schemaFingerprintOf } from '../spaces/schema-stamp.js';
 import { readSchemaVersionAct } from '../spaces/schema-versions-acts.js';
 import { networkIdsSharedWithCaller } from '../networks/network-spaces.js';
 import { EXPORT_OK } from '../export/export-statuses.js';
 import { chooseRdfFormat, RDF_MEDIA_TYPES, RDF_FORMAT_NOT_ACCEPTABLE } from '../rdf/export-format.js';
 import { rdfMembers, type RdfMember } from '../rdf/rdf-members.js';
-import { addressNames, recordOfAddress, shapeOfAddress, termOfIri } from '../rdf/term-reverse.js';
+import { addressNames, recordOfAddress, shapeOfAddress } from '../rdf/term-reverse.js';
 import { exportReportIri, graphDescription } from '../rdf/export-act.js';
-import { createQuadSource } from '../rdf/quad-source.js';
-import { fromRdfJs } from '../rdf/rdf-js-terms.js';
-import type { Quad } from '../rdf/literals.js';
 import { rdfSchemaExportAct, type UsedType } from '../rdf/schema-export-act.js';
-import { renderGraph, SPARQL_GRAPH_FORMATS } from '../rdf/sparql-answer.js';
-import {
-  sparqlRefusalOf, SPARQL_BUSY, SPARQL_UNAVAILABLE, SPARQL_TOO_LARGE, SPARQL_TOO_MANY_RESULTS, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT,
-  SPARQL_STORE_UNAVAILABLE,
-} from '../rdf/sparql-refusal.js';
+import { renderGraph } from '../rdf/graph-render.js';
+import { SPARQL_GRAPH_FORMATS } from '../rdf/sparql-answer.js';
+import { readStatements, typeInUse, spaceOfAddress, undeclaredTypeOf, type LdRefusal, type LdStatementsKind } from '../rdf/linked-data-act.js';
+import { SPARQL_BUSY, SPARQL_TOO_MANY_RESULTS, SPARQL_TOO_MUCH_READ, SPARQL_TIMEOUT, SPARQL_STORE_UNAVAILABLE } from '../rdf/sparql-refusal.js';
 import { RDF_NOT_ENABLED, RDF_BASE_SHARED, RDF_BASE_NESTED, RDF_BASE_CONFLICT, RDF_TERM_CLASH, RDF_UNWRITABLE, type RdfCaller } from '../rdf/rdf-space-state.js';
 import { sendProblem } from './problem-body.js';
 
@@ -99,7 +92,6 @@ const TAB_OF: Readonly<Record<LdKind, string>> = Object.freeze({
   entity: 'entities', fact: 'facts', chrono: 'chrono', edge: 'edges', file: 'files', agent: 'overview', schema: 'overview', vocab: 'overview',
   graph: 'overview', ontology: 'overview', shape: 'overview',
 });
-const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 /** The media types a browser's `Accept` is weighed against: the RDF formats first, so a tie (`*\/*`) is a machine read. */
 const WEIGHED = Object.freeze([...SPARQL_GRAPH_FORMATS.map(f => RDF_MEDIA_TYPES[f]), 'text/html']);
 
@@ -120,17 +112,6 @@ const RESOLVED = new WeakMap<Request, Resolved>();
 
 /** The request's path as sent (percent-encoding kept), without its query. */
 const pathOf = (req: Request): string => (req.originalUrl.split('?')[0] ?? '');
-
-/** The space with RDF on whose base is the longest start of `address`, or null. */
-function spaceOfAddress(address: string): string | null {
-  let best: { id: string; base: string } | null = null;
-  for (const s of getConfig().spaces) {
-    const rdf = s.meta?.rdf;
-    if (rdf?.enabled !== true || typeof rdf.base !== 'string' || rdf.base === '' || !address.startsWith(rdf.base)) continue;
-    if (best === null || rdf.base.length > best.base.length) best = { id: s.id, base: rdf.base };
-  }
-  return best?.id ?? null;
-}
 
 /** Let `/:kind/:id` answer the record kinds only; any other kind goes on to the routes after it (the 404). */
 function recordKindOnly(req: Request, _res: Response, next: NextFunction): void {
@@ -190,50 +171,17 @@ function memberOf(req: Request, res: Response, space: string): RdfMember | null 
 }
 
 /**
- * At most `limit` quads of a match that `keep` admits, and whether there were more of them; the stream is closed either way. A quad `keep`
- * refuses is neither counted nor answered, so the cap and the "more" are about the statements the answer would carry.
+ * Answer a refusal of a read (a bound, the store, the deadline, a slot that is spent) as a problem body, with the wait a 503 tells, and log it:
+ * the code and the status, never the address (a refusal at this door was a silent 4xx or 5xx; the operator reads these lines to see a bound hit).
  */
-async function take(stream: AsyncIterable<unknown>, limit: number, keep: (q: unknown) => boolean = () => true): Promise<{ quads: unknown[]; more: boolean }> {
-  const quads: unknown[] = [];
-  for await (const q of stream) {
-    if (!keep(q)) continue;
-    if (quads.length >= limit) return { quads, more: true };
-    quads.push(q);
-  }
-  return { quads, more: false };
+function sendLdRefusal(res: Response, r: LdRefusal): void {
+  log.warn(`Linked Data read refused (${peerText(r.code, { max: NAME_QUOTED })}, status ${r.status})`);
+  if (r.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(r.retryAfterSeconds));
+  sendProblem(res, { status: r.status, title: r.title, detail: r.detail, code: r.code, ...(r.retryAfterSeconds !== undefined ? { extra: { retryAfterSeconds: r.retryAfterSeconds } } : {}) });
 }
 
-/** A statement in the default graph: an address's answer describes one resource, in one graph. */
-const statementOf = (q: unknown): Quad => {
-  const { subject, predicate, object } = fromRdfJs(q as never);
-  return { subject, predicate, object };
-};
-
-/** Answer a refusal the read met (a bound, the store, the deadline) as a problem body, with the wait a 503 tells. */
-function sendRefusal(res: Response, err: unknown): boolean {
-  const named = sparqlRefusalOf(err);
-  if (!named) return false;
-  if (named.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(named.retryAfterSeconds));
-  sendProblem(res, { status: named.status, title: 'Not answered', detail: named.message, code: named.code });
-  return true;
-}
-
-/** A slot of family `sparql` for this caller's read of the store; or `null`, the busy answer sent. */
-function readSlotOf(req: Request, res: Response): ReturnType<typeof takeSlot> | null {
-  const callerKey = (req.authToken as { id?: string } | undefined)?.id ?? req.ip ?? '';
-  const slot = takeSlot('sparql', callerKey);
-  if (slot) return slot;
-  const { retryAfterSeconds, instance, perCaller } = SLOT_FAMILIES.sparql;
-  res.setHeader('Retry-After', String(retryAfterSeconds));
-  sendProblem(res, {
-    status: SPARQL_UNAVAILABLE, title: 'Busy', code: SPARQL_BUSY, extra: { retryAfterSeconds },
-    detail: `A read is already running for this caller, or as many as the instance runs at once (${instance}, ${perCaller} per caller): try again when it ends`,
-  });
-  return null;
-}
-
-/** The statements of a record, a file or an agent (`kind`), read from the quad source. */
-async function answerStatements(req: Request, res: Response, kind: LdKind): Promise<void> {
+/** The statements of a record, a file or an agent (`kind`), read from the quad source by the act. */
+async function answerStatements(req: Request, res: Response, kind: LdStatementsKind): Promise<void> {
   const { address, space } = RESOLVED.get(req)!;
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Access-Control-Expose-Headers', `${LD_TRUNCATED_HEADER}, Retry-After`);
@@ -241,71 +189,17 @@ async function answerStatements(req: Request, res: Response, kind: LdKind): Prom
   if (!choice.ok) { sendProblem(res, { status: choice.status, title: 'Not acceptable', detail: choice.error, code: choice.code, extra: { formats: choice.formats } }); return; }
   const member = memberOf(req, res, space);
   if (!member) return;
-  const read = recordOfAddress(address, addressNames(member.meta));
-  const id = kind === 'agent'
-    ? (read.answer === 'other' && read.what === 'agent' ? read.name : undefined)
-    : (read.answer === 'record' && read.kind === kind ? read.id : undefined);
-  // A file's statements are the caller's only with `files: read`, as on the export: without it the file is not there for them. The quad source
-  // withholds a file's statements from a member read without it (`findsOf`), so this check is a second line of defence: the answer would be 404
-  // for want of statements anyway, and it keeps that true if the source's predicate ever moves.
-  if (id === undefined || (kind === 'file' && !member.files)) { sendNotFound(res); return; }
-
-  const slot = readSlotOf(req, res);
-  if (!slot) return;
-  const ended = new AbortController();
-  res.once('close', () => { if (!res.writableFinished) ended.abort(); });
-  try {
-    const { timeoutMs, maxResults } = sparqlLimits(getConfig());
-    const source = createQuadSource({ members: [space], caller: callerOf(req), fingerprintOf: schemaFingerprintOf }, { deadline: Date.now() + timeoutMs, signal: ended.signal });
-    // The chrono entry's time nodes are its own statements: a fragment never travels, so they are answered at the entry's address.
-    const subjects = kind === 'chrono' ? [address, `${address}#start`, `${address}#end`] : [address];
-    const about: unknown[] = [];
-    for (const s of subjects) {
-      const got = await take(source.match(DataFactory.namedNode(s), undefined, undefined, undefined) as AsyncIterable<unknown>, maxResults + 1 - about.length);
-      about.push(...got.quads);
-      if (about.length > maxResults) {
-        sendProblem(res, {
-          status: SPARQL_TOO_LARGE, title: 'Too many statements', code: SPARQL_TOO_MANY_RESULTS,
-          detail: `The address has more than ${maxResults} statements of its own (sparql.maxResults), so none of them is answered: ask a SPARQL query for a part of them`,
-        });
-        return;
-      }
-    }
-    if (about.length === 0) { sendNotFound(res); return; }
-    let pointing: unknown[] = [];
-    let truncated = false;
-    // An agent is pointed at by every record it wrote: its answer is its own statements.
-    if (kind !== 'agent') {
-      const own = new Set(subjects);
-      try {
-        // A statement of the record's own (a self-reference) is answered in its own half: it is filtered before the cap counts, so an answer
-        // that fits the cap is not called cut because of a statement it would not carry twice.
-        const got = await take(source.match(undefined, undefined, DataFactory.namedNode(address), undefined) as AsyncIterable<unknown>, maxResults - about.length,
-          q => !own.has((q as { subject: { value: string } }).subject.value));
-        pointing = got.quads;
-        truncated = got.more;
-      } catch (err) {
-        // The pointing half stops at a bound of the read (the records read, the time) as it stops at the cap: what was read about the record is
-        // answered whole, and the answer says its inbound half was cut.
-        const named = sparqlRefusalOf(err);
-        if (named?.code !== SPARQL_TOO_MUCH_READ && named?.code !== SPARQL_TIMEOUT) throw err;
-        truncated = true;
-      }
-    }
-    const statements = [...about, ...pointing].map(statementOf);
-    const rendered = renderGraph(choice.format, statements);
-    if ('code' in rendered) { sendProblem(res, { status: rendered.status, title: 'Not writable', detail: rendered.error, code: rendered.code }); return; }
-    if (truncated) res.setHeader(LD_TRUNCATED_HEADER, 'inbound');
-    req.auditEntryId = id;
-    req.auditChangesExplicit = [{ field: 'kind', to: kind }, { field: 'statements', to: statements.length }, { field: 'truncated', to: truncated }];
-    res.status(EXPORT_OK).setHeader('Content-Type', rendered.contentType);
-    res.end(rendered.body);
-  } catch (err) {
-    if (ended.signal.aborted) return;
-    if (!sendRefusal(res, err)) throw err;
-  } finally {
-    slot.release();
-  }
+  const outcome = await readStatements({ address, space, member, kind, caller: callerOf(req), callerKey: slotCallerKey(req), signal: abortWhenClientGoes(res) });
+  if (outcome.answer === 'gone') return;
+  if (outcome.answer === 'not-found') { sendNotFound(res); return; }
+  if (outcome.answer === 'refused') { sendLdRefusal(res, outcome.refusal); return; }
+  const rendered = renderGraph(choice.format, outcome.statements);
+  if ('code' in rendered) { sendProblem(res, { status: rendered.status, title: 'Not writable', detail: rendered.error, code: rendered.code }); return; }
+  if (outcome.truncated) res.setHeader(LD_TRUNCATED_HEADER, 'inbound');
+  req.auditEntryId = outcome.id;
+  req.auditChangesExplicit = [{ field: 'kind', to: kind }, { field: 'statements', to: outcome.statements.length }, { field: 'truncated', to: outcome.truncated }];
+  res.status(EXPORT_OK).setHeader('Content-Type', rendered.contentType);
+  res.end(rendered.body);
 }
 
 /**
@@ -331,46 +225,6 @@ async function answerGraph(req: Request, res: Response): Promise<void> {
 }
 
 /**
- * The type a vocab address names when the space's schema does not declare it (`termOfIri` reads it by the Direct Mapping alone), or
- * undefined for any other address: a declared term, a property, a file's document.
- */
-function undeclaredTypeOf(address: string, meta: RdfMember['meta']): UsedType | undefined {
-  const term = termOfIri(address, addressNames(meta));
-  if (term.answer !== 'term' || term.of !== 'space' || term.how !== 'vocabulary') return undefined;
-  const owner = term.owners[0];
-  if (owner === undefined || owner.prop !== undefined || owner.type === null || owner.kind === 'file') return undefined;
-  return { kind: owner.kind, type: owner.type };
-}
-
-/**
- * Does a record of the space use the undeclared type at `address`: a record typed with it (`?s rdf:type <address>`), or for an edge label
- * an edge under it (`?s <address> ?o`)? One statement of the quad source, read in a slot of family `sparql` under the query bounds. Asked
- * only of a caller who reads the records (`knowledge: read`): the vocab address is read with schema read, and it must not tell such a
- * caller that a record of a type exists. `null` when the answer (busy, a bound) was sent.
- */
-async function typeInUse(req: Request, res: Response, space: string, address: string, used: UsedType): Promise<boolean | null> {
-  const rights = (req.authToken as { rights?: TokenRights | null } | undefined)?.rights;
-  if (!mayReadArea(rights, space, 'knowledge')) return false;
-  const slot = readSlotOf(req, res);
-  if (!slot) return null;
-  const ended = new AbortController();
-  res.once('close', () => { if (!res.writableFinished) ended.abort(); });
-  try {
-    const { timeoutMs } = sparqlLimits(getConfig());
-    const source = createQuadSource({ members: [space], caller: callerOf(req), fingerprintOf: schemaFingerprintOf }, { deadline: Date.now() + timeoutMs, signal: ended.signal });
-    const term = DataFactory.namedNode(address);
-    const stream = used.kind === 'edge' ? source.match(undefined, term, undefined, undefined) : source.match(undefined, DataFactory.namedNode(RDF_TYPE), term, undefined);
-    return (await take(stream as AsyncIterable<unknown>, 1)).quads.length > 0;
-  } catch (err) {
-    if (ended.signal.aborted) return null;
-    if (sendRefusal(res, err)) return null;
-    throw err;
-  } finally {
-    slot.release();
-  }
-}
-
-/**
  * A schema version (`schema/:fp`), the ontology (`schema`), a shape (`schema/shape/<kind>/<type>`) or a vocabulary term (`vocab/...`),
  * answered by the schema export's act; a vocab address of a type records use and the schema does not declare by the act's `used`.
  */
@@ -391,9 +245,10 @@ async function answerSchema(req: Request, res: Response, kind: 'schema' | 'vocab
   } else if (kind === 'vocab') {
     const undeclared = undeclaredTypeOf(address, member.meta);
     if (undeclared !== undefined) {
-      const inUse = await typeInUse(req, res, space, address, undeclared);
-      if (inUse === null) return;
-      if (inUse) used = undeclared;
+      const inUse = await typeInUse({ space, address, used: undeclared, caller: callerOf(req), rights: token?.rights, callerKey: slotCallerKey(req), signal: abortWhenClientGoes(res) });
+      if (inUse.answer === 'gone') return;
+      if (inUse.answer === 'refused') { sendLdRefusal(res, inUse.refusal); return; }
+      if (inUse.answer === 'read' && inUse.used) used = undeclared;
     }
   } else {
     const read = recordOfAddress(address, addressNames(member.meta));
@@ -460,6 +315,7 @@ linkedDataRouter.get('/:spaceId/file/*path', globalRateLimit, browsersToTheApp(f
   answered('GET /ld/:spaceId/file/*path', (req, res) => answerStatements(req, res, 'file')));
 // GET /ld/:spaceId/:kind/:id - a record's statements (entity, fact, chrono, edge), knowledge read.
 linkedDataRouter.get('/:spaceId/:kind/:id', recordKindOnly, globalRateLimit, browsersToTheApp(kindParam), requireAuth, requireResolvedRung,
-  answered('GET /ld/:spaceId/:kind/:id', (req, res) => answerStatements(req, res, kindParam(req))));
+  // `recordKindOnly` let only a record kind through, so the kind is one `answerStatements` takes.
+  answered('GET /ld/:spaceId/:kind/:id', (req, res) => answerStatements(req, res, kindParam(req) as LdStatementsKind)));
 // Anything else under /ld/ is no address: the one not-found answer, to every caller and every Accept.
 linkedDataRouter.use((_req, res) => { res.vary('Accept'); sendNotFound(res); });

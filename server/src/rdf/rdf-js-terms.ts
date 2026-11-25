@@ -55,8 +55,11 @@ export function toRdfJs(q: Quad, graph?: string): N3.Quad {
   return quad(asSubject(toRdfJsTerm(q.subject)), namedNode(q.predicate.value), asObject(toRdfJsTerm(q.object)), g === undefined ? defaultGraph() : namedNode(g));
 }
 
-/** The part of an RDF/JS term the conversion reads. */
-interface RdfJsLike {
+/**
+ * The part of an RDF/JS term the conversions read: what a SPARQL engine's row holds, and what the quad source's stream yields, typed once so no
+ * door casts at the boundary.
+ */
+export interface RdfJsLike {
   termType: string;
   value: string;
   language?: string;

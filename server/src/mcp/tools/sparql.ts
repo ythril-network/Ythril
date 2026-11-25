@@ -28,8 +28,9 @@ import { SPARQL_LIMIT_BOUNDS } from '../../config/sparql-limits.js';
 import { MAX_SPACE_IDS } from '../../util/request-bounds.js';
 import { createRdfWriter, RdfWriteError } from '../../rdf/serialize.js';
 import type { Quad } from '../../rdf/literals.js';
+import { unwritable, holdsTriple } from '../../rdf/graph-render.js';
 import {
-  answerSparql, prepareSparql, resultsJson, unwritable, holdsTriple, SPARQL_ENDPOINT_CODES, SPARQL_MEMBERS_LEFT_OUT, SPARQL_FILE_TRIPLES_WITHHELD, type PreparedSparql, type SparqlAnswerRefusal, type SparqlQueryInput,
+  answerSparql, prepareSparql, resultsJson, isSparqlRefusal, sparqlRefusalBody, SPARQL_ENDPOINT_CODES, SPARQL_MEMBERS_LEFT_OUT, SPARQL_FILE_TRIPLES_WITHHELD, type PreparedSparql, type SparqlAnswerRefusal, type SparqlQueryInput,
 } from '../../rdf/sparql-answer.js';
 
 const STRINGS = { type: 'array', items: { type: 'string' } } as const;
@@ -59,13 +60,8 @@ export const SPARQL_QUERY_OUTPUT_SCHEMA = {
 
 /** The act's refusal as the tool's. */
 function refused(r: SparqlAnswerRefusal): Error {
-  return toolRefusalOfAct(r.status as ToolRefusalStatus, r.error, {
-    error: r.error, code: r.code, ...(r.line !== undefined ? { line: r.line } : {}), ...(r.column !== undefined ? { column: r.column } : {}),
-    ...(r.retryAfterSeconds !== undefined ? { retryAfterSeconds: r.retryAfterSeconds } : {}), ...(r.detail ?? {}),
-  });
+  return toolRefusalOfAct(r.status as ToolRefusalStatus, r.error, sparqlRefusalBody(r));
 }
-
-const isRefusal = (v: unknown): v is SparqlAnswerRefusal => typeof (v as SparqlAnswerRefusal | null)?.code === 'string' && typeof (v as SparqlAnswerRefusal).status === 'number';
 
 /** What the answer left out, as the summary names it. */
 function warningsOf(p: PreparedSparql): Array<{ code: string; members: string[] }> {
@@ -152,10 +148,10 @@ export const sparql_queryTool: ToolHandler = {
       caller: ctx.callerRecord ?? { rights: ctx.rights ?? null }, callerKey: ctx.rateKey, fingerprintOf: schemaFingerprintOf,
     };
     const prepared = await prepareSparql(input);
-    if (isRefusal(prepared)) throw refused(prepared);
+    if (isSparqlRefusal(prepared)) throw refused(prepared);
     const answered = await answerSparql(input, prepared);
     // A refusal of the run is audited too, by the counts of the query it ended and its code as the outcome.
-    if (isRefusal(answered)) {
+    if (isSparqlRefusal(answered)) {
       if (answered.auditChanges) ctx.recordAuditChanges?.(answered.auditChanges);
       throw refused(answered);
     }

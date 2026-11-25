@@ -39,6 +39,7 @@ import {
 import { trailersFor } from '../../export/export-trailers.js';
 import { closeUnlessFinished, pacedWriter, type ReaderPace } from '../../export/export-reader-pace.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
+import { slotCallerKey } from '../../http/read-caller.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { log, peerText, NAME_QUOTED } from '../../util/log.js';
 import type { TokenRights } from '../../config/rights-shape.js';
@@ -81,7 +82,7 @@ rdfExportRouter.get('/spaces/:spaceId/export/rdf', globalRateLimit, requireSpace
       format: req.query['format'], edgeDetails: req.query['edgeDetails'], after: req.query['after'], limit: req.query['limit'],
       maxChars: req.query['maxChars'], maxBytes: req.query['maxBytes'], maxTokens: req.query['maxTokens'],
     },
-    caller: token, callerKey: token?.id ?? req.ip ?? '', transport: 'rest' as const, fingerprintOf: schemaFingerprintOf,
+    caller: token, callerKey: slotCallerKey(req), transport: 'rest' as const, fingerprintOf: schemaFingerprintOf,
   };
   if (req.method === 'HEAD') {
     answerHead(res, input);

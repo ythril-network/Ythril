@@ -26,13 +26,14 @@ import { requireSpaceAuth } from '../../auth/middleware.js';
 import { globalRateLimit } from '../../rate-limit/middleware.js';
 import { readSpacesOfRequest, viewReadOfRequest } from '../../spaces/read-scope.js';
 import { answeredUnknownSpace } from '../write-target-answer.js';
+import { abortWhenClientGoes, slotCallerKey } from '../../http/read-caller.js';
 import { sendCaughtFailure } from '../send-failure.js';
 import { schemaFingerprintOf } from '../../spaces/schema-stamp.js';
 import type { TokenRights } from '../../config/rights-shape.js';
 import { SPARQL_QUERY_MAX_BYTES } from '../../rdf/sparql-engine.js';
 import { SPARQL_BAD_REQUEST, SPARQL_TOO_LARGE, SPARQL_QUERY_TOO_LARGE, SPARQL_UPDATE_NOT_HERE } from '../../rdf/sparql-refusal.js';
 import {
-  answerSparql, prepareSparql, renderSparql, headerList, CallerGone, SPARQL_NO_QUERY, SPARQL_UNSUPPORTED_MEDIA_TYPE, SPARQL_UNSUPPORTED_MEDIA_TYPE_STATUS,
+  answerSparql, prepareSparql, renderSparql, headerList, isSparqlRefusal, sparqlRefusalBody, CallerGone, SPARQL_NO_QUERY, SPARQL_UNSUPPORTED_MEDIA_TYPE, SPARQL_UNSUPPORTED_MEDIA_TYPE_STATUS,
   type SparqlAnswerRefusal, type SparqlQueryInput, type PreparedSparql,
 } from '../../rdf/sparql-answer.js';
 
@@ -64,10 +65,7 @@ export const sparqlRouter = Router();
 /** A refusal on the wire: `{error, code, ...}`, with `Retry-After` on a 503. */
 function sendRefusal(res: Response, r: SparqlAnswerRefusal): void {
   if (r.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(r.retryAfterSeconds));
-  res.status(r.status).json({
-    error: r.error, code: r.code, ...(r.line !== undefined ? { line: r.line } : {}), ...(r.column !== undefined ? { column: r.column } : {}),
-    ...(r.retryAfterSeconds !== undefined ? { retryAfterSeconds: r.retryAfterSeconds } : {}), ...(r.detail ?? {}),
-  });
+  res.status(r.status).json(sparqlRefusalBody(r));
 }
 
 /** Parse a POST body with `parser`; every refusal of the parser is a SPARQL refusal with a code (`parserRefusal`), never the app's bare answer. */
@@ -116,8 +114,6 @@ function protocolParameters(req: Request): Record<string, unknown> | SparqlAnswe
   };
 }
 
-const isRefusal = (v: unknown): v is SparqlAnswerRefusal => typeof (v as SparqlAnswerRefusal | null)?.code === 'string' && typeof (v as SparqlAnswerRefusal).status === 'number';
-
 /** The headers that say what the answer left out, each a list of member ids. */
 function setLeftOutHeaders(res: Response, p: PreparedSparql): void {
   if (p.leftOut.length > 0) res.setHeader(MEMBERS_LEFT_OUT_HEADER, headerList(p.leftOut));
@@ -131,18 +127,16 @@ async function answer(req: Request, res: Response): Promise<void> {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Access-Control-Expose-Headers', EXPOSED);
   const params = protocolParameters(req);
-  if (isRefusal(params)) { sendRefusal(res, params); return; }
+  if (isSparqlRefusal(params)) { sendRefusal(res, params); return; }
   const token = req.authToken as { id?: string; admin?: boolean; rights?: TokenRights | null } | undefined;
-  const ended = new AbortController();
-  res.once('close', () => { if (!res.writableFinished) ended.abort(); });
   const input: SparqlQueryInput = {
     spaceId, spaces: readSpacesOfRequest(req, spaceId), view: viewReadOfRequest(req, spaceId) !== undefined,
     query: params['query'], limit: params['limit'], defaultGraphUri: params['default-graph-uri'], namedGraphUri: params['named-graph-uri'],
-    accept: req.headers['accept'], caller: token, callerKey: token?.id ?? req.ip ?? '', fingerprintOf: schemaFingerprintOf, signal: ended.signal,
+    accept: req.headers['accept'], caller: token, callerKey: slotCallerKey(req), fingerprintOf: schemaFingerprintOf, signal: abortWhenClientGoes(res),
   };
   try {
     const prepared = await prepareSparql(input);
-    if (isRefusal(prepared)) { sendRefusal(res, prepared); return; }
+    if (isSparqlRefusal(prepared)) { sendRefusal(res, prepared); return; }
     setLeftOutHeaders(res, prepared);
     if (req.method === 'HEAD') {
       res.status(SPARQL_ANSWERED).setHeader('Content-Type', prepared.contentType);
@@ -150,14 +144,14 @@ async function answer(req: Request, res: Response): Promise<void> {
       return;
     }
     const answered = await answerSparql(input, prepared);
-    if (isRefusal(answered)) {
+    if (isSparqlRefusal(answered)) {
       // A refusal of the run is audited by the counts of the query it ended, with its code as the outcome.
       if (answered.auditChanges) req.auditChangesExplicit = answered.auditChanges;
       sendRefusal(res, answered);
       return;
     }
     const rendered = renderSparql(prepared, answered.collected);
-    if (isRefusal(rendered)) { sendRefusal(res, rendered); return; }
+    if (isSparqlRefusal(rendered)) { sendRefusal(res, rendered); return; }
     req.auditChangesExplicit = answered.auditChanges;
     res.status(SPARQL_ANSWERED).setHeader('Content-Type', rendered.contentType);
     res.end(rendered.body);
