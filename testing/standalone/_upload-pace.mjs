@@ -100,12 +100,16 @@ export function resetLingerBounds() { lingerModule.setLingerBoundsForTest?.(null
  *
  * - `readWhileSending`: the sender reads as it writes, so the answer that came before a cut is read too: a socket that failed after the
  *   refusal's head was read answers `status` of that head (with `reset` true), never 0.
+ * - `followServer`: the sender writes a piece only when the socket has taken the last one (backpressure), so a server that began to read late, on
+ *   a loaded runner, still meets a sender that has sent no more than the server read and its kernel buffers hold. Without it the pieces go out on
+ *   the clock, and a server slower than `totalBytes / chunkBytes * everyMs` finds the whole body already written: no cut can be seen (Full run
+ *   45638678554). `totalBytes` is then the most it sends, far above the kernel buffers.
  * - `pipelined`: the raw text of a next request. The sender reads as it writes, sends pieces until the refusal's head has been read (`totalBytes`
  *   is only the most it sends), then ends its body and writes `pipelined` straight after it, on the same socket, while the server still reads and
  *   drops what the sender sends. `pipelinedAfterAnswer` says it was written after the answer was read: a case that asserts on the next request
  *   must also assert that it was sent.
  */
-export function floodedSender(url, { headers = {}, first = '', totalBytes = 0, chunkBytes = 64 * 1024, everyMs = 16, stayOpen = false, readWhileSending = false, pipelined = null }) {
+export function floodedSender(url, { headers = {}, first = '', totalBytes = 0, chunkBytes = 64 * 1024, everyMs = 16, stayOpen = false, readWhileSending = false, pipelined = null, followServer = false }) {
   const target = new URL(url);
   const started = Date.now();
   const socket = net.connect({ host: target.hostname, port: Number(target.port), allowHalfOpen: true });
@@ -170,6 +174,9 @@ export function floodedSender(url, { headers = {}, first = '', totalBytes = 0, c
     if (socket.destroyed) { stopTicker(); return; }
     // A sender that stays open sends a byte a tick and never ends: only the server's own bounds close the connection, and its next write meets it.
     if (stayOpen) { socket.write(chunk(Buffer.from(' '))); sentBytes += 1; return; }
+    // A sender that follows the server writes only while the kernel takes its bytes: what it has sent is what the server has read and what its
+    // two kernel buffers hold, however late the server began to read, never the whole body written on the clock.
+    if (followServer && socket.writableNeedDrain) return;
     // A sender with a next request keeps sending until the refusal has been read: that is the moment the server's close has begun.
     const refused = pipelined === null || headRead();
     if (sentBytes < totalBytes && !(pipelined !== null && refused)) { socket.write(chunk(piece)); sentBytes += chunkBytes; return; }

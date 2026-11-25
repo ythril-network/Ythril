@@ -36,6 +36,8 @@ const MIB = 1024 * 1024;
 /** The bounds the drain cases narrow the lingering close to: the bytes it reads after the answer and the time it holds the socket. */
 const DRAIN_BYTES = 256 * 1024;
 const DRAIN_MS = 1_000;
+/** How late the server answers a refusal in the late case: longer than a sender writing on the clock takes to write 8 MiB (about 512 ms). */
+const LATE_ANSWER_MS = 700;
 /** The window the pipelining case keeps the drain open for: far longer than the case, so only the sender's end closes the socket. */
 const OPEN_WINDOW_MS = 20_000;
 
@@ -78,20 +80,39 @@ describe('the admin import reads out a body it refused, at full speed and within
     } finally { door.loader.mutateConfig(cfg => { delete cfg.importBodyMaxBytes; }); }
   });
 
-  it('a sender that keeps sending past the byte bound of the drain is cut before its body ends', T, async () => {
+  /**
+   * A sender that keeps sending past the drain's byte bound, its refusal answered `answerDelayMs` after it was decided. The sender follows the server
+   * (`followServer`): the pieces it has sent are what the server has read and the kernel holds, so a server that answers late, as on a loaded
+   * runner, still has a sender to cut. A sender that wrote its body on the clock had it all in flight before a late server began to read
+   * (the Full run 45638678554: "the drain read all 8388608 bytes"), and no cut could be seen.
+   */
+  const keepsSendingPastTheBound = (answerDelayMs) => async () => {
     setPace({ idleMs: 60_000, windowMs: 60_000, minBytesPerSecond: 1 });
     setLingerBounds({ maxBytes: DRAIN_BYTES, maxMs: 30_000 });
     door.loader.mutateConfig(cfg => { cfg.importBodyMaxBytes = 64 * 1024; });
+    const holdAnswer = (req, res) => {
+      const end = res.end.bind(res);
+      // waits-differently: a simulated slow server, the answer is held back for a fixed time
+      res.end = (...args) => { setTimeout(() => end(...args), answerDelayMs); return res; };
+    };
+    if (answerDelayMs > 0) door.server.httpServer.prependListener('request', holdAnswer);
     try {
-      const flood = floodedSender(url(), { headers: headersOf(), first: '{"facts":[', totalBytes: 8 * MIB, everyMs: 4, readWhileSending: true });
+      const flood = floodedSender(url(), { headers: headersOf(), first: '{"facts":[', totalBytes: 64 * MIB, everyMs: 4, readWhileSending: true, followServer: true });
       const answer = await answeredWithin(flood, 30_000, 'the flooding upload past the drain\'s byte bound to end');
       flood.stop();
       assert.equal(answer.wroteAll, false, `the drain read all ${answer.sentBytes} bytes of a body past its bound of ${DRAIN_BYTES}`);
       // A server that closes at once cuts the sender too, and before the bound; and the answer it was sent must have been read first.
       assert.equal(answer.status, 413, `the refusal was not read before the cut: ${answer.status} (${answer.error})`);
       assert.ok(answer.sentBytes > DRAIN_BYTES, `the sender was cut after ${answer.sentBytes} bytes, before the drain's byte bound of ${DRAIN_BYTES}`);
-    } finally { door.loader.mutateConfig(cfg => { delete cfg.importBodyMaxBytes; }); }
-  });
+    } finally {
+      door.server.httpServer.off('request', holdAnswer);
+      door.loader.mutateConfig(cfg => { delete cfg.importBodyMaxBytes; });
+    }
+  };
+
+  it('a sender that keeps sending past the byte bound of the drain is cut before its body ends', T, keepsSendingPastTheBound(0));
+
+  it('a sender that keeps sending past the byte bound is cut before its body ends when the server answers its refusal late', T, keepsSendingPastTheBound(LATE_ANSWER_MS));
 
   it('a refused sender that never ends its body or closes is cut at the time bound of the drain', T, async () => {
     setPace({ idleMs: 60_000, windowMs: 60_000, minBytesPerSecond: 1 });
