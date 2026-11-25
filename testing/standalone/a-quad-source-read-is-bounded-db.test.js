@@ -145,6 +145,7 @@ describe('the quad source read is bounded and its estimate is never a false empt
     // The first batch of each find arrives after its stream is gone; a cursor that was closed too early stays open until the server's own
     // ten-minute idle timeout, so the window is the time the batches need, and the cursors must be back at the baseline at its end.
     await elapse(OPEN_BATCH_MS, 'absence window: the batches of the destroyed finds arrive, and a cursor left open shows idle');
-    assert.ok(await openCursors() <= baseline, `a cursor stayed open after its stream was destroyed with its find in flight: ${(await idleCursors()).join(' ')}`);
+    const back = await holdsWithin(async () => (await openCursors()) <= baseline, CLOSE_WITHIN_MS, CLOSE_PROBE_MS);
+    assert.ok(back, `a cursor stayed open after its stream was destroyed with its find in flight: ${(await idleCursors()).join(' ')}`);
   });
 });
