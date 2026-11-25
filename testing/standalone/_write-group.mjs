@@ -36,16 +36,14 @@ export async function openWriteGroupFixture(suite) {
   }, null, 2), { mode: 0o600 });
   const loader = await import('../../server/dist/config/loader.js');
   loader.loadConfig();
-  // RED-RUN FALLBACK (removed with the implementation): on the base the group writer does not exist, and a group of plans is written by
-  // `commitPlans`, stage by stage — so each spec's red line is that writer's partial landing, not a missing module.
-  const group = await import('../../server/dist/brain/write-plan/write-group.js').catch(() => null);
+  const group = await import('../../server/dist/brain/write-plan/write-group.js');
   const commit = await import('../../server/dist/brain/write-plan/commit.js');
   const held = await import('../../server/dist/brain/held-transaction.js');
   const coll = (name) => mongo.col(`${SPACE}_${name}`);
   return {
     mongo, loader, group, commit, held, coll,
     /** Write `plans` as one group. */
-    commitGroup: (plans) => (group ? group.commitWriteGroup(SPACE, plans) : commit.commitPlans(SPACE, plans)),
+    commitGroup: (plans) => group.commitWriteGroup(SPACE, plans),
     /** Empty every collection a group writes. */
     async clear() {
       for (const c of ['facts', 'entities', 'edges', 'chrono', 'links', 'tombstones', 'embed_jobs']) await coll(c).deleteMany({});

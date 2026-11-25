@@ -28,10 +28,9 @@ const skip = await mongoSkipReason();
 const SLOW = 120_000;
 
 let fx;
-let operationBytes;
 const facts = (n, from = 1) => Array.from({ length: n }, (_, i) => insertFact(factId(from + i), `fact ${from + i}`));
-/** The group's bytes the code's way: `writeGroupSize` where the group writer exists, else the same sum of each written document. */
-const bytesOf = (plans) => (fx.group ? fx.group.writeGroupSize(plans).bytes : plans.reduce((n, p) => n + operationBytes(p.doc), 0));
+/** The group's bytes the code's way (`writeGroupSize`, which the ceiling reads). */
+const bytesOf = (plans) => fx.group.writeGroupSize(plans).bytes;
 
 /** Refused before a transaction opened, as `write_group_too_large` naming `ceiling`; nothing of it stored. */
 async function assertRefusedBeforeASession(plans, ceiling) {
@@ -48,10 +47,7 @@ async function assertRefusedBeforeASession(plans, ceiling) {
 }
 
 describe('a write group over its ceilings', { skip }, () => {
-  before(async () => {
-    fx = await openWriteGroupFixture('writegroupceiling');
-    ({ operationBytes } = await import('../../server/dist/db/one-command.js'));
-  });
+  before(async () => { fx = await openWriteGroupFixture('writegroupceiling'); });
   after(async () => { await fx?.cleanup(); });
   beforeEach(async () => { await fx.clear(); });
 

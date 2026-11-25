@@ -12,6 +12,12 @@
  * keeps one direct `insertOne` has a second write path the batch does not see: its seq, its links and its
  * embed job land outside the commit's ordering, and the bulk and single doors stop meaning the same thing.
  *
+ * ## The group commit writes through the same stage writer (`Q-760`)
+ *
+ * `write-plan/write-group.ts` (`commitWriteGroup`, a group that lands whole in one transaction) holds no write of its own: it calls the
+ * commit's `writeStage` and `reconcileLinkRows` with its session, so the commit stays the one file a create or converge reaches a record
+ * collection from, and a write the group adds outside it is an unclaimed site below like any other.
+ *
  * ## Scope, stated rather than implied
  *
  * This is about the CREATE/CONVERGE writers only. `update*`, `delete*`, merge, re-key, redaction, sync ingest,
