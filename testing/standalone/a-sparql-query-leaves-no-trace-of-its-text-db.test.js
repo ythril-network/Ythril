@@ -14,8 +14,8 @@
  *
  * ## Seen red
  *
- * On db66e206d no route answers `/api/brain/spaces/:spaceId/sparql` (404) and no tool `sparql_query` exists. Mutations: writing the query
- * text into `changes` (rule 2: the marker is in the row); spilling rows without `spaceId` (rule 3: `spillRefused: unattributed`).
+ * On db66e206d no route answers `/api/brain/spaces/:spaceId/sparql` (404) and no tool `sparql_query` exists. Mutations: a parse refusal's words
+ * followed by the query's text (rule 2: the marker is in the error body); spilling rows without `spaceId` (rule 3: no spill).
  *
  * Run: a Mongo the harness accepts, npm run build:server, then
  *      node --test testing/standalone/a-sparql-query-leaves-no-trace-of-its-text-db.test.js
@@ -32,7 +32,9 @@ const S = 'spq-trace';
 const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
 /** A marker no answer, code or sentence of the server holds: found anywhere, it came from the query's text. */
 const MARK = 'zq7marker';
-const GOOD = `SELECT ?s ?n WHERE { ?s <${RDFS_LABEL}> ?n FILTER(?n != "${MARK}") }`;
+/** The entities' labels (the records' writer, an agent, has one too, and is left out by the class). */
+const ENTITY_LABELS = `?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/ythril/ns#Entity> ; <${RDFS_LABEL}> ?n`;
+const GOOD = `SELECT ?s ?n WHERE { ${ENTITY_LABELS} FILTER(?n != "${MARK}") }`;
 const BROKEN = `SELECT ?s WHERE { ?s ?p "${MARK}" .. }`;
 const STAMP = '2026-03-04T05:06:07.000Z';
 const OP = 'brain.sparql_query';
@@ -92,14 +94,14 @@ describe('a SPARQL query leaves no trace of its text', { skip }, () => {
   });
 
   it('a budget-cut MCP answer spills its cut rows, readable by read_spill, and the spill goes with its space', async () => {
-    const m = await d.sparqlMcp(tok.key, { space: S, query: `SELECT ?s ?n WHERE { ?s <${RDFS_LABEL}> ?n } ORDER BY ?n`, maxChars: 2_000 });
+    const m = await d.sparqlMcp(tok.key, { space: S, query: `SELECT ?s ?n WHERE { ${ENTITY_LABELS} } ORDER BY ?n`, maxChars: 2_000 });
     assert.ok(!m.isError, m.text.slice(0, 300));
     assert.equal(m.summary?.truncated, true, `the answer was not cut: ${m.blocks[1]?.slice(0, 300)}`);
     const returned = m.body.results.bindings.length;
     assert.ok(returned > 0 && returned < 40, `${returned} rows returned`);
     const spillId = m.summary?.remainder?.spillId;
     assert.ok(spillId, `no spill: ${JSON.stringify(m.summary).slice(0, 400)}`);
-    const read = await d.toolCall(tok.key, 'read_spill', { spillId });
+    const read = await d.toolCall(tok.key, 'read_spill', { id: spillId });
     assert.ok(!read.isError, read.text.slice(0, 300));
     const items = read.structured?.items ?? JSON.parse(read.blocks[0] ?? '{}').items ?? [];
     assert.equal(items.length, 40 - returned, 'the spill holds the rows the budget cut, no more, no less');

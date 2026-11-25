@@ -18,9 +18,8 @@
  *
  * ## Seen red
  *
- * On db66e206d no route answers `/api/brain/spaces/:spaceId/sparql` (404) and no tool `sparql_query` exists. Mutations: answering a graph
- * through Comunica's own Turtle serializer (rule 4: the `>` reaches the document); dropping the route-level text parser (rule 1: the
- * `application/sparql-query` door answers `sparql_no_query`).
+ * On db66e206d no route answers `/api/brain/spaces/:spaceId/sparql` (404) and no tool `sparql_query` exists. Mutation: the route-level
+ * text parser taking another media type (rule 1: the `application/sparql-query` door answers `400 sparql_no_query`).
  *
  * Run: a Mongo the harness accepts, npm run build:server, then node --test testing/standalone/the-sparql-endpoint-speaks-the-protocol-db.test.js
  */
@@ -34,9 +33,12 @@ const skip = await mongoSkipReason();
 const S = 'spq-protocol';
 const OTHER = 'spq-protocol-other';
 const RDFS_LABEL = 'http://www.w3.org/2000/01/rdf-schema#label';
-const SELECT = `SELECT ?s ?n WHERE { ?s <${RDFS_LABEL}> ?n } ORDER BY ?n`;
+/** An entity's class: the records' writer (an agent) has a label too, and the queries here ask for the entities alone. */
+const ENTITY = 'https://w3id.org/ythril/ns#Entity';
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+const SELECT = `SELECT ?s ?n WHERE { ?s <${RDF_TYPE}> <${ENTITY}> ; <${RDFS_LABEL}> ?n } ORDER BY ?n`;
 const ASK = `ASK { ?s <${RDFS_LABEL}> "Ada" }`;
-const CONSTRUCT = `CONSTRUCT { ?s <${RDFS_LABEL}> ?n } WHERE { ?s <${RDFS_LABEL}> ?n }`;
+const CONSTRUCT = `CONSTRUCT { ?s <${RDFS_LABEL}> ?n } WHERE { ?s <${RDF_TYPE}> <${ENTITY}> ; <${RDFS_LABEL}> ?n }`;
 const STAMP = '2026-03-04T05:06:07.000Z';
 
 let d, reader;

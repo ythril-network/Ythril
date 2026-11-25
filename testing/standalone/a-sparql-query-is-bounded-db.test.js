@@ -14,8 +14,9 @@
  *
  * ## Seen red
  *
- * On db66e206d no route answers `/api/brain/spaces/:spaceId/sparql` (404) and no tool `sparql_query` exists. Mutations: answering the rows
- * collected at the cap (`rows(maxResults)` and a 200): rule 1's 200; not destroying the result on `res` close: rule 3's reads after the close.
+ * On db66e206d no route answers `/api/brain/spaces/:spaceId/sparql` (404) and no tool `sparql_query` exists. Mutations: answering one row
+ * over the bound (`taken.length > p.bound + 1`): rule 1's 200; the route handing the act no signal that ends with the response: rule 3's
+ * slot is still held after the client went away.
  *
  * Run: a Mongo the harness accepts, npm run build:server, then node --test testing/standalone/a-sparql-query-is-bounded-db.test.js
  */
