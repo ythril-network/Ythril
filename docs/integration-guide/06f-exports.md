@@ -304,6 +304,7 @@ Every refusal of the door itself is a problem body (`application/problem+json`, 
 | 406 | `rdf_format_not_acceptable` | `Accept` names none of the formats |
 | 409 | `rdf_not_enabled`, `rdf_base_conflict`, `rdf_base_shared`, `rdf_base_nested`, `rdf_term_clash`, `rdf_unwritable` | The space's RDF names are not settled, or a term no document of the format can carry |
 | 413 | `sparql_too_many_results` | The address has more statements of its own than `sparql.maxResults` |
+| 413 | `sparql_answer_too_large` | Its own statements hold more than `sparql.maxResultBytes` bytes of values |
 | 413 | `sparql_too_much_read` | Reading its own statements passed `sparql.maxRecordsRead` (an agent's are read over every record) |
 | 503 | `sparql_timeout`, `sparql_store_unavailable` | The read passed `sparql.timeoutMs`, or the store failed; `Retry-After` |
 | 503 | `sparql_busy` | As many reads and queries run as the instance or this token may run at once; `Retry-After` |

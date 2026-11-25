@@ -25,7 +25,8 @@ import { refusalOfParse } from '../util/log.js';
 import { EXPORT_OK, EXPORT_BAD_REQUEST, EXPORT_NOT_ACCEPTABLE, EXPORT_CONFLICT } from '../export/export-statuses.js';
 import { getConfig } from '../config/loader.js';
 import type { KnowledgeType } from '@ythril-network/schema';
-import { schemaGraph, usedTypeDefinition, type SchemaLeftOut } from './schema-owl-shacl.js';
+import { schemaGraph, usedTypeDefinition, usedPropertiesDefinition, type SchemaLeftOut } from './schema-owl-shacl.js';
+import type { TermKind } from './term-iri.js';
 import type { Quad, Term } from './literals.js';
 import { createRdfWriter, RdfWriteError, type RdfFormat } from './serialize.js';
 import { chooseRdfFormat, rdfContentDisposition, rdfContentType, RDF_MEDIA_TYPES, RDF_BAD_FORMAT } from './export-format.js';
@@ -106,6 +107,9 @@ function aboutTermWhole(quads: readonly Quad[], term: string): Quad[] {
 /** A type a record of the space uses, which the door names when it asks for that type's vocab address (`term`). */
 export interface UsedType { kind: KnowledgeType; type: string }
 
+/** The properties records of an untyped kind use (the names the door found), which it names when it asks for the kind's own vocab document (`term`). */
+export interface UsedProperties { kind: TermKind; names: readonly string[] }
+
 /**
  * Export the schema of `spaceId`: the current one, or the held `version`; whole, or only the statements about `term`. With `used`, the
  * type `term` names that records use: when the schema writes nothing about it (the schema does not declare it), its definition is
@@ -113,7 +117,7 @@ export interface UsedType { kind: KnowledgeType; type: string }
  */
 export function rdfSchemaExportAct(input: {
   spaceId: string; format?: unknown; accept?: string | undefined; caller: RdfCaller | undefined; fingerprintOf: FingerprintOf;
-  version?: SchemaVersionInput; term?: string; formats?: readonly RdfFormat[]; used?: UsedType;
+  version?: SchemaVersionInput; term?: string; formats?: readonly RdfFormat[]; used?: UsedType; usedProperties?: UsedProperties;
 }): RdfSchemaOutcome {
   // The rung (`schema: read`) is asked before this act on every door: the route's guard and the dispatcher answer a token without it.
   const { spaceId, caller } = input;
@@ -133,6 +137,11 @@ export function rdfSchemaExportAct(input: {
     const defined = usedTypeDefinition(meta, input.used.kind, input.used.type);
     // Only the type `term` names: a `used` that names another type adds nothing.
     if (defined.every(q => q.subject.kind === 'iri' && q.subject.value === term)) graph = { ...graph, quads: defined };
+  }
+  if (term !== undefined && input.usedProperties !== undefined && graph.quads.length === 0) {
+    // The document of an untyped kind: its properties records use, each a fragment of it (`<term>#<prop>`); a name that is none of the document's adds nothing.
+    const defined = usedPropertiesDefinition(meta, input.usedProperties.kind, input.usedProperties.names);
+    if (defined.every(q => q.subject.kind === 'iri' && aboutTerm(q.subject.value, term))) graph = { ...graph, quads: defined };
   }
   const comment = graph.leftOut.length === 0 ? undefined
     : `ythril-schema-export: ${graph.leftOut.length} schema values left out: ${graph.leftOut.map(l => `${l.where} ${l.field} (${l.reason})`).join(', ')}`;

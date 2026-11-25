@@ -27,6 +27,7 @@ import { QueryEngine } from '@comunica/query-sparql-rdfjs';
 import { DataFactory } from 'n3';
 import { MAX_PATTERN_LENGTH, hasReDoSRisk } from '../util/redos.js';
 import type { RdfJsLike } from './rdf-js-terms.js';
+import { ByteMeter, rowBytes, termBytes } from './answer-size.js';
 import {
   SPARQL_BAD_REQUEST, SPARQL_TOO_LARGE, SPARQL_FEDERATION_REFUSED, SPARQL_MALFORMED, SPARQL_PATTERN_REFUSED, SPARQL_QUERY_TOO_LARGE, SPARQL_UPDATE_NOT_HERE, SparqlRefusal, sparqlRefusalOf,
   timeoutRefusal,
@@ -185,9 +186,9 @@ export type SparqlRow = Record<string, RdfJsLike>;
  * answers, to know there were more). `destroy` stops the engine and releases its reads.
  */
 export type SparqlResult =
-  | { kind: 'bindings'; rows(limit?: number): Promise<SparqlRow[]>; destroy(): void }
+  | { kind: 'bindings'; rows(limit?: number, maxBytes?: number): Promise<SparqlRow[]>; destroy(): void }
   | { kind: 'boolean'; rows(): Promise<boolean>; destroy(): void }
-  | { kind: 'quads'; rows(limit?: number): Promise<RdfJsLike[]>; destroy(): void };
+  | { kind: 'quads'; rows(limit?: number, maxBytes?: number): Promise<RdfJsLike[]>; destroy(): void };
 
 /** What the engine streams: an asynciterator, ended by `destroy`. */
 interface EngineStream {
@@ -255,8 +256,12 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
     throw refusalOf(err, source);
   }
 
-  /** Collect at most `limit` items of an engine stream, mapping each. */
-  const collect = <T>(stream: EngineStream, limit: number, map: (item: unknown) => T): Promise<T[]> => new Promise((resolve, reject) => {
+  /**
+   * Collect at most `limit` items of an engine stream, mapping each; with `bytes` (the bytes one mapped item holds, and the bound), the read
+   * ends with `413 sparql_answer_too_large` when the items together pass the bound, and the stream is destroyed (lens-2 P1).
+   */
+  const collect = <T>(stream: EngineStream, limit: number, map: (item: unknown) => T, bytes?: { of: (item: T) => number; max: number }): Promise<T[]> => new Promise((resolve, reject) => {
+    const meter = bytes ? new ByteMeter(bytes.max) : null;
     // A stream the engine opened after the query ended (the deadline or an abort landed while it planned) is closed here: `end` destroyed only
     // the streams it knew, and this one holds the source's cursors.
     if (ended) { stream.destroy(); reject(refusalOf(ended, source)); return; }
@@ -266,7 +271,11 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
     const settle = (fn: () => void): void => { if (done) return; done = true; streams.delete(stream); finish(); fn(); };
     stream.on('data', (item) => {
       if (done) return;
-      out.push(map(item));
+      const mapped = map(item);
+      out.push(mapped);
+      if (meter && bytes) {
+        try { meter.add(bytes.of(mapped)); } catch (err) { settle(() => reject(err)); stream.destroy(); return; }
+      }
       if (out.length >= limit) { settle(() => resolve(out)); stream.destroy(); }
     });
     stream.on('error', (err) => settle(() => reject(refusalOf(err, source))));
@@ -298,16 +307,19 @@ export async function runSparql(algebra: SparqlAlgebra, source: unknown, opts: {
     const bindings = raw;
     return {
       kind: 'bindings', destroy,
-      rows: guarded(async (limit = Infinity) => collect(await bindings.execute() as unknown as EngineStream, limit, (item): SparqlRow => {
+      rows: guarded(async (limit = Infinity, maxBytes = Infinity) => collect(await bindings.execute() as unknown as EngineStream, limit, (item): SparqlRow => {
         const row: SparqlRow = {};
         for (const [variable, term] of item as Iterable<[{ value: string }, RdfJsLike]>) row[variable.value] = term;
         return row;
-      })),
+      }, { of: rowBytes, max: maxBytes })),
     };
   }
   if (raw.resultType === 'quads') {
     const quads = raw;
-    return { kind: 'quads', destroy, rows: guarded(async (limit = Infinity) => collect(await quads.execute() as unknown as EngineStream, limit, (item) => item as RdfJsLike)) };
+    return {
+      kind: 'quads', destroy,
+      rows: guarded(async (limit = Infinity, maxBytes = Infinity) => collect(await quads.execute() as unknown as EngineStream, limit, (item) => item as RdfJsLike, { of: termBytes, max: maxBytes })),
+    };
   }
   if (raw.resultType === 'boolean') {
     // Not reached: an ASK runs as one row above. Kept so an engine form that is boolean and no ASK is not answered as rows.

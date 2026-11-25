@@ -11,7 +11,9 @@
  *
  * ## Seen red
  *
- * On 3cfca318b the refused row has no counts at all (`changes` empty) and a refusal's outcome is absent.
+ * On 3cfca318b the refused row has no counts at all (`changes` empty) and a refusal's outcome is absent. On d78b20280 (lens-3) a refusal of the
+ * parameters and an engine failure still left `changes` empty: their rows now hold the counts they know and the code, or `engine_failed`, as
+ * the outcome.
  *
  * Run: a Mongo the harness accepts, npm run build:server, then
  *      node --test testing/standalone/a-refused-sparql-query-is-audited-by-its-counts-db.test.js
@@ -83,6 +85,47 @@ describe('a refused SPARQL query is audited by its counts', { skip }, () => {
       } finally { await setLimits(undefined); }
     });
   }
+
+  for (const [what, query, params, status, code] of [
+    ['a text that does not parse (a refusal of the parameters)', 'SELEC ?s WHERE { ?s ?p ?o }', {}, 400, 'sparql_malformed'],
+    ['a limit that is no whole number (a refusal of the parameters)', LABELS, { limit: 'many' }, 400, 'sparql_bad_limit'],
+  ]) {
+    it(`${what} is a row with its length, members, nothing read and its code as the outcome, on GET and POST (lens-3 audit counts)`, async () => {
+      const rows_ = await rowsOf(async () => {
+        const get = await d.sparqlGet(tok.key, S, query, params);
+        assert.equal(get.status, status, `GET: ${fmt(get)}`);
+        assert.equal(get.body?.code, code, `GET: ${fmt(get)}`);
+        const post = await d.sparqlPost(tok.key, S, query, { params });
+        assert.equal(post.status, status, `POST: ${fmt(post)}`);
+      });
+      assert.equal(rows_.length, 2, `rows: ${rows_.map(r => `${r.method} ${r.status}`).join(', ')}`);
+      for (const r of rows_) {
+        const f = fieldsOf(r);
+        assert.equal(f.outcome, code, `${r.method}: outcome (${JSON.stringify(r.changes)})`);
+        assert.equal(f.length, Buffer.byteLength(query), `${r.method}: length`);
+        assert.equal(f.members, 1, `${r.method}: members`);
+        assert.equal(f.rows, 0, `${r.method}: rows`);
+        assert.equal(f.recordsRead, 0, `${r.method}: recordsRead`);
+      }
+    });
+  }
+
+  it('an engine failure is a row with its counts and the outcome engine_failed, on GET, POST and MCP, and holds no text of the query (lens-3 audit counts)', async () => {
+    const query = 'SELECT ?s WHERE { ?s ?p ?o FILTER(<https://example.org/zq7auditmarker/fn>(?o)) }';
+    const rows_ = await rowsOf(async () => {
+      assert.equal((await d.sparqlGet(tok.key, S, query)).status, 500);
+      assert.equal((await d.sparqlPost(tok.key, S, query)).status, 500);
+      assert.equal((await d.sparqlMcp(tok.key, { space: S, query })).isError, true);
+    });
+    assert.equal(rows_.length, 3, `rows: ${rows_.map(r => `${r.method} ${r.status}`).join(', ')}`);
+    for (const r of rows_) {
+      const f = fieldsOf(r);
+      assert.equal(f.outcome, 'engine_failed', `${r.method}: outcome (${JSON.stringify(r.changes)})`);
+      assert.equal(f.form, 'select', `${r.method}: form`);
+      assert.equal(f.length, Buffer.byteLength(query), `${r.method}: length`);
+      assert.ok(!JSON.stringify(r).includes('zq7auditmarker'), `${r.method}: the row holds the query's text`);
+    }
+  });
 
   it('an answered query keeps outcome answered beside it', async () => {
     const rows_ = await rowsOf(async () => {

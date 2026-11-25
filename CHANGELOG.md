@@ -81,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RDF:** the user guide describes the "RDF namespaces of schema groups" card of the Schema Library page.
 - **RDF:** the Ythril vocabulary is published under `docs/rdf/`, with decision record 23: a property holds one plain value; structure is an edge or a link.
 - **RDF:** SPARQL 1.1 over a space's records or your own view: `GET`/`POST /api/brain/spaces/:spaceId/sparql` and MCP `sparql_query`, read at query time with your rights; an answer is whole or refused ([SPARQL API](docs/integration-guide/04j-sparql-api.md)).
-- **RDF:** config keys `sparql.timeoutMs`, `sparql.maxRecordsRead` and `sparql.maxResults`, read live; two queries at once per instance, one per token (`503 sparql_busy`).
+- **RDF:** config keys `sparql.timeoutMs`, `sparql.maxRecordsRead`, `sparql.maxResults` and `sparql.maxResultBytes`, read live; two queries at once per instance, one per token (`503 sparql_busy`).
 - **RDF:** audit event `brain.sparql_query`, written whatever `logReads` says, with a query's counts and outcome, never its text.
 - **RDF:** the SPARQL engine `@comunica/query-sparql-rdfjs` (MIT) ships, listed in `NOTICE`; it reaches no network.
 - **RDF:** addresses in a space's base under `<public url>/ld/` resolve to their statements for a token with read rights on the space (`423` for a peer token on a held space); a browser gets `303` to the Brain ([Exports](docs/integration-guide/06f-exports.md#record-addresses)).

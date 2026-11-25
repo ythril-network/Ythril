@@ -77,6 +77,9 @@ never a short `200`.
 | `sparql.timeoutMs` | 30 000 | How long a query may run. |
 | `sparql.maxRecordsRead` | 200 000 | Records one query may read, every pattern together. |
 | `sparql.maxResults` | 10 000 | Rows (or statements) one answer may hold. |
+| `sparql.maxResultBytes` | 67 108 864 (64 MiB) | Bytes of values (every term of every row or statement) one answer may hold, from 1 MiB to 1 GiB. |
+
+An answer is read while the records change: it is not a point-in-time snapshot, so a record written while the query runs may or may not be in it.
 
 The keys are read live. At most two queries run at once on an instance and one per token (`503 sparql_busy` with `Retry-After`).
 `SERVICE` (federation), `LOAD` and SPARQL Update are refused: this endpoint reads this server's own records and never reaches the network.
@@ -102,6 +105,7 @@ text, and a `503` adds `retryAfterSeconds` and `Retry-After`.
 | 409 | `rdf_unwritable` | The answer holds a term no document of the format can carry (an IRI with a character an IRI cannot hold, a triple term in JSON-LD). |
 | 413 | `sparql_query_too_large` | The text is over 64 KiB, or a form holds more parameters than a query takes. |
 | 413 | `sparql_too_many_results` | The answer holds more than `sparql.maxResults` rows, or more than `limit`. |
+| 413 | `sparql_answer_too_large` | The answer holds more than `sparql.maxResultBytes` bytes of values, however few rows: a record may be 10 MB. |
 | 413 | `sparql_too_much_read` | The query reads more than `sparql.maxRecordsRead` records. |
 | 415 | `sparql_unsupported_media_type` | A POST that is neither `application/sparql-query` nor a form, or whose charset or `Content-Encoding` is not read. |
 | 503 | `sparql_timeout` | The query ran past `sparql.timeoutMs`. |

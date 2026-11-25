@@ -46,7 +46,7 @@ import {
   type BlankTerm, type DeclaredType, type IriTerm, type LeftOutReason, type LiteralTerm, type Quad, type Term,
 } from './literals.js';
 import { patternReadsAlike } from './portable-pattern.js';
-import { edgeClassIri, ontologyIri, prefixesFor, resolveTermIri, shapeIri, termOwnerName, versionIri } from './term-iri.js';
+import { edgeClassIri, ontologyIri, prefixesFor, resolveTermIri, shapeIri, termOwnerName, versionIri, type TermKind } from './term-iri.js';
 import { ythrilIri } from './ythril-vocabulary.js';
 
 /** A schema-library group's namespace, as the instance holds it (`schemaLibraryNamespaces`): the terms under it are the instance's own. */
@@ -592,6 +592,18 @@ function exportType(out: Out, space: Space, kind: KnowledgeType, type: string, r
 export function usedTypeDefinition(meta: SpaceMeta, kind: KnowledgeType, type: string): Quad[] {
   const term = iri(resolveTermIri(meta, kind, type));
   return [quad(term, RDF_TYPE, kind === 'edge' ? OWL('ObjectProperty') : RDFS('Class')), quad(term, RDFS('label'), plain(type))];
+}
+
+/**
+ * The definition of the properties of an untyped kind that records use (bundle-271, lens round): a record with no type, or a file, writes its
+ * properties as fragments of the kind's own document (`<vocab>file#<prop>`), a document the schema says nothing about. Each property is
+ * `rdf:type rdf:Property` with `rdfs:label` its name, as {@link usedTypeDefinition} does for a type. Nothing more.
+ */
+export function usedPropertiesDefinition(meta: SpaceMeta, kind: TermKind, names: readonly string[]): Quad[] {
+  return names.flatMap(name => {
+    const term = iri(resolveTermIri(meta, kind, null, name));
+    return [quad(term, RDF_TYPE, stdIri('rdf', 'Property')), quad(term, RDFS('label'), plain(name))];
+  });
 }
 
 // -- the space ----------------------------------------------------------------------------------------------------------------------------

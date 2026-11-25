@@ -155,15 +155,20 @@ export interface SparqlAnswer {
 }
 
 /** The audit changes of a query on any path: its form, length, member count, records read, rows answered and how it ended. */
-function auditChangesOf(p: PreparedSparql, recordsRead: number, rows: number, outcome: string): SparqlAuditChanges {
+function auditChangesOf(who: { form: string; length: number; members: number }, recordsRead: number, rows: number, outcome: string): SparqlAuditChanges {
   return [
-    { field: 'form', to: p.form }, { field: 'length', to: p.length }, { field: 'members', to: p.members.length },
+    { field: 'form', to: who.form }, { field: 'length', to: who.length }, { field: 'members', to: who.members },
     { field: 'recordsRead', to: recordsRead }, { field: 'rows', to: rows }, { field: 'outcome', to: outcome },
   ];
 }
 
+/** What a judged query says about itself in its audit row. */
+const countsOf = (p: PreparedSparql): { form: string; length: number; members: number } => ({ form: p.form, length: p.length, members: p.members.length });
+
 /** The outcome of a query that was answered. */
 export const SPARQL_OUTCOME_ANSWERED = 'answered';
+/** The outcome of a query the engine failed on with an error nothing maps (it has no code: the answer is the app's generic 500). */
+export const SPARQL_OUTCOME_ENGINE_FAILED = 'engine_failed';
 
 const XSD_STRING = 'http://www.w3.org/2001/XMLSchema#string';
 const RDF_LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
@@ -232,8 +237,19 @@ const PARAM_WORDS: Readonly<Record<string, string>> = {
   [SPARQL_BAD_DATASET]: 'default-graph-uri and named-graph-uri each take one or more IRIs as text',
 };
 
-/** Judge the parameters, parse and check the query, read the members and negotiate the answer; runs nothing. */
+/**
+ * Judge the parameters, parse and check the query, read the members and negotiate the answer; runs nothing. A refusal carries the audit
+ * changes of the query it refused (lens-3 audit counts): its length and the members the guard accepted, nothing read, and its code as the
+ * outcome; the form is `unknown`, as no refusal of the parameters is sure of one.
+ */
 export async function prepareSparql(input: SparqlQueryInput): Promise<PreparedSparql | SparqlAnswerRefusal> {
+  const judged = await judgeSparql(input);
+  if (!isSparqlRefusal(judged)) return judged;
+  const length = typeof input.query === 'string' ? Buffer.byteLength(input.query, 'utf8') : 0;
+  return { ...judged, auditChanges: auditChangesOf({ form: 'unknown', length, members: input.spaces.length }, 0, 0, judged.code) };
+}
+
+async function judgeSparql(input: SparqlQueryInput): Promise<PreparedSparql | SparqlAnswerRefusal> {
   const n = input.spaces.length;
   const { maxResults } = sparqlLimits(getConfig());
   const limitWords = `limit must be a whole number from 1 to ${maxResults} (sparql.maxResults)`;
@@ -308,7 +324,7 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
   const n = input.spaces.length;
   let source: ReturnType<typeof createQuadSource> | null = null;
   /** Every refusal of the run is logged and carries the audit changes of the query it ended: the counts so far, no row answered, its code. */
-  const refuseRun = (r: SparqlAnswerRefusal): SparqlAnswerRefusal => refusalLogged({ ...r, auditChanges: auditChangesOf(p, source?.recordsRead() ?? 0, 0, r.code) }, n);
+  const refuseRun = (r: SparqlAnswerRefusal): SparqlAnswerRefusal => refusalLogged({ ...r, auditChanges: auditChangesOf(countsOf(p), source?.recordsRead() ?? 0, 0, r.code) }, n);
   const slot = takeSlot('sparql', input.callerKey);
   if (!slot) {
     const { status, code, error, retryAfterSeconds } = busyRefusal('sparql');
@@ -317,7 +333,7 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
   let result: SparqlResult | null = null;
   let onAbort: (() => void) | null = null;
   try {
-    const { timeoutMs } = sparqlLimits(getConfig());
+    const { timeoutMs, maxResultBytes } = sparqlLimits(getConfig());
     const deadline = Date.now() + timeoutMs;
     const made = createQuadSource({ members: input.spaces, caller: input.caller, fingerprintOf: input.fingerprintOf }, { deadline, ...(input.signal ? { signal: input.signal } : {}) });
     source = made;
@@ -338,13 +354,13 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
       collected = { form: 'ask', boolean: await Promise.race([running.rows(), gone]) };
       rows = 1;
     } else if (running.kind === 'bindings') {
-      const taken = await Promise.race([running.rows(p.bound + 1), gone]);
+      const taken = await Promise.race([running.rows(p.bound + 1, maxResultBytes), gone]);
       if (taken.length > p.bound) return tooMany();
       rows = taken.length;
       const vars = p.vars.length > 0 ? p.vars : [...new Set(taken.flatMap(r => Object.keys(r)))];
       collected = { form: 'select', vars, rows: taken.map(r => Object.fromEntries(Object.entries(r).map(([k, t]) => [k, jsonTerm(t)]))) };
     } else {
-      const taken = await Promise.race([running.rows(p.bound + 1), gone]);
+      const taken = await Promise.race([running.rows(p.bound + 1, maxResultBytes), gone]);
       if (taken.length > p.bound) return tooMany();
       rows = taken.length;
       const quads: Quad[] = [];
@@ -356,7 +372,7 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
       collected = { form: p.form === 'describe' ? 'describe' : 'construct', quads };
     }
     const recordsRead = made.recordsRead();
-    return { prepared: p, collected, rows, recordsRead, auditChanges: auditChangesOf(p, recordsRead, rows, SPARQL_OUTCOME_ANSWERED) };
+    return { prepared: p, collected, rows, recordsRead, auditChanges: auditChangesOf(countsOf(p), recordsRead, rows, SPARQL_OUTCOME_ANSWERED) };
   } catch (err) {
     if (err instanceof CallerGone) throw err;
     const named = sparqlRefusalOf(err);
@@ -366,7 +382,7 @@ export async function answerSparql(input: SparqlQueryInput, p: PreparedSparql): 
     if (input.signal?.aborted) throw new CallerGone();
     // An error nothing here maps: only its class goes on. Its message may hold the query's text (an engine names the function or the IRI it
     // met), and a thrown error is logged by whoever catches it, so what is thrown is a fixed sentence and the class.
-    throw new SparqlEngineFailure(err);
+    throw new SparqlEngineFailure(err, auditChangesOf(countsOf(p), source?.recordsRead() ?? 0, 0, SPARQL_OUTCOME_ENGINE_FAILED));
   } finally {
     if (onAbort) input.signal?.removeEventListener('abort', onAbort);
     result?.destroy();
@@ -382,10 +398,13 @@ const CLASS_NAME = /^[A-Za-z_$][\w$]{0,63}$/;
  * may hold text of the query, which no log line, error body or audit row carries).
  */
 export class SparqlEngineFailure extends Error {
-  constructor(cause: unknown) {
+  /** The audit changes of the query it ended: its counts so far, and `engine_failed` as the outcome. */
+  readonly auditChanges: SparqlAuditChanges;
+  constructor(cause: unknown, auditChanges: SparqlAuditChanges) {
     const name = cause instanceof Error && CLASS_NAME.test(cause.constructor.name) ? cause.constructor.name : 'a non-Error value';
     super(`The SPARQL engine failed with an error of class ${name}; its message is not kept, as it may hold the query`);
     this.name = 'SparqlEngineFailure';
+    this.auditChanges = auditChanges;
   }
 }
 

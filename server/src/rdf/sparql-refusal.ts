@@ -20,13 +20,14 @@ export const SPARQL_PATTERN_REFUSED = 'sparql_pattern_refused';
 export const SPARQL_TIMEOUT = 'sparql_timeout';
 export const SPARQL_TOO_MUCH_READ = 'sparql_too_much_read';
 export const SPARQL_TOO_MANY_RESULTS = 'sparql_too_many_results';
+export const SPARQL_ANSWER_TOO_LARGE = 'sparql_answer_too_large';
 export const SPARQL_STORE_UNAVAILABLE = 'sparql_store_unavailable';
 export const SPARQL_BUSY = 'sparql_busy';
 
 /** Every code a SPARQL read answers. */
 export const SPARQL_REFUSAL_CODES: readonly string[] = Object.freeze([
   SPARQL_QUERY_TOO_LARGE, SPARQL_MALFORMED, SPARQL_FEDERATION_REFUSED, SPARQL_UPDATE_NOT_HERE, SPARQL_PATTERN_REFUSED, SPARQL_TIMEOUT,
-  SPARQL_TOO_MUCH_READ, SPARQL_TOO_MANY_RESULTS, SPARQL_STORE_UNAVAILABLE, SPARQL_BUSY,
+  SPARQL_TOO_MUCH_READ, SPARQL_TOO_MANY_RESULTS, SPARQL_ANSWER_TOO_LARGE, SPARQL_STORE_UNAVAILABLE, SPARQL_BUSY,
 ]);
 
 /** The statuses a SPARQL read refuses with. */
