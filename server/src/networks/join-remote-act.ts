@@ -37,6 +37,9 @@ import { recordSpaceAlias } from '../sync/space-map.js';
 import { joinedSyncSchedule, syncScheduleRefusal } from '../sync/schedule.js';
 import { scheduleSyncForNetwork } from '../sync/scheduler.js';
 import { MAX_SPACE_IDS } from '../util/request-bounds.js';
+import { fetchNetworkLayer } from '../sync/space-meta-pull.js';
+import { shutdownBoundSignal } from '../sync/held-answer.js';
+import { FETCH_TIMEOUT_MS } from '../sync/peer-timeouts.js';
 
 /** How long the token minted for the inviter lives before the handshake completes and `adoptPeerToken` lifts it. */
 const JOIN_TOKEN_TTL_MS = 10 * 60_000;
@@ -372,6 +375,18 @@ export async function joinRemoteAct(caller: Caller, input: unknown): Promise<Net
   widenPeerTokensOf(freshCfg, [applyData.instanceId], allNetworkSpaces);
   saveConfig(freshCfg);
   if (armSchedule) scheduleSyncForNetwork(networkId, armSchedule);
+  // Q-966: a club, closed or democratic network has no upstream to pull a schema from, so the joiner takes each joined space's schema
+  // from the member it joined through, kept as that network's layer, before the join answers. Through the door every build since F-39.1
+  // serves (`GET /api/sync/meta`), with the token that member just gave us: no new field in the handshake, so an older inviter answers
+  // as before. A refusal leaves the layer missing, the join stands, and the first cycle heals it (`pullNetworkSchema`).
+  if (!isDirectionalNetwork(net)) {
+    for (const { networkId: remoteId, localId } of entries) {
+      await fetchNetworkLayer({
+        networkId, peerUrl: new URL(inviteUrl).origin, from: `inviter ${applyData.instanceLabel ?? 'remote'}`, spaceId: localId, remoteSpaceId: remoteId,
+        init: { headers: { Authorization: `Bearer ${tokenForB}` }, signal: shutdownBoundSignal(AbortSignal.timeout(FETCH_TIMEOUT_MS)) },
+      });
+    }
+  }
   log.info(`join-remote: joined '${peerText(applyData.networkLabel)}' (${peerText(networkId)}) via RSA handshake`);
 
   return { status: 200, body: {

@@ -37,7 +37,7 @@ import { syncItemsPulledTotal, syncPositionBehindTotal } from '../metrics/regist
 import { PositionsBuilding } from '../util/errors.js';
 import { configuredSpaces } from '../spaces/space-lookup.js';
 import { isDirectionalNetwork } from '../networks/network-spaces.js';
-import { pullSpaceMetaFromUpstream } from './space-meta-pull.js';
+import { pullNetworkSchema } from './space-meta-pull.js';
 import { LinkageCheck } from './linkage-check.js';
 import { syncFiles } from './file-sync.js';
 import { checkMerkleWithPeer } from './merkle-check.js';
@@ -144,7 +144,7 @@ export async function exchangeSpacesWithMember(
   out.held.push(...heldNow);
   out.declined.push(...declinedNow);
   // A held space's schema still travels: a wipe changes no schema, and a subscriber takes its types from its upstream (X17).
-  if (exchangeDirections(liveNet, member).shouldPull) for (const h of heldNow) await pullSpaceMetaFromUpstream(liveNet, member, h.spaceId, localToRemote(liveNet, h.spaceId), fetchOpts);
+  if (exchangeDirections(liveNet, member).shouldPull) for (const h of heldNow) await pullNetworkSchema(liveNet, member, h.spaceId, localToRemote(liveNet, h.spaceId), fetchOpts);
   // FIRST match, as `localToRemote` answers (Q-133): a later key for the same space is an inbound alias a rename left behind.
   const toNetworkId = reverseSpaceMap(liveNet);
   // One space of this member may BEGIN a full re-read per cycle (`sync/full-reread.ts`); the rest go on as usual, their marks intact.
@@ -225,7 +225,7 @@ async function exchangeSpaceWithMember(
       if (beginFullReread(net.id, member.instanceId, spaceId)) slot.begun(); else reread = undefined;
     }
     if (shouldPull) {
-      await pullSpaceMetaFromUpstream(net, member, spaceId, remoteSpaceId, fetchOpts, turn); // F-39.1: only from upstream, never throws
+      await pullNetworkSchema(net, member, spaceId, remoteSpaceId, fetchOpts, turn); // F-39.1 upstream; Q-966 a voted network's missing layer; never throws
       if (turn.mayContinue()) {
         const pc = await pullFromPeer(member, spaceId, remoteSpaceId, net.id, fetchOpts, batchFetchOpts, turn);
         addCounts(out.pulled, pc.counts);
