@@ -21,7 +21,9 @@
  * - **A refusal for a read the consumer ended.** A read still on its way when its stream is destroyed ends with the driver's own error;
  *   that is no failure of the store and never the query's (`failure()` stays empty, the query's other matches read on).
  * - **A false empty.** `countQuads` answers from estimates, and the engine skips a pattern it is told is empty: it answers 0 only when no
- *   find can answer the pattern at all, at least 1 otherwise, and a count it cannot make throws, never 0.
+ *   find can answer the pattern at all, at least 1 otherwise, and a count it cannot make answers 1 and ends the
+ *   query's reads with the refusal it recorded: it never answers 0 and never rejects (the engine's handler for a rejected count raises an
+ *   unhandled rejection).
  * - **A statement twice.** An agent's statements are written once per member and match (`agentsSeen`), an edge statement once per
  *   (from, label, to); no whole-quad set is kept.
  */
@@ -393,7 +395,11 @@ export function createQuadSource(scope: QuadScope, opts: QuadSourceOptions): Qua
         if (isBound(s) || isBound(o)) return 1;
         return Math.max(1, sum);
       } catch (err) {
-        return fail(err);
+        // The engine takes this promise with a `.catch` that destroys an iterator nobody listens to, which raises an unhandled rejection
+        // per count: a count never rejects. The failure is the query's (`fail` records it, and every read ends with it), and the engine is
+        // told 1, the one answer that skips no pattern.
+        try { fail(err); } catch { /* recorded by `fail` when it is a refusal */ }
+        return 1;
       }
     },
     leftOut: () => leftOut.map(({ space, code, status }) => ({ space, code, status })),

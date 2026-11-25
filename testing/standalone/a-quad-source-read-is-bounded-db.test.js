@@ -9,8 +9,8 @@
  *    through the engine.
  * 2. **countQuads.** It answers from estimates, so it must never answer 0 for a pattern whose candidate finds are not provably empty: an
  *    empty collection or a type with no rows still answers at least 1, a bound subject answers 1 without reading, and only a pattern no
- *    record can answer (a subject under no member's base) answers 0. A count that cannot be made (the deadline has passed) throws
- *    `sparql_timeout`; it never answers 0.
+ *    record can answer (a subject under no member's base) answers 0. A count that cannot be made (the deadline has passed) answers 1 and
+ *    records `sparql_timeout` as the query's failure, which ends every read; it never answers 0 and never rejects.
  * 3. **The deadline.** A match after the deadline ends with `sparql_timeout` (503).
  * 4. **Cursors close on destroy.** A narrowed find holds a server cursor while its stream is read; destroying the stream (the engine stops
  *    reading, the caller goes away) closes it at once, never at the server's ten-minute idle timeout.
@@ -114,7 +114,9 @@ describe('the quad source read is bounded and its estimate is never a false empt
 
   it('a count or a match after the deadline is sparql_timeout (503), never 0 and never an empty end', async () => {
     const late = source({ deadline: Date.now() - 1 });
-    await assert.rejects(Promise.resolve().then(() => late.countQuads(undefined, LABEL, undefined, undefined)), (err) => err.code === 'sparql_timeout' && err.status === 503);
+    // A count never rejects (the engine's handler for a rejected count raises an unhandled rejection): it answers 1 and the query's failure is the timeout.
+    assert.equal(await late.countQuads(undefined, LABEL, undefined, undefined), 1, 'a count after the deadline answered 0, or rejected');
+    assert.ok(late.failure()?.code === 'sparql_timeout' && late.failure()?.status === 503, 'the count after the deadline did not record sparql_timeout');
     await assert.rejects(drain(late.match(undefined, RDF_TYPE, BULK_CLASS, undefined)), (err) => err.code === 'sparql_timeout');
   });
 
