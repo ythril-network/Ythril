@@ -35,7 +35,7 @@ import { isMaxTimeExpired } from '../db/max-time.js';
 import { spaceCollection } from '../db/space-collection.js';
 import { classifyReadFailure, isStoreSide } from '../brain/store-failure.js';
 import { yieldToEventLoop } from '../util/yield-to-event-loop.js';
-import { log } from '../util/log.js';
+import { log, peerText } from '../util/log.js';
 import { RDF_READ_FIELDS, recordTriples, type RdfRecordKind } from './record-triples.js';
 import { recordIri, graphIri } from './term-iri.js';
 import { xsd } from './literals.js';
@@ -119,9 +119,10 @@ const IDENTIFIER = /^[A-Za-z_$][\w$]{0,63}$/;
 export function storeFailureRefusal(err: unknown): SparqlRefusal | null {
   if (!isStoreSide(err)) return null;
   const { code, codeName } = (err ?? {}) as { code?: unknown; codeName?: unknown };
-  const named = err instanceof Error && IDENTIFIER.test(err.constructor.name) ? err.constructor.name : 'a non-Error value';
+  // Each name enters the line through `peerText`, as every steerable value does (the identifier test narrows what may be said; the renderer bounds it).
+  const named = err instanceof Error && IDENTIFIER.test(err.constructor.name) ? peerText(err.constructor.name) : 'a non-Error value';
   const codeText = typeof code === 'number' && Number.isSafeInteger(code) ? `, code ${code}` : '';
-  const codeNameText = typeof codeName === 'string' && IDENTIFIER.test(codeName) ? `, ${codeName}` : '';
+  const codeNameText = typeof codeName === 'string' && IDENTIFIER.test(codeName) ? `, ${peerText(codeName)}` : '';
   log.warn(`SPARQL read failed on the store (${named}${codeText}${codeNameText})`);
   const f = classifyReadFailure(err);
   return new SparqlRefusal(SPARQL_UNAVAILABLE, SPARQL_STORE_UNAVAILABLE, f.error, f.retryAfterSeconds ?? SPARQL_RETRY_AFTER_SECONDS);
