@@ -90,13 +90,19 @@ const REQUIRED_AT_CREATE: Readonly<Record<KnowledgeType, readonly string[]>> = {
   edge: ['from', 'to', 'label'],
 };
 
-/** The refusal for the first required field of `record` that is not a non-blank string, or `null`. */
-export function requiredFieldError(kind: KnowledgeType, record: Readonly<Record<string, unknown>>): string | null {
+/** The first required field of `record` that is not a non-blank string, or `null`: the field {@link requiredFieldError} names. */
+export function missingRequiredField(kind: KnowledgeType, record: Readonly<Record<string, unknown>>): string | null {
   for (const field of REQUIRED_AT_CREATE[kind]) {
     const value = record[field];
-    if (typeof value !== 'string' || !value.trim()) return `missing required field: ${field}`;
+    if (typeof value !== 'string' || !value.trim()) return field;
   }
   return null;
+}
+
+/** The refusal for the first required field of `record` that is not a non-blank string, or `null`. */
+export function requiredFieldError(kind: KnowledgeType, record: Readonly<Record<string, unknown>>): string | null {
+  const field = missingRequiredField(kind, record);
+  return field === null ? null : `missing required field: ${field}`;
 }
 
 /** The refusal for a chrono `type` outside `allowed` (the space's allowlist, `getAllowedChronoTypes`), in the door's words, or `null`. */
@@ -146,6 +152,20 @@ function recordOf(item: PlannedInput): Record<string, unknown> {
  */
 export function plannedInputError(item: PlannedInput): string | null {
   return recordCheckError(item.kind, recordOf(item));
+}
+
+/**
+ * The required field a write's planner input lacks, when `reason` is the refusal that absence earns, or `null`: what a caller that reports a
+ * refusal by its cause names (the RDF import's report, Q-759). The absence earns one of two sentences, by which check meets it first: the
+ * shape check of the field's blank value ({@link plannedInputError}), or the create check's ({@link plannedCreateError}). A refusal for
+ * anything else, beside a missing field, is not named for the field, and the field is never read back out of the sentence.
+ */
+export function plannedMissingField(item: PlannedInput, reason: string): string | null {
+  const record = recordOf(item);
+  const field = missingRequiredField(item.kind, record);
+  if (field === null) return null;
+  const earned = [record[field] === undefined ? null : shapeError(item.kind, { [field]: record[field] }), requiredFieldError(item.kind, record)];
+  return earned.includes(reason) ? field : null;
 }
 
 /** {@link recordSizeError} of a write's planner input, read as {@link plannedInputError} reads it: the one question every door asks. */

@@ -112,6 +112,19 @@ describe('every code the RDF import answers is listed', () => {
     assert.deepEqual([...answered].filter(c => !guide.has(c)).sort(), [], 'answered but not in the guide');
   });
 
+  // Q-759: a planner's refusal is named in the report by a code of the report's own (`import-report.ts`, every `export const X = '<code>'`),
+  // which a caller reads to know what to change. A code the report answers and the guide's import section does not name leaves the caller with
+  // no way to tell; the benchmark's 30 503 refusals were all one generic code.
+  it('every code the report names a planner\'s refusal by is in the guide\'s import section', () => {
+    const report = consts(code('server/src/rdf/import-report.ts'));
+    const codes = new Set(Object.values(report));
+    for (const c of ['missing-required-field', 'end-refused', 'plan_refused', 'stored_record_gone']) assert.ok(codes.has(c), `${c} is among the codes derived from the report`);
+    const guide = read('docs/integration-guide/06f-exports.md');
+    const section = guide.slice(guide.indexOf('## RDF import'), guide.indexOf('## RDF schema export'));
+    const named = new Set([...section.matchAll(/`([a-z][a-z0-9_-]*)`/g)].map(m => m[1]));
+    assert.deepEqual([...codes].filter(c => !named.has(c)).sort(), [], 'a code of the report the guide does not name');
+  });
+
   it('every status the act answers with is one the tool carries, or the storage limit\'s 507, which the tool answers as the fact tool does, or 408, which no tool call meets', () => {
     const table = Object.fromEntries([...act.matchAll(/\b([A-Z_]+): (\d{3})\b/g)].map(m => [m[1], Number(m[2])]));
     const used = new Set([...act.matchAll(/\brefusal\(\s*HTTP\.([A-Z_]+)/g)].map(m => table[m[1]]).filter(Boolean));

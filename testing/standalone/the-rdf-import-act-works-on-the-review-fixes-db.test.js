@@ -68,10 +68,10 @@ describe('the RDF import act works on top of the review fixes (real routes, real
 
   it('H2: a record the dry plan refuses is absent for the records planned before it and after it, in a warn space', async () => {
     const v = `${baseOf(H2)}vocab/`;
-    // `nameless` states no label, so its entity has no name: refused by the record checks in every mode. `note` (a fact, planned before the
-    // entities) links it and `alice` has an edge to it (an edge, planned after).
+    // `nameless` states an empty label, so its entity has no name: refused by the record checks in every mode (a subject that states no label
+    // at all is named by its address since Q-759). `note` (a fact) links it and `alice` has an edge to it (an edge, planned after).
     const file = [
-      `<http://people.example/nameless> a <${v}entity/person> ; <${v}entity/person#age> "5"^^${DECIMAL} .`,
+      `<http://people.example/nameless> a <${v}entity/person> ; ${RDFS_LABEL} "" ; <${v}entity/person#age> "5"^^${DECIMAL} .`,
       `<http://people.example/alice> a <${v}entity/person> ; ${RDFS_LABEL} "Alice" .`,
       `<http://people.example/alice> <${v}edge/knows> <http://people.example/nameless> .`,
       `<http://people.example/note> a <${YTHRIL}Fact> ; ${SCHEMA_TEXT} "a note" ; ${REFERENCES} <http://people.example/nameless> .`,
@@ -84,6 +84,13 @@ describe('the RDF import act works on top of the review fixes (real routes, real
     assert.ok(kinds.includes('entity'), `the nameless entity is refused: ${kinds}`);
     assert.ok(kinds.includes('edge'), `the edge to the refused record is refused too (it was judged with the record present): ${kinds}`);
     assert.ok(kinds.includes('fact'), `the fact planned before the refused record is refused too: ${kinds}`);
+    // Each is named by its cause (Q-759): the entity by the field it lacks, the edge and the link by the refused record they end at.
+    const causes = (r.body?.report?.reasons ?? []).filter(x => x.outcome === 'refused' && x.kind).map(x => [x.kind, x.code, x.fields ?? x.end ?? null]).sort();
+    assert.deepEqual(causes, [
+      ['edge', 'end-refused', 'http://people.example/nameless'],
+      ['entity', 'missing-required-field', ['name']],
+      ['fact', 'end-refused', 'http://people.example/nameless'],
+    ]);
     assert.deepEqual(await d.records(H2, 'entities'), [], 'nothing landed');
     assert.deepEqual(await d.records(H2, 'edges'), []);
     assert.deepEqual(await d.records(H2, 'facts'), []);

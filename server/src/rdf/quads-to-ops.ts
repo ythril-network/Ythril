@@ -39,6 +39,7 @@ import type { RecordKind, TermOwner } from './term-iri.js';
 import { recordOfAddress, termOfIri, type AddressNames } from './term-reverse.js';
 import { ythrilIri } from './ythril-vocabulary.js';
 import { declaredTypeOf } from './literals.js';
+import { localPart } from './schema-from-rdf-drafts.js';
 
 /** The record kinds an import writes. A file is never imported (its bytes are not in RDF). */
 export type OpKind = 'entity' | 'fact' | 'chrono' | 'edge';
@@ -540,6 +541,24 @@ function readFields(L: Ledger, kind: OpKind, type: string | null | undefined, qu
 const sortedUnion = (...lists: readonly (readonly unknown[] | undefined)[]): string[] =>
   [...new Set(lists.flatMap(l => (l ?? []).filter((v): v is string => typeof v === 'string')))].sort();
 
+/** The field a record's `rdfs:label` is read into, per kind that has one. */
+const NAME_FIELD: Partial<Record<OpKind, 'name' | 'title'>> = { entity: 'name', chrono: 'title' };
+const RDFS_LABEL = std('rdfs', 'label');
+
+/**
+ * A new entity or chrono entry whose subject states no `rdfs:label` is named by its address's local name (Q-759): the schema reader's own
+ * rule for a term without a label (`localPart`), so a schema-less file of typed addresses lands in a strict space and is not refused 30 000
+ * records at a time for a name it never meant to give. A subject that states a label keeps whatever the label's reading answered (a
+ * refused label stays refused), a blank node has no address to name it by, and a converge keeps the stored name.
+ */
+function nameByAddress(kind: OpKind, subject: Subject, data: readonly Quad[], fields: Record<string, unknown>): void {
+  const field = NAME_FIELD[kind];
+  if (field === undefined || fields[field] !== undefined || subject.term.kind !== 'iri') return;
+  if (data.some(q => q.predicate.value === RDFS_LABEL)) return;
+  const local = localPart(subject.term.value);
+  if (local !== '') fields[field] = local;
+}
+
 /** The operation of a record: insert under the minted id, or converge onto the stored one with every unstated field as stored. */
 function finish(kind: OpKind, subject: Subject, graph: string | null, read: { fields: Record<string, unknown>; properties: Properties; tags: string[] }, links: Links, ctx: QuadsToOpsContext): RecordOp {
   const storedKey = subject.address?.of === 'space' ? recordKey(kind, subject.address.id) : null;
@@ -730,6 +749,7 @@ function translate(L: Ledger, group: readonly Quad[], key: string, graph: string
   const ownRef = (op: RecordOp): End => ({ ref: { kind, id: op.id } });
   // The record's id is known before its relations are read: a converge's stored id, or the id minted for its address.
   const probe = finish(kind, subject, graph, { fields: {}, properties: {}, tags: [] }, {}, ctx);
+  if (probe.op === 'insert') nameByAddress(kind, subject, data, read.fields);
   const rel = relations(L, ownRef(probe), kind, graph, edgeQuads, linkQuads, ctx);
   return [finish(kind, subject, graph, read, rel.links, ctx), ...rel.ops];
 }
